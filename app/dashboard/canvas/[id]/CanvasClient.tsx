@@ -42,6 +42,7 @@ import { clipboardManager } from '@/lib/collabboard/ClipboardManager';
 import { toast } from 'sonner';
 import PlacementPrompt from '@/components/collabboard/PlacementPrompt';
 import { usePadletSave } from '@/hooks/canvas';
+import { useStableCanvasActions } from '@/hooks/canvas/useStableCanvasActions';
 import { debugCanvasLogger } from '@/lib/collabboard/debugCanvasLogger';
 import { debounce, sanitizeLibraryMetadata } from '@/components/collabboard/canvas/engine/utils';
 import { segmentsIntersect } from '@/components/collabboard/canvas/engine/geometry';
@@ -69,6 +70,8 @@ import FreeformPadletCards from '@/components/collabboard/canvas/ui/FreeformPadl
 import OverlayLayer from '@/components/collabboard/canvas/ui/OverlayLayer';
 import ZoomControls from '@/components/collabboard/canvas/ui/ZoomControls';
 import GhostDragElement from '@/components/collabboard/canvas/ui/GhostDragElement';
+import { CanvasEditorProvider, type CanvasEditorState } from '@/components/collabboard/canvas/contexts/CanvasEditorContext';
+import { CanvasConfigProvider, type CanvasConfigState } from '@/components/collabboard/canvas/contexts/CanvasConfigContext';
 
 // === BEGIN TYPES + CONSTANTS REGION ===
 
@@ -2146,10 +2149,6 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     }, 500);
   }, [supabase, markPadletLocallyModified]);
 
-
-
-
-
   // Direct delete by ID (for context menu)
   const deletePadletById = async (id: string) => {
     debugCanvasLogger('saveStart', { op: 'deletePadletById', id });
@@ -2625,14 +2624,18 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     const padlet = padlets.find(p => p.id === id);
     if (!padlet || !canvasId) return;
 
+    let branch: 'section' | 'freeform' | null = null;
+    let newPadletData: any = null;
+
     try {
       const sectionId = (padlet.metadata as any)?.sectionId;
       const rest = { ...padlet } as Partial<Padlet>;
       delete rest.id;
       delete rest.created_at;
       delete rest.updated_at;
+      delete (rest as any).location_geog;
 
-      const newPadletData: any = {
+      newPadletData = {
         ...rest,
         id: crypto.randomUUID(),
         created_at: new Date().toISOString(),
@@ -2640,6 +2643,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       };
 
       if (sectionId) {
+        branch = 'section';
         // COLUMN LAYOUT: Handle sectionPosition
         const currentPos = (padlet.metadata as any)?.sectionPosition || 0;
         const newPos = currentPos + 1;
@@ -2674,6 +2678,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           sectionPosition: newPos
         };
       } else {
+        branch = 'freeform';
         // FREEFORM: Apply x/y offset
         newPadletData.position_x = padlet.position_x + 20;
         newPadletData.position_y = padlet.position_y + 20;
@@ -2687,7 +2692,40 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         setSelectedPadletId(data.id);
       }
     } catch (e) {
-      console.error('Failed to duplicate padlet:', e);
+      const serializedError = (() => {
+        try {
+          const json = JSON.parse(JSON.stringify(e));
+          if (json && typeof json === 'object' && Object.keys(json).length > 0) {
+            return json;
+          }
+        } catch {
+        }
+
+        const err = e as {
+          message?: string;
+          details?: string;
+          hint?: string;
+          code?: string;
+          stack?: string;
+          name?: string;
+        };
+        return {
+          name: err?.name,
+          message: err?.message,
+          details: err?.details,
+          hint: err?.hint,
+          code: err?.code,
+          stack: err?.stack,
+        };
+      })();
+
+      console.error('Failed to duplicate padlet', {
+        operation: 'duplicatePadlet',
+        id,
+        branch,
+        payload: newPadletData,
+        error: serializedError,
+      });
     }
   };
 
@@ -2729,13 +2767,16 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     const padlet = padlets.find(p => p.id === id);
     if (!padlet || !canvasId) return;
 
+    let newPadlet: any = null;
+
     try {
       const newId = crypto.randomUUID();
       const rest = { ...padlet } as Partial<Padlet>;
       delete rest.id;
       delete rest.created_at;
       delete rest.updated_at;
-      const newPadlet = {
+      delete (rest as any).location_geog;
+      newPadlet = {
         ...rest,
         id: newId,
         position_x: padlet.position_x + 20,
@@ -2766,7 +2807,39 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         setSelectedPadletId(data.id);
       }
     } catch (e) {
-      console.error('Failed to create synced copy:', e);
+      const serializedError = (() => {
+        try {
+          const json = JSON.parse(JSON.stringify(e));
+          if (json && typeof json === 'object' && Object.keys(json).length > 0) {
+            return json;
+          }
+        } catch {
+        }
+
+        const err = e as {
+          message?: string;
+          details?: string;
+          hint?: string;
+          code?: string;
+          stack?: string;
+          name?: string;
+        };
+        return {
+          name: err?.name,
+          message: err?.message,
+          details: err?.details,
+          hint: err?.hint,
+          code: err?.code,
+          stack: err?.stack,
+        };
+      })();
+
+      console.error('Failed to create synced copy', {
+        operation: 'createSyncedCopy',
+        id,
+        payload: newPadlet,
+        error: serializedError,
+      });
     }
   };
 
@@ -4145,6 +4218,140 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   }, [drawingPendingDraft]);
 
   // --- End Drawing Canvas image placement flow ---
+
+  const rawActions = {
+    duplicatePadlet,
+    requestDeletePadlet,
+    cutPadlet,
+    copyPadlet,
+    lockPadlet,
+    movePadletLayer,
+    groupIntoColumn,
+    replaceImage,
+    downloadImage,
+    toggleCropToGrid,
+    handlePaste,
+    renameComment,
+    renameColumn,
+    renameTodo,
+    createSyncedCopy,
+    addImageToLink,
+    copyLinkAddress,
+    deletePadletById,
+    fetchData,
+    updatePadletMetadata,
+    updatePadletTitle,
+    updatePadletContent,
+    commitPadletMeta,
+  };
+
+  const stableActions = useStableCanvasActions(rawActions);
+
+  const configState: CanvasConfigState = {
+    canvasZoom,
+    canvasId,
+    isFreeformGraphMode,
+    canUseFreeformEditButton,
+    isColumnsLayout,
+  };
+
+  const editorState: CanvasEditorState = {
+    padletToEdit,
+    setPadletToEdit,
+    setIsNoteEditorOpen,
+    setIsTableEditorOpen,
+    setIsLinkEditorOpen,
+    setIsTodoEditorOpen,
+    setIsContainerEditorOpen,
+    setIsCommentEditorOpen,
+    setIsImageEditorOpen,
+    setIsDrawingEditorOpen,
+    setIsCardEditorOpen,
+    setIsCardViewerOpen,
+    setIsAIComponentEditorOpen,
+    setIsAIContentEditModalOpen,
+    setIsAIContentConvertModalOpen,
+    imageToolbarPadletId,
+    setImageToolbarPadletId,
+    isImageColorPickerOpen,
+    setIsImageColorPickerOpen,
+    isImageEmojiOpen,
+    setIsImageEmojiOpen,
+    imageColorTab,
+    setImageColorTab: (v: string) => setImageColorTab(v as any),
+    setCropPadlet,
+    setIsCropMode,
+    setDrawingPadlet,
+    setIsDrawingMode,
+    editingCaption,
+    setEditingCaption,
+    captionPopupPadletId,
+    setCaptionPopupPadletId,
+    textStylePadletId,
+    setTextStylePadletId,
+    cardToolbarPadletId,
+    setCardToolbarPadletId,
+    isCardColorPickerOpen,
+    setIsCardColorPickerOpen,
+    cardColorTab,
+    setCardColorTab: (v: string) => setCardColorTab(v as any),
+    captionEditorPadletId,
+    setCaptionEditorPadletId,
+    setIsLibraryOpen,
+    setIconReplaceTargetPadlet,
+    cardCommentPopupPadletId,
+    setCardCommentPopupPadletId,
+    cardCommentList,
+    setCardCommentList,
+    activeCardCommentId,
+    setActiveCardCommentId,
+    editingCardCommentId,
+    setEditingCardCommentId,
+    editingCardCommentText,
+    setEditingCardCommentText,
+    commentColorPopupId,
+    setCommentColorPopupId,
+    activeCardComment,
+    noteBadgeColorPadletId,
+    setNoteBadgeColorPadletId,
+    internalBadgeColorPopupId,
+    setInternalBadgeColorPopupId,
+    internalBadgePopupPosition,
+    setInternalBadgePopupPosition: (v) => setInternalBadgePopupPosition(v as any),
+    setDetachedPopupPosition,
+    setDetachedPopupPadletId,
+    setDetachedBadgeColorOpen,
+    setDetachedPopupComments,
+    setDetachedPopupOpen,
+    collapsedPopupPadletId,
+    setCollapsedPopupPadletId,
+    collapsedBadgeColorOpen,
+    setCollapsedBadgeColorOpen,
+    collapsedActiveCommentId,
+    setCollapsedActiveCommentId,
+    collapsedEditingCommentId,
+    setCollapsedEditingCommentId,
+    collapsedEditingText,
+    setCollapsedEditingText,
+    collapsedCommentColorPopupId,
+    setCollapsedCommentColorPopupId,
+    setReminderPopupPosition,
+    setReminderPopupTasks,
+    setReminderPopupPadletId,
+    setReminderPopupOpen,
+    setShowDeleteConfirm,
+    setViewDrawingPadlet,
+    setCommentPopupPosition,
+    setCommentPopupComments,
+    setCommentPopupPadletId,
+    setCommentPopupCommentId,
+    setCommentPopupOpen,
+    setCommentPopupHighlightColor,
+    setTextLinkColorPickerPosition,
+    setTextLinkColorPickerOpen,
+    commentPopupPosition,
+    commentPopupHighlightColor,
+  };
 
   // Show loading state during SSR and initial hydration to prevent mismatch
   if (!hasMounted || loading) {
@@ -5739,148 +5946,30 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
 
             {/* Freeform Layout - Cards rendered via FreeformPadletCards component */}
             {isFreeformLayout && (
-              <FreeformPadletCards
-                rootPadlets={rootPadlets}
-                padlets={padlets}
-                setPadlets={setPadlets}
-                canvasZoom={canvasZoom}
-                canvasId={canvasId}
-                user={user}
-                containerRef={containerRef}
-                isDragging={isDragging}
-                draggingPadletId={draggingPadletId}
-                isFreeformGraphMode={isFreeformGraphMode}
-                isGraphConnectMode={isGraphConnectMode}
-                isLineMode={isLineMode}
-                isDrawingMode={isDrawingMode}
-                isColumnsLayout={isColumnsLayout}
-                canUseFreeformEditButton={canUseFreeformEditButton}
-                selectedPadletId={selectedPadletId}
-                setSelectedPadletId={setSelectedPadletId}
-                setGraphConnectSelection={setGraphConnectSelection}
-                graphRefreshToken={graphRefreshToken}
-                padletToEdit={padletToEdit}
-                setPadletToEdit={setPadletToEdit}
-                setIsNoteEditorOpen={setIsNoteEditorOpen}
-                setIsTableEditorOpen={setIsTableEditorOpen}
-                setIsLinkEditorOpen={setIsLinkEditorOpen}
-                setIsTodoEditorOpen={setIsTodoEditorOpen}
-                setIsContainerEditorOpen={setIsContainerEditorOpen}
-                setIsCommentEditorOpen={setIsCommentEditorOpen}
-                setIsImageEditorOpen={setIsImageEditorOpen}
-                setIsDrawingEditorOpen={setIsDrawingEditorOpen}
-                setIsCardEditorOpen={setIsCardEditorOpen}
-                setIsCardViewerOpen={setIsCardViewerOpen}
-                setIsAIComponentEditorOpen={setIsAIComponentEditorOpen}
-                setIsAIContentEditModalOpen={setIsAIContentEditModalOpen}
-                setIsAIContentConvertModalOpen={setIsAIContentConvertModalOpen}
-                imageToolbarPadletId={imageToolbarPadletId}
-                setImageToolbarPadletId={setImageToolbarPadletId}
-                isImageColorPickerOpen={isImageColorPickerOpen}
-                setIsImageColorPickerOpen={setIsImageColorPickerOpen}
-                isImageEmojiOpen={isImageEmojiOpen}
-                setIsImageEmojiOpen={setIsImageEmojiOpen}
-                imageColorTab={imageColorTab}
-                setImageColorTab={(v: string) => setImageColorTab(v as any)}
-                setCropPadlet={setCropPadlet}
-                setIsCropMode={setIsCropMode}
-                setDrawingPadlet={setDrawingPadlet}
-                setIsDrawingMode={setIsDrawingMode}
-                editingCaption={editingCaption}
-                setEditingCaption={setEditingCaption}
-                captionPopupPadletId={captionPopupPadletId}
-                setCaptionPopupPadletId={setCaptionPopupPadletId}
-                textStylePadletId={textStylePadletId}
-                setTextStylePadletId={setTextStylePadletId}
-                cardToolbarPadletId={cardToolbarPadletId}
-                setCardToolbarPadletId={setCardToolbarPadletId}
-                isCardColorPickerOpen={isCardColorPickerOpen}
-                setIsCardColorPickerOpen={setIsCardColorPickerOpen}
-                cardColorTab={cardColorTab}
-                setCardColorTab={(v: string) => setCardColorTab(v as any)}
-                captionEditorPadletId={captionEditorPadletId}
-                setCaptionEditorPadletId={setCaptionEditorPadletId}
-                setIsLibraryOpen={setIsLibraryOpen}
-                setIconReplaceTargetPadlet={setIconReplaceTargetPadlet}
-                cardCommentPopupPadletId={cardCommentPopupPadletId}
-                setCardCommentPopupPadletId={setCardCommentPopupPadletId}
-                cardCommentList={cardCommentList}
-                setCardCommentList={setCardCommentList}
-                activeCardCommentId={activeCardCommentId}
-                setActiveCardCommentId={setActiveCardCommentId}
-                editingCardCommentId={editingCardCommentId}
-                setEditingCardCommentId={setEditingCardCommentId}
-                editingCardCommentText={editingCardCommentText}
-                setEditingCardCommentText={setEditingCardCommentText}
-                commentColorPopupId={commentColorPopupId}
-                setCommentColorPopupId={setCommentColorPopupId}
-                activeCardComment={activeCardComment}
-                noteBadgeColorPadletId={noteBadgeColorPadletId}
-                setNoteBadgeColorPadletId={setNoteBadgeColorPadletId}
-                internalBadgeColorPopupId={internalBadgeColorPopupId}
-                setInternalBadgeColorPopupId={setInternalBadgeColorPopupId}
-                internalBadgePopupPosition={internalBadgePopupPosition}
-                setInternalBadgePopupPosition={(v) => setInternalBadgePopupPosition(v as any)}
-                setDetachedPopupPosition={setDetachedPopupPosition}
-                setDetachedPopupPadletId={setDetachedPopupPadletId}
-                setDetachedBadgeColorOpen={setDetachedBadgeColorOpen}
-                setDetachedPopupComments={setDetachedPopupComments}
-                setDetachedPopupOpen={setDetachedPopupOpen}
-                collapsedPopupPadletId={collapsedPopupPadletId}
-                setCollapsedPopupPadletId={setCollapsedPopupPadletId}
-                collapsedBadgeColorOpen={collapsedBadgeColorOpen}
-                setCollapsedBadgeColorOpen={setCollapsedBadgeColorOpen}
-                collapsedActiveCommentId={collapsedActiveCommentId}
-                setCollapsedActiveCommentId={setCollapsedActiveCommentId}
-                collapsedEditingCommentId={collapsedEditingCommentId}
-                setCollapsedEditingCommentId={setCollapsedEditingCommentId}
-                collapsedEditingText={collapsedEditingText}
-                setCollapsedEditingText={setCollapsedEditingText}
-                collapsedCommentColorPopupId={collapsedCommentColorPopupId}
-                setCollapsedCommentColorPopupId={setCollapsedCommentColorPopupId}
-                setReminderPopupPosition={setReminderPopupPosition}
-                setReminderPopupTasks={setReminderPopupTasks}
-                setReminderPopupPadletId={setReminderPopupPadletId}
-                setReminderPopupOpen={setReminderPopupOpen}
-                setShowDeleteConfirm={setShowDeleteConfirm}
-                setViewDrawingPadlet={setViewDrawingPadlet}
-                setCommentPopupPosition={setCommentPopupPosition}
-                setCommentPopupComments={setCommentPopupComments}
-                setCommentPopupPadletId={setCommentPopupPadletId}
-                setCommentPopupCommentId={setCommentPopupCommentId}
-                setCommentPopupOpen={setCommentPopupOpen}
-                setCommentPopupHighlightColor={setCommentPopupHighlightColor}
-                setTextLinkColorPickerPosition={setTextLinkColorPickerPosition}
-                setTextLinkColorPickerOpen={setTextLinkColorPickerOpen}
-                commentPopupPosition={commentPopupPosition}
-                commentPopupHighlightColor={commentPopupHighlightColor}
-                closeAllToolbars={closeAllToolbars}
-                handlePadletMouseDown={handlePadletMouseDown}
-                getClickedSide={(e: React.MouseEvent) => getClickedSide(e as React.MouseEvent<HTMLElement>)}
-                duplicatePadlet={duplicatePadlet}
-                requestDeletePadlet={requestDeletePadlet}
-                cutPadlet={cutPadlet}
-                copyPadlet={copyPadlet}
-                lockPadlet={lockPadlet}
-                movePadletLayer={movePadletLayer}
-                groupIntoColumn={groupIntoColumn}
-                replaceImage={replaceImage}
-                downloadImage={downloadImage}
-                toggleCropToGrid={toggleCropToGrid}
-                handlePaste={handlePaste}
-                renameComment={renameComment}
-                renameColumn={renameColumn}
-                renameTodo={renameTodo}
-                createSyncedCopy={createSyncedCopy}
-                addImageToLink={addImageToLink}
-                copyLinkAddress={copyLinkAddress}
-                deletePadletById={deletePadletById}
-                fetchData={fetchData}
-                updatePadletMetadata={updatePadletMetadata}
-                updatePadletTitle={updatePadletTitle}
-                updatePadletContent={updatePadletContent}
-                commitPadletMeta={commitPadletMeta}
-              />
+              <CanvasConfigProvider value={configState}>
+                <CanvasEditorProvider value={editorState}>
+                  <FreeformPadletCards
+                    rootPadlets={rootPadlets}
+                    padlets={padlets}
+                    setPadlets={setPadlets}
+                    user={user}
+                    containerRef={containerRef}
+                    isDragging={isDragging}
+                    draggingPadletId={draggingPadletId}
+                    isGraphConnectMode={isGraphConnectMode}
+                    isLineMode={isLineMode}
+                    isDrawingMode={isDrawingMode}
+                    selectedPadletId={selectedPadletId}
+                    setSelectedPadletId={setSelectedPadletId}
+                    setGraphConnectSelection={setGraphConnectSelection}
+                    graphRefreshToken={graphRefreshToken}
+                    closeAllToolbars={closeAllToolbars}
+                    handlePadletMouseDown={handlePadletMouseDown}
+                    getClickedSide={(e: React.MouseEvent) => getClickedSide(e as React.MouseEvent<HTMLElement>)}
+                    stableActions={stableActions}
+                  />
+                </CanvasEditorProvider>
+              </CanvasConfigProvider>
             )}
 
           </PadletLayer>
