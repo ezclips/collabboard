@@ -1,0 +1,96 @@
+name: AI Quality
+
+# Runs the full golden suite on every PR to main.
+# Required GitHub secrets:
+#   DEEPSEEK_API_KEY             - DeepSeek API key (AI routes)
+#   NEXT_PUBLIC_SUPABASE_URL     - Supabase project URL
+#   NEXT_PUBLIC_SUPABASE_ANON_KEY- Supabase anon key
+#   SUPABASE_SERVICE_ROLE_KEY    - Supabase service role key
+#   UNSPLASH_ACCESS_KEY          - Unsplash key (photo_card mode)
+#   PEXELS_API_KEY               - Pexels key (photo_card mode fallback)
+
+on:
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  ai-quality:
+    name: AI golden suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+      NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      UNSPLASH_ACCESS_KEY: ${{ secrets.UNSPLASH_ACCESS_KEY }}
+      PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+      # Disable features that require external services not needed for AI tests
+      NEXT_PUBLIC_ENABLE_GANTT: "false"
+      NEXT_PUBLIC_ENABLE_SCHEDULER: "false"
+      NEXT_PUBLIC_ENABLE_FREEFORM_GRAPH: "false"
+      NEXT_PUBLIC_DEBUG_CANVAS: "false"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Cache Next.js build
+        uses: actions/cache@v4
+        with:
+          path: .next/cache
+          key: nextjs-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-${{ hashFiles('**/*.ts', '**/*.tsx') }}
+          restore-keys: |
+            nextjs-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-
+            nextjs-${{ runner.os }}-
+
+      - name: Build app
+        run: npm run build
+
+      - name: Start server
+        run: npm start &
+
+      - name: Wait for server
+        run: |
+          echo "Waiting for server at http://localhost:3000..."
+          for i in $(seq 1 30); do
+            if curl -sf -o /dev/null http://localhost:3000; then
+              echo "Server ready after ${i} attempt(s)"
+              exit 0
+            fi
+            echo "  attempt $i/30 — retrying in 2s"
+            sleep 2
+          done
+          echo "Server did not become ready within 60s"
+          exit 1
+
+      - name: Run classify suite
+        run: |
+          set -o pipefail
+          npm run ai:test:classify 2>&1 | tee results-classify.txt
+
+      - name: Run conversion suite
+        run: |
+          set -o pipefail
+          npm run ai:test:conversion 2>&1 | tee results-conversion.txt
+
+      - name: Run generation suite
+        run: |
+          set -o pipefail
+          npm run ai:test:generation 2>&1 | tee results-generation.txt
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-test-results-pr-${{ github.event.pull_request.number }}
+          path: results-*.txt
+          retention-days: 30

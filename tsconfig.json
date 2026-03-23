@@ -1,0 +1,71 @@
+{
+  "compilerOptions": {
+    "target": "ES2017",
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "allowJs": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "preserve",
+    "incremental": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./*"]
+    },
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ]
+  },
+  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
+  "exclude": [
+    "node_modules",
+    "components/collabboard/canvas/excalidraw_fork",
+    "app/dashboard/create-canvas/also no goodpage.tsx",
+    "app/dashboard/create-canvas/long_but works_page.tsx",
+    "app/dashboard/create-canvas/samepage.tsx",
+    "app/dashboard/create-canvas/grok_not_working_page.tsx",
+    "components/canvas/layouts/broken_WallLayout.tsx",
+    "components/canvas/layouts/ColumnsCanvasRow - Kopie.tsx",
+    "components/canvas/layouts/ColumnsCanvasRow - Kopie (2).tsx",
+    "components/canvas/layouts/ColumnsLayout - Kopie.tsx",
+    "components/canvas/layouts/ColumnsLayout - Kopie (2).tsx",
+    "components/canvas/layouts/ColumnsLayout - Kopie (3).tsx",
+    "components/canvas/layouts/ColumnsLayout - Kopie (4).tsx",
+    "components/canvas/layouts/ColumnsLayout - Kopie (5).tsx",
+    "components/canvas/layouts/ColumnsLayout - Kopie (6).tsx",
+    "components/canvas/layouts/ColumnsLayout - Kopie (7).tsx",
+    "components/canvas/layouts/ColumnsLayout - Kopie (8).tsx",
+    "components/canvas/layouts/ColumnsLayout - Kopie (9).tsx",
+    "components/canvas/layouts/frombackup_ColumnsLayout.tsx",
+    "components/collabboard/canvas/last workingCanvasSetupPage.tsx",
+    "components/collabboard/canvas/Neuer Ordner",
+    "lib/collabboard/layouts/origFreeformLayout.tsx",
+    "lib/collabboard/layouts/origGridLayout.tsx",
+    "lib/collabboard/layouts/origWallLayout.tsx",
+    "gantt/react/samples-public",
+    "components/collabboard/canvas/excalidraw_fork/dev-docs",
+    "components/collabboard/canvas/excalidraw_fork/examples",
+    "components/collabboard/canvas/excalidraw_fork/excalidraw-app/tests",
+    "components/collabboard/canvas/excalidraw_fork/packages/element/tests",
+    "components/collabboard/canvas/excalidraw_fork/packages/excalidraw/tests",
+    "components/collabboard/canvas/excalidraw_fork/packages/utils/tests",
+    "components/collabboard/canvas/excalidraw_fork/setupTests.ts",
+    "lib/supabase-provider.ts",
+    "app/collabboard/canvas/CanvasSetupPage.tsx",
+    "app/collabboard",
+    "components/canvas/CanvasSetupPage.tsx",
+    "components/canvas/1stnewRowCanvas.tsx",
+    "lib/collabboard/layouts/GridLayout.ts",
+    "lib/layouts",
+    "components/ui-kit"
+  ]
+}
+

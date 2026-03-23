@@ -1,0 +1,131 @@
+"use client";
+
+import React from 'react';
+import "@excalidraw/excalidraw/index.css";
+
+interface ExcalidrawWrapperProps {
+    excalidrawKey: number;
+    initialData: {
+        elements: any[];
+        appState: any;
+        files: any;
+        scrollToContent: boolean;
+        libraryItems?: any[];
+    };
+    onChange: (elements: readonly any[], appState: any, files: any) => void;
+    readOnly: boolean;
+    onShowHelp: () => void;
+    excalidrawAPI?: (api: any) => void;
+    onGroupToggle?: () => void;
+    isGroupModeActive?: boolean;
+    validateEmbeddable?: boolean | string[] | RegExp | RegExp[] | ((link: string) => boolean | undefined);
+    renderEmbeddable?: (element: any, appState: any) => React.ReactElement | null;
+}
+
+export default function ExcalidrawWrapper({
+    excalidrawKey,
+    initialData,
+    onChange,
+    readOnly,
+    onShowHelp,
+    excalidrawAPI,
+    onGroupToggle,
+    isGroupModeActive,
+    validateEmbeddable,
+    renderEmbeddable,
+}: ExcalidrawWrapperProps) {
+    const [api, setApi] = React.useState<any>(null);
+    const [excalidrawLib, setExcalidrawLib] = React.useState<{
+        Excalidraw: React.ComponentType<any>;
+        MainMenu: any;
+        WelcomeScreen: any;
+    } | null>(null);
+
+    React.useEffect(() => {
+        // Set the asset path to load assets from unpkg CDN to avoid local file path issues with workers
+        // This fixes the "SecurityError: Failed to construct 'Worker'"
+        if (typeof window !== 'undefined') {
+            if (!(window as any).EXCALIDRAW_ASSET_PATH) {
+                (window as any).EXCALIDRAW_ASSET_PATH = "https://unpkg.com/@excalidraw/excalidraw/dist/";
+            }
+        }
+    }, []);
+
+    React.useEffect(() => {
+        let mounted = true;
+        import("@excalidraw/excalidraw").then((mod) => {
+            if (!mounted) return;
+            setExcalidrawLib({
+                Excalidraw: mod.Excalidraw,
+                MainMenu: mod.MainMenu,
+                WelcomeScreen: mod.WelcomeScreen,
+            });
+        });
+        return () => {
+            mounted = false;
+        };
+    }, []);
+
+    const uiOptions = React.useMemo(() => ({
+        canvasActions: {
+            loadScene: false,
+            saveToActiveFile: false,
+            toggleTheme: false,
+            saveAsImage: !readOnly,
+        }
+    }), [readOnly]);
+
+    const resolvedValidateEmbeddable = React.useCallback((link: string) => {
+        if (typeof link === "string" && link.startsWith("padlet://")) {
+            return true;
+        }
+        if (typeof validateEmbeddable === "function") {
+            return validateEmbeddable(link);
+        }
+        if (typeof validateEmbeddable === "boolean") {
+            return validateEmbeddable;
+        }
+        if (Array.isArray(validateEmbeddable)) {
+            return validateEmbeddable.some((entry) =>
+                typeof entry === "string" ? entry === link : entry.test(link)
+            );
+        }
+        if (validateEmbeddable instanceof RegExp) {
+            return validateEmbeddable.test(link);
+        }
+        return undefined;
+    }, [validateEmbeddable]);
+
+    if (!excalidrawLib) {
+        return (
+            <div className="flex items-center justify-center h-full text-gray-400 text-sm">
+                Loading drawing editor...
+            </div>
+        );
+    }
+
+    const { Excalidraw, WelcomeScreen } = excalidrawLib;
+
+    return (
+        <Excalidraw
+            excalidrawAPI={(newApi: any) => {
+                setApi(newApi);
+                if (excalidrawAPI) excalidrawAPI(newApi);
+            }}
+            key={excalidrawKey}
+            initialData={initialData}
+            onChange={onChange}
+            theme="light"
+            viewModeEnabled={readOnly}
+            aiEnabled={false}
+            UIOptions={uiOptions}
+            validateEmbeddable={resolvedValidateEmbeddable}
+            renderEmbeddable={renderEmbeddable}
+        >
+            {/* Hide the default Excalidraw welcome screen entirely by passing an empty fragment (truthy child) */}
+            <WelcomeScreen>
+                <React.Fragment></React.Fragment>
+            </WelcomeScreen>
+        </Excalidraw>
+    );
+}

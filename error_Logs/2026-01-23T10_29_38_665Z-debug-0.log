@@ -1,0 +1,2482 @@
+0 verbose cli C:\Program Files\nodejs\node.exe C:\Users\rmeic\AppData\Roaming\npm\node_modules\npm\bin\npm-cli.js
+1 info using npm@11.4.2
+2 info using node@v24.11.1
+3 silly config load:file:C:\Users\rmeic\AppData\Roaming\npm\node_modules\npm\npmrc
+4 silly config load:file:C:\Users\rmeic\Projects\collabboard\lightable\apps\starter-kit\.npmrc
+5 silly config load:file:C:\Users\rmeic\.npmrc
+6 silly config load:file:C:\Users\rmeic\AppData\Roaming\npm\etc\npmrc
+7 verbose title npm install
+8 verbose argv "install"
+9 verbose logfile logs-max:10 dir:C:\Users\rmeic\AppData\Local\npm-cache\_logs\2026-01-23T10_29_38_665Z-
+10 verbose logfile C:\Users\rmeic\AppData\Local\npm-cache\_logs\2026-01-23T10_29_38_665Z-debug-0.log
+11 silly logfile start cleaning logs, removing 1 files
+12 silly packumentCache heap:4496293888 maxSize:1124073472 maxEntrySize:562036736
+13 silly logfile done cleaning log files
+14 silly idealTree buildDeps
+15 silly fetch manifest react-player@^2.16.1
+16 silly packumentCache full:https://registry.npmjs.org/react-player cache-miss
+17 http fetch GET 200 https://registry.npmjs.org/react-player 209ms (cache revalidated)
+18 silly packumentCache full:https://registry.npmjs.org/react-player set size:770924 disposed:false
+19 silly fetch manifest react@^19.0.0
+20 silly packumentCache full:https://registry.npmjs.org/react cache-miss
+21 http fetch GET 200 https://registry.npmjs.org/react 49ms (cache revalidated)
+22 silly packumentCache full:https://registry.npmjs.org/react set size:6406085 disposed:false
+23 silly fetch manifest react-social-media-embed@^2.5.18
+24 silly packumentCache full:https://registry.npmjs.org/react-social-media-embed cache-miss
+25 http cache https://registry.npmjs.org/react-social-media-embed 17ms (cache hit)
+26 silly packumentCache full:https://registry.npmjs.org/react-social-media-embed set size:347368 disposed:false
+27 silly fetch manifest react-dom@^19.0.0
+28 silly packumentCache full:https://registry.npmjs.org/react-dom cache-miss
+29 http fetch GET 200 https://registry.npmjs.org/react-dom 50ms (cache revalidated)
+30 silly packumentCache full:https://registry.npmjs.org/react-dom set size:8449711 disposed:false
+31 silly placeDep ROOT react-player@2.16.1 OK for: starter-kit@0.1.0 want: ^2.16.1
+32 silly placeDep ROOT react-social-media-embed@2.5.18 OK for: starter-kit@0.1.0 want: ^2.5.18
+33 silly fetch manifest deepmerge@^4.0.0
+34 silly packumentCache full:https://registry.npmjs.org/deepmerge cache-miss
+35 silly fetch manifest load-script@^1.0.0
+36 silly packumentCache full:https://registry.npmjs.org/load-script cache-miss
+37 silly fetch manifest memoize-one@^5.1.1
+38 silly packumentCache full:https://registry.npmjs.org/memoize-one cache-miss
+39 silly fetch manifest react-fast-compare@^3.0.1
+40 silly packumentCache full:https://registry.npmjs.org/react-fast-compare cache-miss
+41 silly fetch manifest @types/youtube-player@^5.5.5
+42 silly packumentCache full:https://registry.npmjs.org/@types%2fyoutube-player cache-miss
+43 silly fetch manifest react-html-props@^2.0.3
+44 silly packumentCache full:https://registry.npmjs.org/react-html-props cache-miss
+45 silly fetch manifest react-sub-unsub@^2.2.1
+46 silly packumentCache full:https://registry.npmjs.org/react-sub-unsub cache-miss
+47 silly fetch manifest react-twitter-embed@^4.0.4
+48 silly packumentCache full:https://registry.npmjs.org/react-twitter-embed cache-miss
+49 silly fetch manifest react-youtube@^10.1.0
+50 silly packumentCache full:https://registry.npmjs.org/react-youtube cache-miss
+51 http fetch GET 200 https://registry.npmjs.org/react-fast-compare 81ms (cache revalidated)
+52 silly packumentCache full:https://registry.npmjs.org/react-fast-compare set size:94506 disposed:false
+53 http fetch GET 200 https://registry.npmjs.org/deepmerge 87ms (cache revalidated)
+54 silly packumentCache full:https://registry.npmjs.org/deepmerge set size:101897 disposed:false
+55 http fetch GET 200 https://registry.npmjs.org/memoize-one 100ms (cache revalidated)
+56 silly packumentCache full:https://registry.npmjs.org/memoize-one set size:217155 disposed:false
+57 http fetch GET 200 https://registry.npmjs.org/load-script 272ms (cache revalidated)
+58 silly packumentCache full:https://registry.npmjs.org/load-script set size:10386 disposed:false
+59 http fetch GET 200 https://registry.npmjs.org/react-twitter-embed 277ms (cache miss)
+60 silly packumentCache full:https://registry.npmjs.org/react-twitter-embed set size:undefined disposed:false
+61 http fetch GET 200 https://registry.npmjs.org/react-html-props 280ms (cache miss)
+62 silly packumentCache full:https://registry.npmjs.org/react-html-props set size:undefined disposed:false
+63 http fetch GET 200 https://registry.npmjs.org/react-youtube 283ms (cache miss)
+64 silly packumentCache full:https://registry.npmjs.org/react-youtube set size:undefined disposed:false
+65 http fetch GET 200 https://registry.npmjs.org/react-sub-unsub 286ms (cache miss)
+66 silly packumentCache full:https://registry.npmjs.org/react-sub-unsub set size:undefined disposed:false
+67 http fetch GET 200 https://registry.npmjs.org/@types%2fyoutube-player 424ms (cache miss)
+68 silly packumentCache full:https://registry.npmjs.org/@types%2fyoutube-player set size:undefined disposed:false
+69 silly placeDep ROOT deepmerge@4.3.1 OK for: react-player@2.16.1 want: ^4.0.0
+70 silly placeDep ROOT load-script@1.0.0 OK for: react-player@2.16.1 want: ^1.0.0
+71 silly placeDep ROOT memoize-one@5.2.1 OK for: react-player@2.16.1 want: ^5.1.1
+72 silly placeDep ROOT react-fast-compare@3.2.2 OK for: react-player@2.16.1 want: ^3.0.1
+73 silly fetch manifest react@^16.0.0 || ^17.0.0 || ^18.0.0 || ^19.0.0 || ^20.0.0 || ^21.0.0 || ^22.0.0
+74 silly packumentCache full:https://registry.npmjs.org/react cache-miss
+75 http cache https://registry.npmjs.org/react 12ms (cache hit)
+76 silly packumentCache full:https://registry.npmjs.org/react set size:6406085 disposed:false
+77 silly fetch manifest react-dom@^16.0.0 || ^17.0.0 || ^18.0.0 || ^19.0.0 || ^20.0.0 || ^21.0.0 || ^22.0.0
+78 silly packumentCache full:https://registry.npmjs.org/react-dom cache-miss
+79 http cache https://registry.npmjs.org/react-dom 30ms (cache hit)
+80 silly packumentCache full:https://registry.npmjs.org/react-dom set size:8449711 disposed:false
+81 silly fetch manifest react@^16.0.0 || ^17.0.0 || ^18.0.0
+82 silly packumentCache full:https://registry.npmjs.org/react cache-miss
+83 http cache https://registry.npmjs.org/react 13ms (cache hit)
+84 silly packumentCache full:https://registry.npmjs.org/react set size:6406085 disposed:false
+85 silly fetch manifest react-dom@^16.0.0 || ^17.0.0 || ^18.0.0
+86 silly packumentCache full:https://registry.npmjs.org/react-dom cache-miss
+87 http cache https://registry.npmjs.org/react-dom 16ms (cache hit)
+88 silly packumentCache full:https://registry.npmjs.org/react-dom set size:8449711 disposed:false
+89 silly placeDep ROOT @types/youtube-player@5.5.11 OK for: react-social-media-embed@2.5.18 want: ^5.5.5
+90 silly placeDep ROOT react-html-props@2.1.1 OK for: react-social-media-embed@2.5.18 want: ^2.0.3
+91 silly placeDep ROOT react-sub-unsub@2.2.8 OK for: react-social-media-embed@2.5.18 want: ^2.2.1
+92 silly placeDep node_modules/react-social-media-embed react-twitter-embed@4.0.4 CONFLICT for: react-social-media-embed@2.5.18 want: ^4.0.4
+93 warn ERESOLVE overriding peer dependency {
+93 warn ERESOLVE   code: 'ERESOLVE',
+93 warn ERESOLVE   edge: {
+93 warn ERESOLVE     type: 'peer',
+93 warn ERESOLVE     name: 'react',
+93 warn ERESOLVE     spec: '^16.0.0 || ^17.0.0 || ^18.0.0',
+93 warn ERESOLVE     error: 'INVALID',
+93 warn ERESOLVE     from: {
+93 warn ERESOLVE       name: 'react-twitter-embed',
+93 warn ERESOLVE       version: '4.0.4',
+93 warn ERESOLVE       location: 'node_modules/react-social-media-embed/node_modules/react-twitter-embed',
+93 warn ERESOLVE       isWorkspace: false,
+93 warn ERESOLVE       dependents: [Array]
+93 warn ERESOLVE     }
+93 warn ERESOLVE   },
+93 warn ERESOLVE   dep: {
+93 warn ERESOLVE     name: 'react',
+93 warn ERESOLVE     version: '18.3.1',
+93 warn ERESOLVE     whileInstalling: {
+93 warn ERESOLVE       name: 'react-social-media-embed',
+93 warn ERESOLVE       version: '2.5.18',
+93 warn ERESOLVE       path: 'C:\\Users\\rmeic\\Projects\\collabboard\\lightable\\apps\\starter-kit\\node_modules\\react-social-media-embed'
+93 warn ERESOLVE     },
+93 warn ERESOLVE     location: 'node_modules/react',
+93 warn ERESOLVE     isWorkspace: false,
+93 warn ERESOLVE     dependents: [ [Object] ]
+93 warn ERESOLVE   },
+93 warn ERESOLVE   force: false,
+93 warn ERESOLVE   isMine: false,
+93 warn ERESOLVE   strictPeerDeps: false,
+93 warn ERESOLVE   current: {
+93 warn ERESOLVE     name: 'react',
+93 warn ERESOLVE     version: '19.1.0',
+93 warn ERESOLVE     location: 'node_modules/react',
+93 warn ERESOLVE     isWorkspace: false,
+93 warn ERESOLVE     dependents: [ [Object] ]
+93 warn ERESOLVE   },
+93 warn ERESOLVE   peerConflict: {
+93 warn ERESOLVE     name: 'react',
+93 warn ERESOLVE     version: '19.1.0',
+93 warn ERESOLVE     location: 'node_modules/react',
+93 warn ERESOLVE     isWorkspace: false,
+93 warn ERESOLVE     dependents: [ [Object] ]
+93 warn ERESOLVE   }
+93 warn ERESOLVE }
+94 warn ERESOLVE overriding peer dependency {
+94 warn ERESOLVE   code: 'ERESOLVE',
+94 warn ERESOLVE   edge: {
+94 warn ERESOLVE     type: 'peer',
+94 warn ERESOLVE     name: 'react-dom',
+94 warn ERESOLVE     spec: '^16.0.0 || ^17.0.0 || ^18.0.0',
+94 warn ERESOLVE     error: 'INVALID',
+94 warn ERESOLVE     from: {
+94 warn ERESOLVE       name: 'react-twitter-embed',
+94 warn ERESOLVE       version: '4.0.4',
+94 warn ERESOLVE       location: 'node_modules/react-social-media-embed/node_modules/react-twitter-embed',
+94 warn ERESOLVE       isWorkspace: false,
+94 warn ERESOLVE       dependents: [Array]
+94 warn ERESOLVE     }
+94 warn ERESOLVE   },
+94 warn ERESOLVE   dep: {
+94 warn ERESOLVE     name: 'react-dom',
+94 warn ERESOLVE     version: '18.3.1',
+94 warn ERESOLVE     whileInstalling: {
+94 warn ERESOLVE       name: 'react-social-media-embed',
+94 warn ERESOLVE       version: '2.5.18',
+94 warn ERESOLVE       path: 'C:\\Users\\rmeic\\Projects\\collabboard\\lightable\\apps\\starter-kit\\node_modules\\react-social-media-embed'
+94 warn ERESOLVE     },
+94 warn ERESOLVE     location: 'node_modules/react-dom',
+94 warn ERESOLVE     isWorkspace: false,
+94 warn ERESOLVE     dependents: [ [Object] ]
+94 warn ERESOLVE   },
+94 warn ERESOLVE   force: false,
+94 warn ERESOLVE   isMine: false,
+94 warn ERESOLVE   strictPeerDeps: false,
+94 warn ERESOLVE   current: {
+94 warn ERESOLVE     name: 'react-dom',
+94 warn ERESOLVE     version: '19.1.0',
+94 warn ERESOLVE     location: 'node_modules/react-dom',
+94 warn ERESOLVE     isWorkspace: false,
+94 warn ERESOLVE     dependents: [ [Object] ]
+94 warn ERESOLVE   },
+94 warn ERESOLVE   peerConflict: {
+94 warn ERESOLVE     name: 'react-dom',
+94 warn ERESOLVE     version: '19.1.0',
+94 warn ERESOLVE     location: 'node_modules/react-dom',
+94 warn ERESOLVE     isWorkspace: false,
+94 warn ERESOLVE     dependents: [ [Object] ]
+94 warn ERESOLVE   }
+94 warn ERESOLVE }
+95 silly placeDep ROOT react-youtube@10.1.0 OK for: react-social-media-embed@2.5.18 want: ^10.1.0
+96 silly fetch manifest scriptjs@^2.5.9
+97 silly packumentCache full:https://registry.npmjs.org/scriptjs cache-miss
+98 silly fetch manifest youtube-player@5.5.2
+99 silly packumentCache full:https://registry.npmjs.org/youtube-player cache-miss
+100 http fetch GET 200 https://registry.npmjs.org/youtube-player 201ms (cache miss)
+101 silly packumentCache full:https://registry.npmjs.org/youtube-player set size:undefined disposed:false
+102 http fetch GET 200 https://registry.npmjs.org/scriptjs 231ms (cache miss)
+103 silly packumentCache full:https://registry.npmjs.org/scriptjs set size:undefined disposed:false
+104 silly placeDep ROOT youtube-player@5.5.2 OK for: react-youtube@10.1.0 want: 5.5.2
+105 silly fetch manifest debug@^2.6.6
+106 silly packumentCache full:https://registry.npmjs.org/debug cache-miss
+107 silly fetch manifest sister@^3.0.0
+108 silly packumentCache full:https://registry.npmjs.org/sister cache-miss
+109 http fetch GET 200 https://registry.npmjs.org/debug 36ms (cache revalidated)
+110 silly packumentCache full:https://registry.npmjs.org/debug set size:195840 disposed:false
+111 http fetch GET 200 https://registry.npmjs.org/sister 399ms (cache miss)
+112 silly packumentCache full:https://registry.npmjs.org/sister set size:undefined disposed:false
+113 silly placeDep node_modules/youtube-player debug@2.6.9 OK for: youtube-player@5.5.2 want: ^2.6.6
+114 silly placeDep ROOT sister@3.0.2 OK for: youtube-player@5.5.2 want: ^3.0.0
+115 silly fetch manifest ms@2.0.0
+116 silly packumentCache full:https://registry.npmjs.org/ms cache-miss
+117 http fetch GET 200 https://registry.npmjs.org/ms 37ms (cache revalidated)
+118 silly packumentCache full:https://registry.npmjs.org/ms set size:92208 disposed:false
+119 silly fetch manifest react@^16.8 || ^17.0 || ^18.0
+120 silly packumentCache full:https://registry.npmjs.org/react cache-miss
+121 http cache https://registry.npmjs.org/react 12ms (cache hit)
+122 silly packumentCache full:https://registry.npmjs.org/react set size:6406085 disposed:false
+123 silly fetch manifest react-dom@^16.8 || ^17.0 || ^18.0
+124 silly packumentCache full:https://registry.npmjs.org/react-dom cache-miss
+125 http cache https://registry.npmjs.org/react-dom 16ms (cache hit)
+126 silly packumentCache full:https://registry.npmjs.org/react-dom set size:8449711 disposed:false
+127 warn ERESOLVE overriding peer dependency {
+127 warn ERESOLVE   code: 'ERESOLVE',
+127 warn ERESOLVE   edge: {
+127 warn ERESOLVE     type: 'peer',
+127 warn ERESOLVE     name: 'react',
+127 warn ERESOLVE     spec: '^16.8 || ^17.0 || ^18.0',
+127 warn ERESOLVE     error: 'INVALID',
+127 warn ERESOLVE     from: {
+127 warn ERESOLVE       name: '@radix-ui/react-tabs',
+127 warn ERESOLVE       version: '1.0.2',
+127 warn ERESOLVE       location: 'node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-tabs',
+127 warn ERESOLVE       isWorkspace: false,
+127 warn ERESOLVE       dependents: [Array]
+127 warn ERESOLVE     }
+127 warn ERESOLVE   },
+127 warn ERESOLVE   dep: {
+127 warn ERESOLVE     name: 'react',
+127 warn ERESOLVE     version: '18.3.1',
+127 warn ERESOLVE     whileInstalling: {
+127 warn ERESOLVE       name: '@radix-ui/react-tabs',
+127 warn ERESOLVE       version: '1.0.2',
+127 warn ERESOLVE       path: 'C:\\Users\\rmeic\\Projects\\collabboard\\lightable\\apps\\starter-kit\\node_modules\\@excalidraw\\excalidraw\\node_modules\\@radix-ui\\react-tabs'
+127 warn ERESOLVE     },
+127 warn ERESOLVE     location: 'node_modules/react',
+127 warn ERESOLVE     isWorkspace: false,
+127 warn ERESOLVE     dependents: [ [Object] ]
+127 warn ERESOLVE   },
+127 warn ERESOLVE   force: false,
+127 warn ERESOLVE   isMine: false,
+127 warn ERESOLVE   strictPeerDeps: false,
+127 warn ERESOLVE   current: {
+127 warn ERESOLVE     name: 'react',
+127 warn ERESOLVE     version: '19.1.0',
+127 warn ERESOLVE     location: 'node_modules/react',
+127 warn ERESOLVE     isWorkspace: false,
+127 warn ERESOLVE     dependents: [ [Object] ]
+127 warn ERESOLVE   },
+127 warn ERESOLVE   peerConflict: {
+127 warn ERESOLVE     current: {
+127 warn ERESOLVE       name: 'react',
+127 warn ERESOLVE       version: '19.1.0',
+127 warn ERESOLVE       location: 'node_modules/react',
+127 warn ERESOLVE       isWorkspace: false,
+127 warn ERESOLVE       dependents: [Array]
+127 warn ERESOLVE     },
+127 warn ERESOLVE     peer: {
+127 warn ERESOLVE       name: 'react',
+127 warn ERESOLVE       version: '18.3.1',
+127 warn ERESOLVE       whileInstalling: [Object],
+127 warn ERESOLVE       location: 'node_modules/react',
+127 warn ERESOLVE       isWorkspace: false,
+127 warn ERESOLVE       dependents: [Array]
+127 warn ERESOLVE     }
+127 warn ERESOLVE   }
+127 warn ERESOLVE }
+128 warn ERESOLVE overriding peer dependency {
+128 warn ERESOLVE   code: 'ERESOLVE',
+128 warn ERESOLVE   edge: {
+128 warn ERESOLVE     type: 'peer',
+128 warn ERESOLVE     name: 'react-dom',
+128 warn ERESOLVE     spec: '^16.8 || ^17.0 || ^18.0',
+128 warn ERESOLVE     error: 'INVALID',
+128 warn ERESOLVE     from: {
+128 warn ERESOLVE       name: '@radix-ui/react-tabs',
+128 warn ERESOLVE       version: '1.0.2',
+128 warn ERESOLVE       location: 'node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-tabs',
+128 warn ERESOLVE       isWorkspace: false,
+128 warn ERESOLVE       dependents: [Array]
+128 warn ERESOLVE     }
+128 warn ERESOLVE   },
+128 warn ERESOLVE   dep: {
+128 warn ERESOLVE     name: 'react-dom',
+128 warn ERESOLVE     version: '18.3.1',
+128 warn ERESOLVE     whileInstalling: {
+128 warn ERESOLVE       name: '@radix-ui/react-tabs',
+128 warn ERESOLVE       version: '1.0.2',
+128 warn ERESOLVE       path: 'C:\\Users\\rmeic\\Projects\\collabboard\\lightable\\apps\\starter-kit\\node_modules\\@excalidraw\\excalidraw\\node_modules\\@radix-ui\\react-tabs'
+128 warn ERESOLVE     },
+128 warn ERESOLVE     location: 'node_modules/react-dom',
+128 warn ERESOLVE     isWorkspace: false,
+128 warn ERESOLVE     dependents: [ [Object] ]
+128 warn ERESOLVE   },
+128 warn ERESOLVE   force: false,
+128 warn ERESOLVE   isMine: false,
+128 warn ERESOLVE   strictPeerDeps: false,
+128 warn ERESOLVE   current: {
+128 warn ERESOLVE     name: 'react-dom',
+128 warn ERESOLVE     version: '19.1.0',
+128 warn ERESOLVE     location: 'node_modules/react-dom',
+128 warn ERESOLVE     isWorkspace: false,
+128 warn ERESOLVE     dependents: [ [Object] ]
+128 warn ERESOLVE   },
+128 warn ERESOLVE   peerConflict: {
+128 warn ERESOLVE     current: {
+128 warn ERESOLVE       name: 'react-dom',
+128 warn ERESOLVE       version: '19.1.0',
+128 warn ERESOLVE       location: 'node_modules/react-dom',
+128 warn ERESOLVE       isWorkspace: false,
+128 warn ERESOLVE       dependents: [Array]
+128 warn ERESOLVE     },
+128 warn ERESOLVE     peer: {
+128 warn ERESOLVE       name: 'react-dom',
+128 warn ERESOLVE       version: '18.3.1',
+128 warn ERESOLVE       whileInstalling: [Object],
+128 warn ERESOLVE       location: 'node_modules/react-dom',
+128 warn ERESOLVE       isWorkspace: false,
+128 warn ERESOLVE       dependents: [Array]
+128 warn ERESOLVE     }
+128 warn ERESOLVE   }
+128 warn ERESOLVE }
+129 silly placeDep ROOT scriptjs@2.5.9 OK for: react-twitter-embed@4.0.4 want: ^2.5.9
+130 silly placeDep node_modules/youtube-player ms@2.0.0 OK for: debug@2.6.9 want: 2.0.0
+131 warn ERESOLVE overriding peer dependency {
+131 warn ERESOLVE   code: 'ERESOLVE',
+131 warn ERESOLVE   edge: {
+131 warn ERESOLVE     type: 'peer',
+131 warn ERESOLVE     name: 'react',
+131 warn ERESOLVE     spec: '^16.8 || ^17.0 || ^18.0',
+131 warn ERESOLVE     error: 'INVALID',
+131 warn ERESOLVE     from: {
+131 warn ERESOLVE       name: '@radix-ui/react-context',
+131 warn ERESOLVE       version: '1.0.0',
+131 warn ERESOLVE       location: 'node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-tabs/node_modules/@radix-ui/react-context',
+131 warn ERESOLVE       isWorkspace: false,
+131 warn ERESOLVE       dependents: [Array]
+131 warn ERESOLVE     }
+131 warn ERESOLVE   },
+131 warn ERESOLVE   dep: {
+131 warn ERESOLVE     name: 'react',
+131 warn ERESOLVE     version: '18.3.1',
+131 warn ERESOLVE     whileInstalling: {
+131 warn ERESOLVE       name: '@radix-ui/react-context',
+131 warn ERESOLVE       version: '1.0.0',
+131 warn ERESOLVE       path: 'C:\\Users\\rmeic\\Projects\\collabboard\\lightable\\apps\\starter-kit\\node_modules\\@excalidraw\\excalidraw\\node_modules\\@radix-ui\\react-tabs\\node_modules\\@radix-ui\\react-context'
+131 warn ERESOLVE     },
+131 warn ERESOLVE     location: 'node_modules/react',
+131 warn ERESOLVE     isWorkspace: false,
+131 warn ERESOLVE     dependents: [ [Object] ]
+131 warn ERESOLVE   },
+131 warn ERESOLVE   force: false,
+131 warn ERESOLVE   isMine: false,
+131 warn ERESOLVE   strictPeerDeps: false,
+131 warn ERESOLVE   current: {
+131 warn ERESOLVE     name: 'react',
+131 warn ERESOLVE     version: '19.1.0',
+131 warn ERESOLVE     location: 'node_modules/react',
+131 warn ERESOLVE     isWorkspace: false,
+131 warn ERESOLVE     dependents: [ [Object] ]
+131 warn ERESOLVE   },
+131 warn ERESOLVE   peerConflict: {
+131 warn ERESOLVE     current: {
+131 warn ERESOLVE       name: 'react',
+131 warn ERESOLVE       version: '19.1.0',
+131 warn ERESOLVE       location: 'node_modules/react',
+131 warn ERESOLVE       isWorkspace: false,
+131 warn ERESOLVE       dependents: [Array]
+131 warn ERESOLVE     },
+131 warn ERESOLVE     peer: {
+131 warn ERESOLVE       name: 'react',
+131 warn ERESOLVE       version: '18.3.1',
+131 warn ERESOLVE       whileInstalling: [Object],
+131 warn ERESOLVE       location: 'node_modules/react',
+131 warn ERESOLVE       isWorkspace: false,
+131 warn ERESOLVE       dependents: [Array]
+131 warn ERESOLVE     }
+131 warn ERESOLVE   }
+131 warn ERESOLVE }
+132 warn ERESOLVE overriding peer dependency {
+132 warn ERESOLVE   code: 'ERESOLVE',
+132 warn ERESOLVE   edge: {
+132 warn ERESOLVE     type: 'peer',
+132 warn ERESOLVE     name: 'react',
+132 warn ERESOLVE     spec: '^16.8 || ^17.0 || ^18.0',
+132 warn ERESOLVE     error: 'INVALID',
+132 warn ERESOLVE     from: {
+132 warn ERESOLVE       name: '@radix-ui/react-direction',
+132 warn ERESOLVE       version: '1.0.0',
+132 warn ERESOLVE       location: 'node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-tabs/node_modules/@radix-ui/react-direction',
+132 warn ERESOLVE       isWorkspace: false,
+132 warn ERESOLVE       dependents: [Array]
+132 warn ERESOLVE     }
+132 warn ERESOLVE   },
+132 warn ERESOLVE   dep: {
+132 warn ERESOLVE     name: 'react',
+132 warn ERESOLVE     version: '18.3.1',
+132 warn ERESOLVE     whileInstalling: {
+132 warn ERESOLVE       name: '@radix-ui/react-direction',
+132 warn ERESOLVE       version: '1.0.0',
+132 warn ERESOLVE       path: 'C:\\Users\\rmeic\\Projects\\collabboard\\lightable\\apps\\starter-kit\\node_modules\\@excalidraw\\excalidraw\\node_modules\\@radix-ui\\react-tabs\\node_modules\\@radix-ui\\react-direction'
+132 warn ERESOLVE     },
+132 warn ERESOLVE     location: 'node_modules/react',
+132 warn ERESOLVE     isWorkspace: false,
+132 warn ERESOLVE     dependents: [ [Object] ]
+132 warn ERESOLVE   },
+132 warn ERESOLVE   force: false,
+132 warn ERESOLVE   isMine: false,
+132 warn ERESOLVE   strictPeerDeps: false,
+132 warn ERESOLVE   current: {
+132 warn ERESOLVE     name: 'react',
+132 warn ERESOLVE     version: '19.1.0',
+132 warn ERESOLVE     location: 'node_modules/react',
+132 warn ERESOLVE     isWorkspace: false,
+132 warn ERESOLVE     dependents: [ [Object] ]
+132 warn ERESOLVE   },
+132 warn ERESOLVE   peerConflict: {
+132 warn ERESOLVE     current: {
+132 warn ERESOLVE       name: 'react',
+132 warn ERESOLVE       version: '19.1.0',
+132 warn ERESOLVE       location: 'node_modules/react',
+132 warn ERESOLVE       isWorkspace: false,
+132 warn ERESOLVE       dependents: [Array]
+132 warn ERESOLVE     },
+132 warn ERESOLVE     peer: {
+132 warn ERESOLVE       name: 'react',
+132 warn ERESOLVE       version: '18.3.1',
+132 warn ERESOLVE       whileInstalling: [Object],
+132 warn ERESOLVE       location: 'node_modules/react',
+132 warn ERESOLVE       isWorkspace: false,
+132 warn ERESOLVE       dependents: [Array]
+132 warn ERESOLVE     }
+132 warn ERESOLVE   }
+132 warn ERESOLVE }
+133 warn ERESOLVE overriding peer dependency {
+133 warn ERESOLVE   code: 'ERESOLVE',
+133 warn ERESOLVE   edge: {
+133 warn ERESOLVE     type: 'peer',
+133 warn ERESOLVE     name: 'react',
+133 warn ERESOLVE     spec: '^16.8 || ^17.0 || ^18.0',
+133 warn ERESOLVE     error: 'INVALID',
+133 warn ERESOLVE     from: {
+133 warn ERESOLVE       name: '@radix-ui/react-id',
+133 warn ERESOLVE       version: '1.0.0',
+133 warn ERESOLVE       location: 'node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-tabs/node_modules/@radix-ui/react-id',
+133 warn ERESOLVE       isWorkspace: false,
+133 warn ERESOLVE       dependents: [Array]
+133 warn ERESOLVE     }
+133 warn ERESOLVE   },
+133 warn ERESOLVE   dep: {
+133 warn ERESOLVE     name: 'react',
+133 warn ERESOLVE     version: '18.3.1',
+133 warn ERESOLVE     whileInstalling: {
+133 warn ERESOLVE       name: '@radix-ui/react-id',
+133 warn ERESOLVE       version: '1.0.0',
+133 warn ERESOLVE       path: 'C:\\Users\\rmeic\\Projects\\collabboard\\lightable\\apps\\starter-kit\\node_modules\\@excalidraw\\excalidraw\\node_modules\\@radix-ui\\react-tabs\\node_modules\\@radix-ui\\react-id'
+133 warn ERESOLVE     },
+133 warn ERESOLVE     location: 'node_modules/react',
+133 warn ERESOLVE     isWorkspace: false,
+133 warn ERESOLVE     dependents: [ [Object] ]
+133 warn ERESOLVE   },
+133 warn ERESOLVE   force: false,
+133 warn ERESOLVE   isMine: false,
+133 warn ERESOLVE   strictPeerDeps: false,
+133 warn ERESOLVE   current: {
+133 warn ERESOLVE     name: 'react',
+133 warn ERESOLVE     version: '19.1.0',
+133 warn ERESOLVE     location: 'node_modules/react',
+133 warn ERESOLVE     isWorkspace: false,
+133 warn ERESOLVE     dependents: [ [Object] ]
+133 warn ERESOLVE   },
+133 warn ERESOLVE   peerConflict: {
+133 warn ERESOLVE     current: {
+133 warn ERESOLVE       name: 'react',
+133 warn ERESOLVE       version: '19.1.0',
+133 warn ERESOLVE       location: 'node_modules/react',
+133 warn ERESOLVE       isWorkspace: false,
+133 warn ERESOLVE       dependents: [Array]
+133 warn ERESOLVE     },
+133 warn ERESOLVE     peer: {
+133 warn ERESOLVE       name: 'react',
+133 warn ERESOLVE       version: '18.3.1',
+133 warn ERESOLVE       whileInstalling: [Object],
+133 warn ERESOLVE       location: 'node_modules/react',
+133 warn ERESOLVE       isWorkspace: false,
+133 warn ERESOLVE       dependents: [Array]
+133 warn ERESOLVE     }
+133 warn ERESOLVE   }
+133 warn ERESOLVE }
+134 warn ERESOLVE overriding peer dependency {
+134 warn ERESOLVE   code: 'ERESOLVE',
+134 warn ERESOLVE   edge: {
+134 warn ERESOLVE     type: 'peer',
+134 warn ERESOLVE     name: 'react',
+134 warn ERESOLVE     spec: '^16.8 || ^17.0 || ^18.0',
+134 warn ERESOLVE     error: 'INVALID',
+134 warn ERESOLVE     from: {
+134 warn ERESOLVE       name: '@radix-ui/react-presence',
+134 warn ERESOLVE       version: '1.0.0',
+134 warn ERESOLVE       location: 'node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-tabs/node_modules/@radix-ui/react-presence',
+134 warn ERESOLVE       isWorkspace: false,
+134 warn ERESOLVE       dependents: [Array]
+134 warn ERESOLVE     }
+134 warn ERESOLVE   },
+134 warn ERESOLVE   dep: {
+134 warn ERESOLVE     name: 'react',
+134 warn ERESOLVE     version: '18.3.1',
+134 warn ERESOLVE     whileInstalling: {
+134 warn ERESOLVE       name: '@radix-ui/react-presence',
+134 warn ERESOLVE       version: '1.0.0',
+134 warn ERESOLVE       path: 'C:\\Users\\rmeic\\Projects\\collabboard\\lightable\\apps\\starter-kit\\node_modules\\@excalidraw\\excalidraw\\node_modules\\@radix-ui\\react-tabs\\node_modules\\@radix-ui\\react-presence'
+134 warn ERESOLVE     },
+134 warn ERESOLVE     location: 'node_modules/react',
+134 warn ERESOLVE     isWorkspace: false,
+134 warn ERESOLVE     dependents: [ [Object] ]
+134 warn ERESOLVE   },
+134 warn ERESOLVE   force: false,
+134 warn ERESOLVE   isMine: false,
+134 warn ERESOLVE   strictPeerDeps: false,
+134 warn ERESOLVE   current: {
+134 warn ERESOLVE     name: 'react',
+134 warn ERESOLVE     version: '19.1.0',
+134 warn ERESOLVE     location: 'node_modules/react',
+134 warn ERESOLVE     isWorkspace: false,
+134 warn ERESOLVE     dependents: [ [Object] ]
+134 warn ERESOLVE   },
+134 warn ERESOLVE   peerConflict: {
+134 warn ERESOLVE     current: {
+134 warn ERESOLVE       name: 'react',
+134 warn ERESOLVE       version: '19.1.0',
+134 warn ERESOLVE       location: 'node_modules/react',
+134 warn ERESOLVE       isWorkspace: false,
+134 warn ERESOLVE       dependents: [Array]
+134 warn ERESOLVE     },
+134 warn ERESOLVE     peer: {
+134 warn ERESOLVE       name: 'react',
+134 warn ERESOLVE       version: '18.3.1',
+134 warn ERESOLVE       whileInstalling: [Object],
+134 warn ERESOLVE       location: 'node_modules/react',
+134 warn ERESOLVE       isWorkspace: false,
+134 warn ERESOLVE       dependents: [Array]
+134 warn ERESOLVE     }
+134 warn ERESOLVE   }
+134 warn ERESOLVE }
+135 warn ERESOLVE overriding peer dependency {
+135 warn ERESOLVE   code: 'ERESOLVE',
+135 warn ERESOLVE   edge: {
+135 warn ERESOLVE     type: 'peer',
+135 warn ERESOLVE     name: 'react-dom',
+135 warn ERESOLVE     spec: '^16.8 || ^17.0 || ^18.0',
+135 warn ERESOLVE     error: 'INVALID',
+135 warn ERESOLVE     from: {
+135 warn ERESOLVE       name: '@radix-ui/react-presence',
+135 warn ERESOLVE       version: '1.0.0',
+135 warn ERESOLVE       location: 'node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-tabs/node_modules/@radix-ui/react-presence',
+135 warn ERESOLVE       isWorkspace: false,
+135 warn ERESOLVE       dependents: [Array]
+135 warn ERESOLVE     }
+135 warn ERESOLVE   },
+135 warn ERESOLVE   dep: {
+135 warn ERESOLVE     name: 'react-dom',
+135 warn ERESOLVE     version: '18.3.1',
+135 warn ERESOLVE     whileInstalling: {
+135 warn ERESOLVE       name: '@radix-ui/react-presence',
+135 warn ERESOLVE       version: '1.0.0',
+135 warn ERESOLVE       path: 'C:\\Users\\rmeic\\Projects\\collabboard\\lightable\\apps\\starter-kit\\node_modules\\@excalidraw\\excalidraw\\node_modules\\@radix-ui\\react-tabs\\node_modules\\@radix-ui\\react-presence'
+135 warn ERESOLVE     },
+135 warn ERESOLVE     location: 'node_modules/react-dom',
+135 warn ERESOLVE     isWorkspace: false,
+135 warn ERESOLVE     dependents: [ [Object] ]
+135 warn ERESOLVE   },
+135 warn ERESOLVE   force: false,
+135 warn ERESOLVE   isMine: false,
+135 warn ERESOLVE   strictPeerDeps: false,
+135 warn ERESOLVE   current: {
+135 warn ERESOLVE     name: 'react-dom',
+135 warn ERESOLVE     version: '19.1.0',
+135 warn ERESOLVE     location: 'node_modules/react-dom',
+135 warn ERESOLVE     isWorkspace: false,
+135 warn ERESOLVE     dependents: [ [Object] ]
+135 warn ERESOLVE   },
+135 warn ERESOLVE   peerConflict: {
+135 warn ERESOLVE     current: {
+135 warn ERESOLVE       name: 'react-dom',
+135 warn ERESOLVE       version: '19.1.0',
+135 warn ERESOLVE       location: 'node_modules/react-dom',
+135 warn ERESOLVE       isWorkspace: false,
+135 warn ERESOLVE       dependents: [Array]
+135 warn ERESOLVE     },
+135 warn ERESOLVE     peer: {
+135 warn ERESOLVE       name: 'react-dom',
+135 warn ERESOLVE       version: '18.3.1',
+135 warn ERESOLVE       whileInstalling: [Object],
+135 warn ERESOLVE       location: 'node_modules/react-dom',
+135 warn ERESOLVE       isWorkspace: false,
+135 warn ERESOLVE       dependents: [Array]
+135 warn ERESOLVE     }
+135 warn ERESOLVE   }
+135 warn ERESOLVE }
+136 warn ERESOLVE overriding peer dependency {
+136 warn ERESOLVE   code: 'ERESOLVE',
+136 warn ERESOLVE   edge: {
+136 warn ERESOLVE     type: 'peer',
+136 warn ERESOLVE     name: 'react',
+136 warn ERESOLVE     spec: '^16.8 || ^17.0 || ^18.0',
+136 warn ERESOLVE     error: 'INVALID',
+136 warn ERESOLVE     from: {
+136 warn ERESOLVE       name: '@radix-ui/react-primitive',
+136 warn ERESOLVE       version: '1.0.1',
+136 warn ERESOLVE       location: 'node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-tabs/node_modules/@radix-ui/react-primitive',
+136 warn ERESOLVE       isWorkspace: false,
+136 warn ERESOLVE       dependents: [Array]
+136 warn ERESOLVE     }
+136 warn ERESOLVE   },
+136 warn ERESOLVE   dep: {
+136 warn ERESOLVE     name: 'react',
+136 warn ERESOLVE     version: '18.3.1',
+136 warn ERESOLVE     whileInstalling: {
+136 warn ERESOLVE       name: '@radix-ui/react-primitive',
+136 warn ERESOLVE       version: '1.0.1',
+136 warn ERESOLVE       path: 'C:\\Users\\rmeic\\Projects\\collabboard\\lightable\\apps\\starter-kit\\node_modules\\@excalidraw\\excalidraw\\node_modules\\@radix-ui\\react-tabs\\node_modules\\@radix-ui\\react-primitive'
+136 warn ERESOLVE     },
+136 warn ERESOLVE     location: 'node_modules/react',
+136 warn ERESOLVE     isWorkspace: false,
+136 warn ERESOLVE     dependents: [ [Object] ]
+136 warn ERESOLVE   },
+136 warn ERESOLVE   force: false,
+136 warn ERESOLVE   isMine: false,
+136 warn ERESOLVE   strictPeerDeps: false,
+136 warn ERESOLVE   current: {
+136 warn ERESOLVE     name: 'react',
+136 warn ERESOLVE     version: '19.1.0',
+136 warn ERESOLVE     location: 'node_modules/react',
+136 warn ERESOLVE     isWorkspace: false,
+136 warn ERESOLVE     dependents: [ [Object] ]
+136 warn ERESOLVE   },
+136 warn ERESOLVE   peerConflict: {
+136 warn ERESOLVE     current: {
+136 warn ERESOLVE       name: 'react',
+136 warn ERESOLVE       version: '19.1.0',
+136 warn ERESOLVE       location: 'node_modules/react',
+136 warn ERESOLVE       isWorkspace: false,
+136 warn ERESOLVE       dependents: [Array]
+136 warn ERESOLVE     },
+136 warn ERESOLVE     peer: {
+136 warn ERESOLVE       name: 'react',
+136 warn ERESOLVE       version: '18.3.1',
+136 warn ERESOLVE       whileInstalling: [Object],
+136 warn ERESOLVE       location: 'node_modules/react',
+136 warn ERESOLVE       isWorkspace: false,
+136 warn ERESOLVE       dependents: [Array]
+136 warn ERESOLVE     }
+136 warn ERESOLVE   }
+136 warn ERESOLVE }
+137 warn ERESOLVE overriding peer dependency {
+137 warn ERESOLVE   code: 'ERESOLVE',
+137 warn ERESOLVE   edge: {
+137 warn ERESOLVE     type: 'peer',
+137 warn ERESOLVE     name: 'react-dom',
+137 warn ERESOLVE     spec: '^16.8 || ^17.0 || ^18.0',
+137 warn ERESOLVE     error: 'INVALID',
+137 warn ERESOLVE     from: {
+137 warn ERESOLVE       name: '@radix-ui/react-primitive',
+137 warn ERESOLVE       version: '1.0.1',
+137 warn ERESOLVE       location: 'node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-tabs/node_modules/@radix-ui/react-primitive',
+137 warn ERESOLVE       isWorkspace: false,
+137 warn ERESOLVE       dependents: [Array]
+137 warn ERESOLVE     }
+137 warn ERESOLVE   },
+137 warn ERESOLVE   dep: {
+137 warn ERESOLVE     name: 'react-dom',
+137 warn ERESOLVE     version: '18.3.1',
+137 warn ERESOLVE     whileInstalling: {
+137 warn ERESOLVE       name: '@radix-ui/react-primitive',
+137 warn ERESOLVE       version: '1.0.1',
+137 warn ERESOLVE       path: 'C:\\Users\\rmeic\\Projects\\collabboard\\lightable\\apps\\starter-kit\\node_modules\\@excalidraw\\excalidraw\\node_modules\\@radix-ui\\react-tabs\\node_modules\\@radix-ui\\react-primitive'
+137 warn ERESOLVE     },
+137 warn ERESOLVE     location: 'node_modules/react-dom',
+137 warn ERESOLVE     isWorkspace: false,
+137 warn ERESOLVE     dependents: [ [Object] ]
+137 warn ERESOLVE   },
+137 warn ERESOLVE   force: false,
+137 warn ERESOLVE   isMine: false,
+137 warn ERESOLVE   strictPeerDeps: false,
+137 warn ERESOLVE   current: {
+137 warn ERESOLVE     name: 'react-dom',
+137 warn ERESOLVE     version: '19.1.0',
+137 warn ERESOLVE     location: 'node_modules/react-dom',
+137 warn ERESOLVE     isWorkspace: false,
+137 warn ERESOLVE     dependents: [ [Object] ]
+137 warn ERESOLVE   },
+137 warn ERESOLVE   peerConflict: {
+137 warn ERESOLVE     current: {
+137 warn ERESOLVE       name: 'react-dom',
+137 warn ERESOLVE       version: '19.1.0',
+137 warn ERESOLVE       location: 'node_modules/react-dom',
+137 warn ERESOLVE       isWorkspace: false,
+137 warn ERESOLVE       dependents: [Array]
+137 warn ERESOLVE     },
+137 warn ERESOLVE     peer: {
+137 warn ERESOLVE       name: 'react-dom',
+137 warn ERESOLVE       version: '18.3.1',
+137 warn ERESOLVE       whileInstalling: [Object],
+137 warn ERESOLVE       location: 'node_modules/react-dom',
+137 warn ERESOLVE       isWorkspace: false,
+137 warn ERESOLVE       dependents: [Array]
+137 warn ERESOLVE     }
+137 warn ERESOLVE   }
+137 warn ERESOLVE }
+138 warn ERESOLVE overriding peer dependency {
+138 warn ERESOLVE   code: 'ERESOLVE',
+138 warn ERESOLVE   edge: {
+138 warn ERESOLVE     type: 'peer',
+138 warn ERESOLVE     name: 'react',
+138 warn ERESOLVE     spec: '^16.8 || ^17.0 || ^18.0',
+138 warn ERESOLVE     error: 'INVALID',
+138 warn ERESOLVE     from: {
+138 warn ERESOLVE       name: '@radix-ui/react-roving-focus',
+138 warn ERESOLVE       version: '1.0.2',
+138 warn ERESOLVE       location: 'node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-tabs/node_modules/@radix-ui/react-roving-focus',
+138 warn ERESOLVE       isWorkspace: false,
+138 warn ERESOLVE       dependents: [Array]
+138 warn ERESOLVE     }
+138 warn ERESOLVE   },
+138 warn ERESOLVE   dep: {
+138 warn ERESOLVE     name: 'react',
+138 warn ERESOLVE     version: '18.3.1',
+138 warn ERESOLVE     whileInstalling: {
+138 warn ERESOLVE       name: '@radix-ui/react-roving-focus',
+138 warn ERESOLVE       version: '1.0.2',
+138 warn ERESOLVE       path: 'C:\\Users\\rmeic\\Projects\\collabboard\\lightable\\apps\\starter-kit\\node_modules\\@excalidraw\\excalidraw\\node_modules\\@radix-ui\\react-tabs\\node_modules\\@radix-ui\\react-roving-focus'
+138 warn ERESOLVE     },
+138 warn ERESOLVE     location: 'node_modules/react',
+138 warn ERESOLVE     isWorkspace: false,
+138 warn ERESOLVE     dependents: [ [Object] ]
+138 warn ERESOLVE   },
+138 warn ERESOLVE   force: false,
+138 warn ERESOLVE   isMine: false,
+138 warn ERESOLVE   strictPeerDeps: false,
+138 warn ERESOLVE   current: {
+138 warn ERESOLVE     name: 'react',
+138 warn ERESOLVE     version: '19.1.0',
+138 warn ERESOLVE     location: 'node_modules/react',
+138 warn ERESOLVE     isWorkspace: false,
+138 warn ERESOLVE     dependents: [ [Object] ]
+138 warn ERESOLVE   },
+138 warn ERESOLVE   peerConflict: {
+138 warn ERESOLVE     current: {
+138 warn ERESOLVE       name: 'react',
+138 warn ERESOLVE       version: '19.1.0',
+138 warn ERESOLVE       location: 'node_modules/react',
+138 warn ERESOLVE       isWorkspace: false,
+138 warn ERESOLVE       dependents: [Array]
+138 warn ERESOLVE     },
+138 warn ERESOLVE     peer: {
+138 warn ERESOLVE       name: 'react',
+138 warn ERESOLVE       version: '18.3.1',
+138 warn ERESOLVE       whileInstalling: [Object],
+138 warn ERESOLVE       location: 'node_modules/react',
+138 warn ERESOLVE       isWorkspace: false,
+138 warn ERESOLVE       dependents: [Array]
+138 warn ERESOLVE     }
+138 warn ERESOLVE   }
+138 warn ERESOLVE }
+139 warn ERESOLVE overriding peer dependency {
+139 warn ERESOLVE   code: 'ERESOLVE',
+139 warn ERESOLVE   edge: {
+139 warn ERESOLVE     type: 'peer',
+139 warn ERESOLVE     name: 'react-dom',
+139 warn ERESOLVE     spec: '^16.8 || ^17.0 || ^18.0',
+139 warn ERESOLVE     error: 'INVALID',
+139 warn ERESOLVE     from: {
+139 warn ERESOLVE       name: '@radix-ui/react-roving-focus',
+139 warn ERESOLVE       version: '1.0.2',
+139 warn ERESOLVE       location: 'node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-tabs/node_modules/@radix-ui/react-roving-focus',
+139 warn ERESOLVE       isWorkspace: false,
+139 warn ERESOLVE       dependents: [Array]
+139 warn ERESOLVE     }
+139 warn ERESOLVE   },
+139 warn ERESOLVE   dep: {
+139 warn ERESOLVE     name: 'react-dom',
+139 warn ERESOLVE     version: '18.3.1',
+139 warn ERESOLVE     whileInstalling: {
+139 warn ERESOLVE       name: '@radix-ui/react-roving-focus',
+139 warn ERESOLVE       version: '1.0.2',
+139 warn ERESOLVE       path: 'C:\\Users\\rmeic\\Projects\\collabboard\\lightable\\apps\\starter-kit\\node_modules\\@excalidraw\\excalidraw\\node_modules\\@radix-ui\\react-tabs\\node_modules\\@radix-ui\\react-roving-focus'
+139 warn ERESOLVE     },
+139 warn ERESOLVE     location: 'node_modules/react-dom',
+139 warn ERESOLVE     isWorkspace: false,
+139 warn ERESOLVE     dependents: [ [Object] ]
+139 warn ERESOLVE   },
+139 warn ERESOLVE   force: false,
+139 warn ERESOLVE   isMine: false,
+139 warn ERESOLVE   strictPeerDeps: false,
+139 warn ERESOLVE   current: {
+139 warn ERESOLVE     name: 'react-dom',
+139 warn ERESOLVE     version: '19.1.0',
+139 warn ERESOLVE     location: 'node_modules/react-dom',
+139 warn ERESOLVE     isWorkspace: false,
+139 warn ERESOLVE     dependents: [ [Object] ]
+139 warn ERESOLVE   },
+139 warn ERESOLVE   peerConflict: {
+139 warn ERESOLVE     current: {
+139 warn ERESOLVE       name: 'react-dom',
+139 warn ERESOLVE       version: '19.1.0',
+139 warn ERESOLVE       location: 'node_modules/react-dom',
+139 warn ERESOLVE       isWorkspace: false,
+139 warn ERESOLVE       dependents: [Array]
+139 warn ERESOLVE     },
+139 warn ERESOLVE     peer: {
+139 warn ERESOLVE       name: 'react-dom',
+139 warn ERESOLVE       version: '18.3.1',
+139 warn ERESOLVE       whileInstalling: [Object],
+139 warn ERESOLVE       location: 'node_modules/react-dom',
+139 warn ERESOLVE       isWorkspace: false,
+139 warn ERESOLVE       dependents: [Array]
+139 warn ERESOLVE     }
+139 warn ERESOLVE   }
+139 warn ERESOLVE }
+140 warn ERESOLVE overriding peer dependency {
+140 warn ERESOLVE   code: 'ERESOLVE',
+140 warn ERESOLVE   edge: {
+140 warn ERESOLVE     type: 'peer',
+140 warn ERESOLVE     name: 'react',
+140 warn ERESOLVE     spec: '^16.8 || ^17.0 || ^18.0',
+140 warn ERESOLVE     error: 'INVALID',
+140 warn ERESOLVE     from: {
+140 warn ERESOLVE       name: '@radix-ui/react-use-controllable-state',
+140 warn ERESOLVE       version: '1.0.0',
+140 warn ERESOLVE       location: 'node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-tabs/node_modules/@radix-ui/react-use-controllable-state',
+140 warn ERESOLVE       isWorkspace: false,
+140 warn ERESOLVE       dependents: [Array]
+140 warn ERESOLVE     }
+140 warn ERESOLVE   },
+140 warn ERESOLVE   dep: {
+140 warn ERESOLVE     name: 'react',
+140 warn ERESOLVE     version: '18.3.1',
+140 warn ERESOLVE     whileInstalling: {
+140 warn ERESOLVE       name: '@radix-ui/react-use-controllable-state',
+140 warn ERESOLVE       version: '1.0.0',
+140 warn ERESOLVE       path: 'C:\\Users\\rmeic\\Projects\\collabboard\\lightable\\apps\\starter-kit\\node_modules\\@excalidraw\\excalidraw\\node_modules\\@radix-ui\\react-tabs\\node_modules\\@radix-ui\\react-use-controllable-state'
+140 warn ERESOLVE     },
+140 warn ERESOLVE     location: 'node_modules/react',
+140 warn ERESOLVE     isWorkspace: false,
+140 warn ERESOLVE     dependents: [ [Object] ]
+140 warn ERESOLVE   },
+140 warn ERESOLVE   force: false,
+140 warn ERESOLVE   isMine: false,
+140 warn ERESOLVE   strictPeerDeps: false,
+140 warn ERESOLVE   current: {
+140 warn ERESOLVE     name: 'react',
+140 warn ERESOLVE     version: '19.1.0',
+140 warn ERESOLVE     location: 'node_modules/react',
+140 warn ERESOLVE     isWorkspace: false,
+140 warn ERESOLVE     dependents: [ [Object] ]
+140 warn ERESOLVE   },
+140 warn ERESOLVE   peerConflict: {
+140 warn ERESOLVE     current: {
+140 warn ERESOLVE       name: 'react',
+140 warn ERESOLVE       version: '19.1.0',
+140 warn ERESOLVE       location: 'node_modules/react',
+140 warn ERESOLVE       isWorkspace: false,
+140 warn ERESOLVE       dependents: [Array]
+140 warn ERESOLVE     },
+140 warn ERESOLVE     peer: {
+140 warn ERESOLVE       name: 'react',
+140 warn ERESOLVE       version: '18.3.1',
+140 warn ERESOLVE       whileInstalling: [Object],
+140 warn ERESOLVE       location: 'node_modules/react',
+140 warn ERESOLVE       isWorkspace: false,
+140 warn ERESOLVE       dependents: [Array]
+140 warn ERESOLVE     }
+140 warn ERESOLVE   }
+140 warn ERESOLVE }
+141 warn ERESOLVE overriding peer dependency {
+141 warn ERESOLVE   code: 'ERESOLVE',
+141 warn ERESOLVE   edge: {
+141 warn ERESOLVE     type: 'peer',
+141 warn ERESOLVE     name: 'react',
+141 warn ERESOLVE     spec: '^16.8 || ^17.0 || ^18.0',
+141 warn ERESOLVE     error: 'INVALID',
+141 warn ERESOLVE     from: {
+141 warn ERESOLVE       name: '@radix-ui/react-use-layout-effect',
+141 warn ERESOLVE       version: '1.0.0',
+141 warn ERESOLVE       location: 'node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-tabs/node_modules/@radix-ui/react-id/node_modules/@radix-ui/react-use-layout-effect',
+141 warn ERESOLVE       isWorkspace: false,
+141 warn ERESOLVE       dependents: [Array]
+141 warn ERESOLVE     }
+141 warn ERESOLVE   },
+141 warn ERESOLVE   dep: {
+141 warn ERESOLVE     name: 'react',
+141 warn ERESOLVE     version: '18.3.1',
+141 warn ERESOLVE     whileInstalling: {
+141 warn ERESOLVE       name: '@radix-ui/react-use-layout-effect',
+141 warn ERESOLVE       version: '1.0.0',
+141 warn ERESOLVE       path: 'C:\\Users\\rmeic\\Projects\\collabboard\\lightable\\apps\\starter-kit\\node_modules\\@excalidraw\\excalidraw\\node_modules\\@radix-ui\\react-tabs\\node_modules\\@radix-ui\\react-id\\node_modules\\@radix-ui\\react-use-layout-effect'
+141 warn ERESOLVE     },
+141 warn ERESOLVE     location: 'node_modules/react',
+141 warn ERESOLVE     isWorkspace: false,
+141 warn ERESOLVE     dependents: [ [Object] ]
+141 warn ERESOLVE   },
+141 warn ERESOLVE   force: false,
+141 warn ERESOLVE   isMine: false,
+141 warn ERESOLVE   strictPeerDeps: false,
+141 warn ERESOLVE   current: {
+141 warn ERESOLVE     name: 'react',
+141 warn ERESOLVE     version: '19.1.0',
+141 warn ERESOLVE     location: 'node_modules/react',
+141 warn ERESOLVE     isWorkspace: false,
+141 warn ERESOLVE     dependents: [ [Object] ]
+141 warn ERESOLVE   },
+141 warn ERESOLVE   peerConflict: {
+141 warn ERESOLVE     current: {
+141 warn ERESOLVE       name: 'react',
+141 warn ERESOLVE       version: '19.1.0',
+141 warn ERESOLVE       location: 'node_modules/react',
+141 warn ERESOLVE       isWorkspace: false,
+141 warn ERESOLVE       dependents: [Array]
+141 warn ERESOLVE     },
+141 warn ERESOLVE     peer: {
+141 warn ERESOLVE       name: 'react',
+141 warn ERESOLVE       version: '18.3.1',
+141 warn ERESOLVE       whileInstalling: [Object],
+141 warn ERESOLVE       location: 'node_modules/react',
+141 warn ERESOLVE       isWorkspace: false,
+141 warn ERESOLVE       dependents: [Array]
+141 warn ERESOLVE     }
+141 warn ERESOLVE   }
+141 warn ERESOLVE }
+142 warn ERESOLVE overriding peer dependency {
+142 warn ERESOLVE   code: 'ERESOLVE',
+142 warn ERESOLVE   edge: {
+142 warn ERESOLVE     type: 'peer',
+142 warn ERESOLVE     name: 'react',
+142 warn ERESOLVE     spec: '^16.8 || ^17.0 || ^18.0',
+142 warn ERESOLVE     error: 'INVALID',
+142 warn ERESOLVE     from: {
+142 warn ERESOLVE       name: '@radix-ui/react-compose-refs',
+142 warn ERESOLVE       version: '1.0.0',
+142 warn ERESOLVE       location: 'node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-tabs/node_modules/@radix-ui/react-presence/node_modules/@radix-ui/react-compose-refs',
+142 warn ERESOLVE       isWorkspace: false,
+142 warn ERESOLVE       dependents: [Array]
+142 warn ERESOLVE     }
+142 warn ERESOLVE   },
+142 warn ERESOLVE   dep: {
+142 warn ERESOLVE     name: 'react',
+142 warn ERESOLVE     version: '18.3.1',
+142 warn ERESOLVE     whileInstalling: {
+142 warn ERESOLVE       name: '@radix-ui/react-compose-refs',
+142 warn ERESOLVE       version: '1.0.0',
+142 warn ERESOLVE       path: 'C:\\Users\\rmeic\\Projects\\collabboard\\lightable\\apps\\starter-kit\\node_modules\\@excalidraw\\excalidraw\\node_modules\\@radix-ui\\react-tabs\\node_modules\\@radix-ui\\react-presence\\node_modules\\@radix-ui\\react-compose-refs'
+142 warn ERESOLVE     },
+142 warn ERESOLVE     location: 'node_modules/react',
+142 warn ERESOLVE     isWorkspace: false,
+142 warn ERESOLVE     dependents: [ [Object] ]
+142 warn ERESOLVE   },
+142 warn ERESOLVE   force: false,
+142 warn ERESOLVE   isMine: false,
+142 warn ERESOLVE   strictPeerDeps: false,
+142 warn ERESOLVE   current: {
+142 warn ERESOLVE     name: 'react',
+142 warn ERESOLVE     version: '19.1.0',
+142 warn ERESOLVE     location: 'node_modules/react',
+142 warn ERESOLVE     isWorkspace: false,
+142 warn ERESOLVE     dependents: [ [Object] ]
+142 warn ERESOLVE   },
+142 warn ERESOLVE   peerConflict: {
+142 warn ERESOLVE     current: {
+142 warn ERESOLVE       name: 'react',
+142 warn ERESOLVE       version: '19.1.0',
+142 warn ERESOLVE       location: 'node_modules/react',
+142 warn ERESOLVE       isWorkspace: false,
+142 warn ERESOLVE       dependents: [Array]
+142 warn ERESOLVE     },
+142 warn ERESOLVE     peer: {
+142 warn ERESOLVE       name: 'react',
+142 warn ERESOLVE       version: '18.3.1',
+142 warn ERESOLVE       whileInstalling: [Object],
+142 warn ERESOLVE       location: 'node_modules/react',
+142 warn ERESOLVE       isWorkspace: false,
+142 warn ERESOLVE       dependents: [Array]
+142 warn ERESOLVE     }
+142 warn ERESOLVE   }
+142 warn ERESOLVE }
+143 warn ERESOLVE overriding peer dependency {
+143 warn ERESOLVE   code: 'ERESOLVE',
+143 warn ERESOLVE   edge: {
+143 warn ERESOLVE     type: 'peer',
+143 warn ERESOLVE     name: 'react',
+143 warn ERESOLVE     spec: '^16.8 || ^17.0 || ^18.0',
+143 warn ERESOLVE     error: 'INVALID',
+143 warn ERESOLVE     from: {
+143 warn ERESOLVE       name: '@radix-ui/react-use-layout-effect',
+143 warn ERESOLVE       version: '1.0.0',
+143 warn ERESOLVE       location: 'node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-tabs/node_modules/@radix-ui/react-presence/node_modules/@radix-ui/react-use-layout-effect',
+143 warn ERESOLVE       isWorkspace: false,
+143 warn ERESOLVE       dependents: [Array]
+143 warn ERESOLVE     }
+143 warn ERESOLVE   },
+143 warn ERESOLVE   dep: {
+143 warn ERESOLVE     name: 'react',
+143 warn ERESOLVE     version: '18.3.1',
+143 warn ERESOLVE     whileInstalling: {
+143 warn ERESOLVE       name: '@radix-ui/react-use-layout-effect',
+143 warn ERESOLVE       version: '1.0.0',
+143 warn ERESOLVE       path: 'C:\\Users\\rmeic\\Projects\\collabboard\\lightable\\apps\\starter-kit\\node_modules\\@excalidraw\\excalidraw\\node_modules\\@radix-ui\\react-tabs\\node_modules\\@radix-ui\\react-presence\\node_modules\\@radix-ui\\react-use-layout-effect'
+143 warn ERESOLVE     },
+143 warn ERESOLVE     location: 'node_modules/react',
+143 warn ERESOLVE     isWorkspace: false,
+143 warn ERESOLVE     dependents: [ [Object] ]
+143 warn ERESOLVE   },
+143 warn ERESOLVE   force: false,
+143 warn ERESOLVE   isMine: false,
+143 warn ERESOLVE   strictPeerDeps: false,
+143 warn ERESOLVE   current: {
+143 warn ERESOLVE     name: 'react',
+143 warn ERESOLVE     version: '19.1.0',
+143 warn ERESOLVE     location: 'node_modules/react',
+143 warn ERESOLVE     isWorkspace: false,
+143 warn ERESOLVE     dependents: [ [Object] ]
+143 warn ERESOLVE   },
+143 warn ERESOLVE   peerConflict: {
+143 warn ERESOLVE     current: {
+143 warn ERESOLVE       name: 'react',
+143 warn ERESOLVE       version: '19.1.0',
+143 warn ERESOLVE       location: 'node_modules/react',
+143 warn ERESOLVE       isWorkspace: false,
+143 warn ERESOLVE       dependents: [Array]
+143 warn ERESOLVE     },
+143 warn ERESOLVE     peer: {
+143 warn ERESOLVE       name: 'react',
+143 warn ERESOLVE       version: '18.3.1',
+143 warn ERESOLVE       whileInstalling: [Object],
+143 warn ERESOLVE       location: 'node_modules/react',
+143 warn ERESOLVE       isWorkspace: false,
+143 warn ERESOLVE       dependents: [Array]
+143 warn ERESOLVE     }
+143 warn ERESOLVE   }
+143 warn ERESOLVE }
+144 warn ERESOLVE overriding peer dependency {
+144 warn ERESOLVE   code: 'ERESOLVE',
+144 warn ERESOLVE   edge: {
+144 warn ERESOLVE     type: 'peer',
+144 warn ERESOLVE     name: 'react',
+144 warn ERESOLVE     spec: '^16.8 || ^17.0 || ^18.0',
+144 warn ERESOLVE     error: 'INVALID',
+144 warn ERESOLVE     from: {
+144 warn ERESOLVE       name: '@radix-ui/react-slot',
+144 warn ERESOLVE       version: '1.0.1',
+144 warn ERESOLVE       location: 'node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-tabs/node_modules/@radix-ui/react-primitive/node_modules/@radix-ui/react-slot',
+144 warn ERESOLVE       isWorkspace: false,
+144 warn ERESOLVE       dependents: [Array]
+144 warn ERESOLVE     }
+144 warn ERESOLVE   },
+144 warn ERESOLVE   dep: {
+144 warn ERESOLVE     name: 'react',
+144 warn ERESOLVE     version: '18.3.1',
+144 warn ERESOLVE     whileInstalling: {
+144 warn ERESOLVE       name: '@radix-ui/react-slot',
+144 warn ERESOLVE       version: '1.0.1',
+144 warn ERESOLVE       path: 'C:\\Users\\rmeic\\Projects\\collabboard\\lightable\\apps\\starter-kit\\node_modules\\@excalidraw\\excalidraw\\node_modules\\@radix-ui\\react-tabs\\node_modules\\@radix-ui\\react-primitive\\node_modules\\@radix-ui\\react-slot'
+144 warn ERESOLVE     },
+144 warn ERESOLVE     location: 'node_modules/react',
+144 warn ERESOLVE     isWorkspace: false,
+144 warn ERESOLVE     dependents: [ [Object] ]
+144 warn ERESOLVE   },
+144 warn ERESOLVE   force: false,
+144 warn ERESOLVE   isMine: false,
+144 warn ERESOLVE   strictPeerDeps: false,
+144 warn ERESOLVE   current: {
+144 warn ERESOLVE     name: 'react',
+144 warn ERESOLVE     version: '19.1.0',
+144 warn ERESOLVE     location: 'node_modules/react',
+144 warn ERESOLVE     isWorkspace: false,
+144 warn ERESOLVE     dependents: [ [Object] ]
+144 warn ERESOLVE   },
+144 warn ERESOLVE   peerConflict: {
+144 warn ERESOLVE     current: {
+144 warn ERESOLVE       name: 'react',
+144 warn ERESOLVE       version: '19.1.0',
+144 warn ERESOLVE       location: 'node_modules/react',
+144 warn ERESOLVE       isWorkspace: false,
+144 warn ERESOLVE       dependents: [Array]
+144 warn ERESOLVE     },
+144 warn ERESOLVE     peer: {
+144 warn ERESOLVE       name: 'react',
+144 warn ERESOLVE       version: '18.3.1',
+144 warn ERESOLVE       whileInstalling: [Object],
+144 warn ERESOLVE       location: 'node_modules/react',
+144 warn ERESOLVE       isWorkspace: false,
+144 warn ERESOLVE       dependents: [Array]
+144 warn ERESOLVE     }
+144 warn ERESOLVE   }
+144 warn ERESOLVE }
+145 warn ERESOLVE overriding peer dependency {
+145 warn ERESOLVE   code: 'ERESOLVE',
+145 warn ERESOLVE   edge: {
+145 warn ERESOLVE     type: 'peer',
+145 warn ERESOLVE     name: 'react',
+145 warn ERESOLVE     spec: '^16.8 || ^17.0 || ^18.0',
+145 warn ERESOLVE     error: 'INVALID',
+145 warn ERESOLVE     from: {
+145 warn ERESOLVE       name: '@radix-ui/react-collection',
+145 warn ERESOLVE       version: '1.0.1',
+145 warn ERESOLVE       location: 'node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-tabs/node_modules/@radix-ui/react-roving-focus/node_modules/@radix-ui/react-collection',
+145 warn ERESOLVE       isWorkspace: false,
+145 warn ERESOLVE       dependents: [Array]
+145 warn ERESOLVE     }
+145 warn ERESOLVE   },
+145 warn ERESOLVE   dep: {
+145 warn ERESOLVE     name: 'react',
+145 warn ERESOLVE     version: '18.3.1',
+145 warn ERESOLVE     whileInstalling: {
+145 warn ERESOLVE       name: '@radix-ui/react-collection',
+145 warn ERESOLVE       version: '1.0.1',
+145 warn ERESOLVE       path: 'C:\\Users\\rmeic\\Projects\\collabboard\\lightable\\apps\\starter-kit\\node_modules\\@excalidraw\\excalidraw\\node_modules\\@radix-ui\\react-tabs\\node_modules\\@radix-ui\\react-roving-focus\\node_modules\\@radix-ui\\react-collection'
+145 warn ERESOLVE     },
+145 warn ERESOLVE     location: 'node_modules/react',
+145 warn ERESOLVE     isWorkspace: false,
+145 warn ERESOLVE     dependents: [ [Object] ]
+145 warn ERESOLVE   },
+145 warn ERESOLVE   force: false,
+145 warn ERESOLVE   isMine: false,
+145 warn ERESOLVE   strictPeerDeps: false,
+145 warn ERESOLVE   current: {
+145 warn ERESOLVE     name: 'react',
+145 warn ERESOLVE     version: '19.1.0',
+145 warn ERESOLVE     location: 'node_modules/react',
+145 warn ERESOLVE     isWorkspace: false,
+145 warn ERESOLVE     dependents: [ [Object] ]
+145 warn ERESOLVE   },
+145 warn ERESOLVE   peerConflict: {
+145 warn ERESOLVE     current: {
+145 warn ERESOLVE       name: 'react',
+145 warn ERESOLVE       version: '19.1.0',
+145 warn ERESOLVE       location: 'node_modules/react',
+145 warn ERESOLVE       isWorkspace: false,
+145 warn ERESOLVE       dependents: [Array]
+145 warn ERESOLVE     },
+145 warn ERESOLVE     peer: {
+145 warn ERESOLVE       name: 'react',
+145 warn ERESOLVE       version: '18.3.1',
+145 warn ERESOLVE       whileInstalling: [Object],
+145 warn ERESOLVE       location: 'node_modules/react',
+145 warn ERESOLVE       isWorkspace: false,
+145 warn ERESOLVE       dependents: [Array]
+145 warn ERESOLVE     }
+145 warn ERESOLVE   }
+145 warn ERESOLVE }
+146 warn ERESOLVE overriding peer dependency {
+146 warn ERESOLVE   code: 'ERESOLVE',
+146 warn ERESOLVE   edge: {
+146 warn ERESOLVE     type: 'peer',
+146 warn ERESOLVE     name: 'react-dom',
+146 warn ERESOLVE     spec: '^16.8 || ^17.0 || ^18.0',
+146 warn ERESOLVE     error: 'INVALID',
+146 warn ERESOLVE     from: {
+146 warn ERESOLVE       name: '@radix-ui/react-collection',
+146 warn ERESOLVE       version: '1.0.1',
+146 warn ERESOLVE       location: 'node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-tabs/node_modules/@radix-ui/react-roving-focus/node_modules/@radix-ui/react-collection',
+146 warn ERESOLVE       isWorkspace: false,
+146 warn ERESOLVE       dependents: [Array]
+146 warn ERESOLVE     }
+146 warn ERESOLVE   },
+146 warn ERESOLVE   dep: {
+146 warn ERESOLVE     name: 'react-dom',
+146 warn ERESOLVE     version: '18.3.1',
+146 warn ERESOLVE     whileInstalling: {
+146 warn ERESOLVE       name: '@radix-ui/react-collection',
+146 warn ERESOLVE       version: '1.0.1',
+146 warn ERESOLVE       path: 'C:\\Users\\rmeic\\Projects\\collabboard\\lightable\\apps\\starter-kit\\node_modules\\@excalidraw\\excalidraw\\node_modules\\@radix-ui\\react-tabs\\node_modules\\@radix-ui\\react-roving-focus\\node_modules\\@radix-ui\\react-collection'
+146 warn ERESOLVE     },
+146 warn ERESOLVE     location: 'node_modules/react-dom',
+146 warn ERESOLVE     isWorkspace: false,
+146 warn ERESOLVE     dependents: [ [Object] ]
+146 warn ERESOLVE   },
+146 warn ERESOLVE   force: false,
+146 warn ERESOLVE   isMine: false,
+146 warn ERESOLVE   strictPeerDeps: false,
+146 warn ERESOLVE   current: {
+146 warn ERESOLVE     name: 'react-dom',
+146 warn ERESOLVE     version: '19.1.0',
+146 warn ERESOLVE     location: 'node_modules/react-dom',
+146 warn ERESOLVE     isWorkspace: false,
+146 warn ERESOLVE     dependents: [ [Object] ]
+146 warn ERESOLVE   },
+146 warn ERESOLVE   peerConflict: {
+146 warn ERESOLVE     current: {
+146 warn ERESOLVE       name: 'react-dom',
+146 warn ERESOLVE       version: '19.1.0',
+146 warn ERESOLVE       location: 'node_modules/react-dom',
+146 warn ERESOLVE       isWorkspace: false,
+146 warn ERESOLVE       dependents: [Array]
+146 warn ERESOLVE     },
+146 warn ERESOLVE     peer: {
+146 warn ERESOLVE       name: 'react-dom',
+146 warn ERESOLVE       version: '18.3.1',
+146 warn ERESOLVE       whileInstalling: [Object],
+146 warn ERESOLVE       location: 'node_modules/react-dom',
+146 warn ERESOLVE       isWorkspace: false,
+146 warn ERESOLVE       dependents: [Array]
+146 warn ERESOLVE     }
+146 warn ERESOLVE   }
+146 warn ERESOLVE }
+147 warn ERESOLVE overriding peer dependency {
+147 warn ERESOLVE   code: 'ERESOLVE',
+147 warn ERESOLVE   edge: {
+147 warn ERESOLVE     type: 'peer',
+147 warn ERESOLVE     name: 'react',
+147 warn ERESOLVE     spec: '^16.8 || ^17.0 || ^18.0',
+147 warn ERESOLVE     error: 'INVALID',
+147 warn ERESOLVE     from: {
+147 warn ERESOLVE       name: '@radix-ui/react-compose-refs',
+147 warn ERESOLVE       version: '1.0.0',
+147 warn ERESOLVE       location: 'node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-tabs/node_modules/@radix-ui/react-roving-focus/node_modules/@radix-ui/react-compose-refs',
+147 warn ERESOLVE       isWorkspace: false,
+147 warn ERESOLVE       dependents: [Array]
+147 warn ERESOLVE     }
+147 warn ERESOLVE   },
+147 warn ERESOLVE   dep: {
+147 warn ERESOLVE     name: 'react',
+147 warn ERESOLVE     version: '18.3.1',
+147 warn ERESOLVE     whileInstalling: {
+147 warn ERESOLVE       name: '@radix-ui/react-compose-refs',
+147 warn ERESOLVE       version: '1.0.0',
+147 warn ERESOLVE       path: 'C:\\Users\\rmeic\\Projects\\collabboard\\lightable\\apps\\starter-kit\\node_modules\\@excalidraw\\excalidraw\\node_modules\\@radix-ui\\react-tabs\\node_modules\\@radix-ui\\react-roving-focus\\node_modules\\@radix-ui\\react-compose-refs'
+147 warn ERESOLVE     },
+147 warn ERESOLVE     location: 'node_modules/react',
+147 warn ERESOLVE     isWorkspace: false,
+147 warn ERESOLVE     dependents: [ [Object] ]
+147 warn ERESOLVE   },
+147 warn ERESOLVE   force: false,
+147 warn ERESOLVE   isMine: false,
+147 warn ERESOLVE   strictPeerDeps: false,
+147 warn ERESOLVE   current: {
+147 warn ERESOLVE     name: 'react',
+147 warn ERESOLVE     version: '19.1.0',
+147 warn ERESOLVE     location: 'node_modules/react',
+147 warn ERESOLVE     isWorkspace: false,
+147 warn ERESOLVE     dependents: [ [Object] ]
+147 warn ERESOLVE   },
+147 warn ERESOLVE   peerConflict: {
+147 warn ERESOLVE     current: {
+147 warn ERESOLVE       name: 'react',
+147 warn ERESOLVE       version: '19.1.0',
+147 warn ERESOLVE       location: 'node_modules/react',
+147 warn ERESOLVE       isWorkspace: false,
+147 warn ERESOLVE       dependents: [Array]
+147 warn ERESOLVE     },
+147 warn ERESOLVE     peer: {
+147 warn ERESOLVE       name: 'react',
+147 warn ERESOLVE       version: '18.3.1',
+147 warn ERESOLVE       whileInstalling: [Object],
+147 warn ERESOLVE       location: 'node_modules/react',
+147 warn ERESOLVE       isWorkspace: false,
+147 warn ERESOLVE       dependents: [Array]
+147 warn ERESOLVE     }
+147 warn ERESOLVE   }
+147 warn ERESOLVE }
+148 warn ERESOLVE overriding peer dependency {
+148 warn ERESOLVE   code: 'ERESOLVE',
+148 warn ERESOLVE   edge: {
+148 warn ERESOLVE     type: 'peer',
+148 warn ERESOLVE     name: 'react',
+148 warn ERESOLVE     spec: '^16.8 || ^17.0 || ^18.0',
+148 warn ERESOLVE     error: 'INVALID',
+148 warn ERESOLVE     from: {
+148 warn ERESOLVE       name: '@radix-ui/react-use-callback-ref',
+148 warn ERESOLVE       version: '1.0.0',
+148 warn ERESOLVE       location: 'node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-tabs/node_modules/@radix-ui/react-roving-focus/node_modules/@radix-ui/react-use-callback-ref',
+148 warn ERESOLVE       isWorkspace: false,
+148 warn ERESOLVE       dependents: [Array]
+148 warn ERESOLVE     }
+148 warn ERESOLVE   },
+148 warn ERESOLVE   dep: {
+148 warn ERESOLVE     name: 'react',
+148 warn ERESOLVE     version: '18.3.1',
+148 warn ERESOLVE     whileInstalling: {
+148 warn ERESOLVE       name: '@radix-ui/react-use-callback-ref',
+148 warn ERESOLVE       version: '1.0.0',
+148 warn ERESOLVE       path: 'C:\\Users\\rmeic\\Projects\\collabboard\\lightable\\apps\\starter-kit\\node_modules\\@excalidraw\\excalidraw\\node_modules\\@radix-ui\\react-tabs\\node_modules\\@radix-ui\\react-roving-focus\\node_modules\\@radix-ui\\react-use-callback-ref'
+148 warn ERESOLVE     },
+148 warn ERESOLVE     location: 'node_modules/react',
+148 warn ERESOLVE     isWorkspace: false,
+148 warn ERESOLVE     dependents: [ [Object] ]
+148 warn ERESOLVE   },
+148 warn ERESOLVE   force: false,
+148 warn ERESOLVE   isMine: false,
+148 warn ERESOLVE   strictPeerDeps: false,
+148 warn ERESOLVE   current: {
+148 warn ERESOLVE     name: 'react',
+148 warn ERESOLVE     version: '19.1.0',
+148 warn ERESOLVE     location: 'node_modules/react',
+148 warn ERESOLVE     isWorkspace: false,
+148 warn ERESOLVE     dependents: [ [Object] ]
+148 warn ERESOLVE   },
+148 warn ERESOLVE   peerConflict: {
+148 warn ERESOLVE     current: {
+148 warn ERESOLVE       name: 'react',
+148 warn ERESOLVE       version: '19.1.0',
+148 warn ERESOLVE       location: 'node_modules/react',
+148 warn ERESOLVE       isWorkspace: false,
+148 warn ERESOLVE       dependents: [Array]
+148 warn ERESOLVE     },
+148 warn ERESOLVE     peer: {
+148 warn ERESOLVE       name: 'react',
+148 warn ERESOLVE       version: '18.3.1',
+148 warn ERESOLVE       whileInstalling: [Object],
+148 warn ERESOLVE       location: 'node_modules/react',
+148 warn ERESOLVE       isWorkspace: false,
+148 warn ERESOLVE       dependents: [Array]
+148 warn ERESOLVE     }
+148 warn ERESOLVE   }
+148 warn ERESOLVE }
+149 warn ERESOLVE overriding peer dependency {
+149 warn ERESOLVE   code: 'ERESOLVE',
+149 warn ERESOLVE   edge: {
+149 warn ERESOLVE     type: 'peer',
+149 warn ERESOLVE     name: 'react',
+149 warn ERESOLVE     spec: '^16.8 || ^17.0 || ^18.0',
+149 warn ERESOLVE     error: 'INVALID',
+149 warn ERESOLVE     from: {
+149 warn ERESOLVE       name: '@radix-ui/react-use-callback-ref',
+149 warn ERESOLVE       version: '1.0.0',
+149 warn ERESOLVE       location: 'node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-tabs/node_modules/@radix-ui/react-use-controllable-state/node_modules/@radix-ui/react-use-callback-ref',
+149 warn ERESOLVE       isWorkspace: false,
+149 warn ERESOLVE       dependents: [Array]
+149 warn ERESOLVE     }
+149 warn ERESOLVE   },
+149 warn ERESOLVE   dep: {
+149 warn ERESOLVE     name: 'react',
+149 warn ERESOLVE     version: '18.3.1',
+149 warn ERESOLVE     whileInstalling: {
+149 warn ERESOLVE       name: '@radix-ui/react-use-callback-ref',
+149 warn ERESOLVE       version: '1.0.0',
+149 warn ERESOLVE       path: 'C:\\Users\\rmeic\\Projects\\collabboard\\lightable\\apps\\starter-kit\\node_modules\\@excalidraw\\excalidraw\\node_modules\\@radix-ui\\react-tabs\\node_modules\\@radix-ui\\react-use-controllable-state\\node_modules\\@radix-ui\\react-use-callback-ref'
+149 warn ERESOLVE     },
+149 warn ERESOLVE     location: 'node_modules/react',
+149 warn ERESOLVE     isWorkspace: false,
+149 warn ERESOLVE     dependents: [ [Object] ]
+149 warn ERESOLVE   },
+149 warn ERESOLVE   force: false,
+149 warn ERESOLVE   isMine: false,
+149 warn ERESOLVE   strictPeerDeps: false,
+149 warn ERESOLVE   current: {
+149 warn ERESOLVE     name: 'react',
+149 warn ERESOLVE     version: '19.1.0',
+149 warn ERESOLVE     location: 'node_modules/react',
+149 warn ERESOLVE     isWorkspace: false,
+149 warn ERESOLVE     dependents: [ [Object] ]
+149 warn ERESOLVE   },
+149 warn ERESOLVE   peerConflict: {
+149 warn ERESOLVE     current: {
+149 warn ERESOLVE       name: 'react',
+149 warn ERESOLVE       version: '19.1.0',
+149 warn ERESOLVE       location: 'node_modules/react',
+149 warn ERESOLVE       isWorkspace: false,
+149 warn ERESOLVE       dependents: [Array]
+149 warn ERESOLVE     },
+149 warn ERESOLVE     peer: {
+149 warn ERESOLVE       name: 'react',
+149 warn ERESOLVE       version: '18.3.1',
+149 warn ERESOLVE       whileInstalling: [Object],
+149 warn ERESOLVE       location: 'node_modules/react',
+149 warn ERESOLVE       isWorkspace: false,
+149 warn ERESOLVE       dependents: [Array]
+149 warn ERESOLVE     }
+149 warn ERESOLVE   }
+149 warn ERESOLVE }
+150 warn ERESOLVE overriding peer dependency {
+150 warn ERESOLVE   code: 'ERESOLVE',
+150 warn ERESOLVE   edge: {
+150 warn ERESOLVE     type: 'peer',
+150 warn ERESOLVE     name: 'react',
+150 warn ERESOLVE     spec: '^16.8 || ^17.0 || ^18.0',
+150 warn ERESOLVE     error: 'INVALID',
+150 warn ERESOLVE     from: {
+150 warn ERESOLVE       name: '@radix-ui/react-compose-refs',
+150 warn ERESOLVE       version: '1.0.0',
+150 warn ERESOLVE       location: 'node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-tabs/node_modules/@radix-ui/react-primitive/node_modules/@radix-ui/react-slot/node_modules/@radix-ui/react-compose-refs',
+150 warn ERESOLVE       isWorkspace: false,
+150 warn ERESOLVE       dependents: [Array]
+150 warn ERESOLVE     }
+150 warn ERESOLVE   },
+150 warn ERESOLVE   dep: {
+150 warn ERESOLVE     name: 'react',
+150 warn ERESOLVE     version: '18.3.1',
+150 warn ERESOLVE     whileInstalling: {
+150 warn ERESOLVE       name: '@radix-ui/react-compose-refs',
+150 warn ERESOLVE       version: '1.0.0',
+150 warn ERESOLVE       path: 'C:\\Users\\rmeic\\Projects\\collabboard\\lightable\\apps\\starter-kit\\node_modules\\@excalidraw\\excalidraw\\node_modules\\@radix-ui\\react-tabs\\node_modules\\@radix-ui\\react-primitive\\node_modules\\@radix-ui\\react-slot\\node_modules\\@radix-ui\\react-compose-refs'
+150 warn ERESOLVE     },
+150 warn ERESOLVE     location: 'node_modules/react',
+150 warn ERESOLVE     isWorkspace: false,
+150 warn ERESOLVE     dependents: [ [Object] ]
+150 warn ERESOLVE   },
+150 warn ERESOLVE   force: false,
+150 warn ERESOLVE   isMine: false,
+150 warn ERESOLVE   strictPeerDeps: false,
+150 warn ERESOLVE   current: {
+150 warn ERESOLVE     name: 'react',
+150 warn ERESOLVE     version: '19.1.0',
+150 warn ERESOLVE     location: 'node_modules/react',
+150 warn ERESOLVE     isWorkspace: false,
+150 warn ERESOLVE     dependents: [ [Object] ]
+150 warn ERESOLVE   },
+150 warn ERESOLVE   peerConflict: {
+150 warn ERESOLVE     current: {
+150 warn ERESOLVE       name: 'react',
+150 warn ERESOLVE       version: '19.1.0',
+150 warn ERESOLVE       location: 'node_modules/react',
+150 warn ERESOLVE       isWorkspace: false,
+150 warn ERESOLVE       dependents: [Array]
+150 warn ERESOLVE     },
+150 warn ERESOLVE     peer: {
+150 warn ERESOLVE       name: 'react',
+150 warn ERESOLVE       version: '18.3.1',
+150 warn ERESOLVE       whileInstalling: [Object],
+150 warn ERESOLVE       location: 'node_modules/react',
+150 warn ERESOLVE       isWorkspace: false,
+150 warn ERESOLVE       dependents: [Array]
+150 warn ERESOLVE     }
+150 warn ERESOLVE   }
+150 warn ERESOLVE }
+151 warn ERESOLVE overriding peer dependency {
+151 warn ERESOLVE   code: 'ERESOLVE',
+151 warn ERESOLVE   edge: {
+151 warn ERESOLVE     type: 'peer',
+151 warn ERESOLVE     name: 'react',
+151 warn ERESOLVE     spec: '^16.8 || ^17.0 || ^18.0',
+151 warn ERESOLVE     error: 'INVALID',
+151 warn ERESOLVE     from: {
+151 warn ERESOLVE       name: '@radix-ui/react-slot',
+151 warn ERESOLVE       version: '1.0.1',
+151 warn ERESOLVE       location: 'node_modules/@excalidraw/excalidraw/node_modules/@radix-ui/react-tabs/node_modules/@radix-ui/react-roving-focus/node_modules/@radix-ui/react-collection/node_modules/@radix-ui/react-slot',
+151 warn ERESOLVE       isWorkspace: false,
+151 warn ERESOLVE       dependents: [Array]
+151 warn ERESOLVE     }
+151 warn ERESOLVE   },
+151 warn ERESOLVE   dep: {
+151 warn ERESOLVE     name: 'react',
+151 warn ERESOLVE     version: '18.3.1',
+151 warn ERESOLVE     whileInstalling: {
+151 warn ERESOLVE       name: '@radix-ui/react-slot',
+151 warn ERESOLVE       version: '1.0.1',
+151 warn ERESOLVE       path: 'C:\\Users\\rmeic\\Projects\\collabboard\\lightable\\apps\\starter-kit\\node_modules\\@excalidraw\\excalidraw\\node_modules\\@radix-ui\\react-tabs\\node_modules\\@radix-ui\\react-roving-focus\\node_modules\\@radix-ui\\react-collection\\node_modules\\@radix-ui\\react-slot'
+151 warn ERESOLVE     },
+151 warn ERESOLVE     location: 'node_modules/react',
+151 warn ERESOLVE     isWorkspace: false,
+151 warn ERESOLVE     dependents: [ [Object] ]
+151 warn ERESOLVE   },
+151 warn ERESOLVE   force: false,
+151 warn ERESOLVE   isMine: false,
+151 warn ERESOLVE   strictPeerDeps: false,
+151 warn ERESOLVE   current: {
+151 warn ERESOLVE     name: 'react',
+151 warn ERESOLVE     version: '19.1.0',
+151 warn ERESOLVE     location: 'node_modules/react',
+151 warn ERESOLVE     isWorkspace: false,
+151 warn ERESOLVE     dependents: [ [Object] ]
+151 warn ERESOLVE   },
+151 warn ERESOLVE   peerConflict: {
+151 warn ERESOLVE     current: {
+151 warn ERESOLVE       name: 'react',
+151 warn ERESOLVE       version: '19.1.0',
+151 warn ERESOLVE       location: 'node_modules/react',
+151 warn ERESOLVE       isWorkspace: false,
+151 warn ERESOLVE       dependents: [Array]
+151 warn ERESOLVE     },
+151 warn ERESOLVE     peer: {
+151 warn ERESOLVE       name: 'react',
+151 warn ERESOLVE       version: '18.3.1',
+151 warn ERESOLVE       whileInstalling: [Object],
+151 warn ERESOLVE       location: 'node_modules/react',
+151 warn ERESOLVE       isWorkspace: false,
+151 warn ERESOLVE       dependents: [Array]
+151 warn ERESOLVE     }
+151 warn ERESOLVE   }
+151 warn ERESOLVE }
+152 silly reify moves {}
+153 silly audit bulk request {
+153 silly audit   '@alloc/quick-lru': [ '5.2.0' ],
+153 silly audit   '@ampproject/remapping': [ '2.3.0' ],
+153 silly audit   '@babel/runtime': [ '7.28.4' ],
+153 silly audit   '@braintree/sanitize-url': [ '6.0.2' ],
+153 silly audit   '@dnd-kit/accessibility': [ '3.1.1' ],
+153 silly audit   '@dnd-kit/core': [ '6.3.1' ],
+153 silly audit   '@dnd-kit/sortable': [ '10.0.0' ],
+153 silly audit   '@dnd-kit/utilities': [ '3.2.2' ],
+153 silly audit   '@emnapi/core': [ '1.4.4' ],
+153 silly audit   '@emnapi/runtime': [ '1.4.4' ],
+153 silly audit   '@emnapi/wasi-threads': [ '1.0.3' ],
+153 silly audit   '@eslint-community/eslint-utils': [ '4.7.0' ],
+153 silly audit   'eslint-visitor-keys': [ '3.4.3', '4.2.1' ],
+153 silly audit   '@eslint-community/regexpp': [ '4.12.1' ],
+153 silly audit   '@eslint/config-array': [ '0.21.0' ],
+153 silly audit   '@eslint/config-helpers': [ '0.3.0' ],
+153 silly audit   '@eslint/core': [ '0.14.0', '0.15.1' ],
+153 silly audit   '@eslint/eslintrc': [ '3.3.1' ],
+153 silly audit   '@eslint/js': [ '9.30.1' ],
+153 silly audit   '@eslint/object-schema': [ '2.1.6' ],
+153 silly audit   '@eslint/plugin-kit': [ '0.3.3' ],
+153 silly audit   '@excalidraw/excalidraw': [ '0.18.0' ],
+153 silly audit   '@radix-ui/primitive': [ '1.1.1', '1.0.0', '1.1.2', '1.1.3' ],
+153 silly audit   '@radix-ui/react-arrow': [ '1.1.2', '1.1.7' ],
+153 silly audit   '@radix-ui/react-compose-refs': [ '1.1.1', '1.0.0', '1.1.2' ],
+153 silly audit   '@radix-ui/react-context': [ '1.1.1', '1.0.0', '1.1.2' ],
+153 silly audit   '@radix-ui/react-dismissable-layer': [ '1.1.5', '1.1.11', '1.1.10' ],
+153 silly audit   '@radix-ui/react-focus-guards': [ '1.1.1', '1.1.3', '1.1.2' ],
+153 silly audit   '@radix-ui/react-focus-scope': [ '1.1.2', '1.1.7' ],
+153 silly audit   '@radix-ui/react-id': [ '1.1.0', '1.0.0', '1.1.1' ],
+153 silly audit   '@radix-ui/react-popover': [ '1.1.6', '1.1.14' ],
+153 silly audit   '@radix-ui/react-popper': [ '1.2.2', '1.2.8', '1.2.7' ],
+153 silly audit   '@radix-ui/react-portal': [ '1.1.4', '1.1.9' ],
+153 silly audit   '@radix-ui/react-presence': [ '1.1.2', '1.0.0', '1.1.5', '1.1.4' ],
+153 silly audit   '@radix-ui/react-primitive': [ '2.0.2', '1.0.1', '2.1.3' ],
+153 silly audit   '@radix-ui/react-slot': [ '1.1.2', '1.0.1', '1.2.3' ],
+153 silly audit   '@radix-ui/react-tabs': [ '1.0.2', '1.1.12' ],
+153 silly audit   '@radix-ui/react-direction': [ '1.0.0', '1.1.1' ],
+153 silly audit   '@radix-ui/react-use-layout-effect': [ '1.0.0', '1.1.0', '1.1.1' ],
+153 silly audit   '@radix-ui/react-roving-focus': [ '1.0.2', '1.1.11', '1.1.10' ],
+153 silly audit   '@radix-ui/react-collection': [ '1.0.1', '1.1.7' ],
+153 silly audit   '@radix-ui/react-use-callback-ref': [ '1.0.0', '1.1.0', '1.1.1' ],
+153 silly audit   '@radix-ui/react-use-controllable-state': [ '1.0.0', '1.1.0', '1.2.2' ],
+153 silly audit   '@radix-ui/react-use-escape-keydown': [ '1.1.0', '1.1.1' ],
+153 silly audit   '@radix-ui/react-use-rect': [ '1.1.0', '1.1.1' ],
+153 silly audit   '@radix-ui/react-use-size': [ '1.1.0', '1.1.1' ],
+153 silly audit   '@radix-ui/rect': [ '1.1.0', '1.1.1' ],
+153 silly audit   clsx: [ '1.1.1', '2.1.1' ],
+153 silly audit   nanoid: [ '3.3.3', '4.0.2', '3.3.11' ],
+153 silly audit   '@excalidraw/laser-pointer': [ '1.3.1' ],
+153 silly audit   '@excalidraw/markdown-to-text': [ '0.1.2' ],
+153 silly audit   '@excalidraw/mermaid-to-excalidraw': [ '1.1.2' ],
+153 silly audit   '@excalidraw/random-username': [ '1.1.0' ],
+153 silly audit   '@floating-ui/core': [ '1.7.2' ],
+153 silly audit   '@floating-ui/dom': [ '1.7.2' ],
+153 silly audit   '@floating-ui/react-dom': [ '2.1.4' ],
+153 silly audit   '@floating-ui/utils': [ '0.2.10' ],
+153 silly audit   '@humanfs/core': [ '0.19.1' ],
+153 silly audit   '@humanfs/node': [ '0.16.6' ],
+153 silly audit   '@humanwhocodes/retry': [ '0.3.1', '0.4.3' ],
+153 silly audit   '@humanwhocodes/module-importer': [ '1.0.1' ],
+153 silly audit   '@img/sharp-darwin-arm64': [ '0.34.2' ],
+153 silly audit   '@img/sharp-darwin-x64': [ '0.34.2' ],
+153 silly audit   '@img/sharp-libvips-darwin-arm64': [ '1.1.0' ],
+153 silly audit   '@img/sharp-libvips-darwin-x64': [ '1.1.0' ],
+153 silly audit   '@img/sharp-libvips-linux-arm': [ '1.1.0' ],
+153 silly audit   '@img/sharp-libvips-linux-arm64': [ '1.1.0' ],
+153 silly audit   '@img/sharp-libvips-linux-ppc64': [ '1.1.0' ],
+153 silly audit   '@img/sharp-libvips-linux-s390x': [ '1.1.0' ],
+153 silly audit   '@img/sharp-libvips-linux-x64': [ '1.1.0' ],
+153 silly audit   '@img/sharp-libvips-linuxmusl-arm64': [ '1.1.0' ],
+153 silly audit   '@img/sharp-libvips-linuxmusl-x64': [ '1.1.0' ],
+153 silly audit   '@img/sharp-linux-arm': [ '0.34.2' ],
+153 silly audit   '@img/sharp-linux-arm64': [ '0.34.2' ],
+153 silly audit   '@img/sharp-linux-s390x': [ '0.34.2' ],
+153 silly audit   '@img/sharp-linux-x64': [ '0.34.2' ],
+153 silly audit   '@img/sharp-linuxmusl-arm64': [ '0.34.2' ],
+153 silly audit   '@img/sharp-linuxmusl-x64': [ '0.34.2' ],
+153 silly audit   '@img/sharp-wasm32': [ '0.34.2' ],
+153 silly audit   '@img/sharp-win32-arm64': [ '0.34.2' ],
+153 silly audit   '@img/sharp-win32-ia32': [ '0.34.2' ],
+153 silly audit   '@img/sharp-win32-x64': [ '0.34.2' ],
+153 silly audit   '@isaacs/fs-minipass': [ '4.0.1' ],
+153 silly audit   '@jridgewell/gen-mapping': [ '0.3.12' ],
+153 silly audit   '@jridgewell/resolve-uri': [ '3.1.2' ],
+153 silly audit   '@jridgewell/sourcemap-codec': [ '1.5.4' ],
+153 silly audit   '@jridgewell/trace-mapping': [ '0.3.29' ],
+153 silly audit   '@napi-rs/wasm-runtime': [ '0.2.11' ],
+153 silly audit   '@next/env': [ '15.3.5' ],
+153 silly audit   '@next/eslint-plugin-next': [ '15.3.5' ],
+153 silly audit   '@next/swc-darwin-arm64': [ '15.3.5' ],
+153 silly audit   '@next/swc-darwin-x64': [ '15.3.5' ],
+153 silly audit   '@next/swc-linux-arm64-gnu': [ '15.3.5' ],
+153 silly audit   '@next/swc-linux-arm64-musl': [ '15.3.5' ],
+153 silly audit   '@next/swc-linux-x64-gnu': [ '15.3.5' ],
+153 silly audit   '@next/swc-linux-x64-musl': [ '15.3.5' ],
+153 silly audit   '@next/swc-win32-arm64-msvc': [ '15.3.5' ],
+153 silly audit   '@next/swc-win32-x64-msvc': [ '15.3.5' ],
+153 silly audit   '@nodelib/fs.scandir': [ '2.1.5' ],
+153 silly audit   '@nodelib/fs.stat': [ '2.0.5' ],
+153 silly audit   '@nodelib/fs.walk': [ '1.2.8' ],
+153 silly audit   '@nolyfill/is-core-module': [ '1.0.39' ],
+153 silly audit   '@radix-ui/number': [ '1.1.1' ],
+153 silly audit   '@radix-ui/react-avatar': [ '1.1.10' ],
+153 silly audit   '@radix-ui/react-context-menu': [ '2.2.16' ],
+153 silly audit   '@radix-ui/react-menu': [ '2.1.16', '2.1.15' ],
+153 silly audit   '@radix-ui/react-dialog': [ '1.1.14' ],
+153 silly audit   '@radix-ui/react-dropdown-menu': [ '2.1.15' ],
+153 silly audit   '@radix-ui/react-label': [ '2.1.7' ],
+153 silly audit   '@radix-ui/react-select': [ '2.2.5' ],
+153 silly audit   '@radix-ui/react-separator': [ '1.1.7' ],
+153 silly audit   '@radix-ui/react-switch': [ '1.2.5' ],
+153 silly audit   '@radix-ui/react-use-effect-event': [ '0.0.2' ],
+153 silly audit   '@radix-ui/react-use-is-hydrated': [ '0.1.0' ],
+153 silly audit   '@radix-ui/react-use-previous': [ '1.1.1' ],
+153 silly audit   '@radix-ui/react-visually-hidden': [ '1.2.3' ],
+153 silly audit   '@remirror/core-constants': [ '3.0.0' ],
+153 silly audit   '@rtsao/scc': [ '1.1.0' ],
+153 silly audit   '@rushstack/eslint-patch': [ '1.12.0' ],
+153 silly audit   '@supabase/auth-helpers-nextjs': [ '0.10.0' ],
+153 silly audit   '@supabase/auth-helpers-react': [ '0.5.0' ],
+153 silly audit   '@supabase/auth-helpers-shared': [ '0.7.0' ],
+153 silly audit   '@supabase/auth-js': [ '2.70.0' ],
+153 silly audit   '@supabase/functions-js': [ '2.4.5' ],
+153 silly audit   '@supabase/node-fetch': [ '2.6.15' ],
+153 silly audit   '@supabase/postgrest-js': [ '1.21.0' ],
+153 silly audit   '@supabase/realtime-js': [ '2.11.15' ],
+153 silly audit   '@supabase/ssr': [ '0.6.1' ],
+153 silly audit   '@supabase/storage-js': [ '2.7.1' ],
+153 silly audit   '@supabase/supabase-js': [ '2.50.4' ],
+153 silly audit   '@swc/counter': [ '0.1.3' ],
+153 silly audit   '@swc/helpers': [ '0.5.15' ],
+153 silly audit   '@tailwindcss/node': [ '4.1.11' ],
+153 silly audit   '@tailwindcss/oxide': [ '4.1.11' ],
+153 silly audit   '@tailwindcss/oxide-android-arm64': [ '4.1.11' ],
+153 silly audit   '@tailwindcss/oxide-darwin-arm64': [ '4.1.11' ],
+153 silly audit   '@tailwindcss/oxide-darwin-x64': [ '4.1.11' ],
+153 silly audit   '@tailwindcss/oxide-freebsd-x64': [ '4.1.11' ],
+153 silly audit   '@tailwindcss/oxide-linux-arm-gnueabihf': [ '4.1.11' ],
+153 silly audit   '@tailwindcss/oxide-linux-arm64-gnu': [ '4.1.11' ],
+153 silly audit   '@tailwindcss/oxide-linux-arm64-musl': [ '4.1.11' ],
+153 silly audit   '@tailwindcss/oxide-linux-x64-gnu': [ '4.1.11' ],
+153 silly audit   '@tailwindcss/oxide-linux-x64-musl': [ '4.1.11' ],
+153 silly audit   '@tailwindcss/oxide-wasm32-wasi': [ '4.1.11' ],
+153 silly audit   '@tailwindcss/oxide-win32-arm64-msvc': [ '4.1.11' ],
+153 silly audit   '@tailwindcss/oxide-win32-x64-msvc': [ '4.1.11' ],
+153 silly audit   '@tailwindcss/postcss': [ '4.1.11' ],
+153 silly audit   '@tanstack/react-table': [ '8.21.3' ],
+153 silly audit   '@tanstack/table-core': [ '8.21.3' ],
+153 silly audit   '@tiptap/core': [ '3.13.0' ],
+153 silly audit   '@tiptap/extension-blockquote': [ '3.0.7' ],
+153 silly audit   '@tiptap/extension-bold': [ '3.0.7' ],
+153 silly audit   '@tiptap/extension-bubble-menu': [ '3.0.7' ],
+153 silly audit   '@tiptap/extension-bullet-list': [ '3.0.7' ],
+153 silly audit   '@tiptap/extension-code': [ '3.0.7' ],
+153 silly audit   '@tiptap/extension-code-block': [ '3.0.7' ],
+153 silly audit   '@tiptap/extension-color': [ '3.13.0' ],
+153 silly audit   '@tiptap/extension-document': [ '3.0.7' ],
+153 silly audit   '@tiptap/extension-dropcursor': [ '3.0.7' ],
+153 silly audit   '@tiptap/extension-floating-menu': [ '3.0.7' ],
+153 silly audit   '@tiptap/extension-gapcursor': [ '3.0.7' ],
+153 silly audit   '@tiptap/extension-hard-break': [ '3.0.7' ],
+153 silly audit   '@tiptap/extension-heading': [ '3.0.7' ],
+153 silly audit   '@tiptap/extension-highlight': [ '3.13.0' ],
+153 silly audit   '@tiptap/extension-horizontal-rule': [ '3.0.7' ],
+153 silly audit   '@tiptap/extension-italic': [ '3.0.7' ],
+153 silly audit   '@tiptap/extension-link': [ '3.13.0' ],
+153 silly audit   '@tiptap/extension-list': [ '3.0.7' ],
+153 silly audit   '@tiptap/extension-list-item': [ '3.0.7' ],
+153 silly audit   '@tiptap/extension-list-keymap': [ '3.0.7' ],
+153 silly audit   '@tiptap/extension-ordered-list': [ '3.0.7' ],
+153 silly audit   '@tiptap/extension-paragraph': [ '3.0.7' ],
+153 silly audit   '@tiptap/extension-placeholder': [ '3.13.0' ],
+153 silly audit   '@tiptap/extension-strike': [ '3.0.7' ],
+153 silly audit   '@tiptap/extension-text': [ '3.0.7' ],
+153 silly audit   '@tiptap/extension-text-style': [ '3.13.0' ],
+153 silly audit   '@tiptap/extension-underline': [ '3.13.0' ],
+153 silly audit   '@tiptap/extensions': [ '3.13.0' ],
+153 silly audit   '@tiptap/pm': [ '3.13.0' ],
+153 silly audit   '@tiptap/react': [ '3.0.7' ],
+153 silly audit   '@tiptap/starter-kit': [ '3.0.7' ],
+153 silly audit   '@tybys/wasm-util': [ '0.9.0' ],
+153 silly audit   '@types/d3-color': [ '3.1.3' ],
+153 silly audit   '@types/d3-drag': [ '3.0.7' ],
+153 silly audit   '@types/d3-interpolate': [ '3.0.4' ],
+153 silly audit   '@types/d3-scale': [ '4.0.9' ],
+153 silly audit   '@types/d3-scale-chromatic': [ '3.1.0' ],
+153 silly audit   '@types/d3-selection': [ '3.0.11' ],
+153 silly audit   '@types/d3-time': [ '3.0.4' ],
+153 silly audit   '@types/d3-transition': [ '3.0.9' ],
+153 silly audit   '@types/d3-zoom': [ '3.0.8' ],
+153 silly audit   '@types/debug': [ '4.1.12' ],
+153 silly audit   '@types/estree': [ '1.0.8' ],
+153 silly audit   '@types/json-schema': [ '7.0.15' ],
+153 silly audit   '@types/json5': [ '0.0.29' ],
+153 silly audit   '@types/linkify-it': [ '5.0.0' ],
+153 silly audit   '@types/markdown-it': [ '14.1.2' ],
+153 silly audit   '@types/mdast': [ '3.0.15' ],
+153 silly audit   '@types/mdurl': [ '2.0.0' ],
+153 silly audit   '@types/ms': [ '2.1.0' ],
+153 silly audit   '@types/node': [ '20.19.4' ],
+153 silly audit   '@types/phoenix': [ '1.6.6' ],
+153 silly audit   '@types/react': [ '19.1.8' ],
+153 silly audit   '@types/react-dom': [ '19.1.6' ],
+153 silly audit   '@types/unist': [ '2.0.11' ],
+153 silly audit   '@types/use-sync-external-store': [ '0.0.6' ],
+153 silly audit   '@types/ws': [ '8.18.1' ],
+153 silly audit   '@typescript-eslint/eslint-plugin': [ '8.36.0' ],
+153 silly audit   ignore: [ '7.0.5', '5.3.2' ],
+153 silly audit   '@typescript-eslint/parser': [ '8.36.0' ],
+153 silly audit   '@typescript-eslint/project-service': [ '8.36.0' ],
+153 silly audit   '@typescript-eslint/scope-manager': [ '8.36.0' ],
+153 silly audit   '@typescript-eslint/tsconfig-utils': [ '8.36.0' ],
+153 silly audit   '@typescript-eslint/type-utils': [ '8.36.0' ],
+153 silly audit   '@typescript-eslint/types': [ '8.36.0' ],
+153 silly audit   '@typescript-eslint/typescript-estree': [ '8.36.0' ],
+153 silly audit   'brace-expansion': [ '2.0.2', '1.1.12' ],
+153 silly audit   'fast-glob': [ '3.3.3', '3.3.1' ],
+153 silly audit   'glob-parent': [ '5.1.2', '6.0.2' ],
+153 silly audit   minimatch: [ '9.0.5', '3.1.2' ],
+153 silly audit   '@typescript-eslint/utils': [ '8.36.0' ],
+153 silly audit   '@typescript-eslint/visitor-keys': [ '8.36.0' ],
+153 silly audit   '@unrs/resolver-binding-android-arm-eabi': [ '1.11.0' ],
+153 silly audit   '@unrs/resolver-binding-android-arm64': [ '1.11.0' ],
+153 silly audit   '@unrs/resolver-binding-darwin-arm64': [ '1.11.0' ],
+153 silly audit   '@unrs/resolver-binding-darwin-x64': [ '1.11.0' ],
+153 silly audit   '@unrs/resolver-binding-freebsd-x64': [ '1.11.0' ],
+153 silly audit   '@unrs/resolver-binding-linux-arm-gnueabihf': [ '1.11.0' ],
+153 silly audit   '@unrs/resolver-binding-linux-arm-musleabihf': [ '1.11.0' ],
+153 silly audit   '@unrs/resolver-binding-linux-arm64-gnu': [ '1.11.0' ],
+153 silly audit   '@unrs/resolver-binding-linux-arm64-musl': [ '1.11.0' ],
+153 silly audit   '@unrs/resolver-binding-linux-ppc64-gnu': [ '1.11.0' ],
+153 silly audit   '@unrs/resolver-binding-linux-riscv64-gnu': [ '1.11.0' ],
+153 silly audit   '@unrs/resolver-binding-linux-riscv64-musl': [ '1.11.0' ],
+153 silly audit   '@unrs/resolver-binding-linux-s390x-gnu': [ '1.11.0' ],
+153 silly audit   '@unrs/resolver-binding-linux-x64-gnu': [ '1.11.0' ],
+153 silly audit   '@unrs/resolver-binding-linux-x64-musl': [ '1.11.0' ],
+153 silly audit   '@unrs/resolver-binding-wasm32-wasi': [ '1.11.0' ],
+153 silly audit   '@unrs/resolver-binding-win32-arm64-msvc': [ '1.11.0' ],
+153 silly audit   '@unrs/resolver-binding-win32-ia32-msvc': [ '1.11.0' ],
+153 silly audit   '@unrs/resolver-binding-win32-x64-msvc': [ '1.11.0' ],
+153 silly audit   '@xyflow/react': [ '12.10.0' ],
+153 silly audit   '@xyflow/system': [ '0.0.74' ],
+153 silly audit   acorn: [ '8.15.0' ],
+153 silly audit   'acorn-jsx': [ '5.3.2' ],
+153 silly audit   ajv: [ '6.12.6' ],
+153 silly audit   'ansi-styles': [ '4.3.0' ],
+153 silly audit   anymatch: [ '3.1.3' ],
+153 silly audit   argparse: [ '2.0.1' ],
+153 silly audit   'aria-hidden': [ '1.2.6' ],
+153 silly audit   'aria-query': [ '5.3.2' ],
+153 silly audit   'array-buffer-byte-length': [ '1.0.2' ],
+153 silly audit   'array-includes': [ '3.1.9' ],
+153 silly audit   'array.prototype.findlast': [ '1.2.5' ],
+153 silly audit   'array.prototype.findlastindex': [ '1.2.6' ],
+153 silly audit   'array.prototype.flat': [ '1.3.3' ],
+153 silly audit   'array.prototype.flatmap': [ '1.3.3' ],
+153 silly audit   'array.prototype.tosorted': [ '1.1.4' ],
+153 silly audit   'arraybuffer.prototype.slice': [ '1.0.4' ],
+153 silly audit   'ast-types-flow': [ '0.0.8' ],
+153 silly audit   'async-function': [ '1.0.0' ],
+153 silly audit   'available-typed-arrays': [ '1.0.7' ],
+153 silly audit   'axe-core': [ '4.10.3' ],
+153 silly audit   'axobject-query': [ '4.1.0' ],
+153 silly audit   bahttext: [ '1.1.0' ],
+153 silly audit   'balanced-match': [ '1.0.2' ],
+153 silly audit   'base64-arraybuffer': [ '1.0.2' ],
+153 silly audit   bessel: [ '1.0.2' ],
+153 silly audit   'binary-extensions': [ '2.3.0' ],
+153 silly audit   braces: [ '3.0.3' ],
+153 silly audit   'browser-fs-access': [ '0.29.1' ],
+153 silly audit   busboy: [ '1.6.0' ],
+153 silly audit   'call-bind': [ '1.0.8' ],
+153 silly audit   'call-bind-apply-helpers': [ '1.0.2' ],
+153 silly audit   'call-bound': [ '1.0.4' ],
+153 silly audit   callsites: [ '3.1.0' ],
+153 silly audit   'caniuse-lite': [ '1.0.30001727' ],
+153 silly audit   'canvas-roundrect-polyfill': [ '0.0.1' ],
+153 silly audit   chalk: [ '4.1.2' ],
+153 silly audit   'character-entities': [ '2.0.2' ],
+153 silly audit   chevrotain: [ '7.1.2' ],
+153 silly audit   chokidar: [ '3.6.0' ],
+153 silly audit   chownr: [ '3.0.0' ],
+153 silly audit   'class-variance-authority': [ '0.7.1' ],
+153 silly audit   classcat: [ '5.0.5' ],
+153 silly audit   classnames: [ '2.5.1' ],
+153 silly audit   'client-only': [ '0.0.1' ],
+153 silly audit   color: [ '4.2.3' ],
+153 silly audit   'color-convert': [ '2.0.1' ],
+153 silly audit   'color-name': [ '1.1.4' ],
+153 silly audit   'color-string': [ '1.9.1' ],
+153 silly audit   commander: [ '7.2.0', '8.3.0' ],
+153 silly audit   'concat-map': [ '0.0.1' ],
+153 silly audit   cookie: [ '1.0.2' ],
+153 silly audit   'cose-base': [ '1.0.3' ],
+153 silly audit   'crc-32': [ '0.3.0' ],
+153 silly audit   crelt: [ '1.0.6' ],
+153 silly audit   'cross-env': [ '7.0.3' ],
+153 silly audit   'cross-spawn': [ '7.0.6' ],
+153 silly audit   'css-line-break': [ '2.1.0' ],
+153 silly audit   csstype: [ '3.1.3' ],
+153 silly audit   cytoscape: [ '3.33.1' ],
+153 silly audit   'cytoscape-cose-bilkent': [ '4.1.0' ],
+153 silly audit   d3: [ '7.9.0' ],
+153 silly audit   'd3-array': [ '3.2.4', '2.12.1' ],
+153 silly audit   'd3-axis': [ '3.0.0' ],
+153 silly audit   'd3-brush': [ '3.0.0' ],
+153 silly audit   'd3-chord': [ '3.0.1' ],
+153 silly audit   'd3-color': [ '3.1.0' ],
+153 silly audit   'd3-contour': [ '4.0.2' ],
+153 silly audit   'd3-delaunay': [ '6.0.4' ],
+153 silly audit   'd3-dispatch': [ '3.0.1' ],
+153 silly audit   'd3-drag': [ '3.0.0' ],
+153 silly audit   'd3-dsv': [ '3.0.1' ],
+153 silly audit   'd3-ease': [ '3.0.1' ],
+153 silly audit   'd3-fetch': [ '3.0.1' ],
+153 silly audit   'd3-force': [ '3.0.0' ],
+153 silly audit   'd3-format': [ '3.1.0' ],
+153 silly audit   'd3-geo': [ '3.1.1' ],
+153 silly audit   'd3-hierarchy': [ '3.1.2' ],
+153 silly audit   'd3-interpolate': [ '3.0.1' ],
+153 silly audit   'd3-path': [ '3.1.0', '1.0.9' ],
+153 silly audit   'd3-polygon': [ '3.0.1' ],
+153 silly audit   'd3-quadtree': [ '3.0.1' ],
+153 silly audit   'd3-random': [ '3.0.1' ],
+153 silly audit   'd3-sankey': [ '0.12.3' ],
+153 silly audit   'd3-shape': [ '1.3.7', '3.2.0' ],
+153 silly audit   internmap: [ '1.0.1', '2.0.3' ],
+153 silly audit   'd3-scale': [ '4.0.2' ],
+153 silly audit   'd3-scale-chromatic': [ '3.1.0' ],
+153 silly audit   'd3-selection': [ '3.0.0' ],
+153 silly audit   'd3-time': [ '3.1.0' ],
+153 silly audit   'd3-time-format': [ '4.1.0' ],
+153 silly audit   'd3-timer': [ '3.0.1' ],
+153 silly audit   'd3-transition': [ '3.0.1' ],
+153 silly audit   'd3-zoom': [ '3.0.0' ],
+153 silly audit   'dagre-d3-es': [ '7.0.10' ],
+153 silly audit   'damerau-levenshtein': [ '1.0.8' ],
+153 silly audit   'data-view-buffer': [ '1.0.2' ],
+153 silly audit   'data-view-byte-length': [ '1.0.2' ],
+153 silly audit   'data-view-byte-offset': [ '1.0.1' ],
+153 silly audit   dayjs: [ '1.11.19' ],
+153 silly audit   debug: [ '4.4.1', '3.2.7', '2.6.9' ],
+153 silly audit   'decode-named-character-reference': [ '1.2.0' ],
+153 silly audit   'deep-is': [ '0.1.4' ],
+153 silly audit   'define-data-property': [ '1.1.4' ],
+153 silly audit   'define-properties': [ '1.2.1' ],
+153 silly audit   delaunator: [ '5.0.1' ],
+153 silly audit   dequal: [ '2.0.3' ],
+153 silly audit   'detect-libc': [ '2.0.4' ],
+153 silly audit   'detect-node-es': [ '1.1.0' ],
+153 silly audit   diff: [ '5.2.0' ],
+153 silly audit   doctrine: [ '2.1.0' ],
+153 silly audit   dompurify: [ '3.1.6' ],
+153 silly audit   'dunder-proto': [ '1.0.1' ],
+153 silly audit   elkjs: [ '0.9.3' ],
+153 silly audit   'emoji-picker-react': [ '4.16.1' ],
+153 silly audit   'emoji-regex': [ '9.2.2' ],
+153 silly audit   'enhanced-resolve': [ '5.18.2' ],
+153 silly audit   entities: [ '4.5.0' ],
+153 silly audit   'es-abstract': [ '1.24.0' ],
+153 silly audit   'es-define-property': [ '1.0.1' ],
+153 silly audit   'es-errors': [ '1.3.0' ],
+153 silly audit   'es-iterator-helpers': [ '1.2.1' ],
+153 silly audit   'es-object-atoms': [ '1.1.1' ],
+153 silly audit   'es-set-tostringtag': [ '2.1.0' ],
+153 silly audit   'es-shim-unscopables': [ '1.1.0' ],
+153 silly audit   'es-to-primitive': [ '1.3.0' ],
+153 silly audit   'es6-promise-pool': [ '2.5.0' ],
+153 silly audit   'escape-string-regexp': [ '4.0.0' ],
+153 silly audit   eslint: [ '9.30.1' ],
+153 silly audit   'eslint-config-next': [ '15.3.5' ],
+153 silly audit   'eslint-import-resolver-node': [ '0.3.9' ],
+153 silly audit   'eslint-import-resolver-typescript': [ '3.10.1' ],
+153 silly audit   'eslint-module-utils': [ '2.12.1' ],
+153 silly audit   'eslint-plugin-import': [ '2.32.0' ],
+153 silly audit   semver: [ '6.3.1', '7.7.2' ],
+153 silly audit   'eslint-plugin-jsx-a11y': [ '6.10.2' ],
+153 silly audit   'eslint-plugin-react': [ '7.37.5' ],
+153 silly audit   'eslint-plugin-react-hooks': [ '5.2.0' ],
+153 silly audit   resolve: [ '2.0.0-next.5', '1.22.10' ],
+153 silly audit   'eslint-scope': [ '8.4.0' ],
+153 silly audit   espree: [ '10.4.0' ],
+153 silly audit   esquery: [ '1.6.0' ],
+153 silly audit   esrecurse: [ '4.3.0' ],
+153 silly audit   estraverse: [ '5.3.0' ],
+153 silly audit   esutils: [ '2.0.3' ],
+153 silly audit   'fast-deep-equal': [ '3.1.3' ],
+153 silly audit   'fast-formula-parser': [ '1.0.19' ],
+153 silly audit   'fast-json-stable-stringify': [ '2.1.0' ],
+153 silly audit   'fast-levenshtein': [ '2.0.6' ],
+153 silly audit   fastq: [ '1.19.1' ],
+153 silly audit   'file-entry-cache': [ '8.0.0' ],
+153 silly audit   'fill-range': [ '7.1.1' ],
+153 silly audit   'find-up': [ '5.0.0' ],
+153 silly audit   flairup: [ '1.0.0' ],
+153 silly audit   'flat-cache': [ '4.0.1' ],
+153 silly audit   flatted: [ '3.3.3' ],
+153 silly audit   'for-each': [ '0.3.5' ],
+153 silly audit   'fractional-indexing': [ '3.2.0' ],
+153 silly audit   fsevents: [ '2.3.3' ],
+153 silly audit   'function-bind': [ '1.1.2' ],
+153 silly audit   'function.prototype.name': [ '1.1.8' ],
+153 silly audit   'functions-have-names': [ '1.2.3' ],
+153 silly audit   fuzzy: [ '0.1.3' ],
+153 silly audit   'get-intrinsic': [ '1.3.0' ],
+153 silly audit   'get-nonce': [ '1.0.1' ],
+153 silly audit   'get-proto': [ '1.0.1' ],
+153 silly audit   'get-symbol-description': [ '1.1.0' ],
+153 silly audit   'get-tsconfig': [ '4.10.1' ],
+153 silly audit   globals: [ '14.0.0' ],
+153 silly audit   globalthis: [ '1.0.4' ],
+153 silly audit   glur: [ '1.1.2' ],
+153 silly audit   gopd: [ '1.2.0' ],
+153 silly audit   'graceful-fs': [ '4.2.11' ],
+153 silly audit   graphemer: [ '1.4.0' ],
+153 silly audit   'hachure-fill': [ '0.5.2' ],
+153 silly audit   'has-bigints': [ '1.1.0' ],
+153 silly audit   'has-flag': [ '4.0.0' ],
+153 silly audit   'has-property-descriptors': [ '1.0.2' ],
+153 silly audit   'has-proto': [ '1.2.0' ],
+153 silly audit   'has-symbols': [ '1.1.0' ],
+153 silly audit   'has-tostringtag': [ '1.0.2' ],
+153 silly audit   hasown: [ '2.0.2' ],
+153 silly audit   html2canvas: [ '1.4.1' ],
+153 silly audit   'iconv-lite': [ '0.6.3' ],
+153 silly audit   'image-blob-reduce': [ '3.0.1' ],
+153 silly audit   immutable: [ '4.3.7' ],
+153 silly audit   'import-fresh': [ '3.3.1' ],
+153 silly audit   imurmurhash: [ '0.1.4' ],
+153 silly audit   inherits: [ '2.0.4' ],
+153 silly audit   'internal-slot': [ '1.1.0' ],
+153 silly audit   'is-array-buffer': [ '3.0.5' ],
+153 silly audit   'is-arrayish': [ '0.3.2' ],
+153 silly audit   'is-async-function': [ '2.1.1' ],
+153 silly audit   'is-bigint': [ '1.1.0' ],
+153 silly audit   'is-binary-path': [ '2.1.0' ],
+153 silly audit   'is-boolean-object': [ '1.2.2' ],
+153 silly audit   'is-bun-module': [ '2.0.0' ],
+153 silly audit   'is-callable': [ '1.2.7' ],
+153 silly audit   'is-core-module': [ '2.16.1' ],
+153 silly audit   'is-data-view': [ '1.0.2' ],
+153 silly audit   'is-date-object': [ '1.1.0' ],
+153 silly audit   'is-extglob': [ '2.1.1' ],
+153 silly audit   'is-finalizationregistry': [ '1.1.1' ],
+153 silly audit   'is-generator-function': [ '1.1.0' ],
+153 silly audit   'is-glob': [ '4.0.3' ],
+153 silly audit   'is-map': [ '2.0.3' ],
+153 silly audit   'is-negative-zero': [ '2.0.3' ],
+153 silly audit   'is-number': [ '7.0.0' ],
+153 silly audit   'is-number-object': [ '1.1.1' ],
+153 silly audit   'is-regex': [ '1.2.1' ],
+153 silly audit   'is-set': [ '2.0.3' ],
+153 silly audit   'is-shared-array-buffer': [ '1.0.4' ],
+153 silly audit   'is-string': [ '1.1.1' ],
+153 silly audit   'is-symbol': [ '1.1.1' ],
+153 silly audit   'is-typed-array': [ '1.1.15' ],
+153 silly audit   'is-weakmap': [ '2.0.2' ],
+153 silly audit   'is-weakref': [ '1.1.1' ],
+153 silly audit   'is-weakset': [ '2.0.4' ],
+153 silly audit   isarray: [ '2.0.5' ],
+153 silly audit   isexe: [ '2.0.0' ],
+153 silly audit   isows: [ '1.0.7' ],
+153 silly audit   'iterator.prototype': [ '1.1.5' ],
+153 silly audit   jiti: [ '2.4.2' ],
+153 silly audit   jose: [ '4.15.9' ],
+153 silly audit   jotai: [ '2.11.0' ],
+153 silly audit   'jotai-scope': [ '0.7.2' ],
+153 silly audit   'js-tokens': [ '4.0.0' ],
+153 silly audit   'js-yaml': [ '4.1.0' ],
+153 silly audit   'json-buffer': [ '3.0.1' ],
+153 silly audit   'json-schema-traverse': [ '0.4.1' ],
+153 silly audit   'json-stable-stringify-without-jsonify': [ '1.0.1' ],
+153 silly audit   json5: [ '1.0.2' ],
+153 silly audit   jstat: [ '1.9.6' ],
+153 silly audit   'jsx-ast-utils': [ '3.3.5' ],
+153 silly audit   katex: [ '0.16.27' ],
+153 silly audit   keyv: [ '4.5.4' ],
+153 silly audit   khroma: [ '2.1.0' ],
+153 silly audit   kleur: [ '4.1.5' ],
+153 silly audit   'language-subtag-registry': [ '0.3.23' ],
+153 silly audit   'language-tags': [ '1.0.9' ],
+153 silly audit   'layout-base': [ '1.0.2' ],
+153 silly audit   levn: [ '0.4.1' ],
+153 silly audit   lightningcss: [ '1.30.1' ],
+153 silly audit   'lightningcss-darwin-arm64': [ '1.30.1' ],
+153 silly audit   'lightningcss-darwin-x64': [ '1.30.1' ],
+153 silly audit   'lightningcss-freebsd-x64': [ '1.30.1' ],
+153 silly audit   'lightningcss-linux-arm-gnueabihf': [ '1.30.1' ],
+153 silly audit   'lightningcss-linux-arm64-gnu': [ '1.30.1' ],
+153 silly audit   'lightningcss-linux-arm64-musl': [ '1.30.1' ],
+153 silly audit   'lightningcss-linux-x64-gnu': [ '1.30.1' ],
+153 silly audit   'lightningcss-linux-x64-musl': [ '1.30.1' ],
+153 silly audit   'lightningcss-win32-arm64-msvc': [ '1.30.1' ],
+153 silly audit   'lightningcss-win32-x64-msvc': [ '1.30.1' ],
+153 silly audit   'linkify-it': [ '5.0.0' ],
+153 silly audit   linkifyjs: [ '4.3.2' ],
+153 silly audit   'locate-path': [ '6.0.0' ],
+153 silly audit   'lodash-es': [ '4.17.22' ],
+153 silly audit   'lodash.debounce': [ '4.0.8' ],
+153 silly audit   'lodash.merge': [ '4.6.2' ],
+153 silly audit   'lodash.throttle': [ '4.1.1' ],
+153 silly audit   'loose-envify': [ '1.4.0' ],
+153 silly audit   'lucide-react': [ '0.525.0' ],
+153 silly audit   'magic-string': [ '0.30.17' ],
+153 silly audit   'markdown-it': [ '14.1.0' ],
+153 silly audit   'math-intrinsics': [ '1.1.0' ],
+153 silly audit   'mdast-util-from-markdown': [ '1.3.1' ],
+153 silly audit   'mdast-util-to-string': [ '3.2.0' ],
+153 silly audit   mdurl: [ '2.0.0' ],
+153 silly audit   merge2: [ '1.4.1' ],
+153 silly audit   mermaid: [ '10.9.3' ],
+153 silly audit   micromark: [ '3.2.0' ],
+153 silly audit   'micromark-core-commonmark': [ '1.1.0' ],
+153 silly audit   'micromark-factory-destination': [ '1.1.0' ],
+153 silly audit   'micromark-factory-label': [ '1.1.0' ],
+153 silly audit   'micromark-factory-space': [ '1.1.0' ],
+153 silly audit   'micromark-factory-title': [ '1.1.0' ],
+153 silly audit   'micromark-factory-whitespace': [ '1.1.0' ],
+153 silly audit   'micromark-util-character': [ '1.2.0' ],
+153 silly audit   'micromark-util-chunked': [ '1.1.0' ],
+153 silly audit   'micromark-util-classify-character': [ '1.1.0' ],
+153 silly audit   'micromark-util-combine-extensions': [ '1.1.0' ],
+153 silly audit   'micromark-util-decode-numeric-character-reference': [ '1.1.0' ],
+153 silly audit   'micromark-util-decode-string': [ '1.1.0' ],
+153 silly audit   'micromark-util-encode': [ '1.1.0' ],
+153 silly audit   'micromark-util-html-tag-name': [ '1.2.0' ],
+153 silly audit   'micromark-util-normalize-identifier': [ '1.1.0' ],
+153 silly audit   'micromark-util-resolve-all': [ '1.1.0' ],
+153 silly audit   'micromark-util-sanitize-uri': [ '1.2.0' ],
+153 silly audit   'micromark-util-subtokenize': [ '1.1.0' ],
+153 silly audit   'micromark-util-symbol': [ '1.1.0' ],
+153 silly audit   'micromark-util-types': [ '1.1.0' ],
+153 silly audit   micromatch: [ '4.0.8' ],
+153 silly audit   minimist: [ '1.2.8' ],
+153 silly audit   minipass: [ '7.1.2' ],
+153 silly audit   minizlib: [ '3.0.2' ],
+153 silly audit   mkdirp: [ '3.0.1' ],
+153 silly audit   mri: [ '1.2.0' ],
+153 silly audit   ms: [ '2.1.3', '2.0.0' ],
+153 silly audit   multimath: [ '2.0.0' ],
+153 silly audit   'napi-postinstall': [ '0.3.0' ],
+153 silly audit   'natural-compare': [ '1.4.0' ],
+153 silly audit   next: [ '15.3.5' ],
+153 silly audit   'next-themes': [ '0.4.6' ],
+153 silly audit   postcss: [ '8.4.31', '8.5.6' ],
+153 silly audit   'non-layered-tidy-tree-layout': [ '2.0.2' ],
+153 silly audit   'normalize-path': [ '3.0.0' ],
+153 silly audit   'object-assign': [ '4.1.1' ],
+153 silly audit   'object-inspect': [ '1.13.4' ],
+153 silly audit   'object-keys': [ '1.1.1' ],
+153 silly audit   'object.assign': [ '4.1.7' ],
+153 silly audit   'object.entries': [ '1.1.9' ],
+153 silly audit   'object.fromentries': [ '2.0.8' ],
+153 silly audit   'object.groupby': [ '1.0.3' ],
+153 silly audit   'object.values': [ '1.2.1' ],
+153 silly audit   'open-color': [ '1.9.1' ],
+153 silly audit   optionator: [ '0.9.4' ],
+153 silly audit   orderedmap: [ '2.1.1' ],
+153 silly audit   'own-keys': [ '1.0.1' ],
+153 silly audit   'p-limit': [ '3.1.0' ],
+153 silly audit   'p-locate': [ '5.0.0' ],
+153 silly audit   pako: [ '2.0.3' ],
+153 silly audit   'parent-module': [ '1.0.1' ],
+153 silly audit   'path-data-parser': [ '0.1.0' ],
+153 silly audit   'path-exists': [ '4.0.0' ],
+153 silly audit   'path-key': [ '3.1.1' ],
+153 silly audit   'path-parse': [ '1.0.7' ],
+153 silly audit   'perfect-freehand': [ '1.2.0' ],
+153 silly audit   pica: [ '7.1.1' ],
+153 silly audit   picocolors: [ '1.1.1' ],
+153 silly audit   picomatch: [ '2.3.1', '4.0.2' ],
+153 silly audit   'png-chunk-text': [ '1.0.0' ],
+153 silly audit   'png-chunks-encode': [ '1.0.0' ],
+153 silly audit   'png-chunks-extract': [ '1.0.0' ],
+153 silly audit   'points-on-curve': [ '1.0.1', '0.2.0' ],
+153 silly audit   'points-on-path': [ '0.2.1' ],
+153 silly audit   'possible-typed-array-names': [ '1.1.0' ],
+153 silly audit   'prelude-ls': [ '1.2.1' ],
+153 silly audit   'prop-types': [ '15.8.1' ],
+153 silly audit   'prosemirror-changeset': [ '2.3.1' ],
+153 silly audit   'prosemirror-collab': [ '1.3.1' ],
+153 silly audit   'prosemirror-commands': [ '1.7.1' ],
+153 silly audit   'prosemirror-dropcursor': [ '1.8.2' ],
+153 silly audit   'prosemirror-gapcursor': [ '1.3.2' ],
+153 silly audit   'prosemirror-history': [ '1.4.1' ],
+153 silly audit   'prosemirror-inputrules': [ '1.5.0' ],
+153 silly audit   'prosemirror-keymap': [ '1.2.3' ],
+153 silly audit   'prosemirror-markdown': [ '1.13.2' ],
+153 silly audit   'prosemirror-menu': [ '1.2.5' ],
+153 silly audit   'prosemirror-model': [ '1.25.2' ],
+153 silly audit   'prosemirror-schema-basic': [ '1.2.4' ],
+153 silly audit   'prosemirror-schema-list': [ '1.5.1' ],
+153 silly audit   'prosemirror-state': [ '1.4.3' ],
+153 silly audit   'prosemirror-tables': [ '1.7.1' ],
+153 silly audit   'prosemirror-trailing-node': [ '3.0.0' ],
+153 silly audit   'prosemirror-transform': [ '1.10.4' ],
+153 silly audit   'prosemirror-view': [ '1.40.0' ],
+153 silly audit   punycode: [ '2.3.1' ],
+153 silly audit   'punycode.js': [ '2.3.1' ],
+153 silly audit   pwacompat: [ '2.0.17' ],
+153 silly audit   'queue-microtask': [ '1.2.3' ],
+153 silly audit   react: [ '19.1.0' ],
+153 silly audit   'react-dom': [ '19.1.0' ],
+153 silly audit   'react-image-crop': [ '11.0.10' ],
+153 silly audit   'react-is': [ '16.13.1' ],
+153 silly audit   'react-remove-scroll': [ '2.7.1' ],
+153 silly audit   'react-remove-scroll-bar': [ '2.3.8' ],
+153 silly audit   'react-sketch-canvas': [ '6.2.0' ],
+153 silly audit   'react-spreadsheet': [ '0.10.1' ],
+153 silly audit   'react-style-singleton': [ '2.2.3' ],
+153 silly audit   readdirp: [ '3.6.0' ],
+153 silly audit   'reflect.getprototypeof': [ '1.0.10' ],
+153 silly audit   'regexp-to-ast': [ '0.5.0' ],
+153 silly audit   'regexp.prototype.flags': [ '1.5.4' ],
+153 silly audit   'resolve-from': [ '4.0.0' ],
+153 silly audit   'resolve-pkg-maps': [ '1.0.0' ],
+153 silly audit   reusify: [ '1.1.0' ],
+153 silly audit   'robust-predicates': [ '3.0.2' ],
+153 silly audit   'rope-sequence': [ '1.3.4' ],
+153 silly audit   roughjs: [ '4.6.4' ],
+153 silly audit   'run-parallel': [ '1.2.0' ],
+153 silly audit   rw: [ '1.3.3' ],
+153 silly audit   sade: [ '1.8.1' ],
+153 silly audit   'safe-array-concat': [ '1.1.3' ],
+153 silly audit   'safe-push-apply': [ '1.0.0' ],
+153 silly audit   'safe-regex-test': [ '1.1.0' ],
+153 silly audit   'safer-buffer': [ '2.1.2' ],
+153 silly audit   sass: [ '1.51.0' ],
+153 silly audit   scheduler: [ '0.26.0' ],
+153 silly audit   'set-cookie-parser': [ '2.7.1' ],
+153 silly audit   'set-function-length': [ '1.2.2' ],
+153 silly audit   'set-function-name': [ '2.0.2' ],
+153 silly audit   'set-proto': [ '1.0.0' ],
+153 silly audit   sharp: [ '0.34.2' ],
+153 silly audit   'shebang-command': [ '2.0.0' ],
+153 silly audit   'shebang-regex': [ '3.0.0' ],
+153 silly audit   'side-channel': [ '1.1.0' ],
+153 silly audit   'side-channel-list': [ '1.0.0' ],
+153 silly audit   'side-channel-map': [ '1.0.1' ],
+153 silly audit   'side-channel-weakmap': [ '1.0.2' ],
+153 silly audit   'simple-swizzle': [ '0.2.2' ],
+153 silly audit   sliced: [ '1.0.1' ],
+153 silly audit   sonner: [ '2.0.7' ],
+153 silly audit   'source-map-js': [ '1.2.1' ],
+153 silly audit   'stable-hash': [ '0.0.5' ],
+153 silly audit   'stop-iteration-iterator': [ '1.1.0' ],
+153 silly audit   streamsearch: [ '1.1.0' ],
+153 silly audit   'string.prototype.includes': [ '2.0.1' ],
+153 silly audit   'string.prototype.matchall': [ '4.0.12' ],
+153 silly audit   'string.prototype.repeat': [ '1.0.0' ],
+153 silly audit   'string.prototype.trim': [ '1.2.10' ],
+153 silly audit   'string.prototype.trimend': [ '1.0.9' ],
+153 silly audit   'string.prototype.trimstart': [ '1.0.8' ],
+153 silly audit   'strip-bom': [ '3.0.0' ],
+153 silly audit   'strip-json-comments': [ '3.1.1' ],
+153 silly audit   'styled-jsx': [ '5.1.6' ],
+153 silly audit   stylis: [ '4.3.6' ],
+153 silly audit   'supports-color': [ '7.2.0' ],
+153 silly audit   'supports-preserve-symlinks-flag': [ '1.0.0' ],
+153 silly audit   'tailwind-merge': [ '3.3.1' ],
+153 silly audit   tailwindcss: [ '4.1.11' ],
+153 silly audit   tapable: [ '2.2.2' ],
+153 silly audit   tar: [ '7.4.3' ],
+153 silly audit   'text-segmentation': [ '1.0.3' ],
+153 silly audit   tinyglobby: [ '0.2.14' ],
+153 silly audit   fdir: [ '6.4.6' ],
+153 silly audit   'to-regex-range': [ '5.0.1' ],
+153 silly audit   tr46: [ '0.0.3' ],
+153 silly audit   'ts-api-utils': [ '2.1.0' ],
+153 silly audit   'ts-dedent': [ '2.2.0' ],
+153 silly audit   'tsconfig-paths': [ '3.15.0' ],
+153 silly audit   tslib: [ '2.8.1' ],
+153 silly audit   'tunnel-rat': [ '0.1.2' ],
+153 silly audit   'type-check': [ '0.4.0' ],
+153 silly audit   'typed-array-buffer': [ '1.0.3' ],
+153 silly audit   'typed-array-byte-length': [ '1.0.3' ],
+153 silly audit   'typed-array-byte-offset': [ '1.0.4' ],
+153 silly audit   'typed-array-length': [ '1.0.7' ],
+153 silly audit   typescript: [ '5.8.3' ],
+153 silly audit   'uc.micro': [ '2.1.0' ],
+153 silly audit   'unbox-primitive': [ '1.1.0' ],
+153 silly audit   'undici-types': [ '6.21.0' ],
+153 silly audit   'unist-util-stringify-position': [ '3.0.3' ],
+153 silly audit   'unrs-resolver': [ '1.11.0' ],
+153 silly audit   'uri-js': [ '4.4.1' ],
+153 silly audit   'use-callback-ref': [ '1.3.3' ],
+153 silly audit   'use-context-selector': [ '2.0.0' ],
+153 silly audit   'use-sidecar': [ '1.1.3' ],
+153 silly audit   'use-sync-external-store': [ '1.5.0' ],
+153 silly audit   utrie: [ '1.0.2' ],
+153 silly audit   uuid: [ '9.0.1' ],
+153 silly audit   uvu: [ '0.5.6' ],
+153 silly audit   'w3c-keyname': [ '2.2.8' ],
+153 silly audit   'web-worker': [ '1.5.0' ],
+153 silly audit   'webidl-conversions': [ '3.0.1' ],
+153 silly audit   webworkify: [ '1.5.0' ],
+153 silly audit   'whatwg-url': [ '5.0.0' ],
+153 silly audit   which: [ '2.0.2' ],
+153 silly audit   'which-boxed-primitive': [ '1.1.1' ],
+153 silly audit   'which-builtin-type': [ '1.2.1' ],
+153 silly audit   'which-collection': [ '1.0.2' ],
+153 silly audit   'which-typed-array': [ '1.1.19' ],
+153 silly audit   'word-wrap': [ '1.2.5' ],
+153 silly audit   ws: [ '8.18.3' ],
+153 silly audit   yallist: [ '5.0.0' ],
+153 silly audit   'yocto-queue': [ '0.1.0' ],
+153 silly audit   zustand: [ '4.5.7' ],
+153 silly audit   'react-player': [ '2.16.1' ],
+153 silly audit   'react-social-media-embed': [ '2.5.18' ],
+153 silly audit   deepmerge: [ '4.3.1' ],
+153 silly audit   'load-script': [ '1.0.0' ],
+153 silly audit   'memoize-one': [ '5.2.1' ],
+153 silly audit   'react-fast-compare': [ '3.2.2' ],
+153 silly audit   '@types/youtube-player': [ '5.5.11' ],
+153 silly audit   'react-html-props': [ '2.1.1' ],
+153 silly audit   'react-sub-unsub': [ '2.2.8' ],
+153 silly audit   'react-twitter-embed': [ '4.0.4' ],
+153 silly audit   'react-youtube': [ '10.1.0' ],
+153 silly audit   'youtube-player': [ '5.5.2' ],
+153 silly audit   sister: [ '3.0.2' ],
+153 silly audit   scriptjs: [ '2.5.9' ]
+153 silly audit }
+154 http cache scriptjs@https://registry.npmjs.org/scriptjs/-/scriptjs-2.5.9.tgz 0ms (cache hit)
+155 http cache sister@https://registry.npmjs.org/sister/-/sister-3.0.2.tgz 0ms (cache hit)
+156 http cache react-youtube@https://registry.npmjs.org/react-youtube/-/react-youtube-10.1.0.tgz 0ms (cache hit)
+157 http cache react-sub-unsub@https://registry.npmjs.org/react-sub-unsub/-/react-sub-unsub-2.2.8.tgz 0ms (cache hit)
+158 http cache youtube-player@https://registry.npmjs.org/youtube-player/-/youtube-player-5.5.2.tgz 0ms (cache hit)
+159 http cache @types/youtube-player@https://registry.npmjs.org/@types/youtube-player/-/youtube-player-5.5.11.tgz 0ms (cache hit)
+160 http cache react-fast-compare@https://registry.npmjs.org/react-fast-compare/-/react-fast-compare-3.2.2.tgz 0ms (cache hit)
+161 http cache react-html-props@https://registry.npmjs.org/react-html-props/-/react-html-props-2.1.1.tgz 0ms (cache hit)
+162 http cache load-script@https://registry.npmjs.org/load-script/-/load-script-1.0.0.tgz 0ms (cache hit)
+163 http cache memoize-one@https://registry.npmjs.org/memoize-one/-/memoize-one-5.2.1.tgz 0ms (cache hit)
+164 http cache ms@https://registry.npmjs.org/ms/-/ms-2.0.0.tgz 0ms (cache hit)
+165 http cache react-twitter-embed@https://registry.npmjs.org/react-twitter-embed/-/react-twitter-embed-4.0.4.tgz 0ms (cache hit)
+166 http cache deepmerge@https://registry.npmjs.org/deepmerge/-/deepmerge-4.3.1.tgz 0ms (cache hit)
+167 http cache debug@https://registry.npmjs.org/debug/-/debug-2.6.9.tgz 0ms (cache hit)
+168 http cache react-player@https://registry.npmjs.org/react-player/-/react-player-2.16.1.tgz 0ms (cache hit)
+169 http cache react-social-media-embed@https://registry.npmjs.org/react-social-media-embed/-/react-social-media-embed-2.5.18.tgz 0ms (cache hit)
+170 silly tarball no local data for scriptjs@https://registry.npmjs.org/scriptjs/-/scriptjs-2.5.9.tgz. Extracting by manifest.
+171 silly tarball no local data for sister@https://registry.npmjs.org/sister/-/sister-3.0.2.tgz. Extracting by manifest.
+172 silly tarball no local data for react-youtube@https://registry.npmjs.org/react-youtube/-/react-youtube-10.1.0.tgz. Extracting by manifest.
+173 silly tarball no local data for react-sub-unsub@https://registry.npmjs.org/react-sub-unsub/-/react-sub-unsub-2.2.8.tgz. Extracting by manifest.
+174 silly tarball no local data for youtube-player@https://registry.npmjs.org/youtube-player/-/youtube-player-5.5.2.tgz. Extracting by manifest.
+175 silly tarball no local data for @types/youtube-player@https://registry.npmjs.org/@types/youtube-player/-/youtube-player-5.5.11.tgz. Extracting by manifest.
+176 silly tarball no local data for react-html-props@https://registry.npmjs.org/react-html-props/-/react-html-props-2.1.1.tgz. Extracting by manifest.
+177 silly tarball no local data for load-script@https://registry.npmjs.org/load-script/-/load-script-1.0.0.tgz. Extracting by manifest.
+178 silly tarball no local data for memoize-one@https://registry.npmjs.org/memoize-one/-/memoize-one-5.2.1.tgz. Extracting by manifest.
+179 silly tarball no local data for react-twitter-embed@https://registry.npmjs.org/react-twitter-embed/-/react-twitter-embed-4.0.4.tgz. Extracting by manifest.
+180 silly tarball no local data for react-player@https://registry.npmjs.org/react-player/-/react-player-2.16.1.tgz. Extracting by manifest.
+181 silly tarball no local data for react-social-media-embed@https://registry.npmjs.org/react-social-media-embed/-/react-social-media-embed-2.5.18.tgz. Extracting by manifest.
+182 http fetch GET 200 https://registry.npmjs.org/react-sub-unsub/-/react-sub-unsub-2.2.8.tgz 55ms (cache miss)
+183 http fetch GET 200 https://registry.npmjs.org/react-html-props/-/react-html-props-2.1.1.tgz 58ms (cache miss)
+184 http fetch GET 200 https://registry.npmjs.org/load-script/-/load-script-1.0.0.tgz 59ms (cache miss)
+185 http fetch GET 200 https://registry.npmjs.org/react-youtube/-/react-youtube-10.1.0.tgz 63ms (cache miss)
+186 http fetch GET 200 https://registry.npmjs.org/youtube-player/-/youtube-player-5.5.2.tgz 77ms (cache miss)
+187 http fetch GET 200 https://registry.npmjs.org/sister/-/sister-3.0.2.tgz 81ms (cache miss)
+188 http fetch GET 200 https://registry.npmjs.org/memoize-one/-/memoize-one-5.2.1.tgz 91ms (cache miss)
+189 http fetch GET 200 https://registry.npmjs.org/scriptjs/-/scriptjs-2.5.9.tgz 114ms (cache miss)
+190 http fetch GET 200 https://registry.npmjs.org/react-twitter-embed/-/react-twitter-embed-4.0.4.tgz 115ms (cache miss)
+191 http fetch GET 200 https://registry.npmjs.org/react-social-media-embed/-/react-social-media-embed-2.5.18.tgz 142ms (cache miss)
+192 http fetch GET 200 https://registry.npmjs.org/react-player/-/react-player-2.16.1.tgz 177ms (cache miss)
+193 http fetch POST 200 https://registry.npmjs.org/-/npm/v1/security/advisories/bulk 202ms
+194 silly audit report {
+194 silly audit report   '@eslint/plugin-kit': [
+194 silly audit report     {
+194 silly audit report       id: 1106734,
+194 silly audit report       url: 'https://github.com/advisories/GHSA-xffm-g5w8-qvg7',
+194 silly audit report       title: '@eslint/plugin-kit is vulnerable to Regular Expression Denial of Service attacks through ConfigCommentParser',
+194 silly audit report       severity: 'low',
+194 silly audit report       vulnerable_versions: '<0.3.4',
+194 silly audit report       cwe: [Array],
+194 silly audit report       cvss: [Object]
+194 silly audit report     }
+194 silly audit report   ],
+194 silly audit report   nanoid: [
+194 silly audit report     {
+194 silly audit report       id: 1109563,
+194 silly audit report       url: 'https://github.com/advisories/GHSA-mwcw-c2x4-8c55',
+194 silly audit report       title: 'Predictable results in nanoid generation when given non-integer values',
+194 silly audit report       severity: 'moderate',
+194 silly audit report       vulnerable_versions: '<3.3.8',
+194 silly audit report       cwe: [Array],
+194 silly audit report       cvss: [Object]
+194 silly audit report     },
+194 silly audit report     {
+194 silly audit report       id: 1109564,
+194 silly audit report       url: 'https://github.com/advisories/GHSA-mwcw-c2x4-8c55',
+194 silly audit report       title: 'Predictable results in nanoid generation when given non-integer values',
+194 silly audit report       severity: 'moderate',
+194 silly audit report       vulnerable_versions: '>=4.0.0 <5.0.9',
+194 silly audit report       cwe: [Array],
+194 silly audit report       cvss: [Object]
+194 silly audit report     }
+194 silly audit report   ],
+194 silly audit report   diff: [
+194 silly audit report     {
+194 silly audit report       id: 1112490,
+194 silly audit report       url: 'https://github.com/advisories/GHSA-73rr-hh4g-fpgx',
+194 silly audit report       title: 'jsdiff has a Denial of Service vulnerability in parsePatch and applyPatch',
+194 silly audit report       severity: 'low',
+194 silly audit report       vulnerable_versions: '>=5.0.0 <5.2.2',
+194 silly audit report       cwe: [Array],
+194 silly audit report       cvss: [Object]
+194 silly audit report     }
+194 silly audit report   ],
+194 silly audit report   dompurify: [
+194 silly audit report     {
+194 silly audit report       id: 1105772,
+194 silly audit report       url: 'https://github.com/advisories/GHSA-vhxf-7vqr-mrjg',
+194 silly audit report       title: 'DOMPurify allows Cross-site Scripting (XSS)',
+194 silly audit report       severity: 'moderate',
+194 silly audit report       vulnerable_versions: '<3.2.4',
+194 silly audit report       cwe: [Array],
+194 silly audit report       cvss: [Object]
+194 silly audit report     }
+194 silly audit report   ],
+194 silly audit report   'js-yaml': [
+194 silly audit report     {
+194 silly audit report       id: 1109802,
+194 silly audit report       url: 'https://github.com/advisories/GHSA-mh29-5h37-fv8m',
+194 silly audit report       title: 'js-yaml has prototype pollution in merge (<<)',
+194 silly audit report       severity: 'moderate',
+194 silly audit report       vulnerable_versions: '>=4.0.0 <4.1.1',
+194 silly audit report       cwe: [Array],
+194 silly audit report       cvss: [Object]
+194 silly audit report     }
+194 silly audit report   ],
+194 silly audit report   'lodash-es': [
+194 silly audit report     {
+194 silly audit report       id: 1112453,
+194 silly audit report       url: 'https://github.com/advisories/GHSA-xxjr-mmjv-4gpg',
+194 silly audit report       title: 'Lodash has Prototype Pollution Vulnerability in `_.unset` and `_.omit` functions',
+194 silly audit report       severity: 'moderate',
+194 silly audit report       vulnerable_versions: '>=4.0.0 <=4.17.22',
+194 silly audit report       cwe: [Array],
+194 silly audit report       cvss: [Object]
+194 silly audit report     }
+194 silly audit report   ],
+194 silly audit report   mermaid: [
+194 silly audit report     {
+194 silly audit report       id: 1107246,
+194 silly audit report       url: 'https://github.com/advisories/GHSA-7rqq-prvp-x9jh',
+194 silly audit report       title: 'Mermaid improperly sanitizes sequence diagram labels leading to XSS',
+194 silly audit report       severity: 'moderate',
+194 silly audit report       vulnerable_versions: '>=10.9.0-rc.1 <10.9.4',
+194 silly audit report       cwe: [Array],
+194 silly audit report       cvss: [Object]
+194 silly audit report     }
+194 silly audit report   ],
+194 silly audit report   next: [
+194 silly audit report     {
+194 silly audit report       id: 1111370,
+194 silly audit report       url: 'https://github.com/advisories/GHSA-9qr9-h5gf-34mp',
+194 silly audit report       title: 'Next.js is vulnerable to RCE in React flight protocol',
+194 silly audit report       severity: 'critical',
+194 silly audit report       vulnerable_versions: '>=15.3.0-canary.0 <15.3.6',
+194 silly audit report       cwe: [Array],
+194 silly audit report       cvss: [Object]
+194 silly audit report     },
+194 silly audit report     {
+194 silly audit report       id: 1111378,
+194 silly audit report       url: 'https://github.com/advisories/GHSA-w37m-7fhw-fmv9',
+194 silly audit report       title: 'Next Server Actions Source Code Exposure ',
+194 silly audit report       severity: 'moderate',
+194 silly audit report       vulnerable_versions: '>=15.3.0-canary.0 <15.3.7',
+194 silly audit report       cwe: [Array],
+194 silly audit report       cvss: [Object]
+194 silly audit report     },
+194 silly audit report     {
+194 silly audit report       id: 1111387,
+194 silly audit report       url: 'https://github.com/advisories/GHSA-mwv6-3258-q52c',
+194 silly audit report       title: 'Next Vulnerable to Denial of Service with Server Components',
+194 silly audit report       severity: 'high',
+194 silly audit report       vulnerable_versions: '>=15.3.0-canary.0 <15.3.7',
+194 silly audit report       cwe: [Array],
+194 silly audit report       cvss: [Object]
+194 silly audit report     },
+194 silly audit report     {
+194 silly audit report       id: 1107228,
+194 silly audit report       url: 'https://github.com/advisories/GHSA-g5qg-72qw-gw5v',
+194 silly audit report       title: 'Next.js Affected by Cache Key Confusion for Image Optimization API Routes',
+194 silly audit report       severity: 'moderate',
+194 silly audit report       vulnerable_versions: '>=15.0.0 <=15.4.4',
+194 silly audit report       cwe: [Array],
+194 silly audit report       cvss: [Object]
+194 silly audit report     },
+194 silly audit report     {
+194 silly audit report       id: 1107514,
+194 silly audit report       url: 'https://github.com/advisories/GHSA-xv57-4mr9-wg8v',
+194 silly audit report       title: 'Next.js Content Injection Vulnerability for Image Optimization',
+194 silly audit report       severity: 'moderate',
+194 silly audit report       vulnerable_versions: '>=15.0.0 <=15.4.4',
+194 silly audit report       cwe: [Array],
+194 silly audit report       cvss: [Object]
+194 silly audit report     },
+194 silly audit report     {
+194 silly audit report       id: 1107515,
+194 silly audit report       url: 'https://github.com/advisories/GHSA-4342-x723-ch2f',
+194 silly audit report       title: 'Next.js Improper Middleware Redirect Handling Leads to SSRF',
+194 silly audit report       severity: 'moderate',
+194 silly audit report       vulnerable_versions: '>=15.0.0-canary.0 <15.4.7',
+194 silly audit report       cwe: [Array],
+194 silly audit report       cvss: [Object]
+194 silly audit report     }
+194 silly audit report   ],
+194 silly audit report   tar: [
+194 silly audit report     {
+194 silly audit report       id: 1112255,
+194 silly audit report       url: 'https://github.com/advisories/GHSA-8qq5-rm4j-mr97',
+194 silly audit report       title: 'node-tar is Vulnerable to Arbitrary File Overwrite and Symlink Poisoning via Insufficient Path Sanitization',
+194 silly audit report       severity: 'high',
+194 silly audit report       vulnerable_versions: '<=7.5.2',
+194 silly audit report       cwe: [Array],
+194 silly audit report       cvss: [Object]
+194 silly audit report     },
+194 silly audit report     {
+194 silly audit report       id: 1112329,
+194 silly audit report       url: 'https://github.com/advisories/GHSA-r6q2-hw4h-h46w',
+194 silly audit report       title: 'Race Condition in node-tar Path Reservations via Unicode Ligature Collisions on macOS APFS',
+194 silly audit report       severity: 'high',
+194 silly audit report       vulnerable_versions: '<=7.5.3',
+194 silly audit report       cwe: [Array],
+194 silly audit report       cvss: [Object]
+194 silly audit report     }
+194 silly audit report   ]
+194 silly audit report }
+195 silly packumentCache corgi:https://registry.npmjs.org/@eslint%2fplugin-kit cache-miss
+196 silly packumentCache corgi:https://registry.npmjs.org/nanoid cache-miss
+197 silly packumentCache corgi:https://registry.npmjs.org/diff cache-miss
+198 silly packumentCache corgi:https://registry.npmjs.org/dompurify cache-miss
+199 silly packumentCache corgi:https://registry.npmjs.org/js-yaml cache-miss
+200 silly packumentCache corgi:https://registry.npmjs.org/lodash-es cache-miss
+201 silly packumentCache corgi:https://registry.npmjs.org/mermaid cache-miss
+202 silly packumentCache corgi:https://registry.npmjs.org/next cache-miss
+203 silly packumentCache corgi:https://registry.npmjs.org/tar cache-miss
+204 http fetch GET 200 https://registry.npmjs.org/@types/youtube-player/-/youtube-player-5.5.11.tgz 226ms (cache miss)
+205 http fetch GET 200 https://registry.npmjs.org/dompurify 308ms (cache revalidated)
+206 silly packumentCache corgi:https://registry.npmjs.org/dompurify set size:233487 disposed:false
+207 http fetch GET 200 https://registry.npmjs.org/@eslint%2fplugin-kit 310ms (cache revalidated)
+208 silly packumentCache corgi:https://registry.npmjs.org/@eslint%2fplugin-kit set size:17341 disposed:false
+209 http fetch GET 200 https://registry.npmjs.org/js-yaml 310ms (cache revalidated)
+210 silly packumentCache corgi:https://registry.npmjs.org/js-yaml set size:58533 disposed:false
+211 http fetch GET 200 https://registry.npmjs.org/nanoid 312ms (cache revalidated)
+212 silly packumentCache corgi:https://registry.npmjs.org/nanoid set size:144434 disposed:false
+213 http fetch GET 200 https://registry.npmjs.org/mermaid 313ms (cache revalidated)
+214 silly packumentCache corgi:https://registry.npmjs.org/mermaid set size:551226 disposed:false
+215 http fetch GET 200 https://registry.npmjs.org/diff 321ms (cache updated)
+216 silly packumentCache corgi:https://registry.npmjs.org/diff set size:undefined disposed:false
+217 http fetch GET 200 https://registry.npmjs.org/lodash-es 322ms (cache miss)
+218 silly packumentCache corgi:https://registry.npmjs.org/lodash-es set size:undefined disposed:false
+219 http fetch GET 200 https://registry.npmjs.org/tar 324ms (cache updated)
+220 silly packumentCache corgi:https://registry.npmjs.org/tar set size:undefined disposed:false
+221 http fetch GET 200 https://registry.npmjs.org/next 419ms (cache updated)
+222 silly packumentCache corgi:https://registry.npmjs.org/next set size:undefined disposed:false
+223 silly packumentCache corgi:https://registry.npmjs.org/eslint cache-miss
+224 http fetch GET 200 https://registry.npmjs.org/eslint 33ms (cache revalidated)
+225 silly packumentCache corgi:https://registry.npmjs.org/eslint set size:1117511 disposed:false
+226 silly packumentCache corgi:https://registry.npmjs.org/@excalidraw%2fexcalidraw cache-miss
+227 http fetch GET 200 https://registry.npmjs.org/@excalidraw%2fexcalidraw 93ms (cache updated)
+228 silly packumentCache corgi:https://registry.npmjs.org/@excalidraw%2fexcalidraw set size:undefined disposed:false
+229 silly packumentCache corgi:https://registry.npmjs.org/@excalidraw%2fmermaid-to-excalidraw cache-miss
+230 http fetch GET 200 https://registry.npmjs.org/@excalidraw%2fmermaid-to-excalidraw 448ms (cache revalidated)
+231 silly packumentCache corgi:https://registry.npmjs.org/@excalidraw%2fmermaid-to-excalidraw set size:53357 disposed:false
+232 silly packumentCache corgi:https://registry.npmjs.org/uvu cache-miss
+233 http fetch GET 200 https://registry.npmjs.org/uvu 35ms (cache revalidated)
+234 silly packumentCache corgi:https://registry.npmjs.org/uvu set size:79888 disposed:false
+235 silly packumentCache corgi:https://registry.npmjs.org/@eslint%2feslintrc cache-miss
+236 http fetch GET 200 https://registry.npmjs.org/@eslint%2feslintrc 51ms (cache revalidated)
+237 silly packumentCache corgi:https://registry.npmjs.org/@eslint%2feslintrc set size:80753 disposed:false
+238 silly packumentCache corgi:https://registry.npmjs.org/dagre-d3-es cache-miss
+239 http fetch GET 200 https://registry.npmjs.org/dagre-d3-es 210ms (cache miss)
+240 silly packumentCache corgi:https://registry.npmjs.org/dagre-d3-es set size:undefined disposed:false
+241 silly packumentCache corgi:https://registry.npmjs.org/@tailwindcss%2foxide cache-miss
+242 http fetch GET 200 https://registry.npmjs.org/@tailwindcss%2foxide 252ms (cache miss)
+243 silly packumentCache corgi:https://registry.npmjs.org/@tailwindcss%2foxide set size:undefined disposed:false
+244 silly ADD node_modules/scriptjs
+245 silly ADD node_modules/sister
+246 silly ADD node_modules/youtube-player
+247 silly ADD node_modules/youtube-player/node_modules/ms
+248 silly ADD node_modules/youtube-player/node_modules/debug
+249 silly ADD node_modules/react-youtube
+250 silly ADD node_modules/react-sub-unsub
+251 silly ADD node_modules/react-html-props
+252 silly ADD node_modules/@types/youtube-player
+253 silly ADD node_modules/react-fast-compare
+254 silly ADD node_modules/memoize-one
+255 silly ADD node_modules/load-script
+256 silly ADD node_modules/deepmerge
+257 silly ADD node_modules/react-social-media-embed
+258 silly ADD node_modules/react-social-media-embed/node_modules/react-twitter-embed
+259 silly ADD node_modules/react-player
+260 verbose cwd C:\Users\rmeic\Projects\collabboard\lightable\apps\starter-kit
+261 verbose os Windows_NT 10.0.22631
+262 verbose node v24.11.1
+263 verbose npm  v11.4.2
+264 verbose exit 0
+265 info ok

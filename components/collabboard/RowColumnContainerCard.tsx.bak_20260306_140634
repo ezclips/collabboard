@@ -1,0 +1,349 @@
+"use client";
+
+import React from "react";
+
+import PostCardContent from "./PostCardContent";
+import EmbeddedCommentList from "./EmbeddedCommentList";
+import type { Padlet } from "@/types/collabboard";
+
+const DEFAULT_IGNORE_KINDS = new Set(["columns-container-move"]);
+
+// Helper functions for robust comment detection
+function normalizeType(t: unknown): string {
+  return String(t ?? "").trim().toLowerCase();
+}
+
+function isCommentPost(padlet: any): boolean {
+  const type = normalizeType(padlet?.type);
+  const comments = padlet?.metadata?.comments;
+  if (type === "comment") return true;
+  // Legacy fallback: treat as comment only when type is missing/unknown.
+  if (!type && Array.isArray(comments)) return true;
+  return false;
+}
+
+function sanitizeLibraryMetadata(meta?: Record<string, any>) {
+  if (!meta) return {};
+  const next = { ...meta };
+  delete next.parentId;
+  delete next.childPadletIds;
+  delete next.sectionId;
+  delete next.sectionPosition;
+  delete next.position_in_timeline;
+  delete next.wallPosition;
+  return next;
+}
+
+function hexToRgb(color: string): { r: number; g: number; b: number } | null {
+  const value = color.trim();
+  const hex = value.startsWith('#') ? value.slice(1) : value;
+  if (/^[0-9a-fA-F]{3}$/.test(hex)) {
+    return {
+      r: parseInt(hex[0] + hex[0], 16),
+      g: parseInt(hex[1] + hex[1], 16),
+      b: parseInt(hex[2] + hex[2], 16),
+    };
+  }
+  if (/^[0-9a-fA-F]{6}$/.test(hex)) {
+    return {
+      r: parseInt(hex.slice(0, 2), 16),
+      g: parseInt(hex.slice(2, 4), 16),
+      b: parseInt(hex.slice(4, 6), 16),
+    };
+  }
+  return null;
+}
+
+function getContrastTextColor(bgColor: string): '#0f172a' | '#f8fafc' {
+  const rgb = hexToRgb(bgColor);
+  if (!rgb) return '#0f172a';
+  const toLinear = (c: number) => {
+    const s = c / 255;
+    return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+  };
+  const luminance = 0.2126 * toLinear(rgb.r) + 0.7152 * toLinear(rgb.g) + 0.0722 * toLinear(rgb.b);
+  return luminance > 0.45 ? '#0f172a' : '#f8fafc';
+}
+
+type RowColumnContainerCardProps = {
+  padlet: Padlet;
+  allPadlets: Padlet[];
+  onDropExistingPadlet?: (containerId: string, droppedId: string) => void;
+  onDropDraftIntoContainer?: (containerId: string, draftPayload: any) => void;
+  ignoreDragKinds?: string[];
+  onViewDrawing?: (padlet: Padlet) => void;
+  className?: string;
+  // Comment handling
+  currentUserId?: string;
+  currentUserName?: string;
+  currentUserAvatar?: string;
+  onUpdateChildComments?: (childId: string, comments: any[]) => void;
+  onEditContainer?: (padlet: Padlet) => void;
+  onScanChild?: () => void;
+  emptyStateText?: string;
+  showHeader?: boolean;
+};
+
+export default function RowColumnContainerCard({
+  padlet,
+  allPadlets,
+  onDropExistingPadlet,
+  onDropDraftIntoContainer,
+  ignoreDragKinds = [],
+  onViewDrawing,
+  className,
+  currentUserId,
+  currentUserName,
+  currentUserAvatar,
+  onUpdateChildComments,
+  onEditContainer,
+  onScanChild,
+  emptyStateText = "Drop posts here",
+  showHeader = true,
+}: RowColumnContainerCardProps) {
+  const backgroundColor = typeof (padlet.metadata as any)?.cardColor === 'string' && (padlet.metadata as any)?.cardColor
+    ? (padlet.metadata as any).cardColor
+    : '#ffffff';
+  const textColor = getContrastTextColor(backgroundColor);
+  const mutedTextColor = textColor === '#f8fafc' ? 'rgba(248,250,252,0.82)' : 'rgba(15,23,42,0.68)';
+  const badgeBg = textColor === '#f8fafc' ? 'rgba(255,255,255,0.22)' : 'rgba(15,23,42,0.08)';
+  const containerMetadata = (padlet.metadata ?? {}) as Record<string, unknown>;
+  const childIds = Array.isArray(containerMetadata.childPadletIds)
+    ? containerMetadata.childPadletIds.filter((id): id is string => typeof id === "string")
+    : [];
+  const linkedChildren = allPadlets.filter((p) => {
+    const metadata = (p.metadata ?? {}) as Record<string, unknown>;
+    return metadata.parentId === padlet.id;
+  });
+  const childPadlets = [
+    ...childIds
+      .map((id: string) => allPadlets.find((p) => p.id === id))
+      .filter((p): p is Padlet => p !== undefined),
+    ...linkedChildren,
+  ].filter((child, index, arr) => arr.findIndex((p) => p.id === child.id) === index);
+
+  const dropEnabled = Boolean(onDropExistingPadlet || onDropDraftIntoContainer);
+  const ignoredKinds = new Set([...DEFAULT_IGNORE_KINDS, ...ignoreDragKinds]);
+
+
+
+  return (
+    <div className={`w-full space-y-2 rounded-lg p-2 ${className || ""}`} style={{ backgroundColor }}>
+      <div>
+        {showHeader && (
+          <div className="flex items-center justify-center relative mb-2">
+            <h3 className="text-sm font-bold text-center" style={{ color: textColor }}>{padlet.title || "Container"}</h3>
+            {onEditContainer && (
+              <button
+                onClick={() => onEditContainer(padlet)}
+                className="absolute right-0 p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                title="Edit Container"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" /><path d="m15 5 4 4" /></svg>
+              </button>
+            )}
+          </div>
+        )}
+        <div
+          className="space-y-2 text-left"
+          onDragEnter={(e) => {
+            if (!dropEnabled) return;
+            e.preventDefault();
+            e.stopPropagation();
+          }}
+          onDragOver={(e) => {
+            if (!dropEnabled) return;
+            e.preventDefault();
+            e.stopPropagation();
+          }}
+          onDragLeave={(e) => {
+            if (!dropEnabled) return;
+            e.preventDefault();
+            e.stopPropagation();
+          }}
+          onDrop={(e) => {
+            if (!dropEnabled) return;
+            const kind = e.dataTransfer.getData("application/collabboard-drag-kind");
+            if (ignoredKinds.has(kind)) return;
+
+            e.preventDefault();
+            e.stopPropagation();
+
+            // 1. Check for library items (Personal Library)
+            const libraryPayload = e.dataTransfer.getData("application/collabboard-library");
+            if (libraryPayload) {
+              try {
+                const libData = JSON.parse(libraryPayload);
+                const fileUrl = libData.file_url || libData.metadata?.file_url || libData.metadata?.imageUrl;
+                const cleanMetadata = sanitizeLibraryMetadata(libData.metadata);
+                // Normalize library item to draft format
+                const draftPayload = {
+                  type: libData.type || 'text',
+                  title: libData.title || 'Untitled',
+                  content: libData.content || '',
+                  metadata: {
+                    ...cleanMetadata,
+                    imageUrl: libData.metadata?.imageUrl || fileUrl,
+                    file_url: fileUrl,
+                  },
+                  width: libData.width || 300,
+                  height: libData.height || 200,
+                  file_url: fileUrl,
+                };
+                onDropDraftIntoContainer?.(padlet.id, draftPayload);
+                return;
+              } catch {
+                // ignore
+              }
+            }
+
+            // 2. Check for external clipart (SVG)
+            const svgPayload = e.dataTransfer.getData("application/collabboard-svg");
+            if (svgPayload) {
+              try {
+                const svgData = JSON.parse(svgPayload);
+                // Convert SVG clipart to image-type draft
+                const draftPayload = {
+                  type: 'image',
+                  title: svgData.title || 'Clipart',
+                  content: '',
+                  metadata: {
+                    imageUrl: svgData.svgUrl,
+                    previewUrl: svgData.svgUrl,
+                    source: svgData.source || 'library',
+                  },
+                  width: 200,
+                  height: 200,
+                };
+                onDropDraftIntoContainer?.(padlet.id, draftPayload);
+                return;
+              } catch {
+                // ignore
+              }
+            }
+
+            // 3. Fallback: existing application/json handling
+            const draftPayload = e.dataTransfer.getData("application/json");
+            if (draftPayload) {
+              try {
+                const data = JSON.parse(draftPayload);
+                onDropDraftIntoContainer?.(padlet.id, data);
+                return;
+              } catch {
+                return;
+              }
+            }
+
+            const droppedId = e.dataTransfer.getData("text/padlet-id");
+            if (droppedId && droppedId !== padlet.id) {
+              if (!childIds.includes(droppedId)) {
+                onDropExistingPadlet?.(padlet.id, droppedId);
+              }
+            }
+          }}
+        >
+          {childPadlets.length === 0 ? (
+            emptyStateText ? <p className="text-[9px] text-center py-4" style={{ color: mutedTextColor }}>{emptyStateText}</p> : null
+          ) : (() => {
+            // Comment children manage their own internal scroll via EmbeddedCommentList.
+            // Rendering them inside the outer max-h scroll wrapper creates a double scrollbar.
+            // Split into two groups: comments render unconstrained, others get the scroll wrapper.
+            const commentChildren = onUpdateChildComments
+              ? childPadlets.filter(child => isCommentPost(child))
+              : [];
+            const otherChildren = onUpdateChildComments
+              ? childPadlets.filter(child => !isCommentPost(child))
+              : childPadlets;
+
+            const renderComment = (child: any) => (
+              <EmbeddedCommentList
+                key={child.id}
+                comments={(child.metadata as any)?.comments || []}
+                currentUserId={currentUserId}
+                currentUserName={currentUserName}
+                currentUserAvatar={currentUserAvatar}
+                onSubmit={(text) => {
+                  const newComment = {
+                    id: `comment-${Date.now()}`,
+                    text,
+                    userId: currentUserId || 'anonymous',
+                    userName: currentUserName || 'Anonymous',
+                    userAvatar: currentUserAvatar,
+                    timestamp: Date.now(),
+                  };
+                  const existingComments = (child.metadata as any)?.comments || [];
+                  onUpdateChildComments!(child.id, [...existingComments, newComment]);
+                }}
+                onEditComment={(commentId, newText) => {
+                  const existingComments = (child.metadata as any)?.comments || [];
+                  onUpdateChildComments!(child.id, existingComments.map((c: any) =>
+                    c.id === commentId ? { ...c, text: newText } : c
+                  ));
+                }}
+                onRemoveComment={(commentId) => {
+                  const existingComments = (child.metadata as any)?.comments || [];
+                  onUpdateChildComments!(child.id, existingComments.filter((c: any) => c.id !== commentId));
+                }}
+                onToggleStrikethrough={(commentId) => {
+                  const existingComments = (child.metadata as any)?.comments || [];
+                  onUpdateChildComments!(child.id, existingComments.map((c: any) =>
+                    c.id === commentId ? { ...c, isStrikethrough: !c.isStrikethrough } : c
+                  ));
+                }}
+              />
+            );
+
+            const renderOther = (child: any) => {
+              const childTopStrip = (child.metadata as any)?.topStrip;
+              return (
+                <div
+                  key={child.id}
+                  className="relative rounded-lg border border-gray-200 overflow-hidden shadow-sm"
+                  style={{ backgroundColor: (child.metadata as any)?.cardColor || "#ffffff" }}
+                >
+                  {childTopStrip && childTopStrip !== "transparent" && (
+                    <div className="h-1.5 w-full" style={{ backgroundColor: childTopStrip }} />
+                  )}
+                  <div className="p-2">
+                    <PostCardContent
+                      padlet={child}
+                      allPadlets={allPadlets}
+                      onView={() => onViewDrawing?.(child)}
+                      onScan={onScanChild}
+                      currentUserId={currentUserId}
+                      currentUserName={currentUserName}
+                      currentUserAvatar={currentUserAvatar}
+                      onUpdateChildComments={onUpdateChildComments}
+                    />
+                  </div>
+                </div>
+              );
+            };
+
+            return (
+              <div className="space-y-2">
+                {/* Comment children: no outer scroll cap — EmbeddedCommentList scrolls itself */}
+                {commentChildren.map(renderComment)}
+                {/* All other children: constrained scroll wrapper */}
+                {otherChildren.length > 0 && (
+                  <div className="max-h-[260px] overflow-y-auto pr-1 space-y-2 scrollbar-ultrathin">
+                    {otherChildren.map(renderOther)}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+        </div>
+        {/* Item counter at bottom left - matching wall canvas style */}
+        <div className="flex items-center gap-2 mt-2 pt-2 border-t border-gray-100">
+          <span
+            className="text-[9px] font-medium px-1.5 py-0.5 rounded"
+            style={{ backgroundColor: badgeBg, color: textColor }}
+          >
+            {childPadlets.length} {childPadlets.length === 1 ? "item" : "items"}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}

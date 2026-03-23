@@ -1,0 +1,11 @@
+{
+  "version": "v1.1",
+  "date": "2026-03-23",
+  "skill_name": "target_skill_name",
+  "changes": [],
+  "reason": [],
+  "benchmark_result": {
+    "baseline_avg": 0,
+    "enhanced_avg": 0
+  }
+}

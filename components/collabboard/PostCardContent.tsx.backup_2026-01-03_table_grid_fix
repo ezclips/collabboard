@@ -1,0 +1,277 @@
+"use client";
+
+import React from 'react';
+import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+import { Link as LinkIcon, CheckSquare, Image as ImageIcon, Table as TableIcon } from 'lucide-react';
+import { Padlet } from '@/types/collabboard';
+
+type CellStyle = {
+    bg?: string;
+    align?: 'left' | 'center' | 'right';
+    bold?: boolean;
+    italic?: boolean;
+    underline?: boolean;
+};
+
+interface PostCardContentProps {
+    padlet: Padlet | any; // Using any for flexibility with partial shapes if needed
+    onScan?: () => void; // Callback to refresh data after update
+}
+
+export default function PostCardContent({ padlet, onScan }: PostCardContentProps) {
+    const supabase = createClientComponentClient();
+
+    // --- LINK TYPE ---
+    if (padlet.type === 'link' && padlet.metadata?.linkUrl) {
+        return (
+            <div className="space-y-2 select-none">
+                {/* Link Image - hide if info-only mode */}
+                {padlet.metadata.linkImage && padlet.metadata.displayMode !== 'info-only' && (
+                    <div className="-mx-3 -mt-3 mb-2">
+                        <img
+                            src={padlet.metadata.linkImage}
+                            alt=""
+                            className="w-full h-24 object-cover"
+                            onError={(e) => {
+                                (e.target as HTMLImageElement).style.display = 'none';
+                            }}
+                        />
+                    </div>
+                )}
+                {/* Domain with favicon - hide if image-only mode */}
+                {padlet.metadata.displayMode !== 'image-only' && (
+                    <div className="flex items-center gap-1.5">
+                        {padlet.metadata.linkFavicon && (
+                            <img
+                                src={padlet.metadata.linkFavicon}
+                                alt=""
+                                className="w-3 h-3"
+                                onError={(e) => {
+                                    (e.target as HTMLImageElement).style.display = 'none';
+                                }}
+                            />
+                        )}
+                        <span className="text-[10px] text-gray-500 truncate">
+                            {padlet.metadata.linkDomain || padlet.metadata.linkUrl}
+                        </span>
+                    </div>
+                )}
+                {/* Title - hide if image-only mode */}
+                {padlet.metadata.displayMode !== 'image-only' && (
+                    <h4 className="text-xs font-semibold text-blue-600 leading-tight line-clamp-2">
+                        {padlet.metadata.linkTitle || 'Untitled Link'}
+                    </h4>
+                )}
+                {/* Description - hide if image-only mode */}
+                {padlet.metadata.linkDescription && padlet.metadata.displayMode !== 'image-only' && (
+                    <p className="text-[10px] text-gray-600 line-clamp-2">
+                        {padlet.metadata.linkDescription}
+                    </p>
+                )}
+                {/* Caption */}
+                {padlet.metadata.linkCaption && (
+                    <p className="text-[10px] text-gray-500 italic border-t border-gray-100 pt-2 mt-1">
+                        {padlet.metadata.linkCaption}
+                    </p>
+                )}
+            </div>
+        );
+    }
+
+    // --- TODO TYPE ---
+    if (padlet.type === 'todo' && padlet.metadata?.tasks) {
+        return (
+            <div className="space-y-1 select-none">
+                {/* Todo Title */}
+                {padlet.metadata.todoTitle && (
+                    <h4 className="text-xs font-semibold text-gray-800 mb-1">
+                        {padlet.metadata.todoTitle}
+                    </h4>
+                )}
+                {/* Task list preview (show first 4) */}
+                {padlet.metadata.tasks.slice(0, 4).map((task: { id: string; text: string; completed: boolean; dueDate?: string; assignee?: string }) => (
+                    <div key={task.id} className="flex items-start gap-1.5">
+                        <input
+                            type="checkbox"
+                            checked={task.completed}
+                            onChange={async (e) => {
+                                e.preventDefault();
+                                e.stopPropagation(); // Stop propagation to prevent drag/click issues
+
+                                // Toggle task completion
+                                const updatedTasks = padlet.metadata?.tasks?.map((t: { id: string; completed: boolean }) =>
+                                    t.id === task.id ? { ...t, completed: !t.completed } : t
+                                ) || [];
+                                const updatedMetadata = { ...padlet.metadata, tasks: updatedTasks };
+
+                                try {
+                                    const { error } = await supabase
+                                        .from('padlets')
+                                        .update({
+                                            content: JSON.stringify(updatedTasks),
+                                            metadata: updatedMetadata,
+                                            updated_at: new Date().toISOString(),
+                                        })
+                                        .eq('id', padlet.id);
+                                    if (error) throw error;
+                                    if (onScan) onScan();
+                                } catch (err) {
+                                    console.error('Failed to toggle task:', err);
+                                }
+                            }}
+                            className="w-3 h-3 mt-0.5 accent-green-500 cursor-pointer"
+                        />
+                        <span className={`text-[10px] ${task.completed ? 'line-through text-gray-400' : 'text-gray-700'}`}>
+                            {task.text}
+                        </span>
+                    </div>
+                ))}
+                {/* Show more indicator */}
+                {padlet.metadata.tasks.length > 4 && (
+                    <p className="text-[9px] text-gray-400">
+                        +{padlet.metadata.tasks.length - 4} more tasks
+                    </p>
+                )}
+                {/* Progress indicator */}
+                <div className="pt-1 border-t border-gray-100 mt-1">
+                    <div className="flex items-center gap-1">
+                        <div className="flex-1 h-1 bg-gray-200 rounded-full overflow-hidden">
+                            <div
+                                className="h-full bg-green-500 rounded-full"
+                                style={{
+                                    width: `${padlet.metadata.tasks.length > 0
+                                        ? (padlet.metadata.tasks.filter((t: { completed: boolean }) => t.completed).length / padlet.metadata.tasks.length) * 100
+                                        : 0}%`
+                                }}
+                            />
+                        </div>
+                        <span className="text-[9px] text-gray-500">
+                            {padlet.metadata.tasks.filter((t: { completed: boolean }) => t.completed).length}/{padlet.metadata.tasks.length}
+                        </span>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    // --- TABLE TYPE ---
+    if (padlet.type === 'table') {
+        let tableData: { rows?: string[][]; columns?: string[]; caption?: string; cellStyles?: Record<string, CellStyle> } = {};
+        try {
+            tableData = JSON.parse(padlet.content || '{}');
+        } catch {
+            tableData = {};
+        }
+        const rows = tableData.rows || [];
+        const columns = tableData.columns || ['A', 'B', 'C'];
+        const cellStyles = tableData.cellStyles || {};
+        const displayRows = rows.slice(0, 3); // Show first 3 rows
+        const displayCols = columns.slice(0, 3); // Show first 3 columns
+
+        // Helper to get cell style
+        const getCellStyle = (rowIndex: number, colIndex: number): CellStyle => {
+            const key = `${rowIndex}-${colIndex}`;
+            return cellStyles[key] || {};
+        };
+
+        return (
+            <div className="space-y-1 select-none">
+                {/* Table Title */}
+                <h4 className="text-xs font-semibold text-gray-800 mb-1">
+                    {padlet.title || 'Table'}
+                </h4>
+                {/* Mini table preview */}
+                <div className="overflow-x-auto rounded border border-gray-200 bg-white">
+                    <table className="w-full text-[9px]">
+                        <thead>
+                            <tr className="bg-gray-100">
+                                {displayCols.map((col, i) => (
+                                    <th key={i} className="px-1 py-0.5 border-r border-gray-200 font-medium text-gray-600">
+                                        {col}
+                                    </th>
+                                ))}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {displayRows.length > 0 ? displayRows.map((row, ri) => (
+                                <tr key={ri} className="border-t border-gray-200">
+                                    {row.slice(0, 3).map((cell, ci) => {
+                                        const style = getCellStyle(ri, ci);
+                                        return (
+                                            <td
+                                                key={ci}
+                                                className="px-1 py-0.5 border-r border-gray-200 truncate max-w-[50px]"
+                                                style={{
+                                                    backgroundColor: style.bg || undefined,
+                                                    textAlign: style.align || 'left',
+                                                    fontWeight: style.bold ? 'bold' : undefined,
+                                                    fontStyle: style.italic ? 'italic' : undefined,
+                                                    textDecoration: style.underline ? 'underline' : undefined,
+                                                }}
+                                            >
+                                                {cell || '-'}
+                                            </td>
+                                        );
+                                    })}
+                                </tr>
+                            )) : (
+                                <tr>
+                                    <td colSpan={3} className="px-1 py-2 text-center text-gray-400">
+                                        Empty table
+                                    </td>
+                                </tr>
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+                {/* Show more indicator */}
+                {(rows.length > 3 || columns.length > 3) && (
+                    <p className="text-[9px] text-gray-400">
+                        {rows.length} rows × {columns.length} columns
+                    </p>
+                )}
+                {/* Caption */}
+                {tableData.caption && (
+                    <p className="text-[9px] text-gray-500 italic border-t border-gray-100 pt-1 mt-1">
+                        {tableData.caption}
+                    </p>
+                )}
+            </div>
+        );
+    }
+
+    // --- IMAGE TYPE ---
+    if (padlet.file_url) {
+        if (padlet.file_url.match(/\.(jpg|jpeg|png|gif|webp)$/i) || padlet.file_url.includes('images') || padlet.file_url.includes('unsplash')) {
+            return (
+                <div className="flex flex-col gap-2 pointer-events-none">
+                    <img
+                        src={padlet.file_url}
+                        className="w-full object-contain rounded bg-gray-50"
+                        style={{ maxHeight: '200px' }}
+                        alt="preview"
+                    />
+                    {padlet.title && <p className="text-xs font-medium text-center text-gray-600">{padlet.title}</p>}
+                </div>
+            );
+        }
+    }
+
+    // --- TEXT / DEFAULT TYPE ---
+    return (
+        <div className="select-none pointer-events-none">
+            <div
+                className="text-gray-800 text-xs prose prose-sm break-words tiptap"
+                style={{
+                    wordWrap: 'break-word',
+                    overflowWrap: 'break-word',
+                    overflow: 'hidden',
+                    display: '-webkit-box',
+                    WebkitLineClamp: 12, // Limit height
+                    WebkitBoxOrient: 'vertical',
+                }}
+                dangerouslySetInnerHTML={{ __html: padlet.content || '' }}
+            />
+        </div>
+    );
+}

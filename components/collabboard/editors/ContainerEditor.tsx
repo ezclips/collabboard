@@ -1,0 +1,903 @@
+"use client";
+/* eslint-disable @typescript-eslint/no-explicit-any */
+/* eslint-disable @typescript-eslint/no-unused-vars */
+
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import {
+    XSquare,
+    Palette,
+    Type,
+    Table as TableIcon,
+    Link as LinkIcon,
+    CheckSquare,
+    Image as ImageIcon,
+    ChevronUp,
+    ChevronDown,
+    GripVertical,
+    X,
+    ExternalLink,
+    MessageSquare,
+    CornerRightUp,
+    Trash2,
+} from "lucide-react";
+import { ColorPickerContent } from "../ColorPicker";
+import PostCardContent from "@/components/collabboard/PostCardContent";
+import CommentPopup from "./CommentPopup";
+import {
+    DndContext,
+    closestCenter,
+    KeyboardSensor,
+    PointerSensor,
+    useSensor,
+    useSensors,
+    DragEndEvent,
+} from '@dnd-kit/core';
+import {
+    arrayMove,
+    SortableContext,
+    sortableKeyboardCoordinates,
+    useSortable,
+    verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+
+// Color palette matching other editors
+const BACKGROUND_COLORS = [
+    "#ffffff",
+    "#f3f4f6",
+    "#fee2e2",
+    "#ffedd5",
+    "#fef3c7",
+    "#dcfce7",
+    "#dbeafe",
+    "#e0e7ff",
+    "#f3e8ff",
+    "#fce7f3",
+];
+
+const TOP_STRIP_COLORS = [
+    "transparent",
+    "#ef4444",
+    "#f97316",
+    "#eab308",
+    "#22c55e",
+    "#3b82f6",
+    "#8b5cf6",
+    "#ec4899",
+    "#6b7280",
+    "#1f2937",
+];
+
+interface ChildPadlet {
+    id: string;
+    title: string;
+    content: string;
+    type: string;
+    metadata?: {
+        cardColor?: string;
+        badgeColor?: string;
+        // other metadata properties used by PostCardContent
+        [key: string]: any;
+    };
+}
+
+interface DetachedComment {
+    id: string;
+    text: string;
+    userId: string;
+    userName: string;
+    timestamp: number;
+}
+
+interface ContainerEditorProps {
+    initialTitle?: string;
+    initialBackgroundColor?: string;
+    initialTopStrip?: string | null;
+    initialDetachedComments?: DetachedComment[];
+    containerId?: string;
+    childPadlets?: ChildPadlet[];
+
+    onSave: (data: {
+        title: string;
+        backgroundColor: string;
+        topStrip?: string;
+        detachedComments?: DetachedComment[];
+    }) => void;
+    onClose: () => void;
+
+    onDropPadlet?: (padletId: string) => void;
+    selectedPadletId?: string | null;
+    selectedPadletTitle?: string;
+    onAddSelectedPadlet?: (padletId: string) => void;
+
+    // Opens your real post editor modal/viewer for the child
+    onOpenChildPadlet?: (padletId: string) => void;
+
+    // Persist order
+    onReorderChildPadlets?: (orderedIds: string[]) => void;
+
+    // Optional remove/detach
+    onDetachChildFromFreeformContainer?: (childId: string) => void;
+    onRemoveChildPadlet?: (childId: string) => void;
+
+    // Update comments on a child padlet (for embedded comment editing)
+    onUpdateChildComments?: (childId: string, comments: any[]) => void;
+
+    // Current user info for comment popup
+    currentUserId?: string;
+    currentUserName?: string;
+    currentUserAvatar?: string;
+
+    isOpen: boolean;
+}
+
+function stripHtml(html?: string) {
+    if (!html) return "";
+    return html.replace(/<[^>]*>/g, "").trim();
+}
+
+function hexToRgb(color: string): { r: number; g: number; b: number } | null {
+    const value = color.trim();
+    const hex = value.startsWith('#') ? value.slice(1) : value;
+    if (/^[0-9a-fA-F]{3}$/.test(hex)) {
+        return {
+            r: parseInt(hex[0] + hex[0], 16),
+            g: parseInt(hex[1] + hex[1], 16),
+            b: parseInt(hex[2] + hex[2], 16),
+        };
+    }
+    if (/^[0-9a-fA-F]{6}$/.test(hex)) {
+        return {
+            r: parseInt(hex.slice(0, 2), 16),
+            g: parseInt(hex.slice(2, 4), 16),
+            b: parseInt(hex.slice(4, 6), 16),
+        };
+    }
+    return null;
+}
+
+function getContrastTextColor(bgColor: string): '#0f172a' | '#f8fafc' {
+    const rgb = hexToRgb(bgColor);
+    if (!rgb) return '#0f172a';
+    const toLinear = (c: number) => {
+        const s = c / 255;
+        return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+    };
+    const luminance = 0.2126 * toLinear(rgb.r) + 0.7152 * toLinear(rgb.g) + 0.0722 * toLinear(rgb.b);
+    return luminance > 0.45 ? '#0f172a' : '#f8fafc';
+}
+
+function getDisplayTitle(type: string): string {
+    switch (type) {
+        case 'text': return 'Note';
+        case 'table': return 'Table';
+        case 'link': return 'Link';
+        case 'todo': return 'To-Do';
+        case 'image': return 'Image';
+        case 'drawing': return 'Drawing';
+        case 'comment': return 'Comment';
+        default: return type.charAt(0).toUpperCase() + type.slice(1);
+    }
+}
+
+function extractFirstUrl(text?: string): string | null {
+    if (!text) return null;
+
+    // 1) If content is JSON (common for link blocks)
+    try {
+        const parsed = JSON.parse(text);
+        const candidates = [
+            parsed?.url,
+            parsed?.href,
+            parsed?.data?.url,
+            parsed?.data?.href,
+            parsed?.link,
+            parsed?.data?.link,
+        ].filter(Boolean);
+
+        for (const c of candidates) {
+            if (typeof c === "string" && /^https?:\/\//i.test(c.trim())) return c.trim();
+        }
+    } catch {
+        // ignore
+    }
+
+    // 2) If HTML anchor exists
+    const anchorMatch = text.match(/href=["'](https?:\/\/[^"']+)["']/i);
+    if (anchorMatch?.[1]) return anchorMatch[1].trim();
+
+    // 3) Plain text URL
+    const plain = stripHtml(text);
+    const urlMatch = plain.match(/https?:\/\/[^\s)]+/i);
+    if (urlMatch?.[0]) return urlMatch[0].trim();
+
+    return null;
+}
+
+interface SortableChildItemProps {
+    child: ChildPadlet;
+    internalDragOverId: string | null;
+    handleActivateChild: (child: ChildPadlet) => void;
+    extractFirstUrl: (text?: string) => string | null;
+    getDisplayTitle: (type: string) => string;
+    openLink: (url: string) => void;
+    move: (id: string, dir: -1 | 1) => void;
+    onDetachChildFromFreeformContainer?: (childId: string) => void;
+    onRemoveChildPadlet?: (childId: string) => void;
+    onUpdateChildComments?: (childId: string, comments: any[]) => void;
+    currentUserId?: string;
+    currentUserName?: string;
+    currentUserAvatar?: string;
+}
+
+function SortableChildItem({
+    child,
+    internalDragOverId,
+    handleActivateChild,
+    extractFirstUrl,
+    getDisplayTitle,
+    openLink,
+    move,
+    onDetachChildFromFreeformContainer,
+    onRemoveChildPadlet,
+    onUpdateChildComments,
+    currentUserId,
+    currentUserName,
+    currentUserAvatar
+}: SortableChildItemProps) {
+    const {
+        attributes,
+        listeners,
+        setNodeRef,
+        transform,
+        transition,
+        isDragging,
+    } = useSortable({ id: child.id });
+
+    const style = {
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.5 : 1,
+        position: 'relative' as const,
+        zIndex: isDragging ? 100 : 1,
+    };
+
+    const accent = child.metadata?.badgeColor || child.metadata?.cardColor || "#eab308";
+    const linkUrl = child.type === "link" ? extractFirstUrl(child.content) : null;
+
+    return (
+        <div
+            ref={setNodeRef}
+            style={style}
+            className={`bg-white rounded-xl shadow-sm border transition-all overflow-hidden ${isDragging || internalDragOverId === child.id ? "border-blue-400 ring-2 ring-blue-100" : "border-gray-200"
+                }`}
+        >
+            <div className="h-1 w-full" style={{ backgroundColor: accent }} />
+
+            <div className="p-3">
+                <div className="flex items-start justify-between gap-2">
+                    <div className="flex-1 min-w-0 flex items-center gap-2">
+                        {/* Drag Handle */}
+                        <div {...attributes} {...listeners} className="cursor-grab active:cursor-grabbing p-1 -ml-1 hover:bg-gray-100 rounded">
+                            <GripVertical className="w-4 h-4 text-gray-400" />
+                        </div>
+
+                        <button
+                            type="button"
+                            onClick={() => handleActivateChild(child)}
+                            className="flex-1 min-w-0 text-left group overflow-hidden"
+                            title={child.type === "link" ? "Open link" : "Open editor"}
+                        >
+                            <span className="text-sm font-semibold text-gray-800 truncate">
+                                {child.title || getDisplayTitle(child.type)}
+                            </span>
+                        </button>
+                    </div>
+
+                    <div className="flex items-center gap-1 flex-shrink-0">
+                        {child.type === "table" && <TableIcon className="w-4 h-4 text-purple-500" />}
+                        {child.type === "link" && <LinkIcon className="w-4 h-4 text-blue-500" />}
+                        {child.type === "todo" && <CheckSquare className="w-4 h-4 text-green-500" />}
+                        {child.type === "image" && <ImageIcon className="w-4 h-4 text-gray-500" />}
+                        {child.type === "comment" && <MessageSquare className="w-4 h-4 text-teal-500" />}
+
+                        {child.type === "link" && linkUrl && (
+                            <button
+                                type="button"
+                                onClick={() => openLink(linkUrl)}
+                                className="p-1 rounded hover:bg-gray-100 text-gray-600"
+                                title="Open URL"
+                            >
+                                <ExternalLink className="w-4 h-4" />
+                            </button>
+                        )}
+
+                        <button
+                            type="button"
+                            onClick={() => move(child.id, -1)}
+                            className="p-1 rounded hover:bg-gray-100 text-gray-600"
+                            title="Move up"
+                        >
+                            <ChevronUp className="w-4 h-4" />
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => move(child.id, 1)}
+                            className="p-1 rounded hover:bg-gray-100 text-gray-600"
+                            title="Move down"
+                        >
+                            <ChevronDown className="w-4 h-4" />
+                        </button>
+
+                        {onRemoveChildPadlet ? (
+                            <button
+                                type="button"
+                                onClick={() => onRemoveChildPadlet(child.id)}
+                                className="p-1 rounded text-black/70 hover:text-black hover:bg-gray-200"
+                                title="Delete post"
+                            >
+                                <X className="w-4 h-4" />
+                            </button>
+                        ) : onDetachChildFromFreeformContainer ? (
+                            <button
+                                type="button"
+                                onClick={() => onDetachChildFromFreeformContainer(child.id)}
+                                className="p-1 rounded hover:bg-blue-100 text-blue-500 hover:text-blue-700"
+                                title="Detach from container"
+                            >
+                                <CornerRightUp className="w-4 h-4" />
+                            </button>
+                        ) : null}
+                    </div>
+                </div>
+
+                <div className="mt-2 w-full text-left">
+                    {child.type === "comment" && onUpdateChildComments ? (
+                        <CommentPopup
+                            isOpen={true}
+                            onOpenChange={() => { }}
+                            fullWidth={true}
+                            embedded={true}
+                            onSubmit={(text) => {
+                                const newComment = {
+                                    id: `comment-${Date.now()}`,
+                                    text,
+                                    userId: currentUserId || 'anonymous',
+                                    userName: currentUserName || 'Anonymous',
+                                    userAvatar: currentUserAvatar,
+                                    timestamp: Date.now(),
+                                };
+                                const existingComments = child.metadata?.comments || [];
+                                onUpdateChildComments(child.id, [...existingComments, newComment]);
+                            }}
+                            onEditComment={(commentId, newText) => {
+                                const existingComments = child.metadata?.comments || [];
+                                const updated = existingComments.map((c: any) =>
+                                    c.id === commentId ? { ...c, text: newText } : c
+                                );
+                                onUpdateChildComments(child.id, updated);
+                            }}
+                            onRemoveComment={(commentId) => {
+                                const existingComments = child.metadata?.comments || [];
+                                const filtered = existingComments.filter((c: any) => c.id !== commentId);
+                                onUpdateChildComments(child.id, filtered);
+                            }}
+                            comments={child.metadata?.comments || []}
+                            currentUserId={currentUserId}
+                            currentUserName={currentUserName}
+                        />
+                    ) : (
+                        <div
+                            onClick={() => handleActivateChild(child)}
+                            className="cursor-pointer"
+                            title={child.type === "link" ? "Open link" : "Open editor"}
+                        >
+                            <PostCardContent padlet={child as any} />
+                        </div>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+}
+
+export default function ContainerEditor({
+    initialTitle = "New Container",
+    initialBackgroundColor = "#ffffff",
+    initialTopStrip = null,
+    initialDetachedComments = [],
+    containerId,
+    childPadlets = [],
+    onSave,
+    onClose,
+    onDropPadlet,
+    selectedPadletId,
+    selectedPadletTitle,
+    onAddSelectedPadlet,
+    onOpenChildPadlet,
+    onReorderChildPadlets,
+    onDetachChildFromFreeformContainer,
+    onRemoveChildPadlet,
+    onUpdateChildComments,
+    currentUserId,
+    currentUserName,
+    currentUserAvatar,
+    isOpen,
+}: ContainerEditorProps) {
+    const [title, setTitle] = useState(initialTitle);
+    const [backgroundColor, setBackgroundColor] = useState(initialBackgroundColor);
+    const [topStrip, setTopStrip] = useState<string | null>(initialTopStrip);
+    const containerTextColor = getContrastTextColor(backgroundColor);
+    const mutedContainerTextColor = containerTextColor === '#f8fafc' ? 'rgba(248,250,252,0.82)' : 'rgba(15,23,42,0.68)';
+
+    const sensors = useSensors(
+        useSensor(PointerSensor, { activationConstraint: { distance: 15 } }),
+        useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+    );
+
+    const handleDragEnd = (event: DragEndEvent) => {
+        const { active, over } = event;
+        if (!over || active.id === over.id) return;
+
+        const oldIndex = order.indexOf(active.id as string);
+        const newIndex = order.indexOf(over.id as string);
+        const newOrder = arrayMove(order, oldIndex, newIndex);
+        persistOrder(newOrder);
+    };
+
+    // Comment state
+    const [detachedComments, setDetachedComments] = useState<DetachedComment[]>(initialDetachedComments);
+    const [commentPopupOpen, setCommentPopupOpen] = useState(false);
+    const [commentPopupPosition, setCommentPopupPosition] = useState<{ x: number; y: number } | null>(null);
+
+    // Sync detachedComments when initialDetachedComments changes
+    // Use functional update to bail out when contents match — prevents infinite loops
+    useEffect(() => {
+        setDetachedComments(prev => {
+            if (JSON.stringify(prev) === JSON.stringify(initialDetachedComments)) return prev;
+            return initialDetachedComments;
+        });
+    }, [initialDetachedComments]);
+
+    // Drag from canvas state
+    const [isDragOver, setIsDragOver] = useState(false);
+    const [dragDepth, setDragDepth] = useState(0);
+
+    // Popup states
+    const [showColorPopup, setShowColorPopup] = useState(false);
+    const [colorTab, setColorTab] = useState<"background" | "topStrip">("background");
+    const [showTitleEdit, setShowTitleEdit] = useState(false);
+
+    // Color picker positioning
+    const containerCardRef = useRef<HTMLDivElement | null>(null);
+    const [pickerPosition, setPickerPosition] = useState<{ top: number; left: number } | null>(null);
+
+    // Reorder state
+    const [order, setOrder] = useState<string[]>(() => childPadlets.map((c) => c.id));
+    const [internalDragOverId, setInternalDragOverId] = useState<string | null>(null);
+
+    // Modal drag position state
+    const [modalPosition, setModalPosition] = useState({ x: 0, y: 0 });
+    const [isDraggingModal, setIsDraggingModal] = useState(false);
+    const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+    const wasOpenRef = useRef(false);
+
+    // Reset position only when modal first opens (not on every re-render)
+    useEffect(() => {
+        if (isOpen && !wasOpenRef.current) {
+            // Transitioning from closed to open - reset position
+            setModalPosition({ x: 0, y: 0 });
+        }
+        wasOpenRef.current = isOpen;
+    }, [isOpen]);
+
+    // Update picker position when color popup opens or modal moves
+    useEffect(() => {
+        if (!showColorPopup || !containerCardRef.current) {
+            setPickerPosition(null);
+            return;
+        }
+        const rect = containerCardRef.current.getBoundingClientRect();
+        setPickerPosition({
+            top: rect.top,
+            left: rect.right + 12, // 12px gap
+        });
+    }, [showColorPopup, modalPosition]);
+
+    // Modal drag handlers
+    const handleModalMouseDown = (e: React.MouseEvent) => {
+        e.preventDefault();
+        setIsDraggingModal(true);
+        setDragOffset({
+            x: e.clientX - modalPosition.x,
+            y: e.clientY - modalPosition.y
+        });
+    };
+
+    const handleModalMouseMove = (e: React.MouseEvent) => {
+        if (!isDraggingModal) return;
+        setModalPosition({
+            x: e.clientX - dragOffset.x,
+            y: e.clientY - dragOffset.y
+        });
+    };
+
+    const handleModalMouseUp = () => {
+        setIsDraggingModal(false);
+    };
+    const childIdsKey = useMemo(() => childPadlets.map((c) => c.id).join(','), [childPadlets]);
+
+    useEffect(() => {
+        const incoming = childPadlets.map((c) => c.id);
+        setOrder((prev) => {
+            const kept = prev.filter((id) => incoming.includes(id));
+            const added = incoming.filter((id) => !kept.includes(id));
+            const newOrder = [...kept, ...added];
+            // Only update if the order actually changed
+            if (newOrder.length === prev.length && newOrder.every((id, i) => id === prev[i])) {
+                return prev;
+            }
+            return newOrder;
+        });
+    }, [childIdsKey, childPadlets]);
+
+    useEffect(() => {
+        if (!isOpen) return;
+        const onKeyDown = (e: KeyboardEvent) => {
+            if (e.key === "Escape") handleSaveAndClose();
+        };
+        window.addEventListener("keydown", onKeyDown);
+        return () => window.removeEventListener("keydown", onKeyDown);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isOpen, title, backgroundColor, topStrip]);
+
+    const handleSaveAndClose = () => {
+        onSave({
+            title,
+            backgroundColor,
+            topStrip: topStrip && topStrip !== "transparent" ? topStrip : undefined,
+            detachedComments: detachedComments.length > 0 ? detachedComments : undefined,
+        });
+        onClose();
+    };
+
+    // Comment handlers
+    const handleComment = (e: React.MouseEvent) => {
+        const rect = (e.target as HTMLElement).getBoundingClientRect();
+        setCommentPopupPosition({
+            x: rect.right + 10,
+            y: rect.top,
+        });
+        setCommentPopupOpen(true);
+    };
+
+    const handleAddComment = (commentText: string) => {
+        const newComment: DetachedComment = {
+            id: `comment-${Date.now()}`,
+            text: commentText,
+            userId: 'user1', // TODO: Get from auth
+            userName: 'R', // TODO: Get from auth
+            timestamp: Date.now(),
+        };
+        setDetachedComments(prev => [...prev, newComment]);
+    };
+
+    const preventFocusLoss = (e: React.MouseEvent) => e.preventDefault();
+
+    const countLabel = useMemo(() => {
+        const n = childPadlets.length;
+        return `${n} card${n === 1 ? "" : "s"}`;
+    }, [childPadlets.length]);
+
+    const childById = useMemo(() => {
+        const map = new Map<string, ChildPadlet>();
+        childPadlets.forEach((c) => map.set(c.id, c));
+        return map;
+    }, [childPadlets]);
+
+    const orderedChildren = useMemo(() => {
+        return order.map((id) => childById.get(id)).filter(Boolean) as ChildPadlet[];
+    }, [order, childById]);
+
+    const persistOrder = (next: string[]) => {
+        setOrder(next);
+        onReorderChildPadlets?.(next);
+    };
+
+    const move = (id: string, dir: -1 | 1) => {
+        const idx = order.indexOf(id);
+        if (idx === -1) return;
+        const nextIdx = idx + dir;
+        if (nextIdx < 0 || nextIdx >= order.length) return;
+
+        const next = [...order];
+        const tmp = next[idx];
+        next[idx] = next[nextIdx];
+        next[nextIdx] = tmp;
+        persistOrder(next);
+    };
+
+    const readPadletIdFromDrop = (e: React.DragEvent) => {
+        let id = e.dataTransfer.getData("text/padlet-id");
+        if (!id) id = e.dataTransfer.getData("text/plain");
+        if (!id) {
+            const json = e.dataTransfer.getData("application/json");
+            if (json) {
+                try {
+                    const parsed = JSON.parse(json);
+                    id = parsed?.padletId ?? parsed?.id ?? "";
+                } catch {
+                    // ignore
+                }
+            }
+        }
+        return (id || "").trim();
+    };
+
+    const openLink = (url: string) => {
+        try {
+            window.open(url, "_blank", "noopener,noreferrer");
+        } catch {
+            // fallback (rare)
+            window.location.href = url;
+        }
+    };
+
+    const handleActivateChild = (child: ChildPadlet) => {
+        if (child.type === "link") {
+            const url = extractFirstUrl(child.content);
+            if (url) {
+                openLink(url);
+                return;
+            }
+            // If no URL found, fall back to opening editor
+            onOpenChildPadlet?.(child.id);
+            return;
+        }
+
+        // Default: open the real editor/viewer for the child
+        onOpenChildPadlet?.(child.id);
+    };
+
+    if (!isOpen) return null;
+
+    return (
+        <>
+            {/* Overlay is non-blocking to allow drag from canvas behind */}
+            <div
+                className="fixed inset-0 z-[1001] pointer-events-none flex items-center justify-center"
+                onMouseMove={handleModalMouseMove}
+                onMouseUp={handleModalMouseUp}
+                onMouseLeave={handleModalMouseUp}
+                style={{ pointerEvents: isDraggingModal ? 'auto' : 'none' }}
+            >
+                <div
+                    className="pointer-events-auto flex items-start gap-2"
+                    style={{
+                        transform: `translate(${modalPosition.x}px, ${modalPosition.y}px)`,
+                        cursor: isDraggingModal ? 'grabbing' : 'default'
+                    }}
+                >
+                    {/* Left Toolbar */}
+                    <div className="relative self-start mt-1">
+                        <div className="flex flex-col items-center bg-white rounded-lg shadow-lg p-1 gap-0.5 flex-shrink-0">
+                            <div className="relative flex flex-col items-center shrink-0">
+                                <button
+                                    onMouseDown={preventFocusLoss}
+                                    onClick={handleSaveAndClose}
+                                    className="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-gray-200 text-gray-600 transition-colors"
+                                    title="Close"
+                                >
+                                    <XSquare className="w-5 h-5" />
+                                </button>
+                                <span className="text-[9px] text-gray-500 text-center">Close</span>
+                            </div>
+
+                            <div className="w-8 h-px bg-gray-300 shrink-0" />
+
+                            <div className="relative flex flex-col items-center shrink-0">
+                                <button
+                                    onMouseDown={preventFocusLoss}
+                                    onClick={() => setShowColorPopup((v) => !v)}
+                                    className={`w-10 h-10 flex items-center justify-center rounded-lg transition-colors ${showColorPopup ? "bg-gray-200 text-gray-800" : "hover:bg-gray-200 text-gray-600"
+                                        }`}
+                                    title="Color"
+                                >
+                                    <Palette className="w-5 h-5" />
+                                </button>
+                                <span className="text-[9px] text-gray-500 text-center">Color</span>
+                            </div>
+
+                            <div className="relative flex flex-col items-center shrink-0">
+                                <button
+                                    onMouseDown={preventFocusLoss}
+                                    onClick={() => setShowTitleEdit(true)}
+                                    className={`w-10 h-10 flex items-center justify-center rounded-lg transition-colors ${showTitleEdit ? "bg-gray-200 text-gray-800" : "hover:bg-gray-200 text-gray-600"
+                                        }`}
+                                    title="Title"
+                                >
+                                    <Type className="w-5 h-5" />
+                                </button>
+                                <span className="text-[9px] text-gray-500 text-center">Title</span>
+                            </div>
+
+                        </div>
+
+                    </div>
+
+                    {/* Container Preview */}
+                    <div className="flex flex-col relative">
+                        <div className="m-2 relative">
+                            <div ref={containerCardRef} className="rounded-lg overflow-hidden overflow-y-auto shadow-lg max-h-[80vh]" style={{ backgroundColor, width: 520, minHeight: 360 }}>
+                                {topStrip && topStrip !== "transparent" && (
+                                    <div className="h-2 w-full" style={{ backgroundColor: topStrip }} />
+                                )}
+
+                                <div
+                                    className="p-4 text-center cursor-grab active:cursor-grabbing select-none"
+                                    onMouseDown={handleModalMouseDown}
+                                    title="Drag to move editor"
+                                >
+                                    {showTitleEdit ? (
+                                        <input
+                                            type="text"
+                                            value={title}
+                                            onChange={(e) => setTitle(e.target.value)}
+                                            onBlur={() => setShowTitleEdit(false)}
+                                            onKeyDown={(e) => {
+                                                if (e.key === "Enter") setShowTitleEdit(false);
+                                            }}
+                                            className="w-full text-lg font-bold text-center border-b-2 border-blue-500 outline-none bg-transparent"
+                                            style={{ color: containerTextColor }}
+                                            autoFocus
+                                        />
+                                    ) : (
+                                        <h3 className="text-lg font-bold" style={{ color: containerTextColor }}>{title}</h3>
+                                    )}
+                                    <p className="text-sm mt-1" style={{ color: mutedContainerTextColor }}>{countLabel}</p>
+                                    <p className="text-[11px] mt-1" style={{ color: mutedContainerTextColor }}>
+                                        Link cards open the URL. Other cards open the editor. Drag to reorder. (ESC to close)
+                                    </p>
+                                </div>
+
+                                <div className="px-4 pb-4">
+                                    <div
+                                        className={`border-2 border-dashed rounded-lg min-h-[240px] transition-all ${isDragOver ? "border-gray-400 bg-gray-50/60" : "border-gray-300"}`}
+                                        onDragEnter={(e) => {
+                                            if (!onDropPadlet) return;
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                            setDragDepth((d) => d + 1);
+                                            setIsDragOver(true);
+                                        }}
+                                        onDragOver={(e) => {
+                                            if (!onDropPadlet) return;
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                            if (!isDragOver) setIsDragOver(true);
+                                        }}
+                                        onDragLeave={(e) => {
+                                            if (!onDropPadlet) return;
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                            setDragDepth((d) => {
+                                                const next = Math.max(0, d - 1);
+                                                if (next === 0) setIsDragOver(false);
+                                                return next;
+                                            });
+                                        }}
+                                        onDrop={(e) => {
+                                            if (!onDropPadlet) return;
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                            setDragDepth(0);
+                                            setIsDragOver(false);
+
+                                            const droppedId = readPadletIdFromDrop(e);
+                                            if (droppedId) onDropPadlet(droppedId);
+                                        }}
+                                    >
+                                        {/* Always show the drop hint area */}
+                                        <div className="flex flex-col items-center justify-center gap-2 h-[88px] border-b border-dashed border-gray-200">
+                                            <p className="text-xs" style={{ color: mutedContainerTextColor }}>
+                                                Drag posts here to add them
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                    {/* Children list with dnd-kit sortable (outside the HTML5 drop zone) */}
+                                    {orderedChildren.length === 0 ? (
+                                        <div className="flex items-center justify-center min-h-[180px]">
+                                            <p className="text-sm" style={{ color: mutedContainerTextColor }}>No posts yet</p>
+                                        </div>
+                                    ) : (
+                                        <DndContext
+                                            sensors={sensors}
+                                            collisionDetection={closestCenter}
+                                            onDragEnd={handleDragEnd}
+                                        >
+                                            <SortableContext
+                                                items={order}
+                                                strategy={verticalListSortingStrategy}
+                                            >
+                                                <div className="p-3 space-y-3">
+                                                    {orderedChildren.map((child) => (
+                                                        <SortableChildItem
+                                                            key={child.id}
+                                                            child={child}
+                                                            internalDragOverId={internalDragOverId}
+                                                            handleActivateChild={handleActivateChild}
+                                                            extractFirstUrl={extractFirstUrl}
+                                                            getDisplayTitle={getDisplayTitle}
+                                                            openLink={openLink}
+                                                            move={move}
+                                                            onDetachChildFromFreeformContainer={onDetachChildFromFreeformContainer}
+                                                            onRemoveChildPadlet={onRemoveChildPadlet}
+                                                            onUpdateChildComments={onUpdateChildComments}
+                                                            currentUserId={currentUserId}
+                                                            currentUserName={currentUserName}
+                                                            currentUserAvatar={currentUserAvatar}
+                                                        />
+                                                    ))}
+                                                </div>
+                                            </SortableContext>
+                                        </DndContext>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Color Picker Panel - RIGHT side of container (fixed position) */}
+                {showColorPopup && pickerPosition && (
+                    <div
+                        className="pointer-events-auto bg-white rounded-lg shadow-lg overflow-hidden animate-in fade-in slide-in-from-left-2 duration-200 z-[110]"
+                        style={{
+                            position: 'fixed',
+                            top: pickerPosition.top,
+                            left: pickerPosition.left,
+                        }}
+                    >
+                        <div className="w-[240px] p-4 flex flex-col gap-4">
+                            {/* Mode Toggle */}
+                            <div className="flex items-center justify-between mb-2">
+                                <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Container Color</span>
+                                <div className="flex bg-gray-100 p-1 rounded-lg gap-1">
+                                    <button
+                                        onClick={() => setColorTab("background")}
+                                        className={`w-8 h-8 flex items-center justify-center text-xs font-bold rounded-md transition-all ${colorTab === "background"
+                                            ? "bg-white text-gray-900 shadow-sm"
+                                            : "text-gray-500 hover:text-gray-700"
+                                            }`}
+                                        title="Background Color"
+                                    >
+                                        BG
+                                    </button>
+                                    <button
+                                        onClick={() => setColorTab("topStrip")}
+                                        className={`w-8 h-8 flex items-center justify-center text-xs font-bold rounded-md transition-all ${colorTab === "topStrip"
+                                            ? "bg-white text-gray-900 shadow-sm"
+                                            : "text-gray-500 hover:text-gray-700"
+                                            }`}
+                                        title="Top Strip Color"
+                                    >
+                                        TS
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Advanced Color Picker */}
+                            <ColorPickerContent
+                                color={colorTab === "background" ? backgroundColor : (topStrip || 'transparent')}
+                                onChange={(c) => colorTab === "background" ? setBackgroundColor(c) : setTopStrip(c)}
+                                hasOpacity={true}
+                                presets={colorTab === "background" ? BACKGROUND_COLORS : TOP_STRIP_COLORS}
+                            />
+                        </div>
+                    </div>
+                )}
+            </div>
+        </>
+    );
+}

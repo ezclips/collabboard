@@ -1,0 +1,16 @@
+{
+	"folders": [
+		{
+			"path": "../../../../../linguacultura"
+		},
+		{
+			"path": "../../../../template/LightAble-React-TS/LightAble-React-TS/staterkit/src"
+		},
+		{
+			"path": "../../.."
+		}
+	],
+	"settings": {
+		"powershell.cwd": "collabboard"
+	}
+}

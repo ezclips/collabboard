@@ -1,0 +1,81 @@
+name: AI Quality (nightly)
+
+# Runs the full golden suite every night at 02:00 UTC.
+# Also manually triggerable via workflow_dispatch.
+# Uses the same required secrets as ai-quality.yml.
+
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+
+jobs:
+  ai-quality-full:
+    name: AI golden suite (full)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+      NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      UNSPLASH_ACCESS_KEY: ${{ secrets.UNSPLASH_ACCESS_KEY }}
+      PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+      NEXT_PUBLIC_ENABLE_GANTT: "false"
+      NEXT_PUBLIC_ENABLE_SCHEDULER: "false"
+      NEXT_PUBLIC_ENABLE_FREEFORM_GRAPH: "false"
+      NEXT_PUBLIC_DEBUG_CANVAS: "false"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Cache Next.js build
+        uses: actions/cache@v4
+        with:
+          path: .next/cache
+          key: nextjs-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-${{ hashFiles('**/*.ts', '**/*.tsx') }}
+          restore-keys: |
+            nextjs-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-
+            nextjs-${{ runner.os }}-
+
+      - name: Build app
+        run: npm run build
+
+      - name: Start server
+        run: npm start &
+
+      - name: Wait for server
+        run: |
+          echo "Waiting for server at http://localhost:3000..."
+          for i in $(seq 1 30); do
+            if curl -sf -o /dev/null http://localhost:3000; then
+              echo "Server ready after ${i} attempt(s)"
+              exit 0
+            fi
+            echo "  attempt $i/30 — retrying in 2s"
+            sleep 2
+          done
+          echo "Server did not become ready within 60s"
+          exit 1
+
+      - name: Run all suites
+        run: |
+          set -o pipefail
+          npm run ai:test 2>&1 | tee results-all.txt
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-test-results-nightly-${{ github.run_id }}
+          path: results-all.txt
+          retention-days: 90

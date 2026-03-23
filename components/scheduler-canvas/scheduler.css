@@ -1,0 +1,104 @@
+.scheduler-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: #fff;
+}
+
+.scheduler-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid #e5e7eb;
+  padding: 8px 12px;
+  background: #f8fafc;
+}
+
+.scheduler-toolbar-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #334155;
+}
+
+.scheduler-container {
+  flex: 1;
+  min-height: 0;
+}
+
+.scheduler-event-menu-backdrop {
+  position: fixed;
+  inset: 0;
+  border: 0;
+  background: transparent;
+  z-index: 9998;
+}
+
+.scheduler-event-menu {
+  position: fixed;
+  min-width: 220px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 8px;
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.2);
+  z-index: 9999;
+}
+
+.scheduler-event-menu-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  border-radius: 8px;
+  color: #334155;
+  cursor: pointer;
+  font-size: 13px;
+  padding: 10px 12px;
+  text-align: left;
+}
+
+.scheduler-event-menu-item:hover {
+  background: #f8fafc;
+}
+
+.scheduler-event-menu-item-danger {
+  color: #dc2626;
+}
+
+.scheduler-event-menu-item-danger:hover {
+  background: #fef2f2;
+}
+
+.scheduler-event-menu-separator {
+  height: 1px;
+  background: #e2e8f0;
+  margin: 6px 4px;
+}
+
+.scheduler-event-menu-colors {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 6px;
+}
+
+.scheduler-event-menu-color {
+  width: 20px;
+  height: 20px;
+  border-radius: 9999px;
+  border: 1px solid #cbd5e1;
+  cursor: pointer;
+}
+
+.scheduler-event-menu-color-input {
+  width: 28px;
+  height: 22px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  cursor: pointer;
+  background: #ffffff;
+  padding: 0;
+}

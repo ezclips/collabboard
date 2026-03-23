@@ -1,0 +1,204 @@
+.gantt-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: #fff;
+}
+
+.gantt-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid #e5e7eb;
+  padding: 8px 12px;
+  background: #f8fafc;
+}
+
+.gantt-toolbar-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #334155;
+}
+
+.gantt-zoom-controls {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.gantt-zoom-controls button {
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: #334155;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.gantt-zoom-controls button.is-active {
+  border-color: #2563eb;
+  color: #2563eb;
+  background: #eff6ff;
+}
+
+.gantt-container {
+  flex: 1;
+  min-height: 0;
+}
+
+.gantt-container,
+.gantt-container * {
+  scrollbar-width: thin;
+  scrollbar-color: #94a3b8 #e2e8f0;
+}
+
+.gantt-container ::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.gantt-container ::-webkit-scrollbar-track {
+  background: #e2e8f0;
+}
+
+.gantt-container ::-webkit-scrollbar-thumb {
+  background: #94a3b8;
+  border-radius: 8px;
+  border: 2px solid #e2e8f0;
+}
+
+.gantt-container ::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+}
+
+/* Add task button styling */
+.gantt-add-task-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  color: #2563eb;
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+}
+
+.gantt-add-task-btn:hover {
+  background: #eff6ff;
+  border-color: #2563eb;
+  transform: scale(1.05);
+}
+
+.gantt-add-task-btn:active {
+  transform: scale(0.95);
+}
+
+/* While a cell is being inline-edited, hide only the text label so the
+   duplicate text doesn't show. visibility:hidden (not display:none) keeps
+   the layout intact. Tree lines and expand icons are separate elements and
+   are unaffected. The class is added/removed by the setMapping handler. */
+.gantt-row-editing .gantt_tree_content {
+  visibility: hidden;
+}
+
+/* Give the editor input an opaque background so the hidden cell text
+   cannot bleed through any transparent area. */
+.gantt_grid_editor_placeholder input {
+  background: #fff;
+  border: 1px solid #cfd6df;
+  box-shadow: none;
+  outline: none;
+  box-sizing: border-box;
+  height: calc(100% - 1px);
+  margin: 0;
+}
+
+/* Keep the row divider visible while inline editing the cell label. */
+.gantt_grid_editor_placeholder {
+  box-sizing: border-box;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+/* Make hierarchy toggles visually explicit (gray arrow like reference screenshot). */
+.gantt-container .gantt_tree_icon {
+  opacity: 0.85;
+  filter: grayscale(1);
+}
+
+.gantt-container .gantt_tree_icon.gantt_close,
+.gantt-container .gantt_tree_icon.gantt_open {
+  opacity: 1;
+}
+
+/* Gantt lightbox color picker (aligned to Kanban editor color UX) */
+.gantt-lightbox-color {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.gantt-lightbox-color-input-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.gantt-lightbox-color-preview {
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  border: 1px solid #d5d9e1;
+  flex-shrink: 0;
+  background: transparent;
+}
+
+.gantt-lightbox-color-text {
+  flex: 1;
+}
+
+.gantt-lightbox-color-clear {
+  width: 24px;
+  height: 24px;
+  border: 1px solid #d5d9e1;
+  border-radius: 4px;
+  background: #fff;
+  color: #6b7280;
+  cursor: pointer;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.gantt-lightbox-color-clear:hover {
+  color: #111827;
+}
+
+.gantt-lightbox-color-swatches {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.gantt-lightbox-color-swatch {
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  border: 1px solid #d5d9e1;
+  cursor: pointer;
+}
+
+.gantt-lightbox-color-swatch.clear {
+  background: #fff;
+  color: #c92a2a;
+  font-size: 16px;
+  line-height: 1;
+}

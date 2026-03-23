@@ -1,0 +1,70 @@
+/* Context Menu Styles */
+.context-menu-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 999;
+    background: transparent;
+}
+
+.context-menu {
+    position: fixed;
+    min-width: 200px;
+    background: #ffffff;
+    border: 1px solid hsl(var(--border));
+    border-radius: 8px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+    z-index: 1000;
+    padding: 4px;
+    overflow: hidden;
+}
+
+.context-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    width: 100%;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    text-align: left;
+    border-radius: 6px;
+    transition: background 0.15s ease;
+    font-size: 14px;
+    color: hsl(var(--foreground));
+}
+
+.context-menu-item:hover {
+    background: hsl(var(--accent, 220 14% 96%));
+}
+
+.context-menu-item.danger {
+    color: #dc2626;
+}
+
+.context-menu-item.danger:hover {
+    background: #fee2e2;
+}
+
+.context-menu-icon {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+}
+
+.context-menu-label {
+    flex: 1;
+    white-space: nowrap;
+}
+
+.context-menu-separator {
+    height: 1px;
+    background: hsl(var(--border));
+    margin: 4px 0;
+}

@@ -1,0 +1,15 @@
+{
+  "id": "fail-001",
+  "date": "2026-03-23",
+  "skill_name": "target_skill_name",
+  "task_type": "task_category",
+  "input_summary": "",
+  "failure_category": "F2",
+  "observed_problem": "",
+  "bad_output_excerpt": "",
+  "root_cause_prompt_element": "",
+  "fix_type": "constraint_addition",
+  "proposed_fix": "",
+  "evidence_strength": 1,
+  "applied": false
+}
