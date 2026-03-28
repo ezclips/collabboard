@@ -4,6 +4,7 @@ import { useEffect } from 'react';
 
 interface UseCanvasShortcutsParams {
   selectedPadletId: string | null;
+  selectedPadletIds: string[];
   showDeleteConfirm: boolean;
   isNoteEditorOpen: boolean;
   isTableEditorOpen: boolean;
@@ -14,6 +15,7 @@ interface UseCanvasShortcutsParams {
   requestDeletePadlet: (padletId: string) => Promise<void>;
   setShowDeleteConfirm: (v: boolean) => void;
   setSelectedPadletId: (v: string | null) => void;
+  setSelectedPadletIds: (v: string[]) => void;
   isLineMode: boolean;
   lineEditModeId: string | null;
   selectedLineId: string | null;
@@ -27,10 +29,13 @@ interface UseCanvasShortcutsParams {
   setSelectedLineId: (v: string | null) => void;
   movePadletLayer: (padletId: string, direction: 'front' | 'back') => void;
   deleteLine: (lineId: string) => Promise<void>;
+  onSelectAll: () => void;
+  onUndoPaste: () => void;
 }
 
 export function useCanvasShortcuts({
   selectedPadletId,
+  selectedPadletIds,
   showDeleteConfirm,
   isNoteEditorOpen,
   isTableEditorOpen,
@@ -41,6 +46,7 @@ export function useCanvasShortcuts({
   requestDeletePadlet,
   setShowDeleteConfirm,
   setSelectedPadletId,
+  setSelectedPadletIds,
   isLineMode,
   lineEditModeId,
   selectedLineId,
@@ -54,6 +60,8 @@ export function useCanvasShortcuts({
   setSelectedLineId,
   movePadletLayer,
   deleteLine,
+  onSelectAll,
+  onUndoPaste,
 }: UseCanvasShortcutsParams) {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -66,14 +74,15 @@ export function useCanvasShortcuts({
           setShowDeleteConfirm(true);
         }
       }
-      if (e.key === 'Escape' && selectedPadletId) {
+      if (e.key === 'Escape' && (selectedPadletId || selectedPadletIds.length > 0)) {
         setSelectedPadletId(null);
+        setSelectedPadletIds([]);
         setShowDeleteConfirm(false);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedPadletId, showDeleteConfirm, isNoteEditorOpen, isTableEditorOpen, isLinkEditorOpen, isTodoEditorOpen, isWallLayout, isGridLayout, requestDeletePadlet, setShowDeleteConfirm, setSelectedPadletId]);
+  }, [selectedPadletId, selectedPadletIds.length, showDeleteConfirm, isNoteEditorOpen, isTableEditorOpen, isLinkEditorOpen, isTodoEditorOpen, isWallLayout, isGridLayout, requestDeletePadlet, setShowDeleteConfirm, setSelectedPadletId, setSelectedPadletIds]);
 
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
@@ -96,6 +105,18 @@ export function useCanvasShortcuts({
         }
       }
 
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'a') {
+        e.preventDefault();
+        onSelectAll();
+        return;
+      }
+
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        onUndoPaste();
+        return;
+      }
+
       if (e.ctrlKey && e.shiftKey && selectedPadletId) {
         if (e.key === ']' || e.key === '}') {
           movePadletLayer(selectedPadletId, 'front');
@@ -106,7 +127,7 @@ export function useCanvasShortcuts({
     };
     window.addEventListener('keydown', handleGlobalKeyDown);
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, [isLineMode, lineEditModeId, selectedLineId, newPostDragState.isActive, isNoteEditorOpen, selectedPadletId, isWallLayout, isGridLayout, setNewPostDragState, setWallPlacementPromptOpen, setIsPlacementPromptOpen, setIsNoteEditorOpen, setIsLineMode, setLineEditModeId, setSelectedLineId, movePadletLayer]);
+  }, [isLineMode, lineEditModeId, selectedLineId, newPostDragState.isActive, isNoteEditorOpen, selectedPadletId, isWallLayout, isGridLayout, setNewPostDragState, setWallPlacementPromptOpen, setIsPlacementPromptOpen, setIsNoteEditorOpen, setIsLineMode, setLineEditModeId, setSelectedLineId, movePadletLayer, onSelectAll, onUndoPaste]);
 
   useEffect(() => {
     const handleLineDeleteKey = (e: KeyboardEvent) => {

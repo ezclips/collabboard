@@ -11,6 +11,7 @@ interface ImportsDialogProps {
   isOpen: boolean;
   onClose: () => void;
   onImportResolved: (resolved: ResolvedImportItem) => void;
+  initialProvider?: ImportProvider | null;
 }
 
 type Screen =
@@ -62,29 +63,51 @@ function ProviderCard({
   );
 }
 
-export default function ImportsDialog({ isOpen, onClose, onImportResolved }: ImportsDialogProps) {
+export default function ImportsDialog({ isOpen, onClose, onImportResolved, initialProvider = null }: ImportsDialogProps) {
   const [screen, setScreen] = useState<Screen>({ name: 'chooser' });
 
   // Reset to chooser whenever dialog opens
   useEffect(() => {
-    if (isOpen) setScreen({ name: 'chooser' });
-  }, [isOpen]);
+    if (!isOpen) return;
+    if (initialProvider) {
+      setScreen({ name: 'checking', provider: initialProvider });
+      return;
+    }
+    setScreen({ name: 'chooser' });
+  }, [initialProvider, isOpen]);
+
+  useEffect(() => {
+    if (screen.name !== 'checking') return;
+
+    let cancelled = false;
+
+    const run = async () => {
+      try {
+        const status = await getImportProviderStatus(screen.provider);
+        if (cancelled) return;
+        if (status.connected) {
+          setScreen({ name: 'browser', provider: screen.provider });
+        } else {
+          setScreen({ name: 'connection-required', provider: screen.provider });
+        }
+      } catch {
+        if (!cancelled) {
+          setScreen({ name: 'connection-required', provider: screen.provider });
+        }
+      }
+    };
+
+    void run();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [screen]);
 
   if (!isOpen) return null;
 
-  const handleProviderSelect = async (provider: ImportProvider) => {
+  const handleProviderSelect = (provider: ImportProvider) => {
     setScreen({ name: 'checking', provider });
-
-    try {
-      const status = await getImportProviderStatus(provider);
-      if (status.connected) {
-        setScreen({ name: 'browser', provider });
-      } else {
-        setScreen({ name: 'connection-required', provider });
-      }
-    } catch {
-      setScreen({ name: 'connection-required', provider });
-    }
   };
 
   // Connection required modal (rendered on top)
@@ -107,7 +130,7 @@ export default function ImportsDialog({ isOpen, onClose, onImportResolved }: Imp
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b">
           <div className="flex items-center gap-2">
-            {screen.name !== 'chooser' && screen.name !== 'checking' && (
+            {!initialProvider && screen.name !== 'chooser' && screen.name !== 'checking' && (
               <button
                 onClick={() => setScreen({ name: 'chooser' })}
                 className="text-sm text-gray-500 hover:text-gray-800 mr-1"

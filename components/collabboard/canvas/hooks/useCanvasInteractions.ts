@@ -11,6 +11,7 @@ interface UseCanvasInteractionsParams {
   canvasZoom: number;
   padlets: Padlet[];
   setPadlets: React.Dispatch<React.SetStateAction<Padlet[]>>;
+  selectedPadletIds: string[];
   isLineMode: boolean;
   isAnyEditorOpen: boolean;
   isFreeformGraphMode: boolean;
@@ -32,6 +33,7 @@ export function useCanvasInteractions({
   canvasZoom,
   padlets,
   setPadlets,
+  selectedPadletIds,
   isLineMode,
   isAnyEditorOpen,
   isFreeformGraphMode,
@@ -55,11 +57,13 @@ export function useCanvasInteractions({
   const dragEndInFlightRef = useRef(false);
   const isDraggingRef = useRef(false);
   const draggingPadletIdRef = useRef<string | null>(null);
+  const draggingPadletIdsRef = useRef<string[]>([]);
   const handleCanvasMouseUpRef = useRef<() => void>(() => { });
   const bodyUserSelectRef = useRef<{ userSelect: string; webkitUserSelect: string } | null>(null);
 
   const pendingDragRef = useRef<{
     padletId: string;
+    padletIds: string[];
     startX: number;
     startY: number;
     offsetX: number;
@@ -70,6 +74,8 @@ export function useCanvasInteractions({
   // Tracks the committed drag position so handleCanvasMouseUp always saves
   // the correct coordinates even when the last setPadlets hasn't re-rendered yet.
   const lastDragPositionRef = useRef<{ x: number; y: number } | null>(null);
+  const lastDragDeltaRef = useRef<{ dx: number; dy: number } | null>(null);
+  const dragSelectionStartPositionsRef = useRef<Record<string, { x: number; y: number }>>({});
 
   const lockBodySelection = () => {
     if (bodyUserSelectRef.current) return;
@@ -131,16 +137,24 @@ export function useCanvasInteractions({
       return;
     }
 
+    const isTemporaryGroupDrag =
+      selectedPadletIds.length > 1 &&
+      selectedPadletIds.includes(padletId);
+    const dragPadletIds = isTemporaryGroupDrag ? [...selectedPadletIds] : [padletId];
+
     const rect = e.currentTarget.getBoundingClientRect();
     pendingDragRef.current = {
       padletId,
+      padletIds: dragPadletIds,
       startX: e.clientX,
       startY: e.clientY,
       offsetX: (e.clientX - rect.left) / canvasZoom,
       offsetY: (e.clientY - rect.top) / canvasZoom,
-      selectOnDragStart: true,
+      selectOnDragStart: !isTemporaryGroupDrag,
     };
-    setSelectedPadletId(padletId);
+    if (!isTemporaryGroupDrag) {
+      setSelectedPadletId(padletId);
+    }
   };
 
   const handleImagePadletDrag = (e: React.MouseEvent, padletId: string) => {
@@ -157,6 +171,7 @@ export function useCanvasInteractions({
     const rect = e.currentTarget.getBoundingClientRect();
     pendingDragRef.current = {
       padletId,
+      padletIds: [padletId],
       startX: e.clientX,
       startY: e.clientY,
       offsetX: (e.clientX - rect.left) / canvasZoom,
@@ -188,6 +203,19 @@ export function useCanvasInteractions({
         debugCanvasLogger('dragStart', { padletId: pending.padletId });
         setIsDragging(true);
         setDraggingPadletId(pending.padletId);
+        draggingPadletIdsRef.current = pending.padletIds;
+        if (pending.padletIds.length > 1) {
+          dragSelectionStartPositionsRef.current = Object.fromEntries(
+            padlets
+              .filter((padlet) => pending.padletIds.includes(padlet.id))
+              .map((padlet) => [
+                padlet.id,
+                { x: padlet.position_x || 0, y: padlet.position_y || 0 },
+              ])
+          );
+        } else {
+          dragSelectionStartPositionsRef.current = {};
+        }
         if (pending.selectOnDragStart) {
           setSelectedPadletId(pending.padletId);
         }
@@ -233,6 +261,29 @@ export function useCanvasInteractions({
 
     const clampedX = Math.max(0, newX);
     const clampedY = Math.max(0, newY);
+    const draggedPadletIds = draggingPadletIdsRef.current;
+
+    if (draggedPadletIds.length > 1) {
+      const startPositions = dragSelectionStartPositionsRef.current;
+      const anchorStart = startPositions[draggingPadletId];
+      if (!anchorStart) return;
+      const dx = clampedX - anchorStart.x;
+      const dy = clampedY - anchorStart.y;
+      lastDragDeltaRef.current = { dx, dy };
+
+      setPadlets(prev => prev.map((padlet) => {
+        if (!draggedPadletIds.includes(padlet.id)) return padlet;
+        const start = startPositions[padlet.id];
+        if (!start) return padlet;
+        return {
+          ...padlet,
+          position_x: Math.max(0, start.x + dx),
+          position_y: Math.max(0, start.y + dy),
+        };
+      }));
+      return;
+    }
+
     lastDragPositionRef.current = { x: clampedX, y: clampedY };
 
     setPadlets(prev => prev.map(p =>
@@ -249,6 +300,7 @@ export function useCanvasInteractions({
     try {
       const currentDraggingId = draggingPadletIdRef.current;
       const currentIsDragging = isDraggingRef.current;
+      const currentDraggingIds = draggingPadletIdsRef.current;
       if (pendingDragRef.current) {
         pendingDragRef.current = null;
       }
@@ -257,9 +309,46 @@ export function useCanvasInteractions({
       if (newPostDragState.isActive) return;
 
       if (currentIsDragging && currentDraggingId) {
+        if (currentDraggingIds.length > 1) {
+          const dragDelta = lastDragDeltaRef.current;
+          const startPositions = dragSelectionStartPositionsRef.current;
+          lastDragDeltaRef.current = null;
+          dragSelectionStartPositionsRef.current = {};
+          if (dragDelta) {
+            try {
+              await Promise.all(
+                currentDraggingIds.map(async (padletId) => {
+                  const start = startPositions[padletId];
+                  if (!start) return;
+                  const nextX = Math.max(0, Math.round(start.x + dragDelta.dx));
+                  const nextY = Math.max(0, Math.round(start.y + dragDelta.dy));
+                  markPadletLocallyModified(padletId);
+                  const { error } = await supabase
+                    .from('padlets')
+                    .update({
+                      position_x: nextX,
+                      position_y: nextY,
+                      updated_at: new Date().toISOString(),
+                    })
+                    .eq('id', padletId);
+                  if (error) throw error;
+                })
+              );
+            } catch (err) {
+              console.error('Failed to save grouped padlet positions:', err);
+              fetchData();
+            }
+          }
+          draggingPadletIdsRef.current = [];
+          setIsDragging(false);
+          setDraggingPadletId(null);
+          return;
+        }
+
         const draggedPadlet = padlets.find(p => p.id === currentDraggingId);
         if (!draggedPadlet) {
           lastDragPositionRef.current = null;
+          draggingPadletIdsRef.current = [];
           setIsDragging(false);
           setDraggingPadletId(null);
           return;
@@ -327,24 +416,34 @@ export function useCanvasInteractions({
             }
           }
         } else {
-          markPadletLocallyModified(currentDraggingId);
-          const finalPos = lastDragPositionRef.current ?? { x: draggedPadlet.position_x, y: draggedPadlet.position_y };
+          const finalPos = lastDragPositionRef.current;
           lastDragPositionRef.current = null;
-          try {
-            await supabase
-              .from('padlets')
-              .update({
-                position_x: finalPos.x,
-                position_y: finalPos.y,
-                updated_at: new Date().toISOString()
-              })
-              .eq('id', currentDraggingId);
-          } catch (err) {
-            console.error('Failed to save padlet position:', err);
+          if (finalPos) {
+            const committedX = Math.round(finalPos.x);
+            const committedY = Math.round(finalPos.y);
+            markPadletLocallyModified(currentDraggingId);
+            try {
+              const { error } = await supabase
+                .from('padlets')
+                .update({
+                  position_x: committedX,
+                  position_y: committedY,
+                  updated_at: new Date().toISOString(),
+                })
+                .eq('id', currentDraggingId);
+              if (error) {
+                throw error;
+              }
+            } catch (err) {
+              console.error('Failed to save padlet position:', err);
+            }
           }
         }
       }
       debugCanvasLogger('dragEnd', { padletId: currentDraggingId });
+      draggingPadletIdsRef.current = [];
+      dragSelectionStartPositionsRef.current = {};
+      lastDragDeltaRef.current = null;
       setIsDragging(false);
       setDraggingPadletId(null);
     } finally {
@@ -373,14 +472,6 @@ export function useCanvasInteractions({
     };
   }, []);
 
-  useEffect(() => {
-    if (!isDragging) return;
-    const handleWindowMouseUp = () => {
-      handleCanvasMouseUp();
-    };
-    window.addEventListener('mouseup', handleWindowMouseUp);
-    return () => window.removeEventListener('mouseup', handleWindowMouseUp);
-  }, [isDragging]);
 
   return {
     isDragging,

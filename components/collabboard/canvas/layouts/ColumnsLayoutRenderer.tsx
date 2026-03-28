@@ -1,7 +1,7 @@
 // components/collabboard/canvas/layouts/ColumnsLayoutRenderer.tsx
 "use client";
 
-import { useState } from 'react';
+import { memo, useState } from 'react';
 import { Plus, MoreHorizontal } from 'lucide-react';
 import PostCardContent from '@/components/collabboard/PostCardContent';
 import type { Padlet, BoardSection } from '@/types/collabboard';
@@ -16,7 +16,7 @@ interface ColumnsLayoutRendererProps {
   currentUser: any;
 }
 
-export function ColumnsLayoutRenderer({
+function ColumnsLayoutRendererBase({
   padlets,
   sections,
   onUpdatePadlet,
@@ -191,3 +191,5 @@ export function ColumnsLayoutRenderer({
     </div>
   );
 }
+
+export const ColumnsLayoutRenderer = memo(ColumnsLayoutRendererBase);

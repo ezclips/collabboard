@@ -24,10 +24,10 @@ import { FreeformGraphRepo } from '@/lib/graph/graphRepo';
 import { canEditWorkspace, resolveCurrentWorkspace, type WorkspaceRole } from '@/lib/workspace/context';
 import '@/components/kanban-canvas/kanban-canvas.css';
 import ColumnContainerCreationPrompt from '@/components/canvas/layouts/ColumnContainerCreationPrompt';
-import React, { useEffect, useRef, useState, useCallback, useMemo, useReducer } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo, useReducer } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
-import type { Padlet, BoardSection, PendingPostDraft, NewPostDragState, DropIndicatorState } from '@/types/collabboard';
+import type { Padlet, BoardSection, PendingPostDraft, NewPostDragState, DropIndicatorState, CanvasLine } from '@/types/collabboard';
 import { User, Session } from '@supabase/supabase-js';
 import {
   StickyNote, Link, CheckSquare, MoveRight, MessageCircle,
@@ -60,6 +60,7 @@ import { useCanvasShortcuts } from '@/components/collabboard/canvas/hooks/useCan
 import KanbanShell from '@/components/collabboard/canvas/ui/KanbanShell';
 import GanttShell from '@/components/collabboard/canvas/ui/GanttShell';
 import MapCanvas from '@/components/map/MapCanvas';
+import type mapboxgl from 'mapbox-gl';
 import MapStylePanel from '@/components/map/MapStylePanel';
 import { getPadletMapLocation } from '@/lib/map/geojson';
 import CanvasSidebar from '@/components/collabboard/canvas/ui/CanvasSidebar';
@@ -70,6 +71,8 @@ import FreeformPadletCards from '@/components/collabboard/canvas/ui/FreeformPadl
 import OverlayLayer from '@/components/collabboard/canvas/ui/OverlayLayer';
 import ZoomControls from '@/components/collabboard/canvas/ui/ZoomControls';
 import GhostDragElement from '@/components/collabboard/canvas/ui/GhostDragElement';
+import FreeformCanvasBoardMenu from '@/components/collabboard/canvas/ui/FreeformCanvasBoardMenu';
+import WallpaperSelector from '@/components/collabboard/canvas/WallpaperSelector';
 import { CanvasEditorProvider, type CanvasEditorState } from '@/components/collabboard/canvas/contexts/CanvasEditorContext';
 import { CanvasConfigProvider, type CanvasConfigState } from '@/components/collabboard/canvas/contexts/CanvasConfigContext';
 
@@ -87,6 +90,17 @@ const BADGE_COLORS = [
   "#f3e8ff", "#e9d5ff", "#d8b4fe", "#c084fc", "#a855f7", "#9333ea",
   "#ccfbf1", "#99f6e4", "#5eead4", "#2dd4bf", "#14b8a6", "#0d9488",
 ];
+
+type FreeformBoardMenuState = {
+  x: number;
+  y: number;
+  canvasX: number;
+  canvasY: number;
+} | null;
+
+function getFreeformDotGridStorageKey(boardId?: string) {
+  return boardId ? `freeform-board-dot-grid:${boardId}` : null;
+}
 
 
 function GraphLineToolIcon({ size = 18, className, ...rest }: { size?: number; className?: string;[key: string]: unknown }) {
@@ -132,7 +146,17 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   const [hasMounted, setHasMounted] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [currentWorkspaceRole, setCurrentWorkspaceRole] = useState<WorkspaceRole | null>(null);
+  const [isToolbarCollapsed, setIsToolbarCollapsed] = useState(false);
   const [isFreeformPanning, setIsFreeformPanning] = useState(false);
+  const [freeformBoardMenu, setFreeformBoardMenu] = useState<FreeformBoardMenuState>(null);
+  const [freeformWallpaperDialogOpen, setFreeformWallpaperDialogOpen] = useState(false);
+  const [lastPastedPadletIds, setLastPastedPadletIds] = useState<string[]>([]);
+  const [canPasteFromClipboard, setCanPasteFromClipboard] = useState(false);
+  const [freeformBoardAppearance, setFreeformBoardAppearance] = useState({
+    backgroundType: 'color' as 'color' | 'gradient' | 'image',
+    backgroundValue: '#f3f4f6',
+    showDotGrid: false,
+  });
 
   // === BEGIN CAMERA REGION ===
   const { canvasZoom, setCanvasZoom, handleZoomIn, handleZoomOut, handleZoomReset } = useCanvasCamera();
@@ -141,6 +165,15 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   useEffect(() => {
     setHasMounted(true);
   }, []);
+
+  useEffect(() => {
+    const metadata = user?.user_metadata as Record<string, unknown> | undefined;
+    const preferences =
+      metadata?.preferences && typeof metadata.preferences === 'object' && !Array.isArray(metadata.preferences)
+        ? metadata.preferences as Record<string, unknown>
+        : {};
+    setIsToolbarCollapsed(preferences.toolbarCollapsed === true);
+  }, [user]);
 
   useEffect(() => {
     let cancelled = false;
@@ -172,6 +205,37 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   }, [user]);
 
   const canUseFreeformEditButton = canEditWorkspace(currentWorkspaceRole);
+  const canUseCanvasToolbar = currentWorkspaceRole === 'owner' || currentWorkspaceRole === 'admin';
+  const handleToggleToolbarCollapsed = useCallback(() => {
+    setIsToolbarCollapsed((prev) => {
+      const next = !prev;
+
+      if (user) {
+        const metadata = user.user_metadata as Record<string, unknown> | undefined;
+        const existingPreferences =
+          metadata?.preferences && typeof metadata.preferences === 'object' && !Array.isArray(metadata.preferences)
+            ? metadata.preferences as Record<string, unknown>
+            : {};
+        const nextPreferences = {
+          ...existingPreferences,
+          toolbarCollapsed: next,
+        };
+        const nextMetadata = {
+          ...(metadata || {}),
+          preferences: nextPreferences,
+          preferences_updated_at: new Date().toISOString(),
+        };
+
+        void supabase.auth.updateUser({
+          data: nextMetadata,
+        });
+
+        setUser((prevUser) => prevUser ? ({ ...prevUser, user_metadata: nextMetadata } as User) : prevUser);
+      }
+
+      return next;
+    });
+  }, [user]);
 
   // Fetch user on mount and listen for auth changes (using getUser like dashboard does)
   useEffect(() => {
@@ -527,6 +591,8 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   const {
     selectedPadletId,
     setSelectedPadletId,
+    selectedPadletIds,
+    setSelectedPadletIds,
     isGraphConnectMode,
     setIsGraphConnectMode,
     graphConnectSource,
@@ -766,28 +832,70 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
 
 
   // Memoized background style object - recomputed only when background fields change
+  useEffect(() => {
+    const dotGridStorageKey = getFreeformDotGridStorageKey(canvas?.id);
+    const storedDotGrid =
+      typeof window !== 'undefined' && dotGridStorageKey
+        ? window.localStorage.getItem(dotGridStorageKey)
+        : null;
+
+    setFreeformBoardAppearance({
+      backgroundType: (canvas?.background_type as 'color' | 'gradient' | 'image') || 'color',
+      backgroundValue: canvas?.background_value || '#f3f4f6',
+      showDotGrid: storedDotGrid === 'true',
+    });
+  }, [canvas?.id, canvas?.background_type, canvas?.background_value]);
+
   const canvasBackgroundStyle = useMemo((): React.CSSProperties => {
     if (!canvas) return { backgroundColor: '#f3f4f6' };
 
-    const bgType = canvas.background_type;
-    const bgValue = canvas.background_value;
+    const bgType = freeformBoardAppearance.backgroundType;
+    const bgValue = freeformBoardAppearance.backgroundValue;
+    const showDotGrid = freeformBoardAppearance.showDotGrid;
+    const dotPattern = 'radial-gradient(rgba(148, 163, 184, 0.38) 1px, transparent 1.2px)';
 
     if (bgType === 'color' && bgValue) {
-      return { backgroundColor: bgValue };
+      return showDotGrid
+        ? {
+          backgroundColor: bgValue,
+          backgroundImage: dotPattern,
+          backgroundSize: '18px 18px',
+          backgroundPosition: '0 0',
+        }
+        : { backgroundColor: bgValue };
     }
     if (bgType === 'gradient' && bgValue) {
-      return { background: bgValue };
+      return showDotGrid
+        ? {
+          backgroundImage: `${dotPattern}, ${bgValue}`,
+          backgroundSize: '18px 18px, auto',
+          backgroundPosition: '0 0, center',
+        }
+        : { background: bgValue };
     }
     if (bgType === 'image' && bgValue) {
-      return {
-        backgroundImage: `url("${bgValue}")`,
-        backgroundSize: 'cover',
-        backgroundPosition: 'center',
-        backgroundRepeat: 'no-repeat',
-      };
+      return showDotGrid
+        ? {
+          backgroundImage: `${dotPattern}, url("${bgValue}")`,
+          backgroundSize: '18px 18px, cover',
+          backgroundPosition: '0 0, center',
+          backgroundRepeat: 'repeat, no-repeat',
+        }
+        : {
+          backgroundImage: `url("${bgValue}")`,
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+          backgroundRepeat: 'no-repeat',
+        };
     }
-    return { backgroundColor: '#f3f4f6' };
-  }, [canvas?.background_type, canvas?.background_value]);
+    return showDotGrid
+      ? {
+        backgroundColor: '#f3f4f6',
+        backgroundImage: dotPattern,
+        backgroundSize: '18px 18px',
+      }
+      : { backgroundColor: '#f3f4f6' };
+  }, [canvas, freeformBoardAppearance]);
 
   const getGraphConnectHintStyle = useCallback((): React.CSSProperties => {
     const bgType = canvas?.background_type;
@@ -831,6 +939,10 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   const isTimelineLayout = canvas?.layout === 'timeline';
   const isMapLayout = canvas?.layout === 'map';
   const isFreeformLayout = canvas?.layout === 'freeform' || (!isWallLayout && !isColumnsLayout && !isKanbanLayout && !isGanttLayout && !isSchedulerLayout && !isGridLayout && !isDrawingLayout && !isTimelineLayout && !isMapLayout);
+  const sharedCanvasToolbarInsetPx =
+    canUseCanvasToolbar && !isToolbarCollapsed && (isMapLayout || isFreeformLayout || isTimelineLayout || isSchedulerLayout || isDrawingLayout || isColumnsLayout || isGridLayout)
+      ? 56
+      : 0;
   const currentMapStyleId =
     mapStyleIdOverride ||
     ((canvas?.settings as any)?.mapStyleId as string | undefined) ||
@@ -880,6 +992,137 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   const enableFreeformGraph = process.env.NEXT_PUBLIC_ENABLE_FREEFORM_GRAPH === 'true';
   const isFreeformGraphMode = isFreeformLayout && enableFreeformGraph;
 
+  const getNewPostPosition = useCallback((cardWidth: number, cardHeight: number) => {
+    const viewport = containerRef.current;
+    const viewportWidth = viewport?.clientWidth || 1200;
+    const viewportHeight = viewport?.clientHeight || 800;
+    const scrollLeft = viewport?.scrollLeft || 0;
+    const scrollTop = viewport?.scrollTop || 0;
+    return {
+      x: Math.max(0, Math.round((scrollLeft + viewportWidth / 2) / canvasZoom - cardWidth / 2)),
+      y: Math.max(0, Math.round((scrollTop + viewportHeight / 2) / canvasZoom - cardHeight / 2)),
+    };
+  }, [canvasZoom]);
+
+  const getCanvasPointFromClient = useCallback((clientX: number, clientY: number) => {
+    const rect = containerRef.current?.getBoundingClientRect();
+    const scrollLeft = containerRef.current?.scrollLeft || 0;
+    const scrollTop = containerRef.current?.scrollTop || 0;
+    if (!rect) {
+      return { x: 0, y: 0 };
+    }
+
+    return {
+      x: Math.max(0, Math.round((clientX - rect.left + scrollLeft) / canvasZoom)),
+      y: Math.max(0, Math.round((clientY - rect.top + scrollTop) / canvasZoom)),
+    };
+  }, [canvasZoom]);
+
+  const openFreeformBoardMenuAt = useCallback((clientX: number, clientY: number) => {
+    const point = getCanvasPointFromClient(clientX, clientY);
+    setFreeformBoardMenu({
+      x: clientX,
+      y: clientY,
+      canvasX: point.x,
+      canvasY: point.y,
+    });
+  }, [getCanvasPointFromClient]);
+
+  const refreshClipboardAvailability = useCallback(async () => {
+    setCanPasteFromClipboard(Boolean(await clipboardManager.paste()));
+  }, []);
+
+  const persistFreeformBoardAppearance = useCallback(async (
+    updates: Partial<{ backgroundType: 'color' | 'gradient' | 'image'; backgroundValue: string; showDotGrid: boolean }>
+  ) => {
+    if (!canUseFreeformEditButton) {
+      toast.error('You do not have permission to change the board background');
+      return;
+    }
+
+    let nextAppearance = {
+      backgroundType: updates.backgroundType ?? freeformBoardAppearance.backgroundType,
+      backgroundValue: updates.backgroundValue ?? freeformBoardAppearance.backgroundValue,
+      showDotGrid: updates.showDotGrid ?? freeformBoardAppearance.showDotGrid,
+    };
+
+    if (nextAppearance.showDotGrid && nextAppearance.backgroundType === 'image') {
+      nextAppearance = {
+        ...nextAppearance,
+        backgroundType: 'color',
+        backgroundValue: '#f3f4f6',
+      };
+    }
+
+    setFreeformBoardAppearance(nextAppearance);
+
+    if (!canvasId) return;
+
+    try {
+      const currentBackgroundType = canvas?.background_type || 'color';
+      const currentBackgroundValue = canvas?.background_value || '#f3f4f6';
+      const dotGridStorageKey = getFreeformDotGridStorageKey(canvasId);
+      const currentShowDotGrid =
+        typeof window !== 'undefined' && dotGridStorageKey
+          ? window.localStorage.getItem(dotGridStorageKey) === 'true'
+          : false;
+
+      if (
+        nextAppearance.backgroundType !== currentBackgroundType ||
+        nextAppearance.backgroundValue !== currentBackgroundValue
+      ) {
+        const backgroundResponse = await supabase
+          .from('boards')
+          .update({
+            background_type: nextAppearance.backgroundType,
+            background_value: nextAppearance.backgroundValue,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', canvasId);
+
+        if (backgroundResponse.error) {
+          throw Object.assign(backgroundResponse.error, { scope: 'background' });
+        }
+      }
+
+      if (nextAppearance.showDotGrid !== currentShowDotGrid) {
+        if (typeof window !== 'undefined' && dotGridStorageKey) {
+          window.localStorage.setItem(dotGridStorageKey, String(nextAppearance.showDotGrid));
+        }
+      }
+    } catch (error) {
+      const serializedError = (() => {
+        if (error instanceof Error) {
+          return {
+            name: error.name,
+            message: error.message,
+            stack: error.stack,
+          };
+        }
+        if (error && typeof error === 'object') {
+          const record = error as Record<string, unknown>;
+          return {
+            ownKeys: Object.getOwnPropertyNames(record),
+            message: typeof record.message === 'string' ? record.message : undefined,
+            details: typeof record.details === 'string' ? record.details : undefined,
+            hint: typeof record.hint === 'string' ? record.hint : undefined,
+            code: typeof record.code === 'string' ? record.code : undefined,
+            status: typeof record.status === 'number' ? record.status : undefined,
+            scope: typeof record.scope === 'string' ? record.scope : undefined,
+            raw: record,
+          };
+        }
+        return { raw: error };
+      })();
+      console.warn('Failed to save freeform board appearance:', serializedError);
+      toast.error('Board background changed locally but could not be saved');
+    }
+  }, [canUseFreeformEditButton, canvasId, canvas?.background_type, canvas?.background_value, freeformBoardAppearance]);
+
+  useEffect(() => {
+    void refreshClipboardAvailability();
+  }, [refreshClipboardAvailability]);
+
   const {
     saveNote,
     saveLink,
@@ -919,6 +1162,8 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     setWallPendingPostDraft,
     setWallPlacementPromptOpen,
     padlets,
+    setPadlets,
+    getNewPostPosition,
     onDrawingPlacementStart: (draft) => {
       setDrawingPendingDraft(draft as any);
       setDrawingContainerPromptOpen(true);
@@ -971,6 +1216,11 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     () => padlets.filter(p => !p.metadata?.parentId),
     [padlets]
   );
+
+  useEffect(() => {
+    if (!selectedPadletId || selectedPadletIds.length === 0) return;
+    setSelectedPadletIds([]);
+  }, [selectedPadletId, selectedPadletIds.length, setSelectedPadletIds]);
 
 
 
@@ -1797,6 +2047,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     canvasZoom,
     padlets,
     setPadlets,
+    selectedPadletIds,
     isLineMode,
     isAnyEditorOpen,
     isFreeformGraphMode,
@@ -2164,6 +2415,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       if (selectedPadletId === id) {
         setSelectedPadletId(null);
       }
+      if (selectedPadletIds.includes(id)) {
+        setSelectedPadletIds(selectedPadletIds.filter((padletId) => padletId !== id));
+      }
       toast.success('Post deleted');
       debugCanvasLogger('saveEnd', { op: 'deletePadletById', id });
     } catch (e) {
@@ -2227,6 +2481,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       // Clear selection if needed
       if (selectedPadletId === padletId) {
         setSelectedPadletId(null);
+      }
+      if (selectedPadletIds.includes(padletId)) {
+        setSelectedPadletIds(selectedPadletIds.filter((id) => id !== padletId));
       }
       debugCanvasLogger('saveEnd', { op: 'requestDeletePadlet', padletId });
     } catch (err) {
@@ -2596,6 +2853,200 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     }
   }, [padlets, supabase, fetchData]);
 
+  const handleMapPinContainerOpen = useCallback((post: Padlet) => {
+    if (post.type === 'container') {
+      setMapActiveContainerId(post.id);
+      setSelectedPadletId(post.id);
+    }
+  }, []);
+
+  const handleMapPinContainerClose = useCallback(() => {
+    setMapActiveContainerId(null);
+    if (isMapLayout) setSelectedPadletId(null);
+  }, [isMapLayout]);
+
+  const handleMapSidebarClose = useCallback(() => {
+    setIsMapSidebarOpen(false);
+  }, []);
+
+  useEffect(() => {
+    if (!isMapLayout || !selectedLineId) return;
+    setIsMapSidebarOpen(false);
+  }, [isMapLayout, selectedLineId]);
+
+  const handleMapRefreshChildren = useCallback(() => {
+    fetchData();
+  }, [fetchData]);
+
+  const mapInstanceRef = useRef<mapboxgl.Map | null>(null);
+  // mapReadyVersion bumps when a new map instance is handed off; drives render-loop re-subscription
+  const [mapReadyVersion, setMapReadyVersion] = useState(0);
+  const handleMapReady = useCallback((map: mapboxgl.Map) => {
+    mapInstanceRef.current = map;
+    setMapReadyVersion(v => v + 1);
+  }, []);
+
+
+  // Map-aware line creation: unprojects pixel coords → lng/lat so lines move with the map
+  const createLineForMap = useCallback((
+    rawStartX: number, rawStartY: number, rawEndX: number, rawEndY: number
+  ) => {
+    const mapInst = mapInstanceRef.current;
+    if (isMapLayout && mapInst) {
+      const startGeo = mapInst.unproject([rawStartX, rawStartY]);
+      const endGeo = mapInst.unproject([rawEndX, rawEndY]);
+      createLineFromCoords(rawStartX, rawStartY, rawEndX, rawEndY, {
+        startLng: startGeo.lng, startLat: startGeo.lat,
+        endLng: endGeo.lng, endLat: endGeo.lat,
+      });
+    } else {
+      createLineFromCoords(rawStartX, rawStartY, rawEndX, rawEndY);
+    }
+  }, [isMapLayout, createLineFromCoords]);
+
+  // Frame-accurate projected lines for map mode
+  const [projectedMapLines, setProjectedMapLines] = useState<CanvasLine[]>([]);
+  // Keep a ref so the render-loop callback always sees the latest lines without re-subscribing
+  const linesRef = useRef(lines);
+  useEffect(() => { linesRef.current = lines; }, [lines]);
+
+  // Helper: reproject geo-anchored points to current screen pixels
+  const reprojectLines = useCallback((src: CanvasLine[], mapInst: mapboxgl.Map): CanvasLine[] =>
+    src.map((line) => {
+      if (!line.points?.length || line.points[0].lng == null) return line;
+      const pts = line.points.map((p) => {
+        if (p.lng == null || p.lat == null) return p;
+        const px = mapInst.project({ lng: p.lng, lat: p.lat });
+        return { ...p, x: px.x, y: px.y };
+      });
+      const s = pts[0], e = pts[pts.length - 1];
+      return {
+        ...line,
+        start_x: s.x, start_y: s.y,
+        end_x: e.x, end_y: e.y,
+        control_x: (s.x + e.x) / 2, control_y: Math.min(s.y, e.y) - 50,
+        points: pts,
+      };
+    })
+  , []);
+
+  // Lightweight equality guard — avoids setState churn on every map render frame
+  const projectionChanged = useCallback((prev: CanvasLine[], next: CanvasLine[]): boolean => {
+    if (prev.length !== next.length) return true;
+    for (let i = 0; i < next.length; i++) {
+      const ap = prev[i].points, bp = next[i].points;
+      if (!ap || !bp || ap.length !== bp.length) return true;
+      for (let j = 0; j < bp.length; j++) {
+        if (Math.round(ap[j].x) !== Math.round(bp[j].x) ||
+            Math.round(ap[j].y) !== Math.round(bp[j].y)) return true;
+      }
+    }
+    return false;
+  }, []);
+
+  // Render-loop subscription: reprojects on the same cadence as the Mapbox GL render cycle
+  // so arrows stay locked to the map during pan/zoom without React lag
+  useEffect(() => {
+    const mapInst = mapInstanceRef.current;
+    if (!isMapLayout || !mapInst) return;
+
+    const onRender = () => {
+      const next = reprojectLines(linesRef.current, mapInst);
+      setProjectedMapLines(prev => projectionChanged(prev, next) ? next : prev);
+    };
+
+    mapInst.on('render', onRender);
+    onRender(); // project immediately on subscription
+    return () => { mapInst.off('render', onRender); };
+  }, [isMapLayout, mapReadyVersion, reprojectLines, projectionChanged]);
+
+  // Also reproject when lines change due to DB sync / new line creation
+  // (the render event may not fire when the map is idle)
+  useEffect(() => {
+    const mapInst = mapInstanceRef.current;
+    if (!isMapLayout || !mapInst) return;
+    setProjectedMapLines(reprojectLines(lines, mapInst));
+  }, [lines, isMapLayout, reprojectLines]);
+
+  const activeMapLineIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (selectedLineId) ids.add(selectedLineId);
+    if (lineEditModeId) ids.add(lineEditModeId);
+    return ids;
+  }, [lineEditModeId, selectedLineId]);
+  const projectedMapLinesById = useMemo(
+    () => new Map(projectedMapLines.map((line) => [line.id, line])),
+    [projectedMapLines]
+  );
+  // Ref so the layout effect can read the latest projected values without depending on them
+  // (adding projectedMapLinesById to deps creates a cycle: updateLineLocal → lines changes
+  // → projectedMapLines changes → projectedMapLinesById changes → layout effect fires again).
+  const projectedMapLinesByIdRef = useRef(projectedMapLinesById);
+  projectedMapLinesByIdRef.current = projectedMapLinesById;
+
+  const passiveMapLines = useMemo(
+    () => lines.filter((line) => !activeMapLineIds.has(line.id)),
+    [activeMapLineIds, lines]
+  );
+
+  // When a line first becomes active (selected/editing), seed its x/y in `lines` state
+  // from the already-projected passive map snapshot so the SVG edit overlay uses the
+  // exact same screen geometry the user was just seeing in Mapbox.
+  useLayoutEffect(() => {
+    if (!isMapLayout) return;
+    for (const id of activeMapLineIds) {
+      const projected = projectedMapLinesByIdRef.current.get(id);
+      if (projected) {
+        updateLineLocal(id, {
+          points: projected.points,
+          start_x: projected.start_x, start_y: projected.start_y,
+          end_x: projected.end_x, end_y: projected.end_y,
+          control_x: projected.control_x, control_y: projected.control_y,
+        });
+      }
+    }
+    // projectedMapLinesByIdRef is intentionally excluded — it's read via ref to break the
+    // update cycle. updateLineLocal is stable ([] deps) so safe to include.
+  }, [activeMapLineIds, isMapLayout, updateLineLocal]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Active map lines are sourced from live `lines` state (not projectedMapLines) so that
+  // drag updates from updateLineLocal(...) are immediately reflected without being
+  // overwritten by the passive reproject effect.
+  const mapOverlayLines = useMemo(
+    () => isMapLayout
+      ? lines.filter((line) => activeMapLineIds.has(line.id))
+      : lines,
+    [lines, activeMapLineIds, isMapLayout]
+  );
+  const shouldEnableMapLinePointerEvents = isMapLayout && (selectedLineId !== null || lineEditModeId !== null);
+
+  // When a geo-anchored line is saved after editing, recompute its lng/lat from current pixels
+  const saveLineToDbMapAware = useCallback(async (lineId: string) => {
+    const mapInst = mapInstanceRef.current;
+    if (isMapLayout && mapInst) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const line = linesRef.current.find(l => l.id === lineId);
+      if (line?.points?.length && line.points[0].lng != null) {
+        const geoPoints = line.points.map((p) => {
+          const geo = mapInst.unproject([p.x, p.y]);
+          return { ...p, lng: geo.lng, lat: geo.lat };
+        });
+        await updateLine(lineId, {
+          start_x: line.start_x, start_y: line.start_y,
+          end_x: line.end_x, end_y: line.end_y,
+          control_x: line.control_x, control_y: line.control_y,
+          points: geoPoints,
+        });
+        return;
+      }
+    }
+    await saveLineToDb(lineId);
+  }, [isMapLayout, saveLineToDb, updateLine]);
+
+  const handleLineContextMenu = useCallback((lineId: string, x: number, y: number) => {
+    setLineContextMenuState({ lineId, x, y });
+  }, []);
+
   const handleAddPostToSection = useCallback((sectionId: number) => {
     setPadletToEdit({
       id: 'new',  // Mark as new so handleSaveNote does INSERT not UPDATE
@@ -2612,6 +3063,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     if (!padlet) return;
 
     await clipboardManager.copy([{ type: 'post', data: padlet }]);
+    await refreshClipboardAvailability();
   };
 
   // Cut padlet (copy + delete)
@@ -2729,38 +3181,110 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     }
   };
 
-  const handlePaste = async () => {
+  const buildPastedPadletData = useCallback((
+    sourcePadlet: Padlet,
+    nextId: string,
+    targetPosition?: { x: number; y: number },
+    anchorPosition?: { x: number; y: number },
+  ) => {
+    const rest = { ...sourcePadlet } as Partial<Padlet>;
+    delete rest.id;
+    delete rest.created_at;
+    delete rest.updated_at;
+    delete (rest as any).location_geog;
+
+    const sourceMetadata = { ...((rest.metadata as Record<string, unknown>) || {}) } as Record<string, unknown>;
+    delete sourceMetadata.parentId;
+    delete sourceMetadata.sectionId;
+    delete sourceMetadata.sectionPosition;
+    delete sourceMetadata.childPadletIds;
+
+    const nextPosition = targetPosition && anchorPosition
+      ? {
+        x: targetPosition.x + ((sourcePadlet.position_x || 0) - anchorPosition.x),
+        y: targetPosition.y + ((sourcePadlet.position_y || 0) - anchorPosition.y),
+      }
+      : {
+        x: (sourcePadlet.position_x || 0) + 20,
+        y: (sourcePadlet.position_y || 0) + 20,
+      };
+
+    return {
+      ...rest,
+      id: nextId,
+      board_id: canvasId,
+      position_x: nextPosition.x,
+      position_y: nextPosition.y,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      metadata: sourceMetadata,
+    };
+  }, [canvasId]);
+
+  const handlePaste = async (targetPosition?: { x: number; y: number }) => {
     const clipboard = await clipboardManager.paste();
     if (!clipboard || !canvasId) return;
 
     try {
-      for (const item of clipboard.items) {
-        if (item.type === 'post') {
-          const rest = { ...item.data };
-          delete rest.id;
-          delete rest.created_at;
-          delete rest.updated_at;
-          const newPadlet = {
-            ...rest,
-            id: crypto.randomUUID(),
-            position_x: (rest.position_x || 0) + 40,
-            position_y: (rest.position_y || 0) + 40,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          };
+      const postItems = clipboard.items
+        .filter((item): item is { type: 'post'; data: Padlet } => item.type === 'post' && !!item.data);
+      const anchorPosition = postItems.length > 0
+        ? {
+          x: Math.min(...postItems.map((item) => item.data.position_x || 0)),
+          y: Math.min(...postItems.map((item) => item.data.position_y || 0)),
+        }
+        : undefined;
+      const pastedIds: string[] = [];
 
+      for (const item of postItems) {
+          const nextId = crypto.randomUUID();
+          const newPadlet = buildPastedPadletData(item.data, nextId, targetPosition, anchorPosition);
           const { data, error } = await insertPadletAndSelectSingle(newPadlet);
 
           if (error) throw error;
           if (data) {
             setPadlets(prev => [...prev, data as Padlet]);
+            pastedIds.push(data.id);
           }
-        }
       }
+
+      setLastPastedPadletIds(pastedIds);
+      setSelectedPadletId(null);
+      setSelectedPadletIds(pastedIds);
+      await refreshClipboardAvailability();
     } catch (e) {
       console.error('Failed to paste padlet:', e);
     }
   };
+
+  const handleUndoPaste = useCallback(async () => {
+    if (lastPastedPadletIds.length === 0) return;
+
+    const idsToDelete = [...lastPastedPadletIds];
+    setPadlets((prev) => prev.filter((padlet) => !idsToDelete.includes(padlet.id)));
+    setLastPastedPadletIds([]);
+    setSelectedPadletId(null);
+    setSelectedPadletIds([]);
+
+    try {
+      const { error } = await supabase
+        .from('padlets')
+        .delete()
+        .in('id', idsToDelete);
+      if (error) throw error;
+    } catch (error) {
+      console.error('Failed to undo pasted padlets:', error);
+      toast.error('Failed to undo paste');
+      fetchData(false);
+    }
+  }, [fetchData, lastPastedPadletIds, setSelectedPadletIds, supabase]);
+
+  const handleSelectAllPadlets = useCallback(() => {
+    const allPadletIds = rootPadlets.map((padlet) => padlet.id);
+    setSelectedLineId(null);
+    setSelectedPadletId(null);
+    setSelectedPadletIds(allPadletIds);
+  }, [rootPadlets, setSelectedLineId, setSelectedPadletIds]);
 
   // Create a synced copy (duplicate with link to original)
   const createSyncedCopy = async (id: string) => {
@@ -3388,6 +3912,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
 
   useCanvasShortcuts({
     selectedPadletId,
+    selectedPadletIds,
     showDeleteConfirm,
     isNoteEditorOpen,
     isTableEditorOpen,
@@ -3398,6 +3923,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     requestDeletePadlet,
     setShowDeleteConfirm,
     setSelectedPadletId,
+    setSelectedPadletIds,
     isLineMode,
     lineEditModeId,
     selectedLineId,
@@ -3411,6 +3937,8 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     setSelectedLineId,
     movePadletLayer,
     deleteLine,
+    onSelectAll: handleSelectAllPadlets,
+    onUndoPaste: handleUndoPaste,
   });
   // === END LINE REGION ===
 
@@ -4247,13 +4775,13 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
 
   const stableActions = useStableCanvasActions(rawActions);
 
-  const configState: CanvasConfigState = {
+  const configState: CanvasConfigState = useMemo(() => ({
     canvasZoom,
     canvasId,
     isFreeformGraphMode,
     canUseFreeformEditButton,
     isColumnsLayout,
-  };
+  }), [canvasZoom, canvasId, isFreeformGraphMode, canUseFreeformEditButton, isColumnsLayout]);
 
   const editorState: CanvasEditorState = {
     padletToEdit,
@@ -4360,27 +4888,81 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   if (!canvasId) return <div className="h-screen flex items-center justify-center text-red-600">Missing canvas ID</div>;
   if (error || !canvas) return <div className="h-screen flex items-center justify-center text-red-600">{error || 'Canvas not found'}</div>;
 
-  const sidebarTools = [
-    { icon: StickyNote, label: "Note", color: "text-yellow-600", bg: "hover:bg-yellow-50", type: "note" },
-    { icon: Link, label: "Link", color: "text-blue-600", bg: "hover:bg-blue-50", type: "link" },
-    { icon: CheckSquare, label: "To-do", color: "text-green-600", bg: "hover:bg-green-50", type: "todo" },
-    ...(canvas?.layout !== 'timeline' ? [{ icon: MoveRight, label: "Line", color: "text-gray-600", bg: "hover:bg-gray-50", type: "line" }] : []),
-    ...(isFreeformGraphMode ? [{ icon: GraphLineToolIcon, label: "Graph Line", color: "text-indigo-600", bg: "hover:bg-indigo-50", type: "graph-line" }] : []),
-    ...(isFreeformLayout ? [{ icon: Columns3, label: "Column", color: "text-violet-700", bg: "hover:bg-violet-50", type: "container" }] : []),
-    { icon: Table, label: "Table", color: "text-purple-600", bg: "hover:bg-purple-50", type: "table" },
-    { icon: MessageCircle, label: "Comment", color: "text-orange-600", bg: "hover:bg-orange-50", type: "comment" },
-    { icon: ImageIcon, label: "Add image", color: "text-pink-600", bg: "hover:bg-pink-50", type: "image" },
-    { icon: Upload, label: "Upload", color: "text-cyan-600", bg: "hover:bg-cyan-50", type: "upload" },
-    { icon: CloudDownload, label: "Import", color: "text-sky-600", bg: "hover:bg-sky-50", type: "import" },
-    { icon: PenTool, label: "Draw", color: "text-red-600", bg: "hover:bg-red-50", type: "draw" },
-    { icon: BookOpen, label: "Library", color: "text-blue-600", bg: "hover:bg-blue-50", type: "library", disabled: isTimelineLayout && chronoMode === 'vertical', hint: "Switch to Horizontal or Alternating view to use the Library." },
-    ...(isMapLayout ? [{ icon: MapIcon, label: "Map", color: "text-emerald-600", bg: "hover:bg-emerald-50", type: "map-style" }] : []),
-    ...(isMapLayout ? [{ icon: MapPinToolbarIcon, label: "Pins panel", color: "text-slate-700", bg: "hover:bg-slate-100", type: "map-sidebar" }] : []),
-    { icon: Sparkles, label: "AI Drawing", color: "text-purple-600", bg: "hover:bg-purple-50", type: "ai-component" },
-    { icon: Trash2, label: "Trash", color: "text-gray-500", bg: "hover:bg-red-50", type: "trash" },
+  // Canvas-specific tools: only tools that are unique to the active canvas type
+  const canvasSpecificTools = [
+    { icon: MoveRight, label: "Line", color: "text-gray-600", bg: "hover:bg-gray-50", type: "line" },
+    ...(isMapLayout ? [
+      { icon: MapPinToolbarIcon, label: "Pins panel", color: "text-slate-700", bg: "hover:bg-slate-100", type: "map-sidebar" },
+      { icon: MapIcon, label: "Map", color: "text-emerald-600", bg: "hover:bg-emerald-50", type: "map-style" },
+    ] : []),
+    ...(isFreeformLayout ? [
+      ...(isFreeformGraphMode ? [{ icon: GraphLineToolIcon, label: "Graph Line", color: "text-indigo-600", bg: "hover:bg-indigo-50", type: "graph-line" }] : []),
+      { icon: Columns3, label: "Column", color: "text-violet-700", bg: "hover:bg-violet-50", type: "container" },
+    ] : []),
+  ];
+
+  const toolbarGroups = [
+    // Group 1 — Canvas-specific (always visible, priority 1); only rendered when there are canvas-specific tools
+    ...(canvasSpecificTools.length > 0 ? [{
+      id: 'canvas',
+      label: isMapLayout ? 'Map' : 'Canvas',
+      tools: canvasSpecificTools,
+      priority: 1,
+      alwaysVisible: true,
+    }] : []),
+    // Group 2 — Create (always visible, priority 2); AI is always first
+    {
+      id: 'create',
+      label: 'Create',
+      tools: [
+        { icon: Sparkles, label: "AI", color: "text-purple-600", bg: "hover:bg-purple-50", type: "ai-component" },
+        { icon: StickyNote, label: "Note", color: "text-yellow-600", bg: "hover:bg-yellow-50", type: "note" },
+        { icon: CheckSquare, label: "To-do", color: "text-green-600", bg: "hover:bg-green-50", type: "todo" },
+        { icon: MessageCircle, label: "Comment", color: "text-orange-600", bg: "hover:bg-orange-50", type: "comment" },
+        { icon: Table, label: "Table", color: "text-purple-600", bg: "hover:bg-purple-50", type: "table" },
+      ],
+      priority: 2,
+      alwaysVisible: true,
+    },
+    // Group 3 — Structure (priority 3)
+    {
+      id: 'structure',
+      label: 'Blocks',
+      tools: [
+        { icon: BookOpen, label: "Library", color: "text-blue-600", bg: "hover:bg-blue-50", type: "library",
+          disabled: isTimelineLayout && chronoMode === 'vertical',
+          hint: "Switch to Horizontal or Alternating view to use the Library." },
+      ],
+      priority: 3,
+    },
+    // Group 4 — Media (priority 4)
+    {
+      id: 'media',
+      label: 'Media',
+      tools: [
+        { icon: Link, label: "Link", color: "text-blue-600", bg: "hover:bg-blue-50", type: "link" },
+        { icon: ImageIcon, label: "Add image", color: "text-pink-600", bg: "hover:bg-pink-50", type: "image" },
+        { icon: Upload, label: "Upload", color: "text-cyan-600", bg: "hover:bg-cyan-50", type: "upload" },
+        { icon: CloudDownload, label: "Import", color: "text-sky-600", bg: "hover:bg-sky-50", type: "import" },
+      ],
+      priority: 4,
+    },
+    // Group 5 — Draw (priority 5, collapsed first on small screens)
+    {
+      id: 'draw',
+      label: 'Draw',
+      tools: [
+        { icon: PenTool, label: "Draw", color: "text-red-600", bg: "hover:bg-red-50", type: "draw" },
+      ],
+      priority: 5,
+    },
   ];
 
   const handleToolClick = (toolType: string) => {
+    if (selectedPadletIds.length > 0) {
+      setSelectedPadletIds([]);
+    }
+
     if (toolType !== 'graph-line' && isGraphConnectMode) {
       setIsGraphConnectMode(false);
       setGraphConnectSource(null);
@@ -4712,21 +5294,34 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   }
 
   return (
-    <div className={`h-screen w-full flex overflow-hidden min-w-0 ${isWallLayout || isGridLayout ? '' : ''} ${isSchedulerLayout ? 'scheduler-mode' : ''}`}>
-      {/* Sidebar with icons only, labels on hover */}
-      <CanvasSidebar
-        sidebarTools={sidebarTools}
-        selectedPadletId={selectedPadletId}
-        selectedLineId={selectedLineId}
-        isLineMode={isLineMode}
-        isGraphConnectMode={isGraphConnectMode}
-        handleToolClick={handleToolClick}
-        onBack={() => router.push('/dashboard')}
-      />
-
+    <div className={`h-screen w-full flex overflow-y-hidden overflow-x-visible min-w-0 ${isWallLayout || isGridLayout ? '' : ''} ${isSchedulerLayout ? 'scheduler-mode' : ''}`}>
       {/* Main Canvas */}
       <div className="flex-1 min-w-0 min-h-0 flex flex-col relative">
         {/* Container size controls removed */}
+        {canUseCanvasToolbar && !isToolbarCollapsed && (
+          <div className="absolute left-0 top-0 bottom-0 z-[3000]">
+            <CanvasSidebar
+              groups={toolbarGroups}
+              isLineMode={isLineMode}
+              isGraphConnectMode={isGraphConnectMode}
+              isCollapsed={isToolbarCollapsed}
+              onToggleCollapse={handleToggleToolbarCollapsed}
+              handleToolClick={handleToolClick}
+              onBack={() => router.push('/dashboard')}
+            />
+          </div>
+        )}
+
+        {canUseCanvasToolbar && isToolbarCollapsed && (
+          <button
+            type="button"
+            className="absolute left-0 top-6 z-[3000] flex h-9 w-9 -translate-x-1/2 items-center justify-center rounded-md border border-gray-200 bg-white/95 text-gray-600 shadow-sm transition hover:bg-gray-50"
+            onClick={handleToggleToolbarCollapsed}
+            aria-label="Expand toolbar"
+          >
+            <span className="text-sm leading-none" aria-hidden="true">{'>'}</span>
+          </button>
+        )}
 
         {/* Editor Modals - Wrapped with stopPropagation for defense-in-depth */}
         <CanvasModals
@@ -4786,12 +5381,13 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
             ? 'overflow-x-hidden overflow-y-auto overscroll-x-none'
             : isColumnsLayout
               ? 'overflow-x-auto overflow-y-hidden p-6'
-              : isTimelineLayout || isDrawingLayout
+              : isTimelineLayout || isDrawingLayout || isMapLayout
                 ? 'overflow-hidden p-0'
                 : 'overflow-x-auto overflow-y-auto p-6'
             }`}
           style={{
             ...canvasBackgroundStyle,
+            ...(sharedCanvasToolbarInsetPx > 0 ? { paddingLeft: `${sharedCanvasToolbarInsetPx}px` } : {}),
             ...(isWallLayout || isGridLayout ? { scrollbarGutter: 'stable' } : {}),
           }}
           containerRef={containerRef}
@@ -4931,6 +5527,13 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
               await handleFreeformLibraryDrop(e);
             }
           }}
+          onContextMenu={(e) => {
+            if (!isFreeformLayout || isAnyEditorOpen) return;
+            if ((e.target as HTMLElement).closest('[data-padlet-id]')) return;
+            e.preventDefault();
+            e.stopPropagation();
+            openFreeformBoardMenuAt(e.clientX, e.clientY);
+          }}
           onClick={() => {
             // Guard: If an editor is open, don't clear state on canvas click
             if (isAnyEditorOpen) return;
@@ -4948,8 +5551,10 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
 
             if (!isLineMode) {
               setSelectedPadletId(null);
+              setSelectedPadletIds([]);
               setSelectedLineId(null);
               setLineEditModeId(null); // Also clear line edit mode
+              setFreeformBoardMenu(null);
               setCaptionPopupPadletId(null);
               setTextStylePadletId(null);
               setImageToolbarPadletId(null);
@@ -5006,7 +5611,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
             } else if (isLineMode) {
               hintContent = (
                 <>
-                  <kbd style={kbdStyle}>Click</kbd> to start a line, <kbd style={kbdStyle}>Click</kbd> to place end point.{' '}
+                  Hold the left mouse button and drag to draw the line.{' '}
                   <kbd style={kbdStyle}>Esc</kbd> to cancel
                 </>
               );
@@ -5108,7 +5713,17 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
 
             return (
               <div className="pointer-events-none fixed left-1/2 bottom-4 -translate-x-1/2 z-[2200]">
-                <span className="block text-center" style={hintStyle}>
+                <span
+                  className="block text-center"
+                  style={{
+                    ...hintStyle,
+                    backgroundColor: 'rgba(229, 231, 235, 0.9)',
+                    color: '#111827',
+                    padding: '10px 14px',
+                    borderRadius: '10px',
+                    boxShadow: '0 2px 8px rgba(15, 23, 42, 0.12)',
+                  }}
+                >
                   {hintContent}
                 </span>
               </div>
@@ -5118,18 +5733,19 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           {/* Layer 1: Background Lines (Behind Padlets) */}
           <div className="absolute inset-0" style={{ zIndex: 0, pointerEvents: 'none' }}>
             <SimpleLineRenderer
-              lines={lines}
+              lines={isMapLayout ? [] : lines}
               selectedLineId={selectedLineId}
               onSelectLine={handleLineSelect}
               onUpdateLine={updateLineLocal}
-              onSaveLine={saveLineToDb}
-              isLineMode={isLineMode}
-              onCreateLine={createLineFromCoords}
-              isEditMode={lineEditModeId !== null}
+              onSaveLine={saveLineToDbMapAware}
+              isLineMode={isMapLayout ? false : isLineMode}
+              onCreateLine={createLineForMap}
+              isEditMode={isMapLayout ? false : lineEditModeId !== null}
               onToggleEditMode={handleToggleLineEditMode}
               layer="back"
               draggingLineId={draggingLineId}
               onDragChange={handleLineDragChange}
+              forcePointerEvents={false}
             />
           </div>
 
@@ -5191,8 +5807,10 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
               // don't double-create a freeform post on top.
               if ((e.target as HTMLElement).closest?.('.scheduler-wrapper, .rbc-calendar')) return;
               const containerRect = e.currentTarget.getBoundingClientRect();
-              const dropX = (e.clientX - containerRect.left) / canvasZoom;
-              const dropY = (e.clientY - containerRect.top) / canvasZoom;
+              const scrollLeft = containerRef.current?.scrollLeft || 0;
+              const scrollTop = containerRef.current?.scrollTop || 0;
+              const dropX = (e.clientX - containerRect.left + scrollLeft) / canvasZoom;
+              const dropY = (e.clientY - containerRect.top + scrollTop) / canvasZoom;
 
               // 1. Check for SVG drop (External Clipart)
               let svgData = e.dataTransfer.getData('application/collabboard-svg');
@@ -5757,18 +6375,11 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
               <div className="absolute inset-0 pointer-events-auto z-10 bg-white">
                 <MapCanvas
                   posts={padlets}
+                  lines={passiveMapLines}
                   mapStyle={currentMapStyleId}
                   canEditPosts={canUseFreeformEditButton}
-                  onPinContainerOpen={(post) => {
-                    if (post.type === 'container') {
-                      setMapActiveContainerId(post.id);
-                      setSelectedPadletId(post.id);
-                    }
-                  }}
-                  onPinContainerClose={() => {
-                    setMapActiveContainerId(null);
-                    if (isMapLayout) setSelectedPadletId(null);
-                  }}
+                  onPinContainerOpen={handleMapPinContainerOpen}
+                  onPinContainerClose={handleMapPinContainerClose}
                   onEditPinContainer={canUseFreeformEditButton ? ((post) => {
                     if (post.type !== 'container') return;
                     setPadletToEdit(post);
@@ -5783,10 +6394,14 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                   onChangePinContainerColor={canUseFreeformEditButton ? ((post, color) => {
                     updatePadletMetadata(post.id, { cardColor: color });
                   }) : undefined}
+                  onAddPostToPinContainer={canUseFreeformEditButton ? ((post, toolType) => {
+                    handleMapPinContainerOpen(post);
+                    handleToolClick(toolType);
+                  }) : undefined}
                   sections={sections}
                   canManageSections={canEditWorkspace(currentWorkspaceRole)}
                   canReorderPosts={canEditWorkspace(currentWorkspaceRole)}
-                  onAddSection={() => handleAddSection()}
+                  onAddSection={handleAddSection}
                   onRenameSection={(sectionId, title) => {
                     const numeric = Number(sectionId);
                     if (!Number.isFinite(numeric)) return;
@@ -5800,13 +6415,15 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                   onReorderSections={handleReorderMapSections}
                   onMovePostToSection={handleMoveMapPost}
                   isSidebarOpen={isMapSidebarOpen}
-                  onSidebarClose={() => setIsMapSidebarOpen(false)}
+                  onSidebarClose={handleMapSidebarClose}
                   currentUserId={user?.id}
                   currentUserName={user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'User'}
                   currentUserAvatar={user?.user_metadata?.avatar_url}
-                  onRefreshChildren={() => {
-                    fetchData();
-                  }}
+                  onRefreshChildren={handleMapRefreshChildren}
+                  onMapReady={handleMapReady}
+                  onSelectLine={handleLineSelect}
+                  onLineContextMenu={handleLineContextMenu}
+                  onToggleEditMode={handleToggleLineEditMode}
                   onUpdateChildComments={async (childId, comments) => {
                     const nowIso = new Date().toISOString();
 
@@ -5900,11 +6517,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                   onUpdatePostLocation={async (postId, { lng, lat, label }) => {
                     const existing = padlets.find((p) => p.id === postId);
                     if (!existing) return;
-                    const titleRaw = (existing.title || '').trim();
-                    const isCoordinateTitle =
-                      /^-?\d+(\.\d+)?\s*,\s*-?\d+(\.\d+)?$/.test(titleRaw) ||
-                      /^\(\s*-?\d+(\.\d+)?\s*,\s*-?\d+(\.\d+)?\s*\)$/.test(titleRaw);
-                    const nextTitle = label && (!titleRaw || isCoordinateTitle) ? label : existing.title;
+                    const nextTitle = label || existing.title;
                     const nextMetadata = {
                       ...(existing.metadata as any),
                       mapLocation: { lng, lat, label },
@@ -5960,6 +6573,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                     isLineMode={isLineMode}
                     isDrawingMode={isDrawingMode}
                     selectedPadletId={selectedPadletId}
+                    selectedPadletIds={selectedPadletIds}
                     setSelectedPadletId={setSelectedPadletId}
                     setGraphConnectSelection={setGraphConnectSelection}
                     graphRefreshToken={graphRefreshToken}
@@ -5980,22 +6594,21 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
             style={{ zIndex: isFreeformGraphMode ? 2000 : 500, pointerEvents: 'none' }}
           >
             <SimpleLineRenderer
-              lines={lines}
+              lines={mapOverlayLines}
               selectedLineId={selectedLineId}
               onSelectLine={handleLineSelect}
               onUpdateLine={updateLineLocal}
-              onSaveLine={saveLineToDb}
+              onSaveLine={saveLineToDbMapAware}
               isLineMode={isLineMode}
-              onCreateLine={createLineFromCoords}
+              onCreateLine={createLineForMap}
               isEditMode={lineEditModeId !== null}
               onToggleEditMode={handleToggleLineEditMode}
               layer="front"
               draggingLineId={draggingLineId}
               onDragChange={handleLineDragChange}
-              onContextMenu={(lineId, x, y) => {
-                setLineContextMenuState({ lineId, x, y });
-              }}
+              onContextMenu={handleLineContextMenu}
               canvasZoom={canvasZoom}
+              forcePointerEvents={shouldEnableMapLinePointerEvents}
             />
           </div>
 
@@ -6177,7 +6790,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           )}
 
           {
-            selectedLineId && lines.find(l => l.id === selectedLineId) && (
+            !isMapLayout && selectedLineId && lines.find(l => l.id === selectedLineId) && (
               <LineToolbar
                 line={lines.find(l => l.id === selectedLineId)!}
                 onUpdate={(updates) => updateLine(selectedLineId, updates)}
@@ -6656,6 +7269,57 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
             handleChangeLineLayer={handleChangeLineLayer}
           />
         </CanvasViewport>
+
+        {isFreeformLayout && freeformBoardMenu && (
+          <FreeformCanvasBoardMenu
+            x={freeformBoardMenu.x}
+            y={freeformBoardMenu.y}
+            isEditable={canUseFreeformEditButton}
+            showGraphLine={isFreeformGraphMode}
+            canPaste={canPasteFromClipboard}
+            canUndoPaste={lastPastedPadletIds.length > 0}
+            showDotGrid={freeformBoardAppearance.showDotGrid}
+            onClose={() => setFreeformBoardMenu(null)}
+            onPaste={() => {
+              void handlePaste({ x: freeformBoardMenu.canvasX, y: freeformBoardMenu.canvasY });
+              setFreeformBoardMenu(null);
+            }}
+            onUndo={() => {
+              void handleUndoPaste();
+              setFreeformBoardMenu(null);
+            }}
+            onSelectAll={() => {
+              handleSelectAllPadlets();
+              setFreeformBoardMenu(null);
+            }}
+            onToolAction={(toolType) => {
+              handleToolClick(toolType);
+              setFreeformBoardMenu(null);
+            }}
+            onOpenBackgroundEditor={() => setFreeformWallpaperDialogOpen(true)}
+            onToggleDotGrid={() => {
+              void persistFreeformBoardAppearance({
+                showDotGrid: !freeformBoardAppearance.showDotGrid,
+              });
+            }}
+          />
+        )}
+
+        <WallpaperSelector
+          isOpen={freeformWallpaperDialogOpen}
+          onClose={() => setFreeformWallpaperDialogOpen(false)}
+          currentSelection={{
+            type: freeformBoardAppearance.backgroundType,
+            value: freeformBoardAppearance.backgroundValue,
+          }}
+          onSelect={(type, value) => {
+            setFreeformWallpaperDialogOpen(false);
+            void persistFreeformBoardAppearance({
+              backgroundType: type as 'color' | 'gradient' | 'image',
+              backgroundValue: value,
+            });
+          }}
+        />
 
         {/* Zoom Controls (Excalidraw-style) */}
         {!isWallLayout && !isColumnsLayout && !isGridLayout && !isDrawingLayout && !isTimelineLayout && !isKanbanLayout && !isSchedulerLayout && !isMapLayout && (

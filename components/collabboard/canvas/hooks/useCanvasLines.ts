@@ -70,7 +70,10 @@ export function useCanvasLines({
     }
   }, [canvasId, supabase, setLines, setSelectedLineId]);
 
-  const createLineFromCoords = useCallback((rawStartX: number, rawStartY: number, rawEndX: number, rawEndY: number) => {
+  const createLineFromCoords = useCallback((
+    rawStartX: number, rawStartY: number, rawEndX: number, rawEndY: number,
+    geoPoints?: { startLng: number; startLat: number; endLng: number; endLat: number }
+  ) => {
     const startX = rawStartX / canvasZoom;
     const startY = rawStartY / canvasZoom;
     const endX = rawEndX / canvasZoom;
@@ -88,8 +91,8 @@ export function useCanvasLines({
       end_x: endX,
       end_y: endY,
       points: [
-        { x: startX, y: startY, type: 'smooth' },
-        { x: endX, y: endY, type: 'smooth' }
+        { x: startX, y: startY, type: 'smooth', ...(geoPoints ? { lng: geoPoints.startLng, lat: geoPoints.startLat } : {}) },
+        { x: endX, y: endY, type: 'smooth', ...(geoPoints ? { lng: geoPoints.endLng, lat: geoPoints.endLat } : {}) },
       ],
       color: '#374151',
       stroke_width: 2,

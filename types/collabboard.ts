@@ -76,6 +76,10 @@ export interface Canvas {
   layout: LayoutType;
   background_type?: 'color' | 'gradient' | 'image';
   background_value?: string;
+  metadata?: {
+    showDotGrid?: boolean;
+    [key: string]: any;
+  };
   container_size?: 'small' | 'medium' | 'large';
   settings?: {
     chronoMode?: ChronoMode;
@@ -279,6 +283,9 @@ export interface CanvasLine {
     x: number;
     y: number;
     type: 'corner' | 'smooth';
+    // Geographic anchors — populated in map layout so lines reproject on pan/zoom
+    lng?: number;
+    lat?: number;
   }>;
   // Attachments (optional - when connected to posts)
   start_post_id?: string;

@@ -140,6 +140,7 @@ export interface FreeformPadletCardsProps {
 
   // Selection
   selectedPadletId: string | null;
+  selectedPadletIds: string[];
   setSelectedPadletId: (id: string | null) => void;
   setGraphConnectSelection: (sel: { id: string; side: any; nonce: number }) => void;
   graphRefreshToken: number;
@@ -159,10 +160,14 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
     rootPadlets, padlets, setPadlets, user, containerRef,
     isDragging, draggingPadletId, isGraphConnectMode,
     isLineMode, isDrawingMode,
-    selectedPadletId, setSelectedPadletId, setGraphConnectSelection, graphRefreshToken,
+    selectedPadletId, selectedPadletIds, setSelectedPadletId, setGraphConnectSelection, graphRefreshToken,
     closeAllToolbars, handlePadletMouseDown, getClickedSide,
     stableActions,
   } = props;
+  const isPadletSelected = React.useCallback(
+    (padletId: string) => selectedPadletId === padletId || selectedPadletIds.includes(padletId),
+    [selectedPadletId, selectedPadletIds]
+  );
 
   const {
     canvasZoom,
@@ -711,7 +716,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
               </div>
             )}
             {/* Reaction Picker - Positioned to the right of the image card */}
-            {selectedPadletId === padlet.id && isImageEmojiOpen && (
+            {isPadletSelected(padlet.id) && isImageEmojiOpen && (
               <div
                 className="absolute left-full top-0 ml-3 z-[1100] animate-in fade-in zoom-in duration-200 pointer-events-auto"
                 onClick={(e) => e.stopPropagation()}
@@ -1108,15 +1113,15 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
 
             <div
               key={padlet.id}
-              className={`overflow-hidden flex flex-col bg-white border border-gray-200 group relative transition-all ${selectedPadletId === padlet.id ? 'ring-2 ring-blue-500' : ''
+              className={`overflow-hidden flex flex-col bg-white border border-gray-200 group relative transition-all ${isPadletSelected(padlet.id) ? 'ring-2 ring-blue-500' : ''
                 }`}
               style={{
                 width: '360px',
                 backgroundColor: padlet.metadata?.cardColor || '#ffffff',
-                zIndex: selectedPadletId === padlet.id ? 1000 : ((padlet.metadata as any)?.zIndex || 100),
+                zIndex: isPadletSelected(padlet.id) ? 1000 : ((padlet.metadata as any)?.zIndex || 100),
               }}
               onPointerDownCapture={(e) => {
-                if (isImageColorPickerOpen && selectedPadletId === padlet.id) {
+                if (isImageColorPickerOpen && isPadletSelected(padlet.id)) {
                   e.stopPropagation();
                 }
               }}
@@ -1201,7 +1206,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
               </div>
 
               {/* Reactions Row - Lower left, above caption */}
-              {((padlet.metadata?.reactions?.length ?? 0) > 0 || selectedPadletId === padlet.id) && (
+              {((padlet.metadata?.reactions?.length ?? 0) > 0 || isPadletSelected(padlet.id)) && (
                 <div className="flex items-center gap-1.5 px-3 py-1.5">
                   <ReactionDisplay
                     reactions={padlet.metadata?.reactions || []}
@@ -1498,11 +1503,11 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
         >
           <div
             key={padlet.id}
-            className={`absolute group cursor-pointer transition-colors duration-200 ${selectedPadletId === padlet.id ? 'ring-2 ring-blue-500 rounded-lg shadow-xl' : 'hover:shadow-xl'}`}
+            className={`absolute group cursor-pointer transition-colors duration-200 ${isPadletSelected(padlet.id) ? 'ring-2 ring-blue-500 rounded-lg shadow-xl' : 'hover:shadow-xl'}`}
             style={{
               width: padlet.width || 180,
               height: padlet.height || 220,
-              zIndex: selectedPadletId === padlet.id ? 20000 : ((padlet.metadata as any)?.zIndex || 100),
+              zIndex: isPadletSelected(padlet.id) ? 20000 : ((padlet.metadata as any)?.zIndex || 100),
             }}
             onPointerDownCapture={(e) => {
               // When color panel is open, prevent pointer events from starting any drag
@@ -1538,7 +1543,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                 setPadletToEdit(padlet);
                 setIsCardViewerOpen(true);
               }}
-              isSelected={selectedPadletId === padlet.id}
+              isSelected={isPadletSelected(padlet.id)}
               isCardView={padlet.metadata?.showCardView}
               reactions={padlet.metadata?.reactions || []}
               onAddReaction={() => {
@@ -1675,7 +1680,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                 </div>
               </div>
             )}
-            {selectedPadletId === padlet.id && isImageEmojiOpen && !cardToolbarPadletId && (
+            {isPadletSelected(padlet.id) && isImageEmojiOpen && !cardToolbarPadletId && (
               <div className="absolute left-full top-0 ml-3 z-[70] animate-in fade-in zoom-in duration-200">
                 <div className="shadow-2xl rounded-xl overflow-hidden border border-gray-200 bg-white">
                   <EmojiPicker
@@ -2028,7 +2033,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
             // Collapsed Marker - Pin with number inside
             <div className="relative">
               <div
-                className={`relative cursor-pointer transition-transform hover:scale-110 flex flex-col items-center ${selectedPadletId === padlet.id ? 'ring-2 ring-blue-500 ring-offset-2 rounded-lg' : ''}`}
+                className={`relative cursor-pointer transition-transform hover:scale-110 flex flex-col items-center ${isPadletSelected(padlet.id) ? 'ring-2 ring-blue-500 ring-offset-2 rounded-lg' : ''}`}
                 style={{ zIndex: (padlet.metadata as any)?.zIndex || 100 }}
                 onClick={(e) => {
                   e.stopPropagation();
@@ -2375,7 +2380,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
           ) : (
             // Expanded Post
             <div
-              className={`group cursor-pointer transition-all ${selectedPadletId === padlet.id ? '' : 'hover:shadow-xl'} relative`}
+              className={`group cursor-pointer transition-all ${isPadletSelected(padlet.id) ? '' : 'hover:shadow-xl'} relative`}
               style={{
                 width: padlet.width || 300,
                 zIndex: (padlet.metadata as any)?.zIndex || 100,
@@ -2388,7 +2393,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                   badgeColor={padlet.metadata?.badgeColor || '#facc15'}
                   topStrip={padlet.metadata?.topStrip || 'transparent'}
                   commentTitle={padlet.metadata?.commentTitle || 'Comments'}
-                  selected={selectedPadletId === padlet.id}
+                  selected={isPadletSelected(padlet.id)}
                   showMenu={true}
                   onMenuClick={() => {
                     closeAllToolbars();
@@ -2824,8 +2829,8 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
         const isNote = padlet.type === 'text';
         const content = (
           <div
-            className={`group overflow-hidden flex flex-col cursor-pointer ${selectedPadletId === padlet.id
-              ? 'ring-2 ring-blue-500 ring-offset-2'
+            className={`group overflow-hidden flex flex-col cursor-pointer ${isPadletSelected(padlet.id)
+                ? 'ring-2 ring-blue-500 ring-offset-2'
               : ''
               }`}
             style={{
@@ -4746,7 +4751,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
               })()}
 
               {/* Emoji Picker - Positioned to the right */}
-              {selectedPadletId === padlet.id && isImageEmojiOpen && (
+              {isPadletSelected(padlet.id) && isImageEmojiOpen && (
                 <div className="absolute left-full top-0 ml-3 z-[9999] animate-in fade-in zoom-in duration-200">
                   <div className="shadow-2xl rounded-xl overflow-hidden border border-gray-200 bg-white">
                     <EmojiPicker

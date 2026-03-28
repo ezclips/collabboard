@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git show:*)",
+      "Read(//c/Users/rmeic/.claude/projects/c--Users-rmeic-Projects-dev-starter/**)",
+      "Bash(sed -n '209,225p' app/dashboard/canvas/[id]/CanvasClient.tsx)",
+      "Bash(sed -n '4904,4950p' app/dashboard/canvas/[id]/CanvasClient.tsx)",
+      "Bash(sed -n '4904,5000p' app/dashboard/canvas/[id]/CanvasClient.tsx)",
+      "Bash(sed -n '209,250p' app/dashboard/canvas/[id]/CanvasClient.tsx)",
+      "Bash(sed -n '5275,5310p' app/dashboard/canvas/[id]/CanvasClient.tsx)",
+      "Bash(sed -n '5290,5310p' app/dashboard/canvas/[id]/CanvasClient.tsx)",
+      "Bash(sed -n '5297,5400p' app/dashboard/canvas/[id]/CanvasClient.tsx)",
+      "Bash(sed -n '920,945p' app/dashboard/canvas/[id]/CanvasClient.tsx)",
+      "Bash(sed -n '1,80p' app/dashboard/canvas/[id]/CanvasClient.tsx)",
+      "Bash(sed -n '209,240p' app/dashboard/canvas/[id]/CanvasClient.tsx)",
+      "Bash(sed -n '5297,5320p' app/dashboard/canvas/[id]/CanvasClient.tsx)",
+      "Bash(sed -n '150,180p' app/dashboard/canvas/[id]/CanvasClient.tsx)",
+      "Bash(sed -n '240,260p' app/dashboard/canvas/[id]/CanvasClient.tsx)",
+      "Bash(sed -n '5295,5305p' app/dashboard/canvas/[id]/CanvasClient.tsx)",
+      "Bash(sed -n '5360,5400p' app/dashboard/canvas/[id]/CanvasClient.tsx)"
+    ]
+  }
+}

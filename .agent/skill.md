@@ -756,3 +756,61 @@ For tasks involving architecture changes, refactoring, system design, or multi-s
 
 If the output clearly fails one of those checks, invoke `skill_improver`.
 Do not invoke it for purely stylistic preferences.
+
+---
+
+# Freeform Canvas DOM Structure — Critical Rule
+
+## Rule
+
+The DOM structure of `FreeformPadletCards` is behavior-critical.
+
+Even small JSX extractions — badges, swatches, icons, wrappers, helper subcomponents — can break:
+- drag behavior
+- zoom stability
+- positioning
+- popup anchoring
+
+## Why
+
+- Absolute positioning + transform scaling depend on specific ancestor chain
+- `getBoundingClientRect` anchor math is sensitive to wrapper insertion
+- `closest(...)` traversal assumes a known DOM hierarchy
+- Pointer and drag logic is tied to specific event targets in the tree
+
+## Guardrails
+
+- Do not extract JSX from `FreeformPadletCards` unless explicitly proven safe against drag, zoom, and popup behavior
+- Treat DOM hierarchy as part of the interaction engine, not just a render concern
+- Prefer in-place optimization over component extraction
+- Do not add wrappers or alter ancestor structure casually
+
+## Known Failure Patterns
+
+- Extracting a JSX subtree from an interaction-sensitive DOM node breaks drag or zoom
+- Added wrapper elements change the coordinate reference frame for `getBoundingClientRect`
+- Changed event targets break popup anchor positioning
+
+---
+
+# Freeform Position Persistence — Critical Rule
+
+## Rule
+
+Freeform post position is persistence-critical. The position stored in the DB is the single source of truth on reopen.
+
+## Guardrails
+
+- Persist freeform positions only in canvas-space coordinates
+- Use `(clientCoord - containerRect.origin + scrollOffset) / canvasZoom` for all coordinate conversions
+- Never use random coordinates for new freeform post placement — use viewport-center canvas-space coordinates
+- One drag interaction must produce exactly one final DB commit; duplicate mouseup paths must not be registered
+- Editor/form open snapshots (`padletToEdit`) must never become a second position authority — do not write `position_x` / `position_y` from editor state in existing-post update payloads
+- Always destructure `{ error }` from Supabase `.update()` / `.insert()` and throw on failure; silent Supabase errors leave local UI correct but DB stale
+
+## Known Failure Patterns
+
+- Supabase update fails silently → local UI shows moved coordinates but DB keeps old coordinates → reopen restores old position and appears to undo user work
+- Duplicate `mouseup` listeners (one ref-based, one stale closure) both fire → second call writes pre-drag coordinates from stale `padlets` closure after first call correctly committed
+- Missing scroll offset in drop coordinate calculation → `(clientX - rect.left) / zoom` omits `scrollLeft` / `scrollTop` → dropped item persists at wrong canvas position
+- Editor snapshot `padletToEdit` written back to DB in existing-post save → overwrites correct dragged position → reopen jumps post back to editor-open location

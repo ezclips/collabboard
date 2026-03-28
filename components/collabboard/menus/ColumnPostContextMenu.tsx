@@ -17,6 +17,8 @@ interface ColumnPostContextMenuProps {
     children: React.ReactNode;
     padlet: Padlet;
     onSelect: () => void;
+    open?: boolean;
+    onOpenChange?: (open: boolean) => void;
     onOpen?: () => void;
     // New: openTargets for container children submenu
     openTargets?: Padlet[];
@@ -52,12 +54,18 @@ interface ColumnPostContextMenuProps {
     editPositionLabel?: string;
     onOpenGoogleMaps?: () => void;
     onOpenOsm?: () => void;
+    addPostItems?: Array<{ label: string; type: string }>;
+    onAddPostType?: (type: string) => void;
+    addPostLabel?: string;
+    deleteLabel?: string;
 }
 
 export function ColumnPostContextMenu({
     children,
     padlet,
     onSelect,
+    open: controlledOpen,
+    onOpenChange,
     onOpen,
     openTargets,
     onOpenTarget,
@@ -92,9 +100,15 @@ export function ColumnPostContextMenu({
     editPositionLabel = 'Edit pin position',
     onOpenGoogleMaps,
     onOpenOsm,
+    addPostItems,
+    onAddPostType,
+    addPostLabel = 'Add post',
+    deleteLabel = 'Delete post',
 }: ColumnPostContextMenuProps) {
-    const [open, setOpen] = React.useState(false);
+    const [uncontrolledOpen, setUncontrolledOpen] = React.useState(false);
     const menuId = React.useId();
+    const isControlled = controlledOpen !== undefined;
+    const open = isControlled ? controlledOpen : uncontrolledOpen;
 
     const hasOpenTargets = Boolean(openTargets && openTargets.length > 0 && onOpenTarget);
     const resolveOpenTargetLabel = (target: Padlet) => {
@@ -107,7 +121,8 @@ export function ColumnPostContextMenu({
         const handleCloseMenus = (event: Event) => {
             const detail = (event as CustomEvent<string>).detail;
             if (detail !== menuId) {
-                setOpen(false);
+                if (!isControlled) setUncontrolledOpen(false);
+                onOpenChange?.(false);
             }
         };
 
@@ -141,9 +156,11 @@ export function ColumnPostContextMenu({
             {...{ open, onOpenChange: (nextOpen: boolean) => {
                 if (nextOpen) {
                     onSelect();
+                    onOpen?.();
                     window.dispatchEvent(new CustomEvent('collabboard-close-post-context-menus', { detail: menuId }));
                 }
-                setOpen(nextOpen);
+                if (!isControlled) setUncontrolledOpen(nextOpen);
+                onOpenChange?.(nextOpen);
             }} as any}
         >
             <ContextMenu.Trigger asChild>
@@ -155,6 +172,26 @@ export function ColumnPostContextMenu({
                     className="min-w-[240px] bg-white/95 backdrop-blur-sm rounded-md overflow-hidden p-1 shadow-[0px_10px_38px_-10px_rgba(22,_23,_24,_0.35),_0px_10px_20px_-15px_rgba(22,_23,_24,_0.2)] border border-gray-200"
                     style={{ zIndex: 9999 }}
                 >
+                    {addPostItems && addPostItems.length > 0 && onAddPostType ? (
+                        <ContextMenu.Sub>
+                            <ContextMenu.SubTrigger className="group text-[13px] leading-none text-slate-700 rounded-[3px] flex items-center h-8 px-2 relative select-none outline-none data-[disabled]:text-slate-300 data-[disabled]:pointer-events-none data-[highlighted]:bg-slate-100 data-[highlighted]:text-slate-900 cursor-pointer">
+                                <span className="flex-1">{addPostLabel}</span>
+                                <span className="ml-2 flex items-center"><ChevronRight size={14} /></span>
+                            </ContextMenu.SubTrigger>
+                            <ContextMenu.Portal>
+                                <ContextMenu.SubContent className="min-w-[180px] bg-white/95 backdrop-blur-sm rounded-md overflow-hidden p-1 shadow-lg border border-gray-200" style={{ zIndex: 10000 }}>
+                                    {addPostItems.map((item) => (
+                                        <ContextMenuItem
+                                            key={item.type}
+                                            label={item.label}
+                                            onClick={() => onAddPostType(item.type)}
+                                            icon={<Plus size={14} />}
+                                        />
+                                    ))}
+                                </ContextMenu.SubContent>
+                            </ContextMenu.Portal>
+                        </ContextMenu.Sub>
+                    ) : null}
                     {/* Main actions - Edit post with pencil icon */}
                     {hasOpenTargets ? (
                         openTargets!.length === 1 ? (
@@ -254,7 +291,7 @@ export function ColumnPostContextMenu({
                             onClick={onDuplicate}
                         />
                     )}
-                    {onDelete && <ContextMenuItem label="Delete post" icon={<Trash2 size={16} />} onClick={onDelete} className="text-red-600 focus:text-red-600 focus:bg-red-50" />}
+                    {onDelete && <ContextMenuItem label={deleteLabel} icon={<Trash2 size={16} />} onClick={onDelete} className="text-red-600 focus:text-red-600 focus:bg-red-50" />}
                 </ContextMenu.Content>
             </ContextMenu.Portal>
         </ContextMenu.Root>

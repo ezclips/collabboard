@@ -1,7 +1,7 @@
 // components/collabboard/canvas/layouts/WallLayoutRenderer.tsx
 "use client";
 
-import { useState, useEffect, useRef } from 'react';
+import { memo, useState, useEffect, useRef } from 'react';
 import { PadletComponent } from '../PadletComponent';
 import type { Padlet } from '@/types/collabboard';
 
@@ -14,7 +14,7 @@ interface WallLayoutRendererProps {
   currentUser: any;
 }
 
-export function WallLayoutRenderer({
+function WallLayoutRendererBase({
   padlets,
   onUpdatePadlet,
   onDeletePadlet,
@@ -149,3 +149,5 @@ export function WallLayoutRenderer({
     </div>
   );
 }
+
+export const WallLayoutRenderer = memo(WallLayoutRendererBase);

@@ -13,6 +13,8 @@ type PostPopupProps = {
   allPadlets: Padlet[];
   canEdit?: boolean;
   onClose: () => void;
+  contextMenuOpen?: boolean;
+  onContextMenuOpenChange?: (open: boolean) => void;
   onEditContainer?: (post: Padlet) => void;
   onEditPost?: (post: Padlet) => void;
   onDeleteContainer?: (post: Padlet) => void;
@@ -30,6 +32,8 @@ export default function PostPopup({
   allPadlets,
   canEdit = false,
   onClose,
+  contextMenuOpen,
+  onContextMenuOpenChange,
   onEditContainer,
   onEditPost,
   onDeleteContainer,
@@ -183,10 +187,12 @@ export default function PostPopup({
     <ColumnPostContextMenu
       padlet={post}
       onSelect={() => {}}
+      onOpenChange={onContextMenuOpenChange}
       onEdit={canEdit && onEditContainer ? () => onEditContainer(post) : undefined}
       openTargets={orderedOpenTargets}
       onOpenTarget={canEdit ? onEditPost : undefined}
       onDelete={canEdit && onDeleteContainer ? () => onDeleteContainer(post) : undefined}
+      deleteLabel="Delete map pin"
       onChangeColor={canEdit && onChangeContainerColor ? (color) => onChangeContainerColor(post, color) : undefined}
       onEditPosition={canEdit && hasLocation && onEditLocation ? () => onEditLocation(post) : undefined}
       editPositionLabel="Edit Location"

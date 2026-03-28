@@ -34,7 +34,7 @@ function DropIndicator() {
     );
 }
 
-function SortableContainerItem({ id, children, disabled, widthClass }: { id: string; children: React.ReactNode; disabled?: boolean; widthClass?: string }) {
+function SortableContainerItem({ id, children, disabled, widthClass, containerId }: { id: string; children: React.ReactNode; disabled?: boolean; widthClass?: string; containerId?: string }) {
     const {
         attributes,
         listeners,
@@ -56,6 +56,7 @@ function SortableContainerItem({ id, children, disabled, widthClass }: { id: str
             style={style}
             {...attributes}
             {...listeners}
+            {...(containerId ? { 'data-container-id': containerId } : {})}
             className={`relative shrink-0 outline-none group/sortable ${widthClass || 'w-[280px]'}`}
         >
             {/* Content */}
@@ -408,7 +409,7 @@ export default function RowLane({
                                     <React.Fragment key={post.id}>
                                         {showIndicator && <DropIndicator />}
 
-                                        <SortableContainerItem id={post.id} widthClass={widthClass} disabled={!isEditable}>
+                                        <SortableContainerItem id={post.id} widthClass={widthClass} disabled={!isEditable} containerId={post.id}>
                                             <ColumnPostContextMenu
                                                 padlet={post}
                                                 onSelect={() => { }}

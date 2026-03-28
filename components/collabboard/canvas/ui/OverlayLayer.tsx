@@ -290,6 +290,18 @@ export default function OverlayLayer({
         onSendToBack={() => {
           if (lineContextMenuState) handleChangeLineLayer(lineContextMenuState.lineId, 'back');
         }}
+        onToggleStartArrow={() => {
+          if (!lineContextMenuState) return;
+          const line = lines.find((l) => l.id === lineContextMenuState.lineId);
+          if (!line) return;
+          updateLine(lineContextMenuState.lineId, { start_arrow: !line.start_arrow });
+        }}
+        onToggleEndArrow={() => {
+          if (!lineContextMenuState) return;
+          const line = lines.find((l) => l.id === lineContextMenuState.lineId);
+          if (!line) return;
+          updateLine(lineContextMenuState.lineId, { end_arrow: !line.end_arrow });
+        }}
         onColorChange={(color) => {
           if (lineContextMenuState) updateLine(lineContextMenuState.lineId, { color });
         }}

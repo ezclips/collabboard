@@ -28,6 +28,7 @@ export interface CanvasEditorsState {
 // ── Selection group ────────────────────────────────────────────────────────────
 export interface CanvasSelectionState {
   selectedPadletId: string | null;
+  selectedPadletIds: string[];
   selectedLineId: string | null;
   isGraphConnectMode: boolean;
   graphConnectSource: { id: string; side: GraphSide } | null;
@@ -63,6 +64,7 @@ export const initialCanvasState: CanvasStoreState = {
   },
   selection: {
     selectedPadletId: null,
+    selectedPadletIds: [],
     selectedLineId: null,
     isGraphConnectMode: false,
     graphConnectSource: null,

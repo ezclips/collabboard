@@ -111,11 +111,12 @@ export default function LineToolbar({
     return (
         <div
             ref={toolbarRef}
-            className="fixed bg-white rounded-lg shadow-xl border border-gray-200 z-50 select-none"
+            className="fixed bg-white rounded-lg shadow-xl border border-gray-200 z-[2500] select-none"
             style={{
                 left: position.x,
                 top: position.y,
                 cursor: isDragging ? 'grabbing' : 'grab',
+                pointerEvents: 'auto',
             }}
             onMouseDown={handleMouseDown}
             onClick={(e) => e.stopPropagation()}

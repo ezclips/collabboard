@@ -13,6 +13,8 @@ interface UseCanvasSelectionParams {
 export function useCanvasSelection({ canvasState, dispatch }: UseCanvasSelectionParams) {
   const selectedPadletId = canvasState.selection.selectedPadletId;
   const setSelectedPadletId = (v: string | null) => dispatch({ type: 'SELECTION_PATCH', payload: { selectedPadletId: v } });
+  const selectedPadletIds = canvasState.selection.selectedPadletIds;
+  const setSelectedPadletIds = (v: string[]) => dispatch({ type: 'SELECTION_PATCH', payload: { selectedPadletIds: v } });
 
   const isGraphConnectMode = canvasState.selection.isGraphConnectMode;
   const setIsGraphConnectMode = (v: boolean) => dispatch({ type: 'SELECTION_PATCH', payload: { isGraphConnectMode: v } });
@@ -44,6 +46,8 @@ export function useCanvasSelection({ canvasState, dispatch }: UseCanvasSelection
   return {
     selectedPadletId,
     setSelectedPadletId,
+    selectedPadletIds,
+    setSelectedPadletIds,
     isGraphConnectMode,
     setIsGraphConnectMode,
     graphConnectSource,

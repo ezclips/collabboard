@@ -1,11 +1,12 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import Map, { Marker, NavigationControl, type MapMouseEvent, type MapRef } from 'react-map-gl/mapbox';
+import Map, { Layer, Marker, NavigationControl, Source, type MapMouseEvent, type MapRef } from 'react-map-gl/mapbox';
 type MapLayerMouseEvent = MapMouseEvent;
 import 'mapbox-gl/dist/mapbox-gl.css';
 import type mapboxgl from 'mapbox-gl';
-import type { BoardSection, Padlet } from '@/types/collabboard';
+import type { Feature, FeatureCollection, LineString } from 'geojson';
+import type { BoardSection, CanvasLine, Padlet } from '@/types/collabboard';
 import { getPadletMapLocation } from '@/lib/map/geojson';
 import MapSearchControl from '@/components/map/MapSearchControl';
 import MarkersLayer, {
@@ -13,12 +14,15 @@ import MarkersLayer, {
 } from '@/components/map/MarkersLayer';
 import PostPopup from '@/components/map/PostPopup';
 import MapSidebar from '@/components/map/MapSidebar';
+import { ColumnPostContextMenu } from '@/components/collabboard/menus/ColumnPostContextMenu';
+import { FREEFORM_BOARD_TOOL_ITEMS } from '@/components/collabboard/canvas/ui/FreeformCanvasBoardMenu';
 
 type CreateMode = 'idle' | 'search' | 'dropPin' | 'compose' | 'reposition';
 
 type ClickableFeature = {
+  id?: string | number;
   layer?: { id?: string };
-  properties?: { cluster_id?: number; postId?: string };
+  properties?: { cluster_id?: number; postId?: string; lineId?: string };
   geometry: { coordinates: [number, number] };
 };
 
@@ -26,6 +30,12 @@ type PinMetadata = {
   childPadletIds?: string[];
   cardColor?: string;
 };
+
+const MAP_PASSIVE_LINES_SOURCE_ID = 'map-passive-lines';
+const MAP_PASSIVE_LINES_LAYER_ID = 'map-passive-lines-layer';
+const MAP_PASSIVE_LINES_HIT_LAYER_ID = 'map-passive-lines-hit-layer';
+const DEFAULT_LINE_COLOR = '#374151';
+const DEFAULT_LINE_WIDTH = 2;
 
 function hexToRgb(color: string): { r: number; g: number; b: number } | null {
   const value = color.trim();
@@ -58,6 +68,20 @@ function getContrastTextColor(bgColor: string): '#0f172a' | '#ffffff' {
   return luminance > 0.45 ? '#0f172a' : '#ffffff';
 }
 
+function getBearing(from: [number, number], to: [number, number]): number {
+  const [fromLng, fromLat] = from;
+  const [toLng, toLat] = to;
+  const fromLatRad = (fromLat * Math.PI) / 180;
+  const toLatRad = (toLat * Math.PI) / 180;
+  const deltaLngRad = ((toLng - fromLng) * Math.PI) / 180;
+  const y = Math.sin(deltaLngRad) * Math.cos(toLatRad);
+  const x =
+    Math.cos(fromLatRad) * Math.sin(toLatRad) -
+    Math.sin(fromLatRad) * Math.cos(toLatRad) * Math.cos(deltaLngRad);
+  return ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
+}
+
+
 type AddressPickerContext = {
   mode: 'create' | 'reposition' | 'pin';
   lng: number;
@@ -67,6 +91,7 @@ type AddressPickerContext = {
 
 type MapCanvasProps = {
   posts: Padlet[];
+  lines?: CanvasLine[];
   mapStyle?: string;
   canEditPosts?: boolean;
   onCreatePostAtLocation: (location: { lng: number; lat: number; label?: string }) => Promise<Padlet | null>;
@@ -77,6 +102,7 @@ type MapCanvasProps = {
   onEditPinPost?: (post: Padlet) => void;
   onDeletePinContainer?: (post: Padlet) => void;
   onChangePinContainerColor?: (post: Padlet, color: string) => void;
+  onAddPostToPinContainer?: (post: Padlet, toolType: string) => void;
   sections?: BoardSection[];
   canManageSections?: boolean;
   canReorderPosts?: boolean;
@@ -92,10 +118,15 @@ type MapCanvasProps = {
   currentUserAvatar?: string;
   onUpdateChildComments?: (childId: string, comments: unknown[]) => void;
   onRefreshChildren?: () => void;
+  onMapReady?: (map: mapboxgl.Map) => void;
+  onSelectLine?: (lineId: string | null) => void;
+  onLineContextMenu?: (lineId: string, x: number, y: number) => void;
+  onToggleEditMode?: (lineId: string) => void;
 };
 
-export default function MapCanvas({
+function MapCanvas({
   posts,
+  lines = [],
   mapStyle = 'mapbox://styles/mapbox/streets-v12',
   canEditPosts = false,
   onCreatePostAtLocation,
@@ -106,6 +137,7 @@ export default function MapCanvas({
   onEditPinPost,
   onDeletePinContainer,
   onChangePinContainerColor,
+  onAddPostToPinContainer,
   sections = [],
   canManageSections = false,
   canReorderPosts = false,
@@ -121,14 +153,27 @@ export default function MapCanvas({
   currentUserAvatar,
   onUpdateChildComments,
   onRefreshChildren,
+  onMapReady,
+  onSelectLine,
+  onLineContextMenu,
+  onToggleEditMode,
 }: MapCanvasProps) {
   const mapRef = useRef<MapRef | null>(null);
+  // Timestamp-based double-click detector for passive map lines.
+  // Tracks the last clicked line id and the time of that click so we can
+  // detect a second click on the same line within the threshold window
+  // without relying on the native `dblclick` event (which requires both
+  // clicks to land on the same DOM element — impossible when the first
+  // click is on the Mapbox canvas and the second on the SVG overlay).
+  const lastLineClickRef = useRef<{ lineId: string; at: number } | null>(null);
+  const DBLCLICK_MS = 350;
   const didAutoLocateRef = useRef(false);
   const mapToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
 
   const [createMode, setCreateMode] = useState<CreateMode>('idle');
   const [mapLoaded, setMapLoaded] = useState(false);
   const [selectedPostId, setSelectedPostId] = useState<string | null>(null);
+  const [activeMapContextMenuId, setActiveMapContextMenuId] = useState<string | null>(null);
   const [draftLocation, setDraftLocation] = useState<{ lng: number; lat: number; label?: string } | null>(null);
   const [editingPostId, setEditingPostId] = useState<string | null>(null);
   const [sortMode, setSortMode] = useState<'manual' | 'automatic'>('manual');
@@ -152,6 +197,87 @@ export default function MapCanvas({
     }
     return counts;
   }, [posts]);
+  const passiveLineGeoJson = useMemo<FeatureCollection<LineString, { lineId: string; color: string; strokeWidth: number }>>(() => {
+    const features: Array<Feature<LineString, { lineId: string; color: string; strokeWidth: number }>> = [];
+
+    for (const line of lines) {
+      const coordinates = (line.points ?? [])
+        .filter(
+          (point): point is NonNullable<CanvasLine['points']>[number] & { lng: number; lat: number } =>
+            Number.isFinite(point.lng) && Number.isFinite(point.lat)
+        )
+        .map((point) => [point.lng, point.lat] as [number, number]);
+
+      if (coordinates.length < 2) continue;
+
+      features.push({
+        type: 'Feature',
+        id: line.id,
+        geometry: {
+          type: 'LineString',
+          coordinates,
+        },
+        properties: {
+          lineId: line.id,
+          color: line.color || DEFAULT_LINE_COLOR,
+          strokeWidth: Number.isFinite(line.stroke_width) ? line.stroke_width : DEFAULT_LINE_WIDTH,
+        },
+      });
+    }
+
+    return {
+      type: 'FeatureCollection',
+      features,
+    };
+  }, [lines]);
+  const passiveLineArrowMarkers = useMemo(() => {
+    const markers: Array<{
+      key: string;
+      lng: number;
+      lat: number;
+      bearing: number;
+      color: string;
+    }> = [];
+
+    for (const line of lines) {
+      const coordinates = (line.points ?? [])
+        .filter(
+          (point): point is NonNullable<CanvasLine['points']>[number] & { lng: number; lat: number } =>
+            Number.isFinite(point.lng) && Number.isFinite(point.lat)
+        )
+        .map((point) => [point.lng, point.lat] as [number, number]);
+
+      if (coordinates.length < 2) continue;
+
+      const color = line.color || DEFAULT_LINE_COLOR;
+
+      if (line.end_arrow !== false) {
+        const end = coordinates[coordinates.length - 1];
+        const previous = coordinates[coordinates.length - 2];
+        markers.push({
+          key: `${line.id}::arrow-end`,
+          lng: end[0],
+          lat: end[1],
+          bearing: getBearing(previous, end),
+          color,
+        });
+      }
+
+      if (line.start_arrow) {
+        const start = coordinates[0];
+        const next = coordinates[1];
+        markers.push({
+          key: `${line.id}::arrow-start`,
+          lng: start[0],
+          lat: start[1],
+          bearing: getBearing(next, start),
+          color,
+        });
+      }
+    }
+
+    return markers;
+  }, [lines]);
 
   useEffect(() => {
     if (!selectedPostId) return;
@@ -285,6 +411,7 @@ export default function MapCanvas({
     }
 
     setSelectedPostId(null);
+    setActiveMapContextMenuId(null);
     onPinContainerClose?.();
   };
 
@@ -309,6 +436,45 @@ export default function MapCanvas({
       return;
     }
 
+    if (feature.layer?.id === MAP_PASSIVE_LINES_LAYER_ID || feature.layer?.id === MAP_PASSIVE_LINES_HIT_LAYER_ID) {
+      const lineId = typeof feature.properties?.lineId === 'string'
+        ? feature.properties.lineId
+        : (typeof feature.id === 'string' ? feature.id : null);
+      if (typeof lineId === 'string') {
+        const now = Date.now();
+        const last = lastLineClickRef.current;
+        if (last && last.lineId === lineId && now - last.at <= DBLCLICK_MS) {
+          // Second click on the same line within threshold → treat as double-click
+          lastLineClickRef.current = null;
+          onSelectLine?.(lineId);
+          onToggleEditMode?.(lineId);
+        } else {
+          lastLineClickRef.current = { lineId, at: now };
+          onSelectLine?.(lineId);
+        }
+      }
+      return;
+    }
+
+  };
+
+  const handleFeatureContextMenu = (event: MapLayerMouseEvent) => {
+    const feature = event.features?.[0] as unknown as ClickableFeature | undefined;
+    if (!feature) return;
+
+    if (feature.layer?.id !== MAP_PASSIVE_LINES_LAYER_ID && feature.layer?.id !== MAP_PASSIVE_LINES_HIT_LAYER_ID) {
+      return;
+    }
+
+    const lineId = typeof feature.properties?.lineId === 'string'
+      ? feature.properties.lineId
+      : (typeof feature.id === 'string' ? feature.id : null);
+
+    if (!lineId) return;
+
+    event.originalEvent.preventDefault();
+    onSelectLine?.(lineId);
+    onLineContextMenu?.(lineId, event.point.x, event.point.y);
   };
 
   const startReposition = (post: Padlet) => {
@@ -317,11 +483,13 @@ export default function MapCanvas({
     setEditingPostId(post.id);
     setDraftLocation({ lng: location.lng, lat: location.lat, label: location.label });
     setSelectedPostId(null);
+    setActiveMapContextMenuId(null);
     setCreateMode('reposition');
   };
 
   const openPinContainer = (post: Padlet) => {
     setSelectedPostId(post.id);
+    setActiveMapContextMenuId(null);
     onPinContainerOpen?.(post);
   };
 
@@ -435,8 +603,8 @@ export default function MapCanvas({
         initialViewState={{ longitude: 8.5417, latitude: 47.3769, zoom: 1.8 }}
         style={{ width: '100%', height: '100%' }}
         dragRotate={false}
-        interactiveLayerIds={[CLUSTER_LAYER_ID]}
-        onLoad={() => setMapLoaded(true)}
+        interactiveLayerIds={[CLUSTER_LAYER_ID, MAP_PASSIVE_LINES_LAYER_ID, MAP_PASSIVE_LINES_HIT_LAYER_ID]}
+        onLoad={() => { setMapLoaded(true); if (mapRef.current) onMapReady?.(mapRef.current.getMap()); }}
         onClick={(event) => {
           if (eventCameFromPopup(event)) return;
           if (event.features?.length) {
@@ -445,9 +613,79 @@ export default function MapCanvas({
           }
           handleMapClick(event);
         }}
+        onContextMenu={(event) => {
+          if (eventCameFromPopup(event)) return;
+          if (!event.features?.length) return;
+          handleFeatureContextMenu(event as unknown as MapLayerMouseEvent);
+        }}
       >
         <NavigationControl position="bottom-right" />
         <MarkersLayer posts={postsWithLocation} />
+        <Source id={MAP_PASSIVE_LINES_SOURCE_ID} type="geojson" data={passiveLineGeoJson}>
+          <Layer
+            id={MAP_PASSIVE_LINES_LAYER_ID}
+            type="line"
+            paint={{
+              'line-color': ['coalesce', ['get', 'color'], DEFAULT_LINE_COLOR],
+              'line-width': ['coalesce', ['to-number', ['get', 'strokeWidth']], DEFAULT_LINE_WIDTH],
+            }}
+            layout={{
+              'line-cap': 'round',
+              'line-join': 'round',
+            }}
+          />
+          {/* Transparent hit-buffer layer: 20px wide, opacity 0 — widens click/right-click target area */}
+          <Layer
+            id={MAP_PASSIVE_LINES_HIT_LAYER_ID}
+            type="line"
+            paint={{
+              'line-color': 'transparent',
+              'line-width': 20,
+              'line-opacity': 0,
+            }}
+            layout={{
+              'line-cap': 'round',
+              'line-join': 'round',
+            }}
+          />
+        </Source>
+        {passiveLineArrowMarkers.map((arrow) => (
+          <Marker
+            key={arrow.key}
+            longitude={arrow.lng}
+            latitude={arrow.lat}
+            anchor="center"
+            style={{ pointerEvents: 'none' }}
+          >
+            {/*
+              SVG arrowhead matching the SimpleLineRenderer arrow geometry:
+                path "M0,0 L-10,-5 L-7,0 L-10,5 Z" (tip at origin, body extends left)
+              Scaled 1.4x: "M0,0 L-14,-7 L-10,0 L-14,7 Z"
+
+              viewBox "-16 -9 32 18" centers the tip (0,0) at the SVG pixel center (16,9).
+              Marker anchor="center" places that center at the endpoint coordinate.
+
+              Rotation: geographic bearing B (0=north, 90=east) → CSS rotate(B-90deg)
+              so bearing 90 (east) → rotate(0deg) → tip points right ✓
+              transform-origin: center keeps tip fixed during rotation.
+            */}
+            <svg
+              width="32"
+              height="18"
+              viewBox="-16 -9 32 18"
+              style={{
+                transform: `rotate(${arrow.bearing - 90}deg)`,
+                transformOrigin: 'center center',
+                overflow: 'visible',
+                pointerEvents: 'none',
+                display: 'block',
+              }}
+              aria-hidden="true"
+            >
+              <path d="M0,0 L-14,-7 L-10,0 L-14,7 Z" fill={arrow.color} />
+            </svg>
+          </Marker>
+        ))}
 
         {postsWithLocation.map((post) => {
           const location = getPadletMapLocation(post);
@@ -470,6 +708,57 @@ export default function MapCanvas({
           const pinTextColor = getContrastTextColor(pinColor);
           const pinTextOutlineColor = pinTextColor === '#ffffff' ? '#0f172a' : '#ffffff';
           const pinStrokeColor = '#334155';
+          const pinMenuId = `pin:${post.id}`;
+          const popupMenuId = `popup:${post.id}`;
+          const isPinMenuActive = activeMapContextMenuId === pinMenuId;
+          const isPopupMenuActive = activeMapContextMenuId === popupMenuId;
+          const pinButton = (
+            <button
+              type="button"
+              className="cursor-pointer bg-transparent p-0"
+              onClick={(e) => {
+                e.stopPropagation();
+                openPinContainer(post);
+              }}
+              aria-label={`Open map post ${post.title || post.id}`}
+            >
+              <svg
+                width="34"
+                height="42"
+                viewBox="0 0 34 42"
+                aria-hidden="true"
+                className="drop-shadow"
+              >
+                <path
+                  d="M17 2
+                     A14 14 0 1 1 8.2 28.9
+                     L17 39
+                     L25.8 28.9
+                     A14 14 0 1 1 17 2Z"
+                  fill={pinColor}
+                  stroke={pinStrokeColor}
+                  strokeWidth="1.5"
+                />
+                <text
+                  x="17"
+                  y="16"
+                  textAnchor="middle"
+                  dominantBaseline="middle"
+                  fontSize="11"
+                  fontWeight="700"
+                  fill={pinTextColor}
+                  style={{
+                    paintOrder: 'stroke',
+                    stroke: pinTextOutlineColor,
+                    strokeWidth: 1.25,
+                    strokeLinejoin: 'round',
+                  }}
+                >
+                  {count}
+                </text>
+              </svg>
+            </button>
+          );
           return (
             <Marker
               key={post.id}
@@ -479,7 +768,7 @@ export default function MapCanvas({
               style={{ zIndex: isSelected ? 10000 : 1 }}
             >
               <div className="group relative">
-                {isSelected ? (
+                {isSelected && !isPinMenuActive ? (
                   <div className="pointer-events-auto absolute bottom-full left-1/2 z-30 mb-5 -translate-x-1/2">
                     <PostPopup
                       post={post}
@@ -487,6 +776,11 @@ export default function MapCanvas({
                       canEdit={canEditPosts}
                       onClose={() => {
                         setSelectedPostId(null);
+                        setActiveMapContextMenuId(null);
+                      }}
+                      contextMenuOpen={isPopupMenuActive}
+                      onContextMenuOpenChange={(open) => {
+                        setActiveMapContextMenuId((prev) => open ? popupMenuId : (prev === popupMenuId ? null : prev));
                       }}
                       onEditContainer={(targetPost) => {
                         onEditPinContainer?.(targetPost);
@@ -513,51 +807,48 @@ export default function MapCanvas({
                   </div>
                 ) : null}
 
-                <button
-                  type="button"
-                  className="cursor-pointer bg-transparent p-0"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    openPinContainer(post);
-                  }}
-                  aria-label={`Open map post ${post.title || post.id}`}
-                >
-                  <svg
-                    width="34"
-                    height="42"
-                    viewBox="0 0 34 42"
-                    aria-hidden="true"
-                    className="drop-shadow"
+                {isPopupMenuActive ? (
+                  pinButton
+                ) : (
+                  <ColumnPostContextMenu
+                    padlet={post}
+                    onSelect={() => {
+                      setSelectedPostId(null);
+                    }}
+                    onOpenChange={(open) => {
+                      setActiveMapContextMenuId((prev) => open ? pinMenuId : (prev === pinMenuId ? null : prev));
+                    }}
+                    addPostItems={canEditPosts && post.type === 'container' ? FREEFORM_BOARD_TOOL_ITEMS : undefined}
+                    onAddPostType={canEditPosts && post.type === 'container' && onAddPostToPinContainer
+                      ? ((toolType) => onAddPostToPinContainer(post, toolType))
+                      : undefined}
+                    onDelete={canEditPosts && onDeletePinContainer ? () => onDeletePinContainer(post) : undefined}
+                    deleteLabel="Delete map pin"
+                    onChangeColor={canEditPosts && onChangePinContainerColor ? (color) => onChangePinContainerColor(post, color) : undefined}
+                    onEditPosition={canEditPosts && location ? () => startReposition(post) : undefined}
+                    editPositionLabel="Edit Location"
+                    onOpenGoogleMaps={
+                      location
+                        ? () => {
+                            if (!location) return;
+                            const url = `https://www.google.com/maps/search/?api=1&query=${location.lat},${location.lng}`;
+                            window.open(url, '_blank', 'noopener,noreferrer');
+                          }
+                        : undefined
+                    }
+                    onOpenOsm={
+                      location
+                        ? () => {
+                            if (!location) return;
+                            const url = `https://www.openstreetmap.org/?mlat=${location.lat}&mlon=${location.lng}#map=14/${location.lat}/${location.lng}`;
+                            window.open(url, '_blank', 'noopener,noreferrer');
+                          }
+                        : undefined
+                    }
                   >
-                    <path
-                      d="M17 2
-                         A14 14 0 1 1 8.2 28.9
-                         L17 39
-                         L25.8 28.9
-                         A14 14 0 1 1 17 2Z"
-                      fill={pinColor}
-                      stroke={pinStrokeColor}
-                      strokeWidth="1.5"
-                    />
-                    <text
-                      x="17"
-                      y="16"
-                      textAnchor="middle"
-                      dominantBaseline="middle"
-                      fontSize="11"
-                      fontWeight="700"
-                      fill={pinTextColor}
-                      style={{
-                        paintOrder: 'stroke',
-                        stroke: pinTextOutlineColor,
-                        strokeWidth: 1.25,
-                        strokeLinejoin: 'round',
-                      }}
-                    >
-                      {count}
-                    </text>
-                  </svg>
-                </button>
+                    {pinButton}
+                  </ColumnPostContextMenu>
+                )}
               </div>
             </Marker>
           );
@@ -679,3 +970,5 @@ export default function MapCanvas({
     </div>
   );
 }
+
+export default React.memo(MapCanvas);

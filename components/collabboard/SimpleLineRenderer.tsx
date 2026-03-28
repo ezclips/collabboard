@@ -18,6 +18,7 @@ interface SimpleLineRendererProps {
     onDragChange?: (lineId: string | null) => void;
     onContextMenu?: (lineId: string, x: number, y: number) => void;
     canvasZoom?: number;
+    forcePointerEvents?: boolean;
 }
 
 // Catmull-Rom to Cubic Bezier conversion for smooth paths
@@ -176,6 +177,7 @@ function SimpleLineRenderer({
     layer = 'front',
     onContextMenu,
     canvasZoom = 1,
+    forcePointerEvents = false,
 }: SimpleLineRendererProps) {
     const svgRef = useRef<SVGSVGElement>(null);
 
@@ -225,7 +227,24 @@ function SimpleLineRenderer({
         onSelectLine(lineId);
     };
 
+    const handleMidpointDragStart = (e: React.MouseEvent, lineId: string, segmentIndex: number) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const line = lines.find(l => l.id === lineId);
+        if (!line?.points || line.points.length < 2) return;
+        const p1 = line.points[segmentIndex];
+        const p2 = line.points[segmentIndex + 1];
+        const newPoints = [...line.points];
+        newPoints.splice(segmentIndex + 1, 0, { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2, type: 'smooth' });
+        const newIndex = segmentIndex + 1;
+        onUpdateLine(lineId, { points: newPoints });
+        onSelectLine(lineId);
+        setSelectedPoint({ lineId, index: newIndex });
+        setDraggingPoint({ lineId, index: newIndex });
+    };
+
     const handleLineDragStart = (e: React.MouseEvent, lineId: string) => {
+        if (e.button !== 0) return; // ignore right-click / middle-click
         // In Edit mode for this line, clicking the path should add a point, not drag
         if (isEditMode && selectedLineId === lineId) {
             e.stopPropagation();
@@ -502,20 +521,48 @@ function SimpleLineRenderer({
             style={{
                 width: '100%',
                 height: '100%',
-                pointerEvents: isLineMode ? 'auto' : 'none',
+                pointerEvents: (isLineMode || forcePointerEvents) ? 'auto' : 'none',
                 cursor: isLineMode ? 'crosshair' : 'default',
                 zIndex: layer === 'back' ? 0 : (isLineMode || selectedLineId || isEditMode) ? 1000 : 10,
             }}
             onMouseDown={handleCanvasMouseDown}
+            onContextMenu={(e) => {
+                if (isEditMode || isLineMode) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                }
+            }}
         >
             <defs>
                 {renderVisualLines.map((line: CanvasLine) => (
                     <React.Fragment key={`${layer}-markers-${line.id}`}>
-                        <marker id={`${layer}-arrow-end-${line.id}`} markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
-                            <path d="M2,2 L10,6 L2,10 Z" fill={line.color} />
+                        <marker
+                            id={`${layer}-arrow-end-${line.id}`}
+                            markerWidth="10"
+                            markerHeight="10"
+                            viewBox="-10 -5 10 10"
+                            refX="0"
+                            refY="0"
+                            orient="auto"
+                        >
+                            <path
+                                d="M0,0 L-10,-5 L-7,0 L-10,5 Z"
+                                fill={line.color}
+                            />
                         </marker>
-                        <marker id={`${layer}-arrow-start-${line.id}`} markerWidth="12" markerHeight="12" refX="2" refY="6" orient="auto">
-                            <path d="M10,2 L2,6 L10,10 Z" fill={line.color} />
+                        <marker
+                            id={`${layer}-arrow-start-${line.id}`}
+                            markerWidth="10"
+                            markerHeight="10"
+                            viewBox="0 -5 10 10"
+                            refX="0"
+                            refY="0"
+                            orient="auto"
+                        >
+                            <path
+                                d="M0,0 L10,-5 L7,0 L10,5 Z"
+                                fill={line.color}
+                            />
                         </marker>
                     </React.Fragment>
                 ))}
@@ -651,28 +698,47 @@ function SimpleLineRenderer({
                         {/* Handles - only in front layer */}
                         {layer === 'front' && isEditMode && isSelected && (
                             <>
-                                {line.points ? line.points.map((p: { x: number; y: number; type: 'corner' | 'smooth' }, i: number) => (
-                                    <circle
-                                        key={i}
-                                        cx={p.x}
-                                        cy={p.y}
-                                        r={6}
-                                        fill={selectedPoint?.lineId === line.id && selectedPoint?.index === i ? "#3b82f6" : "white"}
-                                        stroke="#3b82f6"
-                                        strokeWidth={2}
-                                        style={{ cursor: 'grab', pointerEvents: 'auto' }}
-                                        onMouseDown={(e) => handlePointDragStart(e, line.id, i)}
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            if (e.shiftKey) {
-                                                const newPoints = [...line.points!];
-                                                newPoints[i] = { ...newPoints[i], type: newPoints[i].type === 'corner' ? 'smooth' : 'corner' };
-                                                onUpdateLine(line.id, { points: newPoints });
-                                                onSaveLine(line.id);
-                                            }
-                                        }}
-                                    />
-                                )) : (
+                                {line.points ? (
+                                    <>
+                                        {line.points.map((p: { x: number; y: number; type: 'corner' | 'smooth' }, i: number) => (
+                                            <circle
+                                                key={i}
+                                                cx={p.x}
+                                                cy={p.y}
+                                                r={6}
+                                                fill={selectedPoint?.lineId === line.id && selectedPoint?.index === i ? "#3b82f6" : "white"}
+                                                stroke="#3b82f6"
+                                                strokeWidth={2}
+                                                style={{ cursor: 'grab', pointerEvents: 'auto' }}
+                                                onMouseDown={(e) => handlePointDragStart(e, line.id, i)}
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    if (e.shiftKey) {
+                                                        const newPoints = [...line.points!];
+                                                        newPoints[i] = { ...newPoints[i], type: newPoints[i].type === 'corner' ? 'smooth' : 'corner' };
+                                                        onUpdateLine(line.id, { points: newPoints });
+                                                        onSaveLine(line.id);
+                                                    }
+                                                }}
+                                            />
+                                        ))}
+                                        {/* Midpoint handles — one per segment, drag inserts a new draggable point */}
+                                        {line.points.slice(0, -1).map((_: unknown, i: number) => (
+                                            <circle
+                                                key={`mid-${i}`}
+                                                cx={(line.points![i].x + line.points![i + 1].x) / 2}
+                                                cy={(line.points![i].y + line.points![i + 1].y) / 2}
+                                                r={4}
+                                                fill="#10b981"
+                                                stroke="white"
+                                                strokeWidth={1.5}
+                                                style={{ cursor: 'crosshair', pointerEvents: 'auto' }}
+                                                onMouseDown={(e) => handleMidpointDragStart(e, line.id, i)}
+                                                onClick={(e) => e.stopPropagation()}
+                                            />
+                                        ))}
+                                    </>
+                                ) : (
                                     <>
                                         <circle cx={line.start_x} cy={line.start_y} r={6} fill="white" stroke="#3b82f6" strokeWidth={2} style={{ cursor: 'grab', pointerEvents: 'auto' }} onMouseDown={(e) => handlePointDragStart(e, line.id, undefined, 'start')} onClick={(e) => e.stopPropagation()} />
                                         <circle cx={line.control_x} cy={line.control_y} r={6} fill="white" stroke="#10b981" strokeWidth={2} style={{ cursor: 'grab', pointerEvents: 'auto' }} onMouseDown={(e) => handlePointDragStart(e, line.id, undefined, 'control')} onClick={(e) => e.stopPropagation()} />

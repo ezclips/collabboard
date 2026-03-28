@@ -32,6 +32,8 @@ interface LineContextMenuProps {
     onLock?: () => void;
     onBringToFront?: () => void;
     onSendToBack?: () => void;
+    onToggleStartArrow?: () => void;
+    onToggleEndArrow?: () => void;
     onColorChange?: (color: string) => void;
 }
 
@@ -47,6 +49,8 @@ export function LineContextMenu({
     onLock,
     onBringToFront,
     onSendToBack,
+    onToggleStartArrow,
+    onToggleEndArrow,
     onColorChange
 }: LineContextMenuProps) {
     const [showCustomColorPicker, setShowCustomColorPicker] = useState(false);
@@ -101,17 +105,11 @@ export function LineContextMenu({
             }}
             onClick={(e) => e.stopPropagation()}
         >
-            <MenuItem label="Cut" shortcut={["Ctrl", "X"]} onClick={() => handleAction(onCut)} />
-            <MenuItem label="Copy" shortcut={["Ctrl", "C"]} onClick={() => handleAction(onCopy)} />
-            <MenuItem label="Duplicate" shortcut={["Ctrl", "D"]} onClick={() => handleAction(onDuplicate)} />
-            <MenuItem label="Delete" shortcut={["Backspace"]} onClick={() => handleAction(onDelete)} />
-
-            <div className="h-[1px] bg-gray-100 m-1" />
-
-            <MenuItem
-                label={(line as any)?.isLocked ? "Unlock Position" : "Lock Position"}
-                onClick={() => handleAction(onLock)}
-            />
+            <MenuItem label="Cut" onClick={() => handleAction(onCut)} />
+            <MenuItem label="Duplicate" onClick={() => handleAction(onDuplicate)} />
+            <MenuItem label="Delete" onClick={() => handleAction(onDelete)} />
+            <MenuItem label={line.start_arrow ? "Remove Start Arrow" : "Add Start Arrow"} onClick={() => handleAction(onToggleStartArrow)} />
+            <MenuItem label={line.end_arrow ? "Remove End Arrow" : "Add End Arrow"} onClick={() => handleAction(onToggleEndArrow)} />
 
             <div className="h-[1px] bg-gray-100 m-1" />
 

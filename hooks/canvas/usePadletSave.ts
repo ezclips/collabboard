@@ -23,7 +23,7 @@ export type SaveAIComponentData = {
 };
 
 
-import { useCallback } from 'react';
+import { useCallback, Dispatch, SetStateAction } from 'react';
 import { Padlet, PendingPostDraft, SavedAIComponent, StoredAIImageAsset } from '@/types/collabboard';
 import { supabase } from '@/lib/supabase';
 
@@ -204,6 +204,8 @@ export type UsePadletSaveParams = {
   onSchedulerPlacementStart?: (draft: PendingPostDraft) => void;
   onDrawingPlacementStart?: (draft: PendingPostDraft) => void;
   padlets: Padlet[];
+  setPadlets: Dispatch<SetStateAction<Padlet[]>>;
+  getNewPostPosition: (cardWidth: number, cardHeight: number) => { x: number; y: number };
 };
 
 // ============================================================================
@@ -242,6 +244,8 @@ export function usePadletSave(params: UsePadletSaveParams) {
     onSchedulerPlacementStart,
     onDrawingPlacementStart,
     padlets,
+    setPadlets,
+    getNewPostPosition,
   } = params;
 
   const checkGridPlacementRequired = useGridPadletSave({
@@ -371,8 +375,10 @@ export function usePadletSave(params: UsePadletSaveParams) {
     }
 
     try {
+      let createdPadlet: any = null;
       if (padletToEdit?.id === 'new') {
         // Create new padlet and get its ID
+        const { x: position_x, y: position_y } = getNewPostPosition(280, 280);
         const { data: newPadlet, error } = await supabase
           .from('padlets')
           .insert({
@@ -380,8 +386,8 @@ export function usePadletSave(params: UsePadletSaveParams) {
             title: 'New Note',
             content: data.content,
             type: 'text',
-            position_x: Math.round(Math.random() * 300 + 50),
-            position_y: Math.round(Math.random() * 200 + 50),
+            position_x,
+            position_y,
             width: 280,
             height: 280,
             metadata,
@@ -389,6 +395,7 @@ export function usePadletSave(params: UsePadletSaveParams) {
           .select()
           .single();
         if (error) throw error;
+        createdPadlet = newPadlet;
         // If this post has a parentId, update the container's childPadletIds
         const parentId = metadata?.parentId;
         if (parentId && newPadlet) {
@@ -442,7 +449,17 @@ export function usePadletSave(params: UsePadletSaveParams) {
 
       setIsNoteEditorOpen(false);
       setPadletToEdit(null);
-      fetchData();
+      if (padletToEdit?.id === 'new') {
+        if (createdPadlet) setPadlets(prev => [...prev, createdPadlet]);
+        else fetchData();
+      } else if (padletToEdit) {
+        const syncedWithId = (padletToEdit.metadata as any)?.syncedWith;
+        setPadlets(prev => prev.map(p => {
+          if (p.id === padletToEdit!.id) return { ...p, content: data.content, metadata };
+          if (syncedWithId && p.id === syncedWithId) return { ...p, content: data.content, metadata: { ...metadata, syncedWith: padletToEdit!.id } };
+          return p;
+        }));
+      }
     } catch (e: any) {
       console.error('Failed to save note:', e?.message || e?.details || JSON.stringify(e));
     }
@@ -463,6 +480,7 @@ export function usePadletSave(params: UsePadletSaveParams) {
     setWallPendingPostDraft,
     setWallPlacementPromptOpen,
     onTimelinePlacementStart,
+    setPadlets,
   ]);
 
   // ============================================================================
@@ -507,22 +525,27 @@ export function usePadletSave(params: UsePadletSaveParams) {
     }
 
     try {
+      let createdPadlet: any = null;
       if (padletToEdit.id === 'new') {
         // Insert new link padlet
-        const { error } = await supabase
+        const { x: position_x, y: position_y } = getNewPostPosition(300, 350);
+        const { data: newLink, error } = await supabase
           .from('padlets')
           .insert({
             board_id: canvasId,
             title: data.linkTitle || 'Link',
             content: data.linkUrl,
             type: 'link',
-            position_x: Math.floor(Math.random() * 500),
-            position_y: Math.floor(Math.random() * 300),
+            position_x,
+            position_y,
             width: 300,
             height: 350,
             metadata,
-          });
+          })
+          .select()
+          .single();
         if (error) throw error;
+        createdPadlet = newLink;
       } else {
         // Update existing link padlet
         const { error } = await supabase
@@ -539,7 +562,16 @@ export function usePadletSave(params: UsePadletSaveParams) {
 
       setIsLinkEditorOpen(false);
       setPadletToEdit(null);
-      fetchData();
+      if (padletToEdit.id === 'new') {
+        if (createdPadlet) setPadlets(prev => [...prev, createdPadlet]);
+        else fetchData();
+      } else {
+        setPadlets(prev => prev.map(p =>
+          p.id === padletToEdit!.id
+            ? { ...p, title: data.linkTitle || 'Link', content: data.linkUrl, metadata }
+            : p
+        ));
+      }
     } catch (e: unknown) {
       const err = e as { message?: string; details?: string };
       console.error('Failed to save link:', err?.message || err?.details || 'Unknown error');
@@ -560,6 +592,7 @@ export function usePadletSave(params: UsePadletSaveParams) {
     setWallPendingPostDraft,
     setWallPlacementPromptOpen,
     onTimelinePlacementStart,
+    setPadlets,
   ]);
 
   // ============================================================================
@@ -590,21 +623,26 @@ export function usePadletSave(params: UsePadletSaveParams) {
     }
 
     try {
+      let createdPadlet: any = null;
       if (padletToEdit.id === 'new') {
-        const { error } = await supabase
+        const { x: position_x, y: position_y } = getNewPostPosition(300, 350);
+        const { data: newTodo, error } = await supabase
           .from('padlets')
           .insert({
             board_id: canvasId,
             title: data.todoTitle || 'To-Do List',
             content: JSON.stringify(data.tasks),
             type: 'todo',
-            position_x: Math.floor(Math.random() * 500),
-            position_y: Math.floor(Math.random() * 300),
+            position_x,
+            position_y,
             width: 300,
             height: 350,
             metadata,
-          });
+          })
+          .select()
+          .single();
         if (error) throw error;
+        createdPadlet = newTodo;
       } else {
         const { error } = await supabase
           .from('padlets')
@@ -620,7 +658,16 @@ export function usePadletSave(params: UsePadletSaveParams) {
 
       setIsTodoEditorOpen(false);
       setPadletToEdit(null);
-      fetchData();
+      if (padletToEdit.id === 'new') {
+        if (createdPadlet) setPadlets(prev => [...prev, createdPadlet]);
+        else fetchData();
+      } else {
+        setPadlets(prev => prev.map(p =>
+          p.id === padletToEdit!.id
+            ? { ...p, title: data.todoTitle || 'To-Do List', content: JSON.stringify(data.tasks), metadata }
+            : p
+        ));
+      }
     } catch (e: unknown) {
       const err = e as { message?: string; details?: string };
       console.error('Failed to save todo:', err?.message || err?.details || 'Unknown error');
@@ -641,6 +688,7 @@ export function usePadletSave(params: UsePadletSaveParams) {
     setWallPendingPostDraft,
     setWallPlacementPromptOpen,
     onTimelinePlacementStart,
+    setPadlets,
   ]);
 
   // ============================================================================
@@ -664,21 +712,26 @@ export function usePadletSave(params: UsePadletSaveParams) {
     }
 
     try {
+      let createdPadlet: any = null;
       if (padletToEdit.id === 'new') {
-        const { error } = await supabase
+        const { x: position_x, y: position_y } = getNewPostPosition(400, 300);
+        const { data: newTable, error } = await supabase
           .from('padlets')
           .insert({
             board_id: canvasId,
             title: data.title || 'New Table',
             content: data.content,
             type: 'table',
-            position_x: Math.floor(Math.random() * 500),
-            position_y: Math.floor(Math.random() * 300),
+            position_x,
+            position_y,
             width: 400,
             height: 300,
             metadata,
-          });
+          })
+          .select()
+          .single();
         if (error) throw error;
+        createdPadlet = newTable;
       } else {
         const { error } = await supabase
           .from('padlets')
@@ -694,7 +747,16 @@ export function usePadletSave(params: UsePadletSaveParams) {
 
       setIsTableEditorOpen(false);
       setPadletToEdit(null);
-      fetchData();
+      if (padletToEdit.id === 'new') {
+        if (createdPadlet) setPadlets(prev => [...prev, createdPadlet]);
+        else fetchData();
+      } else {
+        setPadlets(prev => prev.map(p =>
+          p.id === padletToEdit!.id
+            ? { ...p, title: data.title || 'New Table', content: data.content, metadata }
+            : p
+        ));
+      }
     } catch (e: unknown) {
       const err = e as { message?: string; details?: string };
       console.error('Failed to save table:', err?.message || err?.details || 'Unknown error');
@@ -715,6 +777,7 @@ export function usePadletSave(params: UsePadletSaveParams) {
     setWallPendingPostDraft,
     setWallPlacementPromptOpen,
     onTimelinePlacementStart,
+    setPadlets,
   ]);
 
   // ============================================================================
@@ -736,21 +799,26 @@ export function usePadletSave(params: UsePadletSaveParams) {
     };
 
     try {
+      let createdPadlet: any = null;
       if (padletToEdit.id === 'new') {
-        const { error } = await supabase
+        const { x: position_x, y: position_y } = getNewPostPosition(350, 300);
+        const { data: newContainer, error } = await supabase
           .from('padlets')
           .insert({
             board_id: canvasId,
             title: data.title || 'New Container',
             content: '',
             type: 'container',
-            position_x: Math.floor(Math.random() * 400),
-            position_y: Math.floor(Math.random() * 200),
+            position_x,
+            position_y,
             width: 350,
             height: 300,
             metadata: { ...metadata, childPadletIds: [] },
-          });
+          })
+          .select()
+          .single();
         if (error) throw error;
+        createdPadlet = newContainer;
       } else {
         const { error } = await supabase
           .from('padlets')
@@ -765,7 +833,16 @@ export function usePadletSave(params: UsePadletSaveParams) {
 
       setIsContainerEditorOpen(false);
       setPadletToEdit(null);
-      fetchData();
+      if (padletToEdit.id === 'new') {
+        if (createdPadlet) setPadlets(prev => [...prev, createdPadlet]);
+        else fetchData();
+      } else {
+        setPadlets(prev => prev.map(p =>
+          p.id === padletToEdit!.id
+            ? { ...p, title: data.title || 'New Container', metadata }
+            : p
+        ));
+      }
     } catch (e: unknown) {
       const err = e as { message?: string; details?: string };
       console.error('Failed to save container:', err?.message || err?.details || 'Unknown error');
@@ -778,6 +855,7 @@ export function usePadletSave(params: UsePadletSaveParams) {
     setPadletToEdit,
     fetchData,
     setIsContainerEditorOpen,
+    setPadlets,
   ]);
 
   // ============================================================================
@@ -819,28 +897,31 @@ export function usePadletSave(params: UsePadletSaveParams) {
     }
 
     try {
+      let createdPadlet: any = null;
       if (padletToEdit.id === 'new') {
-        const { error } = await supabase
+        const { x: position_x, y: position_y } = getNewPostPosition(300, 280);
+        const { data: newComment, error } = await supabase
           .from('padlets')
           .insert({
             board_id: canvasId,
             title: 'Comment',
             content: '',
             type: 'comment',
-            position_x: Math.floor(Math.random() * 400) + 100,
-            position_y: Math.floor(Math.random() * 200) + 100,
+            position_x,
+            position_y,
             width: 300,
             height: 280,
             metadata,
-          });
+          })
+          .select()
+          .single();
         if (error) throw error;
+        createdPadlet = newComment;
       } else {
         const { error } = await supabase
           .from('padlets')
           .update({
             metadata,
-            position_x: Math.round(padletToEdit.position_x ?? 100),
-            position_y: Math.round(padletToEdit.position_y ?? 100),
             updated_at: new Date().toISOString(),
           })
           .eq('id', padletToEdit.id);
@@ -849,7 +930,16 @@ export function usePadletSave(params: UsePadletSaveParams) {
 
       setIsCommentEditorOpen(false);
       setPadletToEdit(null);
-      fetchData();
+      if (padletToEdit.id === 'new') {
+        if (createdPadlet) setPadlets(prev => [...prev, createdPadlet]);
+        else fetchData();
+      } else {
+        setPadlets(prev => prev.map(p =>
+          p.id === padletToEdit!.id
+            ? { ...p, metadata }
+            : p
+        ));
+      }
     } catch (e: unknown) {
       const err = e as { message?: string; details?: string };
       console.error('Failed to save comment:', err?.message || err?.details || 'Unknown error');
@@ -870,6 +960,7 @@ export function usePadletSave(params: UsePadletSaveParams) {
     setWallPendingPostDraft,
     setWallPlacementPromptOpen,
     onTimelinePlacementStart,
+    setPadlets,
   ]);
 
   // ============================================================================
@@ -879,6 +970,7 @@ export function usePadletSave(params: UsePadletSaveParams) {
     if (!canvasId || !padletToEdit) return;
 
     try {
+      let createdPadlet: any = null;
       if (padletToEdit.id === 'new') {
         // For freeform layout: place directly on canvas
         // For map layout with parentId: place in pin container directly
@@ -896,6 +988,7 @@ export function usePadletSave(params: UsePadletSaveParams) {
           ...data.metadata,
           ...(padletToEdit.metadata?.parentId ? { parentId: padletToEdit.metadata.parentId } : {}),
         };
+        const { x: position_x, y: position_y } = getNewPostPosition(180, 220);
         const { data: newCard, error } = await supabase
           .from('padlets')
           .insert({
@@ -903,8 +996,8 @@ export function usePadletSave(params: UsePadletSaveParams) {
             title: data.title,
             content: data.content,
             type: 'card',
-            position_x: Math.floor(Math.random() * 400) + 100,
-            position_y: Math.floor(Math.random() * 200) + 100,
+            position_x,
+            position_y,
             width: 180,
             height: 220,
             metadata: insertMetadata,
@@ -912,6 +1005,7 @@ export function usePadletSave(params: UsePadletSaveParams) {
           .select()
           .single();
         if (error) throw error;
+        createdPadlet = newCard;
 
         // Update container's childPadletIds if this card belongs to one
         if (insertMetadata.parentId && newCard) {
@@ -948,7 +1042,16 @@ export function usePadletSave(params: UsePadletSaveParams) {
 
       setIsCardEditorOpen(false);
       setPadletToEdit(null);
-      fetchData();
+      if (padletToEdit.id === 'new') {
+        if (createdPadlet) setPadlets(prev => [...prev, createdPadlet]);
+        else fetchData();
+      } else {
+        setPadlets(prev => prev.map(p =>
+          p.id === padletToEdit!.id
+            ? { ...p, title: data.title, content: data.content, metadata: data.metadata }
+            : p
+        ));
+      }
     } catch (e) {
       console.error('Failed to save card:', e);
     }
@@ -961,6 +1064,7 @@ export function usePadletSave(params: UsePadletSaveParams) {
     setIsCardEditorOpen,
     isFreeformLayout,
     isMapLayout,
+    setPadlets,
   ]);
 
   // ============================================================================
@@ -1003,20 +1107,24 @@ export function usePadletSave(params: UsePadletSaveParams) {
         return;
       }
 
+      let createdPadlet: any = null;
       if (!padletToEdit || padletToEdit.id === 'new') {
         // New Image
-        await supabase.from('padlets').insert({
+        const { x: position_x, y: position_y } = getNewPostPosition(300, 200);
+        const { data: newImage, error } = await supabase.from('padlets').insert({
           board_id: canvasId,
           title: data.caption || 'Image',
           content: '',
           type: 'image',
           file_url: data.imageUrl,
-          position_x: Math.floor(Math.random() * 400) + 100,
-          position_y: Math.floor(Math.random() * 200) + 100,
+          position_x,
+          position_y,
           width: 300,
           height: 200,
           metadata,
-        });
+        }).select().single();
+        if (error) throw error;
+        createdPadlet = newImage;
       } else {
         // Update Image
         await supabase
@@ -1025,8 +1133,6 @@ export function usePadletSave(params: UsePadletSaveParams) {
             title: data.caption || 'Image',
             file_url: data.imageUrl,
             metadata,
-            position_x: padletToEdit.position_x,
-            position_y: padletToEdit.position_y,
             updated_at: new Date().toISOString(),
           })
           .eq('id', padletToEdit.id);
@@ -1034,7 +1140,16 @@ export function usePadletSave(params: UsePadletSaveParams) {
 
       setIsImageEditorOpen(false);
       setPadletToEdit(null);
-      fetchData();
+      if (!padletToEdit || padletToEdit.id === 'new') {
+        if (createdPadlet) setPadlets(prev => [...prev, createdPadlet]);
+        else fetchData();
+      } else {
+        setPadlets(prev => prev.map(p =>
+          p.id === padletToEdit!.id
+            ? { ...p, title: data.caption || 'Image', file_url: data.imageUrl, metadata }
+            : p
+        ));
+      }
     } catch (e) {
       console.error('Failed to save image:', e);
     }
@@ -1054,6 +1169,7 @@ export function usePadletSave(params: UsePadletSaveParams) {
     setWallPendingPostDraft,
     setWallPlacementPromptOpen,
     onTimelinePlacementStart,
+    setPadlets,
   ]);
 
   // ============================================================================
@@ -1079,21 +1195,26 @@ export function usePadletSave(params: UsePadletSaveParams) {
     }
 
     try {
+      let createdPadlet: any = null;
       if (padletToEdit.id === 'new') {
-        const { error } = await supabase
+        const { x: position_x, y: position_y } = getNewPostPosition(400, 300);
+        const { data: newDrawing, error } = await supabase
           .from('padlets')
           .insert({
             board_id: canvasId,
             title: 'Drawing',
             content: '',
             type: 'drawing',
-            position_x: Math.floor(Math.random() * 400) + 100,
-            position_y: Math.floor(Math.random() * 200) + 100,
+            position_x,
+            position_y,
             width: 400,
             height: 300,
             metadata,
-          });
+          })
+          .select()
+          .single();
         if (error) throw error;
+        createdPadlet = newDrawing;
       } else {
         const { error } = await supabase
           .from('padlets')
@@ -1107,7 +1228,16 @@ export function usePadletSave(params: UsePadletSaveParams) {
 
       setIsDrawingEditorOpen(false);
       setPadletToEdit(null);
-      fetchData();
+      if (padletToEdit.id === 'new') {
+        if (createdPadlet) setPadlets(prev => [...prev, createdPadlet]);
+        else fetchData();
+      } else {
+        setPadlets(prev => prev.map(p =>
+          p.id === padletToEdit!.id
+            ? { ...p, metadata }
+            : p
+        ));
+      }
     } catch (e: unknown) {
       const err = e as { message?: string; details?: string };
       console.error('Failed to save drawing:', err?.message || err?.details || 'Unknown error');
@@ -1128,6 +1258,7 @@ export function usePadletSave(params: UsePadletSaveParams) {
     setWallPendingPostDraft,
     setWallPlacementPromptOpen,
     onTimelinePlacementStart,
+    setPadlets,
   ]);
 
   const saveAIComponent = useCallback(async (data: SaveAIComponentData) => {
@@ -1206,21 +1337,26 @@ export function usePadletSave(params: UsePadletSaveParams) {
     }
 
     try {
+      let createdPadlet: any = null;
       if (padletToEdit.id === 'new') {
-        const { error } = await supabase
+        const { x: position_x, y: position_y } = getNewPostPosition(500, 400);
+        const { data: newAIComp, error } = await supabase
           .from('padlets')
           .insert({
             board_id: canvasId,
             title: 'AI Component',
             content: data.aiPrompt,
             type: 'ai-component',
-            position_x: Math.floor(Math.random() * 400) + 100,
-            position_y: Math.floor(Math.random() * 200) + 100,
+            position_x,
+            position_y,
             width: 500,
             height: 400,
             metadata,
-          });
+          })
+          .select()
+          .single();
         if (error) throw error;
+        createdPadlet = newAIComp;
       } else {
         const { error } = await supabase
           .from('padlets')
@@ -1235,7 +1371,16 @@ export function usePadletSave(params: UsePadletSaveParams) {
 
       setIsAIComponentEditorOpen(false);
       setPadletToEdit(null);
-      fetchData();
+      if (padletToEdit.id === 'new') {
+        if (createdPadlet) setPadlets(prev => [...prev, createdPadlet]);
+        else fetchData();
+      } else {
+        setPadlets(prev => prev.map(p =>
+          p.id === padletToEdit!.id
+            ? { ...p, content: data.aiPrompt, metadata }
+            : p
+        ));
+      }
     } catch (e: unknown) {
       const err = e as { message?: string; details?: string };
       console.error('Failed to save AI component:', err?.message || err?.details || 'Unknown error');
@@ -1256,6 +1401,7 @@ export function usePadletSave(params: UsePadletSaveParams) {
     setWallPendingPostDraft,
     setWallPlacementPromptOpen,
     onTimelinePlacementStart,
+    setPadlets,
   ]);
 
   return {
