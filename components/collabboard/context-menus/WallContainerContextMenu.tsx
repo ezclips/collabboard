@@ -43,6 +43,8 @@ interface WallContainerContextMenuProps {
     onRename?: () => void;
     onLock?: () => void;
     onBringToFront?: () => void;
+    onBringForward?: () => void;
+    onSendBackward?: () => void;
     onSendToBack?: () => void;
     onAddContainerAt?: (position: number) => void;
     customActions?: Array<{
@@ -85,6 +87,8 @@ export function WallContainerContextMenu({
     onRename,
     onLock,
     onBringToFront,
+    onBringForward,
+    onSendBackward,
     onSendToBack,
     onAddContainerAt,
     customActions
@@ -102,6 +106,8 @@ export function WallContainerContextMenu({
             case 'post.rename': onRename?.(); break;
             case 'post.lockPosition': onLock?.(); break;
             case 'post.bringToFront': onBringToFront?.(); break;
+            case 'post.bringForward': onBringForward?.(); break;
+            case 'post.sendBackward': onSendBackward?.(); break;
             case 'post.sendToBack': onSendToBack?.(); break;
         }
 
@@ -196,6 +202,13 @@ export function WallContainerContextMenu({
                             ))}
                         </div>
                     )}
+                    {(onBringToFront || onBringForward || onSendBackward || onSendToBack) && (
+                        <ContextMenu.Separator className="h-[1px] bg-gray-100 m-1" />
+                    )}
+                    {onSendToBack && <ContextMenuItem label="Send to Back" shortcut={["Ctrl", "Shift", "["]} onClick={() => handleAction('post.sendToBack')} />}
+                    {onSendBackward && <ContextMenuItem label="Send Backward" onClick={() => handleAction('post.sendBackward')} />}
+                    {onBringForward && <ContextMenuItem label="Bring Forward" onClick={() => handleAction('post.bringForward')} />}
+                    {onBringToFront && <ContextMenuItem label="Bring to Front" shortcut={["Ctrl", "Shift", "]"]} onClick={() => handleAction('post.bringToFront')} />}
                     {onDelete && <ContextMenuItem label={deleteLabel} icon={<Trash2 size={16} />} onClick={onDelete} className="text-red-600 focus:text-red-600 focus:bg-red-50" />}
                 </ContextMenu.Content>
             </ContextMenu.Portal>

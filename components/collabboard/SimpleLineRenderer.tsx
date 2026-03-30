@@ -3,6 +3,47 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import type { CanvasLine } from '@/types/collabboard';
 
+const DEV_LINE_RENDER_DIAGNOSTICS = process.env.NODE_ENV !== 'production';
+
+function logLineEventDiagnostics(
+    phase: string,
+    rendererLabel: 'back' | 'front',
+    lineId: string | null,
+    event: React.MouseEvent | MouseEvent,
+    extra?: Record<string, unknown>,
+) {
+    if (!DEV_LINE_RENDER_DIAGNOSTICS) return;
+
+    const target = event.target instanceof Element ? event.target : null;
+    const currentTarget = event.currentTarget instanceof Element ? event.currentTarget : null;
+
+    console.debug('[SimpleLineRenderer:event]', {
+        phase,
+        rendererLabel,
+        lineId,
+        type: event.type,
+        button: event.button,
+        buttons: event.buttons,
+        defaultPrevented: event.defaultPrevented,
+        eventPhase: event.eventPhase,
+        target: target ? {
+            tag: target.tagName,
+            className: target.getAttribute('class'),
+            lineId: target.getAttribute('data-line-id'),
+            lineRenderer: target.getAttribute('data-line-renderer'),
+            lineRole: target.getAttribute('data-line-role'),
+        } : null,
+        currentTarget: currentTarget ? {
+            tag: currentTarget.tagName,
+            className: currentTarget.getAttribute('class'),
+            lineId: currentTarget.getAttribute('data-line-id'),
+            lineRenderer: currentTarget.getAttribute('data-line-renderer'),
+            lineRole: currentTarget.getAttribute('data-line-role'),
+        } : null,
+        ...extra,
+    });
+}
+
 interface SimpleLineRendererProps {
     lines: CanvasLine[];
     selectedLineId: string | null;
@@ -19,6 +60,7 @@ interface SimpleLineRendererProps {
     onContextMenu?: (lineId: string, x: number, y: number) => void;
     canvasZoom?: number;
     forcePointerEvents?: boolean;
+    excalidrawAPIRef?: React.RefObject<any>;
 }
 
 // Catmull-Rom to Cubic Bezier conversion for smooth paths
@@ -178,8 +220,10 @@ function SimpleLineRenderer({
     onContextMenu,
     canvasZoom = 1,
     forcePointerEvents = false,
+    excalidrawAPIRef,
 }: SimpleLineRendererProps) {
     const svgRef = useRef<SVGSVGElement>(null);
+    const rendererLabel = layer === 'back' ? 'back' : 'front';
 
     // Refs to avoid useEffect re-runs during drag
     const linesRef = useRef(lines);
@@ -220,16 +264,30 @@ function SimpleLineRenderer({
     }, [canvasZoom]);
 
     const handlePointDragStart = (e: React.MouseEvent, lineId: string, index?: number, point?: any) => {
+        logLineEventDiagnostics('point-drag-start:before-stop', rendererLabel, lineId, e, {
+            index: index ?? null,
+            point: point ?? null,
+        });
         e.preventDefault();
         e.stopPropagation();
+        logLineEventDiagnostics('point-drag-start:after-stop', rendererLabel, lineId, e, {
+            index: index ?? null,
+            point: point ?? null,
+        });
         setDraggingPoint({ lineId, index, point });
         setSelectedPoint({ lineId, index }); // Select point on click/drag
         onSelectLine(lineId);
     };
 
     const handleMidpointDragStart = (e: React.MouseEvent, lineId: string, segmentIndex: number) => {
+        logLineEventDiagnostics('midpoint-drag-start:before-stop', rendererLabel, lineId, e, {
+            segmentIndex,
+        });
         e.preventDefault();
         e.stopPropagation();
+        logLineEventDiagnostics('midpoint-drag-start:after-stop', rendererLabel, lineId, e, {
+            segmentIndex,
+        });
         const line = lines.find(l => l.id === lineId);
         if (!line?.points || line.points.length < 2) return;
         const p1 = line.points[segmentIndex];
@@ -244,11 +302,19 @@ function SimpleLineRenderer({
     };
 
     const handleLineDragStart = (e: React.MouseEvent, lineId: string) => {
+        logLineEventDiagnostics('line-drag-start:entry', rendererLabel, lineId, e, {
+            isEditMode,
+            selectedLineId,
+        });
         if (e.button !== 0) return; // ignore right-click / middle-click
         // In Edit mode for this line, clicking the path should add a point, not drag
         if (isEditMode && selectedLineId === lineId) {
             e.stopPropagation();
             e.preventDefault();
+            logLineEventDiagnostics('line-drag-start:add-point-branch', rendererLabel, lineId, e, {
+                isEditMode,
+                selectedLineId,
+            });
 
             // Get the line and add a point
             const line = lines.find(l => l.id === lineId);
@@ -294,6 +360,10 @@ function SimpleLineRenderer({
 
         e.preventDefault();
         e.stopPropagation();
+        logLineEventDiagnostics('line-drag-start:drag-branch', rendererLabel, lineId, e, {
+            isEditMode,
+            selectedLineId,
+        });
         const pos = getMousePos(e);
         dragOffsetRef.current = { x: pos.x, y: pos.y };
         setDraggingLine({ lineId });
@@ -453,6 +523,10 @@ function SimpleLineRenderer({
     }, [selectedPoint, lines, isEditMode, onUpdateLine, onSaveLine]);
 
     const handleCanvasMouseDown = (e: React.MouseEvent) => {
+        logLineEventDiagnostics('canvas-mousedown', rendererLabel, null, e, {
+            isLineMode,
+            isEditMode,
+        });
         // Prevent background clicks from firing when clicking children
         if (e.target !== e.currentTarget) return;
 
@@ -467,8 +541,29 @@ function SimpleLineRenderer({
     };
 
     const handlePathClick = (e: React.MouseEvent, line: CanvasLine) => {
+        logLineEventDiagnostics('path-click:before-stop', rendererLabel, line.id, e, {
+            isEditMode,
+            selectedLineId,
+        });
         e.stopPropagation(); // Always stop propagation to prevent canvas deselect
         e.preventDefault(); // Prevent any default behavior
+        logLineEventDiagnostics('path-click:after-stop', rendererLabel, line.id, e, {
+            isEditMode,
+            selectedLineId,
+        });
+
+        const api = excalidrawAPIRef?.current;
+        if (api && typeof api.updateScene === "function") {
+            api.updateScene({
+                appState: {
+                    selectedElementIds: {},
+                    selectedGroupIds: {},
+                    activeEmbeddable: null,
+                    selectedLinearElement: null,
+                    openPopup: null,
+                },
+            });
+        }
 
         // Always select the line on click
         onSelectLine(line.id);
@@ -481,38 +576,164 @@ function SimpleLineRenderer({
         }
     };
 
-    // NEW APPROACH:
-    // - Back layer: Renders ONLY visible strokes for z_index < 0 lines (visual only, no interaction)
-    // - Front layer: Renders ALL hit areas (so every line is clickable) + visible strokes for z_index >= 0
+    // Sort lines within this plane by z_index (ascending), with the selected line
+    // rendered last (on top) within the same plane.
+    // Incoming lines are already filtered to this plane by the caller — no sign-based
+    // plane detection here.
+    const orderedLines = useMemo(() => {
+        const sorted = lines
+            .map((line, index) => ({ line, index }))
+            .sort((a, b) => {
+                const zDiff = (a.line.z_index ?? 0) - (b.line.z_index ?? 0);
+                if (zDiff !== 0) return zDiff;
+                return a.index - b.index;
+            })
+            .map(({ line }) => line);
 
-    // Lines to render visually in this layer
-    const visualLines = useMemo(() => {
-        if (layer === 'back') {
-            // Back: only lines with z_index < 0 (but not the selected one - it shows in front)
-            return lines.filter(line => (line.z_index ?? 0) < 0 && line.id !== selectedLineId);
-        } else {
-            // Front: lines with z_index >= 0 OR the selected line
-            return lines.filter(line => (line.z_index ?? 0) >= 0 || line.id === selectedLineId);
-        }
-    }, [lines, layer, selectedLineId]);
+        if (!selectedLineId) return sorted;
 
-    // Lines that need hit areas (interaction) - ONLY in front layer, but for ALL lines
-    const interactionLines = useMemo(() => {
-        if (layer === 'front') {
-            return lines; // All lines are interactable via the front layer
-        }
-        return []; // Back layer has no interaction
-    }, [lines, layer]);
+        // Place selected line last so it paints on top within this plane.
+        const selected = sorted.find(l => l.id === selectedLineId);
+        const rest = sorted.filter(l => l.id !== selectedLineId);
+        return selected ? [...rest, selected] : sorted;
+    }, [lines, selectedLineId]);
 
-    // For rendering order: selected line should be on top
-    const renderVisualLines = useMemo(() => {
-        if (layer === 'front' && selectedLineId) {
-            const selected = visualLines.find(l => l.id === selectedLineId);
-            const rest = visualLines.filter(l => l.id !== selectedLineId);
-            return selected ? [...rest, selected] : visualLines;
+    // Both visual strokes and hit areas use the same ordered set.
+    const visualLines = orderedLines;
+    const interactionLines = orderedLines;
+    const renderedVisibleLines = visualLines;
+
+    const propsLineIds = useMemo(() => lines.map((line) => line.id), [lines]);
+    const orderedLineIds = useMemo(() => orderedLines.map((line) => line.id), [orderedLines]);
+    const visualLineIds = useMemo(() => visualLines.map((line) => line.id), [visualLines]);
+    const renderedVisibleLineIds = useMemo(
+        () => renderedVisibleLines.map((line) => line.id),
+        [renderedVisibleLines]
+    );
+
+    useEffect(() => {
+        if (!DEV_LINE_RENDER_DIAGNOSTICS) return;
+
+        const selectedLine =
+            lines.find((line) => line.id === selectedLineId) ??
+            orderedLines.find((line) => line.id === selectedLineId) ??
+            null;
+
+        console.debug('[SimpleLineRenderer]', {
+            rendererLabel,
+            selectedLineId,
+            isLineMode,
+            isEditMode,
+            forcePointerEvents,
+            propsLines: {
+                count: propsLineIds.length,
+                ids: propsLineIds,
+            },
+            orderedLines: {
+                count: orderedLineIds.length,
+                ids: orderedLineIds,
+            },
+            visualLines: {
+                count: visualLineIds.length,
+                ids: visualLineIds,
+            },
+            renderedVisibleLines: {
+                count: renderedVisibleLineIds.length,
+                ids: renderedVisibleLineIds,
+            },
+            selectedLine:
+                selectedLine
+                    ? {
+                        id: selectedLine.id,
+                        layer_plane: selectedLine.layer_plane,
+                        z_index: selectedLine.z_index ?? 0,
+                        color: selectedLine.color,
+                        stroke_width: selectedLine.stroke_width,
+                        points: selectedLine.points?.length ?? 0,
+                    }
+                    : null,
+        });
+    }, [
+        forcePointerEvents,
+        isEditMode,
+        isLineMode,
+        lines,
+        orderedLines,
+        orderedLineIds,
+        propsLineIds,
+        renderedVisibleLineIds,
+        renderedVisibleLines,
+        rendererLabel,
+        selectedLineId,
+        visualLineIds,
+    ]);
+
+    useEffect(() => {
+        if (!DEV_LINE_RENDER_DIAGNOSTICS) return;
+        if (rendererLabel !== 'back') return;
+        if (!selectedLineId) return;
+
+        const selector =
+            `[data-line-role="visible-path"]` +
+            `[data-line-renderer="${rendererLabel}"]` +
+            `[data-line-id="${selectedLineId}"]`;
+
+        const node = document.querySelector(selector);
+
+        if (!(node instanceof SVGPathElement)) {
+            console.debug('[SimpleLineRenderer:dom]', {
+                rendererLabel,
+                selectedLineId,
+                selector,
+                exists: false,
+            });
+            return;
         }
-        return visualLines;
-    }, [visualLines, layer, selectedLineId]);
+
+        let bbox:
+            | { x: number; y: number; width: number; height: number }
+            | { error: string }
+            | null = null;
+
+        try {
+            const nextBBox = node.getBBox();
+            bbox = {
+                x: nextBBox.x,
+                y: nextBBox.y,
+                width: nextBBox.width,
+                height: nextBBox.height,
+            };
+        } catch (error) {
+            bbox = {
+                error: error instanceof Error ? error.message : String(error),
+            };
+        }
+
+        const computedStyle = window.getComputedStyle(node);
+
+        console.debug('[SimpleLineRenderer:dom]', {
+            rendererLabel,
+            selectedLineId,
+            selector,
+            exists: true,
+            attrs: {
+                stroke: node.getAttribute('stroke'),
+                'stroke-width': node.getAttribute('stroke-width'),
+                opacity: node.getAttribute('opacity'),
+                display: node.getAttribute('display'),
+                visibility: node.getAttribute('visibility'),
+                d: node.getAttribute('d'),
+                'marker-start': node.getAttribute('marker-start'),
+                'marker-end': node.getAttribute('marker-end'),
+            },
+            computedStyle: {
+                opacity: computedStyle.opacity,
+                display: computedStyle.display,
+                visibility: computedStyle.visibility,
+            },
+            bbox,
+        });
+    }, [rendererLabel, selectedLineId, renderedVisibleLineIds]);
 
     return (
         <svg
@@ -534,7 +755,7 @@ function SimpleLineRenderer({
             }}
         >
             <defs>
-                {renderVisualLines.map((line: CanvasLine) => (
+                {renderedVisibleLines.map((line: CanvasLine) => (
                     <React.Fragment key={`${layer}-markers-${line.id}`}>
                         <marker
                             id={`${layer}-arrow-end-${line.id}`}
@@ -598,6 +819,9 @@ function SimpleLineRenderer({
                             fill="none"
                             stroke="transparent"
                             strokeWidth={20}
+                            data-line-id={line.id}
+                            data-line-renderer={rendererLabel}
+                            data-line-role="hit-path"
                             style={{
                                 cursor: (isEditMode && isSelected) ? 'cell' : (isEditMode ? 'default' : 'move'),
                                 pointerEvents: 'auto'
@@ -606,8 +830,16 @@ function SimpleLineRenderer({
                             onDoubleClick={() => onToggleEditMode(line.id)}
                             onClick={(e) => handlePathClick(e, line)}
                             onContextMenu={(e) => {
+                                logLineEventDiagnostics('hit-path-contextmenu:before-stop', rendererLabel, line.id, e, {
+                                    isEditMode,
+                                    selectedLineId,
+                                });
                                 e.preventDefault();
                                 e.stopPropagation();
+                                logLineEventDiagnostics('hit-path-contextmenu:after-stop', rendererLabel, line.id, e, {
+                                    isEditMode,
+                                    selectedLineId,
+                                });
                                 onSelectLine(line.id);
                                 onContextMenu?.(line.id, e.clientX, e.clientY);
                             }}
@@ -617,7 +849,7 @@ function SimpleLineRenderer({
             })}
 
             {/* Visible lines - only lines belonging to this layer */}
-            {renderVisualLines.map((line: CanvasLine) => {
+            {renderedVisibleLines.map((line: CanvasLine) => {
                 const isSelected = selectedLineId === line.id;
                 const pathData = (line.points && line.points.length > 0)
                     ? getCurvePath(line.points)
@@ -633,6 +865,9 @@ function SimpleLineRenderer({
                             fill="none"
                             stroke={line.color}
                             strokeWidth={line.stroke_width}
+                            data-line-id={line.id}
+                            data-line-renderer={rendererLabel}
+                            data-line-role="visible-path"
                             strokeDasharray={line.dashed ? "5,5" : "none"}
                             strokeLinecap="round"
                             strokeLinejoin="round"
@@ -640,7 +875,7 @@ function SimpleLineRenderer({
                             markerEnd={line.end_arrow ? `url(#${layer}-arrow-end-${line.id})` : "none"}
                             className="transition-all duration-200"
                             style={{
-                                filter: isSelected && layer === 'front' ? 'drop-shadow(0 0 2px rgba(59, 130, 246, 0.5))' : 'none',
+                                filter: isSelected ? 'drop-shadow(0 0 2px rgba(59, 130, 246, 0.5))' : 'none',
                                 pointerEvents: 'none'
                             }}
                         />
@@ -685,7 +920,10 @@ function SimpleLineRenderer({
                                             minWidth: '20px',
                                             maxWidth: '180px',
                                         }}
-                                        onMouseDown={layer === 'front' ? (e) => handlePointDragStart(e, line.id, undefined, 'label') : undefined}
+                                        data-line-id={line.id}
+                                        data-line-renderer={rendererLabel}
+                                        data-line-role="label-handle"
+                                        onMouseDown={(e) => handlePointDragStart(e, line.id, undefined, 'label')}
                                         onClick={(e) => e.stopPropagation()}
                                         onDoubleClick={(e) => e.stopPropagation()}
                                     >
@@ -695,8 +933,8 @@ function SimpleLineRenderer({
                             </foreignObject>
                         )}
 
-                        {/* Handles - only in front layer */}
-                        {layer === 'front' && isEditMode && isSelected && (
+                        {/* Edit handles - render on the selected line in either plane so DrawingLayout can bridge to the real DOM target */}
+                        {isEditMode && isSelected && (
                             <>
                                 {line.points ? (
                                     <>
@@ -709,6 +947,9 @@ function SimpleLineRenderer({
                                                 fill={selectedPoint?.lineId === line.id && selectedPoint?.index === i ? "#3b82f6" : "white"}
                                                 stroke="#3b82f6"
                                                 strokeWidth={2}
+                                                data-line-id={line.id}
+                                                data-line-renderer={rendererLabel}
+                                                data-line-role="point-handle"
                                                 style={{ cursor: 'grab', pointerEvents: 'auto' }}
                                                 onMouseDown={(e) => handlePointDragStart(e, line.id, i)}
                                                 onClick={(e) => {
@@ -732,6 +973,9 @@ function SimpleLineRenderer({
                                                 fill="#10b981"
                                                 stroke="white"
                                                 strokeWidth={1.5}
+                                                data-line-id={line.id}
+                                                data-line-renderer={rendererLabel}
+                                                data-line-role="midpoint-handle"
                                                 style={{ cursor: 'crosshair', pointerEvents: 'auto' }}
                                                 onMouseDown={(e) => handleMidpointDragStart(e, line.id, i)}
                                                 onClick={(e) => e.stopPropagation()}
@@ -740,9 +984,9 @@ function SimpleLineRenderer({
                                     </>
                                 ) : (
                                     <>
-                                        <circle cx={line.start_x} cy={line.start_y} r={6} fill="white" stroke="#3b82f6" strokeWidth={2} style={{ cursor: 'grab', pointerEvents: 'auto' }} onMouseDown={(e) => handlePointDragStart(e, line.id, undefined, 'start')} onClick={(e) => e.stopPropagation()} />
-                                        <circle cx={line.control_x} cy={line.control_y} r={6} fill="white" stroke="#10b981" strokeWidth={2} style={{ cursor: 'grab', pointerEvents: 'auto' }} onMouseDown={(e) => handlePointDragStart(e, line.id, undefined, 'control')} onClick={(e) => e.stopPropagation()} />
-                                        <circle cx={line.end_x} cy={line.end_y} r={6} fill="white" stroke="#3b82f6" strokeWidth={2} style={{ cursor: 'grab', pointerEvents: 'auto' }} onMouseDown={(e) => handlePointDragStart(e, line.id, undefined, 'end')} onClick={(e) => e.stopPropagation()} />
+                                        <circle cx={line.start_x} cy={line.start_y} r={6} fill="white" stroke="#3b82f6" strokeWidth={2} data-line-id={line.id} data-line-renderer={rendererLabel} data-line-role="start-handle" style={{ cursor: 'grab', pointerEvents: 'auto' }} onMouseDown={(e) => handlePointDragStart(e, line.id, undefined, 'start')} onClick={(e) => e.stopPropagation()} />
+                                        <circle cx={line.control_x} cy={line.control_y} r={6} fill="white" stroke="#10b981" strokeWidth={2} data-line-id={line.id} data-line-renderer={rendererLabel} data-line-role="control-handle" style={{ cursor: 'grab', pointerEvents: 'auto' }} onMouseDown={(e) => handlePointDragStart(e, line.id, undefined, 'control')} onClick={(e) => e.stopPropagation()} />
+                                        <circle cx={line.end_x} cy={line.end_y} r={6} fill="white" stroke="#3b82f6" strokeWidth={2} data-line-id={line.id} data-line-renderer={rendererLabel} data-line-role="end-handle" style={{ cursor: 'grab', pointerEvents: 'auto' }} onMouseDown={(e) => handlePointDragStart(e, line.id, undefined, 'end')} onClick={(e) => e.stopPropagation()} />
                                     </>
                                 )}
                             </>
@@ -767,38 +1011,4 @@ function SimpleLineRenderer({
     );
 }
 
-// Custom comparison for React.memo
-// Only optimize back layer - front layer always re-renders
-function arePropsEqual(
-    prevProps: SimpleLineRendererProps,
-    nextProps: SimpleLineRendererProps
-): boolean {
-    if (prevProps.selectedLineId !== nextProps.selectedLineId) return false;
-    if (prevProps.isLineMode !== nextProps.isLineMode) return false;
-    if (prevProps.isEditMode !== nextProps.isEditMode) return false;
-    if (prevProps.layer !== nextProps.layer) return false;
-
-    const layer = nextProps.layer || 'front';
-
-    // Front layer: always re-render for smooth drag updates
-    if (layer === 'front') return false;
-
-    // Back layer: only re-render if back-layer lines changed
-    const prevBackLines = prevProps.lines.filter(l => (l.z_index ?? 0) < 0 && l.id !== prevProps.selectedLineId);
-    const nextBackLines = nextProps.lines.filter(l => (l.z_index ?? 0) < 0 && l.id !== nextProps.selectedLineId);
-
-    if (prevBackLines.length !== nextBackLines.length) return false;
-
-    for (let i = 0; i < prevBackLines.length; i++) {
-        const prev = prevBackLines[i];
-        const next = nextBackLines.find(l => l.id === prev.id);
-        if (!next) return false;
-        if (prev.start_x !== next.start_x || prev.start_y !== next.start_y) return false;
-        if (prev.end_x !== next.end_x || prev.end_y !== next.end_y) return false;
-        if (JSON.stringify(prev.points) !== JSON.stringify(next.points)) return false;
-    }
-
-    return true; // Back layer unchanged
-}
-
-export default React.memo(SimpleLineRenderer, arePropsEqual);
+export default SimpleLineRenderer;

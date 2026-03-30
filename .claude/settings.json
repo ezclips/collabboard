@@ -17,7 +17,10 @@
       "Bash(sed -n '150,180p' app/dashboard/canvas/[id]/CanvasClient.tsx)",
       "Bash(sed -n '240,260p' app/dashboard/canvas/[id]/CanvasClient.tsx)",
       "Bash(sed -n '5295,5305p' app/dashboard/canvas/[id]/CanvasClient.tsx)",
-      "Bash(sed -n '5360,5400p' app/dashboard/canvas/[id]/CanvasClient.tsx)"
+      "Bash(sed -n '5360,5400p' app/dashboard/canvas/[id]/CanvasClient.tsx)",
+      "Bash(xargs wc:*)",
+      "Bash(supabase --version)",
+      "Bash(supabase db:*)"
     ]
   }
 }

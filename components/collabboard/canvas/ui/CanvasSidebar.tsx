@@ -28,6 +28,7 @@ interface CanvasSidebarProps {
   isGraphConnectMode: boolean;
   isCollapsed?: boolean;
   onToggleCollapse?: () => void;
+  onBeforeToolClick?: (type: string) => void;
   handleToolClick: (type: string) => void;
   onBack: () => void;
 }
@@ -42,6 +43,7 @@ export default function CanvasSidebar({
   isGraphConnectMode,
   isCollapsed = false,
   onToggleCollapse,
+  onBeforeToolClick,
   handleToolClick,
   onBack,
 }: CanvasSidebarProps) {
@@ -141,6 +143,7 @@ export default function CanvasSidebar({
                   } ${isDisabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer hover:scale-105'}`}
                   onClick={() => {
                     if (isDisabled) return;
+                    onBeforeToolClick?.(tool.type);
                     handleToolClick(tool.type);
                   }}
                 >

@@ -16,6 +16,7 @@ interface CanvasViewportProps {
   onMouseUp: (e: React.MouseEvent<HTMLDivElement>) => void;
   onMouseLeave: (e: React.MouseEvent<HTMLDivElement>) => void;
   children: React.ReactNode;
+  overlay?: React.ReactNode;
 }
 
 export default function CanvasViewport({
@@ -32,6 +33,7 @@ export default function CanvasViewport({
   onMouseUp,
   onMouseLeave,
   children,
+  overlay,
 }: CanvasViewportProps) {
   return (
     <div
@@ -49,6 +51,7 @@ export default function CanvasViewport({
       onMouseLeave={onMouseLeave}
     >
       {children}
+      {overlay}
     </div>
   );
 }

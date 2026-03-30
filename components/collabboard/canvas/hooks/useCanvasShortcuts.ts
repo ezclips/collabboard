@@ -27,7 +27,7 @@ interface UseCanvasShortcutsParams {
   setIsLineMode: (v: boolean) => void;
   setLineEditModeId: (v: string | null) => void;
   setSelectedLineId: (v: string | null) => void;
-  movePadletLayer: (padletId: string, direction: 'front' | 'back') => void;
+  movePadletLayer: (padletId: string, action: string) => void;
   deleteLine: (lineId: string) => Promise<void>;
   onSelectAll: () => void;
   onUndoPaste: () => void;
@@ -119,9 +119,9 @@ export function useCanvasShortcuts({
 
       if (e.ctrlKey && e.shiftKey && selectedPadletId) {
         if (e.key === ']' || e.key === '}') {
-          movePadletLayer(selectedPadletId, 'front');
+          movePadletLayer(selectedPadletId, 'bringToFront');
         } else if (e.key === '[' || e.key === '{') {
-          movePadletLayer(selectedPadletId, 'back');
+          movePadletLayer(selectedPadletId, 'sendToBack');
         }
       }
     };

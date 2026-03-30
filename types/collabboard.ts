@@ -293,7 +293,8 @@ export interface CanvasLine {
   // Styling
   color: string; // default: '#374151' (gray-700)
   stroke_width: number; // default: 2
-  z_index?: number; // Layer order (higher = on top), default: 0
+  z_index?: number; // Layer order within the plane (higher = on top), default: 0
+  layer_plane: 'back' | 'front'; // Global plane: 'front' renders above padlets, 'back' renders behind them
   start_arrow: boolean; // default: false
   end_arrow: boolean; // default: true
   dashed: boolean; // default: false
@@ -315,6 +316,8 @@ export type PendingPostDraft = {
   metadata?: Record<string, any>;
   width?: number;
   height?: number;
+  position_x?: number;
+  position_y?: number;
   createdAt: number;
 };
 

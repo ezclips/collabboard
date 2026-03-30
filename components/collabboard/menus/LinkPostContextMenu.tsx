@@ -18,6 +18,8 @@ interface LinkPostContextMenuProps {
     onCopy?: () => void;
     onLock?: () => void;
     onBringToFront?: () => void;
+    onBringForward?: () => void;
+    onSendBackward?: () => void;
     onSendToBack?: () => void;
     onGroupIntoColumn?: () => void;
     // Link-specific actions
@@ -35,6 +37,8 @@ export function LinkPostContextMenu({
     onCopy,
     onLock,
     onBringToFront,
+    onBringForward,
+    onSendBackward,
     onSendToBack,
     onGroupIntoColumn,
     onAddImage,
@@ -50,6 +54,8 @@ export function LinkPostContextMenu({
             case 'edit.copy': onCopy?.(); break;
             case 'post.lockPosition': onLock?.(); break;
             case 'post.bringToFront': onBringToFront?.(); break;
+            case 'post.bringForward': onBringForward?.(); break;
+            case 'post.sendBackward': onSendBackward?.(); break;
             case 'post.sendToBack': onSendToBack?.(); break;
             case 'post.groupIntoColumn': onGroupIntoColumn?.(); break;
             case 'post.addImage': onAddImage?.(); break;

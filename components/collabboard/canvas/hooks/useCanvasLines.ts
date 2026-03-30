@@ -99,6 +99,7 @@ export function useCanvasLines({
       start_arrow: false,
       end_arrow: true,
       dashed: false,
+      layer_plane: 'front',
     });
   }, [canvasId, createLine, canvasZoom]);
 

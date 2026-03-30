@@ -3,6 +3,81 @@
 import { useCallback, useState } from "react";
 import type { Padlet } from "@/types/collabboard";
 
+type SceneElement = {
+  id: string;
+  type?: string;
+  link?: string | null;
+  version?: number;
+  versionNonce?: number;
+  updated?: number;
+};
+
+type ReorderAction = "bringToFront" | "sendToBack" | "bringForward" | "sendBackward";
+
+function splitEmbeddables<T extends SceneElement>(elements: readonly T[]) {
+  const embeddables: T[] = [];
+  const others: T[] = [];
+
+  for (const el of elements) {
+    if (el.type === "embeddable") {
+      embeddables.push(el);
+    } else {
+      others.push(el);
+    }
+  }
+
+  return { embeddables, others };
+}
+
+function reorderElements<T extends { id: string }>(elements: readonly T[], targetId: string, action: ReorderAction) {
+  const index = elements.findIndex((el) => el.id === targetId);
+  if (index === -1) return [...elements];
+
+  const target = elements[index];
+
+  switch (action) {
+    case "bringToFront":
+      return [...elements.filter((el) => el.id !== targetId), target];
+
+    case "sendToBack":
+      return [target, ...elements.filter((el) => el.id !== targetId)];
+
+    case "bringForward": {
+      if (index === elements.length - 1) return [...elements];
+      const next = elements[index + 1];
+      const newArr = [...elements];
+      newArr[index] = next;
+      newArr[index + 1] = target;
+      return newArr;
+    }
+
+    case "sendBackward": {
+      if (index === 0) return [...elements];
+      const prev = elements[index - 1];
+      const newArr = [...elements];
+      newArr[index] = prev;
+      newArr[index - 1] = target;
+      return newArr;
+    }
+
+    default:
+      return [...elements];
+  }
+}
+
+function reorderEmbeddables<T extends SceneElement>(elements: readonly T[], targetId: string, action: ReorderAction) {
+  const { embeddables, others } = splitEmbeddables(elements);
+  const reordered = reorderElements(embeddables, targetId, action);
+  const updatedAt = Date.now();
+  const touchedEmbeddables = reordered.map((el) => ({
+    ...el,
+    version: (el.version ?? 1) + 1,
+    versionNonce: Math.floor(Math.random() * 1e9),
+    updated: updatedAt,
+  }));
+  return [...others, ...touchedEmbeddables];
+}
+
 type UseCanvasActionsParams = {
   canvasId: string;
   padlets: Padlet[];
@@ -12,20 +87,25 @@ type UseCanvasActionsParams = {
   onUpdatePadlet: (id: string, updates: Partial<Padlet>) => Promise<void>;
   onDeletePadlet?: (id: string) => Promise<void>;
   onPadletCreated?: (padlet: Padlet) => void;
+  getSceneElements?: () => readonly SceneElement[];
+  updateSceneElements?: (nextElements: readonly SceneElement[], options?: { commitToHistory?: boolean }) => void;
+  onReorderPadlet?: (padletId: string, action: ReorderAction) => void;
 };
 
-export function useCanvasActions({
-  canvasId,
-  padlets,
-  masterPadletId,
-  appState,
-  onAddPadlet,
-  onUpdatePadlet,
-  onDeletePadlet,
-  onPadletCreated,
-}: UseCanvasActionsParams) {
+export function useCanvasActions(params: UseCanvasActionsParams) {
+  const {
+    canvasId,
+    appState,
+    onAddPadlet,
+    onUpdatePadlet,
+    onDeletePadlet,
+    onPadletCreated,
+    getSceneElements,
+    updateSceneElements,
+    onReorderPadlet,
+  } = params;
+
   const [clipboard, setClipboard] = useState<Padlet | null>(null);
-  const [zOrders, setZOrders] = useState<Record<string, number>>({});
 
   const handleDuplicatePadlet = useCallback(
     async (padlet: Padlet) => {
@@ -52,38 +132,36 @@ export function useCanvasActions({
     [onDeletePadlet]
   );
 
-  // Base z-index for padlets. Excalidraw's layerUI (menus/toolbars) sits at z-index 4,
-  // so padlets live at 3 — below the UI layer but above the canvas (z-index 2).
-  const BASE_Z = 3;
+  const reorderDrawingPadlet = useCallback((padlet: Padlet, action: ReorderAction) => {
+    if (!getSceneElements || !updateSceneElements) return false;
 
-  const getZ = useCallback((id: string) => zOrders[id] ?? BASE_Z, [zOrders]);
+    const elements = getSceneElements();
+    const targetEmbeddable = elements.find(
+      (el) => el.type === "embeddable" && el.link === `padlet://${padlet.id}`
+    );
+    if (!targetEmbeddable || !targetEmbeddable.id) return false;
 
-  const allZ = useCallback(() => {
-    const ids = padlets.filter((p) => p.type !== "drawing" && p.id !== masterPadletId).map((p) => p.id);
-    return ids.map((id) => zOrders[id] ?? BASE_Z);
-  }, [padlets, masterPadletId, zOrders]);
+    const nextElements = reorderEmbeddables(elements, targetEmbeddable.id, action);
+    updateSceneElements(nextElements, { commitToHistory: true });
+    onReorderPadlet?.(padlet.id, action);
+    return true;
+  }, [getSceneElements, onReorderPadlet, updateSceneElements]);
 
-  const handleSendToBack = useCallback(
-    (p: Padlet) => {
-      setZOrders((prev) => ({ ...prev, [p.id]: Math.min(...allZ(), BASE_Z) - 1 }));
-    },
-    [allZ]
-  );
+  const handleSendToBack = useCallback((p: Padlet) => {
+    reorderDrawingPadlet(p, "sendToBack");
+  }, [reorderDrawingPadlet]);
 
   const handleSendBackward = useCallback((p: Padlet) => {
-    setZOrders((prev) => ({ ...prev, [p.id]: (prev[p.id] ?? BASE_Z) - 1 }));
-  }, []);
+    reorderDrawingPadlet(p, "sendBackward");
+  }, [reorderDrawingPadlet]);
 
   const handleBringForward = useCallback((p: Padlet) => {
-    setZOrders((prev) => ({ ...prev, [p.id]: (prev[p.id] ?? BASE_Z) + 1 }));
-  }, []);
+    reorderDrawingPadlet(p, "bringForward");
+  }, [reorderDrawingPadlet]);
 
-  const handleBringToFront = useCallback(
-    (p: Padlet) => {
-      setZOrders((prev) => ({ ...prev, [p.id]: Math.max(...allZ(), BASE_Z) + 1 }));
-    },
-    [allZ]
-  );
+  const handleBringToFront = useCallback((p: Padlet) => {
+    reorderDrawingPadlet(p, "bringToFront");
+  }, [reorderDrawingPadlet]);
 
   const handleCopyPadlet = useCallback((p: Padlet) => {
     setClipboard(p);
@@ -213,7 +291,6 @@ export function useCanvasActions({
 
   return {
     clipboard,
-    getZ,
     handleDuplicatePadlet,
     handleDeletePadlet,
     handleSendToBack,

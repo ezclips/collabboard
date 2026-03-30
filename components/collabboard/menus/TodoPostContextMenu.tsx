@@ -18,6 +18,8 @@ interface TodoPostContextMenuProps {
     onCopy?: () => void;
     onLock?: () => void;
     onBringToFront?: () => void;
+    onBringForward?: () => void;
+    onSendBackward?: () => void;
     onSendToBack?: () => void;
     onGroupIntoColumn?: () => void;
     // To-do specific action
@@ -34,6 +36,8 @@ export function TodoPostContextMenu({
     onCopy,
     onLock,
     onBringToFront,
+    onBringForward,
+    onSendBackward,
     onSendToBack,
     onGroupIntoColumn,
     onRename
@@ -48,6 +52,8 @@ export function TodoPostContextMenu({
             case 'edit.copy': onCopy?.(); break;
             case 'post.lockPosition': onLock?.(); break;
             case 'post.bringToFront': onBringToFront?.(); break;
+            case 'post.bringForward': onBringForward?.(); break;
+            case 'post.sendBackward': onSendBackward?.(); break;
             case 'post.sendToBack': onSendToBack?.(); break;
             case 'post.groupIntoColumn': onGroupIntoColumn?.(); break;
             case 'post.rename': onRename?.(); break;

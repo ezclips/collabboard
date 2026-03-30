@@ -5,6 +5,7 @@ interface ZoomControlsProps {
   handleZoomOut: () => void;
   handleZoomReset: () => void;
   handleZoomIn: () => void;
+  className?: string;
 }
 
 export default function ZoomControls({
@@ -12,9 +13,10 @@ export default function ZoomControls({
   handleZoomOut,
   handleZoomReset,
   handleZoomIn,
+  className,
 }: ZoomControlsProps) {
   return (
-    <div className="absolute bottom-6 right-6 z-50 flex items-center bg-white rounded-lg shadow-md border border-gray-200 pointer-events-auto">
+    <div className={className ?? "absolute bottom-6 right-6 z-50 flex items-center bg-white rounded-lg shadow-md border border-gray-200 pointer-events-auto"}>
       <button
         onClick={handleZoomOut}
         className="p-2 hover:bg-gray-100 text-gray-600 rounded-l-lg transition-colors border-r border-gray-100"

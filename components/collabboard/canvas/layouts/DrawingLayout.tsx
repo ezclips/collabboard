@@ -1,7 +1,8 @@
-﻿"use client";
+"use client";
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import type { Padlet } from '@/types/collabboard';
 import dynamic from 'next/dynamic';
 import { getExcalidrawLibrary } from '@/lib/collabboard/excalidrawLibrary';
@@ -9,12 +10,13 @@ import LibraryPanel from '@/components/collabboard/LibraryPanel';
 import PostCardContent from '@/components/collabboard/PostCardContent';
 import EmbeddedCommentList from '@/components/collabboard/EmbeddedCommentList';
 import RowColumnContainerCard from '@/components/collabboard/RowColumnContainerCard';
+import ZoomControls from '@/components/collabboard/canvas/ui/ZoomControls';
 import { PresentationPanel } from '@/components/presentation/PresentationPanel';
 import { FullscreenPresentation } from '@/components/presentation/FullscreenPresentation';
 import type { FrameSlide, RenderSlideOptions } from '@/components/presentation/PresentationPanel';
 import { CanvasContextMenu } from '@/components/collabboard/canvas/ui/CanvasContextMenu';
 import { useCanvasActions } from '@/components/collabboard/canvas/hooks/useCanvasActions';
-import { MessageSquarePlus, Library, MonitorPlay, X, Workflow, Minus, Plus, Undo2, Redo2, Pencil, ChevronDown, ChevronUp } from 'lucide-react';
+import { MessageSquarePlus, Library, MonitorPlay, X, Workflow, Pencil, ChevronDown, ChevronUp } from 'lucide-react';
 import { contrastIconColor } from '@/components/collabboard/shells/CardShell';
 import CustomMermaidModal from './CustomMermaidModal';
 
@@ -76,6 +78,16 @@ function AutoHeightContainer({ padlet, allPadlets, onNaturalHeight, onDropExisti
 // can quantize fractional positions, so the "DB caught up" comparison needs to
 // tolerate a little more than one scene pixel to avoid snapping back on release.
 const POSITION_SYNC_EPSILON = 1.25;
+const DEV_DRAWING_BRIDGE_DIAGNOSTICS = process.env.NODE_ENV !== 'production';
+const BACK_LINE_INTERACTIVE_ROLE_PRIORITY = [
+  'point-handle',
+  'midpoint-handle',
+  'start-handle',
+  'control-handle',
+  'end-handle',
+  'label-handle',
+  'hit-path',
+] as const;
 
 const toSceneCoords = (
   clientX: number,
@@ -110,6 +122,7 @@ type DrawingEmbeddableCardProps = {
   fetchData?: () => void;
   onContextMenu: (e: React.MouseEvent, padlet: Padlet) => void;
   onPadletEditRef: React.RefObject<((padlet: Padlet) => void) | undefined>;
+  onBeforePadletEdit?: () => void;
   onDragEnd?: (padletId: string, x: number, y: number) => void;
   onNaturalResize?: (padletId: string, height: number) => void;
 };
@@ -130,26 +143,12 @@ function DrawingEmbeddableCard({
   fetchData,
   onContextMenu,
   onPadletEditRef,
+  onBeforePadletEdit,
   onDragEnd,
   onNaturalResize,
 }: DrawingEmbeddableCardProps) {
-  const [isExpanded, _setIsExpanded] = useState(false);
-  const setIsExpanded = useCallback((val: boolean | ((prev: boolean) => boolean)) => {
-    console.trace(`[setIsExpanded] called with`, typeof val === 'function' ? 'fn' : val, `padlet=${padlet.id}`);
-    _setIsExpanded(val);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const [isExpanded, setIsExpanded] = useState(false);
   const [canExpand, setCanExpand] = useState(false);
-
-  // [DBG] mount/unmount detection
-  useEffect(() => {
-    console.log(`[DrawingEmbeddableCard] MOUNT padlet=${padlet.id}`);
-    return () => console.log(`[DrawingEmbeddableCard] UNMOUNT padlet=${padlet.id}`);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // [DBG] isExpanded state changes
-  useEffect(() => {
-    console.log(`[DrawingEmbeddableCard] isExpanded changed -> ${isExpanded} padlet=${padlet.id}`);
-  }, [isExpanded]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const md = padlet.metadata as any;
   const isContainer = md?.isContainer === true || (md?.childPadletIds && md.childPadletIds.length > 0) || padlet.type === "container";
@@ -186,12 +185,18 @@ function DrawingEmbeddableCard({
         e.stopPropagation();
         try {
           const libData = JSON.parse(libPayload);
+          const _as = appStateRef.current;
+          const _zoom = _as?.zoom?.value || 1;
+          const _centerX = (window.innerWidth / 2 / _zoom) - (_as?.scrollX || 0);
+          const _centerY = (window.innerHeight / 2 / _zoom) - (_as?.scrollY || 0);
           const created = await onAddPadlet({
             board_id: canvasId,
             type: (libData.type || libData.kind || 'text') as Padlet['type'],
             title: libData.title || 'New Post',
             content: typeof libData.content === 'string' ? libData.content : JSON.stringify(libData.content ?? ''),
             file_url: libData.file_url || undefined,
+            position_x: _centerX,
+            position_y: _centerY,
             metadata: { parentId: padlet.id } as any,
             width: libData.width || 300,
             height: libData.height || 200,
@@ -318,7 +323,11 @@ function DrawingEmbeddableCard({
             <button
               type="button"
               onPointerDown={(e) => e.stopPropagation()}
-              onClick={(e) => { e.stopPropagation(); onPadletEditRef.current?.(padlet); }}
+              onClick={(e) => {
+                e.stopPropagation();
+                onBeforePadletEdit?.();
+                onPadletEditRef.current?.(padlet);
+              }}
               className="shrink-0 w-5 h-5 rounded flex items-center justify-center hover:bg-black/10 opacity-0 group-hover/strip:opacity-100 transition-opacity"
               style={{ color: iconColor }}
               title="Edit"
@@ -353,7 +362,6 @@ function DrawingEmbeddableCard({
                 (el: any) => el.type === 'embeddable' && el.link === `padlet://${padlet.id}` && !el.isDeleted
               );
               if (!existing || Math.abs(existing.height - newHeight) < 1) return;
-              console.log(`[onNaturalHeight] padlet=${padlet.id} updating scene height: ${existing.height} -> ${newHeight} (x=${existing.x} y=${existing.y})`);
               excAPI.updateScene({
                 elements: excAPI.getSceneElements().map((el: any) =>
                   el.type === 'embeddable' && el.link === `padlet://${padlet.id}` && !el.isDeleted
@@ -384,9 +392,15 @@ function DrawingEmbeddableCard({
               }
             }}
             onDropDraftIntoContainer={async (containerId, draftPayload) => {
+              const _as2 = appStateRef.current;
+              const _zoom2 = _as2?.zoom?.value || 1;
+              const _centerX2 = (window.innerWidth / 2 / _zoom2) - (_as2?.scrollX || 0);
+              const _centerY2 = (window.innerHeight / 2 / _zoom2) - (_as2?.scrollY || 0);
               const created = await onAddPadlet({
                 ...draftPayload,
                 board_id: canvasId,
+                position_x: draftPayload.position_x ?? _centerX2,
+                position_y: draftPayload.position_y ?? _centerY2,
                 metadata: {
                   ...draftPayload.metadata,
                   parentId: containerId
@@ -471,6 +485,9 @@ interface DrawingLayoutProps {
   currentUserId?: string;
   currentUserName?: string;
   currentUserAvatar?: string;
+  viewportContainerRef?: React.RefObject<HTMLDivElement | null>;
+  drawingAppStateRef?: React.RefObject<any>;
+  drawingExcalidrawAPIRef?: React.RefObject<any>;
 }
 
 export default function DrawingLayout({
@@ -489,6 +506,9 @@ export default function DrawingLayout({
   currentUserId,
   currentUserName,
   currentUserAvatar,
+  viewportContainerRef,
+  drawingAppStateRef,
+  drawingExcalidrawAPIRef,
 }: DrawingLayoutProps) {
   const [masterPadlet, setMasterPadlet] = useState<Padlet | null>(null);
   const [isInitializing, setIsInitializing] = useState(true);
@@ -534,7 +554,8 @@ export default function DrawingLayout({
 
   // Excalidraw view state stored in a ref to avoid 60fps React re-renders during pan/zoom.
   // Only zoomPercent drives a render (zoom display in toolbar).
-  const appStateRef = useRef<any>(null);
+  const localAppStateRef = useRef<any>(null);
+  const appStateRef = drawingAppStateRef ?? localAppStateRef;
   const prevZoomPctRef = useRef(100);
   const prevZoomValueRef = useRef(1);
   const [zoomPercent, setZoomPercent] = useState(100);
@@ -579,7 +600,10 @@ export default function DrawingLayout({
 
       try {
         if (drawingPadlet.content) setInitialElements(JSON.parse(drawingPadlet.content));
-        if (drawingPadlet.metadata?.drawingAppState) setInitialAppState(JSON.parse(drawingPadlet.metadata.drawingAppState));
+        if (drawingPadlet.metadata?.drawingAppState) {
+          const parsedAppState = JSON.parse(drawingPadlet.metadata.drawingAppState);
+          setInitialAppState(parsedAppState);
+        }
         if (drawingPadlet.metadata?.drawingFiles) setInitialFiles(JSON.parse(drawingPadlet.metadata.drawingFiles));
       } catch (e) {
         console.error("Failed to parse drawing data", e);
@@ -648,6 +672,52 @@ export default function DrawingLayout({
     }, lockMs));
     onUpdatePadlet(padletId, { position_x: x, position_y: y });
   }, [onUpdatePadlet]);
+
+  const closeSelectedShapePanel = useCallback(() => {
+    const api = excalidrawAPIRef.current ?? excalidrawAPI;
+    if (!api) return;
+
+    // Excalidraw v0.18 shows the "Selected Shape Actions" panel when EITHER:
+    //   1. activeTool is a shape tool (rectangle, diamond, etc. — anything
+    //      not selection/lasso/eraser/hand/laser/custom), OR
+    //   2. there are selected elements (getSelectedElements().length > 0)
+    //
+    // To reliably hide the panel, we must make BOTH conditions false:
+    //   - Switch activeTool to "selection" (disables condition 1)
+    //   - Clear selectedElementIds (disables condition 2)
+    //
+    // The pencil button lives inside an Excalidraw embeddable element.
+    // Even with stopPropagation, Excalidraw's internal render cycle may
+    // re-select the embeddable after a synchronous setActiveTool call.
+    // Using a double-RAF ensures our selection clear runs AFTER Excalidraw's
+    // state reconciliation is complete.
+
+    // Step 1: Switch tool immediately (clears condition 1 right away)
+    if (typeof api.setActiveTool === 'function') {
+      api.setActiveTool({ type: 'selection' });
+    }
+
+    // Step 2: Clear selection after current call stack / immediate render.
+    // We prefer a single deferred clear to allow Excalidraw's internal state
+    // reconciliation to finish processing the tool change before we force
+    // the selection to clear.
+    requestAnimationFrame(() => {
+      // Re-read API in case component re-rendered
+      const latestApi = excalidrawAPIRef.current ?? api;
+      if (typeof latestApi?.updateScene === 'function') {
+        latestApi.updateScene({
+          appState: {
+            selectedElementIds: {},
+            selectedGroupIds: {},
+            activeEmbeddable: null,
+            selectedLinearElement: null,
+            openPopup: null,
+            activeTool: { type: 'selection', customType: null, lastActiveTool: null, locked: false },
+          },
+        });
+      }
+    });
+  }, [excalidrawAPI]);
 
   const performSave = useCallback(async () => {
     const mp = masterPadletRef.current;
@@ -996,8 +1066,9 @@ export default function DrawingLayout({
   const handleContextMenu = useCallback((e: React.MouseEvent, padlet: Padlet) => {
     e.preventDefault();
     e.stopPropagation();
+    closeSelectedShapePanel();
     setContextMenu({ x: e.clientX, y: e.clientY, padlet });
-  }, []);
+  }, [closeSelectedShapePanel]);
 
   const getPadletRenderSignature = useCallback((padlet: Padlet) => {
     return JSON.stringify({
@@ -1188,8 +1259,6 @@ export default function DrawingLayout({
         const timerActive = pendingPosTimersRef.current.has(padletIdFromLink);
         if (positionLocked) reasons.push(`pos LOCKED${timerActive ? '[timer]' : '[coord]'} (scene=${el.x},${el.y} db=${nextX},${nextY})`);
         if (heightLocked) reasons.push(`height LOCKED (scene=${el.height} db=${nextHeight})`);
-        console.log(`[syncEffect] overwriting padlet=${padletIdFromLink} reasons=[${reasons.join(', ')}]`);
-
         const refreshed = {
           ...el,
           x: positionLocked || !positionChangedInPadletData ? el.x : nextX,
@@ -1315,6 +1384,7 @@ export default function DrawingLayout({
         fetchData={fetchData}
         onContextMenu={handleContextMenu}
         onPadletEditRef={onPadletEditRef}
+        onBeforePadletEdit={closeSelectedShapePanel}
         onDragEnd={(id, x, y) => {
           recentlyDraggedRef.current.set(id, { x, y, expiresAt: Date.now() + 5000 });
           savePadletPositionWithLock(id, x, y);
@@ -1333,6 +1403,19 @@ export default function DrawingLayout({
     get scrollX() { return appStateRef.current?.scrollX ?? 0; },
     get scrollY() { return appStateRef.current?.scrollY ?? 0; },
   }), []);
+
+  const getDrawingSceneElements = useCallback(() => {
+    if (!excalidrawAPI) return [] as any[];
+    return excalidrawAPI.getSceneElements();
+  }, [excalidrawAPI]);
+
+  const updateDrawingSceneElements = useCallback((nextElements: readonly any[], options?: { commitToHistory?: boolean }) => {
+    if (!excalidrawAPI) return;
+    excalidrawAPI.updateScene({
+      elements: nextElements as any[],
+      commitToHistory: options?.commitToHistory ?? true,
+    });
+  }, [excalidrawAPI]);
 
   const {
     clipboard,
@@ -1356,6 +1439,8 @@ export default function DrawingLayout({
     onUpdatePadlet,
     onDeletePadlet,
     onPadletCreated: insertPadletEmbeddable,
+    getSceneElements: getDrawingSceneElements,
+    updateSceneElements: updateDrawingSceneElements,
   });
 
   // Render a single Excalidraw frame to a PNG dataURL (used by PresentationPanel)
@@ -1415,7 +1500,7 @@ export default function DrawingLayout({
     elements: initialElements,
     appState: {
       ...initialAppState,
-      viewBackgroundColor: "#ffffff",
+      viewBackgroundColor: "transparent",
       theme: "light",
       collaborators: new Map(),
     },
@@ -1505,16 +1590,6 @@ export default function DrawingLayout({
     });
   }, [excalidrawAPI]); // appState removed -- reads from ref at call time
 
-  const handleUndo = useCallback(() => {
-    if (readOnly) return;
-    excalidrawAPI?.history?.undo?.();
-  }, [readOnly, excalidrawAPI]);
-
-  const handleRedo = useCallback(() => {
-    if (readOnly) return;
-    excalidrawAPI?.history?.redo?.();
-  }, [readOnly, excalidrawAPI]);
-
   const contextMenuOpenTargets = useMemo(() => {
     if (!contextMenu) return [] as Padlet[];
     const menuPadlet = contextMenu.padlet;
@@ -1535,6 +1610,183 @@ export default function DrawingLayout({
     return [...ordered, ...extras];
   }, [contextMenu, padlets]);
 
+  const bridgedBackLineInteractiveTargetRef = useRef<Element | null>(null);
+  const isDispatchingBackLineBridgeEventRef = useRef(false);
+
+  const findBackLineInteractiveTargetAtPoint = useCallback((clientX: number, clientY: number) => {
+    const stack = document.elementsFromPoint(clientX, clientY);
+
+    for (const role of BACK_LINE_INTERACTIVE_ROLE_PRIORITY) {
+      for (const node of stack) {
+        if (!(node instanceof Element)) continue;
+        if (node.dataset.lineRenderer !== 'back') continue;
+        if (node.dataset.lineRole !== role) continue;
+        return node;
+      }
+    }
+
+    return null;
+  }, []);
+
+  const handleBackLineBridgeMouseDownCapture = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    if (isDispatchingBackLineBridgeEventRef.current) return;
+
+    bridgedBackLineInteractiveTargetRef.current = null;
+
+    const activeToolType = appStateRef.current?.activeTool?.type ?? 'selection';
+    if (activeToolType !== 'selection') return;
+    if (event.button !== 0) return;
+
+    const target = event.target;
+    if (!(target instanceof HTMLCanvasElement) || !target.classList.contains('excalidraw__canvas')) {
+      return;
+    }
+
+    const interactiveTarget = findBackLineInteractiveTargetAtPoint(event.clientX, event.clientY);
+
+    if (DEV_DRAWING_BRIDGE_DIAGNOSTICS) {
+      console.debug('[DrawingLayout:back-line-bridge]', {
+        phase: 'mouse-down-capture',
+        activeToolType,
+        targetTag: target.tagName,
+        targetClassName: target.className,
+        bridgedLineId: interactiveTarget?.dataset.lineId ?? null,
+        bridgedLineRole: interactiveTarget?.dataset.lineRole ?? null,
+      });
+    }
+
+    if (!interactiveTarget) return;
+
+    bridgedBackLineInteractiveTargetRef.current = interactiveTarget;
+    event.preventDefault();
+    event.stopPropagation();
+
+    isDispatchingBackLineBridgeEventRef.current = true;
+    try {
+      interactiveTarget.dispatchEvent(new MouseEvent('mousedown', {
+        bubbles: true,
+        cancelable: true,
+        clientX: event.clientX,
+        clientY: event.clientY,
+        button: event.button,
+        buttons: event.buttons,
+        ctrlKey: event.ctrlKey,
+        shiftKey: event.shiftKey,
+        altKey: event.altKey,
+        metaKey: event.metaKey,
+      }));
+    } finally {
+      isDispatchingBackLineBridgeEventRef.current = false;
+    }
+  }, [appStateRef, findBackLineInteractiveTargetAtPoint]);
+
+  const handleBackLineBridgeClickCapture = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    if (isDispatchingBackLineBridgeEventRef.current) return;
+    if (event.button !== 0) return;
+
+    const bridgedTarget = bridgedBackLineInteractiveTargetRef.current;
+    bridgedBackLineInteractiveTargetRef.current = null;
+
+    if (!bridgedTarget) return;
+
+    const target = event.target;
+    if (!(target instanceof HTMLCanvasElement) || !target.classList.contains('excalidraw__canvas')) {
+      return;
+    }
+
+    if (DEV_DRAWING_BRIDGE_DIAGNOSTICS) {
+      console.debug('[DrawingLayout:back-line-bridge]', {
+        phase: 'click-capture',
+        bridgedLineId: bridgedTarget.dataset.lineId ?? null,
+        bridgedLineRole: bridgedTarget.dataset.lineRole ?? null,
+      });
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    isDispatchingBackLineBridgeEventRef.current = true;
+    try {
+      bridgedTarget.dispatchEvent(new MouseEvent('click', {
+        bubbles: true,
+        cancelable: true,
+        clientX: event.clientX,
+        clientY: event.clientY,
+        button: event.button,
+        buttons: event.buttons,
+        ctrlKey: event.ctrlKey,
+        shiftKey: event.shiftKey,
+        altKey: event.altKey,
+        metaKey: event.metaKey,
+      }));
+    } finally {
+      isDispatchingBackLineBridgeEventRef.current = false;
+    }
+  }, []);
+
+  const handleBackLineBridgePointerDownCapture = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (!DEV_DRAWING_BRIDGE_DIAGNOSTICS) return;
+
+    const target = event.target instanceof Element ? event.target : null;
+    console.debug('[DrawingLayout:back-line-bridge]', {
+      phase: 'pointer-down-capture',
+      targetTag: target?.tagName ?? null,
+      targetClassName: target?.getAttribute('class') ?? null,
+      button: event.button,
+      buttons: event.buttons,
+    });
+  }, []);
+
+  const handleBackLineBridgeContextMenuCapture = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    if (isDispatchingBackLineBridgeEventRef.current) return;
+
+    const activeToolType = appStateRef.current?.activeTool?.type ?? 'selection';
+    if (activeToolType !== 'selection') return;
+
+    const target = event.target instanceof Element ? event.target : null;
+    if (!(target instanceof HTMLCanvasElement) || !target.classList.contains('excalidraw__canvas')) {
+      return;
+    }
+
+    const interactiveTarget = findBackLineInteractiveTargetAtPoint(event.clientX, event.clientY);
+
+    if (DEV_DRAWING_BRIDGE_DIAGNOSTICS) {
+      console.debug('[DrawingLayout:back-line-bridge]', {
+        phase: 'contextmenu-capture',
+        targetTag: target?.tagName ?? null,
+        targetClassName: target?.getAttribute('class') ?? null,
+        button: event.button,
+        buttons: event.buttons,
+        bridgedLineId: interactiveTarget?.dataset.lineId ?? null,
+        bridgedLineRole: interactiveTarget?.dataset.lineRole ?? null,
+      });
+    }
+
+    if (!interactiveTarget) return;
+
+    bridgedBackLineInteractiveTargetRef.current = null;
+    event.preventDefault();
+    event.stopPropagation();
+
+    isDispatchingBackLineBridgeEventRef.current = true;
+    try {
+      interactiveTarget.dispatchEvent(new MouseEvent('contextmenu', {
+        bubbles: true,
+        cancelable: true,
+        clientX: event.clientX,
+        clientY: event.clientY,
+        button: event.button,
+        buttons: event.buttons,
+        ctrlKey: event.ctrlKey,
+        shiftKey: event.shiftKey,
+        altKey: event.altKey,
+        metaKey: event.metaKey,
+      }));
+    } finally {
+      isDispatchingBackLineBridgeEventRef.current = false;
+    }
+  }, [appStateRef, findBackLineInteractiveTargetAtPoint]);
+
   if (isInitializing) {
     return <div className="flex-1 flex items-center justify-center p-8 text-gray-500">Initializing drawing canvas...</div>;
   }
@@ -1542,12 +1794,16 @@ export default function DrawingLayout({
   return (
     <div
 
-      className="flex-1 w-full h-full absolute inset-0 bg-white"
+      className="flex-1 w-full h-full absolute inset-0 bg-transparent"
+      onPointerDownCapture={handleBackLineBridgePointerDownCapture}
+      onMouseDownCapture={handleBackLineBridgeMouseDownCapture}
+      onClickCapture={handleBackLineBridgeClickCapture}
+      onContextMenuCapture={handleBackLineBridgeContextMenuCapture}
 
     >
       <div style={{ width: '100%', height: '100%' }}>
         <ExcalidrawWrapper
-          excalidrawAPI={(api) => { setExcalidrawAPI(api); excalidrawAPIRef.current = api; }}
+          excalidrawAPI={(api) => { setExcalidrawAPI(api); excalidrawAPIRef.current = api; if (drawingExcalidrawAPIRef) drawingExcalidrawAPIRef.current = api; }}
           excalidrawKey={key}
           initialData={excalidrawInitialData}
           onChange={handleChange}
@@ -1604,54 +1860,16 @@ export default function DrawingLayout({
         </div>
       )}
 
-      {/* Bottom-left Floating Toolbar */}
-      <div
-        className="fixed bottom-6 left-14 flex items-center gap-2 z-[130] pointer-events-none"
-      >
-        <div className="flex items-center rounded-xl bg-[#f4f4f8] border border-gray-200 shadow-sm overflow-hidden px-1 py-1 pointer-events-auto">
-          <button
-            onClick={() => applyZoom('out')}
-            className="h-8 w-9 flex items-center justify-center text-gray-700 hover:bg-gray-200 rounded-lg"
-            title="Zoom out"
-          >
-            <Minus size={16} />
-          </button>
-          <button
-            onClick={() => applyZoom('reset')}
-            className="h-8 px-3 text-sm font-medium text-gray-700 hover:bg-gray-200 rounded-lg min-w-[74px]"
-            title="Reset zoom"
-          >
-            {zoomPercent}%
-          </button>
-          <button
-            onClick={() => applyZoom('in')}
-            className="h-8 w-9 flex items-center justify-center text-gray-700 hover:bg-gray-200 rounded-lg"
-            title="Zoom in"
-          >
-            <Plus size={16} />
-          </button>
-        </div>
-
-        {!readOnly && (
-          <div className="flex items-center rounded-xl bg-[#f4f4f8] border border-gray-200 shadow-sm overflow-hidden px-1 py-1 pointer-events-auto">
-            <button
-              onClick={handleUndo}
-              className="h-8 w-9 flex items-center justify-center text-gray-500 hover:bg-gray-200 rounded-lg"
-              title="Undo"
-            >
-              <Undo2 size={16} />
-            </button>
-
-            <button
-              onClick={handleRedo}
-              className="h-8 w-9 flex items-center justify-center text-gray-500 hover:bg-gray-200 rounded-lg"
-              title="Redo"
-            >
-              <Redo2 size={16} />
-            </button>
-          </div>
-        )}
-      </div>
+      {viewportContainerRef?.current ? createPortal(
+        <ZoomControls
+          canvasZoom={zoomPercent / 100}
+          handleZoomOut={() => applyZoom('out')}
+          handleZoomReset={() => applyZoom('reset')}
+          handleZoomIn={() => applyZoom('in')}
+          className="absolute bottom-6 right-6 z-[130] flex items-center bg-white rounded-lg shadow-md border border-gray-200 pointer-events-auto"
+        />,
+        viewportContainerRef.current
+      ) : null}
 
       {/* Overlay for catching clicks when in comment mode */}
       {activeTool === 'comment' && (

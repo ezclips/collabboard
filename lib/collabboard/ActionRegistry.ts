@@ -26,6 +26,8 @@ export type ActionId =
     | 'post.lockPosition'
     | 'post.bringToFront'
     | 'post.sendToBack'
+    | 'post.bringForward'
+    | 'post.sendBackward'
     | 'post.createSyncedCopy'
     | 'post.addImage'
     | 'post.copyLinkAddress'

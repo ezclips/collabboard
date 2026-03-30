@@ -207,7 +207,12 @@ export function useCanvasData({ canvasId, dispatch }: UseCanvasDataParams) {
       } else {
         setPadlets([]);
       }
-      setLines(lineData || []);
+      // Normalize: rows written before the layer_plane column existed arrive as null.
+      // Treat them as 'front' at runtime; the DB default handles new inserts.
+      setLines((lineData || []).map(l => ({
+        ...l,
+        layer_plane: l.layer_plane ?? 'front',
+      })));
     } catch (e) {
       console.error('fetchData failed:', e);
       setError('Failed to load canvas.');
@@ -348,6 +353,7 @@ export function useCanvasData({ canvasId, dispatch }: UseCanvasDataParams) {
           label: line.label,
           label_position: line.label_position,
           z_index: line.z_index,
+          layer_plane: line.layer_plane ?? 'front',
           label_text_color: line.label_text_color,
           label_background_color: line.label_background_color,
           updated_at: new Date().toISOString()
@@ -408,21 +414,33 @@ export function useCanvasData({ canvasId, dispatch }: UseCanvasDataParams) {
     const targetLine = lines.find(l => l.id === lineId);
     if (!targetLine) return;
 
-    const zIndexes = lines.map(l => l.z_index ?? 0);
-    const minZ = Math.min(...zIndexes, 0);
-    const maxZ = Math.max(...zIndexes, 0);
+    const currentPlane = targetLine.layer_plane ?? 'front';
     const currentZ = targetLine.z_index ?? 0;
 
-    let newZ: number;
-    switch (action) {
-      case 'front': newZ = maxZ + 1; break;
-      case 'back': newZ = minZ - 1; break;
-      case 'forward': newZ = currentZ + 1; break;
-      case 'backward': newZ = currentZ - 1; break;
-      default: newZ = currentZ;
-    }
+    if (action === 'front') {
+      // Move to front plane: place above all current front-plane lines
+      const frontZIndexes = lines
+        .filter(l => (l.layer_plane ?? 'front') === 'front')
+        .map(l => l.z_index ?? 0);
+      const maxFrontZ = frontZIndexes.length > 0 ? Math.max(...frontZIndexes) : 0;
+      updateLine(lineId, { layer_plane: 'front', z_index: maxFrontZ + 1 });
 
-    updateLine(lineId, { z_index: newZ });
+    } else if (action === 'back') {
+      // Move to back plane: place below all current back-plane lines
+      const backZIndexes = lines
+        .filter(l => (l.layer_plane ?? 'front') === 'back')
+        .map(l => l.z_index ?? 0);
+      const minBackZ = backZIndexes.length > 0 ? Math.min(...backZIndexes) : 0;
+      updateLine(lineId, { layer_plane: 'back', z_index: minBackZ - 1 });
+
+    } else if (action === 'forward') {
+      // Reorder within the current plane only — do not change layer_plane
+      updateLine(lineId, { z_index: currentZ + 1 });
+
+    } else if (action === 'backward') {
+      // Reorder within the current plane only — do not change layer_plane
+      updateLine(lineId, { z_index: currentZ - 1 });
+    }
   }, [lines, updateLine]);
 
   // Duplicate a line (for context menu)

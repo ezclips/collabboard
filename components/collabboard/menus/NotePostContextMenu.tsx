@@ -18,6 +18,8 @@ interface NotePostContextMenuProps {
     onCopy?: () => void;
     onLock?: () => void;
     onBringToFront?: () => void;
+    onBringForward?: () => void;
+    onSendBackward?: () => void;
     onSendToBack?: () => void;
     onCreateSyncedCopy?: () => void;
     onGroupIntoColumn?: () => void;
@@ -33,6 +35,8 @@ export function NotePostContextMenu({
     onCopy,
     onLock,
     onBringToFront,
+    onBringForward,
+    onSendBackward,
     onSendToBack,
     onCreateSyncedCopy,
     onGroupIntoColumn
@@ -47,6 +51,8 @@ export function NotePostContextMenu({
             case 'edit.copy': onCopy?.(); break;
             case 'post.lockPosition': onLock?.(); break;
             case 'post.bringToFront': onBringToFront?.(); break;
+            case 'post.bringForward': onBringForward?.(); break;
+            case 'post.sendBackward': onSendBackward?.(); break;
             case 'post.sendToBack': onSendToBack?.(); break;
             case 'post.createSyncedCopy': onCreateSyncedCopy?.(); break;
             case 'post.groupIntoColumn': onGroupIntoColumn?.(); break;
@@ -99,8 +105,10 @@ export function NotePostContextMenu({
 
                     <ContextMenu.Separator className="h-[1px] bg-gray-100 m-1" />
 
-                    <ContextMenuItem label="Bring to Front" shortcut={["Ctrl", "Shift", "]"]} onClick={() => handleAction('post.bringToFront')} />
                     <ContextMenuItem label="Send to Back" shortcut={["Ctrl", "Shift", "["]} onClick={() => handleAction('post.sendToBack')} />
+                    <ContextMenuItem label="Send Backward" onClick={() => handleAction('post.sendBackward')} />
+                    <ContextMenuItem label="Bring Forward" onClick={() => handleAction('post.bringForward')} />
+                    <ContextMenuItem label="Bring to Front" shortcut={["Ctrl", "Shift", "]"]} onClick={() => handleAction('post.bringToFront')} />
                 </ContextMenu.Content>
             </ContextMenu.Portal>
         </ContextMenu.Root>

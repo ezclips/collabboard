@@ -939,10 +939,13 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   const isTimelineLayout = canvas?.layout === 'timeline';
   const isMapLayout = canvas?.layout === 'map';
   const isFreeformLayout = canvas?.layout === 'freeform' || (!isWallLayout && !isColumnsLayout && !isKanbanLayout && !isGanttLayout && !isSchedulerLayout && !isGridLayout && !isDrawingLayout && !isTimelineLayout && !isMapLayout);
+  const usesConstantCanvasToolbarInset = canUseCanvasToolbar && (isFreeformLayout || isDrawingLayout);
   const sharedCanvasToolbarInsetPx =
-    canUseCanvasToolbar && !isToolbarCollapsed && (isMapLayout || isFreeformLayout || isTimelineLayout || isSchedulerLayout || isDrawingLayout || isColumnsLayout || isGridLayout)
+    usesConstantCanvasToolbarInset
       ? 56
-      : 0;
+      : canUseCanvasToolbar && !isToolbarCollapsed && (isMapLayout || isTimelineLayout || isSchedulerLayout || isColumnsLayout || isGridLayout)
+        ? 56
+        : 0;
   const currentMapStyleId =
     mapStyleIdOverride ||
     ((canvas?.settings as any)?.mapStyleId as string | undefined) ||
@@ -1165,7 +1168,18 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     setPadlets,
     getNewPostPosition,
     onDrawingPlacementStart: (draft) => {
-      setDrawingPendingDraft(draft as any);
+      const _as = drawingAppStateRef.current;
+      const _zoom = (typeof _as?.zoom?.value === 'number' && _as.zoom.value > 0) ? _as.zoom.value : 1;
+      const _scrollX = typeof _as?.scrollX === 'number' ? _as.scrollX : 0;
+      const _scrollY = typeof _as?.scrollY === 'number' ? _as.scrollY : 0;
+      const _offsetLeft = typeof _as?.offsetLeft === 'number' ? _as.offsetLeft : 0;
+      const _offsetTop = typeof _as?.offsetTop === 'number' ? _as.offsetTop : 0;
+      const _centerX = ((window.innerWidth - _offsetLeft) / 2 / _zoom) - _scrollX;
+      const _centerY = ((window.innerHeight - _offsetTop) / 2 / _zoom) - _scrollY;
+      const positionFields = (Number.isFinite(_centerX) && Number.isFinite(_centerY))
+        ? { position_x: _centerX, position_y: _centerY }
+        : {};
+      setDrawingPendingDraft({ ...draft, ...positionFields } as any);
       setDrawingContainerPromptOpen(true);
     },
     onTimelinePlacementStart: (draft) => {
@@ -3015,7 +3029,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   const mapOverlayLines = useMemo(
     () => isMapLayout
       ? lines.filter((line) => activeMapLineIds.has(line.id))
-      : lines,
+      : lines.filter((line) => (line.layer_plane ?? 'front') === 'front'),
     [lines, activeMapLineIds, isMapLayout]
   );
   const shouldEnableMapLinePointerEvents = isMapLayout && (selectedLineId !== null || lineEditModeId !== null);
@@ -3609,30 +3623,33 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     }
   };
 
-  const movePadletLayer = async (id: string, direction: 'front' | 'back') => {
+  const movePadletLayer = async (id: string, action: string) => {
     const padlet = padlets.find(p => p.id === id);
     if (!padlet) return;
 
-    // Get all z-indexes to find max/min
-    const allZIndexes = padlets
-      .map(p => (p.metadata as any)?.zIndex || 100)
-      .sort((a, b) => a - b);
+    const zValues = padlets.map(p => (p.metadata as any)?.zIndex || 100);
+    const maxZ = Math.max(...zValues);
+    const minZ = Math.min(...zValues);
+    const currentZ = (padlet.metadata as any)?.zIndex || 100;
 
     let newZ: number;
 
-    if (direction === 'front') {
-      // Move above the current highest
-      const maxZ = Math.max(...allZIndexes);
-      newZ = maxZ + 1;
-
-      // If we're reaching high numbers, normalize everything
-      if (newZ > 9000) {
-        setTimeout(() => normalizeZIndexes(), 0);
-      }
-    } else {
-      // Move below the current lowest (but minimum 10)
-      const minZ = Math.min(...allZIndexes);
-      newZ = Math.max(10, minZ - 1);
+    switch (action) {
+      case 'bringToFront':
+        newZ = maxZ + 1;
+        if (newZ > 9000) setTimeout(() => normalizeZIndexes(), 0);
+        break;
+      case 'sendToBack':
+        newZ = Math.max(10, minZ - 1);
+        break;
+      case 'bringForward':
+        newZ = currentZ + 1;
+        break;
+      case 'sendBackward':
+        newZ = Math.max(10, currentZ - 1);
+        break;
+      default:
+        return;
     }
 
     markPadletLocallyModified(id);
@@ -3649,7 +3666,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         p.id === id ? { ...p, metadata: newMetadata } : p
       ));
     } catch (e) {
-      console.error(`Failed to move padlet to ${direction}:`, e);
+      console.error(`Failed to move padlet layer (${action}):`, e);
     }
   };
 
@@ -4609,13 +4626,15 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   const handleDrawingLayoutAddPadlet = useCallback(async (postData: any) => {
     const { forceContainerPrompt: _forceContainerPrompt, ...cleanMetadata } = postData.metadata || {};
     const newId = crypto.randomUUID();
+    const rawPositionX = postData.x_position ?? postData.position_x ?? 0;
+    const rawPositionY = postData.y_position ?? postData.position_y ?? 0;
     const newPadlet = {
       ...postData,
       id: newId,
       board_id: canvasId,
       metadata: cleanMetadata,
-      position_x: postData.x_position ?? postData.position_x ?? 0,
-      position_y: postData.y_position ?? postData.position_y ?? 0,
+      position_x: Math.round(rawPositionX),
+      position_y: Math.round(rawPositionY),
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
@@ -4628,7 +4647,14 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   }, [canvasId, setPadlets, addDrawingLayoutPadlet]);
 
   const handleDrawingLayoutUpdatePadlet = useCallback(async (id: string, updates: any) => {
-    await updateDrawingLayoutPadlet(id, updates);
+    const normalizedUpdates = { ...updates };
+    if (typeof normalizedUpdates.position_x === 'number') {
+      normalizedUpdates.position_x = Math.round(normalizedUpdates.position_x);
+    }
+    if (typeof normalizedUpdates.position_y === 'number') {
+      normalizedUpdates.position_y = Math.round(normalizedUpdates.position_y);
+    }
+    await updateDrawingLayoutPadlet(id, normalizedUpdates);
   }, [updateDrawingLayoutPadlet]);
 
   const handleDrawingLayoutDeletePadlet = useCallback(async (id: string) => {
@@ -4639,6 +4665,25 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   const [drawingPendingDraft, setDrawingPendingDraft] = useState<Partial<Padlet> | null>(null);
   const [drawingContainerPromptOpen, setDrawingContainerPromptOpen] = useState(false);
   const [drawingGhostDraft, setDrawingGhostDraft] = useState<Partial<Padlet> | null>(null);
+  // Ref populated by DrawingLayout so we can read live Excalidraw viewport state here
+  const drawingAppStateRef = useRef<any>(null);
+  // Ref populated by DrawingLayout so we can call Excalidraw API methods (e.g. scrollToContent) after modal creation
+  const drawingExcalidrawAPIRef = useRef<any>(null);
+
+  const closeDrawingSelectedShapePanel = useCallback(() => {
+    if (!isDrawingLayout) return;
+    const api = drawingExcalidrawAPIRef.current;
+    if (!api?.updateScene) return;
+    api.updateScene({
+      appState: {
+        selectedElementIds: {},
+        selectedGroupIds: {},
+        activeEmbeddable: null,
+        selectedLinearElement: null,
+        openPopup: null,
+      },
+    });
+  }, [isDrawingLayout]);
 
   const handleDrawingLayoutAddPadletWithContainerCheck = useCallback(async (postData: any) => {
     const needsContainerPrompt =
@@ -4661,8 +4706,10 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
 
     const containerId = crypto.randomUUID();
     const childId = crypto.randomUUID();
-    let posX = (drawingPendingDraft as any).position_x ?? 100;
-    const posY = (drawingPendingDraft as any).position_y ?? 100;
+    const rawPosX = (drawingPendingDraft as any).position_x;
+    const rawPosY = (drawingPendingDraft as any).position_y;
+    let posX = Number.isFinite(rawPosX) ? Math.round(rawPosX) : 100;
+    const posY = Number.isFinite(rawPosY) ? Math.round(rawPosY) : 100;
 
     const containerW = 380;
     const containerH = 320;
@@ -4717,13 +4764,22 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     };
 
     setPadlets(prev => [...prev, containerPadlet, childPadlet]);
+    // Smooth pan to new container after scene sync (no zoom change)
+    setTimeout(() => {
+      const excAPI = drawingExcalidrawAPIRef.current;
+      if (!excAPI) return;
+      const el = excAPI.getSceneElements().find(
+        (e: any) => e.type === 'embeddable' && e.link === `padlet://${containerId}` && !e.isDeleted
+      );
+      if (el) excAPI.scrollToContent([el], { fitToContent: false, animate: true, duration: 400 });
+    }, 200);
     try {
       const { error: containerError } = await insertPadlet(containerPadlet);
       if (containerError) throw containerError;
       const { error: childError } = await insertPadlet(childPadlet);
       if (childError) throw childError;
-    } catch (err) {
-      console.error('Failed to create drawing container with image:', err);
+    } catch (err: any) {
+      console.error('Failed to create drawing container with image:', err?.message || err?.code || err?.details || err, { posX, posY });
       toast.error('Failed to create container');
       setPadlets(prev => prev.filter(p => p.id !== containerId && p.id !== childId));
     }
@@ -5003,6 +5059,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     switch (toolType) {
       case 'note':
         // Open Note Editor
+        closeDrawingSelectedShapePanel();
         closeAllToolbars();
         setPadletToEdit({
           id: 'new',
@@ -5022,6 +5079,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         break;
       case 'table':
         // Open Table/Spreadsheet Editor
+        closeDrawingSelectedShapePanel();
         closeAllToolbars();
         setPadletToEdit({
           id: 'new',
@@ -5041,6 +5099,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         break;
       case 'link':
         // Open Link Editor
+        closeDrawingSelectedShapePanel();
         closeAllToolbars();
         setPadletToEdit({
           id: 'new',
@@ -5060,6 +5119,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         break;
       case 'todo':
         // Open Todo Editor
+        closeDrawingSelectedShapePanel();
         closeAllToolbars();
         setPadletToEdit({
           id: 'new',
@@ -5078,6 +5138,12 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         setIsTodoEditorOpen(true);
         break;
       case 'line':
+        // Close native Excalidraw selected-shape panel before line-post flow begins
+        closeDrawingSelectedShapePanel();
+        const api = drawingExcalidrawAPIRef.current;
+        if (isDrawingLayout && api && typeof api.setActiveTool === "function") {
+          api.setActiveTool({ type: "selection" });
+        }
         // Toggle line drawing mode
         if (isLineMode) {
           // Deactivate line mode
@@ -5112,6 +5178,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         }
 
         // Open Container Editor
+        closeDrawingSelectedShapePanel();
         closeAllToolbars();
         setPadletToEdit({
           id: 'new',
@@ -5131,6 +5198,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         break;
       case 'comment':
         // Open Comment Editor for standalone comment post
+        closeDrawingSelectedShapePanel();
         closeAllToolbars();
         setPadletToEdit({
           id: 'new',
@@ -5149,6 +5217,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         setIsCommentEditorOpen(true);
         break;
       case 'image':
+        closeDrawingSelectedShapePanel();
         closeAllToolbars();
         if (mapContainerId) {
           setPadletToEdit({
@@ -5172,6 +5241,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         setImageEditorTab('search');
         break;
       case 'upload':
+        closeDrawingSelectedShapePanel();
         closeAllToolbars();
         if (mapContainerId) {
           setPadletToEdit({
@@ -5195,11 +5265,13 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         setImageEditorTab('upload');
         break;
       case 'import':
+        closeDrawingSelectedShapePanel();
         closeAllToolbars();
         setIsImportBrowserOpen(true);
         break;
       case 'draw':
         // Open Excalidraw Editor
+        closeDrawingSelectedShapePanel();
         closeAllToolbars();
         setPadletToEdit({
           id: 'new',
@@ -5218,6 +5290,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         setIsDrawingEditorOpen(true);
         break;
       case 'ai-component':
+        closeDrawingSelectedShapePanel();
         closeAllToolbars();
         setPadletToEdit({
           id: 'new',
@@ -5253,6 +5326,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   };
 
   const openPadletInTypeEditor = (post: Padlet) => {
+    closeDrawingSelectedShapePanel();
     closeAllToolbars();
     setPadletToEdit(post);
     if (post.type === 'image') setIsImageEditorOpen(true);
@@ -5306,21 +5380,11 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
               isGraphConnectMode={isGraphConnectMode}
               isCollapsed={isToolbarCollapsed}
               onToggleCollapse={handleToggleToolbarCollapsed}
+              onBeforeToolClick={closeDrawingSelectedShapePanel}
               handleToolClick={handleToolClick}
               onBack={() => router.push('/dashboard')}
             />
           </div>
-        )}
-
-        {canUseCanvasToolbar && isToolbarCollapsed && (
-          <button
-            type="button"
-            className="absolute left-0 top-6 z-[3000] flex h-9 w-9 -translate-x-1/2 items-center justify-center rounded-md border border-gray-200 bg-white/95 text-gray-600 shadow-sm transition hover:bg-gray-50"
-            onClick={handleToggleToolbarCollapsed}
-            aria-label="Expand toolbar"
-          >
-            <span className="text-sm leading-none" aria-hidden="true">{'>'}</span>
-          </button>
         )}
 
         {/* Editor Modals - Wrapped with stopPropagation for defense-in-depth */}
@@ -5390,6 +5454,16 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
             ...(sharedCanvasToolbarInsetPx > 0 ? { paddingLeft: `${sharedCanvasToolbarInsetPx}px` } : {}),
             ...(isWallLayout || isGridLayout ? { scrollbarGutter: 'stable' } : {}),
           }}
+          overlay={canUseCanvasToolbar && isToolbarCollapsed ? (
+            <button
+              type="button"
+              className="absolute left-4 top-4 z-[3000] flex h-9 w-9 items-center justify-center rounded-md border border-gray-200 bg-white/95 text-gray-600 shadow-sm transition hover:bg-gray-50"
+              onClick={handleToggleToolbarCollapsed}
+              aria-label="Expand toolbar"
+            >
+              <span className="text-sm leading-none" aria-hidden="true">{'>'}</span>
+            </button>
+          ) : undefined}
           containerRef={containerRef}
           onWheel={(e) => {
             // Zoom with Ctrl + Wheel
@@ -5730,22 +5804,27 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
             );
           })()}
 
-          {/* Layer 1: Background Lines (Behind Padlets) */}
+          {/* Layer 1: Background Lines (Behind Padlets) — back-plane only */}
+          {/* pointer-events on the div stays 'none' (pass-through); the SVG enables its own
+              events via forcePointerEvents so only actual line hit-paths are interactive.
+              Padlets above in z-order naturally block clicks on covered segments. */}
           <div className="absolute inset-0" style={{ zIndex: 0, pointerEvents: 'none' }}>
             <SimpleLineRenderer
-              lines={isMapLayout ? [] : lines}
+              lines={isMapLayout ? [] : lines.filter(l => (l.layer_plane ?? 'front') === 'back')}
               selectedLineId={selectedLineId}
               onSelectLine={handleLineSelect}
               onUpdateLine={updateLineLocal}
               onSaveLine={saveLineToDbMapAware}
-              isLineMode={isMapLayout ? false : isLineMode}
+              isLineMode={false}
               onCreateLine={createLineForMap}
               isEditMode={isMapLayout ? false : lineEditModeId !== null}
               onToggleEditMode={handleToggleLineEditMode}
               layer="back"
               draggingLineId={draggingLineId}
               onDragChange={handleLineDragChange}
-              forcePointerEvents={false}
+              onContextMenu={handleLineContextMenu}
+              forcePointerEvents={true}
+              excalidrawAPIRef={isDrawingLayout ? drawingExcalidrawAPIRef : undefined}
             />
           </div>
 
@@ -6223,9 +6302,12 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                 onDeletePadlet={handleDrawingLayoutDeletePadlet}
                 ghostDraft={drawingGhostDraft}
                 onGhostDraftDropped={() => setDrawingGhostDraft(null)}
+                drawingAppStateRef={drawingAppStateRef}
+                drawingExcalidrawAPIRef={drawingExcalidrawAPIRef}
                 currentUserId={user?.id}
                 currentUserName={user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'User'}
                 currentUserAvatar={user?.user_metadata?.avatar_url}
+                viewportContainerRef={containerRef}
                 onPadletEdit={(padlet) => {
                   openPadletInTypeEditor(padlet);
                 }}
@@ -6609,6 +6691,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
               onContextMenu={handleLineContextMenu}
               canvasZoom={canvasZoom}
               forcePointerEvents={shouldEnableMapLinePointerEvents}
+              excalidrawAPIRef={isDrawingLayout ? drawingExcalidrawAPIRef : undefined}
             />
           </div>
 

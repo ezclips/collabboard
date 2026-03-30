@@ -56,7 +56,7 @@ type FreeformPadletActionMap = {
   cutPadlet: (id: string) => void;
   copyPadlet: (id: string) => void;
   lockPadlet: (id: string) => void;
-  movePadletLayer: (id: string, dir: 'front' | 'back') => void;
+  movePadletLayer: (id: string, action: string) => void;
   groupIntoColumn: (id: string) => void;
   replaceImage: (id: string) => void;
   downloadImage: (id: string) => void;
@@ -75,6 +75,19 @@ type FreeformPadletActionMap = {
   updatePadletContent: (id: string, content: string) => Promise<any>;
   commitPadletMeta: (id: string, meta: any) => void;
 };
+
+// Priority order for resolving which back-line DOM target receives a bridged event.
+// Handles take precedence over the hit-path so that drag-from-handle works correctly
+// even when the line is in the back plane and the FPC surface is the first hit.
+const BACK_LINE_INTERACTIVE_ROLE_PRIORITY = [
+  'point-handle',
+  'midpoint-handle',
+  'start-handle',
+  'control-handle',
+  'end-handle',
+  'label-handle',
+  'hit-path',
+] as const;
 
 const BACKGROUND_COLORS = [
   "#ffffff", "#f3f4f6", "#fee2e2", "#ffedd5", "#fef3c7",
@@ -380,6 +393,179 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
     openFreeformImageEditModal,
   ]);
 
+  // ── Freeform back-line bridge ──────────────────────────────────────────────
+  // The FPC surface div sits above the back-plane SVG in CSS stacking order
+  // (PadletLayer comes after the back-plane container in the DOM and therefore
+  // wins all pointer events even though the back SVG has pointer-events:auto).
+  // This bridge mirrors the DrawingLayout pattern: capture events on the
+  // surface, scan the DOM stack for a back-line interactive target at the same
+  // point, guard against real padlet targets, and re-dispatch to the line element.
+
+  const bridgedBackLineInteractiveTargetRef = React.useRef<Element | null>(null);
+  const isDispatchingFreeformBackLineBridgeRef = React.useRef(false);
+
+  const findBackLineInteractiveTargetAtPoint = React.useCallback(
+    (clientX: number, clientY: number): Element | null => {
+      const stack = document.elementsFromPoint(clientX, clientY);
+      for (const role of BACK_LINE_INTERACTIVE_ROLE_PRIORITY) {
+        for (const node of stack) {
+          if (!(node instanceof Element)) continue;
+          if ((node as HTMLElement).dataset?.lineRenderer !== 'back') continue;
+          if ((node as HTMLElement).dataset?.lineRole !== role) continue;
+          return node;
+        }
+      }
+      return null;
+    },
+    [],
+  );
+
+  /** Returns true when the direct event target is inside a real padlet card — padlet should win. */
+  const isPadletTarget = React.useCallback((target: EventTarget | null): boolean => {
+    if (!(target instanceof Element)) return false;
+    return target.closest('[data-padlet-id]') !== null;
+  }, []);
+
+  const handleFreeformBackLineBridgeMouseDownCapture = React.useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => {
+      if (isDispatchingFreeformBackLineBridgeRef.current) return;
+      bridgedBackLineInteractiveTargetRef.current = null;
+
+      if (isGraphConnectMode) return;
+      if (isLineMode) return;
+      if (event.button !== 0) return;
+      if (isPadletTarget(event.target)) return;
+
+      const interactiveTarget = findBackLineInteractiveTargetAtPoint(event.clientX, event.clientY);
+      if (!interactiveTarget) return;
+
+      bridgedBackLineInteractiveTargetRef.current = interactiveTarget;
+      event.preventDefault();
+      event.stopPropagation();
+
+      isDispatchingFreeformBackLineBridgeRef.current = true;
+      try {
+        interactiveTarget.dispatchEvent(new MouseEvent('mousedown', {
+          bubbles: true,
+          cancelable: true,
+          clientX: event.clientX,
+          clientY: event.clientY,
+          button: event.button,
+          buttons: event.buttons,
+          ctrlKey: event.ctrlKey,
+          shiftKey: event.shiftKey,
+          altKey: event.altKey,
+          metaKey: event.metaKey,
+        }));
+      } finally {
+        isDispatchingFreeformBackLineBridgeRef.current = false;
+      }
+    },
+    [isGraphConnectMode, isLineMode, isPadletTarget, findBackLineInteractiveTargetAtPoint],
+  );
+
+  const handleFreeformBackLineBridgeClickCapture = React.useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => {
+      if (isDispatchingFreeformBackLineBridgeRef.current) return;
+      if (event.button !== 0) return;
+
+      const bridgedTarget = bridgedBackLineInteractiveTargetRef.current;
+      bridgedBackLineInteractiveTargetRef.current = null;
+      if (!bridgedTarget) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      isDispatchingFreeformBackLineBridgeRef.current = true;
+      try {
+        bridgedTarget.dispatchEvent(new MouseEvent('click', {
+          bubbles: true,
+          cancelable: true,
+          clientX: event.clientX,
+          clientY: event.clientY,
+          button: event.button,
+          buttons: event.buttons,
+          ctrlKey: event.ctrlKey,
+          shiftKey: event.shiftKey,
+          altKey: event.altKey,
+          metaKey: event.metaKey,
+        }));
+      } finally {
+        isDispatchingFreeformBackLineBridgeRef.current = false;
+      }
+    },
+    [],
+  );
+
+  const handleFreeformBackLineBridgeDoubleClickCapture = React.useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => {
+      if (isDispatchingFreeformBackLineBridgeRef.current) return;
+      if (isGraphConnectMode) return;
+      if (isLineMode) return;
+      if (isPadletTarget(event.target)) return;
+
+      const interactiveTarget = findBackLineInteractiveTargetAtPoint(event.clientX, event.clientY);
+      if (!interactiveTarget) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      isDispatchingFreeformBackLineBridgeRef.current = true;
+      try {
+        interactiveTarget.dispatchEvent(new MouseEvent('dblclick', {
+          bubbles: true,
+          cancelable: true,
+          clientX: event.clientX,
+          clientY: event.clientY,
+          button: event.button,
+          buttons: event.buttons,
+          ctrlKey: event.ctrlKey,
+          shiftKey: event.shiftKey,
+          altKey: event.altKey,
+          metaKey: event.metaKey,
+        }));
+      } finally {
+        isDispatchingFreeformBackLineBridgeRef.current = false;
+      }
+    },
+    [isGraphConnectMode, isLineMode, isPadletTarget, findBackLineInteractiveTargetAtPoint],
+  );
+
+  const handleFreeformBackLineBridgeContextMenuCapture = React.useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => {
+      if (isDispatchingFreeformBackLineBridgeRef.current) return;
+      if (isGraphConnectMode) return;
+      if (isPadletTarget(event.target)) return;
+
+      const interactiveTarget = findBackLineInteractiveTargetAtPoint(event.clientX, event.clientY);
+      if (!interactiveTarget) return;
+
+      bridgedBackLineInteractiveTargetRef.current = null;
+      event.preventDefault();
+      event.stopPropagation();
+
+      isDispatchingFreeformBackLineBridgeRef.current = true;
+      try {
+        interactiveTarget.dispatchEvent(new MouseEvent('contextmenu', {
+          bubbles: true,
+          cancelable: true,
+          clientX: event.clientX,
+          clientY: event.clientY,
+          button: event.button,
+          buttons: event.buttons,
+          ctrlKey: event.ctrlKey,
+          shiftKey: event.shiftKey,
+          altKey: event.altKey,
+          metaKey: event.metaKey,
+        }));
+      } finally {
+        isDispatchingFreeformBackLineBridgeRef.current = false;
+      }
+    },
+    [isGraphConnectMode, isPadletTarget, findBackLineInteractiveTargetAtPoint],
+  );
+  // ── end Freeform back-line bridge ───────────────────────────────────────────
+
   return (
     <>
       <div
@@ -388,6 +574,10 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
           transform: `scale(${canvasZoom})`,
           transformOrigin: '0 0'
         }}
+        onMouseDownCapture={handleFreeformBackLineBridgeMouseDownCapture}
+        onClickCapture={handleFreeformBackLineBridgeClickCapture}
+        onDoubleClickCapture={handleFreeformBackLineBridgeDoubleClickCapture}
+        onContextMenuCapture={handleFreeformBackLineBridgeContextMenuCapture}
       >
       {rootPadlets.map(padlet => (
     <div
@@ -523,8 +713,10 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
           onCut={() => cutPadlet(padlet.id)}
           onCopy={() => copyPadlet(padlet.id)}
           onLock={() => lockPadlet(padlet.id)}
-          onBringToFront={() => movePadletLayer(padlet.id, 'front')}
-          onSendToBack={() => movePadletLayer(padlet.id, 'back')}
+          onBringToFront={() => movePadletLayer(padlet.id, 'bringToFront')}
+          onBringForward={() => movePadletLayer(padlet.id, 'bringForward')}
+          onSendBackward={() => movePadletLayer(padlet.id, 'sendBackward')}
+          onSendToBack={() => movePadletLayer(padlet.id, 'sendToBack')}
           onGroupIntoColumn={() => groupIntoColumn(padlet.id)}
           onReplaceImage={() => replaceImage(padlet.id)}
           onDownloadImage={() => downloadImage(padlet.id)}
@@ -1496,8 +1688,10 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
           padlet={padlet}
           onSelect={() => setSelectedPadletId(padlet.id)}
           onDelete={() => requestDeletePadlet(padlet.id)}
-          onBringToFront={() => movePadletLayer(padlet.id, 'front')}
-          onSendToBack={() => movePadletLayer(padlet.id, 'back')}
+          onBringToFront={() => movePadletLayer(padlet.id, 'bringToFront')}
+          onBringForward={() => movePadletLayer(padlet.id, 'bringForward')}
+          onSendBackward={() => movePadletLayer(padlet.id, 'sendBackward')}
+          onSendToBack={() => movePadletLayer(padlet.id, 'sendToBack')}
           onLock={() => lockPadlet(padlet.id)}
           onCreateSyncedCopy={() => createSyncedCopy(padlet.id)}
         >
@@ -2026,8 +2220,10 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
           onPaste={handlePaste}
           onRename={() => renameComment(padlet.id)}
           onLock={() => lockPadlet(padlet.id)}
-          onBringToFront={() => movePadletLayer(padlet.id, 'front')}
-          onSendToBack={() => movePadletLayer(padlet.id, 'back')}
+          onBringToFront={() => movePadletLayer(padlet.id, 'bringToFront')}
+          onBringForward={() => movePadletLayer(padlet.id, 'bringForward')}
+          onSendBackward={() => movePadletLayer(padlet.id, 'sendBackward')}
+          onSendToBack={() => movePadletLayer(padlet.id, 'sendToBack')}
         >
           {padlet.metadata?.isCollapsed ? (
             // Collapsed Marker - Pin with number inside
@@ -3599,8 +3795,8 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
               onCut={() => cutPadlet(padlet.id)}
               onCopy={() => copyPadlet(padlet.id)}
               onLock={() => lockPadlet(padlet.id)}
-              onBringToFront={() => movePadletLayer(padlet.id, 'front')}
-              onSendToBack={() => movePadletLayer(padlet.id, 'back')}
+              onBringToFront={() => movePadletLayer(padlet.id, 'bringToFront')}
+              onSendToBack={() => movePadletLayer(padlet.id, 'sendToBack')}
               onGroupIntoColumn={() => groupIntoColumn(padlet.id)}
               onAddImage={() => addImageToLink(padlet.id)}
               onCopyLinkAddress={() => copyLinkAddress(padlet.id)}
@@ -3969,8 +4165,8 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
               onCut={() => cutPadlet(padlet.id)}
               onCopy={() => copyPadlet(padlet.id)}
               onLock={() => lockPadlet(padlet.id)}
-              onBringToFront={() => movePadletLayer(padlet.id, 'front')}
-              onSendToBack={() => movePadletLayer(padlet.id, 'back')}
+              onBringToFront={() => movePadletLayer(padlet.id, 'bringToFront')}
+              onSendToBack={() => movePadletLayer(padlet.id, 'sendToBack')}
               onCreateSyncedCopy={() => createSyncedCopy(padlet.id)}
               onGroupIntoColumn={() => groupIntoColumn(padlet.id)}
             >
@@ -4328,8 +4524,8 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
               onCut={() => cutPadlet(padlet.id)}
               onCopy={() => copyPadlet(padlet.id)}
               onLock={() => lockPadlet(padlet.id)}
-              onBringToFront={() => movePadletLayer(padlet.id, 'front')}
-              onSendToBack={() => movePadletLayer(padlet.id, 'back')}
+              onBringToFront={() => movePadletLayer(padlet.id, 'bringToFront')}
+              onSendToBack={() => movePadletLayer(padlet.id, 'sendToBack')}
               onGroupIntoColumn={() => groupIntoColumn(padlet.id)}
               onRename={() => renameTodo(padlet.id)}
             >
@@ -4690,8 +4886,8 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
               onPaste={handlePaste}
               onRename={() => renameColumn(padlet.id)}
               onLock={() => lockPadlet(padlet.id)}
-              onBringToFront={() => movePadletLayer(padlet.id, 'front')}
-              onSendToBack={() => movePadletLayer(padlet.id, 'back')}
+              onBringToFront={() => movePadletLayer(padlet.id, 'bringToFront')}
+              onSendToBack={() => movePadletLayer(padlet.id, 'sendToBack')}
             >
               {content}
             </ColumnPostContextMenu>
@@ -4708,8 +4904,8 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
             onCut={() => cutPadlet(padlet.id)}
             onCopy={() => copyPadlet(padlet.id)}
             onLock={() => lockPadlet(padlet.id)}
-            onBringToFront={() => movePadletLayer(padlet.id, 'front')}
-            onSendToBack={() => movePadletLayer(padlet.id, 'back')}
+            onBringToFront={() => movePadletLayer(padlet.id, 'bringToFront')}
+            onSendToBack={() => movePadletLayer(padlet.id, 'sendToBack')}
             onCreateSyncedCopy={() => createSyncedCopy(padlet.id)}
             onGroupIntoColumn={() => groupIntoColumn(padlet.id)}
           >

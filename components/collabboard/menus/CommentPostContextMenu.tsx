@@ -18,6 +18,8 @@ interface CommentPostContextMenuProps {
     onRename?: () => void;
     onLock?: () => void;
     onBringToFront?: () => void;
+    onBringForward?: () => void;
+    onSendBackward?: () => void;
     onSendToBack?: () => void;
 }
 
@@ -33,6 +35,8 @@ export function CommentPostContextMenu({
     onRename,
     onLock,
     onBringToFront,
+    onBringForward,
+    onSendBackward,
     onSendToBack
 }: CommentPostContextMenuProps) {
 
@@ -46,6 +50,8 @@ export function CommentPostContextMenu({
             case 'post.rename': onRename?.(); break;
             case 'post.lockPosition': onLock?.(); break;
             case 'post.bringToFront': onBringToFront?.(); break;
+            case 'post.bringForward': onBringForward?.(); break;
+            case 'post.sendBackward': onSendBackward?.(); break;
             case 'post.sendToBack': onSendToBack?.(); break;
         }
 
