@@ -5501,6 +5501,34 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   // Keep the ref current so the early-mounted useEffect can call this function
   openPadletInTypeEditorRef.current = openPadletInTypeEditor;
 
+  const closeDrawingEditorsBeforePadletEdit = useCallback(() => {
+    setIsNoteEditorOpen(false);
+    setIsLinkEditorOpen(false);
+    setIsTableEditorOpen(false);
+    setIsTodoEditorOpen(false);
+    setIsCommentEditorOpen(false);
+    setIsImageEditorOpen(false);
+    setIsDrawingEditorOpen(false);
+    setIsAIComponentEditorOpen(false);
+    setIsAIContentEditModalOpen(false);
+    setIsAIContentConvertModalOpen(false);
+    setIsCardEditorOpen(false);
+    setIsContainerEditorOpen(false);
+  }, [
+    setIsNoteEditorOpen,
+    setIsLinkEditorOpen,
+    setIsTableEditorOpen,
+    setIsTodoEditorOpen,
+    setIsCommentEditorOpen,
+    setIsImageEditorOpen,
+    setIsDrawingEditorOpen,
+    setIsAIComponentEditorOpen,
+    setIsAIContentEditModalOpen,
+    setIsAIContentConvertModalOpen,
+    setIsCardEditorOpen,
+    setIsContainerEditorOpen,
+  ]);
+
   // === BEGIN RENDER REGION (JSX ONLY) ===
   // All hooks are declared above the early returns to preserve hook ordering.
   if (isKanbanLayout) {
@@ -6466,6 +6494,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                 currentUserAvatar={user?.user_metadata?.avatar_url}
                 viewportContainerRef={containerRef}
                 onPadletEdit={(padlet) => {
+                  closeDrawingEditorsBeforePadletEdit();
                   if (isImageEditPadlet(padlet)) {
                     closeDrawingSelectedShapePanel();
                     closeAllToolbars({ imageToolbar: true });
