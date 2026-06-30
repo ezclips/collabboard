@@ -3731,6 +3731,15 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     const padlet = padlets.find(p => p.id === id);
     if (!padlet || padlet.type !== 'image') return;
 
+    if (isDrawingLayout || isTimelineLayout) {
+      closeDrawingSelectedShapePanel();
+      closeAllToolbars({ imageToolbar: true });
+      setPadletToEdit(null);
+      setIsImageEditorOpen(false);
+      setImageToolbarPadletId(padlet.id);
+      return;
+    }
+
     // Open the Image Editor
     setPadletToEdit(padlet);
     setIsImageEditorOpen(true);
@@ -5485,6 +5494,12 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   const openPadletInTypeEditor = (post: Padlet) => {
     closeDrawingSelectedShapePanel();
     closeAllToolbars();
+    if (post.type === 'image' && (isDrawingLayout || isTimelineLayout)) {
+      setPadletToEdit(null);
+      setIsImageEditorOpen(false);
+      setImageToolbarPadletId(post.id);
+      return;
+    }
     setPadletToEdit(post);
     if (post.type === 'image') setIsImageEditorOpen(true);
     else if (post.type === 'todo') setIsTodoEditorOpen(true);
@@ -7590,7 +7605,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           }}
         />
 
-        {isDrawingLayout && imageToolbarPadletId && activeImageToolbarPadlet && activeImageToolbarSrc && (
+        {(isDrawingLayout || isTimelineLayout) && imageToolbarPadletId && activeImageToolbarPadlet && activeImageToolbarSrc && (
           <div
             className="fixed inset-0 z-[60000] flex items-center justify-center bg-black/35 backdrop-blur-sm"
             onClick={() => {
