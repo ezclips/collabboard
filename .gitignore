@@ -41,3 +41,6 @@ next-env.d.ts
 supabase/.temp/
 tmp-line-debug/
 devserver.out.log
+
+.agent/
+.claude/
