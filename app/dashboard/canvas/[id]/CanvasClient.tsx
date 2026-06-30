@@ -5516,6 +5516,16 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   // Keep the ref current so the early-mounted useEffect can call this function
   openPadletInTypeEditorRef.current = openPadletInTypeEditor;
 
+  const openTimelineTargetFromContextMenu = useCallback((post: Padlet) => {
+    if (post.type === 'image') {
+      window.setTimeout(() => {
+        openPadletInTypeEditor(post);
+      }, 0);
+      return;
+    }
+    openPadletInTypeEditor(post);
+  }, [openPadletInTypeEditor]);
+
   const closeDrawingEditorsBeforePadletEdit = () => {
     setIsNoteEditorOpen(false);
     setIsLinkEditorOpen(false);
@@ -6538,7 +6548,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                   }}
                   onDeleteContainer={canUseFreeformEditButton ? ((containerId) => requestDeletePadlet(containerId)) : undefined}
                   onCreateEmptyContainer={canUseFreeformEditButton ? handleCreateEmptyTimelineContainer : undefined}
-                  onOpenTarget={canUseFreeformEditButton ? openPadletInTypeEditor : undefined}
+                  onOpenTarget={canUseFreeformEditButton ? openTimelineTargetFromContextMenu : undefined}
                   allPadlets={padlets}
                   onDropExistingPadlet={canUseFreeformEditButton ? (async (containerId, droppedId) => {
                     const containerPadlet = padlets.find(p => p.id === containerId);
