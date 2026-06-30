@@ -5501,7 +5501,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   // Keep the ref current so the early-mounted useEffect can call this function
   openPadletInTypeEditorRef.current = openPadletInTypeEditor;
 
-  const closeDrawingEditorsBeforePadletEdit = useCallback(() => {
+  const closeDrawingEditorsBeforePadletEdit = () => {
     setIsNoteEditorOpen(false);
     setIsLinkEditorOpen(false);
     setIsTableEditorOpen(false);
@@ -5514,20 +5514,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     setIsAIContentConvertModalOpen(false);
     setIsCardEditorOpen(false);
     setIsContainerEditorOpen(false);
-  }, [
-    setIsNoteEditorOpen,
-    setIsLinkEditorOpen,
-    setIsTableEditorOpen,
-    setIsTodoEditorOpen,
-    setIsCommentEditorOpen,
-    setIsImageEditorOpen,
-    setIsDrawingEditorOpen,
-    setIsAIComponentEditorOpen,
-    setIsAIContentEditModalOpen,
-    setIsAIContentConvertModalOpen,
-    setIsCardEditorOpen,
-    setIsContainerEditorOpen,
-  ]);
+  };
 
   // === BEGIN RENDER REGION (JSX ONLY) ===
   // All hooks are declared above the early returns to preserve hook ordering.
