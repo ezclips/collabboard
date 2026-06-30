@@ -19,7 +19,6 @@ import {
     Italic,
     Underline,
     X,
-    Pin,
     Trash2,
     PenTool,
 } from "lucide-react";
@@ -123,6 +122,14 @@ type CellStyle = {
 type CellCoord = { row: number; col: number };
 type SelectionRange = { start: CellCoord; end: CellCoord };
 type SelectionBox = { left: number; top: number; width: number; height: number } | null;
+
+const TABLE_ROW_HEADER_WIDTH = 32;
+const TABLE_CELL_WIDTH = 100;
+const TABLE_CELL_HEIGHT = 32;
+const TABLE_VISIBLE_COLUMNS = 3;
+const TABLE_VISIBLE_ROWS = 4;
+const TABLE_VIEWPORT_WIDTH = TABLE_ROW_HEADER_WIDTH + TABLE_CELL_WIDTH * TABLE_VISIBLE_COLUMNS;
+const TABLE_VIEWPORT_HEIGHT = TABLE_CELL_HEIGHT * (TABLE_VISIBLE_ROWS + 1);
 
 export default function TableEditor({
     initialTitle = "New Table",
@@ -789,7 +796,17 @@ export default function TableEditor({
                             </div>
 
                             {/* Table viewport */}
-                            <div ref={tableViewportRef} className="relative overflow-auto" style={{ maxHeight: "350px" }}>
+                            <div
+                                ref={tableViewportRef}
+                                className="relative overflow-x-auto overflow-y-auto"
+                                style={{
+                                    width: `${TABLE_VIEWPORT_WIDTH}px`,
+                                    maxWidth: "100%",
+                                    height: `${TABLE_VIEWPORT_HEIGHT}px`,
+                                    maxHeight: `${TABLE_VIEWPORT_HEIGHT}px`,
+                                    scrollbarGutter: "stable both-edges",
+                                }}
+                            >
                                 {/* ✅ Selection outline overlay */}
                                 {selectionBox && (
                                     <div
@@ -809,16 +826,36 @@ export default function TableEditor({
                                     </div>
                                 )}
 
-                                <table className="border-collapse w-full" style={{ userSelect: isSelectingCells ? "none" : "auto" }}>
+                                <table
+                                    className="border-collapse"
+                                    style={{
+                                        userSelect: isSelectingCells ? "none" : "auto",
+                                        width: "max-content",
+                                        minWidth: "100%",
+                                    }}
+                                >
                                     <thead>
                                         {table.getHeaderGroups().map((headerGroup) => (
                                             <tr key={headerGroup.id}>
-                                                <th className="w-8 h-8 bg-gray-100 border border-gray-300 text-xs text-center border-b-2" />
+                                                <th
+                                                    className="bg-gray-100 border border-gray-300 text-xs text-center border-b-2"
+                                                    style={{
+                                                        width: `${TABLE_ROW_HEADER_WIDTH}px`,
+                                                        minWidth: `${TABLE_ROW_HEADER_WIDTH}px`,
+                                                        height: `${TABLE_CELL_HEIGHT}px`,
+                                                    }}
+                                                />
                                                 {headerGroup.headers.map((header, i) => (
                                                     <th
                                                         key={header.id}
-                                                        className={`min-w-[100px] h-8 border border-gray-300 text-xs font-medium text-center cursor-pointer hover:bg-gray-200 transition-colors ${selectedCell?.col === i ? "bg-purple-100 text-purple-700" : "bg-gray-100 text-gray-700"
+                                                        className={`border border-gray-300 text-xs font-medium text-center cursor-pointer hover:bg-gray-200 transition-colors ${selectedCell?.col === i ? "bg-purple-100 text-purple-700" : "bg-gray-100 text-gray-700"
                                                             }`}
+                                                        style={{
+                                                            width: `${TABLE_CELL_WIDTH}px`,
+                                                            minWidth: `${TABLE_CELL_WIDTH}px`,
+                                                            maxWidth: `${TABLE_CELL_WIDTH}px`,
+                                                            height: `${TABLE_CELL_HEIGHT}px`,
+                                                        }}
                                                         onClick={(e) => handleColumnHeaderClick(i, e)}
                                                     >
                                                         {flexRender(header.column.columnDef.header, header.getContext())}
@@ -831,7 +868,14 @@ export default function TableEditor({
                                     <tbody>
                                         {table.getRowModel().rows.map((row) => (
                                             <tr key={row.id}>
-                                                <td className="w-8 h-8 bg-gray-100 border border-gray-300 text-xs text-center text-gray-500 font-medium select-none">
+                                                <td
+                                                    className="bg-gray-100 border border-gray-300 text-xs text-center text-gray-500 font-medium select-none"
+                                                    style={{
+                                                        width: `${TABLE_ROW_HEADER_WIDTH}px`,
+                                                        minWidth: `${TABLE_ROW_HEADER_WIDTH}px`,
+                                                        height: `${TABLE_CELL_HEIGHT}px`,
+                                                    }}
+                                                >
                                                     {row.index + 1}
                                                 </td>
 
@@ -846,9 +890,13 @@ export default function TableEditor({
                                                         <td
                                                             key={cell.id}
                                                             ref={(el) => setCellRef(row.index, colIndex, el)}
-                                                            className={`min-w-[100px] h-8 border border-gray-300 p-0 relative ${inRange ? "bg-purple-100/40" : ""
+                                                            className={`border border-gray-300 p-0 relative ${inRange ? "bg-purple-100/40" : ""
                                                                 } ${isActive ? "z-10" : "hover:bg-gray-50"}`}
                                                             style={{
+                                                                width: `${TABLE_CELL_WIDTH}px`,
+                                                                minWidth: `${TABLE_CELL_WIDTH}px`,
+                                                                maxWidth: `${TABLE_CELL_WIDTH}px`,
+                                                                height: `${TABLE_CELL_HEIGHT}px`,
                                                                 userSelect: isSelectingCells ? "none" : "auto", // Fix userSelect
                                                                 backgroundColor: style?.bg,
                                                                 textAlign: style?.align || "left",
@@ -1315,7 +1363,7 @@ export default function TableEditor({
                         }}
                         onClick={(e) => e.stopPropagation()}
                     >
-                        {/* Header with B/I/U, Pin and Close buttons */}
+                        {/* Header with B/I/U and Close button */}
                         <div className="p-3 flex items-center justify-between gap-2 border-b border-gray-100">
                             <div className="flex gap-1">
                                 <button
@@ -1364,15 +1412,7 @@ export default function TableEditor({
                                     <Underline className="w-3.5 h-3.5" />
                                 </button>
                             </div>
-                            {/* Pin and Close buttons */}
                             <div className="flex gap-1">
-                                <button
-                                    className={`w-6 h-6 rounded flex items-center justify-center transition-colors ${pinnedTextStyle ? 'bg-purple-100 text-purple-600' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'}`}
-                                    onClick={() => setPinnedTextStyle(!pinnedTextStyle)}
-                                    title={pinnedTextStyle ? "Unpin panel" : "Pin panel open"}
-                                >
-                                    <Pin className="w-3.5 h-3.5" />
-                                </button>
                                 <button
                                     className="w-6 h-6 rounded text-gray-400 hover:text-gray-600 hover:bg-gray-100 flex items-center justify-center"
                                     onClick={() => {
@@ -1413,6 +1453,15 @@ export default function TableEditor({
                         }}
                         onClick={(e) => e.stopPropagation()}
                     >
+                        <div className="p-3 flex items-center justify-end border-b border-gray-100">
+                            <button
+                                className="w-6 h-6 rounded text-gray-400 hover:text-gray-600 hover:bg-gray-100 flex items-center justify-center"
+                                onClick={() => setActiveSubmenu(null)}
+                                title="Close panel"
+                            >
+                                <X className="w-3.5 h-3.5" />
+                            </button>
+                        </div>
                         <div className="p-3">
                             <ColorPickerContent
                                 color={(() => {

@@ -20,7 +20,14 @@
       "Bash(sed -n '5360,5400p' app/dashboard/canvas/[id]/CanvasClient.tsx)",
       "Bash(xargs wc:*)",
       "Bash(supabase --version)",
-      "Bash(supabase db:*)"
+      "Bash(supabase db:*)",
+      "WebFetch(domain:localhost)",
+      "Read(//tmp/**)",
+      "Bash(taskkill /PID 14244 /F)",
+      "Bash(powershell -Command \"Stop-Process -Id 14244 -Force\")",
+      "Bash(powershell -Command \"Get-NetTCPConnection -LocalPort 3000 | Select-Object LocalAddress,LocalPort,OwningProcess | Format-Table\")",
+      "Bash(powershell -Command \"Get-Process -Id 14244 | Select-Object Id,ProcessName,MainWindowTitle,StartTime\")",
+      "Bash(npx next:*)"
     ]
   }
 }

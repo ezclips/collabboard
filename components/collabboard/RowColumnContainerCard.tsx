@@ -74,11 +74,12 @@ type RowColumnContainerCardProps = {
   ignoreDragKinds?: string[];
   onViewDrawing?: (padlet: Padlet) => void;
   className?: string;
+  canvasContext?: "default" | "drawing" | "timeline";
   // Comment handling
   currentUserId?: string;
   currentUserName?: string;
   currentUserAvatar?: string;
-  onUpdateChildComments?: (childId: string, comments: any[]) => void;
+  onUpdateChildComments?: (childId: string, comments: any[], options?: { field?: 'comments' | 'detachedComments' }) => void;
   onEditContainer?: (padlet: Padlet) => void;
   onScanChild?: () => void;
   emptyStateText?: string;
@@ -100,6 +101,7 @@ export default function RowColumnContainerCard({
   ignoreDragKinds = [],
   onViewDrawing,
   className,
+  canvasContext = "default",
   currentUserId,
   currentUserName,
   currentUserAvatar,
@@ -345,26 +347,26 @@ export default function RowColumnContainerCard({
                               timestamp: Date.now(),
                             };
                             const existingComments = (child.metadata as any)?.comments || [];
-                            onUpdateChildComments(child.id, [...existingComments, newComment]);
+                            onUpdateChildComments(child.id, [...existingComments, newComment], { field: 'comments' });
                           }}
                           onEditComment={(commentId, newText) => {
                             const existingComments = (child.metadata as any)?.comments || [];
                             const updated = existingComments.map((c: any) =>
                               c.id === commentId ? { ...c, text: newText } : c
                             );
-                            onUpdateChildComments(child.id, updated);
+                            onUpdateChildComments(child.id, updated, { field: 'comments' });
                           }}
                           onRemoveComment={(commentId) => {
                             const existingComments = (child.metadata as any)?.comments || [];
                             const filtered = existingComments.filter((c: any) => c.id !== commentId);
-                            onUpdateChildComments(child.id, filtered);
+                            onUpdateChildComments(child.id, filtered, { field: 'comments' });
                           }}
                           onToggleStrikethrough={(commentId) => {
                             const existingComments = (child.metadata as any)?.comments || [];
                             const updated = existingComments.map((c: any) =>
                               c.id === commentId ? { ...c, isStrikethrough: !c.isStrikethrough } : c
                             );
-                            onUpdateChildComments(child.id, updated);
+                            onUpdateChildComments(child.id, updated, { field: 'comments' });
                           }}
                         />
                       </div>
@@ -391,6 +393,7 @@ export default function RowColumnContainerCard({
                           allPadlets={allPadlets}
                           onView={() => onViewDrawing?.(child)}
                           onScan={onScanChild}
+                          canvasContext={canvasContext}
                           currentUserId={currentUserId}
                           currentUserName={currentUserName}
                           currentUserAvatar={currentUserAvatar}

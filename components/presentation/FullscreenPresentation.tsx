@@ -1,10 +1,32 @@
 "use client";
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { FrameSlide, RenderSlideToPNG } from "./PresentationPanel";
 import type { Padlet } from "@/types/collabboard";
 import PostCardContent from "@/components/collabboard/PostCardContent";
+import { RuntimeSlideRenderer } from "./runtime-slide/RuntimeSlideRenderer";
+
+/**
+ * Strategy switch.
+ * true  → use the new runtime live slideshow (Excalidraw layers + live padlet DOM).
+ * false → fall back to the legacy PNG-only path.
+ *
+ * Rollback: set to false to revert to PNG-only rendering without removing code.
+ */
+const USE_RUNTIME_LIVE_SLIDESHOW = true;
+
+/**
+ * Optional helpers injected by DrawingLayout to enable the runtime slideshow path.
+ * When absent, the component falls back to the PNG-only path.
+ */
+export type RuntimeSlideHelpers = {
+  getSceneElements: () => readonly any[];
+  getPadlets: () => Padlet[];
+  getFiles: () => any;
+};
 
 /**
  * Given the image's intrinsic aspect ratio and the viewport size,
@@ -24,20 +46,13 @@ function getContainedRect(
   const vpAspect = vpW / vpH;
   let w: number, h: number;
   if (frameAspect > vpAspect) {
-    // Width-constrained (letterboxed top/bottom)
     w = vpW;
     h = vpW / frameAspect;
   } else {
-    // Height-constrained (pillarboxed left/right)
     h = vpH;
     w = vpH * frameAspect;
   }
-  return {
-    x: (vpW - w) / 2,
-    y: (vpH - h) / 2,
-    w,
-    h,
-  };
+  return { x: (vpW - w) / 2, y: (vpH - h) / 2, w, h };
 }
 
 export function FullscreenPresentation({
@@ -46,26 +61,49 @@ export function FullscreenPresentation({
   renderSlideToPNG,
   onClose,
   contentPadlets = [],
+  runtimeHelpers,
 }: {
   slides: FrameSlide[];
   startSlideId: string | null;
   renderSlideToPNG: RenderSlideToPNG;
   onClose: () => void;
   contentPadlets?: Padlet[];
+  /** When provided and USE_RUNTIME_LIVE_SLIDESHOW is true, enables live DOM rendering */
+  runtimeHelpers?: RuntimeSlideHelpers;
 }) {
+  const usingRuntime = USE_RUNTIME_LIVE_SLIDESHOW && !!runtimeHelpers;
+
+  const USE_LEGACY_CONTENT_PADLET_OVERLAY = false;
+
   const [currentIdx, setCurrentIdx] = useState(() => {
     if (!startSlideId) return 0;
     const idx = slides.findIndex((s) => s.id === startSlideId);
     return idx >= 0 ? idx : 0;
   });
 
-  // PNG cache: slideId → dataURL
+  // ── PNG cache (legacy / fallback path only) ───────────────────────────────
   const [pngs, setPngs] = useState<Record<string, string>>({});
+  const pngsRef = useRef<Record<string, string>>({});
   const renderingRef = useRef<Set<string>>(new Set());
+  const renderedKeysRef = useRef<Record<string, string>>({});
   const cancelledRef = useRef(false);
+  // Distinguishes initial mount (needs settle delay) from subsequent navigation
+  const hasMountedRef = useRef(false);
 
-  // Track viewport size for overlay positioning
-  const [vpSize, setVpSize] = useState({ w: 0, h: 0 });
+  // Keep pngsRef in sync so renderSlide doesn't close over stale pngs
+  useEffect(() => { pngsRef.current = pngs; }, [pngs]);
+
+  const getSlideCacheKey = useCallback(
+    (slide: FrameSlide) => slide.renderSignature ?? `${slide.x},${slide.y},${slide.width},${slide.height},${slide.contentVersion ?? 0}`,
+    [],
+  );
+
+  // Track viewport size for overlay positioning and runtime renderer
+  const [vpSize, setVpSize] = useState(() =>
+    typeof window !== "undefined"
+      ? { w: window.innerWidth, h: window.innerHeight }
+      : { w: 0, h: 0 }
+  );
   useEffect(() => {
     const measure = () => setVpSize({ w: window.innerWidth, h: window.innerHeight });
     measure();
@@ -81,22 +119,26 @@ export function FullscreenPresentation({
     return getContainedRect(currentSlide.width, currentSlide.height, vpSize.w, vpSize.h);
   }, [currentSlide, vpSize]);
 
-  // Content padlets that overlap the current slide's frame bounds
+  // Content padlets that overlap the current slide's frame bounds (legacy overlay)
   const slidePadlets = useMemo(() => {
     if (!currentSlide || !contentPadlets.length) return [];
-    return contentPadlets.filter((p) => {
-      return (
-        p.position_x < currentSlide.x + currentSlide.width &&
-        p.position_x + p.width > currentSlide.x &&
-        p.position_y < currentSlide.y + currentSlide.height &&
-        p.position_y + p.height > currentSlide.y
-      );
-    });
+    return contentPadlets.filter((p) => (
+      p.position_x < currentSlide.x + currentSlide.width &&
+      p.position_x + p.width > currentSlide.x &&
+      p.position_y < currentSlide.y + currentSlide.height &&
+      p.position_y + p.height > currentSlide.y
+    ));
   }, [currentSlide, contentPadlets]);
 
+  // ── PNG rendering (legacy / fallback path) ────────────────────────────────
+
+  // renderSlide uses a ref for pngs to avoid stale closure issues
   const renderSlide = useCallback(async (slide: FrameSlide | undefined) => {
     if (!slide) return;
-    if (pngs[slide.id] || renderingRef.current.has(slide.id)) return;
+    const cacheKey = getSlideCacheKey(slide);
+    // Check via ref to avoid stale closure capturing old pngs state
+    if (pngsRef.current[slide.id] && renderedKeysRef.current[slide.id] === cacheKey) return;
+    if (renderingRef.current.has(slide.id)) return;
     renderingRef.current.add(slide.id);
 
     const dpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
@@ -110,18 +152,54 @@ export function FullscreenPresentation({
       paddingPx: 0,
     });
     if (!cancelledRef.current) {
+      renderedKeysRef.current[slide.id] = cacheKey;
       setPngs((prev) => ({ ...prev, [slide.id]: png }));
     }
     renderingRef.current.delete(slide.id);
-  }, [pngs, renderSlideToPNG]);
+  }, [renderSlideToPNG, getSlideCacheKey]);
 
-  // Render current + pre-fetch adjacent
+  // Invalidate stale PNG cache entries when slides (or their signatures) change
   useEffect(() => {
-    renderSlide(slides[currentIdx]);
-    renderSlide(slides[currentIdx + 1]);
-    renderSlide(slides[currentIdx - 1]);
+    setPngs((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const slide of slides) {
+        const cacheKey = getSlideCacheKey(slide);
+        if (renderedKeysRef.current[slide.id] && renderedKeysRef.current[slide.id] !== cacheKey) {
+          delete next[slide.id];
+          delete renderedKeysRef.current[slide.id];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [slides, getSlideCacheKey]);
+
+  // Render current + pre-fetch adjacent slides (PNG path only).
+  // On initial mount, wait double-RAF so the canvas has settled before capture.
+  useEffect(() => {
+    // Skip PNG rendering entirely in runtime mode
+    if (usingRuntime) return;
+
+    const doRender = () => {
+      renderSlide(slides[currentIdx]);
+      renderSlide(slides[currentIdx + 1]);
+      renderSlide(slides[currentIdx - 1]);
+    };
+    if (!hasMountedRef.current) {
+      hasMountedRef.current = true;
+      let raf2: number;
+      const raf1 = window.requestAnimationFrame(() => {
+        raf2 = window.requestAnimationFrame(doRender);
+      });
+      return () => {
+        window.cancelAnimationFrame(raf1);
+        window.cancelAnimationFrame(raf2!);
+      };
+    }
+    doRender();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentIdx, slides]);
+  }, [currentIdx, slides, usingRuntime]);
 
   useEffect(() => {
     cancelledRef.current = false;
@@ -147,16 +225,10 @@ export function FullscreenPresentation({
 
   const currentPng = currentSlide ? pngs[currentSlide.id] : null;
 
-  // DEBUG: log actual dimensions to browser console
-  useEffect(() => {
-    if (currentSlide && overlayRect) {
-      console.debug(
-        "[Presentation] viewport:", vpSize,
-        "| frame:", { w: currentSlide.width, h: currentSlide.height },
-        "| overlayRect:", overlayRect,
-      );
-    }
-  }, [currentSlide, vpSize, overlayRect]);
+  // Resolve live scene data for runtime path
+  const sceneElements = usingRuntime ? runtimeHelpers!.getSceneElements() : null;
+  const allPadlets = usingRuntime ? runtimeHelpers!.getPadlets() : null;
+  const files = usingRuntime ? runtimeHelpers!.getFiles() : null;
 
   const content = (
     <div
@@ -172,96 +244,90 @@ export function FullscreenPresentation({
         userSelect: "none",
       }}
     >
-      {currentPng ? (
-        <>
-          {/*
-            The slide image fills the entire viewport.
-            object-fit: contain makes the BROWSER handle aspect-ratio fitting —
-            no JS / CSS-layout math needed for the image itself.
-          */}
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={currentPng}
-            alt={`Slide ${currentIdx + 1}`}
-            draggable={false}
-            style={{
-              display: "block",
-              position: "absolute",
-              top: 0,
-              left: 0,
-              width: "100%",
-              height: "100%",
-              objectFit: "contain",
-            }}
-          />
-
-          {/*
-            Padlet overlay container — positioned EXACTLY over the area where
-            object-fit:contain renders the image (calculated by getContainedRect).
-            Padlets use percentage positioning within this container.
-          */}
-          {overlayRect && currentSlide && (
-            <div
-              style={{
-                position: "absolute",
-                left: overlayRect.x,
-                top: overlayRect.y,
-                width: overlayRect.w,
-                height: overlayRect.h,
-                overflow: "hidden",
-                pointerEvents: "none",
-              }}
-            >
-              {slidePadlets.map((padlet) => {
-                const pctLeft = ((padlet.position_x - currentSlide.x) / currentSlide.width) * 100;
-                const pctTop = ((padlet.position_y - currentSlide.y) / currentSlide.height) * 100;
-                const pctW = (padlet.width / currentSlide.width) * 100;
-                const pctH = (padlet.height / currentSlide.height) * 100;
-                return (
-                  <div
-                    key={padlet.id}
-                    className="absolute overflow-hidden rounded-xl border border-gray-200/50 shadow-md"
-                    style={{
-                      left: `${pctLeft}%`,
-                      top: `${pctTop}%`,
-                      width: `${pctW}%`,
-                      height: `${pctH}%`,
-                      backgroundColor: padlet.metadata?.backgroundColor || "#ffffff",
-                    }}
-                  >
-                    {padlet.metadata?.topStrip && (
-                      <div
-                        className="h-1.5 w-full flex-shrink-0"
-                        style={{ backgroundColor: padlet.metadata.topStrip }}
-                      />
-                    )}
-                    <div className="w-full h-full overflow-hidden">
-                      <PostCardContent padlet={padlet} />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </>
+      {/* ── Runtime live renderer ──────────────────────────────────────────── */}
+      {usingRuntime ? (
+        <RuntimeSlideRenderer
+          slide={currentSlide}
+          sceneElements={sceneElements!}
+          allPadlets={allPadlets!}
+          files={files}
+          vpW={vpSize.w}
+          vpH={vpSize.h}
+        />
       ) : (
-        <div
-          style={{
-            position: "absolute",
-            inset: 0,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-        >
-          <div className="flex flex-col items-center justify-center gap-3 text-gray-400 text-sm">
-            <svg className="animate-spin w-8 h-8" viewBox="0 0 24 24" fill="none">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
-            </svg>
-            Rendering slide…
+        /* ── Legacy PNG renderer ──────────────────────────────────────────── */
+        currentPng ? (
+          <>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={currentPng}
+              alt={`Slide ${currentIdx + 1}`}
+              draggable={false}
+              style={{
+                display: "block",
+                position: "absolute",
+                top: 0,
+                left: 0,
+                width: "100%",
+                height: "100%",
+                objectFit: "contain",
+              }}
+            />
+
+            {USE_LEGACY_CONTENT_PADLET_OVERLAY && overlayRect && currentSlide && (
+              <div
+                style={{
+                  position: "absolute",
+                  left: overlayRect.x,
+                  top: overlayRect.y,
+                  width: overlayRect.w,
+                  height: overlayRect.h,
+                  overflow: "hidden",
+                  pointerEvents: "none",
+                }}
+              >
+                {slidePadlets.map((padlet) => {
+                  const pctLeft = ((padlet.position_x - currentSlide.x) / currentSlide.width) * 100;
+                  const pctTop = ((padlet.position_y - currentSlide.y) / currentSlide.height) * 100;
+                  const pctW = (padlet.width / currentSlide.width) * 100;
+                  const pctH = (padlet.height / currentSlide.height) * 100;
+                  return (
+                    <div
+                      key={padlet.id}
+                      className="absolute overflow-hidden rounded-xl border border-gray-200/50 shadow-md"
+                      style={{
+                        left: `${pctLeft}%`,
+                        top: `${pctTop}%`,
+                        width: `${pctW}%`,
+                        height: `${pctH}%`,
+                        backgroundColor: padlet.metadata?.backgroundColor || "#ffffff",
+                      }}
+                    >
+                      {padlet.metadata?.topStrip && (
+                        <div className="h-1.5 w-full flex-shrink-0" style={{ backgroundColor: padlet.metadata.topStrip }} />
+                      )}
+                      <div className="w-full h-full overflow-hidden">
+                        <PostCardContent padlet={padlet} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </>
+        ) : (
+          <div
+            style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}
+          >
+            <div className="flex flex-col items-center justify-center gap-3 text-gray-400 text-sm">
+              <svg className="animate-spin w-8 h-8" viewBox="0 0 24 24" fill="none">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+              </svg>
+              Rendering slide…
+            </div>
           </div>
-        </div>
+        )
       )}
 
       {/* Floating nav bar */}
@@ -273,6 +339,7 @@ export function FullscreenPresentation({
           left: "50%",
           transform: "translateX(-50%)",
           pointerEvents: "auto",
+          zIndex: 10,
         }}
       >
         <button
@@ -321,7 +388,7 @@ export function FullscreenPresentation({
       {/* Hint */}
       <div
         className="text-gray-400 text-xs"
-        style={{ position: "absolute", top: 16, right: 16 }}
+        style={{ position: "absolute", top: 16, right: 16, zIndex: 10 }}
       >
         ← → Space · Esc to end
       </div>

@@ -6,6 +6,10 @@ import ImageDrawingLayer from '@/components/collabboard/editors/ImageDrawingLaye
 import ImageCropLayer from '@/components/collabboard/editors/ImageCropLayer';
 import CardEditor from '@/components/collabboard/CardEditor';
 import ClipartCardDraftModal from '@/components/collabboard/editors/ClipartCardDraftModal';
+import ImageActionsToolbar from '@/components/collabboard/editors/ImageActionsToolbar';
+import TextStylePopup from '@/components/collabboard/editors/TextStylePopup';
+import ReactionDisplay from '@/components/collabboard/editors/ReactionDisplay';
+import InlineCaption from '@/components/collabboard/editors/InlineCaption';
 import SimpleLineRenderer from '@/components/collabboard/SimpleLineRenderer';
 import ColumnsLayout from '@/components/canvas/layouts/ColumnsLayout';
 import DrawingLayout from '@/components/collabboard/canvas/layouts/DrawingLayout';
@@ -32,8 +36,9 @@ import { User, Session } from '@supabase/supabase-js';
 import {
   StickyNote, Link, CheckSquare, MoveRight, MessageCircle,
   Image as ImageIcon, Upload, PenTool, Trash2, Bell, Table, X, Columns3,
-  Map as MapIcon, BookOpen, Plus, CloudDownload, Sparkles
+  Map as MapIcon, BookOpen, Plus, CloudDownload, Sparkles, Palette, Strikethrough
 } from 'lucide-react';
+import EmojiPicker from 'emoji-picker-react';
 import AIComponentEditor from '@/components/collabboard/editors/AIComponentEditor';
 import LibraryPanel from '@/components/collabboard/LibraryPanel';
 import ImportsDialog from '@/components/collabboard/imports/ImportsDialog';
@@ -75,6 +80,8 @@ import FreeformCanvasBoardMenu from '@/components/collabboard/canvas/ui/Freeform
 import WallpaperSelector from '@/components/collabboard/canvas/WallpaperSelector';
 import { CanvasEditorProvider, type CanvasEditorState } from '@/components/collabboard/canvas/contexts/CanvasEditorContext';
 import { CanvasConfigProvider, type CanvasConfigState } from '@/components/collabboard/canvas/contexts/CanvasConfigContext';
+import { ColorPickerContent } from '@/components/collabboard/ColorPicker';
+import { isStripVisible } from '@/components/collabboard/canvas/engine/utils';
 
 // === BEGIN TYPES + CONSTANTS REGION ===
 
@@ -89,6 +96,19 @@ const BADGE_COLORS = [
   "#dcfce7", "#bbf7d0", "#86efac", "#4ade80", "#22c55e", "#16a34a",
   "#f3e8ff", "#e9d5ff", "#d8b4fe", "#c084fc", "#a855f7", "#9333ea",
   "#ccfbf1", "#99f6e4", "#5eead4", "#2dd4bf", "#14b8a6", "#0d9488",
+];
+
+const BACKGROUND_COLORS = [
+  "#ffffff", "#f3f4f6", "#fee2e2", "#ffedd5", "#fef3c7",
+  "#dcfce7", "#dbeafe", "#f3e8ff", "#fce7f3", "#ccfbf1",
+  "#fefce8", "#f0fdf4", "#eff6ff", "#faf5ff", "#fff1f2",
+];
+
+const TOP_STRIP_COLORS = [
+  "transparent", "#ef4444", "#f97316", "#f59e0b", "#eab308",
+  "#84cc16", "#22c55e", "#10b981", "#14b8a6", "#06b6d4",
+  "#0ea5e9", "#3b82f6", "#6366f1", "#8b5cf6", "#a855f7",
+  "#d946ef", "#ec4899", "#f43f5e",
 ];
 
 type FreeformBoardMenuState = {
@@ -611,6 +631,32 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     setSelectedLineId,
   } = useCanvasSelection({ canvasState, dispatch });
   const activeCardComment = cardCommentList.find((comment) => comment.id === activeCardCommentId) || null;
+  const getImageEditSource = useCallback((padlet: Padlet | null | undefined): string | null => {
+    if (!padlet) return null;
+    return (
+      padlet.metadata?.imageUrl ||
+      (padlet.metadata as any)?.fileUrl ||
+      (padlet.metadata as any)?.file_url ||
+      padlet.image_url ||
+      padlet.file_url ||
+      padlet.metadata?.drawing ||
+      (typeof padlet.content === 'string' && /^https?:\/\//i.test(padlet.content) ? padlet.content : null)
+    );
+  }, []);
+  const isImageEditPadlet = useCallback((padlet: Padlet | null | undefined): boolean => {
+    if (!padlet) return false;
+    const normalizedType = String(padlet.type || '').toLowerCase();
+    if (normalizedType === 'image') return true;
+    if (normalizedType === 'drawing' || normalizedType === 'link' || normalizedType === 'todo' || normalizedType === 'table' || normalizedType === 'container' || normalizedType === 'comment') {
+      return false;
+    }
+    const fileType = String(padlet.file_type || (padlet.metadata as any)?.fileType || '').toLowerCase();
+    return fileType.startsWith('image/') && Boolean(getImageEditSource(padlet));
+  }, [getImageEditSource]);
+  const activeImageToolbarPadlet = imageToolbarPadletId
+    ? padlets.find((padlet) => padlet.id === imageToolbarPadletId) ?? null
+    : null;
+  const activeImageToolbarSrc = getImageEditSource(activeImageToolbarPadlet);
   // === END SELECTION REGION ===
 
   // === BEGIN LINE REGION ===
@@ -686,7 +732,8 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     grabOffset: { x: 0, y: 0 }
   });
   const [newPostHoverContainerId, setNewPostHoverContainerId] = useState<string | null>(null);
-  const [placementContext, setPlacementContext] = useState<'columns' | 'wall' | null>(null);
+  const [placementContext, setPlacementContext] = useState<'columns' | 'wall' | 'timeline-horizontal-all' | null>(null);
+  const [placementPromptMode, setPlacementPromptMode] = useState<'columns' | 'timeline-horizontal-all' | null>(null);
   const [activeSectionId] = useState<string | null>(null);
 
   // Global Drop Indicator State
@@ -1183,6 +1230,13 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       setDrawingContainerPromptOpen(true);
     },
     onTimelinePlacementStart: (draft) => {
+      if (chronoMode === 'horizontal-all') {
+        setPendingPostDraft(draft);
+        setPlacementPromptMode('timeline-horizontal-all');
+        setIsPlacementPromptOpen(true);
+        return;
+      }
+
       setPendingPostDraft(draft);
       setPlacementContext('columns');
       setNewPostDragState({
@@ -1720,6 +1774,84 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     }
   };
 
+  const handleCreateHorizontalAllTimelineContainerWithDraft = async () => {
+    const currentDraft = pendingPostDraftRef.current;
+    if (!currentDraft || !canvasId || chronoMode !== 'horizontal-all') return;
+
+    const existingContainers = getTimelineContainers();
+    const insertPosition = existingContainers.reduce((max, container) => (
+      Math.max(max, (container.metadata as any)?.position_in_timeline ?? -1)
+    ), -1) + 1;
+    const containerId = crypto.randomUUID();
+
+    try {
+      const containerPayload = {
+        id: containerId,
+        board_id: canvasId,
+        title: currentDraft.title || 'New Event',
+        content: '',
+        type: 'container',
+        position_x: 0,
+        position_y: 0,
+        width: 280,
+        height: 200,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        metadata: {
+          childPadletIds: [],
+          cardColor: '#ffffff',
+          topStrip: 'transparent',
+          kind: 'container',
+          isContainer: true,
+          position_in_timeline: insertPosition,
+        },
+      };
+
+      setPadlets((prev) => [...prev, containerPayload as any]);
+
+      const childPayload = draftToInsertPayload(currentDraft, containerId);
+      const { data: childData, error: childError } = await supabase
+        .from('padlets')
+        .insert(childPayload)
+        .select()
+        .single();
+
+      if (childError) throw childError;
+
+      const finalContainerPayload = {
+        ...containerPayload,
+        metadata: {
+          ...containerPayload.metadata,
+          childPadletIds: [childData.id],
+        },
+      };
+
+      const { error: containerError } = await supabase
+        .from('padlets')
+        .insert(finalContainerPayload);
+
+      if (containerError) {
+        await deletePadletByIdRaw(childData.id);
+        throw containerError;
+      }
+
+      setPadlets((prev) => prev.map((p) => (
+        p.id === containerId ? finalContainerPayload as any : p
+      )));
+      setPadlets((prev) => [...prev, childData as Padlet]);
+
+      setIsPlacementPromptOpen(false);
+      setPendingPostDraft(null);
+      setPlacementPromptMode(null);
+      toast.success('Container with post created');
+    } catch (err: any) {
+      console.error('Failed to create timeline container/post:', err);
+      toast.error('Failed to create container');
+      setPadlets((prev) => prev.filter((p) => p.id !== containerId));
+      fetchData();
+    }
+  };
+
   // Helper to create post from draft (Scoped to Component)
   const createRealPostFromDraft = async (draft: PendingPostDraft, containerId: string) => {
     try {
@@ -1918,6 +2050,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       // Defensive - close both prompts to prevent blocking
       setIsPlacementPromptOpen(false);
       setWallPlacementPromptOpen(false);
+      setPlacementPromptMode(null);
 
       // Set origin context
       setPlacementContext('columns');
@@ -1931,6 +2064,22 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       });
       toast.info('Click a container to place your post');
     }
+  };
+
+  const handleStartDragToExistingFromHorizontalAll = () => {
+    if (!pendingPostDraft || chronoMode !== 'horizontal-all') return;
+
+    setIsPlacementPromptOpen(false);
+    setWallPlacementPromptOpen(false);
+    setPlacementPromptMode(null);
+    setPlacementContext('timeline-horizontal-all');
+    setNewPostDragState({
+      isActive: true,
+      draft: pendingPostDraft,
+      cursor: { x: 0, y: 0 },
+      grabOffset: { x: 0, y: 0 }
+    });
+    toast.info('Click a container to place your post');
   };
 
 
@@ -2016,6 +2165,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         createRealPostFromDraftRef.current(newPostDragState.draft, hoverId);
         setWallPendingPostDraft(null);
         setPlacementContext(null);
+        setPlacementPromptMode(null);
         setNewPostDragState({ isActive: false, draft: null, cursor: { x: 0, y: 0 }, grabOffset: { x: 0, y: 0 } });
         setNewPostHoverContainerId(null);
         hoverContainerRef.current = null;
@@ -2024,6 +2174,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         if (placementContext === 'wall') {
           setWallPlacementPromptOpen(true);
         } else {
+          if (placementContext === 'timeline-horizontal-all') {
+            setPlacementPromptMode('timeline-horizontal-all');
+          }
           setIsPlacementPromptOpen(true);
         }
         setPlacementContext(null);
@@ -2035,6 +2188,8 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       if (e.key === 'Escape') {
         setNewPostDragState({ isActive: false, draft: null, cursor: { x: 0, y: 0 }, grabOffset: { x: 0, y: 0 } });
         setPendingPostDraft(null);
+        setPlacementPromptMode(null);
+        setPlacementContext(null);
         hoverContainerRef.current = null;
       }
     };
@@ -2175,6 +2330,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       toast.error("Please create a section first");
       setPendingPostDraft(null); // Clear draft to avoid stuck state
       setIsPlacementPromptOpen(false);
+      setPlacementPromptMode(null);
       return;
     }
 
@@ -2249,6 +2405,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       // Reset states
       setIsPlacementPromptOpen(false);
       setPendingPostDraft(null);
+      setPlacementPromptMode(null);
       toast.success("Created new container with post");
 
       // Force refresh to ensure data consistency
@@ -6309,6 +6466,14 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                 currentUserAvatar={user?.user_metadata?.avatar_url}
                 viewportContainerRef={containerRef}
                 onPadletEdit={(padlet) => {
+                  if (isImageEditPadlet(padlet)) {
+                    closeDrawingSelectedShapePanel();
+                    closeAllToolbars({ imageToolbar: true });
+                    setPadletToEdit(null);
+                    setIsImageEditorOpen(false);
+                    setImageToolbarPadletId(padlet.id);
+                    return;
+                  }
                   openPadletInTypeEditor(padlet);
                 }}
                 onEditPadletAsPost={(padlet) => {
@@ -7060,9 +7225,14 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
               onClose={() => {
                 setIsPlacementPromptOpen(false);
                 setPendingPostDraft(null);
+                setPlacementPromptMode(null);
               }}
-              onNewContainer={handleCreateNewContainerWithDraft}
-              onAddToExisting={handleStartDragToExisting}
+              onNewContainer={placementPromptMode === 'timeline-horizontal-all'
+                ? handleCreateHorizontalAllTimelineContainerWithDraft
+                : handleCreateNewContainerWithDraft}
+              onAddToExisting={placementPromptMode === 'timeline-horizontal-all'
+                ? handleStartDragToExistingFromHorizontalAll
+                : handleStartDragToExisting}
             />
 
             {/* Container Creation Placement Prompt (Triggered by + Container button) */}
@@ -7403,6 +7573,547 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
             });
           }}
         />
+
+        {isDrawingLayout && imageToolbarPadletId && activeImageToolbarPadlet && activeImageToolbarSrc && (
+          <div
+            className="fixed inset-0 z-[60000] flex items-center justify-center bg-black/35 backdrop-blur-sm"
+            onClick={() => {
+              setImageToolbarPadletId(null);
+              setIsImageColorPickerOpen(false);
+              setTextStylePadletId(null);
+              setCaptionPopupPadletId(null);
+              setIsImageEmojiOpen(false);
+              setCardCommentPopupPadletId(null);
+              setCommentColorPopupId(null);
+            }}
+          >
+            <div
+              className="relative flex max-h-[calc(100vh-80px)] max-w-[calc(100vw-80px)] items-start gap-6"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <ImageActionsToolbar
+                currentCardColor={activeImageToolbarPadlet.metadata?.cardColor || '#ffffff'}
+                commentCount={activeImageToolbarPadlet.metadata?.detachedComments?.length || 0}
+                commentBadgeColor={activeImageToolbarPadlet.metadata?.badgeColor || '#facc15'}
+                onColorClick={() => {
+                  const nextOpen = !isImageColorPickerOpen;
+                  setIsImageColorPickerOpen(nextOpen);
+                  if (nextOpen) {
+                    setTextStylePadletId(null);
+                    setCaptionPopupPadletId(null);
+                  }
+                }}
+                isColorPickerOpen={isImageColorPickerOpen}
+                isDrawingMode={isDrawingMode}
+                isCaptionMode={captionPopupPadletId === activeImageToolbarPadlet.id}
+                isTextStyleMode={textStylePadletId === activeImageToolbarPadlet.id}
+                onCardColor={async (color) => {
+                  await updatePadletMetadata(activeImageToolbarPadlet.id, { cardColor: color });
+                }}
+                onTopStrip={async (color) => {
+                  await updatePadletMetadata(activeImageToolbarPadlet.id, { topStrip: color });
+                }}
+                onCaptionTextColor={async (color) => {
+                  await updatePadletMetadata(activeImageToolbarPadlet.id, {
+                    captionStyle: { ...activeImageToolbarPadlet.metadata?.captionStyle, color },
+                  });
+                }}
+                currentTopStrip={activeImageToolbarPadlet.metadata?.topStrip || 'transparent'}
+                currentCaptionTextColor={activeImageToolbarPadlet.metadata?.captionStyle?.color || '#1F2937'}
+                onCaption={() => {
+                  const isOpening = captionPopupPadletId !== activeImageToolbarPadlet.id;
+                  setCaptionPopupPadletId(isOpening ? activeImageToolbarPadlet.id : null);
+                  if (isOpening) {
+                    setEditingCaption(activeImageToolbarPadlet.metadata?.caption || '');
+                    setIsImageColorPickerOpen(false);
+                  }
+                }}
+                onTextStyle={() => {
+                  const isOpening = textStylePadletId !== activeImageToolbarPadlet.id;
+                  setTextStylePadletId(isOpening ? activeImageToolbarPadlet.id : null);
+                  if (isOpening && captionPopupPadletId !== activeImageToolbarPadlet.id) {
+                    setCaptionPopupPadletId(activeImageToolbarPadlet.id);
+                    setEditingCaption(activeImageToolbarPadlet.metadata?.caption || '');
+                  }
+                  if (isOpening) {
+                    setIsImageColorPickerOpen(false);
+                  }
+                }}
+                onSelectColor={async (color) => {
+                  await updatePadletMetadata(activeImageToolbarPadlet.id, {
+                    captionStyle: { ...activeImageToolbarPadlet.metadata?.captionStyle, color },
+                  });
+                }}
+                onSelectHighlight={async (highlight) => {
+                  await updatePadletMetadata(activeImageToolbarPadlet.id, {
+                    captionStyle: { ...activeImageToolbarPadlet.metadata?.captionStyle, backgroundColor: highlight },
+                  });
+                }}
+                currentColor={activeImageToolbarPadlet.metadata?.captionStyle?.color}
+                currentHighlight={activeImageToolbarPadlet.metadata?.captionStyle?.backgroundColor}
+                onEditImage={() => {
+                  setImageToolbarPadletId(null);
+                  setCropPadlet(activeImageToolbarPadlet);
+                  setIsCropMode(true);
+                }}
+                onDrawOnTop={() => {
+                  closeAllToolbars();
+                  setImageToolbarPadletId(null);
+                  setDrawingPadlet(activeImageToolbarPadlet);
+                  setIsDrawingMode(true);
+                }}
+                onAddReaction={() => {
+                  setIsImageEmojiOpen(true);
+                }}
+                onComment={() => {
+                  const commentsToShow = activeImageToolbarPadlet.metadata?.detachedComments || [];
+                  setCardCommentList(commentsToShow);
+                  setCardCommentPopupPadletId(activeImageToolbarPadlet.id);
+                }}
+              />
+
+              <div
+                className="overflow-hidden flex flex-col border border-gray-200 shadow-2xl"
+                style={{ width: '360px', backgroundColor: activeImageToolbarPadlet.metadata?.cardColor || '#ffffff' }}
+                onMouseDown={(e) => e.stopPropagation()}
+              >
+                <div
+                  className="w-full flex-shrink-0"
+                  style={{
+                    minHeight: '22px',
+                    backgroundColor: isStripVisible(activeImageToolbarPadlet.metadata?.topStrip)
+                      ? activeImageToolbarPadlet.metadata?.topStrip
+                      : 'rgba(0,0,0,0.04)',
+                  }}
+                />
+                <div className="relative overflow-hidden bg-gray-50 flex items-center justify-center min-h-[100px]">
+                  <img
+                    src={activeImageToolbarSrc}
+                    alt={activeImageToolbarPadlet.metadata?.caption || 'Image'}
+                    className="w-full h-auto object-contain max-h-[500px] pointer-events-none select-none"
+                  />
+                </div>
+                {(activeImageToolbarPadlet.metadata?.reactions?.length ?? 0) > 0 && (
+                  <div className="flex items-center gap-1.5 px-3 py-1.5">
+                    <ReactionDisplay
+                      reactions={activeImageToolbarPadlet.metadata?.reactions || []}
+                      onAddClick={() => setIsImageEmojiOpen(true)}
+                      onReactionClick={async (emoji) => {
+                        const currentReactions = activeImageToolbarPadlet.metadata?.reactions || [];
+                        const indexToRemove = currentReactions.indexOf(emoji);
+                        if (indexToRemove === -1) return;
+                        const newReactions = [
+                          ...currentReactions.slice(0, indexToRemove),
+                          ...currentReactions.slice(indexToRemove + 1),
+                        ];
+                        await updatePadletMetadata(activeImageToolbarPadlet.id, { reactions: newReactions });
+                      }}
+                    />
+                  </div>
+                )}
+                <InlineCaption
+                  value={(captionPopupPadletId === activeImageToolbarPadlet.id || textStylePadletId === activeImageToolbarPadlet.id)
+                    ? editingCaption
+                    : (activeImageToolbarPadlet.metadata?.caption || '')}
+                  isEditing={captionPopupPadletId === activeImageToolbarPadlet.id || textStylePadletId === activeImageToolbarPadlet.id}
+                  color={activeImageToolbarPadlet.metadata?.captionStyle?.color}
+                  backgroundColor={activeImageToolbarPadlet.metadata?.captionStyle?.backgroundColor}
+                  textStyle={{
+                    fontSize: activeImageToolbarPadlet.metadata?.captionStyle?.fontSize,
+                    fontWeight: activeImageToolbarPadlet.metadata?.captionStyle?.fontWeight,
+                    fontStyle: activeImageToolbarPadlet.metadata?.captionStyle?.fontStyle,
+                    fontFamily: activeImageToolbarPadlet.metadata?.captionStyle?.fontFamily,
+                    lineHeight: activeImageToolbarPadlet.metadata?.captionStyle?.lineHeight,
+                  }}
+                  onChange={(next) => setEditingCaption(next)}
+                  onCommit={async () => {
+                    await updatePadletMetadata(activeImageToolbarPadlet.id, { caption: editingCaption });
+                  }}
+                />
+              </div>
+
+              {activeImageToolbarPadlet && textStylePadletId === activeImageToolbarPadlet.id && (
+                <div
+                  className="relative animate-in fade-in zoom-in duration-200 bg-white rounded-lg shadow-xl border border-gray-200 px-3 pb-3 pt-8 min-w-[240px]"
+                  onClick={(e) => e.stopPropagation()}
+                  onMouseDown={(e) => e.stopPropagation()}
+                >
+                  <button
+                    onClick={() => setTextStylePadletId(null)}
+                    className="absolute top-2 right-2 w-4 h-4 flex items-center justify-center rounded hover:bg-gray-100"
+                    title="Close"
+                  >
+                    <X className="w-3 h-3 text-gray-400" />
+                  </button>
+                  <TextStylePopup
+                    isOpen={true}
+                    onOpenChange={(open) => !open && setTextStylePadletId(null)}
+                    onSelectHeading={(level) => {
+                      const baseStyle = activeImageToolbarPadlet.metadata?.captionStyle || {};
+                      const nextStyle = (() => {
+                        switch (level) {
+                          case 'h1': return { ...baseStyle, heading: 'h1', fontSize: '18px', fontWeight: '700', fontStyle: 'normal', fontFamily: undefined, lineHeight: '1.3' };
+                          case 'h2': return { ...baseStyle, heading: 'h2', fontSize: '16px', fontWeight: '600', fontStyle: 'normal', fontFamily: undefined, lineHeight: '1.35' };
+                          case 'small': return { ...baseStyle, heading: 'small', fontSize: '12px', fontWeight: '400', fontStyle: 'normal', fontFamily: undefined, lineHeight: '1.4' };
+                          case 'code': return { ...baseStyle, heading: 'code', fontSize: '13px', fontWeight: '400', fontStyle: 'normal', fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace", lineHeight: '1.4' };
+                          case 'quote': return { ...baseStyle, heading: 'quote', fontSize: '14px', fontWeight: '400', fontStyle: 'italic', fontFamily: undefined, lineHeight: '1.45' };
+                          case 'callout': return { ...baseStyle, heading: 'callout', fontSize: '14px', fontWeight: '500', fontStyle: 'normal', fontFamily: undefined, lineHeight: '1.4', backgroundColor: baseStyle.backgroundColor || '#fef3c7' };
+                          case 'normal':
+                          default: return { ...baseStyle, heading: 'normal', fontSize: '14px', fontWeight: '400', fontStyle: 'normal', fontFamily: undefined, lineHeight: '1.4' };
+                        }
+                      })();
+                      const nextMeta = { ...(activeImageToolbarPadlet.metadata || {}), captionStyle: nextStyle };
+                      setPadlets((prev) => prev.map((p) => (p.id === activeImageToolbarPadlet.id ? { ...p, metadata: nextMeta } : p)));
+                      commitPadletMeta(activeImageToolbarPadlet.id, nextMeta);
+                    }}
+                    onSelectColor={(color) => {
+                      const nextMeta = { ...(activeImageToolbarPadlet.metadata || {}), captionStyle: { ...(activeImageToolbarPadlet.metadata?.captionStyle || {}), color } };
+                      setPadlets((prev) => prev.map((p) => (p.id === activeImageToolbarPadlet.id ? { ...p, metadata: nextMeta } : p)));
+                      commitPadletMeta(activeImageToolbarPadlet.id, nextMeta);
+                    }}
+                    onSelectHighlight={(color) => {
+                      const nextMeta = { ...(activeImageToolbarPadlet.metadata || {}), captionStyle: { ...(activeImageToolbarPadlet.metadata?.captionStyle || {}), backgroundColor: color } };
+                      setPadlets((prev) => prev.map((p) => (p.id === activeImageToolbarPadlet.id ? { ...p, metadata: nextMeta } : p)));
+                      commitPadletMeta(activeImageToolbarPadlet.id, nextMeta);
+                    }}
+                    currentHeading={activeImageToolbarPadlet.metadata?.captionStyle?.heading || 'normal'}
+                    currentColor={activeImageToolbarPadlet.metadata?.captionStyle?.color}
+                    currentHighlight={activeImageToolbarPadlet.metadata?.captionStyle?.backgroundColor}
+                  />
+                </div>
+              )}
+
+              {activeImageToolbarPadlet && isImageColorPickerOpen && (
+                <div
+                  className="animate-in fade-in zoom-in duration-200"
+                  onClick={(e) => e.stopPropagation()}
+                  onMouseDown={(e) => e.stopPropagation()}
+                >
+                  <div className="bg-white rounded-lg shadow-xl border border-gray-200 overflow-hidden w-[340px]">
+                    <div className="p-4 flex flex-col gap-4">
+                      <div className="grid items-center gap-3" style={{ gridTemplateColumns: '1fr auto 1fr' }}>
+                        <span className="text-sm font-semibold text-slate-800 whitespace-nowrap">Image Color</span>
+                        <div className="inline-flex rounded-lg border bg-slate-50 p-1">
+                          <button
+                            onClick={() => setImageColorTab('background')}
+                            className={["px-3 py-1 text-xs font-medium rounded-md", imageColorTab === 'background' ? "bg-white shadow-sm" : "text-slate-600"].join(" ")}
+                            title="Background Color"
+                          >BG</button>
+                          <button
+                            onClick={() => setImageColorTab('topstrip')}
+                            className={["px-3 py-1 text-xs font-medium rounded-md", imageColorTab === 'topstrip' ? "bg-white shadow-sm" : "text-slate-600"].join(" ")}
+                            title="Top Strip Color"
+                          >TS</button>
+                        </div>
+                        <div className="flex justify-end">
+                          <button
+                            onClick={() => setIsImageColorPickerOpen(false)}
+                            className="w-5 h-5 rounded flex items-center justify-center text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                            title="Close"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                      <ColorPickerContent
+                        color={imageColorTab === 'background' ? (activeImageToolbarPadlet.metadata?.cardColor || '#ffffff') : (activeImageToolbarPadlet.metadata?.topStrip || 'transparent')}
+                        onChange={(color) => {
+                          setPadlets((prev) =>
+                            prev.map((p) => {
+                              if (p.id !== activeImageToolbarPadlet.id) return p;
+                              const nextMeta = imageColorTab === 'background'
+                                ? { ...(p.metadata || {}), cardColor: color }
+                                : { ...(p.metadata || {}), topStrip: color };
+                              return { ...p, metadata: nextMeta };
+                            })
+                          );
+                          const nextMeta = imageColorTab === 'background'
+                            ? { ...(activeImageToolbarPadlet.metadata || {}), cardColor: color }
+                            : { ...(activeImageToolbarPadlet.metadata || {}), topStrip: color };
+                          commitPadletMeta(activeImageToolbarPadlet.id, nextMeta);
+                        }}
+                        hasOpacity={true}
+                        presets={imageColorTab === 'background' ? BACKGROUND_COLORS : TOP_STRIP_COLORS}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Drawing image toolbar — emoji picker */}
+              {isImageEmojiOpen && (
+                <div
+                  className="animate-in fade-in zoom-in duration-200"
+                  onClick={(e) => e.stopPropagation()}
+                  onMouseDown={(e) => e.stopPropagation()}
+                >
+                  <div className="relative shadow-2xl rounded-xl overflow-hidden border border-gray-200 bg-white">
+                    <button
+                      className="absolute top-2 right-2 translate-x-1 z-10 w-4 h-4 rounded hover:bg-gray-100 flex items-center justify-center"
+                      onClick={() => setIsImageEmojiOpen(false)}
+                      title="Close"
+                    >
+                      <X className="w-3 h-3 text-gray-400" />
+                    </button>
+                    <EmojiPicker
+                      onEmojiClick={async (emojiData) => {
+                        try {
+                          const currentReactions = activeImageToolbarPadlet.metadata?.reactions || [];
+                          const newReactions = [...currentReactions, emojiData.emoji];
+                          await updatePadletMetadata(activeImageToolbarPadlet.id, { reactions: newReactions });
+                          setIsImageEmojiOpen(false);
+                        } catch (err) {
+                          console.error('Failed to add reaction:', err);
+                        }
+                      }}
+                      width={300}
+                      height={400}
+                      lazyLoadEmojis={true}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Drawing image toolbar — detached comments popup */}
+              {cardCommentPopupPadletId === activeImageToolbarPadlet.id && (
+                <div
+                  className="animate-in fade-in slide-in-from-left-2 duration-200"
+                  onClick={(e) => e.stopPropagation()}
+                  onMouseDown={(e) => e.stopPropagation()}
+                >
+                  <div className="relative bg-white rounded-xl shadow-2xl border border-gray-200 p-4 min-w-[280px] max-w-[320px]">
+                    <div className="flex items-center justify-between mb-3">
+                      <h4 className="text-sm font-semibold text-gray-700">Comments</h4>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => {
+                            setNoteBadgeColorPadletId(noteBadgeColorPadletId === activeImageToolbarPadlet.id ? null : activeImageToolbarPadlet.id);
+                            setCommentColorPopupId(null);
+                          }}
+                          className="w-7 h-7 flex items-center justify-center rounded hover:bg-gray-100"
+                          title="Badge Color"
+                        >
+                          <div
+                            className="w-4 h-4 rounded border border-gray-300"
+                            style={{ backgroundColor: activeImageToolbarPadlet.metadata?.badgeColor || '#facc15' }}
+                          />
+                        </button>
+                        <button
+                          onClick={() => {
+                            setCardCommentPopupPadletId(null);
+                            setActiveCardCommentId(null);
+                            setEditingCardCommentId(null);
+                            setEditingCardCommentText('');
+                            setCommentColorPopupId(null);
+                            setNoteBadgeColorPadletId(null);
+                          }}
+                          className="text-gray-400 hover:text-gray-600 p-1 rounded hover:bg-gray-100"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                    {noteBadgeColorPadletId === activeImageToolbarPadlet.id && (
+                      <div className="absolute right-3 top-12 z-10 bg-white rounded-lg shadow-lg border border-gray-200 p-2">
+                        <div className="grid grid-cols-6 gap-1.5">
+                          {BADGE_COLORS.map((color) => (
+                            <button
+                              key={color}
+                              onClick={async () => {
+                                await updatePadletMetadata(activeImageToolbarPadlet.id, { badgeColor: color });
+                                setNoteBadgeColorPadletId(null);
+                              }}
+                              className={`rounded transition-transform hover:scale-110 ${activeImageToolbarPadlet.metadata?.badgeColor === color ? 'ring-2 ring-blue-500' : ''}`}
+                              style={{
+                                width: '20px',
+                                height: '20px',
+                                backgroundColor: color,
+                                border: ['#f3f4f6', '#e5e7eb', '#fef9c3', '#fef08a'].includes(color) ? '1px solid #d1d5db' : 'none',
+                              }}
+                              title={color}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {cardCommentList.length === 0 ? (
+                      <p className="text-xs text-gray-400 text-center py-4">No comments yet</p>
+                    ) : (
+                      <div className="flex gap-2 relative">
+                        <div className="flex-1 space-y-2 max-h-[360px] overflow-y-auto overflow-x-hidden pr-0 scrollbar-ultrathin">
+                          {cardCommentList.map((c: any, i: number) => {
+                            const isEditing = editingCardCommentId === c.id;
+                            const isActive = activeCardCommentId === c.id;
+                            const commitEdit = async () => {
+                              const trimmed = editingCardCommentText.trim();
+                              if (!trimmed) {
+                                setEditingCardCommentId(null);
+                                setEditingCardCommentText('');
+                                setCommentColorPopupId(null);
+                                return;
+                              }
+                              const currentComments = activeImageToolbarPadlet.metadata?.detachedComments || [];
+                              const nextComments = currentComments.map((comment: any) =>
+                                comment.id === c.id ? { ...comment, text: trimmed } : comment
+                              );
+                              await updatePadletMetadata(activeImageToolbarPadlet.id, { detachedComments: nextComments });
+                              setCardCommentList(nextComments);
+                              setEditingCardCommentId(null);
+                              setEditingCardCommentText('');
+                              setCommentColorPopupId(null);
+                            };
+                            const startEdit = () => {
+                              setEditingCardCommentId(c.id || null);
+                              setEditingCardCommentText(c.text || '');
+                              setCommentColorPopupId(null);
+                            };
+                            return (
+                              <div
+                                key={c.id || i}
+                                className={`flex gap-2 rounded py-0.5 px-0.5 cursor-pointer ${isActive ? 'bg-blue-50' : 'hover:bg-gray-50'}`}
+                                onClick={() => setActiveCardCommentId(c.id || null)}
+                                onDoubleClick={(e) => { e.stopPropagation(); startEdit(); }}
+                              >
+                                <div className="flex flex-col items-center gap-0.5 shrink-0 w-[22px]">
+                                  <div className="w-[22px] h-[22px] rounded-full bg-blue-500 flex items-center justify-center text-white text-[9px] font-bold shrink-0">
+                                    {c.userName?.charAt(0).toUpperCase() || 'U'}
+                                  </div>
+                                  <span className="text-[9px] text-gray-400 leading-none text-center">
+                                    {(() => {
+                                      const diff = Date.now() - c.timestamp;
+                                      const minutes = Math.floor(diff / 60000);
+                                      const hours = Math.floor(minutes / 60);
+                                      const days = Math.floor(hours / 24);
+                                      const years = Math.floor(days / 365);
+                                      if (minutes < 60) return `${Math.max(1, minutes)}m`;
+                                      if (hours < 24) return `${hours}h`;
+                                      if (days < 365) return `${days}d`;
+                                      return `${years}y`;
+                                    })()}
+                                  </span>
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2 mb-0.5">
+                                    <span className="text-xs font-medium text-gray-700 truncate">{c.userName || 'User'}</span>
+                                  </div>
+                                  {isEditing ? (
+                                    <textarea
+                                      value={editingCardCommentText}
+                                      onChange={(e) => setEditingCardCommentText(e.target.value)}
+                                      onKeyDown={async (e) => {
+                                        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); await commitEdit(); }
+                                        if (e.key === 'Escape') { setEditingCardCommentId(null); setEditingCardCommentText(''); setCommentColorPopupId(null); }
+                                      }}
+                                      onBlur={() => { if (commentColorPopupId === c.id) return; commitEdit(); }}
+                                      className="w-full text-xs text-gray-600 bg-gray-50 rounded px-2 py-1 outline-none border border-gray-200 focus:border-blue-400 resize-none overflow-hidden break-words whitespace-pre-wrap"
+                                      style={{ color: c.textColor || c.color || '#4b5563', backgroundColor: c.backgroundColor || undefined }}
+                                      rows={1}
+                                      autoFocus
+                                    />
+                                  ) : (
+                                    <div
+                                      className={`text-xs text-gray-600 mt-0.5 whitespace-pre-wrap break-words ${c.isStrikethrough ? 'line-through' : ''}`}
+                                      style={{ color: c.textColor || c.color, backgroundColor: c.backgroundColor || undefined }}
+                                      onMouseDown={(e) => e.stopPropagation()}
+                                      onClick={(e) => e.stopPropagation()}
+                                      onDoubleClick={(e) => { e.stopPropagation(); startEdit(); }}
+                                      dangerouslySetInnerHTML={{ __html: c.text }}
+                                    />
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <div className="flex flex-col gap-1 flex-shrink-0 pt-1">
+                          {editingCardCommentId && activeCardComment && editingCardCommentId === activeCardComment.id ? (
+                            <button
+                              onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                              onClick={(e) => { e.preventDefault(); e.stopPropagation(); setCommentColorPopupId(commentColorPopupId === activeCardComment.id ? null : (activeCardComment.id || null)); }}
+                              className="p-1 rounded transition-colors text-gray-300 hover:text-blue-500"
+                              title="Color"
+                              disabled={!activeCardComment}
+                            >
+                              <Palette className="w-3 h-3" />
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => { if (!activeCardComment) return; setEditingCardCommentId(activeCardComment.id || null); setEditingCardCommentText(activeCardComment.text || ''); setCommentColorPopupId(null); }}
+                              className="p-1 rounded transition-colors text-gray-300 hover:text-blue-500 disabled:opacity-40 disabled:hover:text-gray-300"
+                              title="Edit"
+                              disabled={!activeCardComment}
+                            >
+                              <PenTool className="w-3 h-3" />
+                            </button>
+                          )}
+                          <button
+                            onClick={async () => {
+                              if (!activeCardComment) return;
+                              const currentComments = activeImageToolbarPadlet.metadata?.detachedComments || [];
+                              const nextComments = currentComments.map((comment: any) =>
+                                comment.id === activeCardComment.id ? { ...comment, isStrikethrough: !comment.isStrikethrough } : comment
+                              );
+                              await updatePadletMetadata(activeImageToolbarPadlet.id, { detachedComments: nextComments });
+                              setCardCommentList(nextComments);
+                            }}
+                            className={`p-1 rounded transition-colors ${activeCardComment?.isStrikethrough ? 'text-blue-500 bg-blue-50' : 'text-gray-300 hover:text-blue-500'} disabled:opacity-40 disabled:hover:text-gray-300`}
+                            title="Strikethrough"
+                            disabled={!activeCardComment}
+                          >
+                            <Strikethrough className="w-3 h-3" />
+                          </button>
+                          <button
+                            onClick={async () => {
+                              if (!activeCardComment) return;
+                              const currentComments = activeImageToolbarPadlet.metadata?.detachedComments || [];
+                              const nextComments = currentComments.filter((comment: any) => comment.id !== activeCardComment.id);
+                              await updatePadletMetadata(activeImageToolbarPadlet.id, { detachedComments: nextComments });
+                              setCardCommentList(nextComments);
+                              setActiveCardCommentId(nextComments[nextComments.length - 1]?.id || null);
+                              setEditingCardCommentId(null);
+                              setEditingCardCommentText('');
+                              setCommentColorPopupId(null);
+                            }}
+                            className="p-1 text-gray-300 hover:text-red-500 transition-colors disabled:opacity-40 disabled:hover:text-gray-300"
+                            title="Delete"
+                            disabled={!activeCardComment}
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    <div className="mt-3 pt-3 border-t border-gray-100">
+                      <input
+                        type="text"
+                        placeholder="Add a comment..."
+                        className="w-full text-xs px-3 py-2 rounded-lg border border-gray-200 focus:border-blue-400 focus:ring-1 focus:ring-blue-100 outline-none"
+                        onKeyDown={async (e) => {
+                          if (e.key === 'Enter' && e.currentTarget.value.trim()) {
+                            const inputElement = e.currentTarget;
+                            const commentText = inputElement.value.trim();
+                            const newComment = {
+                              id: `comment-${Date.now()}`,
+                              text: commentText,
+                              userId: user?.id || 'anon',
+                              userName: user?.email?.split('@')[0] || 'You',
+                              timestamp: Date.now(),
+                            };
+                            const currentComments = activeImageToolbarPadlet.metadata?.detachedComments || [];
+                            inputElement.value = '';
+                            await updatePadletMetadata(activeImageToolbarPadlet.id, { detachedComments: [...currentComments, newComment] });
+                            setCardCommentList([...currentComments, newComment]);
+                            setActiveCardCommentId(newComment.id);
+                          }
+                        }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Zoom Controls (Excalidraw-style) */}
         {!isWallLayout && !isColumnsLayout && !isGridLayout && !isDrawingLayout && !isTimelineLayout && !isKanbanLayout && !isSchedulerLayout && !isMapLayout && (

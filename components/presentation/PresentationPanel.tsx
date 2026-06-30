@@ -17,6 +17,10 @@ export type FrameSlide = {
   width: number;
   height: number;
   order?: number | null;
+  /** Increments when elements inside this frame change; drives thumbnail cache invalidation */
+  contentVersion?: number;
+  /** Full render signature including padlet overlay inputs */
+  renderSignature?: string;
 };
 
 export type ViewportSize = { width: number; height: number };
@@ -82,15 +86,6 @@ export function PresentationPanel({
     () => sortedSlides.filter((s) => selected[s.id]).length,
     [sortedSlides, selected]
   );
-  const selectedIds = useMemo(
-    () => sortedSlides.filter((s) => selected[s.id]).map((s) => s.id),
-    [sortedSlides, selected]
-  );
-  const selectedSlides = useMemo(() => {
-    const set = new Set(selectedIds);
-    return sortedSlides.filter((s) => set.has(s.id));
-  }, [sortedSlides, selectedIds]);
-
   useEffect(() => {
     if (sortedSlides.length === 0) return;
     const hasAny = Object.values(selected).some(Boolean);
@@ -183,7 +178,6 @@ export function PresentationPanel({
   const { thumbs, isGeneratingAny } = useSlideThumbnails({
     slides: sortedSlides,
     renderSlideToPNG,
-    width: thumbnail.width,
     height: thumbnail.height,
     background: "#ffffff",
     dpr: 2,

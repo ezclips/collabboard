@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { FrameSlide, RenderSlideToPNG } from "./PresentationPanel";
 import { SlideThumbnail } from "./SlideThumbnail";
 
@@ -34,48 +34,99 @@ export function PresentationPreviewModal({
 
   const [bigPng, setBigPng] = useState<string | null>(null);
   const [thumbs, setThumbs] = useState<Record<string, string>>({});
+  const renderedThumbKeysRef = useRef<Record<string, string>>({});
+  // Tracks whether this is the very first open — needs settle delay before capture
+  const isFirstOpenRef = useRef(true);
+  useEffect(() => { if (!open) { isFirstOpenRef.current = true; } }, [open]);
+  const getSlideCacheKey = React.useCallback(
+    (slide: FrameSlide) => slide.renderSignature ?? `${slide.x},${slide.y},${slide.width},${slide.height},${slide.contentVersion ?? 0}`,
+    [],
+  );
 
-  // Render the big preview when current slide changes
+  // Render the big preview when current slide changes.
+  // On initial open, wait double-RAF so canvas state has settled before capture.
   useEffect(() => {
     if (!open || !currentSlide) return;
     setBigPng(null);
 
     let cancelled = false;
-    const scale = currentSlide.height > 0 ? 900 / currentSlide.height : 1;
-    renderSlideToPNG(currentSlide, {
-      scale: scale * 2,
-      background: "#ffffff",
-      paddingPx: 32,
-    }).then((png) => {
-      if (!cancelled) setBigPng(png);
-    });
+    let raf2: number;
+    const render = () => {
+      const scale = currentSlide.height > 0 ? 900 / currentSlide.height : 1;
+      renderSlideToPNG(currentSlide, {
+        scale: scale * 2,
+        background: "#ffffff",
+        paddingPx: 32,
+      }).then((png) => {
+        if (!cancelled) setBigPng(png);
+      });
+    };
 
+    if (isFirstOpenRef.current) {
+      isFirstOpenRef.current = false;
+      const raf1 = window.requestAnimationFrame(() => {
+        raf2 = window.requestAnimationFrame(render);
+      });
+      return () => {
+        cancelled = true;
+        window.cancelAnimationFrame(raf1);
+        window.cancelAnimationFrame(raf2);
+      };
+    }
+
+    render();
     return () => { cancelled = true; };
-  }, [open, currentSlide, renderSlideToPNG]);
+  }, [open, currentSlide, renderSlideToPNG, getSlideCacheKey]);
 
-  // Warm thumbnails for the strip
+  useEffect(() => {
+    if (!open) return;
+
+    setThumbs((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const slide of slides) {
+        const cacheKey = getSlideCacheKey(slide);
+        if (renderedThumbKeysRef.current[slide.id] && renderedThumbKeysRef.current[slide.id] !== cacheKey) {
+          delete next[slide.id];
+          delete renderedThumbKeysRef.current[slide.id];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [open, slides, getSlideCacheKey]);
+
+  // Warm thumbnails for the strip.
+  // Double-RAF at start prevents capturing transient state on first open.
   useEffect(() => {
     if (!open) return;
 
     let cancelled = false;
     const run = async () => {
+      await new Promise<void>((resolve) => {
+        window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolve()));
+      });
+      if (cancelled) return;
       for (const s of slides.slice(0, 24)) {
         if (cancelled) break;
-        if (thumbs[s.id]) continue;
+        const cacheKey = getSlideCacheKey(s);
+        if (renderedThumbKeysRef.current[s.id] === cacheKey) continue;
         const scale = s.height > 0 ? 160 / s.height : 1;
         const png = await renderSlideToPNG(s, {
           scale: scale * 2,
           background: "#ffffff",
           paddingPx: 20,
         });
-        if (!cancelled) setThumbs((prev) => ({ ...prev, [s.id]: png }));
+        if (!cancelled) {
+          renderedThumbKeysRef.current[s.id] = cacheKey;
+          setThumbs((prev) => ({ ...prev, [s.id]: png }));
+        }
       }
     };
     run();
 
     return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, slides]);
+  }, [open, slides, renderSlideToPNG, getSlideCacheKey]);
 
   // Keyboard navigation
   useEffect(() => {

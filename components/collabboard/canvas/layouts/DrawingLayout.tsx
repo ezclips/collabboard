@@ -1,7 +1,7 @@
 "use client";
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
 import type { Padlet } from '@/types/collabboard';
 import dynamic from 'next/dynamic';
@@ -12,8 +12,9 @@ import EmbeddedCommentList from '@/components/collabboard/EmbeddedCommentList';
 import RowColumnContainerCard from '@/components/collabboard/RowColumnContainerCard';
 import ZoomControls from '@/components/collabboard/canvas/ui/ZoomControls';
 import { PresentationPanel } from '@/components/presentation/PresentationPanel';
-import { FullscreenPresentation } from '@/components/presentation/FullscreenPresentation';
+import { FullscreenPresentation, type RuntimeSlideHelpers } from '@/components/presentation/FullscreenPresentation';
 import type { FrameSlide, RenderSlideOptions } from '@/components/presentation/PresentationPanel';
+import { createSlideRenderer } from '@/components/presentation/slide-renderer/createSlideRenderer';
 import { CanvasContextMenu } from '@/components/collabboard/canvas/ui/CanvasContextMenu';
 import { useCanvasActions } from '@/components/collabboard/canvas/hooks/useCanvasActions';
 import { MessageSquarePlus, Library, MonitorPlay, X, Workflow, Pencil, ChevronDown, ChevronUp } from 'lucide-react';
@@ -36,7 +37,7 @@ type AutoHeightContainerProps = {
   currentUserId?: string;
   currentUserName?: string;
   currentUserAvatar?: string;
-  onUpdateChildComments?: (childId: string, comments: any[]) => void;
+  onUpdateChildComments?: (childId: string, comments: any[], options?: { field?: 'comments' | 'detachedComments' }) => void;
   onScanChild?: () => void;
   isExpanded?: boolean;
   onExpandAvailabilityChange?: (available: boolean) => void;
@@ -60,6 +61,7 @@ function AutoHeightContainer({ padlet, allPadlets, onNaturalHeight, onDropExisti
         allPadlets={allPadlets}
         showHeader={false}
         isExpanded={isExpanded}
+        canvasContext="drawing"
         onDropExistingPadlet={onDropExistingPadlet}
         onDropDraftIntoContainer={onDropDraftIntoContainer}
         currentUserId={currentUserId}
@@ -79,6 +81,8 @@ function AutoHeightContainer({ padlet, allPadlets, onNaturalHeight, onDropExisti
 // tolerate a little more than one scene pixel to avoid snapping back on release.
 const POSITION_SYNC_EPSILON = 1.25;
 const DEV_DRAWING_BRIDGE_DIAGNOSTICS = process.env.NODE_ENV !== 'production';
+const DRAWING_BRIDGE_LOG_PREFIX = '[DrawingLayout:back-line-bridge]';
+const INITIAL_VIEWPORT_SETTLE_MAX_FRAMES = 12;
 const BACK_LINE_INTERACTIVE_ROLE_PRIORITY = [
   'point-handle',
   'midpoint-handle',
@@ -88,6 +92,53 @@ const BACK_LINE_INTERACTIVE_ROLE_PRIORITY = [
   'label-handle',
   'hit-path',
 ] as const;
+
+const getElementClassNameForDiagnostics = (node: Element | null) => {
+  if (!node) return null;
+  const className = node.className as string | { baseVal?: string } | undefined;
+  if (typeof className === 'string') return className;
+  if (className && typeof className === 'object' && 'baseVal' in className) {
+    return className.baseVal ?? null;
+  }
+  return node.getAttribute('class');
+};
+
+const getElementDatasetForDiagnostics = (node: Element | null) => {
+  if (!node) return null;
+  if (node instanceof HTMLElement || node instanceof SVGElement) {
+    return { ...node.dataset };
+  }
+  return null;
+};
+
+const summarizeElementForDiagnostics = (node: Element | null) => {
+  if (!node) return null;
+  return {
+    tagName: node.tagName,
+    className: getElementClassNameForDiagnostics(node),
+    dataset: getElementDatasetForDiagnostics(node),
+    lineId: node.getAttribute('data-line-id'),
+    lineRole: node.getAttribute('data-line-role'),
+    lineRenderer: node.getAttribute('data-line-renderer'),
+  };
+};
+
+const getElementsFromPointSummaryForDiagnostics = (clientX: number, clientY: number) => {
+  if (typeof document === 'undefined' || typeof document.elementsFromPoint !== 'function') {
+    return [];
+  }
+
+  return document
+    .elementsFromPoint(clientX, clientY)
+    .slice(0, 8)
+    .map((node) => ({
+      tagName: node.tagName,
+      className: getElementClassNameForDiagnostics(node),
+      lineId: node.getAttribute('data-line-id'),
+      lineRole: node.getAttribute('data-line-role'),
+      lineRenderer: node.getAttribute('data-line-renderer'),
+    }));
+};
 
 const toSceneCoords = (
   clientX: number,
@@ -118,7 +169,7 @@ type DrawingEmbeddableCardProps = {
   currentUserId?: string;
   currentUserName?: string;
   currentUserAvatar?: string;
-  onUpdateChildComments: (childId: string, comments: any[]) => void;
+  onUpdateChildComments: (childId: string, comments: any[], options?: { field?: 'comments' | 'detachedComments' }) => void;
   fetchData?: () => void;
   onContextMenu: (e: React.MouseEvent, padlet: Padlet) => void;
   onPadletEditRef: React.RefObject<((padlet: Padlet) => void) | undefined>;
@@ -441,23 +492,23 @@ function DrawingEmbeddableCard({
                     timestamp: Date.now(),
                   };
                   const existing = (padlet.metadata as any)?.comments || [];
-                  onUpdateChildComments(padlet.id, [...existing, newComment]);
+                  onUpdateChildComments(padlet.id, [...existing, newComment], { field: 'comments' });
                 }}
                 onEditComment={(commentId, newText) => {
                   const existing = (padlet.metadata as any)?.comments || [];
                   onUpdateChildComments(padlet.id, existing.map((c: any) =>
                     c.id === commentId ? { ...c, text: newText } : c
-                  ));
+                  ), { field: 'comments' });
                 }}
                 onRemoveComment={(commentId) => {
                   const existing = (padlet.metadata as any)?.comments || [];
-                  onUpdateChildComments(padlet.id, existing.filter((c: any) => c.id !== commentId));
+                  onUpdateChildComments(padlet.id, existing.filter((c: any) => c.id !== commentId), { field: 'comments' });
                 }}
                 onToggleStrikethrough={(commentId) => {
                   const existing = (padlet.metadata as any)?.comments || [];
                   onUpdateChildComments(padlet.id, existing.map((c: any) =>
                     c.id === commentId ? { ...c, isStrikethrough: !c.isStrikethrough } : c
-                  ));
+                  ), { field: 'comments' });
                 }}
               />
             );
@@ -513,6 +564,8 @@ export default function DrawingLayout({
   const [masterPadlet, setMasterPadlet] = useState<Padlet | null>(null);
   const [isInitializing, setIsInitializing] = useState(true);
   const [key, setKey] = useState(0);
+  const [rightClusterAnchorEl, setRightClusterAnchorEl] = useState<HTMLElement | null>(null);
+  const [rightClusterLeftPx, setRightClusterLeftPx] = useState<number | null>(null);
 
   const [initialElements, setInitialElements] = useState<any[]>([]);
   const [initialAppState, setInitialAppState] = useState<any>(null);
@@ -521,7 +574,13 @@ export default function DrawingLayout({
 
   const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
   const dirtyDataRef = useRef<{ elements: any[], appState: any, files: any } | null>(null);
+  // Per-frame content version tracking: increments when elements inside a frame change
+  const frameVersionsRef = useRef<Record<string, number>>({});
+  const frameSigsRef = useRef<Record<string, string>>({});
   const initializedRef = useRef(false);
+  const drawingRootRef = useRef<HTMLDivElement | null>(null);
+  const topFloatingToolbarRef = useRef<HTMLDivElement | null>(null);
+  const presentationSidebarRef = useRef<HTMLDivElement | null>(null);
   const paddletsRef = useRef<Padlet[]>(padlets);
   // Track active element count to avoid O(N) reduce on every Excalidraw onChange (60fps during drag)
   const activeElementCountRef = useRef(0);
@@ -562,6 +621,7 @@ export default function DrawingLayout({
   const [elements, setElements] = useState<readonly any[]>([]);
   const [activeTool, setActiveTool] = useState<'select' | 'comment' | 'library' | 'present' | 'group'>('select');
   const [excalidrawAPI, setExcalidrawAPI] = useState<any>(null);
+  const [isInitialViewportSettled, setIsInitialViewportSettled] = useState(true);
   // Ref so renderEmbeddable can read the API without recreating on every API change
   const excalidrawAPIRef = useRef<any>(null);
   // Ref so renderEmbeddable can call onPadletEdit without adding it to deps
@@ -573,9 +633,16 @@ export default function DrawingLayout({
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; padlet: Padlet } | null>(null);
   // Track current binary files (images embedded in drawing) for export
   const currentFilesRef = useRef<any>(null);
+  const runtimeSceneElementsRef = useRef<readonly any[]>([]);
+  const runtimePadletsRef = useRef<Padlet[]>(padlets);
+  const runtimeInitialFilesRef = useRef<any>(null);
 
   // Lasso and selection state
   const [mermaidModalOpen, setMermaidModalOpen] = useState(false);
+
+  runtimeSceneElementsRef.current = elements;
+  runtimePadletsRef.current = padlets;
+  runtimeInitialFilesRef.current = initialFiles;
 
   useEffect(() => {
     const handleMermaidOpen = () => {
@@ -584,6 +651,141 @@ export default function DrawingLayout({
     window.addEventListener('open-custom-mermaid', handleMermaidOpen);
     return () => window.removeEventListener('open-custom-mermaid', handleMermaidOpen);
   }, []);
+
+  useEffect(() => {
+    if (isInitializing) {
+      setRightClusterAnchorEl(null);
+      return;
+    }
+
+    let cancelled = false;
+    let frameId = 0;
+    let attempts = 0;
+
+    const resolveAnchor = () => {
+      if (cancelled) return;
+
+      const root = drawingRootRef.current;
+      // Keep this fallback order as-tested: app-shell and CanvasViewport anchors
+      // shrank with browser width in runtime measurement, while this Excalidraw
+      // UI layer stayed stable and prevents the custom cluster from drifting.
+      const nextAnchor = root?.querySelector<HTMLElement>('.layer-ui__wrapper')
+        ?? root?.querySelector<HTMLElement>('.App-menu_top')
+        ?? root?.querySelector<HTMLElement>('.excalidraw')
+        ?? null;
+
+      if (nextAnchor || attempts >= 120) {
+        setRightClusterAnchorEl(nextAnchor);
+        return;
+      }
+
+      attempts += 1;
+      frameId = window.requestAnimationFrame(resolveAnchor);
+    };
+
+    resolveAnchor();
+
+    return () => {
+      cancelled = true;
+      if (frameId) {
+        window.cancelAnimationFrame(frameId);
+      }
+    };
+  }, [isInitializing, key]);
+
+  useLayoutEffect(() => {
+    const anchorEl = rightClusterAnchorEl ?? drawingRootRef.current;
+    if (!anchorEl) {
+      setRightClusterLeftPx(null);
+      return;
+    }
+
+    let frameId = 0;
+    let timeoutId: number | null = null;
+    let observer: MutationObserver | null = null;
+    let resizeObserver: ResizeObserver | null = null;
+    let lastResolvedLeftPx: number | null = null;
+
+    const scheduleRetry = (delayMs = 0) => {
+      if (frameId) {
+        window.cancelAnimationFrame(frameId);
+      }
+      if (timeoutId) {
+        window.clearTimeout(timeoutId);
+      }
+      if (delayMs > 0) {
+        timeoutId = window.setTimeout(() => {
+          timeoutId = null;
+          frameId = window.requestAnimationFrame(updatePosition);
+        }, delayMs);
+        return;
+      }
+      frameId = window.requestAnimationFrame(updatePosition);
+    };
+
+    const updatePosition = () => {
+      const drawingRoot = drawingRootRef.current;
+      const stockToolbarEl = drawingRoot?.querySelector<HTMLElement>('.Island.App-toolbar');
+      const clusterEl = topFloatingToolbarRef.current;
+      if (!stockToolbarEl || !clusterEl) {
+        scheduleRetry(120);
+        return;
+      }
+
+      const anchorRect = anchorEl.getBoundingClientRect();
+      const stockToolbarRect = stockToolbarEl.getBoundingClientRect();
+      const clusterRect = clusterEl.getBoundingClientRect();
+      if (stockToolbarRect.width === 0 || clusterRect.width === 0) {
+        scheduleRetry(120);
+        return;
+      }
+      const viewportRight = viewportContainerRef?.current?.getBoundingClientRect().right ?? window.innerWidth;
+      const reservedSidebarLeft = presentationSidebarRef.current?.getBoundingClientRect().left ?? (viewportRight - 320);
+      const equalGap = Math.max(16, (reservedSidebarLeft - stockToolbarRect.right - clusterRect.width) / 2);
+      const nextLeftPx = stockToolbarRect.right + equalGap - anchorRect.left;
+
+      lastResolvedLeftPx = nextLeftPx;
+      setRightClusterLeftPx(nextLeftPx);
+    };
+
+    const requestUpdate = () => {
+      scheduleRetry();
+    };
+
+    observer = new MutationObserver(() => {
+      requestUpdate();
+    });
+    observer.observe(anchorEl, { childList: true, subtree: true, attributes: true });
+
+    resizeObserver = new ResizeObserver(() => {
+      requestUpdate();
+    });
+    resizeObserver.observe(anchorEl);
+    if (viewportContainerRef?.current) {
+      resizeObserver.observe(viewportContainerRef.current);
+    }
+    if (presentationSidebarRef.current) {
+      resizeObserver.observe(presentationSidebarRef.current);
+    }
+
+    requestUpdate();
+    window.addEventListener('resize', requestUpdate);
+
+    return () => {
+      if (frameId) {
+        window.cancelAnimationFrame(frameId);
+      }
+      if (timeoutId) {
+        window.clearTimeout(timeoutId);
+      }
+      observer?.disconnect();
+      resizeObserver?.disconnect();
+      if (lastResolvedLeftPx === null) {
+        setRightClusterLeftPx(null);
+      }
+      window.removeEventListener('resize', requestUpdate);
+    };
+  }, [rightClusterAnchorEl, viewportContainerRef, activeTool, key]);
 
   // Excalidraw specific refs
   const deletedEmbeddablePadletIdsRef = useRef<Set<string>>(new Set());
@@ -1354,10 +1556,11 @@ export default function DrawingLayout({
   }, [excalidrawAPI, key, padletsLoaded]);
 
   // Persists updated comments array for any padlet (root comment posts + container children)
-  const handleUpdateChildComments = useCallback((childId: string, comments: any[]) => {
+  const handleUpdateChildComments = useCallback((childId: string, comments: any[], options?: { field?: 'comments' | 'detachedComments' }) => {
     const child = paddletsRef.current.find(p => p.id === childId);
     if (!child) return;
-    onUpdatePadlet(childId, { metadata: { ...(child.metadata as any), comments } });
+    const field = options?.field || 'comments';
+    onUpdatePadlet(childId, { metadata: { ...(child.metadata as any), [field]: comments } });
   }, [onUpdatePadlet]);
 
   const renderEmbeddable = useCallback((element: any) => {
@@ -1443,34 +1646,24 @@ export default function DrawingLayout({
     updateSceneElements: updateDrawingSceneElements,
   });
 
-  // Render a single Excalidraw frame to a PNG dataURL (used by PresentationPanel)
-  const renderSlideToPNG = useCallback(async (slide: FrameSlide, opts: RenderSlideOptions): Promise<string> => {
-    const { exportToCanvas } = await import("@excalidraw/excalidraw");
-    const activeElements = elements.filter((el: any) => !el.isDeleted);
-    const frameElement = activeElements.find((el: any) => el.id === slide.id) ?? null;
+  const slideRenderer = useMemo(() => createSlideRenderer({
+    getSceneElements: () => elements,
+    getPadlets: () => padlets,
+    getFiles: () => currentFilesRef.current ?? initialFiles ?? null,
+  }), [elements, initialFiles, padlets]);
 
-    const canvas = await exportToCanvas({
-      elements: activeElements as any[],
-      appState: {
-        exportBackground: true,
-        viewBackgroundColor: opts.background ?? '#ffffff',
-        exportWithDarkMode: false,
-      } as any,
-      files: currentFilesRef.current ?? initialFiles ?? null,
-      exportingFrame: frameElement as any,
-      getDimensions: (width: number, height: number) => {
-        const scale = opts.scale ?? 2;
-        return {
-          width: Math.round(width * scale),
-          height: Math.round(height * scale),
-          scale: scale,
-        };
-      },
-      exportPadding: opts.paddingPx ?? 0,
-    });
+  // Render a single Excalidraw frame to a PNG dataURL (used by PresentationPanel + export path)
+  const renderSlideToPNG = useCallback((slide: FrameSlide, opts: RenderSlideOptions): Promise<string> => (
+    slideRenderer.renderSlideToPNG(slide, opts)
+  ), [slideRenderer]);
 
-    return canvas.toDataURL('image/png');
-  }, [elements, initialFiles]);
+  // Helpers for the runtime live slideshow path in FullscreenPresentation.
+  // Keep the helper identity stable and read fresh scene data from refs at call time.
+  const runtimeSlideHelpers = useMemo((): RuntimeSlideHelpers => ({
+    getSceneElements: () => runtimeSceneElementsRef.current,
+    getPadlets: () => runtimePadletsRef.current,
+    getFiles: () => currentFilesRef.current ?? runtimeInitialFilesRef.current ?? null,
+  }), []);
 
   const handleActivateSlide = useCallback((slideId: string) => {
     setActiveSlideId(slideId);
@@ -1484,17 +1677,113 @@ export default function DrawingLayout({
     }
   }, [elements, excalidrawAPI]);
 
-  const frames: FrameSlide[] = elements
+  const frames: FrameSlide[] = (elements as any[])
     .filter((el: any) => el.type === 'frame' && !el.isDeleted)
-    .map((el: any) => ({
-      id: el.id,
-      name: el.name ?? null,
-      x: el.x,
-      y: el.y,
-      width: el.width,
-      height: el.height,
-      order: null,
-    })); const contentPadlets = padlets.filter(p => p.type !== 'drawing' && p.type !== 'comment' && p.id !== masterPadlet?.id);
+    .map((el: any) => {
+      const baseSlide = {
+        id: el.id,
+        name: el.name ?? null,
+        x: el.x,
+        y: el.y,
+        width: el.width,
+        height: el.height,
+        order: null,
+      } satisfies FrameSlide;
+      const sig = slideRenderer.getSlideRenderSignature(baseSlide);
+      if (frameSigsRef.current[el.id] !== sig) {
+        frameSigsRef.current[el.id] = sig;
+        frameVersionsRef.current[el.id] = (frameVersionsRef.current[el.id] ?? 0) + 1;
+      }
+      return {
+        ...baseSlide,
+        contentVersion: frameVersionsRef.current[el.id] ?? 0,
+        renderSignature: sig,
+      };
+    }); const contentPadlets = padlets.filter(p => p.type !== 'drawing' && p.type !== 'comment' && p.id !== masterPadlet?.id);
+
+  const hasSavedViewportOnInit = useMemo(() => {
+    const scrollX = initialAppState?.scrollX;
+    const scrollY = initialAppState?.scrollY;
+    const zoomValue =
+      typeof initialAppState?.zoom === "number"
+        ? initialAppState.zoom
+        : initialAppState?.zoom?.value;
+
+    const hasSavedViewport =
+      Number.isFinite(scrollX) ||
+      Number.isFinite(scrollY) ||
+      Number.isFinite(zoomValue);
+
+    return hasSavedViewport;
+  }, [initialAppState]);
+
+  useEffect(() => {
+    setIsInitialViewportSettled(!hasSavedViewportOnInit);
+  }, [hasSavedViewportOnInit, key]);
+
+  useEffect(() => {
+    if (!hasSavedViewportOnInit || isInitialViewportSettled || !excalidrawAPI) return;
+
+    const expectedScrollX = initialAppState?.scrollX;
+    const expectedScrollY = initialAppState?.scrollY;
+    const expectedZoom =
+      typeof initialAppState?.zoom === "number"
+        ? initialAppState.zoom
+        : initialAppState?.zoom?.value;
+
+    let cancelled = false;
+    let attempts = 0;
+    let rafId = 0;
+
+    const markSettled = () => {
+      rafId = window.requestAnimationFrame(() => {
+        if (!cancelled) {
+          setIsInitialViewportSettled(true);
+        }
+      });
+    };
+
+    const hasExpectedViewport = () => {
+      const latestAppState = excalidrawAPI.getAppState?.() || appStateRef.current;
+      const latestZoom =
+        typeof latestAppState?.zoom === "number"
+          ? latestAppState.zoom
+          : latestAppState?.zoom?.value;
+
+      const scrollXMatches =
+        !Number.isFinite(expectedScrollX) ||
+        (Number.isFinite(latestAppState?.scrollX) && Math.abs(latestAppState.scrollX - expectedScrollX) <= 1);
+      const scrollYMatches =
+        !Number.isFinite(expectedScrollY) ||
+        (Number.isFinite(latestAppState?.scrollY) && Math.abs(latestAppState.scrollY - expectedScrollY) <= 1);
+      const zoomMatches =
+        !Number.isFinite(expectedZoom) ||
+        (Number.isFinite(latestZoom) && Math.abs(latestZoom - expectedZoom) <= 0.01);
+
+      return scrollXMatches && scrollYMatches && zoomMatches;
+    };
+
+    const settleViewport = () => {
+      if (cancelled) return;
+
+      if (hasExpectedViewport() || attempts >= INITIAL_VIEWPORT_SETTLE_MAX_FRAMES) {
+        markSettled();
+        return;
+      }
+
+      attempts += 1;
+      rafId = window.requestAnimationFrame(settleViewport);
+    };
+
+    rafId = window.requestAnimationFrame(settleViewport);
+
+    return () => {
+      cancelled = true;
+      if (rafId) {
+        window.cancelAnimationFrame(rafId);
+      }
+    };
+  }, [appStateRef, excalidrawAPI, hasSavedViewportOnInit, initialAppState, isInitialViewportSettled]);
 
   const excalidrawInitialData = useMemo(() => ({
     elements: initialElements,
@@ -1505,9 +1794,9 @@ export default function DrawingLayout({
       collaborators: new Map(),
     },
     files: initialFiles,
-    scrollToContent: true,
+    scrollToContent: !hasSavedViewportOnInit,
     libraryItems: libraryItems,
-  }), [initialElements, initialAppState, initialFiles, libraryItems]);
+  }), [hasSavedViewportOnInit, initialElements, initialAppState, initialFiles, libraryItems]);
 
   const handleInsertMermaid = useCallback((newElements: any[], newFiles?: any) => {
     if (!excalidrawAPI) return;
@@ -1613,49 +1902,182 @@ export default function DrawingLayout({
   const bridgedBackLineInteractiveTargetRef = useRef<Element | null>(null);
   const isDispatchingBackLineBridgeEventRef = useRef(false);
 
-  const findBackLineInteractiveTargetAtPoint = useCallback((clientX: number, clientY: number) => {
+  const logBackLineBridgeDiagnostics = useCallback((params: {
+    phase: string;
+    event: Pick<MouseEvent, 'type' | 'button' | 'buttons' | 'clientX' | 'clientY' | 'target' | 'currentTarget'>;
+    activeToolType?: string;
+    guardPassed?: boolean | null;
+    guardFailedReason?: string | null;
+    backTargetResolutionAttempted?: boolean;
+    backTargetFound?: boolean;
+    foundTarget?: Element | null;
+    bridgedTarget?: Element | null;
+    extra?: Record<string, unknown>;
+  }) => {
+    if (!DEV_DRAWING_BRIDGE_DIAGNOSTICS) return;
+
+    const target = params.event.target instanceof Element ? params.event.target : null;
+    const currentTarget = params.event.currentTarget instanceof Element ? params.event.currentTarget : null;
+    const embeddableOuter = target?.closest('.excalidraw__embeddable__outer') ?? null;
+    const embeddableContainer = target?.closest('.excalidraw__embeddable-container') ?? null;
+    const targetIsCanvas = target instanceof HTMLCanvasElement;
+    const targetHasExcalidrawCanvasClass = target?.classList.contains('excalidraw__canvas') ?? false;
+    const foundTarget = params.foundTarget ?? params.bridgedTarget ?? null;
+
+    console.debug(DRAWING_BRIDGE_LOG_PREFIX, {
+      phase: params.phase,
+      eventType: params.event.type,
+      activeToolType: params.activeToolType ?? null,
+      button: params.event.button,
+      buttons: params.event.buttons,
+      targetTagName: target?.tagName ?? null,
+      targetClassName: getElementClassNameForDiagnostics(target),
+      targetDataset: getElementDatasetForDiagnostics(target),
+      currentTargetTagName: currentTarget?.tagName ?? null,
+      currentTargetClassName: getElementClassNameForDiagnostics(currentTarget),
+      currentTargetDataset: getElementDatasetForDiagnostics(currentTarget),
+      targetIsCanvas,
+      targetHasExcalidrawCanvasClass,
+      closestEmbeddableOuter: summarizeElementForDiagnostics(embeddableOuter),
+      closestEmbeddableContainer: summarizeElementForDiagnostics(embeddableContainer),
+      topStack: getElementsFromPointSummaryForDiagnostics(params.event.clientX, params.event.clientY),
+      guardPassed: params.guardPassed ?? null,
+      guardFailedReason: params.guardFailedReason ?? null,
+      backTargetResolutionAttempted: params.backTargetResolutionAttempted ?? false,
+      backTargetFound: params.backTargetFound ?? null,
+      foundTargetLineId: foundTarget?.getAttribute('data-line-id') ?? null,
+      foundTargetLineRole: foundTarget?.getAttribute('data-line-role') ?? null,
+      foundTargetLineRenderer: foundTarget?.getAttribute('data-line-renderer') ?? null,
+      ...params.extra,
+    });
+  }, []);
+
+  const findBackLineInteractiveTargetAtPoint = useCallback((clientX: number, clientY: number, sourcePhase?: string) => {
     const stack = document.elementsFromPoint(clientX, clientY);
+    let resolvedTarget: Element | null = null;
 
     for (const role of BACK_LINE_INTERACTIVE_ROLE_PRIORITY) {
       for (const node of stack) {
         if (!(node instanceof Element)) continue;
-        if (node.dataset.lineRenderer !== 'back') continue;
-        if (node.dataset.lineRole !== role) continue;
-        return node;
+        if (node.getAttribute('data-line-renderer') !== 'back') continue;
+        if (node.getAttribute('data-line-role') !== role) continue;
+        resolvedTarget = node;
+        break;
       }
+      if (resolvedTarget) break;
     }
-
-    return null;
-  }, []);
-
-  const handleBackLineBridgeMouseDownCapture = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
-    if (isDispatchingBackLineBridgeEventRef.current) return;
-
-    bridgedBackLineInteractiveTargetRef.current = null;
-
-    const activeToolType = appStateRef.current?.activeTool?.type ?? 'selection';
-    if (activeToolType !== 'selection') return;
-    if (event.button !== 0) return;
-
-    const target = event.target;
-    if (!(target instanceof HTMLCanvasElement) || !target.classList.contains('excalidraw__canvas')) {
-      return;
-    }
-
-    const interactiveTarget = findBackLineInteractiveTargetAtPoint(event.clientX, event.clientY);
 
     if (DEV_DRAWING_BRIDGE_DIAGNOSTICS) {
-      console.debug('[DrawingLayout:back-line-bridge]', {
-        phase: 'mouse-down-capture',
-        activeToolType,
-        targetTag: target.tagName,
-        targetClassName: target.className,
-        bridgedLineId: interactiveTarget?.dataset.lineId ?? null,
-        bridgedLineRole: interactiveTarget?.dataset.lineRole ?? null,
+      console.debug(DRAWING_BRIDGE_LOG_PREFIX, {
+        phase: sourcePhase ?? 'target-lookup',
+        eventType: 'target-lookup',
+        backTargetResolutionAttempted: true,
+        backTargetFound: Boolean(resolvedTarget),
+        foundTargetLineId: resolvedTarget?.getAttribute('data-line-id') ?? null,
+        foundTargetLineRole: resolvedTarget?.getAttribute('data-line-role') ?? null,
+        foundTargetLineRenderer: resolvedTarget?.getAttribute('data-line-renderer') ?? null,
+        topStack: stack.slice(0, 8).map((node) => ({
+          tagName: node.tagName,
+          className: getElementClassNameForDiagnostics(node),
+          lineId: node.getAttribute('data-line-id'),
+          lineRole: node.getAttribute('data-line-role'),
+          lineRenderer: node.getAttribute('data-line-renderer'),
+        })),
       });
     }
 
-    if (!interactiveTarget) return;
+    return resolvedTarget;
+  }, []);
+
+  const handleBackLineBridgeMouseDownCapture = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    const activeToolType = appStateRef.current?.activeTool?.type ?? 'selection';
+
+    if (isDispatchingBackLineBridgeEventRef.current) {
+      logBackLineBridgeDiagnostics({
+        phase: 'mouse-down-capture',
+        event,
+        activeToolType,
+        guardPassed: false,
+        guardFailedReason: 'reentrant-bridge-guard',
+        backTargetResolutionAttempted: false,
+      });
+      return;
+    }
+
+    bridgedBackLineInteractiveTargetRef.current = null;
+
+    if (activeToolType !== 'selection') {
+      logBackLineBridgeDiagnostics({
+        phase: 'mouse-down-capture',
+        event,
+        activeToolType,
+        guardPassed: false,
+        guardFailedReason: 'missing-selection-tool',
+        backTargetResolutionAttempted: false,
+      });
+      return;
+    }
+    if (event.button !== 0) {
+      logBackLineBridgeDiagnostics({
+        phase: 'mouse-down-capture',
+        event,
+        activeToolType,
+        guardPassed: false,
+        guardFailedReason: 'non-left-button',
+        backTargetResolutionAttempted: false,
+      });
+      return;
+    }
+
+    const target = event.target instanceof Element ? event.target : null;
+    if (!(target instanceof HTMLCanvasElement)) {
+      logBackLineBridgeDiagnostics({
+        phase: 'mouse-down-capture',
+        event,
+        activeToolType,
+        guardPassed: false,
+        guardFailedReason: 'target-not-canvas',
+        backTargetResolutionAttempted: false,
+      });
+      return;
+    }
+    if (!target.classList.contains('excalidraw__canvas')) {
+      logBackLineBridgeDiagnostics({
+        phase: 'mouse-down-capture',
+        event,
+        activeToolType,
+        guardPassed: false,
+        guardFailedReason: 'target-missing-excalidraw-canvas-class',
+        backTargetResolutionAttempted: false,
+      });
+      return;
+    }
+
+    const interactiveTarget = findBackLineInteractiveTargetAtPoint(event.clientX, event.clientY, 'mouse-down-capture:target-lookup');
+
+    if (!interactiveTarget) {
+      logBackLineBridgeDiagnostics({
+        phase: 'mouse-down-capture',
+        event,
+        activeToolType,
+        guardPassed: false,
+        guardFailedReason: 'no-back-line-target-found',
+        backTargetResolutionAttempted: true,
+        backTargetFound: false,
+      });
+      return;
+    }
+
+    logBackLineBridgeDiagnostics({
+      phase: 'mouse-down-capture',
+      event,
+      activeToolType,
+      guardPassed: true,
+      guardFailedReason: null,
+      backTargetResolutionAttempted: true,
+      backTargetFound: true,
+      foundTarget: interactiveTarget,
+    });
 
     bridgedBackLineInteractiveTargetRef.current = interactiveTarget;
     event.preventDefault();
@@ -1681,26 +2103,82 @@ export default function DrawingLayout({
   }, [appStateRef, findBackLineInteractiveTargetAtPoint]);
 
   const handleBackLineBridgeClickCapture = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
-    if (isDispatchingBackLineBridgeEventRef.current) return;
-    if (event.button !== 0) return;
+    const activeToolType = appStateRef.current?.activeTool?.type ?? 'selection';
+
+    if (isDispatchingBackLineBridgeEventRef.current) {
+      logBackLineBridgeDiagnostics({
+        phase: 'click-capture',
+        event,
+        activeToolType,
+        guardPassed: false,
+        guardFailedReason: 'reentrant-bridge-guard',
+        backTargetResolutionAttempted: false,
+      });
+      return;
+    }
+    if (event.button !== 0) {
+      logBackLineBridgeDiagnostics({
+        phase: 'click-capture',
+        event,
+        activeToolType,
+        guardPassed: false,
+        guardFailedReason: 'non-left-button',
+        backTargetResolutionAttempted: false,
+      });
+      return;
+    }
 
     const bridgedTarget = bridgedBackLineInteractiveTargetRef.current;
     bridgedBackLineInteractiveTargetRef.current = null;
 
-    if (!bridgedTarget) return;
-
-    const target = event.target;
-    if (!(target instanceof HTMLCanvasElement) || !target.classList.contains('excalidraw__canvas')) {
+    if (!bridgedTarget) {
+      logBackLineBridgeDiagnostics({
+        phase: 'click-capture',
+        event,
+        activeToolType,
+        guardPassed: false,
+        guardFailedReason: 'missing-bridged-target',
+        backTargetResolutionAttempted: false,
+      });
       return;
     }
 
-    if (DEV_DRAWING_BRIDGE_DIAGNOSTICS) {
-      console.debug('[DrawingLayout:back-line-bridge]', {
+    const target = event.target instanceof Element ? event.target : null;
+    if (!(target instanceof HTMLCanvasElement)) {
+      logBackLineBridgeDiagnostics({
         phase: 'click-capture',
-        bridgedLineId: bridgedTarget.dataset.lineId ?? null,
-        bridgedLineRole: bridgedTarget.dataset.lineRole ?? null,
+        event,
+        activeToolType,
+        guardPassed: false,
+        guardFailedReason: 'target-not-canvas',
+        backTargetResolutionAttempted: false,
+        bridgedTarget,
       });
+      return;
     }
+    if (!target.classList.contains('excalidraw__canvas')) {
+      logBackLineBridgeDiagnostics({
+        phase: 'click-capture',
+        event,
+        activeToolType,
+        guardPassed: false,
+        guardFailedReason: 'target-missing-excalidraw-canvas-class',
+        backTargetResolutionAttempted: false,
+        bridgedTarget,
+      });
+      return;
+    }
+
+    logBackLineBridgeDiagnostics({
+      phase: 'click-capture',
+      event,
+      activeToolType,
+      guardPassed: true,
+      guardFailedReason: null,
+      backTargetResolutionAttempted: false,
+      backTargetFound: true,
+      bridgedTarget,
+    });
 
     event.preventDefault();
     event.stopPropagation();
@@ -1722,47 +2200,194 @@ export default function DrawingLayout({
     } finally {
       isDispatchingBackLineBridgeEventRef.current = false;
     }
-  }, []);
+  }, [appStateRef, logBackLineBridgeDiagnostics]);
 
-  const handleBackLineBridgePointerDownCapture = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
-    if (!DEV_DRAWING_BRIDGE_DIAGNOSTICS) return;
-
-    const target = event.target instanceof Element ? event.target : null;
-    console.debug('[DrawingLayout:back-line-bridge]', {
-      phase: 'pointer-down-capture',
-      targetTag: target?.tagName ?? null,
-      targetClassName: target?.getAttribute('class') ?? null,
-      button: event.button,
-      buttons: event.buttons,
-    });
-  }, []);
-
-  const handleBackLineBridgeContextMenuCapture = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
-    if (isDispatchingBackLineBridgeEventRef.current) return;
-
+  const handleBackLineBridgeDoubleClickCapture = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     const activeToolType = appStateRef.current?.activeTool?.type ?? 'selection';
-    if (activeToolType !== 'selection') return;
 
-    const target = event.target instanceof Element ? event.target : null;
-    if (!(target instanceof HTMLCanvasElement) || !target.classList.contains('excalidraw__canvas')) {
+    if (isDispatchingBackLineBridgeEventRef.current) {
+      logBackLineBridgeDiagnostics({
+        phase: 'double-click-capture',
+        event,
+        activeToolType,
+        guardPassed: false,
+        guardFailedReason: 'reentrant-bridge-guard',
+        backTargetResolutionAttempted: false,
+      });
       return;
     }
 
-    const interactiveTarget = findBackLineInteractiveTargetAtPoint(event.clientX, event.clientY);
-
-    if (DEV_DRAWING_BRIDGE_DIAGNOSTICS) {
-      console.debug('[DrawingLayout:back-line-bridge]', {
-        phase: 'contextmenu-capture',
-        targetTag: target?.tagName ?? null,
-        targetClassName: target?.getAttribute('class') ?? null,
-        button: event.button,
-        buttons: event.buttons,
-        bridgedLineId: interactiveTarget?.dataset.lineId ?? null,
-        bridgedLineRole: interactiveTarget?.dataset.lineRole ?? null,
+    if (activeToolType !== 'selection') {
+      logBackLineBridgeDiagnostics({
+        phase: 'double-click-capture',
+        event,
+        activeToolType,
+        guardPassed: false,
+        guardFailedReason: 'missing-selection-tool',
+        backTargetResolutionAttempted: false,
       });
+      return;
     }
 
-    if (!interactiveTarget) return;
+    const target = event.target instanceof Element ? event.target : null;
+    if (!(target instanceof HTMLCanvasElement)) {
+      logBackLineBridgeDiagnostics({
+        phase: 'double-click-capture',
+        event,
+        activeToolType,
+        guardPassed: false,
+        guardFailedReason: 'target-not-canvas',
+        backTargetResolutionAttempted: false,
+      });
+      return;
+    }
+    if (!target.classList.contains('excalidraw__canvas')) {
+      logBackLineBridgeDiagnostics({
+        phase: 'double-click-capture',
+        event,
+        activeToolType,
+        guardPassed: false,
+        guardFailedReason: 'target-missing-excalidraw-canvas-class',
+        backTargetResolutionAttempted: false,
+      });
+      return;
+    }
+
+    const interactiveTarget = findBackLineInteractiveTargetAtPoint(event.clientX, event.clientY, 'double-click-capture:target-lookup');
+
+    if (!interactiveTarget) {
+      logBackLineBridgeDiagnostics({
+        phase: 'double-click-capture',
+        event,
+        activeToolType,
+        guardPassed: false,
+        guardFailedReason: 'no-back-line-target-found',
+        backTargetResolutionAttempted: true,
+        backTargetFound: false,
+      });
+      return;
+    }
+
+    logBackLineBridgeDiagnostics({
+      phase: 'double-click-capture',
+      event,
+      activeToolType,
+      guardPassed: true,
+      guardFailedReason: null,
+      backTargetResolutionAttempted: true,
+      backTargetFound: true,
+      foundTarget: interactiveTarget,
+    });
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    isDispatchingBackLineBridgeEventRef.current = true;
+    try {
+      interactiveTarget.dispatchEvent(new MouseEvent('dblclick', {
+        bubbles: true,
+        cancelable: true,
+        clientX: event.clientX,
+        clientY: event.clientY,
+        button: event.button,
+        buttons: event.buttons,
+        ctrlKey: event.ctrlKey,
+        shiftKey: event.shiftKey,
+        altKey: event.altKey,
+        metaKey: event.metaKey,
+      }));
+    } finally {
+      isDispatchingBackLineBridgeEventRef.current = false;
+    }
+  }, [appStateRef, findBackLineInteractiveTargetAtPoint, logBackLineBridgeDiagnostics]);
+
+  const handleBackLineBridgePointerDownCapture = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    logBackLineBridgeDiagnostics({
+      phase: 'pointer-down-capture',
+      event,
+      activeToolType: appStateRef.current?.activeTool?.type ?? 'selection',
+      guardPassed: null,
+      guardFailedReason: null,
+      backTargetResolutionAttempted: false,
+    });
+  }, [appStateRef, logBackLineBridgeDiagnostics]);
+
+  const handleBackLineBridgeContextMenuCapture = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    const activeToolType = appStateRef.current?.activeTool?.type ?? 'selection';
+
+    if (isDispatchingBackLineBridgeEventRef.current) {
+      logBackLineBridgeDiagnostics({
+        phase: 'contextmenu-capture',
+        event,
+        activeToolType,
+        guardPassed: false,
+        guardFailedReason: 'reentrant-bridge-guard',
+        backTargetResolutionAttempted: false,
+      });
+      return;
+    }
+
+    if (activeToolType !== 'selection') {
+      logBackLineBridgeDiagnostics({
+        phase: 'contextmenu-capture',
+        event,
+        activeToolType,
+        guardPassed: false,
+        guardFailedReason: 'missing-selection-tool',
+        backTargetResolutionAttempted: false,
+      });
+      return;
+    }
+
+    const target = event.target instanceof Element ? event.target : null;
+    if (!(target instanceof HTMLCanvasElement)) {
+      logBackLineBridgeDiagnostics({
+        phase: 'contextmenu-capture',
+        event,
+        activeToolType,
+        guardPassed: false,
+        guardFailedReason: 'target-not-canvas',
+        backTargetResolutionAttempted: false,
+      });
+      return;
+    }
+    if (!target.classList.contains('excalidraw__canvas')) {
+      logBackLineBridgeDiagnostics({
+        phase: 'contextmenu-capture',
+        event,
+        activeToolType,
+        guardPassed: false,
+        guardFailedReason: 'target-missing-excalidraw-canvas-class',
+        backTargetResolutionAttempted: false,
+      });
+      return;
+    }
+
+    const interactiveTarget = findBackLineInteractiveTargetAtPoint(event.clientX, event.clientY, 'contextmenu-capture:target-lookup');
+
+    if (!interactiveTarget) {
+      logBackLineBridgeDiagnostics({
+        phase: 'contextmenu-capture',
+        event,
+        activeToolType,
+        guardPassed: false,
+        guardFailedReason: 'no-back-line-target-found',
+        backTargetResolutionAttempted: true,
+        backTargetFound: false,
+      });
+      return;
+    }
+
+    logBackLineBridgeDiagnostics({
+      phase: 'contextmenu-capture',
+      event,
+      activeToolType,
+      guardPassed: true,
+      guardFailedReason: null,
+      backTargetResolutionAttempted: true,
+      backTargetFound: true,
+      foundTarget: interactiveTarget,
+    });
 
     bridgedBackLineInteractiveTargetRef.current = null;
     event.preventDefault();
@@ -1791,6 +2416,58 @@ export default function DrawingLayout({
     return <div className="flex-1 flex items-center justify-center p-8 text-gray-500">Initializing drawing canvas...</div>;
   }
 
+  const topFloatingToolbar = !readOnly ? (
+      <div
+        ref={topFloatingToolbarRef}
+        className="absolute top-4 z-[130] pointer-events-none"
+        style={{
+          left: rightClusterLeftPx !== null ? `${rightClusterLeftPx}px` : undefined,
+          opacity: rightClusterLeftPx !== null ? 1 : 0,
+        }}
+      >
+      <div className="bg-white rounded-lg shadow-lg border border-gray-200 flex items-center p-1 gap-1 pointer-events-auto">
+        <button
+          onClick={() => setActiveTool(activeTool === 'comment' ? 'select' : 'comment')}
+          className={`p-2 rounded-md transition-colors flex items-center gap-2 text-sm font-medium ${activeTool === 'comment' ? 'bg-blue-100 text-blue-700' : 'hover:bg-gray-100 text-gray-700'
+            }`}
+          title="Add Comment"
+        >
+          <MessageSquarePlus size={18} />
+        </button>
+
+        <div className="w-px h-6 bg-gray-200 mx-1" />
+
+        <button
+          onClick={() => setActiveTool(activeTool === 'library' ? 'select' : 'library')}
+          className={`p-2 rounded-md transition-colors flex items-center gap-2 text-sm font-medium ${activeTool === 'library' ? 'bg-blue-100 text-blue-700' : 'hover:bg-gray-100 text-gray-700'
+            }`}
+          title="Open Library"
+        >
+          <Library size={18} />
+        </button>
+
+        <button
+          onClick={() => setActiveTool(activeTool === 'present' ? 'select' : 'present')}
+          className={`p-2 rounded-md transition-colors flex items-center gap-2 text-sm font-medium ${activeTool === 'present' ? 'bg-blue-100 text-blue-700' : 'hover:bg-gray-100 text-gray-700'
+            }`}
+          title="Present Frames"
+        >
+          <MonitorPlay size={18} />
+        </button>
+
+        <div className="w-px h-6 bg-gray-200 mx-1" />
+
+        <button
+          onClick={() => setMermaidModalOpen(true)}
+          className="p-2 rounded-md transition-colors flex items-center gap-2 text-sm font-medium hover:bg-gray-100 text-gray-700"
+          title="Insert Mermaid Diagram"
+        >
+          <Workflow size={18} />
+        </button>
+      </div>
+    </div>
+  ) : null;
+
   return (
     <div
 
@@ -1798,10 +2475,18 @@ export default function DrawingLayout({
       onPointerDownCapture={handleBackLineBridgePointerDownCapture}
       onMouseDownCapture={handleBackLineBridgeMouseDownCapture}
       onClickCapture={handleBackLineBridgeClickCapture}
+      onDoubleClickCapture={handleBackLineBridgeDoubleClickCapture}
       onContextMenuCapture={handleBackLineBridgeContextMenuCapture}
 
     >
-      <div style={{ width: '100%', height: '100%' }}>
+      <div
+        ref={drawingRootRef}
+        style={{
+          width: '100%',
+          height: '100%',
+          visibility: isInitialViewportSettled ? 'visible' : 'hidden',
+        }}
+      >
         <ExcalidrawWrapper
           excalidrawAPI={(api) => { setExcalidrawAPI(api); excalidrawAPIRef.current = api; if (drawingExcalidrawAPIRef) drawingExcalidrawAPIRef.current = api; }}
           excalidrawKey={key}
@@ -1815,52 +2500,11 @@ export default function DrawingLayout({
       </div>
 
       {/* Top Floating Toolbar (Pro Features) */}
-      {!readOnly && (
-        <div className="fixed top-4 right-[21rem] z-[130] pointer-events-none">
-          <div className="bg-white rounded-lg shadow-lg border border-gray-200 flex items-center p-1 gap-1 pointer-events-auto">
-            <button
-              onClick={() => setActiveTool(activeTool === 'comment' ? 'select' : 'comment')}
-              className={`p-2 rounded-md transition-colors flex items-center gap-2 text-sm font-medium ${activeTool === 'comment' ? 'bg-blue-100 text-blue-700' : 'hover:bg-gray-100 text-gray-700'
-                }`}
-              title="Add Comment"
-            >
-              <MessageSquarePlus size={18} />
-            </button>
+      {isInitialViewportSettled && (rightClusterAnchorEl ?? drawingRootRef.current)
+        ? createPortal(topFloatingToolbar, rightClusterAnchorEl ?? drawingRootRef.current!)
+        : null}
 
-            <div className="w-px h-6 bg-gray-200 mx-1" />
-
-            <button
-              onClick={() => setActiveTool(activeTool === 'library' ? 'select' : 'library')}
-              className={`p-2 rounded-md transition-colors flex items-center gap-2 text-sm font-medium ${activeTool === 'library' ? 'bg-blue-100 text-blue-700' : 'hover:bg-gray-100 text-gray-700'
-                }`}
-              title="Open Library"
-            >
-              <Library size={18} />
-            </button>
-
-            <button
-              onClick={() => setActiveTool(activeTool === 'present' ? 'select' : 'present')}
-              className={`p-2 rounded-md transition-colors flex items-center gap-2 text-sm font-medium ${activeTool === 'present' ? 'bg-blue-100 text-blue-700' : 'hover:bg-gray-100 text-gray-700'
-                }`}
-              title="Present Frames"
-            >
-              <MonitorPlay size={18} />
-            </button>
-
-            <div className="w-px h-6 bg-gray-200 mx-1" />
-
-            <button
-              onClick={() => setMermaidModalOpen(true)}
-              className="p-2 rounded-md transition-colors flex items-center gap-2 text-sm font-medium hover:bg-gray-100 text-gray-700"
-              title="Insert Mermaid Diagram"
-            >
-              <Workflow size={18} />
-            </button>
-          </div>
-        </div>
-      )}
-
-      {viewportContainerRef?.current ? createPortal(
+      {isInitialViewportSettled && viewportContainerRef?.current ? createPortal(
         <ZoomControls
           canvasZoom={zoomPercent / 100}
           handleZoomOut={() => applyZoom('out')}
@@ -2059,7 +2703,7 @@ export default function DrawingLayout({
 
       {/* Presentation Sidebar */}
       {activeTool === 'present' && (
-        <div className="fixed top-0 right-0 bottom-0 w-80 z-[500] pointer-events-auto shadow-2xl border-l border-gray-200">
+        <div ref={presentationSidebarRef} className="fixed top-0 right-0 bottom-0 w-80 z-[500] pointer-events-auto shadow-2xl border-l border-gray-200">
           <PresentationPanel
             slides={frames}
             activeSlideId={activeSlideId}
@@ -2087,6 +2731,7 @@ export default function DrawingLayout({
           renderSlideToPNG={renderSlideToPNG}
           onClose={() => setPresentationActive(false)}
           contentPadlets={contentPadlets}
+          runtimeHelpers={runtimeSlideHelpers}
         />
       )}
 

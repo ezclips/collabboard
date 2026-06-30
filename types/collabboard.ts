@@ -181,6 +181,9 @@ export interface Padlet {
 
     // Container-specific
     childPadletIds?: string[];
+    coverChildId?: string;
+    coverPadletId?: string;
+    coverChildPadletId?: string;
     // Hierarchy
     parentId?: string;
     containerIndex?: number;

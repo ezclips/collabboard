@@ -576,6 +576,14 @@ function SimpleLineRenderer({
         }
     };
 
+    const handlePathDoubleClick = (e: React.MouseEvent, lineId: string) => {
+        logLineEventDiagnostics('hit-path-doubleclick', rendererLabel, lineId, e, {
+            isEditMode,
+            selectedLineId,
+        });
+        onToggleEditMode(lineId);
+    };
+
     // Sort lines within this plane by z_index (ascending), with the selected line
     // rendered last (on top) within the same plane.
     // Incoming lines are already filtered to this plane by the caller — no sign-based
@@ -602,138 +610,6 @@ function SimpleLineRenderer({
     const visualLines = orderedLines;
     const interactionLines = orderedLines;
     const renderedVisibleLines = visualLines;
-
-    const propsLineIds = useMemo(() => lines.map((line) => line.id), [lines]);
-    const orderedLineIds = useMemo(() => orderedLines.map((line) => line.id), [orderedLines]);
-    const visualLineIds = useMemo(() => visualLines.map((line) => line.id), [visualLines]);
-    const renderedVisibleLineIds = useMemo(
-        () => renderedVisibleLines.map((line) => line.id),
-        [renderedVisibleLines]
-    );
-
-    useEffect(() => {
-        if (!DEV_LINE_RENDER_DIAGNOSTICS) return;
-
-        const selectedLine =
-            lines.find((line) => line.id === selectedLineId) ??
-            orderedLines.find((line) => line.id === selectedLineId) ??
-            null;
-
-        console.debug('[SimpleLineRenderer]', {
-            rendererLabel,
-            selectedLineId,
-            isLineMode,
-            isEditMode,
-            forcePointerEvents,
-            propsLines: {
-                count: propsLineIds.length,
-                ids: propsLineIds,
-            },
-            orderedLines: {
-                count: orderedLineIds.length,
-                ids: orderedLineIds,
-            },
-            visualLines: {
-                count: visualLineIds.length,
-                ids: visualLineIds,
-            },
-            renderedVisibleLines: {
-                count: renderedVisibleLineIds.length,
-                ids: renderedVisibleLineIds,
-            },
-            selectedLine:
-                selectedLine
-                    ? {
-                        id: selectedLine.id,
-                        layer_plane: selectedLine.layer_plane,
-                        z_index: selectedLine.z_index ?? 0,
-                        color: selectedLine.color,
-                        stroke_width: selectedLine.stroke_width,
-                        points: selectedLine.points?.length ?? 0,
-                    }
-                    : null,
-        });
-    }, [
-        forcePointerEvents,
-        isEditMode,
-        isLineMode,
-        lines,
-        orderedLines,
-        orderedLineIds,
-        propsLineIds,
-        renderedVisibleLineIds,
-        renderedVisibleLines,
-        rendererLabel,
-        selectedLineId,
-        visualLineIds,
-    ]);
-
-    useEffect(() => {
-        if (!DEV_LINE_RENDER_DIAGNOSTICS) return;
-        if (rendererLabel !== 'back') return;
-        if (!selectedLineId) return;
-
-        const selector =
-            `[data-line-role="visible-path"]` +
-            `[data-line-renderer="${rendererLabel}"]` +
-            `[data-line-id="${selectedLineId}"]`;
-
-        const node = document.querySelector(selector);
-
-        if (!(node instanceof SVGPathElement)) {
-            console.debug('[SimpleLineRenderer:dom]', {
-                rendererLabel,
-                selectedLineId,
-                selector,
-                exists: false,
-            });
-            return;
-        }
-
-        let bbox:
-            | { x: number; y: number; width: number; height: number }
-            | { error: string }
-            | null = null;
-
-        try {
-            const nextBBox = node.getBBox();
-            bbox = {
-                x: nextBBox.x,
-                y: nextBBox.y,
-                width: nextBBox.width,
-                height: nextBBox.height,
-            };
-        } catch (error) {
-            bbox = {
-                error: error instanceof Error ? error.message : String(error),
-            };
-        }
-
-        const computedStyle = window.getComputedStyle(node);
-
-        console.debug('[SimpleLineRenderer:dom]', {
-            rendererLabel,
-            selectedLineId,
-            selector,
-            exists: true,
-            attrs: {
-                stroke: node.getAttribute('stroke'),
-                'stroke-width': node.getAttribute('stroke-width'),
-                opacity: node.getAttribute('opacity'),
-                display: node.getAttribute('display'),
-                visibility: node.getAttribute('visibility'),
-                d: node.getAttribute('d'),
-                'marker-start': node.getAttribute('marker-start'),
-                'marker-end': node.getAttribute('marker-end'),
-            },
-            computedStyle: {
-                opacity: computedStyle.opacity,
-                display: computedStyle.display,
-                visibility: computedStyle.visibility,
-            },
-            bbox,
-        });
-    }, [rendererLabel, selectedLineId, renderedVisibleLineIds]);
 
     return (
         <svg
@@ -827,7 +703,7 @@ function SimpleLineRenderer({
                                 pointerEvents: 'auto'
                             }}
                             onMouseDown={(e) => handleLineDragStart(e, line.id)}
-                            onDoubleClick={() => onToggleEditMode(line.id)}
+                            onDoubleClick={(e) => handlePathDoubleClick(e, line.id)}
                             onClick={(e) => handlePathClick(e, line)}
                             onContextMenu={(e) => {
                                 logLineEventDiagnostics('hit-path-contextmenu:before-stop', rendererLabel, line.id, e, {

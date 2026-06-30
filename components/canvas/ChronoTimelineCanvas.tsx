@@ -569,6 +569,7 @@ export default function ChronoTimelineCanvas({
               onUpdateChildComments={onUpdateChildComments}
               isExpanded={expandedContainers[container.id] ?? false}
               onExpandAvailabilityChange={(available) => setExpandableContainers(prev => prev[container.id] === available ? prev : { ...prev, [container.id]: available })}
+              canvasContext="timeline"
               isContentOnly
             />
           </CardShell>

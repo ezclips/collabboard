@@ -6,6 +6,7 @@ import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 import { Padlet } from "@/types/collabboard";
 import LinkMediaEmbed, { getLinkEmbedKind } from "./LinkMediaEmbed";
 import EmbeddedCommentList from "./EmbeddedCommentList";
+import ReactionDisplay from "./editors/ReactionDisplay";
 import { buildYouTubeThumbCandidates, extractYouTubeId } from "@/lib/media/youtubeThumb";
 import AIContentRenderer from "@/components/ai/AIContentRenderer";
 import { extractAIContentFromPadletMetadata } from "@/lib/ai/normalize-ai-content";
@@ -16,6 +17,7 @@ type CellStyle = {
     bold?: boolean;
     italic?: boolean;
     underline?: boolean;
+    color?: string;
 };
 
 interface PostCardContentProps {
@@ -23,12 +25,12 @@ interface PostCardContentProps {
     allPadlets?: Padlet[];
     onScan?: () => void;
     onView?: () => void;
-    canvasContext?: "default" | "drawing";
+    canvasContext?: "default" | "drawing" | "timeline";
     // Comment handling for interactive comments inside containers
     currentUserId?: string;
     currentUserName?: string;
     currentUserAvatar?: string;
-    onUpdateChildComments?: (childId: string, comments: any[]) => void;
+    onUpdateChildComments?: (childId: string, comments: any[], options?: { field?: "comments" | "detachedComments" }) => void;
 }
 
 // Decode HTML entities that may have been escaped
@@ -51,6 +53,14 @@ function isCommentPost(padlet: any): boolean {
     // Legacy fallback: treat as comment only when type is missing/unknown.
     if (!type && Array.isArray(comments)) return true;
     return false;
+}
+
+function getMeaningfulImageTitle(padlet: Padlet): string {
+    const title = String(padlet.title ?? "").trim();
+    if (!title) return "";
+    const normalized = title.toLowerCase();
+    if (normalized === "image" || normalized === "untitled") return "";
+    return title;
 }
 
 function asStringContent(v: unknown): string {
@@ -96,6 +106,119 @@ function VisibleAIContent({ content }: { content: unknown }) {
     return (
         <div ref={ref} className="w-full h-full min-h-[150px] overflow-hidden rounded-lg">
             {isVisible && <AIContentRenderer content={content} />}
+        </div>
+    );
+}
+
+function ClipartCardContent({
+    svgUrl,
+    title,
+    iconBgColor,
+    textColor,
+}: {
+    svgUrl: string;
+    title?: string | null;
+    iconBgColor: string;
+    textColor: string;
+}) {
+    const [isSvgSourceReady, setIsSvgSourceReady] = useState(false);
+    const [isRenderedSvgReady, setIsRenderedSvgReady] = useState(false);
+    const [isClipartVisible, setIsClipartVisible] = useState(false);
+    const renderedImgRef = useRef<HTMLImageElement | null>(null);
+
+    useEffect(() => {
+        let cancelled = false;
+        setIsSvgSourceReady(false);
+        setIsRenderedSvgReady(false);
+        setIsClipartVisible(false);
+
+        const img = new Image();
+
+        const markReady = async () => {
+            try {
+                if (typeof img.decode === "function") {
+                    await img.decode();
+                }
+            } catch {
+                // SVG decode can reject even when the browser can still render it.
+            }
+
+            if (!cancelled) {
+                setIsSvgSourceReady(true);
+            }
+        };
+
+        img.onload = () => {
+            void markReady();
+        };
+        img.onerror = () => {
+            if (!cancelled) {
+                setIsSvgSourceReady(false);
+                setIsRenderedSvgReady(false);
+            }
+        };
+        img.src = svgUrl;
+
+        if (img.complete && img.naturalWidth > 0) {
+            void markReady();
+        }
+
+        return () => {
+            cancelled = true;
+        };
+    }, [svgUrl]);
+
+    useEffect(() => {
+        if (!isSvgSourceReady) return;
+        const img = renderedImgRef.current;
+        if (img && img.complete && img.naturalWidth > 0) {
+            setIsRenderedSvgReady(true);
+        }
+    }, [isSvgSourceReady, svgUrl]);
+
+    useEffect(() => {
+        if (!isRenderedSvgReady || isClipartVisible) return;
+
+        let cancelled = false;
+        const rafId = window.requestAnimationFrame(() => {
+            if (!cancelled) {
+                setIsClipartVisible(true);
+            }
+        });
+
+        return () => {
+            cancelled = true;
+            window.cancelAnimationFrame(rafId);
+        };
+    }, [isRenderedSvgReady, isClipartVisible]);
+
+    return (
+        <div className="flex w-full flex-col items-center gap-1.5 select-none pointer-events-none">
+            <div
+                className="flex h-[220px] max-h-[55vh] w-full items-center justify-center overflow-hidden"
+                style={{ backgroundColor: isClipartVisible ? iconBgColor : "transparent" }}
+            >
+                {isSvgSourceReady && (
+                    <img
+                        ref={renderedImgRef}
+                        src={svgUrl}
+                        alt=""
+                        className="h-full w-full object-contain"
+                        style={{ visibility: isClipartVisible ? "visible" : "hidden" }}
+                        onLoad={() => setIsRenderedSvgReady(true)}
+                        onError={() => {
+                            setIsSvgSourceReady(false);
+                            setIsRenderedSvgReady(false);
+                            setIsClipartVisible(false);
+                        }}
+                    />
+                )}
+            </div>
+            {title && isClipartVisible && (
+                <div className="text-center text-xs font-semibold" style={{ color: textColor }}>
+                    {title}
+                </div>
+            )}
         </div>
     );
 }
@@ -365,6 +488,7 @@ export default function PostCardContent({
                                                         textAlign: style.align || "left",
                                                         fontWeight: style.bold ? "bold" : undefined,
                                                         fontStyle: style.italic ? "italic" : undefined,
+                                                        color: canvasContext === "timeline" ? style.color || undefined : undefined,
                                                         textDecoration: style.underline ? "underline" : undefined,
                                                     }}
                                                 >
@@ -447,13 +571,24 @@ export default function PostCardContent({
     // --- IMAGE TYPE --- (skip card/clipart posts – handled below)
     const isCardClipart = type === "card" && !!padlet.metadata?.svgUrl;
     const imageSrc = isCardClipart ? null :
-        padlet.file_url ||
-        padlet.metadata?.imageUrl ||
+        (canvasContext === "drawing"
+            ? padlet.metadata?.imageUrl || padlet.file_url
+            : padlet.file_url || padlet.metadata?.imageUrl
+        ) ||
         padlet.metadata?.fileUrl ||
         (typeof padlet.content === "string" && padlet.content.startsWith("http") ? padlet.content : null);
     if (imageSrc) {
+        const titleText = getMeaningfulImageTitle(padlet);
+        const captionText = String(padlet.metadata?.caption ?? "").trim();
+        const reactions = Array.isArray(padlet.metadata?.reactions) ? padlet.metadata.reactions : [];
+        const detachedComments = Array.isArray((padlet.metadata as any)?.detachedComments)
+            ? (padlet.metadata as any).detachedComments
+            : [];
+        const drawingOverlay = typeof (padlet.metadata as any)?.drawing === "string" ? (padlet.metadata as any).drawing : "";
+        const captionStyle = (padlet.metadata?.captionStyle || {}) as Record<string, string | undefined>;
         const importOpenUrl = padlet.metadata?.source === 'import' ? padlet.metadata?.importOpenUrl : undefined;
         const isInContainer = !!(padlet.metadata as any)?.parentId;
+        const useDrawingContainerImageBinding = canvasContext === "drawing" && isInContainer;
         const isDocThumbnail = (padlet.metadata as any)?.importKind === 'document';
         const providerLabel = (padlet.metadata as any)?.importProvider === 'google-drive' ? 'Google Drive' : 'OneDrive';
         return (
@@ -462,18 +597,27 @@ export default function PostCardContent({
                 onClick={importOpenUrl ? (e) => { e.stopPropagation(); window.open(importOpenUrl, '_blank', 'noopener,noreferrer'); } : undefined}
                 title={importOpenUrl ? `Open in ${providerLabel}` : undefined}
             >
-                <img
-                    src={imageSrc}
-                    className={isInContainer && !isDocThumbnail
-                        ? "w-full h-auto object-contain bg-gray-50"
-                        : "w-full object-contain bg-gray-50"
-                    }
-                    style={isInContainer ? (isDocThumbnail ? { maxHeight: "200px" } : undefined) : { maxHeight: "200px" }}
-                    alt="preview"
-                    onError={(e) => {
-                        (e.target as HTMLImageElement).style.display = "none";
-                    }}
-                />
+                <div className="relative">
+                    <img
+                        src={imageSrc}
+                        className={isInContainer && !isDocThumbnail
+                            ? "w-full h-auto object-contain bg-gray-50"
+                            : "w-full object-contain bg-gray-50"
+                        }
+                        style={isInContainer ? (isDocThumbnail ? { maxHeight: "200px" } : undefined) : { maxHeight: "200px" }}
+                        alt="preview"
+                        onError={(e) => {
+                            (e.target as HTMLImageElement).style.display = "none";
+                        }}
+                    />
+                    {useDrawingContainerImageBinding && drawingOverlay && (
+                        <img
+                            src={drawingOverlay}
+                            className="absolute inset-0 w-full h-full object-contain pointer-events-none"
+                            alt=""
+                        />
+                    )}
+                </div>
                 {importOpenUrl && (
                     <div className="absolute bottom-1 left-1 opacity-0 group-hover/img:opacity-100 transition-opacity pointer-events-none">
                         <span className="text-[10px] px-1.5 py-0.5 rounded bg-black/60 text-white font-medium">
@@ -481,8 +625,75 @@ export default function PostCardContent({
                         </span>
                     </div>
                 )}
-                {padlet.title && padlet.title !== "Image" && (
+                {useDrawingContainerImageBinding && reactions.length > 0 && (
+                    <div className={`px-1.5 pt-1 ${isInContainer ? '' : 'pb-1'}`}>
+                        <ReactionDisplay reactions={reactions} />
+                    </div>
+                )}
+                {useDrawingContainerImageBinding && (titleText || captionText) && (
+                    <div className={isInContainer ? "px-1.5 py-1 space-y-1" : "space-y-1"}>
+                        {titleText && (
+                            <p className="text-xs font-medium text-center text-gray-600">{titleText}</p>
+                        )}
+                        {captionText && (
+                            <p
+                                className="text-[11px] text-center break-words"
+                                style={{
+                                    color: captionStyle.color || "#4B5563",
+                                    backgroundColor: captionStyle.backgroundColor || "transparent",
+                                    fontSize: captionStyle.fontSize,
+                                    fontWeight: captionStyle.fontWeight as any,
+                                    fontStyle: captionStyle.fontStyle,
+                                    fontFamily: captionStyle.fontFamily,
+                                    lineHeight: captionStyle.lineHeight,
+                                }}
+                            >
+                                {captionText}
+                            </p>
+                        )}
+                    </div>
+                )}
+                {!useDrawingContainerImageBinding && padlet.title && padlet.title !== "Image" && (
                     <p className={`text-xs font-medium text-center text-gray-600 ${isInContainer ? 'px-1.5 py-1' : ''}`}>{padlet.title}</p>
+                )}
+                {useDrawingContainerImageBinding && onUpdateChildComments && (
+                    <div className="px-1.5 pb-1.5">
+                        <EmbeddedCommentList
+                            comments={detachedComments}
+                            badgeColor={(padlet.metadata as any)?.badgeColor}
+                            currentUserId={currentUserId}
+                            currentUserName={currentUserName}
+                            currentUserAvatar={currentUserAvatar}
+                            onSubmit={(text) => {
+                                const newComment = {
+                                    id: `comment-${Date.now()}`,
+                                    text,
+                                    userId: currentUserId || 'anonymous',
+                                    userName: currentUserName || 'Anonymous',
+                                    userAvatar: currentUserAvatar,
+                                    timestamp: Date.now(),
+                                };
+                                onUpdateChildComments(padlet.id, [...detachedComments, newComment], { field: "detachedComments" });
+                            }}
+                            onEditComment={(commentId, newText) => {
+                                const updated = detachedComments.map((comment: any) =>
+                                    comment.id === commentId ? { ...comment, text: newText } : comment
+                                );
+                                onUpdateChildComments(padlet.id, updated, { field: "detachedComments" });
+                            }}
+                            onRemoveComment={(commentId) => {
+                                const updated = detachedComments.filter((comment: any) => comment.id !== commentId);
+                                onUpdateChildComments(padlet.id, updated, { field: "detachedComments" });
+                            }}
+                            onToggleStrikethrough={(commentId) => {
+                                const updated = detachedComments.map((comment: any) =>
+                                    comment.id === commentId ? { ...comment, isStrikethrough: !comment.isStrikethrough } : comment
+                                );
+                                onUpdateChildComments(padlet.id, updated, { field: "detachedComments" });
+                            }}
+                            showComposer={true}
+                        />
+                    </div>
                 )}
             </div>
         );
@@ -646,24 +857,12 @@ export default function PostCardContent({
         const iconBgColor = padlet.metadata?.iconBgColor || '#f8f9fa';
         const textColor = padlet.metadata?.textColor || '#1F2937';
         return (
-            <div className="flex w-full flex-col items-center gap-1.5 select-none pointer-events-none">
-                <div
-                    className="flex h-[220px] max-h-[55vh] w-full items-center justify-center overflow-hidden"
-                    style={{ backgroundColor: iconBgColor }}
-                >
-                    <img
-                        src={svgUrl}
-                        alt=""
-                        className="h-full w-full object-contain"
-                        onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-                    />
-                </div>
-                {padlet.title && (
-                    <div className="text-center text-xs font-semibold" style={{ color: textColor }}>
-                        {padlet.title}
-                    </div>
-                )}
-            </div>
+            <ClipartCardContent
+                svgUrl={svgUrl}
+                title={padlet.title}
+                iconBgColor={iconBgColor}
+                textColor={textColor}
+            />
         );
     }
 
