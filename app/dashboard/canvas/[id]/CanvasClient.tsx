@@ -5516,7 +5516,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   // Keep the ref current so the early-mounted useEffect can call this function
   openPadletInTypeEditorRef.current = openPadletInTypeEditor;
 
-  const openTimelineTargetFromContextMenu = useCallback((post: Padlet) => {
+  const openTimelineTargetFromContextMenu = (post: Padlet) => {
     if (post.type === 'image') {
       window.setTimeout(() => {
         openPadletInTypeEditor(post);
@@ -5524,7 +5524,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       return;
     }
     openPadletInTypeEditor(post);
-  }, [openPadletInTypeEditor]);
+  };
 
   const closeDrawingEditorsBeforePadletEdit = () => {
     setIsNoteEditorOpen(false);
