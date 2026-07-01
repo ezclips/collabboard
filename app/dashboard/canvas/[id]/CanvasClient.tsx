@@ -168,6 +168,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   const [user, setUser] = useState<User | null>(null);
   const [currentWorkspaceRole, setCurrentWorkspaceRole] = useState<WorkspaceRole | null>(null);
   const [isToolbarCollapsed, setIsToolbarCollapsed] = useState(false);
+  const [isMapToolbarCollapsed, setIsMapToolbarCollapsed] = useState(false);
   const [isFreeformPanning, setIsFreeformPanning] = useState(false);
   const [freeformBoardMenu, setFreeformBoardMenu] = useState<FreeformBoardMenuState>(null);
   const [freeformWallpaperDialogOpen, setFreeformWallpaperDialogOpen] = useState(false);
@@ -230,6 +231,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   // Otherwise editable member accounts can open and modify a board but lose the
   // left toolbar entirely because they are not workspace admins.
   const canUseCanvasToolbar = canUseFreeformEditButton;
+  const handleToggleMapToolbarCollapsed = useCallback(() => {
+    setIsMapToolbarCollapsed((prev) => !prev);
+  }, []);
   const handleToggleToolbarCollapsed = useCallback(() => {
     setIsToolbarCollapsed((prev) => {
       const next = !prev;
@@ -990,10 +994,10 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   const isTimelineLayout = canvas?.layout === 'timeline';
   const isMapLayout = canvas?.layout === 'map';
   const isFreeformLayout = canvas?.layout === 'freeform' || (!isWallLayout && !isColumnsLayout && !isKanbanLayout && !isGanttLayout && !isSchedulerLayout && !isGridLayout && !isDrawingLayout && !isTimelineLayout && !isMapLayout);
-  // Map boards depend on the left tool rail for core creation flows, so do not
-  // reuse a saved collapsed preference from other canvas layouts here.
-  const allowCollapsedToolbar = !isMapLayout;
-  const effectiveToolbarCollapsed = allowCollapsedToolbar ? isToolbarCollapsed : false;
+  // Map boards keep a local collapse state so the button is available without
+  // inheriting a saved global collapsed preference from other layouts.
+  const effectiveToolbarCollapsed = isMapLayout ? isMapToolbarCollapsed : isToolbarCollapsed;
+  const handleToolbarCollapseToggle = isMapLayout ? handleToggleMapToolbarCollapsed : handleToggleToolbarCollapsed;
   const usesConstantCanvasToolbarInset = canUseCanvasToolbar && (isFreeformLayout || isDrawingLayout);
   const sharedCanvasToolbarInsetPx =
     usesConstantCanvasToolbarInset
@@ -5591,7 +5595,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
               isLineMode={isLineMode}
               isGraphConnectMode={isGraphConnectMode}
               isCollapsed={effectiveToolbarCollapsed}
-              onToggleCollapse={allowCollapsedToolbar ? handleToggleToolbarCollapsed : undefined}
+              onToggleCollapse={handleToolbarCollapseToggle}
               onBeforeToolClick={closeDrawingSelectedShapePanel}
               handleToolClick={handleToolClick}
               onBack={() => router.push('/dashboard')}
@@ -5670,7 +5674,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
             <button
               type="button"
               className="absolute left-4 top-4 z-[3000] flex h-9 w-9 items-center justify-center rounded-md border border-gray-200 bg-white/95 text-gray-600 shadow-sm transition hover:bg-gray-50"
-              onClick={handleToggleToolbarCollapsed}
+              onClick={handleToolbarCollapseToggle}
               aria-label="Expand toolbar"
             >
               <span className="text-sm leading-none" aria-hidden="true">{'>'}</span>

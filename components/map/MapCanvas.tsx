@@ -594,6 +594,13 @@ function MapCanvas({
     setAddressLoading(false);
   };
 
+  const handleSearchFocus = () => {
+    setSelectedPostId(null);
+    setActiveMapContextMenuId(null);
+    onPinContainerClose?.();
+    onSidebarClose?.();
+  };
+
   return (
     <div className="relative h-full w-full">
       <Map
@@ -887,6 +894,7 @@ function MapCanvas({
         accessToken={mapToken}
         onSelectLocation={handleSelectLocation}
         onDropPin={() => setCreateMode('dropPin')}
+        onSearchFocus={handleSearchFocus}
         onCancel={
           createMode !== 'idle'
             ? () => {

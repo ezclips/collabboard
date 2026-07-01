@@ -32,6 +32,7 @@ type MapSearchControlProps = {
   onDropPin: () => void;
   onCancel?: () => void;
   isDropPinActive?: boolean;
+  onSearchFocus?: () => void;
 };
 
 export default function MapSearchControl({
@@ -40,9 +41,10 @@ export default function MapSearchControl({
   onDropPin,
   onCancel,
   isDropPinActive = false,
+  onSearchFocus,
 }: MapSearchControlProps) {
   return (
-    <div className="absolute left-3 top-3 z-20 w-[min(560px,calc(100%-24px))] rounded-xl border border-slate-300 bg-slate-100/95 p-1 shadow">
+    <div className="absolute left-1/2 top-3 z-40 w-[min(640px,calc(100%-24px))] -translate-x-1/2 rounded-xl border border-slate-300 bg-slate-100/95 p-1 shadow">
       <div className="flex items-center gap-1.5">
         <button
           type="button"
@@ -62,7 +64,12 @@ export default function MapSearchControl({
             Cancel
           </button>
         ) : null}
-        <div className="min-w-0 flex-1 rounded-md border border-slate-300 bg-white p-1">
+        <div
+          className="min-w-0 flex-1 rounded-md border border-slate-300 bg-white p-1"
+          onFocusCapture={() => {
+            onSearchFocus?.();
+          }}
+        >
           <SearchBox
             accessToken={accessToken}
             options={{
