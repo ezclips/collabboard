@@ -837,7 +837,14 @@ const LayoutSection: React.FC<{
 };
 
 // Main Canvas Setup Component
-const CanvasSetupPage: React.FC = () => {
+interface CanvasSetupPageProps {
+  onSave?: (canvasData: any) => Promise<void>;
+  isCreating?: boolean;
+  loadingProp?: boolean;
+  initialData?: any;
+}
+
+const CanvasSetupPage: React.FC<CanvasSetupPageProps> = ({ onSave, isCreating, loadingProp, initialData }) => {
   const router = useRouter();
 
   // Authentication & Loading State

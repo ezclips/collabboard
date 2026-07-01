@@ -3,7 +3,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import CanvasSetupPage from '../../../../components/collabboard/canvas/CanvasSetupPage';
+import CanvasSetupPage from '../CanvasSetupPage';
 import { CreateCanvasRequest } from '../../../../lib/collabboard/types';
 
 export default function CreateCanvasPage() {

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useSupabase } from '@/lib/supabase';
+import { supabaseBrowser } from '@/lib/supabase/browser';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import Icon from '@/components/AppIcon';
@@ -10,7 +10,7 @@ import Icon from '@/components/AppIcon';
 export default function AuthPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { supabase } = useSupabase();
+  const supabase = supabaseBrowser();
   const redirectPath = searchParams.get('redirect') || '/dashboard';
   
   const [mode, setMode] = useState<'login' | 'signup' | 'reset'>('login');

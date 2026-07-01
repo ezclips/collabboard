@@ -3,7 +3,7 @@
 
 import { useEffect, useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabase';
+import { supabaseBrowser } from '@/lib/supabase/browser';
 import DashboardSidebar, { Folder } from '@/components/dashboard/DashboardSidebar';
 import CanvasCard from '@/components/dashboard/CanvasCard';
 import { Plus, Loader2, ArrowLeft, LayoutDashboard, Clock, Star, Trash2, Folder as FolderIcon, Settings, Palette, X } from 'lucide-react';
@@ -63,6 +63,7 @@ function formatError(err: unknown) {
 
 export default function DashboardPage() {
     const router = useRouter();
+    const supabase = supabaseBrowser();
     const [canvases, setCanvases] = useState<Canvas[]>([]);
     const [folders, setFolders] = useState<Folder[]>([]);
     const [loading, setLoading] = useState(true);
@@ -91,7 +92,7 @@ export default function DashboardPage() {
 
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) {
-                router.push('/login');
+                router.push('/auth');
                 return;
             }
             setUser(user);

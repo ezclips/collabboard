@@ -1,110 +1,127 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { Globe, Download, Users, Info, Loader2, Sparkles } from 'lucide-react';
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+import React, { useEffect, useState } from 'react';
+import { Globe, Download, Users, Info, Loader2, Sparkles, CheckSquare, Square } from 'lucide-react';
 import { toast } from 'sonner';
-import { resolveCurrentWorkspace } from '@/lib/workspace/context';
 
 type ExportType = 'accessible' | 'all' | 'team-member';
 
-interface ExportHistory {
+interface ExportableBoard {
     id: string;
-    type: ExportType;
-    status: 'pending' | 'completed' | 'failed';
-    created_at: string;
-    download_url?: string;
-    expires_at?: string;
+    title: string;
+    layout: string;
+    folderId: string | null;
 }
 
 export default function ExportPage() {
-    const supabase = createClientComponentClient();
     const [selectedType, setSelectedType] = useState<ExportType>('accessible');
     const [exporting, setExporting] = useState(false);
-    const [exportHistory, setExportHistory] = useState<ExportHistory[]>([]);
-    const [loading, setLoading] = useState(true);
+
+    const [boards, setBoards] = useState<ExportableBoard[]>([]);
+    const [folderNameById, setFolderNameById] = useState<Record<string, string>>({});
+    const [selectedBoardIds, setSelectedBoardIds] = useState<Set<string>>(new Set());
+    const [loadingBoards, setLoadingBoards] = useState(true);
 
     useEffect(() => {
-        loadExportHistory();
+        loadExportableBoards();
     }, []);
 
-    const loadExportHistory = async () => {
+    const loadExportableBoards = async () => {
         try {
-            setLoading(true);
-            // Try to load export history from database
-            // For now, just show empty state
-            setExportHistory([]);
-        } catch (err) {
-            console.error('Error loading export history:', err);
+            setLoadingBoards(true);
+            const response = await fetch('/api/workspace/export', {
+                method: 'GET',
+            });
+            const rawText = await response.text();
+            let body: any = {};
+            try {
+                body = rawText ? JSON.parse(rawText) : {};
+            } catch {
+                body = { rawText };
+            }
+            if (!response.ok) {
+                console.error('Error loading boards for export:', {
+                    status: response.status,
+                    statusText: response.statusText,
+                    body,
+                });
+                toast.error(body.error || body.rawText || `Failed to load boards (${response.status})`);
+                return;
+            }
+
+            const loadedBoards: ExportableBoard[] = (body.boards ?? []).map((row: any) => ({
+                id: row.id,
+                title: row.title,
+                layout: row.layout,
+                folderId: row.folderId,
+            }));
+            setBoards(loadedBoards);
+            setSelectedBoardIds(new Set(loadedBoards.map((board) => board.id)));
+
+            const nameMap: Record<string, string> = {};
+            (body.folders ?? []).forEach((folder: any) => {
+                nameMap[folder.id] = folder.name;
+            });
+            setFolderNameById(nameMap);
         } finally {
-            setLoading(false);
+            setLoadingBoards(false);
         }
     };
 
+    const allSelected = boards.length > 0 && selectedBoardIds.size === boards.length;
+
+    const toggleBoard = (boardId: string) => {
+        setSelectedBoardIds((prev) => {
+            const next = new Set(prev);
+            if (next.has(boardId)) {
+                next.delete(boardId);
+            } else {
+                next.add(boardId);
+            }
+            return next;
+        });
+    };
+
+    const toggleSelectAll = () => {
+        setSelectedBoardIds(allSelected ? new Set() : new Set(boards.map((board) => board.id)));
+    };
+
     const handleExport = async () => {
+        if (selectedBoardIds.size === 0) {
+            toast.error('Select at least one board to export');
+            return;
+        }
+
         try {
             setExporting(true);
-            
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) return;
-            const workspaceContext = await resolveCurrentWorkspace(supabase, user);
 
-            // Fetch all user data for export
-            const exportData: any = {
-                exportedAt: new Date().toISOString(),
-                exportType: selectedType,
-                version: '1.0'
-            };
+            const response = await fetch('/api/workspace/export', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ scope: selectedType, boardIds: Array.from(selectedBoardIds) }),
+            });
 
-            // Fetch boards/scenes
-            let boardsQuery = supabase
-                .from('boards')
-                .select('*')
-                .is('deleted_at', null);
-
-            boardsQuery = workspaceContext
-                ? boardsQuery.eq('workspace_id', workspaceContext.workspaceId)
-                : boardsQuery.eq('user_id', user.id);
-
-            const { data: boards } = await boardsQuery;
-            exportData.boards = boards || [];
-            exportData.scenes = exportData.boards;
-
-            // Fetch padlets
-            if (boards && boards.length > 0) {
-                const boardIds = boards.map(b => b.id);
-                const { data: padlets } = await supabase
-                    .from('padlets')
-                    .select('*')
-                    .in('board_id', boardIds);
-                exportData.padlets = padlets || [];
+            if (!response.ok) {
+                const body = await response.json().catch(() => ({}));
+                toast.error(body.error || 'Failed to export workspace');
+                return;
             }
 
-            // Fetch folders/collections
-            let foldersQuery = supabase
-                .from('folders')
-                .select('*');
+            const blob = await response.blob();
+            const disposition = response.headers.get('Content-Disposition') || '';
+            const filenameMatch = disposition.match(/filename="([^"]+)"/);
+            const filename = filenameMatch?.[1] || `workspace-export-${new Date().toISOString().split('T')[0]}.zip`;
 
-            foldersQuery = workspaceContext
-                ? foldersQuery.eq('workspace_id', workspaceContext.workspaceId)
-                : foldersQuery.eq('user_id', user.id);
-
-            const { data: folders } = await foldersQuery;
-            exportData.folders = folders || [];
-            exportData.collections = exportData.folders;
-
-            // Generate and download ZIP file
-            const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `workspace-export-${new Date().toISOString().split('T')[0]}.json`;
+            a.download = filename;
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
 
-            toast.success('Export completed! Your download should start automatically.');
+            toast.success('Export complete. Your download should start automatically.');
         } catch (err) {
             console.error('Error exporting:', err);
             toast.error('Failed to export workspace');
@@ -124,7 +141,7 @@ export default function ExportPage() {
                 <div>
                     <h2 className="text-lg font-semibold text-purple-600 mb-2">Export workspace data</h2>
                     <p className="text-sm text-gray-500">
-                        You can export your workspace to a zip file. The zip file will contain all the scenes in your workspace.
+                        Download a zip file containing the boards, padlets, and folders in your workspace.
                     </p>
                 </div>
 
@@ -133,7 +150,8 @@ export default function ExportPage() {
                     <div className="flex gap-3 p-4 bg-purple-50 border border-purple-200 rounded-lg mb-6">
                         <Info className="w-5 h-5 text-purple-500 flex-shrink-0 mt-0.5" />
                         <p className="text-sm text-purple-700">
-                            The export process may take some time, depending on the size of your workspace. You will receive an email with a download link when the export is ready.
+                            Export builds a .zip file and downloads it directly to your browser once it's ready.
+                            For large workspaces this may take a few moments.
                         </p>
                     </div>
 
@@ -155,7 +173,7 @@ export default function ExportPage() {
                                     <Globe className="w-5 h-5 text-gray-400 mt-0.5" />
                                     <div>
                                         <h3 className="font-medium text-gray-900">Export accessible scenes</h3>
-                                        <p className="text-sm text-gray-500 mt-1">Public, and your own private scenes</p>
+                                        <p className="text-sm text-gray-500 mt-1">Every board in this workspace you can currently open</p>
                                     </div>
                                 </div>
                                 <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${
@@ -205,10 +223,65 @@ export default function ExportPage() {
                         </div>
                     </div>
 
+                    {/* Board selection */}
+                    <div className="mb-6">
+                        <div className="flex items-center justify-between mb-3">
+                            <p className="text-sm font-medium text-gray-700">
+                                Select boards to export
+                                <span className="ml-2 text-gray-400 font-normal">
+                                    {selectedBoardIds.size}/{boards.length}
+                                </span>
+                            </p>
+                            {boards.length > 0 && (
+                                <button
+                                    onClick={toggleSelectAll}
+                                    className="flex items-center gap-1.5 text-sm text-purple-600 hover:text-purple-700"
+                                >
+                                    {allSelected ? <CheckSquare className="w-4 h-4" /> : <Square className="w-4 h-4" />}
+                                    {allSelected ? 'Deselect all' : 'Select all'}
+                                </button>
+                            )}
+                        </div>
+
+                        <div className="border border-gray-200 rounded-lg divide-y divide-gray-100 max-h-80 overflow-y-auto">
+                            {loadingBoards ? (
+                                <div className="p-4 flex items-center gap-2 text-sm text-gray-500">
+                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                    Loading boards...
+                                </div>
+                            ) : boards.length === 0 ? (
+                                <p className="p-4 text-sm text-gray-500">No boards found in this workspace.</p>
+                            ) : (
+                                boards.map((board) => (
+                                    <label
+                                        key={board.id}
+                                        className="flex items-center gap-3 p-3 cursor-pointer hover:bg-gray-50"
+                                    >
+                                        <input
+                                            type="checkbox"
+                                            checked={selectedBoardIds.has(board.id)}
+                                            onChange={() => toggleBoard(board.id)}
+                                            className="w-4 h-4 rounded border-gray-300 text-purple-600 focus:ring-purple-500"
+                                        />
+                                        <div className="flex-1 min-w-0">
+                                            <p className="text-sm font-medium text-gray-900 truncate">{board.title || 'Untitled board'}</p>
+                                        </div>
+                                        <span className="text-xs text-gray-400 uppercase">{board.layout}</span>
+                                        {board.folderId && folderNameById[board.folderId] && (
+                                            <span className="px-2 py-0.5 bg-gray-100 text-gray-600 text-xs rounded-full">
+                                                {folderNameById[board.folderId]}
+                                            </span>
+                                        )}
+                                    </label>
+                                ))
+                            )}
+                        </div>
+                    </div>
+
                     {/* Export Button */}
                     <button
                         onClick={handleExport}
-                        disabled={exporting}
+                        disabled={exporting || selectedBoardIds.size === 0}
                         className="px-6 py-2 bg-purple-600 text-white rounded-lg font-medium hover:bg-purple-700 transition-colors disabled:opacity-50 flex items-center gap-2"
                     >
                         {exporting ? (
@@ -217,65 +290,9 @@ export default function ExportPage() {
                                 Exporting...
                             </>
                         ) : (
-                            'Export'
+                            `Export ${selectedBoardIds.size || ''} board${selectedBoardIds.size === 1 ? '' : 's'}`
                         )}
                     </button>
-                </div>
-            </div>
-
-            <hr className="border-gray-200 my-8" />
-
-            {/* Workspace export history section */}
-            <div className="grid grid-cols-3 gap-8">
-                <div>
-                    <h2 className="text-lg font-semibold text-purple-600 mb-2">
-                        Workspace export history
-                        <span className="ml-2 text-gray-400 font-normal">{exportHistory.length}</span>
-                    </h2>
-                    <p className="text-sm text-gray-500">
-                        View the history of your workspace exports. Download links are valid for 7 days.
-                    </p>
-                </div>
-
-                <div className="col-span-2">
-                    {exportHistory.length === 0 ? (
-                        <p className="text-gray-500">No exports found for this workspace.</p>
-                    ) : (
-                        <div className="space-y-3">
-                            {exportHistory.map((item) => (
-                                <div 
-                                    key={item.id}
-                                    className="flex items-center justify-between p-4 bg-white rounded-lg border border-gray-200"
-                                >
-                                    <div>
-                                        <p className="font-medium text-gray-900">
-                                            {item.type === 'accessible' ? 'Accessible scenes' : 
-                                             item.type === 'all' ? 'All scenes' : 'Team-member scenes'}
-                                        </p>
-                                        <p className="text-sm text-gray-500">
-                                            {new Date(item.created_at).toLocaleDateString()} at {new Date(item.created_at).toLocaleTimeString()}
-                                        </p>
-                                    </div>
-                                    <div className="flex items-center gap-3">
-                                        {item.status === 'pending' && (
-                                            <span className="text-sm text-yellow-600">Processing...</span>
-                                        )}
-                                        {item.status === 'completed' && item.download_url && (
-                                            <a
-                                                href={item.download_url}
-                                                className="px-3 py-1 bg-purple-100 text-purple-700 rounded-lg text-sm font-medium hover:bg-purple-200 transition-colors"
-                                            >
-                                                Download
-                                            </a>
-                                        )}
-                                        {item.status === 'failed' && (
-                                            <span className="text-sm text-red-600">Failed</span>
-                                        )}
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    )}
                 </div>
             </div>
         </div>

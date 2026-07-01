@@ -5,7 +5,8 @@ export const runtime = 'nodejs';
 
 export async function GET(
   req: NextRequest,
-  { params }: { params: { provider: string } }
+  { params }: { params: Promise<{ provider: string }> }
 ) {
-  return handleOAuthCallback(req, params.provider);
+  const resolvedParams = await params;
+  return handleOAuthCallback(req, resolvedParams.provider);
 }

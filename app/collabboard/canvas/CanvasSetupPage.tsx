@@ -4,10 +4,9 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Canvas, CreateCanvasRequest, CanvasSection } from '../../../lib/collabboard/types';
-import ContentForm from './ContentForm';
 
 interface CanvasSetupPageProps {
-  onSave: (canvasData: CreateCanvasRequest) => void;
+  onSave: (canvasData: CreateCanvasRequest) => void | Promise<void>;
   isCreating: boolean;
   loading: boolean;
   initialData?: Canvas;

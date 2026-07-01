@@ -30,7 +30,7 @@ import '@/components/kanban-canvas/kanban-canvas.css';
 import ColumnContainerCreationPrompt from '@/components/canvas/layouts/ColumnContainerCreationPrompt';
 import React, { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo, useReducer } from 'react';
 import { useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabase';
+import { supabaseBrowser } from '@/lib/supabase/browser';
 import type { Padlet, BoardSection, PendingPostDraft, NewPostDragState, DropIndicatorState, CanvasLine } from '@/types/collabboard';
 import { User, Session } from '@supabase/supabase-js';
 import {
@@ -153,6 +153,7 @@ function MapPinToolbarIcon({ size = 18, className, ...rest }: { size?: number; c
 export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: string; openPadletId?: string }) {
   // Canvas store (PR4) — declared first so useCanvasData can receive dispatch
   const [canvasState, dispatch] = useReducer(canvasReducer, initialCanvasState);
+  const supabase = useMemo(() => supabaseBrowser(), []);
   // === BEGIN SESSION + AUTH REGION ===
   // Session state - fetch once on mount and listen for changes
   const [session, setSession] = useState<Session | null>(null);
@@ -225,7 +226,10 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   }, [user]);
 
   const canUseFreeformEditButton = canEditWorkspace(currentWorkspaceRole);
-  const canUseCanvasToolbar = currentWorkspaceRole === 'owner' || currentWorkspaceRole === 'admin';
+  // Keep the canvas creation toolbar aligned with board editability.
+  // Otherwise editable member accounts can open and modify a board but lose the
+  // left toolbar entirely because they are not workspace admins.
+  const canUseCanvasToolbar = canUseFreeformEditButton;
   const handleToggleToolbarCollapsed = useCallback(() => {
     setIsToolbarCollapsed((prev) => {
       const next = !prev;
@@ -986,11 +990,15 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   const isTimelineLayout = canvas?.layout === 'timeline';
   const isMapLayout = canvas?.layout === 'map';
   const isFreeformLayout = canvas?.layout === 'freeform' || (!isWallLayout && !isColumnsLayout && !isKanbanLayout && !isGanttLayout && !isSchedulerLayout && !isGridLayout && !isDrawingLayout && !isTimelineLayout && !isMapLayout);
+  // Map boards depend on the left tool rail for core creation flows, so do not
+  // reuse a saved collapsed preference from other canvas layouts here.
+  const allowCollapsedToolbar = !isMapLayout;
+  const effectiveToolbarCollapsed = allowCollapsedToolbar ? isToolbarCollapsed : false;
   const usesConstantCanvasToolbarInset = canUseCanvasToolbar && (isFreeformLayout || isDrawingLayout);
   const sharedCanvasToolbarInsetPx =
     usesConstantCanvasToolbarInset
       ? 56
-      : canUseCanvasToolbar && !isToolbarCollapsed && (isMapLayout || isTimelineLayout || isSchedulerLayout || isColumnsLayout || isGridLayout)
+      : canUseCanvasToolbar && !effectiveToolbarCollapsed && (isMapLayout || isTimelineLayout || isSchedulerLayout || isColumnsLayout || isGridLayout)
         ? 56
         : 0;
   const currentMapStyleId =
@@ -5105,7 +5113,14 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
 
   // Show loading state during SSR and initial hydration to prevent mismatch
   if (!hasMounted || loading) {
-    return <div className="h-screen flex items-center justify-center">Loading...</div>;
+    return (
+      <div
+        className="h-screen flex items-center justify-center"
+        suppressHydrationWarning
+      >
+        Loading...
+      </div>
+    );
   }
   if (!canvasId) return <div className="h-screen flex items-center justify-center text-red-600">Missing canvas ID</div>;
   if (error || !canvas) return <div className="h-screen flex items-center justify-center text-red-600">{error || 'Canvas not found'}</div>;
@@ -5569,14 +5584,14 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       {/* Main Canvas */}
       <div className="flex-1 min-w-0 min-h-0 flex flex-col relative">
         {/* Container size controls removed */}
-        {canUseCanvasToolbar && !isToolbarCollapsed && (
+        {canUseCanvasToolbar && !effectiveToolbarCollapsed && (
           <div className="absolute left-0 top-0 bottom-0 z-[3000]">
             <CanvasSidebar
               groups={toolbarGroups}
               isLineMode={isLineMode}
               isGraphConnectMode={isGraphConnectMode}
-              isCollapsed={isToolbarCollapsed}
-              onToggleCollapse={handleToggleToolbarCollapsed}
+              isCollapsed={effectiveToolbarCollapsed}
+              onToggleCollapse={allowCollapsedToolbar ? handleToggleToolbarCollapsed : undefined}
               onBeforeToolClick={closeDrawingSelectedShapePanel}
               handleToolClick={handleToolClick}
               onBack={() => router.push('/dashboard')}
@@ -5651,7 +5666,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
             ...(sharedCanvasToolbarInsetPx > 0 ? { paddingLeft: `${sharedCanvasToolbarInsetPx}px` } : {}),
             ...(isWallLayout || isGridLayout ? { scrollbarGutter: 'stable' } : {}),
           }}
-          overlay={canUseCanvasToolbar && isToolbarCollapsed ? (
+          overlay={canUseCanvasToolbar && effectiveToolbarCollapsed ? (
             <button
               type="button"
               className="absolute left-4 top-4 z-[3000] flex h-9 w-9 items-center justify-center rounded-md border border-gray-200 bg-white/95 text-gray-600 shadow-sm transition hover:bg-gray-50"
