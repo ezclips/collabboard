@@ -7,6 +7,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import Icon from '@/components/AppIcon';
 
+const MIN_PASSWORD_LENGTH = 15;
+const MAX_PASSWORD_LENGTH = 64;
+
 export default function ResetPasswordPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -17,6 +20,8 @@ export default function ResetPasswordPage() {
   const [error, setError] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   useEffect(() => {
     // Check if we have the necessary tokens from the URL
@@ -41,8 +46,13 @@ export default function ResetPasswordPage() {
       return;
     }
 
-    if (password.length < 8) {
-      setError('Password must be at least 8 characters long');
+    if (password.length < MIN_PASSWORD_LENGTH) {
+      setError(`Password must be at least ${MIN_PASSWORD_LENGTH} characters long`);
+      return;
+    }
+
+    if (password.length > MAX_PASSWORD_LENGTH) {
+      setError(`Password must be ${MAX_PASSWORD_LENGTH} characters or fewer`);
       return;
     }
 
@@ -56,7 +66,7 @@ export default function ResetPasswordPage() {
       });
 
       if (error) {
-        setError(error.message);
+        setError('We could not update your password. Please request a new reset link and try again.');
         return;
       }
 
@@ -64,7 +74,7 @@ export default function ResetPasswordPage() {
       setTimeout(() => {
         router.push('/dashboard');
       }, 2000);
-    } catch (err: any) {
+    } catch {
       setError('Failed to update password. Please try again.');
     } finally {
       setLoading(false);
@@ -87,7 +97,7 @@ export default function ResetPasswordPage() {
 
         {/* Messages */}
         {message && (
-          <div className="mb-4 p-4 bg-green-50 border border-green-200 rounded-lg">
+          <div className="mb-4 p-4 bg-green-50 border border-green-200 rounded-lg" role="status" aria-live="polite">
             <div className="flex items-center">
               <Icon name="CheckCircle" size={16} className="text-green-600 mr-2" />
               <p className="text-sm text-green-700">{message}</p>
@@ -96,7 +106,7 @@ export default function ResetPasswordPage() {
         )}
 
         {error && (
-          <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+          <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg" role="alert" aria-live="assertive">
             <div className="flex items-center">
               <Icon name="AlertCircle" size={16} className="text-red-600 mr-2" />
               <p className="text-sm text-red-700">{error}</p>
@@ -111,17 +121,30 @@ export default function ResetPasswordPage() {
               <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">
                 New Password
               </label>
-              <Input
-                id="password"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Enter your new password"
-                disabled={loading}
-                required
-              />
+              <div className="relative">
+                <Input
+                  id="password"
+                  type={showPassword ? 'text' : 'password'}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Create a strong passphrase"
+                  autoComplete="new-password"
+                  maxLength={MAX_PASSWORD_LENGTH}
+                  disabled={loading}
+                  required
+                  className="pr-24"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((current) => !current)}
+                  className="absolute inset-y-0 right-3 text-sm font-medium text-blue-600 hover:text-blue-500"
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                >
+                  {showPassword ? 'Hide' : 'Show'}
+                </button>
+              </div>
               <p className="text-xs text-gray-500 mt-1">
-                Password must be at least 8 characters long
+                Use at least {MIN_PASSWORD_LENGTH} characters. Passphrases are supported up to {MAX_PASSWORD_LENGTH} characters.
               </p>
             </div>
 
@@ -129,15 +152,28 @@ export default function ResetPasswordPage() {
               <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-700 mb-1">
                 Confirm New Password
               </label>
-              <Input
-                id="confirmPassword"
-                type="password"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                placeholder="Confirm your new password"
-                disabled={loading}
-                required
-              />
+              <div className="relative">
+                <Input
+                  id="confirmPassword"
+                  type={showConfirmPassword ? 'text' : 'password'}
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  placeholder="Confirm your new password"
+                  autoComplete="new-password"
+                  maxLength={MAX_PASSWORD_LENGTH}
+                  disabled={loading}
+                  required
+                  className="pr-24"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmPassword((current) => !current)}
+                  className="absolute inset-y-0 right-3 text-sm font-medium text-blue-600 hover:text-blue-500"
+                  aria-label={showConfirmPassword ? 'Hide confirmed password' : 'Show confirmed password'}
+                >
+                  {showConfirmPassword ? 'Hide' : 'Show'}
+                </button>
+              </div>
             </div>
 
             <Button

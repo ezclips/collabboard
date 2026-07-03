@@ -413,6 +413,7 @@ export default function RowLane({
                                             <ColumnPostContextMenu
                                                 padlet={post}
                                                 onSelect={() => { }}
+                                                restrictToMenuTrigger
                                                 onOpen={() => onOpenPost?.(post)}
                                                 openTargets={isEditable ? containerChildren : undefined}
                                                 onOpenTarget={isEditable ? onOpenTarget : undefined}
@@ -472,6 +473,7 @@ export default function RowLane({
                                         <ColumnPostContextMenu
                                             padlet={post}
                                             onSelect={() => { }}
+                                            restrictToMenuTrigger
                                             onOpen={() => onOpenPost?.(post)}
                                             onOpenInNewTab={() => onOpenInNewTab?.(post)}
                                             onCopyLink={() => onCopyLink?.(post)}

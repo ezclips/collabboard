@@ -30,7 +30,7 @@ type StandaloneSchedulerCanvasProps = {
     start: Date,
     end: Date,
     options?: { title?: string; metadata?: Record<string, unknown> }
-  ) => Promise<void> | void;
+  ) => Promise<string | null> | Promise<void> | void;
   onTargetItem?: (padlet: Padlet) => void;
   onEditItem?: (padlet: Padlet) => void;
   selectedTimeSlot?: { start: Date; end: Date } | null;
@@ -239,10 +239,20 @@ export default function StandaloneSchedulerCanvas({
   const handleSelectSlot = useCallback(
     ({ start, end }: { start: Date; end: Date }) => {
       if (readOnly) return;
-      console.log('[Scheduler] Selected slot:', start, end);
-      onSelectTimeSlot?.({ start, end });
+      const overlapsExistingEvent = events.some(
+        (event) => event.start < end && event.end > start
+      );
+      if (overlapsExistingEvent) {
+        // The click landed on/near an existing block; let onSelectEvent handle it instead.
+        onSelectTimeSlot?.(null);
+        return;
+      }
+      // One-step creation: dragging an empty slot immediately creates a blank
+      // event block, matching the prior scheduler's click-to-create behavior.
+      onSelectTimeSlot?.(null);
+      void onCreatePadlet(start, end);
     },
-    [onSelectTimeSlot, readOnly]
+    [events, onCreatePadlet, onSelectTimeSlot, readOnly]
   );
 
   const handleSelectEvent = (event: SchedulerEvent) => {
@@ -251,7 +261,6 @@ export default function StandaloneSchedulerCanvas({
       suppressNextSelectRef.current = false;
       return;
     }
-    console.log('[Scheduler] Clicked existing event:', event);
     onEditItem?.(event.resource);
   };
 
@@ -292,10 +301,17 @@ export default function StandaloneSchedulerCanvas({
     return events.filter((event) => event.start.getTime() === startMs && event.end.getTime() === endMs).length;
   }, [events, selectedTimeSlot]);
 
+  const hasLiveSelectedContainer = useMemo(() => {
+    if (!selectedContainerId) return false;
+    return events.some((event) => event.resource.id === selectedContainerId);
+  }, [events, selectedContainerId]);
+
   const slotPropGetter = useCallback((date: Date) => {
     if (!selectedTimeSlot) return {};
     // Once multiple containers exist for one time range, slot-wide highlight becomes ambiguous.
     if (selectedSlotContainerCount > 1) return {};
+    // If a slot already has container(s), only keep the slot highlight while one of them is actively selected.
+    if (selectedSlotContainerCount > 0 && !hasLiveSelectedContainer) return {};
     // Check if this date (time slot) falls within the selected start and end
     if (date >= selectedTimeSlot.start && date < selectedTimeSlot.end) {
       return {
@@ -305,7 +321,7 @@ export default function StandaloneSchedulerCanvas({
       };
     }
     return {};
-  }, [selectedSlotContainerCount, selectedTimeSlot]);
+  }, [hasLiveSelectedContainer, selectedSlotContainerCount, selectedTimeSlot]);
 
   const eventPropGetter = useCallback((event: SchedulerEvent) => {
     const metadata = event.resource.metadata as Record<string, unknown> | undefined;
@@ -314,6 +330,7 @@ export default function StandaloneSchedulerCanvas({
     const isInBlueSelectedSlot = !!(
       selectedTimeSlot &&
       selectedSlotContainerCount <= 1 &&
+      (selectedSlotContainerCount === 0 || hasLiveSelectedContainer) &&
       event.start < selectedTimeSlot.end &&
       event.end > selectedTimeSlot.start
     );
@@ -344,7 +361,7 @@ export default function StandaloneSchedulerCanvas({
       return { style: targetOutline };
     }
     return {};
-  }, [selectedContainerId, selectedSlotContainerCount, selectedTimeSlot]);
+  }, [hasLiveSelectedContainer, selectedContainerId, selectedSlotContainerCount, selectedTimeSlot]);
 
   const setEventDuration = useCallback(async (event: SchedulerEvent, minutes: number) => {
     if (readOnly) return;
@@ -541,9 +558,7 @@ export default function StandaloneSchedulerCanvas({
   ]);
 
   const CustomEvent = useCallback(({ title, event }: { title: string; event: SchedulerEvent }) => {
-    const childCount = Array.isArray(event.resource.metadata?.childPadletIds)
-      ? event.resource.metadata.childPadletIds.length
-      : 0;
+    const childCount = padlets.filter((p) => (p.metadata as any)?.parentId === event.resource.id).length;
     const postLabel = `${childCount} ${childCount === 1 ? 'post' : 'posts'}`;
     return (
       <div
@@ -555,6 +570,12 @@ export default function StandaloneSchedulerCanvas({
         <span className="block truncate">{title}</span>
       </div>
     );
+  }, [padlets]);
+
+  const TimeSlotWrapper = useCallback(({ value, children }: { value: Date; children: React.ReactElement }) => {
+    return React.cloneElement(children, {
+      'data-scheduler-slot-start': value.toISOString(),
+    } as React.HTMLAttributes<HTMLElement>);
   }, []);
 
   const clearExternalDragState = useCallback(() => {
@@ -620,7 +641,11 @@ export default function StandaloneSchedulerCanvas({
           events={events}
           date={currentDate}
           view={currentView}
-          onNavigate={(newDate: Date) => setCurrentDate(newDate)}
+          onNavigate={(newDate: Date) => {
+            setCurrentDate(newDate);
+            // A slot highlight from a different date/view is stale once we navigate away.
+            onSelectTimeSlot?.(null);
+          }}
           onView={(newView: View) => setCurrentView(newView)}
           views={['month', 'week', 'day', 'agenda']}
           resizable={!readOnly}
@@ -641,6 +666,7 @@ export default function StandaloneSchedulerCanvas({
           components={{
             event: CustomEvent,
             eventWrapper: CustomEventWrapper,
+            timeSlotWrapper: TimeSlotWrapper,
           }}
         />
       )}

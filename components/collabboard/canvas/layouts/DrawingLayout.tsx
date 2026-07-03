@@ -220,7 +220,13 @@ function DrawingEmbeddableCard({
       data-padlet-id={padlet.id}
       className={`w-full overflow-hidden rounded-xl bg-white flex flex-col border border-gray-200 ${isContainer ? '' : 'h-full'}`}
       onMouseDown={(e) => { if (e.button === 2) e.stopPropagation(); }}
-      onContextMenu={(e) => onContextMenu(e, padlet)}
+      onContextMenu={(e) => {
+        const target = e.target as HTMLElement | null;
+        if (!target?.closest?.('[data-post-menu-trigger="true"]')) {
+          return;
+        }
+        onContextMenu(e, padlet);
+      }}
       onDragOver={isContainer ? (e) => {
         if (e.dataTransfer.types.includes('application/collabboard-library')) {
           e.preventDefault();
@@ -373,6 +379,7 @@ function DrawingEmbeddableCard({
           {!readOnly && (
             <button
               type="button"
+              data-post-menu-trigger="true"
               onPointerDown={(e) => e.stopPropagation()}
               onClick={(e) => {
                 e.stopPropagation();

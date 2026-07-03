@@ -7,16 +7,23 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import Icon from '@/components/AppIcon';
 
+const MIN_PASSWORD_LENGTH = 15;
+const MAX_PASSWORD_LENGTH = 64;
+
 export default function AuthPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const supabase = supabaseBrowser();
   const redirectPath = searchParams.get('redirect') || '/dashboard';
+  const shouldSwitchAccount = searchParams.get('switch') === '1';
+  const requestedMode = searchParams.get('mode');
   
   const [mode, setMode] = useState<'login' | 'signup' | 'reset'>('login');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   
   // Form data
   const [formData, setFormData] = useState({
@@ -27,16 +34,31 @@ export default function AuthPage() {
     acceptTerms: false
   });
 
+  useEffect(() => {
+    if (requestedMode === 'login' || requestedMode === 'signup' || requestedMode === 'reset') {
+      setMode(requestedMode);
+      setError('');
+      setMessage('');
+    }
+  }, [requestedMode]);
+
   // Check if user is already logged in
   useEffect(() => {
     const checkUser = async () => {
       const { data: { session } } = await supabase.auth.getSession();
+      if (shouldSwitchAccount) {
+        if (session) {
+          await supabase.auth.signOut();
+        }
+        return;
+      }
+
       if (session) {
         router.push(redirectPath);
       }
     };
     checkUser();
-  }, [supabase, router, redirectPath]);
+  }, [supabase, router, redirectPath, shouldSwitchAccount]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value, type, checked } = e.target;
@@ -47,7 +69,12 @@ export default function AuthPage() {
   };
 
   const validateForm = () => {
-    if (!formData.email || !formData.password) {
+    if (!formData.email) {
+      setError('Email is required');
+      return false;
+    }
+
+    if (mode !== 'reset' && !formData.password) {
       setError('Email and password are required');
       return false;
     }
@@ -61,8 +88,12 @@ export default function AuthPage() {
         setError('Passwords do not match');
         return false;
       }
-      if (formData.password.length < 8) {
-        setError('Password must be at least 8 characters long');
+      if (formData.password.length < MIN_PASSWORD_LENGTH) {
+        setError(`Password must be at least ${MIN_PASSWORD_LENGTH} characters long`);
+        return false;
+      }
+      if (formData.password.length > MAX_PASSWORD_LENGTH) {
+        setError(`Password must be ${MAX_PASSWORD_LENGTH} characters or fewer`);
         return false;
       }
       if (!formData.acceptTerms) {
@@ -83,31 +114,38 @@ export default function AuthPage() {
     setMessage('');
 
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: formData.email,
-        password: formData.password,
+      const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          email: formData.email,
+          password: formData.password,
+        }),
       });
+      const result = await response.json().catch(() => ({}));
 
-      if (error) {
-        setError(error.message);
+      if (!response.ok) {
+        setError(typeof result?.error === 'string' ? result.error : 'Unable to sign in right now. Please try again.');
         return;
       }
 
-      if (data.user) {
-        // Create or update profile
+      const { data: userData } = await supabase.auth.getUser();
+      if (userData.user) {
         await supabase.from('profiles').upsert({
-          id: data.user.id,
-          email: data.user.email || formData.email || '',
-          display_name: data.user.user_metadata?.full_name || formData.fullName,
+          id: userData.user.id,
+          email: userData.user.email || formData.email || '',
+          display_name: userData.user.user_metadata?.full_name || formData.fullName,
           updated_at: new Date().toISOString()
         });
-
-        setMessage('Login successful! Redirecting...');
-        setTimeout(() => {
-          router.push(redirectPath);
-        }, 1000);
       }
-    } catch (err: any) {
+
+      setMessage('Login successful! Redirecting...');
+      setTimeout(() => {
+        router.push(redirectPath);
+      }, 1000);
+    } catch {
       setError('Login failed. Please try again.');
     } finally {
       setLoading(false);
@@ -123,42 +161,34 @@ export default function AuthPage() {
     setMessage('');
 
     try {
-      const { data, error } = await supabase.auth.signUp({
-        email: formData.email,
-        password: formData.password,
-        options: {
-          data: {
-            full_name: formData.fullName,
-            display_name: formData.fullName
-          }
-        }
+      const response = await fetch('/api/auth/signup', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          email: formData.email,
+          password: formData.password,
+          fullName: formData.fullName,
+          acceptTerms: formData.acceptTerms,
+        }),
       });
+      const result = await response.json().catch(() => ({}));
 
-      if (error) {
-        setError(error.message);
+      if (!response.ok) {
+        setError(typeof result?.error === 'string' ? result.error : 'We could not create your account. Check the form and try again.');
         return;
       }
 
-      if (data.user) {
-        // Create profile
-        await supabase.from('profiles').upsert({
-          id: data.user.id,
-          email: data.user.email || formData.email || '',
-          display_name: formData.fullName,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        });
-
-        if (data.user.email_confirmed_at) {
-          setMessage('Account created successfully! Redirecting...');
-          setTimeout(() => {
-            router.push(redirectPath);
-          }, 1000);
-        } else {
-          setMessage('Please check your email and click the confirmation link to complete your registration.');
-        }
+      if (result?.emailConfirmationRequired === false) {
+        setMessage('Account created successfully! Redirecting...');
+        setTimeout(() => {
+          router.push(redirectPath);
+        }, 1000);
+      } else {
+        setMessage('Please check your email and click the confirmation link to complete your registration.');
       }
-    } catch (err: any) {
+    } catch {
       setError('Registration failed. Please try again.');
     } finally {
       setLoading(false);
@@ -177,17 +207,28 @@ export default function AuthPage() {
     setMessage('');
 
     try {
-      const { error } = await supabase.auth.resetPasswordForEmail(formData.email, {
-        redirectTo: `${window.location.origin}/auth/reset-password`
+      const response = await fetch('/api/auth/password-reset', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          email: formData.email,
+        }),
       });
+      const result = await response.json().catch(() => ({}));
 
-      if (error) {
-        setError(error.message);
+      if (!response.ok) {
+        setError(typeof result?.error === 'string' ? result.error : 'We could not send reset instructions right now. Please try again.');
         return;
       }
 
-      setMessage('Password reset instructions sent to your email.');
-    } catch (err: any) {
+      setMessage(
+        typeof result?.message === 'string'
+          ? result.message
+          : 'If an account exists for that email, password reset instructions will be sent.'
+      );
+    } catch {
       setError('Failed to send reset email. Please try again.');
     } finally {
       setLoading(false);
@@ -206,7 +247,7 @@ export default function AuthPage() {
       if (error) {
         setError('Google sign-in failed. Please try again.');
       }
-    } catch (err: any) {
+    } catch {
       setError('Google sign-in failed. Please try again.');
     }
   };
@@ -242,11 +283,16 @@ export default function AuthPage() {
             {mode === 'signup' && 'Create your account to get started.'}
             {mode === 'reset' && 'Reset your password'}
           </p>
+          {shouldSwitchAccount && mode === 'login' && (
+            <p className="text-sm text-gray-500 mt-2">
+              You can now sign in with a different account.
+            </p>
+          )}
         </div>
 
         {/* Messages */}
         {message && (
-          <div className="mb-4 p-4 bg-green-50 border border-green-200 rounded-lg">
+          <div className="mb-4 p-4 bg-green-50 border border-green-200 rounded-lg" role="status" aria-live="polite">
             <div className="flex items-center">
               <Icon name="CheckCircle" size={16} className="text-green-600 mr-2" />
               <p className="text-sm text-green-700">{message}</p>
@@ -255,7 +301,7 @@ export default function AuthPage() {
         )}
 
         {error && (
-          <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+          <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg" role="alert" aria-live="assertive">
             <div className="flex items-center">
               <Icon name="AlertCircle" size={16} className="text-red-600 mr-2" />
               <p className="text-sm text-red-700">{error}</p>
@@ -278,6 +324,7 @@ export default function AuthPage() {
                   value={formData.fullName}
                   onChange={handleInputChange}
                   placeholder="Enter your full name"
+                  autoComplete="name"
                   disabled={loading}
                   required
                 />
@@ -295,6 +342,10 @@ export default function AuthPage() {
                 value={formData.email}
                 onChange={handleInputChange}
                 placeholder="Enter your email"
+                autoComplete="email"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
                 disabled={loading}
                 required
               />
@@ -305,16 +356,34 @@ export default function AuthPage() {
                 <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">
                   Password
                 </label>
-                <Input
-                  id="password"
-                  name="password"
-                  type="password"
-                  value={formData.password}
-                  onChange={handleInputChange}
-                  placeholder="Enter your password"
-                  disabled={loading}
-                  required
-                />
+                <div className="relative">
+                  <Input
+                    id="password"
+                    name="password"
+                    type={showPassword ? 'text' : 'password'}
+                    value={formData.password}
+                    onChange={handleInputChange}
+                    placeholder={mode === 'signup' ? 'Create a strong passphrase' : 'Enter your password'}
+                    autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
+                    maxLength={MAX_PASSWORD_LENGTH}
+                    disabled={loading}
+                    required
+                    className="pr-24"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((current) => !current)}
+                    className="absolute inset-y-0 right-3 text-sm font-medium text-blue-600 hover:text-blue-500"
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  >
+                    {showPassword ? 'Hide' : 'Show'}
+                  </button>
+                </div>
+                {mode === 'signup' && (
+                  <p className="text-xs text-gray-500 mt-1">
+                    Use at least {MIN_PASSWORD_LENGTH} characters. Passphrases are supported up to {MAX_PASSWORD_LENGTH} characters.
+                  </p>
+                )}
               </div>
             )}
 
@@ -323,16 +392,29 @@ export default function AuthPage() {
                 <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-700 mb-1">
                   Confirm Password
                 </label>
-                <Input
-                  id="confirmPassword"
-                  name="confirmPassword"
-                  type="password"
-                  value={formData.confirmPassword}
-                  onChange={handleInputChange}
-                  placeholder="Confirm your password"
-                  disabled={loading}
-                  required
-                />
+                <div className="relative">
+                  <Input
+                    id="confirmPassword"
+                    name="confirmPassword"
+                    type={showConfirmPassword ? 'text' : 'password'}
+                    value={formData.confirmPassword}
+                    onChange={handleInputChange}
+                    placeholder="Confirm your password"
+                    autoComplete="new-password"
+                    maxLength={MAX_PASSWORD_LENGTH}
+                    disabled={loading}
+                    required
+                    className="pr-24"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPassword((current) => !current)}
+                    className="absolute inset-y-0 right-3 text-sm font-medium text-blue-600 hover:text-blue-500"
+                    aria-label={showConfirmPassword ? 'Hide confirmed password' : 'Show confirmed password'}
+                  >
+                    {showConfirmPassword ? 'Hide' : 'Show'}
+                  </button>
+                </div>
               </div>
             )}
 
@@ -403,7 +485,7 @@ export default function AuthPage() {
           {mode === 'login' && (
             <div className="space-y-2">
               <p className="text-sm text-gray-600">
-                Don't have an account?{' '}
+                Don&apos;t have an account?{' '}
                 <button
                   onClick={() => switchMode('signup')}
                   className="text-blue-600 hover:text-blue-500 font-medium"

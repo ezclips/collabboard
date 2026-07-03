@@ -154,6 +154,7 @@ const SortablePadletCard: React.FC<SortablePadletProps> = ({
         <WallContainerContextMenu
           padlet={padlet}
           onSelect={() => onSelect?.(padlet.id)}
+          restrictToMenuTrigger
           onEdit={isEditable ? () => onEdit(padlet) : undefined}
           onDelete={isEditable ? () => onDelete(padlet.id) : undefined}
           onDuplicate={isEditable ? () => onDuplicate?.(padlet) : undefined}

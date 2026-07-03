@@ -194,17 +194,18 @@ const SortablePadletCard: React.FC<SortablePadletProps> = ({
                 <WallContainerContextMenu
                     padlet={padlet}
                     onSelect={() => onSelect?.(padlet.id)}
-                    onEdit={() => onEdit(padlet)}
-                    onDelete={() => onDelete(padlet.id)}
-                    onDuplicate={() => onDuplicate?.(padlet)}
-                    onChangeColor={(color) => onChangeColor?.(padlet.id, color)}
+                    restrictToMenuTrigger
+                    onEdit={isEditable ? () => onEdit(padlet) : undefined}
+                    onDelete={isEditable ? () => onDelete(padlet.id) : undefined}
+                    onDuplicate={isEditable ? () => onDuplicate?.(padlet) : undefined}
+                    onChangeColor={isEditable ? (color) => onChangeColor?.(padlet.id, color) : undefined}
                     onOpen={() => onOpen?.(padlet)}
                     openTargets={openTargets}
-                    onOpenTarget={(target) => onEdit(target)}
+                    onOpenTarget={isEditable ? (target) => onEdit(target) : undefined}
                     getOpenTargetLabel={(target) => target.type || 'post'}
                     onCopyLink={() => onCopyLink?.(padlet)}
-                    onAddBefore={() => onAddBefore?.(padlet)}
-                    onAddAfter={() => onAddAfter?.(padlet)}
+                    onAddBefore={isEditable ? () => onAddBefore?.(padlet) : undefined}
+                    onAddAfter={isEditable ? () => onAddAfter?.(padlet) : undefined}
                 >
                     <div
                         // Use same container wrapper styles as WallCanvas, but overflow-x-auto for row behavior
@@ -222,19 +223,22 @@ const SortablePadletCard: React.FC<SortablePadletProps> = ({
                         )}
 
                         {/* Edit Button */}
-                        <button
-                            data-no-drag="true"
-                            onMouseDownCapture={(e) => e.stopPropagation()}
-                            onClick={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                onEdit(padlet);
-                            }}
-                            className="absolute top-3 right-3 p-1.5 text-gray-500 hover:text-gray-800 hover:bg-black/5 rounded-full opacity-0 group-hover:opacity-100 transition-all z-10"
-                            title="Edit post"
-                        >
-                            <Edit2 size={16} />
-                        </button>
+                        {isEditable && (
+                            <button
+                                data-post-menu-trigger="true"
+                                data-no-drag="true"
+                                onMouseDownCapture={(e) => e.stopPropagation()}
+                                onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    onEdit(padlet);
+                                }}
+                                className="absolute top-3 right-3 p-1.5 text-gray-500 hover:text-gray-800 hover:bg-black/5 rounded-full opacity-0 group-hover:opacity-100 transition-all z-10"
+                                title="Edit post"
+                            >
+                                <Edit2 size={16} />
+                            </button>
+                        )}
 
                         {/* Content Area - Header */}
                         <div className="mb-2">

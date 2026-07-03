@@ -1,9 +1,22 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
-import { Loader2 } from 'lucide-react';
+import { KeyRound, Loader2, ShieldCheck, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
+
+const MIN_PASSWORD_LENGTH = 15;
+const DEFAULT_PASSKEY_NAME = 'Primary passkey';
+
+type PasskeyFactor = {
+    id: string;
+    friendly_name?: string;
+    created_at: string;
+    updated_at: string;
+    last_challenged_at?: string;
+};
+
+type AALLevel = 'aal1' | 'aal2' | 'aal3' | null;
 
 const getAccessToken = (): string | null => {
     try {
@@ -57,6 +70,127 @@ export default function PasswordPage() {
     const [newPassword, setNewPassword] = useState('');
     const [updating, setUpdating] = useState(false);
     const [sendingReset, setSendingReset] = useState(false);
+    const [loadingPasskeys, setLoadingPasskeys] = useState(true);
+    const [registeringPasskey, setRegisteringPasskey] = useState(false);
+    const [verifyingPasskeyId, setVerifyingPasskeyId] = useState<string | null>(null);
+    const [removingPasskeyId, setRemovingPasskeyId] = useState<string | null>(null);
+    const [passkeyName, setPasskeyName] = useState(DEFAULT_PASSKEY_NAME);
+    const [passkeyFactors, setPasskeyFactors] = useState<PasskeyFactor[]>([]);
+    const [currentAal, setCurrentAal] = useState<AALLevel>(null);
+    const [nextAal, setNextAal] = useState<AALLevel>(null);
+
+    const loadPasskeyState = useCallback(async () => {
+        try {
+            setLoadingPasskeys(true);
+
+            const [{ data: factorsData, error: factorsError }, { data: aalData, error: aalError }] = await Promise.all([
+                supabase.auth.mfa.listFactors(),
+                supabase.auth.mfa.getAuthenticatorAssuranceLevel(),
+            ]);
+
+            if (factorsError) {
+                throw factorsError;
+            }
+
+            if (aalError) {
+                throw aalError;
+            }
+
+            setPasskeyFactors((factorsData?.webauthn ?? []) as PasskeyFactor[]);
+            setCurrentAal((aalData?.currentLevel ?? null) as AALLevel);
+            setNextAal((aalData?.nextLevel ?? null) as AALLevel);
+        } catch (err) {
+            console.error('loadPasskeyState error:', err);
+            toast.error('Failed to load passkey settings');
+        } finally {
+            setLoadingPasskeys(false);
+        }
+    }, [supabase.auth.mfa]);
+
+    useEffect(() => {
+        void loadPasskeyState();
+    }, [loadPasskeyState]);
+
+    const handleRegisterPasskey = async () => {
+        const friendlyName = passkeyName.trim() || DEFAULT_PASSKEY_NAME;
+
+        try {
+            setRegisteringPasskey(true);
+
+            const { data, error } = await supabase.auth.mfa.webauthn.register({
+                friendlyName,
+            });
+
+            if (error) {
+                throw error;
+            }
+
+            if (!data) {
+                throw new Error('Passkey registration did not complete.');
+            }
+
+            await emitSecurityNotification(`A new passkey was added to your account (${friendlyName}).`);
+            toast.success('Passkey added successfully');
+            setPasskeyName(DEFAULT_PASSKEY_NAME);
+            await loadPasskeyState();
+        } catch (err) {
+            console.error('handleRegisterPasskey error:', err);
+            toast.error(err instanceof Error ? err.message : 'Failed to register passkey');
+        } finally {
+            setRegisteringPasskey(false);
+        }
+    };
+
+    const handleVerifyWithPasskey = async (factorId: string) => {
+        try {
+            setVerifyingPasskeyId(factorId);
+
+            const { data, error } = await supabase.auth.mfa.webauthn.authenticate({
+                factorId,
+            });
+
+            if (error) {
+                throw error;
+            }
+
+            if (!data) {
+                throw new Error('Passkey verification did not complete.');
+            }
+
+            await emitSecurityNotification('A passkey was used to verify this session.');
+            toast.success('Session verified with passkey');
+            await loadPasskeyState();
+        } catch (err) {
+            console.error('handleVerifyWithPasskey error:', err);
+            toast.error(err instanceof Error ? err.message : 'Failed to verify with passkey');
+        } finally {
+            setVerifyingPasskeyId(null);
+        }
+    };
+
+    const handleRemovePasskey = async (factorId: string) => {
+        try {
+            setRemovingPasskeyId(factorId);
+
+            const { error } = await supabase.auth.mfa.unenroll({ factorId });
+            if (error) {
+                throw error;
+            }
+
+            await emitSecurityNotification('A passkey was removed from your account.');
+            toast.success('Passkey removed');
+            await loadPasskeyState();
+        } catch (err) {
+            console.error('handleRemovePasskey error:', err);
+            toast.error(
+                err instanceof Error
+                    ? err.message
+                    : 'Failed to remove passkey. Verify the session with a passkey first if required.'
+            );
+        } finally {
+            setRemovingPasskeyId(null);
+        }
+    };
 
     const resolveAccountEmail = async (): Promise<string | null> => {
         const { data: { user } } = await supabase.auth.getUser();
@@ -88,8 +222,8 @@ export default function PasswordPage() {
             return;
         }
 
-        if (newPassword.length < 8) {
-            toast.error('Password must be at least 8 characters');
+        if (newPassword.length < MIN_PASSWORD_LENGTH) {
+            toast.error(`Password must be at least ${MIN_PASSWORD_LENGTH} characters`);
             return;
         }
 
@@ -138,14 +272,27 @@ export default function PasswordPage() {
                 return;
             }
 
-            const { error } = await supabase.auth.resetPasswordForEmail(email, {
-                redirectTo: `${window.location.origin}/auth/callback?next=/dashboard/settings/password`
+            const response = await fetch('/api/auth/password-reset', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    email,
+                }),
             });
+            const result = await response.json().catch(() => ({}));
 
-            if (error) throw error;
+            if (!response.ok) {
+                throw new Error(typeof result?.error === 'string' ? result.error : 'Failed to send reset email');
+            }
 
             await emitSecurityNotification('A password reset email was requested.');
-            toast.success('Password reset email sent! Check your inbox.');
+            toast.success(
+                typeof result?.message === 'string'
+                    ? result.message
+                    : 'If an account exists for that email, password reset instructions will be sent.'
+            );
         } catch (err: unknown) {
             console.error('Error sending reset email:', err);
             toast.error(err instanceof Error ? err.message : 'Failed to send reset email');
@@ -195,7 +342,7 @@ export default function PasswordPage() {
                                 className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent bg-gray-50 placeholder:text-gray-400"
                             />
                             <p className="text-sm text-purple-600 mt-2">
-                                Minimum of 8 characters
+                                Minimum of {MIN_PASSWORD_LENGTH} characters
                             </p>
                         </div>
                     </div>
@@ -222,14 +369,135 @@ export default function PasswordPage() {
                 </div>
             </div>
 
+            <div className="mt-6 rounded-xl border border-gray-200 bg-white overflow-hidden">
+                <div className="border-b border-gray-100 px-6 py-5">
+                    <div className="flex items-start justify-between gap-4">
+                        <div>
+                            <div className="flex items-center gap-2">
+                                <KeyRound className="h-5 w-5 text-purple-600" />
+                                <h2 className="text-lg font-semibold text-gray-900">Passkeys</h2>
+                            </div>
+                            <p className="mt-1 text-sm text-gray-600">
+                                Add a passkey to verify your session with WebAuthn on this device or through your platform password manager.
+                            </p>
+                        </div>
+                        <div className="rounded-lg bg-purple-50 px-3 py-2 text-sm text-purple-700">
+                            Current session: <span className="font-medium uppercase">{currentAal ?? 'unknown'}</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="px-6 py-5 space-y-6">
+                    <div className="rounded-lg border border-purple-100 bg-purple-50/60 p-4 text-sm text-purple-800">
+                        <div className="font-medium">How this works</div>
+                        <p className="mt-1">
+                            In this app, passkeys are currently used as a verified security factor for signed-in sessions. They strengthen account security and support step-up verification for sensitive actions.
+                        </p>
+                        <p className="mt-2">
+                            Next available level for this session: <span className="font-medium uppercase">{nextAal ?? 'unknown'}</span>
+                        </p>
+                    </div>
+
+                    <div className="flex flex-col gap-3 md:flex-row md:items-end">
+                        <div className="flex-1">
+                            <label className="mb-1 block text-sm font-medium text-gray-700" htmlFor="passkey-name">
+                                Passkey name
+                            </label>
+                            <input
+                                id="passkey-name"
+                                type="text"
+                                value={passkeyName}
+                                onChange={(e) => setPasskeyName(e.target.value)}
+                                placeholder="Name this passkey"
+                                className="w-full rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-gray-900 focus:border-transparent focus:ring-2 focus:ring-purple-500"
+                            />
+                        </div>
+                        <button
+                            type="button"
+                            onClick={handleRegisterPasskey}
+                            disabled={registeringPasskey || loadingPasskeys}
+                            className="inline-flex items-center justify-center gap-2 rounded-lg bg-purple-600 px-5 py-3 font-medium text-white transition-colors hover:bg-purple-700 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                            {registeringPasskey && <Loader2 className="h-4 w-4 animate-spin" />}
+                            Add passkey
+                        </button>
+                    </div>
+
+                    <div>
+                        <div className="mb-3 flex items-center gap-2">
+                            <ShieldCheck className="h-4 w-4 text-gray-500" />
+                            <h3 className="text-sm font-medium text-gray-900">Registered passkeys</h3>
+                        </div>
+
+                        {loadingPasskeys ? (
+                            <div className="flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-4 py-4 text-sm text-gray-600">
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                                Loading passkeys...
+                            </div>
+                        ) : passkeyFactors.length === 0 ? (
+                            <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50 px-4 py-4 text-sm text-gray-600">
+                                No passkeys registered yet.
+                            </div>
+                        ) : (
+                            <div className="space-y-3">
+                                {passkeyFactors.map((factor) => (
+                                    <div
+                                        key={factor.id}
+                                        className="flex flex-col gap-3 rounded-lg border border-gray-200 px-4 py-4 md:flex-row md:items-center md:justify-between"
+                                    >
+                                        <div>
+                                            <div className="font-medium text-gray-900">
+                                                {factor.friendly_name || 'Unnamed passkey'}
+                                            </div>
+                                            <div className="mt-1 text-sm text-gray-600">
+                                                Added {new Date(factor.created_at).toLocaleString()}
+                                            </div>
+                                            {factor.last_challenged_at && (
+                                                <div className="mt-1 text-xs text-gray-500">
+                                                    Last used {new Date(factor.last_challenged_at).toLocaleString()}
+                                                </div>
+                                            )}
+                                        </div>
+                                        <div className="flex flex-wrap items-center gap-2">
+                                            <button
+                                                type="button"
+                                                onClick={() => void handleVerifyWithPasskey(factor.id)}
+                                                disabled={verifyingPasskeyId === factor.id || removingPasskeyId === factor.id}
+                                                className="inline-flex items-center gap-2 rounded-lg border border-purple-200 bg-purple-50 px-4 py-2 text-sm font-medium text-purple-700 transition-colors hover:bg-purple-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                            >
+                                                {verifyingPasskeyId === factor.id && <Loader2 className="h-4 w-4 animate-spin" />}
+                                                Verify session
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => void handleRemovePasskey(factor.id)}
+                                                disabled={removingPasskeyId === factor.id || verifyingPasskeyId === factor.id}
+                                                className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-medium text-red-700 transition-colors hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                            >
+                                                {removingPasskeyId === factor.id ? (
+                                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                                ) : (
+                                                    <Trash2 className="h-4 w-4" />
+                                                )}
+                                                Remove
+                                            </button>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            </div>
+
             {/* Security Tips */}
             <div className="mt-6 p-4 bg-purple-50 border border-purple-200 rounded-lg">
                 <h3 className="font-medium text-purple-800 mb-2">Password security tips</h3>
                 <ul className="text-sm text-purple-700 space-y-1 list-disc list-inside">
                     <li>Use a unique password that you do not use elsewhere</li>
-                    <li>Include a mix of uppercase, lowercase, numbers, and symbols</li>
+                    <li>Use a long passphrase that is easy for you to remember and hard to guess</li>
                     <li>Avoid using personal information like names or birthdays</li>
-                    <li>Consider using a password manager</li>
+                    <li>Use a password manager and add a passkey where supported</li>
                 </ul>
             </div>
         </div>

@@ -119,6 +119,7 @@ export default function PostPopup({
             <button
               type="button"
               title="Edit container"
+              data-post-menu-trigger="true"
               className="flex h-5 w-5 items-center justify-center rounded text-gray-400 opacity-0 transition-all hover:bg-black/10 hover:text-gray-700 group-hover/popup:opacity-100"
               onClick={() => onEditContainer(post)}
               aria-label="Edit container"
@@ -188,6 +189,7 @@ export default function PostPopup({
       padlet={post}
       onSelect={() => {}}
       onOpenChange={onContextMenuOpenChange}
+      restrictToMenuTrigger
       onEdit={canEdit && onEditContainer ? () => onEditContainer(post) : undefined}
       openTargets={orderedOpenTargets}
       onOpenTarget={canEdit ? onEditPost : undefined}

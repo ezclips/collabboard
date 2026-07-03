@@ -459,6 +459,7 @@ export default function ChronoTimelineCanvas({
       <ColumnPostContextMenu
         padlet={container}
         onSelect={() => { }}
+        restrictToMenuTrigger
         openTargets={isEditable ? openTargets : undefined}
         onOpenTarget={isEditable ? onOpenTarget : undefined}
         getOpenTargetLabel={(target) => target.type || 'post'}

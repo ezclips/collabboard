@@ -21,7 +21,7 @@ export function withAuth<P extends WithAuthProps>(
       const checkUser = async () => {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) {
-          router.push('/collabboard/auth/login');
+          router.push('/auth?mode=login&redirect=/collabboard');
           return;
         }
         setUser(user);
@@ -33,7 +33,7 @@ export function withAuth<P extends WithAuthProps>(
       const { data: { subscription } } = supabase.auth.onAuthStateChange(
         (_event, session) => {
           if (!session?.user) {
-            router.push('/collabboard/auth/login');
+            router.push('/auth?mode=login&redirect=/collabboard');
           } else {
             setUser(session.user);
           }

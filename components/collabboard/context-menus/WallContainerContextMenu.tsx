@@ -15,6 +15,7 @@ interface WallContainerContextMenuProps {
     children: React.ReactNode;
     padlet: Padlet;
     onSelect: () => void;
+    restrictToMenuTrigger?: boolean;
     onOpen?: () => void;
     openTargets?: Padlet[];
     onOpenTarget?: (padlet: Padlet) => void;
@@ -59,6 +60,7 @@ export function WallContainerContextMenu({
     children,
     padlet,
     onSelect,
+    restrictToMenuTrigger = false,
     onOpen,
     openTargets,
     onOpenTarget,
@@ -138,6 +140,19 @@ export function WallContainerContextMenu({
         };
     }, [menuId]);
 
+    const wrappedTrigger = restrictToMenuTrigger ? (
+        <div
+            onContextMenuCapture={(event) => {
+                const target = event.target as HTMLElement | null;
+                if (!target?.closest?.('[data-post-menu-trigger="true"]')) {
+                    event.stopPropagation();
+                }
+            }}
+        >
+            {children}
+        </div>
+    ) : children;
+
     return (
         <ContextMenu.Root
             {...{ open, onOpenChange: (nextOpen: boolean) => {
@@ -149,7 +164,7 @@ export function WallContainerContextMenu({
             }} as any}
         >
             <ContextMenu.Trigger asChild>
-                {children}
+                {wrappedTrigger}
             </ContextMenu.Trigger>
 
             <ContextMenu.Portal>

@@ -58,7 +58,7 @@ export async function POST(req: NextRequest) {
         }
 
         const body = await req.json();
-        const { emails, role = 'member' } = body as { emails?: string[]; role?: string };
+        const { emails, role = 'member', canvas_ids } = body as { emails?: string[]; role?: string; canvas_ids?: string[] | null };
 
         const normalizedEmails = Array.isArray(emails)
             ? [...new Set(emails.map((email) => email.trim().toLowerCase()).filter((email) => email.includes('@')))]
@@ -67,6 +67,10 @@ export async function POST(req: NextRequest) {
         if (normalizedEmails.length === 0) {
             return NextResponse.json({ error: 'No valid emails provided.' }, { status: 400 });
         }
+
+        const requestedCanvasIds = Array.isArray(canvas_ids)
+            ? [...new Set(canvas_ids.filter((value): value is string => typeof value === 'string' && value.trim().length > 0))]
+            : [];
 
         let wsId: string | null = null;
 
@@ -153,11 +157,31 @@ export async function POST(req: NextRequest) {
             }
         }
 
+        let validWorkspaceCanvasIds: string[] = [];
+        if (requestedCanvasIds.length > 0) {
+            const { data: workspaceBoards, error: boardValidationError } = await adminClient
+                .from('boards')
+                .select('id')
+                .eq('workspace_id', wsId)
+                .in('id', requestedCanvasIds);
+
+            if (boardValidationError) {
+                return NextResponse.json(
+                    { error: `Failed to validate canvas access: ${boardValidationError.message}` },
+                    { status: 500 },
+                );
+            }
+
+            const allowedSet = new Set((workspaceBoards || []).map((board: { id: string }) => board.id));
+            validWorkspaceCanvasIds = requestedCanvasIds.filter((id) => allowedSet.has(id));
+        }
+
         const invitationPayload = normalizedEmails.map((email) => ({
             workspace_id: wsId,
             type: 'email',
             email,
             role,
+            canvas_ids: validWorkspaceCanvasIds.length > 0 ? validWorkspaceCanvasIds : null,
             uses: 0,
             created_by: userId,
             expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
@@ -166,7 +190,7 @@ export async function POST(req: NextRequest) {
         const { data: invitations, error: insertError } = await adminClient
             .from('workspace_invitations')
             .insert(invitationPayload)
-            .select('id, workspace_id, email, role, type, uses, created_at');
+            .select('id, workspace_id, email, role, type, canvas_ids, uses, created_at');
 
         if (insertError) {
             return NextResponse.json(

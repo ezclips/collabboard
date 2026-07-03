@@ -25,7 +25,7 @@ import RowColumnContainerCard from '@/components/collabboard/RowColumnContainerC
 import RowCanvasDnD from '@/components/collabboard/row/RowCanvasDnD';
 import { routeEdge, type GraphSide } from '@/lib/graph/edgeRouting';
 import { FreeformGraphRepo } from '@/lib/graph/graphRepo';
-import { canEditWorkspace, resolveCurrentWorkspace, type WorkspaceRole } from '@/lib/workspace/context';
+import { canEditWorkspace, canManageWorkspace, resolveCurrentWorkspace, type WorkspaceRole } from '@/lib/workspace/context';
 import '@/components/kanban-canvas/kanban-canvas.css';
 import ColumnContainerCreationPrompt from '@/components/canvas/layouts/ColumnContainerCreationPrompt';
 import React, { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo, useReducer } from 'react';
@@ -36,7 +36,7 @@ import { User, Session } from '@supabase/supabase-js';
 import {
   StickyNote, Link, CheckSquare, MoveRight, MessageCircle,
   Image as ImageIcon, Upload, PenTool, Trash2, Bell, Table, X, Columns3,
-  Map as MapIcon, BookOpen, Plus, CloudDownload, Sparkles, Palette, Strikethrough
+  Map as MapIcon, BookOpen, Plus, CloudDownload, Sparkles, Palette, Strikethrough, UserPlus
 } from 'lucide-react';
 import EmojiPicker from 'emoji-picker-react';
 import AIComponentEditor from '@/components/collabboard/editors/AIComponentEditor';
@@ -69,6 +69,7 @@ import type mapboxgl from 'mapbox-gl';
 import MapStylePanel from '@/components/map/MapStylePanel';
 import { getPadletMapLocation } from '@/lib/map/geojson';
 import CanvasSidebar from '@/components/collabboard/canvas/ui/CanvasSidebar';
+import CanvasShareModal from '@/components/collabboard/canvas/ui/CanvasShareModal';
 import CanvasModals from '@/components/collabboard/canvas/ui/CanvasModals';
 import CanvasViewport from '@/components/collabboard/canvas/ui/CanvasViewport';
 import PadletLayer from '@/components/collabboard/canvas/ui/PadletLayer';
@@ -214,7 +215,8 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       } catch (error) {
         console.error('Error resolving workspace role:', error);
         if (!cancelled) {
-          setCurrentWorkspaceRole('member');
+          // Fail closed so edit controls never appear when role resolution breaks.
+          setCurrentWorkspaceRole(null);
         }
       }
     };
@@ -231,6 +233,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   // Otherwise editable member accounts can open and modify a board but lose the
   // left toolbar entirely because they are not workspace admins.
   const canUseCanvasToolbar = canUseFreeformEditButton;
+  const canManageCanvasShare = canManageWorkspace(currentWorkspaceRole);
   const handleToggleMapToolbarCollapsed = useCallback(() => {
     setIsMapToolbarCollapsed((prev) => !prev);
   }, []);
@@ -331,6 +334,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   // Separate modal states for different editors (11 vars → canvas store, PR4)
   const isNoteEditorOpen = canvasState.editors.isNoteEditorOpen; // SHARED: overlays + editors
   const setIsNoteEditorOpen = (v: boolean) => dispatch({ type: 'EDITORS_PATCH', payload: { isNoteEditorOpen: v } });
+  const [isCanvasShareModalOpen, setIsCanvasShareModalOpen] = useState(false);
   const isTableEditorOpen = canvasState.editors.isTableEditorOpen; // SHARED: overlays + editors
   const setIsTableEditorOpen = (v: boolean) => dispatch({ type: 'EDITORS_PATCH', payload: { isTableEditorOpen: v } });
   const isLinkEditorOpen = canvasState.editors.isLinkEditorOpen; // SHARED: overlays + editors
@@ -740,7 +744,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     grabOffset: { x: 0, y: 0 }
   });
   const [newPostHoverContainerId, setNewPostHoverContainerId] = useState<string | null>(null);
-  const [placementContext, setPlacementContext] = useState<'columns' | 'wall' | 'timeline-horizontal-all' | null>(null);
+  const [placementContext, setPlacementContext] = useState<'columns' | 'wall' | 'timeline-horizontal-all' | 'scheduler' | null>(null);
   const [placementPromptMode, setPlacementPromptMode] = useState<'columns' | 'timeline-horizontal-all' | null>(null);
   const [activeSectionId] = useState<string | null>(null);
 
@@ -1258,6 +1262,17 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         grabOffset: { x: 0, y: 0 }
       });
       toast.info('Click a container to place your post');
+    },
+    onSchedulerPlacementStart: (draft) => {
+      setPendingPostDraft(draft);
+      setPlacementContext('scheduler');
+      setNewPostDragState({
+        isActive: true,
+        draft,
+        cursor: { x: 0, y: 0 },
+        grabOffset: { x: 0, y: 0 }
+      });
+      toast.info('Drag onto a time slot to place your post');
     },
   });
 
@@ -2147,6 +2162,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   // Use a ref so handleMouseUp always reads the latest hover target
   // (avoids stale closure when React hasn't flushed the state update from handleMouseMove)
   const hoverContainerRef = useRef<string | null>(null);
+  const hoverSchedulerSlotStartRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!newPostDragState.isActive) return;
@@ -2156,9 +2172,16 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       // pointer-events:none but still blocks elementFromPoint)
       const elements = document.elementsFromPoint(e.clientX, e.clientY);
       let containerEl: Element | null = null;
+      let slotStartEl: Element | null = null;
       for (const el of elements) {
-        const found = el.closest('[data-container-id]');
+        const found = el.closest('[data-container-id], [data-scheduler-container-id]');
         if (found) { containerEl = found; break; }
+      }
+      if (!containerEl && placementContext === 'scheduler') {
+        for (const el of elements) {
+          const found = el.closest('[data-scheduler-slot-start]');
+          if (found) { slotStartEl = found; break; }
+        }
       }
 
       setNewPostDragState(prev => ({
@@ -2166,13 +2189,17 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         cursor: { x: e.clientX, y: e.clientY }
       }));
 
-      const hoverId = containerEl?.getAttribute('data-container-id') || null;
+      const hoverId = containerEl?.getAttribute('data-container-id')
+        || containerEl?.getAttribute('data-scheduler-container-id')
+        || null;
       hoverContainerRef.current = hoverId;
       setNewPostHoverContainerId(hoverId);
+      hoverSchedulerSlotStartRef.current = hoverId ? null : slotStartEl?.getAttribute('data-scheduler-slot-start') || null;
     };
 
     const handleMouseUp = () => {
       const hoverId = hoverContainerRef.current;
+      const hoverSlotStart = hoverSchedulerSlotStartRef.current;
       if (hoverId && newPostDragState.draft) {
         createRealPostFromDraftRef.current(newPostDragState.draft, hoverId);
         setWallPendingPostDraft(null);
@@ -2181,6 +2208,24 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         setNewPostDragState({ isActive: false, draft: null, cursor: { x: 0, y: 0 }, grabOffset: { x: 0, y: 0 } });
         setNewPostHoverContainerId(null);
         hoverContainerRef.current = null;
+        hoverSchedulerSlotStartRef.current = null;
+      } else if (placementContext === 'scheduler' && hoverSlotStart && newPostDragState.draft) {
+        const draft = newPostDragState.draft;
+        const start = new Date(hoverSlotStart);
+        const end = new Date(start.getTime() + 60 * 60 * 1000);
+        setNewPostDragState({ isActive: false, draft: null, cursor: { x: 0, y: 0 }, grabOffset: { x: 0, y: 0 } });
+        setPlacementContext(null);
+        hoverContainerRef.current = null;
+        hoverSchedulerSlotStartRef.current = null;
+        placeDraftInNewSchedulerContainer(draft, start, end);
+      } else if (placementContext === 'scheduler') {
+        // Dropped outside the scheduler grid entirely — nothing to attach to.
+        toast.info('Drop your post onto the scheduler to place it');
+        setNewPostDragState({ isActive: false, draft: null, cursor: { x: 0, y: 0 }, grabOffset: { x: 0, y: 0 } });
+        setPendingPostDraft(null);
+        setPlacementContext(null);
+        hoverContainerRef.current = null;
+        hoverSchedulerSlotStartRef.current = null;
       } else {
         setNewPostDragState({ isActive: false, draft: null, cursor: { x: 0, y: 0 }, grabOffset: { x: 0, y: 0 } });
         if (placementContext === 'wall') {
@@ -3739,16 +3784,21 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     setIsCommentEditorOpen(true);
   };
 
+  const openImagePostEditor = (padlet: Padlet) => {
+    if (padlet.type !== 'image') return;
+    closeDrawingSelectedShapePanel();
+    closeAllToolbars({ imageToolbar: true });
+    setPadletToEdit(null);
+    setIsImageEditorOpen(false);
+    setImageToolbarPadletId(padlet.id);
+  };
+
   const replaceImage = (id: string) => {
     const padlet = padlets.find(p => p.id === id);
     if (!padlet || padlet.type !== 'image') return;
 
     if (isDrawingLayout || isTimelineLayout) {
-      closeDrawingSelectedShapePanel();
-      closeAllToolbars({ imageToolbar: true });
-      setPadletToEdit(null);
-      setIsImageEditorOpen(false);
-      setImageToolbarPadletId(padlet.id);
+      openImagePostEditor(padlet);
       return;
     }
 
@@ -4527,15 +4577,15 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     start: Date,
     end: Date,
     options?: { title?: string; metadata?: Record<string, unknown> }
-  ) => {
-    if (!canvasId) return;
+  ): Promise<string | null> => {
+    if (!canvasId) return null;
     const safeStart = Number.isNaN(start.getTime()) ? new Date() : start;
     const safeEnd = Number.isNaN(end.getTime()) || end <= safeStart
       ? new Date(safeStart.getTime() + 60 * 60 * 1000)
       : end;
 
     try {
-      const { error } = await insertPadlet({
+      const { data, error } = await insertPadletAndSelectSingle({
         board_id: canvasId,
         title: options?.title || '',
         content: '',
@@ -4552,10 +4602,22 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       });
       if (error) throw error;
       await fetchData();
+      if (data?.id) {
+        setSelectedSchedulerContainerId(data.id);
+        setSelectedSchedulerSlot(null);
+      }
+      return data?.id ?? null;
     } catch (err) {
       console.error('Failed to create scheduler event:', err);
+      return null;
     }
-  }, [canvasId, fetchData]);
+  }, [canvasId, fetchData, insertPadletAndSelectSingle, setSelectedSchedulerContainerId, setSelectedSchedulerSlot]);
+
+  const clearSchedulerSelection = useCallback(() => {
+    setSelectedSchedulerSlot(null);
+    setSelectedSchedulerContainerId(null);
+    setSchedulerPopoverPadletId(null);
+  }, [setSelectedSchedulerContainerId, setSelectedSchedulerSlot, setSchedulerPopoverPadletId]);
 
   const handleOpenSchedulerPadlet = useCallback((padlet: Padlet) => {
     closeAllToolbars();
@@ -4576,7 +4638,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     setSelectedSchedulerContainerId(padlet.id);
     // Open the container popover so the user can see child posts.
     setSchedulerPopoverPadletId(padlet.id);
-  }, [closeAllToolbars]);
+  }, [closeAllToolbars, setSelectedPadletId, setSelectedSchedulerContainerId, setSelectedSchedulerSlot, setSchedulerPopoverPadletId]);
 
   const handleTargetSchedulerPadlet = useCallback((padlet: Padlet) => {
     closeAllToolbars();
@@ -4597,7 +4659,34 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     setSelectedSchedulerContainerId(padlet.id);
     // Do not open the modal on "Add post" from context menu.
     setSchedulerPopoverPadletId(null);
-  }, [closeAllToolbars]);
+  }, [closeAllToolbars, setSelectedPadletId, setSelectedSchedulerContainerId, setSelectedSchedulerSlot, setSchedulerPopoverPadletId]);
+
+  useEffect(() => {
+    if (!isSchedulerLayout) return;
+    if (!selectedSchedulerContainerId) return;
+
+    const hasLiveSelectedContainer = padlets.some((padlet) =>
+      padlet.id === selectedSchedulerContainerId &&
+      padlet.type === 'container' &&
+      !(padlet.metadata as any)?.parentId
+    );
+
+    if (hasLiveSelectedContainer) return;
+
+    setSelectedSchedulerContainerId(null);
+    setSelectedSchedulerSlot(null);
+    if (schedulerPopoverPadletId === selectedSchedulerContainerId) {
+      setSchedulerPopoverPadletId(null);
+    }
+  }, [
+    isSchedulerLayout,
+    padlets,
+    schedulerPopoverPadletId,
+    selectedSchedulerContainerId,
+    setSelectedSchedulerContainerId,
+    setSelectedSchedulerSlot,
+    setSchedulerPopoverPadletId,
+  ]);
 
   const handleSchedulerExternalDrop = useCallback(async ({
     payload,
@@ -4735,6 +4824,72 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       fetchData();
     }
   }, [canvasId, padlets, supabase, setPadlets, fetchData]);
+
+  // Ghost-drag: a toolbar-created post dropped on empty scheduler space gets a
+  // brand-new default-duration container, created and attached in one shot so
+  // we never depend on a re-fetch landing before the child post is inserted.
+  const placeDraftInNewSchedulerContainer = useCallback(async (
+    draft: PendingPostDraft,
+    start: Date,
+    end: Date,
+  ) => {
+    if (!canvasId) return;
+    const now = new Date().toISOString();
+    const containerId = crypto.randomUUID();
+    const postId = crypto.randomUUID();
+
+    const newContainer: Padlet = {
+      id: containerId,
+      board_id: canvasId,
+      title: '',
+      content: '',
+      type: 'container',
+      position_x: 0,
+      position_y: 0,
+      width: 350,
+      height: 300,
+      created_at: now,
+      updated_at: now,
+      metadata: {
+        start_date: start.toISOString(),
+        end_date: end.toISOString(),
+        childPadletIds: [postId],
+        cardColor: '#ffffff',
+      },
+    };
+
+    const newPost: Padlet = {
+      id: postId,
+      board_id: canvasId,
+      title: draft.title || '',
+      content: draft.content || '',
+      type: draft.kind,
+      width: 300,
+      height: 200,
+      position_x: 0,
+      position_y: 0,
+      created_at: now,
+      updated_at: now,
+      metadata: {
+        ...draft.metadata,
+        parentId: containerId,
+      },
+    } as Padlet;
+
+    setPadlets((prev) => [...prev, newContainer, newPost]);
+
+    try {
+      await supabase.from('padlets').insert(newContainer);
+      await supabase.from('padlets').insert(newPost);
+      setSelectedSchedulerSlot({ start, end });
+      setSelectedSchedulerContainerId(containerId);
+      toast.success('Post added to a new time slot');
+    } catch (err) {
+      console.error('Failed to create scheduler container for dropped post:', err);
+      toast.error('Failed to place post');
+      fetchData();
+    }
+  }, [canvasId, supabase, setPadlets, fetchData, setSelectedSchedulerSlot, setSelectedSchedulerContainerId]);
 
   // PR11.5 — Hoisted handlers (extracted from inline JSX props)
   // Must stay above early returns so hook count is stable across renders.
@@ -5174,7 +5329,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           disabled: isTimelineLayout && chronoMode === 'vertical',
           hint: "Switch to Horizontal or Alternating view to use the Library." },
       ],
-      priority: 3,
+      priority: 4,
     },
     // Group 4 — Media (priority 4)
     {
@@ -5186,7 +5341,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         { icon: Upload, label: "Upload", color: "text-cyan-600", bg: "hover:bg-cyan-50", type: "upload" },
         { icon: CloudDownload, label: "Import", color: "text-sky-600", bg: "hover:bg-sky-50", type: "import" },
       ],
-      priority: 4,
+      priority: 5,
     },
     // Group 5 — Draw (priority 5, collapsed first on small screens)
     {
@@ -5195,8 +5350,17 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       tools: [
         { icon: PenTool, label: "Draw", color: "text-red-600", bg: "hover:bg-red-50", type: "draw" },
       ],
-      priority: 5,
+      priority: 6,
     },
+    ...(canManageCanvasShare ? [{
+      id: 'share',
+      label: 'Share',
+      tools: [
+        { icon: UserPlus, label: 'Share canvas', color: 'text-slate-700', bg: 'hover:bg-slate-100', type: 'share' },
+      ],
+      priority: 7,
+      alwaysVisible: true,
+    }] : []),
   ];
 
   const handleToolClick = (toolType: string) => {
@@ -5237,9 +5401,15 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       isMapLayout && mapActiveContainerId && padlets.some((p) => p.id === mapActiveContainerId && p.type === 'container')
         ? mapActiveContainerId
         : null;
+    const schedulerContainerId =
+      isSchedulerLayout && selectedSchedulerContainerId && padlets.some((p) => p.id === selectedSchedulerContainerId && p.type === 'container')
+        ? selectedSchedulerContainerId
+        : null;
     const createMetadata = mapContainerId
       ? { ...baseMetadata, parentId: mapContainerId }
-      : baseMetadata;
+      : schedulerContainerId
+        ? { ...baseMetadata, parentId: schedulerContainerId }
+        : baseMetadata;
 
     switch (toolType) {
       case 'note':
@@ -5505,6 +5675,11 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         if (!isMapLayout) break;
         setIsMapSidebarOpen((prev) => !prev);
         break;
+      case 'share':
+        setIsLibraryOpen(false);
+        setIsMapStylePanelOpen(false);
+        setIsCanvasShareModalOpen(true);
+        break;
       default:
         break;
     }
@@ -5514,9 +5689,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     closeDrawingSelectedShapePanel();
     closeAllToolbars();
     if (post.type === 'image' && (isDrawingLayout || isTimelineLayout)) {
-      setPadletToEdit(null);
-      setIsImageEditorOpen(false);
-      setImageToolbarPadletId(post.id);
+      openImagePostEditor(post);
       return;
     }
     setPadletToEdit(post);
@@ -5535,7 +5708,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   // Keep the ref current so the early-mounted useEffect can call this function
   openPadletInTypeEditorRef.current = openPadletInTypeEditor;
 
-  const openTimelineTargetFromContextMenu = (post: Padlet) => {
+  const openPadletTargetFromContextMenu = (post: Padlet) => {
     if (post.type === 'image') {
       window.setTimeout(() => {
         openPadletInTypeEditor(post);
@@ -5566,12 +5739,14 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     return (
       <KanbanShell
         canvasId={canvas.id}
+        canvasTitle={canvas.title || 'Untitled canvas'}
         enableGantt={enableGantt}
         enableScheduler={enableScheduler}
         isGanttVisible={isGanttVisible}
         isSchedulerVisible={isSchedulerVisible}
         setIsGanttVisible={setIsGanttVisible}
         setIsSchedulerVisible={setIsSchedulerVisible}
+        currentWorkspaceRole={currentWorkspaceRole}
         onBack={() => router.push('/dashboard')}
       />
     );
@@ -5579,7 +5754,12 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
 
   if (isGanttLayout) {
     return (
-      <GanttShell canvasId={canvas.id} onBack={() => router.push('/dashboard')} />
+      <GanttShell
+        canvasId={canvas.id}
+        canvasTitle={canvas.title || 'Untitled canvas'}
+        currentWorkspaceRole={currentWorkspaceRole}
+        onBack={() => router.push('/dashboard')}
+      />
     );
   }
 
@@ -5604,6 +5784,14 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         )}
 
         {/* Editor Modals - Wrapped with stopPropagation for defense-in-depth */}
+        <CanvasShareModal
+          isOpen={isCanvasShareModalOpen}
+          onClose={() => setIsCanvasShareModalOpen(false)}
+          canvasId={canvas.id}
+          canvasTitle={canvas.title || 'Untitled canvas'}
+          currentWorkspaceRole={currentWorkspaceRole}
+        />
+
         <CanvasModals
           isNoteEditorOpen={isNoteEditorOpen}
           setIsNoteEditorOpen={setIsNoteEditorOpen}
@@ -6469,7 +6657,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                   setIsContainerEditorOpen(true);
                 }}
                 onOpenTarget={(post: Padlet) => {
-                  openPadletInTypeEditor(post);
+                  openPadletTargetFromContextMenu(post);
                 }}
                 onPadletCreate={handleCreateEmptyWallContainer}
                 onReorder={handleWallReorder}
@@ -6527,11 +6715,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                 onPadletEdit={(padlet) => {
                   closeDrawingEditorsBeforePadletEdit();
                   if (isImageEditPadlet(padlet)) {
-                    closeDrawingSelectedShapePanel();
-                    closeAllToolbars({ imageToolbar: true });
-                    setPadletToEdit(null);
-                    setIsImageEditorOpen(false);
-                    setImageToolbarPadletId(padlet.id);
+                    openImagePostEditor(padlet);
                     return;
                   }
                   openPadletInTypeEditor(padlet);
@@ -6567,7 +6751,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                   }}
                   onDeleteContainer={canUseFreeformEditButton ? ((containerId) => requestDeletePadlet(containerId)) : undefined}
                   onCreateEmptyContainer={canUseFreeformEditButton ? handleCreateEmptyTimelineContainer : undefined}
-                  onOpenTarget={canUseFreeformEditButton ? openTimelineTargetFromContextMenu : undefined}
+                  onOpenTarget={canUseFreeformEditButton ? openPadletTargetFromContextMenu : undefined}
                   allPadlets={padlets}
                   onDropExistingPadlet={canUseFreeformEditButton ? (async (containerId, droppedId) => {
                     const containerPadlet = padlets.find(p => p.id === containerId);
@@ -6671,6 +6855,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                   onSelectTimeSlot={(slot) => {
                     setSelectedSchedulerSlot(slot);
                     setSelectedSchedulerContainerId(null);
+                    setSchedulerPopoverPadletId(null);
                   }}
                   onDeletePadlet={deletePadletById}
                   onExternalDropItem={handleSchedulerExternalDrop}
@@ -6693,7 +6878,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                     setIsContainerEditorOpen(true);
                   }) : undefined}
                   onEditPinPost={canUseFreeformEditButton ? ((post) => {
-                    openPadletInTypeEditor(post);
+                    openPadletTargetFromContextMenu(post);
                   }) : undefined}
                   onDeletePinContainer={canUseFreeformEditButton ? ((post) => {
                     deleteMapPinContainer(post.id);
@@ -7474,7 +7659,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
             {isSchedulerLayout && schedulerPopoverPadletId && (
               <div
                 className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/40 backdrop-blur-sm"
-                onMouseDown={() => setSchedulerPopoverPadletId(null)}
+                onMouseDown={clearSchedulerSelection}
               >
                 <div
                   className="relative w-full max-w-sm max-h-[80vh] flex flex-col scale-100 transition-all duration-200"
@@ -7482,7 +7667,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                 >
                   <button
                     className="absolute -top-4 -right-4 w-8 h-8 rounded-full bg-white text-gray-800 shadow-xl flex items-center justify-center hover:bg-gray-100 z-10 transition-transform hover:scale-110"
-                    onClick={() => setSchedulerPopoverPadletId(null)}
+                    onClick={clearSchedulerSelection}
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
                   </button>
@@ -7634,7 +7819,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           }}
         />
 
-        {(isDrawingLayout || isTimelineLayout) && imageToolbarPadletId && activeImageToolbarPadlet && activeImageToolbarSrc && (
+        {!isColumnsLayout && !isGridLayout && !isFreeformLayout && imageToolbarPadletId && activeImageToolbarPadlet && activeImageToolbarSrc && (
           <div
             className="fixed inset-0 z-[60000] flex items-center justify-center bg-black/35 backdrop-blur-sm"
             onClick={() => {

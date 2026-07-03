@@ -336,6 +336,7 @@ export default function ColumnsCanvasRow({
               <ColumnPostContextMenu
                 padlet={post}
                 onSelect={() => {}}
+                restrictToMenuTrigger
                 openTargets={isEditable ? openTargets : undefined}
                 onOpenTarget={isEditable ? onEditPost : undefined}
                 getOpenTargetLabel={(target) => target.type || "post"}
@@ -402,6 +403,7 @@ export default function ColumnsCanvasRow({
               <ColumnPostContextMenu
                 padlet={post}
                 onSelect={() => {}}
+                restrictToMenuTrigger
                 onOpen={() => onOpenPost?.(post)}
                 onOpenInNewTab={() => onOpenInNewTab?.(post)}
                 onCopyLink={() => onCopyLink?.(post)}

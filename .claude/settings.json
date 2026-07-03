@@ -27,7 +27,8 @@
       "Bash(powershell -Command \"Stop-Process -Id 14244 -Force\")",
       "Bash(powershell -Command \"Get-NetTCPConnection -LocalPort 3000 | Select-Object LocalAddress,LocalPort,OwningProcess | Format-Table\")",
       "Bash(powershell -Command \"Get-Process -Id 14244 | Select-Object Id,ProcessName,MainWindowTitle,StartTime\")",
-      "Bash(npx next:*)"
+      "Bash(npx next:*)",
+      "Bash(npx tsc *)"
     ]
   }
 }

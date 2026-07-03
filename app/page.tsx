@@ -82,6 +82,17 @@ export default function Home() {
     initializeAuth()
   }, [mounted, router])
 
+  const handleUseAnotherAccount = async () => {
+    try {
+      const { supabase } = await import('@/lib/supabase')
+      await supabase.auth.signOut()
+    } catch (error) {
+      console.error('Failed to sign out before switching accounts:', error)
+    } finally {
+      router.push('/auth?switch=1')
+    }
+  }
+
   // Show loading while mounting or checking auth
   if (!mounted || loading) {
     return (
@@ -115,6 +126,13 @@ export default function Home() {
               {user ? (
                 <div className="flex items-center space-x-4">
                   <span className="text-gray-700">Welcome, {user.email}</span>
+                  <button
+                    type="button"
+                    onClick={handleUseAnotherAccount}
+                    className="text-sm font-medium text-blue-600 hover:text-blue-700 transition-colors"
+                  >
+                    Use another account
+                  </button>
                   <Link
                     href="/dashboard"
                     className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
@@ -158,12 +176,21 @@ export default function Home() {
 
           <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
             {user ? (
-              <Link
-                href="/dashboard"
-                className="bg-blue-600 text-white px-8 py-4 rounded-lg text-lg font-semibold hover:bg-blue-700 transition-colors shadow-lg"
-              >
-                Go to Dashboard
-              </Link>
+              <>
+                <Link
+                  href="/dashboard"
+                  className="bg-blue-600 text-white px-8 py-4 rounded-lg text-lg font-semibold hover:bg-blue-700 transition-colors shadow-lg"
+                >
+                  Go to Dashboard
+                </Link>
+                <button
+                  type="button"
+                  onClick={handleUseAnotherAccount}
+                  className="border-2 border-blue-600 text-blue-600 px-8 py-4 rounded-lg text-lg font-semibold hover:bg-blue-50 transition-colors"
+                >
+                  Log in with another account
+                </button>
+              </>
             ) : (
               <>
                 <Link

@@ -20,6 +20,7 @@ interface ColumnPostContextMenuProps {
     open?: boolean;
     onOpenChange?: (open: boolean) => void;
     onOpen?: () => void;
+    restrictToMenuTrigger?: boolean;
     // New: openTargets for container children submenu
     openTargets?: Padlet[];
     onOpenTarget?: (padlet: Padlet) => void;
@@ -69,6 +70,7 @@ export function ColumnPostContextMenu({
     open: controlledOpen,
     onOpenChange,
     onOpen,
+    restrictToMenuTrigger = false,
     openTargets,
     onOpenTarget,
     getOpenTargetLabel,
@@ -157,12 +159,24 @@ export function ColumnPostContextMenu({
         });
     };
 
+    const wrappedTrigger = restrictToMenuTrigger ? (
+        <div
+            onContextMenuCapture={(event) => {
+                const target = event.target as HTMLElement | null;
+                if (!target?.closest?.('[data-post-menu-trigger="true"]')) {
+                    event.stopPropagation();
+                }
+            }}
+        >
+            {children}
+        </div>
+    ) : children;
+
     return (
         <ContextMenu.Root
             {...{ open, onOpenChange: (nextOpen: boolean) => {
                 if (nextOpen) {
                     onSelect();
-                    onOpen?.();
                     window.dispatchEvent(new CustomEvent('collabboard-close-post-context-menus', { detail: menuId }));
                 }
                 if (!isControlled) setUncontrolledOpen(nextOpen);
@@ -170,7 +184,7 @@ export function ColumnPostContextMenu({
             }} as any}
         >
             <ContextMenu.Trigger asChild>
-                {children}
+                {wrappedTrigger}
             </ContextMenu.Trigger>
 
             <ContextMenu.Portal>

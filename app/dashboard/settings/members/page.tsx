@@ -188,14 +188,21 @@ export default function MembersPage() {
 
     const [showUpdateInvitationModal, setShowUpdateInvitationModal] = useState(false);
     const [updatingInvitationId, setUpdatingInvitationId] = useState<string | null>(null);
+    const [updatingInvitationType, setUpdatingInvitationType] = useState<Invitation['type'] | null>(null);
     const [updateLinkRole, setUpdateLinkRole] = useState<InvitableWorkspaceRole>('member');
     const [updateLinkRestrictDomain, setUpdateLinkRestrictDomain] = useState(false);
     const [updateLinkEmailDomain, setUpdateLinkEmailDomain] = useState('');
+    const [updateInvitationRestrictToCanvases, setUpdateInvitationRestrictToCanvases] = useState(false);
+    const [updateInvitationCanvasIds, setUpdateInvitationCanvasIds] = useState<string[]>([]);
+    const [showUpdateInvitationCanvasPicker, setShowUpdateInvitationCanvasPicker] = useState(false);
     const [updatingLink, setUpdatingLink] = useState(false);
 
     const [showInviteUserModal, setShowInviteUserModal] = useState(false);
     const [inviteEmails, setInviteEmails] = useState('');
     const [inviteUserRole, setInviteUserRole] = useState<InvitableWorkspaceRole>('member');
+    const [restrictInviteUsersToCanvases, setRestrictInviteUsersToCanvases] = useState(false);
+    const [inviteUserCanvasIds, setInviteUserCanvasIds] = useState<string[]>([]);
+    const [showInviteUserCanvasPicker, setShowInviteUserCanvasPicker] = useState(false);
     const [invitingUser, setInvitingUser] = useState(false);
     const [editingMember, setEditingMember] = useState<Member | null>(null);
     const [editingRole, setEditingRole] = useState<InvitableWorkspaceRole>('member');
@@ -657,6 +664,7 @@ export default function MembersPage() {
                 body: JSON.stringify({
                     emails,
                     role: inviteUserRole,
+                    canvas_ids: restrictInviteUsersToCanvases && inviteUserCanvasIds.length > 0 ? inviteUserCanvasIds : null,
                 }),
             });
 
@@ -673,6 +681,7 @@ export default function MembersPage() {
                 email?: string;
                 role: string;
                 type: 'email' | 'link';
+                canvas_ids?: string[] | null;
                 uses?: number;
                 created_at: string;
             }> | null;
@@ -699,6 +708,7 @@ export default function MembersPage() {
                     email: inv.email,
                     role: normalizeWorkspaceRole(inv.role) as InvitableWorkspaceRole,
                     type: inv.type as Invitation['type'],
+                    canvas_ids: inv.canvas_ids || undefined,
                     uses: inv.uses || 0,
                     created_at: inv.created_at,
                 })),
@@ -707,6 +717,9 @@ export default function MembersPage() {
 
             toast.success(`Invitation${emails.length > 1 ? 's' : ''} sent to ${emails.length} user${emails.length > 1 ? 's' : ''}`);
             setInviteEmails('');
+            setRestrictInviteUsersToCanvases(false);
+            setInviteUserCanvasIds([]);
+            setShowInviteUserCanvasPicker(false);
             setShowInviteUserModal(false);
         } catch (err) {
             console.error('Error inviting users:', err);
@@ -723,6 +736,10 @@ export default function MembersPage() {
         }
 
         if (!updatingInvitationId) return;
+        const isLinkInvitation = updatingInvitationType === 'link';
+        const nextCanvasIds = updateInvitationRestrictToCanvases && updateInvitationCanvasIds.length > 0
+            ? updateInvitationCanvasIds
+            : null;
 
         try {
             setUpdatingLink(true);
@@ -732,7 +749,8 @@ export default function MembersPage() {
                     .from('workspace_invitations')
                     .update({
                         role: updateLinkRole,
-                        email_domain: updateLinkRestrictDomain ? updateLinkEmailDomain : null,
+                        email_domain: isLinkInvitation && updateLinkRestrictDomain ? updateLinkEmailDomain : null,
+                        canvas_ids: nextCanvasIds,
                     })
                     .eq('id', updatingInvitationId);
 
@@ -749,7 +767,8 @@ export default function MembersPage() {
                         ? {
                             ...inv,
                             role: updateLinkRole,
-                            email_domain: updateLinkRestrictDomain ? updateLinkEmailDomain : undefined,
+                            email_domain: isLinkInvitation && updateLinkRestrictDomain ? updateLinkEmailDomain : undefined,
+                            canvas_ids: nextCanvasIds || undefined,
                         }
                         : inv
                 )
@@ -757,12 +776,35 @@ export default function MembersPage() {
 
             toast.success('Invitation updated successfully');
             setShowUpdateInvitationModal(false);
+            setUpdatingInvitationId(null);
+            setUpdatingInvitationType(null);
+            setUpdateInvitationRestrictToCanvases(false);
+            setUpdateInvitationCanvasIds([]);
+            setShowUpdateInvitationCanvasPicker(false);
         } catch (err) {
             console.error('Error updating invitation:', err);
             toast.error('Failed to update invitation');
         } finally {
             setUpdatingLink(false);
         }
+    };
+
+    const openUpdateInvitationModal = (invitation: Invitation) => {
+        if (!canManageMembers) {
+            return;
+        }
+        setUpdatingInvitationId(invitation.id);
+        setUpdatingInvitationType(invitation.type);
+        setUpdateLinkRole(invitation.role);
+        setUpdateLinkRestrictDomain(invitation.type === 'link' && !!invitation.email_domain);
+        setUpdateLinkEmailDomain(invitation.email_domain || '');
+        setUpdateInvitationRestrictToCanvases(!!(invitation.canvas_ids && invitation.canvas_ids.length > 0));
+        setUpdateInvitationCanvasIds(invitation.canvas_ids || []);
+        setShowUpdateInvitationCanvasPicker(false);
+        if (workspaceCanvasOptions.length === 0) {
+            void loadWorkspaceCanvases();
+        }
+        setShowUpdateInvitationModal(true);
     };
 
     const revokeInvitation = async (invitation: Invitation) => {
@@ -992,7 +1034,7 @@ export default function MembersPage() {
                                             )}
                                         </td>
                                         <td className="px-5 py-4">
-                                            {invitation.type === 'link' ? (
+                                            {invitation.canvas_ids && invitation.canvas_ids.length > 0 ? (
                                                 invitation.canvas_ids && invitation.canvas_ids.length > 0 ? (
                                                     <span className="text-sm text-slate-700">
                                                         {invitation.canvas_ids.length} selected
@@ -1000,6 +1042,8 @@ export default function MembersPage() {
                                                 ) : (
                                                     <span className="text-sm text-slate-400">All canvases</span>
                                                 )
+                                            ) : invitation.type === 'link' ? (
+                                                <span className="text-sm text-slate-400">All canvases</span>
                                             ) : (
                                                 <span className="text-sm text-slate-400">-</span>
                                             )}
@@ -1016,7 +1060,15 @@ export default function MembersPage() {
                                                 : ` of ${invitation.max_uses}`}
                                         </td>
                                         <td className="px-5 py-4">
-                                            <div className="flex items-center justify-end gap-2">
+                                            <div className="ml-auto grid w-[112px] grid-cols-[32px_32px_32px] items-center justify-items-center gap-2">
+                                                <button
+                                                    onClick={() => openUpdateInvitationModal(invitation)}
+                                                    className="rounded-lg p-2 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600"
+                                                    title="Update invitation"
+                                                    disabled={!canManageMembers}
+                                                >
+                                                    <Edit2 className="h-4 w-4" />
+                                                </button>
                                                 {invitation.type === 'email' ? (
                                                     <button
                                                         onClick={() => resendInvitation(invitation)}
@@ -1026,23 +1078,7 @@ export default function MembersPage() {
                                                         <Mail className="h-4 w-4" />
                                                     </button>
                                                 ) : (
-                                                    <button
-                                                        onClick={() => {
-                                                            if (!canManageMembers) {
-                                                                return;
-                                                            }
-                                                            setUpdatingInvitationId(invitation.id);
-                                                            setUpdateLinkRole(invitation.role);
-                                                            setUpdateLinkRestrictDomain(!!invitation.email_domain);
-                                                            setUpdateLinkEmailDomain(invitation.email_domain || '');
-                                                            setShowUpdateInvitationModal(true);
-                                                        }}
-                                                        className="rounded-lg p-2 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600"
-                                                        title="Update invitation"
-                                                        disabled={!canManageMembers}
-                                                    >
-                                                        <Edit2 className="h-4 w-4" />
-                                                    </button>
+                                                    <span className="h-8 w-8" aria-hidden="true" />
                                                 )}
                                                 <button
                                                     onClick={() => revokeInvitation(invitation)}
@@ -1421,7 +1457,17 @@ export default function MembersPage() {
                     <div className="mx-4 w-full max-w-md rounded-xl bg-white shadow-xl">
                         <div className="flex items-center justify-between p-6 pb-2">
                             <h2 className="text-xl font-bold text-[#1f165a]">Update invitation</h2>
-                            <button onClick={() => setShowUpdateInvitationModal(false)} className="rounded-lg p-1 transition-colors hover:bg-gray-100">
+                            <button
+                                onClick={() => {
+                                    setShowUpdateInvitationModal(false);
+                                    setUpdatingInvitationId(null);
+                                    setUpdatingInvitationType(null);
+                                    setUpdateInvitationRestrictToCanvases(false);
+                                    setUpdateInvitationCanvasIds([]);
+                                    setShowUpdateInvitationCanvasPicker(false);
+                                }}
+                                className="rounded-lg p-1 transition-colors hover:bg-gray-100"
+                            >
                                 <X className="h-5 w-5 text-gray-400" />
                             </button>
                         </div>
@@ -1434,26 +1480,110 @@ export default function MembersPage() {
                                     <RoleDropdown value={updateLinkRole} onChange={setUpdateLinkRole} name="update-role" />
                                 </div>
 
-                                <div>
-                                    <label className="flex items-center gap-3 cursor-pointer mt-4">
+                                {updatingInvitationType === 'link' && (
+                                    <div>
+                                        <label className="flex items-center gap-3 cursor-pointer mt-4">
+                                            <input
+                                                type="checkbox"
+                                                checked={updateLinkRestrictDomain}
+                                                onChange={(e) => setUpdateLinkRestrictDomain(e.target.checked)}
+                                                className="h-4 w-4 rounded border-gray-300 text-[#655ac9] focus:ring-[#655ac9]"
+                                            />
+                                            <span className="text-sm text-gray-600">Restrict to a specific email domain</span>
+                                        </label>
+
+                                        {updateLinkRestrictDomain && (
+                                            <div className="mt-3">
+                                                <input
+                                                    type="text"
+                                                    value={updateLinkEmailDomain}
+                                                    onChange={(e) => setUpdateLinkEmailDomain(e.target.value)}
+                                                    placeholder="company.com"
+                                                    className="w-full rounded-lg border border-gray-300 px-4 py-2 text-sm focus:border-[#655ac9] focus:outline-none focus:ring-1 focus:ring-[#655ac9]"
+                                                />
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+
+                                <div className="rounded-2xl bg-[#f6f5fd] p-4">
+                                    <label className="flex cursor-pointer items-center justify-between gap-3">
+                                        <span className="text-sm font-medium text-slate-700">Restrict canvas access</span>
                                         <input
                                             type="checkbox"
-                                            checked={updateLinkRestrictDomain}
-                                            onChange={(e) => setUpdateLinkRestrictDomain(e.target.checked)}
+                                            checked={updateInvitationRestrictToCanvases}
+                                            onChange={(e) => {
+                                                const nextChecked = e.target.checked;
+                                                setUpdateInvitationRestrictToCanvases(nextChecked);
+                                                if (!nextChecked) {
+                                                    setShowUpdateInvitationCanvasPicker(false);
+                                                    setUpdateInvitationCanvasIds([]);
+                                                } else {
+                                                    setShowUpdateInvitationCanvasPicker(true);
+                                                    if (workspaceCanvasOptions.length === 0) {
+                                                        void loadWorkspaceCanvases();
+                                                    }
+                                                }
+                                            }}
                                             className="h-4 w-4 rounded border-gray-300 text-[#655ac9] focus:ring-[#655ac9]"
                                         />
-                                        <span className="text-sm text-gray-600">Restrict to a specific email domain</span>
                                     </label>
 
-                                    {updateLinkRestrictDomain && (
-                                        <div className="mt-3">
-                                            <input
-                                                type="text"
-                                                value={updateLinkEmailDomain}
-                                                onChange={(e) => setUpdateLinkEmailDomain(e.target.value)}
-                                                placeholder="company.com"
-                                                className="w-full rounded-lg border border-gray-300 px-4 py-2 text-sm focus:border-[#655ac9] focus:outline-none focus:ring-1 focus:ring-[#655ac9]"
-                                            />
+                                    {updateInvitationRestrictToCanvases && (
+                                        <div className="mt-4 space-y-3">
+                                            <button
+                                                type="button"
+                                                onClick={() => setShowUpdateInvitationCanvasPicker((prev) => !prev)}
+                                                className="flex w-full items-center justify-between rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-slate-700"
+                                            >
+                                                <span>
+                                                    {updateInvitationCanvasIds.length > 0
+                                                        ? `${updateInvitationCanvasIds.length} canvas${updateInvitationCanvasIds.length === 1 ? '' : 'es'} selected`
+                                                        : 'Select canvases'}
+                                                </span>
+                                                <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform ${showUpdateInvitationCanvasPicker ? 'rotate-180' : ''}`} />
+                                            </button>
+
+                                            {showUpdateInvitationCanvasPicker && (
+                                                <div className="max-h-56 space-y-3 overflow-y-auto rounded-lg border border-gray-200 bg-white p-3">
+                                                    {loadingCanvasOptions ? (
+                                                        <div className="flex items-center gap-2 text-sm text-slate-500">
+                                                            <Loader2 className="h-4 w-4 animate-spin" />
+                                                            Loading canvases...
+                                                        </div>
+                                                    ) : workspaceCanvasOptions.length === 0 ? (
+                                                        <p className="text-sm text-slate-500">No canvases found in this workspace.</p>
+                                                    ) : (
+                                                        Object.entries(groupedCanvasOptions).map(([groupName, canvases]) => (
+                                                            <div key={groupName}>
+                                                                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                                                                    {groupName}
+                                                                </p>
+                                                                <div className="space-y-1">
+                                                                    {canvases.map((canvas) => (
+                                                                        <label
+                                                                            key={canvas.id}
+                                                                            className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm text-slate-700 hover:bg-slate-50"
+                                                                        >
+                                                                            <input
+                                                                                type="checkbox"
+                                                                                checked={updateInvitationCanvasIds.includes(canvas.id)}
+                                                                                onChange={() => setUpdateInvitationCanvasIds((prev) =>
+                                                                                    prev.includes(canvas.id)
+                                                                                        ? prev.filter((id) => id !== canvas.id)
+                                                                                        : [...prev, canvas.id]
+                                                                                )}
+                                                                                className="h-4 w-4 rounded border-gray-300 text-[#655ac9] focus:ring-[#655ac9]"
+                                                                            />
+                                                                            <span className="truncate">{canvas.title}</span>
+                                                                        </label>
+                                                                    ))}
+                                                                </div>
+                                                            </div>
+                                                        ))
+                                                    )}
+                                                </div>
+                                            )}
                                         </div>
                                     )}
                                 </div>
@@ -1462,7 +1592,14 @@ export default function MembersPage() {
 
                         <div className="flex items-center justify-end gap-3 p-6 pt-0">
                             <button
-                                onClick={() => setShowUpdateInvitationModal(false)}
+                                onClick={() => {
+                                    setShowUpdateInvitationModal(false);
+                                    setUpdatingInvitationId(null);
+                                    setUpdatingInvitationType(null);
+                                    setUpdateInvitationRestrictToCanvases(false);
+                                    setUpdateInvitationCanvasIds([]);
+                                    setShowUpdateInvitationCanvasPicker(false);
+                                }}
                                 className="rounded-lg px-4 py-2 text-sm font-bold text-[#655ac9] transition-colors hover:bg-purple-50"
                             >
                                 Cancel
@@ -1517,6 +1654,88 @@ export default function MembersPage() {
                                     <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400" />
                                 </div>
                                 <p className="mt-2 text-sm text-gray-500">{workspaceRoleDescriptions[inviteUserRole]}</p>
+                            </div>
+
+                            <div className="rounded-2xl bg-[#f6f5fd] p-4">
+                                <label className="flex cursor-pointer items-center justify-between gap-3">
+                                    <span className="text-sm font-medium text-slate-700">Restrict canvas access</span>
+                                    <input
+                                        type="checkbox"
+                                        checked={restrictInviteUsersToCanvases}
+                                        onChange={(e) => {
+                                            const nextChecked = e.target.checked;
+                                            setRestrictInviteUsersToCanvases(nextChecked);
+                                            if (!nextChecked) {
+                                                setShowInviteUserCanvasPicker(false);
+                                                setInviteUserCanvasIds([]);
+                                            } else {
+                                                setShowInviteUserCanvasPicker(true);
+                                                if (workspaceCanvasOptions.length === 0) {
+                                                    void loadWorkspaceCanvases();
+                                                }
+                                            }
+                                        }}
+                                        className="h-4 w-4 rounded border-gray-300 text-[#655ac9] focus:ring-[#655ac9]"
+                                    />
+                                </label>
+
+                                {restrictInviteUsersToCanvases && (
+                                    <div className="mt-4 space-y-3">
+                                        <button
+                                            type="button"
+                                            onClick={() => setShowInviteUserCanvasPicker((prev) => !prev)}
+                                            className="flex w-full items-center justify-between rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-slate-700"
+                                        >
+                                            <span>
+                                                {inviteUserCanvasIds.length > 0
+                                                    ? `${inviteUserCanvasIds.length} canvas${inviteUserCanvasIds.length === 1 ? '' : 'es'} selected`
+                                                    : 'Select canvases'}
+                                            </span>
+                                            <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform ${showInviteUserCanvasPicker ? 'rotate-180' : ''}`} />
+                                        </button>
+
+                                        {showInviteUserCanvasPicker && (
+                                            <div className="max-h-56 space-y-3 overflow-y-auto rounded-lg border border-gray-200 bg-white p-3">
+                                                {loadingCanvasOptions ? (
+                                                    <div className="flex items-center gap-2 text-sm text-slate-500">
+                                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                                        Loading canvases...
+                                                    </div>
+                                                ) : workspaceCanvasOptions.length === 0 ? (
+                                                    <p className="text-sm text-slate-500">No canvases found in this workspace.</p>
+                                                ) : (
+                                                    Object.entries(groupedCanvasOptions).map(([groupName, canvases]) => (
+                                                        <div key={groupName}>
+                                                            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                                                                {groupName}
+                                                            </p>
+                                                            <div className="space-y-1">
+                                                                {canvases.map((canvas) => (
+                                                                    <label
+                                                                        key={canvas.id}
+                                                                        className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm text-slate-700 hover:bg-slate-50"
+                                                                    >
+                                                                        <input
+                                                                            type="checkbox"
+                                                                            checked={inviteUserCanvasIds.includes(canvas.id)}
+                                                                            onChange={() => setInviteUserCanvasIds((prev) =>
+                                                                                prev.includes(canvas.id)
+                                                                                    ? prev.filter((id) => id !== canvas.id)
+                                                                                    : [...prev, canvas.id]
+                                                                            )}
+                                                                            className="h-4 w-4 rounded border-gray-300 text-[#655ac9] focus:ring-[#655ac9]"
+                                                                        />
+                                                                        <span className="truncate">{canvas.title}</span>
+                                                                    </label>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    ))
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
                             </div>
                         </div>
 
