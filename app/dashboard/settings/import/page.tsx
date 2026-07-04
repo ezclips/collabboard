@@ -8,14 +8,16 @@ interface ImportPreview {
     exportedFromWorkspaceName: string;
     exportedAt: string;
     folders: { count: number; names: string[] };
-    boards: { count: number; names: string[] };
+    boards: { count: number; names: string[]; items: Array<{ localId: string; title: string }> };
     padlets: { count: number };
+    sections: { count: number };
 }
 
 interface ImportSummary {
     foldersImported: number;
     boardsImported: number;
     padletsImported: number;
+    boardSectionsImported: number;
 }
 
 export default function ImportPage() {
@@ -25,6 +27,7 @@ export default function ImportPage() {
     const [previewing, setPreviewing] = useState(false);
     const [preview, setPreview] = useState<ImportPreview | null>(null);
     const [previewError, setPreviewError] = useState<string | null>(null);
+    const [boardNameOverrides, setBoardNameOverrides] = useState<Record<string, string>>({});
 
     const [importing, setImporting] = useState(false);
     const [summary, setSummary] = useState<ImportSummary | null>(null);
@@ -36,6 +39,7 @@ export default function ImportPage() {
         setPreviewError(null);
         setSummary(null);
         setImportError(null);
+        setBoardNameOverrides({});
         if (fileInputRef.current) {
             fileInputRef.current.value = '';
         }
@@ -72,7 +76,11 @@ export default function ImportPage() {
                 return;
             }
 
-            setPreview(body as ImportPreview);
+            const nextPreview = body as ImportPreview;
+            setPreview(nextPreview);
+            setBoardNameOverrides(
+                Object.fromEntries(nextPreview.boards.items.map((board) => [board.localId, board.title])),
+            );
         } catch (err) {
             console.error('Error previewing import:', err);
             setPreviewError('Failed to read this archive');
@@ -90,6 +98,7 @@ export default function ImportPage() {
 
             const formData = new FormData();
             formData.append('file', file);
+            formData.append('boardNameOverrides', JSON.stringify(boardNameOverrides));
 
             const response = await fetch('/api/workspace/import', {
                 method: 'POST',
@@ -106,7 +115,7 @@ export default function ImportPage() {
 
             setSummary(body as ImportSummary);
             toast.success(
-                `Imported ${body.boardsImported} boards, ${body.padletsImported} padlets, ${body.foldersImported} folders`,
+                `Imported ${body.boardsImported} boards, ${body.padletsImported} padlets, ${body.boardSectionsImported} sections, ${body.foldersImported} folders`,
             );
         } catch (err) {
             console.error('Error importing:', err);
@@ -185,7 +194,7 @@ export default function ImportPage() {
                     <div className="flex items-start gap-3 p-4 bg-red-50 border border-red-200 rounded-lg">
                         <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
                         <div>
-                            <h3 className="font-medium text-red-800">This archive can't be imported</h3>
+                            <h3 className="font-medium text-red-800">This archive can&apos;t be imported</h3>
                             <p className="text-sm text-red-700 mt-1">{previewError}</p>
                         </div>
                     </div>
@@ -201,7 +210,7 @@ export default function ImportPage() {
                             Exported from <span className="font-medium text-gray-700">{preview.exportedFromWorkspaceName}</span> on{' '}
                             {new Date(preview.exportedAt).toLocaleDateString()}
                         </p>
-                        <div className="grid grid-cols-3 gap-4">
+                        <div className="grid grid-cols-4 gap-4">
                             <div className="text-center p-4 bg-gray-50 rounded-lg">
                                 <div className="text-2xl font-bold text-gray-900">{preview.boards.count}</div>
                                 <div className="text-sm text-gray-500">Boards</div>
@@ -209,6 +218,10 @@ export default function ImportPage() {
                             <div className="text-center p-4 bg-gray-50 rounded-lg">
                                 <div className="text-2xl font-bold text-gray-900">{preview.padlets.count}</div>
                                 <div className="text-sm text-gray-500">Padlets</div>
+                            </div>
+                            <div className="text-center p-4 bg-gray-50 rounded-lg">
+                                <div className="text-2xl font-bold text-gray-900">{preview.sections.count}</div>
+                                <div className="text-sm text-gray-500">Sections</div>
                             </div>
                             <div className="text-center p-4 bg-gray-50 rounded-lg">
                                 <div className="text-2xl font-bold text-gray-900">{preview.folders.count}</div>
@@ -228,6 +241,34 @@ export default function ImportPage() {
                                 ))}
                             </ul>
                         </details>
+                    )}
+
+                    {preview.boards.items.length > 0 && (
+                        <div className="mb-4 rounded-lg border border-gray-200 p-4">
+                            <h3 className="font-medium text-gray-900 mb-3">
+                                {preview.boards.items.length === 1 ? 'Canvas name before import' : 'Board names before import'}
+                            </h3>
+                            <div className="space-y-3">
+                                {preview.boards.items.map((board) => (
+                                    <div key={board.localId}>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                                            {preview.boards.items.length === 1 ? 'Canvas name' : `Board: ${board.title}`}
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={boardNameOverrides[board.localId] ?? board.title}
+                                            onChange={(e) =>
+                                                setBoardNameOverrides((prev) => ({
+                                                    ...prev,
+                                                    [board.localId]: e.target.value,
+                                                }))
+                                            }
+                                            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                                        />
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
                     )}
 
                     {preview.folders.names.length > 0 && (
@@ -263,8 +304,8 @@ export default function ImportPage() {
                         <div>
                             <h3 className="font-medium text-green-800">Import complete</h3>
                             <p className="text-sm text-green-700 mt-1">
-                                Imported {summary.boardsImported} boards, {summary.padletsImported} padlets, and{' '}
-                                {summary.foldersImported} folders.
+                                Imported {summary.boardsImported} boards, {summary.padletsImported} padlets,{' '}
+                                {summary.boardSectionsImported} sections, and {summary.foldersImported} folders.
                             </p>
                         </div>
                     </div>

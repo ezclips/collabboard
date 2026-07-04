@@ -6,10 +6,12 @@ import {
   EXPORT_SCHEMA_VERSION,
   PADLET_METADATA_REF_ARRAY_KEY,
   PADLET_METADATA_REF_KEYS,
+  PADLET_METADATA_SECTION_KEY,
   type ExportBundle,
   type ExportData,
   type ExportScope,
   type NormalizedBoard,
+  type NormalizedBoardSection,
   type NormalizedFolder,
   type NormalizedPadlet,
 } from './types';
@@ -42,6 +44,18 @@ interface BoardRow {
   updated_at: string;
 }
 
+function normalizeBoardBackground(
+  background: Record<string, unknown> | string | null,
+): Record<string, unknown> | null {
+  if (background === null || background === 'null') {
+    return null;
+  }
+  if (typeof background === 'object' && !Array.isArray(background)) {
+    return background;
+  }
+  return null;
+}
+
 interface PadletRow {
   id: string;
   board_id: string;
@@ -63,6 +77,19 @@ interface PadletRow {
   location_mapbox_id: string | null;
   location_precision: string | null;
   metadata: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// board_sections has no tracked CREATE TABLE migration (created outside
+// migration files); columns confirmed via a live query: id is numeric
+// (int8/serial), board_id is a uuid FK to boards.id.
+interface BoardSectionRow {
+  id: number;
+  board_id: string;
+  title: string;
+  description: string | null;
+  position: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -103,6 +130,31 @@ function remapPadletMetadataRefs(
     }
   }
 
+  return result;
+}
+
+/**
+ * Remaps a padlet's Columns-layout `metadata.sectionId` (stored as a string
+ * mirroring board_sections.id, a numeric column) to this bundle's local
+ * section id. Uses a separate id-map from remapPadletMetadataRefs since
+ * section ids and padlet ids are different source-id namespaces. Dangling
+ * references (e.g. an already-deleted section) are dropped, matching the
+ * padlet ref-key behavior above.
+ */
+function remapPadletSectionRef(
+  metadata: Record<string, unknown>,
+  sectionLocalIdBySourceId: Map<string, string>,
+): Record<string, unknown> {
+  const value = metadata[PADLET_METADATA_SECTION_KEY];
+  if (typeof value !== 'string') return metadata;
+
+  const result: Record<string, unknown> = { ...metadata };
+  const mapped = sectionLocalIdBySourceId.get(value);
+  if (mapped) {
+    result[PADLET_METADATA_SECTION_KEY] = mapped;
+  } else {
+    delete result[PADLET_METADATA_SECTION_KEY];
+  }
   return result;
 }
 
@@ -196,6 +248,17 @@ export async function buildExportBundle({
     throw new Error(`Failed to load padlets: ${padletError.message}`);
   }
 
+  const { data: boardSectionRows, error: boardSectionError } = boardSourceIds.length
+    ? await supabase
+        .from('board_sections')
+        .select('id, board_id, title, description, position, created_at, updated_at')
+        .in('board_id', boardSourceIds)
+    : { data: [] as BoardSectionRow[], error: null };
+
+  if (boardSectionError) {
+    throw new Error(`Failed to load board sections: ${boardSectionError.message}`);
+  }
+
   // Pass 1: mint local ids for every folder before resolving parent_id refs,
   // since a folder can reference a sibling that appears later in the array.
   const folderLocalIdBySourceId = new Map<string, string>();
@@ -256,7 +319,7 @@ export async function buildExportBundle({
       title: row.title,
       description: row.description,
       layout: row.layout,
-      background: row.background,
+      background: normalizeBoardBackground(row.background),
       backgroundType: row.background_type,
       backgroundValue: row.background_value,
       containerSize: row.container_size,
@@ -272,30 +335,55 @@ export async function buildExportBundle({
     padletLocalIdBySourceId.set(row.id, `p_${index}`);
   });
 
-  const padlets: NormalizedPadlet[] = (padletRows ?? []).map((row: PadletRow) => ({
-    localId: padletLocalIdBySourceId.get(row.id)!,
-    boardRef: boardLocalIdBySourceId.get(row.board_id)!,
-    title: row.title,
-    content: row.content,
-    color: row.color,
-    type: row.type,
-    positionX: row.position_x,
-    positionY: row.position_y,
-    width: row.width,
-    height: row.height,
-    fileUrl: row.file_url,
-    fileName: row.file_name,
-    fileType: row.file_type,
-    fileSize: row.file_size,
-    locationLng: row.location_lng,
-    locationLat: row.location_lat,
-    locationLabel: row.location_label,
-    locationMapboxId: row.location_mapbox_id,
-    locationPrecision: row.location_precision,
-    metadata: remapPadletMetadataRefs(row.metadata ?? {}, padletLocalIdBySourceId),
-    originalCreatedAt: row.created_at,
-    originalUpdatedAt: row.updated_at,
-  }));
+  // board_sections.id is numeric but padlet.metadata.sectionId stores it as a
+  // string (see components/canvas/layouts/ColumnsLayout.tsx), so key this map
+  // by the stringified source id to match how sectionId is actually compared.
+  const sectionLocalIdBySourceId = new Map<string, string>();
+  (boardSectionRows ?? []).forEach((row: BoardSectionRow, index) => {
+    sectionLocalIdBySourceId.set(String(row.id), `s_${index}`);
+  });
+
+  const boardSections: NormalizedBoardSection[] = (boardSectionRows ?? []).map(
+    (row: BoardSectionRow) => ({
+      localId: sectionLocalIdBySourceId.get(String(row.id))!,
+      boardRef: boardLocalIdBySourceId.get(row.board_id)!,
+      title: row.title,
+      description: row.description,
+      position: row.position,
+      originalCreatedAt: row.created_at,
+      originalUpdatedAt: row.updated_at,
+    }),
+  );
+
+  const padlets: NormalizedPadlet[] = (padletRows ?? []).map((row: PadletRow) => {
+    const metadataWithRefs = remapPadletMetadataRefs(row.metadata ?? {}, padletLocalIdBySourceId);
+    const metadata = remapPadletSectionRef(metadataWithRefs, sectionLocalIdBySourceId);
+
+    return {
+      localId: padletLocalIdBySourceId.get(row.id)!,
+      boardRef: boardLocalIdBySourceId.get(row.board_id)!,
+      title: row.title,
+      content: row.content,
+      color: row.color,
+      type: row.type,
+      positionX: row.position_x,
+      positionY: row.position_y,
+      width: row.width,
+      height: row.height,
+      fileUrl: row.file_url,
+      fileName: row.file_name,
+      fileType: row.file_type,
+      fileSize: row.file_size,
+      locationLng: row.location_lng,
+      locationLat: row.location_lat,
+      locationLabel: row.location_label,
+      locationMapboxId: row.location_mapbox_id,
+      locationPrecision: row.location_precision,
+      metadata,
+      originalCreatedAt: row.created_at,
+      originalUpdatedAt: row.updated_at,
+    };
+  });
 
   // Prune to only the folders these boards actually need, walking each
   // board's folder up through parentRef so nested chains stay resolvable
@@ -312,7 +400,7 @@ export async function buildExportBundle({
   boards.forEach((board) => markFolderAndAncestors(board.folderRef));
   const neededFolders = folders.filter((folder) => neededFolderLocalIds.has(folder.localId));
 
-  const data: ExportData = { folders: neededFolders, boards, padlets };
+  const data: ExportData = { folders: neededFolders, boards, padlets, boardSections };
 
   return {
     manifest: {
@@ -326,6 +414,7 @@ export async function buildExportBundle({
         folders: data.folders.length,
         boards: data.boards.length,
         padlets: data.padlets.length,
+        boardSections: data.boardSections.length,
       },
     },
     data,

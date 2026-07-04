@@ -6,6 +6,7 @@ import {
   EXPORT_SCHEMA_VERSION,
   PADLET_METADATA_REF_ARRAY_KEY,
   PADLET_METADATA_REF_KEYS,
+  PADLET_METADATA_SECTION_KEY,
   type ExportBundle,
 } from '@/lib/export/types';
 
@@ -26,7 +27,10 @@ const normalizedBoardSchema = z.object({
   title: z.string().min(1),
   description: z.string().nullable(),
   layout: z.string(),
-  background: jsonRecordSchema.nullable(),
+  background: z.preprocess(
+    (value) => (value === 'null' ? null : value),
+    jsonRecordSchema.nullable(),
+  ),
   backgroundType: z.enum(['color', 'gradient', 'image']).nullable(),
   backgroundValue: z.string().nullable(),
   containerSize: z.enum(['small', 'medium', 'large']).nullable(),
@@ -61,6 +65,16 @@ const normalizedPadletSchema = z.object({
   originalUpdatedAt: z.string(),
 });
 
+const normalizedBoardSectionSchema = z.object({
+  localId: z.string(),
+  boardRef: z.string(),
+  title: z.string(),
+  description: z.string().nullable(),
+  position: z.number().nullable(),
+  originalCreatedAt: z.string(),
+  originalUpdatedAt: z.string(),
+});
+
 const exportManifestSchema = z.object({
   type: z.literal('collabboard-workspace-export'),
   schemaVersion: z.number().int().positive(),
@@ -72,6 +86,9 @@ const exportManifestSchema = z.object({
     folders: z.number().int().nonnegative(),
     boards: z.number().int().nonnegative(),
     padlets: z.number().int().nonnegative(),
+    // Archives exported before board_sections support existed won't have
+    // this field — default to 0 rather than rejecting older archives.
+    boardSections: z.number().int().nonnegative().default(0),
   }),
 });
 
@@ -79,6 +96,8 @@ const exportDataSchema = z.object({
   folders: z.array(normalizedFolderSchema),
   boards: z.array(normalizedBoardSchema),
   padlets: z.array(normalizedPadletSchema),
+  // Same backward-compatibility default as counts.boardSections above.
+  boardSections: z.array(normalizedBoardSectionSchema).default([]),
 });
 
 export const exportBundleSchema = z.object({
@@ -111,6 +130,7 @@ function findDuplicateLocalIdErrors(bundle: ExportBundle): string[] {
   checkUnique('folder', bundle.data.folders.map((folder) => folder.localId));
   checkUnique('board', bundle.data.boards.map((board) => board.localId));
   checkUnique('padlet', bundle.data.padlets.map((padlet) => padlet.localId));
+  checkUnique('section', bundle.data.boardSections.map((section) => section.localId));
 
   return errors;
 }
@@ -127,6 +147,7 @@ function findReferentialIntegrityErrors(bundle: ExportBundle): string[] {
   const folderIds = new Set(bundle.data.folders.map((folder) => folder.localId));
   const boardIds = new Set(bundle.data.boards.map((board) => board.localId));
   const padletIds = new Set(bundle.data.padlets.map((padlet) => padlet.localId));
+  const sectionIds = new Set(bundle.data.boardSections.map((section) => section.localId));
 
   for (const folder of bundle.data.folders) {
     if (folder.parentRef && !folderIds.has(folder.parentRef)) {
@@ -137,6 +158,12 @@ function findReferentialIntegrityErrors(bundle: ExportBundle): string[] {
   for (const board of bundle.data.boards) {
     if (board.folderRef && !folderIds.has(board.folderRef)) {
       errors.push(`Board "${board.title}" references folder "${board.folderRef}" which is not in this archive.`);
+    }
+  }
+
+  for (const section of bundle.data.boardSections) {
+    if (!boardIds.has(section.boardRef)) {
+      errors.push(`Section "${section.title}" references board "${section.boardRef}" which is not in this archive.`);
     }
   }
 
@@ -159,6 +186,11 @@ function findReferentialIntegrityErrors(bundle: ExportBundle): string[] {
           errors.push(`Padlet "${padlet.title}" has a childPadletIds entry referencing a padlet not in this archive.`);
         }
       }
+    }
+
+    const sectionRef = padlet.metadata[PADLET_METADATA_SECTION_KEY];
+    if (typeof sectionRef === 'string' && !sectionIds.has(sectionRef)) {
+      errors.push(`Padlet "${padlet.title}" has metadata.sectionId referencing a section not in this archive.`);
     }
   }
 
@@ -229,8 +261,9 @@ export interface ImportPreview {
   exportedFromWorkspaceName: string;
   exportedAt: string;
   folders: { count: number; names: string[] };
-  boards: { count: number; names: string[] };
+  boards: { count: number; names: string[]; items: Array<{ localId: string; title: string }> };
   padlets: { count: number };
+  sections: { count: number };
 }
 
 /**
@@ -253,7 +286,12 @@ export async function buildImportPreview(zipBuffer: Buffer): Promise<ImportPrevi
     boards: {
       count: bundle.data.boards.length,
       names: bundle.data.boards.map((board) => board.title),
+      items: bundle.data.boards.map((board) => ({
+        localId: board.localId,
+        title: board.title,
+      })),
     },
     padlets: { count: bundle.data.padlets.length },
+    sections: { count: bundle.data.boardSections.length },
   };
 }

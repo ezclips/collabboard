@@ -66,6 +66,23 @@ export const PADLET_METADATA_REF_KEYS = [
 ] as const;
 export const PADLET_METADATA_REF_ARRAY_KEY = 'childPadletIds' as const;
 
+/**
+ * Columns-layout section reference. Resolved against NormalizedBoardSection.localId
+ * (a distinct id namespace from padlets), so it's remapped separately from
+ * PADLET_METADATA_REF_KEYS. See lib/import/restore.ts for the remap pass.
+ */
+export const PADLET_METADATA_SECTION_KEY = 'sectionId' as const;
+
+export interface NormalizedBoardSection {
+  localId: string;
+  boardRef: string;
+  title: string;
+  description: string | null;
+  position: number | null;
+  originalCreatedAt: string;
+  originalUpdatedAt: string;
+}
+
 export interface NormalizedPadlet {
   localId: string;
   boardRef: string;
@@ -103,6 +120,7 @@ export interface ExportManifest {
     folders: number;
     boards: number;
     padlets: number;
+    boardSections: number;
   };
 }
 
@@ -110,6 +128,7 @@ export interface ExportData {
   folders: NormalizedFolder[];
   boards: NormalizedBoard[];
   padlets: NormalizedPadlet[];
+  boardSections: NormalizedBoardSection[];
 }
 
 export interface ExportBundle {

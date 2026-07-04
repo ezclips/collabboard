@@ -7,6 +7,7 @@ export interface ImportSummary {
   foldersImported: number;
   boardsImported: number;
   padletsImported: number;
+  boardSectionsImported: number;
 }
 
 interface RestoreImportBundleParams {
@@ -49,6 +50,7 @@ export async function restoreImportBundle({
     p_folders: bundle.data.folders,
     p_boards: bundle.data.boards,
     p_padlets: bundle.data.padlets,
+    p_board_sections: bundle.data.boardSections,
   });
 
   if (error) {

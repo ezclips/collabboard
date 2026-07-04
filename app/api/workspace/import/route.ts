@@ -6,7 +6,61 @@ import { cookies } from 'next/headers';
 import { resolveCurrentWorkspace } from '@/lib/workspace/context';
 import { parseExportZip, ImportValidationError } from '@/lib/import/schema';
 import { restoreImportBundle } from '@/lib/import/restore';
-import { readUploadedZipBuffer, UploadError } from '@/lib/import/upload';
+import { MAX_IMPORT_FILE_BYTES, UploadError } from '@/lib/import/upload';
+import type { ExportBundle } from '@/lib/export/types';
+
+function applyBoardNameOverrides(
+  bundle: ExportBundle,
+  overrides: Record<string, string>,
+): ExportBundle {
+  if (Object.keys(overrides).length === 0) {
+    return bundle;
+  }
+
+  return {
+    ...bundle,
+    data: {
+      ...bundle.data,
+      boards: bundle.data.boards.map((board) => {
+        const override = overrides[board.localId];
+        if (!override) return board;
+        return {
+          ...board,
+          title: override,
+        };
+      }),
+    },
+  };
+}
+
+function parseBoardNameOverrides(rawValue: FormDataEntryValue | null): Record<string, string> {
+  if (typeof rawValue !== 'string' || rawValue.trim() === '') {
+    return {};
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawValue);
+  } catch {
+    throw new UploadError('Board name overrides are not valid JSON.');
+  }
+
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new UploadError('Board name overrides must be an object keyed by board id.');
+  }
+
+  const overrides: Record<string, string> = {};
+  for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+    if (typeof value !== 'string') {
+      throw new UploadError('Every board name override must be a string.');
+    }
+    const trimmed = value.trim();
+    if (!trimmed) continue;
+    overrides[key] = trimmed;
+  }
+
+  return overrides;
+}
 
 /**
  * v1 contract: this is the write step. Clients are expected to call
@@ -25,7 +79,7 @@ import { readUploadedZipBuffer, UploadError } from '@/lib/import/upload';
  */
 export async function POST(request: NextRequest) {
   const cookieStore = await cookies();
-  const supabase = createRouteHandlerClient({ cookies: () => cookieStore as any });
+  const supabase = createRouteHandlerClient({ cookies: async () => cookieStore });
 
   const {
     data: { user },
@@ -42,8 +96,21 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const zipBuffer = await readUploadedZipBuffer(request);
-    const bundle = await parseExportZip(zipBuffer);
+    const formData = await request.formData().catch(() => null);
+    const file = formData?.get('file');
+
+    if (!file || !(file instanceof File)) {
+      throw new UploadError('No file uploaded. Expected form field "file".');
+    }
+
+    if (file.size > MAX_IMPORT_FILE_BYTES) {
+      throw new UploadError(`File is too large (${Math.round(file.size / 1024 / 1024)}MB). Max is 25MB.`);
+    }
+
+    const zipBuffer = Buffer.from(await file.arrayBuffer());
+    const parsedBundle = await parseExportZip(zipBuffer);
+    const boardNameOverrides = parseBoardNameOverrides(formData?.get('boardNameOverrides') ?? null);
+    const bundle = applyBoardNameOverrides(parsedBundle, boardNameOverrides);
 
     const summary = await restoreImportBundle({
       supabase,
