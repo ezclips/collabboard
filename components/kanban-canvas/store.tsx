@@ -3,7 +3,7 @@
 import { createContext, useContext, useReducer, useCallback, ReactNode, useEffect, useRef } from 'react';
 import { toast } from 'sonner';
 import { loadKanbanData, loadKanbanScaffoldData, loadKanbanCardsForColumn, saveCard, saveCardAssignees, deleteCard, saveColumn, deleteColumn, saveColumnGroup, deleteColumnGroup as deleteColumnGroupPersisted, saveSwimlane, deleteSwimlane, saveLink, deleteLink, saveComment, deleteComment as deleteCommentPersisted, saveVote, deleteVote as deleteVotePersisted, saveMemberSortPreference, saveMemberGroupByPreference, saveMemberDateFormatPreference } from '@/lib/kanban/supabaseAdapter';
-import { supabase } from '@/lib/supabase';
+import { supabaseBrowser } from '@/lib/supabase/browser';
 import type {
   KanbanState,
   KanbanAction,
@@ -16,6 +16,8 @@ import type {
   Comment,
   Vote,
 } from '@/types/kanban-canvas';
+
+const supabase = supabaseBrowser();
 
 // ============================================================================
 // Initial State
@@ -1487,12 +1489,16 @@ export function useKanbanPersistence() {
     addColumn: async (column: Column) => {
       if (blockReadonlyMutation()) return;
       actions.addColumn(column);
-      await saveColumn({
+      const result = await saveColumn({
         id: column.id,
         canvas_id: canvasId,
         name: column.label,
         order_index: column.order
       } as any, { isNew: true });
+      if (!result.ok) {
+        toast.error(result.message || 'Failed to create column.');
+        refetchAndReset();
+      }
     },
     updateColumn: async (id: string, updates: Partial<Column>) => {
       if (blockReadonlyMutation()) return;
@@ -1608,12 +1614,16 @@ export function useKanbanPersistence() {
     addRow: async (row: Row) => {
       if (blockReadonlyMutation()) return;
       actions.addRow(row);
-      await saveSwimlane({
+      const result = await saveSwimlane({
         id: row.id,
         canvas_id: canvasId,
         name: row.label,
         order_index: row.order
       } as any, { isNew: true });
+      if (!result.ok) {
+        toast.error(result.message || 'Failed to create row.');
+        refetchAndReset();
+      }
     },
     updateRow: async (id: string, updates: Partial<Row>) => {
       if (blockReadonlyMutation()) return;

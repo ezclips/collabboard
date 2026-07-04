@@ -234,7 +234,7 @@ export function configureGantt(
   if (!readonly && onAddTask) {
     columns.push({
       name: 'add',
-      label: '+',
+      label: '',
       width: 40,
       align: 'center',
       template: (task: { id: string }) => {

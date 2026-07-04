@@ -2,7 +2,7 @@
 
 import React from 'react';
 import * as ContextMenu from '@radix-ui/react-context-menu';
-import { Clock3, RotateCcw, Scissors, SplitSquareHorizontal, Trash2, Plus } from 'lucide-react';
+import { Clock3, RotateCcw, Scissors, SplitSquareHorizontal, Trash2, Plus, CalendarRange } from 'lucide-react';
 
 type SchedulerEventContextMenuProps = {
   children: React.ReactNode;
@@ -15,6 +15,8 @@ type SchedulerEventContextMenuProps = {
   onDeleteEvent: () => void;
   onAddContainer: () => void;
   onChangeColor: (color: string) => void;
+  isAllDay: boolean;
+  onToggleAllDay: () => void;
 };
 
 function MenuItem({ label, icon, onClick, className }: { label: string; icon?: React.ReactNode; onClick: () => void; className?: string }) {
@@ -88,6 +90,8 @@ export default function SchedulerEventContextMenu({
   onDeleteEvent,
   onAddContainer,
   onChangeColor,
+  isAllDay,
+  onToggleAllDay,
 }: SchedulerEventContextMenuProps) {
   return (
     <ContextMenu.Root>
@@ -106,6 +110,11 @@ export default function SchedulerEventContextMenu({
             <MenuItem label="Revert time setting" icon={<RotateCcw size={16} />} onClick={onRevertTimeSetting} />
           )}
           <MenuItem label="Add container" icon={<Plus size={16} />} onClick={onAddContainer} />
+          <MenuItem
+            label={isAllDay ? 'Make single day' : 'Extend across days'}
+            icon={<CalendarRange size={16} />}
+            onClick={onToggleAllDay}
+          />
           <ContextMenu.Separator className="h-[1px] bg-gray-100 m-1" />
           <div className="flex items-center gap-1 px-2 py-1">
             {['#fff', '#f87171', '#fbbf24', '#34d399', '#60a5fa', '#a78bfa'].map((color) => (

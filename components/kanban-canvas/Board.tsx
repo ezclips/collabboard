@@ -97,6 +97,8 @@ export const Board = memo(function Board({ cards, columns, rows, users = [], rea
   const [loadedColumns, setLoadedColumns] = useState<Set<string>>(new Set());
   const [loadingColumns, setLoadingColumns] = useState<Set<string>>(new Set());
   const hasRunInitialLoadRef = useRef(false);
+  const rowRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const prevRowIdsRef = useRef<string[]>([]);
 
   // Configure sensors for drag detection
   const sensors = useSensors(
@@ -157,6 +159,23 @@ export const Board = memo(function Board({ cards, columns, rows, users = [], rea
     () => [...rows].sort((a, b) => (a.order || 0) - (b.order || 0)),
     [rows]
   );
+
+  useEffect(() => {
+    const previousIds = prevRowIdsRef.current;
+    const currentIds = sortedRows.map((row) => row.id);
+    const addedRowId = currentIds.find((id) => !previousIds.includes(id));
+
+    prevRowIdsRef.current = currentIds;
+
+    if (!addedRowId) return;
+
+    const target = rowRefs.current[addedRowId];
+    if (!target) return;
+
+    requestAnimationFrame(() => {
+      target.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    });
+  }, [sortedRows]);
 
   // Filter and sort cards by search query and sort settings
   const filteredCards = useMemo(() => {
@@ -646,7 +665,13 @@ export const Board = memo(function Board({ cards, columns, rows, users = [], rea
             </div>
 
             {sortedRows.map((row) => (
-              <div key={row.id} className={`kanban-row ${ui.collapsedRows.has(row.id) ? 'collapsed' : ''}`}>
+              <div
+                key={row.id}
+                ref={(el) => {
+                  rowRefs.current[row.id] = el;
+                }}
+                className={`kanban-row ${ui.collapsedRows.has(row.id) ? 'collapsed' : ''}`}
+              >
                 <div className="kanban-row-header">
                   <button
                     className="kanban-row-collapse-btn"

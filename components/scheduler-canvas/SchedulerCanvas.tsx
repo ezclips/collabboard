@@ -17,6 +17,8 @@ type SchedulerEvent = {
 type SchedulerLike = {
   config: {
     readonly?: boolean;
+    drag_move?: boolean;
+    drag_resize?: boolean;
     drag_create?: boolean;
     edit_on_create?: boolean;
     details_on_create?: boolean;
@@ -42,9 +44,12 @@ type EventMenuState = {
   y: number;
 };
 
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
 function toUuid(id: string): string {
-  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-  if (uuidRegex.test(id)) return id;
+  if (isUuid(id)) return id;
   return crypto.randomUUID();
 }
 
@@ -166,6 +171,8 @@ export function SchedulerCanvas() {
       const scheduler = schedulerModule.scheduler as SchedulerLike;
       schedulerRef.current = scheduler;
       scheduler.config.readonly = readonly;
+      scheduler.config.drag_move = !readonly;
+      scheduler.config.drag_resize = !readonly;
       scheduler.config.drag_create = !readonly;
       scheduler.config.edit_on_create = false;
       scheduler.config.details_on_create = false;
@@ -182,14 +189,17 @@ export function SchedulerCanvas() {
       ids.push(
         scheduler.attachEvent('onEventChanged', (id: unknown) => {
           if (isApplyingExternalUpdateRef.current) return true;
-          const ev = scheduler.getEvent(String(id));
+          const eventId = String(id);
+          if (!isUuid(eventId)) return true;
+
+          const ev = scheduler.getEvent(eventId);
           if (!ev) return true;
           const updates: Partial<Card> = {
             label: typeof ev.text === 'string' ? ev.text : undefined,
             start_date: toDateInput(ev.start_date as Date | undefined),
             end_date: toDateInput(ev.end_date as Date | undefined),
           };
-          void actions.updateCard(String(id), updates);
+          void actions.updateCard(eventId, updates);
           return true;
         })
       );
@@ -224,6 +234,7 @@ export function SchedulerCanvas() {
         scheduler.attachEvent('onContextMenu', (id: unknown, rawEvent: unknown) => {
           if (readonly) return false;
           const cardId = String(id);
+          if (!isUuid(cardId)) return false;
           if (!getCardById(cardId)) return false;
           const event = rawEvent as MouseEvent | undefined;
           if (!event) return false;
@@ -240,8 +251,10 @@ export function SchedulerCanvas() {
       ids.push(
         scheduler.attachEvent('onEventDeleted', (id: unknown) => {
           if (isApplyingExternalUpdateRef.current) return true;
+          const eventId = String(id);
+          if (!isUuid(eventId)) return true;
           closeEventMenu();
-          void actions.deleteCard(String(id));
+          void actions.deleteCard(eventId);
           return true;
         })
       );
@@ -269,6 +282,8 @@ export function SchedulerCanvas() {
     const scheduler = schedulerRef.current;
     if (!scheduler) return;
     scheduler.config.readonly = readonly;
+    scheduler.config.drag_move = !readonly;
+    scheduler.config.drag_resize = !readonly;
     scheduler.config.drag_create = !readonly;
     scheduler.config.edit_on_create = false;
     scheduler.setCurrentView();

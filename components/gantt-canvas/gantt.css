@@ -73,6 +73,32 @@
   background: #64748b;
 }
 
+@keyframes gantt-plus-hover-flash {
+  0% {
+    opacity: 0.6;
+    filter: drop-shadow(0 0 0 rgba(37, 99, 235, 0));
+  }
+  100% {
+    opacity: 1;
+    filter: drop-shadow(0 0 6px rgba(37, 99, 235, 0.4));
+  }
+}
+
+.gantt-container .gantt_grid_head_cell.gantt_grid_head_add {
+  animation: gantt-plus-hover-flash 0.8s ease-in-out infinite alternate;
+  transition: background-color 0.18s ease;
+}
+
+.gantt-container .gantt_grid_head_cell.gantt_grid_head_add:hover,
+.gantt-container .gantt_grid_head_cell.gantt_grid_head_add:focus-visible {
+  background: #eff6ff;
+}
+
+.gantt-container .gantt_grid_head_add:hover,
+.gantt-container .gantt_grid_head_add:focus-visible {
+  animation-duration: 0.5s !important;
+}
+
 /* Add task button styling */
 .gantt-add-task-btn {
   width: 28px;

@@ -2197,9 +2197,30 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       hoverSchedulerSlotStartRef.current = hoverId ? null : slotStartEl?.getAttribute('data-scheduler-slot-start') || null;
     };
 
-    const handleMouseUp = () => {
-      const hoverId = hoverContainerRef.current;
-      const hoverSlotStart = hoverSchedulerSlotStartRef.current;
+    const handleMouseUp = (e: MouseEvent) => {
+      // Recompute the drop target fresh from the actual mouseup coordinates
+      // instead of trusting hoverContainerRef/hoverSchedulerSlotStartRef —
+      // those are only updated on mousemove, so a missed/coalesced move event
+      // (fast drag, or a stale ref left over from a prior drag session) could
+      // otherwise attach the post to whatever container was last hovered
+      // instead of where it was actually dropped.
+      const elements = document.elementsFromPoint(e.clientX, e.clientY);
+      let containerEl: Element | null = null;
+      let slotStartEl: Element | null = null;
+      for (const el of elements) {
+        const found = el.closest('[data-container-id], [data-scheduler-container-id]');
+        if (found) { containerEl = found; break; }
+      }
+      if (!containerEl && placementContext === 'scheduler') {
+        for (const el of elements) {
+          const found = el.closest('[data-scheduler-slot-start]');
+          if (found) { slotStartEl = found; break; }
+        }
+      }
+      const hoverId = containerEl?.getAttribute('data-container-id')
+        || containerEl?.getAttribute('data-scheduler-container-id')
+        || null;
+      const hoverSlotStart = hoverId ? null : slotStartEl?.getAttribute('data-scheduler-slot-start') || null;
       if (hoverId && newPostDragState.draft) {
         createRealPostFromDraftRef.current(newPostDragState.draft, hoverId);
         setWallPendingPostDraft(null);
@@ -4622,11 +4643,13 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   const handleOpenSchedulerPadlet = useCallback((padlet: Padlet) => {
     closeAllToolbars();
     setSelectedPadletId(padlet.id);
+    const isAllDay = padlet.metadata?.isAllDay === true;
     const startRaw = typeof padlet.metadata?.start_date === 'string' ? padlet.metadata.start_date : null;
     const endRaw = typeof padlet.metadata?.end_date === 'string' ? padlet.metadata.end_date : null;
     const start = startRaw ? new Date(startRaw) : null;
     const end = endRaw ? new Date(endRaw) : null;
     if (
+      !isAllDay &&
       start &&
       end &&
       !Number.isNaN(start.getTime()) &&
@@ -4634,6 +4657,8 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       end > start
     ) {
       setSelectedSchedulerSlot({ start, end });
+    } else {
+      setSelectedSchedulerSlot(null);
     }
     setSelectedSchedulerContainerId(padlet.id);
     // Open the container popover so the user can see child posts.
@@ -4643,11 +4668,13 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   const handleTargetSchedulerPadlet = useCallback((padlet: Padlet) => {
     closeAllToolbars();
     setSelectedPadletId(padlet.id);
+    const isAllDay = padlet.metadata?.isAllDay === true;
     const startRaw = typeof padlet.metadata?.start_date === 'string' ? padlet.metadata.start_date : null;
     const endRaw = typeof padlet.metadata?.end_date === 'string' ? padlet.metadata.end_date : null;
     const start = startRaw ? new Date(startRaw) : null;
     const end = endRaw ? new Date(endRaw) : null;
     if (
+      !isAllDay &&
       start &&
       end &&
       !Number.isNaN(start.getTime()) &&
@@ -4655,6 +4682,8 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       end > start
     ) {
       setSelectedSchedulerSlot({ start, end });
+    } else {
+      setSelectedSchedulerSlot(null);
     }
     setSelectedSchedulerContainerId(padlet.id);
     // Do not open the modal on "Add post" from context menu.
@@ -4665,24 +4694,30 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     if (!isSchedulerLayout) return;
     if (!selectedSchedulerContainerId) return;
 
-    const hasLiveSelectedContainer = padlets.some((padlet) =>
+    const liveSelectedContainer = padlets.find((padlet) =>
       padlet.id === selectedSchedulerContainerId &&
       padlet.type === 'container' &&
       !(padlet.metadata as any)?.parentId
     );
 
-    if (hasLiveSelectedContainer) return;
+    if (!liveSelectedContainer) {
+      setSelectedSchedulerContainerId(null);
+      setSelectedSchedulerSlot(null);
+      if (schedulerPopoverPadletId === selectedSchedulerContainerId) {
+        setSchedulerPopoverPadletId(null);
+      }
+      return;
+    }
 
-    setSelectedSchedulerContainerId(null);
-    setSelectedSchedulerSlot(null);
-    if (schedulerPopoverPadletId === selectedSchedulerContainerId) {
-      setSchedulerPopoverPadletId(null);
+    if (liveSelectedContainer.metadata?.isAllDay === true && selectedSchedulerSlot) {
+      setSelectedSchedulerSlot(null);
     }
   }, [
     isSchedulerLayout,
     padlets,
     schedulerPopoverPadletId,
     selectedSchedulerContainerId,
+    selectedSchedulerSlot,
     setSelectedSchedulerContainerId,
     setSelectedSchedulerSlot,
     setSchedulerPopoverPadletId,
@@ -7658,6 +7693,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
             {/* Scheduler Container Popover */}
             {isSchedulerLayout && schedulerPopoverPadletId && (
               <div
+                data-container-id={schedulerPopoverPadletId}
                 className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/40 backdrop-blur-sm"
                 onMouseDown={clearSchedulerSelection}
               >
@@ -7677,7 +7713,10 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                       if (!padlet) return null;
                       return (
                         <div className="w-full flex justify-center drop-shadow-2xl">
-                          <div className="w-full bg-white rounded-xl shadow-lg border border-gray-100 overflow-hidden">
+                          <div
+                            data-container-id={padlet.id}
+                            className="w-full bg-white rounded-xl shadow-lg border border-gray-100 overflow-hidden"
+                          >
                             <RowColumnContainerCard
                               padlet={padlet}
                               allPadlets={padlets}

@@ -154,6 +154,7 @@ export interface Padlet {
       isStrikethrough?: boolean;
     }>;
     cardColor?: string;
+    isAllDay?: boolean;
     topStrip?: string;
     textColor?: string;
     reactions?: string[];

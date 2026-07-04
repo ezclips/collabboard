@@ -18,6 +18,10 @@ type SchedulerEvent = {
   start: Date;
   end: Date;
   resource: Padlet;
+  allDay: boolean;
+  // Present only for events that span multiple days and are rendered as one
+  // timed block per day (same hour range repeated) instead of an all-day bar.
+  segment?: { isFirst: boolean; isLast: boolean };
 };
 
 type StandaloneSchedulerCanvasProps = {
@@ -195,22 +199,47 @@ export default function StandaloneSchedulerCanvas({
   }, [readOnly]); // stable — all mutable state accessed through refs
 
   const events = useMemo<SchedulerEvent[]>(() => {
-    return padlets
+    const result: SchedulerEvent[] = [];
+    padlets
       .filter(padlet => !padlet.metadata?.parentId)
-      .map((padlet) => {
+      .forEach((padlet) => {
         const start = parseDate(padlet.metadata?.start_date);
         const end = parseDate(padlet.metadata?.end_date);
-        if (!start) return null;
+        if (!start) return;
         const safeEnd = end && end > start ? end : new Date(start.getTime() + 60 * 60 * 1000);
-        return {
-          id: padlet.id,
-          title: padlet.title?.trim() || '',
-          start,
-          end: safeEnd,
-          resource: padlet,
-        };
-      })
-      .filter((event): event is SchedulerEvent => event !== null);
+        const allDay = padlet.metadata?.isAllDay === true;
+        const title = padlet.title?.trim() || '';
+        const spansMultipleDays = !allDay && safeEnd.toDateString() !== start.toDateString();
+
+        if (!spansMultipleDays) {
+          result.push({ id: padlet.id, title, start, end: safeEnd, resource: padlet, allDay });
+          return;
+        }
+
+        // Render one timed block per day, each keeping the same start/end
+        // hour, so the event still shows *when* it happens each day instead
+        // of collapsing into a bare all-day bar with no time information.
+        const startMidnight = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+        const endMidnight = new Date(safeEnd.getFullYear(), safeEnd.getMonth(), safeEnd.getDate());
+        const dayCount = Math.round((endMidnight.getTime() - startMidnight.getTime()) / (24 * 60 * 60 * 1000)) + 1;
+
+        for (let i = 0; i < dayCount; i++) {
+          const dayStart = new Date(start);
+          dayStart.setDate(dayStart.getDate() + i);
+          const dayEnd = new Date(dayStart);
+          dayEnd.setHours(safeEnd.getHours(), safeEnd.getMinutes(), safeEnd.getSeconds(), 0);
+          result.push({
+            id: `${padlet.id}::day${i}`,
+            title,
+            start: dayStart,
+            end: dayEnd,
+            resource: padlet,
+            allDay: false,
+            segment: { isFirst: i === 0, isLast: i === dayCount - 1 },
+          });
+        }
+      });
+    return result;
   }, [padlets]);
 
   const handleEventMoveOrResize = async ({
@@ -223,6 +252,10 @@ export default function StandaloneSchedulerCanvas({
     end: Date;
   }) => {
     if (readOnly) return;
+    // Multi-day segments only move via the day-extend handles below —
+    // react-big-calendar's native drag/resize is disabled for them via
+    // draggableAccessor/resizableAccessor, but guard here too.
+    if (event.segment) return;
     console.log('[Scheduler] Handling event move/resize', event.title, start, end);
     const safeEnd = end > start ? end : new Date(start.getTime() + 60 * 60 * 1000);
     try {
@@ -237,7 +270,7 @@ export default function StandaloneSchedulerCanvas({
   };
 
   const handleSelectSlot = useCallback(
-    ({ start, end }: { start: Date; end: Date }) => {
+    ({ start, end, action }: { start: Date; end: Date; action: 'select' | 'click' | 'doubleClick' }) => {
       if (readOnly) return;
       const overlapsExistingEvent = events.some(
         (event) => event.start < end && event.end > start
@@ -247,8 +280,12 @@ export default function StandaloneSchedulerCanvas({
         onSelectTimeSlot?.(null);
         return;
       }
-      // One-step creation: dragging an empty slot immediately creates a blank
-      // event block, matching the prior scheduler's click-to-create behavior.
+      // A single click just clears any stale highlight — creation requires a
+      // double-click (or a drag-select) so a stray click can't spawn a container.
+      if (action === 'click') {
+        onSelectTimeSlot?.(null);
+        return;
+      }
       onSelectTimeSlot?.(null);
       void onCreatePadlet(start, end);
     },
@@ -469,11 +506,140 @@ export default function StandaloneSchedulerCanvas({
     });
   }, [getLiveEventRange, onCreatePadlet, readOnly, runEventMutation]);
 
+  // Turns a single-day event into a real multi-day timed span (same start/end
+  // hour repeated on each day, rendered as one block per day — see the
+  // `events` useMemo above) instead of collapsing it into a bare all-day bar
+  // with no time information. "Make single day" collapses it back.
+  const toggleAllDay = useCallback(async (event: SchedulerEvent) => {
+    if (readOnly) return;
+    await runEventMutation(event.resource.id, async () => {
+      const { start, end } = getLiveEventRange(event);
+      const isMultiDay = end.toDateString() !== start.toDateString();
+
+      if (isMultiDay) {
+        const singleDayEnd = new Date(start);
+        singleDayEnd.setHours(end.getHours(), end.getMinutes(), end.getSeconds(), 0);
+        const safeSingleDayEnd = singleDayEnd > start
+          ? singleDayEnd
+          : new Date(start.getTime() + 60 * 60 * 1000);
+        await onUpdatePadletMetadata(event.resource.id, {
+          isAllDay: false,
+          start_date: start.toISOString(),
+          end_date: safeSingleDayEnd.toISOString(),
+        });
+        return;
+      }
+
+      const nextDayEnd = new Date(end);
+      nextDayEnd.setDate(nextDayEnd.getDate() + 1);
+      await onUpdatePadletMetadata(event.resource.id, {
+        isAllDay: false,
+        start_date: start.toISOString(),
+        end_date: nextDayEnd.toISOString(),
+      });
+    });
+  }, [getLiveEventRange, onUpdatePadletMetadata, readOnly, runEventMutation]);
+
+  // Dragging the left/right edge of a multi-day event's first/last day
+  // segment extends (or shrinks) the span by whole days while keeping the
+  // original start/end hour — a horizontal "extend across days" gesture
+  // that native react-big-calendar resize can't do across day columns.
+  const daySpanDragRef = useRef<{
+    padletId: string;
+    edge: 'start' | 'end';
+    originalStart: Date;
+    originalEnd: Date;
+  } | null>(null);
+  const [daySpanDragHighlightDate, setDaySpanDragHighlightDate] = useState<string | null>(null);
+
+  const startDaySpanDrag = useCallback((event: SchedulerEvent, edge: 'start' | 'end') => {
+    if (readOnly) return;
+    const { start, end } = getLiveEventRange(event);
+    daySpanDragRef.current = { padletId: event.resource.id, edge, originalStart: start, originalEnd: end };
+  }, [getLiveEventRange, readOnly]);
+
+  useEffect(() => {
+    const findHoveredDay = (clientX: number, clientY: number): Date | null => {
+      const elements = document.elementsFromPoint(clientX, clientY);
+      for (const el of elements) {
+        const found = el.closest('[data-scheduler-slot-start]');
+        if (found) {
+          const iso = found.getAttribute('data-scheduler-slot-start');
+          if (iso) return new Date(iso);
+        }
+      }
+      return null;
+    };
+
+    const handleMove = (e: MouseEvent) => {
+      if (!daySpanDragRef.current) return;
+      const hoveredDay = findHoveredDay(e.clientX, e.clientY);
+      if (!hoveredDay) return;
+      const dayKey = hoveredDay.toDateString();
+      setDaySpanDragHighlightDate((prev) => (prev === dayKey ? prev : dayKey));
+    };
+
+    const handleUp = (e: MouseEvent) => {
+      const drag = daySpanDragRef.current;
+      daySpanDragRef.current = null;
+      setDaySpanDragHighlightDate(null);
+      if (!drag) return;
+
+      const hoveredDay = findHoveredDay(e.clientX, e.clientY);
+      if (!hoveredDay) return;
+
+      let newStart = drag.originalStart;
+      let newEnd = drag.originalEnd;
+      if (drag.edge === 'end') {
+        const candidate = new Date(hoveredDay);
+        candidate.setHours(drag.originalEnd.getHours(), drag.originalEnd.getMinutes(), drag.originalEnd.getSeconds(), 0);
+        if (candidate > drag.originalStart) newEnd = candidate;
+      } else {
+        const candidate = new Date(hoveredDay);
+        candidate.setHours(drag.originalStart.getHours(), drag.originalStart.getMinutes(), drag.originalStart.getSeconds(), 0);
+        if (candidate < drag.originalEnd) newStart = candidate;
+      }
+
+      if (newStart.getTime() === drag.originalStart.getTime() && newEnd.getTime() === drag.originalEnd.getTime()) return;
+
+      Promise.resolve(
+        onUpdatePadletMetadata(drag.padletId, {
+          start_date: newStart.toISOString(),
+          end_date: newEnd.toISOString(),
+        })
+      ).catch((err) => {
+        console.error('[Scheduler] Failed to extend event across days:', err);
+      });
+    };
+
+    window.addEventListener('mousemove', handleMove);
+    window.addEventListener('mouseup', handleUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMove);
+      window.removeEventListener('mouseup', handleUp);
+    };
+  }, [onUpdatePadletMetadata]);
+
+  const dayPropGetter = useCallback((date: Date) => {
+    if (!daySpanDragHighlightDate) return {};
+    if (date.toDateString() === daySpanDragHighlightDate) {
+      return { style: { backgroundColor: 'rgba(37, 99, 235, 0.08)' } };
+    }
+    return {};
+  }, [daySpanDragHighlightDate]);
+
   const CustomEventWrapper = useCallback(({ event, children }: { event: SchedulerEvent; children: React.ReactNode }) => {
+    // `display: contents` keeps this wrapper out of layout entirely — react-big-
+    // calendar's own `.rbc-event` child stays the thing that's actually sized and
+    // absolutely positioned, so this div can't stretch to fill the whole day
+    // column (which is what let clicks anywhere in the column open the popover).
+    // Mouse events still bubble through it normally, so our click-vs-drag
+    // detection below keeps working without touching the DnD addon's own
+    // onMouseDown (drag-to-move), which stays directly on the child untouched.
     const content = (
       <div
         data-scheduler-container-id={event.resource.id}
-        className="w-full h-full"
+        style={{ display: 'contents' }}
         onMouseDown={(e) => {
           if (readOnly) return;
           if (e.button === 0) {
@@ -539,6 +705,10 @@ export default function StandaloneSchedulerCanvas({
         onChangeColor={(color) => {
           onUpdatePadletMetadata(event.resource.id, { cardColor: color });
         }}
+        isAllDay={!!event.segment}
+        onToggleAllDay={() => {
+          toggleAllDay(event);
+        }}
       >
         {content}
       </SchedulerEventContextMenu>
@@ -548,6 +718,7 @@ export default function StandaloneSchedulerCanvas({
     onDeletePadlet,
     onEditItem,
     onTargetItem,
+    toggleAllDay,
     onUpdatePadletMetadata,
     readOnly,
     revertTimeSetting,
@@ -560,17 +731,41 @@ export default function StandaloneSchedulerCanvas({
   const CustomEvent = useCallback(({ title, event }: { title: string; event: SchedulerEvent }) => {
     const childCount = padlets.filter((p) => (p.metadata as any)?.parentId === event.resource.id).length;
     const postLabel = `${childCount} ${childCount === 1 ? 'post' : 'posts'}`;
+    const showStartHandle = !readOnly && event.segment?.isFirst;
+    const showEndHandle = !readOnly && event.segment?.isLast;
     return (
       <div
         data-scheduler-event-tab="true"
         data-scheduler-container-id={event.resource.id}
-        title={postLabel}
+        title={event.segment ? `${postLabel} · drag the edge to extend across days` : postLabel}
         className="relative block w-full h-full min-h-[20px] px-1 overflow-hidden font-medium text-sm text-left"
       >
         <span className="block truncate">{title}</span>
+        {showStartHandle && (
+          <div
+            className="absolute left-0 top-0 h-full w-2 cursor-ew-resize"
+            style={{ zIndex: 5 }}
+            onMouseDown={(e) => {
+              e.stopPropagation();
+              e.preventDefault();
+              startDaySpanDrag(event, 'start');
+            }}
+          />
+        )}
+        {showEndHandle && (
+          <div
+            className="absolute right-0 top-0 h-full w-2 cursor-ew-resize"
+            style={{ zIndex: 5 }}
+            onMouseDown={(e) => {
+              e.stopPropagation();
+              e.preventDefault();
+              startDaySpanDrag(event, 'end');
+            }}
+          />
+        )}
       </div>
     );
-  }, [padlets]);
+  }, [padlets, readOnly, startDaySpanDrag]);
 
   const TimeSlotWrapper = useCallback(({ value, children }: { value: Date; children: React.ReactElement }) => {
     return React.cloneElement(children, {
@@ -649,6 +844,8 @@ export default function StandaloneSchedulerCanvas({
           onView={(newView: View) => setCurrentView(newView)}
           views={['month', 'week', 'day', 'agenda']}
           resizable={!readOnly}
+          resizableAccessor={(event: SchedulerEvent) => !readOnly && !event.segment}
+          draggableAccessor={(event: SchedulerEvent) => !readOnly && !event.segment}
           selectable={!readOnly}
           popup
           dayLayoutAlgorithm="no-overlap"
@@ -663,6 +860,7 @@ export default function StandaloneSchedulerCanvas({
           onDropFromOutside={() => { clearExternalDragState(); }}
           slotPropGetter={slotPropGetter}
           eventPropGetter={eventPropGetter}
+          dayPropGetter={dayPropGetter}
           components={{
             event: CustomEvent,
             eventWrapper: CustomEventWrapper,

@@ -1,4 +1,4 @@
-import { supabase } from '@/lib/supabase';
+import { supabaseBrowser } from '@/lib/supabase/browser';
 import type {
     KanbanDBCard,
     KanbanDBCardAssignee,
@@ -14,6 +14,8 @@ import type {
 let cardAssigneesTableAvailable: boolean | null = null;
 let commentsTableAvailable: boolean | null = null;
 let votesTableAvailable: boolean | null = null;
+
+const supabase = supabaseBrowser();
 
 export type SaveLinkResult = {
     ok: boolean;
@@ -660,7 +662,12 @@ export async function saveColumn(column: Partial<KanbanDBColumn> & { id: string;
     if (options.isNew) {
         const { error } = await supabase.from('kanban_columns').insert(payload);
         if (error) {
-            console.error('Error creating kanban column:', error);
+            console.error(`Error creating kanban column: ${stringifyForConsole({
+                error: formatSupabaseError(error),
+                columnId: column.id,
+                canvasId: column.canvas_id,
+                payload,
+            })}`);
             return { ok: false, conflict: false, message: 'Failed to create column.' } as SaveEntityResult;
         }
         return { ok: true, conflict: false } as SaveEntityResult;
@@ -759,7 +766,12 @@ export async function saveSwimlane(swimlane: Partial<KanbanDBSwimlane> & { id: s
     if (options.isNew) {
         const { error } = await supabase.from('kanban_swimlanes').insert(payload);
         if (error) {
-            console.error('Error creating kanban swimlane:', error);
+            console.error(`Error creating kanban swimlane: ${stringifyForConsole({
+                error: formatSupabaseError(error),
+                swimlaneId: swimlane.id,
+                canvasId: swimlane.canvas_id,
+                payload,
+            })}`);
             return { ok: false, conflict: false, message: 'Failed to create row.' } as SaveEntityResult;
         }
         return { ok: true, conflict: false } as SaveEntityResult;
