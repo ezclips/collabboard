@@ -21,6 +21,7 @@ interface ColumnPostContextMenuProps {
     onOpenChange?: (open: boolean) => void;
     onOpen?: () => void;
     restrictToMenuTrigger?: boolean;
+    disabled?: boolean;
     // New: openTargets for container children submenu
     openTargets?: Padlet[];
     onOpenTarget?: (padlet: Padlet) => void;
@@ -71,6 +72,7 @@ export function ColumnPostContextMenu({
     onOpenChange,
     onOpen,
     restrictToMenuTrigger = false,
+    disabled = false,
     openTargets,
     onOpenTarget,
     getOpenTargetLabel,
@@ -158,6 +160,10 @@ export function ColumnPostContextMenu({
             target: { kind: 'post', postId: padlet.id, postType: padlet.type, x: 0, y: 0 }
         });
     };
+
+    if (disabled) {
+        return <>{children}</>;
+    }
 
     const wrappedTrigger = restrictToMenuTrigger ? (
         <div

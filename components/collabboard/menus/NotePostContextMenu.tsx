@@ -23,6 +23,7 @@ interface NotePostContextMenuProps {
     onSendToBack?: () => void;
     onCreateSyncedCopy?: () => void;
     onGroupIntoColumn?: () => void;
+    disabled?: boolean;
 }
 
 export function NotePostContextMenu({
@@ -39,8 +40,12 @@ export function NotePostContextMenu({
     onSendBackward,
     onSendToBack,
     onCreateSyncedCopy,
-    onGroupIntoColumn
+    onGroupIntoColumn,
+    disabled = false,
 }: NotePostContextMenuProps) {
+    if (disabled) {
+        return <>{children}</>;
+    }
 
     const handleAction = (id: ActionId) => {
         // If we have a direct prop, use it (easier integration for now)

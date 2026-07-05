@@ -33,6 +33,7 @@ type MapSearchControlProps = {
   onCancel?: () => void;
   isDropPinActive?: boolean;
   onSearchFocus?: () => void;
+  canDropPin?: boolean;
 };
 
 export default function MapSearchControl({
@@ -42,6 +43,7 @@ export default function MapSearchControl({
   onCancel,
   isDropPinActive = false,
   onSearchFocus,
+  canDropPin = true,
 }: MapSearchControlProps) {
   return (
     <div className="absolute left-1/2 top-3 z-40 w-[min(640px,calc(100%-24px))] -translate-x-1/2 rounded-xl border border-slate-300 bg-slate-100/95 p-1 shadow">
@@ -49,9 +51,14 @@ export default function MapSearchControl({
         <button
           type="button"
           className={`rounded-md px-3 py-2 text-xs font-medium transition-colors ${
-            isDropPinActive ? 'bg-amber-500 text-white' : 'bg-slate-900 text-slate-100 hover:bg-slate-800'
+            isDropPinActive
+              ? 'bg-amber-500 text-white'
+              : canDropPin
+                ? 'bg-slate-900 text-slate-100 hover:bg-slate-800'
+                : 'cursor-not-allowed bg-slate-300 text-slate-500'
           }`}
-          onClick={onDropPin}
+          onClick={canDropPin ? onDropPin : undefined}
+          disabled={!canDropPin}
         >
           Drop Pin
         </button>

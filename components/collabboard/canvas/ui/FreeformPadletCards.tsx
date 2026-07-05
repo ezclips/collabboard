@@ -600,7 +600,9 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
       style={{
         left: padlet.position_x || 0,
         top: padlet.position_y || 0,
-        cursor: isDragging && draggingPadletId === padlet.id ? 'grabbing' : 'grab',
+        cursor: canUseFreeformEditButton
+          ? (isDragging && draggingPadletId === padlet.id ? 'grabbing' : 'grab')
+          : 'default',
         zIndex: draggingPadletId === padlet.id ? 10000 : ((padlet.metadata as any)?.zIndex || 1),
       }}
     >                {/* Comment Badge - positioned on outer container so not clipped */}
@@ -708,6 +710,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
         <ImagePostContextMenu
           padlet={padlet}
           onSelect={() => setSelectedPadletId(padlet.id)}
+          disabled={!canUseFreeformEditButton}
           onDuplicate={() => duplicatePadlet(padlet.id)}
           onDelete={() => requestDeletePadlet(padlet.id)}
           onCut={() => cutPadlet(padlet.id)}
@@ -1687,6 +1690,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
         <NotePostContextMenu
           padlet={padlet}
           onSelect={() => setSelectedPadletId(padlet.id)}
+          disabled={!canUseFreeformEditButton}
           onDelete={() => requestDeletePadlet(padlet.id)}
           onBringToFront={() => movePadletLayer(padlet.id, 'bringToFront')}
           onBringForward={() => movePadletLayer(padlet.id, 'bringForward')}
@@ -2213,6 +2217,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
         <CommentPostContextMenu
           padlet={padlet}
           onSelect={() => setSelectedPadletId(padlet.id)}
+          disabled={!canUseFreeformEditButton}
           onDuplicate={() => duplicatePadlet(padlet.id)}
           onDelete={() => requestDeletePadlet(padlet.id)}
           onCut={() => cutPadlet(padlet.id)}
@@ -2651,18 +2656,18 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                       setSelectedPadletId(padlet.id);
                     }
                   }}
-                  onDoubleClick={(e) => {
+                  onDoubleClick={canUseFreeformEditButton ? (e) => {
                     e.stopPropagation();
                     closeAllToolbars();
                     setSelectedPadletId(null);
                     setPadletToEdit(padlet);
                     setIsCommentEditorOpen(true);
-                  }}
-                  onEdit={() => {
+                  } : undefined}
+                  onEdit={canUseFreeformEditButton ? () => {
                     closeAllToolbars();
                     setPadletToEdit(padlet);
                     setIsCommentEditorOpen(true);
-                  }}
+                  } : undefined}
                   onMouseDown={(e) => {
                     if (isLineMode) return;
                     handlePadletMouseDown(e, padlet.id);
@@ -3094,7 +3099,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                             {isExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
                           </button>
                         )}
-                        {isAIPost && (
+                        {isAIPost && canUseFreeformEditButton && (
                           <>
                             <button
                               type="button"
@@ -3224,10 +3229,11 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
             )}
 
             {/* Resize handle - bottom-right corner, AI cards only, hidden when locked */}
-            {padlet.type === 'ai-component' && !(padlet.metadata as any)?.isLocked && (
+            {padlet.type === 'ai-component' && canUseFreeformEditButton && !(padlet.metadata as any)?.isLocked && (
               <div
                 data-no-drag="true"
                 onPointerDown={(e) => {
+                  if (!canUseFreeformEditButton) return;
                   e.preventDefault();
                   e.stopPropagation();
                   (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
@@ -3240,6 +3246,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                   };
                 }}
                 onPointerMove={(e) => {
+                  if (!canUseFreeformEditButton) return;
                   if (!aiResizeRef.current || aiResizeRef.current.id !== padlet.id) return;
                   e.preventDefault();
                   e.stopPropagation();
@@ -3250,6 +3257,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                   setPadlets(prev => prev.map(p => p.id === padlet.id ? { ...p, width: newW, height: newH } : p));
                 }}
                 onPointerUp={(e) => {
+                  if (!canUseFreeformEditButton) return;
                   if (!aiResizeRef.current || aiResizeRef.current.id !== padlet.id) return;
                   e.preventDefault();
                   e.stopPropagation();
@@ -3573,7 +3581,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                   showHeader={false}
                   isExpanded={expandedContainers[padlet.id] ?? false}
                   onExpandAvailabilityChange={(available) => setExpandableContainers(prev => prev[padlet.id] === available ? prev : { ...prev, [padlet.id]: available })}
-                  onDropExistingPadlet={async (containerId, droppedId) => {
+                  onDropExistingPadlet={canUseFreeformEditButton ? async (containerId, droppedId) => {
                     const containerPadlet = padlets.find(p => p.id === containerId);
                     if (!containerPadlet) return;
                     const childIds = containerPadlet.metadata?.childPadletIds || [];
@@ -3599,7 +3607,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                     } catch (err) {
                       console.error('Failed to add padlet to container:', err);
                     }
-                  }}
+                  } : undefined}
                   ignoreDragKinds={[DND_KIND_CONTAINER_MOVE]}
                   onViewDrawing={(p) => setViewDrawingPadlet(p)}
                   currentUserId={user?.id}
@@ -3672,9 +3680,11 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                           aiExportTargetsRef.current[padlet.id] = element;
                         },
                         onResize: (w: number, h: number) => {
+                          if (!canUseFreeformEditButton) return;
                           setPadlets(prev => prev.map(p => p.id === padlet.id ? { ...p, width: w, height: h } : p));
                         },
                         onResizeEnd: (w: number, h: number) => {
+                          if (!canUseFreeformEditButton) return;
                           supabase.from('padlets').update({ width: w, height: h, updated_at: new Date().toISOString() }).eq('id', padlet.id);
                         },
                       }
@@ -3790,6 +3800,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
               key={padlet.id}
               padlet={padlet}
               onSelect={() => setSelectedPadletId(padlet.id)}
+              disabled={!canUseFreeformEditButton}
               onDuplicate={() => duplicatePadlet(padlet.id)}
               onDelete={() => requestDeletePadlet(padlet.id)}
               onCut={() => cutPadlet(padlet.id)}
@@ -4160,6 +4171,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
               key={padlet.id}
               padlet={padlet}
               onSelect={() => setSelectedPadletId(padlet.id)}
+              disabled={!canUseFreeformEditButton}
               onDuplicate={() => duplicatePadlet(padlet.id)}
               onDelete={() => requestDeletePadlet(padlet.id)}
               onCut={() => cutPadlet(padlet.id)}
@@ -4519,6 +4531,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
               key={padlet.id}
               padlet={padlet}
               onSelect={() => setSelectedPadletId(padlet.id)}
+              disabled={!canUseFreeformEditButton}
               onDuplicate={() => duplicatePadlet(padlet.id)}
               onDelete={() => requestDeletePadlet(padlet.id)}
               onCut={() => cutPadlet(padlet.id)}
@@ -4879,15 +4892,16 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
               key={padlet.id}
               padlet={padlet}
               onSelect={() => setSelectedPadletId(padlet.id)}
-              onDuplicate={() => duplicatePadlet(padlet.id)}
-              onDelete={() => requestDeletePadlet(padlet.id)}
-              onCut={() => cutPadlet(padlet.id)}
-              onCopy={() => copyPadlet(padlet.id)}
-              onPaste={handlePaste}
-              onRename={() => renameColumn(padlet.id)}
-              onLock={() => lockPadlet(padlet.id)}
-              onBringToFront={() => movePadletLayer(padlet.id, 'bringToFront')}
-              onSendToBack={() => movePadletLayer(padlet.id, 'sendToBack')}
+              disabled={!canUseFreeformEditButton}
+              onDuplicate={canUseFreeformEditButton ? () => duplicatePadlet(padlet.id) : undefined}
+              onDelete={canUseFreeformEditButton ? () => requestDeletePadlet(padlet.id) : undefined}
+              onCut={canUseFreeformEditButton ? () => cutPadlet(padlet.id) : undefined}
+              onCopy={canUseFreeformEditButton ? () => copyPadlet(padlet.id) : undefined}
+              onPaste={canUseFreeformEditButton ? handlePaste : undefined}
+              onRename={canUseFreeformEditButton ? () => renameColumn(padlet.id) : undefined}
+              onLock={canUseFreeformEditButton ? () => lockPadlet(padlet.id) : undefined}
+              onBringToFront={canUseFreeformEditButton ? () => movePadletLayer(padlet.id, 'bringToFront') : undefined}
+              onSendToBack={canUseFreeformEditButton ? () => movePadletLayer(padlet.id, 'sendToBack') : undefined}
             >
               {content}
             </ColumnPostContextMenu>
@@ -4899,6 +4913,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
             key={padlet.id}
             padlet={padlet}
             onSelect={() => setSelectedPadletId(padlet.id)}
+            disabled={!canUseFreeformEditButton}
             onDuplicate={() => duplicatePadlet(padlet.id)}
             onDelete={() => requestDeletePadlet(padlet.id)}
             onCut={() => cutPadlet(padlet.id)}

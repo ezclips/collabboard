@@ -387,12 +387,23 @@ function MapCanvas({
   };
 
   const handleSelectLocation = (location: { lng: number; lat: number; label?: string }) => {
+    if (!canEditPosts) {
+      flyTo(location.lng, location.lat);
+      return;
+    }
     setDraftLocation(location);
     setCreateMode('compose');
     flyTo(location.lng, location.lat);
   };
 
   const handleMapClick = (event: MapMouseEvent) => {
+    if (!canEditPosts) {
+      setSelectedPostId(null);
+      setActiveMapContextMenuId(null);
+      onPinContainerClose?.();
+      return;
+    }
+
     if (createMode === 'dropPin') {
       const loc = { lng: event.lngLat.lng, lat: event.lngLat.lat };
       setDraftLocation(loc);
@@ -478,6 +489,7 @@ function MapCanvas({
   };
 
   const startReposition = (post: Padlet) => {
+    if (!canEditPosts) return;
     const location = getPadletMapLocation(post);
     if (!location) return;
     setEditingPostId(post.id);
@@ -567,6 +579,7 @@ function MapCanvas({
   };
 
   const applyAddressSelection = async (label: string) => {
+    if (!canEditPosts) return;
     if (!addressPicker) return;
     const { mode, postId, lng, lat } = addressPicker;
 
@@ -772,8 +785,8 @@ function MapCanvas({
               longitude={location.lng}
               latitude={location.lat}
               anchor="bottom"
-              style={{ zIndex: isSelected ? 10000 : 1 }}
-            >
+            style={{ zIndex: isSelected ? 10000 : 1 }}
+          >
               <div className="group relative">
                 {isSelected && !isPinMenuActive ? (
                   <div className="pointer-events-auto absolute bottom-full left-1/2 z-30 mb-5 -translate-x-1/2">
@@ -825,6 +838,7 @@ function MapCanvas({
                     onOpenChange={(open) => {
                       setActiveMapContextMenuId((prev) => open ? pinMenuId : (prev === pinMenuId ? null : prev));
                     }}
+                    disabled={!canEditPosts}
                     addPostItems={canEditPosts && post.type === 'container' ? FREEFORM_BOARD_TOOL_ITEMS : undefined}
                     onAddPostType={canEditPosts && post.type === 'container' && onAddPostToPinContainer
                       ? ((toolType) => onAddPostToPinContainer(post, toolType))
@@ -866,8 +880,9 @@ function MapCanvas({
             longitude={draftLocation.lng}
             latitude={draftLocation.lat}
             anchor="bottom"
-            draggable={true}
+            draggable={canEditPosts}
             onDragEnd={(e) => {
+              if (!canEditPosts) return;
               const loc = { lng: e.lngLat.lng, lat: e.lngLat.lat };
               setDraftLocation({ ...draftLocation, ...loc });
               if (addressPicker) {
@@ -893,7 +908,10 @@ function MapCanvas({
       <MapSearchControl
         accessToken={mapToken}
         onSelectLocation={handleSelectLocation}
-        onDropPin={() => setCreateMode('dropPin')}
+        onDropPin={() => {
+          if (!canEditPosts) return;
+          setCreateMode('dropPin');
+        }}
         onSearchFocus={handleSearchFocus}
         onCancel={
           createMode !== 'idle'
@@ -905,6 +923,7 @@ function MapCanvas({
             : undefined
         }
         isDropPinActive={createMode === 'dropPin'}
+        canDropPin={canEditPosts}
       />
 
       {isSidebarOpen ? (

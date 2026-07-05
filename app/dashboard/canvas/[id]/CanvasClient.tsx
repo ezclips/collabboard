@@ -2292,6 +2292,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   } = useCanvasInteractions({
     containerRef,
     canvasZoom,
+    canEditCanvas: canUseFreeformEditButton,
     padlets,
     setPadlets,
     selectedPadletIds,
@@ -3293,8 +3294,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   }, [isMapLayout, saveLineToDb, updateLine]);
 
   const handleLineContextMenu = useCallback((lineId: string, x: number, y: number) => {
+    if (!canUseFreeformEditButton) return;
     setLineContextMenuState({ lineId, x, y });
-  }, []);
+  }, [canUseFreeformEditButton]);
 
   const handleAddPostToSection = useCallback((sectionId: number) => {
     setPadletToEdit({
@@ -6041,7 +6043,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
             }
           }}
           onContextMenu={(e) => {
-            if (!isFreeformLayout || isAnyEditorOpen) return;
+            if (!isFreeformLayout || isAnyEditorOpen || !canUseFreeformEditButton) return;
             if ((e.target as HTMLElement).closest('[data-padlet-id]')) return;
             e.preventDefault();
             e.stopPropagation();

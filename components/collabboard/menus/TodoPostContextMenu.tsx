@@ -24,6 +24,7 @@ interface TodoPostContextMenuProps {
     onGroupIntoColumn?: () => void;
     // To-do specific action
     onRename?: () => void;
+    disabled?: boolean;
 }
 
 export function TodoPostContextMenu({
@@ -40,8 +41,12 @@ export function TodoPostContextMenu({
     onSendBackward,
     onSendToBack,
     onGroupIntoColumn,
-    onRename
+    onRename,
+    disabled = false,
 }: TodoPostContextMenuProps) {
+    if (disabled) {
+        return <>{children}</>;
+    }
 
     const handleAction = (id: ActionId) => {
         // If we have a direct prop, use it (easier integration for now)

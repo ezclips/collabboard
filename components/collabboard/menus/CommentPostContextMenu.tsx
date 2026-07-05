@@ -21,6 +21,7 @@ interface CommentPostContextMenuProps {
     onBringForward?: () => void;
     onSendBackward?: () => void;
     onSendToBack?: () => void;
+    disabled?: boolean;
 }
 
 export function CommentPostContextMenu({
@@ -37,8 +38,12 @@ export function CommentPostContextMenu({
     onBringToFront,
     onBringForward,
     onSendBackward,
-    onSendToBack
+    onSendToBack,
+    disabled = false,
 }: CommentPostContextMenuProps) {
+    if (disabled) {
+        return <>{children}</>;
+    }
 
     const handleAction = (id: ActionId) => {
         switch (id) {

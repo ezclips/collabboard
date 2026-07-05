@@ -123,7 +123,7 @@ const SortablePadletCard: React.FC<SortablePadletProps> = ({
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: padlet.id });
+  } = useSortable({ id: padlet.id, disabled: !isEditable });
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -168,8 +168,8 @@ const SortablePadletCard: React.FC<SortablePadletProps> = ({
           onAddAfter={isEditable ? () => onAddAfter?.(padlet) : undefined}
         >
           <div
-            className={`select-none w-full cursor-grab active:cursor-grabbing ${isDragging ? "opacity-60 scale-[0.99]" : ""}`}
-            {...listeners}
+            className={`select-none w-full ${isEditable ? 'cursor-grab active:cursor-grabbing' : 'cursor-default'} ${isDragging ? "opacity-60 scale-[0.99]" : ""}`}
+            {...(isEditable ? listeners : {})}
           >
             <CardShell
               padletId={padlet.id}
@@ -516,10 +516,12 @@ const WallCanvas: React.FC<WallCanvasProps> = ({
 
   // Handle drag start
   const handleDragStart = (event: DragStartEvent) => {
+    if (!isEditable) return;
     setActiveId(event.active.id as string);
   };
 
   const handleDragMove = (event: DragMoveEvent) => {
+    if (!isEditable) return;
     const { over, active } = event;
 
     if (!over || !active) {
@@ -555,6 +557,11 @@ const WallCanvas: React.FC<WallCanvasProps> = ({
 
   // Handle drag end - reorder posts
   const handleDragEnd = (event: DragEndEvent) => {
+    if (!isEditable) {
+      setActiveId(null);
+      setDropIndicatorPosition(null);
+      return;
+    }
     const { active, over } = event;
     setActiveId(null);
     setDropIndicatorPosition(null); // Clear indicator

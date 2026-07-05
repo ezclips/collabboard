@@ -190,6 +190,7 @@ export default function PostPopup({
       onSelect={() => {}}
       onOpenChange={onContextMenuOpenChange}
       restrictToMenuTrigger
+      disabled={!canEdit}
       onEdit={canEdit && onEditContainer ? () => onEditContainer(post) : undefined}
       openTargets={orderedOpenTargets}
       onOpenTarget={canEdit ? onEditPost : undefined}

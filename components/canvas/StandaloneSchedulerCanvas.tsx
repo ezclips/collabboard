@@ -372,18 +372,39 @@ export default function StandaloneSchedulerCanvas({
       event.end > selectedTimeSlot.start
     );
     const outlineColor = isInBlueSelectedSlot ? '#f59e0b' : '#2563eb';
+
+    // Multi-day segments render as one block per day column, touching
+    // edge-to-edge (see scheduler-theme.css .scheduler-segment-* rules).
+    // "first"/"last" get rounded outer corners and full borders; "middle"
+    // gets none, so a selected outline reads as one continuous shape
+    // instead of drawing a seam line at every internal join.
+    const segmentPosition = !event.segment || (event.segment.isFirst && event.segment.isLast)
+      ? 'single'
+      : event.segment.isFirst
+        ? 'first'
+        : event.segment.isLast
+          ? 'last'
+          : 'middle';
+    const className = `scheduler-segment-${segmentPosition}`;
+    const showLeftBorder = segmentPosition === 'single' || segmentPosition === 'first';
+    const showRightBorder = segmentPosition === 'single' || segmentPosition === 'last';
+
     const targetOutline = isTargeted
       ? {
-          border: `2px solid ${outlineColor}`,
-          boxShadow: isInBlueSelectedSlot
-            ? '0 0 0 2px rgba(245, 158, 11, 0.25)'
-            : '0 0 0 2px rgba(37, 99, 235, 0.2)',
+          borderTop: `2px solid ${outlineColor}`,
+          borderBottom: `2px solid ${outlineColor}`,
+          borderLeft: showLeftBorder ? `2px solid ${outlineColor}` : 'none',
+          borderRight: showRightBorder ? `2px solid ${outlineColor}` : 'none',
+          boxShadow: segmentPosition === 'single'
+            ? (isInBlueSelectedSlot ? '0 0 0 2px rgba(245, 158, 11, 0.25)' : '0 0 0 2px rgba(37, 99, 235, 0.2)')
+            : 'none',
         }
       : {};
 
     if (cardColor && cardColor !== '#ffffff') {
       const textColor = getReadableTextColor(cardColor);
       return {
+        className,
         style: {
           background: cardColor,
           backgroundColor: cardColor,
@@ -395,9 +416,9 @@ export default function StandaloneSchedulerCanvas({
       };
     }
     if (isTargeted) {
-      return { style: targetOutline };
+      return { className, style: targetOutline };
     }
-    return {};
+    return { className };
   }, [hasLiveSelectedContainer, selectedContainerId, selectedSlotContainerCount, selectedTimeSlot]);
 
   const setEventDuration = useCallback(async (event: SchedulerEvent, minutes: number) => {
@@ -506,39 +527,35 @@ export default function StandaloneSchedulerCanvas({
     });
   }, [getLiveEventRange, onCreatePadlet, readOnly, runEventMutation]);
 
-  // Turns a single-day event into a real multi-day timed span (same start/end
-  // hour repeated on each day, rendered as one block per day — see the
-  // `events` useMemo above) instead of collapsing it into a bare all-day bar
-  // with no time information. "Make single day" collapses it back.
-  const toggleAllDay = useCallback(async (event: SchedulerEvent) => {
+  // Sets a single-day event to span exactly `days` calendar days (same
+  // start/end hour repeated on each day, rendered as one block per day — see
+  // the `events` useMemo above) instead of collapsing it into a bare all-day
+  // bar with no time information. `days === 1` collapses it back down.
+  const setDaySpan = useCallback(async (event: SchedulerEvent, days: number) => {
     if (readOnly) return;
     await runEventMutation(event.resource.id, async () => {
       const { start, end } = getLiveEventRange(event);
-      const isMultiDay = end.toDateString() !== start.toDateString();
+      const safeDays = Math.max(1, Math.round(days));
 
-      if (isMultiDay) {
-        const singleDayEnd = new Date(start);
-        singleDayEnd.setHours(end.getHours(), end.getMinutes(), end.getSeconds(), 0);
-        const safeSingleDayEnd = singleDayEnd > start
-          ? singleDayEnd
-          : new Date(start.getTime() + 60 * 60 * 1000);
-        await onUpdatePadletMetadata(event.resource.id, {
-          isAllDay: false,
-          start_date: start.toISOString(),
-          end_date: safeSingleDayEnd.toISOString(),
-        });
-        return;
-      }
+      const newEnd = new Date(start);
+      newEnd.setDate(newEnd.getDate() + (safeDays - 1));
+      newEnd.setHours(end.getHours(), end.getMinutes(), end.getSeconds(), 0);
+      const safeNewEnd = newEnd > start ? newEnd : new Date(start.getTime() + 60 * 60 * 1000);
 
-      const nextDayEnd = new Date(end);
-      nextDayEnd.setDate(nextDayEnd.getDate() + 1);
       await onUpdatePadletMetadata(event.resource.id, {
         isAllDay: false,
         start_date: start.toISOString(),
-        end_date: nextDayEnd.toISOString(),
+        end_date: safeNewEnd.toISOString(),
       });
     });
   }, [getLiveEventRange, onUpdatePadletMetadata, readOnly, runEventMutation]);
+
+  const getDaySpanCount = useCallback((event: SchedulerEvent) => {
+    const { start, end } = getLiveEventRange(event);
+    const startMidnight = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+    const endMidnight = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+    return Math.round((endMidnight.getTime() - startMidnight.getTime()) / (24 * 60 * 60 * 1000)) + 1;
+  }, [getLiveEventRange]);
 
   // Dragging the left/right edge of a multi-day event's first/last day
   // segment extends (or shrinks) the span by whole days while keeping the
@@ -705,20 +722,21 @@ export default function StandaloneSchedulerCanvas({
         onChangeColor={(color) => {
           onUpdatePadletMetadata(event.resource.id, { cardColor: color });
         }}
-        isAllDay={!!event.segment}
-        onToggleAllDay={() => {
-          toggleAllDay(event);
+        daySpanCount={getDaySpanCount(event)}
+        onSetDaySpan={(days) => {
+          setDaySpan(event, days);
         }}
       >
         {content}
       </SchedulerEventContextMenu>
     );
   }, [
+    getDaySpanCount,
     getLiveEventRange,
     onDeletePadlet,
     onEditItem,
     onTargetItem,
-    toggleAllDay,
+    setDaySpan,
     onUpdatePadletMetadata,
     readOnly,
     revertTimeSetting,

@@ -460,6 +460,7 @@ export default function ChronoTimelineCanvas({
         padlet={container}
         onSelect={() => { }}
         restrictToMenuTrigger
+        disabled={!isEditable}
         openTargets={isEditable ? openTargets : undefined}
         onOpenTarget={isEditable ? onOpenTarget : undefined}
         getOpenTargetLabel={(target) => target.type || 'post'}

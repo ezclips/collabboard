@@ -102,6 +102,12 @@
   border-left: 1px solid #dbe3ee;
 }
 
+.scheduler-wrapper .rbc-day-slot .rbc-events-container {
+  /* react-big-calendar reserves a 10px gap here by default, leaving a
+     permanent empty strip on the right edge of every day column. */
+  margin-right: 0;
+}
+
 .scheduler-wrapper .rbc-event {
   border: none;
   border-radius: 8px;
@@ -112,6 +118,37 @@
   box-sizing: border-box;
   margin-left: 1px;
   margin-right: 1px;
+}
+
+/* Multi-day events render as one block per day column (see the `events`
+   useMemo in StandaloneSchedulerCanvas.tsx). The base .rbc-event gradient
+   restarts on every block, so a chain of them shows a repeating diagonal
+   "brick" pattern instead of one continuous bar — flatten to a solid color
+   and drop the per-block shadow so the seams disappear. */
+.scheduler-wrapper .rbc-event.scheduler-segment-first,
+.scheduler-wrapper .rbc-event.scheduler-segment-middle,
+.scheduler-wrapper .rbc-event.scheduler-segment-last {
+  background: #2563eb;
+  background-image: none;
+  box-shadow: none;
+}
+
+.scheduler-wrapper .rbc-event.scheduler-segment-first {
+  margin-right: 0;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.scheduler-wrapper .rbc-event.scheduler-segment-middle {
+  margin-left: 0;
+  margin-right: 0;
+  border-radius: 0;
+}
+
+.scheduler-wrapper .rbc-event.scheduler-segment-last {
+  margin-left: 0;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
 }
 
 .scheduler-wrapper .rbc-event-label {

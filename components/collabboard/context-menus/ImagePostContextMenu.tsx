@@ -25,6 +25,7 @@ interface ImagePostContextMenuProps {
     onReplaceImage?: () => void;
     onDownloadImage?: () => void;
     onToggleCropToGrid?: () => void;
+    disabled?: boolean;
 }
 
 export function ImagePostContextMenu({
@@ -43,8 +44,12 @@ export function ImagePostContextMenu({
     onGroupIntoColumn,
     onReplaceImage,
     onDownloadImage,
-    onToggleCropToGrid
+    onToggleCropToGrid,
+    disabled = false,
 }: ImagePostContextMenuProps) {
+    if (disabled) {
+        return <>{children}</>;
+    }
 
     const handleAction = (id: ActionId) => {
         switch (id) {

@@ -15,8 +15,8 @@ type SchedulerEventContextMenuProps = {
   onDeleteEvent: () => void;
   onAddContainer: () => void;
   onChangeColor: (color: string) => void;
-  isAllDay: boolean;
-  onToggleAllDay: () => void;
+  daySpanCount: number;
+  onSetDaySpan: (days: number) => void;
 };
 
 function MenuItem({ label, icon, onClick, className }: { label: string; icon?: React.ReactNode; onClick: () => void; className?: string }) {
@@ -79,6 +79,57 @@ function SplitSubmenu({
   );
 }
 
+function DaySpanSubmenu({ currentSpan, onSetDaySpan }: { currentSpan: number; onSetDaySpan: (days: number) => void }) {
+  const [value, setValue] = React.useState(String(Math.max(currentSpan, 2)));
+
+  return (
+    <ContextMenu.Sub>
+      <ContextMenu.SubTrigger className="group text-[13px] leading-none text-slate-700 rounded-[3px] flex items-center h-8 px-2 relative select-none outline-none data-[highlighted]:bg-slate-100 data-[highlighted]:text-slate-900 cursor-pointer">
+        <span className="flex-1">{currentSpan > 1 ? `Spans ${currentSpan} days` : 'Extend across days'}</span>
+        <CalendarRange size={16} />
+      </ContextMenu.SubTrigger>
+      <ContextMenu.Portal>
+        <ContextMenu.SubContent
+          className="min-w-[220px] bg-white rounded-md overflow-hidden p-1 shadow-[0px_10px_38px_-10px_rgba(22,_23,_24,_0.35),_0px_10px_20px_-15px_rgba(22,_23,_24,_0.2)]"
+          style={{ zIndex: 10000 }}
+        >
+          <MenuItem label="2 days" onClick={() => onSetDaySpan(2)} />
+          <MenuItem label="3 days" onClick={() => onSetDaySpan(3)} />
+          <MenuItem label="5 days" onClick={() => onSetDaySpan(5)} />
+          <MenuItem label="7 days" onClick={() => onSetDaySpan(7)} />
+          {currentSpan > 1 && (
+            <MenuItem label="Back to single day" onClick={() => onSetDaySpan(1)} />
+          )}
+          <ContextMenu.Separator className="h-[1px] bg-gray-100 m-1" />
+          <div className="flex items-center gap-2 px-2 py-1.5">
+            <input
+              type="number"
+              min={1}
+              max={60}
+              value={value}
+              onChange={(event) => setValue(event.target.value)}
+              onClick={(event) => event.stopPropagation()}
+              onKeyDown={(event) => event.stopPropagation()}
+              className="w-14 text-[13px] border border-slate-300 rounded px-1.5 py-1 outline-none focus:border-blue-500"
+              aria-label="Number of days"
+            />
+            <button
+              className="text-[12px] px-2 py-1 rounded bg-blue-600 text-white hover:bg-blue-700"
+              onClick={(event) => {
+                event.stopPropagation();
+                const parsed = Math.max(1, Math.min(60, parseInt(value, 10) || 1));
+                onSetDaySpan(parsed);
+              }}
+            >
+              Apply
+            </button>
+          </div>
+        </ContextMenu.SubContent>
+      </ContextMenu.Portal>
+    </ContextMenu.Sub>
+  );
+}
+
 export default function SchedulerEventContextMenu({
   children,
   onAddPost,
@@ -90,8 +141,8 @@ export default function SchedulerEventContextMenu({
   onDeleteEvent,
   onAddContainer,
   onChangeColor,
-  isAllDay,
-  onToggleAllDay,
+  daySpanCount,
+  onSetDaySpan,
 }: SchedulerEventContextMenuProps) {
   return (
     <ContextMenu.Root>
@@ -110,11 +161,7 @@ export default function SchedulerEventContextMenu({
             <MenuItem label="Revert time setting" icon={<RotateCcw size={16} />} onClick={onRevertTimeSetting} />
           )}
           <MenuItem label="Add container" icon={<Plus size={16} />} onClick={onAddContainer} />
-          <MenuItem
-            label={isAllDay ? 'Make single day' : 'Extend across days'}
-            icon={<CalendarRange size={16} />}
-            onClick={onToggleAllDay}
-          />
+          <DaySpanSubmenu currentSpan={daySpanCount} onSetDaySpan={onSetDaySpan} />
           <ContextMenu.Separator className="h-[1px] bg-gray-100 m-1" />
           <div className="flex items-center gap-1 px-2 py-1">
             {['#fff', '#f87171', '#fbbf24', '#34d399', '#60a5fa', '#a78bfa'].map((color) => (

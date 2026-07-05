@@ -337,6 +337,7 @@ export default function ColumnsCanvasRow({
                 padlet={post}
                 onSelect={() => {}}
                 restrictToMenuTrigger
+                disabled={!isEditable}
                 openTargets={isEditable ? openTargets : undefined}
                 onOpenTarget={isEditable ? onEditPost : undefined}
                 getOpenTargetLabel={(target) => target.type || "post"}
@@ -346,29 +347,29 @@ export default function ColumnsCanvasRow({
                 onStartSlideshow={() => onStartSlideshow?.(post)}
                 onDownloadAttachment={() => onDownloadAttachment?.(post)}
                 onCopyAttachmentLink={() => onCopyAttachmentLink?.(post)}
-                onChangeColor={(color: string) => onColorChange?.(post, color)}
-                onEdit={() => onEditPost(post)}
-                onAddBefore={() => onAddBefore?.(post)}
-                onAddAfter={() => onAddAfter?.(post)}
-                onDuplicate={onDuplicate ? () => onDuplicate(post) : undefined}
+                onChangeColor={isEditable ? (color: string) => onColorChange?.(post, color) : undefined}
+                onEdit={isEditable ? () => onEditPost(post) : undefined}
+                onAddBefore={isEditable ? () => onAddBefore?.(post) : undefined}
+                onAddAfter={isEditable ? () => onAddAfter?.(post) : undefined}
+                onDuplicate={isEditable && onDuplicate ? () => onDuplicate(post) : undefined}
                 onCopyToAnotherPadlet={
-                  onCopyToAnotherPadlet
+                  isEditable && onCopyToAnotherPadlet
                     ? () => onCopyToAnotherPadlet(post)
                     : undefined
                 }
                 onTransferToAnotherPadlet={
-                  onTransferToAnotherPadlet
+                  isEditable && onTransferToAnotherPadlet
                     ? () => onTransferToAnotherPadlet(post)
                     : undefined
                 }
                 onSetAsPadletCover={
-                  onSetAsCover ? () => onSetAsCover(post) : undefined
+                  isEditable && onSetAsCover ? () => onSetAsCover(post) : undefined
                 }
-                onPin={onPin ? () => onPin(post) : undefined}
+                onPin={isEditable && onPin ? () => onPin(post) : undefined}
                 onReport={onReport ? () => onReport(post) : undefined}
-                onDelete={onDeletePost ? () => onDeletePost(post) : undefined}
+                onDelete={isEditable && onDeletePost ? () => onDeletePost(post) : undefined}
                 onAddContainerAt={
-                  onAddContainerAt ? (pos: number) => onAddContainerAt(pos) : undefined
+                  isEditable && onAddContainerAt ? (pos: number) => onAddContainerAt(pos) : undefined
                 }
               >
                 <CardShell
@@ -404,35 +405,36 @@ export default function ColumnsCanvasRow({
                 padlet={post}
                 onSelect={() => {}}
                 restrictToMenuTrigger
+                disabled={!isEditable}
                 onOpen={() => onOpenPost?.(post)}
                 onOpenInNewTab={() => onOpenInNewTab?.(post)}
                 onCopyLink={() => onCopyLink?.(post)}
                 onStartSlideshow={() => onStartSlideshow?.(post)}
                 onDownloadAttachment={() => onDownloadAttachment?.(post)}
                 onCopyAttachmentLink={() => onCopyAttachmentLink?.(post)}
-                onChangeColor={(color: string) => onColorChange?.(post, color)}
-                onEdit={() => onEditPost(post)}
-                onAddBefore={() => onAddBefore?.(post)}
-                onAddAfter={() => onAddAfter?.(post)}
-                onDuplicate={onDuplicate ? () => onDuplicate(post) : undefined}
+                onChangeColor={isEditable ? (color: string) => onColorChange?.(post, color) : undefined}
+                onEdit={isEditable ? () => onEditPost(post) : undefined}
+                onAddBefore={isEditable ? () => onAddBefore?.(post) : undefined}
+                onAddAfter={isEditable ? () => onAddAfter?.(post) : undefined}
+                onDuplicate={isEditable && onDuplicate ? () => onDuplicate(post) : undefined}
                 onCopyToAnotherPadlet={
-                  onCopyToAnotherPadlet
+                  isEditable && onCopyToAnotherPadlet
                     ? () => onCopyToAnotherPadlet(post)
                     : undefined
                 }
                 onTransferToAnotherPadlet={
-                  onTransferToAnotherPadlet
+                  isEditable && onTransferToAnotherPadlet
                     ? () => onTransferToAnotherPadlet(post)
                     : undefined
                 }
                 onSetAsPadletCover={
-                  onSetAsCover ? () => onSetAsCover(post) : undefined
+                  isEditable && onSetAsCover ? () => onSetAsCover(post) : undefined
                 }
-                onPin={onPin ? () => onPin(post) : undefined}
+                onPin={isEditable && onPin ? () => onPin(post) : undefined}
                 onReport={onReport ? () => onReport(post) : undefined}
-                onDelete={onDeletePost ? () => onDeletePost(post) : undefined}
+                onDelete={isEditable && onDeletePost ? () => onDeletePost(post) : undefined}
                 onAddContainerAt={
-                  onAddContainerAt ? (pos: number) => onAddContainerAt(pos) : undefined
+                  isEditable && onAddContainerAt ? (pos: number) => onAddContainerAt(pos) : undefined
                 }
               >
                 <CardShell

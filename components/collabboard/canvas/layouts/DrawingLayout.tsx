@@ -1275,9 +1275,10 @@ export default function DrawingLayout({
   const handleContextMenu = useCallback((e: React.MouseEvent, padlet: Padlet) => {
     e.preventDefault();
     e.stopPropagation();
+    if (readOnly) return;
     closeSelectedShapePanel();
     setContextMenu({ x: e.clientX, y: e.clientY, padlet });
-  }, [closeSelectedShapePanel]);
+  }, [closeSelectedShapePanel, readOnly]);
 
   const getPadletRenderSignature = useCallback((padlet: Padlet) => {
     return JSON.stringify({

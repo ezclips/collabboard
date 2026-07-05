@@ -9,6 +9,7 @@ import { isContainerPadlet } from '@/components/collabboard/canvas/engine/utils'
 interface UseCanvasInteractionsParams {
   containerRef: React.RefObject<HTMLDivElement | null>;
   canvasZoom: number;
+  canEditCanvas: boolean;
   padlets: Padlet[];
   setPadlets: React.Dispatch<React.SetStateAction<Padlet[]>>;
   selectedPadletIds: string[];
@@ -31,6 +32,7 @@ interface UseCanvasInteractionsParams {
 export function useCanvasInteractions({
   containerRef,
   canvasZoom,
+  canEditCanvas,
   padlets,
   setPadlets,
   selectedPadletIds,
@@ -120,6 +122,7 @@ export function useCanvasInteractions({
   const handlePadletMouseDown = (e: React.MouseEvent, padletId: string) => {
     debugCanvasLogger('pointerDown', { padletId, x: e.clientX, y: e.clientY });
     if ((e.target as HTMLElement).closest('[data-no-drag="true"]')) return;
+    if (!canEditCanvas) return;
 
     if (isFreeformGraphMode && isGraphConnectMode) {
       e.preventDefault();
@@ -159,6 +162,7 @@ export function useCanvasInteractions({
 
   const handleImagePadletDrag = (e: React.MouseEvent, padletId: string) => {
     if ((e.target as HTMLElement).closest('[data-no-drag="true"]')) return;
+    if (!canEditCanvas) return;
     lockBodySelection();
 
     const padlet = padlets.find(p => p.id === padletId);
@@ -181,6 +185,7 @@ export function useCanvasInteractions({
   };
 
   const handleCanvasMouseMove = (e: React.MouseEvent) => {
+    if (!canEditCanvas) return;
     if (isDragging && e.buttons === 0) {
       handleCanvasMouseUp();
       return;
@@ -298,6 +303,16 @@ export function useCanvasInteractions({
     if (dragEndInFlightRef.current) return;
     dragEndInFlightRef.current = true;
     try {
+      if (!canEditCanvas) {
+        pendingDragRef.current = null;
+        draggingPadletIdsRef.current = [];
+        dragSelectionStartPositionsRef.current = {};
+        lastDragDeltaRef.current = null;
+        lastDragPositionRef.current = null;
+        setIsDragging(false);
+        setDraggingPadletId(null);
+        return;
+      }
       const currentDraggingId = draggingPadletIdRef.current;
       const currentIsDragging = isDraggingRef.current;
       const currentDraggingIds = draggingPadletIdsRef.current;
@@ -459,6 +474,7 @@ export function useCanvasInteractions({
   });
 
   useEffect(() => {
+    if (!canEditCanvas) return;
     const handleWindowMouseUp = () => {
       handleCanvasMouseUpRef.current();
     };
@@ -470,7 +486,7 @@ export function useCanvasInteractions({
       window.removeEventListener('pointerup', handleWindowMouseUp);
       window.removeEventListener('blur', handleWindowMouseUp);
     };
-  }, []);
+  }, [canEditCanvas]);
 
 
   return {

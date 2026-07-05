@@ -25,6 +25,7 @@ interface LinkPostContextMenuProps {
     // Link-specific actions
     onAddImage?: () => void;
     onCopyLinkAddress?: () => void;
+    disabled?: boolean;
 }
 
 export function LinkPostContextMenu({
@@ -42,8 +43,12 @@ export function LinkPostContextMenu({
     onSendToBack,
     onGroupIntoColumn,
     onAddImage,
-    onCopyLinkAddress
+    onCopyLinkAddress,
+    disabled = false,
 }: LinkPostContextMenuProps) {
+    if (disabled) {
+        return <>{children}</>;
+    }
 
     const handleAction = (id: ActionId) => {
         // If we have a direct prop, use it (easier integration for now)

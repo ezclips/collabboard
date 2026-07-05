@@ -414,6 +414,7 @@ export default function RowLane({
                                                 padlet={post}
                                                 onSelect={() => { }}
                                                 restrictToMenuTrigger
+                                                disabled={!isEditable}
                                                 onOpen={() => onOpenPost?.(post)}
                                                 openTargets={isEditable ? containerChildren : undefined}
                                                 onOpenTarget={isEditable ? onOpenTarget : undefined}
