@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useMemo } from "react";
+import DOMPurify from "dompurify";
 
 type RenderMode = "auto" | "html" | "text";
 
@@ -125,12 +126,7 @@ function decodeEntitiesOnce(input: string): string {
 }
 
 function sanitizeHtml(html: string): string {
-    // Minimal sanitizer (swap to DOMPurify if you have it)
-    let s = html.replace(/<(script|style|iframe|object|embed)[^>]*>[\s\S]*?<\/\1>/gi, "");
-    s = s.replace(/\son\w+\s*=\s*(".*?"|'.*?'|[^\s>]+)/gi, "");
-    s = s.replace(/\shref\s*=\s*("javascript:[^"]*"|'javascript:[^']*'|javascript:[^\s>]+)/gi, ' href="#"');
-    s = s.replace(/\ssrc\s*=\s*("javascript:[^"]*"|'javascript:[^']*'|javascript:[^\s>]+)/gi, ' src=""');
-    return s;
+    return DOMPurify.sanitize(html);
 }
 
 function collapseWhitespace(input: string): string {

@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from 'react';
+import DOMPurify from 'dompurify';
 import { Palette, Strikethrough, Trash2 } from 'lucide-react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
@@ -186,7 +187,7 @@ export default function CommentRow({
               color: comment.textColor || comment.color,
               backgroundColor: comment.backgroundColor || undefined,
             }}
-            dangerouslySetInnerHTML={{ __html: comment.text }}
+            dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(comment.text) }}
           />
         )}
       </div>

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { supabaseBrowser } from '@/lib/supabase/browser';
+import { useSupabase } from '@/lib/supabase-provider';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import Icon from '@/components/AppIcon';
@@ -13,7 +13,7 @@ const MAX_PASSWORD_LENGTH = 64;
 export default function AuthPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const supabase = supabaseBrowser();
+  const { supabase } = useSupabase();
   const redirectPath = searchParams.get('redirect') || '/dashboard';
   const shouldSwitchAccount = searchParams.get('switch') === '1';
   const requestedMode = searchParams.get('mode');

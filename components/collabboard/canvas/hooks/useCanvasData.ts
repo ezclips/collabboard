@@ -9,7 +9,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { supabase } from '@/lib/supabase';
+import { supabaseBrowser } from '@/lib/supabase/browser';
 import type { Canvas, Padlet, CanvasLine, BoardSection } from '@/types/collabboard';
 import { generateAndSaveThumbnail, updateLastVisited } from '@/lib/collabboard/thumbnailGenerator';
 import { debugCanvasLogger } from '@/lib/collabboard/debugCanvasLogger';
@@ -22,6 +22,10 @@ interface UseCanvasDataParams {
 }
 
 export function useCanvasData({ canvasId, dispatch }: UseCanvasDataParams) {
+  // Cookie-authenticated client — must match the session the dashboard/rest of
+  // the app uses, or RLS-gated queries silently return zero rows (see
+  // lib/supabase/browser.ts vs lib/supabase.ts).
+  const supabase = supabaseBrowser();
   // ── Data state ──────────────────────────────────────────────────────────────
   const [canvas, setCanvas] = useState<Canvas | null>(null);
   const [padlets, setPadlets] = useState<Padlet[]>([]);

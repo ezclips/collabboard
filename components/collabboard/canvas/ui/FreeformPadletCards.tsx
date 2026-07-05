@@ -1,10 +1,11 @@
-"use client";
+﻿"use client";
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars, @next/next/no-img-element */
 
 import React from 'react';
+import DOMPurify from 'dompurify';
 import type { User } from '@supabase/supabase-js';
 import type { Padlet } from '@/types/collabboard';
-import { supabase } from '@/lib/supabase';
+import { supabaseBrowser } from '@/lib/supabase/browser';
 import ImageActionsToolbar from '@/components/collabboard/editors/ImageActionsToolbar';
 import ImageDrawingLayer from '@/components/collabboard/editors/ImageDrawingLayer';
 import ImageCropLayer from '@/components/collabboard/editors/ImageCropLayer';
@@ -177,6 +178,9 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
     closeAllToolbars, handlePadletMouseDown, getClickedSide,
     stableActions,
   } = props;
+  // Cookie-authenticated client — see useCanvasData.ts for why this must match
+  // supabaseBrowser() rather than the plain lib/supabase.ts singleton.
+  const supabase = React.useMemo(() => supabaseBrowser(), []);
   const isPadletSelected = React.useCallback(
     (padletId: string) => selectedPadletId === padletId || selectedPadletIds.includes(padletId),
     [selectedPadletId, selectedPadletIds]
@@ -1191,7 +1195,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                                       e.stopPropagation();
                                       startEdit();
                                     }}
-                                    dangerouslySetInnerHTML={{ __html: c.text }}
+                                    dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(c.text) }}
                                   />
                                 )}
                               </div>
@@ -2096,7 +2100,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                                       e.stopPropagation();
                                       startEdit();
                                     }}
-                                    dangerouslySetInnerHTML={{ __html: c.text }}
+                                    dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(c.text) }}
                                   />
                                 )}
                               </div>
@@ -2468,7 +2472,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                                         e.stopPropagation();
                                         startEdit();
                                       }}
-                                      dangerouslySetInnerHTML={{ __html: comment.text }}
+                                      dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(comment.text) }}
                                     />
                                   )}
                                 </div>
@@ -3704,7 +3708,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                     overflow: 'hidden',
                     maxWidth: '100%',
                   }}
-                  dangerouslySetInnerHTML={{ __html: padlet.content || '' }}
+                  dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(padlet.content || '') }}
                   onClick={(e) => {
                     const target = e.target as HTMLElement;
                     if (target.classList.contains('comment-mark')) {
@@ -5806,7 +5810,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                                     onMouseDown={(e) => e.stopPropagation()}
                                     onClick={(e) => e.stopPropagation()}
                                     onDoubleClick={(e) => { e.stopPropagation(); startEdit(); }}
-                                    dangerouslySetInnerHTML={{ __html: c.text }}
+                                    dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(c.text) }}
                                   />
                                 )}
                               </div>
@@ -6258,7 +6262,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                                     onMouseDown={(e) => e.stopPropagation()}
                                     onClick={(e) => e.stopPropagation()}
                                     onDoubleClick={(e) => { e.stopPropagation(); startEdit(); }}
-                                    dangerouslySetInnerHTML={{ __html: c.text }}
+                                    dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(c.text) }}
                                   />
                                 )}
                               </div>

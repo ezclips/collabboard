@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
+import { cookies } from 'next/headers';
 import crypto from 'crypto';
+import { getBoardPermission, boardPermissionSatisfies, mapLegacyToBoardPermission } from '@/lib/auth/permissions';
 
 // Create a Supabase client for server-side operations
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
@@ -19,6 +22,15 @@ function hashPassword(password: string): string {
 
 export async function POST(request: NextRequest) {
     try {
+        // Authenticate the caller
+        const cookieStore = await cookies();
+        const userSupabase = createRouteHandlerClient({ cookies: () => cookieStore as any });
+        const { data: { user }, error: authError } = await userSupabase.auth.getUser();
+
+        if (authError || !user) {
+            return NextResponse.json({ error: 'Authentication required to create a share link' }, { status: 401 });
+        }
+
         const body = await request.json();
         const { boardId, padletId, permission, shareTarget, expirationDays, password } = body;
 
@@ -35,6 +47,35 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Invalid share target' }, { status: 400 });
         }
 
+        // Verify the caller has at least the permission level they are granting
+        const requiredPerm = mapLegacyToBoardPermission(permission) ?? 'reader';
+        if (boardId) {
+            const callerPerm = await getBoardPermission(supabase, boardId, user.id);
+            if (!boardPermissionSatisfies(callerPerm, requiredPerm)) {
+                return NextResponse.json(
+                    { error: 'Insufficient board permissions to create this share link' },
+                    { status: 403 },
+                );
+            }
+        } else if (padletId) {
+            // For padlet-only shares, look up the padlet's board and check permission there
+            const { data: padlet, error: padletLookupError } = await supabase
+                .from('padlets')
+                .select('board_id')
+                .eq('id', padletId)
+                .single();
+            if (padletLookupError || !padlet?.board_id) {
+                return NextResponse.json({ error: 'Post not found' }, { status: 404 });
+            }
+            const callerPerm = await getBoardPermission(supabase, padlet.board_id, user.id);
+            if (!boardPermissionSatisfies(callerPerm, requiredPerm)) {
+                return NextResponse.json(
+                    { error: 'Insufficient board permissions to create this share link' },
+                    { status: 403 },
+                );
+            }
+        }
+
         // Generate token
         const token = generateToken();
 
@@ -49,7 +90,6 @@ export async function POST(request: NextRequest) {
         // Hash password if provided
         const passwordHash = password ? hashPassword(password) : null;
 
-        // Insert share link (without created_by since we're not using auth)
         const { data, error } = await supabase
             .from('share_links')
             .insert({
@@ -60,6 +100,7 @@ export async function POST(request: NextRequest) {
                 share_target: shareTarget || 'post-in-board',
                 password_hash: passwordHash,
                 expires_at: expiresAt,
+                created_by: user.id,
             })
             .select()
             .single();
@@ -127,7 +168,6 @@ export async function GET(request: NextRequest) {
             permission: data.permission,
             shareTarget: data.share_target || 'post-in-board',
             isPasswordProtected: !!data.password_hash,
-            passwordHash: data.password_hash,
             expiresAt: data.expires_at,
         });
 

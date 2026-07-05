@@ -28,7 +28,7 @@ import { CSS } from '@dnd-kit/utilities';
 // } from "@/components/ui/dialog";
 // import DeleteConfirmModal from '@/components/modals/DeleteConfirmModal';
 import { toast } from 'sonner';
-import { supabase } from '@/lib/supabase';
+import { supabaseBrowser } from '@/lib/supabase/browser';
 import { WallContainerContextMenu } from '@/components/collabboard/context-menus/WallContainerContextMenu';
 import PostCardContent from '@/components/collabboard/PostCardContent';
 import CardShell from '@/components/collabboard/shells/CardShell';
@@ -229,6 +229,9 @@ const WallCanvas: React.FC<WallCanvasProps> = ({
   currentUserAvatar,
   onUpdateChildComments,
 }) => {
+  // Cookie-authenticated client — see useCanvasData.ts for why this must match
+  // supabaseBrowser() rather than the plain lib/supabase.ts singleton.
+  const supabase = useMemo(() => supabaseBrowser(), []);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [, setSelectedPadletId] = useState<string | null>(null);
   const [orderedPadlets, setOrderedPadlets] = useState<Padlet[]>([]);

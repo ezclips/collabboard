@@ -63,8 +63,20 @@ export async function GET(
       if (!canvasMeta.is_public || !visitorPermission) {
         return NextResponse.json({ error: 'Access denied' }, { status: 403 });
       }
+    }
 
-      if (accessPolicy.requirePassword && accessPolicy.password !== providedPassword) {
+    // Password check applies to all users who are not explicit board members
+    if (accessPolicy.requirePassword) {
+      let isExplicitMember = false;
+      if (authenticatedUser) {
+        try {
+          const permCheck = await requireBoardPermission(supabase, id, authenticatedUser.id, 'reader');
+          isExplicitMember = permCheck.allowed;
+        } catch {
+          isExplicitMember = false;
+        }
+      }
+      if (!isExplicitMember && accessPolicy.password !== providedPassword) {
         return NextResponse.json(
           { error: 'Password required to access this board', code: 'PASSWORD_REQUIRED' },
           { status: 403 },

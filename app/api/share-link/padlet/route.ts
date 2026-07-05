@@ -29,8 +29,24 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({ error: 'Share link has expired' }, { status: 410 });
     }
 
-    // Ensure the token is linked to this padlet or board
-    if (link.padlet_id && link.padlet_id !== padletId) {
+    // Ensure the token is scoped to this padlet or to the board that owns this padlet
+    if (link.padlet_id) {
+        // Padlet-scoped token: must match exactly
+        if (link.padlet_id !== padletId) {
+            return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
+        }
+    } else if (link.board_id) {
+        // Board-scoped token: verify the requested padlet belongs to this board
+        const { data: ownerCheck, error: ownerError } = await supabase
+            .from('padlets')
+            .select('id')
+            .eq('id', padletId)
+            .eq('board_id', link.board_id)
+            .single();
+        if (ownerError || !ownerCheck) {
+            return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
+        }
+    } else {
         return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
     }
 

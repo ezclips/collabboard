@@ -1,4 +1,6 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { cookies } from 'next/headers';
+import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 import { downloadImage } from '@/lib/ai/assets/downloadImage';
 import { uploadImageToStorage } from '@/lib/ai/assets/uploadImageToStorage';
 import { replaceAssetUrlsInCode } from '@/lib/ai/assets/replaceAssetUrlsInCode';
@@ -115,8 +117,15 @@ async function ingestImage(
   }
 }
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
+    const cookieStore = await cookies();
+    const supabase = createRouteHandlerClient({ cookies: () => cookieStore as any });
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
+    }
+
     const body = (await req.json()) as SaveRequest;
     const { componentId, code, rawCode, assets } = body;
 

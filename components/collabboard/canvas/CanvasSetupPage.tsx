@@ -42,7 +42,7 @@ import {
 import IconSelector from "@/components/collabboard/canvas/IconSelector";
 import WallpaperSelector from "@/components/collabboard/canvas/WallpaperSelector";
 import type { LayoutType } from "@/components/collabboard/settings/types";
-import { supabase } from '@/lib/supabase';
+import { supabaseBrowser } from '@/lib/supabase/browser';
 import { resolveCurrentWorkspace } from '@/lib/workspace/context';
 import {
   canCreateBoardForEntitlements,
@@ -846,6 +846,9 @@ interface CanvasSetupPageProps {
 
 const CanvasSetupPage: React.FC<CanvasSetupPageProps> = ({ onSave, isCreating, loadingProp, initialData }) => {
   const router = useRouter();
+  // Cookie-authenticated client — see useCanvasData.ts for why this must match
+  // supabaseBrowser() rather than the plain lib/supabase.ts singleton.
+  const supabase = useMemo(() => supabaseBrowser(), []);
 
   // Authentication & Loading State
   const [user, setUser] = useState<any>(null);
@@ -973,24 +976,28 @@ const CanvasSetupPage: React.FC<CanvasSetupPageProps> = ({ onSave, isCreating, l
       try {
         const { data: { session } } = await supabase.auth.getSession();
         if (session?.user) {
-          const workspaceContext = await resolveCurrentWorkspace(supabase, session.user);
-          const entitlements = await getWorkspaceEntitlements(
-            supabase,
-            workspaceContext?.workspaceId,
-          );
-          let boardCountQuery = supabase
-            .from('boards')
-            .select('*', { count: 'exact', head: true });
+          // Plan-limit check only matters when creating a new board; editing an
+          // existing one shouldn't get blocked by an unrelated board-count limit.
+          if (isCreating) {
+            const workspaceContext = await resolveCurrentWorkspace(supabase, session.user);
+            const entitlements = await getWorkspaceEntitlements(
+              supabase,
+              workspaceContext?.workspaceId,
+            );
+            let boardCountQuery = supabase
+              .from('boards')
+              .select('*', { count: 'exact', head: true });
 
-          boardCountQuery = workspaceContext
-            ? boardCountQuery.eq('workspace_id', workspaceContext.workspaceId)
-            : boardCountQuery.eq('user_id', session.user.id);
+            boardCountQuery = workspaceContext
+              ? boardCountQuery.eq('workspace_id', workspaceContext.workspaceId)
+              : boardCountQuery.eq('user_id', session.user.id);
 
-          const { count: boardCount } = await boardCountQuery.is('deleted_at', null);
-          if (!canCreateBoardForEntitlements(entitlements, boardCount ?? 0)) {
-            setCreateBlockedMessage('Free plan allows up to 3 active boards. Upgrade to Pro to create more.');
-          } else {
-            setCreateBlockedMessage(null);
+            const { count: boardCount } = await boardCountQuery.is('deleted_at', null);
+            if (!canCreateBoardForEntitlements(entitlements, boardCount ?? 0)) {
+              setCreateBlockedMessage('Free plan allows up to 3 active boards. Upgrade to Pro to create more.');
+            } else {
+              setCreateBlockedMessage(null);
+            }
           }
 
           const { data: profile } = await supabase
@@ -1008,11 +1015,51 @@ const CanvasSetupPage: React.FC<CanvasSetupPageProps> = ({ onSave, isCreating, l
 
     getCurrentUser();
     setIsMounted(true);
-  }, []);
+  }, [isCreating]);
+
+  // Prefill from initialData when editing an existing canvas
+  useEffect(() => {
+    if (!initialData) return;
+    setTitle(initialData.title || 'My Canvas');
+    setDescription(initialData.description || '');
+    setSelectedIcon(initialData.thumbnail || '🎨');
+    setCommentsEnabled(initialData.comments_enabled ?? true);
+    setSelectedWallpaper({
+      type: (initialData.background_type as WallpaperSelection['type']) || 'color',
+      value: initialData.background_value || '#ffffff',
+    });
+    setNewPostsAtTop(initialData.new_posts_at_top ?? true);
+    if (initialData.layout) setLayout(initialData.layout as LayoutType);
+  }, [initialData]);
 
   // Supabase Save Function
   const handleSaveCanvas = async () => {
     setError(null);
+
+    // Edit mode: delegate to the caller's boards-backed update instead of the
+    // create-only insert flow below (which always inserts a brand-new board).
+    if (!isCreating && onSave) {
+      try {
+        setLoading(true);
+        await onSave({
+          title: title.trim(),
+          description: description.trim(),
+          layout,
+          background_type: selectedWallpaper.type,
+          background_value: selectedWallpaper.value,
+          comments_enabled: commentsEnabled,
+          new_posts_at_top: newPostsAtTop,
+          thumbnail: selectedIcon,
+        });
+      } catch (err: any) {
+        console.error('Error updating canvas:', err);
+        setError('Error: ' + (err?.message || 'Unknown error occurred'));
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+
     try {
       setLoading(true);
       // 1. Check user
@@ -1068,6 +1115,7 @@ const CanvasSetupPage: React.FC<CanvasSetupPageProps> = ({ onSave, isCreating, l
         background_type: selectedWallpaper.type,
         background_value: selectedWallpaper.value,
         comments_enabled: commentsEnabled,
+        new_posts_at_top: newPostsAtTop,
         reactions_enabled: true,
         user_id: user.id,
         workspace_id: workspaceContext?.workspaceId ?? null,

@@ -1,6 +1,10 @@
 // lib/collabboard/thumbnailGenerator.ts
 
-import { supabase } from '@/lib/supabase';
+import { supabaseBrowser } from '@/lib/supabase/browser';
+
+// Cookie-authenticated client — see useCanvasData.ts for why this must match
+// supabaseBrowser() rather than the plain lib/supabase.ts singleton.
+const supabase = supabaseBrowser();
 
 // Type for padlet data needed for thumbnail generation
 interface PadletForThumbnail {

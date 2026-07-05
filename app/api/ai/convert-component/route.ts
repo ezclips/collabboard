@@ -1,4 +1,6 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { cookies } from 'next/headers';
+import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 import { ZodError } from 'zod';
 
 import type {
@@ -211,11 +213,18 @@ Do not include the source content or any explanation outside the JSON.
   `.trim();
 }
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   let capturedSourceMode: AIMode | undefined;
   let capturedTargetMode: AIMode | undefined;
 
   try {
+    const cookieStore = await cookies();
+    const supabase = createRouteHandlerClient({ cookies: () => cookieStore as any });
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
+    }
+
     const ip = req.headers.get('x-forwarded-for')?.split(',')[0].trim() ?? 'unknown';
     if (!checkRateLimit(ip)) {
       return NextResponse.json(

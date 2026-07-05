@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
+import DOMPurify from 'dompurify';
 
 import type { FlowDiagramData, MindmapDiagramData } from '@/lib/ai/contracts';
 import { renderDiagramCode } from '@/lib/ai/diagram-engine';
@@ -101,7 +102,11 @@ function CodeDiagramRenderer({ data }: { data: CodeDiagramData }) {
           {phase.phase === 'done' && (
             <div
               className="p-4 [&_svg]:max-h-[480px] [&_svg]:max-w-full [&_svg]:h-auto"
-              dangerouslySetInnerHTML={{ __html: phase.svg }}
+              dangerouslySetInnerHTML={{
+                __html: DOMPurify.sanitize(phase.svg, {
+                  USE_PROFILES: { svg: true, svgFilters: true },
+                }),
+              }}
             />
           )}
 

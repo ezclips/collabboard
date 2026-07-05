@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useRef, useEffect } from 'react';
+import DOMPurify from 'dompurify';
 import { MessageSquare, Palette, PenTool, Send, Strikethrough, Trash2 } from 'lucide-react';
 import TextStylePopup from './editors/TextStylePopup';
 
@@ -404,7 +405,7 @@ export default function CommentPost({
                                                     e.stopPropagation();
                                                     startEdit();
                                                 }}
-                                                dangerouslySetInnerHTML={{ __html: comment.text }}
+                                                dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(comment.text) }}
                                             />
                                         )}
                                     </div>

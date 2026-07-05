@@ -2,6 +2,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @next/next/no-img-element */
 
 import React, { useEffect, useRef, useState } from "react";
+import DOMPurify from "dompurify";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 import { Padlet } from "@/types/collabboard";
 import LinkMediaEmbed, { getLinkEmbedKind } from "./LinkMediaEmbed";
@@ -553,7 +554,7 @@ export default function PostCardContent({
                                 <div
                                     className="prose prose-sm max-w-none break-words leading-relaxed"
                                     style={{ wordWrap: "break-word", overflowWrap: "break-word" }}
-                                    dangerouslySetInnerHTML={{ __html: decoded }}
+                                    dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(decoded) }}
                                 />
                             ) : (
                                 <span>{decoded || "Comment"}</span>
@@ -886,7 +887,7 @@ export default function PostCardContent({
                     WebkitBoxOrient: "vertical",
                     color: padlet.metadata?.textColor || "#1F2937",
                 }}
-                dangerouslySetInnerHTML={{ __html: decodeHtmlEntities(rawContent || "") }}
+                dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(decodeHtmlEntities(rawContent || "")) }}
             />
         </div>
     );

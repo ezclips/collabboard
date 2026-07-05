@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import DOMPurify from 'dompurify';
 import { createPortal } from 'react-dom';
 import { Palette, Strikethrough, Trash2, X } from 'lucide-react';
 import { useEditor, EditorContent } from '@tiptap/react';
@@ -378,7 +379,7 @@ export default function CommentPopup({
                                         ) : (
                                             <div
                                                 className={`text-xs text-gray-600 mt-0.5 whitespace-pre-wrap break-words ${comment.isStrikethrough ? 'line-through' : ''}`}
-                                                dangerouslySetInnerHTML={{ __html: comment.text }}
+                                                dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(comment.text) }}
                                             />
                                         )}
                                     </div>

@@ -10,6 +10,7 @@ import { Color } from "@tiptap/extension-color";
 import { TextStyle } from "@tiptap/extension-text-style";
 import { MessageSquare, Palette, PenTool, Send, Strikethrough, Trash2, X } from "lucide-react";
 import EmojiPicker from "emoji-picker-react";
+import DOMPurify from "dompurify";
 
 import CommentEditorToolbar, { ToolbarMode } from "./CommentEditorToolbar";
 import TextStylePopup from "./TextStylePopup";
@@ -868,7 +869,7 @@ export default function CommentEditor({
                               color: comment.textColor || comment.color,
                               backgroundColor: comment.backgroundColor || undefined,
                             }}
-                            dangerouslySetInnerHTML={{ __html: comment.text }}
+                            dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(comment.text) }}
                           />
                         )}
                       </div>

@@ -4,12 +4,14 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import type { User } from '@supabase/supabase-js'
+import { supabaseBrowser } from '@/lib/supabase/browser'
 
 export default function Home() {
   const [mounted, setMounted] = useState(false)
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
   const router = useRouter()
+  const supabase = supabaseBrowser()
 
   useEffect(() => {
     setMounted(true)
@@ -20,9 +22,6 @@ export default function Home() {
 
     const initializeAuth = async () => {
       try {
-        // Dynamically import to avoid SSR issues
-        const { supabase } = await import('@/lib/supabase')
-
         // Check if user is already signed in
         const { data: { session }, error } = await supabase.auth.getSession()
 
@@ -80,11 +79,10 @@ export default function Home() {
     }
 
     initializeAuth()
-  }, [mounted, router])
+  }, [mounted, router, supabase])
 
   const handleUseAnotherAccount = async () => {
     try {
-      const { supabase } = await import('@/lib/supabase')
       await supabase.auth.signOut()
     } catch (error) {
       console.error('Failed to sign out before switching accounts:', error)

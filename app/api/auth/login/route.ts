@@ -18,6 +18,31 @@ type RateLimitEvent = {
 };
 
 const INVALID_CREDENTIALS_MESSAGE = 'We could not sign you in with that email and password.';
+const EMAIL_NOT_CONFIRMED_MESSAGE = 'Your email address is not confirmed yet.';
+const APP_RATE_LIMIT_MESSAGE = 'Too many sign-in attempts in this app. Try again in a few minutes.';
+const AUTH_PROVIDER_RATE_LIMIT_MESSAGE = 'Sign-in is temporarily rate-limited by Supabase. Try again in a few minutes.';
+
+function isRateLimitError(errorMessage: string | undefined) {
+  return (errorMessage || '').toLowerCase().includes('rate limit');
+}
+
+function getAuthFailureMessage(errorMessage: string | undefined) {
+  const normalized = (errorMessage || '').toLowerCase();
+
+  if (normalized.includes('email not confirmed')) {
+    return EMAIL_NOT_CONFIRMED_MESSAGE;
+  }
+
+  if (normalized.includes('rate limit')) {
+    return AUTH_PROVIDER_RATE_LIMIT_MESSAGE;
+  }
+
+  if (normalized.includes('invalid login credentials')) {
+    return INVALID_CREDENTIALS_MESSAGE;
+  }
+
+  return errorMessage || INVALID_CREDENTIALS_MESSAGE;
+}
 
 function getSupabaseAnonServerClient() {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -39,11 +64,11 @@ function getSupabaseAnonServerClient() {
   });
 }
 
-async function fetchRecentFailures(emailHash: string, ipHash: string) {
+async function fetchRecentFailures(emailHash: string, ipHash: string | null) {
   const supabaseAdmin = getSupabaseAdmin();
   const windowStart = new Date(Date.now() - LOGIN_RATE_LIMIT_WINDOW_MS).toISOString();
 
-  const [{ data: emailFailures, error: emailError }, { data: ipFailures, error: ipError }] = await Promise.all([
+  const [{ data: emailFailures, error: emailError }, ipResult] = await Promise.all([
     supabaseAdmin
       .from('auth_rate_limit_events')
       .select('created_at')
@@ -53,28 +78,30 @@ async function fetchRecentFailures(emailHash: string, ipHash: string) {
       .gte('created_at', windowStart)
       .order('created_at', { ascending: false })
       .limit(32),
-    supabaseAdmin
-      .from('auth_rate_limit_events')
-      .select('created_at')
-      .eq('action', 'login')
-      .eq('success', false)
-      .eq('ip_hash', ipHash)
-      .gte('created_at', windowStart)
-      .order('created_at', { ascending: false })
-      .limit(32),
+    ipHash
+      ? supabaseAdmin
+          .from('auth_rate_limit_events')
+          .select('created_at')
+          .eq('action', 'login')
+          .eq('success', false)
+          .eq('ip_hash', ipHash)
+          .gte('created_at', windowStart)
+          .order('created_at', { ascending: false })
+          .limit(32)
+      : Promise.resolve({ data: [], error: null }),
   ]);
 
   if (emailError) {
     throw new Error(emailError.message);
   }
 
-  if (ipError) {
-    throw new Error(ipError.message);
+  if (ipResult.error) {
+    throw new Error(ipResult.error.message);
   }
 
   return {
     emailFailures: (emailFailures ?? []) as RateLimitEvent[],
-    ipFailures: (ipFailures ?? []) as RateLimitEvent[],
+    ipFailures: ((ipResult.data ?? []) as RateLimitEvent[]),
   };
 }
 
@@ -144,7 +171,8 @@ export async function POST(req: NextRequest) {
 
     const ip = getRequestIp(req.headers);
     const emailHash = hashRateLimitValue(email);
-    const ipHash = hashRateLimitValue(ip);
+    const ipHash = ip === 'unknown' ? null : hashRateLimitValue(ip);
+    const storedIpHash = ipHash ?? hashRateLimitValue(`unknown:${emailHash}`);
     const userAgent = req.headers.get('user-agent') ?? '';
 
     const { emailFailures, ipFailures } = await fetchRecentFailures(emailHash, ipHash);
@@ -152,7 +180,7 @@ export async function POST(req: NextRequest) {
     if (throttleState) {
       return NextResponse.json(
         {
-          error: 'Too many sign-in attempts. Try again in a few minutes.',
+          error: APP_RATE_LIMIT_MESSAGE,
           retryAfterSeconds: throttleState.retryAfterSeconds,
         },
         {
@@ -168,15 +196,25 @@ export async function POST(req: NextRequest) {
     const { data, error } = await authClient.auth.signInWithPassword({ email, password });
 
     if (error || !data.session) {
-      await recordRateLimitEvent({
-        action: 'login',
-        emailHash,
-        ipHash,
-        success: false,
-        userAgent,
-      });
+      const authErrorMessage = error?.message;
+      const providerRateLimited = isRateLimitError(authErrorMessage);
 
-      return NextResponse.json({ error: INVALID_CREDENTIALS_MESSAGE }, { status: 401 });
+      if (!providerRateLimited) {
+        await recordRateLimitEvent({
+          action: 'login',
+          emailHash,
+          ipHash: storedIpHash,
+          success: false,
+          userAgent,
+        });
+      }
+
+      return NextResponse.json(
+        {
+          error: getAuthFailureMessage(authErrorMessage),
+        },
+        { status: providerRateLimited ? 429 : 401 }
+      );
     }
 
     const cookieStore = cookies();
@@ -194,7 +232,7 @@ export async function POST(req: NextRequest) {
       recordRateLimitEvent({
         action: 'login',
         emailHash,
-        ipHash,
+        ipHash: storedIpHash,
         success: true,
         userAgent,
       }),

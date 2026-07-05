@@ -29,6 +29,7 @@ import { canEditWorkspace, canManageWorkspace, resolveCurrentWorkspace, type Wor
 import '@/components/kanban-canvas/kanban-canvas.css';
 import ColumnContainerCreationPrompt from '@/components/canvas/layouts/ColumnContainerCreationPrompt';
 import React, { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo, useReducer } from 'react';
+import DOMPurify from 'dompurify';
 import { useRouter } from 'next/navigation';
 import { supabaseBrowser } from '@/lib/supabase/browser';
 import type { Padlet, BoardSection, PendingPostDraft, NewPostDragState, DropIndicatorState, CanvasLine } from '@/types/collabboard';
@@ -36,7 +37,7 @@ import { User, Session } from '@supabase/supabase-js';
 import {
   StickyNote, Link, CheckSquare, MoveRight, MessageCircle,
   Image as ImageIcon, Upload, PenTool, Trash2, Bell, Table, X, Columns3,
-  Map as MapIcon, BookOpen, Plus, CloudDownload, Sparkles, Palette, Strikethrough, UserPlus
+  Map as MapIcon, BookOpen, Plus, CloudDownload, Sparkles, Palette, Strikethrough, UserPlus, Settings
 } from 'lucide-react';
 import EmojiPicker from 'emoji-picker-react';
 import AIComponentEditor from '@/components/collabboard/editors/AIComponentEditor';
@@ -70,6 +71,8 @@ import MapStylePanel from '@/components/map/MapStylePanel';
 import { getPadletMapLocation } from '@/lib/map/geojson';
 import CanvasSidebar from '@/components/collabboard/canvas/ui/CanvasSidebar';
 import CanvasShareModal from '@/components/collabboard/canvas/ui/CanvasShareModal';
+import CanvasSettingsModal from '@/components/collabboard/canvas/ui/CanvasSettingsModal';
+import CanvasTitleHeader, { CANVAS_TITLE_HEADER_HEIGHT } from '@/components/collabboard/canvas/ui/CanvasTitleHeader';
 import CanvasModals from '@/components/collabboard/canvas/ui/CanvasModals';
 import CanvasViewport from '@/components/collabboard/canvas/ui/CanvasViewport';
 import PadletLayer from '@/components/collabboard/canvas/ui/PadletLayer';
@@ -335,6 +338,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   const isNoteEditorOpen = canvasState.editors.isNoteEditorOpen; // SHARED: overlays + editors
   const setIsNoteEditorOpen = (v: boolean) => dispatch({ type: 'EDITORS_PATCH', payload: { isNoteEditorOpen: v } });
   const [isCanvasShareModalOpen, setIsCanvasShareModalOpen] = useState(false);
+  const [isCanvasSettingsModalOpen, setIsCanvasSettingsModalOpen] = useState(false);
   const isTableEditorOpen = canvasState.editors.isTableEditorOpen; // SHARED: overlays + editors
   const setIsTableEditorOpen = (v: boolean) => dispatch({ type: 'EDITORS_PATCH', payload: { isTableEditorOpen: v } });
   const isLinkEditorOpen = canvasState.editors.isLinkEditorOpen; // SHARED: overlays + editors
@@ -982,6 +986,12 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       ? { color: 'rgba(255, 255, 255, 0.72)', fontSize: '0.75rem' }
       : { color: 'rgba(15, 23, 42, 0.55)', fontSize: '0.75rem' };
   }, [canvas?.background_type, canvas?.background_value]);
+
+  const canvasTitleHeaderSettings = (canvas?.settings as any)?.titleHeader || {};
+  const showCanvasTitleHeaderIcon = Boolean(canvasTitleHeaderSettings.showIcon);
+  const showCanvasTitleHeaderTitle = Boolean(canvasTitleHeaderSettings.showTitle);
+  const showCanvasTitleHeaderDescription = Boolean(canvasTitleHeaderSettings.showDescription);
+  const showCanvasTitleHeader = showCanvasTitleHeaderIcon || showCanvasTitleHeaderTitle || showCanvasTitleHeaderDescription;
 
   // Determine active layout
   const isWallLayout = canvas?.layout === 'wall';
@@ -5398,6 +5408,15 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       priority: 7,
       alwaysVisible: true,
     }] : []),
+    ...(canUseFreeformEditButton ? [{
+      id: 'settings',
+      label: 'Settings',
+      tools: [
+        { icon: Settings, label: 'Canvas settings', color: 'text-slate-700', bg: 'hover:bg-slate-100', type: 'canvas-settings' },
+      ],
+      priority: 8,
+      alwaysVisible: true,
+    }] : []),
   ];
 
   const handleToolClick = (toolType: string) => {
@@ -5717,6 +5736,11 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         setIsMapStylePanelOpen(false);
         setIsCanvasShareModalOpen(true);
         break;
+      case 'canvas-settings':
+        setIsLibraryOpen(false);
+        setIsMapStylePanelOpen(false);
+        setIsCanvasSettingsModalOpen(true);
+        break;
       default:
         break;
     }
@@ -5804,9 +5828,22 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     <div className={`h-screen w-full flex overflow-y-hidden overflow-x-visible min-w-0 ${isWallLayout || isGridLayout ? '' : ''} ${isSchedulerLayout ? 'scheduler-mode' : ''}`}>
       {/* Main Canvas */}
       <div className="flex-1 min-w-0 min-h-0 flex flex-col relative">
+        {showCanvasTitleHeader && (
+          <CanvasTitleHeader
+            title={canvas.title || 'Untitled canvas'}
+            description={canvas.description}
+            icon={(canvas as any).thumbnail}
+            showTitle={showCanvasTitleHeaderTitle}
+            showDescription={showCanvasTitleHeaderDescription}
+            showIcon={showCanvasTitleHeaderIcon}
+          />
+        )}
         {/* Container size controls removed */}
         {canUseCanvasToolbar && !effectiveToolbarCollapsed && (
-          <div className="absolute left-0 top-0 bottom-0 z-[3000]">
+          <div
+            className="absolute left-0 bottom-0 z-[3000]"
+            style={{ top: showCanvasTitleHeader ? CANVAS_TITLE_HEADER_HEIGHT : 0 }}
+          >
             <CanvasSidebar
               groups={toolbarGroups}
               isLineMode={isLineMode}
@@ -5827,6 +5864,16 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           canvasId={canvas.id}
           canvasTitle={canvas.title || 'Untitled canvas'}
           currentWorkspaceRole={currentWorkspaceRole}
+        />
+
+        <CanvasSettingsModal
+          isOpen={isCanvasSettingsModalOpen}
+          onClose={() => setIsCanvasSettingsModalOpen(false)}
+          canvasId={canvas.id}
+          canvas={canvas}
+          hasSections={sections.length > 0}
+          currentWorkspaceRole={currentWorkspaceRole}
+          onSaved={() => fetchData()}
         />
 
         <CanvasModals
@@ -7308,7 +7355,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                           </div>
                           <div
                             className="text-xs text-gray-600 mt-0.5 whitespace-pre-wrap break-words"
-                            dangerouslySetInnerHTML={{ __html: comment.text }}
+                            dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(comment.text) }}
                           />
                         </div>
                       </div>
@@ -8303,7 +8350,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                                       onMouseDown={(e) => e.stopPropagation()}
                                       onClick={(e) => e.stopPropagation()}
                                       onDoubleClick={(e) => { e.stopPropagation(); startEdit(); }}
-                                      dangerouslySetInnerHTML={{ __html: c.text }}
+                                      dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(c.text) }}
                                     />
                                   )}
                                 </div>

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from 'react';
-import { supabase } from '@/lib/supabase';
+import { supabaseBrowser } from '@/lib/supabase/browser';
 import type { NewPostDragState, Padlet } from '@/types/collabboard';
 import { debugCanvasLogger } from '@/lib/collabboard/debugCanvasLogger';
 import { isContainerPadlet } from '@/components/collabboard/canvas/engine/utils';
@@ -51,6 +51,9 @@ export function useCanvasInteractions({
   fetchData,
   PADLET_DRAG_START_DISTANCE,
 }: UseCanvasInteractionsParams) {
+  // Cookie-authenticated client — see useCanvasData.ts for why this must match
+  // supabaseBrowser() rather than the plain lib/supabase.ts singleton.
+  const supabase = supabaseBrowser();
   const [isDragging, setIsDragging] = useState(false);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const [draggingPadletId, setDraggingPadletId] = useState<string | null>(null);

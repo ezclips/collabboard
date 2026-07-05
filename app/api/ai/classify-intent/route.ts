@@ -1,4 +1,6 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { cookies } from 'next/headers';
+import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 
 import type { AIMode, DiagramSubtype } from '@/lib/ai/contracts';
 import { MODE_REGISTRY } from '@/lib/ai/mode-registry';
@@ -140,8 +142,15 @@ function parseClassifyResponse(raw: string): ClassifyIntentResult {
   return { mode, subtype, confidence };
 }
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
+    const cookieStore = await cookies();
+    const supabase = createRouteHandlerClient({ cookies: () => cookieStore as any });
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
+    }
+
     const ip = req.headers.get('x-forwarded-for')?.split(',')[0].trim() ?? 'unknown';
     if (!checkRateLimit(ip)) {
       return NextResponse.json(

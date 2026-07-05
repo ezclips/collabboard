@@ -1,5 +1,6 @@
 // components/canvas/layouts/WallLayout.tsx
 import React from "react";
+import DOMPurify from "dompurify";
 
 import { Padlet } from "@/types/collabboard";
 
@@ -115,7 +116,7 @@ export default function WallLayout({
                 {padlet.content && (
                   <div
                     className="text-sm text-gray-600 line-clamp-4 break-words"
-                    dangerouslySetInnerHTML={{ __html: padlet.content }}
+                    dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(padlet.content) }}
                   />
                 )}
               </div>

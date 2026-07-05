@@ -23,9 +23,9 @@ export type SaveAIComponentData = {
 };
 
 
-import { useCallback, Dispatch, SetStateAction } from 'react';
+import { useCallback, useMemo, Dispatch, SetStateAction } from 'react';
 import { Padlet, PendingPostDraft, SavedAIComponent, StoredAIImageAsset } from '@/types/collabboard';
-import { supabase } from '@/lib/supabase';
+import { supabaseBrowser } from '@/lib/supabase/browser';
 
 // ============================================================================
 // Types for save handler data payloads
@@ -213,6 +213,9 @@ export type UsePadletSaveParams = {
 // ============================================================================
 
 export function usePadletSave(params: UsePadletSaveParams) {
+  // Cookie-authenticated client — see useCanvasData.ts for why this must match
+  // supabaseBrowser() rather than the plain lib/supabase.ts singleton.
+  const supabase = useMemo(() => supabaseBrowser(), []);
   const {
     canvasId,
     padletToEdit,
