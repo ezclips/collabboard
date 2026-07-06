@@ -105,7 +105,7 @@ interface RowLaneProps {
     currentUserId?: string;
     currentUserName?: string;
     currentUserAvatar?: string;
-    onUpdateChildComments?: (childId: string, comments: any[]) => void;
+    onUpdateChildComments?: (childId: string, comments: any[], options?: { field?: 'comments' | 'detachedComments' }) => void;
     onDropDraftIntoContainer?: (containerId: string, draftPayload: any) => void | Promise<void>;
     onAddEmptyContainerAt?: (position: number) => void;
 }

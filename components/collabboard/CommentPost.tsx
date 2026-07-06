@@ -25,7 +25,7 @@ interface CommentPostProps {
     topStrip?: string;
     commentTitle?: string;
     onTitleChange?: (title: string) => void;
-    onEdit: () => void;
+    onEdit?: () => void;
     onAddComment?: (text: string) => void;
     onEditComment?: (commentId: string, text: string) => void;
     onToggleCommentStrikethrough?: (commentId: string) => void;
@@ -311,7 +311,7 @@ export default function CommentPost({
                                 if (!comment.id) return;
                                 // If comment has links/rich content, open full editor to preserve HTML
                                 if (hasRichContent(comment.text || '')) {
-                                    onEdit();
+                                    onEdit?.();
                                     return;
                                 }
                                 setActiveCommentId(comment.id);
@@ -482,55 +482,50 @@ export default function CommentPost({
                         })}
                     </div>
                 )}
-                <div className="mt-3 pt-3 border-t border-gray-100">
-                    <div className="flex items-center gap-2">
-                        <div className="w-7 h-7 rounded-full bg-gray-100 flex items-center justify-center text-gray-400 text-xs">
-                            <MessageSquare className="w-3.5 h-3.5" />
-                        </div>
-                        <input
-                            type="text"
-                            placeholder="Add a comment..."
-                            className="flex-1 text-xs px-3 py-2 rounded-lg border border-gray-200 focus:border-blue-400 focus:ring-1 focus:ring-blue-100 outline-none bg-white"
-                            onFocus={(e) => {
-                                e.stopPropagation();
-                                if (!onAddComment) onEdit();
-                            }}
-                            onClick={(e) => e.stopPropagation()}
-                            onPointerDown={(e) => e.stopPropagation()}
-                            onMouseDown={(e) => e.stopPropagation()}
-                            value={draftComment}
-                            onChange={(e) => setDraftComment(e.target.value)}
-                            onKeyDown={(e) => {
-                                if (e.key === 'Enter' && !e.shiftKey) {
-                                    e.preventDefault();
-                                    if (onAddComment && draftComment.trim()) {
-                                        onAddComment(draftComment.trim());
-                                        setDraftComment('');
-                                    } else if (!onAddComment) {
-                                        onEdit();
+                {onAddComment ? (
+                    <div className="mt-3 pt-3 border-t border-gray-100">
+                        <div className="flex items-center gap-2">
+                            <div className="w-7 h-7 rounded-full bg-gray-100 flex items-center justify-center text-gray-400 text-xs">
+                                <MessageSquare className="w-3.5 h-3.5" />
+                            </div>
+                            <input
+                                type="text"
+                                placeholder="Add a comment..."
+                                className="flex-1 text-xs px-3 py-2 rounded-lg border border-gray-200 focus:border-blue-400 focus:ring-1 focus:ring-blue-100 outline-none bg-white"
+                                onFocus={(e) => e.stopPropagation()}
+                                onClick={(e) => e.stopPropagation()}
+                                onPointerDown={(e) => e.stopPropagation()}
+                                onMouseDown={(e) => e.stopPropagation()}
+                                value={draftComment}
+                                onChange={(e) => setDraftComment(e.target.value)}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter' && !e.shiftKey) {
+                                        e.preventDefault();
+                                        if (draftComment.trim()) {
+                                            onAddComment?.(draftComment.trim());
+                                            setDraftComment('');
+                                        }
                                     }
-                                }
-                            }}
-                            data-no-drag="true"
-                        />
-                        <button
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                if (onAddComment && draftComment.trim()) {
-                                    onAddComment(draftComment.trim());
-                                    setDraftComment('');
-                                } else if (!onAddComment) {
-                                    onEdit();
-                                }
-                            }}
-                            className="w-8 h-8 rounded-full bg-gray-100 text-gray-600 flex items-center justify-center hover:bg-gray-200 transition-colors"
-                            title="Open comments"
-                            data-no-drag="true"
-                        >
-                            <Send className="w-3.5 h-3.5" />
-                        </button>
+                                }}
+                                data-no-drag="true"
+                            />
+                            <button
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (draftComment.trim()) {
+                                        onAddComment?.(draftComment.trim());
+                                        setDraftComment('');
+                                    }
+                                }}
+                                className="w-8 h-8 rounded-full bg-gray-100 text-gray-600 flex items-center justify-center hover:bg-gray-200 transition-colors"
+                                title="Add comment"
+                                data-no-drag="true"
+                            >
+                                <Send className="w-3.5 h-3.5" />
+                            </button>
+                        </div>
                     </div>
-                </div>
+                ) : null}
             </div>
         </div>
     );

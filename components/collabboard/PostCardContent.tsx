@@ -525,6 +525,48 @@ export default function PostCardContent({
 
     // --- COMMENT TYPE (robust detection) ---
     if (isCommentPost(padlet)) {
+        // Interactive comment list whenever the layout provides an update callback
+        // (wall/columns/grid root-level posts — same wiring as container children below)
+        if (onUpdateChildComments) {
+            return (
+                <div className="w-full max-w-full overflow-hidden pointer-events-auto">
+                    <EmbeddedCommentList
+                        comments={(padlet.metadata as any)?.comments || []}
+                        badgeColor={(padlet.metadata as any)?.badgeColor}
+                        currentUserId={currentUserId}
+                        currentUserName={currentUserName}
+                        currentUserAvatar={currentUserAvatar}
+                        onSubmit={(text) => {
+                            const newComment = {
+                                id: `comment-${Date.now()}`,
+                                text,
+                                userId: currentUserId || 'anonymous',
+                                userName: currentUserName || 'Anonymous',
+                                userAvatar: currentUserAvatar,
+                                timestamp: Date.now(),
+                            };
+                            const existingComments = (padlet.metadata as any)?.comments || [];
+                            onUpdateChildComments(padlet.id, [...existingComments, newComment]);
+                        }}
+                        onEditComment={(commentId, newText) => {
+                            const existingComments = (padlet.metadata as any)?.comments || [];
+                            const updated = existingComments.map((c: any) =>
+                                c.id === commentId ? { ...c, text: newText } : c
+                            );
+                            onUpdateChildComments(padlet.id, updated);
+                        }}
+                        onRemoveComment={(commentId) => {
+                            const existingComments = (padlet.metadata as any)?.comments || [];
+                            const filtered = existingComments.filter((c: any) => c.id !== commentId);
+                            onUpdateChildComments(padlet.id, filtered);
+                        }}
+                        showComposer={true}
+                    />
+                </div>
+            );
+        }
+
+        // Read-only fallback (previews, slide renderer, contexts without a callback)
         // Always prioritize metadata.comments array
         const comments: Array<{ text?: string; content?: string; html?: string; message?: string }> =
             padlet.metadata?.comments ||

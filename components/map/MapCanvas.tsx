@@ -116,7 +116,7 @@ type MapCanvasProps = {
   currentUserId?: string;
   currentUserName?: string;
   currentUserAvatar?: string;
-  onUpdateChildComments?: (childId: string, comments: unknown[]) => void;
+  onUpdateChildComments?: (childId: string, comments: unknown[], options?: { field?: 'comments' | 'detachedComments' }) => void;
   onRefreshChildren?: () => void;
   onMapReady?: (map: mapboxgl.Map) => void;
   onSelectLine?: (lineId: string | null) => void;

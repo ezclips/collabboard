@@ -2,6 +2,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import React, { useEffect, useRef, useState } from "react";
+import { MessageCircle } from "lucide-react";
 
 import PostCardContent from "./PostCardContent";
 import EmbeddedCommentList from "./EmbeddedCommentList";
@@ -118,6 +119,7 @@ export default function RowColumnContainerCard({
 }: RowColumnContainerCardProps) {
   const COLLAPSED_SCROLL_MAX_HEIGHT = 300;
   const [localIsExpanded, setLocalIsExpanded] = useState(false);
+  const [openCommentsChildId, setOpenCommentsChildId] = useState<string | null>(null);
   const [hasExpandableOverflow, setHasExpandableOverflow] = useState(false);
   const contentMeasureRef = useRef<HTMLDivElement>(null);
   const isControlled = controlledIsExpanded !== undefined;
@@ -142,6 +144,15 @@ export default function RowColumnContainerCard({
       .filter((p): p is Padlet => p !== undefined),
     ...linkedChildren,
   ].filter((child, index, arr) => arr.findIndex((p) => p.id === child.id) === index);
+
+  // Total comments across children: comment-type posts store metadata.comments,
+  // post comments added via editors store metadata.detachedComments
+  const totalChildComments = childPadlets.reduce((sum, child) => {
+    const meta = (child.metadata ?? {}) as Record<string, unknown>;
+    const comments = Array.isArray(meta.comments) ? meta.comments.length : 0;
+    const detached = Array.isArray(meta.detachedComments) ? meta.detachedComments.length : 0;
+    return sum + comments + detached;
+  }, 0);
 
   const dropEnabled = Boolean(onDropExistingPadlet || onDropDraftIntoContainer);
   const ignoredKinds = new Set([...DEFAULT_IGNORE_KINDS, ...ignoreDragKinds]);
@@ -378,6 +389,11 @@ export default function RowColumnContainerCard({
                   const isCardChild = child.type === 'card' && !!(child.metadata as any)?.svgUrl;
                   const isDocThumbnail = (child.metadata as any)?.importKind === 'document';
                   const isImport = (child.metadata as any)?.source === 'import';
+                  const childDetachedComments: any[] = Array.isArray((child.metadata as any)?.detachedComments)
+                    ? (child.metadata as any).detachedComments
+                    : [];
+                  const showChildCommentToggle = !!onUpdateChildComments;
+                  const childCommentsOpen = openCommentsChildId === child.id;
                   return (
                     <div
                       key={child.id}
@@ -400,6 +416,70 @@ export default function RowColumnContainerCard({
                           onUpdateChildComments={onUpdateChildComments}
                         />
                       </div>
+                      {showChildCommentToggle && (
+                        <div
+                          className="pointer-events-auto px-1.5 pb-1.5"
+                          onClick={(e) => e.stopPropagation()}
+                          onMouseDown={(e) => e.stopPropagation()}
+                          onPointerDown={(e) => e.stopPropagation()}
+                        >
+                          <div className="flex justify-end pt-1">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setOpenCommentsChildId(childCommentsOpen ? null : child.id);
+                              }}
+                              className="flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors"
+                              title={childCommentsOpen
+                                ? 'Hide comments'
+                                : childDetachedComments.length > 0
+                                  ? `${childDetachedComments.length} comment${childDetachedComments.length === 1 ? '' : 's'}`
+                                  : 'Add a comment'}
+                            >
+                              <MessageCircle className="w-3 h-3" />
+                              {childDetachedComments.length > 0 ? childDetachedComments.length : ''}
+                            </button>
+                          </div>
+                          {childCommentsOpen && (
+                            <EmbeddedCommentList
+                              comments={childDetachedComments}
+                              badgeColor={(child.metadata as any)?.badgeColor}
+                              currentUserId={currentUserId}
+                              currentUserName={currentUserName}
+                              currentUserAvatar={currentUserAvatar}
+                              onSubmit={(text) => {
+                                const newComment = {
+                                  id: `comment-${Date.now()}`,
+                                  text,
+                                  userId: currentUserId || 'anonymous',
+                                  userName: currentUserName || 'Anonymous',
+                                  userAvatar: currentUserAvatar,
+                                  timestamp: Date.now(),
+                                };
+                                onUpdateChildComments(child.id, [...childDetachedComments, newComment], { field: 'detachedComments' });
+                              }}
+                              onEditComment={(commentId, newText) => {
+                                const updated = childDetachedComments.map((c: any) =>
+                                  c.id === commentId ? { ...c, text: newText } : c
+                                );
+                                onUpdateChildComments(child.id, updated, { field: 'detachedComments' });
+                              }}
+                              onRemoveComment={(commentId) => {
+                                const filtered = childDetachedComments.filter((c: any) => c.id !== commentId);
+                                onUpdateChildComments(child.id, filtered, { field: 'detachedComments' });
+                              }}
+                              onToggleStrikethrough={(commentId) => {
+                                const updated = childDetachedComments.map((c: any) =>
+                                  c.id === commentId ? { ...c, isStrikethrough: !c.isStrikethrough } : c
+                                );
+                                onUpdateChildComments(child.id, updated, { field: 'detachedComments' });
+                              }}
+                              showComposer={true}
+                            />
+                          )}
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -415,6 +495,16 @@ export default function RowColumnContainerCard({
           >
             {childPadlets.length} {childPadlets.length === 1 ? "item" : "items"}
           </span>
+          {totalChildComments > 0 && (
+            <span
+              className="ml-auto flex items-center gap-1 text-[9px] font-medium px-1.5 py-0.5 rounded"
+              style={{ backgroundColor: badgeBg, color: textColor }}
+              title={`${totalChildComments} comment${totalChildComments === 1 ? "" : "s"} in this container`}
+            >
+              <MessageCircle className="w-2.5 h-2.5" />
+              {totalChildComments}
+            </span>
+          )}
         </div>
       </div>
     </div>

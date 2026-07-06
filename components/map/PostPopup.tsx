@@ -23,7 +23,7 @@ type PostPopupProps = {
   currentUserId?: string;
   currentUserName?: string;
   currentUserAvatar?: string;
-  onUpdateChildComments?: (childId: string, comments: unknown[]) => void;
+  onUpdateChildComments?: (childId: string, comments: unknown[], options?: { field?: 'comments' | 'detachedComments' }) => void;
   onRefreshChildren?: () => void;
 };
 

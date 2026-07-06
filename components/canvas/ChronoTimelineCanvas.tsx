@@ -27,7 +27,7 @@ interface TimelineCanvasProps {
   currentUserId?: string;
   currentUserName?: string;
   currentUserAvatar?: string;
-  onUpdateChildComments?: (childId: string, comments: any[]) => void;
+  onUpdateChildComments?: (childId: string, comments: any[], options?: { field?: 'comments' | 'detachedComments' }) => void;
   onUpdateContainerMetadata?: (containerId: string, metadataUpdates: any) => void;
   onDuplicateContainer?: (containerId: string) => void;
   onRenameContainer?: (containerId: string, title: string) => void;

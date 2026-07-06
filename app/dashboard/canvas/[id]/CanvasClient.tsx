@@ -3830,14 +3830,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     const padlet = padlets.find(p => p.id === id);
     if (!padlet || padlet.type !== 'image') return;
 
-    if (isDrawingLayout || isTimelineLayout) {
-      openImagePostEditor(padlet);
-      return;
-    }
-
-    // Open the Image Editor
-    setPadletToEdit(padlet);
-    setIsImageEditorOpen(true);
+    openImagePostEditor(padlet);
   };
 
   const downloadImage = async (id: string) => {
@@ -5800,13 +5793,12 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   const openPadletInTypeEditor = (post: Padlet) => {
     closeDrawingSelectedShapePanel();
     closeAllToolbarLaunchedUi();
-    if (post.type === 'image' && (isDrawingLayout || isTimelineLayout)) {
+    if (post.type === 'image') {
       openImagePostEditor(post);
       return;
     }
     setPadletToEdit(post);
-    if (post.type === 'image') setIsImageEditorOpen(true);
-    else if (post.type === 'todo') setIsTodoEditorOpen(true);
+    if (post.type === 'todo') setIsTodoEditorOpen(true);
     else if (post.type === 'link') setIsLinkEditorOpen(true);
     else if (post.type === 'table') setIsTableEditorOpen(true);
     else if (post.type === 'container') setIsContainerEditorOpen(true);
@@ -6594,7 +6586,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                 onMoveLeft={(id: number) => handleMoveSection(id, 'up')}
                 onMoveRight={(id: number) => handleMoveSection(id, 'down')}
                 onAddGlobalSection={() => handleAddSection()}
-                onEditPost={openPadletInTypeEditor}
+                onEditPost={openPadletTargetFromContextMenu}
                 onOpenPost={(post: Padlet) => {
                   setPadletToEdit(post);
                   setIsNoteEditorOpen(true);
@@ -6625,14 +6617,15 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                 currentUserId={user?.id}
                 currentUserName={user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'User'}
                 currentUserAvatar={user?.user_metadata?.avatar_url}
-                onUpdateChildComments={async (childId, comments) => {
+                onUpdateChildComments={async (childId, comments, options) => {
+                  const field = options?.field ?? 'comments';
                   // Update the child padlet's comments in the database
                   const { error } = await supabase
                     .from('padlets')
                     .update({
                       metadata: {
                         ...(padlets.find(p => p.id === childId)?.metadata as any),
-                        comments
+                        [field]: comments
                       },
                       updated_at: new Date().toISOString()
                     })
@@ -6647,7 +6640,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                   // Update local state
                   setPadlets(prev => prev.map(p =>
                     p.id === childId
-                      ? { ...p, metadata: { ...(p.metadata as any), comments } }
+                      ? { ...p, metadata: { ...(p.metadata as any), [field]: comments } }
                       : p
                   ));
                 }}
@@ -6687,13 +6680,13 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                     onAddEmptyContainerAt={handleCreateContainerAt}
                     onReorderPost={handleColumnReorder}
                     onDropDraftIntoContainer={handleDropDraftIntoContainer}
-                    onEditPost={openPadletInTypeEditor}
+                    onEditPost={openPadletTargetFromContextMenu}
                     onDeletePost={(post) => deletePadletById(post.id)}
                     onOpenPost={(post) => {
                       setPadletToEdit(post);
                       setIsNoteEditorOpen(true);
                     }}
-                    onOpenTarget={openPadletInTypeEditor}
+                    onOpenTarget={openPadletTargetFromContextMenu}
                     onOpenInNewTab={openPostInNewTab}
                     onCopyLink={copyPostLink}
                     onStartSlideshow={startSlideshow}
@@ -6711,14 +6704,15 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                     currentUserId={user?.id}
                     currentUserName={user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'User'}
                     currentUserAvatar={user?.user_metadata?.avatar_url}
-                    onUpdateChildComments={async (childId, comments) => {
+                    onUpdateChildComments={async (childId, comments, options) => {
+                      const field = options?.field ?? 'comments';
                       // Update the child padlet's comments in the database
                       const { error } = await supabase
                         .from('padlets')
                         .update({
                           metadata: {
                             ...(padlets.find(p => p.id === childId)?.metadata as any),
-                            comments
+                            [field]: comments
                           },
                           updated_at: new Date().toISOString()
                         })
@@ -6733,7 +6727,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                       // Update local state
                       setPadlets(prev => prev.map(p =>
                         p.id === childId
-                          ? { ...p, metadata: { ...(p.metadata as any), comments } }
+                          ? { ...p, metadata: { ...(p.metadata as any), [field]: comments } }
                           : p
                       ));
                     }}
@@ -6799,14 +6793,15 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                 currentUserId={user?.id}
                 currentUserName={user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'User'}
                 currentUserAvatar={user?.user_metadata?.avatar_url}
-                onUpdateChildComments={async (childId, comments) => {
+                onUpdateChildComments={async (childId, comments, options) => {
+                  const field = options?.field ?? 'comments';
                   // Update the child padlet's comments in the database
                   const { error } = await supabase
                     .from('padlets')
                     .update({
                       metadata: {
                         ...(padlets.find(p => p.id === childId)?.metadata as any),
-                        comments
+                        [field]: comments
                       },
                       updated_at: new Date().toISOString()
                     })
@@ -6821,7 +6816,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                   // Update local state
                   setPadlets(prev => prev.map(p =>
                     p.id === childId
-                      ? { ...p, metadata: { ...(p.metadata as any), comments } }
+                      ? { ...p, metadata: { ...(p.metadata as any), [field]: comments } }
                       : p
                   ));
                 }}
@@ -6928,14 +6923,15 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                   currentUserId={user?.id}
                   currentUserName={user?.user_metadata?.full_name || user?.email || 'Anonymous'}
                   currentUserAvatar={user?.user_metadata?.avatar_url}
-                  onUpdateChildComments={canUseFreeformEditButton ? (async (childId, comments) => {
+                  onUpdateChildComments={canUseFreeformEditButton ? (async (childId, comments, options) => {
+                    const field = options?.field ?? 'comments';
                     const childPadlet = padlets.find(p => p.id === childId);
                     if (!childPadlet) return;
 
                     // Optimistic update
                     setPadlets(prev => prev.map(p =>
                       p.id === childId
-                        ? { ...p, metadata: { ...p.metadata, comments } }
+                        ? { ...p, metadata: { ...p.metadata, [field]: comments } }
                         : p
                     ));
 
@@ -6943,7 +6939,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                       await supabase
                         .from('padlets')
                         .update({
-                          metadata: { ...childPadlet.metadata, comments },
+                          metadata: { ...childPadlet.metadata, [field]: comments },
                           updated_at: new Date().toISOString(),
                         })
                         .eq('id', childId);
@@ -7051,7 +7047,8 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                   onSelectLine={handleLineSelect}
                   onLineContextMenu={handleLineContextMenu}
                   onToggleEditMode={handleToggleLineEditMode}
-                  onUpdateChildComments={async (childId, comments) => {
+                  onUpdateChildComments={async (childId, comments, options) => {
+                    const field = options?.field ?? 'comments';
                     const nowIso = new Date().toISOString();
 
                     setPadlets((prev) =>
@@ -7059,8 +7056,8 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                         p.id === childId
                           ? {
                             ...p,
-                            metadata: { ...(p.metadata as any), comments },
-                            content: JSON.stringify(comments),
+                            metadata: { ...(p.metadata as any), [field]: comments },
+                            ...(field === 'comments' ? { content: JSON.stringify(comments) } : {}),
                             updated_at: nowIso,
                           }
                           : p
@@ -7077,14 +7074,14 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
 
                       const nextMetadataForDb = {
                         ...((existingChild?.metadata as Record<string, unknown> | null) || {}),
-                        comments,
+                        [field]: comments,
                       };
 
                       await supabase
                         .from('padlets')
                         .update({
                           metadata: nextMetadataForDb,
-                          content: JSON.stringify(comments),
+                          ...(field === 'comments' ? { content: JSON.stringify(comments) } : {}),
                           updated_at: nowIso,
                         })
                         .eq('id', childId);
@@ -7824,19 +7821,20 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                               currentUserId={user?.id}
                               currentUserName={user?.user_metadata?.full_name || user?.email || 'Anonymous'}
                               currentUserAvatar={user?.user_metadata?.avatar_url}
-                              onUpdateChildComments={async (childId, comments) => {
+                              onUpdateChildComments={async (childId, comments, options) => {
+                                const field = options?.field ?? 'comments';
                                 const childPadlet = padlets.find(p => p.id === childId);
                                 if (!childPadlet) return;
                                 setPadlets(prev => prev.map(p =>
                                   p.id === childId
-                                    ? { ...p, metadata: { ...p.metadata, comments } }
+                                    ? { ...p, metadata: { ...p.metadata, [field]: comments } }
                                     : p
                                 ));
                                 try {
                                   await supabase
                                     .from('padlets')
                                     .update({
-                                      metadata: { ...childPadlet.metadata, comments },
+                                      metadata: { ...childPadlet.metadata, [field]: comments },
                                       updated_at: new Date().toISOString(),
                                     })
                                     .eq('id', childId);
@@ -7958,7 +7956,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           }}
         />
 
-        {!isColumnsLayout && !isGridLayout && !isFreeformLayout && imageToolbarPadletId && activeImageToolbarPadlet && activeImageToolbarSrc && (
+        {!isFreeformLayout && imageToolbarPadletId && activeImageToolbarPadlet && activeImageToolbarSrc && (
           <div
             className="fixed inset-0 z-[60000] flex items-center justify-center bg-black/35 backdrop-blur-sm"
             onClick={() => {

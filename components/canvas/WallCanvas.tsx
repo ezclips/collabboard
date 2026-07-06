@@ -60,7 +60,7 @@ interface WallCanvasProps {
   currentUserId?: string;
   currentUserName?: string;
   currentUserAvatar?: string;
-  onUpdateChildComments?: (childId: string, comments: any[]) => void;
+  onUpdateChildComments?: (childId: string, comments: any[], options?: { field?: 'comments' | 'detachedComments' }) => void;
 }
 
 interface SortablePadletProps {
@@ -84,7 +84,7 @@ interface SortablePadletProps {
   currentUserId?: string;
   currentUserName?: string;
   currentUserAvatar?: string;
-  onUpdateChildComments?: (childId: string, comments: any[]) => void;
+  onUpdateChildComments?: (childId: string, comments: any[], options?: { field?: 'comments' | 'detachedComments' }) => void;
 }
 
 

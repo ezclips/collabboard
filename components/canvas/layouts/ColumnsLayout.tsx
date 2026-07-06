@@ -76,7 +76,7 @@ interface ColumnsLayoutProps {
     currentUserId?: string;
     currentUserName?: string;
     currentUserAvatar?: string;
-    onUpdateChildComments?: (childId: string, comments: any[]) => void;
+    onUpdateChildComments?: (childId: string, comments: any[], options?: { field?: 'comments' | 'detachedComments' }) => void;
 }
 
 const customDropAnimation: DropAnimation = {
