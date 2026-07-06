@@ -52,3 +52,5 @@ devserver*.log
 *tsc_output.txt
 Sakai_Investments/
 *.bundle
+test-results/
+playwright-report/
