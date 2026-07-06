@@ -44,3 +44,11 @@ devserver.out.log
 
 .agent/
 .claude/
+
+# local dev artifacts (Phase 0 hygiene)
+tmp/
+error_Logs/
+devserver*.log
+*tsc_output.txt
+Sakai_Investments/
+*.bundle
