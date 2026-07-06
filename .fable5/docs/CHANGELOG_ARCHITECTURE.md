@@ -8,6 +8,10 @@ Newest first. One entry per decision — link the owning doc for detail.
 - **Incident:** logins failing with 429. Root cause was Supabase's per-IP auth rate
   limit (~30 sign-in requests/5 min) tripped by repeated attempts — not an app bug.
   Confirmed by hitting GoTrue directly (`over_request_rate_limit`).
+- **Patch implemented:** password sign-in is now client-primary. The browser calls
+  `/api/auth/login` for app-level lockout preflight, signs in directly with Supabase
+  so Supabase sees the user's IP, then reports success/failure back to the same route
+  for rate-limit bookkeeping.
 - **Decision (accepted from implementation model):** login success is taken from the
   login response itself, not a follow-up `auth.getUser()` read; profile upsert after
   login is best-effort and can no longer block sign-in.
@@ -15,12 +19,25 @@ Newest first. One entry per decision — link the owning doc for detail.
   `signInWithPassword` fallback when the server route is rate-limited. Rejected
   because it duplicates the login path (P6), bypasses the server's lockout
   bookkeeping, and doesn't help anyway when the IP itself is limited.
-- **Flaw identified, patch pending:** ALL sign-ins proxy through the server route,
+- **Flaw resolved at app layer:** ALL sign-ins used to proxy through the server route,
   so in production every user shares the server's egress IP against Supabase's
-  per-IP auth limits — classroom-scale simultaneous logins will mass-fail.
-  Direction: make client-side sign-in the primary path (per-user IPs) and keep
-  app-level throttling as a server-side observer. Requires its own patch +
-  security review; tracked on CURRENT_TASK.md.
+  per-IP auth limits — classroom-scale simultaneous logins could mass-fail. The
+  normal browser path now signs in directly against Supabase while keeping app-level
+  throttling as a server-side observer. The legacy password-proxy branch remains
+  as compatibility fallback and should be removed after a short soak.
+- **CTO review of the above (accepted with notes):** the `success` phase correctly
+  verifies the caller's real session cookie before clearing lockouts — good. Known
+  limitation queued for the auth security patch: the unauthenticated `failure` phase
+  lets an attacker inflate a victim email's lockout counter (bounded by the
+  reporter's own IP throttle, and equivalent-cost attack existed before, but should
+  be hardened — e.g., per-IP cap on failure reports).
+- **Second root cause found:** `middleware.ts` ran `getSession()` (which can refresh
+  tokens) on EVERY request including all `/api/*` calls; token refreshes count
+  against the same per-IP Supabase auth limit, keeping it permanently exhausted in
+  dev and blocking all sign-ins. Fix: middleware matcher now excludes `/api/*` and
+  assets — session sync happens on page navigations only. Production corollary:
+  many users behind one NAT (a school) share that per-IP budget; keep auth traffic
+  frugal by design.
 
 ## 2026-07-06 — Phase 1 opened; patch system instituted
 

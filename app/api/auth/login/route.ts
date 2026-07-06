@@ -21,6 +21,7 @@ const INVALID_CREDENTIALS_MESSAGE = 'We could not sign you in with that email an
 const EMAIL_NOT_CONFIRMED_MESSAGE = 'Your email address is not confirmed yet.';
 const APP_RATE_LIMIT_MESSAGE = 'Too many sign-in attempts in this app. Try again in a few minutes.';
 const AUTH_PROVIDER_RATE_LIMIT_MESSAGE = 'Sign-in is temporarily rate-limited by Supabase. Try again in a few minutes.';
+const LOGIN_PHASES = new Set(['preflight', 'success', 'failure']);
 
 function isRateLimitError(errorMessage: string | undefined) {
   return (errorMessage || '').toLowerCase().includes('rate limit');
@@ -163,9 +164,10 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
     const email = typeof body?.email === 'string' ? normalizeEmail(body.email) : '';
+    const phase = typeof body?.phase === 'string' && LOGIN_PHASES.has(body.phase) ? body.phase : null;
     const password = typeof body?.password === 'string' ? body.password : '';
 
-    if (!email || !password) {
+    if (!email || (!phase && !password)) {
       return NextResponse.json({ error: INVALID_CREDENTIALS_MESSAGE }, { status: 400 });
     }
 
@@ -190,6 +192,58 @@ export async function POST(req: NextRequest) {
           },
         }
       );
+    }
+
+    if (phase === 'preflight') {
+      return NextResponse.json({ success: true });
+    }
+
+    if (phase === 'failure') {
+      const authErrorMessage = typeof body?.error === 'string' ? body.error : undefined;
+      if (!isRateLimitError(authErrorMessage)) {
+        await recordRateLimitEvent({
+          action: 'login',
+          emailHash,
+          ipHash: storedIpHash,
+          success: false,
+          userAgent,
+        });
+      }
+
+      return NextResponse.json({ success: true });
+    }
+
+    if (phase === 'success') {
+      const cookieStore = cookies();
+      const routeSupabase = createRouteHandlerClient({ cookies: () => cookieStore });
+      const {
+        data: { user },
+        error: userError,
+      } = await routeSupabase.auth.getUser();
+
+      if (userError || !user || normalizeEmail(user.email || '') !== email) {
+        return NextResponse.json({ error: 'Unable to verify signed-in user.' }, { status: 401 });
+      }
+
+      await Promise.all([
+        recordRateLimitEvent({
+          action: 'login',
+          emailHash,
+          ipHash: storedIpHash,
+          success: true,
+          userAgent,
+        }),
+        clearLoginFailures(emailHash),
+      ]);
+
+      return NextResponse.json({
+        success: true,
+        user: {
+          id: user.id,
+          email: user.email ?? email,
+          fullName: (typeof user.user_metadata?.full_name === 'string' && user.user_metadata.full_name) || null,
+        },
+      });
     }
 
     const authClient = getSupabaseAnonServerClient();

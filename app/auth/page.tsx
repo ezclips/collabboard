@@ -9,11 +9,40 @@ import Icon from '@/components/AppIcon';
 
 const MIN_PASSWORD_LENGTH = 15;
 const MAX_PASSWORD_LENGTH = 64;
+const SUPABASE_RATE_LIMIT_MESSAGE = 'Sign-in is temporarily rate-limited by Supabase. Try again in a few minutes.';
+const SUPABASE_RATE_LIMIT_COOLDOWN_MS = 5 * 60 * 1000;
+
 type LoginUser = {
   id: string;
   email?: string | null;
   fullName?: string | null;
 };
+
+function mapSupabaseLoginError(error: { message?: string; code?: string } | null | undefined) {
+  const normalizedMessage = (error?.message || '').toLowerCase();
+  const normalizedCode = (error?.code || '').toLowerCase();
+
+  if (normalizedCode === 'email_not_confirmed' || normalizedMessage.includes('email not confirmed')) {
+    return 'Your email address is not confirmed yet.';
+  }
+
+  if (normalizedCode === 'over_request_rate_limit' || normalizedMessage.includes('rate limit')) {
+    return SUPABASE_RATE_LIMIT_MESSAGE;
+  }
+
+  if (normalizedCode === 'invalid_credentials' || normalizedMessage.includes('invalid login credentials')) {
+    return 'We could not sign you in with that email and password.';
+  }
+
+  return error?.message || 'Unable to sign in right now. Please try again.';
+}
+
+function isSupabaseRateLimitError(error: { message?: string; code?: string } | null | undefined) {
+  const normalizedMessage = (error?.message || '').toLowerCase();
+  const normalizedCode = (error?.code || '').toLowerCase();
+
+  return normalizedCode === 'over_request_rate_limit' || normalizedMessage.includes('rate limit');
+}
 
 function AuthForm() {
   const router = useRouter();
@@ -29,6 +58,8 @@ function AuthForm() {
   const [error, setError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [rateLimitedUntil, setRateLimitedUntil] = useState<number | null>(null);
+  const [now, setNow] = useState(() => Date.now());
   
   // Form data
   const [formData, setFormData] = useState({
@@ -46,6 +77,20 @@ function AuthForm() {
       setMessage('');
     }
   }, [requestedMode]);
+
+  useEffect(() => {
+    if (!rateLimitedUntil) return;
+
+    const intervalId = window.setInterval(() => {
+      const nextNow = Date.now();
+      setNow(nextNow);
+      if (nextNow >= rateLimitedUntil) {
+        setRateLimitedUntil(null);
+      }
+    }, 1000);
+
+    return () => window.clearInterval(intervalId);
+  }, [rateLimitedUntil]);
 
   // Check if user is already logged in
   useEffect(() => {
@@ -110,6 +155,11 @@ function AuthForm() {
     return true;
   };
 
+  const rateLimitSecondsRemaining =
+    rateLimitedUntil && now < rateLimitedUntil ? Math.ceil((rateLimitedUntil - now) / 1000) : 0;
+  const isLoginRateLimited = mode === 'login' && rateLimitSecondsRemaining > 0;
+  const submitDisabled = loading || isLoginRateLimited;
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!validateForm()) return;
@@ -119,33 +169,93 @@ function AuthForm() {
     setMessage('');
 
     try {
-      let signedInUser: LoginUser | null = null;
+      if (isLoginRateLimited) {
+        setError(`${SUPABASE_RATE_LIMIT_MESSAGE} Try again in ${rateLimitSecondsRemaining} seconds.`);
+        return;
+      }
 
-      const response = await fetch('/api/auth/login', {
+      let signedInUser: LoginUser | null = null;
+      const email = formData.email.trim().toLowerCase();
+
+      const preflightResponse = await fetch('/api/auth/login', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          email: formData.email,
-          password: formData.password,
+          phase: 'preflight',
+          email,
         }),
       });
-      const result = await response.json().catch(() => ({}));
+      const preflightResult = await preflightResponse.json().catch(() => ({}));
 
-      if (!response.ok) {
-        // All sign-ins go through the server route (rate limiting + lockout
-        // bookkeeping live there). No client-side fallback: it would create a
-        // second login path that bypasses those controls.
-        setError(typeof result?.error === 'string' ? result.error : 'Unable to sign in right now. Please try again.');
+      if (!preflightResponse.ok) {
+        if (preflightResponse.status === 429) {
+          const retryAfterSeconds =
+            typeof preflightResult?.retryAfterSeconds === 'number' ? preflightResult.retryAfterSeconds : 60;
+          setRateLimitedUntil(Date.now() + retryAfterSeconds * 1000);
+        }
+
+        setError(
+          typeof preflightResult?.error === 'string'
+            ? preflightResult.error
+            : 'Unable to sign in right now. Please try again.'
+        );
         return;
       }
 
-      if (result?.user && typeof result.user.id === 'string') {
+      const { data, error: signInError } = await supabase.auth.signInWithPassword({
+        email,
+        password: formData.password,
+      });
+
+      if (signInError || !data.session) {
+        if (isSupabaseRateLimitError(signInError)) {
+          setRateLimitedUntil(Date.now() + SUPABASE_RATE_LIMIT_COOLDOWN_MS);
+        }
+
+        await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            phase: 'failure',
+            email,
+            error: signInError?.message,
+          }),
+        }).catch(() => undefined);
+
+        setError(mapSupabaseLoginError(signInError));
+        return;
+      }
+
+      const recordResponse = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          phase: 'success',
+          email,
+        }),
+      });
+      const recordResult = await recordResponse.json().catch(() => ({}));
+
+      if (recordResponse.ok && recordResult?.user && typeof recordResult.user.id === 'string') {
         signedInUser = {
-          id: result.user.id,
-          email: typeof result.user.email === 'string' ? result.user.email : formData.email.trim(),
-          fullName: typeof result.user.fullName === 'string' ? result.user.fullName : null,
+          id: recordResult.user.id,
+          email: typeof recordResult.user.email === 'string' ? recordResult.user.email : email,
+          fullName: typeof recordResult.user.fullName === 'string' ? recordResult.user.fullName : null,
+        };
+      } else {
+        signedInUser = {
+          id: data.user?.id || data.session.user.id,
+          email: data.user?.email || data.session.user.email || email,
+          fullName:
+            (typeof data.user?.user_metadata?.full_name === 'string' && data.user.user_metadata.full_name) ||
+            (typeof data.session.user.user_metadata?.full_name === 'string' && data.session.user.user_metadata.full_name) ||
+            null,
         };
       }
 
@@ -331,7 +441,7 @@ function AuthForm() {
         )}
 
         {/* Forms */}
-        <form onSubmit={mode === 'login' ? handleLogin : mode === 'signup' ? handleSignup : handlePasswordReset}>
+        <form method="post" onSubmit={mode === 'login' ? handleLogin : mode === 'signup' ? handleSignup : handlePasswordReset}>
           <div className="space-y-4">
             {mode === 'signup' && (
               <div>
@@ -467,10 +577,15 @@ function AuthForm() {
             <Button
               type="submit"
               className="w-full"
-              disabled={loading}
+              disabled={submitDisabled}
               loading={loading}
             >
-              {mode === 'login' && (loading ? 'Signing in...' : 'Sign In')}
+              {mode === 'login' &&
+                (loading
+                  ? 'Signing in...'
+                  : isLoginRateLimited
+                    ? `Try again in ${rateLimitSecondsRemaining}s`
+                    : 'Sign In')}
               {mode === 'signup' && (loading ? 'Creating account...' : 'Create Account')}
               {mode === 'reset' && (loading ? 'Sending...' : 'Send Reset Email')}
             </Button>

@@ -15,10 +15,11 @@ dedicated Supabase test user and set `E2E_EMAIL` / `E2E_PASSWORD` in `.env.local
 **Planned next:** PATCH-002 ESLint boundary freeze (no new `@supabase/*` imports in
 components) → PATCH-003 `lib/domain` skeleton → PATCH-004+ command extraction.
 
-**Queued (2026-07-07):** auth sign-in path redesign — server-proxied login shares one
-egress IP against Supabase's per-IP auth rate limits and will mass-fail concurrent
-production logins. Direction: client-primary sign-in + server-side throttle observer.
-Needs its own patch + security review (see CHANGELOG_ARCHITECTURE.md 2026-07-07).
+**Completed urgent patch (2026-07-07):** auth sign-in path redesign — password login
+is now client-primary with `/api/auth/login` used for app-level lockout preflight
+and success/failure bookkeeping. This avoids all users sharing the server egress IP
+against Supabase's per-IP auth limit. Follow-up: remove the legacy password-proxy
+branch after a short soak (see CHANGELOG_ARCHITECTURE.md 2026-07-07).
 
 **E2E credentials:** test user exists; `E2E_EMAIL` / `E2E_PASSWORD` are set in
 `.env.local` — PATCH-001 owner pre-work is DONE.
