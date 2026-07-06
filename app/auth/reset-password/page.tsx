@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useSupabase } from '@/lib/supabase-provider';
 import { Button } from '@/components/ui/button';
@@ -10,7 +10,7 @@ import Icon from '@/components/AppIcon';
 const MIN_PASSWORD_LENGTH = 15;
 const MAX_PASSWORD_LENGTH = 64;
 
-export default function ResetPasswordPage() {
+function ResetPasswordForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { supabase } = useSupabase();
@@ -201,5 +201,14 @@ export default function ResetPasswordPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function ResetPasswordPage() {
+  // useSearchParams requires a Suspense boundary for prerendering (Next 15)
+  return (
+    <Suspense fallback={null}>
+      <ResetPasswordForm />
+    </Suspense>
   );
 }

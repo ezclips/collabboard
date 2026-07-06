@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, Suspense } from 'react';
 import { Check, Loader2 } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
@@ -91,7 +91,7 @@ const BASE_INTEGRATIONS: Integration[] = [
   },
 ];
 
-export default function IntegrationsPage() {
+function IntegrationsContent() {
   const supabase = createClientComponentClient();
   const searchParams = useSearchParams();
   const [loading, setLoading] = useState(true);
@@ -274,5 +274,14 @@ export default function IntegrationsPage() {
         ))}
       </div>
     </div>
+  );
+}
+
+export default function IntegrationsPage() {
+  // useSearchParams requires a Suspense boundary for prerendering (Next 15)
+  return (
+    <Suspense fallback={null}>
+      <IntegrationsContent />
+    </Suspense>
   );
 }
