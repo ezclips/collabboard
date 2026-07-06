@@ -3,6 +3,25 @@
 Dated record of every architectural decision, reversal, and milestone.
 Newest first. One entry per decision — link the owning doc for detail.
 
+## 2026-07-07 — Login flow hardened; auth-proxy scaling flaw identified
+
+- **Incident:** logins failing with 429. Root cause was Supabase's per-IP auth rate
+  limit (~30 sign-in requests/5 min) tripped by repeated attempts — not an app bug.
+  Confirmed by hitting GoTrue directly (`over_request_rate_limit`).
+- **Decision (accepted from implementation model):** login success is taken from the
+  login response itself, not a follow-up `auth.getUser()` read; profile upsert after
+  login is best-effort and can no longer block sign-in.
+- **Decision (rejected from implementation model):** client-side
+  `signInWithPassword` fallback when the server route is rate-limited. Rejected
+  because it duplicates the login path (P6), bypasses the server's lockout
+  bookkeeping, and doesn't help anyway when the IP itself is limited.
+- **Flaw identified, patch pending:** ALL sign-ins proxy through the server route,
+  so in production every user shares the server's egress IP against Supabase's
+  per-IP auth limits — classroom-scale simultaneous logins will mass-fail.
+  Direction: make client-side sign-in the primary path (per-user IPs) and keep
+  app-level throttling as a server-side observer. Requires its own patch +
+  security review; tracked on CURRENT_TASK.md.
+
 ## 2026-07-06 — Phase 1 opened; patch system instituted
 
 - **Decision:** All implementation work now flows through numbered patches in

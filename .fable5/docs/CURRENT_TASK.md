@@ -15,6 +15,14 @@ dedicated Supabase test user and set `E2E_EMAIL` / `E2E_PASSWORD` in `.env.local
 **Planned next:** PATCH-002 ESLint boundary freeze (no new `@supabase/*` imports in
 components) → PATCH-003 `lib/domain` skeleton → PATCH-004+ command extraction.
 
+**Queued (2026-07-07):** auth sign-in path redesign — server-proxied login shares one
+egress IP against Supabase's per-IP auth rate limits and will mass-fail concurrent
+production logins. Direction: client-primary sign-in + server-side throttle observer.
+Needs its own patch + security review (see CHANGELOG_ARCHITECTURE.md 2026-07-07).
+
+**E2E credentials:** test user exists; `E2E_EMAIL` / `E2E_PASSWORD` are set in
+`.env.local` — PATCH-001 owner pre-work is DONE.
+
 ### Phase 0 carried items (do not block PATCH-001)
 
 1. **Finish migration baseline** — blocked on Docker + DB password. Procedure documented in `supabase/BASELINE.md`. Until done, `supabase/baseline/schema_snapshot_2026-07-05.sql` is the schema reference.

@@ -9,6 +9,11 @@ import Icon from '@/components/AppIcon';
 
 const MIN_PASSWORD_LENGTH = 15;
 const MAX_PASSWORD_LENGTH = 64;
+type LoginUser = {
+  id: string;
+  email?: string | null;
+  fullName?: string | null;
+};
 
 function AuthForm() {
   const router = useRouter();
@@ -114,6 +119,8 @@ function AuthForm() {
     setMessage('');
 
     try {
+      let signedInUser: LoginUser | null = null;
+
       const response = await fetch('/api/auth/login', {
         method: 'POST',
         headers: {
@@ -127,18 +134,32 @@ function AuthForm() {
       const result = await response.json().catch(() => ({}));
 
       if (!response.ok) {
+        // All sign-ins go through the server route (rate limiting + lockout
+        // bookkeeping live there). No client-side fallback: it would create a
+        // second login path that bypasses those controls.
         setError(typeof result?.error === 'string' ? result.error : 'Unable to sign in right now. Please try again.');
         return;
       }
 
-      const { data: userData } = await supabase.auth.getUser();
-      if (userData.user) {
-        await supabase.from('profiles').upsert({
-          id: userData.user.id,
-          email: userData.user.email || formData.email || '',
-          display_name: userData.user.user_metadata?.full_name || formData.fullName,
+      if (result?.user && typeof result.user.id === 'string') {
+        signedInUser = {
+          id: result.user.id,
+          email: typeof result.user.email === 'string' ? result.user.email : formData.email.trim(),
+          fullName: typeof result.user.fullName === 'string' ? result.user.fullName : null,
+        };
+      }
+
+      if (signedInUser) {
+        const { error: profileError } = await supabase.from('profiles').upsert({
+          id: signedInUser.id,
+          email: signedInUser.email || formData.email || '',
+          display_name: signedInUser.fullName || formData.fullName,
           updated_at: new Date().toISOString()
         });
+
+        if (profileError) {
+          console.warn('Profile upsert after login failed:', profileError);
+        }
       }
 
       setMessage('Login successful! Redirecting...');

@@ -239,7 +239,17 @@ export async function POST(req: NextRequest) {
       clearLoginFailures(emailHash),
     ]);
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({
+      success: true,
+      user: {
+        id: data.user?.id ?? data.session.user.id,
+        email: data.user?.email ?? data.session.user.email ?? email,
+        fullName:
+          (typeof data.user?.user_metadata?.full_name === 'string' && data.user.user_metadata.full_name) ||
+          (typeof data.session.user.user_metadata?.full_name === 'string' && data.session.user.user_metadata.full_name) ||
+          null,
+      },
+    });
   } catch (error) {
     console.error('Login route error:', error);
     return NextResponse.json({ error: 'Unable to sign in right now. Please try again.' }, { status: 500 });
