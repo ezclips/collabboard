@@ -71,6 +71,12 @@ Environment notes: Windows host; Git Bash and PowerShell available (mind their
 different syntax); CRLF warnings from git are normal noise; the dev server may
 already be running on :3000 — Playwright's webServer uses :3100.
 
+⚠️ **Never run `npm run build` or `npm run test:e2e` while the dev server is
+running.** `next dev` and `next build` share the `.next` directory; a production
+build under a live dev server corrupts its cache and the app starts returning
+Internal Server Error (observed 2026-07-06). Stop the dev server first; if the
+error appears anyway: stop the server, delete `.next`, restart `npm run dev`.
+
 ## 6. Testing Philosophy
 
 - Characterization tests assert what the app DOES today, not what it should do.
