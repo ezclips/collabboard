@@ -5050,6 +5050,49 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   // Ref populated by DrawingLayout so we can call Excalidraw API methods (e.g. scrollToContent) after modal creation
   const drawingExcalidrawAPIRef = useRef<any>(null);
 
+  const closeAllToolbarLaunchedUi = useCallback(() => {
+    closeAllToolbars();
+    dispatch({
+      type: 'EDITORS_PATCH',
+      payload: {
+        isNoteEditorOpen: false,
+        isTableEditorOpen: false,
+        isLinkEditorOpen: false,
+        isTodoEditorOpen: false,
+        isContainerEditorOpen: false,
+        isCommentEditorOpen: false,
+        isImageEditorOpen: false,
+        isDrawingEditorOpen: false,
+        isCardEditorOpen: false,
+        isAIComponentEditorOpen: false,
+        isAIContentEditModalOpen: false,
+        isAIContentConvertModalOpen: false,
+        padletToEdit: null,
+        viewDrawingPadlet: null,
+      },
+    });
+    setIsCanvasShareModalOpen(false);
+    setIsCanvasSettingsModalOpen(false);
+    setIsImportBrowserOpen(false);
+    setIsClipartDraftModalOpen(false);
+    setIsLibraryOpen(false);
+    setIsMapStylePanelOpen(false);
+    setFreeformWallpaperDialogOpen(false);
+    setShowChronoModeModal(false);
+    setIsPlacementPromptOpen(false);
+    setWallPlacementPromptOpen(false);
+    setContainerCreationPromptOpen(false);
+    setDrawingContainerPromptOpen(false);
+  }, [
+    closeAllToolbars,
+    dispatch,
+    setIsLibraryOpen,
+    setShowChronoModeModal,
+    setWallPlacementPromptOpen,
+    setContainerCreationPromptOpen,
+    setDrawingContainerPromptOpen,
+  ]);
+
   const closeDrawingSelectedShapePanel = useCallback(() => {
     if (!isDrawingLayout) return;
     const api = drawingExcalidrawAPIRef.current;
@@ -5471,7 +5514,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       case 'note':
         // Open Note Editor
         closeDrawingSelectedShapePanel();
-        closeAllToolbars();
+        closeAllToolbarLaunchedUi();
         setPadletToEdit({
           id: 'new',
           board_id: canvasId,
@@ -5491,7 +5534,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       case 'table':
         // Open Table/Spreadsheet Editor
         closeDrawingSelectedShapePanel();
-        closeAllToolbars();
+        closeAllToolbarLaunchedUi();
         setPadletToEdit({
           id: 'new',
           board_id: canvasId,
@@ -5511,7 +5554,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       case 'link':
         // Open Link Editor
         closeDrawingSelectedShapePanel();
-        closeAllToolbars();
+        closeAllToolbarLaunchedUi();
         setPadletToEdit({
           id: 'new',
           board_id: canvasId,
@@ -5531,7 +5574,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       case 'todo':
         // Open Todo Editor
         closeDrawingSelectedShapePanel();
-        closeAllToolbars();
+        closeAllToolbarLaunchedUi();
         setPadletToEdit({
           id: 'new',
           board_id: canvasId,
@@ -5583,14 +5626,14 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         break;
       case 'container':
         if (isFreeformLayout) {
-          closeAllToolbars();
+          closeAllToolbarLaunchedUi();
           void handleCreateEmptyFreeformContainer();
           break;
         }
 
         // Open Container Editor
         closeDrawingSelectedShapePanel();
-        closeAllToolbars();
+        closeAllToolbarLaunchedUi();
         setPadletToEdit({
           id: 'new',
           board_id: canvasId,
@@ -5610,7 +5653,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       case 'comment':
         // Open Comment Editor for standalone comment post
         closeDrawingSelectedShapePanel();
-        closeAllToolbars();
+        closeAllToolbarLaunchedUi();
         setPadletToEdit({
           id: 'new',
           board_id: canvasId,
@@ -5629,7 +5672,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         break;
       case 'image':
         closeDrawingSelectedShapePanel();
-        closeAllToolbars();
+        closeAllToolbarLaunchedUi();
         if (mapContainerId) {
           setPadletToEdit({
             id: 'new',
@@ -5653,7 +5696,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         break;
       case 'upload':
         closeDrawingSelectedShapePanel();
-        closeAllToolbars();
+        closeAllToolbarLaunchedUi();
         if (mapContainerId) {
           setPadletToEdit({
             id: 'new',
@@ -5677,13 +5720,13 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         break;
       case 'import':
         closeDrawingSelectedShapePanel();
-        closeAllToolbars();
+        closeAllToolbarLaunchedUi();
         setIsImportBrowserOpen(true);
         break;
       case 'draw':
         // Open Excalidraw Editor
         closeDrawingSelectedShapePanel();
-        closeAllToolbars();
+        closeAllToolbarLaunchedUi();
         setPadletToEdit({
           id: 'new',
           board_id: canvasId,
@@ -5702,7 +5745,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         break;
       case 'ai-component':
         closeDrawingSelectedShapePanel();
-        closeAllToolbars();
+        closeAllToolbarLaunchedUi();
         setPadletToEdit({
           id: 'new',
           board_id: canvasId,
@@ -5720,25 +5763,33 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         setIsAIComponentEditorOpen(true);
         break;
       case 'library':
-        setIsMapStylePanelOpen(false);
-        setIsLibraryOpen(!isLibraryOpen);
+        {
+          const shouldOpenLibrary = !isLibraryOpen;
+          closeAllToolbarLaunchedUi();
+          if (shouldOpenLibrary) {
+            setIsLibraryOpen(true);
+          }
+        }
         break;
       case 'map-style':
-        setIsLibraryOpen(false);
-        setIsMapStylePanelOpen(!isMapStylePanelOpen);
+        {
+          const shouldOpenMapStylePanel = !isMapStylePanelOpen;
+          closeAllToolbarLaunchedUi();
+          if (shouldOpenMapStylePanel) {
+            setIsMapStylePanelOpen(true);
+          }
+        }
         break;
       case 'map-sidebar':
         if (!isMapLayout) break;
         setIsMapSidebarOpen((prev) => !prev);
         break;
       case 'share':
-        setIsLibraryOpen(false);
-        setIsMapStylePanelOpen(false);
+        closeAllToolbarLaunchedUi();
         setIsCanvasShareModalOpen(true);
         break;
       case 'canvas-settings':
-        setIsLibraryOpen(false);
-        setIsMapStylePanelOpen(false);
+        closeAllToolbarLaunchedUi();
         setIsCanvasSettingsModalOpen(true);
         break;
       default:
@@ -5748,7 +5799,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
 
   const openPadletInTypeEditor = (post: Padlet) => {
     closeDrawingSelectedShapePanel();
-    closeAllToolbars();
+    closeAllToolbarLaunchedUi();
     if (post.type === 'image' && (isDrawingLayout || isTimelineLayout)) {
       openImagePostEditor(post);
       return;

@@ -162,8 +162,23 @@ export default function CanvasSettingsModal({
 
   return (
     <>
-      <Dialog open={isOpen} onOpenChange={onClose}>
-        <DialogContent className="max-w-xl max-h-[85vh] overflow-y-auto">
+      {isOpen ? (
+        <div
+          aria-hidden="true"
+          className="fixed inset-0 z-[4000] bg-black/50 backdrop-blur-sm pointer-events-none"
+        />
+      ) : null}
+
+      {/* modal={false}: this Dialog stays open while WallpaperSelector opens its
+          own Google/OneDrive picker on top. Radix's default modal lock marks
+          everything outside its own portaled content as inert, which would
+          freeze that nested (non-Radix, portaled-to-body) picker underneath. */}
+      <Dialog open={isOpen} onOpenChange={onClose} modal={false}>
+        <DialogContent
+          className="z-[4100] sm:max-w-xl max-h-[85vh] overflow-y-auto"
+          onPointerDownOutside={(event) => event.preventDefault()}
+          onInteractOutside={(event) => event.preventDefault()}
+        >
           <DialogHeader>
             <DialogTitle>Canvas settings</DialogTitle>
           </DialogHeader>
@@ -184,7 +199,7 @@ export default function CanvasSettingsModal({
                   onChange={(event) => setTitle(event.target.value)}
                   placeholder="Canvas title"
                   disabled={!canEdit}
-                  className="h-8 flex-1 text-sm"
+                  className="h-8 flex-1 text-sm focus-visible:border-input focus-visible:ring-0"
                 />
                 <Switch
                   aria-label="Show title in banner"
@@ -225,9 +240,15 @@ export default function CanvasSettingsModal({
                   variant="outline"
                   onClick={() => setIconDialogOpen(true)}
                   disabled={!canEdit}
-                  className="h-8 flex-1 justify-start text-sm"
+                  className="h-8 min-w-0 flex-1 justify-start gap-2 text-sm"
                 >
-                  {thumbnail} Select icon
+                  {thumbnail.startsWith('http') ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={thumbnail} alt="" className="h-5 w-5 flex-shrink-0 rounded object-cover" />
+                  ) : (
+                    <span className="flex-shrink-0">{thumbnail}</span>
+                  )}
+                  <span className="truncate">Select icon</span>
                 </Button>
                 <Switch
                   aria-label="Show icon in banner"
@@ -303,7 +324,12 @@ export default function CanvasSettingsModal({
             <Button type="button" variant="outline" onClick={onClose}>
               Cancel
             </Button>
-            <Button type="button" onClick={handleSave} disabled={!canEdit || saving}>
+            <Button
+              type="button"
+              onClick={handleSave}
+              disabled={!canEdit || saving}
+              className="border-2 border-gray-900"
+            >
               {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
               Save changes
             </Button>

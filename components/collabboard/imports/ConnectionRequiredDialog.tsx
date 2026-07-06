@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { X, ExternalLink, AlertCircle } from 'lucide-react';
 import type { ImportProvider } from '@/lib/imports/types';
 
@@ -22,8 +23,12 @@ export default function ConnectionRequiredDialog({
 }: ConnectionRequiredDialogProps) {
   const label = PROVIDER_LABELS[provider];
 
-  return (
-    <div className="fixed inset-0 bg-black/50 z-[1100] flex items-center justify-center p-4 backdrop-blur-sm">
+  // Portaled to document.body — this dialog can be reached while a Radix
+  // Dialog (CanvasSettingsModal, WallpaperSelector) is still open above it in
+  // the tree, and a plain nested fixed div gets stuck fighting that dialog's
+  // own overlay/focus-trap instead of receiving clicks.
+  return createPortal(
+    <div className="fixed inset-0 bg-black/50 z-[4200] flex items-center justify-center p-4 backdrop-blur-sm">
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-md animate-in fade-in zoom-in duration-200">
         {/* Header */}
         <div className="flex items-center justify-between p-5 border-b">
@@ -79,6 +84,7 @@ export default function ConnectionRequiredDialog({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

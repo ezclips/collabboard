@@ -132,8 +132,17 @@ const WallpaperSelector: React.FC<WallpaperSelectorProps> = ({
 
   return (
     <>
-      <Dialog open={isOpen} onOpenChange={onClose}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+      {/* modal={false}: this Dialog stays open while the Google/OneDrive import
+          picker (ImportsDialog/ConnectionRequiredDialog) renders on top of it,
+          portaled to document.body. Radix's default modal lock would mark
+          that portaled picker as inert since it's outside this Dialog's own
+          content, freezing its buttons. */}
+      <Dialog open={isOpen} onOpenChange={onClose} modal={false}>
+        <DialogContent
+          className="z-[4150] sm:max-w-2xl max-h-[90vh] overflow-y-auto"
+          onPointerDownOutside={(event) => event.preventDefault()}
+          onInteractOutside={(event) => event.preventDefault()}
+        >
           <DialogHeader className="flex flex-row items-center justify-between">
             <div className="w-9" />
             <DialogTitle className="flex-1 text-center">Wallpaper</DialogTitle>
@@ -305,7 +314,7 @@ const WallpaperSelector: React.FC<WallpaperSelectorProps> = ({
 
       {/* Link upload dialog */}
       <Dialog open={linkDialogOpen} onOpenChange={setLinkDialogOpen}>
-        <DialogContent>
+        <DialogContent className="z-[4160]">
           <DialogHeader>
             <DialogTitle>Enter image link</DialogTitle>
           </DialogHeader>

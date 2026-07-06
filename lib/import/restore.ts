@@ -54,7 +54,14 @@ export async function restoreImportBundle({
   });
 
   if (error) {
-    throw new Error(`Failed to import workspace bundle: ${error.message}`);
+    const detailParts = [
+      error.code ? `code=${error.code}` : null,
+      error.message ? `message=${error.message}` : null,
+      error.details ? `details=${error.details}` : null,
+      error.hint ? `hint=${error.hint}` : null,
+    ].filter(Boolean);
+
+    throw new Error(`Failed to import workspace bundle: ${detailParts.join(' | ')}`);
   }
 
   return data as ImportSummary;

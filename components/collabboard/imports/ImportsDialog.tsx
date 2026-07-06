@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { X, Loader2 } from 'lucide-react';
 import type { ImportProvider, ResolvedImportItem } from '@/lib/imports/types';
 import { getImportProviderStatus } from '@/lib/imports/clientApi';
@@ -121,8 +122,12 @@ export default function ImportsDialog({ isOpen, onClose, onImportResolved, initi
     );
   }
 
-  return (
-    <div className="fixed inset-0 bg-black/50 z-[1100] flex items-center justify-center p-4 backdrop-blur-sm">
+  // Portaled to document.body — see ConnectionRequiredDialog.tsx for why: this
+  // dialog is opened from within WallpaperSelector's/CanvasSettingsModal's
+  // still-open Radix Dialogs, and a plain nested fixed div there doesn't
+  // receive clicks correctly.
+  return createPortal(
+    <div className="fixed inset-0 bg-black/50 z-[4200] flex items-center justify-center p-4 backdrop-blur-sm">
       <div
         className="bg-white rounded-xl shadow-2xl w-full animate-in fade-in zoom-in duration-200 overflow-hidden"
         style={{ maxWidth: screen.name === 'browser' ? '720px' : '480px', height: screen.name === 'browser' ? '80vh' : 'auto' }}
@@ -201,6 +206,7 @@ export default function ImportsDialog({ isOpen, onClose, onImportResolved, initi
           );
         })()}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

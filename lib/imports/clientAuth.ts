@@ -1,6 +1,6 @@
 'use client';
 
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+import { supabaseBrowser } from '@/lib/supabase/browser';
 
 const findAccessTokenDeep = (value: unknown): string | null => {
   if (!value) return null;
@@ -45,7 +45,11 @@ function getAccessTokenFromStorage(): string | null {
 }
 
 export async function resolveClientAccessToken(): Promise<string | null> {
-  const supabase = createClientComponentClient();
+  // Reuse the app's shared client instead of creating a new GoTrueClient here
+  // — multiple concurrent instances race over the same cookie-stored session,
+  // and one instance's background token refresh can invalidate another's
+  // cached token, causing this to intermittently look unauthenticated.
+  const supabase = supabaseBrowser();
 
   const {
     data: { session },

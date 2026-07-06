@@ -79,7 +79,7 @@ function parseBoardNameOverrides(rawValue: FormDataEntryValue | null): Record<st
  */
 export async function POST(request: NextRequest) {
   const cookieStore = await cookies();
-  const supabase = createRouteHandlerClient({ cookies: async () => cookieStore });
+  const supabase = createRouteHandlerClient({ cookies: () => cookieStore as any });
 
   const {
     data: { user },
@@ -124,6 +124,7 @@ export async function POST(request: NextRequest) {
     if (error instanceof UploadError || error instanceof ImportValidationError) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
+    console.error('[workspace import] write step failed', error);
     const message = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json({ error: `Import failed: ${message}` }, { status: 500 });
   }
