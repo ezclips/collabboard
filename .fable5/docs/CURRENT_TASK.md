@@ -4,9 +4,18 @@
 
 ## Now
 
-**Phase 0 — Stop the Bleeding** (ROADMAP.md) — largely complete as of 2026-07-06. Remaining items below.
+**Phase 1 — Domain Layer & Characterization Net** (opened 2026-07-06).
+Work flows through numbered patches in `.fable5/patches/` designed by the CTO model
+and executed by implementation models (SKILL.md).
 
-### Phase 0 remaining
+**Active patch:** `PATCH-001` (authenticated characterization harness + board
+lifecycle test) — **drafted, awaiting owner approval.** Owner pre-work: create a
+dedicated Supabase test user and set `E2E_EMAIL` / `E2E_PASSWORD` in `.env.local`.
+
+**Planned next:** PATCH-002 ESLint boundary freeze (no new `@supabase/*` imports in
+components) → PATCH-003 `lib/domain` skeleton → PATCH-004+ command extraction.
+
+### Phase 0 carried items (do not block PATCH-001)
 
 1. **Finish migration baseline** — blocked on Docker + DB password. Procedure documented in `supabase/BASELINE.md`. Until done, `supabase/baseline/schema_snapshot_2026-07-05.sql` is the schema reference.
 2. **Git history purge (decision needed)** — `tmp/` Chrome profiles (Login Data, Cookies, third-party session storage; 10,726 files) are removed from tip but remain in git history. Repo has NO remote, so `git filter-repo --path tmp --invert-paths` is feasible and recommended. Full pre-purge backup exists: `c:/Users/rmeic/Projects/dev/starter-pre-phase0-20260706.bundle` (165 MB). **User approval required** — rewrites all commit hashes.

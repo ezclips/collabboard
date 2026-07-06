@@ -17,7 +17,8 @@ You are working on **Fable 5**, a visual collaboration platform (Padlet-class UX
 | Engineering | [COMPONENT_GUIDELINES](docs/COMPONENT_GUIDELINES.md) · [STATE_MANAGEMENT](docs/STATE_MANAGEMENT.md) · [CODING_STANDARDS](docs/CODING_STANDARDS.md) |
 | Design | [UI_GUIDELINES](docs/UI_GUIDELINES.md) · [DESIGN_SYSTEM](docs/DESIGN_SYSTEM.md) · [ACCESSIBILITY](docs/ACCESSIBILITY.md) |
 | Quality | [PERFORMANCE](docs/PERFORMANCE.md) · [SECURITY](docs/SECURITY.md) · [TESTING](docs/TESTING.md) |
-| Execution | [ROADMAP](docs/ROADMAP.md) · [CURRENT_TASK](docs/CURRENT_TASK.md) |
+| Execution | [ROADMAP](docs/ROADMAP.md) · [CURRENT_TASK](docs/CURRENT_TASK.md) · [CHANGELOG_ARCHITECTURE](docs/CHANGELOG_ARCHITECTURE.md) |
+| Governance | [SKILL](docs/SKILL.md) (how implementation models work here) · [CTO_GUIDELINES](docs/CTO_GUIDELINES.md) (how CTO models run the project) · [patches/](patches/) (numbered work units) |
 
 ## Non-Negotiable Rules (enforced in review; full detail in the docs)
 
@@ -34,7 +35,11 @@ You are working on **Fable 5**, a visual collaboration platform (Padlet-class UX
 
 ## Current Phase
 
-**Phase 0 — Stop the Bleeding** (hygiene, migration baseline, CI gates, telemetry). See ROADMAP.md for exit criteria. During Phases 1–3, new features ship on the new architecture or not at all.
+**Phase 1 — Domain Layer & Characterization Net** (Phase 0 executed 2026-07-06; carried
+items listed in CURRENT_TASK.md). All implementation flows through numbered patches in
+`patches/` — one patch at a time, owner approval between patches. Implementation models:
+read [SKILL.md](docs/SKILL.md) before touching anything. During Phases 1–3, new features
+ship on the new architecture or not at all.
 
 ## Repo Facts (verified 2026-07-06)
 

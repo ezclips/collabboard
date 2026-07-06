@@ -2,23 +2,26 @@
 
 Phased consolidation → differentiation → scale. Each phase has **exit criteria**; we do not start the next phase's risky work until the current one's criteria are green. Dates assume current team velocity; revisit monthly. (Today: 2026-07-06.)
 
-## Phase 0 — Stop the Bleeding (1–2 weeks)
+## Phase 0 — Stop the Bleeding (executed 2026-07-06; three items carried)
 
-Cheap, mechanical, immediately compounding.
+- [x] Repo hygiene purge: ~10.9k files removed from tip incl. committed Chrome profiles; history purge pending owner approval
+- [~] Migration baseline: SQL archived to `supabase/legacy/`, snapshot in `supabase/baseline/`, procedure in `supabase/BASELINE.md` — final `db diff` blocked on Docker + DB password
+- [ ] ESLint boundaries → moved to Phase 1 (PATCH-002); lint decoupled from build (5,426-error burn-down tracked)
+- [x] Typecheck zero errors; production build repaired; CI workflow ready (inert until a remote exists); smoke tests green
+- [ ] Telemetry: Sentry + web-vitals RUM + `board_open_ms` — **carried, do early in Phase 1**
+- [x] Security quick audit: debug routes removed, orphan hardcoded-key file removed, gitignore hardened (SSRF/webhook deep-audit carried to Phase 1)
+- [ ] dhtmlx licensing decision — **owner decision still open**
 
-- [ ] Repo hygiene purge: backup files, logs, tsc outputs, dead pages, root scripts/SQL (CODING_STANDARDS.md §3)
-- [ ] Migration baseline: `supabase db diff` → committed baseline; delete schema dumps; migrations-only rule starts (DATABASE.md §4)
-- [ ] ESLint boundaries: no new `supabase` imports in components; no-console; file-size ceiling on touched files
-- [ ] Typecheck to zero errors; CI: typecheck + lint + build gate
-- [ ] Telemetry: Sentry + web-vitals RUM + `board_open_ms` (SYSTEM_DESIGN.md §7)
-- [ ] Security quick audit: debug routes out of prod, link-preview SSRF, webhook signatures, storage bucket policies (SECURITY.md §5)
-- [ ] dhtmlx licensing decision (buy vs replace) — legal exposure, decide now even if replacement lands later
+**Exit status:** green enough to open Phase 1; carried items stay on CURRENT_TASK.md and do not block the characterization net.
 
-**Exit:** CI green-gated; migrations reproducible; telemetry dashboard exists.
+## Phase 1 — Domain Layer & Characterization Net (4–6 weeks; opened 2026-07-06)
 
-## Phase 1 — Domain Layer & Characterization Net (4–6 weeks)
+Work proceeds via numbered patches in `.fable5/patches/` (see SKILL.md / CTO_GUIDELINES.md).
+Planned early sequence: PATCH-001 characterization harness → PATCH-002 ESLint boundary
+freeze → PATCH-003 domain-layer skeleton (`lib/domain`, Result type, first repository)
+→ PATCH-004+ command-by-command extraction from `CanvasClient.tsx`.
 
-- [ ] Playwright characterization suite for current behavior (TESTING.md §1 flows 1–6)
+- [ ] Playwright characterization suite for current behavior (TESTING.md §1 flows 1–6) — started with PATCH-001
 - [ ] `lib/domain`: repositories + commands; move all 105 `CanvasClient.tsx` data call sites behind them, behavior-preserving
 - [ ] `BoardStore` + `BoardUiStore` (zustand); `CanvasClient.tsx` → < 1,000 lines (STATE_MANAGEMENT.md §5)
 - [ ] Snapshot RPC `get_board_snapshot` — board open in one round trip
