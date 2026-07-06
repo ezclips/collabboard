@@ -21,12 +21,13 @@ export async function middleware(req: NextRequest) {
 export const config = {
     matcher: [
         /*
-         * Match all request paths except for the ones starting with:
-         * - _next/static (static files)
-         * - _next/image (image optimization files)
-         * - favicon.ico (favicon file)
-         * - public folder
+         * Session-sync middleware runs ONLY on page navigations.
+         * Excluded: _next assets, favicon, and ALL /api routes — route handlers
+         * read/refresh auth cookies themselves via createRouteHandlerClient.
+         * Rationale: getSession() here can trigger a token refresh against
+         * Supabase's per-IP auth rate limit; running it on every API call kept
+         * that limit exhausted and blocked password sign-ins (2026-07-07).
          */
-        '/((?!_next/static|_next/image|favicon.ico).*)',
+        '/((?!_next/static|_next/image|favicon.ico|api/).*)',
     ],
 };
