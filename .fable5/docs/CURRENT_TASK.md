@@ -50,6 +50,8 @@ branch after a short soak (see CHANGELOG_ARCHITECTURE.md 2026-07-07).
 | dhtmlx buy-vs-replace | User | Phase 0 exit | GPL exposure; recommendation: replace |
 | Surviving canvas system | CTO | Phase 1 | Needs feature diff first |
 | Default branch `master` vs `main` | User | Before remote push | Work is on `master` |
+| Raise Supabase sign-in limit 30→100/5min (dev convenience + school-NAT headroom) | User | Anytime (dashboard, 1 min) | Auth → Rate Limits |
+| Configure custom SMTP (email limit is 2/h on built-in) | User | Before ANY beta/invites | Breaks signup/reset/invites beyond 2 users/h |
 
 ## Context for a Fresh Session
 

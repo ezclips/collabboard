@@ -38,6 +38,20 @@ Newest first. One entry per decision — link the owning doc for detail.
   assets — session sync happens on page navigations only. Production corollary:
   many users behind one NAT (a school) share that per-IP budget; keep auth traffic
   frugal by design.
+- **Attribution correction (from owner's dashboard, 2026-07-07):** sign-ins and
+  token refreshes are SEPARATE per-IP buckets (30/5min vs 150/5min). The prolonged
+  sign-in 429s were the 30/5min sign-in bucket being repeatedly refilled by retry
+  attempts from all parties; the middleware refresh traffic pressured the separate
+  refresh bucket. The middleware fix stands on its own merits (wasteful auth
+  traffic), but calm retry discipline is what clears sign-in blocks.
+- **New risk from the same dashboard: project email limit is 2/hour** (Supabase
+  built-in SMTP default). Signup confirmations, password resets, and invitation
+  emails will fail beyond 2 users/hour — this silently caps growth and breaks
+  onboarding. Action queued: configure custom SMTP (Resend/Postmark/SES) before
+  any beta. Also noted: anonymous sign-ins are 30/hour/IP — reinforces the
+  PERMISSIONS.md decision to implement share-link visitors with signed cookies,
+  NOT Supabase anonymous users (a classroom behind one NAT would exhaust 30/h
+  instantly).
 
 ## 2026-07-06 — Phase 1 opened; patch system instituted
 
