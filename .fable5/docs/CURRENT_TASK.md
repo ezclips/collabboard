@@ -63,5 +63,11 @@ branch after a short soak (see CHANGELOG_ARCHITECTURE.md 2026-07-07).
 
 ## Log
 
+- **2026-07-07** — Login incident RESOLVED (owner-confirmed in browser). Causes:
+  Supabase per-IP sign-in limit (30/5min) kept warm by retries; middleware was
+  additionally refreshing tokens on every API call (fixed, `f64dd76`). Auth is now
+  client-primary with server lockout bookkeeping (`51db5a8`, CTO-reviewed).
+  Owner follow-ups queued: raise sign-in limit 30→100/5min, custom SMTP (email
+  cap is 2/h), auth hardening items for a later security patch.
 - **2026-07-06 (pm)** — Phase 0 executed: hygiene purge (~10.9k files removed from tip), secrets audit (no service keys; anon key orphan removed; Chrome profiles found in history — purge pending approval), SQL reorganized + baseline documented, production build repaired, CI gates + smoke tests added and passing.
 - **2026-07-06 (am)** — Architecture audit completed; `.fable5/docs` documentation suite created (20 docs). Phase 0 defined.
