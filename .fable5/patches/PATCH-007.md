@@ -73,6 +73,10 @@ which is likewise e2e-covered only).
 - Scope creep temptation: no domain layer, no repository — this page has no
   table. Resist symmetry; the seam is only for data access.
 
+## Commit
+  Commit message:
+  feat(settings): extract logs current-user access
+
 ## Rollback
 Single `git revert`. (Note: PATCH-009 will DEPEND on `getCurrentUser` — once
 009 lands, reverting 007 requires reverting 009 first. Within this patch's
