@@ -3,6 +3,29 @@
 Dated record of every architectural decision, reversal, and milestone.
 Newest first. One entry per decision — link the owning doc for detail.
 
+## 2026-07-07 — PATCH-001 landed: characterization harness (Phase 1 net begins)
+
+- **Shipped (commit 9b8bed2):** authenticated Playwright harness + wall board
+  lifecycle test (create → add note → edit/persist → delete board). Projects:
+  setup/smoke/characterization; `PW_BASE_URL` lets the suite run against a live
+  dev server so we never build under a running dev server (SKILL.md guard).
+- **Deviation (accepted):** standalone post-deletion via the wall card's
+  right-click menu was deferred — on the wall layout that menu is unreliable to
+  drive (right-click reopens the editor; items lack stable menuitem roles). Board
+  deletion still exercises a delete path and removes the post. Queued as a
+  follow-up once wall context-menu a11y is fixed.
+- **Findings surfaced during execution (backlog, not fixed here):**
+  1. Sidebar tools and canvas post cards are non-semantic `<div onClick>` with
+     tooltip-span labels — no button/menuitem roles. Concrete first entry for the
+     ACCESSIBILITY.md burn-down; also makes tests brittle.
+  2. Board-create redirects to `/dashboard`, not into the new board — minor P2
+     friction (extra click to start working). Product decision for later.
+  3. Free-plan board limit + soft-delete means abandoned test/QA boards consume
+     quota; e2e cleanup must hard-delete or run under a high-limit account.
+- **Repo note:** more backup files found in `app/dashboard/create-canvas/`
+  (`also no good...`, `long_but works_page.tsx`, `samepage.tsx`) — Phase 0-style
+  cruft, queued for a hygiene sweep (not touched by this patch).
+
 ## 2026-07-07 — Login flow hardened; auth-proxy scaling flaw identified
 
 - **Incident:** logins failing with 429. Root cause was Supabase's per-IP auth rate

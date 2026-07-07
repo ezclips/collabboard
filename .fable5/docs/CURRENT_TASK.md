@@ -8,12 +8,21 @@
 Work flows through numbered patches in `.fable5/patches/` designed by the CTO model
 and executed by implementation models (SKILL.md).
 
-**Active patch:** `PATCH-001` (authenticated characterization harness + board
-lifecycle test) — **drafted, awaiting owner approval.** Owner pre-work: create a
-dedicated Supabase test user and set `E2E_EMAIL` / `E2E_PASSWORD` in `.env.local`.
+**Last patch:** `PATCH-001` — **DONE (2026-07-07, commit 9b8bed2).** Authenticated
+characterization harness + wall board lifecycle test. `npm run test:e2e` = 6 pass
+with credentials; skips cleanly without. Run against a live dev server with
+`PW_BASE_URL=http://localhost:3000` (never build under a running dev server).
 
-**Planned next:** PATCH-002 ESLint boundary freeze (no new `@supabase/*` imports in
-components) → PATCH-003 `lib/domain` skeleton → PATCH-004+ command extraction.
+**Active patch:** none — ready to draft **PATCH-002** (ESLint boundary freeze:
+no new `@supabase/*` imports in components; then PATCH-003 `lib/domain` skeleton →
+PATCH-004+ command extraction from `CanvasClient.tsx`).
+
+**Backlog from PATCH-001 execution:**
+- Deferred: standalone post-delete e2e step (wall context-menu a11y/selectors).
+- a11y: sidebar tools + post cards are non-semantic `<div onClick>` — first
+  concrete ACCESSIBILITY.md burn-down item.
+- Hygiene: more backup files in `app/dashboard/create-canvas/` to sweep.
+- e2e board quota: cleanup must hard-delete or use a high-limit test account.
 
 **Completed urgent patch (2026-07-07):** auth sign-in path redesign — password login
 is now client-primary with `/api/auth/login` used for app-level lockout preflight
@@ -63,6 +72,9 @@ branch after a short soak (see CHANGELOG_ARCHITECTURE.md 2026-07-07).
 
 ## Log
 
+- **2026-07-07** — PATCH-001 DONE (commit 9b8bed2): characterization harness +
+  board lifecycle test green (6 pass w/ creds, clean skips w/o). Phase 1 behavior
+  net is live. Backlog items recorded above.
 - **2026-07-07** — Login incident RESOLVED (owner-confirmed in browser). Causes:
   Supabase per-IP sign-in limit (30/5min) kept warm by retries; middleware was
   additionally refreshing tokens on every API call (fixed, `f64dd76`). Auth is now

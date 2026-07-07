@@ -21,7 +21,7 @@ Planned early sequence: PATCH-001 characterization harness → PATCH-002 ESLint 
 freeze → PATCH-003 domain-layer skeleton (`lib/domain`, Result type, first repository)
 → PATCH-004+ command-by-command extraction from `CanvasClient.tsx`.
 
-- [ ] Playwright characterization suite for current behavior (TESTING.md §1 flows 1–6) — started with PATCH-001
+- [~] Playwright characterization suite for current behavior (TESTING.md §1 flows 1–6) — PATCH-001 DONE: board lifecycle (create/add/edit/persist/delete) green; remaining flows (comments, sharing, layout-switch, kanban, billing) to follow as needed before the extractions they guard
 - [ ] `lib/domain`: repositories + commands; move all 105 `CanvasClient.tsx` data call sites behind them, behavior-preserving
 - [ ] `BoardStore` + `BoardUiStore` (zustand); `CanvasClient.tsx` → < 1,000 lines (STATE_MANAGEMENT.md §5)
 - [ ] Snapshot RPC `get_board_snapshot` — board open in one round trip

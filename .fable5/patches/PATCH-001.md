@@ -1,6 +1,8 @@
 # PATCH-001 — Authenticated characterization harness + board lifecycle test
 
-**Status:** draft (awaiting owner approval)
+**Status:** DONE (2026-07-07, commit 9b8bed2). Verified: 6 pass with credentials;
+smoke pass + auth/characterization skip cleanly without. One accepted deviation
+(below): standalone post-deletion deferred due to wall context-menu fragility.
 
 ## Goal
 Extend the existing Playwright setup with an authenticated session and one
