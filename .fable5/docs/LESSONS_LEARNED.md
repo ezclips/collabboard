@@ -65,6 +65,13 @@ at minimum before working on this repo. Newest first within each section.
 **Fix (verified present):** the success phase requires the caller's real session cookie and email match before clearing anything.
 **Reusable rule:** any client-reported security event needs cryptographic/session proof before it mutates server-side security state.
 
+### A lockfile can be inconsistent while `npm ls` says it's fine (2026-07-07, PATCH-003 blockage)
+**Symptom:** `npm install -D vitest` failed with ERESOLVE though nothing touched React; `npm ls` reported a consistent tree.
+**Wrong path:** treating it as a vitest/PATCH-003 problem.
+**Root cause:** `react-chrono@3.3.3` declares peer `react@^19.2.3` while the lockfile pins react 19.1.0 — the package was originally installed with peer checks bypassed. Install-time validation is stricter than `npm ls`, so EVERY subsequent install fails, regardless of what's being installed.
+**Fix:** upgrade react/react-dom to ^19.2.3 (PATCH-002.1) — the resolution the peer contract actually asks for; proven via `npm install --dry-run` before delegating.
+**Reusable rule:** when any `npm install` ERESOLVEs on packages you didn't touch, the lockfile itself is inconsistent — diagnose with `--dry-run`, fix the named peer contract permanently, and never reach for `--legacy-peer-deps`/`--force` (that's how the inconsistency was created). Dry-run the fix before prescribing it.
+
 ## E2E & UI testing in this codebase
 
 ### Discover selectors live; never guess labels (2026-07-07, PATCH-001)

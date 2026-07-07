@@ -22,11 +22,16 @@ fixed in CTO review (glob escaping of `[id]` routes; `--no-inline-config`).
 **Active patch:** `PATCH-003` (domain layer foundation: `lib/domain` skeleton —
 Result, error taxonomy, branded ids, `defineCommand`, `BoardRepository`
 interface, conventions, unit tests via vitest, domain-purity lint) —
-**APPROVED (2026-07-07) and DELEGATED to Codex GPT-5.4.** Explicitly out of
-scope: moving any existing calls, CanvasClient, UI behavior, realtime, state
-management, schema. Handoff block for GPT-5.4 is at the bottom of
-`.fable5/patches/PATCH-003.md`. CTO reviews the returned commit + diff
-(re-running all verification), then updates these docs.
+**APPROVED but BLOCKED by PATCH-002.1.** Codex correctly stopped at Step 1:
+`npm install` fails on a pre-existing lockfile inconsistency (react-chrono
+peer wants react ^19.2.3; locked react is 19.1.0 — see LESSONS_LEARNED).
+PATCH-003 itself is unchanged; resume after the prerequisite lands.
+
+**Prerequisite patch:** `PATCH-002.1` (upgrade react/react-dom → ^19.2.3;
+fix CTO-verified via dry-run; `--legacy-peer-deps`/`--force` explicitly NOT
+approved) — **drafted, awaiting owner approval.** After it lands: owner
+restarts dev server, CTO runs the e2e net on React 19.2, then PATCH-003
+delegation resumes.
 
 **Delegation lesson (2026-07-07):** Codex implemented faithfully but skipped the
 spec's verification and commit steps. Future delegation prompts must state:
