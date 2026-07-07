@@ -29,9 +29,12 @@ PATCH-003 itself is unchanged; resume after the prerequisite lands.
 
 **Prerequisite patch:** `PATCH-002.1` (upgrade react/react-dom → ^19.2.3;
 fix CTO-verified via dry-run; `--legacy-peer-deps`/`--force` explicitly NOT
-approved) — **drafted, awaiting owner approval.** After it lands: owner
-restarts dev server, CTO runs the e2e net on React 19.2, then PATCH-003
-delegation resumes.
+approved) — **APPROVED (2026-07-07) and DELEGATED to Codex GPT-5.4.**
+Sequence after Codex returns: CTO review (dependency diff, independent
+re-verification, lockfile audit for unexpected transitive changes, commit
+hash) → owner restarts dev server → CTO runs e2e net on React 19.2 →
+PATCH-003 delegation resumes. PATCH-003 stays blocked until PATCH-002.1
+passes CTO review.
 
 **Delegation lesson (2026-07-07):** Codex implemented faithfully but skipped the
 spec's verification and commit steps. Future delegation prompts must state:

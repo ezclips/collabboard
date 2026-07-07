@@ -1,6 +1,11 @@
 # PATCH-002.1 — Restore npm installability: align React with react-chrono's peer range
 
-**Status:** draft (awaiting owner approval)
+**Status:** APPROVED (owner, 2026-07-07) — delegated to Codex GPT-5.4.
+Execute the Verification Steps exactly; `--legacy-peer-deps`/`--force` remain
+NOT approved. Codex must not edit `.fable5/` or `.claude/`. CTO review on
+return: dependency diff (react/react-dom only), verification output re-run
+independently, typecheck, boundary check, commit hash, and a lockfile audit
+for unexpected transitive changes.
 **Type:** prerequisite (blocks PATCH-003) · **Complexity:** easy
 **Estimated implementation time:** 15–30 minutes
 **Assigned model (proposed):** GPT-5.4 (Codex)
