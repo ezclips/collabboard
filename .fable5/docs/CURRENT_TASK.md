@@ -70,7 +70,7 @@ Grandfather trajectory 17 → 10:
 |---|---|---|---|
 | 010 | CanvasModals + OverlayLayer | type-only `AuthUser` swap (new) | 17→15 ✅ **DONE** (743d719, review PASSED; Amendment 1 scope confirmed exact) |
 | 011 | ProtectedRoute | F: auth-state observer (new; adds `authState.ts` helper incl. signOut) | 15→14 ✅ **DONE** (e56bc5a, review PASSED; Pattern F entered into catalog, verified) |
-| 012 | Navbar | F repetition (session-state mapping, census-gated) | 14→13 |
+| 012 | Navbar | F repetition (session-state mapping, census-gated) | 14→13 ✅ **DONE** (2a3ff44, review PASSED; Amendment 1a corrected proof re-verified by CTO before resume; orphaned-component scope held) |
 | 013 | app/page.tsx (landing) | F repetition (+ first signOut consumer; event branches preserved) | 13→12 |
 | 014 | delete-account page | C (+ signOut); **exclusion reversed** — re-census proved deletion is server-side, client is a form + fetch; `app/api/**` hard-forbidden | 12→11 |
 | 015 | share/[token] (server page) | G: server-page read (new; adds `serverClient.ts` — first server seam) | 11→10 |
@@ -168,6 +168,30 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-08** — PATCH-012 DONE (2a3ff44), CTO review PASSED. Both
+  session→user renames (state, init read, subscription callback, every
+  render-time `session?.user?.X` → `user?.X`) applied exactly per spec; both
+  `@supabase` imports removed; grandfather 14→13 (verified: file removed from
+  `GRANDFATHERED_UI_FILES`, count re-counted at 13). CTO independently
+  re-ran, not just the implementer's report: all three orphan-proof commands
+  (exact match, `./components/ui-kit/ClientWrapper.tsx`), the pre-edit
+  census (0 `@supabase` matches remain post-edit), `tsc --noEmit` (0
+  errors), `check:boundaries` (green), `test:unit` (38/38, unchanged count —
+  Pattern F has no unit tests by design). Minor accepted deviation: the
+  `onAuthUserChanged` callback dropped `async` (unused — no `await` in the
+  body); harmless simplification, not a behavior change, not required to be
+  reverted. Ruling on the implementer's flagged question: `grep -c
+  "@supabase" file` printing `0` while exiting `1` is correct, expected grep
+  behavior (exit 1 = zero matching lines, not an error) — the acceptance
+  criterion is the printed value, which is `0`; not a defect. E2E full-suite
+  rerun was NOT performed this review (no dev server was up); ruled
+  acceptable because the orphan-proof is static-reachability evidence
+  strictly stronger than e2e sampling for a component nothing mounts — e2e
+  would only reconfirm unreachability it cannot even exercise. Doc-lag
+  caught: the CTO_PLAYBOOK health ledger had not been updated since PATCH-009
+  (batch-064) despite PATCH-010 and PATCH-011 both landing and passing review
+  in the interim — three patches' worth of movement backfilled together this
+  entry (see CTO_PLAYBOOK §12). Recommendation: PATCH-013 proceeds unchanged.
 - **2026-07-07** — PATCH-012 Amendment 1a: the orphan-proof's first command
   self-contradicted (pattern "ui-kit/Navbar" can't match ClientWrapper's
   relative `./Navbar` import; expected-result comment said it would).

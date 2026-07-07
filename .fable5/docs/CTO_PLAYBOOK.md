@@ -257,7 +257,22 @@ repair; architecture 13→14) → **64** (2026-07-07: batch 005–009 complete �
 grandfather 23→17 in one day, all five patterns A–E validated on the
 economical model, unit net 21→38, e2e 8→13; architecture 14→15, safety
 14→15). Axis snapshot at 64: safety 15, ops 12, architecture 15, product 12,
-continuity 10 — the axes are deliberately
+continuity 10 → **66** (2026-07-08: catch-up entry — PATCH-010, -011, and
+-012 all landed and passed review between the 64 entry and today, but the
+ledger was never advanced; a continuity gap, caught and closed in this
+entry rather than dated separately per-patch since the arithmetic is the
+same either way. Combined evidence: grandfather 17→13 across three patches;
+a new reusable seam (`authState.ts`, Pattern F) added in 011 and proven
+reusable on a second repetition in 012 with zero behavior drift; a real
+pre-merge defect caught by `tsc` in 010 (TS2322) and a real proof-command
+defect caught by CTO dry-run in 012 (Amendment 1a) — both before any bad
+code reached `main`. +1 architecture 15→16 — grandfather shrink continues,
+pattern reuse validated twice; +1 safety 15→16 — three consecutive patches
+landed with zero defects reaching `main`, all caught pre-merge by gates or
+CTO re-verification; continuity held flat at 10 rather than credited for
+catching its own lag — the gap existing at all is the finding, not a thing
+to reward fixing.) Axis snapshot at 66: safety 16, ops 12, architecture 16,
+product 12, continuity 10 — the axes are deliberately
 harsh; a 70 requires the monolith visibly shrinking (several more
 extractions) AND telemetry existing.
 
