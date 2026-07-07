@@ -7,8 +7,19 @@ you don't make them twice. The patch file always wins over this document; if
 the patch and the pattern disagree, STOP and report the disagreement instead
 of choosing.
 
+**If your patch's own header names a pattern with "(new)" or says it "will
+enter PATCH_REFERENCE at review" — this document will NOT contain it yet,
+by design (see the map's footer note). That is not a spec defect; do not
+stop for it. The patch file itself is the complete, self-contained
+specification for a brand-new pattern (verbatim code, exact bindings) —
+this catalog only gets that pattern's summary added AFTER the patch is
+reviewed, as a resource for the NEXT patch that reuses it.** Only stop if
+the patch instance and its OWN text contradict each other, or if it points
+you to a pattern number/name that should already be reviewed (check §7's
+✅ done column) and isn't.
+
 Patterns are extracted from real, reviewed patches:
-PATCH-004 (canonical, commit `5278468`), 005, 006, 007, 008, 009.
+PATCH-004 (canonical, commit `5278468`), 005, 006, 007, 008, 009, 010.
 
 ---
 
@@ -38,6 +49,7 @@ Then classify:
 | One table, read only (no upsert/insert/update/delete) | **D — read-only repository** | PATCH-008 |
 | One table, select + upsert (settings-style row per user) | **A — settings read/write** | PATCH-004 (canonical), 005 |
 | Two or more tables, or any join — but still only reads/upserts | **E — composite page** | PATCH-009 |
+| ONLY a type import (`import type { User }`) used in a prop/state type, no runtime call | **type-only import swap** | PATCH-010 |
 | ANYTHING below in "Not yours" | none — **stop** | — |
 
 **Not yours (escalate; GPT-5.5/CTO territory — do not attempt):**
@@ -197,6 +209,38 @@ query binding without diffing it against the real call site (PATCH-009's
 binding named a column that didn't exist — the pre-edit census caught it;
 run yours and compare before writing code).
 
+## 5.5. Pattern — type-only import swap
+
+**Reference:** PATCH-010.
+
+**When:** the file's ONLY `@supabase` dependency is `import type { X }` used
+in a prop or state type — no runtime `supabase.*` call anywhere in the file.
+
+**When NOT:** any runtime usage at all → a different pattern (B/C/D/A/E).
+
+**Required pieces:** ONE domain type module (`lib/domain/<area>/<name>.ts`)
+declaring a structural subset of the vendor type — ONLY the fields actually
+read by the file(s) in scope (census every property chain to its LEAVES,
+not just the first segment — see the mistake below). No zod, no functions,
+pure types (domain-purity lint applies). Swap the import and the type
+annotation only; the vendor type stays structurally assignable at every
+caller, so callers are never touched.
+
+**Tests:** none new. `tsc --noEmit` IS the test (a missing field fails the
+build); the existing e2e suite is the behavior net if it exercises the
+component. No unit tests for a pure type.
+
+**Common mistakes:**
+- Censusing only the first segment of a property chain (`user?.X`) and
+  missing fields accessed one level deeper (`user?.user_metadata?.name`) —
+  the vendor type's real shape is wider than any one call site suggests;
+  every access path must be enumerated to its leaf before the domain type
+  is written (PATCH-010 Amendment 1: `tsc` caught a missed `.name` field
+  because an index signature of `unknown` narrows to `{}` in a `||` chain).
+- Widening the domain type's index signature to `any` to make errors go
+  away — this destroys the exact safety net that catches step 1's mistake.
+- Touching component logic/JSX beyond the import + type-annotation lines.
+
 ---
 
 ## 6. Universal requirements (every pattern, every patch)
@@ -257,7 +301,11 @@ it, STOP — never adapt.
 | 007 | settings/logs | C (+ introduces `getCurrentUser`) | 20→19 ✅ done |
 | 008 | settings/achievements | D | 19→18 ✅ done |
 | 009 | settings/dashboard | E (A + D composed; needs 007) | 18→17 ✅ done |
+| 010 | CanvasModals + OverlayLayer | type-only import swap | 17→15 ✅ done |
 
-New patterns discovered by future patches get added here by the CTO at
+**New patterns discovered by future patches get added here by the CTO at
 review — this catalog only ever contains patterns with a reviewed reference
-implementation.
+implementation.** Concretely: PATCH-011 (Pattern F), PATCH-015 (Pattern G) do
+NOT appear above yet — they are queued but not yet reviewed. Their own patch
+files are fully self-contained specifications in the meantime; do not expect
+to find their pattern here until their row shows ✅ done.

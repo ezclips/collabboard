@@ -168,6 +168,15 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-07** — PATCH-011 blocked correctly by GPT-5.4 on a real gap: the
+  reading-order instruction says consult PATCH_REFERENCE.md first, but
+  neither Pattern F (queued) NOR PATCH-010's own type-only-swap pattern
+  (already reviewed) was actually in the catalog — a stated "add at review"
+  policy that had never been executed. Fixed: PATCH-010's pattern backfilled
+  into PATCH_REFERENCE §5.5; explicit "not yet in catalog, that's expected"
+  notices added to PATCH_REFERENCE's own header and inline into PATCH-011/
+  PATCH-015; AI_WORKFLOW's reading-order instruction corrected. No code
+  changed; GPT-5.4 cleared to resume PATCH-011 unchanged.
 - **2026-07-07** — PATCH-010 DONE (743d719), CTO review PASSED — first
   components/** grandfather shrink (17→15); type-only AuthUser swap; unit
   count unchanged (correct for this pattern); e2e 13/13 incl. board-lifecycle

@@ -31,8 +31,14 @@ it escalates up, never sideways.
 ### GPT-5.4 (Codex) — Implementation Engineer
 - Takes patches marked **trivial/easy/medium** with exact specifications.
 - **Extraction patches:** read `PATCH_REFERENCE.md` FIRST — it classifies
-  the extraction patterns (A–E) and tells you which one your patch instance
-  is before you read it. `PATCH-004` (commit `5278468`) is the canonical
+  the extraction patterns and tells you which one your patch instance is
+  before you read it, PROVIDED that pattern has already been reviewed
+  (check §7's ✅ done column). **If your patch's own header says the
+  pattern is "new" / "not yet in PATCH_REFERENCE" / names a letter with no
+  ✅ done row, that absence is expected, not a defect — the patch file
+  itself is the complete spec for a first-of-its-kind pattern.** Stop only
+  if the patch contradicts itself or claims a pattern is already-reviewed
+  when §7 shows it isn't. `PATCH-004` (commit `5278468`) is the canonical
   reference implementation for moving a page off direct Supabase onto the
   domain/infra seam — domain type+schema+repository interface+command, infra
   repository with injected narrow client + factory, DI command factory,

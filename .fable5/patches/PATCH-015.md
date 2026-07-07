@@ -5,7 +5,10 @@
 **Assigned model:** **GPT-5.4** — every decision bound below; novelty is why
 this runs last, after four reviews of the batch's simpler patches.
 **Pattern:** new — "server-page read" (Pattern G; enters PATCH_REFERENCE at
-review). Independent of 010–014 (no shared helpers).
+review — it is NOT there yet, by design; see PATCH_REFERENCE.md's own
+top-of-file note. This patch below is the complete, self-contained spec —
+do not stop looking for "Pattern G" elsewhere). Independent of 010–014 (no
+shared helpers).
 
 ## Goal
 Move `app/share/[token]/page.tsx` (88 lines, a SERVER component reading

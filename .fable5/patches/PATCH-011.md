@@ -4,10 +4,13 @@
 **Complexity:** easy
 **Assigned model:** **GPT-5.4**
 **Pattern:** new — "auth-state observer" (Pattern F; enters PATCH_REFERENCE
-at review). Three grandfathered files share this shape
-(`auth.getSession()` + `auth.onAuthStateChange()`): ProtectedRoute (this
-patch, smallest at 103 lines), Navbar (PATCH-012), landing page (PATCH-013).
-This patch introduces the shared helper; 012/013 are repetitions.
+at review — it is NOT there yet, by design; see PATCH_REFERENCE.md's own
+top-of-file note. This patch below is the complete, self-contained spec —
+do not stop looking for "Pattern F" elsewhere). Three grandfathered files
+share this shape (`auth.getSession()` + `auth.onAuthStateChange()`):
+ProtectedRoute (this patch, smallest at 103 lines), Navbar (PATCH-012),
+landing page (PATCH-013). This patch introduces the shared helper; 012/013
+are repetitions.
 **Depends on:** PATCH-010 (`AuthUser` domain type).
 
 ## Goal
