@@ -13,11 +13,11 @@ at minimum before working on this repo. Newest first within each section.
 **Fix:** CTO ran verification, found two spec defects, fixed, committed (`a7fe12c`); handoff template now demands pasted output + commit hash.
 **Reusable rule:** a delegated patch is not done until the reviewer has re-run verification themselves and the commit hash exists — treat all pasted reports as claims, not evidence.
 
-### Spec defects survive faithful implementation (2026-07-07, PATCH-002)
-**Symptom:** Codex implemented the spec byte-faithfully; the result was still broken (glob escaping + inline-config errors — see below).
+### Spec defects survive faithful implementation (2026-07-07, PATCH-002; recurred PATCH-003)
+**Symptom:** Codex implemented specs byte-faithfully; results were still broken (PATCH-002: glob escaping + inline-config; PATCH-003: `Object.assign(fn, { name })` throws because `Function.name` is writable:false — use `Object.defineProperty(fn, 'name', { value, configurable: true })`, it is configurable:true).
 **Root cause:** the spec author (CTO) wrote exact file contents without executing them first.
-**Fix:** review caught it; both defects were spec bugs, not implementation bugs.
-**Reusable rule:** when a spec contains exact code, the spec author should dry-run its verification section before delegating — or explicitly mark it "unexecuted, expect iteration".
+**Fix:** review/verification caught both; all defects were spec bugs, not implementation bugs. PATCH-003's "unexecuted spec" declaration + stop-on-failure rule worked as designed — the failure surfaced cleanly with a clean report.
+**Reusable rule:** when a spec contains exact code, the spec author should dry-run its verification section before delegating — or explicitly mark it "unexecuted, expect iteration". Interface-shape corrections stay CTO decisions even when the fix is one line; only mechanical corrections are implementer latitude.
 
 ### Implementers stop on warnings unless the spec defines the tiers (2026-07-07, PATCH-002.1)
 **Symptom:** install exited 0 but emitted npm peer warnings; the implementation model classified them as verification failure and halted mid-patch.

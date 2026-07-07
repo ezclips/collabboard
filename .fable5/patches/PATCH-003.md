@@ -1,10 +1,20 @@
 # PATCH-003 — Domain layer foundation (`lib/domain` skeleton)
 
-**Status:** APPROVED — **UNBLOCKED** (2026-07-07): PATCH-002.1 landed
-(b5698b5) and passed CTO review; `npm install -D vitest@^3` dry-run confirmed
-exit 0. Delegation to Codex GPT-5.4 may resume with this spec UNCHANGED.
-Reminder to implementer: Warning Policy applies (see PATCH-002.1 / handoff
-rule 10) — npm peer warnings are observations, not blockers.
+**Status:** APPROVED — attempt 2 in progress. **Spec correction (CTO,
+2026-07-07):** `defineCommand` originally used `Object.assign(run, { name })`,
+which throws — `Function.name` is read-only (writable:false). Fixed in Step 6
+below with `Object.defineProperty` (name IS configurable:true; CTO-verified in
+isolation). The `Command` interface is UNCHANGED — callable function exposing
+`.name` — deliberately chosen over renaming to `commandName` or an
+`{ name, run }` object, because interface ugliness taxes every future
+consumer while the fix is one implementation line.
+
+**Resume instructions for Codex:** your created files are already in the
+worktree. (1) Replace the `Object.assign(...)` return in
+`lib/domain/core/command.ts` with the exact defineProperty ending shown in
+Step 6. (2) Re-run verification from `npm run test:unit` onward, including the
+purity-canary proof. (3) Commit and report per the spec. No other changes.
+Warning Policy / handoff rule 10 still applies to any npm output.
 Execute the Final Implementation Specification below. Codex must not edit
 `.fable5/` or `.claude/`. CTO review criteria on return: authorized files only ·
 no product code touched · purity-canary proof demonstrated · unit tests green ·
@@ -296,7 +306,10 @@ export function defineCommand<I, O>(definition: {
       );
     }
   };
-  return Object.assign(run, { name: definition.name }) as Command<I, O>;
+  // Function.name is writable:false but configurable:true — defineProperty is
+  // the only sanctioned way to set it (Object.assign throws in strict mode).
+  Object.defineProperty(run, 'name', { value: definition.name, configurable: true });
+  return run as Command<I, O>;
 }
 ```
 

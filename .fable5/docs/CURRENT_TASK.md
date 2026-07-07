@@ -22,9 +22,13 @@ fixed in CTO review (glob escaping of `[id]` routes; `--no-inline-config`).
 **Active patch:** `PATCH-003` (domain layer foundation: `lib/domain` skeleton —
 Result, error taxonomy, branded ids, `defineCommand`, `BoardRepository`
 interface, conventions, unit tests via vitest, domain-purity lint) —
-**APPROVED and UNBLOCKED — ready to re-delegate to Codex GPT-5.4, spec
-unchanged.** Owner: re-paste the handoff (template + PATCH-003), noting the
-Warning Policy / handoff rule 10 applies to the `npm install` step.
+**APPROVED — attempt 2 paused on a spec bug, now corrected; Codex may
+resume.** Codex stopped correctly on a unit-test failure: the spec's
+`Object.assign(run, { name })` throws (Function.name is read-only). CTO
+correction in PATCH-003 Step 6: `Object.defineProperty` — Command interface
+deliberately UNCHANGED. Worktree holds Codex's created files uncommitted;
+resume instructions are in the patch status block (fix the one line → re-run
+verification from test:unit → canary proof → commit → report).
 
 **Prerequisite `PATCH-002.1`: DONE (2026-07-07, commit b5698b5) — CTO review
 PASSED.** react/react-dom 19.1.0 → 19.2.7; lockfile audit clean (3 expected
