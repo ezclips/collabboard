@@ -13,9 +13,10 @@ characterization harness + wall board lifecycle test. `npm run test:e2e` = 6 pas
 with credentials; skips cleanly without. Run against a live dev server with
 `PW_BASE_URL=http://localhost:3000` (never build under a running dev server).
 
-**Active patch:** none — ready to draft **PATCH-002** (ESLint boundary freeze:
-no new `@supabase/*` imports in components; then PATCH-003 `lib/domain` skeleton →
-PATCH-004+ command extraction from `CanvasClient.tsx`).
+**Active patch:** `PATCH-002` (architecture boundary freeze — blocking check
+against new `@supabase/*` imports in UI; 24 grandfathered files) — **drafted,
+awaiting owner approval.** Then PATCH-003 `lib/domain` skeleton → PATCH-004+
+command extraction from `CanvasClient.tsx`.
 
 **Backlog from PATCH-001 execution:**
 - Deferred: standalone post-delete e2e step (wall context-menu a11y/selectors).
