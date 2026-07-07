@@ -69,7 +69,7 @@ Grandfather trajectory 17 → 10:
 | Patch | Target | Pattern | Shrink |
 |---|---|---|---|
 | 010 | CanvasModals + OverlayLayer | type-only `AuthUser` swap (new) | 17→15 ✅ **DONE** (743d719, review PASSED; Amendment 1 scope confirmed exact) |
-| 011 | ProtectedRoute | F: auth-state observer (new; adds `authState.ts` helper incl. signOut) | 15→14 |
+| 011 | ProtectedRoute | F: auth-state observer (new; adds `authState.ts` helper incl. signOut) | 15→14 ✅ **DONE** (e56bc5a, review PASSED; Pattern F entered into catalog, verified) |
 | 012 | Navbar | F repetition (session-state mapping, census-gated) | 14→13 |
 | 013 | app/page.tsx (landing) | F repetition (+ first signOut consumer; event branches preserved) | 13→12 |
 | 014 | delete-account page | C (+ signOut); **exclusion reversed** — re-census proved deletion is server-side, client is a form + fetch; `app/api/**` hard-forbidden | 12→11 |
@@ -168,6 +168,11 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-07** — PATCH-011 DONE (e56bc5a), CTO review PASSED — Pattern F
+  reference implementation; authState.ts verbatim-faithful; subscription
+  lifecycle sound; e2e 15/15 with both gate sides covered. Pattern F entered
+  into PATCH_REFERENCE (§5.6 + rows) and VERIFIED landed at review closeout.
+  012/013/014 dependencies now met.
 - **2026-07-07** — PATCH-011 blocked correctly by GPT-5.4 on a real gap: the
   reading-order instruction says consult PATCH_REFERENCE.md first, but
   neither Pattern F (queued) NOR PATCH-010's own type-only-swap pattern

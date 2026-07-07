@@ -19,7 +19,7 @@ you to a pattern number/name that should already be reviewed (check §7's
 ✅ done column) and isn't.
 
 Patterns are extracted from real, reviewed patches:
-PATCH-004 (canonical, commit `5278468`), 005, 006, 007, 008, 009, 010.
+PATCH-004 (canonical, commit `5278468`), 005, 006, 007, 008, 009, 010, 011.
 
 ---
 
@@ -50,12 +50,14 @@ Then classify:
 | One table, select + upsert (settings-style row per user) | **A — settings read/write** | PATCH-004 (canonical), 005 |
 | Two or more tables, or any join — but still only reads/upserts | **E — composite page** | PATCH-009 |
 | ONLY a type import (`import type { User }`) used in a prop/state type, no runtime call | **type-only import swap** | PATCH-010 |
+| `auth.getSession()` + `auth.onAuthStateChange()` (session observation, optionally + `signOut`), no tables | **F — auth-state observer** | PATCH-011 |
 | ANYTHING below in "Not yours" | none — **stop** | — |
 
 **Not yours (escalate; GPT-5.5/CTO territory — do not attempt):**
 `supabase.storage` (uploads), `supabase.channel` (realtime), `.rpc(...)`,
-auth MUTATIONS (`updateUser`, `signOut` as part of a flow, session/token
-handling like `getSession`/`refreshSession`), cross-page shared state,
+auth MUTATIONS (`updateUser`; `signOut`/`getSession` are Pattern F when a
+reviewed patch binds them — anything beyond F's helper shapes escalates),
+session/token handling like `refreshSession`, cross-page shared state,
 security-sensitive flows (password, account deletion, payments, invitations/
 roles), or any page where the patch's description doesn't match what you find.
 
@@ -241,6 +243,43 @@ component. No unit tests for a pure type.
   away — this destroys the exact safety net that catches step 1's mistake.
 - Touching component logic/JSX beyond the import + type-annotation lines.
 
+## 5.6. Pattern F — auth-state observer
+
+**Reference:** PATCH-011 (ProtectedRoute; introduces `lib/infra/supabase/authState.ts`).
+
+**When:** the file's Supabase use is observing WHO is signed in:
+`auth.getSession()` for the initial read and/or `auth.onAuthStateChange()`
+for updates, optionally `auth.signOut()`. No tables.
+
+**When NOT:** identity checks before destructive actions (that is Pattern C
+with `getCurrentUser` — network-validating, deliberate); token/session-field
+access (`access_token`, `refreshSession`) — escalate; any table access.
+
+**Required pieces:** NO domain code beyond the existing `AuthUser` type.
+Use the existing helpers in `lib/infra/supabase/authState.ts`:
+- `getSessionUser()` — LOCAL session read; do NOT substitute the
+  network-validating `getCurrentUser*` helpers, semantics differ.
+- `onAuthUserChanged((event, user) => …) → unsubscribe` — event names pass
+  through Supabase's strings; the returned function MUST be called in the
+  effect cleanup, exactly where `subscription.unsubscribe()` was.
+- `signOutCurrentUser()` — Result-shaped; error handling per the patch.
+The helper file is FROZEN for repetition patches — if it seems insufficient,
+STOP.
+
+**Census gates (both mandatory):** the file must show exactly the auth calls
+the patch names, and every `session.*` access must be `session.user…` —
+any other session field (`access_token`, `expires_at`) means STOP.
+
+**Tests:** e2e characterization only (helpers bind the real browser client);
+the spec must cover BOTH gate sides where applicable (authenticated renders,
+unauthenticated redirects). Fresh-context tests need absolute URLs —
+`browser.newContext()` does not inherit config baseURL.
+
+**Common mistakes:** dropping the unsubscribe on unmount (invisible to e2e,
+only review catches it); substituting getSession semantics with getUser;
+storing the whole session object in state when only the user is read
+(census-gate the session fields first); dropping auth event-name branches.
+
 ---
 
 ## 6. Universal requirements (every pattern, every patch)
@@ -302,10 +341,11 @@ it, STOP — never adapt.
 | 008 | settings/achievements | D | 19→18 ✅ done |
 | 009 | settings/dashboard | E (A + D composed; needs 007) | 18→17 ✅ done |
 | 010 | CanvasModals + OverlayLayer | type-only import swap | 17→15 ✅ done |
+| 011 | ProtectedRoute | F — auth-state observer (introduces `authState.ts`) | 15→14 ✅ done |
 
 **New patterns discovered by future patches get added here by the CTO at
 review — this catalog only ever contains patterns with a reviewed reference
-implementation.** Concretely: PATCH-011 (Pattern F), PATCH-015 (Pattern G) do
-NOT appear above yet — they are queued but not yet reviewed. Their own patch
+implementation.** Concretely: PATCH-015 (Pattern G) does
+NOT appear above yet — it is queued but not yet reviewed. Their own patch
 files are fully self-contained specifications in the meantime; do not expect
 to find their pattern here until their row shows ✅ done.

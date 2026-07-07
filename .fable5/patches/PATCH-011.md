@@ -1,6 +1,6 @@
 # PATCH-011 — Extraction: auth-state infra helper; ProtectedRoute onto the seam
 
-**Status:** draft (awaiting owner approval — execute after 010)
+**Status:** **DONE — CTO review PASSED (2026-07-07, commit `e56bc5a`).** Pattern F reference implementation.
 **Complexity:** easy
 **Assigned model:** **GPT-5.4**
 **Pattern:** new — "auth-state observer" (Pattern F; enters PATCH_REFERENCE
@@ -175,3 +175,36 @@ never print them. PW_BASE_URL against the running dev server; final
 
 ## Estimated Difficulty
 easy — helper given verbatim; smallest of the three observer files.
+
+## CTO review verdict (2026-07-07) — PASSED
+
+Independently re-verified (GPT-5.4):
+- **Footprint:** exactly the 4 authorized files; single atomic commit
+  `e56bc5a`; clean single-line boundary deletion.
+- **Re-run by CTO:** tsc 0; boundaries green; grandfather = 14; component
+  greps 0; unit 38/10 (count unchanged — correct, Pattern F has no unit
+  tests by design); fresh production build; full e2e **15/15** — the suite
+  grew by BOTH new protected-route tests (authenticated dashboard render;
+  fresh-context redirect to /auth), covering both sides of the gate as the
+  spec demanded.
+- **`authState.ts` vs verbatim spec:** function-for-function identical
+  (imports, `getSessionUser`, `onAuthUserChanged`, `signOutCurrentUser`);
+  only delta is an em-dash→hyphen in one comment. `signOutCurrentUser` is
+  present despite being unused — exactly as ordered (013/014 consume it).
+- **Subscription lifecycle (explicitly requested):** sound — one
+  subscription per mount, `unsubscribe()` in the effect cleanup precisely
+  where `subscription.unsubscribe()` was, `setLoading(false)` still fires
+  per auth event. Dep array `[supabase]` → `[]` is behaviorally equivalent
+  (the auth-helpers client was a cached singleton; effect ran once either
+  way).
+- **Behavior preservation:** the `if (session?.user) setUser(...) else
+  setUser(null)` pair collapsed to `setUser(result.value)` — semantically
+  identical; error path maps to the same console.error + null-user outcome;
+  `getSession` semantics preserved (no substitution with network-validating
+  getUser). Redirect logic, redirectTo default, renders: untouched.
+- **Craft note (positive):** the fresh-context e2e test correctly handles
+  the Playwright subtlety that `browser.newContext()` does not inherit
+  config baseURL — absolute URL via PW_BASE_URL. Unprompted, correct.
+- **Pattern F is hereby entered into PATCH_REFERENCE** (§5.6 + map row) —
+  verified landed as part of this review closeout, not just asserted
+  (per the PATCH-011-blockage lesson).
