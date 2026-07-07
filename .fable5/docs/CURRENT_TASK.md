@@ -59,7 +59,7 @@ trajectory 23 → 17:
 | 005 | notifications page | purest 004 clone (`maybeSingle` variant) | 23→22 ✅ **DONE** (06e40b4, review PASSED; e2e net race fixed in 8636bd1) |
 | 006 | ai + preferences pages | dead Supabase client removal (verified unused) | 22→20 ✅ **DONE** (b813ce9, review PASSED; blank-line residue cleaned 61d54dc; executed by Gemini 3.1 Pro) |
 | 007 | logs page | auth-only; adds shared `getCurrentUser` (id+email) helper | 20→19 ✅ **DONE** (9f0a72d, review PASSED) |
-| 008 | achievements page | read-only repository variant (no command) | 19→18 |
+| 008 | achievements page | read-only repository variant (no command) | 19→18 ✅ **DONE** (7ba48e2; message-only amend from 1b3c49c, review PASSED) |
 | 009 | dashboard page | two repositories + joined read; **depends on 007** | 18→17 |
 
 **Second batch PATCH-010 → 015 — DRAFTED (2026-07-07), awaiting owner
@@ -168,6 +168,11 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-07** — PATCH-008 DONE (7ba48e2), CTO review PASSED — Pattern D
+  (read-only repository) validated; stale-belt bug preserved as specified;
+  grandfather 19→18; unit 25; e2e 12/12. Commit message named the wrong page
+  (stale handoff title) — message-only amend on the unpushed tip
+  (1b3c49c→7ba48e2); handoff template rule 11 added (copy titles verbatim).
 - **2026-07-07** — PATCH-007 DONE (9f0a72d), CTO review PASSED — logs page
   extracted (Pattern C); `getCurrentUser` helper live (009 dependency met);
   grandfather 20→19; full e2e 11/11. Clean GPT-5.4 execution. Governance

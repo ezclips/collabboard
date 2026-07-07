@@ -84,3 +84,9 @@ are configured in .env.local; never hardcode or print them.}}
   verification and the commit (rules 6–7 exist because of that), and where
   spec defects surfaced only at verification time (rule 8's "report failures
   the patch didn't anticipate").
+
+## Rule 11 (added 2026-07-07, after PATCH-008)
+`{{TITLE}}` and any commit-message line in the handoff MUST be copied
+verbatim from the patch file's own header — never retyped from memory.
+PATCH-008 shipped with a commit message naming the wrong page because the
+handoff supplied a stale title; the implementer faithfully used it.

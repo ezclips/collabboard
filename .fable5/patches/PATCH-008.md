@@ -1,6 +1,6 @@
 # PATCH-008 — Extraction: achievements page (read-only repository variant)
 
-**Status:** draft (awaiting owner approval)
+**Status:** **DONE — CTO review PASSED (2026-07-07, commit `7ba48e2` — amended from 1b3c49c, message-only fix).**
 **Complexity:** easy
 **Assigned model:** **GPT-5.4**
 **Canonical reference:** PATCH-004 (commit `5278468`) — minus the command:
@@ -102,3 +102,29 @@ Warning Policy / handoff rule 10 applies. Docs are CTO-only, updated at review.
 
 ## Estimated Difficulty
 easy — smaller than PATCH-004 (no command, no write path).
+
+## CTO review verdict (2026-07-07) — PASSED
+
+Independently re-verified (GPT-5.4):
+- **Footprint:** exactly the 6 authorized files; single atomic commit;
+  clean single-line boundary deletion.
+- **Re-run by CTO:** unit 25 green / 7 files (new infra test LISTED);
+  tsc 0; boundaries green; grandfather = 18; page greps 0; fresh production
+  build; full e2e **12/12** including the new achievements spec.
+- **Pattern D compliance: exact.** The deliberate absences held — no
+  command, no zod, no domain test file. `?? 0` points mapping in the
+  repository as bound; PGRST116 → ok(null); repository errors silently
+  skipped exactly like the old page. **The stale-state belt bug is
+  preserved untouched** (the spec's hardest instruction — followed).
+- **Commit-message mismatch, ruled and fixed:** the handoff prompt supplied
+  "preferences"; the commit message said so while the implementation
+  correctly targeted achievements. Severity: traceability defect —
+  tolerable in the worst case, but the commit was UNPUSHED at tip, so the
+  CTO amended the message only: **new hash `7ba48e2`** (footprint
+  byte-identical; deliberate exception to the no-amend preference,
+  content untouched). Had it been pushed, it would have stayed with a note.
+  Guard added to CODER_HANDOFF_TEMPLATE: titles/commit lines are COPIED
+  from the patch file header, never typed.
+- **Minor future-flake noted:** the e2e spec asserts the literal text
+  "2026 belt progress" — breaks at year rollover. Backlogged; acceptable
+  as characterization of today's rendering.
