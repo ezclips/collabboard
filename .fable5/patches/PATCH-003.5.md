@@ -210,5 +210,25 @@ secrets mechanism here is configuration hygiene, not secrecy.)
 
 ## 8. Result
 
-_To be filled during execution (pasted verification output, final sizes,
-new root commit hash)._
+**Local purge EXECUTED 2026-07-07 (CTO). All six verifications passed.**
+
+- Phase 0: worktree clean; main == origin/main at `9873501`; Python 3.13.5;
+  git-filter-repo installed (`a40bce548d2c`).
+- Phase 1: `../starter-pre-purge-20260707.bundle` created (173,382,889 bytes,
+  9 refs, "records a complete history", verify = "is okay").
+- Phase 3: `git filter-repo --force --invert-paths --path tmp
+  --path .claude/settings.local.json` — 65 commits parsed, finished in 1.19s;
+  `origin` remote removed by filter-repo as documented.
+- Verification:
+  1. `git log --all -- tmp` → EMPTY ✓
+  2. `git log --all -- .claude/settings.local.json` → EMPTY ✓
+  3. `git rev-list --all --objects | grep -c ' tmp/'` → **0** ✓
+  4. `HEAD^{tree}` before == after == `a95b0ba5f8481acc98e0d2c5bf9ef8865e931324` ✓
+  5. All 6 local refs present, rewritten: main `9873501`→`8eaa491`,
+     agents/verify-notifications-endpoint `08c5835`→`baede48`,
+     Backup1 `2e0dd29`→`6b548a0`, backup-import-export `3b76221`→`5611267`,
+     restore-point-* `b4bde8f`→`357bca9`, toolbar-v1-stable `40ae5c2`→`d20a84c` ✓
+  6. `tsc --noEmit` 0 errors; `check:boundaries` green ✓
+- Pack size: **166.00 MiB → 38.81 MiB** (−77%).
+- GitHub replacement: _pending owner delete/recreate; push + old-SHA-fetch-fails
+  check + secrets to follow._
