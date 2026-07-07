@@ -1,6 +1,6 @@
 # PATCH-013 — Extraction: landing page (app/page.tsx) onto the auth-state helper
 
-**Status:** draft (awaiting owner approval — execute after 012)
+**Status:** DONE (2026-07-08, commit `7c290f2`) — CTO review PASSED
 **Complexity:** easy (Pattern F repetition #2, plus the first `signOutCurrentUser` consumer)
 **Assigned model:** **GPT-5.4**
 **Pattern:** F — auth-state observer. Reference: PATCH-011.

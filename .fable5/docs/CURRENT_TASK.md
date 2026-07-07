@@ -71,7 +71,7 @@ Grandfather trajectory 17 → 10:
 | 010 | CanvasModals + OverlayLayer | type-only `AuthUser` swap (new) | 17→15 ✅ **DONE** (743d719, review PASSED; Amendment 1 scope confirmed exact) |
 | 011 | ProtectedRoute | F: auth-state observer (new; adds `authState.ts` helper incl. signOut) | 15→14 ✅ **DONE** (e56bc5a, review PASSED; Pattern F entered into catalog, verified) |
 | 012 | Navbar | F repetition (session-state mapping, census-gated) | 14→13 ✅ **DONE** (2a3ff44, review PASSED; Amendment 1a corrected proof re-verified by CTO before resume; orphaned-component scope held) |
-| 013 | app/page.tsx (landing) | F repetition (+ first signOut consumer; event branches preserved) | 13→12 |
+| 013 | app/page.tsx (landing) | F repetition (+ first signOut consumer; event branches preserved) | 13→12 ✅ **DONE** (7c290f2, review PASSED; subscription leak fixed — old code returned cleanup from async fn, new code hoists unsubscribe correctly) |
 | 014 | delete-account page | C (+ signOut); **exclusion reversed** — re-census proved deletion is server-side, client is a form + fetch; `app/api/**` hard-forbidden | 12→11 |
 | 015 | share/[token] (server page) | G: server-page read (new; adds `serverClient.ts` — first server seam) | 11→10 |
 
@@ -168,6 +168,22 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-08** — PATCH-013 DONE (7c290f2), CTO review PASSED. Landing
+  page (`app/page.tsx`) moved onto `authState.ts` helpers — Pattern F
+  repetition #2 plus the first `signOutCurrentUser` consumer. All three
+  event branches (`SIGNED_IN`, `SIGNED_OUT`, `TOKEN_REFRESHED ||
+  INITIAL_SESSION`) preserved verbatim; sign-out `finally`-navigation
+  (`router.push('/auth?switch=1')` regardless of outcome) preserved exactly.
+  Subscription lifecycle silently fixed: old code returned cleanup from
+  inside an async function (useEffect ignores async return values — leak);
+  new code hoists `let unsubscribe` and the effect's own synchronous cleanup
+  calls it — spec explicitly required this pattern. Grandfather 13→12
+  (manually counted, `app/page.tsx` removed). tsc 0, boundaries green, unit
+  38 (unchanged — Pattern F), `grep -c "@supabase"` → 0. E2e spec covers
+  both gate sides: fresh unauthenticated context (absolute URL, cleared
+  storage) + stored authenticated session. No MUST-NOT files touched; no
+  `.fable5/` or `.claude/` in the implementation commit. Commit message
+  matches spec verbatim. No deviations. Recommendation: PATCH-014 proceeds.
 - **2026-07-08** — PATCH-012 DONE (2a3ff44), CTO review PASSED. Both
   session→user renames (state, init read, subscription callback, every
   render-time `session?.user?.X` → `user?.X`) applied exactly per spec; both

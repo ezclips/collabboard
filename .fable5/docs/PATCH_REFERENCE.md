@@ -19,7 +19,7 @@ you to a pattern number/name that should already be reviewed (check §7's
 ✅ done column) and isn't.
 
 Patterns are extracted from real, reviewed patches:
-PATCH-004 (canonical, commit `5278468`), 005, 006, 007, 008, 009, 010, 011.
+PATCH-004 (canonical, commit `5278468`), 005, 006, 007, 008, 009, 010, 011, 012, 013.
 
 ---
 
@@ -346,6 +346,8 @@ it, STOP — never adapt.
 | 009 | settings/dashboard | E (A + D composed; needs 007) | 18→17 ✅ done |
 | 010 | CanvasModals + OverlayLayer | type-only import swap | 17→15 ✅ done |
 | 011 | ProtectedRoute | F — auth-state observer (introduces `authState.ts`) | 15→14 ✅ done |
+| 012 | Navbar | F repetition (orphaned component; census-gated) | 14→13 ✅ done |
+| 013 | app/page.tsx (landing) | F repetition (+ first `signOutCurrentUser` consumer) | 13→12 ✅ done |
 
 **New patterns discovered by future patches get added here by the CTO at
 review — this catalog only ever contains patterns with a reviewed reference

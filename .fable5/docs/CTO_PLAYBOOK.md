@@ -274,7 +274,17 @@ catching its own lag — the gap existing at all is the finding, not a thing
 to reward fixing.) Axis snapshot at 66: safety 16, ops 12, architecture 16,
 product 12, continuity 10 — the axes are deliberately
 harsh; a 70 requires the monolith visibly shrinking (several more
-extractions) AND telemetry existing.
+extractions) AND telemetry existing. → **67** (2026-07-08: PATCH-013
+landed and passed review — grandfather 13→12, Pattern F proven on a
+second live page and first `signOutCurrentUser` consumer, plus a real
+subscription-lifecycle leak removed from the landing page while preserving
+all auth-event branches and the unconditional switch-account navigation.
++1 architecture 16→17 — another grandfather removed and the auth-state seam
+now covers a mounted high-traffic page, not just a route guard/orphaned
+component. Other axes unchanged: safety stays 16 because verify/e2e/CTO
+re-run all held but no new gate/mechanism was added; ops 12, product 12,
+continuity 10. Axis snapshot at 67: safety 16, ops 12, architecture 17,
+product 12, continuity 10.)
 
 ## 13. The succession test
 
