@@ -1,9 +1,13 @@
 # PATCH-002 — Architecture boundary freeze: no new `@supabase/*` imports in UI
 
-**Status:** APPROVED (owner, 2026-07-07) — delegated to Codex GPT-5.4 for
-implementation. Execute the **Final Implementation Specification** at the bottom
-of this file; the sections between here and there are context and rationale.
-CTO review happens on the returned commit + diff.
+**Status:** DONE (2026-07-07, commit a7fe12c). Implemented by Codex GPT-5.4;
+CTO review found the implementation spec-faithful but the SPEC itself had two
+defects (both fixed in review): unescaped `[id]`/`[token]` glob character
+classes in ignore paths, and unknown-rule errors from inline disable comments
+(fixed with `--no-inline-config`, which also hardens the check against
+eslint-disable circumvention). Codex skipped Step 4 verification and Step 5
+commit — verification would have caught both defects; flagged for future
+delegation prompts. All four verification runs green.
 
 **Spec change vs. draft (CTO, 2026-07-07):** `eslint.config.mjs` is NO LONGER
 modified. Spreading the boundaries config there would globally ignore `app/api`

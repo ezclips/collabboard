@@ -3,6 +3,21 @@
 Dated record of every architectural decision, reversal, and milestone.
 Newest first. One entry per decision — link the owning doc for detail.
 
+## 2026-07-07 — PATCH-002 landed: UI boundary freeze (commit a7fe12c)
+
+- **Shipped:** blocking `check:boundaries` gate (in `verify` + CI) — no new
+  `@supabase/*` imports in UI code; 24 existing violators grandfathered on a
+  shrink-only list. Server routes (`app/api/**`, `**/route.ts`) stay in scope
+  of the domain-layer migration, not the freeze.
+- **First delegated patch (Codex GPT-5.4):** implementation was spec-faithful;
+  the spec itself had two defects caught in CTO review — Next.js dynamic-route
+  folders (`[id]`) are glob character classes and must be escaped in ESLint
+  ignore paths; inline eslint-disable comments referencing unloaded plugin rules
+  error in a standalone config. Fix `--no-inline-config` doubles as hardening
+  (the boundary cannot be eslint-disabled away). Codex skipped the verification
+  and commit steps — delegation prompts now must demand pasted verification
+  output and the commit itself.
+
 ## 2026-07-07 — PATCH-001 landed: characterization harness (Phase 1 net begins)
 
 - **Shipped (commit 9b8bed2):** authenticated Playwright harness + wall board

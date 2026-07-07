@@ -13,13 +13,20 @@ characterization harness + wall board lifecycle test. `npm run test:e2e` = 6 pas
 with credentials; skips cleanly without. Run against a live dev server with
 `PW_BASE_URL=http://localhost:3000` (never build under a running dev server).
 
-**Active patch:** `PATCH-002` (architecture boundary freeze — blocking check
-against new `@supabase/*` imports in UI; 24 grandfathered files) —
-**APPROVED (2026-07-07) and DELEGATED to Codex GPT-5.4.** The executable spec is
-the "Final Implementation Specification" section of
-`.fable5/patches/PATCH-002.md`. Codex must not edit `.fable5/`; CTO reviews the
-returned commit + diff, then updates these docs. Next after review:
-PATCH-003 `lib/domain` skeleton → PATCH-004+ command extraction.
+**Last patch:** `PATCH-002` — **DONE (2026-07-07, commit a7fe12c).** Blocking UI
+boundary check live: `npm run check:boundaries` (in `verify` + CI) fails on any
+new `@supabase/*` import in UI code; 24 grandfathered files (shrink-only list in
+`eslint.boundaries.config.mjs`). Implemented by Codex GPT-5.4; two spec defects
+fixed in CTO review (glob escaping of `[id]` routes; `--no-inline-config`).
+
+**Active patch:** none — next up **PATCH-003** (`lib/domain` skeleton: Result
+type, error taxonomy, first repository + command), pending CTO draft + owner
+approval.
+
+**Delegation lesson (2026-07-07):** Codex implemented faithfully but skipped the
+spec's verification and commit steps. Future delegation prompts must state:
+"run every verification command and paste real output; the patch is not done
+until the commit exists."
 
 **Backlog from PATCH-001 execution:**
 - Deferred: standalone post-delete e2e step (wall context-menu a11y/selectors).
