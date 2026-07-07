@@ -67,6 +67,10 @@ the net).
   regression net; watch for incidental failures in unrelated specs (they are
   signal, not noise).
 
+## Commit
+  Commit message:
+  refactor(auth): move Navbar onto the auth-state infra helper
+
 ## Rollback
 Single `git revert`.
 

@@ -125,6 +125,10 @@ STOP); Navbar and app/page.tsx (they are 012/013); all other files;
   `getCurrentUserId`/`getUser` (network-validating); the page reads the
   LOCAL session by design.
 
+## Commit
+  Commit message:
+  refactor(auth): extract auth-state infra helper; move ProtectedRoute onto it
+
 ## Rollback
 Single `git revert`. (012/013/014 depend on this helper once they land —
 revert order is reverse patch order, as always.)

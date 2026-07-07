@@ -79,6 +79,10 @@ Near-zero. Only failure mode: a `User` field in use that `AuthUser` lacks —
 `tsc` catches it; if that happens, STOP and report (the fix is a CTO
 decision about the domain type, not an ad-hoc field addition).
 
+## Commit
+  Commit message:
+  refactor(auth): extract domain AuthUser type for CanvasModals + OverlayLayer
+
 ## Rollback
 Single `git revert`.
 

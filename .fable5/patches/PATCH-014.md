@@ -81,6 +81,10 @@ grep -oE "\buser(\?)?\.[a-zA-Z_]+" app/dashboard/settings/delete-account/page.ts
 - Fail-closed mapping: an `err` from `getCurrentUser` must land in the SAME
   branch as a null user. Do not add a separate error branch.
 
+## Commit
+  Commit message:
+  refactor(settings): extract delete-account auth swap
+
 ## Rollback
 Single `git revert`.
 

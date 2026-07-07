@@ -153,6 +153,10 @@ No new dependencies.
   unescaped variant leaves the check silently passing for the wrong reason
   (PATCH-002 lesson).
 
+## Commit
+  Commit message:
+  refactor(share): extract share-link server-side repository seam
+
 ## Rollback
 Single `git revert`.
 

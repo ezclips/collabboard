@@ -66,6 +66,10 @@ unit tests (Pattern F).
 - This is the landing page — the highest-traffic page in the app. The
   Phase A/C characterization runs are not optional ceremony here.
 
+## Commit
+  Commit message:
+  refactor(auth): move landing page onto the auth-state infra helper
+
 ## Rollback
 Single `git revert`.
 

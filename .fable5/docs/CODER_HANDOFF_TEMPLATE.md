@@ -90,3 +90,11 @@ are configured in .env.local; never hardcode or print them.}}
 verbatim from the patch file's own header — never retyped from memory.
 PATCH-008 shipped with a commit message naming the wrong page because the
 handoff supplied a stale title; the implementer faithfully used it.
+
+## Rule 12 (added 2026-07-07)
+Every patch file MUST contain a `## Commit` section with an exact commit
+message BEFORE it is handed off. This was previously assembled ad hoc
+per-patch (PATCH-005 had no Commit section at all; PATCH-008's arrived via a
+separate follow-up commit) — a spec omission an implementer has no authority
+to fix on their own. If a patch you're handed lacks `## Commit`, STOP and
+report; do not invent a message.

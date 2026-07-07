@@ -21,6 +21,11 @@
 ## Architecture Notes
 ## Migration Notes
 ## Potential Risks
+
+## Commit
+  Commit message:
+  <exact conventional-commit message the implementer must use verbatim>
+
 ## Rollback Plan
 ## Acceptance Criteria
 ## Required Tests
