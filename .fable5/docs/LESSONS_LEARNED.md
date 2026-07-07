@@ -72,6 +72,12 @@ at minimum before working on this repo. Newest first within each section.
 **Symptom:** committed `tsc_output.txt` implied many type errors; `tsc --noEmit` was actually clean, while `npm run build` was actually broken (lint-blocked + prerender crashes).
 **Reusable rule:** never trust committed logs/outputs; re-run the tool. The gate you don't run in CI is a gate that is currently failing.
 
+### Localized netstat broke the dev-server guard — CTO built over a live dev server (2026-07-07, PATCH-004 review)
+**Symptom:** port-3000 checks reported "free" all session; then `npm start` failed EADDRINUSE and `netstat` showed PID 7932 listening the whole time — the owner's dev server, up since seconds after the patch commit. The CTO's verify build AND a second build had run against a live dev server, then deleted its `.next` — the exact incident the guard exists to prevent, caused by the guard's own check.
+**Wrong path (double):** (1) grepping netstat output for the word "LISTENING" — this Windows is German-localized and prints `ABHÖREN`; the grep could never match. (2) Running e2e via `PW_BASE_URL` against whatever answered on :3000 without confirming WHICH server it was — 7 green tests were nearly unattributable evidence (they turned out to be the dev server serving the reviewed commit, so they stood, but by luck not design).
+**Fix:** killed the stale-cache dev server, removed `.next`, owner restarts fresh; locale-safe check added to SKILL.md (`Get-NetTCPConnection -LocalPort 3000 -State Listen` count, or read `netstat -ano | findstr :3000` lines directly — never grep the status word).
+**Reusable rule:** never grep localized command output for English words (netstat, tasklist, systeminfo are all localized on Windows) — use PowerShell object cmdlets or match locale-neutral fields like `:PORT`. And PW_BASE_URL evidence is only evidence when you can attribute the server: check the port immediately before starting your own server, and if something already answers, identify the PID and what it serves before trusting a single test result.
+
 ### Windows execSync mangles `^` — a review audit compared a commit to itself (2026-07-07, PATCH-003 review)
 **Symptom:** lockfile audit reported 0 added/0 changed while `git show --stat` showed a 16k-line diff and grep found vitest only in the new file.
 **Wrong path:** almost trusted the "no changes" audit because it looked authoritative.

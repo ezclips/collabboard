@@ -1,6 +1,8 @@
 # PATCH-004 — First extraction: accessibility settings page onto the domain/infra seam
 
-**Status:** in progress (GPT-5.5) — **Amendment 1 issued, resume below**
+**Status:** **DONE — CTO review PASSED (2026-07-07, commit `5278468`).**
+This patch is the **canonical extraction example** for all future
+grandfather-list removals (see AI_WORKFLOW). Review verdict at the bottom.
 **Complexity:** medium (pattern-setting) · **Estimated implementation time:** 2–4 hours
 **Assigned model (CTO recommendation):** **GPT-5.5 (senior engineer)** — see
 "Why 5.5" at the bottom. PATCH-005+ repetitions of this pattern go to GPT-5.4
@@ -242,3 +244,37 @@ them. Dev server runs on :3000; use PW_BASE_URL as the spec shows. You have
 the senior-engineer latitude defined in the patch's Architecture Notes —
 record every decision. Phase order is mandatory: the e2e net must be green
 against the OLD page before you change it."
+
+## CTO review verdict (2026-07-07) — PASSED
+
+Independently re-verified, not taken from reports:
+- **Footprint:** exactly the 10 authorized files (7 new + page + one-line
+  boundary removal + Amendment-1 vitest line). Single atomic commit. No
+  quiet sins: no weakened gates, no new dependencies, no duplicated concerns.
+- **Re-run by CTO:** `npm run verify` fully green (typecheck, boundaries,
+  unit, build); unit run lists BOTH new test files (14 tests total, was 7);
+  `grep -c "@supabase" page.tsx` → 0; grandfather list = 23; full e2e 7/7
+  green including the new accessibility characterization spec, served by the
+  dev server running commit 5278468.
+- **Architecture:** house pattern established as specified — reads via
+  repository, write via `settings.saveAccessibility` command; domain stays
+  pure (zod + core only); error mapping exact (PGRST116 → ok(null), else
+  `unavailable` with cause; nothing Supabase-shaped reaches the page);
+  silent-failure semantics preserved (differences are console-only).
+- **Senior decisions accepted:** (1) command as DI factory
+  (`createSaveAccessibilityCommand(repository)`) — better than a module
+  singleton, adopt for future extractions; (2) narrow structural client
+  interface (`AccessibilitySupabaseClient`) with the `as unknown as` cast
+  contained in the factory — principled way to avoid the huge supabase
+  builder generics; the test fake implements exactly this interface;
+  (3) dead `toast` import dropped — harmless.
+- **Watchlist note (MEDIUM, accepted):** a legacy `accessibility_settings`
+  row with a partial/malformed `settings` JSONB would load fine (load is
+  unvalidated by design) but make subsequent saves fail zod validation
+  silently (console.warn, same UX as a network failure). Old code would have
+  saved the partial object. If support ever reports "accessibility settings
+  stop persisting", look here first. Acceptable: rows are written full-shape
+  by this page; validation-on-write is house rule 6.
+- **Review-side incident (CTO's, not the patch's):** locale-broken port
+  checks led the CTO to build over the live dev server during review —
+  recorded in LESSONS_LEARNED; SKILL.md guard now has a locale-safe check.

@@ -37,16 +37,20 @@ follow-ups: Actions secrets (below), recommended Supabase session revocation
 **All commit hashes changed** — hashes in docs older than this line refer to
 pre-rewrite history; map via commit messages if needed.
 
-**Active patch:** `PATCH-004` (first extraction: accessibility settings page →
-domain/infra seam; grandfather list 24 → 23 only after proof) — **IN PROGRESS
-(GPT-5.5), Amendments 1 + 2 issued 2026-07-07.** Two correct blocks on CTO
-spec contradictions: (1) vitest include vs. config freeze → one-line include
-widening authorized; (2) flat "no build" vs. `verify`-includes-build → guard
-restored to its conditional form ("not while dev server runs"); final
-sequence = stop dev server → `npm run verify` → atomic commit → rm `.next` →
-restart dev. All patch evidence green per owner report; only the final
-verify+commit remain. Implementation sits uncommitted in the worktree — do
-not clean it.
+**Last patch:** `PATCH-004` — **DONE (2026-07-07, commit `5278468`) — CTO
+review PASSED.** First extraction landed: accessibility settings page on the
+domain/infra seam (repository read + `settings.saveAccessibility` command);
+grandfather list **24 → 23**; unit tests 7 → 14; new page-level
+characterization spec in the e2e net. Two spec contradictions en route (both
+CTO's, both correctly blocked by GPT-5.5 — Amendments 1+2 in the patch file).
+**PATCH-004 is now the canonical extraction example** (AI_WORKFLOW): similar
+single-table extractions go to GPT-5.4 with it as reference; joins/storage/
+realtime/cross-page pages still go to GPT-5.5. Note: owner must RESTART the
+dev server (CTO stopped it and cleaned `.next` during review — see
+LESSONS_LEARNED netstat-locale record).
+
+**Next:** PATCH-005 (next settings-page extraction, GPT-5.4) — NOT yet
+drafted; owner go needed.
 
 **Prerequisite `PATCH-002.1`: DONE (2026-07-07, commit b5698b5) — CTO review
 PASSED.** react/react-dom 19.1.0 → 19.2.7; lockfile audit clean (3 expected

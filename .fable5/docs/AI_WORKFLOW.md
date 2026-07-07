@@ -30,6 +30,14 @@ it escalates up, never sideways.
 
 ### GPT-5.4 (Codex) — Implementation Engineer
 - Takes patches marked **trivial/easy/medium** with exact specifications.
+- **Extraction patches:** `PATCH-004` (commit `5278468`) is the canonical
+  reference implementation for moving a page off direct Supabase onto the
+  domain/infra seam — domain type+schema+repository interface+command, infra
+  repository with injected narrow client + factory, DI command factory,
+  page-level characterization spec first, grandfather entry removed last.
+  GPT-5.4 executes same-shape extractions (single table, select+upsert, no
+  joins/storage/realtime/cross-page state) by imitating it file-for-file;
+  anything beyond that shape stays with GPT-5.5.
 - Zero design latitude: executes the Final Implementation Specification
   literally. Any deviation requires stopping and reporting, not adapting.
 - Known failure modes to guard against (observed 2026-07-07, PATCH-002):

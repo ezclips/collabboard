@@ -3,6 +3,27 @@
 Dated record of every architectural decision, reversal, and milestone.
 Newest first. One entry per decision — link the owning doc for detail.
 
+## 2026-07-07 — PATCH-004 landed: first extraction; template established (5278468)
+
+- **Shipped (GPT-5.5):** accessibility settings page extracted onto the
+  domain/infra seam — first consumer of PATCH-003's foundation, first
+  grandfather-list shrink (**24 → 23**), unit suite 7 → 14 tests, new
+  page-level characterization spec. Behavior preserved (CTO re-ran the full
+  e2e net: 7/7). **PATCH-004 is the canonical extraction example**; the
+  remaining ~20 extractions imitate it (AI_WORKFLOW).
+- **Delegation shift decided:** same-shape extractions (single table,
+  select+upsert) → GPT-5.4 with PATCH-004 as reference; GPT-5.5 reserved for
+  pages with joins/storage/realtime/cross-page state.
+- **Adopted patterns from senior latitude:** DI command factories
+  (`createXCommand(repository)`) and narrow structural client interfaces in
+  infra (fake-friendly, cast contained in the factory).
+- **Process record:** two CTO spec contradictions were caught by GPT-5.5
+  stopping cleanly (Amendments 1+2 — vitest include scope; conditional build
+  guard restated as absolute). Escalation ladder worked both times.
+- **Review-side incident (CTO):** localized Windows netstat (`ABHÖREN`) made
+  the dev-server port check silently useless — CTO built over the live dev
+  server during review. Locale-safe check now in SKILL.md; lesson recorded.
+
 ## 2026-07-07 — PATCH-003.5 EXECUTED: git history purged everywhere
 
 - **Done and proven:** `git filter-repo` removed `tmp/` (10,726 Chrome-profile

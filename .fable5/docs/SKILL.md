@@ -84,6 +84,13 @@ build under a live dev server corrupts its cache and the app starts returning
 Internal Server Error (observed 2026-07-06). Stop the dev server first; if the
 error appears anyway: stop the server, delete `.next`, restart `npm run dev`.
 
+**Checking whether the dev server is running — locale-safe (2026-07-07):**
+`netstat` output is localized on Windows (German prints `ABHÖREN`, not
+`LISTENING`) — never grep for the word "LISTENING". Use:
+`powershell -Command "(Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue | Measure-Object).Count"`
+(prints `0` = free, `1+` = in use) or `netstat -ano | findstr :3000` and read
+the lines yourself. Check IMMEDIATELY before the build, not minutes earlier.
+
 ## 6. Testing Philosophy
 
 - Characterization tests assert what the app DOES today, not what it should do.

@@ -246,10 +246,15 @@ Scoring discipline:
 - Recalibrate to the rubric, never to the previous number's momentum.
 
 **Ledger so far:** 53 (post-Phase-0 baseline: gates live but no remote, dirty
-history, monolith untouched) → **57** (2026-07-07: remote live +4, minus the
-history-exposure escalation it caused). Axis snapshot at 57: safety 13,
-ops 10, architecture 12, product 12, continuity 10 — the axes are deliberately
-harsh; a 70 requires the monolith visibly shrinking AND telemetry existing.
+history, monolith untouched) → 57 (2026-07-07: remote live +4, minus the
+history-exposure escalation it caused) → 59 (2026-07-07: PATCH-003.5 history
+purge executed, all refs backed up off-machine; ops 10→12) → **61**
+(2026-07-07: PATCH-004 landed — first grandfather shrink 24→23, seam consumed
+end-to-end, unit net doubled, extraction template proven; architecture 12→13,
+safety 13→14). Axis snapshot at 61: safety 14, ops 12, architecture 13,
+product 12, continuity 10 — the axes are deliberately harsh; a 70 requires
+the monolith visibly shrinking (several more extractions) AND telemetry
+existing.
 
 ## 13. The succession test
 
