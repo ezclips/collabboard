@@ -68,7 +68,7 @@ Grandfather trajectory 17 → 10:
 
 | Patch | Target | Pattern | Shrink |
 |---|---|---|---|
-| 010 | CanvasModals + OverlayLayer | type-only `AuthUser` swap (new) | 17→15 — **Amendment 1** (census missed `user_metadata.name`; type extended, CTO dry-ran fix, tsc 0; resume from tsc) |
+| 010 | CanvasModals + OverlayLayer | type-only `AuthUser` swap (new) | 17→15 ✅ **DONE** (743d719, review PASSED; Amendment 1 scope confirmed exact) |
 | 011 | ProtectedRoute | F: auth-state observer (new; adds `authState.ts` helper incl. signOut) | 15→14 |
 | 012 | Navbar | F repetition (session-state mapping, census-gated) | 14→13 |
 | 013 | app/page.tsx (landing) | F repetition (+ first signOut consumer; event branches preserved) | 13→12 |
@@ -168,6 +168,12 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-07** — PATCH-010 DONE (743d719), CTO review PASSED — first
+  components/** grandfather shrink (17→15); type-only AuthUser swap; unit
+  count unchanged (correct for this pattern); e2e 13/13 incl. board-lifecycle
+  which drives both components through real interaction. Amendment 1 scope
+  check: the committed diff matches the CTO's dry-run byte-for-byte, one
+  additive field, nothing else touched.
 - **2026-07-07** — PATCH-010 blocked correctly by GPT-5.4 at tsc (Risks
   section prediction exact): AuthUserMetadata lacked `name` (line-350 access
   missed by one-segment census grep). Amendment 1: field added, CTO dry-ran

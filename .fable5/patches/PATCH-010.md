@@ -1,6 +1,6 @@
 # PATCH-010 — Extraction (type-only): domain AuthUser type; CanvasModals + OverlayLayer off @supabase types
 
-**Status:** in progress (GPT-5.4) — **Amendment 1 issued after a correct tsc block; resume at the bottom**
+**Status:** **DONE — CTO review PASSED (2026-07-07, commit `743d719`).**
 **Complexity:** trivial (type-position changes only; zero runtime diff)
 **Assigned model:** **GPT-5.4**
 **Pattern:** new — "type-only import swap" (will enter PATCH_REFERENCE at
@@ -178,3 +178,31 @@ OverlayLayer — none.
    "exactly 4 changed lines across the two components" criterion (the type
    file is a create, not a component change — the criterion still holds).
 4. Report "Amendment 1 applied, CTO-authorized" in Decisions made.
+
+## CTO review verdict (2026-07-07) — PASSED
+
+Independently re-verified (GPT-5.4):
+- **Footprint:** exactly the 4 authorized files; single atomic commit
+  `743d719`; boundary entries removed as clean single-line deletions (no
+  blank-line residue this time).
+- **Re-run by CTO:** tsc 0; boundaries green; grandfather = 15; both
+  components grep 0 for `@supabase`; unit 38/10 (count unchanged — correct,
+  a type-only patch adds no tests); fresh production build; full e2e
+  **13/13**, including the board-lifecycle spec that actually drives
+  CanvasModals (comment/edit modals) and OverlayLayer through real
+  interaction — the strongest behavior-preservation evidence available for
+  a type-position-only change.
+- **`git diff` shows exactly 4 changed lines across the two components**
+  (2 + 2) — the acceptance criterion holds; the new type file is a create,
+  correctly excluded from that count.
+- **Amendment 1 scope check (explicitly requested):** the committed
+  `lib/domain/auth/user.ts` matches the CTO's dry-run byte-for-byte — ONE
+  additive field (`name?: string`) inside the existing `AuthUserMetadata`
+  interface, no other change to the type, no change to `AuthUser` itself,
+  no change to either component beyond the pre-authorized import + prop-type
+  swap. The amendment stayed exactly inside its granted scope; nothing
+  expanded during implementation.
+- **Pattern compliance (new pattern, first instance):** structural typing
+  used correctly — Supabase's `User` remains assignable to `AuthUser`
+  without any cast at call sites; callers (CanvasClient) untouched as
+  specified. This is now the reference for any future type-only swap.
