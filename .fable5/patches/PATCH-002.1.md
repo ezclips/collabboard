@@ -1,11 +1,15 @@
 # PATCH-002.1 — Restore npm installability: align React with react-chrono's peer range
 
-**Status:** APPROVED (owner, 2026-07-07) — delegated to Codex GPT-5.4.
-Execute the Verification Steps exactly; `--legacy-peer-deps`/`--force` remain
-NOT approved. Codex must not edit `.fable5/` or `.claude/`. CTO review on
-return: dependency diff (react/react-dom only), verification output re-run
-independently, typecheck, boundary check, commit hash, and a lockfile audit
-for unexpected transitive changes.
+**Status:** DONE (2026-07-07, commit b5698b5). Implemented by Codex GPT-5.4
+(attempt 2, after the Warning Policy revision). CTO review PASSED, all checks
+re-run independently: footprint exactly package.json + package-lock.json;
+package.json diff exactly the two react lines (npm wrote `^19.2.7`, narrower
+than spec's `^19.2.3` — accepted, satisfies the peer); lockfile audit shows
+exactly 3 version changes (react, react-dom, scheduler — React's lockstep
+internal dep; zero unexpected); install idempotent exit 0; react/react-dom
+19.2.7; vitest dry-run exit 0 (PATCH-003 unblocked); typecheck 0 errors;
+boundaries green; dev server restarted on 19.2 → full e2e net (4 smoke +
+auth + characterization) 6/6 green.
 **Type:** prerequisite (blocks PATCH-003) · **Complexity:** easy
 **Estimated implementation time:** 15–30 minutes
 **Assigned model (proposed):** GPT-5.4 (Codex)

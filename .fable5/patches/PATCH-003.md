@@ -1,11 +1,10 @@
 # PATCH-003 — Domain layer foundation (`lib/domain` skeleton)
 
-**Status:** APPROVED — **BLOCKED by PATCH-002.1** (2026-07-07): Step 1
-(`npm install -D vitest`) fails on a pre-existing lockfile inconsistency
-(react-chrono peer requires react ^19.2.3, locked react is 19.1.0). Codex
-correctly stopped with a clean tree. Resume delegation unchanged once
-PATCH-002.1 lands. Original delegation note follows.
-Delegated to Codex GPT-5.4.
+**Status:** APPROVED — **UNBLOCKED** (2026-07-07): PATCH-002.1 landed
+(b5698b5) and passed CTO review; `npm install -D vitest@^3` dry-run confirmed
+exit 0. Delegation to Codex GPT-5.4 may resume with this spec UNCHANGED.
+Reminder to implementer: Warning Policy applies (see PATCH-002.1 / handoff
+rule 10) — npm peer warnings are observations, not blockers.
 Execute the Final Implementation Specification below. Codex must not edit
 `.fable5/` or `.claude/`. CTO review criteria on return: authorized files only ·
 no product code touched · purity-canary proof demonstrated · unit tests green ·

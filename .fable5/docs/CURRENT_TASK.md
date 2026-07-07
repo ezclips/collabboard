@@ -22,26 +22,17 @@ fixed in CTO review (glob escaping of `[id]` routes; `--no-inline-config`).
 **Active patch:** `PATCH-003` (domain layer foundation: `lib/domain` skeleton —
 Result, error taxonomy, branded ids, `defineCommand`, `BoardRepository`
 interface, conventions, unit tests via vitest, domain-purity lint) —
-**APPROVED but BLOCKED by PATCH-002.1.** Codex correctly stopped at Step 1:
-`npm install` fails on a pre-existing lockfile inconsistency (react-chrono
-peer wants react ^19.2.3; locked react is 19.1.0 — see LESSONS_LEARNED).
-PATCH-003 itself is unchanged; resume after the prerequisite lands.
+**APPROVED and UNBLOCKED — ready to re-delegate to Codex GPT-5.4, spec
+unchanged.** Owner: re-paste the handoff (template + PATCH-003), noting the
+Warning Policy / handoff rule 10 applies to the `npm install` step.
 
-**Prerequisite patch:** `PATCH-002.1` (upgrade react/react-dom → ^19.2.3;
-fix CTO-verified via dry-run; `--legacy-peer-deps`/`--force` explicitly NOT
-approved) — **APPROVED (2026-07-07) and DELEGATED to Codex GPT-5.4 — attempt 2 in
-progress.** Attempt 1 stopped on npm peer WARNINGS despite exit 0; spec now
-carries a Warning Policy (two pre-existing warning families explicitly
-accepted: typescript-eslint peer-lag → lint-overhaul patch; react-twitter-embed
-React-19 peers → embed/dependency review). Global rule codified (SKILL.md +
-handoff rule 10): warnings are observations, errors are blockers. Install is
-already applied in the working tree (react 19.2.7, uncommitted) — Codex
-resumes at verification per the spec's Resume instruction.
-Sequence after Codex returns: CTO review (dependency diff, independent
-re-verification, lockfile audit for unexpected transitive changes, commit
-hash) → owner restarts dev server → CTO runs e2e net on React 19.2 →
-PATCH-003 delegation resumes. PATCH-003 stays blocked until PATCH-002.1
-passes CTO review.
+**Prerequisite `PATCH-002.1`: DONE (2026-07-07, commit b5698b5) — CTO review
+PASSED.** react/react-dom 19.1.0 → 19.2.7; lockfile audit clean (3 expected
+changes only); install idempotent; vitest dry-run exit 0; typecheck 0;
+boundaries green; dev server restarted; **e2e net 6/6 green on React 19.2.**
+Two warning families remain as classified debt (typescript-eslint peer-lag →
+lint-overhaul patch; react-twitter-embed React-19 peers → embed/dependency
+review).
 
 **Delegation lesson (2026-07-07):** Codex implemented faithfully but skipped the
 spec's verification and commit steps. Future delegation prompts must state:

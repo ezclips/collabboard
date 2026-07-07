@@ -3,6 +3,22 @@
 Dated record of every architectural decision, reversal, and milestone.
 Newest first. One entry per decision — link the owning doc for detail.
 
+## 2026-07-07 — PATCH-002.1 landed: React 19.2.7, npm installability restored (b5698b5)
+
+- **Shipped (Codex GPT-5.4, attempt 2):** react/react-dom 19.1.0 → 19.2.7,
+  satisfying react-chrono's peer contract that the lockfile had violated —
+  every `npm install` was failing. Lockfile audit: 3 expected changes only.
+  Full e2e net green on React 19.2. `--legacy-peer-deps`/`--force` were
+  explicitly rejected as the fix.
+- **Process decision (owner-proposed, adopted):** "warnings are observations;
+  errors are blockers" — only non-zero exit codes or failed acceptance
+  criteria stop a patch unless the spec names a specific warning as a blocker.
+  Codified in SKILL.md + handoff template rule 10 after attempt 1 halted on
+  accepted peer warnings.
+- **Classified debt with named homes:** typescript-eslint peer-lag (TS 5.9.3
+  vs <5.9 range) → lint-overhaul patch; react-twitter-embed React-19 peers →
+  embed/dependency review.
+
 ## 2026-07-07 — PATCH-002 landed: UI boundary freeze (commit a7fe12c)
 
 - **Shipped:** blocking `check:boundaries` gate (in `verify` + CI) — no new
