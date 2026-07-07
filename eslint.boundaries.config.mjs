@@ -21,7 +21,6 @@ const GRANDFATHERED_UI_FILES = [
   'app/dashboard/settings/profile/page.tsx',
   'app/page.tsx',
   'app/share/\\[token\\]/page.tsx',
-  'components/ProtectedRoute.tsx',
   'components/canvas/AddPadletMenu.tsx',
   'components/collabboard/PostCardContent.tsx',
   'components/collabboard/canvas/ui/FreeformPadletCards.tsx',

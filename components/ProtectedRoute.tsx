@@ -4,8 +4,8 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
-import type { User } from '@supabase/auth-helpers-nextjs';
+import type { AuthUser } from '@/lib/domain/auth/user';
+import { getSessionUser, onAuthUserChanged } from '@/lib/infra/supabase/authState';
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -17,27 +17,21 @@ export default function ProtectedRoute({
   redirectTo = '/auth' 
 }: ProtectedRouteProps) {
   const router = useRouter();
-  const supabase = createClientComponentClient();
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const checkAuth = async () => {
       try {
-        // Get current session
-        const { data: { session }, error } = await supabase.auth.getSession();
-        
-        if (error) {
-          console.error('Session check error:', error);
+        const result = await getSessionUser();
+
+        if (!result.ok) {
+          console.error('Session check error:', result.error);
           setUser(null);
           return;
         }
 
-        if (session?.user) {
-          setUser(session.user);
-        } else {
-          setUser(null);
-        }
+        setUser(result.value);
       } catch (error) {
         console.error('Auth check failed:', error);
         setUser(null);
@@ -48,25 +42,22 @@ export default function ProtectedRoute({
 
     checkAuth();
 
-    // Listen for auth state changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        console.log('Auth state changed:', event, session?.user?.email);
-        
-        if (session?.user) {
-          setUser(session.user);
-        } else {
-          setUser(null);
-        }
-        
-        setLoading(false);
+    const unsubscribe = onAuthUserChanged((event, user) => {
+      console.log('Auth state changed:', event, user?.email);
+
+      if (user) {
+        setUser(user);
+      } else {
+        setUser(null);
       }
-    );
+
+      setLoading(false);
+    });
 
     return () => {
-      subscription.unsubscribe();
+      unsubscribe();
     };
-  }, [supabase]);
+  }, []);
 
   // Redirect if not authenticated (after loading is complete)
   useEffect(() => {
