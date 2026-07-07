@@ -14,7 +14,6 @@ const GRANDFATHERED_UI_FILES = [
   'app/collabboard/canvas/\\[id\\]/page.tsx',
   'app/dashboard/canvas/\\[id\\]/CanvasClient.tsx',
   'app/dashboard/settings/achievements/page.tsx',
-
   'app/dashboard/settings/dashboard/page.tsx',
   'app/dashboard/settings/delete-account/page.tsx',
   'app/dashboard/settings/integrations/page.tsx',
@@ -22,7 +21,6 @@ const GRANDFATHERED_UI_FILES = [
   'app/dashboard/settings/members/page.tsx',
   'app/dashboard/settings/page.tsx',
   'app/dashboard/settings/password/page.tsx',
-
   'app/dashboard/settings/profile/page.tsx',
   'app/page.tsx',
   'app/share/\\[token\\]/page.tsx',
