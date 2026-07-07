@@ -3,6 +3,18 @@
 Dated record of every architectural decision, reversal, and milestone.
 Newest first. One entry per decision — link the owning doc for detail.
 
+## 2026-07-07 — Remote repository live; risk register rebalanced
+
+- **Resolved:** the #1 standing risk since Phase 0 — private GitHub remote
+  (`ezclips/collabboard`), branch renamed master → `main`, in sync
+  (CTO-verified). CI workflows are now live-capable.
+- **Elevated as a consequence:** the Chrome-profile credential material in git
+  history now has an off-machine copy on GitHub — the history purge
+  (filter-repo + force-push) escalates from "when convenient" to "next owner
+  action". Single collaborator, so force-push is safe; bundle backup exists.
+- **New follow-up:** GitHub Actions secrets must be configured
+  (`NEXT_PUBLIC_SUPABASE_URL/ANON_KEY`) or CI's build/smoke steps run red.
+
 ## 2026-07-07 — PATCH-003 landed: domain layer seam open (75d7626)
 
 - **Shipped (Codex GPT-5.4):** `lib/domain` foundation — `Result<T,E>`, closed

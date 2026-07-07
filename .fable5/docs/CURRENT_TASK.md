@@ -86,17 +86,22 @@ branch after a short soak (see CHANGELOG_ARCHITECTURE.md 2026-07-07).
 
 | Decision | Owner | Needed by | Notes |
 |---|---|---|---|
-| Approve git history purge of `tmp/` | User | ASAP (credential material in history) | Bundle backup exists; no remote → safe window |
+| Approve git history purge of `tmp/` | User | **ESCALATED — history now on GitHub** | filter-repo + force-push; single collaborator so safe; bundle backup exists |
+| Configure GitHub Actions secrets (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`) | User | Before next push (CI is live now) | Else CI build/smoke steps run red |
 | dhtmlx buy-vs-replace | User | Phase 0 exit | GPL exposure; recommendation: replace |
 | Surviving canvas system | CTO | Phase 1 | Needs feature diff first |
-| Default branch `master` vs `main` | User | Before remote push | Work is on `master` |
 | Raise Supabase sign-in limit 30→100/5min (dev convenience + school-NAT headroom) | User | Anytime (dashboard, 1 min) | Auth → Rate Limits |
 | Configure custom SMTP (email limit is 2/h on built-in) | User | Before ANY beta/invites | Breaks signup/reset/invites beyond 2 users/h |
+
+**Resolved decisions:** remote repository — DONE 2026-07-07 (private
+`github.com/ezclips/collabboard`, `origin/main` in sync); branch question —
+resolved by the push, default is `main` (was `master`).
 
 ## Context for a Fresh Session
 
 - Read `.fable5/CLAUDE.md` first, then this file.
-- Working tree is clean; all Phase 0 work is committed on `master`.
+- Default branch is `main`, tracking `origin/main`
+  (`github.com/ezclips/collabboard`, private). Keep it pushed.
 - `npm run verify` = typecheck + build; `npm run test:e2e` = smoke suite (builds must exist: run build first or let webServer reuse).
 - Comment storage split (`metadata.comments` / `detachedComments` / `canvas_comments`) is a planned Phase 3 migration — do not fix opportunistically.
 - Excalidraw fork has its own `node_modules` committed (major repo bloat); handle carefully in a later phase — it backs a `file:` dependency.

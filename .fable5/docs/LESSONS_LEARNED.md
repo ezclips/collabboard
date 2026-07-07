@@ -115,9 +115,21 @@ Two canvas systems, three comment stores, the kanban schema island: each has a s
 
 ## Standing risks future models must not forget
 
-1. **No remote repository** — one local bundle is the only backup (top risk since Phase 0).
-2. Chrome-profile credentials remain in git **history** pending owner-approved purge.
+1. **Chrome-profile credentials in git history — NOW ELEVATED (2026-07-07):**
+   the repo was pushed to GitHub (private: `ezclips/collabboard`), so the
+   third-party session material in history now has an off-machine copy. The
+   purge (`git filter-repo --path tmp --invert-paths` + force-push, single
+   collaborator so safe) is MORE urgent than before, not less. Owner approval
+   still pending. Bundle backup exists: `../starter-pre-phase0-20260706.bundle`.
+2. **CI secrets not yet configured** — pushing activated
+   `.github/workflows/ci.yml`; the build (and smoke) steps need repo secrets
+   `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` or the first
+   Actions runs will fail red. Owner action; then check the first run.
 3. dhtmlx-gantt/scheduler are GPL/commercial dual-licensed and shipped unlicensed — replace or buy before GA.
 4. Supabase built-in email = **2/hour project-wide** — configure custom SMTP before any beta.
 5. Lint has 5,426 legacy errors and is advisory; the build ignores it (`eslint.ignoreDuringBuilds`) — burn down, then remove the bypass.
-6. Excalidraw fork has its own committed `node_modules` backing a `file:` dependency — repo bloat; handle in a dedicated patch only.
+6. Excalidraw fork has its own committed `node_modules` backing a `file:` dependency — repo bloat; also inflates every clone/push now that a remote exists.
+
+**Resolved:** ~~No remote repository / off-machine backup~~ — RESOLVED
+2026-07-07: private GitHub remote live (`origin/main`, branch renamed from
+master; in sync, CTO-verified). Was the #1 risk since Phase 0.
