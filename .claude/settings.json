@@ -30,7 +30,8 @@
       "Bash(npx next:*)",
       "Bash(npx tsc *)",
       "Bash(node -e ' *)",
-      "Bash(git fetch *)"
+      "Bash(git fetch *)",
+      "Bash(netstat -ano)"
     ]
   }
 }
