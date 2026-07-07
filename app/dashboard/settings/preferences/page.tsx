@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+
 import { 
     Sun, 
     Moon, 
@@ -30,7 +30,7 @@ interface Preferences {
 }
 
 export default function PreferencesPage() {
-    const supabase = createClientComponentClient();
+
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [preferences, setPreferences] = useState<Preferences>({

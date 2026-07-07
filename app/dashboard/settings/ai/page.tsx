@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+
 import { 
     Sparkles, 
     Zap, 
@@ -32,7 +32,7 @@ interface AISettings {
 }
 
 export default function AISettingsPage() {
-    const supabase = createClientComponentClient();
+
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [showApiKey, setShowApiKey] = useState(false);
