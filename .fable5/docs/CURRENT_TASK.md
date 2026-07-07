@@ -62,11 +62,29 @@ trajectory 23 → 17:
 | 008 | achievements page | read-only repository variant (no command) | 19→18 |
 | 009 | dashboard page | two repositories + joined read; **depends on 007** | 18→17 |
 
-Deliberately EXCLUDED from this batch (not GPT-5.4 shape / security-sensitive;
-future patches with GPT-5.5 ± security review): password (auth.updateUser),
-delete-account (signOut + account deletion flow), integrations
-(getSession/refreshSession token semantics), profile + settings-root
-(storage uploads), members (1,817 lines, invitations/roles).
+**Second batch PATCH-010 → 015 — DRAFTED (2026-07-07), awaiting owner
+approval.** All GPT-5.4, strictly sequential after 005–009 complete.
+Grandfather trajectory 17 → 10:
+
+| Patch | Target | Pattern | Shrink |
+|---|---|---|---|
+| 010 | CanvasModals + OverlayLayer | type-only `AuthUser` swap (new) | 17→15 |
+| 011 | ProtectedRoute | F: auth-state observer (new; adds `authState.ts` helper incl. signOut) | 15→14 |
+| 012 | Navbar | F repetition (session-state mapping, census-gated) | 14→13 |
+| 013 | app/page.tsx (landing) | F repetition (+ first signOut consumer; event branches preserved) | 13→12 |
+| 014 | delete-account page | C (+ signOut); **exclusion reversed** — re-census proved deletion is server-side, client is a form + fetch; `app/api/**` hard-forbidden | 12→11 |
+| 015 | share/[token] (server page) | G: server-page read (new; adds `serverClient.ts` — first server seam) | 11→10 |
+
+Dependencies: 011←010; 012/013/014←011; 015 independent (runs last for
+novelty, not dependency). New patterns (type-swap, F, G) enter
+PATCH_REFERENCE at each review, per the catalog's reviewed-reference rule.
+
+Still EXCLUDED (GPT-5.5 ± security review, later): password (auth.updateUser
++ MFA ×6), integrations (getSession/refreshSession token semantics), profile
++ settings-root (storage uploads), members (1,817 lines, invitations/roles),
+PostCardContent (real canvas write — belongs to the ops-migration path, not
+a one-off command), AddPadletMenu (storage + canvas writes), the two canvas
+pages (the monolith itself).
 
 **Prerequisite `PATCH-002.1`: DONE (2026-07-07, commit b5698b5) — CTO review
 PASSED.** react/react-dom 19.1.0 → 19.2.7; lockfile audit clean (3 expected
@@ -142,6 +160,16 @@ resolved by the push, default is `main` (was `master`).
 
 ## Log
 
+- **2026-07-07** — Second batch PATCH-010…015 drafted from a census of ALL
+  remaining grandfathered files. Finds: CanvasModals/OverlayLayer are
+  type-only `import type { User }` (trivial −2); ProtectedRoute/Navbar/
+  landing share the getSession+onAuthStateChange shape (new Pattern F with
+  one bound helper); delete-account's deletion is server-side (exclusion
+  reversed, API route hard-forbidden); share/[token] is a server component
+  reading share_links with a service-role fallback (new Pattern G, first
+  server seam; security question about RLS-scoped lookup queued, behavior
+  preserved). PostCardContent stays excluded: its write belongs to the
+  future ops path, not a one-off command.
 - **2026-07-07** — Extraction batch PATCH-005…009 drafted from a fresh census
   of all 12 grandfathered settings pages (sizes, tables, exact supabase API
   usage per page). Sequenced: template validation → free wins → helper
