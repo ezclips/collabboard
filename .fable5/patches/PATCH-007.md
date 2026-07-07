@@ -1,6 +1,6 @@
 # PATCH-007 — Extraction: activity logs page; introduce `getCurrentUser` infra helper
 
-**Status:** draft (awaiting owner approval)
+**Status:** **DONE — CTO review PASSED (2026-07-07, commit `9f0a72d`).**
 **Complexity:** easy
 **Assigned model:** **GPT-5.4**
 **Canonical reference:** PATCH-004 (commit `5278468`).
@@ -111,3 +111,26 @@ Warning Policy / handoff rule 10 applies. Docs are CTO-only, updated at review.
 
 ## Estimated Difficulty
 easy — one helper (code given verbatim), one call-site swap.
+
+## CTO review verdict (2026-07-07) — PASSED
+
+Independently re-verified (GPT-5.4):
+- **Footprint:** exactly the 4 authorized files; single atomic commit
+  `9f0a72d`; boundary entry removed as a clean single-line deletion.
+- **Re-run by CTO:** unit 21 green (count unchanged, as the spec predicted);
+  tsc 0; boundaries green; grandfather = 19; page greps 0 for `@supabase`;
+  fresh production build; full e2e **11/11** including the new logs spec
+  (signed-in email visible in entries) and all prior nets.
+- **Helper:** `getCurrentUser` byte-faithful to the spec's verbatim code;
+  `getCurrentUserId` untouched; additive-only honored. PATCH-009's
+  dependency is now in place.
+- **Mapping judgment call, accepted:** `!result.ok` → `throw
+  userResult.error` into the page's existing try/catch — the spec's
+  "existing catch/console-error path" honored via throw. Old code on auth
+  error silently early-returned; new code logs to console — console-only
+  difference, allowed. Mock-data rendering byte-identical (`??` vs `||`
+  equivalent here and prescribed by the spec).
+- **Governance note:** commit `288748f` added a commit-message section to
+  this patch file before implementation — `.fable5/**` is CTO-only
+  (AI_WORKFLOW). Content harmless; henceforth commit-message hints go in
+  the handoff prompt, not the patch file.

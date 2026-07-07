@@ -245,7 +245,7 @@ it, STOP — never adapt.
 | 004 | settings/accessibility | A (canonical, `.single()`) | 24→23 ✅ done |
 | 005 | settings/notifications | A (`.maybeSingle()` variant) | 23→22 ✅ done |
 | 006 | settings/ai + preferences | B | 22→20 ✅ done |
-| 007 | settings/logs | C (+ introduces `getCurrentUser`) | 20→19 |
+| 007 | settings/logs | C (+ introduces `getCurrentUser`) | 20→19 ✅ done |
 | 008 | settings/achievements | D | 19→18 |
 | 009 | settings/dashboard | E (A + D composed; needs 007) | 18→17 |
 

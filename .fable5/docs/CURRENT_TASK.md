@@ -58,7 +58,7 @@ trajectory 23 → 17:
 |---|---|---|---|
 | 005 | notifications page | purest 004 clone (`maybeSingle` variant) | 23→22 ✅ **DONE** (06e40b4, review PASSED; e2e net race fixed in 8636bd1) |
 | 006 | ai + preferences pages | dead Supabase client removal (verified unused) | 22→20 ✅ **DONE** (b813ce9, review PASSED; blank-line residue cleaned 61d54dc; executed by Gemini 3.1 Pro) |
-| 007 | logs page | auth-only; adds shared `getCurrentUser` (id+email) helper | 20→19 |
+| 007 | logs page | auth-only; adds shared `getCurrentUser` (id+email) helper | 20→19 ✅ **DONE** (9f0a72d, review PASSED) |
 | 008 | achievements page | read-only repository variant (no command) | 19→18 |
 | 009 | dashboard page | two repositories + joined read; **depends on 007** | 18→17 |
 
@@ -168,6 +168,11 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-07** — PATCH-007 DONE (9f0a72d), CTO review PASSED — logs page
+  extracted (Pattern C); `getCurrentUser` helper live (009 dependency met);
+  grandfather 20→19; full e2e 11/11. Clean GPT-5.4 execution. Governance
+  note: commit-message hints go in handoffs, not patch files (.fable5 is
+  CTO-only).
 - **2026-07-07** — PATCH-006 DONE (b813ce9), CTO review PASSED — dead clients
   verified gone at SOURCE level (parent: 2 refs/page; HEAD: 0). Grandfather
   22→20. Executed by Gemini 3.1 Pro (new implementer, owner-assigned): craft
