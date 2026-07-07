@@ -1,0 +1,74 @@
+// Architecture boundary freeze (PATCH-002, .fable5/patches/PATCH-002.md).
+// ONE rule: UI code must not import @supabase/* directly.
+// Enforced as a BLOCKING gate via `npm run check:boundaries` (verify + CI).
+// STANDALONE config - deliberately NOT spread into eslint.config.mjs (its
+// global ignores would disable all main-lint coverage for those paths).
+// The grandfather list may only SHRINK. Never add a file to it.
+import tsParser from '@typescript-eslint/parser';
+
+// Existing violators, frozen 2026-07-07. Remove entries as files are migrated
+// to the domain layer (lib/domain). Adding an entry requires CTO sign-off.
+// NOTE: [ and ] are glob character classes — Next.js dynamic-route folders
+// like [id] must be escaped (\\[id\\]) or the ignore silently misses the file.
+const GRANDFATHERED_UI_FILES = [
+  'app/collabboard/canvas/\\[id\\]/page.tsx',
+  'app/dashboard/canvas/\\[id\\]/CanvasClient.tsx',
+  'app/dashboard/settings/accessibility/page.tsx',
+  'app/dashboard/settings/achievements/page.tsx',
+  'app/dashboard/settings/ai/page.tsx',
+  'app/dashboard/settings/dashboard/page.tsx',
+  'app/dashboard/settings/delete-account/page.tsx',
+  'app/dashboard/settings/integrations/page.tsx',
+  'app/dashboard/settings/logs/page.tsx',
+  'app/dashboard/settings/members/page.tsx',
+  'app/dashboard/settings/notifications/page.tsx',
+  'app/dashboard/settings/page.tsx',
+  'app/dashboard/settings/password/page.tsx',
+  'app/dashboard/settings/preferences/page.tsx',
+  'app/dashboard/settings/profile/page.tsx',
+  'app/page.tsx',
+  'app/share/\\[token\\]/page.tsx',
+  'components/ProtectedRoute.tsx',
+  'components/canvas/AddPadletMenu.tsx',
+  'components/collabboard/PostCardContent.tsx',
+  'components/collabboard/canvas/ui/CanvasModals.tsx',
+  'components/collabboard/canvas/ui/FreeformPadletCards.tsx',
+  'components/collabboard/canvas/ui/OverlayLayer.tsx',
+  'components/ui-kit/Navbar.tsx',
+];
+
+export default [
+  {
+    // Global ignores: pruned during traversal (fast; excalidraw_fork contains
+    // a vendored node_modules). Server code is out of scope until the domain
+    // layer exists: app/api/** and all route.ts handlers.
+    ignores: [
+      '**/node_modules/**',
+      'app/api/**',
+      '**/route.ts',
+      'components/collabboard/canvas/excalidraw_fork/**',
+      ...GRANDFATHERED_UI_FILES,
+    ],
+  },
+  {
+    files: ['components/**/*.{ts,tsx}', 'app/**/*.{ts,tsx}'],
+    languageOptions: {
+      parser: tsParser,
+      parserOptions: { sourceType: 'module', ecmaFeatures: { jsx: true } },
+    },
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['@supabase/*'],
+              message:
+                'UI code must not import Supabase directly (PATCH-002 freeze). Use the domain layer (lib/domain) or, until it covers this feature, the legacy lib/supabase-provider. See .fable5/CLAUDE.md rule 1.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+];

@@ -27,6 +27,9 @@ jobs:
       - name: Typecheck (blocking)
         run: npx tsc --noEmit
 
+      - name: Boundary check (blocking)
+        run: npm run check:boundaries
+
       - name: Lint (advisory until burn-down reaches zero)
         run: npm run lint
         continue-on-error: true
