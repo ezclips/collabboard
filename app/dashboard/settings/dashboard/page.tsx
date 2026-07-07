@@ -1,99 +1,70 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
-import type { User } from '@supabase/supabase-js';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Loader2, Check } from 'lucide-react';
 import { toast } from 'sonner';
-
-interface Library {
-    id: string;
-    name: string;
-    username: string;
-    type: 'personal' | 'workspace';
-    avatar_url?: string;
-    show: boolean;
-}
-
-interface WorkspaceRow {
-    workspace_id: string;
-    role: string;
-    workspaces: {
-        id: string;
-        name: string;
-        logo_url: string | null;
-    } | null;
-}
+import type { Library } from '@/lib/domain/settings/dashboard';
+import { createSaveDashboardSettingsCommand } from '@/lib/domain/settings/dashboard';
+import type { WorkspaceMembership } from '@/lib/domain/workspaces/memberships';
+import { createDashboardSettingsRepository } from '@/lib/infra/settings/dashboardSettingsRepository';
+import type { CurrentUser } from '@/lib/infra/supabase/currentUser';
+import { getCurrentUser } from '@/lib/infra/supabase/currentUser';
+import { createWorkspaceMembershipsRepository } from '@/lib/infra/workspaces/workspaceMembershipsRepository';
 
 export default function DashboardSettingsPage() {
-    const supabase = createClientComponentClient();
+    const dashboardSettingsRepository = useMemo(() => createDashboardSettingsRepository(), []);
+    const membershipsRepository = useMemo(() => createWorkspaceMembershipsRepository(), []);
+    const saveDashboardSettings = useMemo(
+        () => createSaveDashboardSettingsCommand(dashboardSettingsRepository),
+        [dashboardSettingsRepository]
+    );
     const [loading, setLoading] = useState(true);
     const [libraries, setLibraries] = useState<Library[]>([]);
     const [defaultWorkspace, setDefaultWorkspace] = useState<string>('');
-    const [user, setUser] = useState<User | null>(null);
+    const [user, setUser] = useState<CurrentUser | null>(null);
     const [loadError, setLoadError] = useState<string | null>(null);
 
     const loadSettings = useCallback(async () => {
         try {
             setLoading(true);
             setLoadError(null);
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) {
+            const userResult = await getCurrentUser();
+            if (!userResult.ok) throw userResult.error;
+            if (!userResult.value) {
                 console.warn('[DashboardSettings] No authenticated user found');
                 setLibraries([]);
                 setDefaultWorkspace('');
                 setLoadError('You are not authenticated. Please sign in again.');
                 return;
             }
+            const user = userResult.value;
             setUser(user);
 
             const username = user.email?.split('@')[0] || 'user';
 
-            const { data: memberships, error: membershipsError } = await supabase
-                .from('workspace_members')
-                .select(`
-                    workspace_id,
-                    role,
-                    workspaces:workspace_id (
-                        id,
-                        name,
-                        logo_url
-                    )
-                `)
-                .eq('member_user_id', user.id)
-                .eq('status', 'active');
+            const membershipsResult = await membershipsRepository.listActiveByUserId(user.id);
 
-            if (membershipsError) {
-                console.warn('[DashboardSettings] Failed to load workspace memberships:', membershipsError);
+            if (!membershipsResult.ok) {
+                console.warn('[DashboardSettings] Failed to load workspace memberships:', membershipsResult.error);
             } else {
-                console.log('[DashboardSettings] Membership rows loaded:', memberships?.length || 0);
+                console.log('[DashboardSettings] Membership rows loaded:', membershipsResult.value.length);
             }
 
-            let effectiveMemberships = memberships || [];
+            let effectiveMemberships = membershipsResult.ok ? membershipsResult.value : [];
             if (effectiveMemberships.length === 0 && user.email) {
-                const { data: emailMemberships, error: emailMembershipsError } = await supabase
-                    .from('workspace_members')
-                    .select(`
-                        workspace_id,
-                        role,
-                        workspaces:workspace_id (
-                            id,
-                            name,
-                            logo_url
-                        )
-                    `)
-                    .eq('member_email', user.email.toLowerCase())
-                    .eq('status', 'active');
+                const emailMembershipsResult = await membershipsRepository.listActiveByEmail(
+                    user.email.toLowerCase()
+                );
 
-                if (emailMembershipsError) {
-                    console.warn('[DashboardSettings] Email-based membership fallback failed:', emailMembershipsError);
+                if (!emailMembershipsResult.ok) {
+                    console.warn('[DashboardSettings] Email-based membership fallback failed:', emailMembershipsResult.error);
                 } else {
-                    effectiveMemberships = emailMemberships || [];
+                    effectiveMemberships = emailMembershipsResult.value;
                     console.log('[DashboardSettings] Email membership fallback rows loaded:', effectiveMemberships.length);
                 }
             }
 
-            const workspaceLibraries: Library[] = (effectiveMemberships as unknown as WorkspaceRow[])
+            const workspaceLibraries: Library[] = (effectiveMemberships as WorkspaceMembership[])
                 .filter((row) => row.workspaces?.id)
                 .map((row) => ({
                     id: row.workspaces!.id,
@@ -106,7 +77,7 @@ export default function DashboardSettingsPage() {
 
             const personalLibrary: Library = {
                 id: user.id,
-                name: user.user_metadata?.display_name || username,
+                name: user.displayName || username,
                 username,
                 type: 'personal',
                 show: true
@@ -116,26 +87,17 @@ export default function DashboardSettingsPage() {
             console.log('[DashboardSettings] Effective libraries:', defaultLibraries.length);
 
             // Try to load dashboard settings
-            try {
-                const { data } = await supabase
-                    .from('dashboard_settings')
-                    .select('*')
-                    .eq('user_id', user.id)
-                    .single();
-
-                if (data) {
-                    setDefaultWorkspace(data.default_workspace || defaultLibraries[0]?.id || user.id);
-                    if (data.libraries) {
-                        const savedById = new Map((data.libraries as Library[]).map((lib) => [lib.id, lib]));
+            const settingsResult = await dashboardSettingsRepository.load(user.id);
+            if (settingsResult.ok && settingsResult.value) {
+                    setDefaultWorkspace(settingsResult.value.defaultWorkspace || defaultLibraries[0]?.id || user.id);
+                    if (settingsResult.value.libraries) {
+                        const savedById = new Map((settingsResult.value.libraries as Library[]).map((lib) => [lib.id, lib]));
                         setLibraries(defaultLibraries.map((lib) => ({
                             ...lib,
                             show: savedById.get(lib.id)?.show ?? true
                         })));
                         return;
                     }
-                }
-            } catch {
-                // Use defaults
             }
 
             setLibraries(defaultLibraries);
@@ -146,7 +108,7 @@ export default function DashboardSettingsPage() {
         } finally {
             setLoading(false);
         }
-    }, [supabase]);
+    }, [dashboardSettingsRepository, membershipsRepository]);
 
     useEffect(() => {
         void loadSettings();
@@ -161,14 +123,11 @@ export default function DashboardSettingsPage() {
 
         // Save to database
         try {
-            await supabase
-                .from('dashboard_settings')
-                .upsert({
-                    user_id: user.id,
-                    libraries: newLibraries,
-                    default_workspace: defaultWorkspace,
-                    updated_at: new Date().toISOString()
-                });
+            const result = await saveDashboardSettings({
+                libraries: newLibraries,
+                defaultWorkspace,
+            }, { userId: user.id });
+            if (!result.ok) console.warn('Could not save dashboard settings');
         } catch {
             console.warn('Could not save dashboard settings');
         }
@@ -179,14 +138,14 @@ export default function DashboardSettingsPage() {
         setDefaultWorkspace(workspaceId);
         
         try {
-            await supabase
-                .from('dashboard_settings')
-                .upsert({
-                    user_id: user.id,
-                    libraries: libraries,
-                    default_workspace: workspaceId,
-                    updated_at: new Date().toISOString()
-                });
+            const result = await saveDashboardSettings({
+                libraries,
+                defaultWorkspace: workspaceId,
+            }, { userId: user.id });
+            if (!result.ok) {
+                console.warn('Could not save dashboard settings');
+                return;
+            }
             toast.success('Default workspace updated');
         } catch {
             console.warn('Could not save dashboard settings');

@@ -8,6 +8,7 @@ import { createBrowserSupabaseClient } from './browserClient';
 export interface CurrentUser {
   readonly id: UserId;
   readonly email: string | null;
+  readonly displayName: string | null;
 }
 
 export async function getCurrentUserId(): Promise<Result<UserId | null>> {
@@ -38,7 +39,16 @@ export async function getCurrentUser(): Promise<Result<CurrentUser | null>> {
       return err(domainError('unavailable', 'Could not load current user', { cause: error }));
     }
 
-    return ok(user ? { id: asUserId(user.id), email: user.email ?? null } : null);
+    return ok(
+      user
+        ? {
+            id: asUserId(user.id),
+            email: user.email ?? null,
+            displayName:
+              (user.user_metadata as { display_name?: string } | undefined)?.display_name ?? null,
+          }
+        : null,
+    );
   } catch (cause: unknown) {
     return err(domainError('unavailable', 'Could not load current user', { cause }));
   }
