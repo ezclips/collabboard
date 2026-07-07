@@ -155,9 +155,12 @@ grep -c "@supabase" app/dashboard/settings/accessibility/page.tsx   # must print
 npm run check:boundaries
 git status --porcelain
 ```
-Dev-server rule applies: no `npm run build`, no Playwright-with-webServer;
-use `PW_BASE_URL` against the running dev server. Warning Policy / handoff
-rule 10 applies.
+Dev-server rule applies **[clarified by Amendment 2]**: no `npm run build`
+and no Playwright-with-webServer **while the dev server is running** (shared
+`.next` corruption); use `PW_BASE_URL` against the running dev server for all
+e2e phases. The final `npm run verify` (which includes build) runs AFTER the
+dev server is stopped — see Amendment 2 for the exact sequence. Warning
+Policy / handoff rule 10 applies.
 
 ## Estimated Difficulty
 medium — small surface, but it sets the pattern ~20 future patches copy, and
@@ -200,6 +203,36 @@ gets added consciously).
 5. Everything else in the spec is unchanged; the MUST-NOT list still applies
    with the single vitest exception. Record this in your "Decisions made"
    report as "Amendment 1 applied, CTO-authorized".
+
+## Amendment 2 (2026-07-07) — build prohibition vs. `npm run verify` · CTO decision
+
+**Blockage (GPT-5.5, correct stop):** the patch said "no `npm run build`"
+flatly, while the handoff requires `npm run verify`, whose last step IS a
+build. Spec bug (CTO's): the house guard was always conditional — *no builds
+while the dev server runs* (SKILL.md; shared-`.next` corruption incident) —
+and this patch restated it without its condition.
+
+**Decision: the prohibition is amended to its true conditional form** (see
+Verification Steps). `npm run verify` stays exactly as it is — the build gate
+is not weakened per-patch (rejected option 1) or permanently (rejected
+option 2); the gate was never the problem, the sequencing was. All
+dev-server-dependent evidence (Phases A/C e2e) is already collected, so the
+build simply runs after the server stops.
+
+**Resume instructions (GPT-5.5) — final sequence, in this exact order:**
+1. Confirm all e2e evidence is already pasted/saved (Phase A old-page run,
+   Phase C new-page + full-suite runs). Do NOT re-run e2e after step 2.
+2. **Owner stops the dev server.** Verify port 3000 is free before
+   proceeding (e.g. `netstat -ano | findstr :3000` → no LISTENING line).
+3. `npm run verify` — paste the full output (typecheck → boundaries →
+   test:unit → build). Both new test files must appear in the test:unit
+   section (Amendment 1 criterion).
+4. If green: create the single atomic commit per the spec (implementation +
+   grandfather-list removal + vitest include together), report the hash.
+5. Post-commit cleanup: delete `.next`, then the owner restarts the dev
+   server (fresh dev cache after a production build — standing recovery
+   procedure).
+6. Report done with all pasted outputs + commit hash → CTO review.
 
 ## Handoff instructions (owner: paste this)
 Use `.fable5/docs/CODER_HANDOFF_TEMPLATE.md` with `{{NUMBER}}` = 004,

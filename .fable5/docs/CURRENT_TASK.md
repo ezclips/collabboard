@@ -39,12 +39,14 @@ pre-rewrite history; map via commit messages if needed.
 
 **Active patch:** `PATCH-004` (first extraction: accessibility settings page →
 domain/infra seam; grandfather list 24 → 23 only after proof) — **IN PROGRESS
-(GPT-5.5), Amendment 1 issued 2026-07-07.** GPT-5.5 correctly blocked on a
-spec contradiction (infra tests required but vitest include was domain-only
-and config files were out of scope; no commit made). CTO authorized the
-one-line `vitest.config.ts` include widening; resume instructions are in the
-patch file's Amendment 1 section. Implementation sits uncommitted in the
-worktree — do not clean it.
+(GPT-5.5), Amendments 1 + 2 issued 2026-07-07.** Two correct blocks on CTO
+spec contradictions: (1) vitest include vs. config freeze → one-line include
+widening authorized; (2) flat "no build" vs. `verify`-includes-build → guard
+restored to its conditional form ("not while dev server runs"); final
+sequence = stop dev server → `npm run verify` → atomic commit → rm `.next` →
+restart dev. All patch evidence green per owner report; only the final
+verify+commit remain. Implementation sits uncommitted in the worktree — do
+not clean it.
 
 **Prerequisite `PATCH-002.1`: DONE (2026-07-07, commit b5698b5) — CTO review
 PASSED.** react/react-dom 19.1.0 → 19.2.7; lockfile audit clean (3 expected
@@ -120,6 +122,10 @@ resolved by the push, default is `main` (was `master`).
 
 ## Log
 
+- **2026-07-07** — PATCH-004 Amendment 2: flat "no build" contradicted
+  `verify`; guard restored to conditional form, build sequenced after dev
+  server stops. Verify gate NOT weakened. Lesson: never restate a
+  conditional rule without its condition.
 - **2026-07-07** — PATCH-004 Amendment 1: GPT-5.5 blocked correctly on a spec
   contradiction (vitest include vs. config-freeze); CTO authorized the
   one-line vitest.config.ts widening; acceptance criteria hardened (test file
