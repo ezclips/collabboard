@@ -83,6 +83,9 @@ branch after a short soak (see CHANGELOG_ARCHITECTURE.md 2026-07-07).
 
 ## Log
 
+- **2026-07-07** — CTO_PLAYBOOK.md created (succession doc: patch evaluation/
+  rejection, split/refactor/abstraction judgment, debt prioritization,
+  philosophies, if-this-then-that table).
 - **2026-07-07** — Knowledge-extraction pass: LESSONS_LEARNED.md,
   AI_WORKFLOW.md (roles: Fable 5 CTO / GPT-5.5 senior / GPT-5.4 implementer),
   CODER_HANDOFF_TEMPLATE.md, `extract-approach` skill; CLAUDE.md rule 11
