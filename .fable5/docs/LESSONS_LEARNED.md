@@ -1,0 +1,102 @@
+# Lessons Learned
+
+Solved-problem records in the `extract-approach` format (see
+`.claude/skills/extract-approach/SKILL.md`). Read the **Reusable rule** lines
+at minimum before working on this repo. Newest first within each section.
+
+## Delegation & process
+
+### Codex skipped verification and commit (2026-07-07, PATCH-002)
+**Symptom:** implementation returned "complete"; HEAD unchanged, work uncommitted, verification never run — and the tree actually FAILED the check.
+**Wrong path:** assuming a well-written spec's Step 4/5 would be followed because they were explicit.
+**Root cause:** implementation models optimize for producing the artifact; process steps around it get dropped without a forcing function.
+**Fix:** CTO ran verification, found two spec defects, fixed, committed (`a7fe12c`); handoff template now demands pasted output + commit hash.
+**Reusable rule:** a delegated patch is not done until the reviewer has re-run verification themselves and the commit hash exists — treat all pasted reports as claims, not evidence.
+
+### Spec defects survive faithful implementation (2026-07-07, PATCH-002)
+**Symptom:** Codex implemented the spec byte-faithfully; the result was still broken (glob escaping + inline-config errors — see below).
+**Root cause:** the spec author (CTO) wrote exact file contents without executing them first.
+**Fix:** review caught it; both defects were spec bugs, not implementation bugs.
+**Reusable rule:** when a spec contains exact code, the spec author should dry-run its verification section before delegating — or explicitly mark it "unexecuted, expect iteration".
+
+## Repo & tooling mechanics
+
+### `next dev` and `next build` share `.next` (2026-07-06, incident)
+**Symptom:** dashboard/canvas routes returned Internal Server Error; homepage still worked.
+**Wrong path:** suspecting the day's code changes.
+**Root cause:** production builds ran while the dev server was live; both write `.next`, corrupting the dev cache (static pages survive, dynamic routes 500).
+**Fix:** stop server → delete `.next` → restart dev; guard added to SKILL.md; `PW_BASE_URL` override added so e2e can target a live dev server instead of building.
+**Reusable rule:** never run `npm run build` or e2e-with-webServer while the dev server is running; recovery is stop → rm `.next` → restart.
+
+### ESLint ignore paths treat `[id]` as a character class (2026-07-07, PATCH-002)
+**Symptom:** three grandfathered files still failed the boundary check.
+**Root cause:** minimatch: `[id]` matches one char (`i` or `d`), so `app/share/[token]/page.tsx` never matched the literal folder.
+**Fix:** escape as `\\[id\\]` (`a7fe12c`).
+**Reusable rule:** in any glob (ESLint ignores, tsconfig, Playwright), Next.js dynamic-route folders must have `[` `]` escaped.
+
+### Standalone ESLint configs choke on inline disable comments (2026-07-07, PATCH-002)
+**Symptom:** 53 errors "Definition for rule ... was not found" from files never touched by the patch.
+**Root cause:** source files carry `eslint-disable` comments for plugin rules the minimal config doesn't load; ESLint errors resolving them.
+**Fix:** `--no-inline-config` — which also hardens the check: the boundary cannot be eslint-disabled away.
+**Reusable rule:** single-purpose ESLint gates should run with `--no-inline-config`; it removes unknown-rule noise AND circumvention.
+
+### Committed junk can hide real credentials (2026-07-06, Phase 0)
+**Symptom:** `tmp/` contained 10,726 committed files including full Chrome profiles (Login Data, Cookies, third-party session storage).
+**Root cause:** audit scripts used repo-local `user-data-dir`s; `tmp/` wasn't gitignored; "backup snapshot" commits swept everything in.
+**Fix:** removed from tip (`bcba8fe`); full bundle backup made first; history purge pending owner approval (`git filter-repo`), feasible because no remote exists.
+**Reusable rule:** before any cleanup, bundle-backup the repo; browser automation must keep profiles outside the worktree; hygiene deletions of tracked files are safe (git history), untracked ones are not.
+
+### Stale build artifacts lie (2026-07-06, Phase 0)
+**Symptom:** committed `tsc_output.txt` implied many type errors; `tsc --noEmit` was actually clean, while `npm run build` was actually broken (lint-blocked + prerender crashes).
+**Reusable rule:** never trust committed logs/outputs; re-run the tool. The gate you don't run in CI is a gate that is currently failing.
+
+## Auth & Supabase platform
+
+### Supabase rate limits are per-IP buckets, and they're separate (2026-07-07, login incident)
+**Symptom:** all logins 429'd for 90+ minutes, surviving code fixes.
+**Wrong paths:** (1) blaming the login code; (2) blaming middleware token refreshes for the sign-in bucket (refreshes have their OWN 150/5min bucket — the dashboard screenshot corrected this).
+**Root cause:** sign-ins are 30/5min/IP; every retry (user + models testing) kept refilling the window. Separately, `middleware.ts` ran `getSession()` (refresh-capable) on EVERY request including `/api/*`, draining the refresh bucket.
+**Fix:** client-primary sign-in (browser spends its own IP budget; server keeps lockout bookkeeping via session-verified phases) `51db5a8`; middleware matcher excludes `/api/*` `f64dd76`; owner advised: sign-in limit 30→100, custom SMTP (built-in email = 2/hour, silently breaks onboarding at 3 users/hour).
+**Reusable rule:** on any 429, STOP retrying (retries extend the block) and identify WHICH bucket via a direct provider call that bypasses app layers; design auth so each user's own IP pays their rate-limit cost (server-proxied auth funnels everyone through one IP — school NATs have the same shape).
+
+### Client-reported security events must be session-verified (2026-07-07, auth review)
+**Symptom (near-miss):** the client-primary redesign lets the browser report login success/failure to the server for lockout bookkeeping.
+**Root cause risk:** trusting `phase:'success'` without proof would let anyone clear a victim's lockout; trusting `phase:'failure'` lets anyone inflate it (accepted, bounded by the reporter's own IP throttle; hardening queued).
+**Fix (verified present):** the success phase requires the caller's real session cookie and email match before clearing anything.
+**Reusable rule:** any client-reported security event needs cryptographic/session proof before it mutates server-side security state.
+
+## E2E & UI testing in this codebase
+
+### Discover selectors live; never guess labels (2026-07-07, PATCH-001)
+**Symptom:** three failed test iterations at ~5 min each: Escape doesn't save notes, "Delete" is actually "Move to Trash" in the card's right-click menu, sidebar "buttons" aren't buttons.
+**Root cause:** the UI is non-semantic — sidebar tools and cards are `<div onClick>` with tooltip-span labels; NoteEditor saves on backdrop-click only; menu labels differ between the dropdown and context menu for the same action.
+**Fix:** discovery scripts that drive the real app and dump DOM/buttons/menus before writing assertions; selector notes embedded in the spec file.
+**Reusable rule:** in this repo, write UI tests in two passes — a throwaway discovery run that prints reality, then the test; and read the component source for the affordance before selecting it. (The deep fix is semantic markup — first ACCESSIBILITY.md burn-down item.)
+
+### Test data pollutes real quotas (2026-07-07, PATCH-001)
+**Symptom:** board creation started failing mid-verification; leftover `e2e-*` boards had consumed the free-plan board limit (soft-delete keeps counting).
+**Fix:** hard-deleted via service role; lifecycle test cleans up in `finally`.
+**Reusable rule:** e2e cleanup must hard-delete (or use a high-limit account); soft-deleted rows still count against entitlements.
+
+## Architecture strategy (the standing plan)
+
+### Domain-layer migration: net → freeze → seam → extract
+The agreed strategy for de-godding `CanvasClient.tsx` (8.5k lines, ~105 direct DB call sites) without a rewrite:
+1. **Net first** (PATCH-001): characterization e2e locks observable behavior; refactors must keep it green with zero test edits.
+2. **Freeze second** (PATCH-002): blocking check stops NEW UI→Supabase imports; 24 grandfathered files, shrink-only list in `eslint.boundaries.config.mjs`.
+3. **Seam third** (PATCH-003, pending): `lib/domain` skeleton — Result type, error taxonomy, first repository + command, proven on one small settings page (removes the first grandfathered file).
+4. **Extract repeatedly** (PATCH-004+): one command/page at a time, characterization green before/after, grandfather list shrinks each patch.
+**Reusable rule:** never extract from a god component without a behavior net and an anti-regression freeze already in place; sequence cheap guards before expensive work.
+
+### Known dualities are load-bearing until their planned phase
+Two canvas systems, three comment stores, the kanban schema island: each has a scheduled migration (ROADMAP Phases 1–3). Opportunistic "fixes" strand data.
+**Reusable rule:** check CURRENT_TASK/ROADMAP before unifying anything that looks duplicated — if it's listed, it's quarantined, not forgotten.
+
+## Standing risks future models must not forget
+
+1. **No remote repository** — one local bundle is the only backup (top risk since Phase 0).
+2. Chrome-profile credentials remain in git **history** pending owner-approved purge.
+3. dhtmlx-gantt/scheduler are GPL/commercial dual-licensed and shipped unlicensed — replace or buy before GA.
+4. Supabase built-in email = **2/hour project-wide** — configure custom SMTP before any beta.
+5. Lint has 5,426 legacy errors and is advisory; the build ignores it (`eslint.ignoreDuringBuilds`) — burn down, then remove the bypass.
+6. Excalidraw fork has its own committed `node_modules` backing a `file:` dependency — repo bloat; handle in a dedicated patch only.

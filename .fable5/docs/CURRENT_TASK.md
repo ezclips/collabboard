@@ -83,6 +83,10 @@ branch after a short soak (see CHANGELOG_ARCHITECTURE.md 2026-07-07).
 
 ## Log
 
+- **2026-07-07** — Knowledge-extraction pass: LESSONS_LEARNED.md,
+  AI_WORKFLOW.md (roles: Fable 5 CTO / GPT-5.5 senior / GPT-5.4 implementer),
+  CODER_HANDOFF_TEMPLATE.md, `extract-approach` skill; CLAUDE.md rule 11
+  (learning note after every non-trivial solved problem).
 - **2026-07-07** — PATCH-001 DONE (commit 9b8bed2): characterization harness +
   board lifecycle test green (6 pass w/ creds, clean skips w/o). Phase 1 behavior
   net is live. Backlog items recorded above.

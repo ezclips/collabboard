@@ -18,7 +18,8 @@ You are working on **Fable 5**, a visual collaboration platform (Padlet-class UX
 | Design | [UI_GUIDELINES](docs/UI_GUIDELINES.md) · [DESIGN_SYSTEM](docs/DESIGN_SYSTEM.md) · [ACCESSIBILITY](docs/ACCESSIBILITY.md) |
 | Quality | [PERFORMANCE](docs/PERFORMANCE.md) · [SECURITY](docs/SECURITY.md) · [TESTING](docs/TESTING.md) |
 | Execution | [ROADMAP](docs/ROADMAP.md) · [CURRENT_TASK](docs/CURRENT_TASK.md) · [CHANGELOG_ARCHITECTURE](docs/CHANGELOG_ARCHITECTURE.md) |
-| Governance | [SKILL](docs/SKILL.md) (how implementation models work here) · [CTO_GUIDELINES](docs/CTO_GUIDELINES.md) (how CTO models run the project) · [patches/](patches/) (numbered work units) |
+| Governance | [SKILL](docs/SKILL.md) (how implementation models work here) · [CTO_GUIDELINES](docs/CTO_GUIDELINES.md) (how CTO models run the project) · [AI_WORKFLOW](docs/AI_WORKFLOW.md) (roles: Fable 5 CTO / GPT-5.5 senior / GPT-5.4 implementer) · [patches/](patches/) (numbered work units) · [CODER_HANDOFF_TEMPLATE](docs/CODER_HANDOFF_TEMPLATE.md) (paste for every delegation) |
+| Knowledge | [LESSONS_LEARNED](docs/LESSONS_LEARNED.md) (solved-problem records — read the Reusable rule lines) · `.claude/skills/extract-approach/SKILL.md` (how to record new ones) |
 
 ## Non-Negotiable Rules (enforced in review; full detail in the docs)
 
@@ -32,6 +33,7 @@ You are working on **Fable 5**, a visual collaboration platform (Padlet-class UX
 8. **Behavior-preserving refactors ride the characterization suite** — run relevant Playwright flows before and after; a refactor PR with behavior diffs is two PRs.
 9. **Don't delete or "fix" the known dualities opportunistically** (two canvas systems, three comment stores, kanban island) — each has a planned migration phase; ad-hoc fixes strand data.
 10. **Never lose user work (P3):** destructive ops need undo or soft-delete; no silent catch; report failures honestly.
+11. **Extract before you move on:** after every non-trivial solved problem (surprise root cause, 3+ attempts, review-caught defect, reversed decision), create or update a learning note in [LESSONS_LEARNED.md](docs/LESSONS_LEARNED.md) using the `extract-approach` skill format — in the same session, before starting the next task. A problem solved without a note will be solved again.
 
 ## Current Phase
 
