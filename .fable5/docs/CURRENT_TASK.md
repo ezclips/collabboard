@@ -168,6 +168,12 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-07** — PATCH-012 Amendment 1a: the orphan-proof's first command
+  self-contradicted (pattern "ui-kit/Navbar" can't match ClientWrapper's
+  relative `./Navbar` import; expected-result comment said it would).
+  Corrected pattern dry-run-verified this time. Architecture decision
+  unchanged; resume with corrected proof. Lesson: dry-run obligation covers
+  amendment-embedded proof commands.
 - **2026-07-07** — PATCH-012 blocked correctly by GPT-5.4: the spec claimed
   Navbar "renders on most pages," but CTO independently confirmed it's
   orphaned — its only importer (ClientWrapper.tsx) is itself imported by

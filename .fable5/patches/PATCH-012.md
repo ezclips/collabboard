@@ -49,7 +49,9 @@ this file's current shape.
 **Mandatory orphan-proof (paste before editing; STOP if it shows a live
 importer):**
 ```bash
-grep -rln "ui-kit/Navbar" --include="*.tsx" --include="*.ts" . \
+# [Amendment 1a] ClientWrapper imports via the RELATIVE form `./Navbar`, so
+# the pattern must cover both the path form and the import-name form:
+grep -rln "ui-kit/Navbar\|import Navbar" --include="*.tsx" --include="*.ts" . \
   --exclude-dir=node_modules --exclude-dir=.next --exclude-dir=.git
 # expect exactly: ./components/ui-kit/ClientWrapper.tsx
 grep -rln "ClientWrapper" --include="*.tsx" --include="*.ts" . \
@@ -63,6 +65,17 @@ grep -rn "dynamic(\|import(" --include="*.tsx" --include="*.ts" . \
 If any of these three shows a different result than expected, STOP — the
 component is not orphaned the way this amendment assumes, and the original
 e2e-based verification plan must be used instead (report back to the CTO).
+
+**Amendment 1a (2026-07-07):** the first proof command originally grepped
+only `"ui-kit/Navbar"`, which cannot match ClientWrapper's actual relative
+import (`import Navbar from "./Navbar"`) — the command found nothing while
+its own comment expected ClientWrapper, a self-contradiction. Root cause:
+the CTO's investigation used a broader pattern than what got transcribed
+into the proof; the proof command was never dry-run before delegation.
+Corrected pattern above is CTO-dry-run-verified (returns exactly
+`./components/ui-kit/ClientWrapper.tsx`, exit 0). Architecture decision
+(Amendment 1: unused-component extraction, no e2e spec, mount restoration
+rejected) is UNCHANGED — resume with the corrected proof.
 
 ## Goal
 Move `components/ui-kit/Navbar.tsx` (156 lines) onto
