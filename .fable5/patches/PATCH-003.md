@@ -1,20 +1,15 @@
 # PATCH-003 — Domain layer foundation (`lib/domain` skeleton)
 
-**Status:** APPROVED — attempt 2 in progress. **Spec correction (CTO,
-2026-07-07):** `defineCommand` originally used `Object.assign(run, { name })`,
-which throws — `Function.name` is read-only (writable:false). Fixed in Step 6
-below with `Object.defineProperty` (name IS configurable:true; CTO-verified in
-isolation). The `Command` interface is UNCHANGED — callable function exposing
-`.name` — deliberately chosen over renaming to `commandName` or an
-`{ name, run }` object, because interface ugliness taxes every future
-consumer while the fix is one implementation line.
-
-**Resume instructions for Codex:** your created files are already in the
-worktree. (1) Replace the `Object.assign(...)` return in
-`lib/domain/core/command.ts` with the exact defineProperty ending shown in
-Step 6. (2) Re-run verification from `npm run test:unit` onward, including the
-purity-canary proof. (3) Commit and report per the spec. No other changes.
-Warning Policy / handoff rule 10 still applies to any npm output.
+**Status:** DONE (2026-07-07, commit 75d7626). Implemented by Codex GPT-5.4
+across three attempts (blocked by PATCH-002.1 lockfile issue; then one CTO
+spec bug: `Object.assign` on read-only `Function.name`, fixed via
+`Object.defineProperty` with the Command interface unchanged). CTO review
+PASSED, everything re-run independently: footprint exactly the 13 authorized
+files; domain sources spec-faithful; lockfile audit +139 (vitest 3.2.7 tree)
+/ 0 removed / 4 transitive patch bumps; 7 unit tests (15 assertions) green;
+typecheck 0; boundaries green; purity canary fails-then-clears live; CI unit
+step in place; `verify` chain extended. `lib/domain` seam is open —
+extraction patches (PATCH-004+) may now consume it.
 Execute the Final Implementation Specification below. Codex must not edit
 `.fable5/` or `.claude/`. CTO review criteria on return: authorized files only ·
 no product code touched · purity-canary proof demonstrated · unit tests green ·

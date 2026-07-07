@@ -22,13 +22,16 @@ fixed in CTO review (glob escaping of `[id]` routes; `--no-inline-config`).
 **Active patch:** `PATCH-003` (domain layer foundation: `lib/domain` skeleton —
 Result, error taxonomy, branded ids, `defineCommand`, `BoardRepository`
 interface, conventions, unit tests via vitest, domain-purity lint) —
-**APPROVED — attempt 2 paused on a spec bug, now corrected; Codex may
-resume.** Codex stopped correctly on a unit-test failure: the spec's
-`Object.assign(run, { name })` throws (Function.name is read-only). CTO
-correction in PATCH-003 Step 6: `Object.defineProperty` — Command interface
-deliberately UNCHANGED. Worktree holds Codex's created files uncommitted;
-resume instructions are in the patch status block (fix the one line → re-run
-verification from test:unit → canary proof → commit → report).
+**DONE (2026-07-07, commit 75d7626) — CTO review PASSED.** Domain seam open:
+Result/errors/ids/defineCommand/BoardRepository + conventions + purity lint +
+7 unit tests; verify chain and CI extended. Full independent re-verification
+green (lockfile audit +139 vitest tree / 0 removed / 4 transitive bumps;
+canary proof live).
+
+**Active patch:** none. **Next: PATCH-004** (first extraction — one small
+settings page onto the domain layer via a repository implementation in
+`lib/infra`, removing the first entry from the 24-file grandfather list) —
+awaiting CTO draft + owner approval. Do not start without owner go-ahead.
 
 **Prerequisite `PATCH-002.1`: DONE (2026-07-07, commit b5698b5) — CTO review
 PASSED.** react/react-dom 19.1.0 → 19.2.7; lockfile audit clean (3 expected

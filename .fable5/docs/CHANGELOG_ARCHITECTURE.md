@@ -3,6 +3,22 @@
 Dated record of every architectural decision, reversal, and milestone.
 Newest first. One entry per decision — link the owning doc for detail.
 
+## 2026-07-07 — PATCH-003 landed: domain layer seam open (75d7626)
+
+- **Shipped (Codex GPT-5.4):** `lib/domain` foundation — `Result<T,E>`, closed
+  `DomainError` taxonomy (8 codes), branded ids, `defineCommand` (zod-validated,
+  throw-converting, callable with `entity.verb` name), `BoardRepository`
+  exemplar interface, CONVENTIONS.md, 7 unit tests (vitest 3.2.7, first real
+  unit tests in the repo), domain-purity lint block enforced from day one.
+  `verify` now = typecheck → boundaries → unit tests → build; CI gains a
+  blocking unit-test step.
+- **One spec bug en route (CTO's):** `Object.assign(fn, { name })` throws —
+  `Function.name` is writable:false. Fixed via `Object.defineProperty`
+  (configurable:true); the Command interface deliberately unchanged.
+- **Phase 1 state:** net (001) + freeze (002) + seam (003) complete. Next:
+  PATCH-004 — first extraction consumes the seam and removes the first entry
+  from the 24-file grandfather list.
+
 ## 2026-07-07 — PATCH-002.1 landed: React 19.2.7, npm installability restored (b5698b5)
 
 - **Shipped (Codex GPT-5.4, attempt 2):** react/react-dom 19.1.0 → 19.2.7,

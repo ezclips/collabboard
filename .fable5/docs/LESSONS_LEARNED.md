@@ -57,6 +57,13 @@ at minimum before working on this repo. Newest first within each section.
 **Symptom:** committed `tsc_output.txt` implied many type errors; `tsc --noEmit` was actually clean, while `npm run build` was actually broken (lint-blocked + prerender crashes).
 **Reusable rule:** never trust committed logs/outputs; re-run the tool. The gate you don't run in CI is a gate that is currently failing.
 
+### Windows execSync mangles `^` — a review audit compared a commit to itself (2026-07-07, PATCH-003 review)
+**Symptom:** lockfile audit reported 0 added/0 changed while `git show --stat` showed a 16k-line diff and grep found vitest only in the new file.
+**Wrong path:** almost trusted the "no changes" audit because it looked authoritative.
+**Root cause:** `execSync('git show 75d7626^:file')` on Windows runs through cmd.exe, where `^` is the escape character — `75d7626^:` became `75d7626:`, so old==new by construction. (`~` is safe; `^` is not.)
+**Fix:** re-ran the audit with explicit parent hashes; real result: +139 vitest tree, 0 removed, 4 transitive bumps.
+**Reusable rule:** on Windows, never put `^` in a shell-executed git revspec — use `HEAD~1`, explicit hashes, or `--no-walk`; and when two verification tools disagree, neither is trusted until the disagreement is explained.
+
 ## Auth & Supabase platform
 
 ### Supabase rate limits are per-IP buckets, and they're separate (2026-07-07, login incident)
