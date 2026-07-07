@@ -19,8 +19,17 @@ test.describe('accessibility settings (characterization)', () => {
     const changedValue = originalValue === 'on' ? 'off' : 'on';
 
     try {
+      // The page's save is fire-and-forget; reloading before the POST
+      // completes aborts it. Barrier on the save request's response.
+      const saveDone = page.waitForResponse(
+        (resp) =>
+          resp.url().includes('/rest/v1/accessibility_settings') &&
+          resp.request().method() === 'POST',
+        { timeout: 15_000 },
+      );
       await reducedMotion.selectOption(changedValue);
       await expect(reducedMotion).toHaveValue(changedValue);
+      await saveDone;
 
       await page.reload({ waitUntil: 'domcontentloaded' });
       await expect(page.getByRole('heading', { name: 'Accessibility' })).toBeVisible({
@@ -28,8 +37,17 @@ test.describe('accessibility settings (characterization)', () => {
       });
       await expect(page.locator('select').nth(1)).toHaveValue(changedValue, { timeout: 30_000 });
     } finally {
+      const restoreDone = page
+        .waitForResponse(
+          (resp) =>
+            resp.url().includes('/rest/v1/accessibility_settings') &&
+            resp.request().method() === 'POST',
+          { timeout: 15_000 },
+        )
+        .catch(() => undefined);
       await page.locator('select').nth(1).selectOption(originalValue).catch(() => undefined);
       await expect(page.locator('select').nth(1)).toHaveValue(originalValue).catch(() => undefined);
+      await restoreDone;
     }
   });
 });
