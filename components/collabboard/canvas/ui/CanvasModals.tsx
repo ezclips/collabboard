@@ -1,7 +1,7 @@
 "use client";
 
 import React from 'react';
-import type { User } from '@supabase/supabase-js';
+import type { AuthUser } from '@/lib/domain/auth/user';
 import type { Padlet } from '@/types/collabboard';
 
 // Stable empty array to avoid creating a new [] reference on every render
@@ -61,7 +61,7 @@ export interface CanvasModalsProps {
   viewDrawingPadlet: Padlet | null;
   setViewDrawingPadlet: (p: Padlet | null) => void;
   imageEditorTab: string;
-  user: User | null;
+  user: AuthUser | null;
   canvasLayout: string | undefined;
   canvasId: string | undefined;
 

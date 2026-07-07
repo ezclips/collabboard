@@ -1,7 +1,7 @@
 "use client";
 
 import React from 'react';
-import type { User } from '@supabase/supabase-js';
+import type { AuthUser } from '@/lib/domain/auth/user';
 import type { Padlet, CanvasLine } from '@/types/collabboard';
 import CommentPopup from '@/components/collabboard/editors/CommentPopup';
 import TextStylePopup from '@/components/collabboard/editors/TextStylePopup';
@@ -35,7 +35,7 @@ export interface OverlayLayerProps {
   // Data
   padlets: Padlet[];
   lines: CanvasLine[];
-  user: User | null;
+  user: AuthUser | null;
 
   // Callbacks
   updatePadletContent: (id: string, content: string) => Promise<any>;

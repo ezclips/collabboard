@@ -24,9 +24,7 @@ const GRANDFATHERED_UI_FILES = [
   'components/ProtectedRoute.tsx',
   'components/canvas/AddPadletMenu.tsx',
   'components/collabboard/PostCardContent.tsx',
-  'components/collabboard/canvas/ui/CanvasModals.tsx',
   'components/collabboard/canvas/ui/FreeformPadletCards.tsx',
-  'components/collabboard/canvas/ui/OverlayLayer.tsx',
   'components/ui-kit/Navbar.tsx',
 ];
 
