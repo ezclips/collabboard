@@ -1,26 +1,13 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Loader2 } from 'lucide-react';
+import type { NotificationCategory, NotificationSettingsData, TabType } from '@/lib/domain/settings/notifications';
+import { createSaveNotificationsCommand } from '@/lib/domain/settings/notifications';
+import { getCurrentUserId } from '@/lib/infra/supabase/currentUser';
+import { createNotificationSettingsRepository } from '@/lib/infra/settings/notificationSettingsRepository';
 
-interface NotificationSetting {
-    id: string;
-    label: string;
-    description: string;
-    push: boolean;
-    email: boolean;
-    roleRestriction?: string;
-}
-
-interface NotificationCategory {
-    title: string;
-    settings: NotificationSetting[];
-}
-
-type TabType = 'general' | 'scenes' | 'accounts';
-
-const DEFAULT_NOTIFICATIONS: Record<TabType, NotificationCategory[]> = {
+const DEFAULT_NOTIFICATIONS: NotificationSettingsData = {
     general: [
         {
             title: 'Updates',
@@ -59,16 +46,16 @@ const DEFAULT_NOTIFICATIONS: Record<TabType, NotificationCategory[]> = {
     ]
 };
 
-const cloneNotificationDefaults = (): Record<TabType, NotificationCategory[]> =>
+const cloneNotificationDefaults = (): NotificationSettingsData =>
     (Object.keys(DEFAULT_NOTIFICATIONS) as TabType[]).reduce((acc, tab) => {
         acc[tab] = DEFAULT_NOTIFICATIONS[tab].map((category) => ({
             title: category.title,
             settings: category.settings.map((setting) => ({ ...setting })),
         }));
         return acc;
-    }, {} as Record<TabType, NotificationCategory[]>);
+    }, {} as NotificationSettingsData);
 
-const mergeSavedNotifications = (savedSettings: unknown): Record<TabType, NotificationCategory[]> => {
+const mergeSavedNotifications = (savedSettings: unknown): NotificationSettingsData => {
     const merged = cloneNotificationDefaults();
 
     if (!savedSettings || typeof savedSettings !== 'object') {
@@ -133,14 +120,18 @@ const urlBase64ToUint8Array = (base64String: string): Uint8Array => {
 };
 
 export default function NotificationsPage() {
-    const supabase = createClientComponentClient();
+    const repository = useMemo(() => createNotificationSettingsRepository(), []);
+    const saveNotifications = useMemo(
+        () => createSaveNotificationsCommand(repository),
+        [repository]
+    );
     const [loading, setLoading] = useState(true);
     const [activeTab, setActiveTab] = useState<TabType>('general');
-    const [notifications, setNotifications] = useState<Record<TabType, NotificationCategory[]>>(
+    const [notifications, setNotifications] = useState<NotificationSettingsData>(
         () => cloneNotificationDefaults()
     );
 
-    const registerPushIfNeeded = useCallback(async (state: Record<TabType, NotificationCategory[]>) => {
+    const registerPushIfNeeded = useCallback(async (state: NotificationSettingsData) => {
         const anyPushEnabled = (Object.keys(state) as TabType[]).some((tab) =>
             state[tab].some((category) => category.settings.some((setting) => setting.push))
         );
@@ -183,19 +174,19 @@ export default function NotificationsPage() {
     const loadSettings = useCallback(async () => {
         try {
             setLoading(true);
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) return;
+            const userIdResult = await getCurrentUserId();
+            if (!userIdResult.ok) {
+                console.error('Error loading settings:', userIdResult.error);
+                return;
+            }
+            if (!userIdResult.value) return;
 
             // Try to load notification settings from database
             try {
-                const { data } = await supabase
-                    .from('notification_settings')
-                    .select('settings')
-                    .eq('user_id', user.id)
-                    .maybeSingle();
+                const settingsResult = await repository.load(userIdResult.value);
 
-                if (data?.settings) {
-                    const merged = mergeSavedNotifications(data.settings);
+                if (settingsResult.ok && settingsResult.value) {
+                    const merged = mergeSavedNotifications(settingsResult.value);
                     setNotifications(merged);
                     await registerPushIfNeeded(merged);
                 }
@@ -207,7 +198,7 @@ export default function NotificationsPage() {
         } finally {
             setLoading(false);
         }
-    }, [supabase, registerPushIfNeeded]);
+    }, [repository, registerPushIfNeeded]);
 
     useEffect(() => {
         loadSettings();
@@ -232,16 +223,11 @@ export default function NotificationsPage() {
 
         // Save to database
         try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) return;
+            const userIdResult = await getCurrentUserId();
+            if (!userIdResult.ok || !userIdResult.value) return;
 
-            await supabase
-                .from('notification_settings')
-                .upsert({
-                    user_id: user.id,
-                    settings: newNotifications,
-                    updated_at: new Date().toISOString()
-                });
+            const result = await saveNotifications(newNotifications, { userId: userIdResult.value });
+            if (!result.ok) console.warn('Could not save notification settings');
         } catch {
             console.warn('Could not save notification settings');
         }

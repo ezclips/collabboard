@@ -20,7 +20,6 @@ const GRANDFATHERED_UI_FILES = [
   'app/dashboard/settings/integrations/page.tsx',
   'app/dashboard/settings/logs/page.tsx',
   'app/dashboard/settings/members/page.tsx',
-  'app/dashboard/settings/notifications/page.tsx',
   'app/dashboard/settings/page.tsx',
   'app/dashboard/settings/password/page.tsx',
   'app/dashboard/settings/preferences/page.tsx',
