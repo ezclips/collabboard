@@ -251,10 +251,13 @@ history-exposure escalation it caused) → 59 (2026-07-07: PATCH-003.5 history
 purge executed, all refs backed up off-machine; ops 10→12) → **61**
 (2026-07-07: PATCH-004 landed — first grandfather shrink 24→23, seam consumed
 end-to-end, unit net doubled, extraction template proven; architecture 12→13,
-safety 13→14) → **62** (2026-07-07: PATCH-005 landed — template proven on
+safety 13→14) → 62 (2026-07-07: PATCH-005 landed — template proven on
 GPT-5.4, grandfather 22, unit 21; net hardened after the async-save race
-repair; architecture 13→14). Axis snapshot at 62: safety 14, ops 12,
-architecture 14, product 12, continuity 10 — the axes are deliberately
+repair; architecture 13→14) → **64** (2026-07-07: batch 005–009 complete —
+grandfather 23→17 in one day, all five patterns A–E validated on the
+economical model, unit net 21→38, e2e 8→13; architecture 14→15, safety
+14→15). Axis snapshot at 64: safety 15, ops 12, architecture 15, product 12,
+continuity 10 — the axes are deliberately
 harsh; a 70 requires the monolith visibly shrinking (several more
 extractions) AND telemetry existing.
 

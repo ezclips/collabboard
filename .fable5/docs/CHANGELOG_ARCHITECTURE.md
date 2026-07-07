@@ -3,6 +3,23 @@
 Dated record of every architectural decision, reversal, and milestone.
 Newest first. One entry per decision — link the owning doc for detail.
 
+## 2026-07-07 — Batch 005–009 complete: grandfather 23→17, patterns A–E validated (42e593f)
+
+- **Milestone:** five extraction patches landed in one day on the economical
+  model (005/007/008/009 GPT-5.4, 006 Gemini 3.1 Pro), all CTO-reviewed with
+  independent re-verification. Grandfather list 23→17; unit tests 21→38;
+  e2e characterization nets 8→13. Every pattern in PATCH_REFERENCE (A–E) now
+  has a reviewed reference implementation.
+- **Two correct implementer blocks en route** (both CTO spec defects: vitest
+  include contradiction; membership query bound from grep fragments) — the
+  escalation ladder and census gates caught both with zero bad code written.
+- **One deliberate behavior divergence accepted at review (PATCH-009):**
+  failed default-workspace saves no longer show a false success toast.
+  Ruling: never-report-false-success (P3) outranks bug-preservation;
+  precedent scoped to false-success reporting caught at review.
+- Next: batch 010–015 (type-swap, auth-state observer F, server-page G) →
+  grandfather 10, leaving only the monolith core and security-review pages.
+
 ## 2026-07-07 — PATCH-004 landed: first extraction; template established (5278468)
 
 - **Shipped (GPT-5.5):** accessibility settings page extracted onto the

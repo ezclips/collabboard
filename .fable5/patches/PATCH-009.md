@@ -1,6 +1,6 @@
 # PATCH-009 — Extraction: dashboard settings page (two repositories, joined read)
 
-**Status:** in progress (GPT-5.4) — **Amendment 1 issued after a correct block; resume instructions at the bottom**
+**Status:** **DONE — CTO review PASSED (2026-07-07, commit `42e593f`).** Batch 005–009 complete.
 **Complexity:** medium (largest of the batch; still fully bound)
 **Assigned model:** **GPT-5.4** — every decision is bound below. If ANY
 query result or page behavior does not match this spec's description, STOP
@@ -224,3 +224,37 @@ STOP again.
 4. MUST-NOT list: unchanged EXCEPT `lib/infra/supabase/currentUser.ts` is
    now authorized for the exact additive change above.
 5. Report "Amendment 1 applied, CTO-authorized" in Decisions made.
+
+## CTO review verdict (2026-07-07) — PASSED (one deviation formally accepted)
+
+Independently re-verified (GPT-5.4) — strictest review of the batch:
+- **Footprint:** exactly the 11 authorized files (incl. the Amendment-1
+  `currentUser.ts` additive change — interface field + mapping only,
+  `getCurrentUserId` untouched).
+- **Re-run by CTO:** unit **38 green / 10 files** (all three new test files
+  listed); tsc 0; boundaries green; grandfather = **17**; page greps 0;
+  fresh production build; full e2e **13/13** including the new dashboard
+  spec — which correctly uses the §6 async-save barrier (the catalog rule
+  propagated without prompting).
+- **Amendment 1 compliance: exact.** Two membership methods with the real
+  column pairs (`member_user_id`+`status` / `member_email`+`status`),
+  verbatim select string, fallback CONTROL FLOW preserved line-for-line in
+  the page including its asymmetric error handling; `.toLowerCase()` at the
+  call site; `displayName` mapped as bound. dashboard_settings load/save
+  and both save sites through the single command.
+- **Deviation — ACCEPTED as a deliberate behavior fix (recorded, not
+  silent):** the old page showed `toast.success('Default workspace
+  updated')` UNCONDITIONALLY, including when the upsert had failed (its
+  error was ignored) — a false success report on a failed save. The new
+  code returns early on `!result.ok` (console.warn, no toast). This is a
+  user-visible difference in the FAILURE path only; the success path is
+  identical. Ruling: the preserve-bugs rule exists to prevent accidental
+  drift; this divergence is reviewed and deliberate, and "never report
+  false success on a lost write" (P3 + error-honesty rules) outranks
+  bug-preservation for this specific class. Characterization contract
+  updated knowingly. Precedent scope: false-success reporting may be
+  fixed in extraction patches ONLY when caught and ruled at review.
+- **Watchlist (same class as PATCH-004's):** saves now zod-validate; a
+  legacy `dashboard_settings.libraries` row with drifted shape loads fine
+  (unknown at load boundary) but a subsequent save could fail validation
+  silently. If "dashboard settings stop saving" ever surfaces, look here.

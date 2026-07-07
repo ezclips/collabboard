@@ -60,7 +60,7 @@ trajectory 23 → 17:
 | 006 | ai + preferences pages | dead Supabase client removal (verified unused) | 22→20 ✅ **DONE** (b813ce9, review PASSED; blank-line residue cleaned 61d54dc; executed by Gemini 3.1 Pro) |
 | 007 | logs page | auth-only; adds shared `getCurrentUser` (id+email) helper | 20→19 ✅ **DONE** (9f0a72d, review PASSED) |
 | 008 | achievements page | read-only repository variant (no command) | 19→18 ✅ **DONE** (7ba48e2; message-only amend from 1b3c49c, review PASSED) |
-| 009 | dashboard page | two repositories + joined read; **depends on 007** | 18→17 — **Amendment 1 issued** (correct 5.4 block: spec bound wrong filter columns, missed email-fallback + display_name; fallback PRESERVED via two methods; CurrentUser gains displayName) |
+| 009 | dashboard page | two repositories + joined read | 18→17 ✅ **DONE** (42e593f, review PASSED; Amendment 1 honored exactly; toast-honesty deviation formally accepted) |
 
 **Second batch PATCH-010 → 015 — DRAFTED (2026-07-07), awaiting owner
 approval.** All GPT-5.4, strictly sequential after 005–009 complete.
@@ -168,6 +168,13 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-07** — PATCH-009 DONE (42e593f), CTO review PASSED — **batch
+  005–009 COMPLETE: grandfather 23→17**, unit 21→38, e2e nets 8→13. Pattern E
+  (composite, two repositories) validated on GPT-5.4; Amendment 1 honored
+  exactly (email fallback preserved line-for-line). One deviation formally
+  ACCEPTED: no more false success-toast on failed default-workspace saves
+  (P3 outranks bug-preservation for false-success reporting — ruling scoped
+  in the patch verdict). Watchlist: zod-on-save vs legacy libraries rows.
 - **2026-07-07** — PATCH-009 blocked correctly by GPT-5.4 (zero code): spec's
   membership query binding didn't match reality (member_user_id + status
   filters, email-fallback query, display_name consumption — census grepped

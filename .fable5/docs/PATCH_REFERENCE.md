@@ -256,7 +256,7 @@ it, STOP — never adapt.
 | 006 | settings/ai + preferences | B | 22→20 ✅ done |
 | 007 | settings/logs | C (+ introduces `getCurrentUser`) | 20→19 ✅ done |
 | 008 | settings/achievements | D | 19→18 ✅ done |
-| 009 | settings/dashboard | E (A + D composed; needs 007) | 18→17 |
+| 009 | settings/dashboard | E (A + D composed; needs 007) | 18→17 ✅ done |
 
 New patterns discovered by future patches get added here by the CTO at
 review — this catalog only ever contains patterns with a reviewed reference
