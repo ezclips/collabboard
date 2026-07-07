@@ -21,7 +21,13 @@ wc -l <page>
 grep -n "supabase\|Supabase" <page>
 grep -oE "supabase\.(auth\.[a-zA-Z]+|rpc\([^)]*\)|channel|storage)" <page> | sort | uniq -c
 grep -o "\.from('[^']*')" <page> | sort -u
+# For EVERY table found: read the FULL call site, not the fragment —
+grep -n -B2 -A14 "\.from('<table>')" <page>
 ```
+The last step is mandatory since PATCH-009: filter chains (`.eq` columns,
+status filters), fallback control flow, and consumed user fields do not
+show up in fragment greps — a spec bound from fragments described a query
+that did not exist.
 
 Then classify:
 
@@ -186,7 +192,10 @@ the page).
 fallback paths — the boundary check fails only after everything else is
 done, so find them up front by grepping the table name); merging
 repositories; validating joined results (mirror-the-shape: cast, don't
-parse); putting column-name mapping anywhere but infra.
+parse); putting column-name mapping anywhere but infra; trusting a spec's
+query binding without diffing it against the real call site (PATCH-009's
+binding named a column that didn't exist — the pre-edit census caught it;
+run yours and compare before writing code).
 
 ---
 

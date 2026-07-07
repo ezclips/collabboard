@@ -1,6 +1,6 @@
 # PATCH-009 — Extraction: dashboard settings page (two repositories, joined read)
 
-**Status:** draft (awaiting owner approval — execute AFTER 005–008 land)
+**Status:** in progress (GPT-5.4) — **Amendment 1 issued after a correct block; resume instructions at the bottom**
 **Complexity:** medium (largest of the batch; still fully bound)
 **Assigned model:** **GPT-5.4** — every decision is bound below. If ANY
 query result or page behavior does not match this spec's description, STOP
@@ -153,3 +153,74 @@ Warning Policy / handoff rule 10 applies. Docs are CTO-only, updated at review.
 ## Estimated Difficulty
 medium — most files in the batch, but every interface, query, and mapping is
 specified; zero open decisions.
+
+## Amendment 1 (2026-07-07) — corrected membership bindings · CTO decision
+
+**Blockage (GPT-5.4, correct stop; no code changes):** the spec's bound
+query `from('workspace_members')...eq('user_id', userId)` does not exist in
+the page. CTO census error — the select string was grepped but the filter
+chains were not read. Actual behavior (verified by full read):
+
+1. PRIMARY: `.eq('member_user_id', user.id).eq('status', 'active')`
+2. FALLBACK (only when primary returned ZERO rows AND `user.email` exists):
+   `.eq('member_email', user.email.toLowerCase()).eq('status', 'active')` —
+   with its OWN error handling (fallback error → warn, keep `[]`; it never
+   overwrites on error).
+3. The page also consumes `user.user_metadata?.display_name` (personal
+   library name) — `getCurrentUser` (id+email) is insufficient.
+
+**Decision 1 — the email fallback is PRESERVED.** It serves members invited
+by email whose rows aren't linked to a user id yet; dropping it would hide
+their workspaces. Extraction patches change zero behavior — not negotiable.
+
+**Decision 2 — shape: TWO explicit methods; fallback control flow stays in
+the page.** Replace the spec's `listForUser(userId)` binding with:
+
+```ts
+// lib/domain/workspaces/memberships.ts
+export interface WorkspaceMembershipsRepository {
+  listActiveByUserId(userId: UserId): Promise<Result<WorkspaceMembership[], DomainError>>;
+  listActiveByEmail(emailLowercased: string): Promise<Result<WorkspaceMembership[], DomainError>>;
+}
+```
+Infra: each method wraps ONE query verbatim (same select string as the page,
+plus the exact `.eq` chains above; the narrow client interface must model
+two chained `.eq` calls). Error → `err(unavailable, { cause })`; success →
+`ok(data ?? [])` cast. **`.toLowerCase()` stays at the page call site**
+(caller logic today, caller logic after). The page keeps its exact control
+flow: primary → warn-on-err/log-on-ok → if empty && email → fallback →
+fallback's own warn/replace logic. Console mapping: existing console.warn
+lines log `result.error` instead of the raw supabase error (console-only
+difference, allowed).
+
+**Decision 3 — extend `CurrentUser` additively (authorized change to
+PATCH-007's artifact).** In `lib/infra/supabase/currentUser.ts`:
+- `CurrentUser` gains `readonly displayName: string | null;`
+- `getCurrentUser` maps it: `displayName: (user.user_metadata as { display_name?: string } | undefined)?.display_name ?? null`
+- `getCurrentUserId` remains untouched. Existing consumer (logs page)
+  unaffected — the field is additive.
+Page mapping: `user.user_metadata?.display_name || username` becomes
+`user.displayName || username` (`||` kept — empty-string display names fall
+back to username exactly as today).
+
+**Updated tests (replaces the spec's memberships test description):**
+`workspaceMembershipsRepository.test.ts` covers BOTH methods × three cases
+(rows passthrough, empty → `ok([])`, db-error → `unavailable`) and asserts
+each method hits the right column pair (`member_user_id`+`status` /
+`member_email`+`status`) via the fake client.
+
+**Strengthened census rule (applies to this resume and all future E
+patches):** pre-edit, paste the FULL query call sites —
+`grep -n -B2 -A14 "\.from('workspace_members')" <page>` and the same for
+`dashboard_settings` — and diff them against these bindings. Any mismatch:
+STOP again.
+
+**Resume instructions (GPT-5.4):**
+1. Keep the clean worktree; this amendment replaces the memberships binding
+   and adds the CurrentUser extension. Everything else in the spec stands
+   (dashboard_settings bindings verified correct as written).
+2. Run the strengthened census first; paste it.
+3. Implement per Decisions 2–3; phase order unchanged (e2e net first).
+4. MUST-NOT list: unchanged EXCEPT `lib/infra/supabase/currentUser.ts` is
+   now authorized for the exact additive change above.
+5. Report "Amendment 1 applied, CTO-authorized" in Decisions made.

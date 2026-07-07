@@ -60,7 +60,7 @@ trajectory 23 → 17:
 | 006 | ai + preferences pages | dead Supabase client removal (verified unused) | 22→20 ✅ **DONE** (b813ce9, review PASSED; blank-line residue cleaned 61d54dc; executed by Gemini 3.1 Pro) |
 | 007 | logs page | auth-only; adds shared `getCurrentUser` (id+email) helper | 20→19 ✅ **DONE** (9f0a72d, review PASSED) |
 | 008 | achievements page | read-only repository variant (no command) | 19→18 ✅ **DONE** (7ba48e2; message-only amend from 1b3c49c, review PASSED) |
-| 009 | dashboard page | two repositories + joined read; **depends on 007** | 18→17 |
+| 009 | dashboard page | two repositories + joined read; **depends on 007** | 18→17 — **Amendment 1 issued** (correct 5.4 block: spec bound wrong filter columns, missed email-fallback + display_name; fallback PRESERVED via two methods; CurrentUser gains displayName) |
 
 **Second batch PATCH-010 → 015 — DRAFTED (2026-07-07), awaiting owner
 approval.** All GPT-5.4, strictly sequential after 005–009 complete.
@@ -168,6 +168,13 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-07** — PATCH-009 blocked correctly by GPT-5.4 (zero code): spec's
+  membership query binding didn't match reality (member_user_id + status
+  filters, email-fallback query, display_name consumption — census grepped
+  fragments instead of reading call sites). Amendment 1: fallback preserved
+  (two explicit repository methods, control flow stays in page), CurrentUser
+  extended additively with displayName. Census rule hardened in
+  PATCH_REFERENCE §0 + LESSONS_LEARNED.
 - **2026-07-07** — PATCH-008 DONE (7ba48e2), CTO review PASSED — Pattern D
   (read-only repository) validated; stale-belt bug preserved as specified;
   grandfather 19→18; unit 25; e2e 12/12. Commit message named the wrong page
