@@ -1,6 +1,6 @@
 # PATCH-005 — Extraction: notification settings page onto the domain/infra seam
 
-**Status:** draft (awaiting owner approval)
+**Status:** **DONE — CTO review PASSED (2026-07-07, commit `06e40b4`).**
 **Complexity:** easy (mechanical repetition of PATCH-004)
 **Assigned model:** **GPT-5.4** — first repetition of the canonical template.
 **Canonical reference:** `PATCH-004` (commit `5278468`). Imitate it
@@ -121,3 +121,29 @@ Warning Policy / handoff rule 10 applies.
 
 ## Estimated Difficulty
 easy — every decision is bound above; the reference implementation exists.
+
+## CTO review verdict (2026-07-07) — PASSED
+
+Independently re-verified:
+- **Footprint:** exactly the 7 authorized files; single atomic commit `06e40b4`.
+- **Re-run by CTO:** 21 unit tests / 6 files green, BOTH new test files
+  listed; tsc 0; boundaries green; page grep 0; grandfather = 22; fresh
+  production build; full e2e 8/8 (after the net repair below).
+- **Pattern compliance: exemplary.** Both spec traps avoided (explicit
+  z.object, `maybeSingle` with no PGRST116 branch); types verbatim; DI
+  command factory; narrow structural client; select('settings'); merge +
+  push logic untouched in the page. First GPT-5.4 execution of the template
+  — clean. Delegation shift to 5.4 for Pattern A validated.
+- **Review incident (NOT this patch's defect):** the accessibility
+  characterization spec (PATCH-004) failed deterministically during review.
+  Diagnosis: the spec reloads immediately after toggling while the page's
+  save is fire-and-forget — navigation aborts the in-flight POST. Probe
+  proved the save path healthy (row updates given 3s). Root cause was the
+  CTO's PATCH-004 spec outline (no persistence barrier); it had passed by
+  timing luck. Fixed in `8636bd1` with a `waitForResponse` barrier
+  (deterministic; spec now 714ms). Notable: GPT-5.4's new notifications spec
+  had already guarded this with a 1s wait — the implementer out-guarded the
+  spec author.
+- **Watchlist (minor, queued):** "Multiple GoTrueClient instances" console
+  warning — `createBrowserSupabaseClient()` constructs a new client per
+  call. Queue a micro-patch to memoize a singleton in `browserClient.ts`.

@@ -200,6 +200,14 @@ full e2e green again → grandfather entry removed LAST → final verify.
 page's real DOM/labels, then the assertions. Specs skip cleanly without
 credentials; clean up data they create.
 
+**Async-save barrier (added at PATCH-005 review):** these pages save
+fire-and-forget; reloading immediately aborts the in-flight POST and the
+persistence assertion fails — sometimes only sometimes (timing luck). After
+the mutating interaction and BEFORE reloading, barrier on the save request:
+`await page.waitForResponse(r => r.url().includes('/rest/v1/<table>') && r.request().method() === 'POST')`
+(set up the promise before triggering the save). Same in the restore path.
+Never rely on `waitForTimeout` sleeps for persistence.
+
 **Verification skeleton** (the patch fills in the paths):
 ```bash
 PW_BASE_URL=http://localhost:3000 npx playwright test <new spec>     # Phase A, OLD page
@@ -235,7 +243,7 @@ it, STOP — never adapt.
 | Patch | Page | Pattern | Grandfather |
 |---|---|---|---|
 | 004 | settings/accessibility | A (canonical, `.single()`) | 24→23 ✅ done |
-| 005 | settings/notifications | A (`.maybeSingle()` variant) | 23→22 |
+| 005 | settings/notifications | A (`.maybeSingle()` variant) | 23→22 ✅ done |
 | 006 | settings/ai + preferences | B | 22→20 |
 | 007 | settings/logs | C (+ introduces `getCurrentUser`) | 20→19 |
 | 008 | settings/achievements | D | 19→18 |

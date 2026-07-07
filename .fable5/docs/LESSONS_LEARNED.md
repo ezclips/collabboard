@@ -115,6 +115,13 @@ at minimum before working on this repo. Newest first within each section.
 **Fix:** discovery scripts that drive the real app and dump DOM/buttons/menus before writing assertions; selector notes embedded in the spec file.
 **Reusable rule:** in this repo, write UI tests in two passes — a throwaway discovery run that prints reality, then the test; and read the component source for the affordance before selecting it. (The deep fix is semantic markup — first ACCESSIBILITY.md burn-down item.)
 
+### A racy characterization spec passes by luck, then fails when innocent (2026-07-07, PATCH-005 review)
+**Symptom:** the accessibility characterization spec (PATCH-004) failed deterministically during PATCH-005's review — a patch that never touched that page. The "persisted after reload" value came back unchanged.
+**Wrong path:** suspecting PATCH-005 (shared infra) or a malformed DB row (the PATCH-004 watchlist scenario). Both disproven by evidence: the row was full-shape and its `updated_at` predated the failing runs — saves weren't landing at all.
+**Root cause:** the spec reloaded immediately after toggling, while the page saves fire-and-forget through TWO network round-trips (auth.getUser + upsert); navigation aborts in-flight requests. Every earlier green run had won the race by luck. A direct probe (toggle, wait 3s, read the row via service role) proved the save path healthy.
+**Fix:** `waitForResponse` barrier on the save POST before reloading (and in the restore path) — `8636bd1`; spec went from 30s-timeout-flaky to deterministic 714ms. Rule added to PATCH_REFERENCE §6. Notable: GPT-5.4's notifications spec had independently guarded this with a wait — the implementer out-guarded the spec author.
+**Reusable rule:** a characterization spec that asserts persistence MUST have a completion barrier on the save request — never assert-after-reload on faith, never use sleeps. And when a previously-green test fails under an innocent patch, suspect the test's timing assumptions before the code: check whether the write ever reached the database (row `updated_at` is the cheapest witness).
+
 ### Test data pollutes real quotas (2026-07-07, PATCH-001)
 **Symptom:** board creation started failing mid-verification; leftover `e2e-*` boards had consumed the free-plan board limit (soft-delete keeps counting).
 **Fix:** hard-deleted via service role; lifecycle test cleans up in `finally`.

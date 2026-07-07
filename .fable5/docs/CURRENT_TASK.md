@@ -56,7 +56,7 @@ trajectory 23 → 17:
 
 | Patch | Target | Shape | Shrink |
 |---|---|---|---|
-| 005 | notifications page | purest 004 clone (`maybeSingle` variant) | 23→22 |
+| 005 | notifications page | purest 004 clone (`maybeSingle` variant) | 23→22 ✅ **DONE** (06e40b4, review PASSED; e2e net race fixed in 8636bd1) |
 | 006 | ai + preferences pages | dead Supabase client removal (verified unused) | 22→20 |
 | 007 | logs page | auth-only; adds shared `getCurrentUser` (id+email) helper | 20→19 |
 | 008 | achievements page | read-only repository variant (no command) | 19→18 |
@@ -98,6 +98,11 @@ review).
 spec's verification and commit steps. Future delegation prompts must state:
 "run every verification command and paste real output; the patch is not done
 until the commit exists."
+
+**Backlog from PATCH-005 review:** memoize the browser Supabase client
+(`browserClient.ts` returns a new client per call → "Multiple GoTrueClient
+instances" console warning). One-line micro-patch, queue after the current
+batches.
 
 **Backlog from PATCH-001 execution:**
 - Deferred: standalone post-delete e2e step (wall context-menu a11y/selectors).
@@ -160,6 +165,12 @@ resolved by the push, default is `main` (was `master`).
 
 ## Log
 
+- **2026-07-07** — PATCH-005 DONE (06e40b4), CTO review PASSED — first GPT-5.4
+  extraction, pattern-compliant on both spec traps. Grandfather 23→22, unit
+  tests 14→21. Review surfaced a race in PATCH-004's accessibility spec
+  (fire-and-forget save vs. immediate reload; passed by luck before) — fixed
+  with a waitForResponse barrier (8636bd1), rule added to PATCH_REFERENCE §6.
+  Backlog: browserClient singleton (GoTrueClient warning).
 - **2026-07-07** — Second batch PATCH-010…015 drafted from a census of ALL
   remaining grandfathered files. Finds: CanvasModals/OverlayLayer are
   type-only `import type { User }` (trivial −2); ProtectedRoute/Navbar/
