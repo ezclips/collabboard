@@ -47,6 +47,24 @@ it escalates up, never sideways.
   demands pasted output and the commit hash. Always use
   `CODER_HANDOFF_TEMPLATE.md` — it forces both.
 
+### Gemini 3.1 Pro — Experimental Implementer (added 2026-07-07, owner decision)
+- **Scope: trivial/easy MECHANICAL patches only** — deletion-only cleanups,
+  shallow characterization/render specs, type-only swaps if explicitly
+  assigned. NOT architecture-bearing extraction patches (anything creating
+  domain/infra files or commands) unless the owner explicitly approves that
+  assignment per patch.
+- **GPT-5.4 remains the preferred economical implementer for Pattern A and
+  the other extraction patterns.** Gemini is an overflow/experiment lane,
+  not a replacement.
+- Track record (basis for the scope): PATCH-006 — substance clean and
+  source-verified, but craft deviations (replaced deleted lines with blank
+  lines incl. inside a gate file's array; non-conventional commit message).
+  Review consequence: on Gemini patches, reviewers read the `--stat`
+  insertion counts first and hold formatting-sensitive constraints to the
+  letter.
+- Same rules as all implementers: SKILL.md, handoff template, pasted
+  verification + commit hash, MUST-NOT lists are reject-on-contact.
+
 ### Owner
 - Approves patches, provides credentials/dashboard access, makes product and
   spend decisions (licensing, SMTP, rate limits, history purge, remote).

@@ -149,11 +149,13 @@ branch after a short soak (see CHANGELOG_ARCHITECTURE.md 2026-07-07).
 | Surviving canvas system | CTO | Phase 1 | Needs feature diff first |
 | Raise Supabase sign-in limit 30→100/5min (dev convenience + school-NAT headroom) | User | Anytime (dashboard, 1 min) | Auth → Rate Limits |
 | Configure custom SMTP (email limit is 2/h on built-in) | User | Before ANY beta/invites | Breaks signup/reset/invites beyond 2 users/h |
-| Formalize Gemini 3.1 Pro in the AI_WORKFLOW roster? | User | Before its next assignment | Executed 006 cleanly (substance) with craft deviations; CTO fine with it on trivial/easy pattern patches |
-
 **Resolved decisions:** remote repository — DONE 2026-07-07 (private
 `github.com/ezclips/collabboard`, `origin/main` in sync); branch question —
-resolved by the push, default is `main` (was `master`).
+resolved by the push, default is `main` (was `master`); Gemini 3.1 Pro
+roster — RESOLVED 2026-07-07: experimental implementer, trivial/easy
+mechanical patches only (deletion-only cleanup, shallow characterization),
+no architecture-bearing extractions without explicit per-patch approval;
+GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Context for a Fresh Session
 
