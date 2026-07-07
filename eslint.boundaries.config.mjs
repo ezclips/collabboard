@@ -24,7 +24,6 @@ const GRANDFATHERED_UI_FILES = [
   'components/canvas/AddPadletMenu.tsx',
   'components/collabboard/PostCardContent.tsx',
   'components/collabboard/canvas/ui/FreeformPadletCards.tsx',
-  'components/ui-kit/Navbar.tsx',
 ];
 
 export default [

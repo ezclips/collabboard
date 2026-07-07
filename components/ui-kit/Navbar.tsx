@@ -5,8 +5,8 @@ import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { ModeToggle } from "@/components/mode-toggle";
-import { useSupabase } from "@/lib/supabase";
-import { Session } from "@supabase/supabase-js";
+import type { AuthUser } from "@/lib/domain/auth/user";
+import { getSessionUser, onAuthUserChanged } from "@/lib/infra/supabase/authState";
 import UserProfileDropdown from "@/components/UserProfileDropdown";
 
 const navItems = [
@@ -17,8 +17,7 @@ const navItems = [
 
 const Navbar: React.FC = () => {
   const pathname = usePathname();
-  const { supabase } = useSupabase();
-  const [session, setSession] = useState<Session | null>(null);
+  const [user, setUser] = useState<AuthUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [mounted, setMounted] = useState(false);
 
@@ -29,21 +28,21 @@ const Navbar: React.FC = () => {
 
   // Handle authentication
   useEffect(() => {
-    if (!supabase || !mounted) return;
+    if (!mounted) return;
 
     let isMounted = true;
 
     const initializeAuth = async () => {
       try {
         // Get current session
-        const { data: { session }, error } = await supabase.auth.getSession();
-        
-        if (error) {
-          console.error("Error getting session:", error);
+        const result = await getSessionUser();
+
+        if (!result.ok) {
+          console.error("Error getting session:", result.error);
         }
 
         if (isMounted) {
-          setSession(session);
+          setUser(result.ok ? result.value : null);
           setIsLoading(false);
         }
       } catch (error) {
@@ -57,12 +56,11 @@ const Navbar: React.FC = () => {
     initializeAuth();
 
     // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        console.log('Navbar auth event:', event, session?.user?.id);
+    const unsubscribe = onAuthUserChanged((event, user) => {
+        console.log('Navbar auth event:', event, user?.id);
         
         if (isMounted) {
-          setSession(session);
+          setUser(user);
           setIsLoading(false);
         }
       }
@@ -70,9 +68,9 @@ const Navbar: React.FC = () => {
 
     return () => {
       isMounted = false;
-      subscription.unsubscribe();
+      unsubscribe();
     };
-  }, [supabase, mounted]);
+  }, [mounted]);
 
   // Don't render anything until mounted (prevents hydration issues)
   if (!mounted) {
@@ -117,7 +115,7 @@ const Navbar: React.FC = () => {
             ))}
             
             {/* Create Canvas button - only show when authenticated and not loading */}
-            {!isLoading && session && (
+            {!isLoading && user && (
               <Link
                 href="/dashboard/create-canvas"
                 className={cn(
@@ -139,7 +137,7 @@ const Navbar: React.FC = () => {
           {/* Show loading state */}
           {isLoading ? (
             <div className="w-8 h-8 rounded-full bg-gray-200 animate-pulse" />
-          ) : session ? (
+          ) : user ? (
             /* Show profile dropdown when authenticated */
             <UserProfileDropdown />
           ) : (
