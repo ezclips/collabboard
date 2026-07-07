@@ -3,6 +3,28 @@
 Dated record of every architectural decision, reversal, and milestone.
 Newest first. One entry per decision — link the owning doc for detail.
 
+## 2026-07-07 — PATCH-003.5 drafted: history purge runbook; ops doctrine codified
+
+- **Operational patch class created** (`.5` numbering): runbook-style, CTO/owner
+  executed, never delegated. First instance: PATCH-003.5 purges the Chrome-profile
+  material (10,726 files incl. Login Data/Cookies/Local State) from ALL git
+  history via `git filter-repo`, then **deletes and recreates** the GitHub repo
+  (force-push leaves old SHAs fetchable server-side; the repo is one day old, so
+  recreate is free and verifiable).
+- **Scope verified, not assumed:** GitHub holds only `refs/heads/main`; three
+  local tags + one agent branch also carry ~10,378 profile files each and are
+  cleaned by the same rewrite. The Phase-0 bundle predates PATCH-001…003 — the
+  runbook makes a fresh `--all` bundle first.
+- **Credential verdict:** nothing to force-rotate (Chrome material is
+  DPAPI-chained to the owner's Windows account; anon key is public by design);
+  Supabase session revocation for profile-used accounts recommended.
+- **Doctrine written down:** pre-push history-sensitivity gate (AI_WORKFLOW);
+  incident rows in CTO_PLAYBOOK §11; **health-score rubric formalized**
+  (CTO_PLAYBOOK §12 — five axes × 20, ±5 max per event, arithmetic required) so
+  the footer number survives CTO succession.
+- CI secrets decision: only `NEXT_PUBLIC_SUPABASE_URL/ANON_KEY`, configured
+  AFTER the repo recreate; E2E credentials deliberately kept out of CI for now.
+
 ## 2026-07-07 — Remote repository live; risk register rebalanced
 
 - **Resolved:** the #1 standing risk since Phase 0 — private GitHub remote

@@ -28,7 +28,14 @@ Result/errors/ids/defineCommand/BoardRepository + conventions + purity lint +
 green (lockfile audit +139 vitest tree / 0 removed / 4 transitive bumps;
 canary proof live).
 
-**Active patch:** `PATCH-004` (first extraction: accessibility settings page →
+**Active patch:** `PATCH-003.5` (operational: purge Chrome-profile material
+from ALL git history — filter-repo + fresh bundle + GitHub delete-and-recreate;
+full runbook in `.fable5/patches/PATCH-003.5.md`) — **READY, awaiting owner
+approval.** Executes before PATCH-004 so the purge rewrites the fewest
+commits and CI secrets are configured exactly once (on the recreated repo).
+CTO runs the local git surgery; owner runs the GitHub steps; never delegated.
+
+**Queued patch:** `PATCH-004` (first extraction: accessibility settings page →
 domain/infra seam; target chosen by census — smallest page, 186 lines, one
 table, two ops; net-first phase order; grandfather list 24 → 23 only after
 proof) — **DRAFTED, awaiting owner approval.** CTO recommends **GPT-5.5**
@@ -86,8 +93,8 @@ branch after a short soak (see CHANGELOG_ARCHITECTURE.md 2026-07-07).
 
 | Decision | Owner | Needed by | Notes |
 |---|---|---|---|
-| Approve git history purge of `tmp/` | User | **ESCALATED — history now on GitHub** | filter-repo + force-push; single collaborator so safe; bundle backup exists |
-| Configure GitHub Actions secrets (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`) | User | Before next push (CI is live now) | Else CI build/smoke steps run red |
+| **Approve + execute PATCH-003.5** (history purge runbook, ready) | User approves; CTO executes local steps, User executes GitHub steps | **Before PATCH-004** | `.fable5/patches/PATCH-003.5.md` — filter-repo + GitHub delete-and-recreate (force-push alone leaves old SHAs fetchable). Fresh `--all` bundle is step 1 |
+| Configure GitHub Actions secrets (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`) | User | **AFTER the PATCH-003.5 repo recreate** (else configured twice) | PATCH-003.5 §6; E2E creds deliberately NOT added to CI |
 | dhtmlx buy-vs-replace | User | Phase 0 exit | GPL exposure; recommendation: replace |
 | Surviving canvas system | CTO | Phase 1 | Needs feature diff first |
 | Raise Supabase sign-in limit 30→100/5min (dev convenience + school-NAT headroom) | User | Anytime (dashboard, 1 min) | Auth → Rate Limits |
@@ -108,6 +115,11 @@ resolved by the push, default is `main` (was `master`).
 
 ## Log
 
+- **2026-07-07** — PATCH-003.5 drafted (history purge runbook) after the
+  GitHub push escalated the credential-history risk. Scope verified: GitHub
+  holds only main; local tags/agent branch also carry the profiles and are
+  cleaned by the same rewrite. Health rubric written into CTO_PLAYBOOK §13;
+  pre-push gate + operational-patch rules added to AI_WORKFLOW.
 - **2026-07-07** — CTO_PLAYBOOK.md created (succession doc: patch evaluation/
   rejection, split/refactor/abstraction judgment, debt prioritization,
   philosophies, if-this-then-that table).

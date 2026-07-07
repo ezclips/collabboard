@@ -53,6 +53,19 @@ at minimum before working on this repo. Newest first within each section.
 **Fix:** removed from tip (`bcba8fe`); full bundle backup made first; history purge pending owner approval (`git filter-repo`), feasible because no remote exists.
 **Reusable rule:** before any cleanup, bundle-backup the repo; browser automation must keep profiles outside the worktree; hygiene deletions of tracked files are safe (git history), untracked ones are not.
 
+### A remote turns dormant history risk into live exposure (2026-07-07, PATCH-003.5)
+**Symptom:** the long-tolerated "purge git history when convenient" item became urgent overnight — the first push to GitHub copied the entire dirty history (Chrome profiles with Login Data/Cookies) to servers we don't control.
+**Wrong path:** treating "repo has no remote" as a reason the purge could wait, instead of as the closing condition of the safe window. The push and the purge were tracked as independent tasks; they were actually ordered.
+**Root cause:** risk items were listed flat; the dependency "purge MUST precede first push" was never written as a gate, so resolving one risk (no backup) silently escalated another (history credentials).
+**Fix:** PATCH-003.5 runbook (filter-repo, fresh `--all` bundle, delete-and-recreate on GitHub because force-push leaves old commits fetchable by SHA until GitHub's own gc). Pre-push gate added to AI_WORKFLOW.
+**Reusable rule:** before content gets its FIRST copy on any external surface (git remote, artifact host, package registry), scan its full history — `git log --all -- <suspect paths>` and `git for-each-ref` (tags and side branches keep deleted material reachable; here, three local tags each held ~10,378 profile files a branch-only check would have missed). And when two open risks interact, write the ordering down as a gate, not two list items.
+
+### Chrome profile material is DPAPI-chained — assess before rotating (2026-07-07, PATCH-003.5)
+**Symptom:** committed `Login Data`, `Cookies`, and `Local State` files looked like a mass-credential leak demanding immediate rotation of everything.
+**Root cause of the over-read:** Chrome encrypts passwords/cookies with a per-profile AES key in `Local State`, itself wrapped by Windows DPAPI bound to the owner's OS account; the DPAPI master key (`%APPDATA%\Microsoft\Protect`) is never inside the profile. Repo copies are ciphertext without the key chain's root.
+**Fix:** tiered assessment in PATCH-003.5 §4 — nothing "definitely rotate"; session revocation for accounts used in the profiles "recommended" (refresh tokens survive password changes); anon key "unnecessary".
+**Reusable rule:** the Supabase anon key is PUBLIC by design (it ships in every browser bundle — RLS is the boundary); never panic-rotate it. The service-role key is the real secret and must never appear in repo, CI, or client. For leaked browser profiles, prefer session revocation ("sign out everywhere") over password rotation — it's what actually kills live refresh tokens.
+
 ### Stale build artifacts lie (2026-07-06, Phase 0)
 **Symptom:** committed `tsc_output.txt` implied many type errors; `tsc --noEmit` was actually clean, while `npm run build` was actually broken (lint-blocked + prerender crashes).
 **Reusable rule:** never trust committed logs/outputs; re-run the tool. The gate you don't run in CI is a gate that is currently failing.
@@ -115,12 +128,17 @@ Two canvas systems, three comment stores, the kanban schema island: each has a s
 
 ## Standing risks future models must not forget
 
-1. **Chrome-profile credentials in git history — NOW ELEVATED (2026-07-07):**
-   the repo was pushed to GitHub (private: `ezclips/collabboard`), so the
-   third-party session material in history now has an off-machine copy. The
-   purge (`git filter-repo --path tmp --invert-paths` + force-push, single
-   collaborator so safe) is MORE urgent than before, not less. Owner approval
-   still pending. Bundle backup exists: `../starter-pre-phase0-20260706.bundle`.
+1. **Chrome-profile credentials in git history — RUNBOOK READY (2026-07-07):**
+   the repo was pushed to GitHub (private: `ezclips/collabboard`), so main's
+   history — including the profile material — has an off-machine copy. Full
+   operational runbook exists: **`.fable5/patches/PATCH-003.5.md`** (verified
+   facts, filter-repo procedure, mechanical verification, credential
+   assessment, GitHub delete-and-recreate). Awaiting owner approval +
+   execution. Key scope facts: GitHub holds ONLY `refs/heads/main`; local tags
+   `Backup1`/`backup-import-export`/`restore-point-*` and branch
+   `agents/verify-notifications-endpoint` also carry ~10,378 profile files
+   each (cleaned by the same rewrite). The old bundle predates PATCH-001…003 —
+   the runbook creates a fresh `--all` bundle first.
 2. **CI secrets not yet configured** — pushing activated
    `.github/workflows/ci.yml`; the build (and smoke) steps need repo secrets
    `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` or the first

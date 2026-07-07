@@ -57,6 +57,37 @@ CTO drafts patch (.fable5/patches/PATCH-XXX.md, template.md format)
 One patch in flight at a time. A patch is DONE only when: commit exists,
 CTO re-verified, docs updated.
 
+**Patch numbering:** `PATCH-N` = planned work unit. `PATCH-N.1` = prerequisite
+discovered while executing N (blocks it, lands first). `PATCH-N.5` =
+operational patch (infrastructure/git/platform surgery, no product code) slotted
+between N and N+1.
+
+## Operational patches (PATCH-N.5)
+
+Rules that differ from product patches (established by PATCH-003.5):
+
+- **Never delegated to engineers.** History rewrites, remote replacement,
+  platform/dashboard changes have no test net and often need owner-account
+  access. The CTO executes the local steps; the owner executes the
+  provider-side (GitHub/Supabase dashboard) steps.
+- Written as **runbooks**: every command literal, ✋ checkpoints that halt on
+  failure, verification that produces mechanical proof (e.g. the
+  `HEAD^{tree}`-identity check for history rewrites), and a rollback rooted in
+  a **fresh, verified backup created inside the procedure** — never an old one.
+- Destructive steps require explicit owner "GO" in the session, even after the
+  patch is approved.
+
+## Pre-push gate (all models, standing)
+
+Before the repo's content gets its FIRST copy on any new external surface
+(new git remote, package registry, artifact host, public share): run a
+history-sensitivity scan — `git log --all -- <suspect paths>` for anything
+ever flagged, plus `git for-each-ref` (tags and side branches keep deleted
+material reachable). If anything is found, the purge precedes the push; the
+two are ordered, not parallel. This gate exists because the 2026-07-07 push
+copied the dirty history to GitHub one day before its purge would have made
+that impossible to leak (see LESSONS_LEARNED).
+
 ## Boundaries (all models)
 
 - Only the CTO edits `.fable5/**` and `.claude/**`.

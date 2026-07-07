@@ -205,6 +205,8 @@ expensive fix of existing debt.
 | Flaky test | Quarantine same day; fix or delete within a week. A red-but-ignored suite is worse than none. |
 | Two implementations of one concern discovered | Check ROADMAP/CURRENT_TASK first — known dualities are quarantined with planned migrations; unknown ones get a removal ticket the same day, survivor named. |
 | Security find (secret, RLS gap, XSS), any source | Interrupt everything. Assess blast radius, rotate if exposed, fix critical before resuming, record in changelog + lessons. |
+| Sensitive material found in git history | Scan ALL refs (`git for-each-ref` — tags/side branches keep it reachable), fresh `--all` bundle, then `git filter-repo`. **Before any remote exists:** purge immediately — that's the cheap window. **After:** local rewrite + delete-and-recreate the remote (force-push leaves old SHAs fetchable on GitHub until their gc). Assess credentials by encryption chain, not filename panic (PATCH-003.5 §4 is the exemplar). |
+| About to create the repo's FIRST external copy (remote, registry, artifact host) | Pre-push gate: history-sensitivity scan first (AI_WORKFLOW). Open risks that interact with the push are ordering constraints, not parallel list items. |
 | Owner requests a feature mid-migration | It ships on the new architecture or not at all (ROADMAP standing rule). Offer the compliant version + honest delta in time. Don't build on the monolith "just this once". |
 | Owner proposes something violating P1–P10 | One sentence naming the conflict, one compliant alternative, owner decides informed. No silent compliance, no lecture (CTO_GUIDELINES §5). |
 | Engineer touched a MUST-NOT file | Revert that change by default; conversation second. |
@@ -214,7 +216,42 @@ expensive fix of existing debt.
 | You disagree with a past CTO decision | Facts changed → reverse it openly in CHANGELOG_ARCHITECTURE with the new evidence. Facts didn't change → the decision stands; write your dissent in the changelog for the next reviewer. |
 | Context window lost mid-task | CURRENT_TASK.md is the recovery point — that's why it's updated before, not after, risky work. |
 
-## 12. The succession test
+## 12. How the health score is computed (the footer's first line)
+
+This rubric previously lived only in the sitting CTO's judgment — which made
+every score a vibe. It is now the definition. **Health (0–100)** is the sum of
+five axes, 20 points each:
+
+1. **Delivery safety** — can we change code without breaking users? (behavior
+   net coverage, blocking gates in verify+CI, one-revert reversibility,
+   gate-you-don't-run-is-failing rule)
+2. **Operational integrity** — can we lose something irreplaceable? (backups/
+   remote, secrets posture, rate-limit/email ceilings, licensing exposure)
+3. **Architecture trajectory** — is structure getting better or worse per
+   week? (seams open vs. consumed, grandfather count direction, count of
+   implementations per concern, high-interest debt on the critical path)
+4. **Product/velocity potential** — how fast can a correct feature ship on the
+   new architecture, and does the first-60-seconds experience still win?
+5. **Knowledge continuity** — could a cold model take over tomorrow? (docs
+   match code, lessons extracted, CURRENT_TASK truthful, runbooks for the
+   scary operations)
+
+Scoring discipline:
+- Score each axis 0–20 against evidence you re-verified this session, then sum.
+- **No single event moves the total more than ±5**; resolving/adding one top-5
+  risk is typically ±2–4. Big jumps mean the previous score was wrong — say so
+  instead of jumping.
+- Every change ships with its arithmetic in the report ("57 → 61: +2 op
+  integrity — history purged; +2 delivery safety — CI green on real secrets").
+- Recalibrate to the rubric, never to the previous number's momentum.
+
+**Ledger so far:** 53 (post-Phase-0 baseline: gates live but no remote, dirty
+history, monolith untouched) → **57** (2026-07-07: remote live +4, minus the
+history-exposure escalation it caused). Axis snapshot at 57: safety 13,
+ops 10, architecture 12, product 12, continuity 10 — the axes are deliberately
+harsh; a 70 requires the monolith visibly shrinking AND telemetry existing.
+
+## 13. The succession test
 
 You've absorbed this playbook when you can answer these without re-reading:
 Why did the freeze land before the domain layer? Why per-property LWW instead
