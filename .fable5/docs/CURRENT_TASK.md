@@ -28,10 +28,12 @@ Result/errors/ids/defineCommand/BoardRepository + conventions + purity lint +
 green (lockfile audit +139 vitest tree / 0 removed / 4 transitive bumps;
 canary proof live).
 
-**Active patch:** none. **Next: PATCH-004** (first extraction — one small
-settings page onto the domain layer via a repository implementation in
-`lib/infra`, removing the first entry from the 24-file grandfather list) —
-awaiting CTO draft + owner approval. Do not start without owner go-ahead.
+**Active patch:** `PATCH-004` (first extraction: accessibility settings page →
+domain/infra seam; target chosen by census — smallest page, 186 lines, one
+table, two ops; net-first phase order; grandfather list 24 → 23 only after
+proof) — **DRAFTED, awaiting owner approval.** CTO recommends **GPT-5.5**
+(pattern-setting extraction needs senior latitude); PATCH-005+ repetitions go
+to GPT-5.4 with this as exemplar.
 
 **Prerequisite `PATCH-002.1`: DONE (2026-07-07, commit b5698b5) — CTO review
 PASSED.** react/react-dom 19.1.0 → 19.2.7; lockfile audit clean (3 expected
