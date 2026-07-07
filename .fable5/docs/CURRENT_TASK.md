@@ -38,11 +38,13 @@ follow-ups: Actions secrets (below), recommended Supabase session revocation
 pre-rewrite history; map via commit messages if needed.
 
 **Active patch:** `PATCH-004` (first extraction: accessibility settings page →
-domain/infra seam; target chosen by census — smallest page, 186 lines, one
-table, two ops; net-first phase order; grandfather list 24 → 23 only after
-proof) — **DRAFTED, awaiting owner approval.** CTO recommends **GPT-5.5**
-(pattern-setting extraction needs senior latitude); PATCH-005+ repetitions go
-to GPT-5.4 with this as exemplar.
+domain/infra seam; grandfather list 24 → 23 only after proof) — **IN PROGRESS
+(GPT-5.5), Amendment 1 issued 2026-07-07.** GPT-5.5 correctly blocked on a
+spec contradiction (infra tests required but vitest include was domain-only
+and config files were out of scope; no commit made). CTO authorized the
+one-line `vitest.config.ts` include widening; resume instructions are in the
+patch file's Amendment 1 section. Implementation sits uncommitted in the
+worktree — do not clean it.
 
 **Prerequisite `PATCH-002.1`: DONE (2026-07-07, commit b5698b5) — CTO review
 PASSED.** react/react-dom 19.1.0 → 19.2.7; lockfile audit clean (3 expected
@@ -118,6 +120,10 @@ resolved by the push, default is `main` (was `master`).
 
 ## Log
 
+- **2026-07-07** — PATCH-004 Amendment 1: GPT-5.5 blocked correctly on a spec
+  contradiction (vitest include vs. config-freeze); CTO authorized the
+  one-line vitest.config.ts widening; acceptance criteria hardened (test file
+  names must appear in pasted run output). Lesson recorded.
 - **2026-07-07** — PATCH-003.5 EXECUTED: history purge complete and proven
   (all-refs filter-repo, tree-identical, 166→38.8 MiB; GitHub repo replaced,
   old SHAs unfetchable; branches+tags pushed). All commit hashes rewritten.

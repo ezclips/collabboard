@@ -1,6 +1,6 @@
 # PATCH-004 — First extraction: accessibility settings page onto the domain/infra seam
 
-**Status:** draft (awaiting owner approval)
+**Status:** in progress (GPT-5.5) — **Amendment 1 issued, resume below**
 **Complexity:** medium (pattern-setting) · **Estimated implementation time:** 2–4 hours
 **Assigned model (CTO recommendation):** **GPT-5.5 (senior engineer)** — see
 "Why 5.5" at the bottom. PATCH-005+ repetitions of this pattern go to GPT-5.4
@@ -64,6 +64,11 @@ CanvasClient involvement whatsoever.
   (load errors → defaults; save errors → `console.warn`-equivalent no-op —
   map `err` results to the same outcomes). No UI changes, no copy changes,
   no new features.
+- `vitest.config.ts` — **[Amendment 1]** widen the include list so the new
+  infra tests actually execute. Exact change, nothing else in the file:
+  ```ts
+  include: ['lib/domain/**/*.test.ts', 'lib/infra/**/*.test.ts'],
+  ```
 - `eslint.boundaries.config.mjs` — LAST step, only after all verification is
   green: delete the single line
   `'app/dashboard/settings/accessibility/page.tsx',` from
@@ -76,7 +81,7 @@ CanvasClient involvement whatsoever.
   `types/`, `lib/domain/core/**` (the foundation is frozen for this patch —
   if it seems insufficient, STOP and report), `lib/collabboard/**`,
   existing e2e specs, all config files except the one-line grandfather
-  removal, `.fable5/`, `.claude/`.
+  removal and the Amendment-1 vitest include line, `.fable5/`, `.claude/`.
 - No new dependencies.
 
 ## Architecture Notes (binding)
@@ -122,7 +127,11 @@ exists, so they must be atomic).
 ## Acceptance Criteria
 - [ ] New e2e spec green against the OLD page first (pasted run), then green
       against the NEW page (pasted run) — behavior preserved
-- [ ] `npm run test:unit` green including the new domain + infra tests
+- [ ] `npm run test:unit` green — and the pasted output must LIST both new
+      test files (`lib/domain/settings/accessibility.test.ts` and
+      `lib/infra/settings/accessibilityRepository.test.ts`) as executed.
+      A green run that doesn't show the infra file means the include glob is
+      still wrong (Amendment 1's original failure mode: silent non-execution)
 - [ ] `npx tsc --noEmit` 0 errors
 - [ ] `npm run check:boundaries` green WITH the grandfather entry removed —
       the mechanical proof the page is clean
@@ -161,6 +170,36 @@ local design decisions (hook structure, test fakes) that must be made and
 *recorded* rather than escalated one at a time. AI_WORKFLOW assigns exactly
 this profile to the senior engineer. The deliverable doubles as the exemplar
 for GPT-5.4's future repetitions — worth senior quality once.
+
+## Amendment 1 (2026-07-07) — vitest include scope · CTO decision
+
+**Blockage (GPT-5.5, correct stop):** the spec requires infra tests to run in
+`npm run test:unit`, but `vitest.config.ts` (created in PATCH-003) includes
+only `lib/domain/**/*.test.ts` — `lib/infra/settings/accessibilityRepository.test.ts`
+would silently never execute — while this patch listed all config files as
+out of scope. A genuine spec contradiction; escalating instead of expanding
+scope was the right call per AI_WORKFLOW.
+
+**Decision: authorize `vitest.config.ts`** (added to Files to Modify above).
+Rejected alternatives: moving infra tests under `lib/domain/` (breaks layer
+cohesion and the tests-colocate-with-code convention; the domain tree stays
+free of infra concerns even in tests), and a separate infra test
+script/config (second mechanism for one concern, P6). The include list is
+deliberately explicit per layer — do NOT widen to `lib/**` (that would
+silently sweep future legacy dirs into the unit gate; each new tested layer
+gets added consciously).
+
+**Resume instructions (GPT-5.5):**
+1. Keep your current worktree — do not restart or re-create anything.
+2. Apply exactly the Amendment-1 change to `vitest.config.ts` (one line).
+3. Run `npm run test:unit`; confirm the output lists BOTH new test files
+   (see the strengthened acceptance criterion) and paste it.
+4. Continue the patch from wherever you stopped, phase order unchanged
+   (Phase A net evidence must already exist from before the block — if you
+   never ran it, do Phase A first).
+5. Everything else in the spec is unchanged; the MUST-NOT list still applies
+   with the single vitest exception. Record this in your "Decisions made"
+   report as "Amendment 1 applied, CTO-authorized".
 
 ## Handoff instructions (owner: paste this)
 Use `.fable5/docs/CODER_HANDOFF_TEMPLATE.md` with `{{NUMBER}}` = 004,
