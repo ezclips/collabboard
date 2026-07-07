@@ -19,9 +19,13 @@ new `@supabase/*` import in UI code; 24 grandfathered files (shrink-only list in
 `eslint.boundaries.config.mjs`). Implemented by Codex GPT-5.4; two spec defects
 fixed in CTO review (glob escaping of `[id]` routes; `--no-inline-config`).
 
-**Active patch:** none — next up **PATCH-003** (`lib/domain` skeleton: Result
-type, error taxonomy, first repository + command), pending CTO draft + owner
-approval.
+**Active patch:** `PATCH-003` (domain layer foundation: `lib/domain` skeleton —
+Result, error taxonomy, branded ids, `defineCommand`, `BoardRepository`
+interface, conventions, unit tests via vitest, domain-purity lint) —
+**DRAFTED with full implementation spec, awaiting owner approval.** Explicitly
+out of scope: moving any existing calls, CanvasClient, UI behavior, realtime,
+state management, schema. Handoff block for GPT-5.4 is at the bottom of
+`.fable5/patches/PATCH-003.md`.
 
 **Delegation lesson (2026-07-07):** Codex implemented faithfully but skipped the
 spec's verification and commit steps. Future delegation prompts must state:
