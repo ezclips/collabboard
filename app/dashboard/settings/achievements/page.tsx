@@ -1,8 +1,9 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Loader2, Trophy, Star } from 'lucide-react';
+import { createUserAchievementsRepository } from '@/lib/infra/achievements/userAchievementsRepository';
+import { getCurrentUserId } from '@/lib/infra/supabase/currentUser';
 
 interface Belt {
     id: string;
@@ -23,7 +24,7 @@ const BELTS: Belt[] = [
 ];
 
 export default function AchievementsPage() {
-    const supabase = createClientComponentClient();
+    const repository = useMemo(() => createUserAchievementsRepository(), []);
     const [loading, setLoading] = useState(true);
     const [currentPoints, setCurrentPoints] = useState(0);
     const [currentBeltIndex, setCurrentBeltIndex] = useState(-1);
@@ -35,22 +36,14 @@ export default function AchievementsPage() {
     const loadAchievements = async () => {
         try {
             setLoading(true);
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) return;
+            const userIdResult = await getCurrentUserId();
+            if (!userIdResult.ok) throw userIdResult.error;
+            if (!userIdResult.value) return;
 
             // Try to load achievements from database
-            try {
-                const { data } = await supabase
-                    .from('user_achievements')
-                    .select('*')
-                    .eq('user_id', user.id)
-                    .single();
-
-                if (data) {
-                    setCurrentPoints(data.points || 0);
-                }
-            } catch {
-                // Use defaults - 0 points
+            const achievementsResult = await repository.load(userIdResult.value);
+            if (achievementsResult.ok && achievementsResult.value) {
+                setCurrentPoints(achievementsResult.value.points);
             }
 
             // Calculate current belt
