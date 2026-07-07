@@ -278,7 +278,11 @@ unauthenticated redirects). Fresh-context tests need absolute URLs —
 **Common mistakes:** dropping the unsubscribe on unmount (invisible to e2e,
 only review catches it); substituting getSession semantics with getUser;
 storing the whole session object in state when only the user is read
-(census-gate the session fields first); dropping auth event-name branches.
+(census-gate the session fields first); dropping auth event-name branches;
+**assuming a component "renders on most pages" without tracing its import
+chain to an actual root layout/page** (PATCH-012: an orphaned component was
+imported only by another orphaned component — trace to a mounted root
+before writing any e2e assertion that expects the component visible).
 
 ---
 

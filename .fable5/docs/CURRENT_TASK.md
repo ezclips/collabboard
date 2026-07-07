@@ -168,6 +168,14 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-07** — PATCH-012 blocked correctly by GPT-5.4: the spec claimed
+  Navbar "renders on most pages," but CTO independently confirmed it's
+  orphaned — its only importer (ClientWrapper.tsx) is itself imported by
+  nobody; root layout never mounts either. Amendment 1: proceed as an
+  unused-component extraction (grandfather value unchanged), e2e requirement
+  replaced with a mandatory orphan-proof census; restoring the mount point
+  REJECTED as out-of-scope behavior change. Lesson + Pattern F mistake entry
+  added: trace import chains to a mounted root before claiming "renders".
 - **2026-07-07** — PATCH-011 DONE (e56bc5a), CTO review PASSED — Pattern F
   reference implementation; authState.ts verbatim-faithful; subscription
   lifecycle sound; e2e 15/15 with both gate sides covered. Pattern F entered
