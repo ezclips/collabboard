@@ -28,14 +28,16 @@ Result/errors/ids/defineCommand/BoardRepository + conventions + purity lint +
 green (lockfile audit +139 vitest tree / 0 removed / 4 transitive bumps;
 canary proof live).
 
-**Active patch:** `PATCH-003.5` (operational: purge Chrome-profile material
-from ALL git history — filter-repo + fresh bundle + GitHub delete-and-recreate;
-full runbook in `.fable5/patches/PATCH-003.5.md`) — **READY, awaiting owner
-approval.** Executes before PATCH-004 so the purge rewrites the fewest
-commits and CI secrets are configured exactly once (on the recreated repo).
-CTO runs the local git surgery; owner runs the GitHub steps; never delegated.
+**Last patch:** `PATCH-003.5` — **DONE (2026-07-07).** History purge executed
+and proven: filter-repo across all refs (HEAD tree-identical before/after),
+pack 166 → 38.8 MiB, GitHub repo deleted + recreated with purged history only
+(pre-rewrite SHA fetch fails), all branches/tags pushed. Remaining owner
+follow-ups: Actions secrets (below), recommended Supabase session revocation
+(PATCH-003.5 §4). Bundles retained until PATCH-004 verified on new remote.
+**All commit hashes changed** — hashes in docs older than this line refer to
+pre-rewrite history; map via commit messages if needed.
 
-**Queued patch:** `PATCH-004` (first extraction: accessibility settings page →
+**Active patch:** `PATCH-004` (first extraction: accessibility settings page →
 domain/infra seam; target chosen by census — smallest page, 186 lines, one
 table, two ops; net-first phase order; grandfather list 24 → 23 only after
 proof) — **DRAFTED, awaiting owner approval.** CTO recommends **GPT-5.5**
@@ -93,8 +95,9 @@ branch after a short soak (see CHANGELOG_ARCHITECTURE.md 2026-07-07).
 
 | Decision | Owner | Needed by | Notes |
 |---|---|---|---|
-| **Approve + execute PATCH-003.5** (history purge runbook, ready) | User approves; CTO executes local steps, User executes GitHub steps | **Before PATCH-004** | `.fable5/patches/PATCH-003.5.md` — filter-repo + GitHub delete-and-recreate (force-push alone leaves old SHAs fetchable). Fresh `--all` bundle is step 1 |
-| Configure GitHub Actions secrets (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`) | User | **AFTER the PATCH-003.5 repo recreate** (else configured twice) | PATCH-003.5 §6; E2E creds deliberately NOT added to CI |
+| Configure GitHub Actions secrets (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`) | User | **Now** (repo recreated; do once) | PATCH-003.5 §6; E2E creds deliberately NOT added to CI |
+| Revoke Supabase sessions for e2e user + any account used in the old automation profiles | User | Soon (recommended, not blocking) | PATCH-003.5 §4 — "sign out everywhere"; kills refresh tokens that survive password changes |
+| Approve PATCH-004 delegation to GPT-5.5 | User | Next | Patch drafted + approved-to-draft; ready for handoff |
 | dhtmlx buy-vs-replace | User | Phase 0 exit | GPL exposure; recommendation: replace |
 | Surviving canvas system | CTO | Phase 1 | Needs feature diff first |
 | Raise Supabase sign-in limit 30→100/5min (dev convenience + school-NAT headroom) | User | Anytime (dashboard, 1 min) | Auth → Rate Limits |
@@ -115,6 +118,10 @@ resolved by the push, default is `main` (was `master`).
 
 ## Log
 
+- **2026-07-07** — PATCH-003.5 EXECUTED: history purge complete and proven
+  (all-refs filter-repo, tree-identical, 166→38.8 MiB; GitHub repo replaced,
+  old SHAs unfetchable; branches+tags pushed). All commit hashes rewritten.
+  Standing risk #1 resolved; secrets + session revocation queued to owner.
 - **2026-07-07** — PATCH-003.5 drafted (history purge runbook) after the
   GitHub push escalated the credential-history risk. Scope verified: GitHub
   holds only main; local tags/agent branch also carry the profiles and are

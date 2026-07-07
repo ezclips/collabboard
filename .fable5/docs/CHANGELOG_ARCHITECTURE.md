@@ -3,6 +3,25 @@
 Dated record of every architectural decision, reversal, and milestone.
 Newest first. One entry per decision — link the owning doc for detail.
 
+## 2026-07-07 — PATCH-003.5 EXECUTED: git history purged everywhere
+
+- **Done and proven:** `git filter-repo` removed `tmp/` (10,726 Chrome-profile
+  files) and `.claude/settings.local.json` from every ref. Proofs: zero
+  matching objects across `--all`; `HEAD^{tree}` identical before/after
+  (`a95b0ba5…` — content untouched); pack 166 → **38.8 MiB**; tsc +
+  boundaries green. GitHub repo deleted and recreated by owner; purged
+  history pushed (all branches + tags — first full off-machine backup);
+  pre-rewrite SHAs unfetchable from the new remote.
+- **Consequence: every commit hash changed.** Hashes recorded in docs/patches
+  before this entry (9b8bed2, a7fe12c, b5698b5, 75d7626, …) refer to
+  pre-rewrite history — resolve by commit message, not hash.
+- **Residual:** the two local bundles are now the only copies of the sensitive
+  history — retained until PATCH-004 lands verified, then BOTH must be
+  deleted (tracked as a standing risk). Owner follow-ups: Actions secrets,
+  recommended Supabase session revocation.
+- Runbook errata for future ops patches: `git push --all --tags` is rejected
+  by modern git — two separate pushes.
+
 ## 2026-07-07 — PATCH-003.5 drafted: history purge runbook; ops doctrine codified
 
 - **Operational patch class created** (`.5` numbering): runbook-style, CTO/owner

@@ -197,16 +197,19 @@ secrets mechanism here is configuration hygiene, not secrecy.)
 
 ## 7. Acceptance criteria
 
-- [ ] Fresh `--all` bundle created and verified BEFORE the rewrite
-- [ ] All six §3 verifications pass with pasted output
-- [ ] `HEAD^{tree}` hash identical before/after (content-preservation proof)
-- [ ] Old GitHub repo deleted; new one holds ONLY purged history (pre-rewrite
+- [x] Fresh `--all` bundle created and verified BEFORE the rewrite
+- [x] All six §3 verifications pass with pasted output
+- [x] `HEAD^{tree}` hash identical before/after (content-preservation proof)
+- [x] Old GitHub repo deleted; new one holds ONLY purged history (pre-rewrite
       SHA fetch fails)
-- [ ] `git push origin --all --tags` done — tags/branches now backed up off-machine
-- [ ] Actions secrets configured on the NEW repo; first CI run checked
-- [ ] Docs updated (LESSONS_LEARNED, CURRENT_TASK, CTO_PLAYBOOK, AI_WORKFLOW,
+- [x] Branches and tags pushed — everything now backed up off-machine
+      (note: modern git rejects `push --all --tags` combined; run
+      `push origin --all` then `push origin --tags` — runbook's one spec bug)
+- [ ] Actions secrets configured on the NEW repo; first CI run checked (owner)
+- [x] Docs updated (LESSONS_LEARNED, CURRENT_TASK, CTO_PLAYBOOK, AI_WORKFLOW,
       CHANGELOG_ARCHITECTURE) — done in the same patch
 - [ ] Bundles retained until PATCH-004 is landed and verified on the new remote
+      (standing — do not delete yet)
 
 ## 8. Result
 
@@ -230,5 +233,13 @@ secrets mechanism here is configuration hygiene, not secrecy.)
      restore-point-* `b4bde8f`→`357bca9`, toolbar-v1-stable `40ae5c2`→`d20a84c` ✓
   6. `tsc --noEmit` 0 errors; `check:boundaries` green ✓
 - Pack size: **166.00 MiB → 38.81 MiB** (−77%).
-- GitHub replacement: _pending owner delete/recreate; push + old-SHA-fetch-fails
-  check + secrets to follow._
+- GitHub replacement EXECUTED 2026-07-07: owner deleted `ezclips/collabboard`
+  and recreated it empty/private; CTO pushed `main`, `agents/*` branch, all
+  4 tags (`ls-remote` confirms 6 refs, hashes match local). **Old-SHA proof:**
+  `git fetch origin 9873501…` → "not our ref"; `git fetch origin f86428c` →
+  "couldn't find remote ref". The purged history is the only history that
+  exists off-machine.
+- Runbook errata: `git push origin --all --tags` is rejected by modern git
+  ("cannot be used together") — push `--all` and `--tags` as two commands.
+- Remaining: owner configures Actions secrets (§6), first CI run checked;
+  bundles retained until PATCH-004 verified on the new remote.
