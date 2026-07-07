@@ -63,16 +63,44 @@ PATCH-003, not here — one concern per patch), nothing under `components/`,
 `git revert` the patch commit, then `npm install` to restore the previous
 lockfile state.
 
-## Acceptance Criteria
-- [ ] `npm install` completes with exit 0 and NO peer-resolution flags
+## Warning Policy (added 2026-07-07 after first implementation attempt)
+
+**Rule: warnings are observations; errors are blockers.** Only a non-zero exit
+code or a failed acceptance criterion stops this patch. Warnings must be COPIED
+into the report's "Surprises/notes", never acted on.
+
+Known warning families for this repo's installs — both PRE-EXISTING, neither
+introduced by this patch, both **explicitly accepted** here:
+
+| Warning | Classification | Disposition |
+|---|---|---|
+| `@typescript-eslint/*@8.36` peer wants `typescript <5.9.0`, found 5.9.3 | Acceptable technical debt (dev tooling lag; tsc unaffected, lint demonstrably runs) | Future patch: bundle a `@typescript-eslint` upgrade into the lint-overhaul patch |
+| `react-twitter-embed@4.0.4` peer wants React ≤18, found 19.x (via react-social-media-embed) | Acceptable pre-existing debt (existed under React 19.1 too; embeds covered by smoke usage) | Future patch: handle within the embed/dependency review (SECURITY.md embeds item) |
+
+Any NEW warning family outside these two: still not a blocker (exit 0 rule
+applies), but flag it prominently in the report for CTO classification.
+
+## Acceptance Criteria (revised — distinguishes failure / error / warning)
+- [ ] **Installation success:** `npm install` exit code 0, run WITHOUT
+      `--legacy-peer-deps`/`--force`. Peer WARNINGS in its output do NOT fail
+      this criterion; an ERESOLVE **error** (non-zero exit) does.
 - [ ] `node -e "console.log(require('react/package.json').version)"` prints 19.2.x
-- [ ] `npm install --dry-run -D vitest@^3` exits 0 (PATCH-003 unblocked — do
-      NOT actually install vitest)
-- [ ] `npx tsc --noEmit` — 0 errors
-- [ ] `npm run check:boundaries` — green
+- [ ] `npm install --dry-run -D vitest@^3` **exit code 0** (warnings ignored;
+      do NOT actually install vitest)
+- [ ] `npx tsc --noEmit` — 0 **errors** (compiler errors are blockers; this
+      tool has no warning tier)
+- [ ] `npm run check:boundaries` — exit 0 (rule violations are errors/blockers)
 - [ ] `git diff` touches only `package.json` (react + react-dom lines) and
       `package-lock.json`
 - [ ] Commit exists; hash reported
+- [ ] Report lists all warning text observed, mapped against the table above
+
+## Resume instruction for GPT-5.4 (state as of 2026-07-07)
+The install step is ALREADY APPLIED in the working tree (react 19.2.7 in
+package.json + lockfile, uncommitted). Do not redo it. Resume at the
+verification steps: re-run `npm install` once to confirm idempotent exit 0
+(warnings expected per the table), then continue from the react-version check
+through commit and report.
 
 ## Verification Steps (Codex: run all, paste real output)
 ```bash

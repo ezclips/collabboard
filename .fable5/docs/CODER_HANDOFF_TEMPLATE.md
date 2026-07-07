@@ -41,6 +41,10 @@ Non-negotiable rules:
    and report. A half-applied patch is worse than none.
 9. If you discover a security issue (hardcoded secret, RLS gap, XSS vector),
    report it immediately regardless of scope.
+10. Warnings are observations; errors are blockers. Only a non-zero exit code
+    or a failed acceptance criterion stops the patch — unless the spec names a
+    specific warning as a blocker. Copy all warnings into "Surprises/notes";
+    do not stop on them and do not fix them.
 
 Report back in exactly this format:
 
@@ -73,6 +77,9 @@ are configured in .env.local; never hardcode or print them.}}
 ---
 
 ## Changelog of this template
+- 2026-07-07 (b): rule 10 added after PATCH-002.1, where the implementer
+  stopped on npm peer WARNINGS despite exit code 0 — warnings are
+  observations, errors are blockers.
 - 2026-07-07: created after PATCH-002, where the implementer skipped
   verification and the commit (rules 6–7 exist because of that), and where
   spec defects surfaced only at verification time (rule 8's "report failures

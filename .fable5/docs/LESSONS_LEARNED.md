@@ -19,6 +19,13 @@ at minimum before working on this repo. Newest first within each section.
 **Fix:** review caught it; both defects were spec bugs, not implementation bugs.
 **Reusable rule:** when a spec contains exact code, the spec author should dry-run its verification section before delegating — or explicitly mark it "unexecuted, expect iteration".
 
+### Implementers stop on warnings unless the spec defines the tiers (2026-07-07, PATCH-002.1)
+**Symptom:** install exited 0 but emitted npm peer warnings; the implementation model classified them as verification failure and halted mid-patch.
+**Wrong path:** the spec said "run and paste output" without defining what counts as failure — leaving severity interpretation to the implementer.
+**Root cause:** verification sections that don't distinguish exit-code failure / error / warning delegate a judgment call to a model with zero design latitude — it will (correctly per its rules) stop.
+**Fix:** warning policy added to PATCH-002.1 with a classification table of the two pre-existing warning families (typescript-eslint peer-lag: accepted, fix with lint overhaul; react-twitter-embed React-19 peers: accepted, fix in embed/dependency review); global rule added to SKILL.md and handoff template rule 10.
+**Reusable rule:** "warnings are observations; errors are blockers — only non-zero exit codes or failed acceptance criteria stop a patch, unless the spec names a specific warning as a blocker." Specs for noisy tools (npm, webpack) must pre-classify known warnings.
+
 ## Repo & tooling mechanics
 
 ### `next dev` and `next build` share `.next` (2026-07-06, incident)

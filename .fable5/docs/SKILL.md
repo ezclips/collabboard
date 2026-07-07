@@ -67,6 +67,13 @@ npm run lint         # advisory: must not ADD errors (5,426 legacy errors exist)
 Run the patch's "Required Tests" explicitly. Paste real output in your report —
 never claim green without running.
 
+**Warnings vs. errors:** warnings are observations; errors are blockers. Only a
+non-zero exit code or a failed acceptance criterion stops a patch — unless the
+patch explicitly names a specific warning as a blocker. Copy all warnings into
+your report's notes; never stop on them, never "fix" them (that's unrequested
+scope). npm peer warnings in this repo have known accepted families — see the
+active patch's Warning Policy or LESSONS_LEARNED.md.
+
 Environment notes: Windows host; Git Bash and PowerShell available (mind their
 different syntax); CRLF warnings from git are normal noise; the dev server may
 already be running on :3000 — Playwright's webServer uses :3100.

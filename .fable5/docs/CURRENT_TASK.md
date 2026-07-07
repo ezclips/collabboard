@@ -29,7 +29,14 @@ PATCH-003 itself is unchanged; resume after the prerequisite lands.
 
 **Prerequisite patch:** `PATCH-002.1` (upgrade react/react-dom → ^19.2.3;
 fix CTO-verified via dry-run; `--legacy-peer-deps`/`--force` explicitly NOT
-approved) — **APPROVED (2026-07-07) and DELEGATED to Codex GPT-5.4.**
+approved) — **APPROVED (2026-07-07) and DELEGATED to Codex GPT-5.4 — attempt 2 in
+progress.** Attempt 1 stopped on npm peer WARNINGS despite exit 0; spec now
+carries a Warning Policy (two pre-existing warning families explicitly
+accepted: typescript-eslint peer-lag → lint-overhaul patch; react-twitter-embed
+React-19 peers → embed/dependency review). Global rule codified (SKILL.md +
+handoff rule 10): warnings are observations, errors are blockers. Install is
+already applied in the working tree (react 19.2.7, uncommitted) — Codex
+resumes at verification per the spec's Resume instruction.
 Sequence after Codex returns: CTO review (dependency diff, independent
 re-verification, lockfile audit for unexpected transitive changes, commit
 hash) → owner restarts dev server → CTO runs e2e net on React 19.2 →
