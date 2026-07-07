@@ -14,9 +14,12 @@ with credentials; skips cleanly without. Run against a live dev server with
 `PW_BASE_URL=http://localhost:3000` (never build under a running dev server).
 
 **Active patch:** `PATCH-002` (architecture boundary freeze — blocking check
-against new `@supabase/*` imports in UI; 24 grandfathered files) — **drafted,
-awaiting owner approval.** Then PATCH-003 `lib/domain` skeleton → PATCH-004+
-command extraction from `CanvasClient.tsx`.
+against new `@supabase/*` imports in UI; 24 grandfathered files) —
+**APPROVED (2026-07-07) and DELEGATED to Codex GPT-5.4.** The executable spec is
+the "Final Implementation Specification" section of
+`.fable5/patches/PATCH-002.md`. Codex must not edit `.fable5/`; CTO reviews the
+returned commit + diff, then updates these docs. Next after review:
+PATCH-003 `lib/domain` skeleton → PATCH-004+ command extraction.
 
 **Backlog from PATCH-001 execution:**
 - Deferred: standalone post-delete e2e step (wall context-menu a11y/selectors).
