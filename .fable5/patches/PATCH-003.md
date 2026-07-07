@@ -1,6 +1,11 @@
 # PATCH-003 — Domain layer foundation (`lib/domain` skeleton)
 
-**Status:** draft (awaiting owner approval)
+**Status:** APPROVED (owner, 2026-07-07) — delegated to Codex GPT-5.4.
+Execute the Final Implementation Specification below. Codex must not edit
+`.fable5/` or `.claude/`. CTO review criteria on return: authorized files only ·
+no product code touched · purity-canary proof demonstrated · unit tests green ·
+verification outputs pasted · commit hash exists. CTO re-runs all verification
+independently.
 **Complexity:** easy-medium · **Estimated implementation time:** 45–90 minutes
 **Assigned model (proposed):** GPT-5.4 (Codex) via CODER_HANDOFF_TEMPLATE.md
 

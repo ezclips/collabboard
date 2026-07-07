@@ -22,10 +22,11 @@ fixed in CTO review (glob escaping of `[id]` routes; `--no-inline-config`).
 **Active patch:** `PATCH-003` (domain layer foundation: `lib/domain` skeleton —
 Result, error taxonomy, branded ids, `defineCommand`, `BoardRepository`
 interface, conventions, unit tests via vitest, domain-purity lint) —
-**DRAFTED with full implementation spec, awaiting owner approval.** Explicitly
-out of scope: moving any existing calls, CanvasClient, UI behavior, realtime,
-state management, schema. Handoff block for GPT-5.4 is at the bottom of
-`.fable5/patches/PATCH-003.md`.
+**APPROVED (2026-07-07) and DELEGATED to Codex GPT-5.4.** Explicitly out of
+scope: moving any existing calls, CanvasClient, UI behavior, realtime, state
+management, schema. Handoff block for GPT-5.4 is at the bottom of
+`.fable5/patches/PATCH-003.md`. CTO reviews the returned commit + diff
+(re-running all verification), then updates these docs.
 
 **Delegation lesson (2026-07-07):** Codex implemented faithfully but skipped the
 spec's verification and commit steps. Future delegation prompts must state:
