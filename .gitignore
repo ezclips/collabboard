@@ -54,3 +54,4 @@ Sakai_Investments/
 *.bundle
 test-results/
 playwright-report/
+e2e/.auth/
