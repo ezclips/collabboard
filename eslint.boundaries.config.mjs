@@ -17,7 +17,6 @@ const GRANDFATHERED_UI_FILES = [
   'app/dashboard/settings/dashboard/page.tsx',
   'app/dashboard/settings/delete-account/page.tsx',
   'app/dashboard/settings/integrations/page.tsx',
-  'app/dashboard/settings/logs/page.tsx',
   'app/dashboard/settings/members/page.tsx',
   'app/dashboard/settings/page.tsx',
   'app/dashboard/settings/password/page.tsx',

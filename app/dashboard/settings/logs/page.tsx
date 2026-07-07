@@ -1,8 +1,8 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import { ScrollText, Filter, Loader2, Search, Download, ChevronDown, ChevronRight } from 'lucide-react';
+import { getCurrentUser } from '@/lib/infra/supabase/currentUser';
 
 interface LogEntry {
     id: string;
@@ -27,7 +27,6 @@ const actionLabels: Record<string, { label: string; color: string }> = {
 };
 
 export default function LogsPage() {
-    const supabase = createClientComponentClient();
     const [loading, setLoading] = useState(true);
     const [logs, setLogs] = useState<LogEntry[]>([]);
     const [searchQuery, setSearchQuery] = useState('');
@@ -41,8 +40,10 @@ export default function LogsPage() {
     const loadLogs = async () => {
         try {
             setLoading(true);
-            
-            const { data: { user } } = await supabase.auth.getUser();
+            const userResult = await getCurrentUser();
+            if (!userResult.ok) throw userResult.error;
+
+            const user = userResult.value;
             if (!user) return;
 
             // In a real app, you'd have an activity_logs table
@@ -51,7 +52,7 @@ export default function LogsPage() {
                 {
                     id: '1',
                     action: 'board.create',
-                    actor_email: user.email || '',
+                    actor_email: user.email ?? '',
                     target_type: 'board',
                     target_name: 'New Project Board',
                     created_at: new Date().toISOString()
@@ -59,7 +60,7 @@ export default function LogsPage() {
                 {
                     id: '2',
                     action: 'padlet.create',
-                    actor_email: user.email || '',
+                    actor_email: user.email ?? '',
                     target_type: 'padlet',
                     target_name: 'Welcome Note',
                     details: { board: 'New Project Board', type: 'note' },
@@ -68,7 +69,7 @@ export default function LogsPage() {
                 {
                     id: '3',
                     action: 'settings.update',
-                    actor_email: user.email || '',
+                    actor_email: user.email ?? '',
                     target_type: 'settings',
                     target_name: 'Workspace Settings',
                     details: { changed: ['workspace_name'] },
