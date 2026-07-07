@@ -71,4 +71,26 @@ export default [
       ],
     },
   },
+  {
+    // Domain purity (PATCH-003): lib/domain imports no UI or infrastructure.
+    files: ['lib/domain/**/*.ts'],
+    languageOptions: {
+      parser: tsParser,
+      parserOptions: { sourceType: 'module' },
+    },
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['react', 'react-*', 'next', 'next/*', '@supabase/*', '@/components/*', '@/app/*'],
+              message:
+                'lib/domain must stay pure: no UI, no framework, no infrastructure imports (lib/domain/CONVENTIONS.md rule 1).',
+            },
+          ],
+        },
+      ],
+    },
+  },
 ];

@@ -30,6 +30,9 @@ jobs:
       - name: Boundary check (blocking)
         run: npm run check:boundaries
 
+      - name: Unit tests (blocking)
+        run: npm run test:unit
+
       - name: Lint (advisory until burn-down reaches zero)
         run: npm run lint
         continue-on-error: true

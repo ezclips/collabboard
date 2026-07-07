@@ -3,13 +3,14 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "check:boundaries": "eslint --no-warn-ignored --no-inline-config -c eslint.boundaries.config.mjs \"components/**/*.{ts,tsx}\" \"app/**/*.{ts,tsx}\"",
+    "check:boundaries": "eslint --no-warn-ignored --no-inline-config -c eslint.boundaries.config.mjs \"components/**/*.{ts,tsx}\" \"app/**/*.{ts,tsx}\" \"lib/domain/**/*.ts\"",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
+    "test:unit": "vitest run",
     "typecheck": "tsc --noEmit",
-    "verify": "npm run typecheck && npm run check:boundaries && npm run build",
+    "verify": "npm run typecheck && npm run check:boundaries && npm run test:unit && npm run build",
     "test:e2e": "playwright test",
     "ai:test": "npx tsx scripts/test-ai-prompts.ts --suite all",
     "ai:test:generation": "npx tsx scripts/test-ai-prompts.ts --suite generation",
@@ -101,6 +102,7 @@
     "eslint": "^9",
     "eslint-config-next": "15.3.5",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^3.2.7"
   }
 }
