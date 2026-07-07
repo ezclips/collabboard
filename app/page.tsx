@@ -3,15 +3,18 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import type { User } from '@supabase/supabase-js'
-import { supabaseBrowser } from '@/lib/supabase/browser'
+import type { AuthUser } from '@/lib/domain/auth/user'
+import {
+  getSessionUser,
+  onAuthUserChanged,
+  signOutCurrentUser,
+} from '@/lib/infra/supabase/authState'
 
 export default function Home() {
   const [mounted, setMounted] = useState(false)
-  const [user, setUser] = useState<User | null>(null)
+  const [user, setUser] = useState<AuthUser | null>(null)
   const [loading, setLoading] = useState(true)
   const router = useRouter()
-  const supabase = supabaseBrowser()
 
   useEffect(() => {
     setMounted(true)
@@ -20,58 +23,53 @@ export default function Home() {
   useEffect(() => {
     if (!mounted) return
 
+    let unsubscribe = () => {}
+
     const initializeAuth = async () => {
       try {
         // Check if user is already signed in
-        const { data: { session }, error } = await supabase.auth.getSession()
+        const result = await getSessionUser()
 
-        if (error) {
-          console.error('Auth error:', error)
+        if (!result.ok) {
+          console.error('Auth error:', result.error)
           // Don't let auth errors block the page
           setLoading(false)
           return
         }
 
-        if (session?.user) {
-          setUser(session.user)
+        if (result.value) {
+          setUser(result.value)
           // Optionally redirect to dashboard if user is logged in
           // router.push('/dashboard')
         }
 
         // Track if we've already handled an initial session to avoid redirect loops
-        let hasHandledInitialSession = !!session?.user;
+        let hasHandledInitialSession = !!result.value;
 
         // Listen for auth changes
-        const { data: { subscription } } = supabase.auth.onAuthStateChange(
-          async (event, session) => {
-            console.log('Auth event:', event)
+        unsubscribe = onAuthUserChanged((event, user) => {
+          console.log('Auth event:', event)
 
-            if (event === 'SIGNED_IN' && session) {
-              setUser(session.user)
-              // Only redirect to dashboard on a fresh sign-in, not on session refresh
-              // Check if we're currently on the home page before redirecting
-              if (!hasHandledInitialSession && window.location.pathname === '/') {
-                router.push('/dashboard')
-              }
-              hasHandledInitialSession = true;
-            } else if (event === 'SIGNED_OUT') {
-              setUser(null)
-              hasHandledInitialSession = false;
-            } else if (event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION') {
-              // Just update user state, don't redirect
-              if (session?.user) {
-                setUser(session.user)
-              }
+          if (event === 'SIGNED_IN' && user) {
+            setUser(user)
+            // Only redirect to dashboard on a fresh sign-in, not on session refresh
+            // Check if we're currently on the home page before redirecting
+            if (!hasHandledInitialSession && window.location.pathname === '/') {
+              router.push('/dashboard')
+            }
+            hasHandledInitialSession = true;
+          } else if (event === 'SIGNED_OUT') {
+            setUser(null)
+            hasHandledInitialSession = false;
+          } else if (event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION') {
+            // Just update user state, don't redirect
+            if (user) {
+              setUser(user)
             }
           }
-        )
+        })
 
         setLoading(false)
-
-        // Cleanup subscription
-        return () => {
-          subscription.unsubscribe()
-        }
       } catch (error) {
         console.error('Failed to initialize auth:', error)
         setLoading(false)
@@ -79,11 +77,18 @@ export default function Home() {
     }
 
     initializeAuth()
-  }, [mounted, router, supabase])
+
+    return () => {
+      unsubscribe()
+    }
+  }, [mounted, router])
 
   const handleUseAnotherAccount = async () => {
     try {
-      await supabase.auth.signOut()
+      const result = await signOutCurrentUser()
+      if (!result.ok) {
+        console.error('Failed to sign out before switching accounts:', result.error)
+      }
     } catch (error) {
       console.error('Failed to sign out before switching accounts:', error)
     } finally {

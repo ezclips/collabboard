@@ -19,7 +19,6 @@ const GRANDFATHERED_UI_FILES = [
   'app/dashboard/settings/page.tsx',
   'app/dashboard/settings/password/page.tsx',
   'app/dashboard/settings/profile/page.tsx',
-  'app/page.tsx',
   'app/share/\\[token\\]/page.tsx',
   'components/canvas/AddPadletMenu.tsx',
   'components/collabboard/PostCardContent.tsx',
