@@ -1,6 +1,6 @@
 # PATCH-010 — Extraction (type-only): domain AuthUser type; CanvasModals + OverlayLayer off @supabase types
 
-**Status:** draft (awaiting owner approval)
+**Status:** in progress (GPT-5.4) — **Amendment 1 issued after a correct tsc block; resume at the bottom**
 **Complexity:** trivial (type-position changes only; zero runtime diff)
 **Assigned model:** **GPT-5.4**
 **Pattern:** new — "type-only import swap" (will enter PATCH_REFERENCE at
@@ -124,3 +124,57 @@ after the owner stops it (locale-safe port check as the spec shows)."
 
 ## Estimated Difficulty
 trivial — the cheapest components/** shrink available.
+
+## Amendment 1 (2026-07-07) — `AuthUserMetadata` missing the `name` field · CTO decision
+
+**Blockage (GPT-5.4, correct stop at the exact gate the Risks section
+predicted):** `tsc` failed at CanvasModals line 350 —
+`currentUserName={user?.user_metadata?.name || ...}` reads a metadata field
+the bound `AuthUser` type never declared. Undeclared fields fall through to
+the `[key: string]: unknown` index signature, and `unknown` inside a `||`
+chain narrows to `{}` → `TS2322: Type '{}' is not assignable to type
+'string'`.
+
+**Root cause (CTO census error, PATCH-009's lesson recurring one level
+deeper):** the census pattern `\buser(\?)?\.[a-zA-Z_]+` captures ONE chain
+segment — it proved `user_metadata` was accessed but never enumerated the
+fields accessed THROUGH it; the Evidence section's field list came from a
+truncated spot-read (lines 322–324) that missed line 350.
+
+**Decision: Option 1 — extend the type; the components stay untouched**
+(Option 2 rejected: this patch's own binding says "NOTHING else changes" in
+the components; adjusting JSX to fit the type would invert the patch).
+The verbatim binding for `lib/domain/auth/user.ts` is now:
+
+```ts
+export interface AuthUserMetadata {
+  full_name?: string;
+  name?: string;
+  avatar_url?: string;
+  [key: string]: unknown;
+}
+```
+
+**Already applied and dry-run verified:** the CTO made this one-line
+addition directly in the in-progress worktree and confirmed `npx tsc
+--noEmit` → 0 errors with no other changes. It is a labeled CTO spec-bug
+correction; it lands inside this patch's single atomic commit.
+
+**Census hardened (this patch and all future type-swap patches):** the
+pre-edit census gains a full-chain enumeration —
+```bash
+grep -oE "user_metadata(\?)?\.[a-zA-Z_]+" <file> | sort -u
+```
+and the bound type MUST declare every field that appears. Complete result
+for this patch: CanvasModals — `full_name`, `name`, `avatar_url`;
+OverlayLayer — none.
+
+**Resume instructions (GPT-5.4):**
+1. Keep the worktree exactly as it is (your component edits + the corrected
+   type file).
+2. Resume verification from `npx tsc --noEmit` (now 0) and continue the
+   spec's verification list in order.
+3. Everything else unchanged, including the `## Commit` message and the
+   "exactly 4 changed lines across the two components" criterion (the type
+   file is a create, not a component change — the criterion still holds).
+4. Report "Amendment 1 applied, CTO-authorized" in Decisions made.

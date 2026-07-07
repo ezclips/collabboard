@@ -68,7 +68,7 @@ Grandfather trajectory 17 → 10:
 
 | Patch | Target | Pattern | Shrink |
 |---|---|---|---|
-| 010 | CanvasModals + OverlayLayer | type-only `AuthUser` swap (new) | 17→15 |
+| 010 | CanvasModals + OverlayLayer | type-only `AuthUser` swap (new) | 17→15 — **Amendment 1** (census missed `user_metadata.name`; type extended, CTO dry-ran fix, tsc 0; resume from tsc) |
 | 011 | ProtectedRoute | F: auth-state observer (new; adds `authState.ts` helper incl. signOut) | 15→14 |
 | 012 | Navbar | F repetition (session-state mapping, census-gated) | 14→13 |
 | 013 | app/page.tsx (landing) | F repetition (+ first signOut consumer; event branches preserved) | 13→12 |
@@ -168,6 +168,11 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-07** — PATCH-010 blocked correctly by GPT-5.4 at tsc (Risks
+  section prediction exact): AuthUserMetadata lacked `name` (line-350 access
+  missed by one-segment census grep). Amendment 1: field added, CTO dry-ran
+  in worktree (tsc 0), full-chain census rule added. Engineer resumes from
+  tsc; atomic commit unchanged.
 - **2026-07-07** — PATCH-009 DONE (42e593f), CTO review PASSED — **batch
   005–009 COMPLETE: grandfather 23→17**, unit 21→38, e2e nets 8→13. Pattern E
   (composite, two repositories) validated on GPT-5.4; Amendment 1 honored
