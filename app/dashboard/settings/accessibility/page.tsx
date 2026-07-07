@@ -1,19 +1,18 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+import React, { useMemo, useState, useEffect } from 'react';
 import { Loader2, ChevronDown } from 'lucide-react';
-import { toast } from 'sonner';
-
-interface AccessibilitySettings {
-    keyboardShortcuts: boolean;
-    autoDismissMessages: boolean;
-    highContrastMode: 'system' | 'on' | 'off';
-    reducedMotion: 'system' | 'on' | 'off';
-}
+import type { AccessibilitySettings } from '@/lib/domain/settings/accessibility';
+import { createSaveAccessibilityCommand } from '@/lib/domain/settings/accessibility';
+import { getCurrentUserId } from '@/lib/infra/supabase/currentUser';
+import { createAccessibilitySettingsRepository } from '@/lib/infra/settings/accessibilityRepository';
 
 export default function AccessibilityPage() {
-    const supabase = createClientComponentClient();
+    const repository = useMemo(() => createAccessibilitySettingsRepository(), []);
+    const saveAccessibility = useMemo(
+        () => createSaveAccessibilityCommand(repository),
+        [repository]
+    );
     const [loading, setLoading] = useState(true);
     const [settings, setSettings] = useState<AccessibilitySettings>({
         keyboardShortcuts: true,
@@ -29,22 +28,16 @@ export default function AccessibilityPage() {
     const loadSettings = async () => {
         try {
             setLoading(true);
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) return;
+            const userIdResult = await getCurrentUserId();
+            if (!userIdResult.ok) {
+                console.error('Error loading settings:', userIdResult.error);
+                return;
+            }
+            if (!userIdResult.value) return;
 
-            // Try to load accessibility settings
-            try {
-                const { data } = await supabase
-                    .from('accessibility_settings')
-                    .select('*')
-                    .eq('user_id', user.id)
-                    .single();
-
-                if (data?.settings) {
-                    setSettings(data.settings);
-                }
-            } catch {
-                // Use defaults
+            const settingsResult = await repository.load(userIdResult.value);
+            if (settingsResult.ok && settingsResult.value) {
+                setSettings(settingsResult.value);
             }
         } catch (err) {
             console.error('Error loading settings:', err);
@@ -61,16 +54,14 @@ export default function AccessibilityPage() {
         setSettings(newSettings);
 
         try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) return;
+            const userIdResult = await getCurrentUserId();
+            if (!userIdResult.ok || !userIdResult.value) {
+                if (!userIdResult.ok) console.warn('Could not save accessibility settings');
+                return;
+            }
 
-            await supabase
-                .from('accessibility_settings')
-                .upsert({
-                    user_id: user.id,
-                    settings: newSettings,
-                    updated_at: new Date().toISOString()
-                });
+            const result = await saveAccessibility(newSettings, { userId: userIdResult.value });
+            if (!result.ok) console.warn('Could not save accessibility settings');
         } catch {
             console.warn('Could not save accessibility settings');
         }
