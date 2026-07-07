@@ -57,7 +57,7 @@ trajectory 23 → 17:
 | Patch | Target | Shape | Shrink |
 |---|---|---|---|
 | 005 | notifications page | purest 004 clone (`maybeSingle` variant) | 23→22 ✅ **DONE** (06e40b4, review PASSED; e2e net race fixed in 8636bd1) |
-| 006 | ai + preferences pages | dead Supabase client removal (verified unused) | 22→20 |
+| 006 | ai + preferences pages | dead Supabase client removal (verified unused) | 22→20 ✅ **DONE** (b813ce9, review PASSED; blank-line residue cleaned 61d54dc; executed by Gemini 3.1 Pro) |
 | 007 | logs page | auth-only; adds shared `getCurrentUser` (id+email) helper | 20→19 |
 | 008 | achievements page | read-only repository variant (no command) | 19→18 |
 | 009 | dashboard page | two repositories + joined read; **depends on 007** | 18→17 |
@@ -149,6 +149,7 @@ branch after a short soak (see CHANGELOG_ARCHITECTURE.md 2026-07-07).
 | Surviving canvas system | CTO | Phase 1 | Needs feature diff first |
 | Raise Supabase sign-in limit 30→100/5min (dev convenience + school-NAT headroom) | User | Anytime (dashboard, 1 min) | Auth → Rate Limits |
 | Configure custom SMTP (email limit is 2/h on built-in) | User | Before ANY beta/invites | Breaks signup/reset/invites beyond 2 users/h |
+| Formalize Gemini 3.1 Pro in the AI_WORKFLOW roster? | User | Before its next assignment | Executed 006 cleanly (substance) with craft deviations; CTO fine with it on trivial/easy pattern patches |
 
 **Resolved decisions:** remote repository — DONE 2026-07-07 (private
 `github.com/ezclips/collabboard`, `origin/main` in sync); branch question —
@@ -165,6 +166,12 @@ resolved by the push, default is `main` (was `master`).
 
 ## Log
 
+- **2026-07-07** — PATCH-006 DONE (b813ce9), CTO review PASSED — dead clients
+  verified gone at SOURCE level (parent: 2 refs/page; HEAD: 0). Grandfather
+  22→20. Executed by Gemini 3.1 Pro (new implementer, owner-assigned): craft
+  deviations only (blank-line residue instead of deletions — cleaned in
+  labeled fix 61d54dc; non-conventional commit message). Full e2e 10/10.
+  Roster question raised: formalize Gemini's role in AI_WORKFLOW?
 - **2026-07-07** — PATCH-005 DONE (06e40b4), CTO review PASSED — first GPT-5.4
   extraction, pattern-compliant on both spec traps. Grandfather 23→22, unit
   tests 14→21. Review surfaced a race in PATCH-004's accessibility spec

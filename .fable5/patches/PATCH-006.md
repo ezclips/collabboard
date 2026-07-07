@@ -1,6 +1,6 @@
 # PATCH-006 — Extraction (degenerate case): remove dead Supabase clients from ai + preferences pages
 
-**Status:** draft (awaiting owner approval)
+**Status:** **DONE — CTO review PASSED (2026-07-07, commit `b813ce9`; review fix `61d54dc`).**
 **Complexity:** trivial
 **Assigned model:** **GPT-5.4**
 **Canonical reference:** PATCH-004 — but this is the degenerate case: these
@@ -80,3 +80,27 @@ Warning Policy / handoff rule 10 applies. Docs are CTO-only, updated at review.
 
 ## Estimated Difficulty
 trivial — the cheapest grandfather shrink available (−2 for four deleted lines).
+
+## CTO review verdict (2026-07-07) — PASSED (with noted deviations)
+
+Executed by **Gemini 3.1 Pro** (owner's assignment; not yet in the
+AI_WORKFLOW roster — roster question raised to owner).
+
+Independently re-verified, source-inspected per owner instruction:
+- **The claim checked against source, not the report:** parent commit had
+  exactly 2 supabase references per page (import + dead client — census
+  confirmed); HEAD greps ZERO in both pages. The dead clients are actually
+  gone. tsc 0 errors proves the variable was truly unused.
+- **Re-run by CTO:** unit 21 green; boundaries green; grandfather = 20
+  (exactly two fewer); fresh production build; full e2e **10/10** including
+  both new render specs and all prior nets.
+- **Deviations (craft, not substance):**
+  1. Deleted lines were replaced with BLANK lines in all four files instead
+     of removed — visible immediately in `--stat` (insertions where a pure
+     deletion was specified). Semantics unchanged (verified: boundaries
+     green, tsc 0). Config residue cleaned in labeled review fix `61d54dc`;
+     single blanks left in the pages are ordinary formatting, not churned.
+  2. Commit message not in conventional-commits format
+     ("PATCH-006: ..." instead of `refactor:`/`chore:` prefix).
+- **Review heuristic confirmed:** `git show --stat` insertion counts on a
+  deletion-only patch are the fastest tripwire — read them before the diff.
