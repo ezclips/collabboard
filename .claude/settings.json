@@ -36,7 +36,8 @@
       "Bash(powershell -Command \"\\(Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue | Measure-Object\\).Count\")",
       "Bash(npm start *)",
       "PowerShell($pids = Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique; if \\($pids\\) { $pids | ForEach-Object { Stop-Process -Id $_ -Force -Confirm:$false } }; Start-Sleep -Seconds 2; Remove-Item -Recurse -Force .next -ErrorAction SilentlyContinue; \\(Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue | Measure-Object\\).Count)",
-      "Bash(python -)"
+      "Bash(python -)",
+      "Bash(git -c core.safecrlf=false add .fable5/patches/PATCH-006.md)"
     ]
   }
 }
