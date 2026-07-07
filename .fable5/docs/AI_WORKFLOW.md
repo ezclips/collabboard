@@ -30,7 +30,9 @@ it escalates up, never sideways.
 
 ### GPT-5.4 (Codex) — Implementation Engineer
 - Takes patches marked **trivial/easy/medium** with exact specifications.
-- **Extraction patches:** `PATCH-004` (commit `5278468`) is the canonical
+- **Extraction patches:** read `PATCH_REFERENCE.md` FIRST — it classifies
+  the extraction patterns (A–E) and tells you which one your patch instance
+  is before you read it. `PATCH-004` (commit `5278468`) is the canonical
   reference implementation for moving a page off direct Supabase onto the
   domain/infra seam — domain type+schema+repository interface+command, infra
   repository with injected narrow client + factory, DI command factory,
@@ -119,5 +121,7 @@ product/spend/legal question → owner
 1. `.fable5/CLAUDE.md` (rules index)
 2. `.fable5/docs/CURRENT_TASK.md` (state)
 3. Your patch file (engineers) / `CTO_GUIDELINES.md` (CTO)
+   — for extraction patches, `.fable5/docs/PATCH_REFERENCE.md` BEFORE the
+   patch file (pattern classification)
 4. `.fable5/docs/SKILL.md` (engineers, mandatory before first edit)
 5. `.fable5/docs/LESSONS_LEARNED.md` (skim the Reusable rule lines)

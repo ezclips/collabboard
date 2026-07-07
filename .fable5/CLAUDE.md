@@ -18,7 +18,7 @@ You are working on **Fable 5**, a visual collaboration platform (Padlet-class UX
 | Design | [UI_GUIDELINES](docs/UI_GUIDELINES.md) · [DESIGN_SYSTEM](docs/DESIGN_SYSTEM.md) · [ACCESSIBILITY](docs/ACCESSIBILITY.md) |
 | Quality | [PERFORMANCE](docs/PERFORMANCE.md) · [SECURITY](docs/SECURITY.md) · [TESTING](docs/TESTING.md) |
 | Execution | [ROADMAP](docs/ROADMAP.md) · [CURRENT_TASK](docs/CURRENT_TASK.md) · [CHANGELOG_ARCHITECTURE](docs/CHANGELOG_ARCHITECTURE.md) |
-| Governance | [SKILL](docs/SKILL.md) (how implementation models work here) · [CTO_PLAYBOOK](docs/CTO_PLAYBOOK.md) (how to THINK like the CTO — succession doc) · [CTO_GUIDELINES](docs/CTO_GUIDELINES.md) (session procedures) · [AI_WORKFLOW](docs/AI_WORKFLOW.md) (roles: Fable 5 CTO / GPT-5.5 senior / GPT-5.4 implementer) · [patches/](patches/) (numbered work units) · [CODER_HANDOFF_TEMPLATE](docs/CODER_HANDOFF_TEMPLATE.md) (paste for every delegation) |
+| Governance | [PATCH_REFERENCE](docs/PATCH_REFERENCE.md) (extraction-pattern catalog — implementers read BEFORE their patch) · [SKILL](docs/SKILL.md) (how implementation models work here) · [CTO_PLAYBOOK](docs/CTO_PLAYBOOK.md) (how to THINK like the CTO — succession doc) · [CTO_GUIDELINES](docs/CTO_GUIDELINES.md) (session procedures) · [AI_WORKFLOW](docs/AI_WORKFLOW.md) (roles: Fable 5 CTO / GPT-5.5 senior / GPT-5.4 implementer) · [patches/](patches/) (numbered work units) · [CODER_HANDOFF_TEMPLATE](docs/CODER_HANDOFF_TEMPLATE.md) (paste for every delegation) |
 | Knowledge | [LESSONS_LEARNED](docs/LESSONS_LEARNED.md) (solved-problem records — read the Reusable rule lines) · `.claude/skills/extract-approach/SKILL.md` (how to record new ones) |
 
 ## Non-Negotiable Rules (enforced in review; full detail in the docs)
