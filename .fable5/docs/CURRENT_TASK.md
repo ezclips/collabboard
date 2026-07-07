@@ -49,8 +49,24 @@ realtime/cross-page pages still go to GPT-5.5. Note: owner must RESTART the
 dev server (CTO stopped it and cleaned `.next` during review — see
 LESSONS_LEARNED netstat-locale record).
 
-**Next:** PATCH-005 (next settings-page extraction, GPT-5.4) — NOT yet
-drafted; owner go needed.
+**Next: extraction batch PATCH-005 → 009 — DRAFTED (2026-07-07), awaiting
+owner approval.** All GPT-5.4, all bound to the PATCH-004 template, executed
+strictly in sequence (one at a time, CTO review between). Grandfather
+trajectory 23 → 17:
+
+| Patch | Target | Shape | Shrink |
+|---|---|---|---|
+| 005 | notifications page | purest 004 clone (`maybeSingle` variant) | 23→22 |
+| 006 | ai + preferences pages | dead Supabase client removal (verified unused) | 22→20 |
+| 007 | logs page | auth-only; adds shared `getCurrentUser` (id+email) helper | 20→19 |
+| 008 | achievements page | read-only repository variant (no command) | 19→18 |
+| 009 | dashboard page | two repositories + joined read; **depends on 007** | 18→17 |
+
+Deliberately EXCLUDED from this batch (not GPT-5.4 shape / security-sensitive;
+future patches with GPT-5.5 ± security review): password (auth.updateUser),
+delete-account (signOut + account deletion flow), integrations
+(getSession/refreshSession token semantics), profile + settings-root
+(storage uploads), members (1,817 lines, invitations/roles).
 
 **Prerequisite `PATCH-002.1`: DONE (2026-07-07, commit b5698b5) — CTO review
 PASSED.** react/react-dom 19.1.0 → 19.2.7; lockfile audit clean (3 expected
@@ -126,6 +142,13 @@ resolved by the push, default is `main` (was `master`).
 
 ## Log
 
+- **2026-07-07** — Extraction batch PATCH-005…009 drafted from a fresh census
+  of all 12 grandfathered settings pages (sizes, tables, exact supabase API
+  usage per page). Sequenced: template validation → free wins → helper
+  introduction → read-only variant → composite page. Notable census finds:
+  ai + preferences import Supabase but never use it (dead client); logs
+  renders mock data and only needs the user's email; achievements is
+  read-only with a pre-existing stale-state belt bug (preserved, queued).
 - **2026-07-07** — PATCH-004 Amendment 2: flat "no build" contradicted
   `verify`; guard restored to conditional form, build sequenced after dev
   server stops. Verify gate NOT weakened. Lesson: never restate a
