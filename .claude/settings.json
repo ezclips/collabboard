@@ -29,7 +29,8 @@
       "Bash(powershell -Command \"Get-Process -Id 14244 | Select-Object Id,ProcessName,MainWindowTitle,StartTime\")",
       "Bash(npx next:*)",
       "Bash(npx tsc *)",
-      "Bash(node -e ' *)"
+      "Bash(node -e ' *)",
+      "Bash(git fetch *)"
     ]
   }
 }
