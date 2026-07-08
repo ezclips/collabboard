@@ -322,7 +322,24 @@ step (the 66-entry calibration gated higher scores on the monolith visibly
 shrinking; the grandfather list halving is periphery, CanvasClient is
 untouched). Ops 12, product 12, continuity 10 — telemetry remains the
 binding constraint on ops and on any further total movement. Axis snapshot
-at 70: safety 18, ops 12, architecture 18, product 12, continuity 10.)
+at 70: safety 18, ops 12, architecture 18, product 12, continuity 10.) →
+**72** (2026-07-09: catch-up entry covering PATCH-016 and PATCH-017, both
+landed and reviewed since the 70 entry. PATCH-016: orphan deletion
+(grandfather 10→9) — zero architecture credit, deliberately: deleting
+unreachable code is hygiene, not a seam consumed, and the patch file says
+so explicitly (the alternative was building two seams for code nothing
+mounts). PATCH-017: grandfather 9→8, first CLIENT-side storage seam
+(Pattern H into the catalog §5.8) consumed by a real command with
+preserved write-order/partial-failure semantics; +1 architecture 18→19. This patch's review also demonstrated the amendment
+process working as designed on a Fable-authored spec, not just an
+implementer's: the CTO's own characterization was wrong (happy-path
+assumption never checked against the e2e account's actual — cookie-only —
+session state), caught by GPT-5.4's correct stop, fixed by reproduction
+before any spec change, zero behavior drift. +1 safety 18→19 — self-caught
+spec defect, resolved with evidence, zero cost to the implementation
+(no code was ever wrong; only the test was). Ops 12, product 12, continuity
+10 unchanged. Axis snapshot at 72: safety 19, ops 12, architecture 19,
+product 12, continuity 10.)
 
 ## 13. The succession test
 

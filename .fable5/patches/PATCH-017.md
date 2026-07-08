@@ -1,10 +1,11 @@
 # PATCH-017 — Extraction: settings-root (workspace settings) + the storage seam (Pattern H)
 
-**Status:** draft (awaiting owner approval — second patch of batch 016–019) —
+**Status:** DONE (2026-07-08, commit `ff84152`) — CTO review PASSED.
 **Amendment 1 issued: characterization rebound to the e2e account's reachable
 state (cookie-only session → the page's localStorage token guard fails
 first); the "non-empty name" and banner⇄Save assertions were CTO spec
-defects.**
+defects.** No deviations beyond the two pre-accepted ones (DomainError
+wraps thrown storage/write errors; console-only difference).
 **Complexity:** medium (three new seam files + one command, but every decision
 is pre-made below)
 **Assigned model:** **GPT-5.4**

@@ -130,7 +130,7 @@ Grandfather trajectory 17 → 10:
 | Patch | Target | Shape | Shrink | Model | Spec status |
 |---|---|---|---|---|---|
 | 016 | AddPadletMenu | orphan deletion, census-gated | 10→9 | GPT-5.4 | ✅ **DONE** (0a2d372, review PASSED) |
-| 017 | settings-root | Pattern H intro (storage gateway, verbatim-bound) + workspace-settings repos + `settings.saveWorkspace` command | 9→8 | GPT-5.4 | **READY — `patches/PATCH-017.md`** (census dry-run-verified; note: page has its OWN narrower token-scavenger — frozen byte-identical in the patch, outputs passed as arguments; 023 flag updated) |
+| 017 | settings-root | Pattern H intro (storage gateway, verbatim-bound) + workspace-settings repos + `settings.saveWorkspace` command | 9→8 | GPT-5.4 | ✅ **DONE** (ff84152, review PASSED; Amendment 1 held; Pattern H in catalog §5.8) |
 | 018 | profile | H repetition + profiles repo + scavenger centralized (behavior preserved) | 8→7 | GPT-5.4 | Fable to author (by 07-12) |
 | 019 | integrations | scavenger helper reuse + getSession/refreshSession mapping | 7→6 | GPT-5.4 | Fable to author (by 07-12) |
 
@@ -272,6 +272,29 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-09** — PATCH-017 DONE (ff84152), CTO review PASSED. Diff (with
+  `--ignore-space-at-eol`) touches exactly the bound regions: import block,
+  useMemo wiring, the three replaced call-site blocks in
+  `loadSettings`/`saveSettings`/`uploadLogoFile`; scavenger + atob + API
+  fetch lines byte-identical (re-verified: `getAccessToken`/`atob` count
+  still 6). `settings.saveWorkspace` command, both repositories, and the
+  storage gateway all match their verbatim bindings exactly — insert/update
+  payload keys byte-for-byte against the old page, `maybeSingle` no-row
+  path returns `ok(null)` with no PGRST116 branch (correct — no `.single()`
+  here), write order and partial-failure semantics preserved (unit test
+  explicitly asserts `workspacesRepository` NOT called when the settings
+  write fails). Unit 43→60 (17 new across the 4 required files, all listed
+  by name — exceeds the ≥14 bound). tsc 0; boundaries green; grandfather
+  line removed exactly, re-counted at 8; `grep -c "@supabase"` on the page
+  prints 0. E2e spec matches the Amendment 1 flow exactly (failure-path
+  state, mutation-free — no Save click, no logo modal, no upload); full
+  suite 20/20 against a live dev server; final `npm run verify` (typecheck +
+  boundaries + unit + production build) green with the server stopped and
+  `.next` cleared first. No deviations beyond the two pre-accepted ones
+  (DomainError wraps thrown errors; console-only). Pattern H entered
+  PATCH_REFERENCE §5.8 + §7 row. Health 70→72 (CTO_PLAYBOOK §12 catch-up
+  entry, covers PATCH-016 + PATCH-017 together — 016 was never logged).
+  Next: PATCH-018 (profile) — not drafted, per instruction.
 - **2026-07-09** — PATCH-017 Amendment 1: GPT-5.4 blocked correctly (no
   code, clean tree) — the spec's characterization asserted a non-empty
   workspace-name input; observed value is `""`. CTO reproduced with the e2e

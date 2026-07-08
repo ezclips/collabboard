@@ -344,6 +344,51 @@ spec that needs no credentials (ENOENT on CI — caught at PATCH-015 review).
 
 ---
 
+## 5.8. Pattern H — browser storage gateway
+
+**Reference:** PATCH-017 (`app/dashboard/settings/page.tsx`; introduces
+`lib/infra/supabase/storage.ts`).
+
+**When:** a CLIENT component calls `supabase.storage.from(bucket).upload(...)`
+and/or `.getPublicUrl(...)` directly, for user-facing file/image uploads
+(avatars, logos, attachments).
+
+**When NOT:** server-side storage access (escalate — Pattern G's server
+client, not this); anything beyond `upload`/`getPublicUrl` (`remove`,
+`list`, `download`, signed URLs) — the gateway interface only covers what
+the extracted page actually calls; widen it deliberately per-patch, never
+speculatively.
+
+**Required pieces:** `lib/infra/supabase/storage.ts` — `StorageGateway`
+interface (`upload(bucket, path, file, options) → Result<void>`,
+`getPublicUrl(bucket, path) → string`, both bucket-PARAMETERIZED, never
+bucket-hardcoded, so every page consumer supplies its own bucket name),
+`SupabaseStorageGateway` class wrapping the real client, `createStorageGateway()`
+factory bound to `createBrowserSupabaseClient`. The file is FROZEN for
+repetition patches once reviewed — if a page needs a method the gateway
+doesn't have, that page's patch extends the gateway explicitly and the
+extension is reviewed, not silently widened.
+
+**Error mapping:** `upload` maps a returned Supabase error AND a thrown
+exception to the SAME `domainError('unavailable', ...)` shape (real object
+storage clients can throw on network failure, not just return `{ error }}`);
+`getPublicUrl` is synchronous and cannot fail upstream — no Result wrapper.
+
+**Census gate:** count `.storage\b` and `.from('<bucket>')` occurrences by
+LINE NUMBER, not by client-variable name — real call sites are commonly
+multi-line (`await supabase.storage` on one line, `.from(...)` on the
+next), so a single-line grep pattern silently misses them (PATCH-017: the
+original census used one regex per call and had to be corrected to
+line-anchored `grep -nE` before delegation).
+
+**Common mistakes:** hardcoding the bucket name in the gateway (couples it
+to one page — parameterize instead); forgetting a page may have ITS OWN
+distinct auth-token scavenger even when the census note calls it "just a
+storage extraction" (PATCH-017: discovered mid-authoring, frozen
+byte-identical, tracked as a security-flag addendum, not fixed in-patch).
+
+---
+
 ## 6. Universal requirements (every pattern, every patch)
 
 **Phase order is mandatory:** e2e characterization spec written and GREEN
@@ -360,6 +405,17 @@ of the two (ENOENT on CI — PATCH-015 review). Clean up data they create.
 Local full-suite runs are capped at 2 workers in `playwright.config.ts`
 (dev-server contention rotates random 30s timeouts at higher counts —
 PATCH-015 review); do not "speed them up" with `--workers`.
+
+**Characterize the reachable state, not the happy path (added at PATCH-017
+review):** before binding ANY e2e assertion, drive the real OLD page once
+with the real e2e credentials/storage state and assert what you OBSERVE —
+a fallback chain or success branch in the source guarantees nothing about
+the state a given test account actually reaches (PATCH-017: the spec
+assumed a non-empty workspace name "for any account"; the e2e session is
+cookie-only while the page's token guard reads localStorage, so it
+deterministically hit the FIRST early-return instead). The dry-run
+obligation (§0, PATCH-012 Amendment 1a) covers this too — it is not just
+for census/proof commands.
 
 **Async-save barrier (added at PATCH-005 review):** these pages save
 fire-and-forget; reloading immediately aborts the in-flight POST and the
@@ -431,6 +487,8 @@ it, STOP — never adapt.
 | 013 | app/page.tsx (landing) | F repetition (+ first `signOutCurrentUser` consumer) | 13→12 ✅ done |
 | 014 | settings/delete-account | C (+ `signOutCurrentUser`) | 12→11 ✅ done |
 | 015 | share/[token] (server page) | G — server-page read (introduces `serverClient.ts`) | 11→10 ✅ done |
+| 016 | AddPadletMenu | orphan deletion (census-gated) | 10→9 ✅ done |
+| 017 | settings-root | A/E composition + H — storage gateway (introduces `storage.ts`) | 9→8 ✅ done |
 
 **New patterns discovered by future patches get added here by the CTO at
 review — this catalog only ever contains patterns with a reviewed reference
