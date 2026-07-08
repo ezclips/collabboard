@@ -168,6 +168,20 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-08** — PATCH-014 blocked correctly by GPT-5.4 (no code changed,
+  census matched): the spec's e2e required asserting the wrong-confirmation
+  error toast, but the destructive button is `disabled` unless the text is
+  exactly `DELETE` — the toast guard is UI-unreachable dead code in the
+  handler. CTO verified against source (page.tsx line 166 vs. lines 43–46).
+  Amendment 1: characterize the reachable behavior instead (wrong text →
+  button stays disabled; verify step now REQUIRED, exercising the exact
+  getUser call the patch swaps — strictly stronger than the original);
+  making the error path reachable REJECTED as a behavior change (same
+  standing rule as PATCH-012 Option 3); guard stays byte-untouched as
+  defense-in-depth. Safety rules tightened: never click the destructive
+  button at any point, even disabled. Lesson recurrence recorded: assertions
+  must be traced to user-reachable triggers, not just found in handler
+  source. Resume with the amended spec; bindings unchanged.
 - **2026-07-08** — PATCH-013 DONE (7c290f2), CTO review PASSED. Landing
   page (`app/page.tsx`) moved onto `authState.ts` helpers — Pattern F
   repetition #2 plus the first `signOutCurrentUser` consumer. All three

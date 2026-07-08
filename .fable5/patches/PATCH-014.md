@@ -1,6 +1,6 @@
 # PATCH-014 — Extraction: delete-account page (auth-only swap)
 
-**Status:** draft (awaiting owner approval — execute after 011)
+**Status:** draft (awaiting owner approval — execute after 011) — **Amendment 1 issued: e2e wrong-confirmation assertion corrected to the reachable behavior**
 **Complexity:** easy (Pattern C + one `signOutCurrentUser` call)
 **Assigned model:** **GPT-5.4**
 **Pattern:** C — auth-only swap (reference: PATCH-007), plus the sign-out
@@ -53,15 +53,51 @@ grep -oE "\buser(\?)?\.[a-zA-Z_]+" app/dashboard/settings/delete-account/page.ts
 # report it — getCurrentUser provides id+email; anything MORE means STOP.
 ```
 
+## Amendment 1 (2026-07-08) — the wrong-confirmation error toast is UNREACHABLE through the UI · CTO decision
+
+**Blockage (GPT-5.4, correct stop):** the original e2e spec required typing
+a wrong confirmation ("NOPE") and asserting the error toast. But the
+destructive button is `disabled={deleting || deleteConfirmText !== 'DELETE'}`
+(page.tsx line 166 pre-edit), so a wrong confirmation can never be
+SUBMITTED — the `toast.error('Please type DELETE to confirm')` guard in
+`handleDeleteAccount` (lines 43–46) is a handler-level dead branch through
+the UI. **CTO-verified against the source (2026-07-08).**
+
+**Root cause (CTO spec defect):** the e2e requirement was written from the
+HANDLER code without tracing the asserted behavior to a reachable UI
+trigger. Same defect family as PATCH-012 Amendment 1 (import chain not
+traced to a mounted root) — an asserted behavior must be traced to a
+reachable trigger, not just found in the source.
+
+**Decision: characterize the reachable behavior.** Making the error path
+reachable (e.g. enabling the button and relying on the handler guard) is a
+product/behavior change and is REJECTED for the same standing reason as
+PATCH-012's Option-3 rejection: behavior changes never ride an extraction
+patch. The handler guard itself stays byte-untouched (Bindings already say
+the confirmation-text logic is UNTOUCHED — it is legitimate defense-in-depth
+even if the UI can't reach it today). Note the corrected spec is STRONGER
+than the original where it counts: the verify step it now requires exercises
+the exact `getUser` call this patch swaps, which the original spec never
+covered.
+
 ## Files to Create
 - `e2e/characterization/delete-account-page.spec.ts` — Phase A first, and
-  **read-only by design**: login → open the page → assert the warning copy
-  and the confirmation input render → type a WRONG confirmation ("NOPE") →
-  assert the error toast/message → assert the account still works (navigate
-  to `/dashboard`, it loads). **NEVER type DELETE, never submit a valid
-  confirmation — this page destroys the test account.** The spec must not
-  exercise the success path; the sign-out swap is covered by review + the
-  unchanged code path shape.
+  **read-only by design**. **[Amendment 1] Corrected flow:**
+  login → open the page → assert the warning copy renders → click the
+  verify step ("Log in") → assert the "Identity verified" toast and the
+  "Verified" state appear (this exercises the identity guard — the exact
+  call this patch swaps) → click "Delete my account" → assert the
+  irreversible-action panel and the confirmation input render → assert the
+  "Permanently delete account" button is DISABLED while the input is empty →
+  type a WRONG confirmation ("NOPE") → assert the button is STILL disabled
+  (this replaces the original error-toast assertion — that toast is
+  unreachable through the UI; do NOT assert it) → click "Cancel" → assert
+  the confirmation panel closes → navigate to `/dashboard` and assert it
+  loads. **NEVER type DELETE, never submit a valid confirmation — this page
+  destroys the test account. Never click "Permanently delete account" at any
+  point, not even while it is disabled.** The spec must not exercise the
+  success path; the sign-out swap is covered by review + the unchanged code
+  path shape.
 
 ## Files to Modify
 - `app/dashboard/settings/delete-account/page.tsx`
@@ -91,7 +127,10 @@ Single `git revert`.
 ## Acceptance Criteria
 - [ ] Pre-edit census pasted and matches
 - [ ] New e2e spec green against OLD page first, then NEW (pasted) — and it
-      contains NO valid-confirmation submission (reviewer will check)
+      contains NO valid-confirmation submission and NO click on the
+      destructive button, and does NOT assert the (UI-unreachable)
+      wrong-confirmation error toast (reviewer will check all three)
+      **[Amendment 1]**
 - [ ] `npm run test:unit` green (count unchanged — state it)
 - [ ] `npx tsc --noEmit` 0 errors
 - [ ] `npm run check:boundaries` green with the entry removed
