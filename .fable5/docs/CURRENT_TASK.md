@@ -130,7 +130,7 @@ Grandfather trajectory 17 → 10:
 | Patch | Target | Shape | Shrink | Model | Spec status |
 |---|---|---|---|---|---|
 | 016 | AddPadletMenu | orphan deletion, census-gated | 10→9 | GPT-5.4 | ✅ **DONE** (0a2d372, review PASSED) |
-| 017 | settings-root | Pattern H intro (avatars storage helper, verbatim-bound) + workspace-settings repos | 9→8 | GPT-5.4 | Fable to author (by 07-12) |
+| 017 | settings-root | Pattern H intro (storage gateway, verbatim-bound) + workspace-settings repos + `settings.saveWorkspace` command | 9→8 | GPT-5.4 | **READY — `patches/PATCH-017.md`** (census dry-run-verified; note: page has its OWN narrower token-scavenger — frozen byte-identical in the patch, outputs passed as arguments; 023 flag updated) |
 | 018 | profile | H repetition + profiles repo + scavenger centralized (behavior preserved) | 8→7 | GPT-5.4 | Fable to author (by 07-12) |
 | 019 | integrations | scavenger helper reuse + getSession/refreshSession mapping | 7→6 | GPT-5.4 | Fable to author (by 07-12) |
 
@@ -164,6 +164,11 @@ CTO_PLAYBOOK §12/§14.
 scan all of localStorage for access tokens and hand-decode JWTs
 (`getAccessTokenFromStorage`/`findAccessTokenDeep`, duplicated in both
 files). Extraction preserves it (centralized + audited); 023 removes it.
+**Addendum (PATCH-017 authoring):** settings-root has a THIRD, narrower
+variant (`getAccessToken`, keys filtered by 'auth-token', + 2 manual atob
+JWT decodes for userId). PATCH-017 freezes it byte-identical in the page
+(seam calls take its outputs as arguments); 023's inventory is now three
+pages, three scavenger variants.
 
 Dependencies: 011←010; 012/013/014←011; 015 independent (runs last for
 novelty, not dependency). New patterns (type-swap, F, G) enter
