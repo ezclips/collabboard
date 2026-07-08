@@ -12,6 +12,12 @@ export default defineConfig({
   testDir: './e2e',
   timeout: 30_000,
   fullyParallel: true,
+  // Local runs share one machine with the dev server; at default worker
+  // counts (6 on this box) navigations stall under contention and random
+  // specs blow the fixed 30s budget (diagnosed at PATCH-015 review: full
+  // suite green 19/19 at 2 workers, rotating failures at 6). CI keeps
+  // Playwright's default (runners are 2-core; retries cover the rest).
+  workers: process.env.CI ? undefined : 2,
   retries: process.env.CI ? 2 : 0,
   reporter: process.env.CI ? 'github' : 'list',
   use: {
