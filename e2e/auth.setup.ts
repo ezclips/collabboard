@@ -8,16 +8,20 @@ setup('authenticate', async ({ page }) => {
   setup.skip(!hasE2ECredentials, 'E2E_EMAIL / E2E_PASSWORD not set (see .env.e2e.example)');
 
   // One retry: on dev servers the form can be visible before React handlers
-  // attach, making the first submit a no-op (observed 2026-07-07).
+  // attach, or controls can still be settling when the first fill runs
+  // (observed 2026-07-07 and 2026-07-08).
   for (let attempt = 1; attempt <= 2; attempt++) {
-    await page.goto('/auth', { waitUntil: 'domcontentloaded' });
-    const signIn = page.getByRole('button', { name: /^Sign In$/i });
-    await signIn.waitFor({ state: 'visible', timeout: 30_000 });
-    await page.waitForTimeout(1500); // hydration settle
-    await page.fill('input[name="email"]', E2E_EMAIL);
-    await page.fill('input[name="password"]', E2E_PASSWORD);
-    await signIn.click();
     try {
+      await page.goto('/auth', { waitUntil: 'domcontentloaded' });
+      const signIn = page.getByRole('button', { name: /^Sign In$/i });
+      const emailInput = page.locator('input[name="email"]');
+      const passwordInput = page.locator('input[name="password"]');
+
+      await signIn.waitFor({ state: 'visible', timeout: 30_000 });
+      await page.waitForTimeout(1500); // hydration settle
+      await emailInput.fill(E2E_EMAIL);
+      await passwordInput.fill(E2E_PASSWORD);
+      await signIn.click();
       await page.waitForURL('**/dashboard**', { timeout: 45_000 });
       break;
     } catch (error) {
