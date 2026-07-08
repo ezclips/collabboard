@@ -1,9 +1,13 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Image as ImageIcon, Loader2, Pencil, X } from 'lucide-react';
 import { toast } from 'sonner';
+import { asUserId } from '@/lib/domain/core/ids';
+import { createSaveWorkspaceSettingsCommand } from '@/lib/domain/settings/workspace';
+import { createWorkspaceSettingsRepository } from '@/lib/infra/settings/workspaceSettingsRepository';
+import { createWorkspacesRepository } from '@/lib/infra/workspaces/workspacesRepository';
+import { createStorageGateway } from '@/lib/infra/supabase/storage';
 
 interface WorkspaceData {
     workspaceId: string;
@@ -14,8 +18,14 @@ interface WorkspaceData {
 }
 
 export default function SettingsPage() {
-    const supabase = createClientComponentClient();
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const workspaceSettingsRepository = useMemo(() => createWorkspaceSettingsRepository(), []);
+    const workspacesRepository = useMemo(() => createWorkspacesRepository(), []);
+    const storageGateway = useMemo(() => createStorageGateway(), []);
+    const saveWorkspaceSettings = useMemo(
+        () => createSaveWorkspaceSettingsCommand(workspaceSettingsRepository, workspacesRepository),
+        [workspaceSettingsRepository, workspacesRepository],
+    );
 
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
@@ -77,16 +87,15 @@ export default function SettingsPage() {
             }
 
             // Load workspace_settings row if it exists
-            const { data: settingsRow } = await supabase
-                .from('workspace_settings')
-                .select('id, workspace_name, workspace_logo')
-                .eq('workspace_id', workspaceId)
-                .maybeSingle();
+            const settingsResult = await workspaceSettingsRepository.findByWorkspaceId(workspaceId);
+            // PATCH-017: the legacy page destructured `data` and IGNORED read errors -
+            // an err here must behave exactly like "no row" (fall through to API values).
+            const settingsRow = settingsResult.ok ? settingsResult.value : null;
 
             const resolvedName: string =
-                settingsRow?.workspace_name || data.workspace_name || 'My Workspace';
+                settingsRow?.workspaceName || data.workspace_name || 'My Workspace';
             const resolvedLogo: string | null =
-                settingsRow?.workspace_logo || data.workspace_logo || null;
+                settingsRow?.workspaceLogo || data.workspace_logo || null;
 
             setWorkspace({
                 workspaceId,
@@ -115,32 +124,16 @@ export default function SettingsPage() {
             const userId: string = payload?.sub;
             if (!userId) throw new Error('Could not resolve user id');
 
-            const now = new Date().toISOString();
-
-            if (workspace.settingsRowId) {
-                const { error } = await supabase
-                    .from('workspace_settings')
-                    .update({ workspace_name: workspaceName, workspace_logo: logoUrl, updated_at: now })
-                    .eq('id', workspace.settingsRowId);
-                if (error) throw error;
-            } else {
-                const { error } = await supabase
-                    .from('workspace_settings')
-                    .insert({
-                        workspace_id: workspace.workspaceId,
-                        user_id: userId,
-                        workspace_name: workspaceName,
-                        workspace_logo: logoUrl,
-                        updated_at: now,
-                    });
-                if (error) throw error;
-            }
-
-            const { error: wsError } = await supabase
-                .from('workspaces')
-                .update({ name: workspaceName, logo_url: logoUrl, updated_at: now })
-                .eq('id', workspace.workspaceId);
-            if (wsError) throw wsError;
+            const result = await saveWorkspaceSettings(
+                {
+                    workspaceId: workspace.workspaceId,
+                    settingsRowId: workspace.settingsRowId,
+                    workspaceName,
+                    workspaceLogo: logoUrl,
+                },
+                { userId: asUserId(userId) },
+            );
+            if (!result.ok) throw result.error;
 
             toast.success('Settings saved successfully');
             await loadSettings();
@@ -175,14 +168,9 @@ export default function SettingsPage() {
             const fileExt = file.name.split('.').pop();
             const filePath = `logos/workspace_logo_${userId}_${Date.now()}.${fileExt}`;
 
-            const { error: uploadError } = await supabase.storage
-                .from('avatars')
-                .upload(filePath, file, { upsert: true });
-            if (uploadError) throw uploadError;
-
-            const { data: { publicUrl } } = supabase.storage
-                .from('avatars')
-                .getPublicUrl(filePath);
+            const uploadResult = await storageGateway.upload('avatars', filePath, file, { upsert: true });
+            if (!uploadResult.ok) throw uploadResult.error;
+            const publicUrl = storageGateway.getPublicUrl('avatars', filePath);
 
             setLogoUrl(publicUrl);
             toast.success('Logo uploaded successfully');
