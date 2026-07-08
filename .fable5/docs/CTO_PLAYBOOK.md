@@ -284,7 +284,26 @@ now covers a mounted high-traffic page, not just a route guard/orphaned
 component. Other axes unchanged: safety stays 16 because verify/e2e/CTO
 re-run all held but no new gate/mechanism was added; ops 12, product 12,
 continuity 10. Axis snapshot at 67: safety 16, ops 12, architecture 17,
-product 12, continuity 10.)
+product 12, continuity 10.) → **69** (2026-07-08: PATCH-014 landed and
+passed review — grandfather 12→11, second `signOutCurrentUser` consumer, and
+the first extraction to survive two independent, evidence-backed disputes
+without any behavior change: Amendment 1 (a wrong-confirmation error toast
+proven UI-unreachable through the source, characterization corrected to the
+reachable behavior) and Amendment 2 (the implementer's OLD-page dispute
+CTO-reproduced as a swallowed pre-hydration click, not weakened behavior).
+Review itself resolved a third false alarm cleanly: the reported full-suite
+failure (`settings-pages-render.spec.ts`, two pages PATCH-014 never touches)
+reproduced only on a freshly started dev server and vanished on a warm
+rerun — a Next dev on-demand-compile cold start, not a regression, confirmed
+by rerunning standalone then rerunning the full 18-test suite twice green.
++1 architecture 17→18 — another grandfather removed, `authState.ts` seam
+now proven on a destructive-adjacent page. +1 safety 16→17 — three
+consecutive real disputes resolved by reproduction/evidence with zero
+behavior drift and zero defect reaching `main`; the hydration-acknowledged-
+click idiom (PATCH_REFERENCE §6) is now validated green in a live spec, not
+just documented. Ops 12, product 12, continuity 10 unchanged — no new
+runbook or telemetry this patch. Axis snapshot at 69: safety 17, ops 12,
+architecture 18, product 12, continuity 10.)
 
 ## 13. The succession test
 

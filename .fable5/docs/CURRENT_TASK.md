@@ -72,7 +72,7 @@ Grandfather trajectory 17 → 10:
 | 011 | ProtectedRoute | F: auth-state observer (new; adds `authState.ts` helper incl. signOut) | 15→14 ✅ **DONE** (e56bc5a, review PASSED; Pattern F entered into catalog, verified) |
 | 012 | Navbar | F repetition (session-state mapping, census-gated) | 14→13 ✅ **DONE** (2a3ff44, review PASSED; Amendment 1a corrected proof re-verified by CTO before resume; orphaned-component scope held) |
 | 013 | app/page.tsx (landing) | F repetition (+ first signOut consumer; event branches preserved) | 13→12 ✅ **DONE** (7c290f2, review PASSED; subscription leak fixed — old code returned cleanup from async fn, new code hoists unsubscribe correctly) |
-| 014 | delete-account page | C (+ signOut); **exclusion reversed** — re-census proved deletion is server-side, client is a form + fetch; `app/api/**` hard-forbidden | 12→11 |
+| 014 | delete-account page | C (+ signOut); **exclusion reversed** — re-census proved deletion is server-side, client is a form + fetch; `app/api/**` hard-forbidden | 12→11 ✅ **DONE** (7726215, review PASSED; Amendments 1+2 both held, no behavior change; hydration-acknowledged verify click validated green) |
 | 015 | share/[token] (server page) | G: server-page read (new; adds `serverClient.ts` — first server seam) | 11→10 |
 
 Dependencies: 011←010; 012/013/014←011; 015 independent (runs last for
@@ -168,6 +168,36 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-08** — PATCH-014 DONE (7726215), CTO review PASSED. Diff
+  (ignoring the whole-file line-ending churn Codex's editor introduced)
+  matches Bindings exactly: two imports swapped for `getCurrentUser` +
+  `signOutCurrentUser`; identity guard mapped `!result.ok || result.value
+  === null` → the existing toast-and-redirect branch (fail-closed, one
+  branch, as required); post-deletion `signOut()` → `signOutCurrentUser()`,
+  result still ignored; both `@supabase` imports removed; zero JSX/rendering
+  changes. `eslint.boundaries.config.mjs` diff is exactly the one grandfather
+  line removed. Grandfather re-counted at 11 directly from the file (12→11).
+  Committed spec matches the Amendment 1+2 flow verbatim: warning copy →
+  acknowledged verify-step click (`toPass` retry anchored on the durable
+  "Verified" state, per Amendment 2) → "Identity verified" toast → open the
+  confirmation panel → destructive button disabled empty AND on wrong text
+  "NOPE" (Amendment 1, no error-toast assertion) → Cancel closes the panel →
+  `/dashboard` still loads. Never types DELETE, never clicks the destructive
+  button. CTO independently re-ran every gate: `tsc --noEmit` 0, boundaries
+  green, unit 38/38 (unchanged, correct for Pattern C), `grep -c "@supabase"`
+  prints `0` / exits 1 (same ruling as PATCH-012 — printed value is the
+  criterion, not the exit code). Full e2e reran twice against a live dev
+  server: first run showed 2 failures in `settings-pages-render.spec.ts`
+  (unrelated pages) that vanished on a warm-server rerun — diagnosed as a
+  Next dev on-demand-compile cold start, not a regression (see
+  LESSONS_LEARNED); second full run was 18/18 green including the new spec.
+  Final `npm run verify` (typecheck + boundaries + unit + production build)
+  green with the dev server stopped and `.next` cleared first, per protocol.
+  `git status --porcelain` clean after. No deviations; no MUST-NOT files
+  touched. Health ledger 67→69 (CTO_PLAYBOOK §12). **Recommendation: PATCH-015
+  proceeds unchanged** — it is independent of 014 (runs last for novelty, not
+  dependency, per the batch table above); nothing in this review bears on
+  its Pattern G server-seam scope. PATCH-015 itself not drafted this session.
 - **2026-07-08** — PATCH-014 Amendment 2: the implementer's OLD-page dispute
   (verify click → getUser 200 but no toast/Verified/redirect) resolved as a
   **harness artifact, not product behavior**. CTO reproduced both sides with

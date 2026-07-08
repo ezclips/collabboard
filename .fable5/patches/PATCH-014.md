@@ -1,6 +1,6 @@
 # PATCH-014 — Extraction: delete-account page (auth-only swap)
 
-**Status:** draft (awaiting owner approval — execute after 011) — **Amendment 1 issued: e2e wrong-confirmation assertion corrected to the reachable behavior** — **Amendment 2 issued: OLD-page dispute resolved as a harness artifact; characterization stands; verify-step click must be hydration-acknowledged**
+**Status:** DONE (2026-07-08, commit `7726215`) — CTO review PASSED. **Amendment 1: e2e wrong-confirmation assertion corrected to the reachable behavior. Amendment 2: OLD-page dispute resolved as a harness artifact; characterization stood; verify-step click hardened to hydration-acknowledged.**
 **Complexity:** easy (Pattern C + one `signOutCurrentUser` call)
 **Assigned model:** **GPT-5.4**
 **Pattern:** C — auth-only swap (reference: PATCH-007), plus the sign-out

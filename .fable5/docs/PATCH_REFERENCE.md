@@ -364,6 +364,7 @@ it, STOP — never adapt.
 | 011 | ProtectedRoute | F — auth-state observer (introduces `authState.ts`) | 15→14 ✅ done |
 | 012 | Navbar | F repetition (orphaned component; census-gated) | 14→13 ✅ done |
 | 013 | app/page.tsx (landing) | F repetition (+ first `signOutCurrentUser` consumer) | 13→12 ✅ done |
+| 014 | settings/delete-account | C (+ `signOutCurrentUser`) | 12→11 ✅ done |
 
 **New patterns discovered by future patches get added here by the CTO at
 review — this catalog only ever contains patterns with a reviewed reference
