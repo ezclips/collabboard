@@ -1,13 +1,13 @@
 'use client';
 
 import React, { useState } from 'react';
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import { Fingerprint, Trash2, Loader2, ChevronRight, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
+import { signOutCurrentUser } from '@/lib/infra/supabase/authState';
+import { getCurrentUser } from '@/lib/infra/supabase/currentUser';
 
 export default function DeleteAccountPage() {
-    const supabase = createClientComponentClient();
     const router = useRouter();
     
     const [isVerified, setIsVerified] = useState(false);
@@ -21,8 +21,8 @@ export default function DeleteAccountPage() {
             setVerifying(true);
             
             // Check if user is logged in
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) {
+            const result = await getCurrentUser();
+            if (!result.ok || result.value === null) {
                 toast.error('Please log in again to verify your identity');
                 router.push('/login');
                 return;
@@ -58,7 +58,7 @@ export default function DeleteAccountPage() {
                 throw new Error(payload?.error || 'Failed to delete account');
             }
 
-            await supabase.auth.signOut();
+            await signOutCurrentUser();
             toast.success('Your account has been deleted');
             router.push('/login');
         } catch (err) {
