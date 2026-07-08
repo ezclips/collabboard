@@ -131,7 +131,7 @@ Grandfather trajectory 17 → 10:
 |---|---|---|---|---|---|
 | 016 | AddPadletMenu | orphan deletion, census-gated | 10→9 | GPT-5.4 | ✅ **DONE** (0a2d372, review PASSED) |
 | 017 | settings-root | Pattern H intro (storage gateway, verbatim-bound) + workspace-settings repos + `settings.saveWorkspace` command | 9→8 | GPT-5.4 | ✅ **DONE** (ff84152, review PASSED; Amendment 1 held; Pattern H in catalog §5.8) |
-| 018 | profile | H repetition + profiles repo + scavenger centralized (behavior preserved) | 8→7 | GPT-5.4 | Fable to author (by 07-12) |
+| 018 | profile | H reuse (gateway class over legacy client) + profiles repo + `profile.savePatch` command + `legacyToken.ts` quarantine (scavenger moved verbatim) | 8→7 | GPT-5.4 | **READY — `patches/PATCH-018.md`** (census dry-run-verified; characterization probed against the OLD page with the e2e state) |
 | 019 | integrations | scavenger helper reuse + getSession/refreshSession mapping | 7→6 | GPT-5.4 | Fable to author (by 07-12) |
 
 Dependencies: 016 independent; 017 → 018 → 019 strictly sequential (018
@@ -178,6 +178,17 @@ therefore a FUNCTIONAL REPAIR for this page, not just security hygiene.
 Check whether profile/integrations' deep-scan variants hit the same wall
 when authoring PATCH-018/019 — their specs must probe first (lesson
 updated: dry-run covers characterization assertions).
+**Addendum 3 (PATCH-018 authoring, 2026-07-09):** inventory CORRECTED by
+full-file read — profile does NOT have the deep-scan variant; it has the
+NARROW `getAccessToken` (same 'auth-token' key filter as settings-root)
+plus a robust base64url `decodeJwtPayload` and the bespoke
+`makeAuthedClient` Bearer client. Only INTEGRATIONS has the deep scan
+(`getAccessTokenFromStorage`/`findAccessTokenDeep`). CTO probe confirmed
+profile hits the same cookie-only wall (toast, defaults-only form, zero
+network). 023 inventory: settings-root (narrow, frozen in-page),
+profile → `lib/infra/supabase/legacyToken.ts` (narrow + JWT decode +
+Bearer client, after 018), integrations (deep scan — 019 decides whether
+its variant joins legacyToken.ts verbatim or stays in-page).
 
 Dependencies: 011←010; 012/013/014←011; 015 independent (runs last for
 novelty, not dependency). New patterns (type-swap, F, G) enter
@@ -272,6 +283,25 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-09** — PATCH-018 AUTHORED (handoff-ready for GPT-5.4). Full
+  861-line page read; census dry-run-verified (9 call sites: 3 profiles +
+  2 storage + 2 auth, all via the bespoke `makeAuthedClient` Bearer
+  client); characterization PROBED against the OLD page with the e2e
+  storage state before binding (cookie-only wall confirmed: toast,
+  defaults-only form, exactly one "Not set", email-modal round-trip is
+  local-state-only with zero network; "Personal account" label deliberately
+  NOT bound — strict-mode collision with the sidebar, caught by the probe).
+  Design: `legacyToken.ts` quarantine file (scavenger + Bearer client +
+  JWT decode moved VERBATIM, raw-passthrough auth helpers by explicit CTO
+  ruling), `profile.savePatch` command + legacy-bound profiles repository
+  (update-then-insert control flow, spread order preserved, raw errors
+  travel as DomainError.cause and are rethrown at the page boundary so
+  every toast stays byte-identical), Pattern H reused via class injection
+  (storage.ts gets exactly one authorized `export` keyword). Inventory
+  correction recorded (Addendum 3): profile has the NARROW scavenger, not
+  the deep scan. Self-review fixed three spec defects pre-commit (zod
+  clones → toEqual not toBe; git diff notation; unbound dynamic-payload
+  typing). 019 not drafted, per instruction.
 - **2026-07-09** — PATCH-017 DONE (ff84152), CTO review PASSED. Diff (with
   `--ignore-space-at-eol`) touches exactly the bound regions: import block,
   useMemo wiring, the three replaced call-site blocks in
