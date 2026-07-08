@@ -1,11 +1,6 @@
 import { redirect } from 'next/navigation';
-import { createClient } from '@supabase/supabase-js';
 import SharePageClient from './SharePageClient';
-
-const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-);
+import { createShareLinkRepository } from '@/lib/infra/share/shareLinkRepository';
 
 export default async function SharePage({
     params,
@@ -13,15 +8,13 @@ export default async function SharePage({
     params: Promise<{ token: string }>;
 }) {
     const { token } = await params;
+    const repository = createShareLinkRepository();
 
     // Validate the token
-    const { data, error } = await supabase
-        .from('share_links')
-        .select('*')
-        .eq('token', token)
-        .single();
+    const result = await repository.findByToken(token);
+    const data = result.ok ? result.value : null;
 
-    if (error || !data) {
+    if (!data) {
         return (
             <div className="min-h-screen flex items-center justify-center bg-gray-50">
                 <div className="text-center">
@@ -45,18 +38,12 @@ export default async function SharePage({
     }
 
     // Update access count (fire and forget)
-    supabase
-        .from('share_links')
-        .update({
-            access_count: (data.access_count || 0) + 1,
-            last_accessed_at: new Date().toISOString(),
-        })
-        .eq('id', data.id)
-        .then(() => {});
+    void repository.recordAccess(data.id, data.access_count || 0);
 
     const shareTarget: string = data.share_target || 'post-in-board';
     const boardId: string | null = data.board_id;
     const padletId: string | null = data.padlet_id;
+    const permission: string = data.permission || 'view';
     const isPasswordProtected: boolean = !!data.password_hash;
 
     // Option 2: Full board — redirect immediately (no password shown before redirect)
@@ -80,7 +67,7 @@ export default async function SharePage({
             shareTarget={shareTarget}
             boardId={boardId}
             padletId={padletId}
-            permission={data.permission}
+            permission={permission}
             isPasswordProtected={isPasswordProtected}
             passwordHash={data.password_hash || null}
         />
