@@ -1,6 +1,6 @@
 # PATCH-014 — Extraction: delete-account page (auth-only swap)
 
-**Status:** draft (awaiting owner approval — execute after 011) — **Amendment 1 issued: e2e wrong-confirmation assertion corrected to the reachable behavior**
+**Status:** draft (awaiting owner approval — execute after 011) — **Amendment 1 issued: e2e wrong-confirmation assertion corrected to the reachable behavior** — **Amendment 2 issued: OLD-page dispute resolved as a harness artifact; characterization stands; verify-step click must be hydration-acknowledged**
 **Complexity:** easy (Pattern C + one `signOutCurrentUser` call)
 **Assigned model:** **GPT-5.4**
 **Pattern:** C — auth-only swap (reference: PATCH-007), plus the sign-out
@@ -80,11 +80,64 @@ than the original where it counts: the verify step it now requires exercises
 the exact `getUser` call this patch swaps, which the original spec never
 covered.
 
+## Amendment 2 (2026-07-08) — the disputed OLD-page behavior is REAL; the implementer's observation was a swallowed pre-hydration click · CTO decision
+
+**Dispute (GPT-5.4, correct stop — no code changed):** running the Amendment 1
+flow against the OLD page, the implementer reported that clicking the verify
+step ("Log in") produced `GET /auth/v1/user → 200` but NO "Identity verified"
+toast, NO "Verified" state, and no redirect — and asked that the OLD-page
+characterization be weakened to match.
+
+**CTO independent reproduction (2026-07-08, OLD page, running dev server,
+same `e2e/.auth/user.json` storage state, Playwright chromium probe):**
+
+| Probe | Click timing | Auth traffic | Outcome |
+|---|---|---|---|
+| 1 | after button visible + 2s settle | one `GET /auth/v1/user → 200` | "Identity verified" toast + "Verified" state, ~1.5s after click |
+| 2 | the instant the button became visible | **none** | UI unchanged indefinitely — the implementer's exact symptom |
+
+**Root cause (harness artifact, not product behavior):** on a dev server the
+button renders and is clickable BEFORE React attaches its handlers; a click
+in that window is silently swallowed — no request, no `verifying` spinner, no
+state change, and no error. This is the same failure family the implementer
+had already fixed in `e2e/auth.setup.ts` (c7b0fb1: "form can be visible
+before React handlers attach"). Note the swallowed-click reproduction fired
+NO `getUser` at all: the 200 the implementer attributed to the click did not
+come from a running `handleVerify` (when the handler actually runs, the
+success UI deterministically follows — probe 1).
+
+**Decision: the Amendment 1 characterization STANDS unchanged.** The asserted
+behavior is real and CTO-reproduced; weakening the characterization to "no UI
+change" would enshrine a test-harness race as product behavior and would
+leave the exact `getUser` call this patch swaps uncovered. **No behavior
+change is authorized.** Instead, the spec's verify-step click becomes an
+**acknowledged click**:
+
+```ts
+const verifyStep = page.getByRole('button', { name: /Log in/ });
+await expect(async () => {
+  await verifyStep.click();
+  await expect(page.getByText('Verified', { exact: true })).toBeVisible({ timeout: 3_000 });
+}).toPass({ timeout: 30_000 });
+await expect(page.locator('[data-sonner-toast]', { hasText: 'Identity verified' })).toBeVisible();
+```
+
+Retry-click is safe HERE because the trigger is idempotent and read-only
+(`getUser`); asserting the durable "Verified" state inside the retry and the
+transient toast after it keeps both Amendment 1 assertions. **This retry-click
+idiom is authorized ONLY for the verify step. It must NEVER be applied to
+"Delete my account", "Permanently delete account", or any mutating control —
+the existing rule stands: never click the destructive button at any point,
+not even while disabled.** Rule generalized in PATCH_REFERENCE §6
+(hydration-acknowledged first click).
+
 ## Files to Create
 - `e2e/characterization/delete-account-page.spec.ts` — Phase A first, and
   **read-only by design**. **[Amendment 1] Corrected flow:**
   login → open the page → assert the warning copy renders → click the
-  verify step ("Log in") → assert the "Identity verified" toast and the
+  verify step ("Log in") **[Amendment 2: as an acknowledged click — the
+  exact `toPass` idiom above; a bare click is swallowed pre-hydration]** →
+  assert the "Identity verified" toast and the
   "Verified" state appear (this exercises the identity guard — the exact
   call this patch swaps) → click "Delete my account" → assert the
   irreversible-action panel and the confirmation input render → assert the
@@ -131,6 +184,9 @@ Single `git revert`.
       destructive button, and does NOT assert the (UI-unreachable)
       wrong-confirmation error toast (reviewer will check all three)
       **[Amendment 1]**
+- [ ] The verify-step click uses the Amendment 2 acknowledged-click idiom
+      (`toPass` retry anchored on the durable "Verified" state); the retry
+      idiom appears NOWHERE else in the spec **[Amendment 2]**
 - [ ] `npm run test:unit` green (count unchanged — state it)
 - [ ] `npx tsc --noEmit` 0 errors
 - [ ] `npm run check:boundaries` green with the entry removed

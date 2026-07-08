@@ -304,6 +304,22 @@ the mutating interaction and BEFORE reloading, barrier on the save request:
 (set up the promise before triggering the save). Same in the restore path.
 Never rely on `waitForTimeout` sleeps for persistence.
 
+**Hydration-acknowledged first click (added at PATCH-014 Amendment 2):** on a
+dev server, a button renders and is clickable BEFORE React attaches its
+handlers; a click in that window is silently swallowed — no request, no
+spinner, no state change, no error. A swallowed click looks exactly like
+"the feature doesn't work". Any spec whose interaction is the FIRST handler
+trigger on a freshly loaded page must use an acknowledged click: retry the
+click inside `expect(async () => { await btn.click(); await expect(<durable
+outcome>).toBeVisible({ timeout: 3_000 }); }).toPass({ timeout: 30_000 })` —
+anchored on a durable outcome (state text, panel), never on a transient toast
+alone. This idiom is permitted ONLY on idempotent, non-mutating triggers;
+mutating or destructive controls get one click behind an explicit readiness
+barrier, never a retry loop. Corollary for observations: before reporting
+"clicking X does nothing" on a dev server, prove the handler ran (spinner,
+network from THAT click) — otherwise you are reporting the race, not the
+page.
+
 **Verification skeleton** (the patch fills in the paths):
 ```bash
 PW_BASE_URL=http://localhost:3000 npx playwright test <new spec>     # Phase A, OLD page

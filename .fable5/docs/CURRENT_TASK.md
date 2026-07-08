@@ -168,6 +168,21 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-08** — PATCH-014 Amendment 2: the implementer's OLD-page dispute
+  (verify click → getUser 200 but no toast/Verified/redirect) resolved as a
+  **harness artifact, not product behavior**. CTO reproduced both sides with
+  probes against the running dev server (same storage state, OLD page):
+  post-hydration click → toast + Verified in ~1.5s with one getUser 200;
+  click-on-visible → the exact reported symptom with NO auth request at all
+  (the cited 200 never came from a running handler — a pre-hydration click is
+  swallowed traceless). Same failure family as the implementer's own
+  auth.setup retry fix (c7b0fb1). Amendment 1's characterization STANDS; no
+  behavior change authorized; spec hardened with an acknowledged-click idiom
+  (toPass retry anchored on the durable "Verified" state, authorized ONLY for
+  the idempotent verify step — destructive button remains never-clicked).
+  Rule generalized in PATCH_REFERENCE §6 (hydration-acknowledged first
+  click); lesson recorded (observation vs. source contradiction ⇒ reproduce
+  before amending). Resume with the amended spec; bindings unchanged.
 - **2026-07-08** — PATCH-014 blocked correctly by GPT-5.4 (no code changed,
   census matched): the spec's e2e required asserting the wrong-confirmation
   error toast, but the destructive button is `disabled` unless the text is
