@@ -1,6 +1,10 @@
 # PATCH-017 — Extraction: settings-root (workspace settings) + the storage seam (Pattern H)
 
-**Status:** draft (awaiting owner approval — second patch of batch 016–019)
+**Status:** draft (awaiting owner approval — second patch of batch 016–019) —
+**Amendment 1 issued: characterization rebound to the e2e account's reachable
+state (cookie-only session → the page's localStorage token guard fails
+first); the "non-empty name" and banner⇄Save assertions were CTO spec
+defects.**
 **Complexity:** medium (three new seam files + one command, but every decision
 is pre-made below)
 **Assigned model:** **GPT-5.4**
@@ -373,27 +377,68 @@ Current suite is 43 tests / 11 files. Expect ≥14 new tests; `npm run
 test:unit` output must LIST all four new files by name and state the new
 total.
 
-## Characterization requirements — `e2e/characterization/workspace-settings-root.spec.ts`
+## Amendment 1 (2026-07-09) — characterize the REACHABLE state: the e2e session is cookie-only, so the page's token guard fails before any Supabase call · CTO decision
+
+**Blockage (GPT-5.4, correct stop — no code changed):** step 3 asserted a
+non-empty workspace-name input "for ANY account"; observed OLD-page value
+is `""`.
+
+**CTO reproduction (2026-07-09, OLD page, live dev server, the e2e storage
+state):** localStorage is EMPTY (`[]`); the session lives only in the
+`sb-…-auth-token` COOKIE; `getAccessToken()` scans localStorage → null →
+`loadSettings` early-returns at its FIRST guard. Observed, all
+deterministic: toast "Not authenticated — please log in again"; ZERO
+requests to `/api/workspace/settings-access` and zero Supabase reads; name
+input `""` and DISABLED; "Save changes" DISABLED; read-only banner ABSENT
+(it requires a loaded workspace); all three rows render.
+
+**Root cause (CTO spec defect):** steps 3 and 5 were written from
+`loadSettings`' happy path; the source has four early-return paths that
+leave the name `''`, and the e2e account deterministically hits the first.
+Third instance of the assert-reachability defect family (PATCH-012
+"renders on most pages"; PATCH-014 wrong-confirmation toast) — this time
+in a Fable-authored spec: the dry-run obligation was honored for census
+commands but NOT for characterization assertions. Lesson updated.
+
+**Product-bug note (preserve, do NOT fix here):** the page is unusable for
+ANY cookie-session user — its localStorage assumption is stale relative to
+the cookie-based auth-helpers login. This makes PATCH-023's scavenger
+normalization a FUNCTIONAL REPAIR, not just hygiene. Recorded in
+CURRENT_TASK; behavior preserved byte-identical in this patch.
+
+**Decision:** characterize the deterministic failure-path state. This is a
+real net for the extraction: it proves the rewrite keeps the token guard
+FIRST (seam construction at mount must not crash or reorder ahead of it).
+The seams themselves are e2e-unreachable for this account — repository/
+command/gateway correctness rides the unit tests + review, per the
+PATCH-014/015 risk-acceptance shape. Accepted by CTO.
+
+## Characterization requirements — `e2e/characterization/workspace-settings-root.spec.ts` **[flow rebound by Amendment 1]**
 Phase A first: green against the OLD page, then unchanged against the NEW.
 Authenticated project (keep the standard
-`test.skip(!hasE2ECredentials, ...)` guard — this flow needs the login).
+`test.skip(!hasE2ECredentials, ...)` guard — the spec characterizes the
+signed-in-but-cookie-only state).
 **Read-only by design: the spec must NEVER click "Save changes", never open
 the logo modal, never upload — it would write shared workspace state.**
 Flow:
-1. `goto('/dashboard/settings')`; assert the `Settings` heading and the
-   `Workspace settings` label render (30s timeout — the loading spinner
-   must resolve).
-2. Assert the three rows render: `Logo`, `Name`, `Workspace URL`.
-3. Assert the name input value is non-empty (the fallback chain
-   `settingsRow → API → 'My Workspace'` guarantees this for ANY account).
-4. Read the input value; assert the URL row's second span equals
-   `value.toLowerCase().replace(/\s+/g, '-')` (characterizes the mirror).
-5. Assert the gating invariant without assuming the account's role:
-   `readOnlyBannerVisible === saveButtonDisabled` (the banner text is
-   "You have read-only access"; button name "Save changes"). Both sides of
-   canManage are legal; their CONSISTENCY is the behavior.
-The write path is deliberately NOT e2e-covered (mutates shared state);
-it is covered by the command/repository unit tests + review. Same
+1. `goto('/dashboard/settings')`; assert the `Settings` heading renders
+   (30s timeout — the loading spinner must resolve).
+2. IMMEDIATELY next (the toast auto-dismisses in ~4s and fires at the same
+   render tick as the form): assert the "Not authenticated — please log in
+   again" toast (`[data-sonner-toast]`; deterministic for the e2e session —
+   cookie-only, empty localStorage).
+3. Assert the `Workspace settings` label and the three rows render:
+   `Logo`, `Name`, `Workspace URL` (the `collabboard.app/` prefix is the
+   URL row's witness).
+4. Assert the name input (`getByPlaceholder('Enter workspace name')`) has
+   value `""` AND is disabled.
+5. Assert "Save changes" is DISABLED and the read-only banner
+   ("You have read-only access") is NOT visible — the banner requires a
+   loaded workspace, and none loads in this state.
+Do NOT assert on the API or Supabase network (there is none in this path —
+that absence is the point). The write path and all three seams are
+deliberately NOT e2e-covered (unreachable for this account); they are
+covered by the command/repository/gateway unit tests + review. Same
 risk-acceptance shape as PATCH-014/015.
 
 ## Known deviations (pre-accepted; do not "fix", do not extend)
@@ -438,6 +483,10 @@ Single `git revert`.
 - [ ] Pre-edit census pasted and matches ALL four expected blocks
 - [ ] New e2e spec green against OLD page first, then NEW (both pasted),
       and it contains NO Save click, NO logo-modal interaction, NO upload
+- [ ] Spec matches the Amendment 1 flow exactly: failure-path state
+      (empty+disabled input, disabled Save, absent banner, auth toast
+      asserted immediately after the heading); NO non-empty-name assertion,
+      NO banner⇄Save equivalence, NO network assertions **[Amendment 1]**
 - [ ] `npm run test:unit` green; four new test files listed by name;
       new total stated (≥57)
 - [ ] `npx tsc --noEmit` 0 errors

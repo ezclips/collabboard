@@ -169,6 +169,15 @@ variant (`getAccessToken`, keys filtered by 'auth-token', + 2 manual atob
 JWT decodes for userId). PATCH-017 freezes it byte-identical in the page
 (seam calls take its outputs as arguments); 023's inventory is now three
 pages, three scavenger variants.
+**Addendum 2 (PATCH-017 Amendment 1, 2026-07-09):** CTO-reproduced — the
+settings-root page is UNUSABLE for cookie-session users: its scavenger
+reads localStorage, but the auth-helpers login stores the session only in
+the `sb-…-auth-token` cookie (e2e probe: localStorage `[]`, guard fails,
+"Not authenticated" toast, no API/Supabase call ever fires). 023 is
+therefore a FUNCTIONAL REPAIR for this page, not just security hygiene.
+Check whether profile/integrations' deep-scan variants hit the same wall
+when authoring PATCH-018/019 — their specs must probe first (lesson
+updated: dry-run covers characterization assertions).
 
 Dependencies: 011←010; 012/013/014←011; 015 independent (runs last for
 novelty, not dependency). New patterns (type-swap, F, G) enter
@@ -263,6 +272,22 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-09** — PATCH-017 Amendment 1: GPT-5.4 blocked correctly (no
+  code, clean tree) — the spec's characterization asserted a non-empty
+  workspace-name input; observed value is `""`. CTO reproduced with the e2e
+  storage state: the session is COOKIE-ONLY (localStorage empty), the
+  page's localStorage token guard fails first, so no API/Supabase call ever
+  fires — deterministic failure-path state ("Not authenticated" toast,
+  empty+disabled input, disabled Save, no banner). Spec defect was the
+  CTO's: happy-path assertion never probed against the account's reachable
+  state (third instance of the assert-reachability family; lesson updated —
+  dry-run obligation now explicitly covers characterization assertions).
+  Amendment rebinds the flow to the observed state (toast asserted
+  immediately after heading — 4s auto-dismiss), documents that the seams
+  are e2e-unreachable for this account (unit tests + review carry them,
+  PATCH-014/015 shape), and records the product bug: settings-root is
+  unusable for ALL cookie-session users, making 023 a functional repair.
+  Bindings unchanged; resume with the amended spec.
 - **2026-07-08** — PATCH-016 DONE (0a2d372), CTO review PASSED. Diff exactly
   the spec's two files (component deletion + one grandfather line); orphan
   census re-verified post-deletion (zero importers repo-wide, zero e2e
