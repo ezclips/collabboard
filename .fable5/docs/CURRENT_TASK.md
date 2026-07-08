@@ -75,9 +75,95 @@ Grandfather trajectory 17 → 10:
 | 014 | delete-account page | C (+ signOut); **exclusion reversed** — re-census proved deletion is server-side, client is a form + fetch; `app/api/**` hard-forbidden | 12→11 ✅ **DONE** (7726215, review PASSED; Amendments 1+2 both held, no behavior change; hydration-acknowledged verify click validated green) |
 | 015 | share/[token] (server page) | G: server-page read (new; adds `serverClient.ts` — first server seam) | 11→10 ✅ **DONE** (6672c12 + review fix dbd8691; review PASSED; Pattern G in catalog §5.7) |
 
-**Batch 010–015 COMPLETE (2026-07-08): grandfather 17→10 as planned.** Next
-patch not yet drafted (owner instruction). Remaining grandfathered files are
-the excluded-for-cause set below plus the canvas verticals.
+**Batch 010–015 COMPLETE (2026-07-08): grandfather 17→10 as planned.**
+
+## Remaining-10 classification (CTO census 2026-07-08 — supersedes the old "Still EXCLUDED" notes)
+
+**A. Mechanical now (GPT-5.4 with bound specs):**
+- `components/canvas/AddPadletMenu.tsx` (372) — **ORPHAN, zero importers**
+  (verified across ts/tsx/js/jsx in app/components/lib). Deletion, not
+  extraction: keeping it compiling would need two seams (storage + canvas
+  write) that don't exist yet, for unmounted code. → PATCH-016 (drafted).
+- `app/dashboard/settings/page.tsx` (357) — `workspace_settings` ×3 +
+  `workspaces` ×1 + avatars storage upload/getPublicUrl ×2 + one API fetch.
+  Introduces the **storage seam (queued Pattern H)** on the smallest storage
+  consumer. → PATCH-017.
+
+**B. Fable-spec required, then delegable:**
+- `app/dashboard/settings/profile/page.tsx` (861) — `profiles` ×3, avatars
+  storage (H repetition), reauth (`signInWithPassword` + `updateUser`), and
+  a **token-scavenger**: scans ALL of localStorage for anything shaped like
+  an access token, builds a bespoke `createClient(...Bearer token...)`,
+  decodes JWTs by hand. Extraction PRESERVES the scavenger centralized in
+  one audited legacy helper (serverClient precedent); replacing it is
+  PATCH-023's authorized behavior change, not this. → PATCH-018 (GPT-5.4).
+- `app/dashboard/settings/integrations/page.tsx` (287) — same scavenger
+  (verbatim copy) + `getSession`/`refreshSession` before OAuth connect.
+  Reuses 018's helper. → PATCH-019 (GPT-5.4).
+- `app/dashboard/settings/password/page.tsx` (505) — reauth + `updateUser`
+  + **6 MFA calls incl. `mfa.webauthn.register/authenticate`** + one
+  `profiles` site. Security-critical; needs a verbatim-bound
+  `lib/infra/supabase/mfa.ts`. → PATCH-020 (**GPT-5.5**, security trigger).
+- `app/dashboard/settings/members/page.tsx` (1,817) — `workspace_members`
+  ×3, `workspace_invitations` ×3, `boards` ×1, auth ×4, two invitation API
+  fetches. Pattern E at scale. → PATCH-021 (**GPT-5.5**).
+
+**C. Monolith-risk (Phase 2 program — NOT mechanical extractions):**
+- `app/dashboard/canvas/[id]/CanvasClient.tsx` (8,526) — 10× `padlets`,
+  2× storage, 3 auth calls. The strangler target itself.
+- `components/collabboard/canvas/ui/FreeformPadletCards.tsx` (6,368) —
+  **sole importer is CanvasClient**: a monolith limb despite the collabboard
+  path (the directory lies). Never extract independently; rides the
+  strangler.
+- `components/collabboard/PostCardContent.tsx` (936) — **22 importers across
+  BOTH canvas stacks** (wall/columns layouts, presentation, map). One write:
+  task-checkbox toggle updating `padlets`. First consumer of the future
+  canvas ops seam; blast radius too high for a one-off command.
+- `app/collabboard/canvas/[id]/page.tsx` (871) — one
+  `rpc('update_canvas_access')`; **no active-app link navigates to
+  /collabboard** (URL-reachable only). Gated by the surviving-canvas
+  decision: likely DELETED, not extracted. Decision brief before any work.
+
+## Batch plan (drafted 2026-07-08; owner approval per patch as usual)
+
+**Batch 3 — settings completion + storage seam (016–019), grandfather 10→6:**
+| Patch | Target | Shape | Shrink | Model | Spec status |
+|---|---|---|---|---|---|
+| 016 | AddPadletMenu | orphan deletion, census-gated | 10→9 | GPT-5.4 | **READY — `patches/PATCH-016.md`** |
+| 017 | settings-root | Pattern H intro (avatars storage helper, verbatim-bound) + workspace-settings repos | 9→8 | GPT-5.4 | Fable to author (by 07-12) |
+| 018 | profile | H repetition + profiles repo + scavenger centralized (behavior preserved) | 8→7 | GPT-5.4 | Fable to author (by 07-12) |
+| 019 | integrations | scavenger helper reuse + getSession/refreshSession mapping | 7→6 | GPT-5.4 | Fable to author (by 07-12) |
+
+Dependencies: 016 independent; 017 → 018 → 019 strictly sequential (018
+introduces the legacy-token helper that 019 reuses; both storage consumers
+follow 017's Pattern H).
+
+**Batch 4 — security-sensitive settings (020–021), grandfather 6→4:**
+| Patch | Target | Shape | Shrink | Model | Spec status |
+|---|---|---|---|---|---|
+| 020 | password | auth-security swap + verbatim `mfa.ts` helper (webauthn preserved byte-exact) | 6→5 | **GPT-5.5** | Fable to author (by 07-12) |
+| 021 | members | Pattern E at scale (3 repos + auth swaps; API fetches untouched) | 5→4 | **GPT-5.5** | Fable to author (by 07-12) |
+
+**Batch 5 — canvas program (022+; Phase 2 entry; NOT mechanical):**
+| Patch | Target | Shape | Model |
+|---|---|---|---|
+| 022 | canvas duality DECISION brief (feature-diff collabboard vs dashboard verticals; owner decides delete-vs-keep; if delete: route deletion 4→3) | CTO brief → owner | Fable brief by 07-12 |
+| 023 | security normalization — **authorized behavior change**: replace token-scavenger with real session reads; revisit share-link service-role→RLS | GPT-5.5 | Fable spec |
+| 024 | canvas ops seam (lib/domain/canvas commands: padlet create/update + padlet-files storage); first consumer = PostCardContent task-toggle (3→2) | GPT-5.5 | Fable design by 07-12 |
+| 025+ | CanvasClient strangler series (10 padlets sites + 2 storage + 3 auth, mapped to seams); FreeformPadletCards LAST (limb) | per-site | Fable map by 07-12 |
+
+**Fable-window critical path (closes 2026-07-12).** In priority order:
+① specs 017–019 (unblocks GPT-5.4 for the whole of batch 3), ② specs
+020–021, ③ duality decision brief (022), ④ canvas ops seam design + the
+CanvasClient call-site map (024/025 prerequisites). Everything on this list
+is DESIGN — implementation and post-window reviews run on GPT-5.4/5.5
+against these specs using the per-patch acceptance checklists +
+CTO_PLAYBOOK §12/§14.
+
+**Security flag (recorded 2026-07-08, feeds 023):** profile + integrations
+scan all of localStorage for access tokens and hand-decode JWTs
+(`getAccessTokenFromStorage`/`findAccessTokenDeep`, duplicated in both
+files). Extraction preserves it (centralized + audited); 023 removes it.
 
 Dependencies: 011←010; 012/013/014←011; 015 independent (runs last for
 novelty, not dependency). New patterns (type-swap, F, G) enter
@@ -172,6 +258,24 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-08 (planning session)** — Post-batch CTO planning: fresh census
+  of all 10 remaining grandfathered files (variable-agnostic grep after the
+  `supabase.`-only pattern missed `db.`-named clients — §0 discipline
+  applies to the CTO too). Classification + batch plan 016–025 written into
+  the Now section (A: mechanical, B: Fable-spec-then-delegate, C: monolith
+  program). Census surprises, all census-verified: AddPadletMenu is a
+  zero-importer ORPHAN (deletion patch 016 drafted, handoff-ready);
+  FreeformPadletCards' sole importer is CanvasClient (monolith limb — its
+  collabboard path lies); PostCardContent has 22 importers across BOTH
+  canvas stacks (shared renderer, ops-seam consumer, not a one-off);
+  no active-app link navigates to /collabboard (decision brief 022 gates
+  that vertical); profile AND integrations share a duplicated
+  token-scavenger (localStorage-wide token scan + hand-rolled JWT decode) —
+  security flag recorded, preserved-then-replaced across 018/019 → 023.
+  Fable-window critical path (closes 07-12) defined: specs 017–021, duality
+  brief, ops-seam design + CanvasClient site map — all design, no
+  implementation. CTO_PLAYBOOK §14 added (post-window review rituals +
+  successor calibration). Next handoff: **PATCH-016 to GPT-5.4**.
 - **2026-07-08** — PATCH-015 DONE (6672c12 + CTO review fix dbd8691), review
   PASSED — **batch 010–015 COMPLETE, grandfather 17→10**. First server-side
   seam live: `lib/infra/supabase/serverClient.ts` (service-role fallback

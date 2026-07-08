@@ -333,3 +333,43 @@ sign-in later accepted? Why does the boundary check run with
 `--no-inline-config`? Why do we strangle instead of rewrite? If any answer is
 missing, the gap is in LESSONS_LEARNED.md or CHANGELOG_ARCHITECTURE.md — and
 if it's not there either, that's a doc bug to fix before your first patch.
+
+## 14. Fable-window continuity plan (written 2026-07-08; window closes 2026-07-12)
+
+The sitting CTO (Fable) is available only until 2026-07-12. The plan
+deliberately splits the remaining work by what actually needs this model:
+
+**Needs Fable (design; front-loaded before the 12th):** specs 017–021 (the
+storage seam, the token-scavenger centralization, MFA/webauthn bindings,
+members-at-scale), the canvas-duality decision brief (022), the canvas ops
+seam design and the CanvasClient call-site map (024/025). These are the
+patches where a wrong binding silently changes behavior — spec authorship is
+where the risk lives. The batch plan with per-patch status is in
+CURRENT_TASK.md.
+
+**Does not need Fable (execution + review, after the 12th):** running
+GPT-5.4/5.5 against those specs. Every spec is written execution-complete:
+verbatim file contents where a decision matters, census gates with expected
+output, per-patch acceptance checklists. Reviews then reduce to checklist
+verification plus the standing rituals — do them ALL, every patch:
+
+1. Re-run the gates yourself; never accept pasted output alone (tsc,
+   boundaries, unit incl. the new-file-listed-by-name rule, full e2e at the
+   CONFIG worker count, final `verify` with the dev server stopped —
+   `Get-NetTCPConnection`, never localized netstat words).
+2. Diff-vs-Bindings line by line; whole-file churn (line endings) hides
+   real changes — use `--ignore-space-at-eol`.
+3. Any deviation gets a written ruling: accepted-with-proof (e.g. the
+   PATCH-015 `permission || 'view'` render-equivalence) or reverted. Silence
+   is not acceptance.
+4. When implementer observation contradicts the source, REPRODUCE before
+   amending the spec (PATCH-014 Amendment 2 pattern).
+5. Health ledger moves only per §12 arithmetic, ±5 max, evidence re-verified
+   that session.
+6. Patterns enter PATCH_REFERENCE at review, not before (and actually do
+   it — PATCH-011 lesson).
+
+**Standing calibration for the successor:** architecture credit above 18
+requires the monolith itself (CanvasClient sites consumed by the ops seam)
+or a duality retired — periphery is done. Ops credit above 12 requires
+telemetry to exist. Do not let either drift upward on batch momentum.
