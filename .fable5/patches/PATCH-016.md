@@ -1,6 +1,8 @@
 # PATCH-016 — Deletion: orphaned AddPadletMenu component
 
-**Status:** draft (awaiting owner approval — first patch of batch 016–019)
+**Status:** DONE (2026-07-08, commit `0a2d372`) — CTO review PASSED. Orphan
+census re-verified post-deletion (zero importers, zero e2e references);
+grandfather re-counted at 9; no deviations.
 **Complexity:** trivial (deletion-only; the discipline is in the census)
 **Assigned model:** **GPT-5.4**
 **Pattern:** orphan removal (census-gated deletion; orphan-proof discipline

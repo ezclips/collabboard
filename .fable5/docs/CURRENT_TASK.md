@@ -129,7 +129,7 @@ Grandfather trajectory 17 → 10:
 **Batch 3 — settings completion + storage seam (016–019), grandfather 10→6:**
 | Patch | Target | Shape | Shrink | Model | Spec status |
 |---|---|---|---|---|---|
-| 016 | AddPadletMenu | orphan deletion, census-gated | 10→9 | GPT-5.4 | **READY — `patches/PATCH-016.md`** |
+| 016 | AddPadletMenu | orphan deletion, census-gated | 10→9 | GPT-5.4 | ✅ **DONE** (0a2d372, review PASSED) |
 | 017 | settings-root | Pattern H intro (avatars storage helper, verbatim-bound) + workspace-settings repos | 9→8 | GPT-5.4 | Fable to author (by 07-12) |
 | 018 | profile | H repetition + profiles repo + scavenger centralized (behavior preserved) | 8→7 | GPT-5.4 | Fable to author (by 07-12) |
 | 019 | integrations | scavenger helper reuse + getSession/refreshSession mapping | 7→6 | GPT-5.4 | Fable to author (by 07-12) |
@@ -258,6 +258,14 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-08** — PATCH-016 DONE (0a2d372), CTO review PASSED. Diff exactly
+  the spec's two files (component deletion + one grandfather line); orphan
+  census re-verified post-deletion (zero importers repo-wide, zero e2e
+  references) — matches the pre-edit census. tsc 0, boundaries green, unit
+  43/43 unchanged (correct for deletion), full e2e 19/19 at the configured
+  2 workers, `npm run verify` green with server stopped first. Grandfather
+  10→9, count re-verified. No deviations. Next: PATCH-017 (settings-root,
+  Pattern H storage seam) — spec authorship pending (Fable window).
 - **2026-07-08 (planning session)** — Post-batch CTO planning: fresh census
   of all 10 remaining grandfathered files (variable-agnostic grep after the
   `supabase.`-only pattern missed `db.`-named clients — §0 discipline
