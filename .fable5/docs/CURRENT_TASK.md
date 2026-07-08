@@ -73,7 +73,11 @@ Grandfather trajectory 17 → 10:
 | 012 | Navbar | F repetition (session-state mapping, census-gated) | 14→13 ✅ **DONE** (2a3ff44, review PASSED; Amendment 1a corrected proof re-verified by CTO before resume; orphaned-component scope held) |
 | 013 | app/page.tsx (landing) | F repetition (+ first signOut consumer; event branches preserved) | 13→12 ✅ **DONE** (7c290f2, review PASSED; subscription leak fixed — old code returned cleanup from async fn, new code hoists unsubscribe correctly) |
 | 014 | delete-account page | C (+ signOut); **exclusion reversed** — re-census proved deletion is server-side, client is a form + fetch; `app/api/**` hard-forbidden | 12→11 ✅ **DONE** (7726215, review PASSED; Amendments 1+2 both held, no behavior change; hydration-acknowledged verify click validated green) |
-| 015 | share/[token] (server page) | G: server-page read (new; adds `serverClient.ts` — first server seam) | 11→10 |
+| 015 | share/[token] (server page) | G: server-page read (new; adds `serverClient.ts` — first server seam) | 11→10 ✅ **DONE** (6672c12 + review fix dbd8691; review PASSED; Pattern G in catalog §5.7) |
+
+**Batch 010–015 COMPLETE (2026-07-08): grandfather 17→10 as planned.** Next
+patch not yet drafted (owner instruction). Remaining grandfathered files are
+the excluded-for-cause set below plus the canvas verticals.
 
 Dependencies: 011←010; 012/013/014←011; 015 independent (runs last for
 novelty, not dependency). New patterns (type-swap, F, G) enter
@@ -168,6 +172,31 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-08** — PATCH-015 DONE (6672c12 + CTO review fix dbd8691), review
+  PASSED — **batch 010–015 COMPLETE, grandfather 17→10**. First server-side
+  seam live: `lib/infra/supabase/serverClient.ts` (service-role fallback
+  centralized verbatim, security question stays queued), share-link
+  repository per PATCH-004 structure, domain interface verbatim. Page diff
+  matches Bindings; both deliberate deviations honored (all-errors→ok(null)
+  mapping with PATCH-015 comment; recordAccess Promise<void> swallow); server
+  client's only import chain is page→repository→serverClient (no 'use
+  client' importer — CTO-traced). Unit 38→43 (new file listed by name); tsc
+  0; boundaries green; grandfather re-counted at 10. One ACCEPTED deviation:
+  `permission || 'view'` prop fallback (tsc-forced by the typed seam; proven
+  render-equivalent by reading SharePageClient's only consumption). One
+  review-CAUGHT defect fixed pre-push (dbd8691): the e2e spec inherited the
+  project storageState without a credentials skip → ENOENT in the CI
+  configuration; now overrides with an inline empty state (runs
+  credential-free — CI now exercises the server seam). The verification-run
+  "dashboard/settings navigation instability" was root-caused by controlled
+  experiment: NOT a regression and NOT just cold-compile — dev-server
+  contention at 6 parallel workers (clean pre-warmed server still failed;
+  2 workers → 19/19 ×3, all specs at fast baseline); fixed in config
+  (workers: 2 locally, CI untouched), rules in PATCH_REFERENCE §6, lessons
+  updated (cold-start entry requalified). Final verify green with server
+  stopped, `.next` cleaned before AND deleted after (owner restarts dev on
+  a clean cache). Health 69→70 (CTO_PLAYBOOK §12). Next patch deliberately
+  not drafted (owner instruction).
 - **2026-07-08** — PATCH-014 DONE (7726215), CTO review PASSED. Diff
   (ignoring the whole-file line-ending churn Codex's editor introduced)
   matches Bindings exactly: two imports swapped for `getCurrentUser` +

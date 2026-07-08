@@ -1,6 +1,17 @@
 # PATCH-015 — Extraction: share/[token] page; introduce the server-side infra seam
 
-**Status:** draft (awaiting owner approval — execute last in the 010–015 batch)
+**Status:** DONE (2026-07-08, commit `6672c12` + review fix `dbd8691`) — CTO
+review PASSED with two rulings: (1) accepted deviation — `permission ||
+'view'` prop fallback, tsc-forced by the typed seam surfacing latent
+nullability, proven render-equivalent against `SharePageClient`'s only
+consumption (the `=== 'edit' / === 'comment' / else` ternary); (2)
+review-caught defect, fixed pre-push in `dbd8691` — the e2e spec inherited
+the project storageState with no credentials skip → ENOENT on CI; now
+overrides with an inline empty state per this patch's own "unauthenticated
+context" design. Same fix commit caps local Playwright workers at 2 (the
+"unrelated dashboard/settings navigation instability" during verification
+was diagnosed as dev-server contention at 6 workers — 19/19 deterministic
+at 2; see LESSONS_LEARNED). Pattern G entered PATCH_REFERENCE §5.7.
 **Complexity:** medium (new pattern: first SERVER-side repository)
 **Assigned model:** **GPT-5.4** — every decision bound below; novelty is why
 this runs last, after four reviews of the batch's simpler patches.

@@ -286,6 +286,64 @@ before writing any e2e assertion that expects the component visible).
 
 ---
 
+## 5.7. Pattern G — server-page read (server-side repository seam)
+
+**Reference:** PATCH-015 (`app/share/[token]`; introduces
+`lib/infra/supabase/serverClient.ts`).
+
+**When:** a SERVER component (no `'use client'`) reads a table directly,
+typically with a module-level `createClient(...)` using env keys and
+possibly the service-role fallback.
+
+**When NOT:** API route handlers (`app/api/**` — out of scope until the
+domain layer covers server writes); client components (Patterns A–F); pages
+needing the caller's auth context (the server client is key-based, not
+cookie/session-based — that variant does not exist yet; STOP and escalate).
+
+**Required pieces:**
+- Domain: an interface file (`lib/domain/<area>/<name>.ts`) with a loose
+  row-shaped type mirroring exactly the columns the page consumes, plus the
+  repository interface. No zod at this seam yet (behavior preservation);
+  the type is documentation, not validation.
+- Infra: `createServerSupabaseClient()` from
+  `lib/infra/supabase/serverClient.ts` — service-role key when present,
+  anon key otherwise (RLS bypass for server lookups; centralizing this in
+  ONE audited file is the point). **NEVER import it from a `'use client'`
+  module**; tsc will not stop you — review must trace every importer.
+- Infra: repository per PATCH-004 structure (narrow structural client
+  interface, injected client, factory bound to the server client) + unit
+  tests with a fake client.
+- Page: repository created inside the async component (no hooks), reads
+  mapped so the existing render branches stay byte-identical.
+
+**Fire-and-forget writes:** bookkeeping updates whose outcome today's code
+ignores (`.then(() => {})`) become `Promise<void>` repository methods that
+swallow errors, called with `void repo.method(...)` — NOT Result-shaped,
+NOT awaited (CTO ruling in PATCH-015: write-via-command applies to
+user-intent writes, not telemetry-style bookkeeping).
+
+**Error mapping is page-specific:** PATCH-015 maps ALL find errors to
+`ok(null)` because the page renders `error || !data` identically ("Link
+not found"); copying Pattern A's `unavailable` mapping would CHANGE
+rendered behavior. Always derive the mapping from the page's existing
+error handling, and comment the deviation citing the patch.
+
+**Tests:** unit tests on the repository (row passthrough, PGRST116, the
+deliberate error mapping, fire-and-forget payload + swallow). E2E
+characterization: the unauthenticated-reachable branch at minimum — and
+the spec must override the project storageState inline
+(`test.use({ storageState: { cookies: [], origins: [] } })`) so it runs
+credential-free (see §6).
+
+**Common mistakes:** typing the seam surfaces latent nullability the old
+`any` row hid — resolving it must be proven render-equivalent against the
+consuming component, not just tsc-quieted (PATCH-015: `permission ||
+'view'` accepted only after reading `SharePageClient`'s ternary);
+inheriting the characterization project's file-based storageState in a
+spec that needs no credentials (ENOENT on CI — caught at PATCH-015 review).
+
+---
+
 ## 6. Universal requirements (every pattern, every patch)
 
 **Phase order is mandatory:** e2e characterization spec written and GREEN
@@ -294,7 +352,14 @@ full e2e green again → grandfather entry removed LAST → final verify.
 
 **The e2e net:** two-pass rule — a throwaway discovery run that prints the
 page's real DOM/labels, then the assertions. Specs skip cleanly without
-credentials; clean up data they create.
+credentials (`test.skip(!hasE2ECredentials, ...)`) — OR, if the flow needs
+no login at all, override the project storage state inline
+(`test.use({ storageState: { cookies: [], origins: [] } })`) so the spec
+RUNS credential-free; never inherit the file-based storageState without one
+of the two (ENOENT on CI — PATCH-015 review). Clean up data they create.
+Local full-suite runs are capped at 2 workers in `playwright.config.ts`
+(dev-server contention rotates random 30s timeouts at higher counts —
+PATCH-015 review); do not "speed them up" with `--workers`.
 
 **Async-save barrier (added at PATCH-005 review):** these pages save
 fire-and-forget; reloading immediately aborts the in-flight POST and the
@@ -365,6 +430,7 @@ it, STOP — never adapt.
 | 012 | Navbar | F repetition (orphaned component; census-gated) | 14→13 ✅ done |
 | 013 | app/page.tsx (landing) | F repetition (+ first `signOutCurrentUser` consumer) | 13→12 ✅ done |
 | 014 | settings/delete-account | C (+ `signOutCurrentUser`) | 12→11 ✅ done |
+| 015 | share/[token] (server page) | G — server-page read (introduces `serverClient.ts`) | 11→10 ✅ done |
 
 **New patterns discovered by future patches get added here by the CTO at
 review — this catalog only ever contains patterns with a reviewed reference

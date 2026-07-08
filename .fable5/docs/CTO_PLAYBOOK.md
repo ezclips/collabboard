@@ -303,7 +303,26 @@ behavior drift and zero defect reaching `main`; the hydration-acknowledged-
 click idiom (PATCH_REFERENCE §6) is now validated green in a live spec, not
 just documented. Ops 12, product 12, continuity 10 unchanged — no new
 runbook or telemetry this patch. Axis snapshot at 69: safety 17, ops 12,
-architecture 18, product 12, continuity 10.)
+architecture 18, product 12, continuity 10.) → **70** (2026-07-08: PATCH-015
+landed and passed review — grandfather 11→10, **batch 010–015 complete
+(17→10 as planned)**, first SERVER-side seam (`serverClient.ts` + share-link
+repository, Pattern G into the catalog §5.7). Two review products beyond the
+patch: a CI-breaking spec defect (storageState ENOENT without credentials)
+caught by simulating CI pre-push, and the recurring "unrelated e2e
+instability" finally root-caused by controlled experiment — NOT cold-compile
+(the 66→69-era explanation, disproven on a clean pre-warmed server) but
+dev-server contention at 6 parallel workers; fixed mechanically
+(`workers: 2` locally, dbd8691; 19/19 deterministic ×3). +1 safety 17→18 —
+the net grew to 19 specs AND its systemic local false-negative source was
+eliminated by config, not discipline; a would-be-red CI defect never reached
+the remote. Architecture holds 18, deliberately: periphery extraction is
+now COMPLETE and further architecture credit requires the monolith itself
+or a duality consolidation — Pattern G is trajectory consolidation, not a
+step (the 66-entry calibration gated higher scores on the monolith visibly
+shrinking; the grandfather list halving is periphery, CanvasClient is
+untouched). Ops 12, product 12, continuity 10 — telemetry remains the
+binding constraint on ops and on any further total movement. Axis snapshot
+at 70: safety 18, ops 12, architecture 18, product 12, continuity 10.)
 
 ## 13. The succession test
 
