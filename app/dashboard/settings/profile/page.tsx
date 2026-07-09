@@ -1,8 +1,6 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { createClient } from '@supabase/supabase-js';
-import type { User } from '@supabase/supabase-js';
 import { useRouter } from 'next/navigation';
 import {
     Loader2,
@@ -10,6 +8,17 @@ import {
     X,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import type { AuthUser } from '@/lib/domain/auth/user';
+import { asUserId } from '@/lib/domain/core/ids';
+import { createSaveProfilePatchCommand } from '@/lib/domain/profile/profile';
+import { createLegacyProfilesRepository } from '@/lib/infra/profile/profilesRepository';
+import {
+    createLegacyTokenStorageGateway,
+    decodeJwtPayload,
+    getAccessToken,
+    legacyReauthenticateWithPassword,
+    legacyRequestEmailChange,
+} from '@/lib/infra/supabase/legacyToken';
 
 interface Profile {
     id: string;
@@ -47,41 +56,6 @@ const ACCOUNT_TYPES = [
 ];
 const FORCE_REAUTH_EMAIL_CHANGE = process.env.NEXT_PUBLIC_FORCE_REAUTH_EMAIL_CHANGE === 'true';
 const STRICT_MFA = process.env.NEXT_PUBLIC_STRICT_MFA === 'true';
-
-// Session is in localStorage, not cookies. Read the token directly.
-const getAccessToken = (): string | null => {
-    try {
-        const lsKeys = Object.keys(localStorage).filter(k => k.includes('auth-token'));
-        for (const key of lsKeys) {
-            const raw = localStorage.getItem(key);
-            if (!raw) continue;
-            const parsed = JSON.parse(raw);
-            const token = Array.isArray(parsed) ? parsed[0]?.access_token : parsed?.access_token;
-            if (token) return token;
-        }
-    } catch { /* ignore */ }
-    return null;
-};
-
-// Create a supabase client with the access token explicitly set so RLS sees auth.uid()
-const makeAuthedClient = (token: string) => createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    { global: { headers: { Authorization: `Bearer ${token}` } }, auth: { persistSession: false } }
-);
-
-type JwtPayload = {
-    sub?: string;
-    email?: string;
-    user_metadata?: Record<string, unknown>;
-};
-
-const decodeJwtPayload = (token: string): JwtPayload => {
-    const [, payload = ''] = token.split('.');
-    const normalized = payload.replace(/-/g, '+').replace(/_/g, '/');
-    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=');
-    return JSON.parse(atob(padded)) as JwtPayload;
-};
 
 const getErrorMessage = (err: unknown, fallback = 'Failed to save'): string => {
     if (err instanceof Error && err.message) return err.message;
@@ -131,7 +105,7 @@ export default function BasicInfoPage() {
     
     const [loading, setLoading] = useState(true);
     const [uploadingAvatar, setUploadingAvatar] = useState(false);
-    const [user, setUser] = useState<User | null>(null);
+    const [user, setUser] = useState<AuthUser | null>(null);
     const [profile, setProfile] = useState<Profile>({
         id: '',
         display_name: '',
@@ -177,24 +151,23 @@ export default function BasicInfoPage() {
             if (!userId) {
                 throw new Error('Session is invalid. Please sign in again.');
             }
-            setUser({ id: userId, email: userEmail } as User);
+            setUser({ id: userId, email: userEmail } as AuthUser);
 
-            const db = makeAuthedClient(token);
-            const { data: profileData, error: profileError } = await db
-                .from('profiles')
-                .select('*')
-                .eq('id', userId)
-                .maybeSingle();
-
-            if (profileError) {
-                console.error('profiles SELECT error:', profileError);
-                toast.error(`Profile load failed: ${profileError.message} (${profileError.code})`);
+            const repository = createLegacyProfilesRepository(token);
+            const profileResult = await repository.findById(asUserId(userId));
+            // PATCH-018: legacy toast preserved - the raw supabase error travels as
+            // the DomainError cause; message/code interpolation stays byte-identical.
+            if (!profileResult.ok) {
+                const cause = profileResult.error.cause as { message?: string; code?: string } | undefined;
+                console.error('profiles SELECT error:', cause);
+                toast.error(`Profile load failed: ${cause?.message} (${cause?.code})`);
             }
+            const profileData = profileResult.ok ? profileResult.value : null;
 
             if (profileData) {
                 setProfile({
                     id: profileData.id,
-                    display_name: profileData.display_name || payload.user_metadata?.display_name || '',
+                    display_name: profileData.display_name || (payload.user_metadata?.display_name as string | undefined) || '',
                     email: userEmail,
                     username: profileData.username || userEmail.split('@')[0] || '',
                     about: profileData.about || '',
@@ -244,33 +217,13 @@ export default function BasicInfoPage() {
         const email = explicitPatchEmail || user?.email || profile.email || jwtPayload.email || '';
         if (!email) throw new Error('Missing account email in session. Please sign in again.');
 
-        const db = makeAuthedClient(token);
-        const now = new Date().toISOString();
-        const { data: updatedRow, error: updateError } = await db
-            .from('profiles')
-            .update({
-                email,
-                ...patch,
-                updated_at: now,
-            })
-            .eq('id', userId)
-            .select('id')
-            .maybeSingle();
-
-        if (updateError) throw updateError;
-        if (updatedRow) return;
-
-        const { error: insertError } = await db
-            .from('profiles')
-            .insert({
-                id: userId,
-                email,
-                created_at: now,
-                ...patch,
-                updated_at: now,
-            });
-
-        if (insertError) throw insertError;
+        const saveProfilePatch = createSaveProfilePatchCommand(
+            createLegacyProfilesRepository(token),
+        );
+        const result = await saveProfilePatch({ email, patch }, { userId: asUserId(userId) });
+        // PATCH-018: rethrow the RAW supabase error (the DomainError cause) so
+        // getErrorMessage and every save toast stay byte-identical.
+        if (!result.ok) throw (result.error.cause ?? result.error);
     };
 
     const saveField = async (field: string, value: string) => {
@@ -333,23 +286,22 @@ export default function BasicInfoPage() {
             if (!token) {
                 throw new Error('Your session expired. Please sign in again and retry.');
             }
-            const db = makeAuthedClient(token);
 
             if (FORCE_REAUTH_EMAIL_CHANGE) {
-                const { error: reauthError } = await db.auth.signInWithPassword({
-                    email: normalizedCurrentEmail,
-                    password: currentPasswordForEmail,
-                });
+                const { error: reauthError } = await legacyReauthenticateWithPassword(
+                    token,
+                    normalizedCurrentEmail,
+                    currentPasswordForEmail,
+                );
                 if (reauthError) {
                     throw new Error('Current email/password is incorrect');
                 }
             }
 
-            const { error: updateError } = await db.auth.updateUser(
-                { email: normalizedNewEmail },
-                {
-                    emailRedirectTo: `${window.location.origin}/auth/callback?next=/dashboard/settings/profile`,
-                }
+            const { error: updateError } = await legacyRequestEmailChange(
+                token,
+                normalizedNewEmail,
+                `${window.location.origin}/auth/callback?next=/dashboard/settings/profile`,
             );
             if (updateError) {
                 throw updateError;
@@ -402,21 +354,15 @@ export default function BasicInfoPage() {
             if (!token) throw new Error('Not authenticated');
             const userId = user?.id || decodeJwtPayload(token).sub;
             if (!userId) throw new Error('Session is invalid. Please sign in again.');
-            const db = makeAuthedClient(token);
+            const storage = createLegacyTokenStorageGateway(token);
 
             const fileExt = file.name.split('.').pop();
             const fileName = `avatar_${userId}_${Date.now()}.${fileExt}`;
             const filePath = `avatars/${fileName}`;
 
-            const { error: uploadError } = await db.storage
-                .from('avatars')
-                .upload(filePath, file, { upsert: true });
-
-            if (uploadError) throw uploadError;
-
-            const { data: { publicUrl } } = db.storage
-                .from('avatars')
-                .getPublicUrl(filePath);
+            const uploadResult = await storage.upload('avatars', filePath, file, { upsert: true });
+            if (!uploadResult.ok) throw uploadResult.error;
+            const publicUrl = storage.getPublicUrl('avatars', filePath);
 
             await persistProfilePatch({ avatar_url: publicUrl });
 

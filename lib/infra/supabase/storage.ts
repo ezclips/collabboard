@@ -13,7 +13,7 @@ interface StorageErrorLike {
   readonly message?: string;
 }
 
-interface StorageSupabaseClient {
+export interface StorageSupabaseClient {
   storage: {
     from(bucket: string): {
       upload(

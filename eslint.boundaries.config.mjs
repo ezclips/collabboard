@@ -16,7 +16,6 @@ const GRANDFATHERED_UI_FILES = [
   'app/dashboard/settings/integrations/page.tsx',
   'app/dashboard/settings/members/page.tsx',
   'app/dashboard/settings/password/page.tsx',
-  'app/dashboard/settings/profile/page.tsx',
   'components/collabboard/PostCardContent.tsx',
   'components/collabboard/canvas/ui/FreeformPadletCards.tsx',
 ];
