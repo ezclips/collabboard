@@ -150,7 +150,7 @@ follow 017's Pattern H).
 | 022 | canvas duality DECISION brief | CTO brief → owner | ✅ **RESOLVED** (brief delivered AND Fact-1 census executed 2026-07-09: zero user data, 5 owner-test rows, `canvas_files` table doesn't exist — verdict DELETE; proxy-metric trap stands: NO type-only de-linting of the two monolith files) |
 | 023 | **v1 collabboard vertical DELETION** (18 files: 9 pages incl. a v1 auth sub-vertical + 9 API routes; census-gated, deletions-only, live accept-route byte-untouched, NO table drops) | GPT-5.4 | ✅ **DONE** (cbe529e, review PASSED; Amendment 1 held; commit chain includes the CTO's accidental-bundle incident `5c3e15f` → restore `75cf480` → proper implementation — see the spec's Incident record; grandfather 4→3) |
 | 024 | security normalization — **authorized behavior change**: token acquisition moves to the cookie session (`sessionToken.ts`: getSession→refreshSession, the proven PATCH-019 cascade minus its deep-scan step); ALL four scavengers deleted from the quarantine; 11 call-site swaps across settings-root/profile/password/integrations; settings-root + profile FUNCTIONALLY REPAIRED for cookie users; two characterization specs rebound to repaired states (expected-unprobed, STOP-and-amend protocol); share-link RLS explicitly DEFERRED to its own server-side patch *(renumbered from 023)* | **GPT-5.5 REQUIRED** (auth behavior change + unprobeable-in-advance characterization = the owner's definitional GPT-5.5 case) | **✅ DONE — `32faa80`, CTO review PASSED 2026-07-09** (all gates independently re-run: both whole-file bindings byte-identical, 27/27 e2e green on the reviewer's own server incl. both repaired-state specs, verify green; two cosmetic undisclosed deviations accepted — disclosure-gap chain; Amendments 1–2 rode the implementation; follow-up queued: clientAuth dead tail + notifications-page swap) |
-| 025 | canvas ops seam (lib/domain/canvas: `padlets` repository + FIRST canvas command `canvas.toggleTask`); first consumer = PostCardContent's single write site (22 importers, component returned identical) *(renumbered from 024)* | GPT-5.5 | Fable design by 07-12 |
+| 025 | canvas ops seam: `PostsRepository` (`lib/domain/canvas/posts.ts` + `lib/infra/canvas/postsRepository.ts`, neutral naming per P7) + FIRST canvas command `canvas.toggleTask`; first consumer = PostCardContent's single write site (22 importers, rendering identical); **grandfather 3→2 EARNED** (the value import + the only runtime supabase call both leave the file — not type-only gaming) *(renumbered from 024)* | **GPT-5.4 acceptable** — the one mutation path's semantics are locked by 9 bound unit tests the CTO already ran GREEN at authoring; 1 untestable-by-e2e call < the ≥2 GPT-5.5 threshold; client swap is identity (browserClient wraps createClientComponentClient) | **READY — `patches/PATCH-025.md`** (all four new files compile-verified AND test-verified at authoring; census measured; post-edit gates derived; substring checks done). Companion: `docs/CANVASCLIENT_SITE_MAP.md` authored (successor-inheritance doc) |
 | 026+ | CanvasClient strangler series — grouped by table+operation (60 `padlets` + 6 `board_sections` + 4 `boards` sites, 2 storage, 3 auth incl. `auth.updateUser` at L263); FreeformPadletCards LAST (22 `padlets` sites, same ops); realtime/presence CTO-only, undesigned *(renumbered from 025+)* | per-group, GPT-5.5 first group | Fable site-map by 07-12 (successor inheritance artifact) |
 
 **Fable-window critical path (closes 2026-07-12).** In priority order:
@@ -324,6 +324,36 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-09** — PATCH-025 AUTHORED (handoff-ready; **GPT-5.4
+  acceptable** — ruling in the spec header: the single mutation path is
+  locked by nine bound unit tests the CTO ran GREEN against the bound
+  implementation at authoring time via scratch vitest, all four new files
+  `tsc --strict` clean; one untestable-by-e2e call sits below the ≥2
+  GPT-5.5 threshold; the repository client is IDENTITY with the legacy
+  client, not merely equivalent). Design: canvas ops seam opens —
+  `lib/domain/canvas/posts.ts` (PostsRepository + `canvas.toggleTask`,
+  neutral naming per P7) + `lib/infra/canvas/postsRepository.ts` (narrow
+  structural client, house factory idiom); first consumer is
+  PostCardContent's single write (todo checkbox), three bound component
+  edits with explicit blank-line bindings (PATCH-024 lesson applied);
+  grandfather 3→2 EARNED (value import + runtime call both leave; no
+  type-only de-linting anywhere — CanvasClient/FreeformPadletCards/hooks
+  bound byte-untouched). Characterization ruling: no new e2e spec — the
+  toggle path is pinned by executable unit tests (stronger than
+  PATCH-020's diff-only net), the component's render path stays live in
+  board-lifecycle, full suite 27/18 is Phase A baseline and Phase C
+  regression net; unit suite 76/18 → 85/20. **Companion deliverable:
+  `docs/CANVASCLIENT_SITE_MAP.md`** — successor-inheritance census of the
+  monolith: 73 `.from(` sites (61 padlets — CORRECTS the recorded 60; site
+  L2652 is double-quoted and invisible to single-quote greps — 6
+  board_sections, 4 boards, 2 storage) + 3 auth; the reads live in the
+  canvas HOOKS (26 more sites incl. the previously uncensused
+  `canvas_lines` table), which are neither grandfathered nor lint-visible
+  (proxy-metric); 23 sites below L6086 are inline-JSX handlers (different
+  extraction shape); full line table + the regeneration script bound
+  inline + 026+ sequencing guidance (board_sections first, cascade/pair
+  writes extracted as single commands, FreeformPadletCards last). No
+  PATCH-026 drafted — 025 needs no split.
 - **2026-07-09** — PATCH-024 landed and reviewed: **PASSED** (commit
   `32faa80`, GPT-5.5). The plan's one authorized behavior-change patch is
   DONE: cookie-session users regain settings-root and profile (both pages
