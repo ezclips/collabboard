@@ -142,7 +142,7 @@ follow 017's Pattern H).
 | Patch | Target | Shape | Shrink | Model | Spec status |
 |---|---|---|---|---|---|
 | 020 | password | auth-security swap: nine call sites behind a raw-passthrough `passwordSecurity.ts` facade (5 MFA/webauthn + getUser/reauth/updateUser + profiles-email fallback); page's duplicate scavenger+JWT-decode helpers DELETED and re-imported from the quarantine (byte-compared) | 6→5 | GPT-5.5 | ✅ **DONE** (1eb0e2c, review PASSED; Amendment 3 AAL-badge assertion held; Pattern J in catalog §5.10) |
-| 021 | members | Pattern E at scale (3 repos + auth swaps; API fetches untouched) | 5→4 | **GPT-5.5** | Fable to author (by 07-12) |
+| 021 | members | raw-passthrough CRUD facade (`workspaceMembers.ts`, 10 functions covering 13 raw touches: workspace_members select/update/delete, workspace_invitations select/update/delete, boards select, getUser×2, getSession×2, resolveCurrentWorkspace×2 reused thin); `User` type import replaced by narrow `MembersPageUser`; API fetches untouched | 5→4 | **GPT-5.5 REQUIRED** (5 of 10 facade functions wrap real mutations/real email-sends — diff fidelity is the only net) | **READY — `patches/PATCH-021.md`** (census dry-run-verified; characterization probed against live e2e account — solo workspace owner, zero pending invitations; CSS-uppercase "You"/"YOU" trap caught pre-authoring via the PATCH-020 lesson; `lib/workspace/context.ts` confirmed untouched by design) |
 
 **Batch 5 — canvas program (022+; Phase 2 entry; NOT mechanical):**
 | Patch | Target | Shape | Model |
@@ -293,6 +293,51 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-09** — PATCH-021 AUTHORED (handoff-ready; **GPT-5.5 REQUIRED**,
+  ruling: five of the ten new facade functions wrap real mutations or feed
+  a real side effect — `updateMemberRole`, `removeWorkspaceMember`,
+  `updateInvitation`, `deleteInvitation`, and `getCurrentAuthSession`
+  feeding the real invite-creation/invite-email API calls — more
+  untestable-mutation density than PATCH-020's five MFA calls, so the same
+  Pattern-J-derived ruling applies; GPT-5.4 only as owner-authorized
+  fallback). Full 1,817-line page read; census dry-run-verified (thirteen
+  raw Supabase touches — 4 auth calls, 2 `resolveCurrentWorkspace(supabase,
+  ...)` calls, 7 table calls across workspace_members/workspace_invitations/
+  boards — condensed into ten facade functions, three of which are each
+  reused across two call sites). The page's grandfather trigger is narrower
+  than expected: only the `import type { User } from '@supabase/supabase-js'`
+  line violates the boundary lint — `useSupabase()` itself is an internal
+  `@/lib/supabase` alias and already passes lint — but the architectural
+  goal (no direct Supabase access from any page component) still requires
+  moving all thirteen touches into infra, so the full extraction proceeds
+  regardless. `User` replaced by a narrow local `MembersPageUser` interface
+  covering exactly the five fields the page reads (grepped exhaustively:
+  `id`, `email`, `user_metadata.display_name`, `user_metadata.avatar_url`,
+  `created_at`). `resolveWorkspaceForUser`'s parameter type is derived with
+  `Parameters<typeof resolveCurrentWorkspace>[1]` specifically so it cannot
+  drift from the real signature; `lib/workspace/context.ts` itself — already
+  outside the boundary lint's scope and shared by other pages — is
+  explicitly bound as untouched, with the reviewer checklist naming it the
+  single highest-value diff check. Characterization PROBED against the OLD
+  page: the e2e account is its workspace's sole OWNER with zero pending
+  invitations (cookie session satisfies `getUser` directly, same as
+  integrations — no scavenger wall). Two probe corrections during authoring:
+  a bare `getByRole('heading', {name:'Members'})` collides with an unrelated
+  second "Members" heading elsewhere on the settings shell (disambiguated
+  with `level: 1`, not `.first()`, since level is the real distinguishing
+  property); and the owner's own-row "You" badge is visually `YOU` via a
+  Tailwind `uppercase` class exactly like PATCH-020 Amendment 3's AAL badge —
+  caught THIS TIME during authoring (not after a Phase A failure) by
+  applying the freshly-recorded lesson proactively, and bound correctly as
+  `getByText('You', {exact:true})` from the start. The one characterization
+  test is read-only by necessity: every other interaction on this page is a
+  real mutation or a real email send, so nothing else is safe to assert
+  without an authorized behavior-change patch. Full-suite arithmetic stated
+  explicitly (26 + 1 = 27 in 18 files, reconfirmed live via
+  `playwright --list` before authoring). One operational note: my own probe
+  server left a lingering :3000 listener the auto-mode safety classifier
+  correctly refused to let me kill without stronger attribution — flagged
+  for owner cleanup rather than worked around.
 - **2026-07-09** — PATCH-020 landed and reviewed: PASSED (commit `1eb0e2c`).
   Grandfather 6→5. All gates independently re-run: page diff is exactly
   the bound import swap, two deleted helper defs, deleted client line, nine
