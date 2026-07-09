@@ -149,7 +149,7 @@ follow 017's Pattern H).
 |---|---|---|---|
 | 022 | canvas duality DECISION brief | CTO brief → owner | ✅ **RESOLVED** (brief delivered AND Fact-1 census executed 2026-07-09: zero user data, 5 owner-test rows, `canvas_files` table doesn't exist — verdict DELETE; proxy-metric trap stands: NO type-only de-linting of the two monolith files) |
 | 023 | **v1 collabboard vertical DELETION** (18 files: 9 pages incl. a v1 auth sub-vertical + 9 API routes; census-gated, deletions-only, live accept-route byte-untouched, NO table drops) | GPT-5.4 | ✅ **DONE** (cbe529e, review PASSED; Amendment 1 held; commit chain includes the CTO's accidental-bundle incident `5c3e15f` → restore `75cf480` → proper implementation — see the spec's Incident record; grandfather 4→3) |
-| 024 | security normalization — **authorized behavior change**: replace token-scavenger with real session reads; revisit share-link service-role→RLS *(renumbered from 023)* | GPT-5.5 | Fable spec |
+| 024 | security normalization — **authorized behavior change**: token acquisition moves to the cookie session (`sessionToken.ts`: getSession→refreshSession, the proven PATCH-019 cascade minus its deep-scan step); ALL four scavengers deleted from the quarantine; 11 call-site swaps across settings-root/profile/password/integrations; settings-root + profile FUNCTIONALLY REPAIRED for cookie users; two characterization specs rebound to repaired states (expected-unprobed, STOP-and-amend protocol); share-link RLS explicitly DEFERRED to its own server-side patch *(renumbered from 023)* | **GPT-5.5 REQUIRED** (auth behavior change + unprobeable-in-advance characterization = the owner's definitional GPT-5.5 case) | **READY — `patches/PATCH-024.md`** (census measured; bound TS compile-verified; post-edit gates derived from measured pre-edit counts; substring-collision check done on the new symbol) |
 | 025 | canvas ops seam (lib/domain/canvas: `padlets` repository + FIRST canvas command `canvas.toggleTask`); first consumer = PostCardContent's single write site (22 importers, component returned identical) *(renumbered from 024)* | GPT-5.5 | Fable design by 07-12 |
 | 026+ | CanvasClient strangler series — grouped by table+operation (60 `padlets` + 6 `board_sections` + 4 `boards` sites, 2 storage, 3 auth incl. `auth.updateUser` at L263); FreeformPadletCards LAST (22 `padlets` sites, same ops); realtime/presence CTO-only, undesigned *(renumbered from 025+)* | per-group, GPT-5.5 first group | Fable site-map by 07-12 (successor inheritance artifact) |
 
@@ -299,6 +299,37 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-09** — PATCH-024 AUTHORED (handoff-ready; **GPT-5.5 REQUIRED**
+  — auth/session behavior change with two characterization specs rebound
+  to repaired states that cannot exist before implementation, the owner's
+  definitional GPT-5.5 criterion). This is the plan's ONE authorized
+  behavior-change patch (queued since PATCH-017 Amendment 1). Design: new
+  `lib/infra/supabase/sessionToken.ts` (getSession → refreshSession —
+  PATCH-019's production-proven cascade minus its deep-scan step —
+  plus `decodeJwtPayload`/`JwtPayload` moved verbatim); `legacyToken.ts`
+  rewritten whole-file-bound down to the four surviving bearer-machinery
+  exports (8→4), header corrected per the renumbering (the owner-required
+  stale-PATCH-023 fix); eleven token-swap call sites bound individually
+  (3 settings-root incl. two manual-atob→decodeJwtPayload upgrades, 5
+  profile, 2 password, 1 integrations); unit test file renamed with its
+  one import line (76/18 unchanged). Five authorized behavior changes
+  enumerated exhaustively in the spec — settings-root and profile REPAIRED
+  for cookie users, password's silent no-email defect repaired,
+  integrations' dead deep-scan fallback removed, quarantine shrunk.
+  Characterization: the two failure-state specs are REBOUND to repaired
+  behavior and marked EXPECTED-UNPROBED with a bound STOP-and-amend
+  protocol (PATCH-003 unexecuted-spec precedent — the repaired states are
+  unobservable until the repair exists); integrations/password specs bound
+  byte-untouched as the regression net. Authoring safeguards all applied:
+  bound TS compile-verified against installed types (scratch tsc clean),
+  gates derived from measured pre-edit counts, substring-collision check
+  on `getSessionAccessToken` vs `getAccessToken` (not a substring —
+  'Session' splits it), shell-bound numerics, stale-`.next/types` rule
+  embedded, read-status-before-staging rule embedded. Share-link RLS
+  explicitly deferred to its own server-side patch. Suite stays 27/18.
+  Self-review pre-commit caught three spec defects: an 11-vs-12 swap-count
+  slip, an unbound Phase A total (bound to 8 = 7+setup), and a
+  thinking-out-loud gate comment rewritten as a clean binding.
 - **2026-07-09** — PATCH-023 landed and reviewed: PASSED (commit
   `cbe529e`). Grandfather 4→3 — remaining: CanvasClient,
   PostCardContent, FreeformPadletCards (proxy-metric ruling stands; no
