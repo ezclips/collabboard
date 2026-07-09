@@ -32,6 +32,14 @@ import React, { useEffect, useLayoutEffect, useRef, useState, useCallback, useMe
 import DOMPurify from 'dompurify';
 import { useRouter } from 'next/navigation';
 import { supabaseBrowser } from '@/lib/supabase/browser';
+import {
+  createCreateSectionCommand,
+  createDeleteSectionCommand,
+  createRenameSectionCommand,
+  createReorderSectionsCommand,
+  createSwapSectionPositionsCommand,
+} from '@/lib/domain/canvas/sections';
+import { createSectionsRepository } from '@/lib/infra/canvas/sectionsRepository';
 import type { Padlet, BoardSection, PendingPostDraft, NewPostDragState, DropIndicatorState, CanvasLine } from '@/types/collabboard';
 import { User, Session } from '@supabase/supabase-js';
 import {
@@ -2833,23 +2841,18 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       // Log board_id details for debugging
       console.log('[handleAddSection] Creating section with board_id:', canvasId, 'type:', typeof canvasId);
 
-      // Attempt insert with string ID first (assuming UUID or string-based ID)
-      // If your DB expects an integer, ensure canvasId string is a valid number '123'
-      const { data, error } = await supabase
-        .from('board_sections')
-        .insert({
-          board_id: canvasId, // Sending as string
-          title: sectionName,
-          description: '',
-          position: position,
-        })
-        .select()
-        .single();
+      const createSection = createCreateSectionCommand(createSectionsRepository());
+      const result = await createSection(
+        { boardId: canvasId, title: sectionName, position },
+        { userId: null }
+      );
 
-      if (error) {
-        console.error('[handleAddSection] Database error:', error);
-        throw error;
+      if (!result.ok) {
+        console.error('[handleAddSection] Database error:', result.error);
+        throw result.error.cause ?? result.error;
       }
+
+      const data = result.value as BoardSection | null;
 
       if (data) {
         setSections(prev => {
@@ -2887,12 +2890,10 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
 
   const handleRenameSection = useCallback(async (sectionId: number, title: string) => {
     try {
-      const { error } = await supabase
-        .from('board_sections')
-        .update({ title, updated_at: new Date().toISOString() })
-        .eq('id', sectionId);
+      const renameSection = createRenameSectionCommand(createSectionsRepository());
+      const result = await renameSection({ sectionId, title }, { userId: null });
 
-      if (error) throw error;
+      if (!result.ok) throw result.error.cause ?? result.error;
       setSections(prev => prev.map(s => s.id === sectionId ? { ...s, title } : s));
     } catch (e) {
       console.error('Failed to rename section:', e);
@@ -2902,12 +2903,10 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
 
   const handleDeleteSection = useCallback(async (sectionId: number) => {
     try {
-      const { error } = await supabase
-        .from('board_sections')
-        .delete()
-        .eq('id', sectionId);
+      const deleteSection = createDeleteSectionCommand(createSectionsRepository());
+      const result = await deleteSection({ sectionId }, { userId: null });
 
-      if (error) throw error;
+      if (!result.ok) throw result.error.cause ?? result.error;
       setSections(prev => prev.filter(s => s.id !== sectionId));
 
       // Unlink posts from this section
@@ -2973,20 +2972,17 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     }));
 
     try {
-      // Update both sections in database
-      const { error: error1 } = await supabase
-        .from('board_sections')
-        .update({ position: neighborPosition, updated_at: new Date().toISOString() })
-        .eq('id', currentSection.id);
+      // Update both sections in database (sequential, stop on first error)
+      const swapPositions = createSwapSectionPositionsCommand(createSectionsRepository());
+      const result = await swapPositions(
+        {
+          first: { sectionId: currentSection.id, position: neighborPosition },
+          second: { sectionId: neighborSection.id, position: currentPosition },
+        },
+        { userId: null }
+      );
 
-      if (error1) throw error1;
-
-      const { error: error2 } = await supabase
-        .from('board_sections')
-        .update({ position: currentPosition, updated_at: new Date().toISOString() })
-        .eq('id', neighborSection.id);
-
-      if (error2) throw error2;
+      if (!result.ok) throw result.error.cause ?? result.error;
     } catch (e) {
       console.error('Failed to move section:', e);
       toast.error('Failed to move section');
@@ -3018,14 +3014,10 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     );
 
     try {
-      await Promise.all(
-        numericIds.map((id, idx) =>
-          supabase
-            .from('board_sections')
-            .update({ position: idx, updated_at: new Date().toISOString() })
-            .eq('id', id)
-        )
-      );
+      const reorderSections = createReorderSectionsCommand(createSectionsRepository());
+      const result = await reorderSections({ sectionIds: numericIds }, { userId: null });
+
+      if (!result.ok) throw result.error.cause ?? result.error;
     } catch (err) {
       console.error('Failed to reorder sections:', err);
       toast.error('Failed to reorder sections');
