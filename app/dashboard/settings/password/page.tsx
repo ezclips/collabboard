@@ -1,7 +1,18 @@
 'use client';
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+import { decodeJwtPayload, getAccessToken } from '@/lib/infra/supabase/legacyToken';
+import {
+    authenticateWebauthnPasskey,
+    findProfileEmailById,
+    getAuthenticatorAssuranceLevel,
+    getCurrentAuthUser,
+    listMfaFactors,
+    reauthenticateWithPassword,
+    registerWebauthnPasskey,
+    unenrollMfaFactor,
+    updateCurrentUserPassword,
+} from '@/lib/infra/supabase/passwordSecurity';
 import { KeyRound, Loader2, ShieldCheck, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -17,27 +28,6 @@ type PasskeyFactor = {
 };
 
 type AALLevel = 'aal1' | 'aal2' | 'aal3' | null;
-
-const getAccessToken = (): string | null => {
-    try {
-        const lsKeys = Object.keys(localStorage).filter(k => k.includes('auth-token'));
-        for (const key of lsKeys) {
-            const raw = localStorage.getItem(key);
-            if (!raw) continue;
-            const parsed = JSON.parse(raw);
-            const token = Array.isArray(parsed) ? parsed[0]?.access_token : parsed?.access_token;
-            if (token) return token;
-        }
-    } catch { /* ignore */ }
-    return null;
-};
-
-const decodeJwtPayload = (token: string): { sub?: string; email?: string } => {
-    const [, payload = ''] = token.split('.');
-    const normalized = payload.replace(/-/g, '+').replace(/_/g, '/');
-    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=');
-    return JSON.parse(atob(padded)) as { sub?: string; email?: string };
-};
 
 const emitSecurityNotification = async (action: string) => {
     const token = getAccessToken();
@@ -64,8 +54,6 @@ const emitSecurityNotification = async (action: string) => {
 };
 
 export default function PasswordPage() {
-    const supabase = createClientComponentClient();
-    
     const [currentPassword, setCurrentPassword] = useState('');
     const [newPassword, setNewPassword] = useState('');
     const [updating, setUpdating] = useState(false);
@@ -84,8 +72,8 @@ export default function PasswordPage() {
             setLoadingPasskeys(true);
 
             const [{ data: factorsData, error: factorsError }, { data: aalData, error: aalError }] = await Promise.all([
-                supabase.auth.mfa.listFactors(),
-                supabase.auth.mfa.getAuthenticatorAssuranceLevel(),
+                listMfaFactors(),
+                getAuthenticatorAssuranceLevel(),
             ]);
 
             if (factorsError) {
@@ -105,7 +93,7 @@ export default function PasswordPage() {
         } finally {
             setLoadingPasskeys(false);
         }
-    }, [supabase.auth.mfa]);
+    }, []);
 
     useEffect(() => {
         void loadPasskeyState();
@@ -117,9 +105,7 @@ export default function PasswordPage() {
         try {
             setRegisteringPasskey(true);
 
-            const { data, error } = await supabase.auth.mfa.webauthn.register({
-                friendlyName,
-            });
+            const { data, error } = await registerWebauthnPasskey(friendlyName);
 
             if (error) {
                 throw error;
@@ -145,9 +131,7 @@ export default function PasswordPage() {
         try {
             setVerifyingPasskeyId(factorId);
 
-            const { data, error } = await supabase.auth.mfa.webauthn.authenticate({
-                factorId,
-            });
+            const { data, error } = await authenticateWebauthnPasskey(factorId);
 
             if (error) {
                 throw error;
@@ -172,7 +156,7 @@ export default function PasswordPage() {
         try {
             setRemovingPasskeyId(factorId);
 
-            const { error } = await supabase.auth.mfa.unenroll({ factorId });
+            const { error } = await unenrollMfaFactor(factorId);
             if (error) {
                 throw error;
             }
@@ -193,7 +177,7 @@ export default function PasswordPage() {
     };
 
     const resolveAccountEmail = async (): Promise<string | null> => {
-        const { data: { user } } = await supabase.auth.getUser();
+        const { data: { user } } = await getCurrentAuthUser();
         if (user?.email) return user.email;
 
         const token = getAccessToken();
@@ -203,11 +187,7 @@ export default function PasswordPage() {
 
         const userId = user?.id || payload.sub;
         if (!userId) return null;
-        const { data: profileRow } = await supabase
-            .from('profiles')
-            .select('email')
-            .eq('id', userId)
-            .maybeSingle();
+        const { data: profileRow } = await findProfileEmailById(userId);
         return typeof profileRow?.email === 'string' && profileRow.email ? profileRow.email : null;
     };
 
@@ -236,17 +216,12 @@ export default function PasswordPage() {
                 return;
             }
 
-            const { error: reauthError } = await supabase.auth.signInWithPassword({
-                email,
-                password: currentPassword
-            });
+            const { error: reauthError } = await reauthenticateWithPassword(email, currentPassword);
             if (reauthError) {
                 throw new Error('Current password is incorrect');
             }
 
-            const { error } = await supabase.auth.updateUser({
-                password: newPassword
-            });
+            const { error } = await updateCurrentUserPassword(newPassword);
 
             if (error) throw error;
 

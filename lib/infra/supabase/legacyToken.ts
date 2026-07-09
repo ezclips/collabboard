@@ -13,6 +13,8 @@ import { SupabaseStorageGateway } from './storage';
  * PATCH-019 added the integrations page's deep-scan variant + session
  * cascade - the quarantine now holds all three scavenger inventories for
  * PATCH-023 (settings-root's stayed in-page, 017-frozen).
+ * PATCH-020 adds the password page as a consumer of getAccessToken +
+ * decodeJwtPayload (its in-page duplicates deleted) - no new code.
  * do not add consumers beyond the pages the patches name.
  *
  * DELIBERATE house-style exception: the auth helpers below return RAW
