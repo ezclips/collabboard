@@ -439,7 +439,32 @@ only ever ratchets upward is not measuring anything. No architecture
 credit despite the deletion: removing dead code is hygiene (the PATCH-016
 precedent), and the strategy documents are design, not landed seams. Ops
 12, product 12, continuity 10 unchanged. Axis snapshot at 73: safety 19,
-ops 12, architecture 20, product 12, continuity 10.)
+ops 12, architecture 20, product 12, continuity 10.) → **75** (2026-07-09:
+PATCH-024 landed and passed review — the plan's ONE authorized
+behavior-change patch, queued since PATCH-017 Amendment 1. Cookie-session
+users (the class every real login is in) regain two functionally dead
+pages — settings-root and profile failed closed on a localStorage
+scavenger that could never see the cookie session — and password's
+security-notification emails now actually send; all four quarantine
+scavengers deleted, tokens come from the real session. **+1 ops 12→13** —
+the standing localStorage-scavenger security flag is CLOSED for the
+settings vertical, with the two remaining repo sites (clientAuth's dead
+deep-scan tail, the notifications page's in-page copy) inventoried,
+byte-untouched, and queued rather than discovered later; token-trawling
+attack surface removed from four live pages. **+1 product 12→13** — two
+user-facing pages restored plus a silent security-email defect fixed;
+this is the first patch in the program whose value lands directly on
+users rather than on the codebase. No safety movement: the two authoring
+defects (Amendments 1–2, both asserted-not-measured recurrences caught by
+correct implementer stops) and the two cosmetic undisclosed deviations
+are established, already-priced patterns; the expected-unprobed
+characterization protocol closing cleanly on first live contact is
+genuine evidence but safety sits at 19 on the CTO's own incident, and
+process working as designed does not buy back an incident. No
+architecture movement: quarantine shrink is consolidation of an
+already-credited seam, and the axis is at ceiling. Continuity 10
+unchanged. Axis snapshot at 75: safety 19, ops 13, architecture 20,
+product 13, continuity 10.)
 
 ## 13. The succession test
 

@@ -1,10 +1,9 @@
 # PATCH-024 — Scavenger normalization: token acquisition moves to the real cookie session (AUTHORIZED BEHAVIOR CHANGE)
 
-**Status:** READY — Amendment 1 applied 2026-07-09 (pre-edit importer
-census rebound to cover all import-path spellings); Amendment 2 applied
-2026-07-09 (repo-wide extinction gates rebound to the two measured
-pre-existing survivor sites; scope NOT widened; implementer KEEPS the
-in-flight worktree and resumes from the amended post-edit gates)
+**Status:** ✅ DONE — implemented by GPT-5.5 as `32faa80`; CTO review
+PASSED 2026-07-09 (see CTO Review section). Amendment 1 (importer census
+spellings) and Amendment 2 (extinction gates rebound to measured
+pre-existing survivors) both applied during implementation.
 **Complexity:** medium-high (four pages + the quarantine + one new infra
 module + two characterization specs REBOUND to repaired behavior; the
 mechanism is identical everywhere, but two of the four pages change from
@@ -573,3 +572,58 @@ byte-untouched state is already true in the worktree.
 discipline — run the extinction pattern against the pre-edit tree at
 authoring time; a repo-wide claim is measured on the repo, not derived
 from the vertical you happen to have been working in.
+
+## CTO Review — PASSED (2026-07-09, commit `32faa80`)
+Every gate independently re-run by the CTO; no pasted output accepted.
+- **Commit shape:** single atomic commit, exactly the nine bound files
+  (89 insertions / 190 deletions), bound commit message character-exact,
+  working tree clean, no foreign staged lines swept (verified by
+  `git show --stat`).
+- **Whole-file bindings:** `sessionToken.ts` and `legacyToken.ts` each
+  BYTE-IDENTICAL to §1/§2 (bindings extracted from this spec and diffed
+  against the files — empty diffs). That settles focus points 1–6 at once:
+  session-first cascade with NO localStorage read anywhere in the new
+  module; `decodeJwtPayload`/`JwtPayload` moved verbatim; exports 8→4; all
+  four scavengers gone; only bearer machinery survives; header correction
+  exact including the renumbering explanation.
+- **Eleven swaps:** verified in the raw diffs — 3 settings-root (incl. both
+  manual-atob → `decodeJwtPayload` upgrades with the compile-verified
+  narrowing), 5 profile (guards/toasts/downstream byte-identical), 2
+  password, 1 integrations. Import edits exactly as bound. One diff-display
+  artifact resolved during review: plain `git diff` showed profile's
+  `profilesRepository` import line as a -/+ pair; `diff -w` + `cat -A`
+  byte inspection proved the line identical — git's indent-heuristic hunk
+  regrouping, not a change.
+- **Numeric gates:** all per-file greps exact (0/4/0/3 · 0/6/4/1 · 0/3/0 ·
+  0/2), exports 4, union importer gate 5→2 (profile + profilesRepository
+  only), extinction gates print exactly Amendment 2's bound 6/4 survivor
+  lines, survivor + forbidden files all byte-untouched (clientAuth,
+  notifications, profilesRepository, workspaceMembers, passwordSecurity,
+  CanvasClient, FreeformPadletCards, PostCardContent, app/api — every diff
+  empty). No boundaries-config change; grandfather untouched at 3.
+- **Executable gates:** unit 76/18 green; `tsc --noEmit` 0; boundaries
+  clean; full Playwright **27/27 green on the CTO's own dev server**
+  (port 3000 confirmed free before start, banner port read, canvas/settings
+  routes warmed) — including BOTH rebound specs observing the repaired
+  states live, and the untouched integrations/password regression net;
+  server PID-attributed and stopped after use, port count 0; `.next`
+  cleared; `npm run verify` green end-to-end (production build passes).
+- **Behavior audit (focus 8):** the diffs contain the five authorized
+  changes and nothing else — no sixth behavior change, no signature drift,
+  no new casts, share-link untouched (spec green as regression evidence).
+- **Deviations found (focus 13):** TWO, both cosmetic, both UNDISCLOSED
+  despite "Reported deviations: None": (1) the two rewritten
+  characterization specs omit the bound inline comments on four assertion
+  lines (assertions byte-identical); (2) settings-root's deletion took the
+  blank line adjacent to the bound L44–57 range (avoiding a double blank).
+  **Accepted** — zero behavior effect in both; recorded in LESSONS_LEARNED
+  as the PATCH-018/021 disclosure-gap chain's next recurrence. The rule
+  stands: "no runtime effect" is a review conclusion, not grounds to skip
+  reporting.
+- **Verdict: PASSED.** Health per §12: 73 → 75 (+1 ops — the standing
+  localStorage-scavenger security flag is CLOSED for the settings vertical
+  with the two remaining repo sites inventoried and queued; +1 product —
+  two user-facing pages functionally repaired for the cookie-session class
+  every real user is in, and security-notification emails now actually
+  send). Follow-up queued in CURRENT_TASK: clientAuth dead-tail removal +
+  notifications-page swap (needs its own authorization).

@@ -149,7 +149,7 @@ follow 017's Pattern H).
 |---|---|---|---|
 | 022 | canvas duality DECISION brief | CTO brief → owner | ✅ **RESOLVED** (brief delivered AND Fact-1 census executed 2026-07-09: zero user data, 5 owner-test rows, `canvas_files` table doesn't exist — verdict DELETE; proxy-metric trap stands: NO type-only de-linting of the two monolith files) |
 | 023 | **v1 collabboard vertical DELETION** (18 files: 9 pages incl. a v1 auth sub-vertical + 9 API routes; census-gated, deletions-only, live accept-route byte-untouched, NO table drops) | GPT-5.4 | ✅ **DONE** (cbe529e, review PASSED; Amendment 1 held; commit chain includes the CTO's accidental-bundle incident `5c3e15f` → restore `75cf480` → proper implementation — see the spec's Incident record; grandfather 4→3) |
-| 024 | security normalization — **authorized behavior change**: token acquisition moves to the cookie session (`sessionToken.ts`: getSession→refreshSession, the proven PATCH-019 cascade minus its deep-scan step); ALL four scavengers deleted from the quarantine; 11 call-site swaps across settings-root/profile/password/integrations; settings-root + profile FUNCTIONALLY REPAIRED for cookie users; two characterization specs rebound to repaired states (expected-unprobed, STOP-and-amend protocol); share-link RLS explicitly DEFERRED to its own server-side patch *(renumbered from 023)* | **GPT-5.5 REQUIRED** (auth behavior change + unprobeable-in-advance characterization = the owner's definitional GPT-5.5 case) | **READY — `patches/PATCH-024.md`, Amendments 1–2 applied; implementation IN FLIGHT (worktree kept, resumes at amended post-edit gates)** (importer census rebound to alias+relative+union spellings, Amendment 1; repo-wide extinction gates rebound to the two measured pre-existing survivor sites — clientAuth.ts + notifications page, queued follow-up, scope NOT widened — Amendment 2) |
+| 024 | security normalization — **authorized behavior change**: token acquisition moves to the cookie session (`sessionToken.ts`: getSession→refreshSession, the proven PATCH-019 cascade minus its deep-scan step); ALL four scavengers deleted from the quarantine; 11 call-site swaps across settings-root/profile/password/integrations; settings-root + profile FUNCTIONALLY REPAIRED for cookie users; two characterization specs rebound to repaired states (expected-unprobed, STOP-and-amend protocol); share-link RLS explicitly DEFERRED to its own server-side patch *(renumbered from 023)* | **GPT-5.5 REQUIRED** (auth behavior change + unprobeable-in-advance characterization = the owner's definitional GPT-5.5 case) | **✅ DONE — `32faa80`, CTO review PASSED 2026-07-09** (all gates independently re-run: both whole-file bindings byte-identical, 27/27 e2e green on the reviewer's own server incl. both repaired-state specs, verify green; two cosmetic undisclosed deviations accepted — disclosure-gap chain; Amendments 1–2 rode the implementation; follow-up queued: clientAuth dead tail + notifications-page swap) |
 | 025 | canvas ops seam (lib/domain/canvas: `padlets` repository + FIRST canvas command `canvas.toggleTask`); first consumer = PostCardContent's single write site (22 importers, component returned identical) *(renumbered from 024)* | GPT-5.5 | Fable design by 07-12 |
 | 026+ | CanvasClient strangler series — grouped by table+operation (60 `padlets` + 6 `board_sections` + 4 `boards` sites, 2 storage, 3 auth incl. `auth.updateUser` at L263); FreeformPadletCards LAST (22 `padlets` sites, same ops); realtime/presence CTO-only, undesigned *(renumbered from 025+)* | per-group, GPT-5.5 first group | Fable site-map by 07-12 (successor inheritance artifact) |
 
@@ -161,8 +161,17 @@ is DESIGN — implementation and post-window reviews run on GPT-5.4/5.5
 against these specs using the per-patch acceptance checklists +
 CTO_PLAYBOOK §12/§14.
 
-**Security flag (recorded 2026-07-08; feeds the scavenger-normalization
-patch — RENUMBERED 2026-07-09: was 023, now **PATCH-024**; every "023"
+**Security flag — CLOSED 2026-07-09 by PATCH-024 (`32faa80`, review
+PASSED).** The settings-vertical scavengers are extinct: all four
+quarantine scavenger functions deleted, both in-page copies
+(settings-root, notifications excepted — see Addendum 5) replaced or
+queued, tokens now come from the real cookie session via
+`sessionToken.ts`. The addenda below are HISTORICAL inventory except
+Addendum 5, whose two surviving sites (clientAuth.ts dead tail,
+notifications page) remain the queued follow-up.
+**(Original standing text, kept for the record — recorded 2026-07-08;
+feeds the scavenger-normalization patch — RENUMBERED 2026-07-09: was 023,
+now **PATCH-024**; every "023"
 below in this standing section and its addenda means the renumbered 024.
 Note: `legacyToken.ts`'s header comment still names PATCH-023 as its
 removal patch — that code comment is corrected as a bound one-line edit in
@@ -315,6 +324,30 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-09** — PATCH-024 landed and reviewed: **PASSED** (commit
+  `32faa80`, GPT-5.5). The plan's one authorized behavior-change patch is
+  DONE: cookie-session users regain settings-root and profile (both pages
+  were unusable — "Not authenticated" on every load), password's security
+  emails now actually send, integrations' dead deep-scan fallback removed,
+  quarantine shrunk 8→4 exports with the renumbering header correction.
+  All gates independently re-run at review: both whole-file bindings
+  BYTE-IDENTICAL (bindings extracted from the spec and diffed); eleven
+  swaps verified in raw diffs; all numeric gates exact incl. Amendment 2's
+  survivor line sets; unit 76/18; tsc 0; boundaries clean; full Playwright
+  27/27 on the reviewer's own server (banner-port verified, both rebound
+  specs observed the repaired states LIVE — the expected-unprobed protocol
+  closed cleanly on first contact); stopped-server gate 0; `npm run
+  verify` green. Two cosmetic undisclosed deviations found by byte-diff
+  (spec-comment omissions in the two rewritten e2e files; one adjacent
+  blank line in settings-root's bound deletion) — accepted, recorded as
+  the disclosure-gap chain's next recurrence. Security flag CLOSED (see
+  standing section); remaining scavenger sites (clientAuth dead tail,
+  notifications page) stay queued follow-up needing their own
+  authorization. Health 73 → **75** (+1 ops: standing security flag
+  closed with survivors inventoried; +1 product: two user-facing pages
+  repaired for the class every real user is in). Grandfather unchanged
+  at 3. Next per plan: PATCH-025 canvas ops seam design + CanvasClient
+  site map (Fable-window items, by 07-12).
 - **2026-07-09** — PATCH-024 Amendment 2: repo-wide extinction gates
   rebound; scope ruling = Option 1, NOT widened. GPT-5.5 correctly STOPPED
   at the post-edit census with the implementation applied and preserved

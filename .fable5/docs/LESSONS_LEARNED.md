@@ -236,6 +236,20 @@ recurring, low-severity gap rather than closing — reviewers should expect
 to find at least one undisclosed whitespace-only line per patch and budget
 review time for a full line-by-line diff pass regardless of how clean the
 pasted verification output looks.
+**Recurred (2026-07-09, PATCH-024 review):** two undisclosed cosmetic
+deviations in a "Reported deviations: None" delivery — (1) both rewritten
+characterization specs omit the bound inline comments on four assertion
+lines (the assertions themselves are byte-identical to the binding);
+(2) settings-root's bound 14-line deletion (L44–57) took the adjacent
+blank line too (avoiding a double blank — the sensible edit, but off the
+bound range). Found only by CTO byte-diff against the extracted binding
+blocks. **Ruling: accepted, same chain as PATCH-018/021** — zero behavior
+effect in both. The per-patch expectation stands. Review side-note worth
+keeping: a plain `git diff` displayed one byte-identical import line as
+changed (-/+ pair) — git's indent-heuristic hunk regrouping, not a real
+change; confirmed by `diff -w` plus `cat -A` byte inspection before ruling.
+When a diff line looks impossible, check the tool's presentation heuristics
+before suspecting the file (same family as wc/Measure-Object).
 
 ### A characterization spec that inherits the project storageState breaks CI unless it skips or overrides (2026-07-08, PATCH-015 review)
 **Symptom:** the new `share-link.spec.ts` passed every local run but failed with `ENOENT: no such file ... e2e/.auth/user.json` when run without credentials — the exact configuration CI uses (blocking step, full `playwright test`, no E2E secrets). Caught in review by simulating CI (rename `user.json`, `E2E_SKIP_CREDENTIALS=1`) BEFORE the commit was pushed; CI never went red.
