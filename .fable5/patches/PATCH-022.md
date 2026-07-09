@@ -1,7 +1,16 @@
 # PATCH-022 — CTO Decision Brief: the canvas duality and the CanvasClient strangler program
 
-**Status:** BRIEF — for owner decision. NOT an implementation patch. Nothing
-in this document authorizes code changes.
+**Status:** BRIEF — decision RESOLVED same day. **Fact-1 data census
+executed 2026-07-09 (CTO, service-role, read-only): zero user data — 5 rows
+total, all owner dev-test debris from July 2025 (1 test canvas + 4 literal
+"test comment" rows, all the owner's own account); `canvas_files` doesn't
+even exist in the deployed DB (42P01). Verdict: DELETE. Deletion patch
+authored as PATCH-023 (GPT-5.4, PATCH-016 shape); scavenger normalization
+renumbered 023→024, ops seam 024→025, strangler series 026+. Census
+surprises recorded in PATCH-023: the vertical includes a v1 AUTH
+sub-vertical (3 more pages), and the LIVE invitation-accept route
+references the dead tables (structural no-op — stays byte-untouched,
+Phase-3 item).**
 **Author:** Fable (CTO), 2026-07-09 — final Fable-window strategy document
 for batch 5. Every number below was measured against the repo on
 2026-07-09 (commit `ea03671` era); none are from memory.

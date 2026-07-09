@@ -147,10 +147,11 @@ follow 017's Pattern H).
 **Batch 5 — canvas program (022+; Phase 2 entry; NOT mechanical):**
 | Patch | Target | Shape | Model |
 |---|---|---|---|
-| 022 | canvas duality DECISION brief | CTO brief → owner | ✅ **DELIVERED — `patches/PATCH-022.md`** (2026-07-09; measured census; recommendation: Option 3 — owner runs 3 read-only SQL queries on `canvases`/`canvas_sections`, delete the nav-orphaned collabboard vertical if empty; proxy-metric trap recorded: NO type-only de-linting of the two monolith files) |
-| 023 | security normalization — **authorized behavior change**: replace token-scavenger with real session reads; revisit share-link service-role→RLS | GPT-5.5 | Fable spec |
-| 024 | canvas ops seam (lib/domain/canvas: `padlets` repository + FIRST canvas command `canvas.toggleTask`); first consumer = PostCardContent's single write site (22 importers, component returned identical) | GPT-5.5 | Fable design by 07-12 — per 022 brief, does NOT wait on the Fact-A verdict (only census arithmetic changes) |
-| 025+ | CanvasClient strangler series — grouped by table+operation (60 `padlets` + 6 `board_sections` + 4 `boards` sites, 2 storage, 3 auth incl. `auth.updateUser` at L263); FreeformPadletCards LAST (22 `padlets` sites, same ops); realtime/presence CTO-only, undesigned | per-group, GPT-5.5 first group | Fable site-map by 07-12 (successor inheritance artifact) |
+| 022 | canvas duality DECISION brief | CTO brief → owner | ✅ **RESOLVED** (brief delivered AND Fact-1 census executed 2026-07-09: zero user data, 5 owner-test rows, `canvas_files` table doesn't exist — verdict DELETE; proxy-metric trap stands: NO type-only de-linting of the two monolith files) |
+| 023 | **v1 collabboard vertical DELETION** (18 files: 9 pages incl. a v1 auth sub-vertical + 9 API routes; census-gated, deletions-only, live accept-route byte-untouched, NO table drops) | **GPT-5.4** | **READY — `patches/PATCH-023.md`** (all census greps dry-run-verified; Fact-1 verdict recorded in the spec) |
+| 024 | security normalization — **authorized behavior change**: replace token-scavenger with real session reads; revisit share-link service-role→RLS *(renumbered from 023)* | GPT-5.5 | Fable spec |
+| 025 | canvas ops seam (lib/domain/canvas: `padlets` repository + FIRST canvas command `canvas.toggleTask`); first consumer = PostCardContent's single write site (22 importers, component returned identical) *(renumbered from 024)* | GPT-5.5 | Fable design by 07-12 |
+| 026+ | CanvasClient strangler series — grouped by table+operation (60 `padlets` + 6 `board_sections` + 4 `boards` sites, 2 storage, 3 auth incl. `auth.updateUser` at L263); FreeformPadletCards LAST (22 `padlets` sites, same ops); realtime/presence CTO-only, undesigned *(renumbered from 025+)* | per-group, GPT-5.5 first group | Fable site-map by 07-12 (successor inheritance artifact) |
 
 **Fable-window critical path (closes 2026-07-12).** In priority order:
 ① specs 017–019 (unblocks GPT-5.4 for the whole of batch 3), ② specs
@@ -160,7 +161,12 @@ is DESIGN — implementation and post-window reviews run on GPT-5.4/5.5
 against these specs using the per-patch acceptance checklists +
 CTO_PLAYBOOK §12/§14.
 
-**Security flag (recorded 2026-07-08, feeds 023):** profile + integrations
+**Security flag (recorded 2026-07-08; feeds the scavenger-normalization
+patch — RENUMBERED 2026-07-09: was 023, now **PATCH-024**; every "023"
+below in this standing section and its addenda means the renumbered 024.
+Note: `legacyToken.ts`'s header comment still names PATCH-023 as its
+removal patch — that code comment is corrected as a bound one-line edit in
+the 024 spec, not before):** profile + integrations
 scan all of localStorage for access tokens and hand-decode JWTs
 (`getAccessTokenFromStorage`/`findAccessTokenDeep`, duplicated in both
 files). Extraction preserves it (centralized + audited); 023 removes it.
@@ -293,6 +299,34 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-09** — PATCH-022 Fact-1 data census EXECUTED (CTO,
+  service-role, read-only — the key never printed) and PATCH-023 (deletion)
+  AUTHORED. Census: all eight v1 tables from migration 001 — `canvases` 1
+  row (owner's dev-test canvas `5fb6e0a5…`, empty title, icon 🎯,
+  2025-07-04), `canvas_comments` 4 rows (all the owner's own account, all
+  on that same canvas, contents literally "Direct database test comment!
+  🎯" / "nested comments are working!", newest 2025-07-08), five tables
+  empty, `canvas_files` does not exist in the deployed DB (42P01 — schema
+  drifted). **Verdict: zero user data → DELETE, per PATCH-022 Option 3.**
+  Census surprises: (1) the vertical includes a v1 AUTH sub-vertical
+  (login/register/forgot-password — 3 more pages, all link-orphaned), so
+  the deletion is 18 files (9 pages + 9 API routes incl. a typo'd
+  `collabborators` route variant); (2) the LIVE
+  `app/api/invitations/accept/route.ts` reads `canvases` and upserts
+  `canvas_collaborators` for canvas-scoped invitations — a 2026-03-09
+  migration even retrofitted `workspace_id` onto the dead table; with zero
+  real rows the block is a structural no-op and stays BYTE-UNTOUCHED
+  (rule 9 — recorded as a Phase-3 item alongside the table drops and the
+  now-orphaned `update_canvas_access` rpc); (3) `canvas_comments` (one of
+  the three comment stores) has NO live consumers — the live comment
+  systems are `metadata.comments`/`detachedComments`; the third store is
+  dead-on-arrival v1, which SIMPLIFIES the Phase-3 comment consolidation.
+  PATCH-023 authored PATCH-016-shaped for GPT-5.4: deletions-only diff +
+  one grandfather line (4→3), all census greps dry-run-verified against
+  the live repo, before/after route probes bound (Phase A records codes,
+  Phase B asserts 404), suite stays 27/18, no new spec file, no table
+  drops, no package removals. **Renumbering:** scavenger normalization
+  023→024, canvas ops seam 024→025, strangler series 025+→026+.
 - **2026-07-09** — PATCH-022 DECISION BRIEF delivered
   (`patches/PATCH-022.md`) — the batch-5 strategy document, every number
   measured against the repo this session. Key findings that CORRECT the
