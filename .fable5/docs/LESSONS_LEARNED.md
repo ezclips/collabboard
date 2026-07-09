@@ -99,6 +99,13 @@ at minimum before working on this repo. Newest first within each section.
 **Reusable rule:** never grep localized command output for English words (netstat, tasklist, systeminfo are all localized on Windows) — use PowerShell object cmdlets or match locale-neutral fields like `:PORT`. And PW_BASE_URL evidence is only evidence when you can attribute the server: check the port immediately before starting your own server, and if something already answers, identify the PID and what it serves before trusting a single test result.
 **Recurred (2026-07-08, PATCH-015 review):** the CTO used `netstat | grep LISTEN` mid-diagnosis, took empty output as "port free", deleted `.next` under a still-running dev server (which then 404'd everything), and started a second server that silently bound :3001. The rule covers ad-hoc checks during debugging, not just the formal pre-build guard — `Get-NetTCPConnection` ALWAYS, and after any kill, verify the port count is 0 before touching shared state.
 
+### A numeric spec gate without a bound shell is two gates — `wc -l` vs `Measure-Object -Line` (2026-07-09, PATCH-019 pre-edit census)
+**Symptom:** implementer correctly STOPPED pre-edit: spec expected `wc -l` = 287, census printed 262 — yet every line anchor (L6/L119/L122/L135/L175/L202) and every count in the same census matched exactly.
+**Wrong path (avoided):** treating it as baseline drift. A real 25-line deletion would have shifted every anchor after the deletion point; matching anchors + mismatched total = counting-method split, not file change.
+**Root cause:** the file is byte-identical to the spec baseline. Git Bash `wc -l` counts all 287 lines; PowerShell `(Get-Content $f | Measure-Object -Line).Lines` counts only lines containing non-whitespace — the file has 25 blank lines, so it prints 262. The spec's census was a `bash` block, but nothing stopped a PowerShell substitution with silently different semantics. (`(Get-Content $f).Count` = 287 matches wc.)
+**Fix:** PATCH-019 Amendment 1 — gate rebound with both shells' commands and expected values inline; census accepted as PASSED.
+**Reusable rule:** on this machine every numeric gate in a spec must bind the exact command AND shell that produces the number (same family as the netstat/locale rule above); when a census mismatches on ONE derived total while all positional anchors match, suspect the measuring tool before the file.
+
 ### Windows execSync mangles `^` — a review audit compared a commit to itself (2026-07-07, PATCH-003 review)
 **Symptom:** lockfile audit reported 0 added/0 changed while `git show --stat` showed a 16k-line diff and grep found vitest only in the new file.
 **Wrong path:** almost trusted the "no changes" audit because it looked authoritative.

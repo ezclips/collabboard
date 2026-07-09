@@ -132,7 +132,7 @@ Grandfather trajectory 17 → 10:
 | 016 | AddPadletMenu | orphan deletion, census-gated | 10→9 | GPT-5.4 | ✅ **DONE** (0a2d372, review PASSED) |
 | 017 | settings-root | Pattern H intro (storage gateway, verbatim-bound) + workspace-settings repos + `settings.saveWorkspace` command | 9→8 | GPT-5.4 | ✅ **DONE** (ff84152, review PASSED; Amendment 1 held; Pattern H in catalog §5.8) |
 | 018 | profile | H reuse (gateway class over legacy client) + profiles repo + `profile.savePatch` command + `legacyToken.ts` quarantine (scavenger moved verbatim) | 8→7 | GPT-5.4 | ✅ **DONE** (8872c2e, review PASSED; Pattern I in catalog §5.9; zod v4 compat fix accepted) |
-| 019 | integrations | Pattern I reuse: deep-scan pair moves verbatim into `legacyToken.ts` + `resolveLegacySessionToken` cascade (getSession → refreshSession → deep scan, order preserved) | 7→6 | GPT-5.4 | **READY — `patches/PATCH-019.md`** (census dry-run-verified; characterization probed incl. exact callback-toast texts; page WORKS for the e2e account — first fully-exercisable extraction in the batch) |
+| 019 | integrations | Pattern I reuse: deep-scan pair moves verbatim into `legacyToken.ts` + `resolveLegacySessionToken` cascade (getSession → refreshSession → deep scan, order preserved) | 7→6 | GPT-5.4 | **READY — `patches/PATCH-019.md`** (census dry-run-verified; characterization probed incl. exact callback-toast texts; page WORKS for the e2e account — first fully-exercisable extraction in the batch; Amendment 1: line-count gate rebound shell-explicitly, 262/287 = same file, census ruled PASSED) |
 
 Dependencies: 016 independent; 017 → 018 → 019 strictly sequential (018
 introduces the legacy-token helper that 019 reuses; both storage consumers
@@ -283,6 +283,16 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-09** — PATCH-019 Amendment 1: GPT-5.4 blocked correctly at the
+  pre-edit census (no edits, clean tree) — expected line count 287, printed
+  262. CTO-reproduced: the file is byte-identical to baseline (git log/status
+  clean, all six line anchors matched); the split is the counting tool, not
+  the file — Git Bash `wc -l` counts all 287 lines, PowerShell
+  `Measure-Object -Line` skips the file's 25 blank lines (262 + 25 = 287).
+  Gate rebound shell-explicitly in the spec (both shells' commands + expected
+  values inline); census ruled PASSED, Codex may proceed to Phase A. New
+  lesson recorded (numeric gates must bind the producing shell — same family
+  as the netstat/locale rule). No product code changed.
 - **2026-07-09** — PATCH-019 AUTHORED (handoff-ready for GPT-5.4; closes
   batch 016–019 when landed, grandfather 7→6). Full 287-line page read;
   census dry-run-verified (only TWO Supabase calls — getSession +

@@ -1,6 +1,9 @@
 # PATCH-019 — Extraction: integrations page; deep-scan token cascade joins the legacy quarantine
 
 **Status:** draft (awaiting owner approval — final patch of batch 016–019)
+**Amendment 1 issued: the line-count gate is shell-ambiguous, not a baseline
+mismatch — 287 (all lines) and 262 (non-blank lines) are the SAME file. Gate
+rebound to shell-explicit commands. No code baseline changed.**
 **Complexity:** easy-medium (two auth-call swaps + one verbatim function move;
 the discipline is in what must NOT be clicked)
 **Assigned model:** **GPT-5.4**
@@ -66,9 +69,40 @@ grep -c "resolveAccessToken" "$f"          # expected: 4 (def L118; calls L131/L
 # 4. API fetches (UNTOUCHED):
 grep -n "fetch('/api" "$f"
 # expected EXACTLY 3 lines: L135 (load), L175 (connect), L202 (disconnect)
-wc -l "$f"   # expected: 287
+wc -l "$f"   # expected: 287  [Amendment 1: Git Bash wc -l, counts ALL lines
+             #  incl. the file's 25 blank lines. PowerShell equivalents:
+             #  (Get-Content $f).Count            -> 287  (same semantics, ACCEPTED)
+             #  (Get-Content $f | Measure-Object -Line).Lines -> 262
+             #  Measure-Object -Line SKIPS blank lines; 262 from that command
+             #  is the SAME baseline, ACCEPTED. Any other value: STOP.]
 ```
 Anything more, less, or different: STOP, report, change nothing.
+
+## Amendment 1 (2026-07-09) — 262 vs 287 is a counting-tool split, not a baseline drift · CTO decision
+
+**Dispute (GPT-5.4, correct stop — no edits, clean git status):** pre-edit
+census reported line count 262 against the spec's expected 287; every other
+census item (anchors L6/L119/L122/L135/L175/L202, counts 2/4/4, no
+tables/storage/rpc) matched exactly.
+
+**Finding (CTO, reproduced against the committed file):** the file is
+UNCHANGED since spec authorship — `git log` shows no commits touching it and
+`git status` is clean. Git Bash `wc -l` prints **287** (all lines). The file
+contains **25 blank lines** (`grep -c '^[[:space:]]*$'` = 25) and **262**
+non-blank lines (`grep -cE '[^[:space:]]'` = 262). PowerShell's
+`Measure-Object -Line` counts only lines containing non-whitespace, so it
+prints 262 for the identical bytes. 262 + 25 = 287. The matching line
+anchors were the tell: a real 25-line deletion would have shifted every
+anchor after the deletion point.
+
+**Decision: the 287 baseline STANDS; the gate was shell-ambiguous and is
+rebound in-place above.** The census block is a `bash` block and its gates
+are Git Bash commands; where an implementer substitutes PowerShell, the
+accepted equivalents and their expected values are now bound explicitly.
+This is the same defect family as the port-3000 gate (spec's operational
+lesson 4): on this machine, a numeric gate is only a gate when the command
+that produces the number is bound shell-explicitly. **Codex may proceed to
+Phase A with the already-pasted census accepted as PASSED.**
 
 ## Bindings
 
