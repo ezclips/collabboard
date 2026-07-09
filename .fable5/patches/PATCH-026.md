@@ -1,6 +1,7 @@
 # PATCH-026 — Canvas strangler, group 1: the `board_sections` family onto the ops seam (five commands, Pattern K)
 
-**Status:** READY (authored 2026-07-09; owner approval pending)
+**Status:** ✅ DONE — implemented by GPT-5.4 as `24bdf94`; CTO review
+PASSED 2026-07-10 (see CTO Review section).
 **Complexity:** medium (four NEW whole-file-bound files + SIX bound edits to
 CanvasClient — one import block + five handler-internal swaps; the mechanism
 is PATCH-025's Pattern K applied to the site map's recommended first group)
@@ -1108,3 +1109,73 @@ bounded shape (construct command, await, throw-the-cause on failure) and
 the highest-risk semantics (partial failure, preserved swallow) are locked
 by pre-verified tests; the residual risk is fidelity inside a 8.5k-line
 file and resisting any adjacent cleanup.
+
+## CTO Review — PASSED (2026-07-10, commit `24bdf94`)
+Every gate independently re-run by the CTO; no pasted output accepted.
+- **Commit shape:** single atomic commit, exactly the five bound files
+  (682 insertions / 46 deletions), bound message character-exact, tree
+  clean.
+- **Whole-file bindings:** all FOUR new files BYTE-IDENTICAL to §1–§4
+  (fenced blocks extracted from this spec and diffed — four empty diffs;
+  sizes 137/115/234/158 match exactly). That settles focus 5/6/7/8
+  mechanically: `createSwapSectionPositionsCommand`'s sequential
+  stop-on-first-error and `createReorderSectionsCommand`'s preserved
+  legacy error-swallow are the byte-verified §1 logic, re-inspected
+  directly in the implementation and matching the bound comments verbatim.
+  The 17 tests (11 domain + 6 infra, counted via `grep -c "it("`) include
+  dedicated cases for both: "stops after a first-update failure", "reports
+  a second-update failure with the first already applied", and "preserves
+  the legacy error-swallow: row-level failures still return ok".
+- **CanvasClient:** diff matches §5a–§5f exactly — import block placed
+  immediately after the `supabaseBrowser` import (old L34) as bound; all
+  five handler-internal swaps present with guards/optimistic
+  updates/reverts/toasts/catch blocks byte-identical around them; the §5b
+  blank-line binding holds exactly (`const data = result.value as
+  BoardSection | null;` then one blank line then the untouched
+  `if (data) {`); zero dependency-array lines touched (grep swept the diff
+  for `], [` patterns — none). EOL audit: both old and new trees are
+  all-LF, zero CRLF lines in either (PATCH-025 lesson applied
+  proactively) — the disclosed EOF-blank-line fix (focus 13) was a
+  CONTENT restoration (wc -l 8517→8518), not a byte-encoding issue; file
+  now ends `}\n\n` exactly as the pre-edit tree did, confirmed byte-exact.
+- **Numeric gates:** all exact — `board_sections`/`.from('board_sections')`
+  0/0 (focus 1/2), `createSectionsRepository` 6, `userId: null` 5,
+  `domain/canvas`/`infra/canvas` 1/1, `Database error` 1 (tag preserved),
+  handler-name counts 12/4/4/5/2 unchanged, wc **8,518** (focus 9),
+  grandfather identity-pattern **2** (focus 10, 14 — untouched, no metric
+  chasing).
+- **Sibling-aggregate check (focus 4):** `sections.ts` mentions `posts.ts`
+  only in its own header comment, imports nothing from it, and neither
+  file references `PostsRepository`/`SectionsRepository` across the
+  boundary — two independent aggregates in one canvas folder family, not
+  a merged repository and not methods bolted onto `PostsRepository`.
+- **Byte-untouched (focus 3):** `eslint.boundaries.config.mjs`,
+  FreeformPadletCards.tsx, PostCardContent.tsx, the PATCH-025 trunk files
+  (posts.ts/posts.test.ts/postsRepository.ts/postsRepository.test.ts), and
+  the canvas hooks directory — every diff empty.
+- **Executable gates:** unit **102/22** (focus 11) — 22 files inclusive of
+  the two new; tsc 0; boundaries green repo-wide; full Playwright **27/27**
+  (focus 12) on the CTO's own dev server (port 0 before start, banner
+  :3000 read, `/`, `/auth`, `/dashboard` warmed pre-suite — reproducing
+  and confirming Codex's Phase-A cold-start diagnosis was environmental,
+  not a regression); server PID-attributed and stopped, port 0; `.next`
+  cleared; `npm run verify` green (production build passes, unit count
+  reconfirmed 102/22 inside the pipeline).
+- **Deviations (focus 15):** the three disclosed items are accepted as
+  reported — items 1–2 are dev-server/timing artifacts with zero code
+  effect (reproduced independently above); item 3 (EOF blank line) is
+  verified byte-exact against the pre-edit tree, not a drift. No
+  ADDITIONAL undisclosed line, cast, comment, whitespace, or EOL-byte
+  difference found in this review (unlike PATCH-024/025, this delivery's
+  disclosures were complete and accurate — first clean disclosure record
+  in the chain).
+- **Verdict: PASSED.** Health per §12: **holds at 76** — architecture is
+  already at its 20/20 ceiling (established in the PATCH-025 entry), so
+  the monolith's first-ever line-count shrink (8,526→8,518) is real
+  evidence with no axis room left to express it numerically, same ruling
+  as PATCH-019/020/021's capped-axis entries. No other axis moved: ops,
+  product, continuity unchanged (no telemetry/runbook, no user-facing
+  feature, no new inheritance artifact this patch); the clean disclosure
+  record is the baseline expectation working, not new safety evidence
+  (same "process working as designed does not buy back" standard applied
+  to PATCH-018's chain). Grandfather unchanged at 2, no credit sought.

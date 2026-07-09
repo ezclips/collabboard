@@ -486,7 +486,25 @@ shrinking it POSSIBLE; credit lands when it shrinks. No safety movement:
 one undisclosed EOL byte (disclosure-chain recurrence, priced) and two
 census-gate amendments caught pre-implementation (established pattern).
 Ops 13, product 13 unchanged. Axis snapshot at 76: safety 19, ops 13,
-architecture 20, product 13, continuity 11.)
+architecture 20, product 13, continuity 11.) → **76 (held)** (2026-07-10:
+PATCH-026 landed and passed review — a second Pattern K group
+(`board_sections`, five commands, `sections.ts` a true sibling aggregate
+beside `posts.ts`) landed byte-perfect on GPT-5.4, both risky semantics
+(swap partial-failure, reorder error-swallow) verified byte-exact and
+test-covered, and CanvasClient's line count SHRANK for the first time in
+the program's history (8,526→8,518). No credit: architecture is already
+at its 20/20 ceiling (set in the 76 entry above) — the shrink is genuine
+evidence with no axis room left to express it numerically, the same
+capped-axis ruling already applied to PATCH-019/020/021. No other axis
+moved: ops/product/continuity unchanged (no telemetry, no user-facing
+feature, no new inheritance artifact this patch), and the review's clean
+disclosure record (first zero-additional-finding delivery in the
+024/025/026 chain) is the baseline expectation working as designed, not
+new safety evidence — same standard already applied to PATCH-018's
+disclosure-gap entries in the other direction. Grandfather held at 2, no
+credit sought or given for metric-only movement. Axis snapshot at 76
+(unchanged): safety 19, ops 13, architecture 20, product 13,
+continuity 11.)
 
 ## 13. The succession test
 

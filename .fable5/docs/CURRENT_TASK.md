@@ -151,7 +151,7 @@ follow 017's Pattern H).
 | 023 | **v1 collabboard vertical DELETION** (18 files: 9 pages incl. a v1 auth sub-vertical + 9 API routes; census-gated, deletions-only, live accept-route byte-untouched, NO table drops) | GPT-5.4 | ✅ **DONE** (cbe529e, review PASSED; Amendment 1 held; commit chain includes the CTO's accidental-bundle incident `5c3e15f` → restore `75cf480` → proper implementation — see the spec's Incident record; grandfather 4→3) |
 | 024 | security normalization — **authorized behavior change**: token acquisition moves to the cookie session (`sessionToken.ts`: getSession→refreshSession, the proven PATCH-019 cascade minus its deep-scan step); ALL four scavengers deleted from the quarantine; 11 call-site swaps across settings-root/profile/password/integrations; settings-root + profile FUNCTIONALLY REPAIRED for cookie users; two characterization specs rebound to repaired states (expected-unprobed, STOP-and-amend protocol); share-link RLS explicitly DEFERRED to its own server-side patch *(renumbered from 023)* | **GPT-5.5 REQUIRED** (auth behavior change + unprobeable-in-advance characterization = the owner's definitional GPT-5.5 case) | **✅ DONE — `32faa80`, CTO review PASSED 2026-07-09** (all gates independently re-run: both whole-file bindings byte-identical, 27/27 e2e green on the reviewer's own server incl. both repaired-state specs, verify green; two cosmetic undisclosed deviations accepted — disclosure-gap chain; Amendments 1–2 rode the implementation; follow-up queued: clientAuth dead tail + notifications-page swap) |
 | 025 | canvas ops seam: `PostsRepository` (`lib/domain/canvas/posts.ts` + `lib/infra/canvas/postsRepository.ts`, neutral naming per P7) + FIRST canvas command `canvas.toggleTask`; first consumer = PostCardContent's single write site (22 importers, rendering identical); **grandfather 3→2 EARNED** (the value import + the only runtime supabase call both leave the file — not type-only gaming) *(renumbered from 024)* | **GPT-5.4 acceptable** — the one mutation path's semantics are locked by 9 bound unit tests the CTO already ran GREEN at authoring; 1 untestable-by-e2e call < the ≥2 GPT-5.5 threshold; client swap is identity (browserClient wraps createClientComponentClient) | **✅ DONE — `e2af0ef`, CTO review PASSED 2026-07-09** (all four new files byte-identical to bindings; unit 85/20, e2e 27/27, verify green — all re-run by reviewer; grandfather 3→2 earned via measured `--no-ignore` probe; one undisclosed EOL byte accepted — disclosure chain; Pattern K catalogued §5.11). Companion: `docs/CANVASCLIENT_SITE_MAP.md` (successor-inheritance doc, review-verified) |
-| 026 | CanvasClient strangler group 1: the complete `board_sections` write family (6 sites / 4 handlers → FIVE commands on the canvas trunk: create/rename/delete/swapPositions/reorder; `lib/domain/canvas/sections.ts` + `lib/infra/canvas/sectionsRepository.ts`, sibling aggregate to posts — one folder family, P6); monolith SHRINKS 8,526→8,518; NO grandfather movement (2→2, CanvasClient keeps 70 other sites); reorder's legacy error-swallow PRESERVED + documented + queued as P3-family defect | **GPT-5.4 acceptable** (Pattern K: 17 bound unit tests compiled AND run green at authoring — incl. dedicated tests for the swap's partial-failure and the reorder's preserved swallow; supersedes the provisional "GPT-5.5 first group" note, which predated Pattern K's PATCH-025 proof) | **READY — `patches/PATCH-026.md`** (site-map lines regenerated live; all five OLD blocks byte-diffed against the tree; census measured; `:(literal)` pathspec bound for the `[id]` segment) |
+| 026 | CanvasClient strangler group 1: the complete `board_sections` write family (6 sites / 4 handlers → FIVE commands on the canvas trunk: create/rename/delete/swapPositions/reorder; `lib/domain/canvas/sections.ts` + `lib/infra/canvas/sectionsRepository.ts`, sibling aggregate to posts — one folder family, P6); monolith SHRINKS 8,526→8,518; NO grandfather movement (2→2, CanvasClient keeps 70 other sites); reorder's legacy error-swallow PRESERVED + documented + queued as P3-family defect | **GPT-5.4 acceptable** (Pattern K: 17 bound unit tests compiled AND run green at authoring — incl. dedicated tests for the swap's partial-failure and the reorder's preserved swallow; supersedes the provisional "GPT-5.5 first group" note, which predated Pattern K's PATCH-025 proof) | **✅ DONE — `24bdf94`, CTO review PASSED 2026-07-10** (all four new files byte-identical to bindings; CanvasClient diff matches §5a-§5f exactly incl. blank-line binding; unit 102/22, e2e 27/27, verify green — all re-run by reviewer; monolith 8,526→8,518 (first shrink, but architecture is capped at 20 — health holds at 76, no credit expressible); grandfather untouched 2→2; first fully clean disclosure in the review chain) |
 | 027+ | CanvasClient strangler, remaining groups per site map §7: `boards` updates (4), `padlets` DELETE family (8, cascade pairs = one command), `padlets` INSERT family (19, container+post pairs = one command), `padlets` UPDATE slices (33, 18 in the JSX region — different edit shape), storage pair (Pattern H consumer), auth trio (existing seams); then hooks (26 read sites); FreeformPadletCards LAST; realtime/presence CTO-only, undesigned | per-group; Pattern K where bound tests can carry semantics | site map §7 is the sequencing source |
 
 **Fable-window critical path (closes 2026-07-12).** In priority order:
@@ -306,6 +306,7 @@ branch after a short soak (see CHANGELOG_ARCHITECTURE.md 2026-07-07).
 | Surviving canvas system | CTO | Phase 1 | Needs feature diff first |
 | Raise Supabase sign-in limit 30→100/5min (dev convenience + school-NAT headroom) | User | Anytime (dashboard, 1 min) | Auth → Rate Limits |
 | Configure custom SMTP (email limit is 2/h on built-in) | User | Before ANY beta/invites | Breaks signup/reset/invites beyond 2 users/h |
+| Authorize a fix for `canvas.reorderSections`' error-swallow (map reorder silently drops DB failures — legacy defect, PRESERVED verbatim by PATCH-026, not repaired) | User | Whenever (P3-family, non-blocking) | `lib/domain/canvas/sections.ts` — the command awaits `Promise.all` and never reads resolved per-row errors, same as the legacy handler it replaced; only a thrown network error surfaces. Test coverage exists (`sections.test.ts`, "preserves the legacy error-swallow") so a future fix changes one test's expectation, not the harness. |
 **Resolved decisions:** remote repository — DONE 2026-07-07 (private
 `github.com/ezclips/collabboard`, `origin/main` in sync); branch question —
 resolved by the push, default is `main` (was `master`); Gemini 3.1 Pro
@@ -325,6 +326,39 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-10** — PATCH-026 landed and reviewed: **PASSED** (commit
+  `24bdf94`, GPT-5.4). The board_sections write family is fully off
+  CanvasClient's shoulders and onto the canvas trunk as five commands
+  (`canvas.createSection`/`renameSection`/`deleteSection`/
+  `swapSectionPositions`/`reorderSections`), `sections.ts` confirmed a
+  true sibling aggregate beside `posts.ts` (zero cross-references, one
+  canvas folder family). Both risky semantics verified byte-exact against
+  the bound source AND covered by dedicated passing tests: the swap's
+  sequential stop-on-first-error, and the reorder's PRESERVED legacy
+  error-swallow (now tracked as a standing queued decision above, not
+  lost to a patch file). All gates independently re-run at review: four
+  new files byte-identical to bindings (sizes 137/115/234/158 exact);
+  CanvasClient diff matches all six bound edits exactly, including the
+  blank-line binding and zero dependency-array drift; EOL audit all-LF
+  both sides, zero flips; every numeric gate exact incl. the grandfather
+  identity-pattern held at 2; unit **102/22**; tsc 0; boundaries clean;
+  full Playwright **27/27** on the reviewer's own server (port confirmed
+  free, banner read, `//auth/dashboard` pre-warmed — independently
+  reproducing Codex's cold-start diagnosis as environmental, not a
+  regression); stopped-server gate 0; `npm run verify` green incl.
+  production build. **Monolith SHRANK for the first time: CanvasClient
+  8,526 → 8,518 lines.** Disclosure quality note: this delivery's three
+  reported deviations were all accurate and complete — no additional
+  undisclosed line found, the first fully clean disclosure record in the
+  024/025/026 review chain. Health **holds at 76** — architecture is
+  already at its 20/20 ceiling (set in the PATCH-025 entry), so the
+  monolith's first-ever shrink is real evidence with no room left to
+  register it numerically (same capped-axis ruling as PATCH-019/020/021);
+  no other axis moved (no telemetry/runbook, no user-facing feature, no
+  new inheritance artifact, and a clean disclosure record is the baseline
+  expectation, not new safety evidence). Grandfather held at 2, no credit
+  sought. PATCH-027 NOT drafted — next group sequencing is the owner's
+  call per site map §7.
 - **2026-07-09** — PATCH-026 AUTHORED (handoff-ready; **GPT-5.4
   acceptable** under Pattern K — seventeen bound unit tests compiled and
   run GREEN against the bound implementation at authoring, scratch tsc

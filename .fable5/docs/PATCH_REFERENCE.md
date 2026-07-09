@@ -537,7 +537,16 @@ claims (PATCH-021 Amendment 4).
 **Reference:** PATCH-025 (`components/collabboard/PostCardContent.tsx`;
 introduces `lib/domain/canvas/posts.ts` + `lib/infra/canvas/
 postsRepository.ts` — the canvas ops seam TRUNK that batches 026+ extend;
-one aggregate, one repository, P6).
+one aggregate, one repository, P6). **Extended by PATCH-026**
+(`app/dashboard/canvas/[id]/CanvasClient.tsx`, the `board_sections` write
+family; introduces `lib/domain/canvas/sections.ts` +
+`lib/infra/canvas/sectionsRepository.ts`) — proves the pattern generalizes
+to MULTIPLE call sites in ONE monolith component (six sites, four
+handlers, five commands) and to a SIBLING aggregate in the same trunk
+folder (`sections` next to `posts`, zero cross-references — the P6
+one-trunk rule is satisfied by the folder family, not a single merged
+repository). Landed byte-perfect on GPT-5.4 a second time; the monolith
+SHRANK for the first time as a direct result (8,526→8,518 lines).
 
 **When:** a component performs a direct table WRITE whose UI trigger is
 absent from (or too costly to add to) the e2e net, but whose logic is a
@@ -739,6 +748,7 @@ it, STOP — never adapt.
 | 023 | app/collabboard/** + app/api/collabboard/** | census-gated ROUTE-vertical deletion (PATCH-016 shape, first routed variant): 18 files, deletions-only, authorized by the PATCH-022 Fact-1 data census (zero user data); live accept-route + DB tables left untouched (Phase-3 items) | 4→3 ✅ done |
 | 024 | settings-root + profile + password + integrations (cross-page) | the plan's ONE authorized behavior-change patch (not an extraction pattern): scavenger normalization — new `sessionToken.ts` (getSession→refreshSession), quarantine shrunk 8→4 exports, eleven token-swap sites, two pages functionally REPAIRED for cookie users, two characterization specs rebound via the EXPECTED-UNPROBED protocol (assert the repaired state, STOP-and-amend if it fails — PATCH-003 precedent, first use on a behavior change) | 3→3 (all pages already off the list) ✅ done |
 | 025 | PostCardContent (todo-checkbox write) | new Pattern K — canvas ops command (§5.11): the canvas seam TRUNK (`lib/domain/canvas/posts.ts` + `lib/infra/canvas/postsRepository.ts`, `canvas.toggleTask`); bound unit tests compiled AND run green at authoring, so GPT-5.4 sufficed for a real DB write; grandfather removal EARNED via the measured `--no-ignore` probe (1 error → 0), zero type-only de-linting; companion successor artifact `docs/CANVASCLIENT_SITE_MAP.md` | 3→2 ✅ done |
+| 026 | CanvasClient (`board_sections` write family, 6 sites / 4 handlers) | Pattern K reuse (§5.11): SIBLING aggregate `lib/domain/canvas/sections.ts` beside `posts.ts` (one trunk folder, zero cross-references) — five commands incl. a preserved sequential-partial-failure swap and a preserved legacy error-swallow reorder, each pinned by a dedicated test (17 total); NO grandfather movement (metric not chased); monolith line count SHRANK for the first time (8,526→8,518) | 2→2 (CanvasClient stays grandfathered — 70 sites remain) ✅ done |
 
 **New patterns discovered by future patches get added here by the CTO at
 review — this catalog only ever contains patterns with a reviewed reference
