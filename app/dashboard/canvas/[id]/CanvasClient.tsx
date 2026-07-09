@@ -39,6 +39,13 @@ import {
   createReorderSectionsCommand,
   createSwapSectionPositionsCommand,
 } from '@/lib/domain/canvas/sections';
+import {
+  createSetBoardBackgroundCommand,
+  createSetBoardCoverCommand,
+  createSetChronoModeCommand,
+  createSetMapStyleCommand,
+} from '@/lib/domain/canvas/board';
+import { createCanvasBoardRepository } from '@/lib/infra/canvas/boardRepository';
 import { createSectionsRepository } from '@/lib/infra/canvas/sectionsRepository';
 import type { Padlet, BoardSection, PendingPostDraft, NewPostDragState, DropIndicatorState, CanvasLine } from '@/types/collabboard';
 import { User, Session } from '@supabase/supabase-js';
@@ -1054,15 +1061,12 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     if (!canvasId) return;
 
     try {
-      const nextSettings = {
-        ...((canvas?.settings as any) || {}),
-        mapStyleId: styleId,
-      };
-      const { error } = await supabase
-        .from('boards')
-        .update({ settings: nextSettings })
-        .eq('id', canvasId);
-      if (error) {
+      const setMapStyle = createSetMapStyleCommand(createCanvasBoardRepository());
+      const result = await setMapStyle(
+        { boardId: canvasId, styleId, currentSettings: ((canvas?.settings as any) || {}) },
+        { userId: null }
+      );
+      if (!result.ok) {
         toast.error('Map style changed locally but could not be saved');
         return;
       }
@@ -1155,17 +1159,18 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         nextAppearance.backgroundType !== currentBackgroundType ||
         nextAppearance.backgroundValue !== currentBackgroundValue
       ) {
-        const backgroundResponse = await supabase
-          .from('boards')
-          .update({
-            background_type: nextAppearance.backgroundType,
-            background_value: nextAppearance.backgroundValue,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', canvasId);
+        const setBoardBackground = createSetBoardBackgroundCommand(createCanvasBoardRepository());
+        const backgroundResult = await setBoardBackground(
+          {
+            boardId: canvasId,
+            backgroundType: nextAppearance.backgroundType,
+            backgroundValue: nextAppearance.backgroundValue,
+          },
+          { userId: null }
+        );
 
-        if (backgroundResponse.error) {
-          throw Object.assign(backgroundResponse.error, { scope: 'background' });
+        if (!backgroundResult.ok) {
+          throw Object.assign((backgroundResult.error.cause ?? backgroundResult.error) as object, { scope: 'background' });
         }
       }
 
@@ -4064,18 +4069,13 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   const setAsPadletCover = async (post: Padlet) => {
     const imageUrl = (post.metadata as any)?.imageUrl || (post.metadata as any)?.file_url;
     try {
-      const { error } = await supabase
-        .from('boards')
-        .update({
-          metadata: {
-            cover_post_id: post.id,
-            cover_image: imageUrl || null
-          },
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', canvasId);
+      const setBoardCover = createSetBoardCoverCommand(createCanvasBoardRepository());
+      const result = await setBoardCover(
+        { boardId: canvasId, coverPostId: post.id, coverImage: imageUrl || null },
+        { userId: null }
+      );
 
-      if (error) throw error;
+      if (!result.ok) throw result.error.cause ?? result.error;
       toast.success('Set as padlet cover');
     } catch (err) {
       toast.error('Failed to set cover');
@@ -4305,15 +4305,14 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     setShowChronoModeModal(false);
     if (canvasId) {
       const currentSettings = (canvas as any)?.settings || {};
-      const updatedSettings = { ...currentSettings, chronoMode: mode };
       try {
-        await supabase
-          .from('boards')
-          .update({
-            settings: updatedSettings,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', canvasId);
+        const setChronoMode = createSetChronoModeCommand(createCanvasBoardRepository());
+        const result = await setChronoMode(
+          { boardId: canvasId, mode, currentSettings },
+          { userId: null }
+        );
+
+        if (!result.ok) throw result.error.cause ?? result.error;
       } catch (err) {
         console.error('Failed to save chrono mode:', err);
         toast.error('Failed to save timeline mode');
