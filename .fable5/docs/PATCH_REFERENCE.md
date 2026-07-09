@@ -445,6 +445,60 @@ see LESSONS_LEARNED). Zod version drift: `z.record()` is two-argument
 one-argument v3 form will crash at runtime; verify the installed version's
 API before binding a zod schema literally into a spec.
 
+## 5.10. Pattern J — raw-passthrough auth/MFA facade
+
+**Reference:** PATCH-020 (`app/dashboard/settings/password`; introduces
+`lib/infra/supabase/passwordSecurity.ts`).
+
+**When:** a page calls several Supabase auth/MFA methods directly on the
+shared browser client (unlike Pattern I, no bearer client, no scavenger —
+the session is already correct) and AT LEAST ONE of those calls is
+untestable by characterization because exercising it performs a real
+external side effect (a WebAuthn ceremony, an email send, a factor
+mutation, a real re-authentication). The extraction's job is narrower than
+Patterns A–I: it is a pure relocation of call sites behind named functions,
+not a domain seam — there is no repository, no command, no Result.
+
+**When NOT:** every call site is characterization-testable (use Pattern C
+or a composite instead — a facade is not warranted just to swap an import);
+the page's session comes from a bearer/legacy client (Pattern I applies,
+possibly composed with this one if the page ALSO wraps untestable auth
+calls — none has yet).
+
+**Required pieces:** one new file, one function per call site, each
+function a ONE-LINE body: construct the browser client, call the method
+with the ORIGINAL argument shape, `return` the raw promise — no `await`
+inside the wrapper, no destructuring, no error translation. The facade
+returns exactly what Supabase returns; house-style Result conversion is a
+DELIBERATE exception, same ruling as Pattern I, for the same reason (the
+page's own error handling and toast text consume the raw shape, and a
+behavior-preserving extraction must not translate it).
+
+**The untestable-call discipline (the pattern's defining risk):** for any
+wrapped call whose UI trigger cannot appear in an e2e spec (real OAuth
+redirect, real WebAuthn ceremony, real email send, real destructive write),
+diff fidelity is the ONLY verification available — no red test will catch a
+transposed argument or a swallowed error. The patch spec must name every
+such call explicitly and forbid the implementer (and the reviewer) from
+ever triggering its UI control in a characterization spec. Assign the
+stronger available implementation model to patches with two or more
+untestable calls (PATCH-020 required GPT-5.5 over GPT-5.4 for exactly this
+reason) and give the reviewer's checklist a dedicated line-by-line pass over
+just the untestable wrappers.
+
+**Common mistakes:** binding a characterization assertion to a probe that
+used a different DOM-reading method than the assertion itself will use —
+`.innerText()` is layout-aware and reflects CSS `text-transform`, but
+`getByText()`/`toHaveText()` match raw text content and do not; probe with
+the SAME matcher the spec will bind (PATCH-020 Amendment 3: an `uppercase`
+CSS class made a lowercase `aal1` value look like `AAL1` in the probe,
+producing an assertion the real page could never satisfy). A grep gate on
+a bare identifier can collide with the extraction's own new import PATH
+(`grep -c "supabase"` matches the string "supabase" inside
+`@/lib/infra/supabase/...` import specifiers) — anchor gates on `@supabase`
+(the package) and `supabase\.` (the dotted call, i.e. Git Bash
+`grep -c "supabase\."`) separately, never a bare substring.
+
 ---
 
 ## 6. Universal requirements (every pattern, every patch)
@@ -578,6 +632,7 @@ it, STOP — never adapt.
 | 017 | settings-root | A/E composition + H — storage gateway (introduces `storage.ts`) | 9→8 ✅ done |
 | 018 | profile | A/E composition + I — legacy-token quarantine (introduces `legacyToken.ts`) + H reuse | 8→7 ✅ done |
 | 019 | settings/integrations | I reuse — deep-scan scavenger + session cascade added to `legacyToken.ts` (third and final scavenger variant; batch 016–019 complete) | 7→6 ✅ done |
+| 020 | settings/password | new Pattern J — raw-passthrough MFA/webauthn facade (`passwordSecurity.ts`, 9 wrappers, zero Result conversion) + I reuse as a consumer only (imports `getAccessToken`/`decodeJwtPayload`, adds zero code to the quarantine) | 6→5 ✅ done |
 
 **New patterns discovered by future patches get added here by the CTO at
 review — this catalog only ever contains patterns with a reviewed reference

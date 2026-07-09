@@ -375,7 +375,28 @@ new class of catch, and architecture because Pattern I reuse (not a new
 pattern) closes out a batch that was already fully credited across 016–018.
 Ops 12, product 12, continuity 10 unchanged — still the binding constraint,
 unmoved for four consecutive patches now. Axis snapshot at 74: safety 20,
-ops 12, architecture 20, product 12, continuity 10.)
+ops 12, architecture 20, product 12, continuity 10.) → **74 (held)**
+(2026-07-09: PATCH-020 landed and passed review — grandfather 6→5, a NEW
+pattern catalogued (Pattern J, raw-passthrough auth/MFA facade, §5.10)
+proven on the hardest delegation case yet: five of nine swapped call sites
+are WebAuthn/MFA paths no characterization spec can ever exercise, so the
+review's only net was line-by-line diff fidelity. The model-assignment
+ruling in the spec (GPT-5.5 required, not GPT-5.4) held under real pressure
+with zero behavior drift — a correct judgment call confirmed by outcome,
+not just made. Two more self-caught spec defects (both mine, both caught
+before implementation reached code): the AAL-badge assertion bound to a
+CSS-painted casing my probe read with the wrong DOM-reading method
+(Amendment 3), and a would-be post-edit grep gate that would have collided
+with the new import's own path string (caught in authoring). No credit:
+safety and architecture are already at their 20/20 ceiling — a new pattern
+is the textbook case for architecture credit, but the axis has no room left
+regardless of merit, and a spec defect caught before it reached code is
+process discipline working as designed, not a new safety event. Ops 12,
+product 12, continuity 10 unchanged — still the binding constraint, unmoved
+for five consecutive patches now; real movement here requires the queued
+e2e-infra sweep or telemetry work actually landing, not another clean
+patch. Axis snapshot at 74: safety 20, ops 12, architecture 20, product 12,
+continuity 10.)
 
 ## 13. The succession test
 

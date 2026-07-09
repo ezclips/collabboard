@@ -1,11 +1,6 @@
 # PATCH-020 — Extraction: password/passkey page; auth+MFA surface behind a raw-passthrough facade
 
-**Status:** draft (awaiting owner approval — first patch of batch 020–021)
-**Amendment 3 issued: the AAL-badge characterization assertion was bound to
-the CSS-rendered casing (`AAL1`, via `.innerText()`), not the DOM text
-Playwright's `getByText` actually matches (`aal1`) — a probe-methodology
-error, not a page behavior question. Assertion corrected to match the raw
-text; no page behavior changed.**
+**Status:** DONE (2026-07-09, commit `1eb0e2c`) — CTO review PASSED. **Amendment 3 (AAL-badge casing, probe-methodology error, no behavior change) held exactly. Pattern J catalogued (§5.10). Model-assignment ruling (GPT-5.5 required) confirmed by outcome — zero deviations across all nine call sites.**
 **Complexity:** medium (nine call-site swaps, five of them MFA/webauthn; zero
 of the five passkey paths are exercisable by test, so DIFF FIDELITY IS THE
 ONLY NET on them)
@@ -549,3 +544,56 @@ medium — mechanically simple swaps, but five of them are beyond the reach of
 any test, the page mutates credentials, and the traps are argument-shape
 drift inside the facade, the dep-array change, and the four buttons the spec
 must never click.
+
+## CTO Review (2026-07-09) — PASSED
+
+Implementation commit `1eb0e2c`. All gates independently re-run, not
+accepted from pasted output.
+
+- **Page diff**: exactly the bound import swap, both duplicate helper defs
+  deleted, the client-const line deleted, all nine call sites swapped, and
+  the `[supabase.auth.mfa]` → `[]` dep-array change. Everything else
+  byte-identical. No undisclosed lines.
+- **`passwordSecurity.ts`**: byte-identical to the §1 whole-file binding —
+  9 wrappers, each a one-line raw-return with the original argument shape
+  (`{ friendlyName }`, `{ factorId }`), zero `await`/destructuring/error
+  translation inside the facade, zero Result conversion. The five
+  MFA/webauthn wrappers (the ones no test can reach) were given the
+  line-by-line scrutiny the spec demands — all five pass through untouched.
+- **`legacyToken.ts`**: diff is the single bound comment sentence; every
+  existing export (including `getAccessToken`/`decodeJwtPayload`, now
+  consumed by this page) is byte-untouched. No fourth scavenger variant —
+  the page's duplicates were deleted, not preserved, per Addendum 4.
+- **Boundaries**: single line removed from `GRANDFATHERED_UI_FILES`; list
+  re-counted at 5.
+- **e2e spec**: matches the Amendment-3-corrected bindings byte-for-byte
+  (`aal1`, not `AAL1`); zero clicks on Reset password by email, Add passkey,
+  Verify session, or Remove anywhere in the file; the only click (too-short
+  password) uses the hydration-acknowledged `toPass` idiom and asserts zero
+  forbidden network requests.
+- **Gates independently re-run**: `npx tsc --noEmit` → clean. `npm run
+  check:boundaries` → clean. `npx vitest run` → 76 passed / 18 files
+  (unchanged). `npx playwright test --list` → 26 tests / 17 files, matching
+  the spec's stated arithmetic exactly. Post-edit greps: `@supabase` 0,
+  `supabase\.` 0, `passwordSecurity` 1, `getAccessToken` 3, `decodeJwtPayload`
+  2, `resolveAccountEmail` 3, `profiles` 0, both fetch lines unchanged,
+  facade `createBrowserSupabaseClient` count 10 / `export function` count 9
+  — all exact. Stopped-server gate: both :3000 and :3001 at 0 listeners.
+  `git status` clean.
+- **Reported 3-vs-2 standalone-count deviation**: independently reproduced
+  (`npx playwright test --list e2e/characterization/password-page.spec.ts`
+  → 3 tests / 2 files). Confirmed as Playwright's `[setup]` project running
+  as a dependency of any characterization-file invocation (1 setup + 2 bound
+  tests) — not a spec defect, no amendment needed.
+- **Deviations**: none beyond the two already-amended, self-caught spec
+  defects (Amendment 3's AAL casing; the pre-committed grep-gate fix for
+  `supabase` substring collision). Zero undisclosed off-spec lines, casts,
+  or behavior changes.
+
+**Grandfather: 6 → 5, confirmed.** New pattern catalogued: **Pattern J —
+raw-passthrough auth/MFA facade** (PATCH_REFERENCE §5.10), with its
+defining risk (untestable calls make diff fidelity the only net) and both
+probe/grep mistakes this patch surfaced folded into the pattern's "Common
+mistakes" section. Model-assignment ruling (GPT-5.5 required) held under
+real pressure with zero drift — confirmed in LESSONS_LEARNED as a repeatable
+judgment call, not a one-off.

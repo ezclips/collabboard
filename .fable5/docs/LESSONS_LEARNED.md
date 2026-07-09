@@ -13,6 +13,11 @@ at minimum before working on this repo. Newest first within each section.
 **Fix:** CTO ran verification, found two spec defects, fixed, committed (`a7fe12c`); handoff template now demands pasted output + commit hash.
 **Reusable rule:** a delegated patch is not done until the reviewer has re-run verification themselves and the commit hash exists — treat all pasted reports as claims, not evidence.
 
+### Confirmed working: the "untestable calls need the stronger model" ruling held under real pressure (2026-07-09, PATCH-020)
+**Context:** PATCH-020's spec assigned GPT-5.5 over GPT-5.4 explicitly because five of nine swapped call sites (WebAuthn register/authenticate, MFA unenroll/listFactors/getAAL) can never be exercised by characterization — clicking any of their UI triggers performs a real ceremony or mutation, so line-by-line diff fidelity was the only verification available, unlike every prior patch where a behavior slip would fail a test.
+**Outcome:** implementation landed with zero deviations across all nine call sites, byte-identical to the bound facade file, on the first attempt.
+**Ruling:** the model-assignment logic is confirmed, not just theorized — when a patch's risk is concentrated in surface no test can reach, escalate the implementer, not just the review scrutiny. This is a judgment call worth repeating, not a one-off; use the same reasoning (count the untestable call sites, not just "is this security-sensitive") for future MFA/webhook/payment-adjacent extractions.
+
 ### Spec defects survive faithful implementation (2026-07-07, PATCH-002; recurred PATCH-003)
 **Symptom:** Codex implemented specs byte-faithfully; results were still broken (PATCH-002: glob escaping + inline-config; PATCH-003: `Object.assign(fn, { name })` throws because `Function.name` is writable:false — use `Object.defineProperty(fn, 'name', { value, configurable: true })`, it is configurable:true).
 **Root cause:** the spec author (CTO) wrote exact file contents without executing them first.

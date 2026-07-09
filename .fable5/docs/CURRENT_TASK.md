@@ -141,7 +141,7 @@ follow 017's Pattern H).
 **Batch 4 — security-sensitive settings (020–021), grandfather 6→4:**
 | Patch | Target | Shape | Shrink | Model | Spec status |
 |---|---|---|---|---|---|
-| 020 | password | auth-security swap: nine call sites behind a raw-passthrough `passwordSecurity.ts` facade (5 MFA/webauthn + getUser/reauth/updateUser + profiles-email fallback); page's duplicate scavenger+JWT-decode helpers DELETED and re-imported from the quarantine (byte-compared) | 6→5 | **GPT-5.5 REQUIRED** (5 of 9 swaps untestable — diff fidelity is the only net; GPT-5.4 only as owner-authorized fallback) | **READY — `patches/PATCH-020.md`** (census dry-run-verified; characterization probed incl. AAL badge + zero-network validation branch; supabase-js 2.93.1 webauthn typing verified; Amendment 3: AAL-badge assertion corrected `AAL1`→`aal1`, probe-tooling artifact — `.innerText()` reflects CSS `text-transform`, `getByText` does not, page behavior unchanged) |
+| 020 | password | auth-security swap: nine call sites behind a raw-passthrough `passwordSecurity.ts` facade (5 MFA/webauthn + getUser/reauth/updateUser + profiles-email fallback); page's duplicate scavenger+JWT-decode helpers DELETED and re-imported from the quarantine (byte-compared) | 6→5 | GPT-5.5 | ✅ **DONE** (1eb0e2c, review PASSED; Amendment 3 AAL-badge assertion held; Pattern J in catalog §5.10) |
 | 021 | members | Pattern E at scale (3 repos + auth swaps; API fetches untouched) | 5→4 | **GPT-5.5** | Fable to author (by 07-12) |
 
 **Batch 5 — canvas program (022+; Phase 2 entry; NOT mechanical):**
@@ -293,6 +293,32 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-09** — PATCH-020 landed and reviewed: PASSED (commit `1eb0e2c`).
+  Grandfather 6→5. All gates independently re-run: page diff is exactly
+  the bound import swap, two deleted helper defs, deleted client line, nine
+  call-site swaps, and the `[supabase.auth.mfa]` → `[]` dep-array change;
+  `passwordSecurity.ts` is byte-identical to the spec's whole-file binding
+  (9 one-line raw-passthrough wrappers, zero `await`/destructuring/error
+  mapping inside the facade); `legacyToken.ts` diff is the single bound
+  comment sentence, zero code; boundaries diff is the single named line,
+  list re-counted at 5. e2e spec matches the Amendment-3-corrected bindings
+  byte-for-byte (`aal1`, not `AAL1`); never clicks Reset-by-email/Add
+  passkey/Verify session/Remove. Vitest 76/18 unchanged, tsc clean,
+  boundaries clean, `playwright --list` → 26 tests/17 files exactly as the
+  spec's arithmetic predicted. The reported 3-vs-2 standalone-run count was
+  independently reproduced and is Playwright's `[setup]` project running as
+  a dependency of any characterization-file invocation (1 setup + 2 bound
+  password tests = 3) — not a spec issue, no amendment needed. Both port
+  3000 and 3001 confirmed at 0 listeners post-verification. **New pattern
+  catalogued: Pattern J — raw-passthrough auth/MFA facade (§5.10)**, with
+  its defining risk documented (untestable calls mean diff fidelity is the
+  only net) and the two probe/grep mistakes this patch surfaced folded into
+  the pattern's "Common mistakes" so future authors don't re-derive them.
+  Health held at 74 (CTO_PLAYBOOK §12 — safety and architecture remain at
+  their 20/20 per-axis ceiling per the PATCH-019 ruling, so neither the new
+  pattern nor the correct high-risk model assignment can move them further;
+  ops/product/continuity untouched by this patch, still the binding
+  constraint). PATCH_REFERENCE §7 row + §5.10 added.
 - **2026-07-09** — PATCH-020 Amendment 3 (spec-reviewer ruling, Fable
   unavailable): GPT-5.5 blocked correctly at Phase A — bound assertion
   `getByText(/Current session: AAL1/)` found nothing; actual DOM text is
