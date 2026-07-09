@@ -1,6 +1,10 @@
 # PATCH-023 — Deletion: the abandoned v1 collabboard route vertical (census-gated)
 
 **Status:** draft (awaiting owner approval)
+**Amendment 1 issued: the Phase B diff-stat gate used unstaged `git diff
+--stat`, which is empty after `git rm` stages its deletions — command
+corrected to `git diff --cached --stat`. No deletion scope changed; the
+already-verified 18-file, 3859-deletion staged diff stands.**
 **Complexity:** easy (pure deletion of two directory trees + one grandfather
 line; the discipline is in what must NOT be deleted alongside them)
 **Assigned model:** **GPT-5.4** (per PATCH-022 §8: mechanical once the
@@ -101,6 +105,31 @@ grep -n "app/collabboard" eslint.boundaries.config.mjs
 ```
 Anything more, less, or different: STOP, report, change nothing.
 
+## Amendment 1 (2026-07-09) — the Phase B diff-stat gate read the wrong side of the index · CTO decision
+
+**Dispute (Codex/GPT-5.4, correct stop — deletions staged via `git rm`,
+nothing committed):** Bindings step 1 is `git rm -r ...`, which stages
+deletions immediately; the verification sequence's next command was
+unstaged `git diff --stat`, which is empty by construction once everything
+is staged — there is no unstaged diff left to show.
+
+**Finding:** `git rm` is equivalent to `rm` + `git add` for the deletion —
+it removes the file from disk AND stages the removal in one step. The
+gate's intent ("prove the diff is exactly these 18 deletions, nothing
+else") is correctly satisfied by `git diff --cached --stat`, not the
+unstaged form. Codex independently ran the correct command and confirmed
+**18 files changed, 3859 deletions(-)**, matching the exact file list bound
+above, with zero modified files.
+
+**Decision: gate corrected to `git diff --cached --stat` in-place above.
+Worktree ruling: KEEP the current staged deletion state — do not unstage,
+do not re-run `git rm`, do not restart.** Resume the verification sequence
+from this corrected command onward; every gate already passed (Phase A
+probes, the five pre-edit census blocks, the 18-file deletion itself, the
+post-deletion `app/collabboard`/`app/api/collabboard` zero-count checks,
+the 404 route probes, and the single remaining `lib/collabboard/types.ts:234`
+comment line) stands and does not need re-verification.
+
 ## Bindings
 1. `git rm -r "app/collabboard" "app/api/collabboard"` — the 18 files
    above, nothing else. Empty parent directories disappear with them.
@@ -150,7 +179,11 @@ grep -rln "update_canvas_access" app components lib --include="*.ts" --include="
 # expected: NO output, exit 1
 grep -rln "@supabase/auth-helpers-react" app components lib --include="*.ts" --include="*.tsx"
 # expected: NO output, exit 1
-git diff --stat            # ONLY deletions (18 files) — zero modified files at this point
+git diff --cached --stat   # [Amendment 1] `git rm` STAGES the deletions,
+                           # so unstaged `git diff --stat` is empty by
+                           # construction — the staged diff is the real
+                           # gate. Expected: ONLY 18 deletions, zero
+                           # modified files at this point.
 curl -s -o /dev/null -w "%{http_code}\n" http://localhost:3000/collabboard             # 404
 curl -s -o /dev/null -w "%{http_code}\n" http://localhost:3000/collabboard/canvas/create # 404
 curl -s -o /dev/null -w "%{http_code}\n" http://localhost:3000/api/collabboard/canvases  # 404

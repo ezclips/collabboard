@@ -148,7 +148,7 @@ follow 017's Pattern H).
 | Patch | Target | Shape | Model |
 |---|---|---|---|
 | 022 | canvas duality DECISION brief | CTO brief → owner | ✅ **RESOLVED** (brief delivered AND Fact-1 census executed 2026-07-09: zero user data, 5 owner-test rows, `canvas_files` table doesn't exist — verdict DELETE; proxy-metric trap stands: NO type-only de-linting of the two monolith files) |
-| 023 | **v1 collabboard vertical DELETION** (18 files: 9 pages incl. a v1 auth sub-vertical + 9 API routes; census-gated, deletions-only, live accept-route byte-untouched, NO table drops) | **GPT-5.4** | **READY — `patches/PATCH-023.md`** (all census greps dry-run-verified; Fact-1 verdict recorded in the spec) |
+| 023 | **v1 collabboard vertical DELETION** (18 files: 9 pages incl. a v1 auth sub-vertical + 9 API routes; census-gated, deletions-only, live accept-route byte-untouched, NO table drops) | **GPT-5.4** | **READY — `patches/PATCH-023.md`** (all census greps dry-run-verified; Fact-1 verdict recorded in the spec; Amendment 1: Phase B diff-stat gate corrected to `git diff --cached --stat` — `git rm` stages its own deletions, unstaged diff was empty by construction; 18-file/3859-deletion staged diff independently confirmed) |
 | 024 | security normalization — **authorized behavior change**: replace token-scavenger with real session reads; revisit share-link service-role→RLS *(renumbered from 023)* | GPT-5.5 | Fable spec |
 | 025 | canvas ops seam (lib/domain/canvas: `padlets` repository + FIRST canvas command `canvas.toggleTask`); first consumer = PostCardContent's single write site (22 importers, component returned identical) *(renumbered from 024)* | GPT-5.5 | Fable design by 07-12 |
 | 026+ | CanvasClient strangler series — grouped by table+operation (60 `padlets` + 6 `board_sections` + 4 `boards` sites, 2 storage, 3 auth incl. `auth.updateUser` at L263); FreeformPadletCards LAST (22 `padlets` sites, same ops); realtime/presence CTO-only, undesigned *(renumbered from 025+)* | per-group, GPT-5.5 first group | Fable site-map by 07-12 (successor inheritance artifact) |
@@ -299,6 +299,16 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-09** — PATCH-023 Amendment 1: GPT-5.4 stopped correctly at the
+  Phase B diff-stat gate (deletions staged via `git rm`, nothing
+  committed) — the spec's `git diff --stat` (unstaged) is empty by
+  construction once `git rm` has already staged every deletion; corrected
+  to `git diff --cached --stat`. Codex independently confirmed the staged
+  diff is exactly the bound 18 files, 3859 deletions, zero modifications.
+  Worktree ruling: KEEP the staged deletion state, resume verification from
+  the corrected command — every prior gate (Phase A probes, all five
+  pre-edit census blocks, the deletion itself, post-deletion zero-counts,
+  404 route probes, the one surviving comment line) stands.
 - **2026-07-09** — PATCH-022 Fact-1 data census EXECUTED (CTO,
   service-role, read-only — the key never printed) and PATCH-023 (deletion)
   AUTHORED. Census: all eight v1 tables from migration 001 — `canvases` 1
