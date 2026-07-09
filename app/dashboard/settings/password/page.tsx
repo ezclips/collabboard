@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { decodeJwtPayload, getAccessToken } from '@/lib/infra/supabase/legacyToken';
+import { decodeJwtPayload, getSessionAccessToken } from '@/lib/infra/supabase/sessionToken';
 import {
     authenticateWebauthnPasskey,
     findProfileEmailById,
@@ -30,7 +30,7 @@ type PasskeyFactor = {
 type AALLevel = 'aal1' | 'aal2' | 'aal3' | null;
 
 const emitSecurityNotification = async (action: string) => {
-    const token = getAccessToken();
+    const token = await getSessionAccessToken();
     if (!token) return;
 
     try {
@@ -180,7 +180,7 @@ export default function PasswordPage() {
         const { data: { user } } = await getCurrentAuthUser();
         if (user?.email) return user.email;
 
-        const token = getAccessToken();
+        const token = await getSessionAccessToken();
         if (!token) return null;
         const payload = decodeJwtPayload(token);
         if (payload.email) return payload.email;

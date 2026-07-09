@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { decodeJwtPayload } from './legacyToken';
+import { decodeJwtPayload } from './sessionToken';
 
 function createToken(payloadJson: string) {
   const base64 = Buffer.from(payloadJson, 'utf8')

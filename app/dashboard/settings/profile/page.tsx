@@ -14,11 +14,10 @@ import { createSaveProfilePatchCommand } from '@/lib/domain/profile/profile';
 import { createLegacyProfilesRepository } from '@/lib/infra/profile/profilesRepository';
 import {
     createLegacyTokenStorageGateway,
-    decodeJwtPayload,
-    getAccessToken,
     legacyReauthenticateWithPassword,
     legacyRequestEmailChange,
 } from '@/lib/infra/supabase/legacyToken';
+import { decodeJwtPayload, getSessionAccessToken } from '@/lib/infra/supabase/sessionToken';
 
 interface Profile {
     id: string;
@@ -82,7 +81,7 @@ const emitNotificationEvent = async (
     eventId: 'account_changes' | 'security_alerts',
     context: Record<string, unknown> = {}
 ) => {
-    const token = getAccessToken();
+    const token = await getSessionAccessToken();
     if (!token) return;
 
     try {
@@ -138,7 +137,7 @@ export default function BasicInfoPage() {
         try {
             setLoading(true);
 
-            const token = getAccessToken();
+            const token = await getSessionAccessToken();
             if (!token) {
                 toast.error('Not authenticated — please log in again');
                 return;
@@ -206,7 +205,7 @@ export default function BasicInfoPage() {
     };
 
     const persistProfilePatch = async (patch: Record<string, unknown>) => {
-        const token = getAccessToken();
+        const token = await getSessionAccessToken();
         if (!token) throw new Error('Not authenticated');
 
         const jwtPayload = decodeJwtPayload(token);
@@ -282,7 +281,7 @@ export default function BasicInfoPage() {
                 throw new Error('Please enter a different email address');
             }
 
-            const token = getAccessToken();
+            const token = await getSessionAccessToken();
             if (!token) {
                 throw new Error('Your session expired. Please sign in again and retry.');
             }
@@ -350,7 +349,7 @@ export default function BasicInfoPage() {
         try {
             setUploadingAvatar(true);
 
-            const token = getAccessToken();
+            const token = await getSessionAccessToken();
             if (!token) throw new Error('Not authenticated');
             const userId = user?.id || decodeJwtPayload(token).sub;
             if (!userId) throw new Error('Session is invalid. Please sign in again.');

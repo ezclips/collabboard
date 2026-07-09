@@ -3,7 +3,7 @@
 import React, { useEffect, useState, Suspense } from 'react';
 import { Check, Loader2 } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
-import { resolveLegacySessionToken } from '@/lib/infra/supabase/legacyToken';
+import { getSessionAccessToken } from '@/lib/infra/supabase/sessionToken';
 import { toast } from 'sonner';
 
 interface Integration {
@@ -73,7 +73,7 @@ function IntegrationsContent() {
     }
   }, [searchParams]);
 
-  const resolveAccessToken = async (): Promise<string | null> => resolveLegacySessionToken();
+  const resolveAccessToken = async (): Promise<string | null> => getSessionAccessToken();
 
   const loadIntegrations = async () => {
     try {

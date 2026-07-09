@@ -8,6 +8,7 @@ import { createSaveWorkspaceSettingsCommand } from '@/lib/domain/settings/worksp
 import { createWorkspaceSettingsRepository } from '@/lib/infra/settings/workspaceSettingsRepository';
 import { createWorkspacesRepository } from '@/lib/infra/workspaces/workspacesRepository';
 import { createStorageGateway } from '@/lib/infra/supabase/storage';
+import { decodeJwtPayload, getSessionAccessToken } from '@/lib/infra/supabase/sessionToken';
 
 interface WorkspaceData {
     workspaceId: string;
@@ -41,25 +42,10 @@ export default function SettingsPage() {
         loadSettings();
     }, []);
 
-    // auth-helpers uses cookies but this project stores session in localStorage
-    const getAccessToken = (): string | null => {
-        try {
-            const lsKeys = Object.keys(localStorage).filter(k => k.includes('auth-token'));
-            for (const key of lsKeys) {
-                const raw = localStorage.getItem(key);
-                if (!raw) continue;
-                const parsed = JSON.parse(raw);
-                const token = Array.isArray(parsed) ? parsed[0]?.access_token : parsed?.access_token;
-                if (token) return token;
-            }
-        } catch { /* ignore */ }
-        return null;
-    };
-
     const loadSettings = async () => {
         setLoading(true);
         try {
-            const token = getAccessToken();
+            const token = await getSessionAccessToken();
             if (!token) {
                 toast.error('Not authenticated — please log in again');
                 setLoading(false);
@@ -118,10 +104,10 @@ export default function SettingsPage() {
         if (!workspace || !workspace.canManage) return;
         setSaving(true);
         try {
-            const token = getAccessToken();
+            const token = await getSessionAccessToken();
             if (!token) throw new Error('Not authenticated');
-            const payload = JSON.parse(atob(token.split('.')[1]));
-            const userId: string = payload?.sub;
+            const payload = decodeJwtPayload(token);
+            const userId = payload.sub;
             if (!userId) throw new Error('Could not resolve user id');
 
             const result = await saveWorkspaceSettings(
@@ -159,10 +145,10 @@ export default function SettingsPage() {
 
         setUploadingLogo(true);
         try {
-            const token = getAccessToken();
+            const token = await getSessionAccessToken();
             if (!token) throw new Error('Not authenticated');
-            const payload = JSON.parse(atob(token.split('.')[1]));
-            const userId: string = payload?.sub;
+            const payload = decodeJwtPayload(token);
+            const userId = payload.sub;
             if (!userId) throw new Error('Could not resolve user id');
 
             const fileExt = file.name.split('.').pop();
