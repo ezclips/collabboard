@@ -132,7 +132,7 @@ Grandfather trajectory 17 → 10:
 | 016 | AddPadletMenu | orphan deletion, census-gated | 10→9 | GPT-5.4 | ✅ **DONE** (0a2d372, review PASSED) |
 | 017 | settings-root | Pattern H intro (storage gateway, verbatim-bound) + workspace-settings repos + `settings.saveWorkspace` command | 9→8 | GPT-5.4 | ✅ **DONE** (ff84152, review PASSED; Amendment 1 held; Pattern H in catalog §5.8) |
 | 018 | profile | H reuse (gateway class over legacy client) + profiles repo + `profile.savePatch` command + `legacyToken.ts` quarantine (scavenger moved verbatim) | 8→7 | GPT-5.4 | ✅ **DONE** (8872c2e, review PASSED; Pattern I in catalog §5.9; zod v4 compat fix accepted) |
-| 019 | integrations | scavenger helper reuse + getSession/refreshSession mapping | 7→6 | GPT-5.4 | Fable to author (by 07-12) |
+| 019 | integrations | Pattern I reuse: deep-scan pair moves verbatim into `legacyToken.ts` + `resolveLegacySessionToken` cascade (getSession → refreshSession → deep scan, order preserved) | 7→6 | GPT-5.4 | **READY — `patches/PATCH-019.md`** (census dry-run-verified; characterization probed incl. exact callback-toast texts; page WORKS for the e2e account — first fully-exercisable extraction in the batch) |
 
 Dependencies: 016 independent; 017 → 018 → 019 strictly sequential (018
 introduces the legacy-token helper that 019 reuses; both storage consumers
@@ -283,6 +283,26 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-09** — PATCH-019 AUTHORED (handoff-ready for GPT-5.4; closes
+  batch 016–019 when landed, grandfather 7→6). Full 287-line page read;
+  census dry-run-verified (only TWO Supabase calls — getSession +
+  refreshSession inside the token cascade, on the STANDARD auth-helpers
+  client, NOT a bearer client; no tables/storage/rpc). Design: the
+  deep-scan scavenger pair moves VERBATIM (module-private) into
+  `legacyToken.ts` with a new exported `resolveLegacySessionToken()`
+  cascade helper — quarantine now holds all three scavenger inventories
+  for 023; refreshSession (a §0 escalate API) is executable because the
+  CTO bound the cascade verbatim in the spec. Characterization PROBED:
+  unlike 017/018, this page WORKS for the e2e account (cookie session
+  satisfies getSession, API 200, both cards render, 2 Connect buttons) —
+  Phase A/B here exercises the swapped path end-to-end for the first time
+  in the batch. Probe caught a heading strict-collision (`.first()`
+  required) and both callback-toast branches were re-probed with the
+  spec's EXACT param values after self-review flagged the substitution.
+  Zero expected deviations, with the PATCH-018 disclosure rule bound into
+  the handoff. All four operational lessons embedded in the verification
+  sequence (canvas-route warmup, no concurrent probes, quota-via-DB
+  diagnosis, PowerShell listener count as the only stopped-server gate).
 - **2026-07-09** — PATCH-018 DONE (8872c2e), CTO review PASSED. Diff
   (`--ignore-space-at-eol`, whole-file CRLF churn is noise) touches exactly
   the bound regions across four handlers; `legacyToken.ts` matches its
