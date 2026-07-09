@@ -1,8 +1,10 @@
 # PATCH-024 — Scavenger normalization: token acquisition moves to the real cookie session (AUTHORIZED BEHAVIOR CHANGE)
 
 **Status:** READY — Amendment 1 applied 2026-07-09 (pre-edit importer
-census rebound to cover all import-path spellings; implementer resumes from
-the start of the pre-edit census)
+census rebound to cover all import-path spellings); Amendment 2 applied
+2026-07-09 (repo-wide extinction gates rebound to the two measured
+pre-existing survivor sites; scope NOT widened; implementer KEEPS the
+in-flight worktree and resumes from the amended post-edit gates)
 **Complexity:** medium-high (four pages + the quarantine + one new infra
 module + two characterization specs REBOUND to repaired behavior; the
 mechanism is identical everywhere, but two of the four pages change from
@@ -361,12 +363,28 @@ grep -c "resolveLegacySessionToken" app/dashboard/settings/integrations/page.tsx
 grep -c "getSessionAccessToken" app/dashboard/settings/integrations/page.tsx     # 0 -> 2 (1 import + 1 call)
 # quarantine + repo-wide scavenger extinction:
 grep -c "^export" lib/infra/supabase/legacyToken.ts                  # 8 -> 4
+# AMENDMENT 2 (2026-07-09): the two gates below were originally bound
+# "expected empty" WITHOUT running the patterns on the pre-edit tree — the
+# repo has two PRE-EXISTING scavenger sites outside this patch's scope
+# (lib/imports/clientAuth.ts, a LIVE module imported by ImportBrowser.tsx
+# and lib/imports/clientApi.ts, whose cascade is already session-first with
+# a dead deep-scan tail; and the notifications page's own narrow in-page
+# getAccessToken). Both are byte-untouched by this patch and queued as
+# follow-up work — they are NOT part of the five authorized changes.
 grep -rn "getAccessTokenFromStorage\|findAccessTokenDeep\|resolveLegacySessionToken" app components lib --include="*.ts" --include="*.tsx"
-# expected: NO output, exit 1 (the scavengers are extinct)
+# expected EXACTLY 6 lines, ALL in lib/imports/clientAuth.ts
+# (L5/L9/L20/L27/L35/L62 — measured 2026-07-09, file byte-untouched so the
+# line numbers hold). ANY line in ANY other file is a failure: the
+# quarantine's scavengers and the four bound pages' uses must be gone.
 grep -rn "getAccessToken" app components lib --include="*.ts" --include="*.tsx" | grep -v "getSessionAccessToken"
-# expected: NO output, exit 1 (no bare getAccessToken anywhere; the -v guard
-# excludes the new symbol's lines, which do NOT contain the bare substring
-# anyway - belt and suspenders)
+# expected EXACTLY 4 lines (measured 2026-07-09):
+#   app/dashboard/settings/notifications/page.tsx L95 (in-page def) + L152 (call)
+#   lib/imports/clientAuth.ts L27 (def) + L62 (call)
+# ANY other line is a failure. (The -v guard excludes the new symbol's
+# lines, which do NOT contain the bare substring anyway - belt and
+# suspenders.)
+# the two pre-existing scavenger sites must be BYTE-UNTOUCHED:
+git diff --ignore-space-at-eol -- lib/imports/clientAuth.ts app/dashboard/settings/notifications/page.tsx   # empty
 # importer census, post-edit (AMENDMENT 1; derived from the measured 5):
 grep -rln "legacyToken'" app lib --include="*.ts" --include="*.tsx"
 # expected EXACTLY 2 files (5 measured pre-edit - password import removed
@@ -415,7 +433,9 @@ Single `git revert`.
 - [ ] `sessionToken.ts` byte-equal to §1; `legacyToken.ts` byte-equal to §2
 - [ ] Test rename per §3; `npm run test:unit` 76/18 unchanged, stated
 - [ ] All per-file greps exact per the derived post-edit values
-- [ ] Repo-wide scavenger-extinction greps empty
+- [ ] Repo-wide scavenger greps match Amendment 2's bound survivors EXACTLY
+      (6 clientAuth lines / 4 pre-existing lines); both survivor files
+      byte-untouched
 - [ ] `profilesRepository.ts`, `workspaceMembers.ts`, `passwordSecurity.ts` diffs EMPTY
 - [ ] `npx tsc --noEmit` 0 errors (stale `.next/types` rule applied if routes ghost)
 - [ ] Full suite 27/18 green incl. both rebound specs; integrations/password specs UNCHANGED and green
@@ -497,3 +517,59 @@ import spelling (alias, `../` relative, `./` same-dir). Bind the union
 pattern (`moduleName'`) alongside any per-spelling counts, and measure
 every count on the real tree — never derive it from the file list you
 happen to know about. Recorded in LESSONS_LEARNED.
+
+## Amendment 2 — repo-wide extinction gates rebound to measured survivors (2026-07-09)
+**Blocker (correct STOP at the post-edit census; implementation partially
+applied and preserved):** the two repo-wide extinction gates were bound
+"expected: NO output" but the tree has two PRE-EXISTING scavenger sites
+outside this patch's scope, so a faithful implementation can never satisfy
+them. Phase A, the expected-unprobed repaired assertions, TypeScript, and
+unit tests had all PASSED before the stop.
+**Root cause (CTO authoring defect, same rule Amendment 1 recorded):** the
+gates asserted repo-wide emptiness without running those exact patterns
+against the pre-edit tree. The quarantine-centralization premise
+("PATCH-018/019 moved all scavengers into legacyToken.ts") was true of the
+settings vertical the quarantine was built from, and I generalized it to
+the whole repo without measuring. Fifth member of the asserted-not-measured
+family.
+**The two survivors (CTO-characterized 2026-07-09; both byte-untouched in
+the implementation worktree — verified by empty `git diff`):**
+1. `lib/imports/clientAuth.ts` — LIVE module (imported by
+   `components/collabboard/imports/ImportBrowser.tsx` and
+   `lib/imports/clientApi.ts`). Its `resolveClientAccessToken` cascade is
+   already session-first (getSession → refreshSession) with the deep-scan
+   pair (`findAccessTokenDeep`/`getAccessTokenFromStorage`) as a dead
+   third-step fallback — the exact shape whose tail this patch removes
+   from integrations. Cookie users are served by step 1; the tail serves
+   only retired pre-cookie localStorage sessions.
+2. `app/dashboard/settings/notifications/page.tsx` — its own narrow
+   in-page `getAccessToken` (L95, `auth-token` localStorage key scan),
+   used only by `registerPushIfNeeded` (L152). For cookie users it returns
+   null and push registration SILENTLY NO-OPS — the same silent-defect
+   family as password's security-email defect, but NOT one of this patch's
+   five authorized behavior changes.
+**Ruling: Option 1 — gates amended; scope NOT widened.** The five
+authorized behavior changes are exhaustive by construction ("anything else
+is drift"); widening a behavior-change patch mid-implementation, after the
+expected-unprobed assertions have already passed, would convert a
+nearly-green implementation into an unreviewed scope expansion. Both
+survivors are live code, not dead code to sweep opportunistically.
+**Queued follow-up (recorded in CURRENT_TASK, not this patch):** a small
+successor patch normalizes both sites — clientAuth.ts's dead deep-scan
+tail removed (mechanically identical to this patch's integrations change)
+and the notifications page's scavenger swapped to `getSessionAccessToken`
+(repairs the silent push-registration no-op — a behavior change needing
+its own authorization).
+**Fix:** both gates rebound to exact measured line sets (6 lines, all
+clientAuth / 4 lines, notifications + clientAuth) with ANY-other-line
+failure semantics, plus a byte-untouched diff gate on both survivor files.
+Acceptance criterion updated to match. No other binding changed.
+**Worktree ruling: KEEP the current uncommitted worktree** and resume from
+the amended post-edit census/grep gates. Every gate before the failed pair
+passed and remains valid; the amendment changes no binding that affects
+the already-applied edits, and the two survivor files' required
+byte-untouched state is already true in the worktree.
+**Lesson:** "expected empty" is a count like any other and gets the same
+discipline — run the extinction pattern against the pre-edit tree at
+authoring time; a repo-wide claim is measured on the repo, not derived
+from the vertical you happen to have been working in.
