@@ -141,7 +141,7 @@ follow 017's Pattern H).
 **Batch 4 — security-sensitive settings (020–021), grandfather 6→4:**
 | Patch | Target | Shape | Shrink | Model | Spec status |
 |---|---|---|---|---|---|
-| 020 | password | auth-security swap + verbatim `mfa.ts` helper (webauthn preserved byte-exact) | 6→5 | **GPT-5.5** | Fable to author (by 07-12) |
+| 020 | password | auth-security swap: nine call sites behind a raw-passthrough `passwordSecurity.ts` facade (5 MFA/webauthn + getUser/reauth/updateUser + profiles-email fallback); page's duplicate scavenger+JWT-decode helpers DELETED and re-imported from the quarantine (byte-compared) | 6→5 | **GPT-5.5 REQUIRED** (5 of 9 swaps untestable — diff fidelity is the only net; GPT-5.4 only as owner-authorized fallback) | **READY — `patches/PATCH-020.md`** (census dry-run-verified; characterization probed incl. AAL badge + zero-network validation branch; supabase-js 2.93.1 webauthn typing verified) |
 | 021 | members | Pattern E at scale (3 repos + auth swaps; API fetches untouched) | 5→4 | **GPT-5.5** | Fable to author (by 07-12) |
 
 **Batch 5 — canvas program (022+; Phase 2 entry; NOT mechanical):**
@@ -189,6 +189,16 @@ network). 023 inventory: settings-root (narrow, frozen in-page),
 profile → `lib/infra/supabase/legacyToken.ts` (narrow + JWT decode +
 Bearer client, after 018), integrations (deep scan — 019 decides whether
 its variant joins legacyToken.ts verbatim or stays in-page).
+**Addendum 4 (PATCH-020 authoring, 2026-07-09):** the PASSWORD page holds a
+FOURTH copy — byte-identical (modulo `export`) duplicates of the quarantine's
+narrow `getAccessToken` and `decodeJwtPayload` (return annotation narrower
+but supertype-compatible). PATCH-020 DELETES both duplicates and re-imports
+from the quarantine, so 023's removal inventory gains one more consumer but
+NO new variant (still three variants total). Cookie-only impact differs
+here: the page WORKS for cookie users (`getUser` succeeds), but
+`emitSecurityNotification` silently no-ops for them (scavenger returns
+null → no security email) — an existing defect 023 must fix, preserved
+verbatim by 020.
 
 Dependencies: 011←010; 012/013/014←011; 015 independent (runs last for
 novelty, not dependency). New patterns (type-swap, F, G) enter
@@ -283,6 +293,37 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-09** — PATCH-020 AUTHORED (handoff-ready; **GPT-5.5 REQUIRED**,
+  ruling in the spec: five of the nine swapped call sites are MFA/webauthn
+  paths no test can exercise — clicking any passkey button triggers a real
+  platform ceremony or factor mutation — so diff fidelity is the only net,
+  which inverts the GPT-5.4 delegation calculus; GPT-5.4 only as
+  owner-authorized fallback with heightened review). Full 505-line page
+  read; census dry-run-verified (9 `supabase.auth` lines incl. 1 dep array,
+  1 profiles read, 2 fetches, wc 505 with all three shell-bound counts per
+  019 Amendment 1). Design: ONE new raw-passthrough facade
+  `lib/infra/supabase/passwordSecurity.ts` (9 wrappers, bound verbatim,
+  raw-shape ruling documented); page's duplicate `getAccessToken` +
+  `decodeJwtPayload` byte-compared against the quarantine and DELETED in
+  favor of imports (Addendum 4 above); `legacyToken.ts` gains one comment
+  sentence, zero code. Rejected for fidelity: Result-shaped
+  `getCurrentUser` (changes ignored-error path) and `ProfilesRepository`
+  (bearer client + `select('*')` vs standard client + `select('email')`).
+  supabase-js 2.93.1 `mfa.webauthn` typing VERIFIED in installed auth-js —
+  no casts needed or permitted. Characterization PROBED against the OLD
+  page (own isolated server on :3001 — owner's :3000 server left
+  untouched): unique headings, empty passkey state, `Current session:
+  AAL1`, single `GET /auth/v1/user` on load, and the short-password
+  validation branch fires its toast with ZERO network. Two bound tests;
+  suite arithmetic stated explicitly (24 + 2 = 26 in 17 files, Amendment-2
+  lesson). Four forbidden buttons named (Reset-by-email/Add
+  passkey/Verify/Remove). Self-review caught one spec defect pre-commit:
+  the post-edit `grep -c "supabase" = 0` gate was wrong (new import PATHS
+  contain "supabase/") — rebound to `@supabase` + `supabase\.` dot-anchored
+  gates. NEW ops incident recorded: Next dev silently fell back to :3001
+  because the owner's server appeared on :3000 between my gate check
+  (09:53 → 0 listeners) and my probe start (10:08) — banner-port rule now
+  bound in the spec and LESSONS_LEARNED.
 - **2026-07-09** — PATCH-019 landed and reviewed: PASSED (commit `287f0ca`).
   Grandfather 7→6 — **batch 016–019 complete**; the 6 remaining
   grandfathered files (password, members, PostCardContent,
