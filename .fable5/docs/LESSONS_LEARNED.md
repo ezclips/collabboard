@@ -175,6 +175,13 @@ at minimum before working on this repo. Newest first within each section.
 **Root cause:** the CTO's own `ProfileRow` interface typed `profileData` (previously an untyped/`any` supabase row), which changed `profileData.display_name || payload.user_metadata?.display_name || ''` from an all-`any` chain (silently fine) to one where the JWT payload's `unknown`-typed field needed narrowing — tsc forced the cast. Same family as PATCH-010 (`AuthUserMetadata` missing a field once a vendor type was narrowed) and PATCH-015 (`permission || 'view'`): a spec's own typed seam can force a call site the Bindings never anticipated.
 **Ruling:** accepted — zero runtime effect, purely a compile-time narrowing forced by the extraction's own design. But it should have been (a) anticipated and pre-authorized in the spec's Known Deviations, since the pattern is now recurring and recognizable, and (b) disclosed by the implementer regardless of runtime impact — the implementer judged it too trivial to report, which is not their call to make.
 **Reusable rule:** when a patch introduces a typed row/interface for a field that used to be untyped, grep every downstream consumer of that field for `||`/ternary chains mixing it with other loosely-typed values — tsc will likely force a cast there, and the spec should name it as an accepted deviation up front rather than let it surface silently at review. Separately: implementers must disclose EVERY line that differs from the bound diff, even ones judged harmless — "no runtime effect" is a review conclusion, not grounds to skip reporting.
+**Confirmed working (2026-07-09, PATCH-019 review):** the rule held up in the
+other direction — Codex hit a spec-side mismatch (full-suite count 22 vs
+actual 24, see PATCH-019 Amendment 2) and reported it rather than silently
+adjusting a number or guessing at a fix, exactly as this rule asks. The
+mismatch turned out to be the CTO's own arithmetic error, not an
+implementation defect, and was resolved with zero re-verification needed
+because the disclosure surfaced it immediately.
 
 ### A characterization spec that inherits the project storageState breaks CI unless it skips or overrides (2026-07-08, PATCH-015 review)
 **Symptom:** the new `share-link.spec.ts` passed every local run but failed with `ENOENT: no such file ... e2e/.auth/user.json` when run without credentials — the exact configuration CI uses (blocking step, full `playwright test`, no E2E secrets). Caught in review by simulating CI (rename `user.json`, `E2E_SKIP_CREDENTIALS=1`) BEFORE the commit was pushed; CI never went red.

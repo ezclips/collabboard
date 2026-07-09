@@ -132,7 +132,7 @@ Grandfather trajectory 17 → 10:
 | 016 | AddPadletMenu | orphan deletion, census-gated | 10→9 | GPT-5.4 | ✅ **DONE** (0a2d372, review PASSED) |
 | 017 | settings-root | Pattern H intro (storage gateway, verbatim-bound) + workspace-settings repos + `settings.saveWorkspace` command | 9→8 | GPT-5.4 | ✅ **DONE** (ff84152, review PASSED; Amendment 1 held; Pattern H in catalog §5.8) |
 | 018 | profile | H reuse (gateway class over legacy client) + profiles repo + `profile.savePatch` command + `legacyToken.ts` quarantine (scavenger moved verbatim) | 8→7 | GPT-5.4 | ✅ **DONE** (8872c2e, review PASSED; Pattern I in catalog §5.9; zod v4 compat fix accepted) |
-| 019 | integrations | Pattern I reuse: deep-scan pair moves verbatim into `legacyToken.ts` + `resolveLegacySessionToken` cascade (getSession → refreshSession → deep scan, order preserved) | 7→6 | GPT-5.4 | **READY — `patches/PATCH-019.md`** (census dry-run-verified; characterization probed incl. exact callback-toast texts; page WORKS for the e2e account — first fully-exercisable extraction in the batch; Amendment 1: line-count gate rebound shell-explicitly, 262/287 = same file, census ruled PASSED) |
+| 019 | integrations | Pattern I reuse: deep-scan pair moves verbatim into `legacyToken.ts` + `resolveLegacySessionToken` cascade (getSession → refreshSession → deep scan, order preserved) | 7→6 | GPT-5.4 | ✅ **DONE** (287f0ca, review PASSED; Amendment 1 line-count gate held; Amendment 2 test-count corrected 22→24, CTO arithmetic error not a regression; **batch 016–019 complete**) |
 
 Dependencies: 016 independent; 017 → 018 → 019 strictly sequential (018
 introduces the legacy-token helper that 019 reuses; both storage consumers
@@ -283,6 +283,24 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-09** — PATCH-019 landed and reviewed: PASSED (commit `287f0ca`).
+  Grandfather 7→6 — **batch 016–019 complete**; the 6 remaining
+  grandfathered files (password, members, PostCardContent,
+  FreeformPadletCards, CanvasClient, collabboard canvas page) are all
+  batch-4/5 territory, nothing GPT-5.4-mechanical left. All gates
+  independently re-run (not accepted from pasted output): page diff is
+  exactly the four bound edits, `legacyToken.ts` diff is pure addition with
+  existing exports byte-untouched, cascade order preserved, boundaries diff
+  is the single named line, e2e spec never clicks Connect/Disconnect and
+  asserts the exact CTO-probed callback-toast texts. Vitest 76/18 unchanged,
+  tsc clean, boundaries clean, `playwright --list` → 24 tests/16 files.
+  Amendment 2 added: the spec's "22 tests" expectation was the CTO's own
+  arithmetic error (assumed +1 test where the bound spec adds 3) — corrected
+  to 24, not a regression; Codex disclosed the mismatch rather than silently
+  reconciling it, confirming the PATCH-018 disclosure rule works both
+  directions. Health held at 74 (safety/architecture already at the 20/20
+  per-axis ceiling; ops/product/continuity unmoved — still the binding
+  constraint). PATCH_REFERENCE §7 row added.
 - **2026-07-09** — PATCH-019 Amendment 1: GPT-5.4 blocked correctly at the
   pre-edit census (no edits, clean tree) — expected line count 287, printed
   262. CTO-reproduced: the file is byte-identical to baseline (git log/status

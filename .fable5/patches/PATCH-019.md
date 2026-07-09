@@ -1,9 +1,6 @@
 # PATCH-019 — Extraction: integrations page; deep-scan token cascade joins the legacy quarantine
 
-**Status:** draft (awaiting owner approval — final patch of batch 016–019)
-**Amendment 1 issued: the line-count gate is shell-ambiguous, not a baseline
-mismatch — 287 (all lines) and 262 (non-blank lines) are the SAME file. Gate
-rebound to shell-explicit commands. No code baseline changed.**
+**Status:** DONE (2026-07-09, commit `287f0ca`) — CTO review PASSED. **Amendment 1: line-count gate rebound shell-explicitly (262/287 = same file); census ruled PASSED unchanged. Amendment 2: full-suite test-count expectation (22) was a CTO arithmetic error — actual correct total is 24 (21 pre-existing + 3 new tests, not +1); no code or suite defect.**
 **Complexity:** easy-medium (two auth-call swaps + one verbatim function move;
 the discipline is in what must NOT be clicked)
 **Assigned model:** **GPT-5.4**
@@ -282,7 +279,7 @@ curl -s -o /dev/null -w "%{http_code}\n" "http://localhost:3000/dashboard/canvas
 PW_BASE_URL=http://localhost:3000 npx playwright test e2e/characterization/integrations-page.spec.ts   # Phase A, OLD page
 npm run test:unit          # unchanged: 76 tests / 18 files — state it
 npx tsc --noEmit
-PW_BASE_URL=http://localhost:3000 npx playwright test    # full suite (22 tests), NEW page
+PW_BASE_URL=http://localhost:3000 npx playwright test    # full suite (24 tests — see Amendment 2), NEW page
 grep -c "@supabase" app/dashboard/settings/integrations/page.tsx           # 0 (exit 1 expected)
 grep -c "getAccessTokenFromStorage" app/dashboard/settings/integrations/page.tsx   # 0
 grep -c "findAccessTokenDeep" app/dashboard/settings/integrations/page.tsx         # 0
@@ -339,6 +336,28 @@ Single `git revert`.
 - [ ] At review closeout: §7 row for 019; batch 016–019 closed out in
       CURRENT_TASK; health ledger per §12
 
+## Amendment 2 (2026-07-09) — the "22 tests" expectation was a CTO arithmetic error, not a suite regression · CTO decision
+
+**Reported deviation (Codex, disclosed honestly per the PATCH-018 disclosure
+rule):** the spec expected the full Playwright suite to report 22 tests;
+the actual run reported 24. Suite passed unchanged.
+
+**Finding (CTO, reproduced with `npx playwright test --list`):** the correct
+pre-019 baseline was **21 tests** (1 setup + 4 smoke + 16 pre-existing
+characterization tests), matching PATCH-018's own stated baseline of 21.
+PATCH-019 adds **3** new tests (`integrations-page.spec.ts` has three
+`test(...)` blocks, not one), so 21 + 3 = **24** is the correct total. My
+"22" in this spec was arithmetic that assumed one new test where the spec
+itself binds three — a self-authored miscount, not a code or environment
+defect. Every other number in the spec (2/4/4 census, 76/18 unit, grandfather
+6) was independently correct.
+
+**Decision: no re-implementation, no re-verification.** 24 is the correct
+and now-canonical total; the "22 tests" text above is corrected in place.
+This is the same disclosure-rule pattern PATCH-018 established: the
+implementer's job is to report the mismatch, not silently reconcile it —
+Codex did that correctly here.
+
 ## Expected grandfather reduction
 7 → 6 (`app/dashboard/settings/integrations/page.tsx` removed; count
 re-verified at review). Remaining 6 after this patch: password, members,
@@ -367,3 +386,45 @@ print them. Final `npm run verify` only after the owner stops the server."
 easy-medium — one verbatim function move and a one-line wrapper; the traps
 are the cascade order, the additions-only quarantine diff, and the two
 buttons the spec must never click.
+
+## CTO Review (2026-07-09) — PASSED
+
+Implementation commit `287f0ca`. All gates independently re-run, not
+accepted from pasted output.
+
+- **Page diff** (`git show 287f0ca -- app/.../page.tsx`): exactly the four
+  bindings — import swap, two scavenger functions deleted, client-const line
+  deleted, `resolveAccessToken` body reduced to the one-line wrapper.
+  Everything else byte-identical. No undisclosed lines.
+- **`legacyToken.ts` diff**: pure addition — one new import, both scavenger
+  functions moved byte-identical (module-private, no `export`), the new
+  `resolveLegacySessionToken` cascade preserves order (session → refresh →
+  deep scan, no short-circuit changes), and the header-comment sentence
+  matches the bound text verbatim. Existing exports (`getAccessToken`,
+  `makeAuthedClient`, `decodeJwtPayload`, both passthroughs, the storage
+  gateway factory) are untouched — confirmed by diff, not by claim.
+- **`browserClient.ts` claim verified**: `createBrowserSupabaseClient()` is a
+  one-line wrapper around the same `createClientComponentClient()` the page
+  used to call directly — identical client instance, no behavior change.
+- **Boundaries diff**: single line removed from `GRANDFATHERED_UI_FILES`;
+  list re-counted at 6 entries. Nothing else in the config touched.
+- **e2e spec**: three tests, `.first()` on the heading, Connect count
+  asserted at 2 / Disconnect at 0 with a comment noting it encodes current
+  account state, zero clicks on Connect or Disconnect anywhere in the file.
+  Both callback tests assert the exact CTO-probed toast texts
+  (`e2e-callback-probe connected`, `e2e-probe-message`) via URL params only.
+- **Gates independently re-run**: `npx vitest run` → 76 passed / 18 files
+  (unchanged, confirmed). `npx tsc --noEmit` → clean. `npm run
+  check:boundaries` → clean. `npx playwright test --list` → 24 tests / 16
+  files (see Amendment 2 — correct, not a regression). Post-edit greps:
+  `@supabase` 0, `getAccessTokenFromStorage` 0, `findAccessTokenDeep` 0,
+  `resolveLegacySessionToken` 2, `resolveAccessToken` 4 — all exact.
+  Stopped-server gate (`Get-NetTCPConnection`) → 0. `git status` → clean.
+- **Deviations**: none beyond the disclosed and resolved test-count
+  arithmetic error (Amendment 2, CTO's own spec defect, not the
+  implementer's). Zero undisclosed off-spec lines or casts.
+
+**Grandfather: 7 → 6, confirmed.** Batch 016–019 is complete — nothing
+GPT-5.4-mechanical remains; the 6 remaining files are all batch-4/5
+territory (password, members, PostCardContent, FreeformPadletCards,
+CanvasClient, collabboard canvas page).

@@ -577,6 +577,7 @@ it, STOP — never adapt.
 | 016 | AddPadletMenu | orphan deletion (census-gated) | 10→9 ✅ done |
 | 017 | settings-root | A/E composition + H — storage gateway (introduces `storage.ts`) | 9→8 ✅ done |
 | 018 | profile | A/E composition + I — legacy-token quarantine (introduces `legacyToken.ts`) + H reuse | 8→7 ✅ done |
+| 019 | settings/integrations | I reuse — deep-scan scavenger + session cascade added to `legacyToken.ts` (third and final scavenger variant; batch 016–019 complete) | 7→6 ✅ done |
 
 **New patterns discovered by future patches get added here by the CTO at
 review — this catalog only ever contains patterns with a reviewed reference
