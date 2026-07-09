@@ -1,6 +1,11 @@
 # PATCH-018 — Extraction: profile page; introduce the legacy-token quarantine seam
 
-**Status:** draft (awaiting owner approval — third patch of batch 016–019)
+**Status:** DONE (2026-07-09, commit `8872c2e`) — CTO review PASSED. One
+disclosed deviation (zod v4's two-argument `z.record()` — verified
+independently, accepted without amendment); one undisclosed-but-accepted
+deviation found at review (a tsc-forced type cast on the `display_name`
+fallback, zero runtime effect — see PATCH_REFERENCE §5.9 "Common mistakes").
+Pattern I (legacy-token quarantine) entered the catalog.
 **Complexity:** medium-high (largest client page extracted so far; every
 decision pre-made below)
 **Assigned model:** **GPT-5.4**

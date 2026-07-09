@@ -339,7 +339,30 @@ before any spec change, zero behavior drift. +1 safety 18→19 — self-caught
 spec defect, resolved with evidence, zero cost to the implementation
 (no code was ever wrong; only the test was). Ops 12, product 12, continuity
 10 unchanged. Axis snapshot at 72: safety 19, ops 12, architecture 19,
-product 12, continuity 10.)
+product 12, continuity 10.) → **74** (2026-07-09: PATCH-018 landed and
+passed review — grandfather 8→7, first legacy-token quarantine seam
+(Pattern I, `legacyToken.ts`) proven on the harder bearer-client problem
+(a per-call authed client is a materially bigger extraction than a settings
+upsert) and confirmed reusable ahead of PATCH-019. Review independently
+verified a genuine library-compatibility fix (zod v4's two-argument
+`z.record()` — the one-argument form actually throws on the installed
+4.3.6, confirmed by direct execution) and caught one undisclosed
+zero-effect deviation (a tsc-forced cast the implementer judged too small
+to report — accepted, but the disclosure gap is now an explicit rule).
+Review also closed out two live operational incidents from this week's
+verification with root-cause evidence rather than guesses: the e2e board
+quota recurrence (this time diagnosed via direct DB query before any code
+was suspected) and a stuck-spinner false alarm traced to cold-compiling the
+single heaviest route in the app (`/dashboard/canvas/[id]`, 682 kB) under
+concurrent probe contention. +1 architecture 19→20 — another grandfather
+removed, a second reusable pattern (I) proven this batch. +1 safety
+19→20 — a real runtime-crashing library incompatibility was caught and
+verified before it could land silently, and two recurring operational
+false-alarms were root-caused and documented rather than chased ad hoc a
+third time. Ops 12, product 12, continuity 10 unchanged — the e2e-infra
+pre-suite sweep and the canvas-warmup step are both queued as follow-up
+patches, not yet landed. Axis snapshot at 74: safety 20, ops 12,
+architecture 20, product 12, continuity 10.)
 
 ## 13. The succession test
 

@@ -389,6 +389,64 @@ byte-identical, tracked as a security-flag addendum, not fixed in-patch).
 
 ---
 
+## 5.9. Pattern I — legacy-token quarantine (bearer-client extraction)
+
+**Reference:** PATCH-018 (`app/dashboard/settings/profile`; introduces
+`lib/infra/supabase/legacyToken.ts`).
+
+**When:** a page authenticates every Supabase call with a PER-CALL client
+built from a manually scavenged access token (`createClient(url, anonKey,
+{ global: { headers: { Authorization: Bearer } } })`) instead of the shared
+browser client — typically because the page predates `browserClient.ts` or
+was written against a different session-storage assumption
+(localStorage vs. the cookie-based auth-helpers session).
+
+**When NOT:** pages already on the shared browser client (Patterns A–H);
+pages whose scavenger reads a DIFFERENT localStorage key shape or has
+extra logic (deep multi-key scanning, etc.) — read the ENTIRE scavenger
+before assuming it matches an existing quarantine file; a near-identical
+scavenger with different behavior must not be silently merged into one
+export (PATCH-017's settings-root variant stayed in-page for exactly this
+reason — see its patch file).
+
+**Required pieces:** move the scavenger function(s), the bearer-client
+factory, and any JWT-decode helper VERBATIM (diff against the old page is
+the byte-identical proof) into one quarantine file with an `export` added
+per binding — never rename, never refactor bodies. The moved auth
+passthrough helpers (reauth, email change, etc.) return RAW supabase
+`{ error }` shapes, NOT `Result` — deliberate exception to house style,
+because the legacy page's error handling and toast text read those shapes
+directly and the whole quarantine is scheduled for removal (see below).
+Storage needs on a legacy-token page REUSE the existing Pattern H gateway
+CLASS via a new factory bound to the legacy client — do not fork a second
+gateway implementation.
+
+**Required header comment:** the quarantine file must document (a) which
+patch introduced it, (b) which patch(es) reuse it, (c) which future patch
+REMOVES it and why (the functional defect it carries — e.g. failing closed
+for cookie-session users), and (d) the raw-passthrough exception.
+
+**Error-cause preservation:** repository/command errors must carry the raw
+supabase error as `DomainError.cause`, and the page must rethrow that cause
+at its boundary (`throw result.error.cause ?? result.error`) — this is what
+keeps every legacy toast byte-identical without duplicating the page's
+`getErrorMessage`-style logic in the domain layer.
+
+**Common mistakes:** a typed row interface (introduced by the extraction
+itself) can force a type-narrowing cast at a call site the patch's Bindings
+never explicitly listed (PATCH-018: `payload.user_metadata?.display_name`
+went from implicit `any` to `unknown` once `profileData` became typed,
+forcing an `as string | undefined` one-line cast with zero runtime effect —
+accepted, but should have been anticipated and pre-authorized in the spec's
+Known Deviations, and MUST be disclosed by the implementer even when it has
+zero runtime effect — silently adding it is a process gap, not a free pass,
+see LESSONS_LEARNED). Zod version drift: `z.record()` is two-argument
+(key schema + value schema) as of zod v4 — a spec written against the
+one-argument v3 form will crash at runtime; verify the installed version's
+API before binding a zod schema literally into a spec.
+
+---
+
 ## 6. Universal requirements (every pattern, every patch)
 
 **Phase order is mandatory:** e2e characterization spec written and GREEN
@@ -416,6 +474,35 @@ cookie-only while the page's token guard reads localStorage, so it
 deterministically hit the FIRST early-return instead). The dry-run
 obligation (§0, PATCH-012 Amendment 1a) covers this too — it is not just
 for census/proof commands.
+
+**E2E-created boards leak against the real board quota (added at PATCH-018
+review, recurrence of PATCH-001):** `board-lifecycle.spec.ts` soft-deletes
+(`deleted_at`) in cleanup, and crashed/timed-out runs skip cleanup
+entirely; both accumulate ACTIVE rows against `FREE_PLAN_BOARD_LIMIT = 3`
+per workspace, and Save Canvas then fails SILENTLY (no toast — a separate
+product-bug flag, queued) with zero network trace. Before ruling a
+board-creation failure a code defect, query the e2e workspace's active
+board count via service role. Remediation must scope by BOTH title pattern
+AND `deleted_at IS NULL` — a title-only delete (as first attempted this
+week) removes trashed rows too, which is unnecessary churn but not itself
+harmful; the real risk is the inverse mistake of scoping too narrowly and
+leaving active leaks behind. A recurring pre-suite sweep (service-role,
+hard-delete stale `e2e-lifecycle-*`/`cto-probe-*` boards) is queued as a
+small e2e-infra patch — this is process debt, not a per-patch blocker.
+
+**Cold-compile hits the LARGEST route hardest, not just settings pages
+(added at PATCH-018 review):** the PATCH-014/015 cold-start lesson
+generalizes beyond settings pages — `/dashboard/canvas/[id]` is the
+heaviest route in the app (682 kB, `CanvasClient.tsx` at 8.5k lines); a
+first hit on a freshly (re)started dev server can stall well past a
+generous 90s wait, especially compounded by concurrent worker/probe
+contention on the same server (PATCH-015 review). A stuck loading spinner
+on a dashboard board card that never resolves is that stall, not a broken
+click handler — verify by checking the target route responds fast
+(`curl` timing) before treating it as a UI bug. Warm the canvas route with
+one throwaway navigation before timed runs that will open a board,
+independent of PATCH-015's `workers: 2` config fix (that addresses
+concurrency; this addresses first-hit compile cost — both apply together).
 
 **Async-save barrier (added at PATCH-005 review):** these pages save
 fire-and-forget; reloading immediately aborts the in-flight POST and the
@@ -489,6 +576,7 @@ it, STOP — never adapt.
 | 015 | share/[token] (server page) | G — server-page read (introduces `serverClient.ts`) | 11→10 ✅ done |
 | 016 | AddPadletMenu | orphan deletion (census-gated) | 10→9 ✅ done |
 | 017 | settings-root | A/E composition + H — storage gateway (introduces `storage.ts`) | 9→8 ✅ done |
+| 018 | profile | A/E composition + I — legacy-token quarantine (introduces `legacyToken.ts`) + H reuse | 8→7 ✅ done |
 
 **New patterns discovered by future patches get added here by the CTO at
 review — this catalog only ever contains patterns with a reviewed reference

@@ -131,7 +131,7 @@ Grandfather trajectory 17 → 10:
 |---|---|---|---|---|---|
 | 016 | AddPadletMenu | orphan deletion, census-gated | 10→9 | GPT-5.4 | ✅ **DONE** (0a2d372, review PASSED) |
 | 017 | settings-root | Pattern H intro (storage gateway, verbatim-bound) + workspace-settings repos + `settings.saveWorkspace` command | 9→8 | GPT-5.4 | ✅ **DONE** (ff84152, review PASSED; Amendment 1 held; Pattern H in catalog §5.8) |
-| 018 | profile | H reuse (gateway class over legacy client) + profiles repo + `profile.savePatch` command + `legacyToken.ts` quarantine (scavenger moved verbatim) | 8→7 | GPT-5.4 | **READY — `patches/PATCH-018.md`** (census dry-run-verified; characterization probed against the OLD page with the e2e state) |
+| 018 | profile | H reuse (gateway class over legacy client) + profiles repo + `profile.savePatch` command + `legacyToken.ts` quarantine (scavenger moved verbatim) | 8→7 | GPT-5.4 | ✅ **DONE** (8872c2e, review PASSED; Pattern I in catalog §5.9; zod v4 compat fix accepted) |
 | 019 | integrations | scavenger helper reuse + getSession/refreshSession mapping | 7→6 | GPT-5.4 | Fable to author (by 07-12) |
 
 Dependencies: 016 independent; 017 → 018 → 019 strictly sequential (018
@@ -283,6 +283,39 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-09** — PATCH-018 DONE (8872c2e), CTO review PASSED. Diff
+  (`--ignore-space-at-eol`, whole-file CRLF churn is noise) touches exactly
+  the bound regions across four handlers; `legacyToken.ts` matches its
+  verbatim binding; `storage.ts` diff is exactly the one authorized `export`
+  keyword; `profilesRepository.ts` payload spread order byte-for-byte
+  (`{ email, ...patch, updated_at }` / `{ id, email, created_at, ...patch,
+  updated_at }`); command control flow (update-then-insert) and error-cause
+  passthrough both unit-tested including the exact "insertPatch NOT called
+  when updatePatch reports an existing row" and "returns the SAME error
+  Result" cases. Unit 60→76 (16 new, 3 files listed by name). tsc 0;
+  boundaries green; post-edit census exact (`@supabase` 0,
+  `makeAuthedClient` 0, `getAccessToken` 6, `decodeJwtPayload` 4);
+  grandfather re-counted at 7. E2e spec matches the CTO-probed flow exactly
+  (mutation-free — only the email-modal open/cancel round-trip); full suite
+  21/21 on a warmed dev server; final `npm run verify` green with server
+  stopped and `.next` cleared first. **Disclosed deviation accepted:**
+  zod v4 requires two-argument `z.record(keySchema, valueSchema)` — verified
+  independently (one-arg form throws on the installed 4.3.6; two-arg form
+  is behaviorally identical since object keys are always strings). **One
+  UNDISCLOSED deviation found at review, accepted:** a tsc-forced
+  `as string | undefined` cast on the `display_name` JWT-metadata fallback,
+  zero runtime effect, forced by the patch's own typed `ProfileRow`
+  (same family as PATCH-010/015). Process note recorded in
+  LESSONS_LEARNED: implementers must disclose every off-spec line
+  regardless of perceived triviality. Pattern I (legacy-token quarantine)
+  entered PATCH_REFERENCE §5.9 + §7 row. Two operational lessons from this
+  week's verification folded in: e2e board-quota recurrence (scope cleanup
+  by `deleted_at IS NULL` AND title, not title alone) and cold-compile on
+  the largest route (`/dashboard/canvas/[id]`, 682 kB) causing a
+  stuck-spinner false alarm — both now in LESSONS_LEARNED, e2e-infra
+  pre-suite sweep still queued as a small follow-up patch, not a blocker.
+  Health 72→74 (CTO_PLAYBOOK §12). Next: PATCH-019 (integrations,
+  reuses `legacyToken.ts`) — not drafted, per instruction.
 - **2026-07-09** — PATCH-018 AUTHORED (handoff-ready for GPT-5.4). Full
   861-line page read; census dry-run-verified (9 call sites: 3 profiles +
   2 storage + 2 auth, all via the bespoke `makeAuthedClient` Bearer
