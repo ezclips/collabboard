@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { createBrowserSupabaseClient } from './browserClient';
 import type { StorageGateway, StorageSupabaseClient } from './storage';
 import { SupabaseStorageGateway } from './storage';
 
@@ -9,6 +10,9 @@ import { SupabaseStorageGateway } from './storage';
  * removal by PATCH-023 (scavenger normalization - a functional repair:
  * cookie-session users get an empty localStorage, so these helpers fail
  * closed for them today). PATCH-019 reuses this file. Do not "improve" it;
+ * PATCH-019 added the integrations page's deep-scan variant + session
+ * cascade - the quarantine now holds all three scavenger inventories for
+ * PATCH-023 (settings-root's stayed in-page, 017-frozen).
  * do not add consumers beyond the pages the patches name.
  *
  * DELIBERATE house-style exception: the auth helpers below return RAW
@@ -66,4 +70,61 @@ export function createLegacyTokenStorageGateway(token: string): StorageGateway {
     return new SupabaseStorageGateway(
         makeAuthedClient(token) as unknown as StorageSupabaseClient,
     );
+}
+
+const findAccessTokenDeep = (value: unknown): string | null => {
+  if (!value) return null;
+  if (typeof value === 'object') {
+    const obj = value as Record<string, unknown>;
+    if (typeof obj.access_token === 'string' && obj.access_token.length > 10) {
+      return obj.access_token;
+    }
+    for (const nested of Object.values(obj)) {
+      const found = findAccessTokenDeep(nested);
+      if (found) return found;
+    }
+    return null;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findAccessTokenDeep(item);
+      if (found) return found;
+    }
+  }
+  return null;
+};
+
+const getAccessTokenFromStorage = (): string | null => {
+  try {
+    const lsKeys = Object.keys(localStorage).sort((a, b) => (a > b ? -1 : 1));
+    for (const key of lsKeys) {
+      const raw = localStorage.getItem(key);
+      if (!raw) continue;
+      let token: string | null = null;
+      try {
+        const parsed = JSON.parse(raw);
+        token = findAccessTokenDeep(parsed);
+      } catch {
+        // ignore non-JSON values
+      }
+      if (token) return token;
+    }
+  } catch { /* ignore */ }
+  return null;
+};
+
+/**
+ * PATCH-019: the integrations page's token cascade, verbatim - cookie/
+ * session first (standard auth-helpers client), refresh second, deep
+ * localStorage scan last. Raw `string | null` shape (quarantine ruling 2).
+ */
+export async function resolveLegacySessionToken(): Promise<string | null> {
+  const supabase = createBrowserSupabaseClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  if (session?.access_token) return session.access_token;
+
+  const { data: refreshed } = await supabase.auth.refreshSession();
+  if (refreshed?.session?.access_token) return refreshed.session.access_token;
+
+  return getAccessTokenFromStorage();
 }

@@ -3,49 +3,8 @@
 import React, { useEffect, useState, Suspense } from 'react';
 import { Check, Loader2 } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+import { resolveLegacySessionToken } from '@/lib/infra/supabase/legacyToken';
 import { toast } from 'sonner';
-
-const findAccessTokenDeep = (value: unknown): string | null => {
-  if (!value) return null;
-  if (typeof value === 'object') {
-    const obj = value as Record<string, unknown>;
-    if (typeof obj.access_token === 'string' && obj.access_token.length > 10) {
-      return obj.access_token;
-    }
-    for (const nested of Object.values(obj)) {
-      const found = findAccessTokenDeep(nested);
-      if (found) return found;
-    }
-    return null;
-  }
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      const found = findAccessTokenDeep(item);
-      if (found) return found;
-    }
-  }
-  return null;
-};
-
-const getAccessTokenFromStorage = (): string | null => {
-  try {
-    const lsKeys = Object.keys(localStorage).sort((a, b) => (a > b ? -1 : 1));
-    for (const key of lsKeys) {
-      const raw = localStorage.getItem(key);
-      if (!raw) continue;
-      let token: string | null = null;
-      try {
-        const parsed = JSON.parse(raw);
-        token = findAccessTokenDeep(parsed);
-      } catch {
-        // ignore non-JSON values
-      }
-      if (token) return token;
-    }
-  } catch { /* ignore */ }
-  return null;
-};
 
 interface Integration {
   id: 'google-drive' | 'microsoft-onedrive';
@@ -92,7 +51,6 @@ const BASE_INTEGRATIONS: Integration[] = [
 ];
 
 function IntegrationsContent() {
-  const supabase = createClientComponentClient();
   const searchParams = useSearchParams();
   const [loading, setLoading] = useState(true);
   const [connecting, setConnecting] = useState<string | null>(null);
@@ -115,15 +73,7 @@ function IntegrationsContent() {
     }
   }, [searchParams]);
 
-  const resolveAccessToken = async (): Promise<string | null> => {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (session?.access_token) return session.access_token;
-
-    const { data: refreshed } = await supabase.auth.refreshSession();
-    if (refreshed?.session?.access_token) return refreshed.session.access_token;
-
-    return getAccessTokenFromStorage();
-  };
+  const resolveAccessToken = async (): Promise<string | null> => resolveLegacySessionToken();
 
   const loadIntegrations = async () => {
     try {
