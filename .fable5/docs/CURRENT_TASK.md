@@ -142,7 +142,7 @@ follow 017's Pattern H).
 | Patch | Target | Shape | Shrink | Model | Spec status |
 |---|---|---|---|---|---|
 | 020 | password | auth-security swap: nine call sites behind a raw-passthrough `passwordSecurity.ts` facade (5 MFA/webauthn + getUser/reauth/updateUser + profiles-email fallback); page's duplicate scavenger+JWT-decode helpers DELETED and re-imported from the quarantine (byte-compared) | 6→5 | GPT-5.5 | ✅ **DONE** (1eb0e2c, review PASSED; Amendment 3 AAL-badge assertion held; Pattern J in catalog §5.10) |
-| 021 | members | raw-passthrough CRUD facade (`workspaceMembers.ts`, 10 functions covering 13 raw touches: workspace_members select/update/delete, workspace_invitations select/update/delete, boards select, getUser×2, getSession×2, resolveCurrentWorkspace×2 reused thin); `User` type import replaced by narrow `MembersPageUser`; API fetches untouched | 5→4 | **GPT-5.5 REQUIRED** (5 of 10 facade functions wrap real mutations/real email-sends — diff fidelity is the only net) | **READY — `patches/PATCH-021.md`** (census dry-run-verified; characterization probed against live e2e account — solo workspace owner, zero pending invitations; CSS-uppercase "You"/"YOU" trap caught pre-authoring via the PATCH-020 lesson; `lib/workspace/context.ts` confirmed untouched by design) |
+| 021 | members | raw-passthrough CRUD facade (`workspaceMembers.ts`, 10 functions covering 13 raw touches: workspace_members select/update/delete, workspace_invitations select/update/delete, boards select, getUser×2, getSession×2, resolveCurrentWorkspace×2 reused thin); `User` type import replaced by narrow `MembersPageUser`; API fetches untouched | 5→4 | **GPT-5.5 REQUIRED** (5 of 10 facade functions wrap real mutations/real email-sends — diff fidelity is the only net) | **READY — `patches/PATCH-021.md`** (census dry-run-verified; characterization probed against live e2e account — solo workspace owner, zero pending invitations; CSS-uppercase "You"/"YOU" trap caught pre-authoring via the PATCH-020 lesson; `lib/workspace/context.ts` confirmed untouched by design; Amendment 4: unscoped `table tbody tr` assertion corrected — the invitations table doesn't render when empty, so the locator measured the always-present members table instead) |
 
 **Batch 5 — canvas program (022+; Phase 2 entry; NOT mechanical):**
 | Patch | Target | Shape | Model |
@@ -293,6 +293,24 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-09** — PATCH-021 Amendment 4 (spec-reviewer ruling): GPT-5.5
+  blocked correctly at Phase A — `page.locator('table tbody tr')` expected
+  0 rows, got 1 (the e2e account's own owner row). Root cause: the
+  pending-invitations section renders NO `<table>` at all when empty (a
+  text message instead), while the members section is an UNCONDITIONAL
+  `<table>` — with zero invitations and one member, the page's only table
+  in the DOM is the members table, so the unscoped locator could only ever
+  measure that one. My own probe script ran the same unscoped locator and
+  printed its result under the label `"table rows (invitations)"` — the
+  count (1) was correct, the label was my unverified assumption, and I
+  never reconciled it against the separately-confirmed empty-invitations
+  text. Assertion corrected to a POSITIVE, section-scoped count of 1 for
+  the members table; the already-generated (uncommitted) spec file is kept
+  and amended in place, not regenerated — only one locator needed
+  correction. Codex/GPT-5.5 may resume Phase A. New reusable rule: an
+  unscoped DOM locator's result means only what its selector says, never
+  what a probe script's variable name claims — verify the label against
+  the page structure, not the other way around.
 - **2026-07-09** — PATCH-021 AUTHORED (handoff-ready; **GPT-5.5 REQUIRED**,
   ruling: five of the ten new facade functions wrap real mutations or feed
   a real side effect — `updateMemberRole`, `removeWorkspaceMember`,

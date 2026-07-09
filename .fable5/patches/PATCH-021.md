@@ -1,6 +1,14 @@
 # PATCH-021 — Extraction: members page; workspace membership/invitation CRUD behind a raw-passthrough facade
 
 **Status:** draft (awaiting owner approval — second and final patch of batch 020–021)
+**Amendment 4 issued: the `table tbody tr` count assertion was bound to
+the wrong table — it asserted the PENDING-INVITATIONS table has zero rows,
+but that table doesn't render at all when empty (the page shows a text
+message instead), so the unscoped locator actually matched the ALWAYS-
+rendered MEMBERS table's one row (the e2e account's own owner row). A
+probe-methodology error (mislabeled probe output), not a page-behavior
+question. Assertion corrected to a positive, table-scoped count of 1 for
+the member row; no page behavior changed.**
 **Complexity:** medium-high (thirteen raw call-site swaps, behind ten new
 facade functions, across a 1,817-line file; the file is large but the
 Supabase surface is narrow and localized to six functions — the other
@@ -128,6 +136,56 @@ grep -n "fetch('/api" "$f"
 wc -l "$f"   # expected: 1817
 ```
 Anything more, less, or different: STOP, report, change nothing.
+
+## Amendment 4 (2026-07-09) — the zero-rows assertion was scoped to the wrong table; the members table always renders, the invitations table does not · CTO/spec-reviewer decision
+
+**Dispute (Codex/GPT-5.5, correct stop — no edits, clean git status except
+the new spec file):** Phase A characterization against the OLD page
+failed — `expect(page.locator('table tbody tr')).toHaveCount(0)` received
+1, not 0. The row was identified as the current solo-owner/member row for
+`e2e.causal793@silomails.com`; the pending-invitations empty-state text was
+simultaneously confirmed visible.
+
+**Finding (re-reading the OLD page's render section):** the page renders
+TWO conceptually separate lists, but only ONE of them is unconditionally a
+`<table>`. The pending-invitations section is `pendingInvitations.length ===
+0 ? <div>...text...</div> : <table>...</table>` — when empty (as for this
+e2e account), NO invitations `<table>` exists in the DOM at all. The members
+section, by contrast, is an UNCONDITIONAL `<table>` — `visibleMembers.map(...)`
+always renders inside `<tbody>`, even for a single row. With zero
+invitations and one member (the account's own owner row), the page's ONLY
+`<table>` in the DOM is the members table, with exactly one `<tr>`. The
+bound locator `page.locator('table tbody tr')` is unscoped to either table —
+it was written intending to assert "zero invitation rows" but, given the
+page's actual structure, it can only ever match the members table when
+invitations are empty.
+
+**Root cause of the spec defect:** my own characterization probe
+(`probe-members.cjs`) ran this exact unscoped locator and printed its
+result under the label `"table rows (invitations): 1"` — the count was
+correct, but the label was my assumption, not something the locator itself
+guaranteed. I read "1" under an "invitations" label and reasoned about
+invitations, when the truthful description of what that locator measures
+is "rows in whichever table is currently in the DOM." A second probe pass
+later confirmed the invitations empty-state text independently, but I never
+went back to reconcile the row-count number against that later finding.
+Reusable pattern: an unscoped DOM locator's result means only what the
+locator's selector says, never what a probe script's variable name claims —
+the same discipline as the CSS-transform lessons (trust the tool's actual
+output, not the label attached to it).
+
+**Decision: the assertion is corrected from a negative unscoped check to a
+positive, intent-matching one — the members table has exactly ONE row (the
+e2e account's own owner row), asserted alongside the already-correct
+pending-invitations empty-state text.** No page behavior changed; the
+solo-owner, zero-invitations characterization was accurate all along, only
+the DOM-shape assumption behind one assertion was wrong. **Codex/GPT-5.5 may
+resume Phase A with the corrected spec.**
+
+**On the uncommitted spec file:** keep it, do not regenerate from scratch —
+only the one line at old L14 needs correction (see the corrected binding
+below); every other assertion in that file was independently reproduced
+against the OLD page and stands unchanged.
 
 ## Bindings
 
@@ -414,7 +472,18 @@ Amendment 3 lesson): the "You" badge on the owner's own row is visually
 and never probe it with `.innerText()`.** The owner's own row has its
 Edit-role and Remove-member buttons present in the DOM but DISABLED
 (`title="Edit role"` / `title="Remove member"` are their accessible names —
-they are icon-only buttons with no visible text).
+they are icon-only buttons with no visible text). **Table-shape trap
+(Amendment 4): the pending-invitations section renders NO `<table>` at all
+when empty (a text message instead), while the members section ALWAYS
+renders a `<table>` — with zero invitations and one member (the account's
+own owner row), the page's only table in the DOM is the MEMBERS table with
+exactly one row. Scope any table-row assertion to the members table
+specifically (`page.getByRole('heading', {name:'Members', level:2})
+.locator('..')...` or an equivalent explicit scope) — a bare
+`page.locator('table tbody tr')` measures whichever table happens to
+exist, not "the invitations table," and asserting it has zero rows is
+true only by the accident of the invitations table being absent, not
+because it is empty.**
 
 **NEVER click:** `Create invite link`, `Invite user` (sends REAL email via
 the API route), the `Edit role` button (even though disabled for the
@@ -439,7 +508,12 @@ test.describe('members page (characterization)', () => {
     await expect(page.getByRole('heading', { name: 'Pending invitations' })).toBeVisible();
     // This encodes the test account's current solo-owner, zero-invitations state; rebind if the workspace ever gains a second member or a pending invitation.
     await expect(page.getByText("There aren't any pending invitations currently.")).toBeVisible({ timeout: 30_000 });
-    await expect(page.locator('table tbody tr')).toHaveCount(0);
+
+    // Scoped to the Members section specifically (Amendment 4): the pending-invitations
+    // table doesn't render at all when empty, so an unscoped `table tbody tr` locator
+    // would only ever measure whichever table happens to exist — here, the members table.
+    const membersSection = page.locator('section', { has: page.getByRole('heading', { name: 'Members', level: 2 }) });
+    await expect(membersSection.locator('table tbody tr')).toHaveCount(1);
 
     await expect(page.getByText('e2e.causal793@silomails.com')).toBeVisible();
     // CSS uppercase trap (PATCH-020 Amendment 3): the badge paints as "YOU" but its raw text is "You" — bind the raw text, never the painted casing.
