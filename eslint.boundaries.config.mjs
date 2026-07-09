@@ -13,7 +13,6 @@ import tsParser from '@typescript-eslint/parser';
 const GRANDFATHERED_UI_FILES = [
   'app/collabboard/canvas/\\[id\\]/page.tsx',
   'app/dashboard/canvas/\\[id\\]/CanvasClient.tsx',
-  'app/dashboard/settings/members/page.tsx',
   'components/collabboard/PostCardContent.tsx',
   'components/collabboard/canvas/ui/FreeformPadletCards.tsx',
 ];

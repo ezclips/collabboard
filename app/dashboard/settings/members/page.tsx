@@ -1,8 +1,18 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { useSupabase } from '@/lib/supabase';
-import type { User } from '@supabase/supabase-js';
+import {
+    deleteInvitation,
+    getCurrentAuthSession,
+    getCurrentAuthUser,
+    listPendingInvitations,
+    listWorkspaceCanvasOptions,
+    listWorkspaceMembers,
+    removeWorkspaceMember,
+    resolveWorkspaceForUser,
+    updateInvitation,
+    updateMemberRole,
+} from '@/lib/infra/supabase/workspaceMembers';
 import {
     Check,
     ChevronDown,
@@ -21,7 +31,6 @@ import { toast } from 'sonner';
 import {
     canManageWorkspace,
     normalizeWorkspaceRole,
-    resolveCurrentWorkspace,
     workspaceRoleDescriptions,
     workspaceRoleLabels,
     type InvitableWorkspaceRole,
@@ -40,6 +49,7 @@ interface Member {
     joined_at: string;
     status: 'active' | 'pending' | 'invited';
 }
+
 
 function RoleDropdown({
     value,
@@ -115,6 +125,7 @@ function RoleDropdown({
     );
 }
 
+
 interface Invitation {
     id: string;
     workspace_id?: string;
@@ -163,12 +174,21 @@ interface WorkspaceCanvasOption {
     layout: string | null;
 }
 
+interface MembersPageUser {
+    id: string;
+    email?: string;
+    created_at: string;
+    user_metadata?: {
+        display_name?: string;
+        avatar_url?: string;
+    };
+}
+
 export default function MembersPage() {
-    const { supabase } = useSupabase();
     const [loading, setLoading] = useState(true);
     const [members, setMembers] = useState<Member[]>([]);
     const [pendingInvitations, setPendingInvitations] = useState<Invitation[]>([]);
-    const [currentUser, setCurrentUser] = useState<User | null>(null);
+    const [currentUser, setCurrentUser] = useState<MembersPageUser | null>(null);
     const [workspaceContext, setWorkspaceContext] = useState<WorkspaceContext | null>(null);
 
     const [showInviteLinkModal, setShowInviteLinkModal] = useState(false);
@@ -235,11 +255,11 @@ export default function MembersPage() {
     const loadMembers = async () => {
         try {
             setLoading(true);
-            const { data: { user } } = await supabase.auth.getUser();
+            const { data: { user } } = await getCurrentAuthUser();
             if (!user) return;
             setCurrentUser(user);
 
-            const resolvedWorkspace = await resolveCurrentWorkspace(supabase, user);
+            const resolvedWorkspace = await resolveWorkspaceForUser(user);
             setWorkspaceContext(resolvedWorkspace);
 
             if (!resolvedWorkspace) {
@@ -260,11 +280,7 @@ export default function MembersPage() {
                 return;
             }
 
-            const { data: workspaceMembers, error } = await supabase
-                .from('workspace_members')
-                .select('id, member_user_id, member_email, role, status, joined_at, created_at')
-                .eq('workspace_id', resolvedWorkspace.workspaceId)
-                .order('created_at', { ascending: true });
+            const { data: workspaceMembers, error } = await listWorkspaceMembers(resolvedWorkspace.workspaceId);
 
             if (error && error.code !== 'PGRST116') {
                 console.error('Error loading members:', error);
@@ -300,12 +316,7 @@ export default function MembersPage() {
                 })));
             }
 
-            const { data: invitations } = await supabase
-                .from('workspace_invitations')
-                .select('*')
-                .eq('workspace_id', resolvedWorkspace.workspaceId)
-                .is('redeemed_at', null)
-                .order('created_at', { ascending: false });
+            const { data: invitations } = await listPendingInvitations(resolvedWorkspace.workspaceId);
 
             if (invitations) {
                 setPendingInvitations(invitations.map((inv: WorkspaceInvitationRow) => ({
@@ -346,11 +357,7 @@ export default function MembersPage() {
 
         try {
             setSavingRole(true);
-            const { error } = await supabase
-                .from('workspace_members')
-                .update({ role: editingRole, updated_at: new Date().toISOString() })
-                .eq('id', editingMember.membership_id)
-                .eq('workspace_id', workspaceContext.workspaceId);
+            const { error } = await updateMemberRole(editingMember.membership_id, workspaceContext.workspaceId, editingRole, new Date().toISOString());
 
             if (error) {
                 console.error('Error updating member role:', error);
@@ -387,11 +394,7 @@ export default function MembersPage() {
 
         try {
             setRemovingMemberId(member.membership_id);
-            const { error } = await supabase
-                .from('workspace_members')
-                .delete()
-                .eq('id', member.membership_id)
-                .eq('workspace_id', workspaceContext.workspaceId);
+            const { error } = await removeWorkspaceMember(member.membership_id, workspaceContext.workspaceId);
 
             if (error) {
                 console.error('Error removing member:', error);
@@ -464,7 +467,7 @@ export default function MembersPage() {
             let user = currentUser;
 
             if (!user) {
-                const { data: authData } = await supabase.auth.getUser();
+                const { data: authData } = await getCurrentAuthUser();
                 user = authData.user;
                 if (user) {
                     setCurrentUser(user);
@@ -472,7 +475,7 @@ export default function MembersPage() {
             }
 
             if (!wsId && user) {
-                const resolvedWorkspace = await resolveCurrentWorkspace(supabase, user);
+                const resolvedWorkspace = await resolveWorkspaceForUser(user);
                 if (resolvedWorkspace) {
                     wsId = resolvedWorkspace.workspaceId;
                     setWorkspaceContext((prev) => prev ?? resolvedWorkspace);
@@ -484,12 +487,7 @@ export default function MembersPage() {
                 return;
             }
 
-            const { data, error } = await supabase
-                .from('boards')
-                .select('id, title, layout')
-                .eq('workspace_id', wsId)
-                .is('deleted_at', null)
-                .order('updated_at', { ascending: false });
+            const { data, error } = await listWorkspaceCanvasOptions(wsId);
 
             if (error) {
                 console.error('Error loading workspace canvases:', error);
@@ -528,7 +526,7 @@ export default function MembersPage() {
 
             // Call server-side API route which uses the service role key
             // to bypass all RLS and client-side auth issues
-            const { data: { session } } = await supabase.auth.getSession();
+            const { data: { session } } = await getCurrentAuthSession();
             const headers: Record<string, string> = {
                 'Content-Type': 'application/json',
             };
@@ -650,7 +648,7 @@ export default function MembersPage() {
                 return;
             }
 
-            const { data: { session } } = await supabase.auth.getSession();
+            const { data: { session } } = await getCurrentAuthSession();
             const headers: Record<string, string> = {
                 'Content-Type': 'application/json',
             };
@@ -745,14 +743,7 @@ export default function MembersPage() {
             setUpdatingLink(true);
 
             if (workspaceContext) {
-                const { error } = await supabase
-                    .from('workspace_invitations')
-                    .update({
-                        role: updateLinkRole,
-                        email_domain: isLinkInvitation && updateLinkRestrictDomain ? updateLinkEmailDomain : null,
-                        canvas_ids: nextCanvasIds,
-                    })
-                    .eq('id', updatingInvitationId);
+                const { error } = await updateInvitation(updatingInvitationId, { role: updateLinkRole, email_domain: isLinkInvitation && updateLinkRestrictDomain ? updateLinkEmailDomain : null, canvas_ids: nextCanvasIds });
 
                 if (error) {
                     console.error('Error updating invitation:', error);
@@ -821,10 +812,7 @@ export default function MembersPage() {
         }
 
         try {
-            const { error } = await supabase
-                .from('workspace_invitations')
-                .delete()
-                .eq('id', invitation.id);
+            const { error } = await deleteInvitation(invitation.id);
 
             if (error) {
                 toast.error(error.message || 'Failed to remove invitation');
@@ -1814,4 +1802,3 @@ export default function MembersPage() {
         </div>
     );
 }
-
