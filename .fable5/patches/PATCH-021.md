@@ -16,6 +16,11 @@ block comment (reworded, no glob), and `MembersPageUser.email` was bound
 (rebound `email?: string`, compile-verified against the installed types).
 Worktree KEPT, patched in place; verification resumes from tsc. Codex's
 STOP-on-cast was correct.**
+**Amendment 6 issued: the `workspaceMembers` post-edit gate expected 1 but
+the pattern collides with the pre-existing local variable of the same name
+(3 lines §2 keeps verbatim) — correct count is 4; all other gates
+sweep-verified against the pre-edit file. Worktree KEPT again; resume from
+the grep gates. Codex's 4 was faithful implementation, not drift.**
 **Complexity:** medium-high (thirteen raw call-site swaps, behind ten new
 facade functions, across a 1,817-line file; the file is large but the
 Supabase surface is narrow and localized to six functions — the other
@@ -249,6 +254,43 @@ characterization spec against the implemented page (the mid-implementation
 a separate Phase A issue; Phase A against the OLD page had already passed
 post-Amendment-4 and its result stands). All other gates and bindings are
 unchanged.
+
+## Amendment 6 (2026-07-09) — the `workspaceMembers` post-edit gate collided with a pre-existing local variable the bindings themselves preserve · CTO decision
+
+**Dispute (Codex/GPT-5.5, correct stop — tsc green, nothing committed):**
+the post-edit gate expected `grep -c "workspaceMembers"` = 1 (the import);
+the bindings-faithful page prints 4.
+
+**Finding (CTO, reproduced against HEAD):** the PRE-edit page already
+contains 3 lines matching `workspaceMembers` — the destructured local
+variable in `loadMembers` (`const { data: workspaceMembers, error } = ...`
+at old L263, the `!workspaceMembers || workspaceMembers.length` guard at
+old L273, and `setMembers(workspaceMembers.map(...)` at old L288). §2's own
+binding KEEPS that destructuring verbatim (`const { data: workspaceMembers,
+error } = await listWorkspaceMembers(...)`), so the correct post-edit count
+is 3 + 1 (import line) = **4**. The gate authored "1" by counting only the
+new import and never dry-running the post-edit pattern against the pre-edit
+file — the same substring-collision family as PATCH-020's `supabase`-in-
+import-path gate (caught at authoring there; missed here because the
+collision is with a pre-existing LOCAL IDENTIFIER rather than the new
+import's own path). **Codex's 4 is the natural result of faithful
+implementation, not drift.**
+
+**Sweep (same amendment):** every other post-edit gate pattern was
+re-derived against the pre-edit file — `MembersPageUser` 0→2,
+`resolveWorkspaceForUser` 0→3, `@supabase` 1→0, `useSupabase` 2→0,
+`supabase\.` 4→0, `fetch('/api` 2→2 — all consistent with their bound
+expectations; only the `workspaceMembers` gate carried this defect.
+
+**Decision: gate rebound to 4 in-place above, with composition stated.
+Worktree ruling: KEEP the current uncommitted worktree — the implementation
+is bindings-faithful — and resume from the implementation census/grep gates
+(no need to re-run tsc or Phase A/B; their passes stand).** Authoring rule,
+recorded in LESSONS_LEARNED: every post-edit count gate must be derived as
+(pre-edit count of the same pattern) + (bound additions) − (bound
+deletions), with the pre-edit count actually measured, not assumed zero — a
+new identifier's gate is only "1 (the import)" if the pattern genuinely
+never appears in the file today.
 
 ## Bindings
 
@@ -647,7 +689,13 @@ f="app/dashboard/settings/members/page.tsx"
 grep -c "@supabase" "$f"                # 0  (exit 1 expected)
 grep -c "useSupabase" "$f"               # 0  (exit 1 expected)
 grep -c "supabase\." "$f"                # 0  (exit 1 expected; no import-path collision in this file)
-grep -c "workspaceMembers" "$f"           # 1  (the import)
+grep -c "workspaceMembers" "$f"           # 4  [Amendment 6: 1 import line + the
+                                          #  3 PRE-EXISTING lines of the local
+                                          #  `workspaceMembers` destructured
+                                          #  variable in loadMembers (old
+                                          #  L263/L273/L288), which §2 keeps
+                                          #  byte-identical. Pre-edit count of
+                                          #  this pattern was already 3.]
 grep -c "MembersPageUser" "$f"            # 2  (type def + useState annotation)
 grep -c "resolveWorkspaceForUser" "$f"    # 3  (1 import + 2 call sites, replacing the two resolveCurrentWorkspace(supabase, ...) calls)
 grep -n "fetch('/api" "$f"                # still EXACTLY 2 lines, same two routes

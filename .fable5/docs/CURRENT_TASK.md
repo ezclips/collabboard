@@ -142,7 +142,7 @@ follow 017's Pattern H).
 | Patch | Target | Shape | Shrink | Model | Spec status |
 |---|---|---|---|---|---|
 | 020 | password | auth-security swap: nine call sites behind a raw-passthrough `passwordSecurity.ts` facade (5 MFA/webauthn + getUser/reauth/updateUser + profiles-email fallback); page's duplicate scavenger+JWT-decode helpers DELETED and re-imported from the quarantine (byte-compared) | 6→5 | GPT-5.5 | ✅ **DONE** (1eb0e2c, review PASSED; Amendment 3 AAL-badge assertion held; Pattern J in catalog §5.10) |
-| 021 | members | raw-passthrough CRUD facade (`workspaceMembers.ts`, 10 functions covering 13 raw touches: workspace_members select/update/delete, workspace_invitations select/update/delete, boards select, getUser×2, getSession×2, resolveCurrentWorkspace×2 reused thin); `User` type import replaced by narrow `MembersPageUser`; API fetches untouched | 5→4 | **GPT-5.5 REQUIRED** (5 of 10 facade functions wrap real mutations/real email-sends — diff fidelity is the only net) | **READY — `patches/PATCH-021.md`** (census dry-run-verified; characterization probed against live e2e account — solo workspace owner, zero pending invitations; CSS-uppercase "You"/"YOU" trap caught pre-authoring via the PATCH-020 lesson; `lib/workspace/context.ts` confirmed untouched by design; Amendment 4: unscoped `table tbody tr` assertion corrected — the invitations table doesn't render when empty, so the locator measured the always-present members table instead; Amendment 5: two tsc failures in bound text — `app/**/components/**` glob closed its own block comment, and `MembersPageUser.email` rebound `string | null`→`email?: string` to match vendor `User.email`, compile-verified; worktree kept, patched in place) |
+| 021 | members | raw-passthrough CRUD facade (`workspaceMembers.ts`, 10 functions covering 13 raw touches: workspace_members select/update/delete, workspace_invitations select/update/delete, boards select, getUser×2, getSession×2, resolveCurrentWorkspace×2 reused thin); `User` type import replaced by narrow `MembersPageUser`; API fetches untouched | 5→4 | **GPT-5.5 REQUIRED** (5 of 10 facade functions wrap real mutations/real email-sends — diff fidelity is the only net) | **READY — `patches/PATCH-021.md`** (census dry-run-verified; characterization probed against live e2e account — solo workspace owner, zero pending invitations; CSS-uppercase "You"/"YOU" trap caught pre-authoring via the PATCH-020 lesson; `lib/workspace/context.ts` confirmed untouched by design; Amendment 4: unscoped `table tbody tr` assertion corrected — the invitations table doesn't render when empty, so the locator measured the always-present members table instead; Amendment 5: two tsc failures in bound text — `app/**/components/**` glob closed its own block comment, and `MembersPageUser.email` rebound `string | null`→`email?: string` to match vendor `User.email`, compile-verified; worktree kept, patched in place; Amendment 6: `workspaceMembers` post-edit gate 1→4 — pattern collides with the pre-existing local variable §2 keeps verbatim; all other gates sweep-verified; worktree kept, resume from grep gates) |
 
 **Batch 5 — canvas program (022+; Phase 2 entry; NOT mechanical):**
 | Patch | Target | Shape | Model |
@@ -293,6 +293,24 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-09** — PATCH-021 Amendment 6: GPT-5.5 stopped correctly at the
+  post-edit grep gate (tsc green, nothing committed) — the spec expected
+  `grep -c "workspaceMembers"` = 1, faithful implementation prints 4.
+  CTO-reproduced against HEAD: the PRE-edit page already has 3 lines with
+  that substring — the destructured local `workspaceMembers` variable in
+  `loadMembers` (old L263/L273/L288), which §2's own binding keeps
+  verbatim — plus the new import = 4. The gate was authored by counting
+  only the new import, never dry-running the pattern against the pre-edit
+  file; same substring-collision family as PATCH-020's supabase-in-path
+  gate, this time with a pre-existing local identifier. Gate rebound to 4;
+  ALL other post-edit gates sweep-verified against the pre-edit file in
+  the same amendment (MembersPageUser 0→2, resolveWorkspaceForUser 0→3,
+  deletions 1/2/4→0, fetches 2→2 — only this one was defective). Worktree
+  ruling: KEEP the uncommitted implementation, resume from the
+  implementation census/grep gates — tsc and Phase A/B passes stand. New
+  authoring rule: every post-edit count gate = measured pre-edit count +
+  bound additions − bound deletions; never assume a new identifier's
+  pre-edit count is zero.
 - **2026-07-09** — PATCH-021 Amendment 5: GPT-5.5 stopped mid-implementation
   (nothing committed) on two tsc failures, BOTH in CTO-bound text. (1) The
   bound facade block comment said "outside `app/**/components/**`" — the
