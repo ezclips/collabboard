@@ -3,7 +3,6 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import DOMPurify from "dompurify";
-import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 import { Padlet } from "@/types/collabboard";
 import LinkMediaEmbed, { getLinkEmbedKind } from "./LinkMediaEmbed";
 import EmbeddedCommentList from "./EmbeddedCommentList";
@@ -11,6 +10,9 @@ import ReactionDisplay from "./editors/ReactionDisplay";
 import { buildYouTubeThumbCandidates, extractYouTubeId } from "@/lib/media/youtubeThumb";
 import AIContentRenderer from "@/components/ai/AIContentRenderer";
 import { extractAIContentFromPadletMetadata } from "@/lib/ai/normalize-ai-content";
+import { createToggleTaskCommand } from "@/lib/domain/canvas/posts";
+import { asUserId } from "@/lib/domain/core/ids";
+import { createPostsRepository } from "@/lib/infra/canvas/postsRepository";
 
 type CellStyle = {
     bg?: string;
@@ -235,7 +237,6 @@ export default function PostCardContent({
     currentUserAvatar,
     onUpdateChildComments,
 }: PostCardContentProps) {
-    const supabase = createClientComponentClient();
 
     const type = normalizeType(padlet.type);
     const rawContent = asStringContent(padlet.content);
@@ -373,27 +374,20 @@ export default function PostCardContent({
                                     e.preventDefault();
                                     e.stopPropagation();
 
-                                    const updatedTasks =
-                                        padlet.metadata?.tasks?.map((t: { id: string; completed: boolean }) =>
-                                            t.id === task.id ? { ...t, completed: !t.completed } : t
-                                        ) || [];
+                                    const toggleTask = createToggleTaskCommand(createPostsRepository());
+                                    const result = await toggleTask(
+                                        {
+                                            postId: padlet.id,
+                                            taskId: task.id,
+                                            metadata: padlet.metadata ?? {},
+                                        },
+                                        { userId: currentUserId ? asUserId(currentUserId) : null }
+                                    );
 
-                                    const updatedMetadata = { ...padlet.metadata, tasks: updatedTasks };
-
-                                    try {
-                                        const { error } = await supabase
-                                            .from("padlets")
-                                            .update({
-                                                content: JSON.stringify(updatedTasks),
-                                                metadata: updatedMetadata,
-                                                updated_at: new Date().toISOString(),
-                                            })
-                                            .eq("id", padlet.id);
-
-                                        if (error) throw error;
+                                    if (result.ok) {
                                         onScan?.();
-                                    } catch (err) {
-                                        console.error("Failed to toggle task:", err);
+                                    } else {
+                                        console.error("Failed to toggle task:", result.error);
                                     }
                                 }}
                                 className="w-3 h-3 mt-0.5 accent-green-500 cursor-pointer pointer-events-auto"
