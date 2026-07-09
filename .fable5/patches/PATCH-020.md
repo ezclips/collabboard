@@ -1,6 +1,11 @@
 # PATCH-020 — Extraction: password/passkey page; auth+MFA surface behind a raw-passthrough facade
 
 **Status:** draft (awaiting owner approval — first patch of batch 020–021)
+**Amendment 3 issued: the AAL-badge characterization assertion was bound to
+the CSS-rendered casing (`AAL1`, via `.innerText()`), not the DOM text
+Playwright's `getByText` actually matches (`aal1`) — a probe-methodology
+error, not a page behavior question. Assertion corrected to match the raw
+text; no page behavior changed.**
 **Complexity:** medium (nine call-site swaps, five of them MFA/webauthn; zero
 of the five passkey paths are exercisable by test, so DIFF FIDELITY IS THE
 ONLY NET on them)
@@ -102,6 +107,43 @@ grep -n "fetch('/api" "$f"
 wc -l "$f"   # expected: 505
 ```
 Anything more, less, or different: STOP, report, change nothing.
+
+## Amendment 3 (2026-07-09) — the AAL badge's DOM text is lowercase; `AAL1` was a probe-tooling artifact, not the page's actual behavior · CTO/spec-reviewer decision
+
+**Dispute (Codex/GPT-5.5, correct stop — no edits, clean git status):**
+Phase A characterization against the OLD page failed —
+`getByText(/Current session: AAL1/)` found no element; Playwright's error
+context showed the actual text as `Current session: aal1`. The other bound
+test (short-password validation, zero network) passed.
+
+**Finding (re-reading the OLD page, `app/dashboard/settings/password/page.tsx`
+line 385):**
+```tsx
+Current session: <span className="font-medium uppercase">{currentAal ?? 'unknown'}</span>
+```
+`currentAal` is Supabase's own AAL value, typed `'aal1' | 'aal2' | 'aal3' |
+null` — always lowercase at the source. The `uppercase` class is Tailwind's
+`text-transform: uppercase`, a purely visual CSS effect: the DOM text node
+and the accessible name stay `aal1`; only the painted pixels are capitals.
+
+**Root cause of the spec defect:** the original characterization probe read
+the badge with Playwright's `.innerText()`, which is layout-aware and
+DOES reflect CSS `text-transform` in Chromium — so the probe correctly
+printed `"Current session: AAL1"` and I bound the assertion to what I saw.
+But `getByText()` (used in the actual spec, correctly per house style)
+matches against raw text content / accessible name, which CSS
+`text-transform` does NOT alter. The probe tool and the assertion tool
+disagree on what "the text" is for a CSS-transformed element — the same
+family of defect as PATCH-019 Amendment 1 (two tools, two numbers, same
+underlying bytes), here applied to rendered text instead of a line count.
+
+**Decision: the assertion is corrected to the raw-text baseline
+(`Current session: aal1`); no page behavior changed, nothing further to
+verify.** The OLD page has always rendered `aal1` in its DOM; this was
+never in dispute — only which representation of that text a probe should
+trust when the element carries a CSS text-transform. **Codex/GPT-5.5 may
+resume Phase A with the corrected assertion; the rest of the spec
+(including the passed zero-network validation test) is unaffected.**
 
 ## Bindings
 
@@ -278,7 +320,12 @@ e2e storage state on 2026-07-09.** Observed: unique `Password` and
 disabled while either field is empty; passkey load settles to the empty
 state (`No passkeys registered yet.`, zero `Verify session` buttons) with NO
 error toast — the cookie session satisfies `mfa.listFactors` via a single
-`GET /auth/v1/user`; AAL badge reads exactly `Current session: AAL1`; the
+`GET /auth/v1/user`; AAL badge's underlying DOM text reads
+`Current session: aal1` — the badge is visually uppercased by a CSS
+`uppercase` class (Tailwind `text-transform`), which is why it LOOKS like
+`AAL1` on screen and in `.innerText()` (render-aware) but is lowercase in
+the raw text content Playwright's `getByText` matches (see Amendment 3);
+the
 short-password branch fires the toast `Password must be at least 15
 characters` with ZERO network (validation precedes `resolveAccountEmail`).
 
@@ -308,7 +355,7 @@ test.describe('password page (characterization)', () => {
     // This encodes the test account's current passkey-free state; rebind if the account ever enrolls one.
     await expect(page.getByText('No passkeys registered yet.')).toBeVisible({ timeout: 30_000 });
     await expect(page.getByRole('button', { name: 'Verify session' })).toHaveCount(0);
-    await expect(page.getByText(/Current session: AAL1/)).toBeVisible();
+    await expect(page.getByText(/Current session: aal1/)).toBeVisible();
     await expect(page.locator('[data-sonner-toast]')).toHaveCount(0);
   });
 

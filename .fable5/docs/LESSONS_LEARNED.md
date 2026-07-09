@@ -113,6 +113,13 @@ at minimum before working on this repo. Newest first within each section.
 **Fix:** PATCH-019 Amendment 1 — gate rebound with both shells' commands and expected values inline; census accepted as PASSED.
 **Reusable rule:** on this machine every numeric gate in a spec must bind the exact command AND shell that produces the number (same family as the netstat/locale rule above); when a census mismatches on ONE derived total while all positional anchors match, suspect the measuring tool before the file.
 
+### `.innerText()` sees CSS `text-transform`; `getByText()` does not — a probed casing was never the page's real text (2026-07-09, PATCH-020 Phase A)
+**Symptom:** GPT-5.5 correctly stopped in Phase A — the bound assertion `getByText(/Current session: AAL1/)` found no element; Playwright's error context showed the actual text as `Current session: aal1`.
+**Wrong path (avoided):** none reached — GPT-5.5 stopped and reported rather than loosening the regex or guessing. Would have been wrong to treat this as a page behavior question; it never was one.
+**Root cause:** the badge's span carries Tailwind's `uppercase` class (`text-transform: uppercase`) — a paint-only effect. The DOM text node and accessible name stay lowercase (`aal1`, Supabase's own value). The CTO's original probe read the element with `.innerText()`, which is layout-aware in Chromium and DOES reflect CSS text-transform, so it printed `AAL1` — visually correct, and the CTO bound the assertion to that. But the actual spec (correctly, per house style) uses `getByText()`, which matches raw text content and does NOT apply CSS transforms. Two measurement tools disagreed on "the text" for the same CSS-transformed element — same defect family as the `wc -l` vs `Measure-Object -Line` split above (two tools, two values, same underlying bytes), here on rendered text instead of a line count.
+**Fix:** PATCH-020 Amendment 3 — assertion corrected to the raw-text baseline (`aal1`); no page behavior changed; Codex/GPT-5.5 resumed Phase A on the corrected spec.
+**Reusable rule:** when characterizing an element for a `getByText()`/`toHaveText()` assertion, probe with the SAME matcher (`getByText`) or raw `textContent`, never `.innerText()` — if the element (or an ancestor) carries `uppercase`/`lowercase`/`capitalize` in its class list, `.innerText()` will show you the CSS-painted casing, not the DOM text the assertion actually matches.
+
 ### Windows execSync mangles `^` — a review audit compared a commit to itself (2026-07-07, PATCH-003 review)
 **Symptom:** lockfile audit reported 0 added/0 changed while `git show --stat` showed a 16k-line diff and grep found vitest only in the new file.
 **Wrong path:** almost trusted the "no changes" audit because it looked authoritative.

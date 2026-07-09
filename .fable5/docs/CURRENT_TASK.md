@@ -141,7 +141,7 @@ follow 017's Pattern H).
 **Batch 4 — security-sensitive settings (020–021), grandfather 6→4:**
 | Patch | Target | Shape | Shrink | Model | Spec status |
 |---|---|---|---|---|---|
-| 020 | password | auth-security swap: nine call sites behind a raw-passthrough `passwordSecurity.ts` facade (5 MFA/webauthn + getUser/reauth/updateUser + profiles-email fallback); page's duplicate scavenger+JWT-decode helpers DELETED and re-imported from the quarantine (byte-compared) | 6→5 | **GPT-5.5 REQUIRED** (5 of 9 swaps untestable — diff fidelity is the only net; GPT-5.4 only as owner-authorized fallback) | **READY — `patches/PATCH-020.md`** (census dry-run-verified; characterization probed incl. AAL badge + zero-network validation branch; supabase-js 2.93.1 webauthn typing verified) |
+| 020 | password | auth-security swap: nine call sites behind a raw-passthrough `passwordSecurity.ts` facade (5 MFA/webauthn + getUser/reauth/updateUser + profiles-email fallback); page's duplicate scavenger+JWT-decode helpers DELETED and re-imported from the quarantine (byte-compared) | 6→5 | **GPT-5.5 REQUIRED** (5 of 9 swaps untestable — diff fidelity is the only net; GPT-5.4 only as owner-authorized fallback) | **READY — `patches/PATCH-020.md`** (census dry-run-verified; characterization probed incl. AAL badge + zero-network validation branch; supabase-js 2.93.1 webauthn typing verified; Amendment 3: AAL-badge assertion corrected `AAL1`→`aal1`, probe-tooling artifact — `.innerText()` reflects CSS `text-transform`, `getByText` does not, page behavior unchanged) |
 | 021 | members | Pattern E at scale (3 repos + auth swaps; API fetches untouched) | 5→4 | **GPT-5.5** | Fable to author (by 07-12) |
 
 **Batch 5 — canvas program (022+; Phase 2 entry; NOT mechanical):**
@@ -293,6 +293,21 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-09** — PATCH-020 Amendment 3 (spec-reviewer ruling, Fable
+  unavailable): GPT-5.5 blocked correctly at Phase A — bound assertion
+  `getByText(/Current session: AAL1/)` found nothing; actual DOM text is
+  `aal1`. Root cause: the badge carries a Tailwind `uppercase` CSS class
+  (visual `text-transform` only); the original probe read it with
+  `.innerText()`, which is layout-aware and reflects the CSS-painted
+  casing, while the spec's `getByText()` matches raw text content, which
+  CSS does not alter — two tools disagreeing on "the text" for the same
+  element, same defect family as PATCH-019 Amendment 1 (two tools, two
+  values, same underlying bytes) applied to rendered text instead of a
+  line count. Assertion corrected to `aal1`; no page behavior changed;
+  Codex/GPT-5.5 may resume Phase A. New reusable rule recorded in
+  LESSONS_LEARNED: probe with `getByText`/`textContent`, not `.innerText()`,
+  whenever the assertion tool will be `getByText` — the two do not agree
+  on CSS-transformed elements.
 - **2026-07-09** — PATCH-020 AUTHORED (handoff-ready; **GPT-5.5 REQUIRED**,
   ruling in the spec: five of the nine swapped call sites are MFA/webauthn
   paths no test can exercise — clicking any passkey button triggers a real
