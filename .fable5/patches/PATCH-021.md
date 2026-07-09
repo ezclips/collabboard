@@ -1,6 +1,6 @@
 # PATCH-021 — Extraction: members page; workspace membership/invitation CRUD behind a raw-passthrough facade
 
-**Status:** draft (awaiting owner approval — second and final patch of batch 020–021)
+**Status:** DONE (2026-07-09, commit `ea03671`) — CTO review PASSED. **Amendments 4–6 all held exactly. Batch 020–021 complete.**
 **Amendment 4 issued: the `table tbody tr` count assertion was bound to
 the wrong table — it asserted the PENDING-INVITATIONS table has zero rows,
 but that table doesn't render at all when empty (the page shows a text
@@ -825,3 +825,75 @@ risk is argument-shape fidelity on the five untestable mutation wrappers
 and
 leaving `lib/workspace/context.ts` completely untouched despite it being
 the most tempting file to "helpfully" refactor alongside this one.
+
+## CTO Review (2026-07-09) — PASSED
+
+Implementation commit `ea03671`. All gates independently re-run, not
+accepted from pasted output.
+
+- **Page diff**: exactly the bound import swap, the `User`→`MembersPageUser`
+  type substitution (placed immediately after `WorkspaceCanvasOption` as
+  bound), the deleted `useSupabase()`/`resolveCurrentWorkspace` import, and
+  all thirteen raw call-site swaps. `RoleDropdown`, both `Member`/
+  `Invitation` interfaces, every modal, every handler not named in the
+  bindings, and all rendering are byte-identical.
+- **`lib/workspace/context.ts`**: `git diff --ignore-space-at-eol` across
+  the implementation commit is EMPTY — confirmed independently, the
+  reviewer checklist's highest-value check passes cleanly.
+- **`workspaceMembers.ts`**: byte-identical to the Amendment-5-corrected §1
+  binding — 10 wrappers, each a one-line raw-return, zero Result
+  conversion, the corrected non-glob comment, `resolveWorkspaceForUser`'s
+  parameter type derived via `Parameters<typeof resolveCurrentWorkspace>[1]`
+  exactly as bound. The five mutation/side-effect wrappers
+  (`updateMemberRole`, `removeWorkspaceMember`, `updateInvitation`,
+  `deleteInvitation`, `getCurrentAuthSession`) were given the line-by-line
+  scrutiny the spec demands — every argument matches the original query's
+  exact filter chain, including both `.eq()` calls on the two
+  workspace-scoped member operations.
+- **`MembersPageUser.email`**: bound `email?: string` (Amendment 5),
+  matching the installed vendor `User.email` exactly — re-verified by
+  compiling the three previously-failing assignments against the real
+  installed type; all pass under `--strict`.
+- **Boundaries**: single line removed from `GRANDFATHERED_UI_FILES`; list
+  re-counted at 4.
+- **e2e spec**: matches the Amendment-4-corrected bindings byte-for-byte —
+  the members-table locator is scoped to the Members `<section>` via
+  `has: getByRole('heading', {level:2})`, asserting exactly 1 row; "You" is
+  bound lowercase-Y-capital; zero clicks on Create invite link, Invite
+  user, Edit role, Remove member, or any invitation-row action anywhere in
+  the file.
+- **Gates independently re-run**: `npx tsc --noEmit` → clean. `npm run
+  check:boundaries` → clean. `npx vitest run` → 76 passed / 18 files
+  (unchanged). `npx playwright test --list` → 27 tests / 18 files, matching
+  the spec's stated arithmetic exactly. Post-edit greps: `@supabase` 0,
+  `useSupabase` 0, `supabase\.` 0, `workspaceMembers` 4 (Amendment 6),
+  `MembersPageUser` 2, `resolveWorkspaceForUser` 3, both fetch lines
+  unchanged, facade `createBrowserSupabaseClient` count 11 / `export
+  function` count 10 — all exact. Stopped-server gate: 0 listeners on
+  :3000. `git status` clean.
+- **Reported deviations, both verified as non-issues**: (1) the standalone
+  spec-file test count (2, not 1) is Playwright's `[setup]` project running
+  as a dependency of any characterization-file invocation — reproduced
+  independently, same pattern as PATCH-020's review. (2) the first full-suite
+  attempt timing out in `auth.setup` before a warmed-server rerun passed
+  27/27 is the documented cold-compile/contention discipline (PATCH-018's
+  canvas-route-warmup lesson, PATCH-019's single-client rule) — not a defect.
+- **Undisclosed deviation found (minor, accepted):** the diff contains two
+  extra blank lines (after the `Member` interface and after `RoleDropdown`'s
+  closing brace) and the file's trailing blank line at EOF was stripped —
+  whitespace-only, zero behavior effect, almost certainly editor/formatter
+  autosave rather than a deliberate edit. Not disclosed by the implementer
+  despite the "EVERYTHING else byte-identical" binding and the standing
+  disclosure rule. **Accepted** (same class as PATCH-018's undisclosed
+  cast — zero runtime effect) but recorded as a disclosure-gap recurrence:
+  see LESSONS_LEARNED.
+
+**Grandfather: 5 → 4, confirmed.** **Batch 020–021 is complete.** Pattern J
+(PATCH_REFERENCE §5.10) extended from auth/MFA-only to plain table CRUD,
+with four new "Common mistakes" entries this patch surfaced (block-comment
+globs, vendor nullability copying, pre-edit-count gate arithmetic,
+table-shape locator scoping) folded into the catalog so future authors
+don't re-derive them. Remaining grandfathered files (4): PostCardContent,
+FreeformPadletCards, CanvasClient, collabboard canvas page — all batch-5/
+canvas-program territory, per the standing plan a CTO decision brief
+(PATCH-022), not a GPT-5.4/5.5 delegation.

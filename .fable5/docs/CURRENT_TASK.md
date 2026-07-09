@@ -142,7 +142,7 @@ follow 017's Pattern H).
 | Patch | Target | Shape | Shrink | Model | Spec status |
 |---|---|---|---|---|---|
 | 020 | password | auth-security swap: nine call sites behind a raw-passthrough `passwordSecurity.ts` facade (5 MFA/webauthn + getUser/reauth/updateUser + profiles-email fallback); page's duplicate scavenger+JWT-decode helpers DELETED and re-imported from the quarantine (byte-compared) | 6→5 | GPT-5.5 | ✅ **DONE** (1eb0e2c, review PASSED; Amendment 3 AAL-badge assertion held; Pattern J in catalog §5.10) |
-| 021 | members | raw-passthrough CRUD facade (`workspaceMembers.ts`, 10 functions covering 13 raw touches: workspace_members select/update/delete, workspace_invitations select/update/delete, boards select, getUser×2, getSession×2, resolveCurrentWorkspace×2 reused thin); `User` type import replaced by narrow `MembersPageUser`; API fetches untouched | 5→4 | **GPT-5.5 REQUIRED** (5 of 10 facade functions wrap real mutations/real email-sends — diff fidelity is the only net) | **READY — `patches/PATCH-021.md`** (census dry-run-verified; characterization probed against live e2e account — solo workspace owner, zero pending invitations; CSS-uppercase "You"/"YOU" trap caught pre-authoring via the PATCH-020 lesson; `lib/workspace/context.ts` confirmed untouched by design; Amendment 4: unscoped `table tbody tr` assertion corrected — the invitations table doesn't render when empty, so the locator measured the always-present members table instead; Amendment 5: two tsc failures in bound text — `app/**/components/**` glob closed its own block comment, and `MembersPageUser.email` rebound `string | null`→`email?: string` to match vendor `User.email`, compile-verified; worktree kept, patched in place; Amendment 6: `workspaceMembers` post-edit gate 1→4 — pattern collides with the pre-existing local variable §2 keeps verbatim; all other gates sweep-verified; worktree kept, resume from grep gates) |
+| 021 | members | raw-passthrough CRUD facade (`workspaceMembers.ts`, 10 functions covering 13 raw touches: workspace_members select/update/delete, workspace_invitations select/update/delete, boards select, getUser×2, getSession×2, resolveCurrentWorkspace×2 reused thin); `User` type import replaced by narrow `MembersPageUser`; API fetches untouched | 5→4 | GPT-5.5 | ✅ **DONE** (ea03671, review PASSED; Amendments 4–6 all held; Pattern J extended to table CRUD, §5.10; **batch 020–021 complete**) |
 
 **Batch 5 — canvas program (022+; Phase 2 entry; NOT mechanical):**
 | Patch | Target | Shape | Model |
@@ -293,6 +293,39 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-09** — PATCH-021 landed and reviewed: PASSED (commit `ea03671`).
+  Grandfather 5→4 — **batch 020–021 complete**. All gates independently
+  re-run: page diff is exactly the bound import swap, the `MembersPageUser`
+  type substitution, and all thirteen call-site swaps; `RoleDropdown`,
+  both list-item interfaces, every modal, and all rendering untouched;
+  `lib/workspace/context.ts` diff EMPTY (the review's highest-value single
+  check); `workspaceMembers.ts` byte-identical to the Amendment-5-corrected
+  binding, all five mutation/side-effect wrappers scrutinized line-by-line;
+  boundaries diff is the single named line, list re-counted at 4; e2e spec
+  matches the Amendment-4-corrected bindings exactly, zero clicks on any
+  mutating control. Vitest 76/18 unchanged, tsc clean, boundaries clean,
+  `playwright --list` → 27 tests/18 files exactly as predicted, every
+  post-edit grep exact including the Amendment-6-corrected
+  `workspaceMembers` count of 4. Both reported deviations (standalone
+  setup-project count, cold-server auth.setup timeout then warm rerun)
+  independently verified as non-issues, consistent with prior-patch
+  precedent. One MINOR undisclosed deviation found and accepted: two
+  whitespace-only blank-line insertions plus a stripped trailing EOF blank
+  line — zero behavior effect, almost certainly editor autosave, but not
+  disclosed per the standing rule; recorded as a disclosure-gap recurrence
+  in LESSONS_LEARNED (same acceptance class as PATCH-018's undisclosed
+  cast). Pattern J (§5.10) extended from auth/MFA-only to plain table CRUD;
+  four new "Common mistakes" entries folded into the catalog (block-comment
+  globs, vendor nullability copying, pre-edit-count gate arithmetic,
+  table-shape locator scoping). Health held at 74 (safety/architecture at
+  the 20/20 ceiling; ops/product/continuity untouched, unmoved for six
+  consecutive patches — the queued e2e-infra sweep or telemetry work is the
+  only path to further movement). PATCH_REFERENCE §7 row + §5.10 extension
+  committed. **Remaining grandfathered files (4): PostCardContent,
+  FreeformPadletCards, CanvasClient, collabboard canvas page — all
+  batch-5/canvas-program territory; next up per the standing plan is
+  PATCH-022, a CTO decision brief (canvas duality), not a GPT-5.4/5.5
+  delegation.**
 - **2026-07-09** — PATCH-021 Amendment 6: GPT-5.5 stopped correctly at the
   post-edit grep gate (tsc green, nothing committed) — the spec expected
   `grep -c "workspaceMembers"` = 1, faithful implementation prints 4.

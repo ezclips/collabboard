@@ -396,7 +396,30 @@ product 12, continuity 10 unchanged — still the binding constraint, unmoved
 for five consecutive patches now; real movement here requires the queued
 e2e-infra sweep or telemetry work actually landing, not another clean
 patch. Axis snapshot at 74: safety 20, ops 12, architecture 20, product 12,
-continuity 10.)
+continuity 10.) → **74 (held)** (2026-07-09: PATCH-021 landed and passed
+review — grandfather 5→4, **batch 020–021 complete**. Pattern J extended
+from auth/MFA-only (PATCH-020, 9 call sites) to plain table CRUD (13 raw
+touches across workspace_members/workspace_invitations/boards, condensed
+into 10 facade functions) and proven reusable at larger scale; a shared,
+lint-exempt helper (`lib/workspace/context.ts`) was correctly left
+byte-untouched via a thin, signature-derived pass-through rather than
+folded into the new facade — the right call given it's consumed by other
+pages too. This patch needed THREE self-caught amendment rounds during
+implementation (Amendments 4–6: a mis-scoped DOM locator, a block comment
+whose own glob syntax closed it early plus a hand-guessed vendor
+nullability, and a post-edit gate that assumed a new identifier's pre-edit
+count was zero) — more correction rounds than 019 or 020, all caught before
+any drift reached a commit, but a volume worth naming plainly rather than
+spinning as discipline: this batch's specs needed more iteration to reach
+implementable, not less. No credit: safety and architecture remain at
+their 20/20 ceiling regardless of merit, and repeated self-caught defects
+in the same session are the established pattern already priced in, not a
+new demonstration. One minor undisclosed deviation (whitespace-only,
+zero behavior effect, accepted) is a recurrence of the PATCH-018
+disclosure-gap finding, not a new one. Ops 12, product 12, continuity 10
+unchanged — still the binding constraint, unmoved for six consecutive
+patches now. Axis snapshot at 74: safety 20, ops 12, architecture 20,
+product 12, continuity 10.)
 
 ## 13. The succession test
 

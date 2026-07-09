@@ -448,7 +448,19 @@ API before binding a zod schema literally into a spec.
 ## 5.10. Pattern J — raw-passthrough auth/MFA facade
 
 **Reference:** PATCH-020 (`app/dashboard/settings/password`; introduces
-`lib/infra/supabase/passwordSecurity.ts`).
+`lib/infra/supabase/passwordSecurity.ts`). **Extended by PATCH-021**
+(`app/dashboard/settings/members`; introduces
+`lib/infra/supabase/workspaceMembers.ts`) to plain table CRUD, not just
+auth/MFA methods — the pattern's discipline (one-line raw wrappers, no
+Result, untestable calls named and forbidden in the spec) applies
+identically whether the wrapped calls are `auth.mfa.*` or
+`.from('table').update(...)`. A composite page can also wrap a THIN
+pass-through to an existing non-lint-scoped helper that takes a raw client
+argument (PATCH-021's `resolveWorkspaceForUser` supplies the client to
+`lib/workspace/context.ts`'s `resolveCurrentWorkspace` without touching that
+helper) — derive the wrapper's parameter type with `Parameters<typeof
+helperFn>[N]` rather than hand-writing it, so it cannot silently drift from
+the real signature.
 
 **When:** a page calls several Supabase auth/MFA methods directly on the
 shared browser client (unlike Pattern I, no bearer client, no scavenger —
@@ -497,7 +509,26 @@ a bare identifier can collide with the extraction's own new import PATH
 (`grep -c "supabase"` matches the string "supabase" inside
 `@/lib/infra/supabase/...` import specifiers) — anchor gates on `@supabase`
 (the package) and `supabase\.` (the dotted call, i.e. Git Bash
-`grep -c "supabase\."`) separately, never a bare substring.
+`grep -c "supabase\."`) separately, never a bare substring. It can equally
+collide with a PRE-EXISTING LOCAL IDENTIFIER that happens to share the new
+module's name (PATCH-021: naming the facade `workspaceMembers` collided
+with the page's own destructured `const { data: workspaceMembers, error }`
+— the gate must be derived as measured pre-edit count + bound additions −
+bound deletions, never assumed zero for a "new" name). A bound BLOCK
+COMMENT is code the moment it's bound — never write a glob like
+`app/**/x/**` inside `/* ... */`; the `*/` pair closes the comment early and
+the rest parses as source (PATCH-021: reworded to prose, no asterisks).
+When a bound interface mirrors a vendor SDK type (e.g. Supabase `User`),
+copy each field's optionality/nullability from the installed `.d.ts`
+verbatim — `string | null` vs `string | undefined` is not interchangeable
+under `strict` and will fail at exactly the call sites that pass the field
+back into a vendor-typed parameter (PATCH-021: `email` bound `string |
+null`, vendor is `email?: string`). And when a characterization assertion
+targets a table, scope the locator to the specific section/heading rather
+than a bare tag name — a conditionally-rendered sibling table (empty state
+renders text, not `<table>`) means a bare `table tbody tr` locator measures
+whichever table happens to exist, not the one a variable name or comment
+claims (PATCH-021 Amendment 4).
 
 ---
 
@@ -633,6 +664,7 @@ it, STOP — never adapt.
 | 018 | profile | A/E composition + I — legacy-token quarantine (introduces `legacyToken.ts`) + H reuse | 8→7 ✅ done |
 | 019 | settings/integrations | I reuse — deep-scan scavenger + session cascade added to `legacyToken.ts` (third and final scavenger variant; batch 016–019 complete) | 7→6 ✅ done |
 | 020 | settings/password | new Pattern J — raw-passthrough MFA/webauthn facade (`passwordSecurity.ts`, 9 wrappers, zero Result conversion) + I reuse as a consumer only (imports `getAccessToken`/`decodeJwtPayload`, adds zero code to the quarantine) | 6→5 ✅ done |
+| 021 | settings/members | Pattern J extended to raw table CRUD (`workspaceMembers.ts`, 10 wrappers covering 13 raw touches: workspace_members/workspace_invitations/boards CRUD + 2 auth calls + thin `resolveCurrentWorkspace` pass-through); `lib/workspace/context.ts` byte-untouched; grandfather trigger was solely a raw `User` type import, replaced by a narrow local interface | 5→4 ✅ done |
 
 **New patterns discovered by future patches get added here by the CTO at
 review — this catalog only ever contains patterns with a reviewed reference

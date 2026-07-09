@@ -211,6 +211,17 @@ adjusting a number or guessing at a fix, exactly as this rule asks. The
 mismatch turned out to be the CTO's own arithmetic error, not an
 implementation defect, and was resolved with zero re-verification needed
 because the disclosure surfaced it immediately.
+**Recurred (2026-07-09, PATCH-021 review):** an undisclosed diff again —
+two blank lines inserted (after the `Member` interface, after
+`RoleDropdown`'s closing brace) and the file's trailing EOF blank line
+stripped, in a region the spec bound "byte-identical." Whitespace-only,
+zero behavior effect, almost certainly editor/formatter autosave rather
+than a deliberate edit — found only by the CTO diffing line-by-line, not
+reported. **Ruling: accepted, same as PATCH-018.** The rule is holding as a
+recurring, low-severity gap rather than closing — reviewers should expect
+to find at least one undisclosed whitespace-only line per patch and budget
+review time for a full line-by-line diff pass regardless of how clean the
+pasted verification output looks.
 
 ### A characterization spec that inherits the project storageState breaks CI unless it skips or overrides (2026-07-08, PATCH-015 review)
 **Symptom:** the new `share-link.spec.ts` passed every local run but failed with `ENOENT: no such file ... e2e/.auth/user.json` when run without credentials — the exact configuration CI uses (blocking step, full `playwright test`, no E2E secrets). Caught in review by simulating CI (rename `user.json`, `E2E_SKIP_CREDENTIALS=1`) BEFORE the commit was pushed; CI never went red.
