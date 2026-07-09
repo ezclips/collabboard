@@ -1,6 +1,10 @@
 # PATCH-025 — Canvas ops seam: `PostsRepository` + `canvas.toggleTask`, first consumer PostCardContent (grandfather 3→2)
 
-**Status:** READY (authored 2026-07-09; owner approval pending)
+**Status:** READY — Amendment 1 applied 2026-07-09 (two pre-edit census
+gates rebound: directory-absence check moved from runner-dependent exit
+codes to bound textual output; grandfather count corrected 3→4/identity
+pattern after the excalidraw_fork ignore line's substring collision — see
+Amendment 1 section; implementer resumes from the start of the census)
 **Complexity:** medium (four NEW whole-file-bound files + one bound
 three-part edit to a 936-line component with 22 importers + one grandfather
 line removal; the mechanism is the settings-extraction template applied to
@@ -87,12 +91,25 @@ grep -c "toggleTask" components/collabboard/PostCardContent.tsx       # 0 -> exi
 grep -c "asUserId" components/collabboard/PostCardContent.tsx         # 0 -> exit 1
 grep -c "onScan" components/collabboard/PostCardContent.tsx           # 4
 grep -c "currentUserId" components/collabboard/PostCardContent.tsx    # 9
-# 2. The seam directories must NOT exist yet:
-ls lib/domain/canvas 2>/dev/null; echo "domain/canvas exit: $?"       # non-zero exit
-ls lib/infra/canvas 2>/dev/null; echo "infra/canvas exit: $?"         # non-zero exit
-# 3. The grandfather list (3 entries, PostCardContent present once):
+# 2. The seam directories must NOT exist yet.
+# AMENDMENT 1 (2026-07-09): the original gate read `ls <dir>; echo $?` and
+# expected a non-zero exit — but exit codes proved RUNNER-DEPENDENT (the
+# implementer's shell printed 0 for an absent dir; the CTO's Git Bash
+# prints 2 for the same absent dir). Gates bind TEXTUAL output, not exit
+# codes, from here on. Both forms below measured 2026-07-09:
+test -e lib/domain/canvas && echo "domain/canvas EXISTS" || echo "domain/canvas ABSENT"   # domain/canvas ABSENT
+test -e lib/infra/canvas && echo "infra/canvas EXISTS" || echo "infra/canvas ABSENT"      # infra/canvas ABSENT
+# PowerShell equivalent, if needed: Test-Path lib/domain/canvas  -> False
+# 3. The grandfather list (PostCardContent present once).
+# AMENDMENT 1: the original second gate grepped path substrings and
+# expected 3 — but config line 28 (the excalidraw_fork IGNORE entry, not a
+# grandfather entry) also contains 'components/collabboard', so the true
+# count is 4. Rebound to the identity-based pattern (measured 3 = exactly
+# the three grandfathered files) with the path-based count kept as a
+# secondary check at its MEASURED value:
 grep -c "PostCardContent" eslint.boundaries.config.mjs                # 1
-grep -c "components/collabboard\|app/dashboard/canvas" eslint.boundaries.config.mjs  # 3 (the three grandfather entries)
+grep -c "PostCardContent\|CanvasClient\|FreeformPadletCards" eslint.boundaries.config.mjs  # 3 (the three grandfather entries)
+grep -c "components/collabboard\|app/dashboard/canvas" eslint.boundaries.config.mjs  # 4 (the 3 above + the L28 excalidraw_fork ignore line)
 # 4. The file's boundary violation, demonstrated (expect EXACTLY 1 error, the L6 import):
 npx eslint --no-inline-config -c eslint.boundaries.config.mjs "components/collabboard/PostCardContent.tsx" --no-ignore
 # 5. Suite baselines:
@@ -682,3 +699,48 @@ server."
 low-medium — the highest-risk asset (the moved write's semantics) is locked
 by pre-verified tests; the residual risk is fidelity of the three component
 edits and resisting any "cleanup" of a 936-line legacy file mid-edit.
+
+## Amendment 1 — two pre-edit census gates rebound (2026-07-09)
+**Blocker (correct STOP; zero edits, zero commits):** GPT-5.4 stopped at
+the pre-edit census on two mismatches. Every component-file count (936/3/1/
+2/1/0/0/4/9), the PostCardContent grandfather count (1), and the 1-error
+eslint probe matched exactly; the implementation itself was never reached.
+**Mismatch 1 — directory-absence gate (exit codes are runner-dependent):**
+the gate `ls lib/domain/canvas 2>/dev/null; echo "exit: $?"` expected
+non-zero. The implementer's runner printed `exit: 0` for the ABSENT
+directory; the CTO's Git Bash prints `exit: 2` for the same absent
+directory (reproduced 2026-07-09). Two conforming runners, two different
+signals for one filesystem fact — the same defect family as
+wc/Measure-Object, on exit codes instead of line counts. The implementer
+did exactly the right thing: independently confirmed the underlying FACT
+(both paths absent, PowerShell `Test-Path` → False) and stopped rather
+than self-certifying. **Fix:** the gate now binds TEXTUAL output
+(`test -e <dir> && echo EXISTS || echo ABSENT` → `ABSENT`, measured), with
+the PowerShell `Test-Path → False` equivalent stated. New standing rule:
+census gates bind printed text, never bare exit codes; where a command's
+only signal is its exit code, wrap it so the expectation is a bound string.
+**Mismatch 2 — grandfather count asserted, not measured (CTO defect,
+sixth asserted-not-measured recurrence, second in two days on an
+enumerated-in-comment gate):** the gate expected 3 for
+`grep -c "components/collabboard\|app/dashboard/canvas"`, enumerating "the
+three grandfather entries" — but config line 28, the `excalidraw_fork`
+IGNORE entry, also contains the substring `components/collabboard`; the
+measured count is 4. The CTO knew all three grandfather entries from
+reading the file and composed the gate from that knowledge without running
+it — the exact failure PATCH-024 Amendment 1 recorded, recurring in the
+very next spec. **Fix:** primary gate rebound to the identity-based
+pattern (`PostCardContent\|CanvasClient\|FreeformPadletCards` → 3,
+measured); the path-based count kept as a secondary check at its measured
+value (4) with the L28 collision named.
+**Worktree ruling:** nothing to rule on — no edits were made. Resume from
+the START of the pre-edit census, as the implementer proposed.
+**Post-edit gates audited in the same pass:** every post-edit count in the
+verification sequence was re-derived against the measured pre-edit values;
+the two amended gates have no post-edit counterparts that reuse the broken
+instruments (the §6 outcome is gated by `grep -c "PostCardContent"` 1→0,
+which was measured). No other binding changed.
+**Lesson (recorded in LESSONS_LEARNED):** the dry-run obligation means
+running every census line VERBATIM AS BOUND and pasting its output next to
+the expectation — measuring an adjacent fact with a different command does
+not discharge it, and exit codes are not portable signals between the
+CTO's shell and the implementer's runner.

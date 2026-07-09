@@ -324,6 +324,24 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-09** — PATCH-025 Amendment 1: two pre-edit census gates
+  rebound after a correct GPT-5.4 STOP (zero edits). (1) The
+  directory-absence gate bound `ls <dir>; echo $?` expecting non-zero —
+  exit codes proved RUNNER-DEPENDENT (implementer's runner: 0 for the
+  absent dir; CTO's Git Bash: 2 for the same absent dir); rebound to
+  bound textual output (`test -e ... && echo EXISTS || echo ABSENT` →
+  ABSENT, measured) + PowerShell Test-Path equivalent. New standing rule:
+  gates bind printed text, never bare exit codes. (2) The grandfather
+  count gate expected 3 but measures 4 — the excalidraw_fork IGNORE line
+  (config L28) shares the `components/collabboard` substring; the CTO
+  composed the gate from knowing the list instead of running it (sixth
+  asserted-not-measured recurrence, immediately after PATCH-024
+  Amendment 1 recorded the rule). Primary gate rebound to the
+  identity-based pattern (3, measured), path-based count kept as
+  secondary at 4 with the collision named. All post-edit gates audited —
+  none reuse the broken instruments. Worktree: nothing to rule on;
+  implementer resumes from the census start. Lessons extended
+  (asserted-not-measured variants six and seven).
 - **2026-07-09** — PATCH-025 AUTHORED (handoff-ready; **GPT-5.4
   acceptable** — ruling in the spec header: the single mutation path is
   locked by nine bound unit tests the CTO ran GREEN against the bound
