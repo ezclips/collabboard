@@ -150,7 +150,7 @@ follow 017's Pattern H).
 | 022 | canvas duality DECISION brief | CTO brief → owner | ✅ **RESOLVED** (brief delivered AND Fact-1 census executed 2026-07-09: zero user data, 5 owner-test rows, `canvas_files` table doesn't exist — verdict DELETE; proxy-metric trap stands: NO type-only de-linting of the two monolith files) |
 | 023 | **v1 collabboard vertical DELETION** (18 files: 9 pages incl. a v1 auth sub-vertical + 9 API routes; census-gated, deletions-only, live accept-route byte-untouched, NO table drops) | GPT-5.4 | ✅ **DONE** (cbe529e, review PASSED; Amendment 1 held; commit chain includes the CTO's accidental-bundle incident `5c3e15f` → restore `75cf480` → proper implementation — see the spec's Incident record; grandfather 4→3) |
 | 024 | security normalization — **authorized behavior change**: token acquisition moves to the cookie session (`sessionToken.ts`: getSession→refreshSession, the proven PATCH-019 cascade minus its deep-scan step); ALL four scavengers deleted from the quarantine; 11 call-site swaps across settings-root/profile/password/integrations; settings-root + profile FUNCTIONALLY REPAIRED for cookie users; two characterization specs rebound to repaired states (expected-unprobed, STOP-and-amend protocol); share-link RLS explicitly DEFERRED to its own server-side patch *(renumbered from 023)* | **GPT-5.5 REQUIRED** (auth behavior change + unprobeable-in-advance characterization = the owner's definitional GPT-5.5 case) | **✅ DONE — `32faa80`, CTO review PASSED 2026-07-09** (all gates independently re-run: both whole-file bindings byte-identical, 27/27 e2e green on the reviewer's own server incl. both repaired-state specs, verify green; two cosmetic undisclosed deviations accepted — disclosure-gap chain; Amendments 1–2 rode the implementation; follow-up queued: clientAuth dead tail + notifications-page swap) |
-| 025 | canvas ops seam: `PostsRepository` (`lib/domain/canvas/posts.ts` + `lib/infra/canvas/postsRepository.ts`, neutral naming per P7) + FIRST canvas command `canvas.toggleTask`; first consumer = PostCardContent's single write site (22 importers, rendering identical); **grandfather 3→2 EARNED** (the value import + the only runtime supabase call both leave the file — not type-only gaming) *(renumbered from 024)* | **GPT-5.4 acceptable** — the one mutation path's semantics are locked by 9 bound unit tests the CTO already ran GREEN at authoring; 1 untestable-by-e2e call < the ≥2 GPT-5.5 threshold; client swap is identity (browserClient wraps createClientComponentClient) | **READY — `patches/PATCH-025.md`** (all four new files compile-verified AND test-verified at authoring; census measured; post-edit gates derived; substring checks done). Companion: `docs/CANVASCLIENT_SITE_MAP.md` authored (successor-inheritance doc) |
+| 025 | canvas ops seam: `PostsRepository` (`lib/domain/canvas/posts.ts` + `lib/infra/canvas/postsRepository.ts`, neutral naming per P7) + FIRST canvas command `canvas.toggleTask`; first consumer = PostCardContent's single write site (22 importers, rendering identical); **grandfather 3→2 EARNED** (the value import + the only runtime supabase call both leave the file — not type-only gaming) *(renumbered from 024)* | **GPT-5.4 acceptable** — the one mutation path's semantics are locked by 9 bound unit tests the CTO already ran GREEN at authoring; 1 untestable-by-e2e call < the ≥2 GPT-5.5 threshold; client swap is identity (browserClient wraps createClientComponentClient) | **✅ DONE — `e2af0ef`, CTO review PASSED 2026-07-09** (all four new files byte-identical to bindings; unit 85/20, e2e 27/27, verify green — all re-run by reviewer; grandfather 3→2 earned via measured `--no-ignore` probe; one undisclosed EOL byte accepted — disclosure chain; Pattern K catalogued §5.11). Companion: `docs/CANVASCLIENT_SITE_MAP.md` (successor-inheritance doc, review-verified) |
 | 026+ | CanvasClient strangler series — grouped by table+operation (60 `padlets` + 6 `board_sections` + 4 `boards` sites, 2 storage, 3 auth incl. `auth.updateUser` at L263); FreeformPadletCards LAST (22 `padlets` sites, same ops); realtime/presence CTO-only, undesigned *(renumbered from 025+)* | per-group, GPT-5.5 first group | Fable site-map by 07-12 (successor inheritance artifact) |
 
 **Fable-window critical path (closes 2026-07-12).** In priority order:
@@ -324,6 +324,29 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-09** — PATCH-025 landed and reviewed: **PASSED** (commit
+  `e2af0ef`, GPT-5.4). The canvas ops seam is OPEN and consumed end-to-end:
+  `PostsRepository` + `canvas.toggleTask` (Pattern K, catalogued
+  PATCH_REFERENCE §5.11), first consumer PostCardContent's todo-checkbox
+  write. **Grandfather 3→2** (CanvasClient, FreeformPadletCards remain),
+  earned via the measured standalone `--no-ignore` probe (1 error → 0), no
+  type-only de-linting anywhere. All gates independently re-run at review:
+  four new files byte-identical to bindings (fenced blocks extracted and
+  diffed); component received exactly the three bound edits incl. the
+  blank-line binding, all-LF before and after; unit 85/20; tsc 0;
+  boundaries green; full Playwright 27/27 on the reviewer's own server
+  (board-lifecycle = the render net, green); stopped-server gate 0;
+  `npm run verify` green. GPT-5.4 delivered byte-perfect on first attempt
+  — the Pattern-K model ruling (pre-verified bound tests make the
+  economical model safe for a real write) is confirmed by outcome. One
+  undisclosed deviation found by `cmp -l`: a single EOL byte (CRLF→LF on
+  the config's `const` line, a mixed-EOL file) — accepted, disclosure
+  chain; forensics lesson recorded (MSYS pipes strip `\r`; byte questions
+  get `cmp`/`xxd` on files). Health 75 → **76** (+1 continuity: the
+  CANVASCLIENT_SITE_MAP inheritance artifact is landed and
+  review-verified; the 026+ trunk it sequences is now real). PATCH-026
+  NOT drafted — next design decision (canvas group sequencing) is the
+  owner's call per the site map §7.
 - **2026-07-09** — PATCH-025 Amendment 1: two pre-edit census gates
   rebound after a correct GPT-5.4 STOP (zero edits). (1) The
   directory-absence gate bound `ls <dir>; echo $?` expecting non-zero —

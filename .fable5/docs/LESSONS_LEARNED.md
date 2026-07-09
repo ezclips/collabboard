@@ -251,6 +251,22 @@ changed (-/+ pair) — git's indent-heuristic hunk regrouping, not a real
 change; confirmed by `diff -w` plus `cat -A` byte inspection before ruling.
 When a diff line looks impossible, check the tool's presentation heuristics
 before suspecting the file (same family as wc/Measure-Object).
+**Recurred (2026-07-09, PATCH-025 review):** one undisclosed byte in a
+"Reported deviations: None" delivery — in the mixed-EOL
+`eslint.boundaries.config.mjs`, the `const GRANDFATHERED_UI_FILES = [`
+line's terminator flipped CRLF→LF during the bound one-line deletion
+(editor EOL normalization of the touched neighborhood). Semantics zero;
+accepted, same chain. **The forensics lesson is the keeper:** this time
+plain `git diff` flagged a REAL byte change — but `git show | sed | cat -A`
+showed both versions identical, because MSYS text-mode pipes (sed, awk)
+STRIP the `\r` before the next tool can display it, while `diff -w` hid it
+by design. The instruments that told the truth were `cmp -l` and
+`xxd`/`dd` on FILES. Rule: EOL/byte questions are answered by `cmp -l` or
+`xxd` reading files directly — never through a Git Bash text pipeline, and
+never with whitespace-tolerant diff flags — and the two prior artifact
+rulings (PATCH-024's indent-heuristic -/+ pair) do NOT license dismissing
+an impossible-looking diff line without the byte-level check: one review's
+display artifact is the next review's real byte.
 
 ### A characterization spec that inherits the project storageState breaks CI unless it skips or overrides (2026-07-08, PATCH-015 review)
 **Symptom:** the new `share-link.spec.ts` passed every local run but failed with `ENOENT: no such file ... e2e/.auth/user.json` when run without credentials — the exact configuration CI uses (blocking step, full `playwright test`, no E2E secrets). Caught in review by simulating CI (rename `user.json`, `E2E_SKIP_CREDENTIALS=1`) BEFORE the commit was pushed; CI never went red.

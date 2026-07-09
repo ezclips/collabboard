@@ -532,6 +532,67 @@ claims (PATCH-021 Amendment 4).
 
 ---
 
+## 5.11. Pattern K — canvas ops command (write extraction with pre-verified bound tests)
+
+**Reference:** PATCH-025 (`components/collabboard/PostCardContent.tsx`;
+introduces `lib/domain/canvas/posts.ts` + `lib/infra/canvas/
+postsRepository.ts` — the canvas ops seam TRUNK that batches 026+ extend;
+one aggregate, one repository, P6).
+
+**When:** a component performs a direct table WRITE whose UI trigger is
+absent from (or too costly to add to) the e2e net, but whose logic is a
+pure data transformation — so the fidelity net that e2e cannot provide is
+supplied by UNIT TESTS instead. The defining move, and what distinguishes K
+from a Pattern A-style page extraction: the spec author writes the domain
+command, the infra repository, AND their unit tests as whole-file bindings,
+then COMPILES AND RUNS THE BOUND TESTS AGAINST THE BOUND IMPLEMENTATION AT
+AUTHORING TIME (scratch `tsc --strict` + scratch vitest). Delegation then
+carries pre-verified assets: if a bound test fails against the
+implementer's tree, the implementation deviates from the binding by
+construction — the test is never wrong, never editable by the implementer.
+This inverts the untestable-call escalation rule: PATCH-020-class patches
+need the stronger model BECAUSE nothing executable guards fidelity; a
+K-patch's single write is guarded by executable tests, so the economical
+model is acceptable (PATCH-025 shipped byte-perfect on GPT-5.4, first try).
+
+**When NOT:** the write's semantics depend on live state a unit test can't
+fake honestly (realtime, presence, storage side effects — different
+patterns); more than a handful of call sites (that's a 026+ GROUP patch —
+same seam, staged bindings); the call is a raw passthrough the page's error
+handling consumes shape-for-shape (Pattern J).
+
+**Required pieces:** domain file with repository INTERFACE + `defineCommand`
+command (zod input; `entity.verb` name; legacy semantics ported edge-by-edge
+and each edge named in a comment citing the old line numbers); infra file
+with the narrow structural client interface + class + factory over
+`createBrowserSupabaseClient()` (the `as unknown as` factory double-cast is
+the house idiom, not a deviation); one unit-test file per layer, bound and
+pre-run; the consumer swap as small bound diffs with EXPLICIT blank-line
+bindings for every deleted-line neighborhood.
+
+**Legacy-fidelity discipline (the pattern's defining risk):** a moved
+transformation must reproduce the old code's behavior INCLUDING its
+degenerate paths — PATCH-025 preserved `|| []` (missing tasks wrote an
+empty list) and mapped thrown-on-malformed to error-no-write, and bound a
+test for each. Derive those edges by reading the legacy expression
+operator-by-operator (`?.`, `||`, try/catch reach), then encode each as a
+test BEFORE binding the implementation.
+
+**Common mistakes:** an "earned" grandfather removal must be demonstrated,
+not asserted — bind the standalone `eslint --no-ignore` probe at its
+measured pre-edit error count and at 0 post-edit, so de-listing is proven
+against the real rule, and never touch a type-only `@supabase/*` import to
+get there (the PATCH-022 proxy-metric prohibition). Census gates bind
+PRINTED TEXT, never bare exit codes (exit codes proved runner-dependent —
+PATCH-025 Amendment 1); an existence check is
+`test -e X && echo EXISTS || echo ABSENT`. And a count gate whose comment
+enumerates the expected matches must be RUN, not composed from the
+enumeration — substring collisions live where you aren't looking
+(PATCH-025: an ignore-list line shared the grandfather entries' path
+prefix; PATCH-024: a relative import spelled the module differently).
+
+---
+
 ## 6. Universal requirements (every pattern, every patch)
 
 **Phase order is mandatory:** e2e characterization spec written and GREEN
@@ -677,6 +738,7 @@ it, STOP — never adapt.
 | 021 | settings/members | Pattern J extended to raw table CRUD (`workspaceMembers.ts`, 10 wrappers covering 13 raw touches: workspace_members/workspace_invitations/boards CRUD + 2 auth calls + thin `resolveCurrentWorkspace` pass-through); `lib/workspace/context.ts` byte-untouched; grandfather trigger was solely a raw `User` type import, replaced by a narrow local interface | 5→4 ✅ done |
 | 023 | app/collabboard/** + app/api/collabboard/** | census-gated ROUTE-vertical deletion (PATCH-016 shape, first routed variant): 18 files, deletions-only, authorized by the PATCH-022 Fact-1 data census (zero user data); live accept-route + DB tables left untouched (Phase-3 items) | 4→3 ✅ done |
 | 024 | settings-root + profile + password + integrations (cross-page) | the plan's ONE authorized behavior-change patch (not an extraction pattern): scavenger normalization — new `sessionToken.ts` (getSession→refreshSession), quarantine shrunk 8→4 exports, eleven token-swap sites, two pages functionally REPAIRED for cookie users, two characterization specs rebound via the EXPECTED-UNPROBED protocol (assert the repaired state, STOP-and-amend if it fails — PATCH-003 precedent, first use on a behavior change) | 3→3 (all pages already off the list) ✅ done |
+| 025 | PostCardContent (todo-checkbox write) | new Pattern K — canvas ops command (§5.11): the canvas seam TRUNK (`lib/domain/canvas/posts.ts` + `lib/infra/canvas/postsRepository.ts`, `canvas.toggleTask`); bound unit tests compiled AND run green at authoring, so GPT-5.4 sufficed for a real DB write; grandfather removal EARNED via the measured `--no-ignore` probe (1 error → 0), zero type-only de-linting; companion successor artifact `docs/CANVASCLIENT_SITE_MAP.md` | 3→2 ✅ done |
 
 **New patterns discovered by future patches get added here by the CTO at
 review — this catalog only ever contains patterns with a reviewed reference

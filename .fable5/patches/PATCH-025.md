@@ -1,10 +1,9 @@
 # PATCH-025 — Canvas ops seam: `PostsRepository` + `canvas.toggleTask`, first consumer PostCardContent (grandfather 3→2)
 
-**Status:** READY — Amendment 1 applied 2026-07-09 (two pre-edit census
-gates rebound: directory-absence check moved from runner-dependent exit
-codes to bound textual output; grandfather count corrected 3→4/identity
-pattern after the excalidraw_fork ignore line's substring collision — see
-Amendment 1 section; implementer resumes from the start of the census)
+**Status:** ✅ DONE — implemented by GPT-5.4 as `e2af0ef`; CTO review
+PASSED 2026-07-09 (see CTO Review section). Amendment 1 (census gates:
+textual absence checks, measured grandfather counts) applied
+pre-implementation.
 **Complexity:** medium (four NEW whole-file-bound files + one bound
 three-part edit to a 936-line component with 22 importers + one grandfather
 line removal; the mechanism is the settings-extraction template applied to
@@ -744,3 +743,52 @@ running every census line VERBATIM AS BOUND and pasting its output next to
 the expectation — measuring an adjacent fact with a different command does
 not discharge it, and exit codes are not portable signals between the
 CTO's shell and the implementer's runner.
+
+## CTO Review — PASSED (2026-07-09, commit `e2af0ef`)
+Every gate independently re-run by the CTO; no pasted output accepted.
+- **Commit shape:** single atomic commit, exactly the six bound files (346
+  insertions / 23 deletions), bound message character-exact, tree clean.
+- **Whole-file bindings:** all FOUR new files BYTE-IDENTICAL to §1–§4
+  (fenced blocks extracted from this spec and diffed — four empty diffs).
+  That settles focus 4/5/8 mechanically: the command's toggle-by-id flip,
+  stringified content, metadata spread, `|| []` empty-write path, and
+  truthy-non-array error-no-write path are the byte-verified §1 logic, and
+  the nine tests asserting each of them are the pre-verified §3/§4 files.
+- **Component:** exactly the three §5 edits — import swap verified against
+  the bound block; L238 deletion with the blank-line binding EXACTLY as
+  bound (one blank line survives between `}: PostCardContentProps) {` and
+  `const type =`); handler block byte-identical to §5c (extracted + diffed).
+  EOL audit: the file is all-LF before and after — zero flips.
+- **Numeric gates:** all exact — component 0/0/0/0 (supabase, @supabase,
+  createClientComponentClient, padlets) · 2/2/2/2 (toggleTask, ToggleTask,
+  asUserId, createPostsRepository) · onScan 4 · currentUserId 10 · wc 930;
+  new-file sizes 61/53/129/87; grandfather greps 0 and 2 (identity pattern:
+  CanvasClient + FreeformPadletCards — focus 11/12); the eslint no-ignore
+  probe on the de-listed file prints NOTHING (clean without its grandfather
+  entry — the removal is earned, focus 3).
+- **`padlets` string audit (focus 6):** post-implementation the string
+  lives ONLY in the bound §1 P7 comment, the §2 infra table-name fact
+  (interface literal + `.from('padlets')`), and the §4 test fakes — all
+  byte-verified bound content. Gone from the component.
+- **Byte-untouched (focus 2):** CanvasClient.tsx, FreeformPadletCards.tsx,
+  the canvas hooks directory, lib/imports, app/api — every diff empty.
+- **Executable gates:** unit **85/20** (focus 13); tsc 0; boundaries green
+  repo-wide; full Playwright **27/27** on the CTO's own dev server (port 0
+  before start, banner :3000 read, dashboard warmed; board-lifecycle — the
+  PostCardContent render net — green in-suite; focus 14); server
+  PID-attributed and stopped, port 0; `.next` cleared; `npm run verify`
+  green (production build passes).
+- **Deviations found (focus 15):** ONE, undisclosed despite "Reported
+  deviations: None": in `eslint.boundaries.config.mjs` — a mixed-EOL file —
+  the `const GRANDFATHERED_UI_FILES = [` line's terminator flipped CRLF→LF
+  (one invisible byte; found by `cmp -l`, size delta 2768→2719). Semantics
+  zero; the bound deletion itself is exact. **Accepted** — next link in the
+  PATCH-018/021/024 disclosure chain. Review tooling note recorded in
+  LESSONS_LEARNED: MSYS text-mode pipes (sed/awk) STRIP the CR before
+  cat -A can show it — byte questions get `cmp -l`/`xxd` on files, not
+  pipeline forensics.
+- **Verdict: PASSED.** Health per §12: 75 → 76 (+1 continuity — the
+  CANVASCLIENT_SITE_MAP successor-inheritance artifact is now landed AND
+  review-verified against the tree it describes, with its regeneration
+  script bound inline; the canvas trunk seam it sequences is open and
+  consumed end-to-end). Pattern K (canvas ops command) enters the catalog.

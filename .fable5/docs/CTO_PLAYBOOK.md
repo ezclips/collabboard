@@ -464,7 +464,29 @@ process working as designed does not buy back an incident. No
 architecture movement: quarantine shrink is consolidation of an
 already-credited seam, and the axis is at ceiling. Continuity 10
 unchanged. Axis snapshot at 75: safety 19, ops 13, architecture 20,
-product 13, continuity 10.)
+product 13, continuity 10.) → **76** (2026-07-09: PATCH-025 landed and
+passed review — the canvas ops seam is OPEN: `PostsRepository` +
+`canvas.toggleTask` (Pattern K, §5.11) consumed end-to-end by
+PostCardContent, grandfather 3→2 earned via the measured `--no-ignore`
+probe, zero type-only de-linting. The Pattern-K methodology is the real
+news: the CTO compiled AND ran the bound unit tests against the bound
+implementation at authoring time, which let GPT-5.4 (not 5.5) ship a real
+DB-write extraction byte-perfect on the first attempt — fidelity guarded
+by executable tests instead of model strength. **+1 continuity 10→11** —
+the first movement on this axis since the ledger began:
+CANVASCLIENT_SITE_MAP.md is a landed, review-verified
+successor-inheritance artifact (full 76-site census with line-level
+table, the 61-vs-60 correction, the hooks' 26 lint-invisible sites and
+the uncensused `canvas_lines` table surfaced, regeneration script bound
+inline, 026+ sequencing guidance) — a cold model designing 026 tomorrow
+starts from a verified map instead of an 8.5k-line read. No architecture
+movement despite the trunk seam: the axis is at its 20 ceiling and the
+monolith itself is still 8,526 lines — the map and the trunk make
+shrinking it POSSIBLE; credit lands when it shrinks. No safety movement:
+one undisclosed EOL byte (disclosure-chain recurrence, priced) and two
+census-gate amendments caught pre-implementation (established pattern).
+Ops 13, product 13 unchanged. Axis snapshot at 76: safety 19, ops 13,
+architecture 20, product 13, continuity 11.)
 
 ## 13. The succession test
 
