@@ -547,6 +547,20 @@ folder (`sections` next to `posts`, zero cross-references — the P6
 one-trunk rule is satisfied by the folder family, not a single merged
 repository). Landed byte-perfect on GPT-5.4 a second time; the monolith
 SHRANK for the first time as a direct result (8,526→8,518 lines).
+**Extended again by PATCH-027** (the `boards` update family; introduces
+`lib/domain/canvas/board.ts` + `lib/infra/canvas/boardRepository.ts` as a
+THIRD sibling aggregate in the same trunk folder) — proves the pattern
+also resolves a P6 naming COLLISION cleanly: an unrelated, unconsumed
+exemplar interface (`lib/domain/boards/repository.ts`, zero importers,
+zero implementations) already occupied adjacent naming space, so the new
+interface took the disambiguating name `CanvasBoardRepository` rather than
+`BoardRepository`, and the exemplar was left byte-untouched (different
+concern, not a collision to merge). Also the first K-patch to surface a
+SECOND site in the reorderSections-style silent-swallow family
+(`canvas.setChronoMode`) — same shape (await resolved write, never read
+the row-level `error`), same discipline (preserve verbatim, name a
+dedicated test, queue the fix as a standing owner decision). Landed
+byte-perfect on GPT-5.4 a third time; monolith 8,518→8,517.
 
 **When:** a component performs a direct table WRITE whose UI trigger is
 absent from (or too costly to add to) the e2e net, but whose logic is a
@@ -749,6 +763,7 @@ it, STOP — never adapt.
 | 024 | settings-root + profile + password + integrations (cross-page) | the plan's ONE authorized behavior-change patch (not an extraction pattern): scavenger normalization — new `sessionToken.ts` (getSession→refreshSession), quarantine shrunk 8→4 exports, eleven token-swap sites, two pages functionally REPAIRED for cookie users, two characterization specs rebound via the EXPECTED-UNPROBED protocol (assert the repaired state, STOP-and-amend if it fails — PATCH-003 precedent, first use on a behavior change) | 3→3 (all pages already off the list) ✅ done |
 | 025 | PostCardContent (todo-checkbox write) | new Pattern K — canvas ops command (§5.11): the canvas seam TRUNK (`lib/domain/canvas/posts.ts` + `lib/infra/canvas/postsRepository.ts`, `canvas.toggleTask`); bound unit tests compiled AND run green at authoring, so GPT-5.4 sufficed for a real DB write; grandfather removal EARNED via the measured `--no-ignore` probe (1 error → 0), zero type-only de-linting; companion successor artifact `docs/CANVASCLIENT_SITE_MAP.md` | 3→2 ✅ done |
 | 026 | CanvasClient (`board_sections` write family, 6 sites / 4 handlers) | Pattern K reuse (§5.11): SIBLING aggregate `lib/domain/canvas/sections.ts` beside `posts.ts` (one trunk folder, zero cross-references) — five commands incl. a preserved sequential-partial-failure swap and a preserved legacy error-swallow reorder, each pinned by a dedicated test (17 total); NO grandfather movement (metric not chased); monolith line count SHRANK for the first time (8,526→8,518) | 2→2 (CanvasClient stays grandfathered — 70 sites remain) ✅ done |
+| 027 | CanvasClient (`boards` update family, 4 sites / 4 handlers) | Pattern K reuse (§5.11): THIRD sibling aggregate `lib/domain/canvas/board.ts` beside `posts.ts`/`sections.ts`; resolved a P6 naming collision against the unconsumed `lib/domain/boards/repository.ts` exemplar via disambiguating name (`CanvasBoardRepository`), not a merge; four commands incl. a preserved map-style no-timestamp write and a SECOND silent-swallow site (`setChronoMode`, sibling to `reorderSections`), each pinned by a dedicated test (15 total); NO grandfather movement; monolith line count SHRANK again (8,518→8,517) | 2→2 (CanvasClient stays grandfathered — 66 sites remain) ✅ done |
 
 **New patterns discovered by future patches get added here by the CTO at
 review — this catalog only ever contains patterns with a reviewed reference
