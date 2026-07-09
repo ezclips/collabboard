@@ -147,10 +147,10 @@ follow 017's Pattern H).
 **Batch 5 — canvas program (022+; Phase 2 entry; NOT mechanical):**
 | Patch | Target | Shape | Model |
 |---|---|---|---|
-| 022 | canvas duality DECISION brief (feature-diff collabboard vs dashboard verticals; owner decides delete-vs-keep; if delete: route deletion 4→3) | CTO brief → owner | Fable brief by 07-12 |
+| 022 | canvas duality DECISION brief | CTO brief → owner | ✅ **DELIVERED — `patches/PATCH-022.md`** (2026-07-09; measured census; recommendation: Option 3 — owner runs 3 read-only SQL queries on `canvases`/`canvas_sections`, delete the nav-orphaned collabboard vertical if empty; proxy-metric trap recorded: NO type-only de-linting of the two monolith files) |
 | 023 | security normalization — **authorized behavior change**: replace token-scavenger with real session reads; revisit share-link service-role→RLS | GPT-5.5 | Fable spec |
-| 024 | canvas ops seam (lib/domain/canvas commands: padlet create/update + padlet-files storage); first consumer = PostCardContent task-toggle (3→2) | GPT-5.5 | Fable design by 07-12 |
-| 025+ | CanvasClient strangler series (10 padlets sites + 2 storage + 3 auth, mapped to seams); FreeformPadletCards LAST (limb) | per-site | Fable map by 07-12 |
+| 024 | canvas ops seam (lib/domain/canvas: `padlets` repository + FIRST canvas command `canvas.toggleTask`); first consumer = PostCardContent's single write site (22 importers, component returned identical) | GPT-5.5 | Fable design by 07-12 — per 022 brief, does NOT wait on the Fact-A verdict (only census arithmetic changes) |
+| 025+ | CanvasClient strangler series — grouped by table+operation (60 `padlets` + 6 `board_sections` + 4 `boards` sites, 2 storage, 3 auth incl. `auth.updateUser` at L263); FreeformPadletCards LAST (22 `padlets` sites, same ops); realtime/presence CTO-only, undesigned | per-group, GPT-5.5 first group | Fable site-map by 07-12 (successor inheritance artifact) |
 
 **Fable-window critical path (closes 2026-07-12).** In priority order:
 ① specs 017–019 (unblocks GPT-5.4 for the whole of batch 3), ② specs
@@ -293,6 +293,38 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-09** — PATCH-022 DECISION BRIEF delivered
+  (`patches/PATCH-022.md`) — the batch-5 strategy document, every number
+  measured against the repo this session. Key findings that CORRECT the
+  standing framing: (1) the "two canvas systems" are really three facts —
+  a NAV-ORPHANED route vertical (`app/collabboard/**`, own dead
+  `canvases`/`canvas_sections` schema, nothing links to it anywhere),
+  per-FILE duplication (three `CanvasSetupPage` copies + debris), and the
+  monolith itself (CanvasClient 8,526 + FreeformPadletCards 6,368, ~92
+  raw call sites on live tables — 60+22 `padlets`, 6 `board_sections`, 4
+  `boards`, 2 storage, 3 auth incl. an `auth.updateUser` from inside the
+  canvas). `components/canvas/*` is NOT a rival engine — the live
+  CanvasClient imports 8 files from it alongside ~50 collabboard-tree
+  components; "kill one tree" was never a coherent option. (2) **Proxy-
+  metric trap:** both monolith files' only `@supabase/*` imports are TYPE
+  imports; their call sites ride `@/lib/supabase/browser`, which the
+  boundary lint does not ban — a §5.5 type-swap would de-lint both files
+  while extracting NOTHING. Brief demotes the grandfather count to proxy
+  for these two files and forbids type-only de-linting; lint gets extended
+  to ban the internal alias once consumers are extracted. (3) Kanban is
+  ACTIVELY developed (dozens of 2026-02 migrations) — out of scope, owner
+  coordination required before touching. Recommendation: Option 3 — owner
+  runs three read-only SQL queries on `canvases`/`canvas_sections`; if
+  empty (expected), a GPT-5.4 PATCH-016-shaped deletion patch removes the
+  vertical (grandfather 4→3); if data exists, freeze until Phase 3
+  data-migration. PATCH-024 (ops seam: `padlets` repository + first
+  domain command `canvas.toggleTask`, consumer = PostCardContent's single
+  write, 22 importers) proceeds regardless of the verdict. Canvas
+  characterization note: canvas mutations ARE e2e-safe (e2e account owns
+  its boards), so the 020/021 untestable-surface GPT-5.5 argument mostly
+  does not apply — the risk shifts to diff volume; model table in the
+  brief. All nine standing operational lessons bound as §10 of the brief.
+  NO Codex-ready patch authorized; the data census gates everything.
 - **2026-07-09** — PATCH-021 landed and reviewed: PASSED (commit `ea03671`).
   Grandfather 5→4 — **batch 020–021 complete**. All gates independently
   re-run: page diff is exactly the bound import swap, the `MembersPageUser`
