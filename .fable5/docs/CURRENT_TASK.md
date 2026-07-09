@@ -142,7 +142,7 @@ follow 017's Pattern H).
 | Patch | Target | Shape | Shrink | Model | Spec status |
 |---|---|---|---|---|---|
 | 020 | password | auth-security swap: nine call sites behind a raw-passthrough `passwordSecurity.ts` facade (5 MFA/webauthn + getUser/reauth/updateUser + profiles-email fallback); page's duplicate scavenger+JWT-decode helpers DELETED and re-imported from the quarantine (byte-compared) | 6→5 | GPT-5.5 | ✅ **DONE** (1eb0e2c, review PASSED; Amendment 3 AAL-badge assertion held; Pattern J in catalog §5.10) |
-| 021 | members | raw-passthrough CRUD facade (`workspaceMembers.ts`, 10 functions covering 13 raw touches: workspace_members select/update/delete, workspace_invitations select/update/delete, boards select, getUser×2, getSession×2, resolveCurrentWorkspace×2 reused thin); `User` type import replaced by narrow `MembersPageUser`; API fetches untouched | 5→4 | **GPT-5.5 REQUIRED** (5 of 10 facade functions wrap real mutations/real email-sends — diff fidelity is the only net) | **READY — `patches/PATCH-021.md`** (census dry-run-verified; characterization probed against live e2e account — solo workspace owner, zero pending invitations; CSS-uppercase "You"/"YOU" trap caught pre-authoring via the PATCH-020 lesson; `lib/workspace/context.ts` confirmed untouched by design; Amendment 4: unscoped `table tbody tr` assertion corrected — the invitations table doesn't render when empty, so the locator measured the always-present members table instead) |
+| 021 | members | raw-passthrough CRUD facade (`workspaceMembers.ts`, 10 functions covering 13 raw touches: workspace_members select/update/delete, workspace_invitations select/update/delete, boards select, getUser×2, getSession×2, resolveCurrentWorkspace×2 reused thin); `User` type import replaced by narrow `MembersPageUser`; API fetches untouched | 5→4 | **GPT-5.5 REQUIRED** (5 of 10 facade functions wrap real mutations/real email-sends — diff fidelity is the only net) | **READY — `patches/PATCH-021.md`** (census dry-run-verified; characterization probed against live e2e account — solo workspace owner, zero pending invitations; CSS-uppercase "You"/"YOU" trap caught pre-authoring via the PATCH-020 lesson; `lib/workspace/context.ts` confirmed untouched by design; Amendment 4: unscoped `table tbody tr` assertion corrected — the invitations table doesn't render when empty, so the locator measured the always-present members table instead; Amendment 5: two tsc failures in bound text — `app/**/components/**` glob closed its own block comment, and `MembersPageUser.email` rebound `string | null`→`email?: string` to match vendor `User.email`, compile-verified; worktree kept, patched in place) |
 
 **Batch 5 — canvas program (022+; Phase 2 entry; NOT mechanical):**
 | Patch | Target | Shape | Model |
@@ -293,6 +293,32 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-09** — PATCH-021 Amendment 5: GPT-5.5 stopped mid-implementation
+  (nothing committed) on two tsc failures, BOTH in CTO-bound text. (1) The
+  bound facade block comment said "outside `app/**/components/**`" — the
+  `*/` inside that glob terminates the block comment and TypeScript parsed
+  `components` as code (TS2304); reworded to "outside the app/ and
+  components/ trees", no glob. (2) `MembersPageUser.email` was bound
+  `string | null`; the installed vendor type is `User.email?: string`
+  (undefined, never null) — three call sites failed exactly as predicted
+  (setState with raw User, the authData.user reassignment, and
+  `resolveWorkspaceForUser` whose param is `Pick<User,'id'|'email'>` by
+  construction). Ruled option (a): `email?: string`, matching the vendor
+  exactly — every page read of `.email` is nullish-agnostic (`|| ''`,
+  `?.`), so no behavior distinction exists and no conversion code is
+  warranted. The corrected binding was COMPILE-VERIFIED before committing
+  the amendment (scratch file exercising all three failing assignments
+  against the real installed `User` type; `tsc --strict` clean) — the
+  missing verification class that caused the blocker. Codex's STOP-on-cast
+  was the spec's own rule working as designed (third confirmation).
+  Worktree ruling: KEEP the uncommitted implementation and patch the two
+  spots in place; verification resumes from `npx tsc --noEmit`; the
+  mid-implementation characterization "heading not found" is DOWNSTREAM of
+  the compile errors, not a Phase A issue (Phase A on the OLD page passed
+  post-Amendment-4 and stands). New authoring rule recorded: census
+  dry-runs cover commands and probes cover assertions, but bound TS files
+  must ALSO be compile-checked at authoring — and bound block comments are
+  code (scan for `*/`; globs are the classic carrier).
 - **2026-07-09** — PATCH-021 Amendment 4 (spec-reviewer ruling): GPT-5.5
   blocked correctly at Phase A — `page.locator('table tbody tr')` expected
   0 rows, got 1 (the e2e account's own owner row). Root cause: the

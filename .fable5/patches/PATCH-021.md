@@ -9,6 +9,13 @@ rendered MEMBERS table's one row (the e2e account's own owner row). A
 probe-methodology error (mislabeled probe output), not a page-behavior
 question. Assertion corrected to a positive, table-scoped count of 1 for
 the member row; no page behavior changed.**
+**Amendment 5 issued: two tsc failures in CTO-bound text — the facade
+comment's `app/**/components/**` glob contains `*/` and closed its own
+block comment (reworded, no glob), and `MembersPageUser.email` was bound
+`string | null` where the vendor `User.email` is `string | undefined`
+(rebound `email?: string`, compile-verified against the installed types).
+Worktree KEPT, patched in place; verification resumes from tsc. Codex's
+STOP-on-cast was correct.**
 **Complexity:** medium-high (thirteen raw call-site swaps, behind ten new
 facade functions, across a 1,817-line file; the file is large but the
 Supabase surface is narrow and localized to six functions — the other
@@ -187,6 +194,62 @@ only the one line at old L14 needs correction (see the corrected binding
 below); every other assertion in that file was independently reproduced
 against the OLD page and stands unchanged.
 
+## Amendment 5 (2026-07-09) — two compile errors in the CTO's own bound code: a glob that closes its block comment, and null-vs-undefined on `User.email` · CTO decision
+
+**Dispute (Codex/GPT-5.5, correct stop — implementation started, tsc
+failed, NOTHING committed):** two independent TypeScript failures, both in
+text this spec bound verbatim.
+
+**Defect 1 — the bound facade comment self-terminates.** The original
+comment said the context helper is "already outside `app/**/components/**`".
+Inside a `/* ... */` block comment, the character pair `*/` ends the
+comment wherever it appears — and `app/**/components` contains exactly that
+pair (`...app/*` `*/` `components...`). TypeScript parsed everything after
+it as code: `TS2304: Cannot find name 'components'`. Corrected in-place in
+§1: the sentence now reads "outside the app/ and components/ trees" —
+identical meaning, no glob syntax, no `*` at all. **Rule for every future
+spec: bound block comments are code; scan them for `*/` (globs like
+`**/x` are the classic carrier) before binding.**
+
+**Defect 2 — `MembersPageUser.email` was bound as `string | null`; the
+installed Supabase `User.email` is `email?: string` (`string | undefined`,
+never null).** Three call sites failed exactly as the vendor type
+predicts: `setCurrentUser(user)` (raw `User` → state), the
+`user = authData.user` reassignment, and `resolveWorkspaceForUser(user)`
+(whose parameter is `Pick<User, 'id' | 'email'>` by construction). The
+implementer stopped rather than casting — the spec's own STOP-on-cast rule
+working as designed, third confirmation of the disclosure discipline.
+**Ruling: option (a) — `email?: string`, matching the vendor type
+exactly.** No normalized-null shape is needed: the CTO re-read every page
+consumer of `.email` (`|| ''`, `?.split(...)`) — all are nullish-agnostic,
+so undefined-vs-null has zero runtime distinction on this page, and
+matching the vendor type is the only choice that composes with
+`Parameters<typeof resolveCurrentWorkspace>[1]` without conversion code.
+Corrected in-place in §2 with an [Amendment 5] note. The corrected binding
+was **compile-verified before this amendment was committed** — a scratch
+file exercising all three failing assignments against the real installed
+`User` type passes `tsc --strict` (the verification step whose omission
+caused this blocker; census dry-runs cover commands, and from this patch
+forward, bound TS files must also be compile-checked at authoring).
+
+**Root cause (shared):** the spec author dry-ran every census command and
+probed every characterization assertion, but never compiled the bound
+facade/interface text — the exact "unexecuted spec" gap LESSONS_LEARNED
+records from PATCH-002/003, recurring in typed form. Recorded there as a
+recurrence.
+
+**Worktree ruling: KEEP the current uncommitted worktree and patch it in
+place — do NOT reset or restart.** The diff-so-far is bindings-faithful;
+the two defects are localized to one comment sentence and one type
+annotation. Codex applies exactly: (1) the §1 comment correction, (2)
+`email?: string` in `MembersPageUser`, then resumes the verification
+sequence FROM `npx tsc --noEmit` onward — including re-running the
+characterization spec against the implemented page (the mid-implementation
+"heading not found" failure is ruled DOWNSTREAM of the compile errors, not
+a separate Phase A issue; Phase A against the OLD page had already passed
+post-Amendment-4 and its result stands). All other gates and bindings are
+unchanged.
+
 ## Bindings
 
 ### 1. New file — `lib/infra/supabase/workspaceMembers.ts` (exact, whole file)
@@ -208,9 +271,9 @@ import type { WorkspaceContext } from '@/lib/workspace/context';
  * translate them. Do not add consumers beyond the pages the patches name.
  *
  * resolveWorkspaceForUser is a THIN pass-through to the existing
- * lib/workspace/context.ts helper (already outside app/**/components/** and
- * therefore already outside the boundary lint) - it supplies the client,
- * nothing about that helper's own logic changes.
+ * lib/workspace/context.ts helper (already outside the app/ and components/
+ * trees and therefore already outside the boundary lint) - it supplies the
+ * client, nothing about that helper's own logic changes.
  */
 
 export function getCurrentAuthUser() {
@@ -319,7 +382,7 @@ shape.)
   ```ts
   interface MembersPageUser {
       id: string;
-      email: string | null;
+      email?: string;
       created_at: string;
       user_metadata?: {
           display_name?: string;
@@ -327,6 +390,14 @@ shape.)
       };
   }
   ```
+  **[Amendment 5]** `email` is OPTIONAL (`string | undefined`), matching the
+  installed Supabase `User.email?: string` exactly — NOT `string | null`.
+  The vendor type never produces `null` for this field, and every page
+  read is nullish-agnostic (`user.email || ''`, `user.email?.split(...)`),
+  so undefined-vs-null is invisible at runtime; only `undefined` type-checks
+  against both `setCurrentUser(user)` (a raw `User`) and
+  `resolveWorkspaceForUser(user)` (whose parameter is
+  `Pick<User, 'id' | 'email'>` via `Parameters<...>`).
   Change `const [currentUser, setCurrentUser] = useState<User | null>(null);`
   → `const [currentUser, setCurrentUser] = useState<MembersPageUser | null>(null);`.
   Every existing `currentUser.*`/`user.*` field access (`.id`, `.email`,
