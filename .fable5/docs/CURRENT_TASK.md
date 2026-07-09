@@ -148,7 +148,7 @@ follow 017's Pattern H).
 | Patch | Target | Shape | Model |
 |---|---|---|---|
 | 022 | canvas duality DECISION brief | CTO brief → owner | ✅ **RESOLVED** (brief delivered AND Fact-1 census executed 2026-07-09: zero user data, 5 owner-test rows, `canvas_files` table doesn't exist — verdict DELETE; proxy-metric trap stands: NO type-only de-linting of the two monolith files) |
-| 023 | **v1 collabboard vertical DELETION** (18 files: 9 pages incl. a v1 auth sub-vertical + 9 API routes; census-gated, deletions-only, live accept-route byte-untouched, NO table drops) | **GPT-5.4** | **READY — `patches/PATCH-023.md`** (all census greps dry-run-verified; Fact-1 verdict recorded in the spec; Amendment 1: Phase B diff-stat gate corrected to `git diff --cached --stat` — `git rm` stages its own deletions, unstaged diff was empty by construction; 18-file/3859-deletion staged diff independently confirmed) |
+| 023 | **v1 collabboard vertical DELETION** (18 files: 9 pages incl. a v1 auth sub-vertical + 9 API routes; census-gated, deletions-only, live accept-route byte-untouched, NO table drops) | GPT-5.4 | ✅ **DONE** (cbe529e, review PASSED; Amendment 1 held; commit chain includes the CTO's accidental-bundle incident `5c3e15f` → restore `75cf480` → proper implementation — see the spec's Incident record; grandfather 4→3) |
 | 024 | security normalization — **authorized behavior change**: replace token-scavenger with real session reads; revisit share-link service-role→RLS *(renumbered from 023)* | GPT-5.5 | Fable spec |
 | 025 | canvas ops seam (lib/domain/canvas: `padlets` repository + FIRST canvas command `canvas.toggleTask`); first consumer = PostCardContent's single write site (22 importers, component returned identical) *(renumbered from 024)* | GPT-5.5 | Fable design by 07-12 |
 | 026+ | CanvasClient strangler series — grouped by table+operation (60 `padlets` + 6 `board_sections` + 4 `boards` sites, 2 storage, 3 auth incl. `auth.updateUser` at L263); FreeformPadletCards LAST (22 `padlets` sites, same ops); realtime/presence CTO-only, undesigned *(renumbered from 025+)* | per-group, GPT-5.5 first group | Fable site-map by 07-12 (successor inheritance artifact) |
@@ -299,6 +299,34 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-09** — PATCH-023 landed and reviewed: PASSED (commit
+  `cbe529e`). Grandfather 4→3 — remaining: CanvasClient,
+  PostCardContent, FreeformPadletCards (proxy-metric ruling stands; no
+  type-only de-linting). All gates independently re-run: the diff is 19
+  files / 0 insertions / 3,860 deletions — exactly the 18 bound files plus
+  the single grandfather line; accept-route and legacyToken.ts
+  byte-untouched across the whole episode (diffed 4bace8f→cbe529e);
+  no migrations, no package changes; both trees at 0 files; the one
+  surviving `app/collabboard` reference is the bound comment line; tsc 0,
+  boundaries clean, vitest 76/18, `--list` 27/18 unchanged, both ports 0.
+  Both deviations accepted: PS 5.1 has no `&&` (sequential reruns, intent
+  preserved), and the tsc failure was stale `.next/types` route stubs —
+  GPT-5.4 diagnosed generated-state-not-source correctly, fixed by
+  stop-server → delete `.next` → restart → re-probe → rerun (new §6 rule +
+  lesson). **Incident, CTO's own, recorded honestly:** the Amendment-1
+  docs commit (`5c3e15f`) bundled Codex's staged 18 deletions into an
+  unauthorized push to main — bare `git commit` commits the whole index,
+  and the pre-commit `git status` showed all 18 `D` lines unread. Owner
+  chose restore (`75cf480`, non-destructive) over keep-and-finish; proper
+  implementation followed. New rule: in a worktree an implementer is
+  using, docs commits use explicit pathspec (`git commit -- <paths>`), and
+  a staged line you didn't create is a STOP signal. Health 74→73: safety
+  20→19 (an unauthorized implementation reached the default branch through
+  CTO process error — the axis exists to price exactly this; the correct
+  recovery and same-day honesty limit the damage but do not erase the
+  event). Phase-3 items recorded: drop the 7 surviving v1 tables + 5 test
+  rows; the accept-route's dead block; the orphaned `update_canvas_access`
+  rpc.
 - **2026-07-09** — PATCH-023 Amendment 1: GPT-5.4 stopped correctly at the
   Phase B diff-stat gate (deletions staged via `git rm`, nothing
   committed) — the spec's `git diff --stat` (unstaged) is empty by

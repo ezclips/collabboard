@@ -589,6 +589,16 @@ one throwaway navigation before timed runs that will open a board,
 independent of PATCH-015's `workers: 2` config fix (that addresses
 concurrency; this addresses first-hit compile cost — both apply together).
 
+**Stale `.next/types` after route deletions (added at PATCH-023 review):**
+Next.js generates route type stubs under `.next/types`, and `tsc` reads
+them. Deleting routed files leaves stale generated types referencing the
+dead routes, so `npx tsc --noEmit` fails with phantom errors that no source
+change can fix. After any patch that DELETES routes: stop the dev server
+(PowerShell listener gate first — never delete `.next` under a live
+server), delete `.next`, restart, re-verify the route probes, then rerun
+tsc. This is an environment artifact, not a source defect — but only after
+the clean rebuild proves it.
+
 **Async-save barrier (added at PATCH-005 review):** these pages save
 fire-and-forget; reloading immediately aborts the in-flight POST and the
 persistence assertion fails — sometimes only sometimes (timing luck). After
@@ -665,6 +675,7 @@ it, STOP — never adapt.
 | 019 | settings/integrations | I reuse — deep-scan scavenger + session cascade added to `legacyToken.ts` (third and final scavenger variant; batch 016–019 complete) | 7→6 ✅ done |
 | 020 | settings/password | new Pattern J — raw-passthrough MFA/webauthn facade (`passwordSecurity.ts`, 9 wrappers, zero Result conversion) + I reuse as a consumer only (imports `getAccessToken`/`decodeJwtPayload`, adds zero code to the quarantine) | 6→5 ✅ done |
 | 021 | settings/members | Pattern J extended to raw table CRUD (`workspaceMembers.ts`, 10 wrappers covering 13 raw touches: workspace_members/workspace_invitations/boards CRUD + 2 auth calls + thin `resolveCurrentWorkspace` pass-through); `lib/workspace/context.ts` byte-untouched; grandfather trigger was solely a raw `User` type import, replaced by a narrow local interface | 5→4 ✅ done |
+| 023 | app/collabboard/** + app/api/collabboard/** | census-gated ROUTE-vertical deletion (PATCH-016 shape, first routed variant): 18 files, deletions-only, authorized by the PATCH-022 Fact-1 data census (zero user data); live accept-route + DB tables left untouched (Phase-3 items) | 4→3 ✅ done |
 
 **New patterns discovered by future patches get added here by the CTO at
 review — this catalog only ever contains patterns with a reviewed reference

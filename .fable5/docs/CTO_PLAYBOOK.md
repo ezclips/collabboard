@@ -419,7 +419,27 @@ zero behavior effect, accepted) is a recurrence of the PATCH-018
 disclosure-gap finding, not a new one. Ops 12, product 12, continuity 10
 unchanged — still the binding constraint, unmoved for six consecutive
 patches now. Axis snapshot at 74: safety 20, ops 12, architecture 20,
-product 12, continuity 10.)
+product 12, continuity 10.) → **73** (2026-07-09: PATCH-022 brief +
+Fact-1 census + PATCH-023 landed and passed review — the abandoned v1
+collabboard vertical (18 files, two route trees, a dead schema's UI) is
+DELETED, grandfather 4→3, and the canvas program now has a written
+strategy: proxy-metric ruling (no type-only de-linting of the two monolith
+files), ops-seam-first sequencing, and a data-census discipline that
+found and classified the only 5 rows before any deletion was authorized.
+**−1 safety 20→19, for the CTO's own incident, priced without spin:** the
+Amendment-1 docs commit bundled the implementer's staged 18-file deletion
+into an unauthorized push to `origin/main` under a docs-only message —
+bare `git commit` commits the whole index, and the pre-commit status
+printed all 18 `D` lines unread. The safety axis exists to price exactly
+this event: an unreviewed implementation reaching the default branch
+through process failure. Same-day non-destructive recovery (restore
+commit, then proper implementation through every gate) and honest
+recording limit the damage; they do not erase the event, and an axis that
+only ever ratchets upward is not measuring anything. No architecture
+credit despite the deletion: removing dead code is hygiene (the PATCH-016
+precedent), and the strategy documents are design, not landed seams. Ops
+12, product 12, continuity 10 unchanged. Axis snapshot at 73: safety 19,
+ops 12, architecture 20, product 12, continuity 10.)
 
 ## 13. The succession test
 

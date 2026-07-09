@@ -1,10 +1,6 @@
 # PATCH-023 — Deletion: the abandoned v1 collabboard route vertical (census-gated)
 
-**Status:** draft (awaiting owner approval)
-**Amendment 1 issued: the Phase B diff-stat gate used unstaged `git diff
---stat`, which is empty after `git rm` stages its deletions — command
-corrected to `git diff --cached --stat`. No deletion scope changed; the
-already-verified 18-file, 3859-deletion staged diff stands.**
+**Status:** DONE (2026-07-09, commit `cbe529e`) — CTO review PASSED. **Amendment 1 (staged-diff gate) held. Incident on the way: the CTO's Amendment-1 doc commit accidentally bundled Codex's staged deletions (`5c3e15f`, unauthorized push), restored in `75cf480`, then implemented properly — see the Incident record section. Grandfather 4→3.**
 **Complexity:** easy (pure deletion of two directory trees + one grandfather
 line; the discipline is in what must NOT be deleted alongside them)
 **Assigned model:** **GPT-5.4** (per PATCH-022 §8: mechanical once the
@@ -268,3 +264,67 @@ only after the owner stops the server."
 easy — the census is already proven against the live repo; the only trap is
 scope creep into the live `components/collabboard/**` tree or "helpful"
 cleanup of the accept-route's dead block.
+
+## Incident record (2026-07-09) — the CTO bundled Codex's staged deletions into a doc commit · process failure, CTO's own
+
+While committing Amendment 1 (a docs-only fix), the CTO ran
+`git add <3 doc files> && git commit` in the shared worktree while Codex's
+18 staged `git rm` deletions sat in the same index. `git commit` commits
+the WHOLE index, not just the files most recently added — commit `5c3e15f`
+therefore pushed the entire deletion to `origin/main` under a docs-only
+message, unauthorized, unreviewed, with the remaining gates unrun. The
+tell was even printed: the pre-commit `git status --short` showed all 18
+`D` lines and the CTO did not read them. Corrected the same day:
+`75cf480` restored all 18 files (non-destructive, no history rewrite),
+and Codex then implemented properly as `cbe529e` through the full gate
+sequence. Net repo state was never wrong for long, but an unauthorized
+implementation was live on the default branch in the interim. Rules
+recorded in LESSONS_LEARNED; safety-axis consequence in the §12 ledger.
+
+## CTO Review (2026-07-09) — PASSED
+
+Implementation commit `cbe529e` (chain: `5c3e15f` accidental bundle →
+`75cf480` restore → `cbe529e` proper implementation). All gates
+independently re-run, not accepted from pasted output.
+
+- **Diff shape**: `cbe529e` is 19 files, **0 insertions**, 3,860
+  deletions — exactly the 18 bound files (verified name-by-name against
+  the census list) plus the single grandfather line. A deletions-only diff
+  as bound.
+- **Restore integrity**: `75cf480` restored all 18 files (+3,859) before
+  the proper implementation deleted them again — the net history is
+  coherent and auditable.
+- **`app/api/invitations/accept/route.ts`**: `git diff 4bace8f cbe529e`
+  on the file is EMPTY — byte-untouched across the entire episode.
+- **`legacyToken.ts`**: same check, EMPTY — its stale "PATCH-023" header
+  comment correction remains deferred to the PATCH-024 spec as planned.
+- **No migrations, no package changes**: `supabase/migrations/**` and
+  `package.json`/lockfile absent from the diff; `@supabase/auth-helpers-react`
+  still installed with zero consumers (as bound).
+- **Census gates re-run**: both trees 0 files; repo-wide `app/collabboard`
+  references = exactly the one comment line (`lib/collabboard/types.ts:234`);
+  `update_canvas_access` consumers 0; grandfather list re-counted at **3**
+  — CanvasClient, PostCardContent, FreeformPadletCards, exactly as
+  expected, with PATCH-022's proxy-metric ruling standing (no type-only
+  de-linting).
+- **Build/test gates re-run**: `npx tsc --noEmit` exit 0;
+  `npm run check:boundaries` clean; `npx vitest run` 76/18 unchanged;
+  `npx playwright test --list` 27/18 UNCHANGED (no spec added, as bound);
+  stopped-server gate 0 on both :3000 and :3001; `git status` clean.
+- **Deviation 1 (PowerShell `&&`)**: accepted — PS 5.1 has no `&&`
+  pipeline-chain operator; rerunning the commands sequentially preserves
+  every gate's intent. Environment fact, not drift.
+- **Deviation 2 (stale `.next/types` broke tsc)**: accepted as an
+  environment artifact and CONFIRMED as a new reusable lesson — Next.js
+  generates route types under `.next/types`, and deleting routes leaves
+  stale generated types that `tsc` still reads; the correct sequence
+  (stop server → delete `.next` → restart → re-verify the 404 probes →
+  rerun tsc) was followed, including re-checking the probes after the
+  restart. No source change was needed or made. Recorded in
+  LESSONS_LEARNED and PATCH_REFERENCE §6.
+- **Undisclosed deviations**: none found — a deletions-only diff has
+  nowhere for them to hide, and the one modified file is the bound line.
+
+**Grandfather: 4 → 3, confirmed.** The v1 vertical is gone; Phase-3 items
+recorded (drop the seven surviving v1 tables + 5 test rows; the
+accept-route's dead block; the orphaned `update_canvas_access` rpc).
