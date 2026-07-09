@@ -1,6 +1,8 @@
 # PATCH-024 — Scavenger normalization: token acquisition moves to the real cookie session (AUTHORIZED BEHAVIOR CHANGE)
 
-**Status:** draft (awaiting owner approval)
+**Status:** READY — Amendment 1 applied 2026-07-09 (pre-edit importer
+census rebound to cover all import-path spellings; implementer resumes from
+the start of the pre-edit census)
 **Complexity:** medium-high (four pages + the quarantine + one new infra
 module + two characterization specs REBOUND to repaired behavior; the
 mechanism is identical everywhere, but two of the four pages change from
@@ -62,11 +64,22 @@ line counts state all-lines (`wc -l`) with blank-line counts so PowerShell
 wc -l lib/infra/supabase/legacyToken.ts          # 132
 grep -c "^export" lib/infra/supabase/legacyToken.ts   # 8
 # 2. Consumers (import lines only where noted):
+# AMENDMENT 1 (2026-07-09): the importers spell the path THREE ways (alias /
+# '../supabase/...' / './...'); the original single alias-form grep printed 3
+# and could never print the intended 4. All three gates below were MEASURED
+# on the pre-edit tree before binding.
 grep -rln "from '@/lib/infra/supabase/legacyToken'" app lib --include="*.ts" --include="*.tsx"
-# expected EXACTLY 4 files: the three settings pages (profile, password,
-#   integrations) + lib/infra/profile/profilesRepository.ts
+# expected EXACTLY 3 files: the three settings pages (profile, password,
+#   integrations) - alias imports
+grep -rln "from '\.\./supabase/legacyToken'" app lib --include="*.ts" --include="*.tsx"
+# expected EXACTLY 1 file: lib/infra/profile/profilesRepository.ts
+#   (relative import, line 7)
+grep -rln "legacyToken'" app lib --include="*.ts" --include="*.tsx"
+# union of ALL import spellings - expected EXACTLY 5 files: the 4 importers
+#   above + lib/infra/supabase/legacyToken.test.ts (imports './legacyToken').
 #   (workspaceMembers.ts/passwordSecurity.ts mention legacyToken only in
-#   comments - they are NOT importers and MUST NOT appear here)
+#   comments, written 'legacyToken.ts' with NO trailing quote - they MUST
+#   NOT appear in any of these three gates)
 # 3. Per-file symbol counts (post-edit gates are derived from THESE):
 grep -c "getAccessToken" app/dashboard/settings/page.tsx            # 4 (in-page def L45 + calls L62/L121/L162)
 grep -c "atob" app/dashboard/settings/page.tsx                      # 2 (manual decodes L123/L164)
@@ -354,6 +367,12 @@ grep -rn "getAccessToken" app components lib --include="*.ts" --include="*.tsx" 
 # expected: NO output, exit 1 (no bare getAccessToken anywhere; the -v guard
 # excludes the new symbol's lines, which do NOT contain the bare substring
 # anyway - belt and suspenders)
+# importer census, post-edit (AMENDMENT 1; derived from the measured 5):
+grep -rln "legacyToken'" app lib --include="*.ts" --include="*.tsx"
+# expected EXACTLY 2 files (5 measured pre-edit - password import removed
+#   - integrations import removed - test file renamed to sessionToken.test.ts):
+#   app/dashboard/settings/profile/page.tsx (keeps the 3-bearer-symbol import)
+#   lib/infra/profile/profilesRepository.ts (relative import, byte-untouched)
 # lib/infra/profile/profilesRepository.ts must be BYTE-UNTOUCHED:
 git diff --ignore-space-at-eol -- lib/infra/profile/profilesRepository.ts   # empty
 git diff --ignore-space-at-eol -- lib/infra/supabase/workspaceMembers.ts lib/infra/supabase/passwordSecurity.ts   # empty
@@ -447,3 +466,34 @@ password + 1 integrations) that are individually trivial; the risk
 concentrates in the two whole-file bindings (byte-equality required) and in
 resisting the urge to "fix" anything adjacent on four legacy pages
 mid-swap.
+
+## Amendment 1 — pre-edit importer census rebound (2026-07-09)
+**Blocker (correct STOP; zero edits, zero commits):** census gate #2 bound
+one instrument — `grep -rln "from '@/lib/infra/supabase/legacyToken'"` —
+but expected 4 files. The instrument only sees the alias spelling;
+`lib/infra/profile/profilesRepository.ts` imports
+`'../supabase/legacyToken'` (relative, line 7), so the gate printed 3 and
+could never print 4. The intended FACT (4 importer files) was correct; the
+bound instrument could not observe it. Same defect family as the
+wc/Measure-Object, innerText/getByText, and diff/--cached splits: the
+number was right, the measuring tool was bound wrong.
+**CTO reproduction (2026-07-09, Git Bash, pre-edit tree):** alias grep →
+exactly the 3 settings pages; relative grep → exactly
+profilesRepository.ts; union `legacyToken'` → exactly 5 files (the 4
+importers + the test file's `'./legacyToken'`). The comment-only mentions
+in workspaceMembers.ts/passwordSecurity.ts are written `legacyToken.ts`
+with no trailing quote and match none of the three gates — verified.
+**Fix:** census gate #2 split into three measured gates (3 alias + 1
+relative + 5 union); one derived post-edit union gate added
+(5 → 2: password import removed, integrations import removed, test file
+renamed; profile keeps its bearer-symbol import, profilesRepository
+byte-untouched). No binding outside the two census blocks changed; the
+per-file symbol gates and byte-untouched diffs were already
+spelling-independent.
+**Worktree ruling:** nothing to rule on — no edits were made. Resume from
+the START of the pre-edit census, exactly as the implementer proposed.
+**Lesson:** an importer census must use an instrument that sees every
+import spelling (alias, `../` relative, `./` same-dir). Bind the union
+pattern (`moduleName'`) alongside any per-spelling counts, and measure
+every count on the real tree — never derive it from the file list you
+happen to know about. Recorded in LESSONS_LEARNED.

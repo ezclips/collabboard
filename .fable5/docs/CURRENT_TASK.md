@@ -149,7 +149,7 @@ follow 017's Pattern H).
 |---|---|---|---|
 | 022 | canvas duality DECISION brief | CTO brief → owner | ✅ **RESOLVED** (brief delivered AND Fact-1 census executed 2026-07-09: zero user data, 5 owner-test rows, `canvas_files` table doesn't exist — verdict DELETE; proxy-metric trap stands: NO type-only de-linting of the two monolith files) |
 | 023 | **v1 collabboard vertical DELETION** (18 files: 9 pages incl. a v1 auth sub-vertical + 9 API routes; census-gated, deletions-only, live accept-route byte-untouched, NO table drops) | GPT-5.4 | ✅ **DONE** (cbe529e, review PASSED; Amendment 1 held; commit chain includes the CTO's accidental-bundle incident `5c3e15f` → restore `75cf480` → proper implementation — see the spec's Incident record; grandfather 4→3) |
-| 024 | security normalization — **authorized behavior change**: token acquisition moves to the cookie session (`sessionToken.ts`: getSession→refreshSession, the proven PATCH-019 cascade minus its deep-scan step); ALL four scavengers deleted from the quarantine; 11 call-site swaps across settings-root/profile/password/integrations; settings-root + profile FUNCTIONALLY REPAIRED for cookie users; two characterization specs rebound to repaired states (expected-unprobed, STOP-and-amend protocol); share-link RLS explicitly DEFERRED to its own server-side patch *(renumbered from 023)* | **GPT-5.5 REQUIRED** (auth behavior change + unprobeable-in-advance characterization = the owner's definitional GPT-5.5 case) | **READY — `patches/PATCH-024.md`** (census measured; bound TS compile-verified; post-edit gates derived from measured pre-edit counts; substring-collision check done on the new symbol) |
+| 024 | security normalization — **authorized behavior change**: token acquisition moves to the cookie session (`sessionToken.ts`: getSession→refreshSession, the proven PATCH-019 cascade minus its deep-scan step); ALL four scavengers deleted from the quarantine; 11 call-site swaps across settings-root/profile/password/integrations; settings-root + profile FUNCTIONALLY REPAIRED for cookie users; two characterization specs rebound to repaired states (expected-unprobed, STOP-and-amend protocol); share-link RLS explicitly DEFERRED to its own server-side patch *(renumbered from 023)* | **GPT-5.5 REQUIRED** (auth behavior change + unprobeable-in-advance characterization = the owner's definitional GPT-5.5 case) | **READY — `patches/PATCH-024.md`, Amendment 1 applied** (census measured; importer census rebound 2026-07-09 to cover alias+relative+union import spellings after a correct pre-edit STOP; bound TS compile-verified; post-edit gates derived from measured pre-edit counts; substring-collision check done on the new symbol) |
 | 025 | canvas ops seam (lib/domain/canvas: `padlets` repository + FIRST canvas command `canvas.toggleTask`); first consumer = PostCardContent's single write site (22 importers, component returned identical) *(renumbered from 024)* | GPT-5.5 | Fable design by 07-12 |
 | 026+ | CanvasClient strangler series — grouped by table+operation (60 `padlets` + 6 `board_sections` + 4 `boards` sites, 2 storage, 3 auth incl. `auth.updateUser` at L263); FreeformPadletCards LAST (22 `padlets` sites, same ops); realtime/presence CTO-only, undesigned *(renumbered from 025+)* | per-group, GPT-5.5 first group | Fable site-map by 07-12 (successor inheritance artifact) |
 
@@ -299,6 +299,25 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-09** — PATCH-024 Amendment 1: pre-edit importer census
+  rebound. GPT-5.5 correctly STOPPED before any edit — census gate #2
+  bound only the alias-form grep (`from '@/lib/infra/supabase/
+  legacyToken'`) yet expected 4 files; `profilesRepository.ts` imports the
+  quarantine via a RELATIVE path (`'../supabase/legacyToken'`, line 7), so
+  the instrument printed 3. The intended fact (4 importer files) was
+  correct and even enumerated in the gate's own comment; the instrument
+  couldn't see one spelling — fourth member of the measurement-instrument
+  family (wc/Measure-Object, innerText/getByText, diff/--cached). CTO
+  reproduced, then measured replacement gates on the real tree: 3 alias +
+  1 relative + 5 union (`legacyToken'`, which also catches the test
+  file's `'./legacyToken'`; the comment-only mentions in
+  workspaceMembers/passwordSecurity write `legacyToken.ts` with no
+  trailing quote and stay invisible — verified). Derived post-edit union
+  gate added (5→2). No binding outside the two census blocks changed.
+  Worktree ruling: nothing to rule on (zero edits); implementer resumes
+  from the start of the pre-edit census. Lesson recorded in
+  LESSONS_LEARNED (importer census must see every import spelling; run
+  enumerated gates at authoring, don't assert them from file knowledge).
 - **2026-07-09** — PATCH-024 AUTHORED (handoff-ready; **GPT-5.5 REQUIRED**
   — auth/session behavior change with two characterization specs rebound
   to repaired states that cannot exist before implementation, the owner's
