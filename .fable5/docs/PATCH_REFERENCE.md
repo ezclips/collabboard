@@ -284,6 +284,33 @@ chain to an actual root layout/page** (PATCH-012: an orphaned component was
 imported only by another orphaned component — trace to a mounted root
 before writing any e2e assertion that expects the component visible).
 
+**Extended by PATCH-037** (CanvasClient's auth trio, GPT-5.5 REQUIRED per
+owner standing rule): the frozen-helper-file rule above governs REPETITION
+patches with an identical consumer shape; 037's consumer needed
+genuinely NEW capability the file didn't have — server-VALIDATED reads
+(`auth.getUser`, not `getSession`'s local-unvalidated read) and a
+session-DELIVERING subscription (the existing `onAuthUserChanged` maps
+to the user and drops the session; this consumer stores the session
+itself) — so the file grew three new exports:
+`getVerifiedAuthUser`/`onAuthSessionChanged`/`updateCurrentUserMetadata`,
+plus a new domain `AuthSession` structural type. All three EXISTING
+exports and their three consumers (ProtectedRoute/Navbar/app/page.tsx)
+stayed byte-untouched — extension, not modification. The load-bearing
+ruling: this consumer's failure channels are OBSERVABLY split
+(resolved auth error → signed-out render with a ready flag set; thrown
+network error → unhandled rejection with the SAME flag left unset,
+reaching a different downstream toast) — a repetition-pattern
+Result-with-catch wrapper would have COLLAPSED that split. The new
+functions deliberately have NO catch, so a resolved error still
+becomes a discardable/collapsible Result while a thrown one still
+rejects exactly as the raw call did — pinned by `rejects.toBe(...)`
+identity tests, the file's FIRST unit tests (via
+`vi.mock('./browserClient')`, the repo's first client-factory mock).
+This is also the CanvasClient strangler's terminal auth patch: after
+it landed, the monolith performs ZERO direct supabase operations of
+any kind (tables OR auth) — only client plumbing to three named legacy
+helpers remains, deferred to the hooks batch.
+
 ---
 
 ## 5.7. Pattern G — server-page read (server-side repository seam)
@@ -968,6 +995,7 @@ it, STOP — never adapt.
 | 034 | CanvasClient (position-write pair: detach padlet leg + drop repositioning) | Pattern K reuse (§5.11), TENTH application, first new-capability extension since 029: one new repository method `updatePosition` (optional metadata OMITTED from the payload when absent, `Object.keys`-pinned on both shapes) + two thin commands mirroring the honest/best-effort split; the honest command carries the program's THIRD authorized micro-change (thrown-mode position rollback convergence — legacy left the optimistic position stranded on a network failure); the best-effort command is the SEVENTH command-internal swallow site; the other two deferred sites (content+select map variant, title-clear) ruled UNRELATED shapes and deferred by name to their own patches; 67 bound tests (9 new + 58 existing re-run non-breaking); review byte-compared each whole-file fence directly against its live file in addition to the hash gates — zero disclosure gaps, third consecutive fully clean review; standing swallow-family decision table brought current to SEVEN sites (incl. a catch-up for 032's extension) | 2→2 (CanvasClient stays grandfathered — 3 padlets sites remain: map content+select pair + title-clear) ✅ done |
 | 035 | CanvasClient (clipart title clear, ONE site) | Pattern K reuse (§5.11), ELEVENTH application, narrowest new-capability extension yet: one repository method `updateTitle` (title-only, UNSTAMPED by design — no `updated_at`, ported exactly from the legacy statement) + ONE best-effort command `canvas.updatePostTitleBestEffort` (no honest twin — the single legacy consumer's contract is bare-await-no-check); the EIGHTH command-internal swallow site, and the FIRST Pattern K application requiring NO authorized behavior change (exact port in both channels — resolved swallowed, thrown re-thrown with no enclosing try/catch, reproducing the same legacy unhandled-rejection gap); the map-comments SELECT+UPDATE variant ruled an UNRELATED shape (needs a content-carrying write plus its own SELECT ruling) and deferred by name; 72 bound tests (5 new + 67 existing re-run non-breaking); review byte-compared each whole-file fence directly against its live file in addition to the hash gates — zero disclosure gaps, FOURTH consecutive fully clean review; `.update({ title: '' })` extinct (1→0) | 2→2 (CanvasClient stays grandfathered — 2 padlets sites remain: the map comments SELECT+UPDATE pair, the last non-auth sites) ✅ done |
 | 036 | CanvasClient (map comments read-merge-write, ONE site — NON-AUTH PADLETS EXTINCTION) | Pattern K reuse (§5.11), TWELFTH application: introduced the aggregate's FIRST READ method `findMetadataById` (owner-ruled IN, not raw — an RMW-cycle read serving a write command, not a rendering read; P6 trunk growth) + the program's FIRST MIXED-CONTRACT command `canvas.updatePostComments` (read leg HONEST — a failure aborts with no write, delivering the original supabase error into the existing catch; write leg the NINTH command-internal swallow site); ZERO new write methods — both `field` branches reuse the ALREADY-EXISTING `updateTasks`/`updateMetadata` shapes byte-for-byte (payload key-order difference + unreachable-but-reused error messages disclosed; `updateTasks`'s doc comment amended for its second consumer, the patch's one deletion line); the `field` z.enum IS the legacy prop type (declared identically on every consuming layout), not a narrowing; NO authorized behavior change; legacy cast retired; 84 bound tests (12 new + 72 existing re-run non-breaking); review byte-compared each whole-file fence directly against its live file in addition to the hash gates — zero disclosure gaps, FIFTH consecutive fully clean review; `from('padlets')` EXTINCT (2→0) — CanvasClient's entire remaining supabase surface is now the auth trio | 2→2 (CanvasClient stays grandfathered — 0 non-auth padlets sites remain; only the auth trio is left) ✅ done |
+| 037 | CanvasClient (the auth trio: `updateUser`/`getUser`/`onAuthStateChange` — DIRECT SUPABASE EXTINCTION) | Pattern F extension (§5.6) delivered with the full Pattern K harness, GPT-5.5 REQUIRED (owner standing rule): the existing `authState.ts` grew THREE new exports the frozen-repetition file didn't have — server-VALIDATED `getVerifiedAuthUser` (getUser, not getSession), session-DELIVERING `onAuthSessionChanged` (sibling of the user-delivering original), and `updateCurrentUserMetadata`; all three EXISTING exports and their three consumers (ProtectedRoute/Navbar/app/page.tsx) confirmed byte-untouched — extension, not modification; the load-bearing ruling: getUser's two failure channels are OBSERVABLY split in production (resolved error → signed-out render with sessionReady TRUE; thrown error → unhandled rejection with sessionReady FALSE, reaching a DIFFERENT downstream toast) — preserved via seam functions with DELIBERATE no-catch (a repetition-pattern try/catch would have collapsed the split), pinned by the file's FIRST unit tests (`vi.mock('./browserClient')`, the repo's first client-factory mock) incl. two `rejects.toBe(...)` identity tests; three new named casts + one carried (§0.3.7, cast census confirmed `as Session` 1→2, `as User` 1→3); NO behavior repair requested or granted; monolith LINE-NEUTRAL 8,384→8,384; 9 bound tests compiled and run green at authoring; review byte-compared each whole-file fence directly against its live file in addition to the hash gates — zero disclosure gaps, SIXTH consecutive fully clean review; `supabase\.auth` EXTINCT (3→0) — CanvasClient performs ZERO direct supabase operations of any kind, tables OR auth; only client plumbing to three named legacy helpers remains (deferred to the hooks batch) | 2→2 (CanvasClient stays grandfathered — the client memo and three legacy hand-offs are the only supabase surface left) ✅ done |
 
 **New patterns discovered by future patches get added here by the CTO at
 review — this catalog only ever contains patterns with a reviewed reference

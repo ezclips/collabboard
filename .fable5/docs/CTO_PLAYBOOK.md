@@ -715,6 +715,39 @@ architecture capped at 20/20, same standing ruling. Fifth consecutive
 fully clean review — zero disclosure gaps found anywhere in scope,
 byte-untouched gates, census, or semantics. Grandfather held at 2. Axis
 snapshot at 76 (unchanged): safety 19, ops 13, architecture 20,
+product 13, continuity 11.) → **76 (held)** (2026-07-10: PATCH-037 landed
+and passed review — the auth trio, GPT-5.5 REQUIRED per the owner's
+standing rule, and the patch that completes CanvasClient's DIRECT
+SUPABASE EXTINCTION: after it landed, the monolith performs zero direct
+supabase operations of any kind, tables or auth. Extended the existing
+Pattern F auth-state seam (`authState.ts`, frozen since PATCH-011) with
+three new exports the file genuinely didn't have: a server-VALIDATED
+user read, a session-DELIVERING subscription (its existing sibling
+delivers the user only and drops the session), and a metadata-write
+wrapper — all three EXISTING exports and their three consumers
+confirmed byte-untouched, extension not modification. The load-bearing
+finding: getUser's two failure channels are OBSERVABLY split in
+production today (a resolved auth error renders signed-out with the
+ready flag SET; a thrown network error leaves an unhandled rejection
+with the ready flag UNSET, surfacing a DIFFERENT downstream toast) — a
+routine Result-with-catch wrapper would have silently collapsed that
+split. The new seam functions carry a deliberate no-catch design
+specifically to preserve it, pinned by the file's first unit tests
+(the repo's first client-factory mock) including two reject-identity
+assertions. Landed byte-perfect on GPT-5.5: all four hashes exact
+against the live spec's own declarations, and the review byte-compared
+all three whole-file fences DIRECTLY against their live files in
+addition to the hash gates, continuing the strongest binding check;
+both bound blocks and the import edit confirmed OLD-gone/NEW-once. 9
+bound tests incl. the two failure-channel identity tests; unit 201/25,
+tsc clean, boundaries clean, e2e 27/27 (reviewer's own warmed server,
+incl. the board-lifecycle spec exercising the touched mount/session
+path), port gate 0 before and after, `npm run verify` green; monolith
+LINE-NEUTRAL 8,384→8,384; `supabase\.auth` EXTINCT (3→0). No credit:
+architecture capped at 20/20, same standing ruling. Sixth consecutive
+fully clean review — zero disclosure gaps found anywhere in scope,
+byte-untouched gates, census, or semantics. Grandfather held at 2. Axis
+snapshot at 76 (unchanged): safety 19, ops 13, architecture 20,
 product 13, continuity 11.)
 
 ## 13. The succession test
