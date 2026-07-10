@@ -32,7 +32,11 @@ export const postRowSchema = z.custom<object>(
   (value) => typeof value === 'object' && value !== null,
 );
 
-/** The exact three-column payload the legacy toggle writes. */
+/**
+ * The exact three-column payload the legacy toggle writes. Since PATCH-036
+ * the comments-mirror branch of canvas.updatePostComments sends the SAME
+ * triple through updateTasks - one repository method per column shape.
+ */
 export interface PostTasksWriteFields {
   readonly content: string;
   readonly metadata: Record<string, unknown>;
@@ -69,6 +73,12 @@ export interface PostsRepository {
   updatePosition(id: PostId, fields: PostPositionWriteFields): Promise<Result<void, DomainError>>;
   /** Legacy clipart title clear sends title ONLY - no updated_at (old L7581-7584). */
   updateTitle(id: PostId, fields: { readonly title: string }): Promise<Result<void, DomainError>>;
+  /**
+   * The aggregate's FIRST read (PATCH-036): one post's metadata for the map
+   * comments read-merge-write. Returns null when the row is missing OR its
+   * metadata column is null - the legacy site collapsed both onto {}.
+   */
+  findMetadataById(id: PostId): Promise<Result<Record<string, unknown> | null, DomainError>>;
   deleteById(id: PostId): Promise<Result<void, DomainError>>;
   deleteByIds(ids: readonly PostId[]): Promise<Result<void, DomainError>>;
   /** Deletes every row whose metadata->>parentId equals the given id. */
@@ -468,6 +478,62 @@ export const createUpdatePostTitleBestEffortCommand = (repository: PostsReposito
       await repository.updateTitle(asPostId(input.postId), {
         title: input.title,
       });
+      return ok(undefined);
+    },
+  });
+
+export const updatePostCommentsSchema = z.object({
+  postId: z.string(),
+  /** The two comment stores the legacy map prop type names (old L6942). */
+  field: z.enum(['comments', 'detachedComments']),
+  /** The full replacement comment list, passed through untyped (legacy shape). */
+  comments: z.array(z.unknown()),
+  /** The call site's shared nowIso - the SAME string already stamps the optimistic update. */
+  updatedAt: z.string(),
+});
+
+/**
+ * The map comments read-merge-write (PATCH-036): fetch the post's CURRENT
+ * metadata (a fresh DB copy, NOT local state - the legacy site's freshness
+ * choice), merge `[field]: comments` over it, then write - mirroring the
+ * list into `content` via updateTasks when field is 'comments' (the same
+ * column triple), or metadata alone via updateMetadata for
+ * 'detachedComments'. The read leg is HONEST (a failure aborts and
+ * surfaces); the write leg preserves the legacy bare-await swallow.
+ */
+export const createUpdatePostCommentsCommand = (repository: PostsRepository) =>
+  defineCommand({
+    name: 'canvas.updatePostComments',
+    input: updatePostCommentsSchema,
+    execute: async (input) => {
+      const readResult = await repository.findMetadataById(asPostId(input.postId));
+      if (!readResult.ok) {
+        return readResult;
+      }
+
+      const nextMetadataForDb = {
+        ...(readResult.value || {}),
+        [input.field]: input.comments,
+      };
+
+      // PRESERVED LEGACY DEFECT (PATCH-036; queued P3-family fix, do NOT
+      // repair here): the legacy map handler awaited this write bare - a
+      // resolved DB error was silently swallowed; only a THROWN network
+      // error reached the handler's catch. Faithful port: ignore the
+      // resolved Result; a thrown exception escapes execute and surfaces
+      // via defineCommand's catch.
+      if (input.field === 'comments') {
+        await repository.updateTasks(asPostId(input.postId), {
+          content: JSON.stringify(input.comments),
+          metadata: nextMetadataForDb,
+          updatedAt: input.updatedAt,
+        });
+      } else {
+        await repository.updateMetadata(asPostId(input.postId), {
+          metadata: nextMetadataForDb,
+          updatedAt: input.updatedAt,
+        });
+      }
       return ok(undefined);
     },
   });

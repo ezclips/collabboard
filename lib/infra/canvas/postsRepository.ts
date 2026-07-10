@@ -28,6 +28,15 @@ interface PostsDeleteQuery {
   in(column: 'id', values: readonly PostId[]): Promise<{ error: SupabaseErrorLike | null }>;
 }
 
+interface PostsMetadataSelectQuery {
+  eq(column: 'id', value: PostId): {
+    maybeSingle(): Promise<{
+      data: { metadata: Record<string, unknown> | null } | null;
+      error: SupabaseErrorLike | null;
+    }>;
+  };
+}
+
 /**
  * The insert builder is awaited directly for plain inserts (thenable) and
  * chained .select().single() when the caller consumes the inserted row -
@@ -64,6 +73,7 @@ interface PostsSupabaseClient {
           }
         | { title: string },
     ): PostsUpdateQuery;
+    select(columns: 'metadata'): PostsMetadataSelectQuery;
     delete(): PostsDeleteQuery;
     insert(row: object): PostsInsertQuery;
   };
@@ -159,6 +169,20 @@ export class SupabasePostsRepository implements PostsRepository {
     }
 
     return ok(undefined);
+  }
+
+  async findMetadataById(id: PostId): Promise<Result<Record<string, unknown> | null, DomainError>> {
+    const { data, error } = await this.client
+      .from('padlets')
+      .select('metadata')
+      .eq('id', id)
+      .maybeSingle();
+
+    if (error) {
+      return err(domainError('unavailable', 'Could not load the post', { cause: error }));
+    }
+
+    return ok(data?.metadata ?? null);
   }
 
   async deleteById(id: PostId): Promise<Result<void, DomainError>> {

@@ -56,6 +56,7 @@ import {
   createDeletePostCommand,
   createDeletePostsCommand,
   createGroupPostIntoContainerCommand,
+  createUpdatePostCommentsCommand,
   createUpdatePostMetadataBestEffortCommand,
   createUpdatePostMetadataCommand,
   createUpdatePostMetadataUnstampedBestEffortCommand,
@@ -6956,26 +6957,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                     );
 
                     try {
-                      const { data: existingChild, error: readError } = await supabase
-                        .from('padlets')
-                        .select('metadata')
-                        .eq('id', childId)
-                        .maybeSingle();
-                      if (readError) throw readError;
-
-                      const nextMetadataForDb = {
-                        ...((existingChild?.metadata as Record<string, unknown> | null) || {}),
-                        [field]: comments,
-                      };
-
-                      await supabase
-                        .from('padlets')
-                        .update({
-                          metadata: nextMetadataForDb,
-                          ...(field === 'comments' ? { content: JSON.stringify(comments) } : {}),
-                          updated_at: nowIso,
-                        })
-                        .eq('id', childId);
+                      const updatePostComments = createUpdatePostCommentsCommand(createPostsRepository());
+                      const result = await updatePostComments({ postId: childId, field, comments, updatedAt: nowIso }, { userId: null });
+                      if (!result.ok) throw result.error.cause ?? result.error;
                     } catch (err) {
                       console.error('Failed to update child comments:', err);
                       toast.error('Failed to update comments');

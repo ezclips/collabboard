@@ -10,6 +10,7 @@ interface FakeError {
 function createFakeClient(
   error: FakeError | null = null,
   insertReturnData: Record<string, unknown> | null = { id: 'row-1' },
+  metadataRow: { metadata: Record<string, unknown> | null } | null = { metadata: {} },
 ) {
   const fromTables: string[] = [];
   const updateCalls: Array<Record<string, unknown>> = [];
@@ -18,6 +19,8 @@ function createFakeClient(
   const deleteInCalls: Array<{ column: string; values: readonly string[] }> = [];
   const insertCalls: object[] = [];
   const selectSingleCalls: object[] = [];
+  const selectColumnsCalls: string[] = [];
+  const selectMetadataEqCalls: Array<{ column: string; value: string }> = [];
 
   const client = {
     from(table: 'padlets') {
@@ -29,6 +32,17 @@ function createFakeClient(
             eq: async (column: 'id', value: string) => {
               eqCalls.push({ column, value });
               return { error };
+            },
+          };
+        },
+        select(columns: 'metadata') {
+          selectColumnsCalls.push(columns);
+          return {
+            eq: (column: 'id', value: string) => {
+              selectMetadataEqCalls.push({ column, value });
+              return {
+                maybeSingle: async () => ({ data: metadataRow, error }),
+              };
             },
           };
         },
@@ -80,6 +94,8 @@ function createFakeClient(
     deleteInCalls,
     insertCalls,
     selectSingleCalls,
+    selectColumnsCalls,
+    selectMetadataEqCalls,
   };
 }
 
@@ -362,6 +378,63 @@ describe('SupabasePostsRepository.updateTitle', () => {
     const repository = new SupabasePostsRepository(client);
 
     const result = await repository.updateTitle(asPostId('post-1'), { title: '' });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe('unavailable');
+      expect(result.error.cause).toBe(supabaseError);
+    }
+  });
+});
+
+describe('SupabasePostsRepository.findMetadataById', () => {
+  it('selects ONLY the metadata column filtered by the post id and returns it', async () => {
+    const { client, fromTables, selectColumnsCalls, selectMetadataEqCalls, updateCalls } =
+      createFakeClient(null, { id: 'row-1' }, { metadata: { comments: [{ id: 'c-1' }] } });
+    const repository = new SupabasePostsRepository(client);
+
+    const result = await repository.findMetadataById(asPostId('post-1'));
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toEqual({ comments: [{ id: 'c-1' }] });
+    }
+    expect(fromTables).toEqual(['padlets']);
+    expect(selectColumnsCalls).toEqual(['metadata']);
+    expect(selectMetadataEqCalls).toEqual([{ column: 'id', value: 'post-1' }]);
+    expect(updateCalls).toHaveLength(0);
+  });
+
+  it('returns null when the row is missing (maybeSingle data null)', async () => {
+    const { client } = createFakeClient(null, { id: 'row-1' }, null);
+    const repository = new SupabasePostsRepository(client);
+
+    const result = await repository.findMetadataById(asPostId('post-1'));
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toBeNull();
+    }
+  });
+
+  it('returns null when the metadata column itself is null', async () => {
+    const { client } = createFakeClient(null, { id: 'row-1' }, { metadata: null });
+    const repository = new SupabasePostsRepository(client);
+
+    const result = await repository.findMetadataById(asPostId('post-1'));
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toBeNull();
+    }
+  });
+
+  it('maps a supabase error to an unavailable DomainError carrying the cause', async () => {
+    const supabaseError = { code: '42501', message: 'permission denied' };
+    const { client } = createFakeClient(supabaseError);
+    const repository = new SupabasePostsRepository(client);
+
+    const result = await repository.findMetadataById(asPostId('post-1'));
 
     expect(result.ok).toBe(false);
     if (!result.ok) {

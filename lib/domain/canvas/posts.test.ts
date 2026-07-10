@@ -11,6 +11,7 @@ import {
   createDeletePostsCommand,
   createGroupPostIntoContainerCommand,
   createToggleTaskCommand,
+  createUpdatePostCommentsCommand,
   createUpdatePostMetadataBestEffortCommand,
   createUpdatePostMetadataCommand,
   createUpdatePostMetadataUnstampedBestEffortCommand,
@@ -55,6 +56,7 @@ function createFakeRepository() {
   const updateTitleCalls: Array<{ id: PostId; fields: { readonly title: string } }> = [];
   const insertCalls: object[] = [];
   const insertReturningCalls: object[] = [];
+  const findMetadataByIdCalls: PostId[] = [];
   let updateTasksResult: Result<void, DomainError> = ok(undefined);
   let updateMetadataResult: Result<void, DomainError> = ok(undefined);
   let deleteByIdResult: Result<void, DomainError> = ok(undefined);
@@ -65,6 +67,7 @@ function createFakeRepository() {
   let updateTitleResult: Result<void, DomainError> = ok(undefined);
   const insertResultQueue: Array<Result<void, DomainError>> = [];
   let insertReturningResult: Result<Record<string, unknown> | null, DomainError> = ok(null);
+  let findMetadataByIdResult: Result<Record<string, unknown> | null, DomainError> = ok(null);
 
   const repository: PostsRepository = {
     updateTasks: async (id, fields) => {
@@ -107,6 +110,10 @@ function createFakeRepository() {
       insertReturningCalls.push(row);
       return insertReturningResult;
     },
+    findMetadataById: async (id) => {
+      findMetadataByIdCalls.push(id);
+      return findMetadataByIdResult;
+    },
   };
 
   return {
@@ -121,6 +128,7 @@ function createFakeRepository() {
     deleteByParentIdCalls,
     insertCalls,
     insertReturningCalls,
+    findMetadataByIdCalls,
     setUpdateTasksResult(result: Result<void, DomainError>) {
       updateTasksResult = result;
     },
@@ -150,6 +158,9 @@ function createFakeRepository() {
     },
     setInsertReturningResult(result: Result<Record<string, unknown> | null, DomainError>) {
       insertReturningResult = result;
+    },
+    setFindMetadataByIdResult(result: Result<Record<string, unknown> | null, DomainError>) {
+      findMetadataByIdResult = result;
     },
   };
 }
@@ -996,5 +1007,150 @@ describe('canvas.updatePostTitleBestEffort', () => {
       expect(result.error.code).toBe('validation');
     }
     expect(fake.updateTitleCalls).toHaveLength(0);
+  });
+});
+
+describe('canvas.updatePostComments', () => {
+  const savedComments = [
+    { id: 'c-1', text: 'first' },
+    { id: 'c-2', text: 'second' },
+  ];
+
+  it('comments branch: merges over the FETCHED metadata and mirrors into content via the tasks triple', async () => {
+    const fake = createFakeRepository();
+    fake.setFindMetadataByIdResult(ok({ todoTitle: 'Note', pinned: true, comments: [{ id: 'c-old' }] }));
+    const updatePostComments = createUpdatePostCommentsCommand(fake.repository);
+
+    const result = await updatePostComments(
+      { postId: 'post-1', field: 'comments', comments: savedComments, updatedAt: '2026-07-10T12:00:00.000Z' },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    expect(fake.findMetadataByIdCalls).toEqual(['post-1']);
+    expect(fake.updateTasksCalls).toHaveLength(1);
+    expect(fake.updateTasksCalls[0].id).toBe('post-1');
+    expect(fake.updateTasksCalls[0].fields.metadata).toEqual({
+      todoTitle: 'Note',
+      pinned: true,
+      comments: savedComments,
+    });
+    expect(fake.updateTasksCalls[0].fields.content).toBe(JSON.stringify(savedComments));
+    expect(fake.updateTasksCalls[0].fields.updatedAt).toBe('2026-07-10T12:00:00.000Z');
+    expect(fake.updateMetadataCalls).toHaveLength(0);
+  });
+
+  it('detachedComments branch: writes metadata + the INPUT timestamp only - no content column', async () => {
+    const fake = createFakeRepository();
+    fake.setFindMetadataByIdResult(ok({ comments: [{ id: 'kept' }] }));
+    const updatePostComments = createUpdatePostCommentsCommand(fake.repository);
+
+    const result = await updatePostComments(
+      { postId: 'post-1', field: 'detachedComments', comments: savedComments, updatedAt: '2026-07-10T12:00:00.000Z' },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    expect(fake.updateMetadataCalls).toHaveLength(1);
+    expect(fake.updateMetadataCalls[0].fields.metadata).toEqual({
+      comments: [{ id: 'kept' }],
+      detachedComments: savedComments,
+    });
+    expect(fake.updateMetadataCalls[0].fields.updatedAt).toBe('2026-07-10T12:00:00.000Z');
+    expect(Object.keys(fake.updateMetadataCalls[0].fields)).toEqual(['metadata', 'updatedAt']);
+    expect(fake.updateTasksCalls).toHaveLength(0);
+  });
+
+  it('merges over {} when the post row is missing or its metadata is null (legacy || {} fact)', async () => {
+    const fake = createFakeRepository();
+    fake.setFindMetadataByIdResult(ok(null));
+    const updatePostComments = createUpdatePostCommentsCommand(fake.repository);
+
+    const result = await updatePostComments(
+      { postId: 'post-1', field: 'comments', comments: savedComments, updatedAt: '2026-07-10T12:00:00.000Z' },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    expect(fake.updateTasksCalls[0].fields.metadata).toEqual({ comments: savedComments });
+  });
+
+  it('read leg is HONEST: a read failure aborts with no write', async () => {
+    const fake = createFakeRepository();
+    fake.setFindMetadataByIdResult(err(domainError('unavailable', 'db down')));
+    const updatePostComments = createUpdatePostCommentsCommand(fake.repository);
+
+    const result = await updatePostComments(
+      { postId: 'post-1', field: 'comments', comments: [], updatedAt: '2026-07-10T12:00:00.000Z' },
+      ctx,
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe('unavailable');
+    }
+    expect(fake.updateTasksCalls).toHaveLength(0);
+    expect(fake.updateMetadataCalls).toHaveLength(0);
+  });
+
+  it('preserves the legacy swallow: a resolved comments-write failure still returns ok', async () => {
+    const fake = createFakeRepository();
+    fake.setUpdateTasksResult(err(domainError('unavailable', 'db down')));
+    const updatePostComments = createUpdatePostCommentsCommand(fake.repository);
+
+    const result = await updatePostComments(
+      { postId: 'post-1', field: 'comments', comments: [], updatedAt: '2026-07-10T12:00:00.000Z' },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    expect(fake.updateTasksCalls).toHaveLength(1);
+  });
+
+  it('preserves the legacy swallow: a resolved detached-write failure still returns ok', async () => {
+    const fake = createFakeRepository();
+    fake.setUpdateMetadataResult(err(domainError('unavailable', 'db down')));
+    const updatePostComments = createUpdatePostCommentsCommand(fake.repository);
+
+    const result = await updatePostComments(
+      { postId: 'post-1', field: 'detachedComments', comments: [], updatedAt: '2026-07-10T12:00:00.000Z' },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    expect(fake.updateMetadataCalls).toHaveLength(1);
+  });
+
+  it('rejects a field outside the two legacy stores without reading or writing', async () => {
+    const fake = createFakeRepository();
+    const updatePostComments = createUpdatePostCommentsCommand(fake.repository);
+
+    const result = await updatePostComments(
+      { postId: 'post-1', field: 'other', comments: [], updatedAt: '2026-07-10T12:00:00.000Z' },
+      ctx,
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe('validation');
+    }
+    expect(fake.findMetadataByIdCalls).toHaveLength(0);
+    expect(fake.updateTasksCalls).toHaveLength(0);
+  });
+
+  it('rejects invalid input without calling the repository', async () => {
+    const fake = createFakeRepository();
+    const updatePostComments = createUpdatePostCommentsCommand(fake.repository);
+
+    const result = await updatePostComments(
+      { postId: 'post-1', field: 'comments', updatedAt: '2026-07-10T12:00:00.000Z' },
+      ctx,
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe('validation');
+    }
+    expect(fake.findMetadataByIdCalls).toHaveLength(0);
   });
 });
