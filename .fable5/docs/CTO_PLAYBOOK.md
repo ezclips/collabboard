@@ -690,6 +690,31 @@ architecture capped at 20/20, same standing ruling. Fourth consecutive
 fully clean review — zero disclosure gaps found anywhere in scope,
 byte-untouched gates, census, or semantics. Grandfather held at 2. Axis
 snapshot at 76 (unchanged): safety 19, ops 13, architecture 20,
+product 13, continuity 11.) → **76 (held)** (2026-07-10: PATCH-036 landed
+and passed review — the twelfth Pattern K group, and the NON-AUTH
+PADLETS EXTINCTION patch: after it landed, CanvasClient's entire
+remaining supabase surface is the auth trio. Introduced the aggregate's
+FIRST READ method, `findMetadataById` — an owner-requested ruling that it
+belongs to the write-serving repository (an RMW-cycle read, not a
+rendering read) rather than staying raw at the call site. The write leg
+needed ZERO new repository methods: analysis showed both `field`
+branches were byte-identical in shape to the ALREADY-EXISTING
+`updateTasks`/`updateMetadata`, so the new command
+`canvas.updatePostComments` — the program's FIRST MIXED-CONTRACT command
+— reuses them directly (read leg honest, write leg the NINTH
+command-internal swallow site, no authorized behavior change in either
+channel). Landed byte-perfect on GPT-5.4: all five hashes exact against
+the live spec's own declarations, and the review byte-compared each of
+the four whole-file fences DIRECTLY against its live file in addition to
+the hash gates, continuing the strongest binding check. 84 bound tests
+incl. all 72 existing re-run non-breaking; unit 192/24, tsc clean,
+boundaries clean, e2e 27/27 (reviewer's own warmed server), port gate 0
+before and after, `npm run verify` green; monolith 8,400→8,384;
+`from('padlets')` and `maybeSingle` both EXTINCT (2→0, 1→0). No credit:
+architecture capped at 20/20, same standing ruling. Fifth consecutive
+fully clean review — zero disclosure gaps found anywhere in scope,
+byte-untouched gates, census, or semantics. Grandfather held at 2. Axis
+snapshot at 76 (unchanged): safety 19, ops 13, architecture 20,
 product 13, continuity 11.)
 
 ## 13. The succession test
