@@ -154,7 +154,8 @@ follow 017's Pattern H).
 | 026 | CanvasClient strangler group 1: the complete `board_sections` write family (6 sites / 4 handlers → FIVE commands on the canvas trunk: create/rename/delete/swapPositions/reorder; `lib/domain/canvas/sections.ts` + `lib/infra/canvas/sectionsRepository.ts`, sibling aggregate to posts — one folder family, P6); monolith SHRINKS 8,526→8,518; NO grandfather movement (2→2, CanvasClient keeps 70 other sites); reorder's legacy error-swallow PRESERVED + documented + queued as P3-family defect | **GPT-5.4 acceptable** (Pattern K: 17 bound unit tests compiled AND run green at authoring — incl. dedicated tests for the swap's partial-failure and the reorder's preserved swallow; supersedes the provisional "GPT-5.5 first group" note, which predated Pattern K's PATCH-025 proof) | **✅ DONE — `24bdf94`, CTO review PASSED 2026-07-10** (all four new files byte-identical to bindings; CanvasClient diff matches §5a-§5f exactly incl. blank-line binding; unit 102/22, e2e 27/27, verify green — all re-run by reviewer; monolith 8,526→8,518 (first shrink, but architecture is capped at 20 — health holds at 76, no credit expressible); grandfather untouched 2→2; first fully clean disclosure in the review chain) |
 | 027 | CanvasClient strangler group 2: the complete `boards` update family (4 sites / 4 handlers → FOUR commands: `canvas.setMapStyle`/`setBoardBackground`/`setBoardCover`/`setChronoMode`; `lib/domain/canvas/board.ts` + `lib/infra/canvas/boardRepository.ts`, third sibling aggregate — P6 collision ruling: the unconsumed exemplar `lib/domain/boards/repository.ts` is a different concern, zero importers/implementations, stays byte-untouched); THREE distinct legacy error semantics preserved (toast-return, scope-annotated throw, SILENT SWALLOW — chrono mode is the second swallow site, standing decision extended at review); map-style write's missing updated_at preserved as a typed fact (dedicated repository method + `Object.keys` test); monolith 8,518→8,517; grandfather 2→2 | **GPT-5.4 acceptable** (Pattern K, third application: 15 bound tests compiled AND run green at authoring; two named casts — the new `as object` re-throw + the relocated legacy `as any`) | **✅ DONE — `261d36e`, CTO review PASSED 2026-07-10** (all four new files byte-identical to bindings — verified against the spec fences AND the CTO's original scratch-tested copies; CanvasClient diff matches §5a-§5e exactly, no other lines touched; unit 117/24, e2e 27/18, boundaries/typecheck clean — all re-run by reviewer; monolith 8,518→8,517 confirmed, EOF blank line exact; grandfather untouched 2→2; second fully clean disclosure in the review chain — both reported deviations (curl warm-up quirk, transient EOF-blank miscount) were environment/process notes, not undisclosed code drift) |
 | 028 | CanvasClient strangler group 3: the complete `padlets` DELETE family (8 sites / 6 handlers → FOUR commands EXTENDING the posts aggregate, no new files — first extension-only Pattern K: `canvas.deletePost`/`deletePosts`/`deleteChildPosts`/`deleteContainerChild`; the unconditional UPDATE+DELETE cascade in handleDeleteChildFromContainer is ONE command per §7, taking its paired update out of the UPDATE census 33→32; the CONDITIONAL cascades (requestDeletePadlet, Wall onPadletDelete) are composed from two thin commands at the call site to preserve exact DB traffic — recorded §0.4 ruling); TWO child-cascade console-swallows preserved AT THE CALL SITE (commands return honest Results, call sites log-and-continue — not command-internal swallows, no standing-decision extension); deleteMapPinContainer's container leg stays on the hook helper (hook layer untouched); monolith 8,517→8,507; blank census 727→726 bound; grandfather 2→2 | **GPT-5.4 acceptable** (Pattern K, fourth application: 25 bound tests — 16 new + 9 existing — compiled AND run green at authoring; edit simulated end-to-end by the CTO, all derived gates verified against the simulation, which caught one import-line substring collision before binding) | **✅ DONE — `0964195`, CTO review PASSED 2026-07-10** (all seven CanvasClient blocks + import block diffed byte-identical to bindings; posts.ts/postsRepository.ts/postsRepository.test.ts byte-identical to bindings; posts.test.ts had one undisclosed interior blank-line drop offset by a gained trailing blank line — accepted, whitespace-only, disclosure-gap chain continues; unit 133/24, e2e 27/18, boundaries/typecheck clean, all census numbers incl. the createPostsRepository:9 collision confirmed — all re-run by reviewer; all byte-untouched files (PostCardContent, FreeformPadletCards, board/sections trunks, exemplar, eslint config) confirmed empty-diff; hook helper call untouched; all five files LF-only) |
-| 029+ | CanvasClient strangler, remaining groups per site map §7: `padlets` INSERT family (19, container+post pairs = one command), `padlets` UPDATE slices (32 after 028, 18 in the JSX region — different edit shape), storage pair (Pattern H consumer), auth trio (existing seams); then hooks (26 read sites); FreeformPadletCards LAST; realtime/presence CTO-only, undesigned | per-group; Pattern K where bound tests can carry semantics | site map §7 is the sequencing source |
+| 029 | CanvasClient strangler group 4: the complete `padlets` INSERT family (19 sites / 12 handlers → SIX commands EXTENDING the posts aggregate, second extension-only Pattern K, no new files: `canvas.createPost`/`createPostAndSelect`/`createContainerWithPost`/`groupPostIntoContainer`/`attachPostToSchedulerContainer`/`createSchedulerContainerWithPost` + repo methods `insert`/`insertReturning`/`updateMetadataUnstamped`); INSERT goes EXTINCT like DELETE did; two paired UPDATE sites travel with their cascades (UPDATE census 32→30); the SCHEDULER SILENT-SWALLOW CLUSTER (five bare-awaited statements) preserved as command-internal swallows — swallow-family sites 3+4, EXTEND the standing decision at review; three compensation semantics preserved at call sites incl. two hook-helper cleanups; groupIntoColumn's unstamped update pinned by `Object.keys === ['metadata']` test; five named casts; compact-form blocks bound to satisfy the never-grow rule — monolith 8,507→8,504, blank 726→724; NEW: bound `git hash-object` byte-identity gates for ALL FIVE final files (computed from the CTO's edit simulation — the anti-cancellation gate) | **GPT-5.4 acceptable** (Pattern K, fifth application: 46 bound tests — 21 new + 25 existing — compiled AND run green at authoring; 11 swap shapes compile-verified incl. Padlet-interface assignability via `z.custom<object>`; full edit simulated, all gates measured on the simulation) | **READY — `patches/PATCH-029.md`** (16 OLD blocks byte-diffed; spec fences self-verified against the scratch-tested copies AND the simulation; post-edit CanvasClient hash bound) |
+| 030+ | CanvasClient strangler, remaining groups per site map §7: `padlets` UPDATE slices (30 after 029, 18 in the JSX region — different edit shape), the lone padlets select, storage pair (Pattern H consumer), auth trio (existing seams); then hooks (26 read sites); FreeformPadletCards LAST; realtime/presence CTO-only, undesigned | per-group; Pattern K where bound tests can carry semantics | site map §7 is the sequencing source |
 
 **Fable-window critical path (closes 2026-07-12).** In priority order:
 ① specs 017–019 (unblocks GPT-5.4 for the whole of batch 3), ② specs
@@ -328,6 +329,45 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-10** — PATCH-029 AUTHORED (handoff-ready; **GPT-5.4
+  acceptable** under Pattern K, fifth application — 46 bound unit tests
+  (21 new + the 25 existing posts tests re-run to prove the second
+  extension non-breaking) compiled and run GREEN at authoring; scratch
+  tsc --strict clean; all 11 distinct call-site swap shapes
+  compile-verified, including the family's typing crux: insert rows are
+  `Padlet`-typed interface locals with no index signature, so the input
+  schema is `z.custom<object>` — record-typed inputs would have forced
+  a cast at every call site). Fourth CanvasClient strangler group: the
+  COMPLETE `padlets` INSERT family (19 sites / 12 handlers) becomes SIX
+  commands extending the posts aggregate — INSERT goes extinct like
+  DELETE did. The two unconditional cascade pairs became single
+  commands per the site-map rule (`createContainerWithPost`,
+  `groupPostIntoContainer` — the latter pulls the famous unstamped
+  parentId update, pinned by an `Object.keys === ['metadata']` infra
+  test); the three container-after-child flows stay COMPOSED at the
+  call sites because the second payload is built from the first
+  statement's returned row and failure compensation calls the HOOK
+  helper `deletePadletByIdRaw` (three different compensation semantics
+  preserved byte-for-byte: wall no-cleanup, horizontal-all cleanup,
+  columns commented-cleanup). Biggest find: the SCHEDULER SILENT-SWALLOW
+  CLUSTER — five bare-awaited insert/update statements across three
+  handlers that never read resolved errors — preserved as two
+  command-internal swallows (`attachPostToSchedulerContainer`,
+  `createSchedulerContainerWithPost`), swallow-family sites 3 and 4;
+  the standing owner-decision entry must be EXTENDED at review
+  closeout. Five named casts (four `value as any` relocating supabase's
+  implicit any, one relocated metadata cast). Line-budget ruling: five
+  NEW blocks bound in compact single-line-call form so the over-ceiling
+  file SHRINKS (8,507→8,504 measured on the simulation; a naive
+  multi-line binding would have GROWN it +7 and violated rule 3).
+  NEW GATE CLASS: bound `git hash-object` byte-identity gates for all
+  five final files — the post-edit CanvasClient hash comes from the
+  CTO's full edit simulation, closing the PATCH-028 line-count
+  cancellation gap (owner-requested); the simulation also corrected the
+  CTO's hand-summed net line movement (−3, not −2) — the edit-simulation
+  rule paying out a second time. Suite 133/24 → 154/24; e2e stays
+  27/18; grandfather 2→2; padlets sites 52→31. No PATCH-030 drafted —
+  029 is one complete table-operation family, no split needed.
 - **2026-07-10** — PATCH-028 landed and reviewed: **PASSED** (commit
   `0964195`, GPT-5.4). All 19 review-focus points independently
   re-verified. Scope exact: 5 files touched, matching the spec's list
