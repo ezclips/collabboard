@@ -600,6 +600,30 @@ discipline itself, same standing as prior instrument-class entries
 rather than a fresh safety event. Grandfather held at 2, no credit
 sought or given for metric-only movement. Axis snapshot at 76
 (unchanged): safety 19, ops 13, architecture 20, product 13,
+continuity 11.) → **76 (held)** (2026-07-10: PATCH-032 landed and passed
+review — the eighth Pattern K group, delegated after two owner-requested
+rulings in one authoring pass: a bare-awaited cluster (7 sites) extended
+the standing P3 swallow family from four to SIX command-internal sites,
+each individually test-pinned; a check-and-branch pair received the
+program's SECOND authorized behavior change, converging a previously
+silent thrown-mode failure onto the same existing user-visible failure
+branch (P3 — report failures honestly), with the resolved-mode branch
+left byte-identical. Landed byte-perfect on GPT-5.4, all three bound
+hashes confirmed exact against the LIVE spec (re-derived from disk, not
+cache — the reviewer applied the 031 correction directly), all nine
+CanvasClient blocks byte-identical to the live fences, 45 bound tests
+incl. the 39 existing posts tests re-run to prove non-breaking, and
+CanvasClient's line count SHRANK again (8,475→8,450). Named-function
+padlets UPDATE went EXTINCT (9→0). No credit: architecture stays at its
+20/20 ceiling, same capped-axis ruling as PATCH-019/020/021/026-031. No
+other axis moved: ops/product/continuity unchanged. Process note, not
+axis-moving: the spec author reconstructed the spec's own final hashes
+from its OLD/NEW fences before delegation — a direct process improvement
+from 031's near-miss, already reflected in ops capacity rather than a
+fresh safety event — and the review was the first fully clean pass since
+the correction (zero disclosure gaps). Grandfather held at 2, no credit
+sought or given for metric-only movement. Axis snapshot at 76
+(unchanged): safety 19, ops 13, architecture 20, product 13,
 continuity 11.)
 
 ## 13. The succession test
