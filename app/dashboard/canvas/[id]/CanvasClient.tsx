@@ -45,7 +45,14 @@ import {
   createSetChronoModeCommand,
   createSetMapStyleCommand,
 } from '@/lib/domain/canvas/board';
+import {
+  createDeleteChildPostsCommand,
+  createDeleteContainerChildCommand,
+  createDeletePostCommand,
+  createDeletePostsCommand,
+} from '@/lib/domain/canvas/posts';
 import { createCanvasBoardRepository } from '@/lib/infra/canvas/boardRepository';
+import { createPostsRepository } from '@/lib/infra/canvas/postsRepository';
 import { createSectionsRepository } from '@/lib/infra/canvas/sectionsRepository';
 import type { Padlet, BoardSection, PendingPostDraft, NewPostDragState, DropIndicatorState, CanvasLine } from '@/types/collabboard';
 import { User, Session } from '@supabase/supabase-js';
@@ -2677,12 +2684,10 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   const deletePadletById = async (id: string) => {
     debugCanvasLogger('saveStart', { op: 'deletePadletById', id });
     try {
-      const { error } = await supabase
-        .from('padlets')
-        .delete()
-        .eq('id', id);
+      const deletePost = createDeletePostCommand(createPostsRepository());
+      const result = await deletePost({ postId: id }, { userId: null });
 
-      if (error) throw error;
+      if (!result.ok) throw result.error.cause ?? result.error;
 
       setPadlets(prev => prev.filter(p => p.id !== id));
       if (selectedPadletId === id) {
@@ -2723,12 +2728,10 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       setPadlets(prev => prev.filter(p => p.id !== padletId));
 
       // Delete from database
-      const { error } = await supabase
-        .from('padlets')
-        .delete()
-        .eq('id', padletId);
+      const deletePost = createDeletePostCommand(createPostsRepository());
+      const result = await deletePost({ postId: padletId }, { userId: null });
 
-      if (error) throw error;
+      if (!result.ok) throw result.error.cause ?? result.error;
 
       // Success feedback
 
@@ -2742,12 +2745,10 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         setPadlets(prev => prev.filter(p => p.metadata?.parentId !== padletId)); // Remove children from UI
 
         // DB delete for children
-        const { error: childError } = await supabase
-          .from('padlets')
-          .delete()
-          .eq('metadata->>parentId', padletId); // Efficient DB delete
+        const deleteChildPosts = createDeleteChildPostsCommand(createPostsRepository());
+        const childResult = await deleteChildPosts({ parentId: padletId }, { userId: null });
 
-        if (childError) console.error('Failed to delete children:', childError);
+        if (!childResult.ok) console.error('Failed to delete children:', childResult.error.cause ?? childResult.error);
       }
 
 
@@ -2790,12 +2791,10 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       if (containerError) throw containerError;
 
       if (childIds.length > 0) {
-        const { error: childError } = await supabase
-          .from('padlets')
-          .delete()
-          .in('id', childIds);
-        if (childError) {
-          console.error('Failed to delete map pin children:', childError);
+        const deletePosts = createDeletePostsCommand(createPostsRepository());
+        const childResult = await deletePosts({ postIds: childIds }, { userId: null });
+        if (!childResult.ok) {
+          console.error('Failed to delete map pin children:', childResult.error.cause ?? childResult.error);
         }
       }
 
@@ -3525,11 +3524,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     setSelectedPadletIds([]);
 
     try {
-      const { error } = await supabase
-        .from('padlets')
-        .delete()
-        .in('id', idsToDelete);
-      if (error) throw error;
+      const deletePosts = createDeletePostsCommand(createPostsRepository());
+      const result = await deletePosts({ postIds: idsToDelete }, { userId: null });
+      if (!result.ok) throw result.error.cause ?? result.error;
     } catch (error) {
       console.error('Failed to undo pasted padlets:', error);
       toast.error('Failed to undo paste');
@@ -4262,20 +4259,17 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     );
 
     try {
-      const { error: containerError } = await supabase
-        .from('padlets')
-        .update({
-          metadata: { ...container.metadata, childPadletIds: newChildIds },
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', containerId);
-      if (containerError) throw containerError;
-
-      const { error: childError } = await supabase
-        .from('padlets')
-        .delete()
-        .eq('id', childId);
-      if (childError) throw childError;
+      const deleteContainerChild = createDeleteContainerChildCommand(createPostsRepository());
+      const result = await deleteContainerChild(
+        {
+          containerId,
+          childId,
+          containerMetadata: ((container.metadata as any) || {}),
+          childPadletIds: newChildIds,
+        },
+        { userId: null }
+      );
+      if (!result.ok) throw result.error.cause ?? result.error;
 
       toast.success('Post deleted');
     } catch (err) {
@@ -6749,20 +6743,16 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                     setPadlets(prev => prev.filter(p => p.id !== padletId && p.metadata?.parentId !== padletId));
 
                     // DB delete item
-                    const { error } = await supabase
-                      .from('padlets')
-                      .delete()
-                      .eq('id', padletId);
+                    const deletePost = createDeletePostCommand(createPostsRepository());
+                    const result = await deletePost({ postId: padletId }, { userId: null });
 
-                    if (error) throw error;
+                    if (!result.ok) throw result.error.cause ?? result.error;
 
                     // Delete children from DB
-                    const { error: childError } = await supabase
-                      .from('padlets')
-                      .delete()
-                      .eq('metadata->>parentId', padletId);
+                    const deleteChildPosts = createDeleteChildPostsCommand(createPostsRepository());
+                    const childResult = await deleteChildPosts({ parentId: padletId }, { userId: null });
 
-                    if (childError) console.error('Failed to delete children:', childError);
+                    if (!childResult.ok) console.error('Failed to delete children:', childResult.error.cause ?? childResult.error);
 
                     toast.success(isContainer ? 'Container deleted' : 'Post deleted');
                   } catch (err) {

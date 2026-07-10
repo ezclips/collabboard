@@ -11,16 +11,14 @@ function createFakeClient(error: FakeError | null = null) {
   const fromTables: string[] = [];
   const updateCalls: Array<Record<string, unknown>> = [];
   const eqCalls: Array<{ column: string; value: string }> = [];
+  const deleteEqCalls: Array<{ column: string; value: string }> = [];
+  const deleteInCalls: Array<{ column: string; values: readonly string[] }> = [];
 
   const client = {
     from(table: 'padlets') {
       fromTables.push(table);
       return {
-        update(payload: {
-          content: string;
-          metadata: Record<string, unknown>;
-          updated_at: string;
-        }) {
+        update(payload: Record<string, unknown>) {
           updateCalls.push(payload);
           return {
             eq: async (column: 'id', value: string) => {
@@ -29,11 +27,23 @@ function createFakeClient(error: FakeError | null = null) {
             },
           };
         },
+        delete() {
+          return {
+            eq: async (column: string, value: string) => {
+              deleteEqCalls.push({ column, value });
+              return { error };
+            },
+            in: async (column: string, values: readonly string[]) => {
+              deleteInCalls.push({ column, values });
+              return { error };
+            },
+          };
+        },
       };
     },
   };
 
-  return { client, fromTables, updateCalls, eqCalls };
+  return { client, fromTables, updateCalls, eqCalls, deleteEqCalls, deleteInCalls };
 }
 
 const fields = {
@@ -83,5 +93,72 @@ describe('SupabasePostsRepository', () => {
     await repository.updateTasks(asPostId('post-2'), fields);
 
     expect(updateCalls).toHaveLength(2);
+  });
+
+  it('updateMetadata sends exactly the metadata and updated_at payload', async () => {
+    const { client, updateCalls, eqCalls } = createFakeClient();
+    const repository = new SupabasePostsRepository(client);
+
+    const result = await repository.updateMetadata(asPostId('container-1'), {
+      metadata: { title: 'Box', childPadletIds: ['child-1'] },
+      updatedAt: '2026-07-10T08:00:00.000Z',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(updateCalls).toEqual([
+      {
+        metadata: { title: 'Box', childPadletIds: ['child-1'] },
+        updated_at: '2026-07-10T08:00:00.000Z',
+      },
+    ]);
+    expect(Object.keys(updateCalls[0])).toEqual(['metadata', 'updated_at']);
+    expect(eqCalls).toEqual([{ column: 'id', value: 'container-1' }]);
+  });
+
+  it('deleteById issues a padlets delete filtered by the post id', async () => {
+    const { client, fromTables, deleteEqCalls, updateCalls } = createFakeClient();
+    const repository = new SupabasePostsRepository(client);
+
+    const result = await repository.deleteById(asPostId('post-1'));
+
+    expect(result.ok).toBe(true);
+    expect(fromTables).toEqual(['padlets']);
+    expect(deleteEqCalls).toEqual([{ column: 'id', value: 'post-1' }]);
+    expect(updateCalls).toHaveLength(0);
+  });
+
+  it('deleteByIds issues a padlets delete with the exact id list', async () => {
+    const { client, deleteInCalls, deleteEqCalls } = createFakeClient();
+    const repository = new SupabasePostsRepository(client);
+
+    const result = await repository.deleteByIds([asPostId('post-1'), asPostId('post-2')]);
+
+    expect(result.ok).toBe(true);
+    expect(deleteInCalls).toEqual([{ column: 'id', values: ['post-1', 'post-2'] }]);
+    expect(deleteEqCalls).toHaveLength(0);
+  });
+
+  it('deleteByParentId filters on the metadata->>parentId column', async () => {
+    const { client, deleteEqCalls } = createFakeClient();
+    const repository = new SupabasePostsRepository(client);
+
+    const result = await repository.deleteByParentId(asPostId('container-1'));
+
+    expect(result.ok).toBe(true);
+    expect(deleteEqCalls).toEqual([{ column: 'metadata->>parentId', value: 'container-1' }]);
+  });
+
+  it('maps a delete error to an unavailable DomainError carrying the cause', async () => {
+    const supabaseError = { code: '42501', message: 'permission denied' };
+    const { client } = createFakeClient(supabaseError);
+    const repository = new SupabasePostsRepository(client);
+
+    const result = await repository.deleteById(asPostId('post-1'));
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe('unavailable');
+      expect(result.error.cause).toBe(supabaseError);
+    }
   });
 });
