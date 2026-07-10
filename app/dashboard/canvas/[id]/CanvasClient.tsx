@@ -46,10 +46,16 @@ import {
   createSetMapStyleCommand,
 } from '@/lib/domain/canvas/board';
 import {
+  createAttachPostToSchedulerContainerCommand,
+  createCreateContainerWithPostCommand,
+  createCreatePostAndSelectCommand,
+  createCreatePostCommand,
+  createCreateSchedulerContainerWithPostCommand,
   createDeleteChildPostsCommand,
   createDeleteContainerChildCommand,
   createDeletePostCommand,
   createDeletePostsCommand,
+  createGroupPostIntoContainerCommand,
 } from '@/lib/domain/canvas/posts';
 import { createCanvasBoardRepository } from '@/lib/infra/canvas/boardRepository';
 import { createPostsRepository } from '@/lib/infra/canvas/postsRepository';
@@ -1793,13 +1799,11 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       // 3. Create Child Post
       const childPayload = draftToInsertPayload(wallPendingPostDraft, containerId);
 
-      const { data: childData, error: childError } = await supabase
-        .from('padlets')
-        .insert(childPayload)
-        .select()
-        .single();
+      const createPostAndSelect = createCreatePostAndSelectCommand(createPostsRepository());
+      const childResult = await createPostAndSelect({ row: childPayload }, { userId: null });
 
-      if (childError) throw childError;
+      if (!childResult.ok) throw childResult.error.cause ?? childResult.error;
+      const childData = childResult.value as any;
 
       // 4. Update container metadata with child ID and save container
       const finalContainerPayload = {
@@ -1810,11 +1814,10 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         }
       };
 
-      const { error: containerError } = await supabase
-        .from('padlets')
-        .insert(finalContainerPayload);
+      const createPost = createCreatePostCommand(createPostsRepository());
+      const containerResult = await createPost({ row: finalContainerPayload }, { userId: null });
 
-      if (containerError) throw containerError;
+      if (!containerResult.ok) throw containerResult.error.cause ?? containerResult.error;
 
       // Update local state with child
       setPadlets(prev => prev.map(p => p.id === containerId ? finalContainerPayload as any : p));
@@ -1867,13 +1870,11 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       setPadlets((prev) => [...prev, containerPayload as any]);
 
       const childPayload = draftToInsertPayload(currentDraft, containerId);
-      const { data: childData, error: childError } = await supabase
-        .from('padlets')
-        .insert(childPayload)
-        .select()
-        .single();
+      const createPostAndSelect = createCreatePostAndSelectCommand(createPostsRepository());
+      const childResult = await createPostAndSelect({ row: childPayload }, { userId: null });
 
-      if (childError) throw childError;
+      if (!childResult.ok) throw childResult.error.cause ?? childResult.error;
+      const childData = childResult.value as any;
 
       const finalContainerPayload = {
         ...containerPayload,
@@ -1883,13 +1884,12 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         },
       };
 
-      const { error: containerError } = await supabase
-        .from('padlets')
-        .insert(finalContainerPayload);
+      const createPost = createCreatePostCommand(createPostsRepository());
+      const containerResult = await createPost({ row: finalContainerPayload }, { userId: null });
 
-      if (containerError) {
+      if (!containerResult.ok) {
         await deletePadletByIdRaw(childData.id);
-        throw containerError;
+        throw containerResult.error.cause ?? containerResult.error;
       }
 
       setPadlets((prev) => prev.map((p) => (
@@ -2021,11 +2021,10 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       setPadlets(prev => [...prev, containerPayload as any]);
 
       // 4. Insert it into the database
-      const { error } = await supabase
-        .from('padlets')
-        .insert(containerPayload);
+      const createPost = createCreatePostCommand(createPostsRepository());
+      const result = await createPost({ row: containerPayload }, { userId: null });
 
-      if (error) throw error;
+      if (!result.ok) throw result.error.cause ?? result.error;
       toast.success('Empty container created');
 
     } catch {
@@ -2474,13 +2473,11 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
 
       // 4. Create Child Padlet FIRST (like Wall logic)
       const childPayload = draftToInsertPayload(currentDraft, containerId);
-      const { data: childData, error: childError } = await supabase
-        .from('padlets')
-        .insert(childPayload)
-        .select()
-        .single();
+      const createPostAndSelect = createCreatePostAndSelectCommand(createPostsRepository());
+      const childResult = await createPostAndSelect({ row: childPayload }, { userId: null });
 
-      if (childError) throw childError;
+      if (!childResult.ok) throw childResult.error.cause ?? childResult.error;
+      const childData = childResult.value as any;
 
       // 5. Now create the final container payload WITH the child ID
       const finalContainerPayload = {
@@ -2492,14 +2489,13 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       };
 
       // 6. Insert the container with child ID (single insert, not insert+update)
-      const { error: containerError } = await supabase
-        .from('padlets')
-        .insert(finalContainerPayload);
+      const createPost = createCreatePostCommand(createPostsRepository());
+      const containerResult = await createPost({ row: finalContainerPayload }, { userId: null });
 
-      if (containerError) {
+      if (!containerResult.ok) {
         // Cleanup child if container fails
         await deletePadletByIdRaw(childData.id);
-        throw containerError;
+        throw containerResult.error.cause ?? containerResult.error;
       }
 
 
@@ -3647,25 +3643,19 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         },
       };
 
-      const { data: containerData, error: containerError } = await supabase
-        .from('padlets')
-        .insert(containerPadlet)
-        .select()
-        .single();
-
-      if (containerError) throw containerError;
-
       // Update the original padlet to set parentId
       const updatedMeta = {
         ...padlet.metadata,
         parentId: containerId,
       };
-      const { error: updateError } = await supabase
-        .from('padlets')
-        .update({ metadata: updatedMeta })
-        .eq('id', id);
+      const groupPostIntoContainer = createGroupPostIntoContainerCommand(createPostsRepository());
+      const result = await groupPostIntoContainer(
+        { containerRow: containerPadlet, postId: id, postMetadata: updatedMeta },
+        { userId: null }
+      );
 
-      if (updateError) throw updateError;
+      if (!result.ok) throw result.error.cause ?? result.error;
+      const containerData = result.value as any;
 
       // Update local state
       if (containerData) {
@@ -4344,8 +4334,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       },
     };
     setPadlets((prev) => [...prev, newContainer]);
-    const { error } = await supabase.from('padlets').insert(newContainer);
-    if (error) {
+    const createPost = createCreatePostCommand(createPostsRepository());
+    const result = await createPost({ row: newContainer }, { userId: null });
+    if (!result.ok) {
       setPadlets((prev) => prev.filter((p) => p.id !== containerId));
       toast.error('Failed to create container');
       return false;
@@ -4449,8 +4440,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       ordered.splice(insertPosition, 0, newContainer);
       setPadlets((prev) => [...prev, newContainer]);
       await applyTimelineOrder(ordered);
-      const { error } = await supabase.from('padlets').insert(newContainer);
-      if (error) throw error;
+      const createPost = createCreatePostCommand(createPostsRepository());
+      const result = await createPost({ row: newContainer }, { userId: null });
+      if (!result.ok) throw result.error.cause ?? result.error;
     } catch (err) {
       console.error('Failed to insert timeline container:', err);
       toast.error('Failed to create container');
@@ -4497,8 +4489,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       ordered.splice(insertPos, 0, newContainer);
       setPadlets((prev) => [...prev, newContainer]);
       await applyTimelineOrder(ordered);
-      const { error } = await supabase.from('padlets').insert(newContainer);
-      if (error) throw error;
+      const createPost = createCreatePostCommand(createPostsRepository());
+      const result = await createPost({ row: newContainer }, { userId: null });
+      if (!result.ok) throw result.error.cause ?? result.error;
     } catch (err) {
       console.error('Failed to duplicate container:', err);
       toast.error('Failed to duplicate container');
@@ -4573,10 +4566,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       await applyTimelineOrder(ordered);
 
       // Persist to database
-      const { error: containerError } = await supabase.from('padlets').insert(newContainer);
-      if (containerError) throw containerError;
-      const { error: padletError } = await supabase.from('padlets').insert(newPadlet);
-      if (padletError) throw padletError;
+      const createContainerWithPost = createCreateContainerWithPostCommand(createPostsRepository());
+      const result = await createContainerWithPost({ containerRow: newContainer, postRow: newPadlet }, { userId: null });
+      if (!result.ok) throw result.error.cause ?? result.error;
     } catch (err) {
       console.error('Failed to create container with library item:', err);
       toast.error('Failed to create container');
@@ -4806,14 +4798,18 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           newPost,
         ]);
 
-        await supabase.from('padlets').insert(newPost);
-        await supabase
-          .from('padlets')
-          .update({
-            metadata: { ...existingContainer.metadata, childPadletIds: newChildIds },
-            updated_at: now,
-          })
-          .eq('id', existingContainer.id);
+        const attachPostToSchedulerContainer = createAttachPostToSchedulerContainerCommand(createPostsRepository());
+        const attachResult = await attachPostToSchedulerContainer(
+          {
+            postRow: newPost,
+            containerId: existingContainer.id,
+            containerMetadata: ((existingContainer.metadata as any) || {}),
+            childPadletIds: newChildIds,
+            updatedAt: now,
+          },
+          { userId: null }
+        );
+        if (!attachResult.ok) throw attachResult.error.cause ?? attachResult.error;
       } else {
         const newContainer: Padlet = {
           id: containerId,
@@ -4837,8 +4833,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
 
         setPadlets((prev) => [...prev, newContainer, newPost]);
 
-        await supabase.from('padlets').insert(newContainer);
-        await supabase.from('padlets').insert(newPost);
+        const createSchedulerContainerWithPost = createCreateSchedulerContainerWithPostCommand(createPostsRepository());
+        const pairResult = await createSchedulerContainerWithPost({ containerRow: newContainer, postRow: newPost }, { userId: null });
+        if (!pairResult.ok) throw pairResult.error.cause ?? pairResult.error;
       }
 
       setSelectedSchedulerSlot({ start: safeStart, end: safeEnd });
@@ -4904,8 +4901,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     setPadlets((prev) => [...prev, newContainer, newPost]);
 
     try {
-      await supabase.from('padlets').insert(newContainer);
-      await supabase.from('padlets').insert(newPost);
+      const createSchedulerContainerWithPost = createCreateSchedulerContainerWithPostCommand(createPostsRepository());
+      const pairResult = await createSchedulerContainerWithPost({ containerRow: newContainer, postRow: newPost }, { userId: null });
+      if (!pairResult.ok) throw pairResult.error.cause ?? pairResult.error;
       setSelectedSchedulerSlot({ start, end });
       setSelectedSchedulerContainerId(containerId);
       toast.success('Post added to a new time slot');
@@ -6488,13 +6486,12 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                   setPadlets(prev => [...prev, newPadlet]);
 
                   // Background sync to Supabase
-                  const { error } = await supabase
-                    .from('padlets')
-                    .insert(newPadlet);
+                  const createPost = createCreatePostCommand(createPostsRepository());
+                  const result = await createPost({ row: newPadlet }, { userId: null });
 
-                  if (error) {
+                  if (!result.ok) {
                     // Rollback on failure
-                    console.error('Failed to insert padlet, rolling back:', error);
+                    console.error('Failed to insert padlet, rolling back:', result.error.cause ?? result.error);
                     setPadlets(prev => prev.filter(p => p.id !== newPadlet.id));
                   }
                   return;

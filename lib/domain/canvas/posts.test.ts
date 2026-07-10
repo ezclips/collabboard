@@ -1,9 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
+  createAttachPostToSchedulerContainerCommand,
+  createCreateContainerWithPostCommand,
+  createCreatePostAndSelectCommand,
+  createCreatePostCommand,
+  createCreateSchedulerContainerWithPostCommand,
   createDeleteChildPostsCommand,
   createDeleteContainerChildCommand,
   createDeletePostCommand,
   createDeletePostsCommand,
+  createGroupPostIntoContainerCommand,
   createToggleTaskCommand,
 } from './posts';
 import type { PostMetadataWriteFields, PostsRepository, PostTasksWriteFields } from './posts';
@@ -29,11 +35,20 @@ function createFakeRepository() {
   const deleteByIdCalls: PostId[] = [];
   const deleteByIdsCalls: Array<readonly PostId[]> = [];
   const deleteByParentIdCalls: PostId[] = [];
+  const updateMetadataUnstampedCalls: Array<{
+    id: PostId;
+    fields: { readonly metadata: Record<string, unknown> };
+  }> = [];
+  const insertCalls: object[] = [];
+  const insertReturningCalls: object[] = [];
   let updateTasksResult: Result<void, DomainError> = ok(undefined);
   let updateMetadataResult: Result<void, DomainError> = ok(undefined);
   let deleteByIdResult: Result<void, DomainError> = ok(undefined);
   let deleteByIdsResult: Result<void, DomainError> = ok(undefined);
   let deleteByParentIdResult: Result<void, DomainError> = ok(undefined);
+  let updateMetadataUnstampedResult: Result<void, DomainError> = ok(undefined);
+  const insertResultQueue: Array<Result<void, DomainError>> = [];
+  let insertReturningResult: Result<Record<string, unknown> | null, DomainError> = ok(null);
 
   const repository: PostsRepository = {
     updateTasks: async (id, fields) => {
@@ -43,6 +58,10 @@ function createFakeRepository() {
     updateMetadata: async (id, fields) => {
       updateMetadataCalls.push({ id, fields });
       return updateMetadataResult;
+    },
+    updateMetadataUnstamped: async (id, fields) => {
+      updateMetadataUnstampedCalls.push({ id, fields });
+      return updateMetadataUnstampedResult;
     },
     deleteById: async (id) => {
       deleteByIdCalls.push(id);
@@ -56,20 +75,34 @@ function createFakeRepository() {
       deleteByParentIdCalls.push(parentId);
       return deleteByParentIdResult;
     },
+    insert: async (row) => {
+      insertCalls.push(row);
+      return insertResultQueue.shift() ?? ok(undefined);
+    },
+    insertReturning: async (row) => {
+      insertReturningCalls.push(row);
+      return insertReturningResult;
+    },
   };
 
   return {
     repository,
     updateTasksCalls,
     updateMetadataCalls,
+    updateMetadataUnstampedCalls,
     deleteByIdCalls,
     deleteByIdsCalls,
     deleteByParentIdCalls,
+    insertCalls,
+    insertReturningCalls,
     setUpdateTasksResult(result: Result<void, DomainError>) {
       updateTasksResult = result;
     },
     setUpdateMetadataResult(result: Result<void, DomainError>) {
       updateMetadataResult = result;
+    },
+    setUpdateMetadataUnstampedResult(result: Result<void, DomainError>) {
+      updateMetadataUnstampedResult = result;
     },
     setDeleteByIdResult(result: Result<void, DomainError>) {
       deleteByIdResult = result;
@@ -79,6 +112,12 @@ function createFakeRepository() {
     },
     setDeleteByParentIdResult(result: Result<void, DomainError>) {
       deleteByParentIdResult = result;
+    },
+    queueInsertResults(...results: Array<Result<void, DomainError>>) {
+      insertResultQueue.push(...results);
+    },
+    setInsertReturningResult(result: Result<Record<string, unknown> | null, DomainError>) {
+      insertReturningResult = result;
     },
   };
 }
@@ -364,3 +403,250 @@ describe('canvas.deleteContainerChild', () => {
   });
 });
 
+
+describe('canvas.createPost', () => {
+  it('passes the row through verbatim - no added fields, no timestamps', async () => {
+    const fake = createFakeRepository();
+    const createPost = createCreatePostCommand(fake.repository);
+    const row = { id: 'post-1', board_id: 'board-1', title: 'Hello', metadata: { a: 1 } };
+
+    const result = await createPost({ row }, ctx);
+
+    expect(result.ok).toBe(true);
+    expect(fake.insertCalls).toEqual([row]);
+    expect(fake.insertCalls[0]).toBe(row);
+    expect(fake.insertReturningCalls).toHaveLength(0);
+  });
+
+  it('propagates a repository failure unchanged', async () => {
+    const fake = createFakeRepository();
+    fake.queueInsertResults(err(domainError('unavailable', 'db down')));
+    const createPost = createCreatePostCommand(fake.repository);
+
+    const result = await createPost({ row: { id: 'post-1' } }, ctx);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe('unavailable');
+    }
+  });
+
+  it('rejects a non-object row without calling the repository', async () => {
+    const fake = createFakeRepository();
+    const createPost = createCreatePostCommand(fake.repository);
+
+    const result = await createPost({ row: 42 }, ctx);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe('validation');
+    }
+    expect(fake.insertCalls).toHaveLength(0);
+  });
+});
+
+describe('canvas.createPostAndSelect', () => {
+  it('returns the inserted row exactly as the repository shapes it', async () => {
+    const fake = createFakeRepository();
+    const insertedRow = { id: 'post-1', board_id: 'board-1', title: 'Hello' };
+    fake.setInsertReturningResult(ok(insertedRow));
+    const createPostAndSelect = createCreatePostAndSelectCommand(fake.repository);
+    const row = { id: 'post-1', board_id: 'board-1', title: 'Hello' };
+
+    const result = await createPostAndSelect({ row }, ctx);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toBe(insertedRow);
+    }
+    expect(fake.insertReturningCalls).toEqual([row]);
+    expect(fake.insertCalls).toHaveLength(0);
+  });
+
+  it('propagates a repository failure unchanged', async () => {
+    const fake = createFakeRepository();
+    fake.setInsertReturningResult(err(domainError('unavailable', 'db down')));
+    const createPostAndSelect = createCreatePostAndSelectCommand(fake.repository);
+
+    const result = await createPostAndSelect({ row: { id: 'post-1' } }, ctx);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe('unavailable');
+    }
+  });
+});
+
+describe('canvas.createContainerWithPost', () => {
+  const containerRow = { id: 'container-1', type: 'container' };
+  const postRow = { id: 'post-1', metadata: { parentId: 'container-1' } };
+
+  it('inserts the container FIRST, then the post', async () => {
+    const fake = createFakeRepository();
+    const createContainerWithPost = createCreateContainerWithPostCommand(fake.repository);
+
+    const result = await createContainerWithPost({ containerRow, postRow }, ctx);
+
+    expect(result.ok).toBe(true);
+    expect(fake.insertCalls).toEqual([containerRow, postRow]);
+  });
+
+  it('a resolved container failure ABORTS the post insert (first-failure-wins)', async () => {
+    const fake = createFakeRepository();
+    fake.queueInsertResults(err(domainError('unavailable', 'db down')));
+    const createContainerWithPost = createCreateContainerWithPostCommand(fake.repository);
+
+    const result = await createContainerWithPost({ containerRow, postRow }, ctx);
+
+    expect(result.ok).toBe(false);
+    expect(fake.insertCalls).toHaveLength(1);
+  });
+
+  it('a post failure propagates after the container already landed (no rollback)', async () => {
+    const fake = createFakeRepository();
+    fake.queueInsertResults(ok(undefined), err(domainError('unavailable', 'db down')));
+    const createContainerWithPost = createCreateContainerWithPostCommand(fake.repository);
+
+    const result = await createContainerWithPost({ containerRow, postRow }, ctx);
+
+    expect(result.ok).toBe(false);
+    expect(fake.insertCalls).toHaveLength(2);
+    expect(fake.deleteByIdCalls).toHaveLength(0);
+  });
+});
+
+describe('canvas.groupPostIntoContainer', () => {
+  const containerRow = { id: 'container-1', type: 'container', metadata: { childPadletIds: ['post-1'] } };
+
+  it('inserts the container returning its row, THEN writes the post metadata WITHOUT a timestamp', async () => {
+    const fake = createFakeRepository();
+    const returnedRow = { id: 'container-1', type: 'container' };
+    fake.setInsertReturningResult(ok(returnedRow));
+    const groupPostIntoContainer = createGroupPostIntoContainerCommand(fake.repository);
+
+    const result = await groupPostIntoContainer(
+      {
+        containerRow,
+        postId: 'post-1',
+        postMetadata: { cardColor: '#fff', parentId: 'container-1' },
+      },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toBe(returnedRow);
+    }
+    expect(fake.insertReturningCalls).toEqual([containerRow]);
+    expect(fake.updateMetadataUnstampedCalls).toEqual([
+      { id: 'post-1', fields: { metadata: { cardColor: '#fff', parentId: 'container-1' } } },
+    ]);
+    expect(fake.updateMetadataCalls).toHaveLength(0);
+  });
+
+  it('a resolved container failure aborts the metadata write', async () => {
+    const fake = createFakeRepository();
+    fake.setInsertReturningResult(err(domainError('unavailable', 'db down')));
+    const groupPostIntoContainer = createGroupPostIntoContainerCommand(fake.repository);
+
+    const result = await groupPostIntoContainer(
+      { containerRow, postId: 'post-1', postMetadata: {} },
+      ctx,
+    );
+
+    expect(result.ok).toBe(false);
+    expect(fake.updateMetadataUnstampedCalls).toHaveLength(0);
+  });
+
+  it('a metadata-write failure propagates after the container already landed (no rollback)', async () => {
+    const fake = createFakeRepository();
+    fake.setInsertReturningResult(ok({ id: 'container-1' }));
+    fake.setUpdateMetadataUnstampedResult(err(domainError('unavailable', 'db down')));
+    const groupPostIntoContainer = createGroupPostIntoContainerCommand(fake.repository);
+
+    const result = await groupPostIntoContainer(
+      { containerRow, postId: 'post-1', postMetadata: {} },
+      ctx,
+    );
+
+    expect(result.ok).toBe(false);
+    expect(fake.insertReturningCalls).toHaveLength(1);
+    expect(fake.deleteByIdCalls).toHaveLength(0);
+  });
+});
+
+describe('canvas.attachPostToSchedulerContainer', () => {
+  const input = {
+    postRow: { id: 'post-1', metadata: { parentId: 'container-1' } },
+    containerId: 'container-1',
+    containerMetadata: { start_date: 's', childPadletIds: ['old-1'] },
+    childPadletIds: ['post-1', 'old-1'],
+    updatedAt: '2026-07-10T09:00:00.000Z',
+  };
+
+  it('inserts the post, then updates the container with the merged metadata and the INPUT timestamp', async () => {
+    const fake = createFakeRepository();
+    const attach = createAttachPostToSchedulerContainerCommand(fake.repository);
+
+    const result = await attach(input, ctx);
+
+    expect(result.ok).toBe(true);
+    expect(fake.insertCalls).toEqual([input.postRow]);
+    expect(fake.updateMetadataCalls).toEqual([
+      {
+        id: 'container-1',
+        fields: {
+          metadata: { start_date: 's', childPadletIds: ['post-1', 'old-1'] },
+          updatedAt: '2026-07-10T09:00:00.000Z',
+        },
+      },
+    ]);
+  });
+
+  it('preserves the legacy swallow: a resolved insert failure still returns ok and the update still runs', async () => {
+    const fake = createFakeRepository();
+    fake.queueInsertResults(err(domainError('unavailable', 'db down')));
+    const attach = createAttachPostToSchedulerContainerCommand(fake.repository);
+
+    const result = await attach(input, ctx);
+
+    expect(result.ok).toBe(true);
+    expect(fake.updateMetadataCalls).toHaveLength(1);
+  });
+
+  it('preserves the legacy swallow: a resolved update failure still returns ok', async () => {
+    const fake = createFakeRepository();
+    fake.setUpdateMetadataResult(err(domainError('unavailable', 'db down')));
+    const attach = createAttachPostToSchedulerContainerCommand(fake.repository);
+
+    const result = await attach(input, ctx);
+
+    expect(result.ok).toBe(true);
+  });
+});
+
+describe('canvas.createSchedulerContainerWithPost', () => {
+  const containerRow = { id: 'container-1', type: 'container' };
+  const postRow = { id: 'post-1', metadata: { parentId: 'container-1' } };
+
+  it('inserts the container, then the post', async () => {
+    const fake = createFakeRepository();
+    const create = createCreateSchedulerContainerWithPostCommand(fake.repository);
+
+    const result = await create({ containerRow, postRow }, ctx);
+
+    expect(result.ok).toBe(true);
+    expect(fake.insertCalls).toEqual([containerRow, postRow]);
+  });
+
+  it('preserves the legacy swallow: a resolved container failure still returns ok and the post insert still runs', async () => {
+    const fake = createFakeRepository();
+    fake.queueInsertResults(err(domainError('unavailable', 'db down')));
+    const create = createCreateSchedulerContainerWithPostCommand(fake.repository);
+
+    const result = await create({ containerRow, postRow }, ctx);
+
+    expect(result.ok).toBe(true);
+    expect(fake.insertCalls).toHaveLength(2);
+  });
+});

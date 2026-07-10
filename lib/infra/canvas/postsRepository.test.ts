@@ -7,12 +7,17 @@ interface FakeError {
   readonly message?: string;
 }
 
-function createFakeClient(error: FakeError | null = null) {
+function createFakeClient(
+  error: FakeError | null = null,
+  insertReturnData: Record<string, unknown> | null = { id: 'row-1' },
+) {
   const fromTables: string[] = [];
   const updateCalls: Array<Record<string, unknown>> = [];
   const eqCalls: Array<{ column: string; value: string }> = [];
   const deleteEqCalls: Array<{ column: string; value: string }> = [];
   const deleteInCalls: Array<{ column: string; values: readonly string[] }> = [];
+  const insertCalls: object[] = [];
+  const selectSingleCalls: object[] = [];
 
   const client = {
     from(table: 'padlets') {
@@ -39,11 +44,43 @@ function createFakeClient(error: FakeError | null = null) {
             },
           };
         },
+        insert(row: object) {
+          insertCalls.push(row);
+          return {
+            // The real builder is a thenable awaited directly for plain inserts;
+            // the generic signature mirrors PromiseLike<{ error }> structurally.
+            then<TResult1 = { error: FakeError | null }, TResult2 = never>(
+              onFulfilled?:
+                | ((value: { error: FakeError | null }) => TResult1 | PromiseLike<TResult1>)
+                | null,
+              onRejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
+            ): Promise<TResult1 | TResult2> {
+              return Promise.resolve({ error }).then(onFulfilled, onRejected);
+            },
+            select() {
+              return {
+                single: async () => {
+                  selectSingleCalls.push(row);
+                  return { data: insertReturnData, error };
+                },
+              };
+            },
+          };
+        },
       };
     },
   };
 
-  return { client, fromTables, updateCalls, eqCalls, deleteEqCalls, deleteInCalls };
+  return {
+    client,
+    fromTables,
+    updateCalls,
+    eqCalls,
+    deleteEqCalls,
+    deleteInCalls,
+    insertCalls,
+    selectSingleCalls,
+  };
 }
 
 const fields = {
@@ -160,5 +197,77 @@ describe('SupabasePostsRepository', () => {
       expect(result.error.code).toBe('unavailable');
       expect(result.error.cause).toBe(supabaseError);
     }
+  });
+
+  it('insert sends the row verbatim to padlets', async () => {
+    const { client, fromTables, insertCalls, updateCalls } = createFakeClient();
+    const repository = new SupabasePostsRepository(client);
+    const row = { id: 'post-1', board_id: 'board-1', title: 'Hello' };
+
+    const result = await repository.insert(row);
+
+    expect(result.ok).toBe(true);
+    expect(fromTables).toEqual(['padlets']);
+    expect(insertCalls).toEqual([row]);
+    expect(insertCalls[0]).toBe(row);
+    expect(updateCalls).toHaveLength(0);
+  });
+
+  it('insert maps a resolved error to an unavailable DomainError carrying the cause', async () => {
+    const supabaseError = { code: '42501', message: 'permission denied' };
+    const { client } = createFakeClient(supabaseError);
+    const repository = new SupabasePostsRepository(client);
+
+    const result = await repository.insert({ id: 'post-1' });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe('unavailable');
+      expect(result.error.cause).toBe(supabaseError);
+    }
+  });
+
+  it('insertReturning issues insert().select().single() and returns the row', async () => {
+    const returned = { id: 'post-1', board_id: 'board-1' };
+    const { client, insertCalls, selectSingleCalls } = createFakeClient(null, returned);
+    const repository = new SupabasePostsRepository(client);
+    const row = { id: 'post-1', board_id: 'board-1' };
+
+    const result = await repository.insertReturning(row);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toBe(returned);
+    }
+    expect(insertCalls).toEqual([row]);
+    expect(selectSingleCalls).toEqual([row]);
+  });
+
+  it('insertReturning maps a resolved error to an unavailable DomainError carrying the cause', async () => {
+    const supabaseError = { code: '42501', message: 'permission denied' };
+    const { client } = createFakeClient(supabaseError);
+    const repository = new SupabasePostsRepository(client);
+
+    const result = await repository.insertReturning({ id: 'post-1' });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe('unavailable');
+      expect(result.error.cause).toBe(supabaseError);
+    }
+  });
+
+  it('updateMetadataUnstamped sends ONLY the metadata payload - no updated_at key', async () => {
+    const { client, updateCalls, eqCalls } = createFakeClient();
+    const repository = new SupabasePostsRepository(client);
+
+    const result = await repository.updateMetadataUnstamped(asPostId('post-1'), {
+      metadata: { parentId: 'container-1' },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(updateCalls).toEqual([{ metadata: { parentId: 'container-1' } }]);
+    expect(Object.keys(updateCalls[0])).toEqual(['metadata']);
+    expect(eqCalls).toEqual([{ column: 'id', value: 'post-1' }]);
   });
 });

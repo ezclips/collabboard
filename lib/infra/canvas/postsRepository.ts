@@ -23,6 +23,20 @@ interface PostsDeleteQuery {
   in(column: 'id', values: readonly PostId[]): Promise<{ error: SupabaseErrorLike | null }>;
 }
 
+/**
+ * The insert builder is awaited directly for plain inserts (thenable) and
+ * chained .select().single() when the caller consumes the inserted row -
+ * both legacy shapes.
+ */
+interface PostsInsertQuery extends PromiseLike<{ error: SupabaseErrorLike | null }> {
+  select(): {
+    single(): Promise<{
+      data: Record<string, unknown> | null;
+      error: SupabaseErrorLike | null;
+    }>;
+  };
+}
+
 interface PostsSupabaseClient {
   from(table: 'padlets'): {
     update(
@@ -35,9 +49,11 @@ interface PostsSupabaseClient {
         | {
             metadata: PostMetadataWriteFields['metadata'];
             updated_at: PostMetadataWriteFields['updatedAt'];
-          },
+          }
+        | { metadata: Record<string, unknown> },
     ): PostsUpdateQuery;
     delete(): PostsDeleteQuery;
+    insert(row: object): PostsInsertQuery;
   };
 }
 
@@ -80,6 +96,22 @@ export class SupabasePostsRepository implements PostsRepository {
     return ok(undefined);
   }
 
+  async updateMetadataUnstamped(
+    id: PostId,
+    fields: { readonly metadata: Record<string, unknown> },
+  ): Promise<Result<void, DomainError>> {
+    const { error } = await this.client
+      .from('padlets')
+      .update({ metadata: fields.metadata })
+      .eq('id', id);
+
+    if (error) {
+      return err(domainError('unavailable', 'Could not update the post', { cause: error }));
+    }
+
+    return ok(undefined);
+  }
+
   async deleteById(id: PostId): Promise<Result<void, DomainError>> {
     const { error } = await this.client.from('padlets').delete().eq('id', id);
 
@@ -111,6 +143,26 @@ export class SupabasePostsRepository implements PostsRepository {
     }
 
     return ok(undefined);
+  }
+
+  async insert(row: object): Promise<Result<void, DomainError>> {
+    const { error } = await this.client.from('padlets').insert(row);
+
+    if (error) {
+      return err(domainError('unavailable', 'Could not create the post', { cause: error }));
+    }
+
+    return ok(undefined);
+  }
+
+  async insertReturning(row: object): Promise<Result<Record<string, unknown> | null, DomainError>> {
+    const { data, error } = await this.client.from('padlets').insert(row).select().single();
+
+    if (error) {
+      return err(domainError('unavailable', 'Could not create the post', { cause: error }));
+    }
+
+    return ok(data);
   }
 }
 
