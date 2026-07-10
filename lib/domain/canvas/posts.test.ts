@@ -17,6 +17,7 @@ import {
   createUpdatePostMetadataUnstampedCommand,
   createUpdatePostPositionCommand,
   createUpdatePostPositionWithMetadataBestEffortCommand,
+  createUpdatePostTitleBestEffortCommand,
 } from './posts';
 import type {
   PostMetadataWriteFields,
@@ -51,6 +52,7 @@ function createFakeRepository() {
     fields: { readonly metadata: Record<string, unknown> };
   }> = [];
   const updatePositionCalls: Array<{ id: PostId; fields: PostPositionWriteFields }> = [];
+  const updateTitleCalls: Array<{ id: PostId; fields: { readonly title: string } }> = [];
   const insertCalls: object[] = [];
   const insertReturningCalls: object[] = [];
   let updateTasksResult: Result<void, DomainError> = ok(undefined);
@@ -60,6 +62,7 @@ function createFakeRepository() {
   let deleteByParentIdResult: Result<void, DomainError> = ok(undefined);
   let updateMetadataUnstampedResult: Result<void, DomainError> = ok(undefined);
   let updatePositionResult: Result<void, DomainError> = ok(undefined);
+  let updateTitleResult: Result<void, DomainError> = ok(undefined);
   const insertResultQueue: Array<Result<void, DomainError>> = [];
   let insertReturningResult: Result<Record<string, unknown> | null, DomainError> = ok(null);
 
@@ -79,6 +82,10 @@ function createFakeRepository() {
     updatePosition: async (id, fields) => {
       updatePositionCalls.push({ id, fields });
       return updatePositionResult;
+    },
+    updateTitle: async (id, fields) => {
+      updateTitleCalls.push({ id, fields });
+      return updateTitleResult;
     },
     deleteById: async (id) => {
       deleteByIdCalls.push(id);
@@ -108,6 +115,7 @@ function createFakeRepository() {
     updateMetadataCalls,
     updateMetadataUnstampedCalls,
     updatePositionCalls,
+    updateTitleCalls,
     deleteByIdCalls,
     deleteByIdsCalls,
     deleteByParentIdCalls,
@@ -124,6 +132,9 @@ function createFakeRepository() {
     },
     setUpdatePositionResult(result: Result<void, DomainError>) {
       updatePositionResult = result;
+    },
+    setUpdateTitleResult(result: Result<void, DomainError>) {
+      updateTitleResult = result;
     },
     setDeleteByIdResult(result: Result<void, DomainError>) {
       deleteByIdResult = result;
@@ -945,5 +956,45 @@ describe('canvas.updatePostPositionWithMetadataBestEffort', () => {
       expect(result.error.code).toBe('validation');
     }
     expect(fake.updatePositionCalls).toHaveLength(0);
+  });
+});
+
+describe('canvas.updatePostTitleBestEffort', () => {
+  it('writes ONLY the title - no timestamp field - and returns ok', async () => {
+    const fake = createFakeRepository();
+    const bestEffort = createUpdatePostTitleBestEffortCommand(fake.repository);
+
+    const result = await bestEffort({ postId: 'post-1', title: '' }, ctx);
+
+    expect(result.ok).toBe(true);
+    expect(fake.updateTitleCalls).toHaveLength(1);
+    expect(fake.updateTitleCalls[0].id).toBe('post-1');
+    expect(fake.updateTitleCalls[0].fields).toEqual({ title: '' });
+    expect(Object.keys(fake.updateTitleCalls[0].fields)).toEqual(['title']);
+    expect(fake.updateMetadataCalls).toHaveLength(0);
+  });
+
+  it('preserves the legacy swallow: a resolved repository failure still returns ok', async () => {
+    const fake = createFakeRepository();
+    fake.setUpdateTitleResult(err(domainError('unavailable', 'db down')));
+    const bestEffort = createUpdatePostTitleBestEffortCommand(fake.repository);
+
+    const result = await bestEffort({ postId: 'post-1', title: '' }, ctx);
+
+    expect(result.ok).toBe(true);
+    expect(fake.updateTitleCalls).toHaveLength(1);
+  });
+
+  it('rejects invalid input without calling the repository', async () => {
+    const fake = createFakeRepository();
+    const bestEffort = createUpdatePostTitleBestEffortCommand(fake.repository);
+
+    const result = await bestEffort({ postId: 'post-1' }, ctx);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe('validation');
+    }
+    expect(fake.updateTitleCalls).toHaveLength(0);
   });
 });

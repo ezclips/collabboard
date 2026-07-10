@@ -61,7 +61,8 @@ interface PostsSupabaseClient {
             position_y: number;
             updated_at: string;
             metadata?: Record<string, unknown>;
-          },
+          }
+        | { title: string },
     ): PostsUpdateQuery;
     delete(): PostsDeleteQuery;
     insert(row: object): PostsInsertQuery;
@@ -139,6 +140,22 @@ export class SupabasePostsRepository implements PostsRepository {
 
     if (error) {
       return err(domainError('unavailable', 'Could not update the post position', { cause: error }));
+    }
+
+    return ok(undefined);
+  }
+
+  async updateTitle(
+    id: PostId,
+    fields: { readonly title: string },
+  ): Promise<Result<void, DomainError>> {
+    const { error } = await this.client
+      .from('padlets')
+      .update({ title: fields.title })
+      .eq('id', id);
+
+    if (error) {
+      return err(domainError('unavailable', 'Could not update the post title', { cause: error }));
     }
 
     return ok(undefined);

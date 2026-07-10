@@ -62,6 +62,7 @@ import {
   createUpdatePostMetadataUnstampedCommand,
   createUpdatePostPositionCommand,
   createUpdatePostPositionWithMetadataBestEffortCommand,
+  createUpdatePostTitleBestEffortCommand,
 } from '@/lib/domain/canvas/posts';
 import { createCanvasBoardRepository } from '@/lib/infra/canvas/boardRepository';
 import { createPostsRepository } from '@/lib/infra/canvas/postsRepository';
@@ -7577,11 +7578,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                   await updatePadletMetadata(iconReplaceTargetPadlet.id, { svgUrl });
 
                   // ALSO clear the title so it doesn't show the old icon name
-                  // We use direct supabase update here for the title field
-                  await supabase
-                    .from('padlets')
-                    .update({ title: '' })
-                    .eq('id', iconReplaceTargetPadlet.id);
+                  const updatePostTitleBestEffort = createUpdatePostTitleBestEffortCommand(createPostsRepository());
+                  const titleResult = await updatePostTitleBestEffort({ postId: iconReplaceTargetPadlet.id, title: '' }, { userId: null });
+                  if (!titleResult.ok) throw titleResult.error.cause ?? titleResult.error;
 
                   // Optimistic local update
                   setPadlets(prev => prev.map(p =>

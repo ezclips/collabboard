@@ -341,3 +341,32 @@ describe('SupabasePostsRepository.updatePosition', () => {
     }
   });
 });
+
+describe('SupabasePostsRepository.updateTitle', () => {
+  it('sends ONLY the title payload - no updated_at key', async () => {
+    const { client, fromTables, updateCalls, eqCalls } = createFakeClient();
+    const repository = new SupabasePostsRepository(client);
+
+    const result = await repository.updateTitle(asPostId('post-1'), { title: '' });
+
+    expect(result.ok).toBe(true);
+    expect(fromTables).toEqual(['padlets']);
+    expect(updateCalls).toEqual([{ title: '' }]);
+    expect(Object.keys(updateCalls[0])).toEqual(['title']);
+    expect(eqCalls).toEqual([{ column: 'id', value: 'post-1' }]);
+  });
+
+  it('maps a supabase error to an unavailable DomainError carrying the cause', async () => {
+    const supabaseError = { code: '42501', message: 'permission denied' };
+    const { client } = createFakeClient(supabaseError);
+    const repository = new SupabasePostsRepository(client);
+
+    const result = await repository.updateTitle(asPostId('post-1'), { title: '' });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe('unavailable');
+      expect(result.error.cause).toBe(supabaseError);
+    }
+  });
+});

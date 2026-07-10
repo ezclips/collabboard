@@ -67,6 +67,8 @@ export interface PostsRepository {
     fields: { readonly metadata: Record<string, unknown> },
   ): Promise<Result<void, DomainError>>;
   updatePosition(id: PostId, fields: PostPositionWriteFields): Promise<Result<void, DomainError>>;
+  /** Legacy clipart title clear sends title ONLY - no updated_at (old L7581-7584). */
+  updateTitle(id: PostId, fields: { readonly title: string }): Promise<Result<void, DomainError>>;
   deleteById(id: PostId): Promise<Result<void, DomainError>>;
   deleteByIds(ids: readonly PostId[]): Promise<Result<void, DomainError>>;
   /** Deletes every row whose metadata->>parentId equals the given id. */
@@ -436,6 +438,35 @@ export const createUpdatePostPositionWithMetadataBestEffortCommand = (repository
         positionY: input.positionY,
         updatedAt: new Date().toISOString(),
         metadata: input.metadata,
+      });
+      return ok(undefined);
+    },
+  });
+
+export const updatePostTitleBestEffortSchema = z.object({
+  postId: z.string(),
+  /** The one legacy consumer clears to '' - the command accepts any title string. */
+  title: z.string(),
+});
+
+/**
+ * The title write sends NO updated_at (legacy old L7581-7584) and its one
+ * consumer (the clipart icon replace) awaited it bare with NO try/catch -
+ * the best-effort shape, unstamped by design.
+ */
+export const createUpdatePostTitleBestEffortCommand = (repository: PostsRepository) =>
+  defineCommand({
+    name: 'canvas.updatePostTitleBestEffort',
+    input: updatePostTitleBestEffortSchema,
+    execute: async (input) => {
+      // PRESERVED LEGACY DEFECT (PATCH-035; queued P3-family fix, do NOT
+      // repair here): the legacy clipart icon-replace site awaited this
+      // title clear bare with NO try/catch - a resolved DB error was
+      // silently swallowed; only a THROWN network error rejected the
+      // handler. Faithful port: ignore the resolved Result; a thrown
+      // exception escapes execute and surfaces via defineCommand's catch.
+      await repository.updateTitle(asPostId(input.postId), {
+        title: input.title,
       });
       return ok(undefined);
     },
