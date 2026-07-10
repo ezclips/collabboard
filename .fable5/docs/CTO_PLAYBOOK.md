@@ -574,7 +574,33 @@ continuity unchanged. Third consecutive fully clean review (zero
 disclosure gaps) — confirms the hash-gate class is holding, not a fresh
 axis event. Grandfather held at 2, no credit sought or given for
 metric-only movement. Axis snapshot at 76 (unchanged): safety 19, ops 13,
-architecture 20, product 13, continuity 11.)
+architecture 20, product 13, continuity 11.) → **76 (held)** (2026-07-10:
+PATCH-031 landed and passed review — the seventh Pattern K group, the
+first split by LEGACY ERROR CONTRACT rather than by feature (six of
+fifteen named-function UPDATE sites ported byte-faithfully onto honest
+commands; nine explicitly excluded pending their own swallow-family and
+check-and-branch rulings, not folded in to inflate the slice). Landed
+byte-perfect on GPT-5.4, all three bound hashes ultimately confirmed
+exact and all six CanvasClient blocks byte-identical to the live spec
+fences, 39 bound tests incl. the 36 existing posts tests re-run to prove
+non-breaking, and CanvasClient's line count SHRANK again (8,499→8,475);
+a second UPDATE contract (UNSTAMPED) went onto its own thin sibling
+command with zero infra changes, and the file's one double-quoted
+`.from("padlets")` site went extinct (1→0). No credit: architecture
+stays at its 20/20 ceiling, same capped-axis ruling as PATCH-019/020/
+021/026/027/028/029/030. No other axis moved: ops/product/continuity
+unchanged. SAFETY-adjacent process note, not itself axis-moving: the
+first review pass produced a false "NEEDS FIX," caused by the reviewer
+diffing against a stale local scratch cache instead of the live spec
+after an out-of-band revision — reversed on re-review once the CTO
+re-read the live document. This is a reviewer-process near-miss, not an
+implementation defect; recorded in LESSONS_LEARNED (measurement-
+instrument family, eleventh variant) as a correction to the review
+discipline itself, same standing as prior instrument-class entries
+rather than a fresh safety event. Grandfather held at 2, no credit
+sought or given for metric-only movement. Axis snapshot at 76
+(unchanged): safety 19, ops 13, architecture 20, product 13,
+continuity 11.)
 
 ## 13. The succession test
 
