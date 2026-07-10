@@ -11,7 +11,9 @@ import {
   createDeletePostsCommand,
   createGroupPostIntoContainerCommand,
   createToggleTaskCommand,
+  createUpdatePostMetadataBestEffortCommand,
   createUpdatePostMetadataCommand,
+  createUpdatePostMetadataUnstampedBestEffortCommand,
   createUpdatePostMetadataUnstampedCommand,
 } from './posts';
 import type { PostMetadataWriteFields, PostsRepository, PostTasksWriteFields } from './posts';
@@ -736,6 +738,93 @@ describe('canvas.updatePostMetadataUnstamped', () => {
 
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.code).toBe('validation');
+    expect(fake.updateMetadataUnstampedCalls).toHaveLength(0);
+  });
+});
+
+describe('canvas.updatePostMetadataBestEffort', () => {
+  it('writes the metadata verbatim with a fresh ISO timestamp and returns ok', async () => {
+    const fake = createFakeRepository();
+    const bestEffort = createUpdatePostMetadataBestEffortCommand(fake.repository);
+
+    const result = await bestEffort(
+      { postId: 'post-1', metadata: { sectionId: 's-1', sectionPosition: 1000 } },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    expect(fake.updateMetadataCalls).toHaveLength(1);
+    expect(fake.updateMetadataCalls[0].id).toBe('post-1');
+    expect(fake.updateMetadataCalls[0].fields.metadata).toEqual({
+      sectionId: 's-1',
+      sectionPosition: 1000,
+    });
+    expect(new Date(fake.updateMetadataCalls[0].fields.updatedAt).toISOString()).toBe(
+      fake.updateMetadataCalls[0].fields.updatedAt,
+    );
+  });
+
+  it('preserves the legacy swallow: a resolved repository failure still returns ok', async () => {
+    const fake = createFakeRepository();
+    fake.setUpdateMetadataResult(err(domainError('unavailable', 'db down')));
+    const bestEffort = createUpdatePostMetadataBestEffortCommand(fake.repository);
+
+    const result = await bestEffort({ postId: 'post-1', metadata: {} }, ctx);
+
+    expect(result.ok).toBe(true);
+    expect(fake.updateMetadataCalls).toHaveLength(1);
+  });
+
+  it('rejects invalid input without calling the repository', async () => {
+    const fake = createFakeRepository();
+    const bestEffort = createUpdatePostMetadataBestEffortCommand(fake.repository);
+
+    const result = await bestEffort({ postId: 'post-1' }, ctx);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe('validation');
+    }
+    expect(fake.updateMetadataCalls).toHaveLength(0);
+  });
+});
+
+describe('canvas.updatePostMetadataUnstampedBestEffort', () => {
+  it('writes the metadata verbatim with NO timestamp field and returns ok', async () => {
+    const fake = createFakeRepository();
+    const bestEffort = createUpdatePostMetadataUnstampedBestEffortCommand(fake.repository);
+
+    const result = await bestEffort({ postId: 'post-1', metadata: { zIndex: 20 } }, ctx);
+
+    expect(result.ok).toBe(true);
+    expect(fake.updateMetadataUnstampedCalls).toHaveLength(1);
+    expect(fake.updateMetadataUnstampedCalls[0].id).toBe('post-1');
+    expect(fake.updateMetadataUnstampedCalls[0].fields).toEqual({ metadata: { zIndex: 20 } });
+    expect(Object.keys(fake.updateMetadataUnstampedCalls[0].fields)).toEqual(['metadata']);
+    expect(fake.updateMetadataCalls).toHaveLength(0);
+  });
+
+  it('preserves the legacy swallow: a resolved repository failure still returns ok', async () => {
+    const fake = createFakeRepository();
+    fake.setUpdateMetadataUnstampedResult(err(domainError('unavailable', 'db down')));
+    const bestEffort = createUpdatePostMetadataUnstampedBestEffortCommand(fake.repository);
+
+    const result = await bestEffort({ postId: 'post-1', metadata: {} }, ctx);
+
+    expect(result.ok).toBe(true);
+    expect(fake.updateMetadataUnstampedCalls).toHaveLength(1);
+  });
+
+  it('rejects invalid input without calling the repository', async () => {
+    const fake = createFakeRepository();
+    const bestEffort = createUpdatePostMetadataUnstampedBestEffortCommand(fake.repository);
+
+    const result = await bestEffort({ postId: 'post-1' }, ctx);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe('validation');
+    }
     expect(fake.updateMetadataUnstampedCalls).toHaveLength(0);
   });
 });

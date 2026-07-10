@@ -327,3 +327,48 @@ export const createUpdatePostMetadataUnstampedCommand = (repository: PostsReposi
         metadata: input.metadata,
       }),
   });
+
+export const updatePostMetadataBestEffortSchema = z.object({
+  postId: z.string(),
+  /** The post's NEW metadata, already merged at the call site (legacy shape). */
+  metadata: z.record(z.string(), z.unknown()),
+});
+
+export const createUpdatePostMetadataBestEffortCommand = (repository: PostsRepository) =>
+  defineCommand({
+    name: 'canvas.updatePostMetadataBestEffort',
+    input: updatePostMetadataBestEffortSchema,
+    execute: async (input) => {
+      // PRESERVED LEGACY DEFECT (PATCH-032; queued P3-family fix, do NOT
+      // repair here): the legacy call sites awaited these writes bare -
+      // resolved DB errors were silently swallowed; only a THROWN network
+      // error surfaced. Faithful port: ignore the resolved Result; a thrown
+      // exception escapes execute and surfaces via defineCommand's catch.
+      await repository.updateMetadata(asPostId(input.postId), {
+        metadata: input.metadata,
+        updatedAt: new Date().toISOString(),
+      });
+      return ok(undefined);
+    },
+  });
+
+export const updatePostMetadataUnstampedBestEffortSchema = z.object({
+  postId: z.string(),
+  /** The post's NEW metadata, already merged at the call site (legacy shape). */
+  metadata: z.record(z.string(), z.unknown()),
+});
+
+/** The no-timestamp best-effort sibling (legacy z-order maintenance writes). */
+export const createUpdatePostMetadataUnstampedBestEffortCommand = (repository: PostsRepository) =>
+  defineCommand({
+    name: 'canvas.updatePostMetadataUnstampedBestEffort',
+    input: updatePostMetadataUnstampedBestEffortSchema,
+    execute: async (input) => {
+      // PRESERVED LEGACY DEFECT (PATCH-032): same bare-await swallow as the
+      // stamped sibling above - resolved errors ignored, thrown escapes.
+      await repository.updateMetadataUnstamped(asPostId(input.postId), {
+        metadata: input.metadata,
+      });
+      return ok(undefined);
+    },
+  });

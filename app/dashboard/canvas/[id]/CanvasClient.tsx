@@ -56,7 +56,9 @@ import {
   createDeletePostCommand,
   createDeletePostsCommand,
   createGroupPostIntoContainerCommand,
+  createUpdatePostMetadataBestEffortCommand,
   createUpdatePostMetadataCommand,
+  createUpdatePostMetadataUnstampedBestEffortCommand,
   createUpdatePostMetadataUnstampedCommand,
 } from '@/lib/domain/canvas/posts';
 import { createCanvasBoardRepository } from '@/lib/infra/canvas/boardRepository';
@@ -900,17 +902,13 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     }));
 
     try {
-      await supabase
-        .from('padlets')
-        .update({
-          metadata: {
-            ...post.metadata,
-            sectionId: toSectionId,
-            sectionPosition: newPosition
-          },
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', postId);
+      const updatePostMetadataBestEffort = createUpdatePostMetadataBestEffortCommand(createPostsRepository());
+      const result = await updatePostMetadataBestEffort(
+        { postId, metadata: { ...post.metadata, sectionId: toSectionId, sectionPosition: newPosition } },
+        { userId: null }
+      );
+
+      if (!result.ok) throw result.error.cause ?? result.error;
     } catch (err) {
       console.error('Failed to reorder post:', err);
       // Rollback
@@ -1591,33 +1589,24 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
 
       const allRootUpdates = [...updates, ...sourceUpdates];
 
+      const updatePostMetadataBestEffort = createUpdatePostMetadataBestEffortCommand(createPostsRepository());
+
       // Persist root updates
-      const rootPromises = allRootUpdates.map(u =>
-        supabase
-          .from('padlets')
-          .update({
-            metadata: {
-              // We need to merge with existing metadata in DB, but we only have local snap.
-              // Ideally we fetch-update, but for speed we merge local.
-              ...(padlets.find(p => p.id === u.id)?.metadata as any),
-              sectionId: u.sectionId,
-              sectionPosition: u.sectionPosition
-            },
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', u.id)
-      );
+      const rootPromises = allRootUpdates.map(async (u) => {
+        // We need to merge with existing metadata in DB, but we only have local snap.
+        // Ideally we fetch-update, but for speed we merge local.
+        const merged = { ...(padlets.find(p => p.id === u.id)?.metadata as any), sectionId: u.sectionId, sectionPosition: u.sectionPosition };
+        const result = await updatePostMetadataBestEffort({ postId: u.id, metadata: merged }, { userId: null });
+
+        if (!result.ok) throw result.error.cause ?? result.error;
+      });
 
       // Persist children updates (sectionId only)
-      const childrenPromises = childPadlets.map(p =>
-        supabase
-          .from('padlets')
-          .update({
-            metadata: { ...(p.metadata as any), sectionId: toSectionId },
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', p.id)
-      );
+      const childrenPromises = childPadlets.map(async (p) => {
+        const result = await updatePostMetadataBestEffort({ postId: p.id, metadata: { ...(p.metadata as any), sectionId: toSectionId } }, { userId: null });
+
+        if (!result.ok) throw result.error.cause ?? result.error;
+      });
 
       await Promise.all([...rootPromises, ...childrenPromises]);
     } catch (err) {
@@ -3072,16 +3061,15 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     );
 
     try {
+      const updatePostMetadataBestEffort = createUpdatePostMetadataBestEffortCommand(createPostsRepository());
       await Promise.all(
-        updates.map((u) => {
+        updates.map(async (u) => {
           const post = padlets.find((p) => p.id === u.id);
           const nextMeta: any = { ...((post?.metadata as any) || {}), sectionPosition: u.sectionPosition };
           if (u.sectionId) nextMeta.sectionId = u.sectionId;
           else delete nextMeta.sectionId;
-          return supabase
-            .from('padlets')
-            .update({ metadata: nextMeta, updated_at: new Date().toISOString() })
-            .eq('id', u.id);
+          const result = await updatePostMetadataBestEffort({ postId: u.id, metadata: nextMeta }, { userId: null });
+          if (!result.ok) throw result.error.cause ?? result.error;
         })
       );
     } catch (err) {
@@ -3946,15 +3934,10 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     const nextMeta = { ...(post.metadata || {}), cardColor: color };
     setPadlets(prev => prev.map(p => p.id === post.id ? { ...p, metadata: nextMeta } : p));
 
-    const { error } = await supabase
-      .from('padlets')
-      .update({
-        metadata: nextMeta,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', post.id);
+    const updatePostMetadata = createUpdatePostMetadataCommand(createPostsRepository());
+    const result = await updatePostMetadata({ postId: post.id, metadata: nextMeta }, { userId: null });
 
-    if (error) {
+    if (!result.ok) {
       toast.error('Failed to update color');
       fetchData();
     }
@@ -4046,15 +4029,10 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     const nextMeta = { ...(post.metadata || {}), isLocked };
     setPadlets(prev => prev.map(p => p.id === post.id ? { ...p, metadata: nextMeta } : p));
 
-    const { error } = await supabase
-      .from('padlets')
-      .update({
-        metadata: nextMeta,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', post.id);
+    const updatePostMetadata = createUpdatePostMetadataCommand(createPostsRepository());
+    const result = await updatePostMetadata({ postId: post.id, metadata: nextMeta }, { userId: null });
 
-    if (error) {
+    if (!result.ok) {
       toast.error('Failed to update pin status');
       fetchData();
     } else {
@@ -4078,12 +4056,11 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
 
     // Background DB sync
     try {
+      const updatePostMetadataUnstampedBestEffort = createUpdatePostMetadataUnstampedBestEffortCommand(createPostsRepository());
       for (const update of updates) {
         markPadletLocallyModified(update.id);
-        await supabase
-          .from('padlets')
-          .update({ metadata: update.metadata })
-          .eq('id', update.id);
+        const result = await updatePostMetadataUnstampedBestEffort({ postId: update.id, metadata: update.metadata }, { userId: null });
+        if (!result.ok) throw result.error.cause ?? result.error;
       }
     } catch {
     }
@@ -4100,15 +4077,14 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     if (postsWithoutZ.length > 0) {
       const migrate = async () => {
         const zUpdates: { id: string; zIndex: number }[] = [];
+        const updatePostMetadataUnstampedBestEffort = createUpdatePostMetadataUnstampedBestEffortCommand(createPostsRepository());
         for (let i = 0; i < postsWithoutZ.length; i++) {
           const padlet = postsWithoutZ[i];
           const newZ = 100 + i;
           zUpdates.push({ id: padlet.id, zIndex: newZ });
           markPadletLocallyModified(padlet.id);
-          await supabase
-            .from('padlets')
-            .update({ metadata: { ...padlet.metadata, zIndex: newZ } })
-            .eq('id', padlet.id);
+          const result = await updatePostMetadataUnstampedBestEffort({ postId: padlet.id, metadata: { ...padlet.metadata, zIndex: newZ } }, { userId: null });
+          if (!result.ok) throw result.error.cause ?? result.error;
         }
         // Update local state directly instead of fetchData() to avoid
         // wiping dev-mode sections that only exist in local state.
@@ -4368,13 +4344,12 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       })
     );
 
+    const updatePostMetadataBestEffort = createUpdatePostMetadataBestEffortCommand(createPostsRepository());
     await Promise.all(
-      updates.map((u) =>
-        supabase
-          .from('padlets')
-          .update({ metadata: u.metadata, updated_at: new Date().toISOString() })
-          .eq('id', u.id)
-      )
+      updates.map(async (u) => {
+        const result = await updatePostMetadataBestEffort({ postId: u.id, metadata: u.metadata }, { userId: null });
+        if (!result.ok) throw result.error.cause ?? result.error;
+      })
     );
   }, [setPadlets, supabase]);
 
