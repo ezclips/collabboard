@@ -558,7 +558,23 @@ entry); the gate class itself is process tooling, already reflected in
 continuity/ops capacity rather than a fresh axis event. Grandfather held
 at 2, no credit sought or given for metric-only movement. Axis snapshot at
 76 (unchanged): safety 19, ops 13, architecture 20, product 13,
-continuity 11.)
+continuity 11.) → **76 (held)** (2026-07-10: PATCH-030 landed and passed
+review — the sixth Pattern K group, the narrowest yet (ONE bound
+CanvasClient block, one thin new command over an already-tested repo
+method, zero infra changes), and the first K patch to compose with the
+existing Pattern H storage gateway instead of only the posts aggregate.
+Landed byte-perfect on GPT-5.4, all three bound hashes matched exactly
+plus the three must-not-change infra hashes confirmed unchanged, 36 bound
+tests incl. the 33 existing posts tests re-run to prove non-breaking, and
+CanvasClient's line count SHRANK again (8,504→8,499); the storage category
+went EXTINCT in CanvasClient (2→0), joining DELETE and INSERT. No credit:
+architecture stays at its 20/20 ceiling, same capped-axis ruling as
+PATCH-019/020/021/026/027/028/029. No other axis moved: ops/product/
+continuity unchanged. Third consecutive fully clean review (zero
+disclosure gaps) — confirms the hash-gate class is holding, not a fresh
+axis event. Grandfather held at 2, no credit sought or given for
+metric-only movement. Axis snapshot at 76 (unchanged): safety 19, ops 13,
+architecture 20, product 13, continuity 11.)
 
 ## 13. The succession test
 

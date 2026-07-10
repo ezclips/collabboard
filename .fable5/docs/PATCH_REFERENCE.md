@@ -591,6 +591,21 @@ child flows, and a five-statement silent-swallow cluster ported as two new
 command-internal swallows — swallow-family sites 3 and 4, joining
 `reorderSections`/`setChronoMode`). Landed byte-perfect on GPT-5.4 a fifth
 time; monolith 8,507→8,504.
+**Extended a sixth time by PATCH-030** (the storage pair + its paired
+metadata update, the `addImageToLink` cluster, 3 sites / 1 handler) — the
+narrowest application yet: ONE bound CanvasClient block, one thin new
+command (`canvas.updatePostMetadata`) over an ALREADY-TESTED repository
+method (028's `updateMetadata`), NO infra changes at all. The storage side
+consumed the pre-existing Pattern H `createStorageGateway()` (§5.8, in
+production since PATCH-017) rather than adding a new seam — the first K
+patch to compose with H instead of only with the posts aggregate. The
+simulation caught a tenth measurement-instrument variant (an unescaped
+grep dot in the storage-extinction gate matching the new import's own
+`supabase/storage` path — see LESSONS_LEARNED). All three bound hashes
+matched exactly at review, plus the three must-not-change infra hashes
+confirmed unchanged; third consecutive zero-disclosure-gap review. Landed
+byte-perfect on GPT-5.4 a sixth time; monolith 8,504→8,499; storage
+category went EXTINCT in CanvasClient (2→0), joining DELETE and INSERT.
 
 **When:** a component performs a direct table WRITE whose UI trigger is
 absent from (or too costly to add to) the e2e net, but whose logic is a
@@ -796,6 +811,7 @@ it, STOP — never adapt.
 | 027 | CanvasClient (`boards` update family, 4 sites / 4 handlers) | Pattern K reuse (§5.11): THIRD sibling aggregate `lib/domain/canvas/board.ts` beside `posts.ts`/`sections.ts`; resolved a P6 naming collision against the unconsumed `lib/domain/boards/repository.ts` exemplar via disambiguating name (`CanvasBoardRepository`), not a merge; four commands incl. a preserved map-style no-timestamp write and a SECOND silent-swallow site (`setChronoMode`, sibling to `reorderSections`), each pinned by a dedicated test (15 total); NO grandfather movement; monolith line count SHRANK again (8,518→8,517) | 2→2 (CanvasClient stays grandfathered — 66 sites remain) ✅ done |
 | 028 | CanvasClient (`padlets` DELETE family, 8 sites / 6 handlers) | Pattern K reuse (§5.11), FIRST EXTENSION-ONLY application: four delete commands (`deletePost`/`deletePosts`/`deleteChildPosts`/`deleteContainerChild`) joined the EXISTING `PostsRepository` (`padlets` IS the posts table, P6) — zero new files; 25 bound tests (16 new + the 9 PATCH-025 tests re-run to prove non-breaking); conditional cascades composed from two thin commands at the call site rather than merged, preserving exact legacy DB traffic; the unconditional cascade became one command, pulling its paired update out of the UPDATE family's count (33→32); two child-cascade console-swallows preserved AT THE CALL SITE (not command-internal — Results stay honest); introduced the edit-simulation authoring technique; NO grandfather movement; monolith line count SHRANK again (8,517→8,507); one accepted whitespace-only disclosure gap at review (blank-line drift that canceled in the line-count gate) | 2→2 (CanvasClient stays grandfathered — 58 sites remain) ✅ done |
 | 029 | CanvasClient (`padlets` INSERT family, 19 sites / 12 handlers) | Pattern K reuse (§5.11), SECOND extension-only application: six create commands (`createPost`/`createPostAndSelect`/`createContainerWithPost`/`groupPostIntoContainer`/`attachPostToSchedulerContainer`/`createSchedulerContainerWithPost`) joined the EXISTING `PostsRepository`, zero new files; 46 bound tests (21 new + 25 existing re-run non-breaking); introduced the HASH-GATE class — bound `git hash-object` for all five final files, computed from the CTO's edit simulation, closing the line-count-cancellation gap 028's review found; a five-statement scheduler silent-swallow cluster ported as TWO command-internal swallows (swallow-family sites 3+4); three distinct container-after-child compensation shapes preserved at call sites; compact-form blocks bound to keep the over-ceiling file shrinking; NO grandfather movement; monolith line count SHRANK again (8,507→8,504); all five hashes matched EXACTLY at review — first fully clean (zero-disclosure-gap) review since the hash-gate class was introduced | 2→2 (CanvasClient stays grandfathered — 31 padlets sites remain) ✅ done |
+| 030 | CanvasClient (storage pair + paired metadata update, `addImageToLink`, 3 sites / 1 handler) | Pattern K reuse (§5.11), SIXTH application, narrowest yet: ONE bound block, one thin new command `canvas.updatePostMetadata` over the ALREADY-TESTED `updateMetadata` repo method (028), zero infra changes; storage side consumed the EXISTING Pattern H `createStorageGateway()` (§5.8, in production since 017) rather than adding a seam — first K patch composing with H; 36 bound tests (3 new + 33 existing re-run non-breaking); simulation caught a tenth measurement-instrument variant (unescaped grep dot false-matching the patch's own new import path); NO grandfather movement; monolith line count SHRANK again (8,504→8,499); storage category went EXTINCT in CanvasClient (2→0); all three bound hashes matched EXACTLY plus all three must-not-change infra hashes confirmed unchanged — third consecutive zero-disclosure-gap review | 2→2 (CanvasClient stays grandfathered — 30 padlets sites remain) ✅ done |
 
 **New patterns discovered by future patches get added here by the CTO at
 review — this catalog only ever contains patterns with a reviewed reference
