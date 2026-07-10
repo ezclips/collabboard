@@ -1,7 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from 'react';
-import { supabaseBrowser } from '@/lib/supabase/browser';
+import {
+  createUpdatePostMetadataBestEffortCommand,
+  createUpdatePostPositionCommand,
+} from '@/lib/domain/canvas/posts';
+import { createPostsRepository } from '@/lib/infra/canvas/postsRepository';
 import type { NewPostDragState, Padlet } from '@/types/collabboard';
 import { debugCanvasLogger } from '@/lib/collabboard/debugCanvasLogger';
 import { isContainerPadlet } from '@/components/collabboard/canvas/engine/utils';
@@ -51,9 +55,6 @@ export function useCanvasInteractions({
   fetchData,
   PADLET_DRAG_START_DISTANCE,
 }: UseCanvasInteractionsParams) {
-  // Cookie-authenticated client — see useCanvasData.ts for why this must match
-  // supabaseBrowser() rather than the plain lib/supabase.ts singleton.
-  const supabase = supabaseBrowser();
   const [isDragging, setIsDragging] = useState(false);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const [draggingPadletId, setDraggingPadletId] = useState<string | null>(null);
@@ -334,6 +335,7 @@ export function useCanvasInteractions({
           dragSelectionStartPositionsRef.current = {};
           if (dragDelta) {
             try {
+              const updatePostPosition = createUpdatePostPositionCommand(createPostsRepository());
               await Promise.all(
                 currentDraggingIds.map(async (padletId) => {
                   const start = startPositions[padletId];
@@ -341,15 +343,8 @@ export function useCanvasInteractions({
                   const nextX = Math.max(0, Math.round(start.x + dragDelta.dx));
                   const nextY = Math.max(0, Math.round(start.y + dragDelta.dy));
                   markPadletLocallyModified(padletId);
-                  const { error } = await supabase
-                    .from('padlets')
-                    .update({
-                      position_x: nextX,
-                      position_y: nextY,
-                      updated_at: new Date().toISOString(),
-                    })
-                    .eq('id', padletId);
-                  if (error) throw error;
+                  const result = await updatePostPosition({ postId: padletId, positionX: nextX, positionY: nextY }, { userId: null });
+                  if (!result.ok) throw result.error.cause ?? result.error;
                 })
               );
             } catch (err) {
@@ -401,22 +396,13 @@ export function useCanvasInteractions({
               markPadletLocallyModified(droppedOnContainer.id);
               markPadletLocallyModified(currentDraggingId);
 
-              await supabase
-                .from('padlets')
-                .update({
-                  metadata: { ...droppedOnContainer.metadata, childPadletIds: newChildIds },
-                  updated_at: new Date().toISOString(),
-                })
-                .eq('id', droppedOnContainer.id);
+              const updatePostMetadataBestEffort = createUpdatePostMetadataBestEffortCommand(createPostsRepository());
+              const containerResult = await updatePostMetadataBestEffort({ postId: droppedOnContainer.id, metadata: { ...droppedOnContainer.metadata, childPadletIds: newChildIds } }, { userId: null });
+              if (!containerResult.ok) throw containerResult.error.cause ?? containerResult.error;
 
               const newMetadata = { ...draggedPadlet.metadata, parentId: droppedOnContainer.id };
-              await supabase
-                .from('padlets')
-                .update({
-                  metadata: newMetadata,
-                  updated_at: new Date().toISOString(),
-                })
-                .eq('id', currentDraggingId);
+              const draggedResult = await updatePostMetadataBestEffort({ postId: currentDraggingId, metadata: newMetadata }, { userId: null });
+              if (!draggedResult.ok) throw draggedResult.error.cause ?? draggedResult.error;
 
               setPadlets(prev => prev.map(p => {
                 if (p.id === droppedOnContainer!.id) {
@@ -441,16 +427,10 @@ export function useCanvasInteractions({
             const committedY = Math.round(finalPos.y);
             markPadletLocallyModified(currentDraggingId);
             try {
-              const { error } = await supabase
-                .from('padlets')
-                .update({
-                  position_x: committedX,
-                  position_y: committedY,
-                  updated_at: new Date().toISOString(),
-                })
-                .eq('id', currentDraggingId);
-              if (error) {
-                throw error;
+              const updatePostPosition = createUpdatePostPositionCommand(createPostsRepository());
+              const result = await updatePostPosition({ postId: currentDraggingId, positionX: committedX, positionY: committedY }, { userId: null });
+              if (!result.ok) {
+                throw result.error.cause ?? result.error;
               }
             } catch (err) {
               console.error('Failed to save padlet position:', err);
