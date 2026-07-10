@@ -537,7 +537,28 @@ line-count gate) — accepted, same disclosure-gap chain as PATCH-018/021/
 to recur at a steady low rate across seven reviews is the expected
 baseline, not a trend requiring action. Grandfather held at 2, no credit
 sought or given for metric-only movement. Axis snapshot at 76 (unchanged):
-safety 19, ops 13, architecture 20, product 13, continuity 11.)
+safety 19, ops 13, architecture 20, product 13, continuity 11.) → **76
+(held)** (2026-07-10: PATCH-029 landed and passed review — the fifth
+Pattern K group, second extension-only application (`padlets` INSERT
+family, six commands joining the existing `PostsRepository`), landed
+byte-perfect on GPT-5.4, all cascade/compensation/swallow semantics
+verified byte-exact and test-covered, 46 bound tests incl. the 25 existing
+posts tests re-run to prove the second extension non-breaking, and
+CanvasClient's line count SHRANK again (8,507→8,504). No credit:
+architecture stays at its 20/20 ceiling, same capped-axis ruling as
+PATCH-019/020/021/026/027/028. No other axis moved: ops/product/continuity
+unchanged. Notable SAFETY-adjacent process improvement, but not itself
+axis-moving: the review introduced bound `git hash-object` whole-file
+identity gates (closing the exact line-count-cancellation gap PATCH-028's
+review discovered), and this review was the first FULLY CLEAN delivery
+since — zero disclosure gaps, all five hashes matching exactly. A clean
+review is the baseline the process is designed to produce, not new safety
+evidence in itself (same standard as PATCH-026's "first clean disclosure"
+entry); the gate class itself is process tooling, already reflected in
+continuity/ops capacity rather than a fresh axis event. Grandfather held
+at 2, no credit sought or given for metric-only movement. Axis snapshot at
+76 (unchanged): safety 19, ops 13, architecture 20, product 13,
+continuity 11.)
 
 ## 13. The succession test
 
