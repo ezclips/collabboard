@@ -648,7 +648,27 @@ unchanged. Second consecutive fully clean review (zero disclosure gaps)
 since the 031 correction — the review discipline is holding. Grandfather
 held at 2, no credit sought or given for metric-only movement. Axis
 snapshot at 76 (unchanged): safety 19, ops 13, architecture 20,
-product 13, continuity 11.)
+product 13, continuity 11.) → **76 (held)** (2026-07-10: PATCH-034 landed
+and passed review — the tenth Pattern K group and the first
+new-capability extension since 029: the position-write pair onto a new
+`canvas.updatePostPosition` seam, with the program's THIRD authorized
+micro-change (thrown-mode position rollback convergence — a genuine P3
+lost-work gap in the legacy handler) and the SEVENTH command-internal
+swallow site. Landed byte-perfect on GPT-5.4: all five hashes exact, and
+the review byte-compared each of the four whole-file fences DIRECTLY
+against its live file in addition to the hash gates — the strongest
+binding check so far. 67 bound tests incl. all 58 existing re-run
+non-breaking; unit 175/24, e2e 27/27, verify green; monolith 8,404→8,401;
+padlets writes down to 2 (+1 select). No credit: architecture capped at
+20/20, same standing ruling. One review-side catch-up recorded honestly:
+the standing swallow-family decision TABLE had not been updated at the
+032 review (the extension was recorded in the row/log only) — corrected
+to seven sites with the omission disclosed in the entry; a bookkeeping
+lapse in a redundant record, not a safety event (the information was
+never absent from the docs, only from one of its two locations). Third
+consecutive fully clean review. Grandfather held at 2. Axis snapshot at
+76 (unchanged): safety 19, ops 13, architecture 20, product 13,
+continuity 11.)
 
 ## 13. The succession test
 
