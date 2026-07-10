@@ -702,6 +702,29 @@ own fences at authoring; at review, each whole-file fence was ALSO
 byte-compared directly against its live file (`fence == live`), the
 strongest binding check so far. Landed byte-perfect on GPT-5.4 a tenth
 time; monolith 8,404→8,401; padlets writes 4→2.
+**Extended an eleventh time by PATCH-035** (the clipart title clear) — the
+narrowest new-capability extension yet: one repository method
+(`updateTitle`, title-only, UNSTAMPED by design — no `updated_at` key,
+matching the legacy statement exactly) plus ONE best-effort command
+(`canvas.updatePostTitleBestEffort` — no honest twin, since the single
+legacy consumer's contract is bare-await-no-check; an honest twin would
+have been dead code). The EIGHTH command-internal swallow site, and the
+FIRST Pattern K application in this program to require NO authorized
+behavior change: the port is exact in both channels (resolved errors
+swallowed inside the command, pinned; thrown errors cause-unwrap re-thrown
+at the call site with no enclosing try/catch, reproducing the same
+unhandled-rejection gap the legacy site had — a defect preserved, not
+repaired, per the standing P3-family queue). The seam-choice ruling: of
+the two sites 034 deferred, the title clear needed no shared capability
+with the map-comments variant (which needs a content-carrying write AND
+a standalone SELECT ruling) — smallest coherent seam, one statement, one
+consumer. 72 bound tests (5 new + 67 existing re-run non-breaking); all
+five final hashes reconstructed from the spec's own fences at authoring;
+at review, each whole-file fence was ALSO byte-compared directly against
+its live file (`fence == live`), continuing the strongest binding check.
+Landed byte-perfect on GPT-5.4 an eleventh time; monolith 8,401→8,400;
+`.update({ title: '' })` extinct (1→0); `from('padlets')` 3→2 — only the
+map comments SELECT+UPDATE pair remains non-auth.
 
 **When:** a component performs a direct table WRITE whose UI trigger is
 absent from (or too costly to add to) the e2e net, but whose logic is a
@@ -912,6 +935,7 @@ it, STOP — never adapt.
 | 032 | CanvasClient (named-function padlets UPDATE extinction, remaining nine sites) | Pattern K reuse (§5.11), EIGHTH application, first patch delegated after two owner-requested rulings in one authoring pass: bare-awaited cluster (7 sites) onto two new command-internal-swallow siblings (`canvas.updatePostMetadataBestEffort` + unstamped twin), extending the P3 swallow family 4→6 sites; check-and-branch pair (`changeCardColor`/`pinPost`) received the program's SECOND authorized behavior change (thrown-mode repair onto the existing failure branch, resolved-mode untouched); fail-fast `Promise.all` semantics preserved exactly via throw-on-!ok wrapper closures; 45 bound tests (6 new + 39 existing re-run non-breaking); spec's own final hashes RECONSTRUCTED from its OLD/NEW fences before delegation (new authoring practice, direct response to 031's review correction); NO grandfather movement; monolith line count SHRANK again (8,475→8,450); named-function padlets UPDATE went EXTINCT (9→0; 23→14 total, all JSX); review re-derived every expectation from the live spec on disk and found zero disclosure gaps — first fully clean review since the 031 correction | 2→2 (CanvasClient stays grandfathered — 15 padlets sites remain, all JSX + the lone select) ✅ done |
 | 033 | CanvasClient (ten of the fourteen JSX padlets UPDATE sites) | Pattern K reuse (§5.11), NINTH application, FIRST ONE-FILE patch: zero domain/test/import changes, pure consumer swaps of the already-tested command quartet — seven bare-await sites onto `updatePostMetadataBestEffort` (no new swallow sites, P3 family stays at six), the `onUpdateChildComments` triplet extending 032's Ruling-2 authorization to three more sites; new binding form introduced — an OLD/NEW pair bound at an explicit occurs-exactly-2/replace-both count for byte-twin columns/wall variants, machine-verified at authoring AND review; fidelity net = the existing 45-test posts suite (no new tests needed, Pattern K's bound-test design paying off on a pure-consumer patch); four sites deferred by column shape and named for their own future rulings; NO grandfather movement; monolith line count SHRANK again (8,450→8,404); padlets UPDATE 14→4; review cross-checked all eight fence-pairs against the implementation directly, not just the whole-file hash — zero disclosure gaps, second consecutive fully clean review | 2→2 (CanvasClient stays grandfathered — 5 padlets sites remain: 4 deferred writes + the lone select) ✅ done |
 | 034 | CanvasClient (position-write pair: detach padlet leg + drop repositioning) | Pattern K reuse (§5.11), TENTH application, first new-capability extension since 029: one new repository method `updatePosition` (optional metadata OMITTED from the payload when absent, `Object.keys`-pinned on both shapes) + two thin commands mirroring the honest/best-effort split; the honest command carries the program's THIRD authorized micro-change (thrown-mode position rollback convergence — legacy left the optimistic position stranded on a network failure); the best-effort command is the SEVENTH command-internal swallow site; the other two deferred sites (content+select map variant, title-clear) ruled UNRELATED shapes and deferred by name to their own patches; 67 bound tests (9 new + 58 existing re-run non-breaking); review byte-compared each whole-file fence directly against its live file in addition to the hash gates — zero disclosure gaps, third consecutive fully clean review; standing swallow-family decision table brought current to SEVEN sites (incl. a catch-up for 032's extension) | 2→2 (CanvasClient stays grandfathered — 3 padlets sites remain: map content+select pair + title-clear) ✅ done |
+| 035 | CanvasClient (clipart title clear, ONE site) | Pattern K reuse (§5.11), ELEVENTH application, narrowest new-capability extension yet: one repository method `updateTitle` (title-only, UNSTAMPED by design — no `updated_at`, ported exactly from the legacy statement) + ONE best-effort command `canvas.updatePostTitleBestEffort` (no honest twin — the single legacy consumer's contract is bare-await-no-check); the EIGHTH command-internal swallow site, and the FIRST Pattern K application requiring NO authorized behavior change (exact port in both channels — resolved swallowed, thrown re-thrown with no enclosing try/catch, reproducing the same legacy unhandled-rejection gap); the map-comments SELECT+UPDATE variant ruled an UNRELATED shape (needs a content-carrying write plus its own SELECT ruling) and deferred by name; 72 bound tests (5 new + 67 existing re-run non-breaking); review byte-compared each whole-file fence directly against its live file in addition to the hash gates — zero disclosure gaps, FOURTH consecutive fully clean review; `.update({ title: '' })` extinct (1→0) | 2→2 (CanvasClient stays grandfathered — 2 padlets sites remain: the map comments SELECT+UPDATE pair, the last non-auth sites) ✅ done |
 
 **New patterns discovered by future patches get added here by the CTO at
 review — this catalog only ever contains patterns with a reviewed reference
