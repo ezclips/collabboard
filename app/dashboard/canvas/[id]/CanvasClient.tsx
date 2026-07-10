@@ -6043,13 +6043,10 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                     });
                   }
 
-                  await supabase
-                    .from('padlets')
-                    .update({
-                      metadata: { ...oldParent.metadata, childPadletIds: newChildIds },
-                      updated_at: new Date().toISOString(),
-                    })
-                    .eq('id', oldParentId);
+                  const updatePostMetadataBestEffort = createUpdatePostMetadataBestEffortCommand(createPostsRepository());
+                  const result = await updatePostMetadataBestEffort({ postId: oldParentId, metadata: { ...oldParent.metadata, childPadletIds: newChildIds } }, { userId: null });
+
+                  if (!result.ok) throw result.error.cause ?? result.error;
                 }
 
                 fetchData();
@@ -6548,19 +6545,14 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                 onUpdateChildComments={async (childId, comments, options) => {
                   const field = options?.field ?? 'comments';
                   // Update the child padlet's comments in the database
-                  const { error } = await supabase
-                    .from('padlets')
-                    .update({
-                      metadata: {
-                        ...(padlets.find(p => p.id === childId)?.metadata as any),
-                        [field]: comments
-                      },
-                      updated_at: new Date().toISOString()
-                    })
-                    .eq('id', childId);
+                  const updatePostMetadata = createUpdatePostMetadataCommand(createPostsRepository());
+                  const result = await updatePostMetadata(
+                    { postId: childId, metadata: { ...(padlets.find(p => p.id === childId)?.metadata as any), [field]: comments } },
+                    { userId: null }
+                  );
 
-                  if (error) {
-                    console.error('Failed to update comments:', error);
+                  if (!result.ok) {
+                    console.error('Failed to update comments:', result.error.cause ?? result.error);
                     toast.error('Failed to update comments');
                     return;
                   }
@@ -6635,19 +6627,14 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                     onUpdateChildComments={async (childId, comments, options) => {
                       const field = options?.field ?? 'comments';
                       // Update the child padlet's comments in the database
-                      const { error } = await supabase
-                        .from('padlets')
-                        .update({
-                          metadata: {
-                            ...(padlets.find(p => p.id === childId)?.metadata as any),
-                            [field]: comments
-                          },
-                          updated_at: new Date().toISOString()
-                        })
-                        .eq('id', childId);
+                      const updatePostMetadata = createUpdatePostMetadataCommand(createPostsRepository());
+                      const result = await updatePostMetadata(
+                        { postId: childId, metadata: { ...(padlets.find(p => p.id === childId)?.metadata as any), [field]: comments } },
+                        { userId: null }
+                      );
 
-                      if (error) {
-                        console.error('Failed to update comments:', error);
+                      if (!result.ok) {
+                        console.error('Failed to update comments:', result.error.cause ?? result.error);
                         toast.error('Failed to update comments');
                         return;
                       }
@@ -6720,19 +6707,14 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                 onUpdateChildComments={async (childId, comments, options) => {
                   const field = options?.field ?? 'comments';
                   // Update the child padlet's comments in the database
-                  const { error } = await supabase
-                    .from('padlets')
-                    .update({
-                      metadata: {
-                        ...(padlets.find(p => p.id === childId)?.metadata as any),
-                        [field]: comments
-                      },
-                      updated_at: new Date().toISOString()
-                    })
-                    .eq('id', childId);
+                  const updatePostMetadata = createUpdatePostMetadataCommand(createPostsRepository());
+                  const result = await updatePostMetadata(
+                    { postId: childId, metadata: { ...(padlets.find(p => p.id === childId)?.metadata as any), [field]: comments } },
+                    { userId: null }
+                  );
 
-                  if (error) {
-                    console.error('Failed to update comments:', error);
+                  if (!result.ok) {
+                    console.error('Failed to update comments:', result.error.cause ?? result.error);
                     toast.error('Failed to update comments');
                     return;
                   }
@@ -6824,21 +6806,12 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                     ));
 
                     try {
-                      await supabase
-                        .from('padlets')
-                        .update({
-                          metadata: { ...containerPadlet.metadata, childPadletIds: newChildIds },
-                          updated_at: new Date().toISOString(),
-                        })
-                        .eq('id', containerId);
+                      const updatePostMetadataBestEffort = createUpdatePostMetadataBestEffortCommand(createPostsRepository());
+                      const containerResult = await updatePostMetadataBestEffort({ postId: containerId, metadata: { ...containerPadlet.metadata, childPadletIds: newChildIds } }, { userId: null });
+                      if (!containerResult.ok) throw containerResult.error.cause ?? containerResult.error;
                       const droppedPadlet = padlets.find(p => p.id === droppedId);
-                      await supabase
-                        .from('padlets')
-                        .update({
-                          metadata: { ...droppedPadlet?.metadata, parentId: containerId },
-                          updated_at: new Date().toISOString(),
-                        })
-                        .eq('id', droppedId);
+                      const droppedResult = await updatePostMetadataBestEffort({ postId: droppedId, metadata: { ...droppedPadlet?.metadata, parentId: containerId } }, { userId: null });
+                      if (!droppedResult.ok) throw droppedResult.error.cause ?? droppedResult.error;
                     } catch (err) {
                       console.error('Failed to add padlet to container:', err);
                       fetchData(); // Rollback on error
@@ -6860,13 +6833,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                     ));
 
                     try {
-                      await supabase
-                        .from('padlets')
-                        .update({
-                          metadata: { ...childPadlet.metadata, [field]: comments },
-                          updated_at: new Date().toISOString(),
-                        })
-                        .eq('id', childId);
+                      const updatePostMetadataBestEffort = createUpdatePostMetadataBestEffortCommand(createPostsRepository());
+                      const result = await updatePostMetadataBestEffort({ postId: childId, metadata: { ...childPadlet.metadata, [field]: comments } }, { userId: null });
+                      if (!result.ok) throw result.error.cause ?? result.error;
                     } catch (err) {
                       console.error('Failed to update child comments:', err);
                       fetchData(); // Rollback on error
@@ -7367,18 +7336,13 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                   }}
                   onSave={async (dataUrl, paths, textElements) => {
                     try {
-                      await supabase
-                        .from('padlets')
-                        .update({
-                          metadata: {
-                            ...drawingPadlet.metadata,
-                            drawing: dataUrl,
-                            drawingPaths: paths,
-                            drawingText: textElements
-                          },
-                          updated_at: new Date().toISOString(),
-                        })
-                        .eq('id', drawingPadlet.id);
+                      const updatePostMetadataBestEffort = createUpdatePostMetadataBestEffortCommand(createPostsRepository());
+                      const result = await updatePostMetadataBestEffort(
+                        { postId: drawingPadlet.id, metadata: { ...drawingPadlet.metadata, drawing: dataUrl, drawingPaths: paths, drawingText: textElements } },
+                        { userId: null }
+                      );
+
+                      if (!result.ok) throw result.error.cause ?? result.error;
                       setIsDrawingMode(false);
                       setDrawingPadlet(null);
                       fetchData();
@@ -7428,19 +7392,13 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                   }}
                   onSave={async (croppedDataUrl) => {
                     try {
-                      await supabase
-                        .from('padlets')
-                        .update({
-                          metadata: {
-                            ...cropPadlet.metadata,
-                            imageUrl: croppedDataUrl,
-                            drawing: null,
-                            drawingPaths: null,
-                            drawingText: null
-                          },
-                          updated_at: new Date().toISOString(),
-                        })
-                        .eq('id', cropPadlet.id);
+                      const updatePostMetadataBestEffort = createUpdatePostMetadataBestEffortCommand(createPostsRepository());
+                      const result = await updatePostMetadataBestEffort(
+                        { postId: cropPadlet.id, metadata: { ...cropPadlet.metadata, imageUrl: croppedDataUrl, drawing: null, drawingPaths: null, drawingText: null } },
+                        { userId: null }
+                      );
+
+                      if (!result.ok) throw result.error.cause ?? result.error;
                       setIsCropMode(false);
                       setCropPadlet(null);
                       fetchData();
@@ -7755,13 +7713,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                                     : p
                                 ));
                                 try {
-                                  await supabase
-                                    .from('padlets')
-                                    .update({
-                                      metadata: { ...childPadlet.metadata, [field]: comments },
-                                      updated_at: new Date().toISOString(),
-                                    })
-                                    .eq('id', childId);
+                                  const updatePostMetadataBestEffort = createUpdatePostMetadataBestEffortCommand(createPostsRepository());
+                                  const result = await updatePostMetadataBestEffort({ postId: childId, metadata: { ...childPadlet.metadata, [field]: comments } }, { userId: null });
+                                  if (!result.ok) throw result.error.cause ?? result.error;
                                 } catch (err) {
                                   console.error('Failed to update child comments:', err);
                                   fetchData();
