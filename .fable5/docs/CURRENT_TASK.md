@@ -153,7 +153,8 @@ follow 017's Pattern H).
 | 025 | canvas ops seam: `PostsRepository` (`lib/domain/canvas/posts.ts` + `lib/infra/canvas/postsRepository.ts`, neutral naming per P7) + FIRST canvas command `canvas.toggleTask`; first consumer = PostCardContent's single write site (22 importers, rendering identical); **grandfather 3→2 EARNED** (the value import + the only runtime supabase call both leave the file — not type-only gaming) *(renumbered from 024)* | **GPT-5.4 acceptable** — the one mutation path's semantics are locked by 9 bound unit tests the CTO already ran GREEN at authoring; 1 untestable-by-e2e call < the ≥2 GPT-5.5 threshold; client swap is identity (browserClient wraps createClientComponentClient) | **✅ DONE — `e2af0ef`, CTO review PASSED 2026-07-09** (all four new files byte-identical to bindings; unit 85/20, e2e 27/27, verify green — all re-run by reviewer; grandfather 3→2 earned via measured `--no-ignore` probe; one undisclosed EOL byte accepted — disclosure chain; Pattern K catalogued §5.11). Companion: `docs/CANVASCLIENT_SITE_MAP.md` (successor-inheritance doc, review-verified) |
 | 026 | CanvasClient strangler group 1: the complete `board_sections` write family (6 sites / 4 handlers → FIVE commands on the canvas trunk: create/rename/delete/swapPositions/reorder; `lib/domain/canvas/sections.ts` + `lib/infra/canvas/sectionsRepository.ts`, sibling aggregate to posts — one folder family, P6); monolith SHRINKS 8,526→8,518; NO grandfather movement (2→2, CanvasClient keeps 70 other sites); reorder's legacy error-swallow PRESERVED + documented + queued as P3-family defect | **GPT-5.4 acceptable** (Pattern K: 17 bound unit tests compiled AND run green at authoring — incl. dedicated tests for the swap's partial-failure and the reorder's preserved swallow; supersedes the provisional "GPT-5.5 first group" note, which predated Pattern K's PATCH-025 proof) | **✅ DONE — `24bdf94`, CTO review PASSED 2026-07-10** (all four new files byte-identical to bindings; CanvasClient diff matches §5a-§5f exactly incl. blank-line binding; unit 102/22, e2e 27/27, verify green — all re-run by reviewer; monolith 8,526→8,518 (first shrink, but architecture is capped at 20 — health holds at 76, no credit expressible); grandfather untouched 2→2; first fully clean disclosure in the review chain) |
 | 027 | CanvasClient strangler group 2: the complete `boards` update family (4 sites / 4 handlers → FOUR commands: `canvas.setMapStyle`/`setBoardBackground`/`setBoardCover`/`setChronoMode`; `lib/domain/canvas/board.ts` + `lib/infra/canvas/boardRepository.ts`, third sibling aggregate — P6 collision ruling: the unconsumed exemplar `lib/domain/boards/repository.ts` is a different concern, zero importers/implementations, stays byte-untouched); THREE distinct legacy error semantics preserved (toast-return, scope-annotated throw, SILENT SWALLOW — chrono mode is the second swallow site, standing decision extended at review); map-style write's missing updated_at preserved as a typed fact (dedicated repository method + `Object.keys` test); monolith 8,518→8,517; grandfather 2→2 | **GPT-5.4 acceptable** (Pattern K, third application: 15 bound tests compiled AND run green at authoring; two named casts — the new `as object` re-throw + the relocated legacy `as any`) | **✅ DONE — `261d36e`, CTO review PASSED 2026-07-10** (all four new files byte-identical to bindings — verified against the spec fences AND the CTO's original scratch-tested copies; CanvasClient diff matches §5a-§5e exactly, no other lines touched; unit 117/24, e2e 27/18, boundaries/typecheck clean — all re-run by reviewer; monolith 8,518→8,517 confirmed, EOF blank line exact; grandfather untouched 2→2; second fully clean disclosure in the review chain — both reported deviations (curl warm-up quirk, transient EOF-blank miscount) were environment/process notes, not undisclosed code drift) |
-| 028+ | CanvasClient strangler, remaining groups per site map §7: `padlets` DELETE family (8, cascade pairs = one command), `padlets` INSERT family (19, container+post pairs = one command), `padlets` UPDATE slices (33, 18 in the JSX region — different edit shape), storage pair (Pattern H consumer), auth trio (existing seams); then hooks (26 read sites); FreeformPadletCards LAST; realtime/presence CTO-only, undesigned | per-group; Pattern K where bound tests can carry semantics | site map §7 is the sequencing source |
+| 028 | CanvasClient strangler group 3: the complete `padlets` DELETE family (8 sites / 6 handlers → FOUR commands EXTENDING the posts aggregate, no new files — first extension-only Pattern K: `canvas.deletePost`/`deletePosts`/`deleteChildPosts`/`deleteContainerChild`; the unconditional UPDATE+DELETE cascade in handleDeleteChildFromContainer is ONE command per §7, taking its paired update out of the UPDATE census 33→32; the CONDITIONAL cascades (requestDeletePadlet, Wall onPadletDelete) are composed from two thin commands at the call site to preserve exact DB traffic — recorded §0.4 ruling); TWO child-cascade console-swallows preserved AT THE CALL SITE (commands return honest Results, call sites log-and-continue — not command-internal swallows, no standing-decision extension); deleteMapPinContainer's container leg stays on the hook helper (hook layer untouched); monolith 8,517→8,507; blank census 727→726 bound; grandfather 2→2 | **GPT-5.4 acceptable** (Pattern K, fourth application: 25 bound tests — 16 new + 9 existing — compiled AND run green at authoring; edit simulated end-to-end by the CTO, all derived gates verified against the simulation, which caught one import-line substring collision before binding) | **READY — `patches/PATCH-028.md`** (all seven OLD blocks byte-diffed; one relocated legacy cast §0.6; posts.ts diff is pure-additions, other three lib diffs enumerated §7.1) |
+| 029+ | CanvasClient strangler, remaining groups per site map §7: `padlets` INSERT family (19, container+post pairs = one command), `padlets` UPDATE slices (32 after 028, 18 in the JSX region — different edit shape), storage pair (Pattern H consumer), auth trio (existing seams); then hooks (26 read sites); FreeformPadletCards LAST; realtime/presence CTO-only, undesigned | per-group; Pattern K where bound tests can carry semantics | site map §7 is the sequencing source |
 
 **Fable-window critical path (closes 2026-07-12).** In priority order:
 ① specs 017–019 (unblocks GPT-5.4 for the whole of batch 3), ② specs
@@ -327,6 +328,42 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-10** — PATCH-028 AUTHORED (handoff-ready; **GPT-5.4
+  acceptable** under Pattern K, fourth application — 25 bound unit tests
+  (16 new + the 9 existing posts tests, proving the extension is
+  non-breaking) compiled and run GREEN against the bound implementation
+  at authoring; scratch tsc --strict clean; all six handler-swap shapes
+  compile-verified). Third CanvasClient strangler group: the COMPLETE
+  `padlets` DELETE family (8 sites / 6 handlers) becomes FOUR commands
+  (`canvas.deletePost`/`deletePosts`/`deleteChildPosts`/
+  `deleteContainerChild`) EXTENDING the existing posts aggregate —
+  padlets IS the posts table, so P6 rules the methods onto
+  `PostsRepository`, making this the first extension-only Pattern K
+  patch: NO new files; all four lib files bound as whole files with the
+  expected diff enumerated (posts.ts pure additions, the other three
+  touch only listed import/type lines). Group choice over INSERT (19)
+  and UPDATE (33): smallest cluster, and a delete's entire semantics is
+  its WHERE clause — the exact thing a unit test pins; zero payload
+  construction, zero consumed .select() results, lowest side-effect
+  density; the two JSX-region sites are plain statement swaps. Cascade
+  rulings recorded (§0.4): the unconditional UPDATE+DELETE pair is ONE
+  command per site map §7 (pulling its update out of the UPDATE census,
+  33→32); the two CONDITIONAL parent+children cascades are composed
+  from thin commands at the call site because merging would change DB
+  traffic — a conscious, documented adjustment of §7's sketch. TWO
+  child-cascade console-swallows preserved at the call sites with
+  cause-unwrapped logging (byte-identical messages) — deliberately NOT
+  command-internal swallows, so no standing-decision extension. New
+  authoring discipline this patch: the CTO applied all seven bound
+  blocks to a scratch copy and ran EVERY derived post-edit gate against
+  the simulation before binding — which caught one derivation error
+  (the createPostsRepository count is 9, not 8: the import line is a
+  substring collision), continuing the measurement-instrument lesson
+  family. Monolith 8,517→8,507; blank census 727→726 (one interior
+  blank leaves with §6g's OLD block, bound); grandfather 2→2; suite
+  117/24 → 133/24 (files unchanged — no new files); e2e stays 27/18.
+  One relocated legacy cast (§0.6, the 027 idiom). No PATCH-029 drafted
+  — 028 is the complete table-operation family, no split needed.
 - **2026-07-10** — PATCH-027 landed and reviewed: **PASSED** (commit
   `261d36e`, GPT-5.4). All 18 review-focus points independently
   re-verified: boards-update family stayed scoped to its four sites;
