@@ -12,6 +12,7 @@ import {
   createGroupPostIntoContainerCommand,
   createToggleTaskCommand,
   createUpdatePostMetadataCommand,
+  createUpdatePostMetadataUnstampedCommand,
 } from './posts';
 import type { PostMetadataWriteFields, PostsRepository, PostTasksWriteFields } from './posts';
 import type { PostId } from '../core/ids';
@@ -699,5 +700,42 @@ describe('canvas.updatePostMetadata', () => {
       expect(result.error.code).toBe('validation');
     }
     expect(fake.updateMetadataCalls).toHaveLength(0);
+  });
+});
+
+describe('canvas.updatePostMetadataUnstamped', () => {
+  it('writes metadata verbatim without updatedAt', async () => {
+    const fake = createFakeRepository();
+    const update = createUpdatePostMetadataUnstampedCommand(fake.repository);
+
+    const result = await update({ postId: 'post-1', metadata: { isLocked: true } }, ctx);
+
+    expect(result.ok).toBe(true);
+    expect(fake.updateMetadataUnstampedCalls).toEqual([
+      { id: 'post-1', fields: { metadata: { isLocked: true } } },
+    ]);
+    expect(fake.updateMetadataCalls).toHaveLength(0);
+  });
+
+  it('propagates a repository failure unchanged', async () => {
+    const fake = createFakeRepository();
+    fake.setUpdateMetadataUnstampedResult(err(domainError('unavailable', 'db down')));
+    const update = createUpdatePostMetadataUnstampedCommand(fake.repository);
+
+    const result = await update({ postId: 'post-1', metadata: {} }, ctx);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe('unavailable');
+  });
+
+  it('rejects invalid input without calling the repository', async () => {
+    const fake = createFakeRepository();
+    const update = createUpdatePostMetadataUnstampedCommand(fake.repository);
+
+    const result = await update({ postId: 'post-1' }, ctx);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe('validation');
+    expect(fake.updateMetadataUnstampedCalls).toHaveLength(0);
   });
 });

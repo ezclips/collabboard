@@ -310,3 +310,20 @@ export const createUpdatePostMetadataCommand = (repository: PostsRepository) =>
         updatedAt: new Date().toISOString(),
       }),
   });
+
+export const updatePostMetadataUnstampedSchema = z.object({
+  postId: z.string(),
+  /** The post's NEW metadata, already merged at the call site (legacy shape). */
+  metadata: z.record(z.string(), z.unknown()),
+});
+
+/** Legacy lock/z-order writes send NO updated_at - the unstamped sibling of updatePostMetadata. */
+export const createUpdatePostMetadataUnstampedCommand = (repository: PostsRepository) =>
+  defineCommand({
+    name: 'canvas.updatePostMetadataUnstamped',
+    input: updatePostMetadataUnstampedSchema,
+    execute: async (input) =>
+      repository.updateMetadataUnstamped(asPostId(input.postId), {
+        metadata: input.metadata,
+      }),
+  });

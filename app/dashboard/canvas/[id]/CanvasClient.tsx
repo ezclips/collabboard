@@ -57,6 +57,7 @@ import {
   createDeletePostsCommand,
   createGroupPostIntoContainerCommand,
   createUpdatePostMetadataCommand,
+  createUpdatePostMetadataUnstampedCommand,
 } from '@/lib/domain/canvas/posts';
 import { createCanvasBoardRepository } from '@/lib/infra/canvas/boardRepository';
 import { createPostsRepository } from '@/lib/infra/canvas/postsRepository';
@@ -1456,22 +1457,14 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
 
     // Persist only the affected containers
     try {
+      const updatePostMetadata = createUpdatePostMetadataCommand(createPostsRepository());
       for (const { id, wallPosition } of updates) {
         const original = padlets.find(p => p.id === id);
         if (!original) continue;
 
-        const { error } = await supabase
-          .from('padlets')
-          .update({
-            metadata: {
-              ...original.metadata,
-              wallPosition,
-            },
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', id);
+        const result = await updatePostMetadata({ postId: id, metadata: { ...original.metadata, wallPosition } }, { userId: null });
 
-        if (error) throw error;
+        if (!result.ok) throw result.error.cause ?? result.error;
       }
     } catch (err) {
       console.error('[handleWallReorder] Save failed:', err);
@@ -1955,15 +1948,10 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       if (postError) throw postError;
 
       // 4. Persist Container Update
-      const { error: containerError } = await supabase
-        .from('padlets')
-        .update({
-          metadata: { ...container.metadata, childPadletIds: newChildren },
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', containerId);
+      const updatePostMetadata = createUpdatePostMetadataCommand(createPostsRepository());
+      const containerResult = await updatePostMetadata({ postId: containerId, metadata: { ...container.metadata, childPadletIds: newChildren } }, { userId: null });
 
-      if (containerError) throw containerError;
+      if (!containerResult.ok) throw containerResult.error.cause ?? containerResult.error;
 
       toast.success('Post added to container');
 
@@ -2666,13 +2654,10 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     return debounce(async (padletId: string, fullMetadata: any) => {
       markPadletLocallyModified(padletId);
       try {
-        await supabase
-          .from("padlets")
-          .update({
-            metadata: fullMetadata,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", padletId);
+        // Result deliberately ignored - the legacy write swallowed BOTH
+        // resolved and thrown errors (empty catch); the command preserves that.
+        const updatePostMetadata = createUpdatePostMetadataCommand(createPostsRepository());
+        await updatePostMetadata({ postId: padletId, metadata: fullMetadata }, { userId: null });
       } catch {
       }
     }, 500);
@@ -3682,12 +3667,10 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     markPadletLocallyModified(id);
     try {
       const newMetadata = { ...padlet.metadata, isLocked: newLockedState };
-      const { error } = await supabase
-        .from('padlets')
-        .update({ metadata: newMetadata })
-        .eq('id', id);
+      const updatePostMetadataUnstamped = createUpdatePostMetadataUnstampedCommand(createPostsRepository());
+      const result = await updatePostMetadataUnstamped({ postId: id, metadata: newMetadata }, { userId: null });
 
-      if (error) throw error;
+      if (!result.ok) throw result.error.cause ?? result.error;
 
       setPadlets(prev => prev.map(p =>
         p.id === id ? { ...p, metadata: newMetadata } : p
@@ -3840,15 +3823,10 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     const newValue = !(padlet.metadata as any)?.cropToGrid;
 
     try {
-      const { error } = await supabase
-        .from('padlets')
-        .update({
-          metadata: { ...padlet.metadata, cropToGrid: newValue },
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', id);
+      const updatePostMetadata = createUpdatePostMetadataCommand(createPostsRepository());
+      const result = await updatePostMetadata({ postId: id, metadata: { ...padlet.metadata, cropToGrid: newValue } }, { userId: null });
 
-      if (error) throw error;
+      if (!result.ok) throw result.error.cause ?? result.error;
       fetchData();
     } catch (err) {
       console.error('Failed to toggle crop to grid:', err);
@@ -3888,12 +3866,10 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     markPadletLocallyModified(id);
     try {
       const newMetadata = { ...padlet.metadata, zIndex: newZ };
-      const { error } = await supabase
-        .from('padlets')
-        .update({ metadata: newMetadata })
-        .eq('id', id);
+      const updatePostMetadataUnstamped = createUpdatePostMetadataUnstampedCommand(createPostsRepository());
+      const result = await updatePostMetadataUnstamped({ postId: id, metadata: newMetadata }, { userId: null });
 
-      if (error) throw error;
+      if (!result.ok) throw result.error.cause ?? result.error;
 
       setPadlets(prev => prev.map(p =>
         p.id === id ? { ...p, metadata: newMetadata } : p
