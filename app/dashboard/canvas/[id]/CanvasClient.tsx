@@ -56,10 +56,12 @@ import {
   createDeletePostCommand,
   createDeletePostsCommand,
   createGroupPostIntoContainerCommand,
+  createUpdatePostMetadataCommand,
 } from '@/lib/domain/canvas/posts';
 import { createCanvasBoardRepository } from '@/lib/infra/canvas/boardRepository';
 import { createPostsRepository } from '@/lib/infra/canvas/postsRepository';
 import { createSectionsRepository } from '@/lib/infra/canvas/sectionsRepository';
+import { createStorageGateway } from '@/lib/infra/supabase/storage';
 import type { Padlet, BoardSection, PendingPostDraft, NewPostDragState, DropIndicatorState, CanvasLine } from '@/types/collabboard';
 import { User, Session } from '@supabase/supabase-js';
 import {
@@ -3711,18 +3713,13 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       try {
         // Upload image to Supabase storage
         const fileName = `link-images/${id}-${Date.now()}-${file.name}`;
-        const { error: uploadError } = await supabase.storage
-          .from('padlet-files')
-          .upload(fileName, file);
+        const storageGateway = createStorageGateway();
+        const uploadResult = await storageGateway.upload('padlet-files', fileName, file);
 
-        if (uploadError) throw uploadError;
+        if (!uploadResult.ok) throw uploadResult.error.cause ?? uploadResult.error;
 
         // Get public URL
-        const { data: urlData } = supabase.storage
-          .from('padlet-files')
-          .getPublicUrl(fileName);
-
-        const imageUrl = urlData.publicUrl;
+        const imageUrl = storageGateway.getPublicUrl('padlet-files', fileName);
 
         // Update padlet metadata with new image
         const newMetadata = {
@@ -3731,12 +3728,10 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         };
 
         markPadletLocallyModified(id);
-        const { error: updateError } = await supabase
-          .from('padlets')
-          .update({ metadata: newMetadata, updated_at: new Date().toISOString() })
-          .eq('id', id);
+        const updatePostMetadata = createUpdatePostMetadataCommand(createPostsRepository());
+        const updateResult = await updatePostMetadata({ postId: id, metadata: newMetadata }, { userId: null });
 
-        if (updateError) throw updateError;
+        if (!updateResult.ok) throw updateResult.error.cause ?? updateResult.error;
 
         // Update local state
         setPadlets(prev => prev.map(p =>

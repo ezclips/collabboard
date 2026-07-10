@@ -11,6 +11,7 @@ import {
   createDeletePostsCommand,
   createGroupPostIntoContainerCommand,
   createToggleTaskCommand,
+  createUpdatePostMetadataCommand,
 } from './posts';
 import type { PostMetadataWriteFields, PostsRepository, PostTasksWriteFields } from './posts';
 import type { PostId } from '../core/ids';
@@ -648,5 +649,55 @@ describe('canvas.createSchedulerContainerWithPost', () => {
 
     expect(result.ok).toBe(true);
     expect(fake.insertCalls).toHaveLength(2);
+  });
+});
+
+describe('canvas.updatePostMetadata', () => {
+  it('writes the metadata verbatim with a fresh ISO timestamp to the right post', async () => {
+    const fake = createFakeRepository();
+    const updatePostMetadata = createUpdatePostMetadataCommand(fake.repository);
+
+    const result = await updatePostMetadata(
+      { postId: 'post-1', metadata: { linkImage: 'https://x.test/img.png', linkUrl: 'https://x.test' } },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    expect(fake.updateMetadataCalls).toHaveLength(1);
+    expect(fake.updateMetadataCalls[0].id).toBe('post-1');
+    expect(fake.updateMetadataCalls[0].fields.metadata).toEqual({
+      linkImage: 'https://x.test/img.png',
+      linkUrl: 'https://x.test',
+    });
+    expect(new Date(fake.updateMetadataCalls[0].fields.updatedAt).toISOString()).toBe(
+      fake.updateMetadataCalls[0].fields.updatedAt,
+    );
+    expect(fake.updateMetadataUnstampedCalls).toHaveLength(0);
+  });
+
+  it('propagates a repository failure unchanged', async () => {
+    const fake = createFakeRepository();
+    fake.setUpdateMetadataResult(err(domainError('unavailable', 'db down')));
+    const updatePostMetadata = createUpdatePostMetadataCommand(fake.repository);
+
+    const result = await updatePostMetadata({ postId: 'post-1', metadata: {} }, ctx);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe('unavailable');
+    }
+  });
+
+  it('rejects invalid input without calling the repository', async () => {
+    const fake = createFakeRepository();
+    const updatePostMetadata = createUpdatePostMetadataCommand(fake.repository);
+
+    const result = await updatePostMetadata({ postId: 'post-1' }, ctx);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe('validation');
+    }
+    expect(fake.updateMetadataCalls).toHaveLength(0);
   });
 });

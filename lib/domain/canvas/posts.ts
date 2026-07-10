@@ -293,3 +293,20 @@ export const createCreateSchedulerContainerWithPostCommand = (repository: PostsR
       return ok(undefined);
     },
   });
+
+export const updatePostMetadataSchema = z.object({
+  postId: z.string(),
+  /** The post's NEW metadata, already merged at the call site (legacy shape). */
+  metadata: z.record(z.string(), z.unknown()),
+});
+
+export const createUpdatePostMetadataCommand = (repository: PostsRepository) =>
+  defineCommand({
+    name: 'canvas.updatePostMetadata',
+    input: updatePostMetadataSchema,
+    execute: async (input) =>
+      repository.updateMetadata(asPostId(input.postId), {
+        metadata: input.metadata,
+        updatedAt: new Date().toISOString(),
+      }),
+  });
