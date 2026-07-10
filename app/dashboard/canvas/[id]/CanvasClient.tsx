@@ -60,6 +60,8 @@ import {
   createUpdatePostMetadataCommand,
   createUpdatePostMetadataUnstampedBestEffortCommand,
   createUpdatePostMetadataUnstampedCommand,
+  createUpdatePostPositionCommand,
+  createUpdatePostPositionWithMetadataBestEffortCommand,
 } from '@/lib/domain/canvas/posts';
 import { createCanvasBoardRepository } from '@/lib/infra/canvas/boardRepository';
 import { createPostsRepository } from '@/lib/infra/canvas/postsRepository';
@@ -6011,15 +6013,13 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                     : p
                 ));
 
-                await supabase
-                  .from('padlets')
-                  .update({
-                    metadata: newMetadata,
-                    position_x: Math.max(0, x),
-                    position_y: Math.max(0, y),
-                    updated_at: new Date().toISOString(),
-                  })
-                  .eq('id', padletId);
+                const updatePostPositionWithMetadataBestEffort = createUpdatePostPositionWithMetadataBestEffortCommand(createPostsRepository());
+                const result = await updatePostPositionWithMetadataBestEffort(
+                  { postId: padletId, positionX: Math.max(0, x), positionY: Math.max(0, y), metadata: newMetadata },
+                  { userId: null }
+                );
+
+                if (!result.ok) throw result.error.cause ?? result.error;
 
                 // 2. Remove from old container's list
                 const oldParent = padlets.find(p => p.id === oldParentId);
@@ -6469,18 +6469,15 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
 
 
                     // Background sync to Supabase
-                    const { error } = await supabase
-                      .from('padlets')
-                      .update({
-                        position_x: Math.round(newX),
-                        position_y: Math.round(newY),
-                        updated_at: new Date().toISOString()
-                      })
-                      .eq('id', padletId);
+                    const updatePostPosition = createUpdatePostPositionCommand(createPostsRepository());
+                    const result = await updatePostPosition(
+                      { postId: padletId, positionX: Math.round(newX), positionY: Math.round(newY) },
+                      { userId: null }
+                    );
 
-                    if (error) {
+                    if (!result.ok) {
                       // Rollback on failure
-                      console.error('Failed to update position, rolling back:', error);
+                      console.error('Failed to update position, rolling back:', result.error.cause ?? result.error);
                       setPadlets(prev => prev.map(p =>
                         p.id === padletId
                           ? { ...p, position_x: oldX, position_y: oldY }

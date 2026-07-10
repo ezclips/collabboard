@@ -271,3 +271,73 @@ describe('SupabasePostsRepository', () => {
     expect(eqCalls).toEqual([{ column: 'id', value: 'post-1' }]);
   });
 });
+
+describe('SupabasePostsRepository.updatePosition', () => {
+  it('sends ONLY position_x/position_y/updated_at when no metadata is given - no metadata key', async () => {
+    const { client, updateCalls, eqCalls } = createFakeClient();
+    const repository = new SupabasePostsRepository(client);
+
+    const result = await repository.updatePosition(asPostId('post-1'), {
+      positionX: 120,
+      positionY: 45,
+      updatedAt: '2026-07-10T08:00:00.000Z',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(updateCalls).toEqual([
+      {
+        position_x: 120,
+        position_y: 45,
+        updated_at: '2026-07-10T08:00:00.000Z',
+      },
+    ]);
+    expect(Object.keys(updateCalls[0])).toEqual(['position_x', 'position_y', 'updated_at']);
+    expect(eqCalls).toEqual([{ column: 'id', value: 'post-1' }]);
+  });
+
+  it('includes the metadata key when metadata is given', async () => {
+    const { client, updateCalls } = createFakeClient();
+    const repository = new SupabasePostsRepository(client);
+
+    const result = await repository.updatePosition(asPostId('post-1'), {
+      positionX: 80,
+      positionY: 30,
+      updatedAt: '2026-07-10T08:00:00.000Z',
+      metadata: { sectionId: 's-1' },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(updateCalls).toEqual([
+      {
+        position_x: 80,
+        position_y: 30,
+        updated_at: '2026-07-10T08:00:00.000Z',
+        metadata: { sectionId: 's-1' },
+      },
+    ]);
+    expect(Object.keys(updateCalls[0])).toEqual([
+      'position_x',
+      'position_y',
+      'updated_at',
+      'metadata',
+    ]);
+  });
+
+  it('maps a supabase error to an unavailable DomainError carrying the cause', async () => {
+    const supabaseError = { code: '42501', message: 'permission denied' };
+    const { client } = createFakeClient(supabaseError);
+    const repository = new SupabasePostsRepository(client);
+
+    const result = await repository.updatePosition(asPostId('post-1'), {
+      positionX: 0,
+      positionY: 0,
+      updatedAt: '2026-07-10T08:00:00.000Z',
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe('unavailable');
+      expect(result.error.cause).toBe(supabaseError);
+    }
+  });
+});

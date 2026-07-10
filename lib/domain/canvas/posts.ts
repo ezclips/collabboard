@@ -45,6 +45,19 @@ export interface PostMetadataWriteFields {
   readonly updatedAt: string;
 }
 
+/**
+ * The position-write payload (PATCH-034). `metadata` is OPTIONAL: one legacy
+ * site writes position alone (no metadata key at all), the other writes
+ * position bundled with a metadata update in the SAME statement - the
+ * repository omits the key entirely when absent, matching each site exactly.
+ */
+export interface PostPositionWriteFields {
+  readonly positionX: number;
+  readonly positionY: number;
+  readonly updatedAt: string;
+  readonly metadata?: Record<string, unknown>;
+}
+
 export interface PostsRepository {
   updateTasks(id: PostId, fields: PostTasksWriteFields): Promise<Result<void, DomainError>>;
   updateMetadata(id: PostId, fields: PostMetadataWriteFields): Promise<Result<void, DomainError>>;
@@ -53,6 +66,7 @@ export interface PostsRepository {
     id: PostId,
     fields: { readonly metadata: Record<string, unknown> },
   ): Promise<Result<void, DomainError>>;
+  updatePosition(id: PostId, fields: PostPositionWriteFields): Promise<Result<void, DomainError>>;
   deleteById(id: PostId): Promise<Result<void, DomainError>>;
   deleteByIds(ids: readonly PostId[]): Promise<Result<void, DomainError>>;
   /** Deletes every row whose metadata->>parentId equals the given id. */
@@ -367,6 +381,60 @@ export const createUpdatePostMetadataUnstampedBestEffortCommand = (repository: P
       // PRESERVED LEGACY DEFECT (PATCH-032): same bare-await swallow as the
       // stamped sibling above - resolved errors ignored, thrown escapes.
       await repository.updateMetadataUnstamped(asPostId(input.postId), {
+        metadata: input.metadata,
+      });
+      return ok(undefined);
+    },
+  });
+
+export const updatePostPositionSchema = z.object({
+  postId: z.string(),
+  positionX: z.number(),
+  positionY: z.number(),
+});
+
+/**
+ * The HONEST position write (PATCH-034): the legacy call site read the
+ * resolved error and rolled the optimistic position back; a thrown
+ * exception previously escaped uncaught with NO rollback (a legacy
+ * asymmetry). The command converts both channels through the same Result,
+ * so the call site's single failure branch now covers both - the P3
+ * repair (never lose user work) applied identically to PATCH-024/032/033.
+ */
+export const createUpdatePostPositionCommand = (repository: PostsRepository) =>
+  defineCommand({
+    name: 'canvas.updatePostPosition',
+    input: updatePostPositionSchema,
+    execute: async (input) =>
+      repository.updatePosition(asPostId(input.postId), {
+        positionX: input.positionX,
+        positionY: input.positionY,
+        updatedAt: new Date().toISOString(),
+      }),
+  });
+
+export const updatePostPositionWithMetadataBestEffortSchema = z.object({
+  postId: z.string(),
+  positionX: z.number(),
+  positionY: z.number(),
+  /** The post's NEW metadata, parentId already removed at the call site (legacy shape). */
+  metadata: z.record(z.string(), z.unknown()),
+});
+
+export const createUpdatePostPositionWithMetadataBestEffortCommand = (repository: PostsRepository) =>
+  defineCommand({
+    name: 'canvas.updatePostPositionWithMetadataBestEffort',
+    input: updatePostPositionWithMetadataBestEffortSchema,
+    execute: async (input) => {
+      // PRESERVED LEGACY DEFECT (PATCH-034; queued P3-family fix, do NOT
+      // repair here): the legacy detach handler awaited this combined
+      // position+metadata write bare - resolved DB errors were silently
+      // swallowed; only a THROWN network error surfaced (escapes execute,
+      // caught by defineCommand).
+      await repository.updatePosition(asPostId(input.postId), {
+        positionX: input.positionX,
+        positionY: input.positionY,
+        updatedAt: new Date().toISOString(),
         metadata: input.metadata,
       });
       return ok(undefined);

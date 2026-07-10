@@ -15,8 +15,15 @@ import {
   createUpdatePostMetadataCommand,
   createUpdatePostMetadataUnstampedBestEffortCommand,
   createUpdatePostMetadataUnstampedCommand,
+  createUpdatePostPositionCommand,
+  createUpdatePostPositionWithMetadataBestEffortCommand,
 } from './posts';
-import type { PostMetadataWriteFields, PostsRepository, PostTasksWriteFields } from './posts';
+import type {
+  PostMetadataWriteFields,
+  PostPositionWriteFields,
+  PostsRepository,
+  PostTasksWriteFields,
+} from './posts';
 import type { PostId } from '../core/ids';
 import type { DomainError } from '../core/errors';
 import { domainError } from '../core/errors';
@@ -43,6 +50,7 @@ function createFakeRepository() {
     id: PostId;
     fields: { readonly metadata: Record<string, unknown> };
   }> = [];
+  const updatePositionCalls: Array<{ id: PostId; fields: PostPositionWriteFields }> = [];
   const insertCalls: object[] = [];
   const insertReturningCalls: object[] = [];
   let updateTasksResult: Result<void, DomainError> = ok(undefined);
@@ -51,6 +59,7 @@ function createFakeRepository() {
   let deleteByIdsResult: Result<void, DomainError> = ok(undefined);
   let deleteByParentIdResult: Result<void, DomainError> = ok(undefined);
   let updateMetadataUnstampedResult: Result<void, DomainError> = ok(undefined);
+  let updatePositionResult: Result<void, DomainError> = ok(undefined);
   const insertResultQueue: Array<Result<void, DomainError>> = [];
   let insertReturningResult: Result<Record<string, unknown> | null, DomainError> = ok(null);
 
@@ -66,6 +75,10 @@ function createFakeRepository() {
     updateMetadataUnstamped: async (id, fields) => {
       updateMetadataUnstampedCalls.push({ id, fields });
       return updateMetadataUnstampedResult;
+    },
+    updatePosition: async (id, fields) => {
+      updatePositionCalls.push({ id, fields });
+      return updatePositionResult;
     },
     deleteById: async (id) => {
       deleteByIdCalls.push(id);
@@ -94,6 +107,7 @@ function createFakeRepository() {
     updateTasksCalls,
     updateMetadataCalls,
     updateMetadataUnstampedCalls,
+    updatePositionCalls,
     deleteByIdCalls,
     deleteByIdsCalls,
     deleteByParentIdCalls,
@@ -107,6 +121,9 @@ function createFakeRepository() {
     },
     setUpdateMetadataUnstampedResult(result: Result<void, DomainError>) {
       updateMetadataUnstampedResult = result;
+    },
+    setUpdatePositionResult(result: Result<void, DomainError>) {
+      updatePositionResult = result;
     },
     setDeleteByIdResult(result: Result<void, DomainError>) {
       deleteByIdResult = result;
@@ -826,5 +843,107 @@ describe('canvas.updatePostMetadataUnstampedBestEffort', () => {
       expect(result.error.code).toBe('validation');
     }
     expect(fake.updateMetadataUnstampedCalls).toHaveLength(0);
+  });
+});
+
+describe('canvas.updatePostPosition', () => {
+  it('writes ONLY position and a fresh ISO timestamp - no metadata key', async () => {
+    const fake = createFakeRepository();
+    const updatePostPosition = createUpdatePostPositionCommand(fake.repository);
+
+    const result = await updatePostPosition({ postId: 'post-1', positionX: 120, positionY: 45 }, ctx);
+
+    expect(result.ok).toBe(true);
+    expect(fake.updatePositionCalls).toHaveLength(1);
+    expect(fake.updatePositionCalls[0].id).toBe('post-1');
+    expect(fake.updatePositionCalls[0].fields.positionX).toBe(120);
+    expect(fake.updatePositionCalls[0].fields.positionY).toBe(45);
+    expect(fake.updatePositionCalls[0].fields.metadata).toBeUndefined();
+    expect(Object.keys(fake.updatePositionCalls[0].fields)).toEqual([
+      'positionX',
+      'positionY',
+      'updatedAt',
+    ]);
+    expect(new Date(fake.updatePositionCalls[0].fields.updatedAt).toISOString()).toBe(
+      fake.updatePositionCalls[0].fields.updatedAt,
+    );
+  });
+
+  it('propagates a repository failure unchanged', async () => {
+    const fake = createFakeRepository();
+    fake.setUpdatePositionResult(err(domainError('unavailable', 'db down')));
+    const updatePostPosition = createUpdatePostPositionCommand(fake.repository);
+
+    const result = await updatePostPosition({ postId: 'post-1', positionX: 0, positionY: 0 }, ctx);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe('unavailable');
+    }
+  });
+
+  it('rejects invalid input without calling the repository', async () => {
+    const fake = createFakeRepository();
+    const updatePostPosition = createUpdatePostPositionCommand(fake.repository);
+
+    const result = await updatePostPosition({ postId: 'post-1', positionX: 0 }, ctx);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe('validation');
+    }
+    expect(fake.updatePositionCalls).toHaveLength(0);
+  });
+});
+
+describe('canvas.updatePostPositionWithMetadataBestEffort', () => {
+  it('writes position AND metadata with a fresh ISO timestamp and returns ok', async () => {
+    const fake = createFakeRepository();
+    const bestEffort = createUpdatePostPositionWithMetadataBestEffortCommand(fake.repository);
+
+    const result = await bestEffort(
+      { postId: 'post-1', positionX: 80, positionY: 30, metadata: { sectionId: 's-1' } },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    expect(fake.updatePositionCalls).toHaveLength(1);
+    expect(fake.updatePositionCalls[0].id).toBe('post-1');
+    expect(fake.updatePositionCalls[0].fields.positionX).toBe(80);
+    expect(fake.updatePositionCalls[0].fields.positionY).toBe(30);
+    expect(fake.updatePositionCalls[0].fields.metadata).toEqual({ sectionId: 's-1' });
+    expect(Object.keys(fake.updatePositionCalls[0].fields)).toEqual([
+      'positionX',
+      'positionY',
+      'updatedAt',
+      'metadata',
+    ]);
+  });
+
+  it('preserves the legacy swallow: a resolved repository failure still returns ok', async () => {
+    const fake = createFakeRepository();
+    fake.setUpdatePositionResult(err(domainError('unavailable', 'db down')));
+    const bestEffort = createUpdatePostPositionWithMetadataBestEffortCommand(fake.repository);
+
+    const result = await bestEffort(
+      { postId: 'post-1', positionX: 0, positionY: 0, metadata: {} },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    expect(fake.updatePositionCalls).toHaveLength(1);
+  });
+
+  it('rejects invalid input without calling the repository', async () => {
+    const fake = createFakeRepository();
+    const bestEffort = createUpdatePostPositionWithMetadataBestEffortCommand(fake.repository);
+
+    const result = await bestEffort({ postId: 'post-1', positionX: 0, positionY: 0 }, ctx);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe('validation');
+    }
+    expect(fake.updatePositionCalls).toHaveLength(0);
   });
 });

@@ -3,7 +3,12 @@ import type { DomainError } from '../../domain/core/errors';
 import type { PostId } from '../../domain/core/ids';
 import type { Result } from '../../domain/core/result';
 import { err, ok } from '../../domain/core/result';
-import type { PostMetadataWriteFields, PostsRepository, PostTasksWriteFields } from '../../domain/canvas/posts';
+import type {
+  PostMetadataWriteFields,
+  PostPositionWriteFields,
+  PostsRepository,
+  PostTasksWriteFields,
+} from '../../domain/canvas/posts';
 import { createBrowserSupabaseClient } from '../supabase/browserClient';
 
 interface SupabaseErrorLike {
@@ -50,7 +55,13 @@ interface PostsSupabaseClient {
             metadata: PostMetadataWriteFields['metadata'];
             updated_at: PostMetadataWriteFields['updatedAt'];
           }
-        | { metadata: Record<string, unknown> },
+        | { metadata: Record<string, unknown> }
+        | {
+            position_x: number;
+            position_y: number;
+            updated_at: string;
+            metadata?: Record<string, unknown>;
+          },
     ): PostsUpdateQuery;
     delete(): PostsDeleteQuery;
     insert(row: object): PostsInsertQuery;
@@ -107,6 +118,27 @@ export class SupabasePostsRepository implements PostsRepository {
 
     if (error) {
       return err(domainError('unavailable', 'Could not update the post', { cause: error }));
+    }
+
+    return ok(undefined);
+  }
+
+  async updatePosition(
+    id: PostId,
+    fields: PostPositionWriteFields,
+  ): Promise<Result<void, DomainError>> {
+    const { error } = await this.client
+      .from('padlets')
+      .update({
+        position_x: fields.positionX,
+        position_y: fields.positionY,
+        updated_at: fields.updatedAt,
+        ...(fields.metadata !== undefined ? { metadata: fields.metadata } : {}),
+      })
+      .eq('id', id);
+
+    if (error) {
+      return err(domainError('unavailable', 'Could not update the post position', { cause: error }));
     }
 
     return ok(undefined);
