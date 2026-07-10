@@ -657,6 +657,31 @@ padlets UPDATE 23→14, all in the JSX region). Review re-derived every
 expectation from the live spec on disk (per the 031 lesson) and found
 zero disclosure gaps — the first fully clean review since the correction.
 Landed byte-perfect on GPT-5.4 an eighth time; monolith 8,475→8,450.
+**Extended a ninth time by PATCH-033** (ten of the fourteen JSX padlets
+UPDATE sites) — the FIRST ONE-FILE APPLICATION: zero domain changes, zero
+test changes, zero new commands, zero import changes. Seven bare-await
+sites (a container-detach leg, a sequential two-write drag-drop pair with
+first-throw-aborts-second preserved, three comments variants, a drawing
+save, a crop save) landed as pure CONSUMERS of the already-tested
+`updatePostMetadataBestEffort` — no new swallow sites, the standing P3
+family stays at six. The check-and-branch `onUpdateChildComments` triplet
+extended PATCH-032's Ruling-2 authorization to three more sites under the
+identical convergence criteria (resolved branch untouched, thrown mode
+routed onto the existing failure branch). One binding introduced a new
+form: an OLD/NEW pair that occurs TWICE in the file (byte-twin columns and
+wall variants) bound with an explicit occurs-exactly-2/replace-both
+instruction, machine-verified at both authoring and review. The fidelity
+net for the whole patch is the EXISTING 45-test posts suite — no new
+tests were needed because this patch only swaps consumers of already-pinned
+commands, the first time Pattern K's design (bound tests as the net) has
+paid off across three consecutive patches without adding to the suite.
+Four sites were explicitly excluded by column shape (two position writes,
+a content+select variant, a title write) and named for their own future
+rulings rather than folded in. Review re-derived every expectation from
+the live spec and cross-checked all eight fence-pairs against the
+implementation directly (not just the whole-file hash) — zero disclosure
+gaps, second consecutive fully clean review. Landed byte-perfect on
+GPT-5.4 a ninth time; monolith 8,450→8,404; padlets UPDATE 14→4.
 
 **When:** a component performs a direct table WRITE whose UI trigger is
 absent from (or too costly to add to) the e2e net, but whose logic is a
@@ -865,6 +890,7 @@ it, STOP — never adapt.
 | 030 | CanvasClient (storage pair + paired metadata update, `addImageToLink`, 3 sites / 1 handler) | Pattern K reuse (§5.11), SIXTH application, narrowest yet: ONE bound block, one thin new command `canvas.updatePostMetadata` over the ALREADY-TESTED `updateMetadata` repo method (028), zero infra changes; storage side consumed the EXISTING Pattern H `createStorageGateway()` (§5.8, in production since 017) rather than adding a seam — first K patch composing with H; 36 bound tests (3 new + 33 existing re-run non-breaking); simulation caught a tenth measurement-instrument variant (unescaped grep dot false-matching the patch's own new import path); NO grandfather movement; monolith line count SHRANK again (8,504→8,499); storage category went EXTINCT in CanvasClient (2→0); all three bound hashes matched EXACTLY plus all three must-not-change infra hashes confirmed unchanged — third consecutive zero-disclosure-gap review | 2→2 (CanvasClient stays grandfathered — 30 padlets sites remain) ✅ done |
 | 031 | CanvasClient (honest-contract padlets UPDATE slice, six named-function sites) | Pattern K reuse (§5.11), SEVENTH application, first split by LEGACY ERROR CONTRACT rather than feature: four sites reused `canvas.updatePostMetadata` (030), two UNSTAMPED sites got a new thin sibling `canvas.updatePostMetadataUnstamped` over 028's already-tested `updateMetadataUnstamped` method, zero infra changes; nine named UPDATE sites explicitly excluded (swallow-cluster and check-and-branch contracts don't port byte-faithfully without a separate ruling); bonus extinction of the file's one double-quoted `.from("padlets")` site (1→0); 39 bound tests (3 new + 36 existing re-run non-breaking); NO grandfather movement; monolith line count SHRANK again (8,499→8,475); all three bound hashes ultimately confirmed EXACT and all six CanvasClient blocks byte-identical to the live spec, but the FIRST review pass produced a false "NEEDS FIX" from a reviewer-side stale scratch cache rather than the live (out-of-band-revised) spec — reversed on re-review, recorded as measurement-instrument variant eleven | 2→2 (CanvasClient stays grandfathered — 24 padlets sites remain) ✅ done |
 | 032 | CanvasClient (named-function padlets UPDATE extinction, remaining nine sites) | Pattern K reuse (§5.11), EIGHTH application, first patch delegated after two owner-requested rulings in one authoring pass: bare-awaited cluster (7 sites) onto two new command-internal-swallow siblings (`canvas.updatePostMetadataBestEffort` + unstamped twin), extending the P3 swallow family 4→6 sites; check-and-branch pair (`changeCardColor`/`pinPost`) received the program's SECOND authorized behavior change (thrown-mode repair onto the existing failure branch, resolved-mode untouched); fail-fast `Promise.all` semantics preserved exactly via throw-on-!ok wrapper closures; 45 bound tests (6 new + 39 existing re-run non-breaking); spec's own final hashes RECONSTRUCTED from its OLD/NEW fences before delegation (new authoring practice, direct response to 031's review correction); NO grandfather movement; monolith line count SHRANK again (8,475→8,450); named-function padlets UPDATE went EXTINCT (9→0; 23→14 total, all JSX); review re-derived every expectation from the live spec on disk and found zero disclosure gaps — first fully clean review since the 031 correction | 2→2 (CanvasClient stays grandfathered — 15 padlets sites remain, all JSX + the lone select) ✅ done |
+| 033 | CanvasClient (ten of the fourteen JSX padlets UPDATE sites) | Pattern K reuse (§5.11), NINTH application, FIRST ONE-FILE patch: zero domain/test/import changes, pure consumer swaps of the already-tested command quartet — seven bare-await sites onto `updatePostMetadataBestEffort` (no new swallow sites, P3 family stays at six), the `onUpdateChildComments` triplet extending 032's Ruling-2 authorization to three more sites; new binding form introduced — an OLD/NEW pair bound at an explicit occurs-exactly-2/replace-both count for byte-twin columns/wall variants, machine-verified at authoring AND review; fidelity net = the existing 45-test posts suite (no new tests needed, Pattern K's bound-test design paying off on a pure-consumer patch); four sites deferred by column shape and named for their own future rulings; NO grandfather movement; monolith line count SHRANK again (8,450→8,404); padlets UPDATE 14→4; review cross-checked all eight fence-pairs against the implementation directly, not just the whole-file hash — zero disclosure gaps, second consecutive fully clean review | 2→2 (CanvasClient stays grandfathered — 5 padlets sites remain: 4 deferred writes + the lone select) ✅ done |
 
 **New patterns discovered by future patches get added here by the CTO at
 review — this catalog only ever contains patterns with a reviewed reference
