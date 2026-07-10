@@ -520,7 +520,24 @@ zero-additional-finding delivery; both implementer-reported items were
 environment/process notes, not code drift) is the baseline expectation,
 not new safety evidence. Grandfather held at 2, no credit sought or given
 for metric-only movement. Axis snapshot at 76 (unchanged): safety 19,
-ops 13, architecture 20, product 13, continuity 11.)
+ops 13, architecture 20, product 13, continuity 11.) → **76 (held)**
+(2026-07-10: PATCH-028 landed and passed review — the fourth Pattern K
+group, and the FIRST extension-only application (`padlets` DELETE family,
+four commands joining the existing `PostsRepository` rather than a new
+aggregate file), landed byte-perfect on GPT-5.4, all cascade/swallow
+semantics verified byte-exact and test-covered, 25 bound tests incl. the 9
+PATCH-025 tests re-run to prove the extension non-breaking, and
+CanvasClient's line count SHRANK again (8,517→8,507). No credit:
+architecture stays at its 20/20 ceiling, same capped-axis ruling as
+PATCH-019/020/021/026/027. No other axis moved: ops/product/continuity
+unchanged. One undisclosed whitespace-only deviation found at review (a
+blank-line drop/gain pair in `posts.test.ts` that canceled in the
+line-count gate) — accepted, same disclosure-gap chain as PATCH-018/021/
+024/025, not new safety evidence in either direction; the gap continuing
+to recur at a steady low rate across seven reviews is the expected
+baseline, not a trend requiring action. Grandfather held at 2, no credit
+sought or given for metric-only movement. Axis snapshot at 76 (unchanged):
+safety 19, ops 13, architecture 20, product 13, continuity 11.)
 
 ## 13. The succession test
 

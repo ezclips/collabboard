@@ -561,6 +561,22 @@ SECOND site in the reorderSections-style silent-swallow family
 the row-level `error`), same discipline (preserve verbatim, name a
 dedicated test, queue the fix as a standing owner decision). Landed
 byte-perfect on GPT-5.4 a third time; monolith 8,518→8,517.
+**Extended a fourth time by PATCH-028** (the `padlets` DELETE family) —
+the FIRST extension-only application: `padlets` IS the `posts` table, so
+the four delete commands (`canvas.deletePost`/`deletePosts`/
+`deleteChildPosts`/`deleteContainerChild`) join the EXISTING
+`PostsRepository` from PATCH-025 rather than creating a fourth aggregate
+file. Proves Pattern K's bound-test discipline generalizes to extending an
+interface already implemented and consumed elsewhere (`PostCardContent.tsx`
+via `createToggleTaskCommand`) — the 25 bound tests included the 9
+PATCH-025 tests, re-run unmodified, to prove the extension non-breaking to
+the existing consumer. Also introduced the EDIT-SIMULATION authoring
+technique (apply every bound OLD/NEW block to a scratch copy and run the
+full post-edit census against the result before binding — see
+LESSONS_LEARNED's measurement-instrument family, eighth variant) after it
+caught a derivation error the same day it was invented. Landed byte-perfect
+on GPT-5.4 a fourth time (one accepted whitespace-only disclosure gap, see
+LESSONS_LEARNED); monolith 8,517→8,507.
 
 **When:** a component performs a direct table WRITE whose UI trigger is
 absent from (or too costly to add to) the e2e net, but whose logic is a
@@ -764,6 +780,7 @@ it, STOP — never adapt.
 | 025 | PostCardContent (todo-checkbox write) | new Pattern K — canvas ops command (§5.11): the canvas seam TRUNK (`lib/domain/canvas/posts.ts` + `lib/infra/canvas/postsRepository.ts`, `canvas.toggleTask`); bound unit tests compiled AND run green at authoring, so GPT-5.4 sufficed for a real DB write; grandfather removal EARNED via the measured `--no-ignore` probe (1 error → 0), zero type-only de-linting; companion successor artifact `docs/CANVASCLIENT_SITE_MAP.md` | 3→2 ✅ done |
 | 026 | CanvasClient (`board_sections` write family, 6 sites / 4 handlers) | Pattern K reuse (§5.11): SIBLING aggregate `lib/domain/canvas/sections.ts` beside `posts.ts` (one trunk folder, zero cross-references) — five commands incl. a preserved sequential-partial-failure swap and a preserved legacy error-swallow reorder, each pinned by a dedicated test (17 total); NO grandfather movement (metric not chased); monolith line count SHRANK for the first time (8,526→8,518) | 2→2 (CanvasClient stays grandfathered — 70 sites remain) ✅ done |
 | 027 | CanvasClient (`boards` update family, 4 sites / 4 handlers) | Pattern K reuse (§5.11): THIRD sibling aggregate `lib/domain/canvas/board.ts` beside `posts.ts`/`sections.ts`; resolved a P6 naming collision against the unconsumed `lib/domain/boards/repository.ts` exemplar via disambiguating name (`CanvasBoardRepository`), not a merge; four commands incl. a preserved map-style no-timestamp write and a SECOND silent-swallow site (`setChronoMode`, sibling to `reorderSections`), each pinned by a dedicated test (15 total); NO grandfather movement; monolith line count SHRANK again (8,518→8,517) | 2→2 (CanvasClient stays grandfathered — 66 sites remain) ✅ done |
+| 028 | CanvasClient (`padlets` DELETE family, 8 sites / 6 handlers) | Pattern K reuse (§5.11), FIRST EXTENSION-ONLY application: four delete commands (`deletePost`/`deletePosts`/`deleteChildPosts`/`deleteContainerChild`) joined the EXISTING `PostsRepository` (`padlets` IS the posts table, P6) — zero new files; 25 bound tests (16 new + the 9 PATCH-025 tests re-run to prove non-breaking); conditional cascades composed from two thin commands at the call site rather than merged, preserving exact legacy DB traffic; the unconditional cascade became one command, pulling its paired update out of the UPDATE family's count (33→32); two child-cascade console-swallows preserved AT THE CALL SITE (not command-internal — Results stay honest); introduced the edit-simulation authoring technique; NO grandfather movement; monolith line count SHRANK again (8,517→8,507); one accepted whitespace-only disclosure gap at review (blank-line drift that canceled in the line-count gate) | 2→2 (CanvasClient stays grandfathered — 58 sites remain) ✅ done |
 
 **New patterns discovered by future patches get added here by the CTO at
 review — this catalog only ever contains patterns with a reviewed reference
