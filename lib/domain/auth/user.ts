@@ -14,3 +14,11 @@ export interface AuthUser {
   email?: string | null;
   user_metadata?: AuthUserMetadata;
 }
+
+/**
+ * Structural subset of an auth session - only the field UI code reads.
+ * Supabase's `Session` is assignable to this type.
+ */
+export interface AuthSession {
+  user: AuthUser;
+}

@@ -68,6 +68,7 @@ import {
 import { createCanvasBoardRepository } from '@/lib/infra/canvas/boardRepository';
 import { createPostsRepository } from '@/lib/infra/canvas/postsRepository';
 import { createSectionsRepository } from '@/lib/infra/canvas/sectionsRepository';
+import { getVerifiedAuthUser, onAuthSessionChanged, updateCurrentUserMetadata } from '@/lib/infra/supabase/authState';
 import { createStorageGateway } from '@/lib/infra/supabase/storage';
 import type { Padlet, BoardSection, PendingPostDraft, NewPostDragState, DropIndicatorState, CanvasLine } from '@/types/collabboard';
 import { User, Session } from '@supabase/supabase-js';
@@ -297,9 +298,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           preferences_updated_at: new Date().toISOString(),
         };
 
-        void supabase.auth.updateUser({
-          data: nextMetadata,
-        });
+        void updateCurrentUserMetadata(nextMetadata);
 
         setUser((prevUser) => prevUser ? ({ ...prevUser, user_metadata: nextMetadata } as User) : prevUser);
       }
@@ -313,7 +312,8 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     let mounted = true;
 
     const fetchUser = async () => {
-      const { data: { user: currentUser } } = await supabase.auth.getUser();
+      const result = await getVerifiedAuthUser();
+      const currentUser = (result.ok ? result.value : null) as User | null;
 
       if (mounted) {
         setUser(currentUser ?? null);
@@ -330,17 +330,17 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     fetchUser();
 
     // Listen for auth state changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, newSession) => {
+    const unsubscribe = onAuthSessionChanged((_event, newSession) => {
       if (mounted) {
-        setSession(newSession);
-        setUser(newSession?.user ?? null);
+        setSession(newSession as Session | null);
+        setUser((newSession?.user as User | undefined) ?? null);
         setSessionReady(true);
       }
     });
 
     return () => {
       mounted = false;
-      subscription.unsubscribe();
+      unsubscribe();
     };
   }, []);
   // === END SESSION + AUTH REGION ===
