@@ -915,7 +915,40 @@ two-file scope (one new, one modified) held exactly. No credit:
 architecture capped at 20/20, same standing ruling. Eleventh
 consecutive fully clean review of the implementation. Grandfather held
 at 2. Axis snapshot at 76 (unchanged): safety 19, ops 13, architecture
-20, product 13, continuity 11.)
+20, product 13, continuity 11.) → **76 (held)** (2026-07-11: PATCH-043
+landed and passed review — hooks slice 6, the fetchData read quartet
+extracted onto the NEW `lib/infra/canvas/canvasViewReads.ts` selector
+module, the first landed application of the hooks-phase READ idiom:
+rendering reads live in selector modules, only RMW reads serving a
+write command join a table's aggregate (the 036 findMetadataById
+distinction made doctrine). The design ruling this patch carried is
+the one that shapes everything after it: the canvas_lines read did NOT
+open the future lines aggregate — Family 4's aggregate is born
+write-side, with the workspace hand-off still riding it — and the
+aggregate-extension alternative was rejected on measured cost (~16
+files of interface + fake ripple vs three files with zero ripple). The
+review verified the differential error contract at the semantic level:
+all four sequential awaits complete before the first ok-check, the
+selector's deliberate no-catch preserves thrown-aborts-what-follows,
+canvas/padlet failures cause-unwrap the ORIGINAL supabase error into
+the same catch, the lines failure stays deliberately unthrown via the
+ok-ternary collapse, the never-read `sectionError` dissolved without a
+behavior delta, and board not-found still flows ok(null) →
+setCanvas(null). Family 2's entire recovery cluster confirmed
+byte-untouched. Harness discipline held for the third consecutive
+patch: the bound three-file extractor re-executed in an isolated
+sandbox against three seeded garbage files, the two-pair recipe
+reconstructed the final hash from the TRUE pre-edit blob, the
+parent-commit base binding confirmed, all 10 MUST-NOT-CHANGE hashes
+held, all 17 census instruments exact including both disclosures.
+Landed on GPT-5.4: unit 224/26 (+10, the first new test file since
+040, run by name), tsc clean (the four bound double-casts against the
+real types), boundaries clean, e2e 27/27, port gate 0/0, `npm run
+verify` green; three-file scope held exactly. No credit: architecture
+capped at 20/20, same standing ruling. Twelfth consecutive fully clean
+review of the implementation. Grandfather held at 2. Axis snapshot at
+76 (unchanged): safety 19, ops 13, architecture 20, product 13,
+continuity 11.)
 
 ## 13. The succession test
 
