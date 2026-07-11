@@ -161,6 +161,12 @@ at minimum before working on this repo. Newest first within each section.
 **Fix:** re-ran the audit with explicit parent hashes; real result: +139 vitest tree, 0 removed, 4 transitive bumps.
 **Reusable rule:** on Windows, never put `^` in a shell-executed git revspec — use `HEAD~1`, explicit hashes, or `--no-walk`; and when two verification tools disagree, neither is trusted until the disagreement is explained.
 
+### `git checkout --` under `core.autocrlf=true` rewrites LF working files as CRLF — hashes stay green while every byte instrument breaks (2026-07-11, PATCH-039 authoring)
+**Symptom:** after an in-tree CTO simulation (apply canonical files → tsc/vitest → `git checkout -- <files>` to restore), the spec's recipe-reconstruction self-check found ZERO occurrences of an OLD fence string that had count 1 an hour earlier — on a file `git status` called clean and `git hash-object` hashed to the exact pre-edit value.
+**Root cause:** global `core.autocrlf=true`. The repo's working files are LF on disk (`w/lf`, written by editors/implementers and never re-smudged), but any file GIT WRITES — checkout, restore, stash pop — comes out CRLF. `git hash-object` and `git diff` apply the clean filter, so every git-level gate stays green while the raw bytes under every fence comparison, python splice, and `fence == live` check silently changed.
+**Fix:** restore working bytes from the blob directly (`git cat-file blob HEAD:<path>` written binary), then a no-op `git add` of the identical content to refresh the eol-dirty stat cache. Verified `w/lf` and exact hashes afterward.
+**Reusable rule:** in this repo, never restore a byte-fenced file with `git checkout`/`restore` — use `git cat-file blob` + binary write; after ANY git-write operation on a scoped file, re-verify `git ls-files --eol` shows `w/lf` before trusting fence or splice instruments; and treat "hash matches but string count changed" as an EOL smudge signature, not a content mystery (companion to the PATCH-028 `cmp -l`/`xxd` rule above).
+
 ## Auth & Supabase platform
 
 ### Supabase rate limits are per-IP buckets, and they're separate (2026-07-07, login incident)
