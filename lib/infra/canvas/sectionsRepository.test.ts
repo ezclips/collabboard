@@ -8,11 +8,17 @@ interface FakeError {
 
 function createFakeClient(options: {
   insertRow?: Record<string, unknown> | null;
+  insertManyRows?: Array<Record<string, unknown>> | null;
   insertError?: FakeError | null;
   mutationError?: FakeError | null;
 } = {}) {
-  const { insertRow = { id: 41 }, insertError = null, mutationError = null } = options;
-  const insertCalls: Array<Record<string, unknown>> = [];
+  const {
+    insertRow = { id: 41 },
+    insertManyRows = [{ id: 41 }],
+    insertError = null,
+    mutationError = null,
+  } = options;
+  const insertCalls: Array<Record<string, unknown> | Array<Record<string, unknown>>> = [];
   const updateCalls: Array<Record<string, unknown>> = [];
   const deleteEqCalls: Array<{ column: string; value: number }> = [];
   const eqCalls: Array<{ column: string; value: number }> = [];
@@ -21,13 +27,17 @@ function createFakeClient(options: {
     from(table: 'board_sections') {
       expectTable(table);
       return {
-        insert(payload: Record<string, unknown>) {
+        insert(payload: Record<string, unknown> | Array<Record<string, unknown>>) {
           insertCalls.push(payload);
           return {
+            // The real builder's select() is thenable AND .single()-chainable.
             select() {
-              return {
-                single: async () => ({ data: insertError ? null : insertRow, error: insertError }),
-              };
+              return Object.assign(
+                Promise.resolve({ data: insertError ? null : insertManyRows, error: insertError }),
+                {
+                  single: async () => ({ data: insertError ? null : insertRow, error: insertError }),
+                },
+              );
             },
           };
         },
@@ -98,6 +108,58 @@ describe('SupabaseSectionsRepository', () => {
     if (!result.ok) {
       expect(result.error.code).toBe('unavailable');
       expect(result.error.cause).toBe(supabaseError);
+    }
+  });
+
+  it('inserts the snake_case array payload and returns all created rows', async () => {
+    const fake = createFakeClient({ insertManyRows: [{ id: 51 }, { id: 52 }] });
+    const repository = new SupabaseSectionsRepository(fake.client);
+
+    const result = await repository.insertSections([
+      { boardId: 'board-9', title: 'Recovered Section 1', description: '', position: 3 },
+      { boardId: 'board-9', title: 'Recovered Section 2', description: '', position: 4 },
+    ]);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toEqual([{ id: 51 }, { id: 52 }]);
+    }
+    expect(fake.insertCalls).toEqual([
+      [
+        { board_id: 'board-9', title: 'Recovered Section 1', description: '', position: 3 },
+        { board_id: 'board-9', title: 'Recovered Section 2', description: '', position: 4 },
+      ],
+    ]);
+    expect(fake.tables).toEqual(['board_sections']);
+  });
+
+  it('maps an array-insert error to an unavailable DomainError carrying the cause', async () => {
+    const supabaseError = { code: '42501', message: 'permission denied' };
+    const fake = createFakeClient({ insertError: supabaseError });
+    const repository = new SupabaseSectionsRepository(fake.client);
+
+    const result = await repository.insertSections([
+      { boardId: 'board-9', title: 'Recovered Section 1', description: '', position: 0 },
+    ]);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe('unavailable');
+      expect(result.error.cause).toBe(supabaseError);
+    }
+  });
+
+  it('passes a null rows payload through unchanged (vendor shape)', async () => {
+    const fake = createFakeClient({ insertManyRows: null });
+    const repository = new SupabaseSectionsRepository(fake.client);
+
+    const result = await repository.insertSections([
+      { boardId: 'board-9', title: 'Recovered Section 1', description: '', position: 0 },
+    ]);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toBeNull();
     }
   });
 

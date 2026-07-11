@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   createCreateSectionCommand,
+  createCreateSectionsCommand,
   createDeleteSectionCommand,
   createRenameSectionCommand,
   createReorderSectionsCommand,
@@ -16,11 +17,13 @@ const ctx = { userId: null };
 
 function createFakeRepository() {
   const insertCalls: SectionInsertFields[] = [];
+  const insertManyCalls: Array<readonly SectionInsertFields[]> = [];
   const renameCalls: Array<{ id: number; title: string; updatedAt: string }> = [];
   const positionCalls: Array<{ id: number; fields: SectionPositionFields }> = [];
   const deleteCalls: number[] = [];
 
   let insertResult: Result<Record<string, unknown> | null, DomainError> = ok({ id: 7 });
+  let insertManyResult: Result<Array<Record<string, unknown>> | null, DomainError> = ok([]);
   const positionResults: Array<Result<void, DomainError>> = [];
   let renameResult: Result<void, DomainError> = ok(undefined);
   let deleteResult: Result<void, DomainError> = ok(undefined);
@@ -29,6 +32,10 @@ function createFakeRepository() {
     insertSection: async (fields) => {
       insertCalls.push(fields);
       return insertResult;
+    },
+    insertSections: async (fields) => {
+      insertManyCalls.push(fields);
+      return insertManyResult;
     },
     renameSection: async (id, fields) => {
       renameCalls.push({ id, title: fields.title, updatedAt: fields.updatedAt });
@@ -47,11 +54,15 @@ function createFakeRepository() {
   return {
     repository,
     insertCalls,
+    insertManyCalls,
     renameCalls,
     positionCalls,
     deleteCalls,
     setInsertResult(result: Result<Record<string, unknown> | null, DomainError>) {
       insertResult = result;
+    },
+    setInsertManyResult(result: Result<Array<Record<string, unknown>> | null, DomainError>) {
+      insertManyResult = result;
     },
     queuePositionResult(result: Result<void, DomainError>) {
       positionResults.push(result);
@@ -99,6 +110,74 @@ describe('canvas.createSection', () => {
     if (!result.ok) {
       expect(result.error.code).toBe('unavailable');
     }
+  });
+});
+
+describe('canvas.createSections', () => {
+  it('merges the board id into every row and returns all created rows', async () => {
+    const fake = createFakeRepository();
+    fake.setInsertManyResult(ok([{ id: 51 }, { id: 52 }]));
+    const createSections = createCreateSectionsCommand(fake.repository);
+
+    const result = await createSections(
+      {
+        boardId: 'board-9',
+        sections: [
+          { title: 'Recovered Section 1', description: '', position: 3 },
+          { title: 'Recovered Section 2', description: '', position: 4 },
+        ],
+      },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toEqual([{ id: 51 }, { id: 52 }]);
+    }
+    expect(fake.insertManyCalls).toEqual([
+      [
+        { boardId: 'board-9', title: 'Recovered Section 1', description: '', position: 3 },
+        { boardId: 'board-9', title: 'Recovered Section 2', description: '', position: 4 },
+      ],
+    ]);
+  });
+
+  it('propagates a repository failure unchanged', async () => {
+    const fake = createFakeRepository();
+    fake.setInsertManyResult(err(domainError('unavailable', 'db down')));
+    const createSections = createCreateSectionsCommand(fake.repository);
+
+    const result = await createSections(
+      {
+        boardId: 'board-9',
+        sections: [{ title: 'Recovered Section 1', description: '', position: 0 }],
+      },
+      ctx,
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe('unavailable');
+    }
+  });
+
+  it('rejects a non-numeric position without calling the repository', async () => {
+    const fake = createFakeRepository();
+    const createSections = createCreateSectionsCommand(fake.repository);
+
+    const result = await createSections(
+      {
+        boardId: 'board-9',
+        sections: [{ title: 'Recovered Section 1', description: '', position: '3' }],
+      },
+      ctx,
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe('validation');
+    }
+    expect(fake.insertManyCalls).toHaveLength(0);
   });
 });
 

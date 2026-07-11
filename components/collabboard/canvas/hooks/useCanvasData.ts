@@ -14,9 +14,12 @@ import {
   createCreatePostBestEffortCommand,
   createCreatePostCommand,
   createUpdatePostContentBestEffortCommand,
+  createUpdatePostMetadataBestEffortCommand,
   createUpdatePostTitleCommand,
 } from '@/lib/domain/canvas/posts';
+import { createCreateSectionsCommand } from '@/lib/domain/canvas/sections';
 import { createPostsRepository } from '@/lib/infra/canvas/postsRepository';
+import { createSectionsRepository } from '@/lib/infra/canvas/sectionsRepository';
 import {
   deletePostRowById,
   insertPostRow,
@@ -127,18 +130,18 @@ export function useCanvasData({ canvasId, dispatch }: UseCanvasDataParams) {
 
           try {
             const recoveryPayload = missingSectionIds.map((_, index) => ({
-              board_id: canvasId,
               title: `Recovered Section ${index + 1}`,
               description: '',
               position: maxPosition + index + 1,
             }));
 
-            const { data: recoveredSections, error: recoveryError } = await supabase
-              .from('board_sections')
-              .insert(recoveryPayload)
-              .select('*');
-
-            if (recoveryError) throw recoveryError;
+            const createSections = createCreateSectionsCommand(createSectionsRepository());
+            const insertResult = await createSections(
+              { boardId: canvasId, sections: recoveryPayload },
+              { userId: null },
+            );
+            if (!insertResult.ok) throw insertResult.error.cause ?? insertResult.error;
+            const recoveredSections = insertResult.value as unknown as BoardSection[] | null;
 
             const remap = new Map<string, string>();
             (recoveredSections || []).forEach((section, index) => {
@@ -146,23 +149,25 @@ export function useCanvasData({ canvasId, dispatch }: UseCanvasDataParams) {
               if (oldId) remap.set(oldId, String(section.id));
             });
 
+            const updatePostMetadataBestEffort = createUpdatePostMetadataBestEffortCommand(createPostsRepository());
             await Promise.all(
               nextPadlets
                 .filter((padlet) => remap.has(String((padlet.metadata as any)?.sectionId)))
-                .map((padlet) => {
+                .map(async (padlet) => {
                   const oldSectionId = String((padlet.metadata as any)?.sectionId);
                   const nextSectionId = remap.get(oldSectionId);
-                  if (!nextSectionId) return Promise.resolve();
-                  return supabase
-                    .from('padlets')
-                    .update({
+                  if (!nextSectionId) return;
+                  const result = await updatePostMetadataBestEffort(
+                    {
+                      postId: padlet.id,
                       metadata: {
                         ...(padlet.metadata as any),
                         sectionId: nextSectionId,
                       },
-                      updated_at: new Date().toISOString(),
-                    })
-                    .eq('id', padlet.id);
+                    },
+                    { userId: null },
+                  );
+                  if (!result.ok) throw result.error.cause ?? result.error;
                 })
             );
 

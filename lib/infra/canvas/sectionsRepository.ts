@@ -14,10 +14,21 @@ interface SupabaseErrorLike {
   readonly message?: string;
 }
 
+/**
+ * The real builder's select() is thenable AND .single()-chainable: the
+ * single-row path (insertSection) chains .single(), the array path
+ * (insertSections) awaits select('*') directly - both legacy shapes.
+ */
+interface SectionsInsertSelectQuery
+  extends PromiseLike<{
+    data: Array<Record<string, unknown>> | null;
+    error: SupabaseErrorLike | null;
+  }> {
+  single(): Promise<{ data: Record<string, unknown> | null; error: SupabaseErrorLike | null }>;
+}
+
 interface SectionsInsertQuery {
-  select(): {
-    single(): Promise<{ data: Record<string, unknown> | null; error: SupabaseErrorLike | null }>;
-  };
+  select(columns?: '*'): SectionsInsertSelectQuery;
 }
 
 interface SectionsMutationQuery {
@@ -26,12 +37,21 @@ interface SectionsMutationQuery {
 
 interface SectionsSupabaseClient {
   from(table: 'board_sections'): {
-    insert(payload: {
-      board_id: string;
-      title: string;
-      description: string;
-      position: number;
-    }): SectionsInsertQuery;
+    insert(
+      payload:
+        | {
+            board_id: string;
+            title: string;
+            description: string;
+            position: number;
+          }
+        | Array<{
+            board_id: string;
+            title: string;
+            description: string;
+            position: number;
+          }>,
+    ): SectionsInsertQuery;
     update(
       payload:
         | { title: string; updated_at: string }
@@ -60,6 +80,28 @@ export class SupabaseSectionsRepository implements SectionsRepository {
 
     if (error) {
       return err(domainError('unavailable', 'Could not create the section', { cause: error }));
+    }
+
+    return ok(data);
+  }
+
+  async insertSections(
+    fields: readonly SectionInsertFields[],
+  ): Promise<Result<Array<Record<string, unknown>> | null, DomainError>> {
+    const { data, error } = await this.client
+      .from('board_sections')
+      .insert(
+        fields.map((section) => ({
+          board_id: section.boardId,
+          title: section.title,
+          description: section.description,
+          position: section.position,
+        })),
+      )
+      .select('*');
+
+    if (error) {
+      return err(domainError('unavailable', 'Could not create the sections', { cause: error }));
     }
 
     return ok(data);

@@ -27,6 +27,10 @@ export interface SectionsRepository {
   insertSection(
     fields: SectionInsertFields,
   ): Promise<Result<Record<string, unknown> | null, DomainError>>;
+  /** insert(rows).select('*') - returns ALL inserted rows for the recovery remap (null mirrors the vendor shape). */
+  insertSections(
+    fields: readonly SectionInsertFields[],
+  ): Promise<Result<Array<Record<string, unknown>> | null, DomainError>>;
   renameSection(
     id: number,
     fields: { readonly title: string; readonly updatedAt: string },
@@ -53,6 +57,38 @@ export const createCreateSectionCommand = (repository: SectionsRepository) =>
         description: '',
         position: input.position,
       }),
+  });
+
+export const createSectionsSchema = z.object({
+  boardId: z.string(),
+  sections: z.array(
+    z.object({
+      title: z.string(),
+      description: z.string(),
+      position: z.number(),
+    }),
+  ),
+});
+
+/**
+ * PATCH-044: the section-recovery ARRAY insert - one insert().select('*')
+ * returning ALL created rows (the remap's read-back - RMW territory per the
+ * PATCH-043 read idiom). boardId rides once and is merged into every row
+ * here; the legacy recovery built the same rows inline (old hook L129-134).
+ */
+export const createCreateSectionsCommand = (repository: SectionsRepository) =>
+  defineCommand({
+    name: 'canvas.createSections',
+    input: createSectionsSchema,
+    execute: async (input) =>
+      repository.insertSections(
+        input.sections.map((section) => ({
+          boardId: input.boardId,
+          title: section.title,
+          description: section.description,
+          position: section.position,
+        })),
+      ),
   });
 
 export const renameSectionSchema = z.object({
