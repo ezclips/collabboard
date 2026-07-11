@@ -17,6 +17,12 @@ import {
   createUpdatePostTitleCommand,
 } from '@/lib/domain/canvas/posts';
 import { createPostsRepository } from '@/lib/infra/canvas/postsRepository';
+import {
+  deletePostRowById,
+  insertPostRow,
+  insertPostRowReturning,
+  updatePostRowById,
+} from '@/lib/infra/supabase/postsRaw';
 import type { Canvas, Padlet, CanvasLine, BoardSection } from '@/types/collabboard';
 import { generateAndSaveThumbnail, updateLastVisited } from '@/lib/collabboard/thumbnailGenerator';
 import { debugCanvasLogger } from '@/lib/collabboard/debugCanvasLogger';
@@ -565,7 +571,7 @@ export function useCanvasData({ canvasId, dispatch }: UseCanvasDataParams) {
     setPadlets((prev) => prev.map((p) => (p.id === id ? { ...p, ...updates } : p)));
 
     try {
-      const { error } = await supabase.from('padlets').update(updates).eq('id', id);
+      const { error } = await updatePostRowById(id, updates);
       if (error) {
         setPadlets((prev) => prev.map((p) => (p.id === id ? previousPadlet : p)));
       }
@@ -576,29 +582,19 @@ export function useCanvasData({ canvasId, dispatch }: UseCanvasDataParams) {
   }, [markPadletLocallyModified]);
 
   const insertPadlet = useCallback(async (payload: any) => {
-    return await supabase.from('padlets').insert(payload);
+    return await insertPostRow(payload);
   }, []);
 
   const insertPadletAndSelectSingle = useCallback(async (payload: any) => {
-    return await supabase
-      .from('padlets')
-      .insert(payload)
-      .select()
-      .single();
+    return await insertPostRowReturning(payload);
   }, []);
 
   const updatePadletById = useCallback(async (id: string, updates: any) => {
-    return await supabase
-      .from('padlets')
-      .update(updates)
-      .eq('id', id);
+    return await updatePostRowById(id, updates);
   }, []);
 
   const deletePadletByIdRaw = useCallback(async (id: string) => {
-    return await supabase
-      .from('padlets')
-      .delete()
-      .eq('id', id);
+    return await deletePostRowById(id);
   }, []);
 
   // ── Return ──────────────────────────────────────────────────────────────────
