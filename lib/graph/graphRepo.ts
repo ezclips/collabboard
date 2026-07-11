@@ -1,5 +1,6 @@
 import { SupabaseClient } from '@supabase/supabase-js';
 import type { FreeformGraphEdge, FreeformGraphSettings } from '../../types/graphTypes';
+import { createBrowserSupabaseClient } from '../infra/supabase/browserClient';
 
 /**
  * Isolated repository for Freeform Graph data operations.
@@ -166,4 +167,17 @@ export class FreeformGraphRepo {
         if (error) throw error;
         return data;
     }
+}
+
+/**
+ * PATCH-046: the client hand-off retirement. Consumers stop constructing
+ * the repo with their own client - this factory supplies the SAME
+ * cookie/browser client CanvasClient's memo passed (the PATCH-025 client
+ * identity). FreeformGraphLayer (rendered by FreeformPadletCards) still
+ * constructs with the LEGACY lib/supabase singleton and is deferred BY
+ * NAME to that phase - do NOT swap it onto this factory without an owner
+ * client-identity ruling.
+ */
+export function createFreeformGraphRepo(boardId: string): FreeformGraphRepo {
+    return new FreeformGraphRepo(createBrowserSupabaseClient(), boardId);
 }

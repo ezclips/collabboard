@@ -24,7 +24,7 @@ import LineToolbar from '@/components/collabboard/LineToolbar';
 import RowColumnContainerCard from '@/components/collabboard/RowColumnContainerCard';
 import RowCanvasDnD from '@/components/collabboard/row/RowCanvasDnD';
 import { routeEdge, type GraphSide } from '@/lib/graph/edgeRouting';
-import { FreeformGraphRepo } from '@/lib/graph/graphRepo';
+import { createFreeformGraphRepo } from '@/lib/graph/graphRepo';
 import { canEditWorkspace, canManageWorkspace, type WorkspaceRole } from '@/lib/workspace/context';
 import { resolveWorkspaceForUser } from '@/lib/infra/supabase/workspaceMembers';
 import '@/components/kanban-canvas/kanban-canvas.css';
@@ -2551,7 +2551,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     let cancelled = false;
     const connect = async () => {
       try {
-        const repo = new FreeformGraphRepo(supabase, canvasId.toString());
+        const repo = createFreeformGraphRepo(canvasId.toString());
         const edges = await repo.getEdges();
         if (cancelled) return;
 
@@ -2641,7 +2641,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
 
     connect();
     return () => { cancelled = true; };
-  }, [isFreeformGraphMode, isGraphConnectMode, canvasId, graphConnectSelection, graphConnectSource, padlets, supabase]);
+  }, [isFreeformGraphMode, isGraphConnectMode, canvasId, graphConnectSelection, graphConnectSource, padlets]);
 
   const commitPadletMeta = useMemo(() => {
     return debounce(async (padletId: string, fullMetadata: any) => {
