@@ -984,7 +984,37 @@ five-file scope held exactly. No credit: architecture capped at 20/20,
 same standing ruling. Thirteenth consecutive fully clean review of the
 implementation. Grandfather held at 2. Axis snapshot at 76
 (unchanged): safety 19, ops 13, architecture 20, product 13, continuity
-11.)
+11.) → **76 (held)** (2026-07-11: PATCH-045 landed and passed review —
+hooks slice 8, the lines write family onto the new write-side canvas
+lines aggregate. Three structural firsts in one patch, all clean: the
+program's first DUAL review (an independent read-only GLM-5.2 review
+passed it first; the CTO re-ran every bound gate from scratch anyway —
+the reconciliation model for external reviewers: their verdict is
+input, never evidence); the extractor's first HYBRID application (six
+whole-file fences plus three single-occurrence CanvasClient
+replacements with pre/post hash asserts — the over-ceiling monolith
+edited with zero hand edits and zero 8.4k fence, landing at exactly
+8,384 lines, never-grow at equality, with the 039-deferred workspace
+rider finally aboard); and the channel-discrimination idiom (call
+sites read defineCommand's 'unknown' as the legacy thrown channel and
+'unavailable' as the legacy resolved channel — both split-channel
+sites preserved exactly with NO convergence authorization, the
+opposite disposition from 041, chosen because the owner ordered
+preservation and the codes are pinned end to end). The honest-command-
+plus-deliberate-inaction shape was ruled over BestEffort for the three
+swallowed sites because BestEffort would have silently broken the
+saveEnd debug-logger contract and grown the queued P3 swallow family —
+which held at eleven. useCanvasLines went SUPABASE-FREE; the GLM
+report's one inconsistency (a port-3100 stopped-server check against
+the spec's port-3000 gate) was reconciled by direct CTO measurement,
+not negotiation. Landed on GPT-5.4: unit 245/28 (+15 across two new
+files), tsc clean, boundaries clean, e2e 27/27, port gate 0/0,
+`npm run verify` green; seven-file scope held exactly. No credit:
+architecture capped at 20/20, same standing ruling. Fourteenth
+consecutive fully clean review. Grandfather held at 2. Family 4
+dispositioned — the hooks read+write extraction of all four canvas
+tables is complete. Axis snapshot at 76 (unchanged): safety 19, ops
+13, architecture 20, product 13, continuity 11.)
 
 ## 13. The succession test
 
