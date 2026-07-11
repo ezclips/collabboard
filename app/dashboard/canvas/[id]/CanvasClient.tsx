@@ -25,7 +25,8 @@ import RowColumnContainerCard from '@/components/collabboard/RowColumnContainerC
 import RowCanvasDnD from '@/components/collabboard/row/RowCanvasDnD';
 import { routeEdge, type GraphSide } from '@/lib/graph/edgeRouting';
 import { FreeformGraphRepo } from '@/lib/graph/graphRepo';
-import { canEditWorkspace, canManageWorkspace, resolveCurrentWorkspace, type WorkspaceRole } from '@/lib/workspace/context';
+import { canEditWorkspace, canManageWorkspace, type WorkspaceRole } from '@/lib/workspace/context';
+import { resolveWorkspaceForUser } from '@/lib/infra/supabase/workspaceMembers';
 import '@/components/kanban-canvas/kanban-canvas.css';
 import ColumnContainerCreationPrompt from '@/components/canvas/layouts/ColumnContainerCreationPrompt';
 import React, { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo, useReducer } from 'react';
@@ -249,7 +250,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       }
 
       try {
-        const workspace = await resolveCurrentWorkspace(supabase, user);
+        const workspace = await resolveWorkspaceForUser(user);
         if (!cancelled) {
           setCurrentWorkspaceRole(workspace?.role ?? 'member');
         }
@@ -731,7 +732,6 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     canvasZoom,
     setLines,
     setSelectedLineId,
-    supabase,
   });
 
   // Helper to close all toolbars and popups when opening a new one

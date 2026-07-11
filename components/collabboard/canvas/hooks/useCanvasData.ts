@@ -11,6 +11,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabaseBrowser } from '@/lib/supabase/browser';
 import {
+  createCreateLineCommand,
+  createDeleteLineCommand,
+  createUpdateLineCommand,
+} from '@/lib/domain/canvas/lines';
+import {
   createCreatePostBestEffortCommand,
   createCreatePostCommand,
   createUpdatePostContentBestEffortCommand,
@@ -18,6 +23,7 @@ import {
   createUpdatePostTitleCommand,
 } from '@/lib/domain/canvas/posts';
 import { createCreateSectionsCommand } from '@/lib/domain/canvas/sections';
+import { createLinesRepository } from '@/lib/infra/canvas/linesRepository';
 import { createPostsRepository } from '@/lib/infra/canvas/postsRepository';
 import { createSectionsRepository } from '@/lib/infra/canvas/sectionsRepository';
 import {
@@ -350,10 +356,14 @@ export function useCanvasData({ canvasId, dispatch }: UseCanvasDataParams) {
     if (!line) return;
 
     debugCanvasLogger('saveStart', { op: 'saveLineToDb', lineId });
-    try {
-      const { error } = await supabase
-        .from('canvas_lines')
-        .update({
+    // PRESERVED LEGACY SWALLOW (P3-family, do not repair): both failure
+    // channels are ignored - only a successful save logs saveEnd. The
+    // updated_at stamp is command-internal (canvas.updateLine).
+    const updateLineCmd = createUpdateLineCommand(createLinesRepository());
+    const result = await updateLineCmd(
+      {
+        lineId,
+        updates: {
           start_x: line.start_x,
           start_y: line.start_y,
           control_x: line.control_x,
@@ -375,14 +385,11 @@ export function useCanvasData({ canvasId, dispatch }: UseCanvasDataParams) {
           layer_plane: line.layer_plane ?? 'front',
           label_text_color: line.label_text_color,
           label_background_color: line.label_background_color,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', lineId);
-
-      if (error) { }
-      else { debugCanvasLogger('saveEnd', { op: 'saveLineToDb', lineId }); }
-    } catch (e) {
-    }
+        },
+      },
+      { userId: null },
+    );
+    if (result.ok) { debugCanvasLogger('saveEnd', { op: 'saveLineToDb', lineId }); }
   }, [lines]);
 
   // Update line with DB save (for toolbar changes)
@@ -398,16 +405,12 @@ export function useCanvasData({ canvasId, dispatch }: UseCanvasDataParams) {
     if (lineId.startsWith('temp-')) return;
 
     debugCanvasLogger('saveStart', { op: 'updateLine', lineId });
-    try {
-      const { error } = await supabase
-        .from('canvas_lines')
-        .update({ ...updates, updated_at: new Date().toISOString() })
-        .eq('id', lineId);
-
-      if (error) { }
-      else { debugCanvasLogger('saveEnd', { op: 'updateLine', lineId }); }
-    } catch (e) {
-    }
+    // PRESERVED LEGACY SWALLOW (P3-family, do not repair): both failure
+    // channels are ignored - only a successful save logs saveEnd. The
+    // updated_at stamp is command-internal (canvas.updateLine).
+    const updateLineCmd = createUpdateLineCommand(createLinesRepository());
+    const result = await updateLineCmd({ lineId, updates }, { userId: null });
+    if (result.ok) { debugCanvasLogger('saveEnd', { op: 'updateLine', lineId }); }
   }, []);
 
   const deleteLine = useCallback(async (lineId: string) => {
@@ -418,15 +421,10 @@ export function useCanvasData({ canvasId, dispatch }: UseCanvasDataParams) {
     // Skip DB delete for temp lines
     if (lineId.startsWith('temp-')) return;
 
-    try {
-      const { error } = await supabase
-        .from('canvas_lines')
-        .delete()
-        .eq('id', lineId);
-
-      if (error) { }
-    } catch (e) {
-    }
+    // PRESERVED LEGACY SWALLOW (P3-family, do not repair): both failure
+    // channels are ignored - the optimistic removal stands either way.
+    const deleteLineCmd = createDeleteLineCommand(createLinesRepository());
+    await deleteLineCmd({ lineId }, { userId: null });
   }, [dispatch]);
 
   const handleChangeLineLayer = useCallback((lineId: string, action: 'front' | 'back' | 'forward' | 'backward') => {
@@ -489,12 +487,15 @@ export function useCanvasData({ canvasId, dispatch }: UseCanvasDataParams) {
       setLines(prev => [...prev, newLine]);
       dispatch({ type: 'SELECTION_PATCH', payload: { selectedLineId: newLineId } });
 
-      // Save to database
-      const { error } = await supabase
-        .from('canvas_lines')
-        .insert(newLine);
+      // Save to database. Channel split PRESERVED (no convergence
+      // authorization): a RESOLVED insert error rolls back the optimistic
+      // line (the legacy if (error) branch); a THROWN one carries code
+      // 'unknown' out of defineCommand's catch and stays silent with the
+      // optimistic line kept - exactly the legacy empty catch.
+      const createLineCmd = createCreateLineCommand(createLinesRepository());
+      const result = await createLineCmd({ row: newLine }, { userId: null });
 
-      if (error) {
+      if (!result.ok && result.error.code !== 'unknown') {
         // Rollback on error
         setLines(prev => prev.filter(l => l.id !== newLineId));
       }

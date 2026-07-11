@@ -2,6 +2,8 @@
 
 import { useCallback, useState } from 'react';
 import type { CanvasLine } from '@/types/collabboard';
+import { createCreateLineAndSelectCommand } from '@/lib/domain/canvas/lines';
+import { createLinesRepository } from '@/lib/infra/canvas/linesRepository';
 import { debugCanvasLogger } from '@/lib/collabboard/debugCanvasLogger';
 
 interface UseCanvasLinesParams {
@@ -9,7 +11,6 @@ interface UseCanvasLinesParams {
   canvasZoom: number;
   setLines: React.Dispatch<React.SetStateAction<CanvasLine[]>>;
   setSelectedLineId: (v: string | null) => void;
-  supabase: any;
 }
 
 export function useCanvasLines({
@@ -17,7 +18,6 @@ export function useCanvasLines({
   canvasZoom,
   setLines,
   setSelectedLineId,
-  supabase,
 }: UseCanvasLinesParams) {
   const [lineEditModeId, setLineEditModeId] = useState<string | null>(null);
   const [isLineMode, setIsLineModeState] = useState(false);
@@ -37,13 +37,19 @@ export function useCanvasLines({
     };
 
     try {
-      const { data, error } = await supabase
-        .from('canvas_lines')
-        .insert(newLine)
-        .select()
-        .single();
+      const createLineAndSelect = createCreateLineAndSelectCommand(createLinesRepository());
+      const result = await createLineAndSelect({ row: newLine }, { userId: null });
 
-      if (error) {
+      // Channel split PRESERVED (no convergence authorization): a THROWN
+      // insert failure carries code 'unknown' out of defineCommand's catch
+      // and re-throws its original cause into the catch below (the legacy
+      // console.error); a RESOLVED insert error takes the temp-line
+      // fallback (the legacy if (error) branch).
+      if (!result.ok && result.error.code === 'unknown') {
+        throw result.error.cause ?? result.error;
+      }
+
+      if (!result.ok) {
         const tempLine: CanvasLine = {
           ...newLine,
           id: `temp-${Date.now()}`,
@@ -58,6 +64,7 @@ export function useCanvasLines({
         return;
       }
 
+      const data = result.value as unknown as CanvasLine | null;
       if (data) {
         setLines(prev => [...prev, data]);
         setSelectedLineId(data.id);
@@ -68,7 +75,7 @@ export function useCanvasLines({
     } catch (e) {
       console.error('Failed to create line:', e);
     }
-  }, [canvasId, supabase, setLines, setSelectedLineId]);
+  }, [canvasId, setLines, setSelectedLineId]);
 
   const createLineFromCoords = useCallback((
     rawStartX: number, rawStartY: number, rawEndX: number, rawEndY: number,
