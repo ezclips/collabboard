@@ -1014,7 +1014,41 @@ architecture capped at 20/20, same standing ruling. Fourteenth
 consecutive fully clean review. Grandfather held at 2. Family 4
 dispositioned — the hooks read+write extraction of all four canvas
 tables is complete. Axis snapshot at 76 (unchanged): safety 19, ops
-13, architecture 20, product 13, continuity 11.)
+13, architecture 20, product 13, continuity 11.) → **76 (held)**
+(2026-07-11: PATCH-046 landed and passed review — hooks slice 9, the
+FreeformGraphRepo client hand-off retired via a one-line
+`createFreeformGraphRepo` factory. The census this patch opened with
+reshaped its own scope: the "family" wasn't five scattered call sites,
+it was one already-isolated pre-domain-layer class whose ONLY
+strangler defect was that its two consumers each constructed it with
+their own client. The ruling that mattered was recognizing when NOT to
+translate — the class's graceful-degradation contract (a stateful
+missing-table detector, synthetic fallback rows, PGRST116 tolerance,
+throw-through) serves two component trees, and Result-translating it
+would have bought zero strangler progress for a full rewrite of
+working defensive code. The review's discovery worth naming: the
+class body isn't just "unchanged," it's provably unchanged — read
+directly, every method's state-machine branch, both console warnings,
+and the throw-through path all matched the pre-edit fence byte for
+byte, which is a stronger claim than a hash alone proves (a hash match
+says the bytes are identical; reading confirms WHICH bytes stayed
+identical, ruling out an insertion elsewhere in the file that a whole-
+file hash would also have failed but which the reviewer wants to SEE,
+not infer). FreeformGraphLayer's still-legacy client was independently
+confirmed, not just hash-checked — the deferred duality is real and
+correctly untouched. One process note: the reviewer's own auxiliary
+reconstruction script had a bug (a missing separator line) that failed
+before the fix — logged as a reviewer-tooling issue explicitly
+distinguished from an implementation defect, because the bound
+extractor embedded in the spec never used that reconstruction path and
+had already passed independently. Landed on GPT-5.4: unit 245/28
+(unchanged), tsc clean, boundaries clean, e2e 27/27, port gate 0/0
+(independently timed before AND after the reviewer's own server run),
+`npm run verify` green; two-file scope held exactly, CanvasClient
+exactly 8,384 lines. No credit: architecture capped at 20/20, same
+standing ruling. Fifteenth consecutive fully clean review. Grandfather
+held at 2. Axis snapshot at 76 (unchanged): safety 19, ops 13,
+architecture 20, product 13, continuity 11.)
 
 ## 13. The succession test
 
