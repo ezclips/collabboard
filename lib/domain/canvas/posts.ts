@@ -608,3 +608,30 @@ export const createUpdatePostTitleCommand = (repository: PostsRepository) =>
         updatedAt: new Date().toISOString(),
       }),
   });
+
+export const createPostBestEffortSchema = z.object({
+  row: postRowSchema,
+});
+
+/**
+ * The library-item insert (PATCH-040): a single passthrough insert whose
+ * one consumer (useCanvasData.addPadletFromLibraryItem) awaited the legacy
+ * statement bare with NO error read - the best-effort sibling of
+ * canvas.createPost. The command adds NO timestamps and NO fields (the
+ * PATCH-029 insert fact).
+ */
+export const createCreatePostBestEffortCommand = (repository: PostsRepository) =>
+  defineCommand({
+    name: 'canvas.createPostBestEffort',
+    input: createPostBestEffortSchema,
+    execute: async (input) => {
+      // PRESERVED LEGACY DEFECT (PATCH-040; queued P3-family fix, do NOT
+      // repair here): the legacy hook awaited this insert bare - a
+      // resolved DB error was silently swallowed and the trailing
+      // fetchData() still ran; only a THROWN network error rejected the
+      // handler. Faithful port: ignore the resolved Result; a thrown
+      // exception escapes execute and surfaces via defineCommand's catch.
+      await repository.insert(input.row);
+      return ok(undefined);
+    },
+  });

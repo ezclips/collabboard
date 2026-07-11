@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   createAttachPostToSchedulerContainerCommand,
   createCreateContainerWithPostCommand,
+  createCreatePostBestEffortCommand,
   createCreatePostAndSelectCommand,
   createCreatePostCommand,
   createCreateSchedulerContainerWithPostCommand,
@@ -1268,5 +1269,44 @@ describe('canvas.updatePostTitle', () => {
       expect(result.error.code).toBe('validation');
     }
     expect(fake.updateTitleStampedCalls).toHaveLength(0);
+  });
+});
+
+describe('canvas.createPostBestEffort', () => {
+  it('passes the row through verbatim - no added fields, no timestamps - and returns ok', async () => {
+    const fake = createFakeRepository();
+    const createPostBestEffort = createCreatePostBestEffortCommand(fake.repository);
+    const row = { id: 'post-1', board_id: 'board-1', title: 'Hello', metadata: { a: 1 } };
+
+    const result = await createPostBestEffort({ row }, ctx);
+
+    expect(result.ok).toBe(true);
+    expect(fake.insertCalls).toEqual([row]);
+    expect(fake.insertCalls[0]).toBe(row);
+    expect(fake.insertReturningCalls).toHaveLength(0);
+  });
+
+  it('preserves the legacy swallow: a resolved repository failure still returns ok', async () => {
+    const fake = createFakeRepository();
+    fake.queueInsertResults(err(domainError('unavailable', 'db down')));
+    const createPostBestEffort = createCreatePostBestEffortCommand(fake.repository);
+
+    const result = await createPostBestEffort({ row: { id: 'post-1' } }, ctx);
+
+    expect(result.ok).toBe(true);
+    expect(fake.insertCalls).toHaveLength(1);
+  });
+
+  it('rejects a non-object row without calling the repository', async () => {
+    const fake = createFakeRepository();
+    const createPostBestEffort = createCreatePostBestEffortCommand(fake.repository);
+
+    const result = await createPostBestEffort({ row: 42 }, ctx);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe('validation');
+    }
+    expect(fake.insertCalls).toHaveLength(0);
   });
 });

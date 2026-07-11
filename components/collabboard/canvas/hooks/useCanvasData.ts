@@ -11,6 +11,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabaseBrowser } from '@/lib/supabase/browser';
 import {
+  createCreatePostBestEffortCommand,
+  createCreatePostCommand,
   createUpdatePostContentBestEffortCommand,
   createUpdatePostTitleCommand,
 } from '@/lib/domain/canvas/posts';
@@ -524,7 +526,9 @@ export function useCanvasData({ canvasId, dispatch }: UseCanvasDataParams) {
   };
 
   const addPadletFromLibraryItem = useCallback(async (payload: any) => {
-    await supabase.from('padlets').insert(payload);
+    const createPostBestEffort = createCreatePostBestEffortCommand(createPostsRepository());
+    const result = await createPostBestEffort({ row: payload }, { userId: null });
+    if (!result.ok) throw result.error.cause ?? result.error;
     fetchData();
   }, [fetchData]);
 
@@ -537,8 +541,9 @@ export function useCanvasData({ canvasId, dispatch }: UseCanvasDataParams) {
 
   const addDrawingLayoutPadlet = useCallback(async (newPadlet: any, newId: string) => {
     try {
-      const { error } = await supabase.from('padlets').insert(newPadlet);
-      if (error) throw error;
+      const createPost = createCreatePostCommand(createPostsRepository());
+      const result = await createPost({ row: newPadlet }, { userId: null });
+      if (!result.ok) throw result.error.cause ?? result.error;
       return newPadlet;
     } catch (err) {
       console.error('Failed to create drawing padlet:', err);
