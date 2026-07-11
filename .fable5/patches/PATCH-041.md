@@ -91,8 +91,11 @@ cannot reject it; the row passes through verbatim, no timestamps added
 CTO compiled and ran the exact post-edit bytes in the working tree
 (tsc clean, boundaries silent, 214/214 green — zero test changes),
 then restored byte-exact. ZERO new casts, ZERO new tests, ZERO import
-edits. Hook census: `.from('padlets')` 7→6; see §5 for the exact
-bound numbers (`.from(` 16, `supabase` 22). Hook 634→639 (+5: the
+edits. Hook census: `.from('padlets')` 8→7 (CORRECTED 2026-07-11 at
+review — authoring mis-stated this baseline as 7→6, an off-by-one
+against the true pre-edit tree; the fence hash was never wrong and the
+implementation is correct — see §1/§5.1 and CTO review record); see §5
+for the exact bound numbers (`.from(` 16, `supabase` 22). Hook 634→639 (+5: the
 four-line authorized-convergence comment + one statement line — under
 the 800 ceiling). Grandfather stays 2. Remaining after this patch:
 Family 5 remainder = `updateDrawingLayoutPadlet` + the 4 raw
@@ -127,7 +130,7 @@ Hook census (measured 2026-07-11):
 H="components/collabboard/canvas/hooks/useCanvasData.ts"
 wc -l "$H"                                # 634
 grep -c '^[[:space:]]*$' "$H"             # 78
-grep -c "\.from('padlets')" "$H"          # 7
+grep -c "\.from('padlets')" "$H"          # 8   (CORRECTED at review from a stale 7 - authoring off-by-one, fence hash unaffected)
 grep -c "\.from(" "$H"                    # 17
 grep -c "supabase" "$H"                   # 23
 grep -c "markPadletLocallyModified" "$H"  # 5
@@ -881,7 +884,7 @@ git ls-files --eol -- components/collabboard/canvas/hooks/useCanvasData.ts
 H="components/collabboard/canvas/hooks/useCanvasData.ts"
 wc -l "$H"                                # 639
 grep -c '^[[:space:]]*$' "$H"             # 78
-grep -c "\.from('padlets')" "$H"          # 6
+grep -c "\.from('padlets')" "$H"          # 7   (CORRECTED at review from a stale 6 - authoring off-by-one, fence hash unaffected)
 grep -c "\.from(" "$H"                    # 16
 grep -c "supabase" "$H"                   # 22
 grep -c "markPadletLocallyModified" "$H"  # 5

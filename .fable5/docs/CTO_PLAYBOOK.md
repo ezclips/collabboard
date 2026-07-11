@@ -841,7 +841,45 @@ same standing ruling. Ninth consecutive fully clean review — the first
 to include a mid-patch amendment and prove it under independent
 re-execution, not just re-reading. Grandfather held at 2. Axis snapshot
 at 76 (unchanged): safety 19, ops 13, architecture 20, product 13,
-continuity 11.)
+continuity 11.) → **76 (held)** (2026-07-11: PATCH-041 landed and
+passed review — hooks slice 4, `addFreeformCardPadlet` onto the
+existing honest `createPost` under the program's FOURTH AUTHORIZED
+BEHAVIOR MICRO-CHANGE. This patch tested the owner-delegation model
+itself: the owner handed the CTO the split-vs-converge ruling flagged
+in PATCH-040, and the CTO ruled convergence only after tracing the
+single consumer chain to ground — `handleFreeformCardDrop` has no catch
+of its own, so a thrown insert failure escaped all the way to an OUTER
+JSX catch two levels up while the optimistic card sat stranded
+(evaporating on the next refetch, the exact P3 harm class 034 already
+repaired on the position family). The review's independent
+re-derivation held at every layer: the bound mechanical extractor
+(standard since PATCH-040 Amendment 1) was RE-EXECUTED fresh in an
+isolated sandbox and reproduced the hash; the hook recipe reconstructed
+the bound hash from the TRUE pre-edit git blob, not a cached copy; the
+diff was read directly to confirm the rollback filter stayed
+byte-identical with only its guard swapped and no rethrow added — the
+convergence does exactly what it claims and nothing more. One
+finding, and it is itself a small case study in review discipline: the
+spec's own `.from('padlets')` census baseline was off by one throughout
+(a CTO-side miscount at authoring, not an implementer deviation) — the
+delta was right, the absolute numbers were wrong, and the authoritative
+whole-file fence hash was never affected. The review caught it by
+re-deriving the true pre-edit count from the parent commit's blob
+rather than trusting the spec's stated number, corrected the spec, and
+logged the pattern in LESSONS_LEARNED: a wrong census number that still
+passes its own internal arithmetic is exactly the kind of
+self-consistent-but-false defect only an external re-derivation
+catches — the same discipline this playbook has applied to hashes now
+extended to plain census counts. Landed on GPT-5.4: unit 214/25
+(unchanged, zero test changes), tsc clean, boundaries clean, e2e 27/27
+(board-lifecycle exercising the touched drop path), port gate 0 before
+and after, `npm run verify` green; hook census `.from('padlets')` 8→7
+(corrected); one-file scope, seven MUST-NOT-CHANGE hashes held. No
+credit: architecture capped at 20/20, same standing ruling. Tenth
+consecutive fully clean review of the implementation — the first to
+find and fix a CTO-side defect rather than an implementer one.
+Grandfather held at 2. Axis snapshot at 76 (unchanged): safety 19,
+ops 13, architecture 20, product 13, continuity 11.)
 
 ## 13. The succession test
 
