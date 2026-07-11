@@ -533,8 +533,13 @@ export function useCanvasData({ canvasId, dispatch }: UseCanvasDataParams) {
   }, [fetchData]);
 
   const addFreeformCardPadlet = useCallback(async (newPadlet: Padlet) => {
-    const { error } = await supabase.from('padlets').insert(newPadlet);
-    if (error) {
+    // AUTHORIZED CONVERGENCE (PATCH-041, the program's fourth behavior
+    // micro-change): a THROWN insert failure previously escaped to the drop
+    // handler's catch and left the optimistic card stranded (ghost work,
+    // P3); both failure channels now take the SAME rollback branch below.
+    const createPost = createCreatePostCommand(createPostsRepository());
+    const result = await createPost({ row: newPadlet }, { userId: null });
+    if (!result.ok) {
       setPadlets((prev) => prev.filter((p) => p.id !== newPadlet.id));
     }
   }, []);
