@@ -804,7 +804,44 @@ No credit: architecture capped at 20/20, same standing ruling. Eighth
 consecutive fully clean review — zero disclosure gaps found anywhere in
 scope, byte-untouched gates, census, or semantics. Grandfather held at
 2. Axis snapshot at 76 (unchanged): safety 19, ops 13, architecture 20,
-product 13, continuity 11.)
+product 13, continuity 11.) → **76 (held)** (2026-07-11: PATCH-040
+landed and passed review, POST-AMENDMENT-1 — hooks slice 3, the
+useCanvasData convergent insert pair (`addPadletFromLibraryItem` +
+`addDrawingLayoutPadlet`) onto the eleventh command-internal-swallow
+site plus a pure consumer swap onto the existing honest `createPost`,
+touching zero infra. The patch that tested the harness itself: the
+first implementation attempt correctly STOPPED on a reported
+fence-vs-hash inconsistency rather than guessing, and restored cleanly
+without git checkout. CTO re-derivation (fresh from the committed spec
+blob, zero cached copies) proved the fences and declared hashes were
+ALREADY mutually consistent — the divergence was an instrument-side
+artifact (`git hash-object` cleans CRLF; a raw sha1 over the same CRLF
+bytes does not), matching the report's exact whole-file-vs-recipe
+asymmetry. Amendment 1 replaced hand-extraction with a bound mechanical
+extractor embedded in the spec; the CTO executed it end-to-end before
+shipping and caught a second, self-inflicted defect (a literal
+triple-backtick inside the extractor's own regex, truncating naive
+extraction of the script) — fixed by building the fence delimiter from
+`chr(96)*3`. The review's job was then to confirm Amendment 1's fix
+actually WORKS, not just reads plausibly: it independently re-ran the
+extractor in an isolated sandbox against seeded garbage files and
+watched it overwrite correctly and hash-verify. Beyond the harness
+check: the hook recipe reconstructed the bound hash from the TRUE
+pre-edit git blob at `e4b7248`; `addFreeformCardPadlet` — the patch's
+flagged owner-decision-point (a split resolved/thrown rollback contract
+that cannot survive `defineCommand`'s catch-all without an authorized
+behavior change) — was confirmed COMPLETELY UNTOUCHED, proving the
+recipe's try-anchor correctly avoided a site that LOOKS identical at
+the insert statement. Landed on GPT-5.4: unit 214/25 (3 new + 211
+existing), tsc clean, boundaries clean, e2e 27/27 (board-lifecycle
+exercising the touched insert paths), port gate 0 before and after,
+`npm run verify` green; hook census `.from('padlets')` 10→8; three-file
+scope, zero infra touched. No credit: architecture capped at 20/20,
+same standing ruling. Ninth consecutive fully clean review — the first
+to include a mid-patch amendment and prove it under independent
+re-execution, not just re-reading. Grandfather held at 2. Axis snapshot
+at 76 (unchanged): safety 19, ops 13, architecture 20, product 13,
+continuity 11.)
 
 ## 13. The succession test
 
