@@ -23,6 +23,12 @@ import {
   insertPostRowReturning,
   updatePostRowById,
 } from '@/lib/infra/supabase/postsRaw';
+import {
+  findBoardById,
+  findLinesByBoardId,
+  findPostsByBoardId,
+  findSectionsByBoardId,
+} from '@/lib/infra/canvas/canvasViewReads';
 import type { Canvas, Padlet, CanvasLine, BoardSection } from '@/types/collabboard';
 import { generateAndSaveThumbnail, updateLastVisited } from '@/lib/collabboard/thumbnailGenerator';
 import { debugCanvasLogger } from '@/lib/collabboard/debugCanvasLogger';
@@ -70,38 +76,29 @@ export function useCanvasData({ canvasId, dispatch }: UseCanvasDataParams) {
     }
     if (showLoading) setLoading(true);
     try {
-      const { data: canvasData, error: canvasError } = await supabase
-        .from('boards')
-        .select('*')
-        .eq('id', canvasId)
-        .maybeSingle();
+      const canvasResult = await findBoardById(canvasId);
 
-      const { data: padletData, error: padletError } = await supabase
-        .from('padlets')
-        .select('*')
-        .eq('board_id', canvasId);
+      const padletsResult = await findPostsByBoardId(canvasId);
 
       // Fetch lines (may not exist yet - graceful fallback)
-      const { data: lineData, error: lineError } = await supabase
-        .from('canvas_lines')
-        .select('*')
-        .eq('board_id', canvasId);
+      const linesResult = await findLinesByBoardId(canvasId);
 
       // Fetch sections for columns layout
-      const { data: sectionData, error: sectionError } = await supabase
-        .from('board_sections')
-        .select('*')
-        .eq('board_id', canvasId);
+      const sectionsResult = await findSectionsByBoardId(canvasId);
 
-      if (canvasError) {
-        console.error('Error fetching canvas:', canvasError);
-        throw canvasError;
+      if (!canvasResult.ok) {
+        console.error('Error fetching canvas:', canvasResult.error.cause ?? canvasResult.error);
+        throw canvasResult.error.cause ?? canvasResult.error;
       }
-      if (padletError) {
-        console.error('Error fetching padlets:', padletError);
-        throw padletError;
+      if (!padletsResult.ok) {
+        console.error('Error fetching padlets:', padletsResult.error.cause ?? padletsResult.error);
+        throw padletsResult.error.cause ?? padletsResult.error;
       }
-      // Don't throw on lineError - table may not exist yet
+      // Don't throw on a failed lines read - table may not exist yet
+      const canvasData = canvasResult.value as unknown as Canvas | null;
+      const padletData = padletsResult.value as unknown as Padlet[];
+      const lineData = linesResult.ok ? (linesResult.value as unknown as CanvasLine[]) : null;
+      const sectionData = sectionsResult.ok ? (sectionsResult.value as unknown as BoardSection[]) : null;
 
       setCanvas(canvasData);
 
