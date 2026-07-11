@@ -1,6 +1,6 @@
 # PATCH-040 — hooks phase slice 3, strangler group 15: the useCanvasData CONVERGENT INSERT PAIR (addPadletFromLibraryItem + addDrawingLayoutPadlet) — eleventh command-internal swallow site + a pure consumer swap onto the existing honest createPost
 
-**Status:** READY FOR IMPLEMENTATION
+**Status:** READY FOR IMPLEMENTATION — **Amendment 1 applied (see §4.5): Phase B is now the bound mechanical extractor, not hand-extraction.**
 **Model:** **GPT-5.4 acceptable** (Pattern K, fifteenth application — one narrow domain addition reusing a pinned repository method, one pure consumer swap; see §0.5)
 **Pattern:** K reuse (§5.11): ONE new command (zero new repository surface — `repository.insert` exists and is pinned since 029), 3 bound tests, two call-site swaps inside ONE hook — CanvasClient untouched, infra untouched, zero JSX.
 **Scope:** THREE files — `lib/domain/canvas/posts.ts`, `lib/domain/canvas/posts.test.ts`, `components/collabboard/canvas/hooks/useCanvasData.ts`.
@@ -2777,7 +2777,71 @@ export function useCanvasData({ canvasId, dispatch }: UseCanvasDataParams) {
 }
 ```
 
-## 5. The hook's edit recipe (three regions — §4 is authoritative if any doubt)
+## 4.5 AMENDMENT 1 (2026-07-11, CTO) — binding-inconsistency report resolved; MANDATORY mechanical extraction
+
+**Verdict on the reported inconsistency:** the fences and the declared
+hashes are BOTH correct and mutually consistent. The CTO re-derived all
+three fences from the LIVE committed spec blob (`dce3373`, byte-identical
+to the working copy, LF throughout, zero CR bytes) with a fresh
+extraction — no cached canonical copies — and every fence hashes to its
+declared value; fence bytes also equal the authoring-time canonical
+copies, ruling out a stale cache. Writing the extracted fences to files
+and running `git hash-object` reproduces the declared hashes exactly.
+NOTHING in this spec was amended content-wise; no hash moved.
+
+**Root-cause class (demonstrated, not guessed):** `git hash-object`
+applies the repo's clean filter (`core.autocrlf=true`), so even a
+CRLF-encoded write of a fence still hashes to the declared value — but
+a RAW sha1 over CRLF bytes does NOT (measured: posts.ts CRLF raw-sha1
+`d7e214ea…`, posts.test.ts `e4f7c3cc…`). The report's asymmetry (hook
+reached its hash, the two whole-file pastes did not) matches an
+extraction- or instrument-side EOL artifact: the hook was rebuilt by
+recipe from the live LF file, the other two were whole-file
+extractions. Verify hashes ONLY with `git hash-object` from the repo
+root, never with a standalone sha1 of raw bytes.
+
+**Phase B is REPLACED by the following bound script** (run from the
+repo root with `python3`; it extracts the three fences from THIS spec,
+hash-asserts each BEFORE writing, writes LF bytes, and re-verifies with
+`git hash-object`; any assert = STOP and report):
+
+```python
+import hashlib, re, subprocess
+
+def blob(data: bytes) -> str:
+    return hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()
+
+spec = open(".fable5/patches/PATCH-040.md", encoding="utf-8", newline="").read()
+assert "\r" not in spec, (
+    "your spec copy is CRLF-smudged; re-read it via "
+    "git cat-file blob HEAD:.fable5/patches/PATCH-040.md"
+)
+TICKS = chr(96) * 3  # the fence delimiter, built without backtick
+# literals so ANY extraction method (regex, renderer, hand copy)
+# survives this script intact.
+fences = re.findall(TICKS + "ts\n(.*?)" + TICKS, spec, re.DOTALL)
+targets = [
+    ("lib/domain/canvas/posts.ts", "fdc5fd153b5a4689a29c086652fc9411f9074b09"),
+    ("lib/domain/canvas/posts.test.ts", "affd371dacd6607be415304f981ec938d6fb6be8"),
+    ("components/collabboard/canvas/hooks/useCanvasData.ts", "2cd6f9c71261804b6bf94c9eb0e536864df44e1f"),
+]
+for i, (path, want) in enumerate(targets):
+    content = fences[i]
+    got = blob(content.encode("utf-8"))
+    assert got == want, f"fence {i} hashes to {got}, expected {want} - STOP, report"
+    with open(path, "w", encoding="utf-8", newline="") as f:
+        f.write(content)
+    check = subprocess.run(["git", "hash-object", path], capture_output=True, text=True).stdout.strip()
+    assert check == want, f"{path}: git hash-object {check} != {want} - STOP, report"
+    print(path, check, "OK")
+print("ALL THREE BOUND FILES WRITTEN AND HASH-VERIFIED")
+```
+
+§5 below remains EXPLANATORY (what changed and why, for review) — do
+not hand-apply it; the script writes the complete final files. After the
+script, continue with §6 (hashes will already match) and Phase C.
+
+## 5. The hook's edit recipe (three regions — §4 is authoritative if any doubt; EXPLANATORY since Amendment 1 — do not hand-apply)
 
 ### §5a — extend the existing domain import block (alphabetical)
 
