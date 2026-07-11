@@ -879,7 +879,43 @@ credit: architecture capped at 20/20, same standing ruling. Tenth
 consecutive fully clean review of the implementation — the first to
 find and fix a CTO-side defect rather than an implementer one.
 Grandfather held at 2. Axis snapshot at 76 (unchanged): safety 19,
-ops 13, architecture 20, product 13, continuity 11.)
+ops 13, architecture 20, product 13, continuity 11.) → **76 (held)**
+(2026-07-11: PATCH-042 landed and passed review — hooks slice 5, the
+raw-passthrough family quarantined onto a new fenced
+`lib/infra/supabase/postsRaw.ts` (the PATCH-021 workspaceMembers
+Pattern-J exception applied verbatim), with `updateDrawingLayoutPadlet`
+riding the same delegation byte-kept. This patch closed Family 5
+entirely — the last of the six named-consumer padlets sites the
+PATCH-038 census opened the hooks phase with. The contract ruling that
+made it possible: ~25 CanvasClient call sites plus one JSX prop
+hand-off all destructure raw supabase shapes, so Result translation
+was correctly rejected as scope creep into the monolith's consumer
+contracts — the raws stay raw, behind a shrink-only fence that dies
+consumer-by-consumer as future patches extract them onto commands. The
+review verified this held at the semantic level, not just the hash
+level: it read all four new functions and confirmed each returns the
+raw builder with zero wrapping, then confirmed
+`updateDrawingLayoutPadlet`'s entire contract — optimistic merge, both
+rollback branches, the console.error, the dynamic `updates: any`
+payload — survived untouched with only its raw statement swapped. The
+harness discipline built across 040/041 held again: the bound two-file
+extractor was independently re-executed in a fresh isolated sandbox
+against a seeded garbage file and wrote both files correctly; the
+six-pair hook recipe reconstructed the bound hash from the TRUE
+pre-edit git blob, not a cached copy. All eight MUST-NOT-CHANGE hashes
+held, including `workspaceMembers.ts` — whose placeholder hash the CTO
+caught UNMEASURED at authoring and corrected before splicing, the
+PATCH-041 census lesson already paying for itself one patch later.
+Landed on GPT-5.4: unit 214/25 (unchanged, zero test changes), tsc
+clean (the load-bearing gate here — raw shapes typed through the
+SupabaseClient's schema generics exactly as before), boundaries clean,
+e2e 27/27 (board-lifecycle exercising the delegated insert/update/
+delete paths), port gate 0 before and after, `npm run verify` green;
+two-file scope (one new, one modified) held exactly. No credit:
+architecture capped at 20/20, same standing ruling. Eleventh
+consecutive fully clean review of the implementation. Grandfather held
+at 2. Axis snapshot at 76 (unchanged): safety 19, ops 13, architecture
+20, product 13, continuity 11.)
 
 ## 13. The succession test
 
