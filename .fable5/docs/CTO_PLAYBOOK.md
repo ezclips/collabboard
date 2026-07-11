@@ -948,7 +948,43 @@ verify` green; three-file scope held exactly. No credit: architecture
 capped at 20/20, same standing ruling. Twelfth consecutive fully clean
 review of the implementation. Grandfather held at 2. Axis snapshot at
 76 (unchanged): safety 19, ops 13, architecture 20, product 13,
-continuity 11.)
+continuity 11.) → **76 (held)** (2026-07-11: PATCH-044 landed and
+passed review — hooks slice 7, the section-recovery cluster
+(Family 2) dispositioned. The array insert became the sections
+aggregate's RMW read-back (new `insertSections`/`canvas.createSections`
+returning all inserted rows), applying rather than extending the 043
+read idiom: the read-back feeds the remap for a write, so it joins the
+aggregate, and `canvasViewReads.ts` stayed byte-untouched. The padlet
+remap loop landed on the EXISTING `updatePostMetadataBestEffort` with
+zero new swallow sites — the count held at eleven — because both
+insert failure channels already converged on the recovery catch and
+the loop's per-row errors were never read to begin with. The review
+verified all six differential channels at the semantic level,
+including the legacy quirk worth naming: a loop-element throw still
+takes the synthetic-fallback branch even though the sections were
+already inserted, preserved byte-for-byte rather than "fixed." Harness
+discipline held for the fourth consecutive patch: the five-file
+extractor re-executed in an isolated sandbox against five seeded
+garbage files, the three-pair recipe reconstructed the final hash from
+the TRUE pre-edit blob, all eleven MUST-NOT-CHANGE hashes held, all 26
+census instruments exact. One finding surfaced outside the patch's own
+scope: two zero-byte untracked files under `app/collabboard/` — debris
+from the route PATCH-022 already deleted for zero user data — broke
+`npm run verify` via Next's page-type plugin, which reads physical
+files regardless of git tracking. This is the second time this class
+of stray artifact has appeared this window (after `_review_041_
+extractor.py` at PATCH-043); worth a LESSONS_LEARNED entry if a third
+occurrence lands. The CTO's own attempt to move the files aside was
+correctly blocked by the permission classifier as unauthorized scope
+expansion — the right failure mode — and the owner then explicitly
+authorized deletion before the gate was re-run clean. Landed on
+GPT-5.4: unit 230/26 (+6, no new file), tsc clean, boundaries clean,
+e2e 27/27, port gate 0/0, `npm run verify` green (post-cleanup);
+five-file scope held exactly. No credit: architecture capped at 20/20,
+same standing ruling. Thirteenth consecutive fully clean review of the
+implementation. Grandfather held at 2. Axis snapshot at 76
+(unchanged): safety 19, ops 13, architecture 20, product 13, continuity
+11.)
 
 ## 13. The succession test
 
