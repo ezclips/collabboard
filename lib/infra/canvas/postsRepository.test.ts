@@ -443,3 +443,77 @@ describe('SupabasePostsRepository.findMetadataById', () => {
     }
   });
 });
+
+describe('SupabasePostsRepository.updateContent', () => {
+  it('sends the exact content + updated_at payload filtered by the post id', async () => {
+    const { client, fromTables, updateCalls, eqCalls } = createFakeClient();
+    const repository = new SupabasePostsRepository(client);
+
+    const result = await repository.updateContent(asPostId('post-1'), {
+      content: '<p>hello</p>',
+      updatedAt: '2026-07-11T12:00:00.000Z',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(fromTables).toEqual(['padlets']);
+    expect(updateCalls).toEqual([
+      { content: '<p>hello</p>', updated_at: '2026-07-11T12:00:00.000Z' },
+    ]);
+    expect(Object.keys(updateCalls[0])).toEqual(['content', 'updated_at']);
+    expect(eqCalls).toEqual([{ column: 'id', value: 'post-1' }]);
+  });
+
+  it('maps a supabase error to an unavailable DomainError carrying the cause', async () => {
+    const supabaseError = { code: '42501', message: 'permission denied' };
+    const { client } = createFakeClient(supabaseError);
+    const repository = new SupabasePostsRepository(client);
+
+    const result = await repository.updateContent(asPostId('post-1'), {
+      content: '',
+      updatedAt: '2026-07-11T12:00:00.000Z',
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe('unavailable');
+      expect(result.error.cause).toBe(supabaseError);
+    }
+  });
+});
+
+describe('SupabasePostsRepository.updateTitleStamped', () => {
+  it('sends the exact title + updated_at payload filtered by the post id', async () => {
+    const { client, fromTables, updateCalls, eqCalls } = createFakeClient();
+    const repository = new SupabasePostsRepository(client);
+
+    const result = await repository.updateTitleStamped(asPostId('post-1'), {
+      title: 'Renamed',
+      updatedAt: '2026-07-11T12:00:00.000Z',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(fromTables).toEqual(['padlets']);
+    expect(updateCalls).toEqual([
+      { title: 'Renamed', updated_at: '2026-07-11T12:00:00.000Z' },
+    ]);
+    expect(Object.keys(updateCalls[0])).toEqual(['title', 'updated_at']);
+    expect(eqCalls).toEqual([{ column: 'id', value: 'post-1' }]);
+  });
+
+  it('maps a supabase error to an unavailable DomainError carrying the cause', async () => {
+    const supabaseError = { code: '42501', message: 'permission denied' };
+    const { client } = createFakeClient(supabaseError);
+    const repository = new SupabasePostsRepository(client);
+
+    const result = await repository.updateTitleStamped(asPostId('post-1'), {
+      title: 'Renamed',
+      updatedAt: '2026-07-11T12:00:00.000Z',
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe('unavailable');
+      expect(result.error.cause).toBe(supabaseError);
+    }
+  });
+});

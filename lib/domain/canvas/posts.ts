@@ -73,6 +73,21 @@ export interface PostsRepository {
   updatePosition(id: PostId, fields: PostPositionWriteFields): Promise<Result<void, DomainError>>;
   /** Legacy clipart title clear sends title ONLY - no updated_at (old L7581-7584). */
   updateTitle(id: PostId, fields: { readonly title: string }): Promise<Result<void, DomainError>>;
+  /** The hooks content write sends content + updated_at (useCanvasData old L494-500). */
+  updateContent(
+    id: PostId,
+    fields: { readonly content: string; readonly updatedAt: string },
+  ): Promise<Result<void, DomainError>>;
+  /**
+   * The hooks title write sends title + updated_at (useCanvasData old
+   * L512-518) - the STAMPED sibling of updateTitle, mirroring the
+   * updateMetadata / updateMetadataUnstamped pair. updateTitle itself is
+   * byte-untouched (extension, not modification).
+   */
+  updateTitleStamped(
+    id: PostId,
+    fields: { readonly title: string; readonly updatedAt: string },
+  ): Promise<Result<void, DomainError>>;
   /**
    * The aggregate's FIRST read (PATCH-036): one post's metadata for the map
    * comments read-merge-write. Returns null when the row is missing OR its
@@ -536,4 +551,60 @@ export const createUpdatePostCommentsCommand = (repository: PostsRepository) =>
       }
       return ok(undefined);
     },
+  });
+
+export const updatePostContentBestEffortSchema = z.object({
+  postId: z.string(),
+  /** The full replacement content string, passed through verbatim (legacy shape). */
+  content: z.string(),
+});
+
+/**
+ * The hooks content write (PATCH-039): content + a fresh stamp. Its one
+ * consumer (useCanvasData.updatePadletContent) awaited the legacy statement
+ * bare inside its try - the local setPadlets content mirror ran even when
+ * the write failed resolved; only a THROWN network error skipped it.
+ */
+export const createUpdatePostContentBestEffortCommand = (repository: PostsRepository) =>
+  defineCommand({
+    name: 'canvas.updatePostContentBestEffort',
+    input: updatePostContentBestEffortSchema,
+    execute: async (input) => {
+      // PRESERVED LEGACY DEFECT (PATCH-039; queued P3-family fix, do NOT
+      // repair here): the legacy hook awaited this write bare - a resolved
+      // DB error was silently swallowed and the local content mirror still
+      // ran; only a THROWN network error reached the handler's catch.
+      // Faithful port: ignore the resolved Result; a thrown exception
+      // escapes execute and surfaces via defineCommand's catch.
+      await repository.updateContent(asPostId(input.postId), {
+        content: input.content,
+        updatedAt: new Date().toISOString(),
+      });
+      return ok(undefined);
+    },
+  });
+
+export const updatePostTitleSchema = z.object({
+  postId: z.string(),
+  /** The full replacement title, passed through verbatim (legacy shape). */
+  title: z.string(),
+});
+
+/**
+ * The HONEST stamped title write (PATCH-039) - distinct from
+ * updatePostTitleBestEffort on BOTH axes: this one stamps updated_at and
+ * surfaces failures. Its one consumer (useCanvasData.updatePadletTitle)
+ * threw on the resolved error into the same catch a thrown network error
+ * reached - both channels already converged, so the Result port is exact
+ * and needs NO behavior authorization.
+ */
+export const createUpdatePostTitleCommand = (repository: PostsRepository) =>
+  defineCommand({
+    name: 'canvas.updatePostTitle',
+    input: updatePostTitleSchema,
+    execute: async (input) =>
+      repository.updateTitleStamped(asPostId(input.postId), {
+        title: input.title,
+        updatedAt: new Date().toISOString(),
+      }),
   });

@@ -71,7 +71,9 @@ interface PostsSupabaseClient {
             updated_at: string;
             metadata?: Record<string, unknown>;
           }
-        | { title: string },
+        | { title: string }
+        | { content: string; updated_at: string }
+        | { title: string; updated_at: string },
     ): PostsUpdateQuery;
     select(columns: 'metadata'): PostsMetadataSelectQuery;
     delete(): PostsDeleteQuery;
@@ -162,6 +164,44 @@ export class SupabasePostsRepository implements PostsRepository {
     const { error } = await this.client
       .from('padlets')
       .update({ title: fields.title })
+      .eq('id', id);
+
+    if (error) {
+      return err(domainError('unavailable', 'Could not update the post title', { cause: error }));
+    }
+
+    return ok(undefined);
+  }
+
+  async updateContent(
+    id: PostId,
+    fields: { readonly content: string; readonly updatedAt: string },
+  ): Promise<Result<void, DomainError>> {
+    const { error } = await this.client
+      .from('padlets')
+      .update({
+        content: fields.content,
+        updated_at: fields.updatedAt,
+      })
+      .eq('id', id);
+
+    if (error) {
+      return err(domainError('unavailable', 'Could not update the post content', { cause: error }));
+    }
+
+    return ok(undefined);
+  }
+
+  async updateTitleStamped(
+    id: PostId,
+    fields: { readonly title: string; readonly updatedAt: string },
+  ): Promise<Result<void, DomainError>> {
+    const { error } = await this.client
+      .from('padlets')
+      .update({
+        title: fields.title,
+        updated_at: fields.updatedAt,
+      })
       .eq('id', id);
 
     if (error) {

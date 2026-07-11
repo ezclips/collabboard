@@ -12,6 +12,7 @@ import {
   createGroupPostIntoContainerCommand,
   createToggleTaskCommand,
   createUpdatePostCommentsCommand,
+  createUpdatePostContentBestEffortCommand,
   createUpdatePostMetadataBestEffortCommand,
   createUpdatePostMetadataCommand,
   createUpdatePostMetadataUnstampedBestEffortCommand,
@@ -19,6 +20,7 @@ import {
   createUpdatePostPositionCommand,
   createUpdatePostPositionWithMetadataBestEffortCommand,
   createUpdatePostTitleBestEffortCommand,
+  createUpdatePostTitleCommand,
 } from './posts';
 import type {
   PostMetadataWriteFields,
@@ -54,6 +56,14 @@ function createFakeRepository() {
   }> = [];
   const updatePositionCalls: Array<{ id: PostId; fields: PostPositionWriteFields }> = [];
   const updateTitleCalls: Array<{ id: PostId; fields: { readonly title: string } }> = [];
+  const updateContentCalls: Array<{
+    id: PostId;
+    fields: { readonly content: string; readonly updatedAt: string };
+  }> = [];
+  const updateTitleStampedCalls: Array<{
+    id: PostId;
+    fields: { readonly title: string; readonly updatedAt: string };
+  }> = [];
   const insertCalls: object[] = [];
   const insertReturningCalls: object[] = [];
   const findMetadataByIdCalls: PostId[] = [];
@@ -65,6 +75,8 @@ function createFakeRepository() {
   let updateMetadataUnstampedResult: Result<void, DomainError> = ok(undefined);
   let updatePositionResult: Result<void, DomainError> = ok(undefined);
   let updateTitleResult: Result<void, DomainError> = ok(undefined);
+  let updateContentResult: Result<void, DomainError> = ok(undefined);
+  let updateTitleStampedResult: Result<void, DomainError> = ok(undefined);
   const insertResultQueue: Array<Result<void, DomainError>> = [];
   let insertReturningResult: Result<Record<string, unknown> | null, DomainError> = ok(null);
   let findMetadataByIdResult: Result<Record<string, unknown> | null, DomainError> = ok(null);
@@ -89,6 +101,14 @@ function createFakeRepository() {
     updateTitle: async (id, fields) => {
       updateTitleCalls.push({ id, fields });
       return updateTitleResult;
+    },
+    updateContent: async (id, fields) => {
+      updateContentCalls.push({ id, fields });
+      return updateContentResult;
+    },
+    updateTitleStamped: async (id, fields) => {
+      updateTitleStampedCalls.push({ id, fields });
+      return updateTitleStampedResult;
     },
     deleteById: async (id) => {
       deleteByIdCalls.push(id);
@@ -123,6 +143,8 @@ function createFakeRepository() {
     updateMetadataUnstampedCalls,
     updatePositionCalls,
     updateTitleCalls,
+    updateContentCalls,
+    updateTitleStampedCalls,
     deleteByIdCalls,
     deleteByIdsCalls,
     deleteByParentIdCalls,
@@ -143,6 +165,12 @@ function createFakeRepository() {
     },
     setUpdateTitleResult(result: Result<void, DomainError>) {
       updateTitleResult = result;
+    },
+    setUpdateContentResult(result: Result<void, DomainError>) {
+      updateContentResult = result;
+    },
+    setUpdateTitleStampedResult(result: Result<void, DomainError>) {
+      updateTitleStampedResult = result;
     },
     setDeleteByIdResult(result: Result<void, DomainError>) {
       deleteByIdResult = result;
@@ -1152,5 +1180,93 @@ describe('canvas.updatePostComments', () => {
       expect(result.error.code).toBe('validation');
     }
     expect(fake.findMetadataByIdCalls).toHaveLength(0);
+  });
+});
+
+describe('canvas.updatePostContentBestEffort', () => {
+  it('writes the content with a fresh ISO timestamp and returns ok', async () => {
+    const fake = createFakeRepository();
+    const bestEffort = createUpdatePostContentBestEffortCommand(fake.repository);
+
+    const result = await bestEffort({ postId: 'post-1', content: '<p>hello</p>' }, ctx);
+
+    expect(result.ok).toBe(true);
+    expect(fake.updateContentCalls).toHaveLength(1);
+    expect(fake.updateContentCalls[0].id).toBe('post-1');
+    expect(fake.updateContentCalls[0].fields.content).toBe('<p>hello</p>');
+    expect(Object.keys(fake.updateContentCalls[0].fields)).toEqual(['content', 'updatedAt']);
+    expect(new Date(fake.updateContentCalls[0].fields.updatedAt).toISOString()).toBe(
+      fake.updateContentCalls[0].fields.updatedAt,
+    );
+    expect(fake.updateTasksCalls).toHaveLength(0);
+  });
+
+  it('preserves the legacy swallow: a resolved repository failure still returns ok', async () => {
+    const fake = createFakeRepository();
+    fake.setUpdateContentResult(err(domainError('unavailable', 'db down')));
+    const bestEffort = createUpdatePostContentBestEffortCommand(fake.repository);
+
+    const result = await bestEffort({ postId: 'post-1', content: '' }, ctx);
+
+    expect(result.ok).toBe(true);
+    expect(fake.updateContentCalls).toHaveLength(1);
+  });
+
+  it('rejects invalid input without calling the repository', async () => {
+    const fake = createFakeRepository();
+    const bestEffort = createUpdatePostContentBestEffortCommand(fake.repository);
+
+    const result = await bestEffort({ postId: 'post-1' }, ctx);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe('validation');
+    }
+    expect(fake.updateContentCalls).toHaveLength(0);
+  });
+});
+
+describe('canvas.updatePostTitle', () => {
+  it('writes the title with a fresh ISO timestamp through the STAMPED method only', async () => {
+    const fake = createFakeRepository();
+    const updatePostTitle = createUpdatePostTitleCommand(fake.repository);
+
+    const result = await updatePostTitle({ postId: 'post-1', title: 'Renamed' }, ctx);
+
+    expect(result.ok).toBe(true);
+    expect(fake.updateTitleStampedCalls).toHaveLength(1);
+    expect(fake.updateTitleStampedCalls[0].id).toBe('post-1');
+    expect(fake.updateTitleStampedCalls[0].fields.title).toBe('Renamed');
+    expect(Object.keys(fake.updateTitleStampedCalls[0].fields)).toEqual(['title', 'updatedAt']);
+    expect(new Date(fake.updateTitleStampedCalls[0].fields.updatedAt).toISOString()).toBe(
+      fake.updateTitleStampedCalls[0].fields.updatedAt,
+    );
+    expect(fake.updateTitleCalls).toHaveLength(0);
+  });
+
+  it('propagates a repository failure unchanged', async () => {
+    const fake = createFakeRepository();
+    fake.setUpdateTitleStampedResult(err(domainError('unavailable', 'db down')));
+    const updatePostTitle = createUpdatePostTitleCommand(fake.repository);
+
+    const result = await updatePostTitle({ postId: 'post-1', title: 'Renamed' }, ctx);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe('unavailable');
+    }
+  });
+
+  it('rejects invalid input without calling the repository', async () => {
+    const fake = createFakeRepository();
+    const updatePostTitle = createUpdatePostTitleCommand(fake.repository);
+
+    const result = await updatePostTitle({ postId: 'post-1' }, ctx);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe('validation');
+    }
+    expect(fake.updateTitleStampedCalls).toHaveLength(0);
   });
 });

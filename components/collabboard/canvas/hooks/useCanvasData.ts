@@ -10,6 +10,11 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabaseBrowser } from '@/lib/supabase/browser';
+import {
+  createUpdatePostContentBestEffortCommand,
+  createUpdatePostTitleCommand,
+} from '@/lib/domain/canvas/posts';
+import { createPostsRepository } from '@/lib/infra/canvas/postsRepository';
 import type { Canvas, Padlet, CanvasLine, BoardSection } from '@/types/collabboard';
 import { generateAndSaveThumbnail, updateLastVisited } from '@/lib/collabboard/thumbnailGenerator';
 import { debugCanvasLogger } from '@/lib/collabboard/debugCanvasLogger';
@@ -491,13 +496,9 @@ export function useCanvasData({ canvasId, dispatch }: UseCanvasDataParams) {
 
   const updatePadletContent = async (padletId: string, content: string) => {
     try {
-      await supabase
-        .from('padlets')
-        .update({
-          content,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', padletId);
+      const updatePostContentBestEffort = createUpdatePostContentBestEffortCommand(createPostsRepository());
+      const result = await updatePostContentBestEffort({ postId: padletId, content }, { userId: null });
+      if (!result.ok) throw result.error.cause ?? result.error;
       setPadlets((prev) =>
         prev.map((p) => (p.id === padletId ? { ...p, content } : p))
       );
@@ -509,14 +510,9 @@ export function useCanvasData({ canvasId, dispatch }: UseCanvasDataParams) {
   const updatePadletTitle = async (padletId: string, title: string) => {
     markPadletLocallyModified(padletId);
     try {
-      const { error } = await supabase
-        .from('padlets')
-        .update({
-          title,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', padletId);
-      if (error) throw error;
+      const updatePostTitle = createUpdatePostTitleCommand(createPostsRepository());
+      const result = await updatePostTitle({ postId: padletId, title }, { userId: null });
+      if (!result.ok) throw result.error.cause ?? result.error;
 
       // Optimistic local update
       setPadlets(prev => prev.map(p =>
