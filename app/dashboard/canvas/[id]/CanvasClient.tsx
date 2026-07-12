@@ -354,7 +354,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     updateLineLocal, saveLineToDb, updateLine, deleteLine, duplicateLine, handleChangeLineLayer,
     updatePadletContent, updatePadletTitle,
     addPadletFromLibraryItem, addFreeformCardPadlet, addDrawingLayoutPadlet, updateDrawingLayoutPadlet,
-    insertPadlet, insertPadletAndSelectSingle, updatePadletById, deletePadletByIdRaw,
+    insertPadlet, insertPadletAndSelectSingle, updatePadletById, deletePostSwallowResolved, deletePostOrThrow,
   } = useCanvasData({ canvasId, dispatch });
 
   // Auto-open a specific padlet from a share link (?openPadlet=id).
@@ -1876,7 +1876,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       const containerResult = await createPost({ row: finalContainerPayload }, { userId: null });
 
       if (!containerResult.ok) {
-        await deletePadletByIdRaw(childData.id);
+        await deletePostSwallowResolved(childData.id);
         throw containerResult.error.cause ?? containerResult.error;
       }
 
@@ -2477,7 +2477,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
 
       if (!containerResult.ok) {
         // Cleanup child if container fails
-        await deletePadletByIdRaw(childData.id);
+        await deletePostSwallowResolved(childData.id);
         throw containerResult.error.cause ?? containerResult.error;
       }
 
@@ -2763,8 +2763,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     if (mapActiveContainerId === containerId) setMapActiveContainerId(null);
 
     try {
-      const { error: containerError } = await deletePadletByIdRaw(containerId);
-      if (containerError) throw containerError;
+      await deletePostOrThrow(containerId);
 
       if (childIds.length > 0) {
         const deletePosts = createDeletePostsCommand(createPostsRepository());
@@ -2780,7 +2779,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       toast.error('Failed to delete pin');
       fetchData();
     }
-  }, [padlets, selectedPadletId, mapActiveContainerId, deletePadletByIdRaw, fetchData]);
+  }, [padlets, selectedPadletId, mapActiveContainerId, deletePostOrThrow, fetchData]);
 
   /* -------------------------------------------------------------------------- */
   /*                              Columns Layout Actions                           */

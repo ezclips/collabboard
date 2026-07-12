@@ -19,6 +19,8 @@ import { createBrowserSupabaseClient } from './browserClient';
  * SHRINK-ONLY: do not add consumers beyond useCanvasData.ts. Each function
  * dies when its CanvasClient consumers are extracted onto canvas commands -
  * lib/domain/canvas/posts.ts remains the ONLY surface for new callers.
+ * PATCH-049: deletePostRowById retired (its three CanvasClient consumers
+ * moved onto canvas.deletePost) - the module's first export death.
  */
 
 export function insertPostRow(row: object) {
@@ -40,9 +42,3 @@ export function updatePostRowById(id: string, fields: object) {
         .eq('id', id);
 }
 
-export function deletePostRowById(id: string) {
-    return createBrowserSupabaseClient()
-        .from('padlets')
-        .delete()
-        .eq('id', id);
-}

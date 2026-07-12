@@ -18,6 +18,7 @@ import {
 import {
   createCreatePostBestEffortCommand,
   createCreatePostCommand,
+  createDeletePostCommand,
   createUpdatePostContentBestEffortCommand,
   createUpdatePostFieldsCommand,
   createUpdatePostMetadataBestEffortCommand,
@@ -28,7 +29,6 @@ import { createLinesRepository } from '@/lib/infra/canvas/linesRepository';
 import { createPostsRepository } from '@/lib/infra/canvas/postsRepository';
 import { createSectionsRepository } from '@/lib/infra/canvas/sectionsRepository';
 import {
-  deletePostRowById,
   insertPostRow,
   insertPostRowReturning,
   updatePostRowById,
@@ -605,8 +605,37 @@ export function useCanvasData({ canvasId, dispatch }: UseCanvasDataParams) {
     return await updatePostRowById(id, updates);
   }, []);
 
-  const deletePadletByIdRaw = useCallback(async (id: string) => {
-    return await deletePostRowById(id);
+  // PATCH-049: the raw delete passthrough retired onto canvas.deletePost -
+  // two helpers, one per legacy call-site contract (the 045 discrimination).
+
+  /**
+   * The container-creation compensating delete (two CanvasClient sites).
+   * PRESERVED LEGACY SWALLOW (queued P3-family fix, do NOT repair here):
+   * the legacy sites awaited the raw delete bare - a RESOLVED failure was
+   * silently ignored and the pending container throw proceeded; only a
+   * THROWN failure replaced it. Faithful port: code 'unknown' rethrows the
+   * original cause; any other failure is deliberately ignored.
+   */
+  const deletePostSwallowResolved = useCallback(async (id: string) => {
+    const deletePost = createDeletePostCommand(createPostsRepository());
+    const result = await deletePost({ postId: id }, { userId: null });
+    if (!result.ok && result.error.code === 'unknown') {
+      throw result.error.cause ?? result.error;
+    }
+  }, []);
+
+  /**
+   * The map-pin container delete: BOTH legacy channels already converged
+   * (the resolved `{ error }` was check-and-thrown into the same catch a
+   * thrown failure reached), so ANY failure rethrows its original cause -
+   * the 038/040 check-and-throw port, no behavior authorization needed.
+   */
+  const deletePostOrThrow = useCallback(async (id: string) => {
+    const deletePost = createDeletePostCommand(createPostsRepository());
+    const result = await deletePost({ postId: id }, { userId: null });
+    if (!result.ok) {
+      throw result.error.cause ?? result.error;
+    }
   }, []);
 
   // ── Return ──────────────────────────────────────────────────────────────────
@@ -642,6 +671,7 @@ export function useCanvasData({ canvasId, dispatch }: UseCanvasDataParams) {
     insertPadlet,
     insertPadletAndSelectSingle,
     updatePadletById,
-    deletePadletByIdRaw,
+    deletePostSwallowResolved,
+    deletePostOrThrow,
   };
 }
