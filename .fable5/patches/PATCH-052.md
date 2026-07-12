@@ -383,15 +383,14 @@ deletes the raw module, and asserts every final hash before reporting success.
 ```python
 import hashlib, re, subprocess
 
-def command(*args):
-    return subprocess.run(args, check=True, capture_output=True, text=True).stdout
+def command_bytes(*args):
+    return subprocess.run(args, check=True, capture_output=True).stdout
+
+def command_text(*args):
+    return command_bytes(*args).decode('utf-8')
 
 def githash(path):
-    return command('git', 'hash-object', path).strip()
-
-def blob(text):
-    data = text.encode('utf-8')
-    return hashlib.sha1(b'blob %d\0' % len(data) + data).hexdigest()
+    return command_text('git', 'hash-object', path).strip()
 
 spec = open('.fable5/patches/PATCH-052.md', encoding='utf-8', newline='').read()
 assert '\r' not in spec, 'CRLF spec - STOP'
@@ -407,9 +406,10 @@ targets = [
 pair = 0
 for path, pre, post, count in targets:
     assert githash(path) == pre, f'{path} working pre-hash - STOP'
-    text = command('git', 'show', f'HEAD:{path}')
-    assert blob(text) == pre, f'{path} true pre-edit blob - STOP'
-    assert '\r' not in text, f'{path} CRLF pre-edit blob - STOP'
+    data = command_bytes('git', 'show', f'HEAD:{path}')
+    assert hashlib.sha1(b'blob %d\0' % len(data) + data).hexdigest() == pre, f'{path} true pre-edit blob - STOP'
+    assert b'\r' not in data, f'{path} CRLF pre-edit blob - STOP'
+    text = data.decode('utf-8')
     for _ in range(count):
         old, new = fences[pair * 2], fences[pair * 2 + 1]
         assert text.count(old) == 1, f'pair {pair + 1} count mismatch - STOP'
@@ -421,7 +421,9 @@ for path, pre, post, count in targets:
 assert pair == 14
 raw = 'lib/infra/supabase/postsRaw.ts'
 assert githash(raw) == 'e17342b1840c6f9ff7dc5ff8dac9e5e6293f7e17', 'raw pre-hash - STOP'
-assert blob(command('git', 'show', f'HEAD:{raw}')) == 'e17342b1840c6f9ff7dc5ff8dac9e5e6293f7e17', 'raw true pre-edit blob - STOP'
+raw_data = command_bytes('git', 'show', f'HEAD:{raw}')
+assert hashlib.sha1(b'blob %d\0' % len(raw_data) + raw_data).hexdigest() == 'e17342b1840c6f9ff7dc5ff8dac9e5e6293f7e17', 'raw true pre-edit blob - STOP'
+assert b'\r' not in raw_data, 'raw CRLF pre-edit blob - STOP'
 subprocess.run(['git', 'rm', '--', raw], check=True)
 assert not __import__('os').path.exists(raw), 'raw deletion - STOP'
 print('ALL THREE BOUND FILES RECONSTRUCTED FROM TRUE BLOBS; POSTSRAW DELETED')
