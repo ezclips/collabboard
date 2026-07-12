@@ -30,9 +30,6 @@ import { createLinesRepository } from '@/lib/infra/canvas/linesRepository';
 import { createPostsRepository } from '@/lib/infra/canvas/postsRepository';
 import { createSectionsRepository } from '@/lib/infra/canvas/sectionsRepository';
 import {
-  updatePostRowById,
-} from '@/lib/infra/supabase/postsRaw';
-import {
   findBoardById,
   findLinesByBoardId,
   findPostsByBoardId,
@@ -640,8 +637,36 @@ export function useCanvasData({ canvasId, dispatch }: UseCanvasDataParams) {
     return result.value;
   }, []);
 
-  const updatePadletById = useCallback(async (id: string, updates: any) => {
-    return await updatePostRowById(id, updates);
+  /**
+   * PATCH-052: the final postsRaw update family splits three pre-existing
+   * failure contracts. The six bare-await CanvasClient calls ignored a
+   * resolved `{ error }` while a rejected builder escaped; preserve that
+   * shape here. The two CanvasModals calls already check-and-throw, and the
+   * map callback keeps its local resolved-error rollback below.
+   */
+  const updatePostFieldsSwallowResolved = useCallback(async (id: string, fields: any) => {
+    const updatePostFields = createUpdatePostFieldsCommand(createPostsRepository());
+    const result = await updatePostFields({ postId: id, fields }, { userId: null });
+    if (!result.ok && result.error.code === 'unknown') {
+      throw result.error.cause ?? result.error;
+    }
+  }, []);
+
+  const updatePostFieldsOrThrow = useCallback(async (id: string, fields: any) => {
+    const updatePostFields = createUpdatePostFieldsCommand(createPostsRepository());
+    const result = await updatePostFields({ postId: id, fields }, { userId: null });
+    if (!result.ok) {
+      throw result.error.cause ?? result.error;
+    }
+  }, []);
+
+  const updatePostFieldsPreservingFailureChannels = useCallback(async (id: string, fields: any) => {
+    const updatePostFields = createUpdatePostFieldsCommand(createPostsRepository());
+    const result = await updatePostFields({ postId: id, fields }, { userId: null });
+    if (!result.ok && result.error.code === 'unknown') {
+      throw result.error.cause ?? result.error;
+    }
+    return result;
   }, []);
 
   // PATCH-049: the raw delete passthrough retired onto canvas.deletePost -
@@ -710,7 +735,9 @@ export function useCanvasData({ canvasId, dispatch }: UseCanvasDataParams) {
     insertPostOrThrow,
     insertPostPreservingFailureChannels,
     insertPostAndSelectOrThrow,
-    updatePadletById,
+    updatePostFieldsSwallowResolved,
+    updatePostFieldsOrThrow,
+    updatePostFieldsPreservingFailureChannels,
     deletePostSwallowResolved,
     deletePostOrThrow,
   };

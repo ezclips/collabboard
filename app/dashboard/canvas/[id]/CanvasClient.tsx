@@ -354,7 +354,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     updateLineLocal, saveLineToDb, updateLine, deleteLine, duplicateLine, handleChangeLineLayer,
     updatePadletContent, updatePadletTitle,
     addPadletFromLibraryItem, addFreeformCardPadlet, addDrawingLayoutPadlet, updateDrawingLayoutPadlet,
-    insertPostOrThrow, insertPostPreservingFailureChannels, insertPostAndSelectOrThrow, updatePadletById, deletePostSwallowResolved, deletePostOrThrow,
+    insertPostOrThrow, insertPostPreservingFailureChannels, insertPostAndSelectOrThrow, updatePostFieldsSwallowResolved, updatePostFieldsOrThrow, updatePostFieldsPreservingFailureChannels, deletePostSwallowResolved, deletePostOrThrow,
   } = useCanvasData({ canvasId, dispatch });
 
   // Auto-open a specific padlet from a share link (?openPadlet=id).
@@ -644,7 +644,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       const container = padlets.find(p => p.id === containerId);
       if (container) {
         const currentChildren = (container.metadata as any)?.childPadletIds ?? [];
-        await updatePadletById(containerId, {
+        await updatePostFieldsSwallowResolved(containerId, {
           metadata: {
             ...(container.metadata as any),
             childPadletIds: [...currentChildren, created.id],
@@ -3347,7 +3347,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
 
           // Batch sync updates to DB
           await Promise.all(updates.map(u =>
-            updatePadletById(u.id, {
+            updatePostFieldsSwallowResolved(u.id, {
               metadata: u.metadata,
               updated_at: new Date().toISOString()
             })
@@ -3546,7 +3546,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           ...padlet.metadata,
           syncedWith: newId,
         };
-        await updatePadletById(id, { metadata: updatedOriginalMeta });
+        await updatePostFieldsSwallowResolved(id, { metadata: updatedOriginalMeta });
 
         setPadlets(prev => [
           ...prev.map(p => p.id === id ? { ...p, metadata: updatedOriginalMeta } : p),
@@ -3979,7 +3979,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       await insertPostOrThrow(newPadlet);
 
       for (const update of updates) {
-        await updatePadletById(update.id, { metadata: update.metadata });
+        await updatePostFieldsSwallowResolved(update.id, { metadata: update.metadata });
       }
 
       fetchData();
@@ -4160,12 +4160,12 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     }));
 
     try {
-      await updatePadletById(containerId, {
+      await updatePostFieldsSwallowResolved(containerId, {
         metadata: { ...container.metadata, childPadletIds: newChildIds },
         updated_at: new Date().toISOString(),
       });
 
-      await updatePadletById(childId, {
+      await updatePostFieldsSwallowResolved(childId, {
         metadata: { ...child.metadata, parentId: undefined },
         updated_at: new Date().toISOString(),
       });
@@ -5890,7 +5890,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           handleDetachChildFromFreeformContainer={handleDetachChildFromFreeformContainer}
           handleDeleteChildFromContainer={handleDeleteChildFromContainer}
           fetchData={fetchData}
-          updatePadletById={updatePadletById}
+          updatePadletById={updatePostFieldsOrThrow}
         />
 
         {/* Canvas Content - Vertical scrolling for Wall, Horizontal for others */}
@@ -7029,7 +7029,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                       )
                     );
 
-                    const { error } = await updatePadletById(postId, {
+                    const updateResult = await updatePostFieldsPreservingFailureChannels(postId, {
                       title: nextTitle,
                       metadata: nextMetadata,
                       location_lng: lng,
@@ -7038,7 +7038,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                       updated_at: new Date().toISOString(),
                     } as any);
 
-                    if (error) {
+                    if (!updateResult.ok) {
                       toast.error('Failed to update map location');
                       fetchData();
                     }

@@ -278,11 +278,10 @@ export default function CanvasModals({
               setPadlets(prev => prev.map(p => p.id === liveContainer.id ? { ...p, metadata: nextMeta } : p));
 
               try {
-                const { error } = await updatePadletById(liveContainer.id, {
+                await updatePadletById(liveContainer.id, {
                   metadata: nextMeta,
                   updated_at: new Date().toISOString(),
                 });
-                if (error) throw error;
               } catch (err) {
                 console.error('Failed to reorder children:', err);
                 fetchData(); // Rollback on failure
@@ -309,11 +308,10 @@ export default function CanvasModals({
               ));
 
               try {
-                const { error } = await updatePadletById(childId, {
+                await updatePadletById(childId, {
                   metadata: { ...childPadlet.metadata, comments },
                   updated_at: new Date().toISOString(),
                 });
-                if (error) throw error;
               } catch (err) {
                 console.error('Failed to update child comments:', err);
                 toast.error('Failed to update comments');
