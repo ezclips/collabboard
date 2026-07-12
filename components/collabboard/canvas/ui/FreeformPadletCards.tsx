@@ -6,6 +6,8 @@ import DOMPurify from 'dompurify';
 import type { User } from '@supabase/supabase-js';
 import type { Padlet } from '@/types/collabboard';
 import { supabaseBrowser } from '@/lib/supabase/browser';
+import { createUpdatePostFieldsCommand } from '@/lib/domain/canvas/posts';
+import { createPostsRepository } from '@/lib/infra/canvas/postsRepository';
 import ImageActionsToolbar from '@/components/collabboard/editors/ImageActionsToolbar';
 import ImageDrawingLayer from '@/components/collabboard/editors/ImageDrawingLayer';
 import ImageCropLayer from '@/components/collabboard/editors/ImageCropLayer';
@@ -181,6 +183,19 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
   // Cookie-authenticated client — see useCanvasData.ts for why this must match
   // supabaseBrowser() rather than the plain lib/supabase.ts singleton.
   const supabase = React.useMemo(() => supabaseBrowser(), []);
+  /**
+   * PATCH-053: image-reaction writes already ignore a resolved Supabase error
+   * but route a rejected builder into their local catch. Preserve both
+   * channels while consuming the existing canvas.updatePostFields command.
+   */
+  const updatePostFieldsPreservingFailureChannels = React.useCallback(async (id: string, fields: object) => {
+    const updatePostFields = createUpdatePostFieldsCommand(createPostsRepository());
+    const result = await updatePostFields({ postId: id, fields }, { userId: null });
+    if (!result.ok && result.error.code === 'unknown') {
+      throw result.error.cause ?? result.error;
+    }
+    return result;
+  }, []);
   const isPadletSelected = React.useCallback(
     (padletId: string) => selectedPadletId === padletId || selectedPadletIds.includes(padletId),
     [selectedPadletId, selectedPadletIds]
@@ -934,13 +949,10 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                       try {
                         const currentReactions = padlet.metadata?.reactions || [];
                         const newReactions = [...currentReactions, emojiData.emoji];
-                        await supabase
-                          .from('padlets')
-                          .update({
-                            metadata: { ...padlet.metadata, reactions: newReactions },
-                            updated_at: new Date().toISOString(),
-                          })
-                          .eq('id', padlet.id);
+                        await updatePostFieldsPreservingFailureChannels(padlet.id, {
+                          metadata: { ...padlet.metadata, reactions: newReactions },
+                          updated_at: new Date().toISOString(),
+                        });
                         setIsImageEmojiOpen(false);
                         fetchData();
                       } catch (err) {
@@ -1425,13 +1437,10 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                           ...currentReactions.slice(indexToRemove + 1)
                         ];
 
-                        await supabase
-                          .from('padlets')
-                          .update({
-                            metadata: { ...padlet.metadata, reactions: newReactions },
-                            updated_at: new Date().toISOString(),
-                          })
-                          .eq('id', padlet.id);
+                        await updatePostFieldsPreservingFailureChannels(padlet.id, {
+                          metadata: { ...padlet.metadata, reactions: newReactions },
+                          updated_at: new Date().toISOString(),
+                        });
                         fetchData();
                       } catch (err) {
                         console.error('Failed to remove reaction:', err);
@@ -5531,13 +5540,10 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                             ...currentReactions.slice(0, indexToRemove),
                             ...currentReactions.slice(indexToRemove + 1),
                           ];
-                          await supabase
-                            .from('padlets')
-                            .update({
-                              metadata: { ...activeImageToolbarPadlet.metadata, reactions: newReactions },
-                              updated_at: new Date().toISOString(),
-                            })
-                            .eq('id', activeImageToolbarPadlet.id);
+                          await updatePostFieldsPreservingFailureChannels(activeImageToolbarPadlet.id, {
+                            metadata: { ...activeImageToolbarPadlet.metadata, reactions: newReactions },
+                            updated_at: new Date().toISOString(),
+                          });
                           fetchData();
                         } catch (err) {
                           console.error('Failed to remove reaction:', err);
@@ -5648,13 +5654,10 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                       try {
                         const currentReactions = activeImageToolbarPadlet.metadata?.reactions || [];
                         const newReactions = [...currentReactions, emojiData.emoji];
-                        await supabase
-                          .from('padlets')
-                          .update({
-                            metadata: { ...activeImageToolbarPadlet.metadata, reactions: newReactions },
-                            updated_at: new Date().toISOString(),
-                          })
-                          .eq('id', activeImageToolbarPadlet.id);
+                        await updatePostFieldsPreservingFailureChannels(activeImageToolbarPadlet.id, {
+                          metadata: { ...activeImageToolbarPadlet.metadata, reactions: newReactions },
+                          updated_at: new Date().toISOString(),
+                        });
                         setIsImageEmojiOpen(false);
                         fetchData();
                       } catch (err) {
