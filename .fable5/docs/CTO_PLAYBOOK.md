@@ -1242,6 +1242,34 @@ phase's postsRaw sub-thread is CLOSED; only FreeformPadletCards remains,
 on its own merits. Axis snapshot at 76 (unchanged): safety 19, ops 13,
 architecture 20, product 13, continuity 11.)
 
+(2026-07-13: PATCH-053 landed and passed review — the FreeformPadletCards
+strangler proper opens, one patch after the postsRaw sub-thread closed.
+Slice 1 retires 4 of the component's 22 direct `padlets` writes (the
+complete image-reaction family) onto the already-landed
+`canvas.updatePostFields`, via one new local, non-exported channel-
+preserving helper. Two deliberate deferrals held: the un-awaited AI-
+resize builders stay raw (an async command would change their execution
+semantics — a call the spec correctly declined to make unilaterally),
+and the remaining 16 direct writes stay untouched pending their own
+family rulings. This is the first review in the postsRaw-retirement
+streak with zero disclosed defects of any kind — no spec defect, no
+implementation defect, no environmental issue, no reviewer mistake —
+breaking the two-patch run (051, 052) of the comment-trap census class;
+worth noting precisely because a clean run is not evidence the class is
+fixed, only that this spec's gates happened to assert true measured
+values instead of a plain-name zero against a retired symbol. Landed on
+GPT-5.4: unit 251/28 (unchanged), tsc clean, boundaries clean, e2e
+27/27 on a server explicitly warmed at five routes per the spec's own
+operational note (avoiding a known cold-compile timeout), port gate 0/0
+independently confirmed before and after; one-file scope held exactly;
+component stays grandfathered, no closeout implied or claimed. No
+credit: architecture capped at 20/20, same standing ruling. Twenty-
+second consecutive fully clean review of the implementation. Grandfather
+held at 2. 18 of 22 direct writes remain in FreeformPadletCards, across
+five more coherent families plus the two deferred builders. Axis
+snapshot at 76 (unchanged): safety 19, ops 13, architecture 20, product
+13, continuity 11.)
+
 ## 13. The succession test
 
 You've absorbed this playbook when you can answer these without re-reading:
