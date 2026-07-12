@@ -354,7 +354,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     updateLineLocal, saveLineToDb, updateLine, deleteLine, duplicateLine, handleChangeLineLayer,
     updatePadletContent, updatePadletTitle,
     addPadletFromLibraryItem, addFreeformCardPadlet, addDrawingLayoutPadlet, updateDrawingLayoutPadlet,
-    insertPadlet, insertPostAndSelectOrThrow, updatePadletById, deletePostSwallowResolved, deletePostOrThrow,
+    insertPostOrThrow, insertPostPreservingFailureChannels, insertPostAndSelectOrThrow, updatePadletById, deletePostSwallowResolved, deletePostOrThrow,
   } = useCanvasData({ canvasId, dispatch });
 
   // Auto-open a specific padlet from a share link (?openPadlet=id).
@@ -572,8 +572,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
 
     // Persist
     try {
-      const { error } = await insertPadlet(newContainer);
-      if (error) throw error;
+      await insertPostOrThrow(newContainer);
       toast.success('Container created');
     } catch (err) {
       console.error("Failed to create container:", err);
@@ -617,8 +616,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     };
     setPadlets(prev => [...prev, newContainer]);
     try {
-      const { error } = await insertPadlet(newContainer);
-      if (error) throw error;
+      await insertPostOrThrow(newContainer);
     } catch (err) {
       console.error('Failed to create container:', err);
       toast.error('Failed to create container');
@@ -1937,8 +1935,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       ));
 
       // 3. Persist Post
-      const { error: postError } = await insertPadlet(newPost);
-      if (postError) throw postError;
+      await insertPostOrThrow(newPost);
 
       // 4. Persist Container Update
       const updatePostMetadata = createUpdatePostMetadataCommand(createPostsRepository());
@@ -2055,8 +2052,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     setPadlets((prev) => [...prev, containerPayload]);
     setSelectedPadletId(containerId);
 
-    const { error } = await insertPadlet(containerPayload as any);
-    if (error) {
+    const insertResult = await insertPostPreservingFailureChannels(containerPayload as any);
+    if (!insertResult.ok) {
+      const error = insertResult.error.cause ?? insertResult.error;
       setPadlets((prev) => prev.filter((p) => p.id !== containerId));
       setSelectedPadletId(null);
       console.error('Failed to create freeform column:', {
@@ -2080,7 +2078,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     }
 
     toast.success('Empty column created');
-  }, [canvasId, isFreeformLayout, canvasZoom, insertPadlet, fetchData]);
+  }, [canvasId, isFreeformLayout, canvasZoom, insertPostPreservingFailureChannels, fetchData]);
 
 
   // Handle "Add to Existing" from Column Placement Prompt
@@ -3978,8 +3976,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     };
 
     try {
-      const { error: insertError } = await insertPadlet(newPadlet);
-      if (insertError) throw insertError;
+      await insertPostOrThrow(newPadlet);
 
       for (const update of updates) {
         await updatePadletById(update.id, { metadata: update.metadata });
@@ -5118,16 +5115,14 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       if (el) excAPI.scrollToContent([el], { fitToContent: false, animate: true, duration: 400 });
     }, 200);
     try {
-      const { error: containerError } = await insertPadlet(containerPadlet);
-      if (containerError) throw containerError;
-      const { error: childError } = await insertPadlet(childPadlet);
-      if (childError) throw childError;
+      await insertPostOrThrow(containerPadlet);
+      await insertPostOrThrow(childPadlet);
     } catch (err: any) {
       console.error('Failed to create drawing container with image:', err?.message || err?.code || err?.details || err, { posX, posY });
       toast.error('Failed to create container');
       setPadlets(prev => prev.filter(p => p.id !== containerId && p.id !== childId));
     }
-  }, [canvasId, drawingPendingDraft, insertPadlet, padlets]);
+  }, [canvasId, drawingPendingDraft, insertPostOrThrow, padlets]);
 
   const handleDrawingAddToExisting = useCallback(() => {
     setDrawingContainerPromptOpen(false);
@@ -6992,14 +6987,15 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                     setMapActiveContainerId(newPost.id);
                     setSelectedPadletId(newPost.id);
 
-                    const { error: containerError } = await insertPadlet({
+                    const insertResult = await insertPostPreservingFailureChannels({
                       ...newPost,
                       location_lng: lng,
                       location_lat: lat,
                       location_label: locationText,
                     } as any);
 
-                    if (containerError) {
+                    if (!insertResult.ok) {
+                      const containerError = insertResult.error.cause ?? insertResult.error;
                       setPadlets((prev) => prev.filter((p) => p.id !== id));
                       if (mapActiveContainerId === id) setMapActiveContainerId(null);
                       if (selectedPadletId === id) setSelectedPadletId(null);

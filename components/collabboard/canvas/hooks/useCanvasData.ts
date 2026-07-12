@@ -30,7 +30,6 @@ import { createLinesRepository } from '@/lib/infra/canvas/linesRepository';
 import { createPostsRepository } from '@/lib/infra/canvas/postsRepository';
 import { createSectionsRepository } from '@/lib/infra/canvas/sectionsRepository';
 import {
-  insertPostRow,
   updatePostRowById,
 } from '@/lib/infra/supabase/postsRaw';
 import {
@@ -593,8 +592,34 @@ export function useCanvasData({ canvasId, dispatch }: UseCanvasDataParams) {
     }
   }, [markPadletLocallyModified]);
 
-  const insertPadlet = useCallback(async (payload: any) => {
-    return await insertPostRow(payload);
+  /**
+   * PATCH-051: the eight standalone insert sites split by their pre-existing
+   * failure contracts. Six check-and-throw callers plus the paired drawing
+   * insert already converge both raw failure channels in their catches;
+   * rethrow the original cause. The two resolved-error branches use the
+   * channel-preserving sibling below.
+   */
+  const insertPostOrThrow = useCallback(async (row: any) => {
+    const createPost = createCreatePostCommand(createPostsRepository());
+    const result = await createPost({ row }, { userId: null });
+    if (!result.ok) {
+      throw result.error.cause ?? result.error;
+    }
+  }, []);
+
+  /**
+   * The freeform-column and map-pin inserts distinguish raw channels: their
+   * resolved `{ error }` branch performs local rollback, while a thrown
+   * builder rejection escapes. Preserve that split: only `unknown` rethrows
+   * its original cause; every other Result returns to its existing branch.
+   */
+  const insertPostPreservingFailureChannels = useCallback(async (row: any) => {
+    const createPost = createCreatePostCommand(createPostsRepository());
+    const result = await createPost({ row }, { userId: null });
+    if (!result.ok && result.error.code === 'unknown') {
+      throw result.error.cause ?? result.error;
+    }
+    return result;
   }, []);
 
   /**
@@ -682,7 +707,8 @@ export function useCanvasData({ canvasId, dispatch }: UseCanvasDataParams) {
     addFreeformCardPadlet,
     addDrawingLayoutPadlet,
     updateDrawingLayoutPadlet,
-    insertPadlet,
+    insertPostOrThrow,
+    insertPostPreservingFailureChannels,
     insertPostAndSelectOrThrow,
     updatePadletById,
     deletePostSwallowResolved,
