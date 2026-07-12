@@ -1139,6 +1139,36 @@ ruling. Eighteenth consecutive fully clean review. Grandfather held at
 passthroughs and the JSX prop hand-off remain, deferred to the
 FreeformPadletCards phase. Axis snapshot at 76 (unchanged): safety 19,
 ops 13, architecture 20, product 13, continuity 11.)
+(2026-07-12: PATCH-050 landed and passed review — hooks slice 13,
+postsRaw's SECOND export death, and a correction to a claim this
+program had been repeating since PATCH-042. The owner asked whether
+the remaining raw contracts were inseparable from the
+FreeformPadletCards boundary; instead of ruling on the question as
+posed, this patch's authoring re-read the actual JSX and found the
+premise false — the "L5903 prop → FreeformPadletCards" line had been
+copied from spec to spec for eight patches without anyone opening the
+file to check, and the real receiver is CanvasModals, a component with
+zero prior mention in this family's sequencing. FreeformPadletCards
+turns out to have NO postsRaw coupling at all. That correction is more
+valuable than the code change: it stopped a strangler phase from being
+scheduled on a boundary that doesn't exist, and it earned its own
+LESSONS_LEARNED entry (a JSX prop's receiver is a fact you read, not a
+claim you inherit) rather than being folded quietly into the patch
+notes. The actual slice — one helper absorbing five call sites whose
+failure channels had already converged — is routine by this program's
+standards, but the review still caught its own mistake honestly: a
+naive substring count flagged a false duplicate (site 4's text
+embedded inside site 3's longer indented line) and a line-anchored
+recount cleared it, logged as a reviewer bug rather than waved away.
+Landed on GPT-5.4: unit 251/28 (unchanged), tsc clean, boundaries
+clean, e2e 27/27, port gate 0/0 (independently confirmed before AND
+after); three-file scope held exactly. No credit: architecture capped
+at 20/20, same standing ruling. Nineteenth consecutive fully clean
+review. Grandfather held at 2. postsRaw's export count is now 2, down
+from 3; two raw passthroughs remain, one of them (`updatePadletById`)
+now correctly understood to require a CanvasModals-inclusive slice
+when its turn comes. Axis snapshot at 76 (unchanged): safety 19, ops
+13, architecture 20, product 13, continuity 11.)
 
 ## 13. The succession test
 
