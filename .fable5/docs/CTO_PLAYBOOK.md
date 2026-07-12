@@ -1048,7 +1048,37 @@ had already passed independently. Landed on GPT-5.4: unit 245/28
 exactly 8,384 lines. No credit: architecture capped at 20/20, same
 standing ruling. Fifteenth consecutive fully clean review. Grandfather
 held at 2. Axis snapshot at 76 (unchanged): safety 19, ops 13,
-architecture 20, product 13, continuity 11.)
+architecture 20, product 13, continuity 11.) → **76 (held)**
+(2026-07-11: PATCH-047 landed and passed review — hooks slice 10, the
+FreeformGraphLayer client-identity migration, the program's FIFTH
+authorized behavior micro-change. This patch closes the duality the
+CTO deliberately opened and named at PATCH-046: rather than silently
+migrating both consumers at once, 046 migrated the safe one and left
+the other flagged for an explicit owner ruling — the owner then asked
+for exactly that ruling before anything else in this patch, and got an
+evidence chain instead of a guess: the legacy singleton is a bare
+`createClient` with a localStorage session store, session-less under
+this app's cookie-based auth, and both graph tables are RLS-gated on
+`auth.uid()`. That's not a style preference, it's a proof that the
+current code has a live defect — a split-brain where writes succeeded
+through one client while reads and further writes silently failed
+through the other, losing user edits as unhandled promise rejections.
+The review verified this claim doesn't just LOOK right, it checked
+that no RLS policy or migration changed alongside the client swap —
+the fix is identity correction, not access broadening, which is the
+one thing that would have turned a defensible ruling into a real
+security problem. Both consumer sites (`useMemo` call count, deps
+array) and both byte-kept bodies (the class's degradation state
+machine, the factory) were confirmed by direct read, not just hash —
+the same discipline PATCH-046's review established, now applied to a
+security-adjacent claim where it matters even more. Landed on GPT-5.4:
+unit 245/28 (unchanged), tsc clean, boundaries clean, e2e 27/27, port
+gate 0/0 (independently confirmed before AND after); two-file scope
+held exactly, the layer exactly 493 lines. No credit: architecture
+capped at 20/20, same standing ruling. Sixteenth consecutive fully
+clean review. Grandfather held at 2. The graph client-identity duality
+is now fully closed. Axis snapshot at 76 (unchanged): safety 19, ops
+13, architecture 20, product 13, continuity 11.)
 
 ## 13. The succession test
 
