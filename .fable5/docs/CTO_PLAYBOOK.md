@@ -1206,6 +1206,41 @@ of the IMPLEMENTATION, despite the one disclosed spec defect. Grandfather
 held at 2. postsRaw's export count is now 1 — only `updatePostRowById`
 remains, and its slice must include CanvasModals. Axis snapshot at 76
 (unchanged): safety 19, ops 13, architecture 20, product 13, continuity 11.)
+(2026-07-12: PATCH-052 landed and passed review — hooks slice 15, and
+`lib/infra/supabase/postsRaw.ts` no longer exists. That module was born
+at PATCH-042 as a DELIBERATE house-style exception (raw supabase shapes
+instead of Result, because two dozen CanvasClient call sites weren't
+ready to be translated) with a SHRINK-ONLY fence and an explicit death
+condition written into its own header comment. Ten patches later
+(042→052), that condition was met exactly as designed: four exports
+died one at a time as their consumers moved onto real commands, and the
+fifth patch in the sequence deleted the file outright rather than
+leaving an empty shell. That's the payoff of the shrink-only discipline
+— nobody had to remember to come back and clean it up, because the
+module was designed to become unnecessary and the spec caught the
+moment it did. The three-way split of the final family (bare-await
+swallow, check-and-throw, channel-preserving) is the same pattern this
+program has used since PATCH-045: read what the legacy code actually
+does before choosing a port, not what would be cleanest to write. The
+review's job here was to verify that split held at every call site,
+including the negative case — proving the map-pin callback has NO
+enclosing try/catch, which is what makes its channel-preserving helper
+correct rather than redundant. A second instance of the PATCH-051 spec-
+defect class surfaces here too: a bound census gate expected zero
+`postsRaw` references and measured two, both prose mentions in comments
+(one of them the spec's OWN new bound text). Same lesson, same label —
+spec defect, not implementation defect, not waved away. Landed on
+GPT-5.4: unit 251/28 (unchanged), tsc clean, boundaries clean, e2e
+27/27, port gate 0/0 (independently confirmed before AND after, via two
+different instruments since the spec bound both `netstat` and
+PowerShell's `Get-NetTCPConnection`); four-path scope (three edits, one
+deletion) held exactly. No credit: architecture capped at 20/20, same
+standing ruling — though this is the milestone that earned that cap in
+the first place, several patches ago. Twenty-first consecutive fully
+clean review of the implementation. Grandfather held at 2. The hooks
+phase's postsRaw sub-thread is CLOSED; only FreeformPadletCards remains,
+on its own merits. Axis snapshot at 76 (unchanged): safety 19, ops 13,
+architecture 20, product 13, continuity 11.)
 
 ## 13. The succession test
 
