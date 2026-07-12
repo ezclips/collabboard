@@ -3635,13 +3635,10 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                         : p
                     ));
                     try {
-                      await supabase
-                        .from('padlets')
-                        .update({
-                          metadata: { ...childPadlet.metadata, comments },
-                          updated_at: new Date().toISOString(),
-                        })
-                        .eq('id', childId);
+                      await updatePostFieldsPreservingFailureChannels(childId, {
+                        metadata: { ...childPadlet.metadata, comments },
+                        updated_at: new Date().toISOString(),
+                      });
                     } catch (err) {
                       console.error('Failed to update child comments:', err);
                       toast.error('Failed to update comments');
