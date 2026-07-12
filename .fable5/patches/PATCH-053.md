@@ -97,7 +97,7 @@ git ls-files --eol -- "$F" # i/lf w/lf
 Collision gate - must be zero before edit:
 
 ```bash
-rg -n '\bupdatePostFieldsPreservingFailureChannels\b' components/collabboard/canvas/ui/FreeformPadletCards.tsx lib app -g '*.ts' -g '*.tsx' | wc -l # 0
+rg -n '\bupdatePostFieldsPreservingFailureChannels\b' components/collabboard/canvas/ui/FreeformPadletCards.tsx | wc -l # 0
 ```
 
 ## 2. Exact replacement pairs
