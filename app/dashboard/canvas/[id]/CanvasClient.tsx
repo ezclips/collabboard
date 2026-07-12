@@ -354,7 +354,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     updateLineLocal, saveLineToDb, updateLine, deleteLine, duplicateLine, handleChangeLineLayer,
     updatePadletContent, updatePadletTitle,
     addPadletFromLibraryItem, addFreeformCardPadlet, addDrawingLayoutPadlet, updateDrawingLayoutPadlet,
-    insertPadlet, insertPadletAndSelectSingle, updatePadletById, deletePostSwallowResolved, deletePostOrThrow,
+    insertPadlet, insertPostAndSelectOrThrow, updatePadletById, deletePostSwallowResolved, deletePostOrThrow,
   } = useCanvasData({ canvasId, dispatch });
 
   // Auto-open a specific padlet from a share link (?openPadlet=id).
@@ -640,8 +640,8 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       },
     };
     try {
-      const { data: created, error } = await insertPadletAndSelectSingle(newPadletData);
-      if (error || !created) throw error || new Error('Insert returned no data');
+      const created = await insertPostAndSelectOrThrow(newPadletData);
+      if (!created) throw new Error('Insert returned no data');
       setPadlets(prev => [...prev, created]);
       const container = padlets.find(p => p.id === containerId);
       if (container) {
@@ -3367,9 +3367,8 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         newPadletData.position_y = padlet.position_y + 20;
       }
 
-      const { data, error } = await insertPadletAndSelectSingle(newPadletData);
+      const data = await insertPostAndSelectOrThrow(newPadletData);
 
-      if (error) throw error;
       if (data) {
         setPadlets(prev => [...prev, data as Padlet]);
         setSelectedPadletId(data.id);
@@ -3470,9 +3469,8 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       for (const item of postItems) {
           const nextId = crypto.randomUUID();
           const newPadlet = buildPastedPadletData(item.data, nextId, targetPosition, anchorPosition);
-          const { data, error } = await insertPadletAndSelectSingle(newPadlet);
+          const data = await insertPostAndSelectOrThrow(newPadlet);
 
-          if (error) throw error;
           if (data) {
             setPadlets(prev => [...prev, data as Padlet]);
             pastedIds.push(data.id);
@@ -3542,9 +3540,8 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         },
       };
 
-      const { data, error } = await insertPadletAndSelectSingle(newPadlet);
+      const data = await insertPostAndSelectOrThrow(newPadlet);
 
-      if (error) throw error;
       if (data) {
         // Update original to link back
         const updatedOriginalMeta = {
@@ -4537,7 +4534,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       : end;
 
     try {
-      const { data, error } = await insertPadletAndSelectSingle({
+      const data = await insertPostAndSelectOrThrow({
         board_id: canvasId,
         title: options?.title || '',
         content: '',
@@ -4552,7 +4549,6 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           end_date: safeEnd.toISOString(),
         },
       });
-      if (error) throw error;
       await fetchData();
       if (data?.id) {
         setSelectedSchedulerContainerId(data.id);
@@ -4563,7 +4559,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       console.error('Failed to create scheduler event:', err);
       return null;
     }
-  }, [canvasId, fetchData, insertPadletAndSelectSingle, setSelectedSchedulerContainerId, setSelectedSchedulerSlot]);
+  }, [canvasId, fetchData, insertPostAndSelectOrThrow, setSelectedSchedulerContainerId, setSelectedSchedulerSlot]);
 
   const clearSchedulerSelection = useCallback(() => {
     setSelectedSchedulerSlot(null);

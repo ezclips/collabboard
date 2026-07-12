@@ -21,19 +21,14 @@ import { createBrowserSupabaseClient } from './browserClient';
  * lib/domain/canvas/posts.ts remains the ONLY surface for new callers.
  * PATCH-049: deletePostRowById retired (its three CanvasClient consumers
  * moved onto canvas.deletePost) - the module's first export death.
+ * PATCH-050: insertPostRowReturning retired (its five CanvasClient
+ * consumers moved onto canvas.createPostAndSelect) - the second death.
  */
 
 export function insertPostRow(row: object) {
     return createBrowserSupabaseClient().from('padlets').insert(row);
 }
 
-export function insertPostRowReturning(row: object) {
-    return createBrowserSupabaseClient()
-        .from('padlets')
-        .insert(row)
-        .select()
-        .single();
-}
 
 export function updatePostRowById(id: string, fields: object) {
     return createBrowserSupabaseClient()

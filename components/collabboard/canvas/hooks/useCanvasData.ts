@@ -16,6 +16,7 @@ import {
   createUpdateLineCommand,
 } from '@/lib/domain/canvas/lines';
 import {
+  createCreatePostAndSelectCommand,
   createCreatePostBestEffortCommand,
   createCreatePostCommand,
   createDeletePostCommand,
@@ -30,7 +31,6 @@ import { createPostsRepository } from '@/lib/infra/canvas/postsRepository';
 import { createSectionsRepository } from '@/lib/infra/canvas/sectionsRepository';
 import {
   insertPostRow,
-  insertPostRowReturning,
   updatePostRowById,
 } from '@/lib/infra/supabase/postsRaw';
 import {
@@ -597,8 +597,22 @@ export function useCanvasData({ canvasId, dispatch }: UseCanvasDataParams) {
     return await insertPostRow(payload);
   }, []);
 
-  const insertPadletAndSelectSingle = useCallback(async (payload: any) => {
-    return await insertPostRowReturning(payload);
+  /**
+   * The returning insert (five CanvasClient sites, PATCH-050): BOTH legacy
+   * channels already converged at every site (the resolved `{ error }` was
+   * check-and-thrown into the same catch a thrown failure reached), so ANY
+   * failure rethrows its original cause - the 038/040 check-and-throw port,
+   * no behavior authorization needed. Returns the inserted row (or null)
+   * verbatim; Promise<any> restores the legacy raw any-flow (the 043
+   * precedent) so the byte-kept downstream casts compile unchanged.
+   */
+  const insertPostAndSelectOrThrow = useCallback(async (row: any): Promise<any> => {
+    const createPostAndSelect = createCreatePostAndSelectCommand(createPostsRepository());
+    const result = await createPostAndSelect({ row }, { userId: null });
+    if (!result.ok) {
+      throw result.error.cause ?? result.error;
+    }
+    return result.value;
   }, []);
 
   const updatePadletById = useCallback(async (id: string, updates: any) => {
@@ -669,7 +683,7 @@ export function useCanvasData({ canvasId, dispatch }: UseCanvasDataParams) {
     addDrawingLayoutPadlet,
     updateDrawingLayoutPadlet,
     insertPadlet,
-    insertPadletAndSelectSingle,
+    insertPostAndSelectOrThrow,
     updatePadletById,
     deletePostSwallowResolved,
     deletePostOrThrow,
