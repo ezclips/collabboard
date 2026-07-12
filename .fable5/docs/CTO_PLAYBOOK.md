@@ -1108,6 +1108,37 @@ consecutive fully clean review. Grandfather held at 2. The postsRaw
 consumer set is now 4, down from 5 at patch start. Axis snapshot at 76
 (unchanged): safety 19, ops 13, architecture 20, product 13,
 continuity 11.)
+(2026-07-12: PATCH-049 landed and passed review — hooks slice 12,
+postsRaw's FIRST actual export death. Every prior slice in this family
+disclosed a hash staying unchanged; this one is the first where the
+review had something to prove a function is actually GONE, not just
+untouched. The review didn't stop at a whole-file hash match — it
+grepped the paren-bearing instrument (`deletePostRowById(`) to zero
+repo-wide, separating the real death from the header comment that now
+merely mentions the retired name in prose (a census trap the spec
+called out in advance). The two new hook helpers split one raw
+passthrough into two legacy contracts rather than one Result
+translation, because the two CanvasClient call-site shapes had never
+converged — one silently swallowed a resolved failure while the other
+already threw on any failure. Both were confirmed by direct read, not
+inferred from a passing test suite (there are no new tests here; the
+underlying command was already pinned two patches ago), matching this
+program's standing discipline of reading claimed behavior rather than
+trusting a hash to imply it. The review also reconfirmed the
+command-internal swallow family holds at eleven — the new helper's
+swallow is call-site class, and the reviewer checked it stayed there
+rather than accepting the label. CanvasClient shrank for the first
+time since the never-grow plateau was set at PATCH-045 (8,384→8,383),
+because a two-line check-and-throw collapsed into one call — a real
+shrink, not just an unchanged count. Landed on GPT-5.4: unit 251/28
+(unchanged), tsc clean, boundaries clean, e2e 27/27, port gate 0/0
+(independently confirmed before AND after); three-file scope held
+exactly. No credit: architecture capped at 20/20, same standing
+ruling. Eighteenth consecutive fully clean review. Grandfather held at
+2. postsRaw's consumer set is now 3, down from 4; three raw
+passthroughs and the JSX prop hand-off remain, deferred to the
+FreeformPadletCards phase. Axis snapshot at 76 (unchanged): safety 19,
+ops 13, architecture 20, product 13, continuity 11.)
 
 ## 13. The succession test
 
