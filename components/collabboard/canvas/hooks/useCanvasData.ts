@@ -19,6 +19,7 @@ import {
   createCreatePostBestEffortCommand,
   createCreatePostCommand,
   createUpdatePostContentBestEffortCommand,
+  createUpdatePostFieldsCommand,
   createUpdatePostMetadataBestEffortCommand,
   createUpdatePostTitleCommand,
 } from '@/lib/domain/canvas/posts';
@@ -574,8 +575,16 @@ export function useCanvasData({ canvasId, dispatch }: UseCanvasDataParams) {
     setPadlets((prev) => prev.map((p) => (p.id === id ? { ...p, ...updates } : p)));
 
     try {
-      const { error } = await updatePostRowById(id, updates);
-      if (error) {
+      // Channel split PRESERVED (the PATCH-045 idiom): a THROWN failure
+      // carries code 'unknown' out of defineCommand's catch and re-throws
+      // its original cause into the catch below (the legacy console.error +
+      // rollback); a RESOLVED error takes the silent rollback branch.
+      const updatePostFields = createUpdatePostFieldsCommand(createPostsRepository());
+      const result = await updatePostFields({ postId: id, fields: updates }, { userId: null });
+      if (!result.ok && result.error.code === 'unknown') {
+        throw result.error.cause ?? result.error;
+      }
+      if (!result.ok) {
         setPadlets((prev) => prev.map((p) => (p.id === id ? previousPadlet : p)));
       }
     } catch (err) {

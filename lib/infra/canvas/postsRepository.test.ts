@@ -517,3 +517,35 @@ describe('SupabasePostsRepository.updateTitleStamped', () => {
     }
   });
 });
+
+describe('updateFieldsById', () => {
+  it('sends the fields object verbatim filtered by id, with no stamp added', async () => {
+    const { client, updateCalls, eqCalls, fromTables } = createFakeClient();
+    const repository = new SupabasePostsRepository(client);
+
+    const result = await repository.updateFieldsById(asPostId('post-7'), {
+      position_x: 40,
+      position_y: 80,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(fromTables).toEqual(['padlets']);
+    expect(updateCalls).toEqual([{ position_x: 40, position_y: 80 }]);
+    expect(Object.keys(updateCalls[0])).toEqual(['position_x', 'position_y']);
+    expect(eqCalls).toEqual([{ column: 'id', value: 'post-7' }]);
+  });
+
+  it('maps a supabase error to an unavailable DomainError carrying the cause', async () => {
+    const supabaseError = { code: '42501', message: 'permission denied' };
+    const { client } = createFakeClient(supabaseError);
+    const repository = new SupabasePostsRepository(client);
+
+    const result = await repository.updateFieldsById(asPostId('post-7'), { width: 100 });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe('unavailable');
+      expect(result.error.cause).toBe(supabaseError);
+    }
+  });
+});

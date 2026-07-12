@@ -70,6 +70,13 @@ export interface PostsRepository {
     id: PostId,
     fields: { readonly metadata: Record<string, unknown> },
   ): Promise<Result<void, DomainError>>;
+  /**
+   * The drawing-layout dynamic update (PATCH-048): arbitrary padlet columns
+   * pass through VERBATIM with NO stamp added - the legacy statement sent
+   * exactly the caller's fields (old useCanvasData L577); the
+   * updateMetadataUnstamped no-stamp precedent, generalized.
+   */
+  updateFieldsById(id: PostId, fields: object): Promise<Result<void, DomainError>>;
   updatePosition(id: PostId, fields: PostPositionWriteFields): Promise<Result<void, DomainError>>;
   /** Legacy clipart title clear sends title ONLY - no updated_at (old L7581-7584). */
   updateTitle(id: PostId, fields: { readonly title: string }): Promise<Result<void, DomainError>>;
@@ -634,4 +641,25 @@ export const createCreatePostBestEffortCommand = (repository: PostsRepository) =
       await repository.insert(input.row);
       return ok(undefined);
     },
+  });
+
+export const updatePostFieldsSchema = z.object({
+  postId: z.string(),
+  /** Arbitrary padlet columns, passed through VERBATIM (the postRowSchema rationale). */
+  fields: z.custom<object>((value) => typeof value === 'object' && value !== null),
+});
+
+/**
+ * PATCH-048: the drawing-layout dynamic update - the hook's LAST internal
+ * raw contract, off postsRaw. HONEST (no BestEffort sibling): the call site
+ * discriminates channels via error.code (the PATCH-045 idiom) - a RESOLVED
+ * 'unavailable' takes the silent rollback branch, a THROWN 'unknown'
+ * rethrows its cause into the byte-kept console.error catch. NO updated_at
+ * stamp - the legacy statement sent none.
+ */
+export const createUpdatePostFieldsCommand = (repository: PostsRepository) =>
+  defineCommand({
+    name: 'canvas.updatePostFields',
+    input: updatePostFieldsSchema,
+    execute: async (input) => repository.updateFieldsById(asPostId(input.postId), input.fields),
   });

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  createUpdatePostFieldsCommand,
   createAttachPostToSchedulerContainerCommand,
   createCreateContainerWithPostCommand,
   createCreatePostBestEffortCommand,
@@ -65,6 +66,7 @@ function createFakeRepository() {
     id: PostId;
     fields: { readonly title: string; readonly updatedAt: string };
   }> = [];
+  const updateFieldsCalls: Array<{ id: PostId; fields: object }> = [];
   const insertCalls: object[] = [];
   const insertReturningCalls: object[] = [];
   const findMetadataByIdCalls: PostId[] = [];
@@ -78,6 +80,8 @@ function createFakeRepository() {
   let updateTitleResult: Result<void, DomainError> = ok(undefined);
   let updateContentResult: Result<void, DomainError> = ok(undefined);
   let updateTitleStampedResult: Result<void, DomainError> = ok(undefined);
+  let updateFieldsResult: Result<void, DomainError> = ok(undefined);
+  let updateFieldsThrows: Error | null = null;
   const insertResultQueue: Array<Result<void, DomainError>> = [];
   let insertReturningResult: Result<Record<string, unknown> | null, DomainError> = ok(null);
   let findMetadataByIdResult: Result<Record<string, unknown> | null, DomainError> = ok(null);
@@ -110,6 +114,11 @@ function createFakeRepository() {
     updateTitleStamped: async (id, fields) => {
       updateTitleStampedCalls.push({ id, fields });
       return updateTitleStampedResult;
+    },
+    updateFieldsById: async (id, fields) => {
+      if (updateFieldsThrows) throw updateFieldsThrows;
+      updateFieldsCalls.push({ id, fields });
+      return updateFieldsResult;
     },
     deleteById: async (id) => {
       deleteByIdCalls.push(id);
@@ -146,6 +155,7 @@ function createFakeRepository() {
     updateTitleCalls,
     updateContentCalls,
     updateTitleStampedCalls,
+    updateFieldsCalls,
     deleteByIdCalls,
     deleteByIdsCalls,
     deleteByParentIdCalls,
@@ -172,6 +182,12 @@ function createFakeRepository() {
     },
     setUpdateTitleStampedResult(result: Result<void, DomainError>) {
       updateTitleStampedResult = result;
+    },
+    setUpdateFieldsResult(result: Result<void, DomainError>) {
+      updateFieldsResult = result;
+    },
+    setUpdateFieldsThrows(error: Error) {
+      updateFieldsThrows = error;
     },
     setDeleteByIdResult(result: Result<void, DomainError>) {
       deleteByIdResult = result;
@@ -1308,5 +1324,68 @@ describe('canvas.createPostBestEffort', () => {
       expect(result.error.code).toBe('validation');
     }
     expect(fake.insertCalls).toHaveLength(0);
+  });
+});
+
+describe('canvas.updatePostFields', () => {
+  it('passes the fields object through verbatim (same reference) with no stamp added', async () => {
+    const fake = createFakeRepository();
+    const updatePostFields = createUpdatePostFieldsCommand(fake.repository);
+    const fields = { position_x: 40, position_y: 80, width: 320 };
+
+    const result = await updatePostFields({ postId: 'post-7', fields }, ctx);
+
+    expect(result.ok).toBe(true);
+    expect(fake.updateFieldsCalls).toHaveLength(1);
+    expect(fake.updateFieldsCalls[0].id).toBe('post-7');
+    expect(fake.updateFieldsCalls[0].fields).toBe(fields);
+    expect(Object.keys(fake.updateFieldsCalls[0].fields)).toEqual([
+      'position_x',
+      'position_y',
+      'width',
+    ]);
+  });
+
+  it('propagates a RESOLVED repository failure unchanged (code unavailable)', async () => {
+    const fake = createFakeRepository();
+    fake.setUpdateFieldsResult(err(domainError('unavailable', 'db down')));
+    const updatePostFields = createUpdatePostFieldsCommand(fake.repository);
+
+    const result = await updatePostFields({ postId: 'post-7', fields: { width: 100 } }, ctx);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe('unavailable');
+    }
+  });
+
+  it('surfaces a THROWN repository error as code unknown carrying the original cause', async () => {
+    // The channel-discrimination pin (the PATCH-045 idiom): the call site
+    // tells the legacy resolved-vs-thrown channels apart via error.code.
+    const fake = createFakeRepository();
+    const networkError = new Error('fetch failed');
+    fake.setUpdateFieldsThrows(networkError);
+    const updatePostFields = createUpdatePostFieldsCommand(fake.repository);
+
+    const result = await updatePostFields({ postId: 'post-7', fields: { width: 100 } }, ctx);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe('unknown');
+      expect(result.error.cause).toBe(networkError);
+    }
+  });
+
+  it('rejects a non-object fields payload without calling the repository', async () => {
+    const fake = createFakeRepository();
+    const updatePostFields = createUpdatePostFieldsCommand(fake.repository);
+
+    const result = await updatePostFields({ postId: 'post-7', fields: null }, ctx);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe('validation');
+    }
+    expect(fake.updateFieldsCalls).toHaveLength(0);
   });
 });

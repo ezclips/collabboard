@@ -73,7 +73,10 @@ interface PostsSupabaseClient {
           }
         | { title: string }
         | { content: string; updated_at: string }
-        | { title: string; updated_at: string },
+        | { title: string; updated_at: string }
+        // The drawing-layout dynamic passthrough (PATCH-048) absorbs the
+        // union for assignability; the named shapes above remain as docs.
+        | object,
     ): PostsUpdateQuery;
     select(columns: 'metadata'): PostsMetadataSelectQuery;
     delete(): PostsDeleteQuery;
@@ -128,6 +131,16 @@ export class SupabasePostsRepository implements PostsRepository {
       .from('padlets')
       .update({ metadata: fields.metadata })
       .eq('id', id);
+
+    if (error) {
+      return err(domainError('unavailable', 'Could not update the post', { cause: error }));
+    }
+
+    return ok(undefined);
+  }
+
+  async updateFieldsById(id: PostId, fields: object): Promise<Result<void, DomainError>> {
+    const { error } = await this.client.from('padlets').update(fields).eq('id', id);
 
     if (error) {
       return err(domainError('unavailable', 'Could not update the post', { cause: error }));
