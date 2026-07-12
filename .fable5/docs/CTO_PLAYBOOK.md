@@ -1169,6 +1169,43 @@ from 3; two raw passthroughs remain, one of them (`updatePadletById`)
 now correctly understood to require a CanvasModals-inclusive slice
 when its turn comes. Axis snapshot at 76 (unchanged): safety 19, ops
 13, architecture 20, product 13, continuity 11.)
+(2026-07-12: PATCH-051 landed and passed review — hooks slice 14,
+postsRaw's THIRD export death. This one is worth remembering for two
+reasons, not one. First, the review had to hold its independence
+against a spec it hadn't authored: PATCH-051 was authored and amended
+outside this review session's own history, and the discipline that
+matters here is that none of that changed how the review was run —
+live spec, live tree, every gate re-derived, no deference to prior
+authorship. Second, the review caught its OWN spec's mistake rather
+than assuming a bound "# 0" comment was ground truth: the live spec's
+census gate asserted `rg` for `insertPostRow` should read 0, but the
+spec's own bound postsRaw.ts fence carries a header comment recording
+the retirement in prose — "insertPostRow retired" — which the
+word-boundary regex correctly matches once. That's not a defect in the
+code; the paren-instrument proved the callable is genuinely extinct
+repo-wide. It's a defect in the spec's own gate text, missing the same
+comment-trap class that PATCH-049 and PATCH-050 disclosed correctly.
+Logging it as a spec defect rather than silently "fixing" the
+expectation or treating it as an implementation problem is the
+important habit: three different failure classes (implementation,
+spec, reviewer measurement) get three different labels, always, even
+when the spec is right about everything else. The two new hook helpers
+split the eight insert sites along a distinction that already existed
+in the legacy code, not a new one: six sites already converged their
+resolved and thrown channels into the same catch, but two — the
+freeform-column and map-pin creates — never had a surrounding
+try/catch at all, so a thrown failure historically escaped uncaught
+while a resolved failure took a local rollback. Confirming that
+distinction meant checking both call sites for the ABSENCE of a
+try/catch, not just reading the helper — an easy thing to skip. Landed
+on GPT-5.4: unit 251/28 (unchanged), tsc clean, boundaries clean, e2e
+27/27, port gate 0/0 (independently confirmed before AND after);
+three-file scope held exactly. No credit: architecture capped at
+20/20, same standing ruling. Twentieth consecutive fully clean review
+of the IMPLEMENTATION, despite the one disclosed spec defect. Grandfather
+held at 2. postsRaw's export count is now 1 — only `updatePostRowById`
+remains, and its slice must include CanvasModals. Axis snapshot at 76
+(unchanged): safety 19, ops 13, architecture 20, product 13, continuity 11.)
 
 ## 13. The succession test
 
