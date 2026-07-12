@@ -1079,6 +1079,35 @@ capped at 20/20, same standing ruling. Sixteenth consecutive fully
 clean review. Grandfather held at 2. The graph client-identity duality
 is now fully closed. Axis snapshot at 76 (unchanged): safety 19, ops
 13, architecture 20, product 13, continuity 11.)
+(2026-07-12: PATCH-048 landed and passed review — hooks slice 11, the
+postsRaw consumer shrink-down begins. The census this patch was built
+on reshaped the expected slice: five hook delegations onto the raw
+module split into four PURE PASSTHROUGHS whose `{ data, error }`
+shapes flow straight to ~24 CanvasClient call sites (retiring those
+IS the FreeformPadletCards strangling, not this patch — the 021/042
+exception re-affirmed rather than re-litigated) and exactly ONE
+hook-internal contract whose raw shape terminates before ever
+reaching a component. That's the right unit of work: the boundary
+this patch draws (postsRaw = CanvasClient's raw surface, nothing
+else) is now provably true rather than asserted, because the review
+independently confirmed `postsRaw.ts` byte-untouched via its own
+MUST-NOT-CHANGE hash — the same file that would have to change if any
+export had actually retired. The behavior-preservation claim was
+checked the same way PATCH-045's channel-discrimination idiom set the
+precedent for: the review read the committed hook code directly and
+confirmed the `code === 'unknown'` guard routes a thrown failure's
+cause into the byte-kept console.error+rollback catch while a
+resolved failure takes the byte-kept silent-rollback branch alone —
+matching the bound test pins (same-reference payload, no-stamp
+Object.keys, the thrown-mode cause pin) rather than trusting the test
+count alone. Landed on GPT-5.4: unit 251/28 (6 new, no new file), tsc
+clean, boundaries clean, e2e 27/27, port gate 0/0 (independently
+confirmed before AND after); five-file scope held exactly. No credit:
+architecture capped at 20/20, same standing ruling. Seventeenth
+consecutive fully clean review. Grandfather held at 2. The postsRaw
+consumer set is now 4, down from 5 at patch start. Axis snapshot at 76
+(unchanged): safety 19, ops 13, architecture 20, product 13,
+continuity 11.)
 
 ## 13. The succession test
 
