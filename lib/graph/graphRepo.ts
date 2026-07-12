@@ -173,10 +173,12 @@ export class FreeformGraphRepo {
  * PATCH-046: the client hand-off retirement. Consumers stop constructing
  * the repo with their own client - this factory supplies the SAME
  * cookie/browser client CanvasClient's memo passed (the PATCH-025 client
- * identity). FreeformGraphLayer (rendered by FreeformPadletCards) still
- * constructs with the LEGACY lib/supabase singleton and is deferred BY
- * NAME to that phase - do NOT swap it onto this factory without an owner
- * client-identity ruling.
+ * identity). PATCH-047 (owner-authorized client-identity ruling): the
+ * second consumer, FreeformGraphLayer, migrated onto this factory too -
+ * its legacy session-less lib/supabase singleton could not satisfy the
+ * auth.uid()-gated RLS on either graph table (reads RLS-filtered to
+ * empty, writes rejected 42501). Both consumers now share ONE client
+ * identity; the anon singleton has no remaining graph consumers.
  */
 export function createFreeformGraphRepo(boardId: string): FreeformGraphRepo {
     return new FreeformGraphRepo(createBrowserSupabaseClient(), boardId);

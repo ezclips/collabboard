@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { FreeformGraphRepo } from '@/lib/graph/graphRepo';
-import { supabase } from '@/lib/supabase';
+import { createFreeformGraphRepo } from '@/lib/graph/graphRepo';
 import { selectValidEdges } from '@/lib/graph/graphSelectors';
 import { routeEdge, type Rect, type GraphSide, type RouteEdgeResult } from '@/lib/graph/edgeRouting';
 import type { FreeformGraphEdge } from '@/types/graphTypes';
@@ -37,7 +36,8 @@ export default function FreeformGraphLayer({ boardId, posts, refreshToken = 0, c
     const [draggingLabel, setDraggingLabel] = useState<string | null>(null);
     const svgRef = useRef<SVGSVGElement | null>(null);
 
-    const repo = useMemo(() => new FreeformGraphRepo(supabase, boardId), [boardId]);
+    // PATCH-047 owner-authorized client-identity migration - see createFreeformGraphRepo's doc.
+    const repo = useMemo(() => createFreeformGraphRepo(boardId), [boardId]);
 
     useEffect(() => {
         if (!boardId) return;
