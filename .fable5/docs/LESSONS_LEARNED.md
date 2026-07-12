@@ -313,6 +313,10 @@ The agreed strategy for de-godding `CanvasClient.tsx` (8.5k lines, ~105 direct D
 Two canvas systems, three comment stores, the kanban schema island: each has a scheduled migration (ROADMAP Phases 1–3). Opportunistic "fixes" strand data.
 **Reusable rule:** check CURRENT_TASK/ROADMAP before unifying anything that looks duplicated — if it's listed, it's quarantined, not forgotten.
 
+### A JSX prop's receiver is a fact you read, not a claim you inherit (PATCH-050)
+For eight patches (042→049) the specs carried "one JSX prop hand-off (L5903) → FreeformPadletCards" as the reason the `updatePadletById` raw contract was deferred to the FreeformPadletCards phase. The PATCH-050 census finally read the live JSX element: the receiver is `<CanvasModals` (CanvasClient L5854), which types the prop and calls it raw at two sites — and FreeformPadletCards contains ZERO postsRaw references. The misattribution nearly caused an entire strangler phase to be scheduled on a false coupling; the claim survived eight specs because each patch re-quoted the previous patch instead of the code. Caught only because the owner's phase question forced the receiver to be named.
+**Reusable rule:** any claim of the form "X is consumed by component Y" that will drive sequencing must be verified by reading the live JSX element (scan upward from the prop line to the opening `<Tag`) and grepping Y for the symbol — in the same session the claim is used, no matter how many prior specs repeat it.
+
 ## Standing risks future models must not forget
 
 1. **CI secrets not yet configured** — pushing activated
