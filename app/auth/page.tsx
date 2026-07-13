@@ -6,13 +6,16 @@ import { useSupabase } from '@/lib/supabase-provider';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import Icon from '@/components/AppIcon';
-import { createLoginSubmissionGate, parseRetryAfterSeconds } from '@/lib/infra/auth/loginSubmission';
+import { createLoginSubmissionGate } from '@/lib/infra/auth/loginSubmission';
+import {
+  LOCAL_LOGIN_SUBMISSION_GUARD_SECONDS,
+  resolveLoginRateLimit,
+  UNKNOWN_SUPABASE_LOGIN_RATE_LIMIT_MESSAGE,
+} from '@/lib/infra/auth/loginRateLimit';
 
 const MIN_PASSWORD_LENGTH = 15;
 const MAX_PASSWORD_LENGTH = 64;
 const SUPABASE_RATE_LIMIT_MESSAGE = 'Sign-in is temporarily rate-limited by Supabase. Try again in a few minutes.';
-const SUPABASE_RATE_LIMIT_COOLDOWN_MS = 5 * 60 * 1000;
-const FALLBACK_LOGIN_COOLDOWN_SECONDS = SUPABASE_RATE_LIMIT_COOLDOWN_MS / 1000;
 
 function AuthForm() {
   const router = useRouter();
@@ -29,6 +32,7 @@ function AuthForm() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [rateLimitedUntil, setRateLimitedUntil] = useState<number | null>(null);
+  const [showRateLimitCountdown, setShowRateLimitCountdown] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const loginSubmissionGateRef = useRef(createLoginSubmissionGate());
   
@@ -133,11 +137,12 @@ function AuthForm() {
   const submitDisabled = loading || isLoginRateLimited;
   const loginFieldDisabled = mode === 'login' ? submitDisabled : loading;
 
-  const applyLoginCooldown = (retryAfterSeconds: number) => {
-    loginSubmissionGateRef.current.startCooldown(retryAfterSeconds);
+  const applyLoginCooldown = (blockSeconds: number, shouldShowCountdown: boolean) => {
+    loginSubmissionGateRef.current.startCooldown(blockSeconds);
     const nextNow = Date.now();
     setNow(nextNow);
-    setRateLimitedUntil(nextNow + retryAfterSeconds * 1000);
+    setShowRateLimitCountdown(shouldShowCountdown);
+    setRateLimitedUntil(nextNow + blockSeconds * 1000);
   };
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -165,13 +170,15 @@ function AuthForm() {
 
         if (!response.ok) {
           if (response.status === 429) {
-            const retryAfterSeconds = parseRetryAfterSeconds(
-              response.headers.get('Retry-After'),
-              typeof result?.retryAfterSeconds === 'number'
-                ? result.retryAfterSeconds
-                : FALLBACK_LOGIN_COOLDOWN_SECONDS,
-            );
-            applyLoginCooldown(retryAfterSeconds);
+            const rateLimit = resolveLoginRateLimit({
+              headerValue: response.headers.get('Retry-After'),
+              payload: result,
+              fallbackMessage: SUPABASE_RATE_LIMIT_MESSAGE,
+              localGuardSeconds: LOCAL_LOGIN_SUBMISSION_GUARD_SECONDS,
+            });
+            applyLoginCooldown(rateLimit.blockSeconds, rateLimit.showCountdown);
+            setError(rateLimit.message);
+            return;
           }
 
           setError(
@@ -194,7 +201,11 @@ function AuthForm() {
     });
 
     if (!submission.accepted && submission.reason === 'cooldown') {
-      setError(`${SUPABASE_RATE_LIMIT_MESSAGE} Try again in ${submission.retryAfterSeconds} seconds.`);
+      if (showRateLimitCountdown) {
+        setError(`${SUPABASE_RATE_LIMIT_MESSAGE} Try again in ${submission.retryAfterSeconds} seconds.`);
+      } else {
+        setError(UNKNOWN_SUPABASE_LOGIN_RATE_LIMIT_MESSAGE);
+      }
     }
   };
 
@@ -498,7 +509,7 @@ function AuthForm() {
               {mode === 'login' &&
                 (loading
                   ? 'Signing in...'
-                  : isLoginRateLimited
+                  : isLoginRateLimited && showRateLimitCountdown
                     ? `Try again in ${rateLimitSecondsRemaining}s`
                     : 'Sign In')}
               {mode === 'signup' && (loading ? 'Creating account...' : 'Create Account')}

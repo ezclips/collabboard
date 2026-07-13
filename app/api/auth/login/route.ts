@@ -4,6 +4,10 @@ import { createClient } from '@supabase/supabase-js';
 import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import {
+  parseRetryAfterHeaderSeconds,
+  UNKNOWN_SUPABASE_LOGIN_RATE_LIMIT_MESSAGE,
+} from '@/lib/infra/auth/loginRateLimit';
+import {
   getLoginBackoffMs,
   getRequestIp,
   hashRateLimitValue,
@@ -70,13 +74,7 @@ function getSupabaseAnonServerClient() {
         fetch: async (input, init) => {
           const response = await fetch(input, init);
           if (response.status === 429) {
-            const retryAfterHeader = response.headers.get('Retry-After');
-            if (retryAfterHeader) {
-              const parsed = Number(retryAfterHeader);
-              if (Number.isFinite(parsed) && parsed > 0) {
-                retryAfterSeconds = Math.ceil(parsed);
-              }
-            }
+            retryAfterSeconds = parseRetryAfterHeaderSeconds(response.headers.get('Retry-After'));
           }
           return response;
         },
@@ -272,6 +270,8 @@ export async function POST(req: NextRequest) {
     if (error || !data.session) {
       const authErrorMessage = error?.message;
       const providerRateLimited = isRateLimitError(authErrorMessage);
+      const providerRetryAfterSeconds = getRetryAfterSeconds();
+      const providerCooldownUnknown = providerRateLimited && providerRetryAfterSeconds == null;
 
       if (!providerRateLimited) {
         await recordRateLimitEvent({
@@ -285,16 +285,21 @@ export async function POST(req: NextRequest) {
 
       return NextResponse.json(
         {
-          error: getAuthFailureMessage(authErrorMessage),
-          retryAfterSeconds: providerRateLimited ? getRetryAfterSeconds() ?? 60 : undefined,
+          error: providerCooldownUnknown
+            ? UNKNOWN_SUPABASE_LOGIN_RATE_LIMIT_MESSAGE
+            : getAuthFailureMessage(authErrorMessage),
+          retryAfterSeconds: providerRateLimited ? providerRetryAfterSeconds ?? undefined : undefined,
+          providerCooldownUnknown: providerCooldownUnknown || undefined,
         },
         providerRateLimited
-          ? {
-              status: 429,
-              headers: {
-                'Retry-After': String(getRetryAfterSeconds() ?? 60),
-              },
-            }
+          ? providerRetryAfterSeconds
+            ? {
+                status: 429,
+                headers: {
+                  'Retry-After': String(providerRetryAfterSeconds),
+                },
+              }
+            : { status: 429 }
           : { status: 401 }
       );
     }

@@ -95,6 +95,21 @@ describe("createLoginSubmissionGate", () => {
       value: "ok",
     });
   });
+
+  it("does not retry automatically after a rejection", async () => {
+    let requestCount = 0;
+    const gate = createLoginSubmissionGate();
+
+    const rejection = await gate.submit(async () => {
+      requestCount += 1;
+      throw new Error("fail");
+    }).catch((error) => error);
+
+    expect(requestCount).toBe(1);
+    expect(rejection).toBeInstanceOf(Error);
+    expect(requestCount).toBe(1);
+    expect(gate.isPending()).toBe(false);
+  });
 });
 
 describe("parseRetryAfterSeconds", () => {
