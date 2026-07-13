@@ -196,6 +196,20 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
     }
     return result;
   }, []);
+  /**
+   * PATCH-056: the task toggle is check-and-throw - BOTH legacy channels
+   * (the resolved { error } thrown at the site, the rejected builder)
+   * already converge into its existing catch, so ANY command failure
+   * rethrows the original cause (a resolved failure's cause is the raw
+   * Supabase error object the legacy site threw).
+   */
+  const updatePostFieldsOrThrow = React.useCallback(async (id: string, fields: object) => {
+    const updatePostFields = createUpdatePostFieldsCommand(createPostsRepository());
+    const result = await updatePostFields({ postId: id, fields }, { userId: null });
+    if (!result.ok) {
+      throw result.error.cause ?? result.error;
+    }
+  }, []);
   const isPadletSelected = React.useCallback(
     (padletId: string) => selectedPadletId === padletId || selectedPadletIds.includes(padletId),
     [selectedPadletId, selectedPadletIds]
@@ -3421,15 +3435,11 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                           const updatedMetadata = { ...padlet.metadata, tasks: updatedTasks };
 
                           try {
-                            const { error } = await supabase
-                              .from('padlets')
-                              .update({
-                                content: JSON.stringify(updatedTasks),
-                                metadata: updatedMetadata,
-                                updated_at: new Date().toISOString(),
-                              })
-                              .eq('id', padlet.id);
-                            if (error) throw error;
+                            await updatePostFieldsOrThrow(padlet.id, {
+                              content: JSON.stringify(updatedTasks),
+                              metadata: updatedMetadata,
+                              updated_at: new Date().toISOString(),
+                            });
                             fetchData(); // Refresh to get updated data
                           } catch (err) {
                             console.error('Failed to toggle task:', err);
