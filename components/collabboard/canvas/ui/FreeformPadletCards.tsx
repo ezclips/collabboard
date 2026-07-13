@@ -3593,21 +3593,15 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                     if (childIds.includes(droppedId)) return;
                     const newChildIds = [...childIds, droppedId];
                     try {
-                      await supabase
-                        .from('padlets')
-                        .update({
-                          metadata: { ...containerPadlet.metadata, childPadletIds: newChildIds },
-                          updated_at: new Date().toISOString(),
-                        })
-                        .eq('id', containerId);
+                      await updatePostFieldsPreservingFailureChannels(containerId, {
+                        metadata: { ...containerPadlet.metadata, childPadletIds: newChildIds },
+                        updated_at: new Date().toISOString(),
+                      });
                       const droppedPadlet = padlets.find(p => p.id === droppedId);
-                      await supabase
-                        .from('padlets')
-                        .update({
-                          metadata: { ...droppedPadlet?.metadata, parentId: containerId },
-                          updated_at: new Date().toISOString(),
-                        })
-                        .eq('id', droppedId);
+                      await updatePostFieldsPreservingFailureChannels(droppedId, {
+                        metadata: { ...droppedPadlet?.metadata, parentId: containerId },
+                        updated_at: new Date().toISOString(),
+                      });
                       fetchData();
                     } catch (err) {
                       console.error('Failed to add padlet to container:', err);
