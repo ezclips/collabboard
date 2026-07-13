@@ -12,6 +12,30 @@ export type ImportedDrawingScene = {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
+export const DRAWING_CAPTURE_UPDATE = {
+  IMMEDIATELY: "IMMEDIATELY",
+  EVENTUALLY: "EVENTUALLY",
+} as const;
+
+export const getDrawingCaptureUpdate = (commitToHistory = true) =>
+  commitToHistory
+    ? DRAWING_CAPTURE_UPDATE.IMMEDIATELY
+    : DRAWING_CAPTURE_UPDATE.EVENTUALLY;
+
+export const buildDrawingSceneUpdate = ({
+  elements,
+  appState,
+  commitToHistory = true,
+}: {
+  elements: unknown[];
+  appState?: unknown;
+  commitToHistory?: boolean;
+}) => ({
+  elements,
+  ...(appState !== undefined ? { appState } : {}),
+  captureUpdate: getDrawingCaptureUpdate(commitToHistory),
+});
+
 export const parseImportedDrawingText = (text: string): ImportedDrawingScene => {
   let parsed: unknown;
 

@@ -6,7 +6,10 @@ import { createPortal } from 'react-dom';
 import type { Padlet } from '@/types/collabboard';
 import dynamic from 'next/dynamic';
 import { getExcalidrawLibrary } from '@/lib/collabboard/excalidrawLibrary';
-import type { ImportedDrawingScene } from '@/lib/infra/drawing/importScene';
+import {
+  buildDrawingSceneUpdate,
+  type ImportedDrawingScene,
+} from '@/lib/infra/drawing/importScene';
 import LibraryPanel from '@/components/collabboard/LibraryPanel';
 import PostCardContent from '@/components/collabboard/PostCardContent';
 import EmbeddedCommentList from '@/components/collabboard/EmbeddedCommentList';
@@ -328,10 +331,12 @@ function DrawingEmbeddableCard({
             const updatedSceneEl = { ...sceneEl, x: newX, y: newY };
 
             excAPI.updateScene({
-              elements: excAPI.getSceneElements().map((el2: any) =>
-                el2.id === sceneEl.id ? updatedSceneEl : el2
-              ),
-              commitToHistory: false,
+              ...buildDrawingSceneUpdate({
+                elements: excAPI.getSceneElements().map((el2: any) =>
+                  el2.id === sceneEl.id ? updatedSceneEl : el2
+                ),
+                commitToHistory: false,
+              }),
             });
 
             // Force update bindings for arrows connected to this container
@@ -351,10 +356,12 @@ function DrawingEmbeddableCard({
             const updatedSceneEl = { ...sceneEl, x: newX, y: newY };
 
             excAPI.updateScene({
-              elements: excAPI.getSceneElements().map((el2: any) =>
-                el2.id === sceneEl.id ? updatedSceneEl : el2
-              ),
-              commitToHistory: true,
+              ...buildDrawingSceneUpdate({
+                elements: excAPI.getSceneElements().map((el2: any) =>
+                  el2.id === sceneEl.id ? updatedSceneEl : el2
+                ),
+                commitToHistory: true,
+              }),
             });
 
             if (typeof (excAPI as any).updateBoundElements === 'function') {
@@ -445,12 +452,14 @@ function DrawingEmbeddableCard({
               );
               if (!existing || Math.abs(existing.height - newHeight) < 1) return;
               excAPI.updateScene({
-                elements: excAPI.getSceneElements().map((el: any) =>
-                  el.type === 'embeddable' && el.link === `padlet://${padlet.id}` && !el.isDeleted
-                    ? { ...el, height: newHeight }
-                    : el
-                ),
-                commitToHistory: false,
+                ...buildDrawingSceneUpdate({
+                  elements: excAPI.getSceneElements().map((el: any) =>
+                    el.type === 'embeddable' && el.link === `padlet://${padlet.id}` && !el.isDeleted
+                      ? { ...el, height: newHeight }
+                      : el
+                  ),
+                  commitToHistory: false,
+                }),
               });
               onNaturalResize?.(padlet.id, newHeight);
             }}
@@ -1215,10 +1224,11 @@ export default function DrawingLayout({
       setElements(snapshot.elements);
 
       api.updateScene({
-        elements: snapshot.elements,
-        appState: mergedAppState,
-        files: importedFiles,
-        commitToHistory: true,
+        ...buildDrawingSceneUpdate({
+          elements: snapshot.elements,
+          appState: mergedAppState,
+          commitToHistory: true,
+        }),
       });
 
       if (typeof api.addFiles === "function" && Object.keys(importedFiles).length > 0) {
@@ -1478,11 +1488,13 @@ export default function DrawingLayout({
     if (alreadyExists) return;
     const embeddable = createEmbeddableElementForPadlet(padlet);
     excalidrawAPI.updateScene({
-      elements: [...currentElements, embeddable],
-      appState: {
-        ...excalidrawAPI.getAppState()
-      },
-      commitToHistory: true,
+      ...buildDrawingSceneUpdate({
+        elements: [...currentElements, embeddable],
+        appState: {
+          ...excalidrawAPI.getAppState()
+        },
+        commitToHistory: true,
+      }),
     });
   }, [createEmbeddableElementForPadlet, excalidrawAPI]);
 
@@ -1638,11 +1650,13 @@ export default function DrawingLayout({
     // fires before the setTimeout(0) reset — giving us a clean one-shot guard.
     isSyncingEmbeddablesRef.current = true;
     excalidrawAPI.updateScene({
-      elements: [
-        ...nextElements,
-        ...missingEmbeddables,
-      ],
-      commitToHistory: false,
+      ...buildDrawingSceneUpdate({
+        elements: [
+          ...nextElements,
+          ...missingEmbeddables,
+        ],
+        commitToHistory: false,
+      }),
     });
     if (typeof (excalidrawAPI as any).updateBoundElements === "function") {
       [...refreshedEmbeddables, ...missingEmbeddables].forEach((el: any) => {
@@ -1678,8 +1692,10 @@ export default function DrawingLayout({
 
       isSyncingEmbeddablesRef.current = true;
       excalidrawAPI.updateScene({
-        elements: refreshedElements,
-        commitToHistory: false,
+        ...buildDrawingSceneUpdate({
+          elements: refreshedElements,
+          commitToHistory: false,
+        }),
       });
 
       if (typeof (excalidrawAPI as any).updateBoundElements === "function") {
@@ -1756,8 +1772,10 @@ export default function DrawingLayout({
   const updateDrawingSceneElements = useCallback((nextElements: readonly any[], options?: { commitToHistory?: boolean }) => {
     if (!excalidrawAPI) return;
     excalidrawAPI.updateScene({
-      elements: nextElements as any[],
-      commitToHistory: options?.commitToHistory ?? true,
+      ...buildDrawingSceneUpdate({
+        elements: nextElements as any[],
+        commitToHistory: options?.commitToHistory ?? true,
+      }),
     });
   }, [excalidrawAPI]);
 
@@ -1986,13 +2004,14 @@ export default function DrawingLayout({
     }));
 
     excalidrawAPI.updateScene({
-      elements: [...currentElements, ...finalElements],
-      appState: {
-        ...appStateRef.current,
-        selectedElementIds: finalElements.reduce((acc: any, el: any) => ({ ...acc, [el.id]: true }), {}),
-      },
-      files: newFiles ? { ...currentFilesRef.current, ...newFiles } : currentFilesRef.current,
-      commitToHistory: true,
+      ...buildDrawingSceneUpdate({
+        elements: [...currentElements, ...finalElements],
+        appState: {
+          ...appStateRef.current,
+          selectedElementIds: finalElements.reduce((acc: any, el: any) => ({ ...acc, [el.id]: true }), {}),
+        },
+        commitToHistory: true,
+      }),
     });
 
     // Register image files so Excalidraw can render image-based diagrams
@@ -2012,11 +2031,14 @@ export default function DrawingLayout({
         : Math.max(0.1, current - 0.1);
 
     excalidrawAPI.updateScene({
-      appState: {
-        ...latest,
-        zoom: { value: nextZoom },
-      },
-      commitToHistory: false,
+      ...buildDrawingSceneUpdate({
+        elements: excalidrawAPI.getSceneElements(),
+        appState: {
+          ...latest,
+          zoom: { value: nextZoom },
+        },
+        commitToHistory: false,
+      }),
     });
   }, [excalidrawAPI]); // appState removed -- reads from ref at call time
 
