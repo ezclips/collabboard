@@ -1388,4 +1388,21 @@ describe('canvas.updatePostFields', () => {
     }
     expect(fake.updateFieldsCalls).toHaveLength(0);
   });
+
+  it('persists the AI-resize payload shape verbatim ({ width, height, updated_at })', async () => {
+    // PATCH-059: pins the exact payload shape of the first consumer that
+    // ACTUALLY EXECUTES AI-card resize persistence (the legacy statements
+    // were inert - the PATCH-058 ruling).
+    const fake = createFakeRepository();
+    const updatePostFields = createUpdatePostFieldsCommand(fake.repository);
+    const fields = { width: 640, height: 480, updated_at: '2026-07-13T00:00:00.000Z' };
+
+    const result = await updatePostFields({ postId: 'post-7', fields }, ctx);
+
+    expect(result.ok).toBe(true);
+    expect(fake.updateFieldsCalls).toHaveLength(1);
+    expect(fake.updateFieldsCalls[0].id).toBe('post-7');
+    expect(fake.updateFieldsCalls[0].fields).toBe(fields);
+    expect(Object.keys(fake.updateFieldsCalls[0].fields)).toEqual(['width', 'height', 'updated_at']);
+  });
 });

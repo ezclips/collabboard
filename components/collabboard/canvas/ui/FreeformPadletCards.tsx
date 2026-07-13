@@ -210,6 +210,25 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
       throw result.error.cause ?? result.error;
     }
   }, []);
+  /**
+   * PATCH-059 (P3 fix, owner-authorized): AI-card resize persistence. The
+   * legacy bare builder statements were INERT (PATCH-058 ruling) - this
+   * helper is the first code that actually saves the resize. Launched
+   * without awaiting so the pointer path never blocks; the command never
+   * throws (defineCommand converts every failure into a Result), so the
+   * void'd promise cannot reject. Failure behavior, ruled deliberately:
+   * console.error only - the optimistic local size stays (no rollback, no
+   * toast, no fetch), matching the component's freeform failure posture.
+   */
+  const persistPostFieldsBestEffort = React.useCallback((id: string, fields: object) => {
+    void (async () => {
+      const updatePostFields = createUpdatePostFieldsCommand(createPostsRepository());
+      const result = await updatePostFields({ postId: id, fields }, { userId: null });
+      if (!result.ok) {
+        console.error('Failed to persist AI card resize:', result.error.cause ?? result.error);
+      }
+    })();
+  }, []);
   const isPadletSelected = React.useCallback(
     (padletId: string) => selectedPadletId === padletId || selectedPadletIds.includes(padletId),
     [selectedPadletId, selectedPadletIds]
@@ -3275,7 +3294,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                   const newW = Math.max(200, Math.round(aiResizeRef.current.w + dx));
                   const newH = Math.max(150, Math.round(aiResizeRef.current.h + dy));
                   aiResizeRef.current = null;
-                  supabase.from('padlets').update({ width: newW, height: newH, updated_at: new Date().toISOString() }).eq('id', padlet.id);
+                  persistPostFieldsBestEffort(padlet.id, { width: newW, height: newH, updated_at: new Date().toISOString() });
                 }}
                 onPointerCancel={() => { aiResizeRef.current = null; }}
                 className="absolute bottom-1 right-1 z-10 h-5 w-5 cursor-nwse-resize flex items-center justify-center rounded-sm bg-white/80 opacity-0 shadow-sm transition-opacity hover:opacity-100 group-hover:opacity-50"
@@ -3681,7 +3700,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                         },
                         onResizeEnd: (w: number, h: number) => {
                           if (!canUseFreeformEditButton) return;
-                          supabase.from('padlets').update({ width: w, height: h, updated_at: new Date().toISOString() }).eq('id', padlet.id);
+                          persistPostFieldsBestEffort(padlet.id, { width: w, height: h, updated_at: new Date().toISOString() });
                         },
                       }
                       : undefined}
