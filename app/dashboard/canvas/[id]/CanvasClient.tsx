@@ -4983,10 +4983,21 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       const deletePosts = createDeletePostsCommand(createPostsRepository());
       const result = await deletePosts({ postIds: [...affectedIds] }, { userId: null });
       if (!result.ok) {
-        throw result.error.cause ?? result.error;
+        const cause = result.error.cause ?? result.error;
+        console.error('Failed to delete drawing overlay padlets:', {
+          rootIds,
+          affectedIds: [...affectedIds],
+          error: cause,
+        });
+        throw new Error(`Imported scene was saved, but deleting drawing overlay containers failed for: ${[...affectedIds].join(', ')}`);
       }
+      await fetchData();
     } catch (error) {
-      console.error('Failed to delete drawing overlay padlets:', error);
+      console.error('Failed to delete drawing overlay padlets:', {
+        rootIds,
+        affectedIds: [...affectedIds],
+        error,
+      });
       fetchData();
       throw error;
     }

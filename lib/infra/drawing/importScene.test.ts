@@ -1,14 +1,16 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  collectDrawingLinkedContainerDeletionPlan,
   collectDrawingOverlayDeletionIds,
-  collectDrawingOverlayRootIds,
   DRAWING_CAPTURE_UPDATE,
   MAX_DRAWING_IMPORT_BYTES,
   assertImportFileSize,
   buildDrawingSceneUpdate,
+  extractPadletIdFromEmbeddableLink,
   parseImportedDrawingText,
   prepareImportedSceneForAdd,
+  shouldAutoCreateDrawingContainer,
 } from "./importScene";
 
 describe("parseImportedDrawingText", () => {
@@ -124,23 +126,81 @@ describe("buildDrawingSceneUpdate", () => {
   });
 });
 
-describe("collectDrawingOverlayDeletionIds", () => {
-  it("collects root overlay padlets and their descendants without touching the master drawing row", () => {
+describe("collectDrawingLinkedContainerDeletionPlan", () => {
+  it("deletes only container-shaped roots linked from the current drawing scene", () => {
     const padlets = [
       { id: "drawing-master", type: "drawing", metadata: {} },
       { id: "container-a", type: "container", metadata: {} },
       { id: "child-a", type: "image", metadata: { parentId: "container-a" } },
-      { id: "container-b", type: "text", metadata: {} },
+      { id: "container-b", type: "text", metadata: { childPadletIds: ["child-b"] } },
+      { id: "child-b", type: "comment", metadata: { parentId: "container-b" } },
+      { id: "plain-root", type: "text", metadata: {} },
+      { id: "unlinked-container", type: "container", metadata: {} },
+    ];
+
+    expect(collectDrawingLinkedContainerDeletionPlan({
+      elements: [
+        { type: "embeddable", link: "padlet://container-a" },
+        { type: "embeddable", link: "padlet://container-b" },
+        { type: "embeddable", link: "padlet://plain-root" },
+        { type: "rectangle" },
+        { type: "embeddable", link: "padlet://unlinked-container", isDeleted: true },
+      ],
+      padlets,
+    })).toEqual({
+      rootIds: ["container-a", "container-b"],
+      affectedIds: [
+        "container-a",
+        "container-b",
+        "child-a",
+        "child-b",
+      ],
+    });
+  });
+});
+
+describe("collectDrawingOverlayDeletionIds", () => {
+  it("collects the requested roots and their descendants", () => {
+    const padlets = [
+      { id: "drawing-master", type: "drawing", metadata: {} },
+      { id: "container-a", type: "container", metadata: {} },
+      { id: "child-a", type: "image", metadata: { parentId: "container-a" } },
+      { id: "container-b", type: "text", metadata: { childPadletIds: ["child-b"] } },
       { id: "child-b", type: "comment", metadata: { parentId: "container-b" } },
     ];
 
-    expect(collectDrawingOverlayRootIds(padlets)).toEqual(["container-a", "container-b"]);
-    expect(collectDrawingOverlayDeletionIds(padlets)).toEqual([
+    expect(collectDrawingOverlayDeletionIds(padlets, ["container-a", "container-b"])).toEqual([
       "container-a",
       "container-b",
       "child-a",
       "child-b",
     ]);
+  });
+});
+
+describe("extractPadletIdFromEmbeddableLink", () => {
+  it("parses only padlet embeddable links", () => {
+    expect(extractPadletIdFromEmbeddableLink("padlet://abc")).toBe("abc");
+    expect(extractPadletIdFromEmbeddableLink("https://example.com")).toBeNull();
+    expect(extractPadletIdFromEmbeddableLink(null)).toBeNull();
+  });
+});
+
+describe("shouldAutoCreateDrawingContainer", () => {
+  it("does not auto-create a container while an import restore is in progress", () => {
+    expect(shouldAutoCreateDrawingContainer({
+      isApplyingImportedScene: true,
+      embeddableId: "emb-1",
+      createdEmbeddableIds: new Set(),
+    })).toBe(false);
+  });
+
+  it("still auto-creates for a brand new user-created embeddable", () => {
+    expect(shouldAutoCreateDrawingContainer({
+      isApplyingImportedScene: false,
+      embeddableId: "emb-1",
+      createdEmbeddableIds: new Set(),
+    })).toBe(true);
   });
 });
 

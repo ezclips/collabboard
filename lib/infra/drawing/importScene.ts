@@ -15,6 +15,13 @@ type DrawingOverlayPadletLike = {
   metadata?: Record<string, unknown> | null;
 };
 
+type DrawingSceneElementLike = {
+  id?: string;
+  type?: string | null;
+  link?: string | null;
+  isDeleted?: boolean;
+};
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
@@ -41,6 +48,25 @@ export const buildDrawingSceneUpdate = ({
   ...(appState !== undefined ? { appState } : {}),
   captureUpdate: getDrawingCaptureUpdate(commitToHistory),
 });
+
+export const isDrawingContainerPadlet = (padlet: DrawingOverlayPadletLike) => {
+  const metadata = padlet.metadata ?? {};
+  const childPadletIds = metadata.childPadletIds;
+  return (
+    padlet.type === "container" ||
+    metadata.kind === "container" ||
+    metadata.isContainer === true ||
+    (Array.isArray(childPadletIds) && childPadletIds.length > 0)
+  );
+};
+
+export const extractPadletIdFromEmbeddableLink = (link: unknown) => {
+  if (typeof link !== "string" || !link.startsWith("padlet://")) {
+    return null;
+  }
+  const padletId = link.slice("padlet://".length).trim();
+  return padletId.length > 0 ? padletId : null;
+};
 
 const cloneValue = <T>(value: T): T => {
   if (typeof structuredClone === "function") {
@@ -74,14 +100,9 @@ const getSceneBounds = (elements: any[]) => {
   return { minX, minY, maxX, maxY };
 };
 
-export const collectDrawingOverlayRootIds = (padlets: DrawingOverlayPadletLike[]) =>
-  padlets
-    .filter((padlet) => padlet.type !== "drawing" && !padlet.metadata?.parentId)
-    .map((padlet) => String(padlet.id));
-
 export const collectDrawingOverlayDeletionIds = (
   padlets: DrawingOverlayPadletLike[],
-  rootIds = collectDrawingOverlayRootIds(padlets),
+  rootIds: string[],
 ) => {
   const rootIdSet = new Set(rootIds.map(String));
   const queue = [...rootIdSet];
@@ -102,6 +123,47 @@ export const collectDrawingOverlayDeletionIds = (
 
   return [...affected];
 };
+
+export const collectDrawingLinkedContainerDeletionPlan = ({
+  elements,
+  padlets,
+}: {
+  elements: DrawingSceneElementLike[];
+  padlets: DrawingOverlayPadletLike[];
+}) => {
+  const linkedPadletIds = new Set(
+    elements
+      .filter((element) => element.type === "embeddable" && !element.isDeleted)
+      .map((element) => extractPadletIdFromEmbeddableLink(element.link))
+      .filter((padletId): padletId is string => Boolean(padletId)),
+  );
+
+  const rootIds = padlets
+    .filter((padlet) => {
+      const padletId = String(padlet.id);
+      return (
+        linkedPadletIds.has(padletId) &&
+        !padlet.metadata?.parentId &&
+        isDrawingContainerPadlet(padlet)
+      );
+    })
+    .map((padlet) => String(padlet.id));
+
+  return {
+    rootIds,
+    affectedIds: collectDrawingOverlayDeletionIds(padlets, rootIds),
+  };
+};
+
+export const shouldAutoCreateDrawingContainer = ({
+  isApplyingImportedScene,
+  embeddableId,
+  createdEmbeddableIds,
+}: {
+  isApplyingImportedScene: boolean;
+  embeddableId: string;
+  createdEmbeddableIds: ReadonlySet<string>;
+}) => !isApplyingImportedScene && !createdEmbeddableIds.has(embeddableId);
 
 export const prepareImportedSceneForAdd = ({
   elements,

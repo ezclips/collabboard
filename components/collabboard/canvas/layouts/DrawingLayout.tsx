@@ -8,9 +8,9 @@ import dynamic from 'next/dynamic';
 import { getExcalidrawLibrary } from '@/lib/collabboard/excalidrawLibrary';
 import {
   buildDrawingSceneUpdate,
-  collectDrawingOverlayDeletionIds,
-  collectDrawingOverlayRootIds,
+  collectDrawingLinkedContainerDeletionPlan,
   prepareImportedSceneForAdd,
+  shouldAutoCreateDrawingContainer,
   type ImportedDrawingScene,
 } from '@/lib/infra/drawing/importScene';
 import LibraryPanel from '@/components/collabboard/LibraryPanel';
@@ -1107,7 +1107,14 @@ export default function DrawingLayout({
     if (activeCount > 0) hasSeenElementsRef.current = true;
 
     // Intercept new unbound embeddables (drawn using the Container tool) to create container padlets
-    if (!isApplyingImportedSceneRef.current && unboundEmbeddable && !createdContainerEmbeddableIdsRef.current.has(unboundEmbeddable.id)) {
+    if (
+      unboundEmbeddable &&
+      shouldAutoCreateDrawingContainer({
+        isApplyingImportedScene: isApplyingImportedSceneRef.current,
+        embeddableId: unboundEmbeddable.id,
+        createdEmbeddableIds: createdContainerEmbeddableIdsRef.current,
+      })
+    ) {
       createdContainerEmbeddableIdsRef.current.add(unboundEmbeddable.id);
 
       const initializeContainerPadlet = async () => {
@@ -1227,20 +1234,20 @@ export default function DrawingLayout({
 
       const { loadFromBlob } = await import("@excalidraw/excalidraw");
       const latestAppState = api.getAppState?.() || appStateRef.current;
+      const currentSceneElements = api.getSceneElements?.() || runtimeSceneElementsRef.current;
       const restoredScene = await loadFromBlob(
         new Blob([JSON.stringify(scene)], { type: "application/json" }),
         latestAppState,
-        api.getSceneElements?.() || runtimeSceneElementsRef.current,
+        currentSceneElements,
       );
       const existingFilesBeforeImport = currentFilesRef.current ?? {};
-      const overlayRootIds =
+      const overlayDeletionPlan =
         mode === 'replace'
-          ? collectDrawingOverlayRootIds(paddletsRef.current as Array<{ id: string; type?: string | null; metadata?: Record<string, unknown> | null }>)
-          : [];
-      const overlayDeletionIds =
-        mode === 'replace'
-          ? collectDrawingOverlayDeletionIds(paddletsRef.current as Array<{ id: string; type?: string | null; metadata?: Record<string, unknown> | null }>, overlayRootIds)
-          : [];
+          ? collectDrawingLinkedContainerDeletionPlan({
+              elements: currentSceneElements as Array<{ id?: string; type?: string | null; link?: string | null; isDeleted?: boolean }>,
+              padlets: paddletsRef.current as Array<{ id: string; type?: string | null; metadata?: Record<string, unknown> | null }>,
+            })
+          : { rootIds: [], affectedIds: [] };
 
       const importedFiles = (restoredScene.files ?? {}) as Record<string, any>;
       const importedElements = restoredScene.elements as any[];
@@ -1313,14 +1320,8 @@ export default function DrawingLayout({
       await saveDrawingSnapshot(snapshot);
       dirtyDataRef.current = null;
 
-      if (mode === 'replace' && overlayRootIds.length > 0) {
-        await onDeleteOverlayPadlets?.(overlayRootIds);
-        if (overlayDeletionIds.length > 0) {
-          setElements((prev) => prev.filter((element: any) => {
-            const link = typeof element?.link === 'string' ? element.link : '';
-            return !overlayDeletionIds.includes(link.replace('padlet://', ''));
-          }));
-        }
+      if (mode === 'replace' && overlayDeletionPlan.rootIds.length > 0) {
+        await onDeleteOverlayPadlets?.(overlayDeletionPlan.rootIds);
       }
 
       setPendingImportedScene(null);
