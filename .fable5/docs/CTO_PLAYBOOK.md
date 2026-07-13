@@ -1270,6 +1270,36 @@ five more coherent families plus the two deferred builders. Axis
 snapshot at 76 (unchanged): safety 19, ops 13, architecture 20, product
 13, continuity 11.)
 
+(2026-07-13: PATCH-054 landed and passed review — the smallest patch in
+the project's history, and deliberately so: one replacement pair, zero
+new functions, the PATCH-053 component-local helper reused verbatim to
+retire FreeformPadletCards' single optimistic child-comments write. The
+lesson this patch encodes is that family boundaries are drawn by READ
+contract, not by name or table: the spec's own §0 warns against
+conflating this bare-await site with CanvasModals' same-named
+check-and-throw `onUpdateChildComments` receiver from PATCH-052, and
+CanvasModals sits on the MUST-NOT-CHANGE list purely as insurance
+against that confusion — the review confirmed it byte-untouched. The
+preserved honesty gap (a resolved database error silently leaves the
+optimistic comment state in place, no toast, no rollback) is disclosed
+in the spec and re-verified in review rather than quietly fixed; it
+joins the owner-authorization-gated P3-family queue rather than being
+smuggled into a refactor. Review note for successors: the reviewer
+authored this spec in the same session — the review deliberately
+re-derived every gate from the live tree anyway, because self-authored
+specs are where deference is most tempting and least visible. Landed on
+GPT-5.4: unit 251/28 (unchanged), tsc clean, boundaries clean, e2e
+27/27 on a five-route-warmed server, port gate 0/0 before and after;
+one-file scope and a single-hunk diff held exactly. Zero disclosed
+defects of any kind — the second consecutive fully clean gate run. No
+credit: architecture capped at 20/20, same standing ruling. Twenty-
+third consecutive fully clean review of the implementation. Grandfather
+held at 2. 17 of 22 direct writes remain in FreeformPadletCards: 12
+uniform style/caption bare-awaits, the check-and-throw task toggle, the
+ordered container-drop cascade, and the two deferred un-awaited
+AI-resize builders. Axis snapshot at 76 (unchanged): safety 19, ops 13,
+architecture 20, product 13, continuity 11.)
+
 ## 13. The succession test
 
 You've absorbed this playbook when you can answer these without re-reading:
