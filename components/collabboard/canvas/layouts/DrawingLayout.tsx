@@ -5,7 +5,6 @@ import React, { useState, useEffect, useCallback, useRef, useMemo, useLayoutEffe
 import { createPortal } from 'react-dom';
 import type { Padlet } from '@/types/collabboard';
 import dynamic from 'next/dynamic';
-import { loadFromBlob } from '@excalidraw/excalidraw';
 import { getExcalidrawLibrary } from '@/lib/collabboard/excalidrawLibrary';
 import type { ImportedDrawingScene } from '@/lib/infra/drawing/importScene';
 import LibraryPanel from '@/components/collabboard/LibraryPanel';
@@ -1189,6 +1188,7 @@ export default function DrawingLayout({
         await saveInFlightRef.current;
       }
 
+      const { loadFromBlob } = await import("@excalidraw/excalidraw");
       const latestAppState = api.getAppState?.() || appStateRef.current;
       const restoredScene = await loadFromBlob(
         new Blob([JSON.stringify(scene)], { type: "application/json" }),
