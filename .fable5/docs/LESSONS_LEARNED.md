@@ -171,6 +171,13 @@ at minimum before working on this repo. Newest first within each section.
 
 ## Auth & Supabase platform
 
+### An un-awaited Supabase builder is not a fire-and-forget write — it is no write at all (2026-07-13, PATCH-058)
+**Symptom:** two "fire-and-forget persistence" statements in FreeformPadletCards (`supabase.from('padlets').update({ width, height, ... }).eq(...)` with no await) were deferred across five patches (053–057) as "porting would change execution semantics" — the endgame ruling had to determine what those semantics actually were.
+**Wrong path:** treating the bare builder statement as an eagerly-started request whose completion is simply not observed (Promise-like intuition from `fetch()` or most SDKs), and designing a `void command(...)` port to "preserve" it.
+**Root cause:** `@supabase/postgrest-js` builders are LAZY thenables — the constructor only stores url/method/body, and the network call is issued inside `then()` (`dist/index.cjs`, `then()` at line 80 in the installed 2.93.1 bundle). Never awaited and never `.then()`d means never sent. Both statements were inert since birth; AI-card resizes were NEVER persisted anywhere (no other path writes width/height), so every resize silently reverts on the next fetch — a data-loss defect hidden inside code that looks like a save.
+**Fix:** PATCH-058 issued an architecture ruling instead of a migration: an un-awaited command call would FIRE a request that never existed (behavior change), so no behavior-preserving port exists; the owner must pick between authorizing the persistence fix (CTO recommendation, P3) or deleting the inert statements. Proven by source read PLUS an instrumented-fetch probe against the installed package (bare statement: 0 fetch calls; awaited: 1).
+**Reusable rule:** before porting any "fire-and-forget" call, PROVE whether it ever executes — read the installed client's `then()`/laziness semantics and run an instrumented probe; a census that counts builder expressions counts INTENTS, not requests, and a "preserve behavior" spec written against imagined semantics preserves a fiction.
+
 ### Supabase rate limits are per-IP buckets, and they're separate (2026-07-07, login incident)
 **Symptom:** all logins 429'd for 90+ minutes, surviving code fixes.
 **Wrong paths:** (1) blaming the login code; (2) blaming middleware token refreshes for the sign-in bucket (refreshes have their OWN 150/5min bucket — the dashboard screenshot corrected this).
