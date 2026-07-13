@@ -775,13 +775,10 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                   isTextStyleMode={textStylePadletId === padlet.id}
                   onCardColor={async (color) => {
                     try {
-                      await supabase
-                        .from('padlets')
-                        .update({
-                          metadata: { ...padlet.metadata, cardColor: color },
-                          updated_at: new Date().toISOString(),
-                        })
-                        .eq('id', padlet.id);
+                      await updatePostFieldsPreservingFailureChannels(padlet.id, {
+                        metadata: { ...padlet.metadata, cardColor: color },
+                        updated_at: new Date().toISOString(),
+                      });
                       fetchData();
                     } catch (err) {
                       console.error('Failed to update card color:', err);
@@ -789,13 +786,10 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                   }}
                   onTopStrip={async (color) => {
                     try {
-                      await supabase
-                        .from('padlets')
-                        .update({
-                          metadata: { ...(padlet.metadata || {}), topStrip: color },
-                          updated_at: new Date().toISOString(),
-                        })
-                        .eq('id', padlet.id);
+                      await updatePostFieldsPreservingFailureChannels(padlet.id, {
+                        metadata: { ...(padlet.metadata || {}), topStrip: color },
+                        updated_at: new Date().toISOString(),
+                      });
                       fetchData();
                     } catch (err) {
                       console.error('Failed to update top strip:', err);
@@ -803,13 +797,10 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                   }}
                   onCaptionTextColor={async (color) => {
                     try {
-                      await supabase
-                        .from('padlets')
-                        .update({
-                          metadata: { ...padlet.metadata, captionStyle: { ...padlet.metadata?.captionStyle, color } },
-                          updated_at: new Date().toISOString(),
-                        })
-                        .eq('id', padlet.id);
+                      await updatePostFieldsPreservingFailureChannels(padlet.id, {
+                        metadata: { ...padlet.metadata, captionStyle: { ...padlet.metadata?.captionStyle, color } },
+                        updated_at: new Date().toISOString(),
+                      });
                       fetchData();
                     } catch (err) {
                       console.error('Failed to update caption text color:', err);
@@ -856,16 +847,13 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                   }}
                   onSelectColor={async (color) => {
                     try {
-                      await supabase
-                        .from('padlets')
-                        .update({
-                          metadata: {
-                            ...padlet.metadata,
-                            captionStyle: { ...padlet.metadata?.captionStyle, color }
-                          },
-                          updated_at: new Date().toISOString(),
-                        })
-                        .eq('id', padlet.id);
+                      await updatePostFieldsPreservingFailureChannels(padlet.id, {
+                        metadata: {
+                          ...padlet.metadata,
+                          captionStyle: { ...padlet.metadata?.captionStyle, color }
+                        },
+                        updated_at: new Date().toISOString(),
+                      });
                       fetchData();
                     } catch (err) {
                       console.error('Failed to update caption color:', err);
@@ -873,16 +861,13 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                   }}
                   onSelectHighlight={async (highlight) => {
                     try {
-                      await supabase
-                        .from('padlets')
-                        .update({
-                          metadata: {
-                            ...padlet.metadata,
-                            captionStyle: { ...padlet.metadata?.captionStyle, backgroundColor: highlight }
-                          },
-                          updated_at: new Date().toISOString(),
-                        })
-                        .eq('id', padlet.id);
+                      await updatePostFieldsPreservingFailureChannels(padlet.id, {
+                        metadata: {
+                          ...padlet.metadata,
+                          captionStyle: { ...padlet.metadata?.captionStyle, backgroundColor: highlight }
+                        },
+                        updated_at: new Date().toISOString(),
+                      });
                       fetchData();
                     } catch (err) {
                       console.error('Failed to update caption highlight:', err);
@@ -1469,13 +1454,10 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                 onChange={(next) => setEditingCaption(next)}
                 onCommit={async () => {
                   try {
-                    await supabase
-                      .from('padlets')
-                      .update({
-                        metadata: { ...padlet.metadata, caption: editingCaption },
-                        updated_at: new Date().toISOString(),
-                      })
-                      .eq('id', padlet.id);
+                    await updatePostFieldsPreservingFailureChannels(padlet.id, {
+                      metadata: { ...padlet.metadata, caption: editingCaption },
+                      updated_at: new Date().toISOString(),
+                    });
                     fetchData();
                   } catch (err) {
                     console.error('Save failed on commit:', err);
@@ -5341,13 +5323,10 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                 isTextStyleMode={textStylePadletId === activeImageToolbarPadlet.id}
                 onCardColor={async (color) => {
                   try {
-                    await supabase
-                      .from('padlets')
-                      .update({
-                        metadata: { ...activeImageToolbarPadlet.metadata, cardColor: color },
-                        updated_at: new Date().toISOString(),
-                      })
-                      .eq('id', activeImageToolbarPadlet.id);
+                    await updatePostFieldsPreservingFailureChannels(activeImageToolbarPadlet.id, {
+                      metadata: { ...activeImageToolbarPadlet.metadata, cardColor: color },
+                      updated_at: new Date().toISOString(),
+                    });
                     fetchData();
                   } catch (err) {
                     console.error('Failed to update card color:', err);
@@ -5355,13 +5334,10 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                 }}
                 onTopStrip={async (color) => {
                   try {
-                    await supabase
-                      .from('padlets')
-                      .update({
-                        metadata: { ...(activeImageToolbarPadlet.metadata || {}), topStrip: color },
-                        updated_at: new Date().toISOString(),
-                      })
-                      .eq('id', activeImageToolbarPadlet.id);
+                    await updatePostFieldsPreservingFailureChannels(activeImageToolbarPadlet.id, {
+                      metadata: { ...(activeImageToolbarPadlet.metadata || {}), topStrip: color },
+                      updated_at: new Date().toISOString(),
+                    });
                     fetchData();
                   } catch (err) {
                     console.error('Failed to update top strip:', err);
@@ -5369,16 +5345,13 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                 }}
                 onCaptionTextColor={async (color) => {
                   try {
-                    await supabase
-                      .from('padlets')
-                      .update({
-                        metadata: {
-                          ...activeImageToolbarPadlet.metadata,
-                          captionStyle: { ...activeImageToolbarPadlet.metadata?.captionStyle, color }
-                        },
-                        updated_at: new Date().toISOString(),
-                      })
-                      .eq('id', activeImageToolbarPadlet.id);
+                    await updatePostFieldsPreservingFailureChannels(activeImageToolbarPadlet.id, {
+                      metadata: {
+                        ...activeImageToolbarPadlet.metadata,
+                        captionStyle: { ...activeImageToolbarPadlet.metadata?.captionStyle, color }
+                      },
+                      updated_at: new Date().toISOString(),
+                    });
                     fetchData();
                   } catch (err) {
                     console.error('Failed to update caption text color:', err);
@@ -5427,16 +5400,13 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                 }}
                 onSelectColor={async (color) => {
                   try {
-                    await supabase
-                      .from('padlets')
-                      .update({
-                        metadata: {
-                          ...activeImageToolbarPadlet.metadata,
-                          captionStyle: { ...activeImageToolbarPadlet.metadata?.captionStyle, color }
-                        },
-                        updated_at: new Date().toISOString(),
-                      })
-                      .eq('id', activeImageToolbarPadlet.id);
+                    await updatePostFieldsPreservingFailureChannels(activeImageToolbarPadlet.id, {
+                      metadata: {
+                        ...activeImageToolbarPadlet.metadata,
+                        captionStyle: { ...activeImageToolbarPadlet.metadata?.captionStyle, color }
+                      },
+                      updated_at: new Date().toISOString(),
+                    });
                     fetchData();
                   } catch (err) {
                     console.error('Failed to update caption color:', err);
@@ -5444,16 +5414,13 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                 }}
                 onSelectHighlight={async (highlight) => {
                   try {
-                    await supabase
-                      .from('padlets')
-                      .update({
-                        metadata: {
-                          ...activeImageToolbarPadlet.metadata,
-                          captionStyle: { ...activeImageToolbarPadlet.metadata?.captionStyle, backgroundColor: highlight }
-                        },
-                        updated_at: new Date().toISOString(),
-                      })
-                      .eq('id', activeImageToolbarPadlet.id);
+                    await updatePostFieldsPreservingFailureChannels(activeImageToolbarPadlet.id, {
+                      metadata: {
+                        ...activeImageToolbarPadlet.metadata,
+                        captionStyle: { ...activeImageToolbarPadlet.metadata?.captionStyle, backgroundColor: highlight }
+                      },
+                      updated_at: new Date().toISOString(),
+                    });
                     fetchData();
                   } catch (err) {
                     console.error('Failed to update caption highlight:', err);
@@ -5567,13 +5534,10 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                   onChange={(next) => setEditingCaption(next)}
                   onCommit={async () => {
                     try {
-                      await supabase
-                        .from('padlets')
-                        .update({
-                          metadata: { ...activeImageToolbarPadlet.metadata, caption: editingCaption },
-                          updated_at: new Date().toISOString(),
-                        })
-                        .eq('id', activeImageToolbarPadlet.id);
+                      await updatePostFieldsPreservingFailureChannels(activeImageToolbarPadlet.id, {
+                        metadata: { ...activeImageToolbarPadlet.metadata, caption: editingCaption },
+                        updated_at: new Date().toISOString(),
+                      });
                       fetchData();
                     } catch (err) {
                       console.error('Save failed on commit:', err);
