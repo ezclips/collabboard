@@ -1,0 +1,73 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  MAX_DRAWING_IMPORT_BYTES,
+  assertImportFileSize,
+  parseImportedDrawingText,
+} from "./importScene";
+
+describe("parseImportedDrawingText", () => {
+  it("accepts the app export shape", () => {
+    const input = JSON.stringify({
+      type: "excalidraw",
+      version: 2,
+      source: "https://excalidraw.com",
+      elements: [{ id: "el-1", type: "rectangle" }],
+      appState: { theme: "light", viewBackgroundColor: "transparent" },
+      files: { "file-1": { id: "file-1", mimeType: "image/png" } },
+    });
+
+    expect(parseImportedDrawingText(input)).toEqual({
+      type: "excalidraw",
+      version: 2,
+      source: "https://excalidraw.com",
+      elements: [{ id: "el-1", type: "rectangle" }],
+      appState: { theme: "light", viewBackgroundColor: "transparent" },
+      files: { "file-1": { id: "file-1", mimeType: "image/png" } },
+    });
+  });
+
+  it("accepts native Excalidraw JSON with omitted optional fields", () => {
+    const parsed = parseImportedDrawingText(JSON.stringify({
+      type: "excalidraw",
+      elements: [],
+    }));
+
+    expect(parsed.type).toBe("excalidraw");
+    expect(parsed.version).toBe(2);
+    expect(parsed.appState).toEqual({});
+    expect(parsed.files).toEqual({});
+  });
+
+  it("rejects malformed JSON", () => {
+    expect(() => parseImportedDrawingText("{")).toThrow(
+      "The selected file is not valid JSON.",
+    );
+  });
+
+  it("rejects unrelated valid JSON", () => {
+    expect(() => parseImportedDrawingText(JSON.stringify({ hello: "world" }))).toThrow(
+      "The selected file must contain an elements array.",
+    );
+  });
+
+  it("rejects invalid files payloads", () => {
+    expect(() => parseImportedDrawingText(JSON.stringify({
+      type: "excalidraw",
+      elements: [],
+      files: [],
+    }))).toThrow("The selected file has an invalid files value.");
+  });
+});
+
+describe("assertImportFileSize", () => {
+  it("allows files at the limit", () => {
+    expect(() => assertImportFileSize(MAX_DRAWING_IMPORT_BYTES)).not.toThrow();
+  });
+
+  it("rejects files above the limit", () => {
+    expect(() => assertImportFileSize(MAX_DRAWING_IMPORT_BYTES + 1)).toThrow(
+      "The selected file is too large.",
+    );
+  });
+});

@@ -5,7 +5,9 @@ import React, { useState, useEffect, useCallback, useRef, useMemo, useLayoutEffe
 import { createPortal } from 'react-dom';
 import type { Padlet } from '@/types/collabboard';
 import dynamic from 'next/dynamic';
+import { loadFromBlob } from '@excalidraw/excalidraw';
 import { getExcalidrawLibrary } from '@/lib/collabboard/excalidrawLibrary';
+import type { ImportedDrawingScene } from '@/lib/infra/drawing/importScene';
 import LibraryPanel from '@/components/collabboard/LibraryPanel';
 import PostCardContent from '@/components/collabboard/PostCardContent';
 import EmbeddedCommentList from '@/components/collabboard/EmbeddedCommentList';
@@ -92,6 +94,29 @@ const BACK_LINE_INTERACTIVE_ROLE_PRIORITY = [
   'label-handle',
   'hit-path',
 ] as const;
+
+type DrawingSceneSnapshot = {
+  elements: any[];
+  appState: any;
+  files: any;
+  generation: number;
+};
+
+const preserveImportedTransientAppState = (nextAppState: any, currentAppState: any) => ({
+  ...nextAppState,
+  collaborators: currentAppState?.collaborators ?? new Map(),
+  activeTool: currentAppState?.activeTool,
+  openDialog: currentAppState?.openDialog ?? null,
+  openSidebar: currentAppState?.openSidebar ?? null,
+  openPopup: null,
+  activeEmbeddable: null,
+  selectedElementIds: {},
+  selectedGroupIds: {},
+  selectedLinearElement: null,
+  editingElement: null,
+  editingGroupId: null,
+  editingLinearElement: null,
+});
 
 const getElementClassNameForDiagnostics = (node: Element | null) => {
   if (!node) return null;
@@ -578,9 +603,13 @@ export default function DrawingLayout({
   const [initialAppState, setInitialAppState] = useState<any>(null);
   const [initialFiles, setInitialFiles] = useState<any>(null);
   const [libraryItems, setLibraryItems] = useState<any[]>([]);
+  const [pendingImportedScene, setPendingImportedScene] = useState<ImportedDrawingScene | null>(null);
+  const [isImportingScene, setIsImportingScene] = useState(false);
 
   const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const dirtyDataRef = useRef<{ elements: any[], appState: any, files: any } | null>(null);
+  const dirtyDataRef = useRef<DrawingSceneSnapshot | null>(null);
+  const saveGenerationRef = useRef(0);
+  const saveInFlightRef = useRef<Promise<void> | null>(null);
   // Per-frame content version tracking: increments when elements inside a frame change
   const frameVersionsRef = useRef<Record<string, number>>({});
   const frameSigsRef = useRef<Record<string, string>>({});
@@ -643,6 +672,7 @@ export default function DrawingLayout({
   const runtimeSceneElementsRef = useRef<readonly any[]>([]);
   const runtimePadletsRef = useRef<Padlet[]>(padlets);
   const runtimeInitialFilesRef = useRef<any>(null);
+  const isApplyingImportedSceneRef = useRef(false);
 
   // Lasso and selection state
   const [mermaidModalOpen, setMermaidModalOpen] = useState(false);
@@ -928,20 +958,19 @@ export default function DrawingLayout({
     });
   }, [excalidrawAPI]);
 
-  const performSave = useCallback(async () => {
+  const saveDrawingSnapshot = useCallback(async (snapshot: DrawingSceneSnapshot) => {
     const mp = masterPadletRef.current;
-    if (!dirtyDataRef.current || !mp || readOnly) return;
+    if (!mp || readOnly) return;
+    if (snapshot.generation !== saveGenerationRef.current) return;
 
-    const { elements, appState, files } = dirtyDataRef.current;
+    const { elements, appState, files } = snapshot;
 
     // Guard: if we've never seen non-empty elements in this session, don't save empty canvas
     // (protects against hot-reload remounting before real data arrives)
     if (elements.length === 0 && !hasSeenElementsRef.current) return;
 
-    dirtyDataRef.current = null; // Clear dirty flag
-
     try {
-      await onUpdatePadlet(mp.id, {
+      const savePromise = onUpdatePadlet(mp.id, {
         content: JSON.stringify(elements),
         metadata: {
           ...mp.metadata,
@@ -949,10 +978,30 @@ export default function DrawingLayout({
           drawingFiles: JSON.stringify(files)
         }
       });
+      const trackedSave = savePromise
+        .then(() => undefined)
+        .catch((e) => {
+          console.error("Failed to save drawing to master padlet", e);
+        });
+      saveInFlightRef.current = trackedSave;
+      try {
+        await trackedSave;
+      } finally {
+        if (saveInFlightRef.current === trackedSave) {
+          saveInFlightRef.current = null;
+        }
+      }
     } catch (e) {
       console.error("Failed to save drawing to master padlet", e);
     }
   }, [onUpdatePadlet, readOnly]); // masterPadlet removed -- read from ref inside
+
+  const performSave = useCallback(async () => {
+    const snapshot = dirtyDataRef.current;
+    if (!snapshot) return;
+    dirtyDataRef.current = null;
+    await saveDrawingSnapshot(snapshot);
+  }, [saveDrawingSnapshot]);
 
   const handleChange = useCallback((elements: readonly any[], newAppState: any, files: any) => {
     if (readOnly) return;
@@ -1080,8 +1129,13 @@ export default function DrawingLayout({
     // Skip auto-save when the change came from our own embeddable-sync updateScene call.
     // Those changes don't represent user drawing content and would trigger an unnecessary
     // save -> fetchData -> padlets refresh -> editor state reset cascade.
-    if (!isSyncingEmbeddablesRef.current) {
-      dirtyDataRef.current = { elements: activeElements, appState: newAppState, files };
+    if (!isSyncingEmbeddablesRef.current && !isApplyingImportedSceneRef.current) {
+      dirtyDataRef.current = {
+        elements: activeElements,
+        appState: newAppState,
+        files,
+        generation: saveGenerationRef.current,
+      };
 
       // Debounce save (e.g., 2 seconds after last change)
       if (autoSaveTimerRef.current) {
@@ -1104,6 +1158,85 @@ export default function DrawingLayout({
       }
     };
   }, [performSave]);
+
+  const handleImportedSceneReady = useCallback((scene: ImportedDrawingScene) => {
+    setPendingImportedScene(scene);
+  }, []);
+
+  const handleCancelImportedScene = useCallback(() => {
+    setPendingImportedScene(null);
+  }, []);
+
+  const handleConfirmImportedScene = useCallback(async () => {
+    const scene = pendingImportedScene;
+    const api = excalidrawAPIRef.current ?? excalidrawAPI;
+    if (!scene || !api) return;
+
+    setIsImportingScene(true);
+
+    try {
+      if (autoSaveTimerRef.current) {
+        clearTimeout(autoSaveTimerRef.current);
+        autoSaveTimerRef.current = null;
+      }
+      dirtyDataRef.current = null;
+      saveGenerationRef.current += 1;
+
+      pendingPosTimersRef.current.forEach((timer) => clearTimeout(timer));
+      pendingPosTimersRef.current.clear();
+
+      if (saveInFlightRef.current) {
+        await saveInFlightRef.current;
+      }
+
+      const latestAppState = api.getAppState?.() || appStateRef.current;
+      const restoredScene = await loadFromBlob(
+        new Blob([JSON.stringify(scene)], { type: "application/json" }),
+        latestAppState,
+        api.getSceneElements?.() || runtimeSceneElementsRef.current,
+      );
+      const importedFiles = restoredScene.files ?? {};
+      const mergedAppState = preserveImportedTransientAppState(
+        restoredScene.appState,
+        latestAppState,
+      );
+      const snapshot: DrawingSceneSnapshot = {
+        elements: restoredScene.elements as any[],
+        appState: mergedAppState,
+        files: importedFiles,
+        generation: saveGenerationRef.current,
+      };
+
+      isApplyingImportedSceneRef.current = true;
+      currentFilesRef.current = importedFiles;
+      appStateRef.current = mergedAppState;
+      hasSeenElementsRef.current = snapshot.elements.length > 0;
+      activeElementCountRef.current = snapshot.elements.length;
+      setElements(snapshot.elements);
+
+      api.updateScene({
+        elements: snapshot.elements,
+        appState: mergedAppState,
+        files: importedFiles,
+        commitToHistory: true,
+      });
+
+      if (typeof api.addFiles === "function" && Object.keys(importedFiles).length > 0) {
+        api.addFiles(Object.values(importedFiles));
+      }
+
+      dirtyDataRef.current = snapshot;
+      await saveDrawingSnapshot(snapshot);
+      dirtyDataRef.current = null;
+      setPendingImportedScene(null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Import failed.";
+      window.alert(message);
+    } finally {
+      isApplyingImportedSceneRef.current = false;
+      setIsImportingScene(false);
+    }
+  }, [appStateRef, excalidrawAPI, pendingImportedScene, saveDrawingSnapshot]);
 
   // â”€â”€ Slide CRUD helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -2502,10 +2635,40 @@ export default function DrawingLayout({
           onChange={handleChange}
           readOnly={readOnly}
           onShowHelp={() => { }}
+          onImportScene={readOnly ? undefined : handleImportedSceneReady}
           renderEmbeddable={renderEmbeddable}
           validateEmbeddable={(link: string) => link.startsWith('padlet://')}
         />
       </div>
+
+      {pendingImportedScene && !readOnly && (
+        <div className="fixed inset-0 z-[10010] flex items-center justify-center bg-black/50 px-4">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+            <h2 className="text-lg font-semibold text-gray-900">Replace current drawing?</h2>
+            <p className="mt-2 text-sm text-gray-600">
+              Replace the current drawing with the imported drawing?
+            </p>
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={handleCancelImportedScene}
+                disabled={isImportingScene}
+                className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmImportedScene}
+                disabled={isImportingScene}
+                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isImportingScene ? 'Replacing...' : 'Replace drawing'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Top Floating Toolbar (Pro Features) */}
       {isInitialViewportSettled && (rightClusterAnchorEl ?? drawingRootRef.current)
@@ -2789,6 +2952,3 @@ export default function DrawingLayout({
     </div>
   );
 }
-
-
-

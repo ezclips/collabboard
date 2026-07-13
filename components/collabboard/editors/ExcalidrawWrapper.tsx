@@ -1,8 +1,13 @@
 "use client";
 
 import React from 'react';
-import { CircleHelp, LassoSelect, Download } from 'lucide-react';
+import { CircleHelp, LassoSelect, Download, Upload } from 'lucide-react';
 import "@excalidraw/excalidraw/index.css";
+import {
+    assertImportFileSize,
+    parseImportedDrawingText,
+    type ImportedDrawingScene,
+} from '@/lib/infra/drawing/importScene';
 
 interface ExcalidrawWrapperProps {
     excalidrawKey: number;
@@ -21,6 +26,7 @@ interface ExcalidrawWrapperProps {
     isGroupModeActive?: boolean;
     validateEmbeddable?: boolean | string[] | RegExp | RegExp[] | ((link: string) => boolean | undefined);
     renderEmbeddable?: (element: any, appState: any) => React.ReactElement | null;
+    onImportScene?: (scene: ImportedDrawingScene) => void | Promise<void>;
 }
 
 export default function ExcalidrawWrapper({
@@ -34,9 +40,11 @@ export default function ExcalidrawWrapper({
     isGroupModeActive,
     validateEmbeddable,
     renderEmbeddable,
+    onImportScene,
 }: ExcalidrawWrapperProps) {
     // API kept in a ref to avoid triggering renders when Excalidraw fires the callback
     const apiRef = React.useRef<any>(null);
+    const importInputRef = React.useRef<HTMLInputElement | null>(null);
     const [excalidrawLib, setExcalidrawLib] = React.useState<{
         Excalidraw: React.ComponentType<any>;
         MainMenu: any;
@@ -48,6 +56,26 @@ export default function ExcalidrawWrapper({
             (window as any).EXCALIDRAW_ASSET_PATH = "https://unpkg.com/@excalidraw/excalidraw/dist/";
         }
     }, []);
+
+    const handleImportClick = React.useCallback(() => {
+        importInputRef.current?.click();
+    }, []);
+
+    const handleImportChange = React.useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        event.target.value = "";
+        if (!file || !onImportScene) return;
+
+        try {
+            assertImportFileSize(file.size);
+            const text = await file.text();
+            const scene = parseImportedDrawingText(text);
+            await onImportScene(scene);
+        } catch (error) {
+            const message = error instanceof Error ? error.message : "Import failed.";
+            window.alert(message);
+        }
+    }, [onImportScene]);
 
     React.useEffect(() => {
         let mounted = true;
@@ -150,7 +178,9 @@ export default function ExcalidrawWrapper({
         if (onGroupToggle) {
             return (
                 <MainMenu>
-                    <MainMenu.DefaultItems.LoadScene />
+                    <MainMenu.Item onSelect={handleImportClick} icon={<Upload size={16} />}>
+                        Import
+                    </MainMenu.Item>
                     <MainMenu.Item onSelect={handleExportJSON} icon={<Download size={16} />}>
                         Save to...
                     </MainMenu.Item>
@@ -172,7 +202,9 @@ export default function ExcalidrawWrapper({
 
         return (
             <MainMenu>
-                <MainMenu.DefaultItems.LoadScene />
+                <MainMenu.Item onSelect={handleImportClick} icon={<Upload size={16} />}>
+                    Import
+                </MainMenu.Item>
                 <MainMenu.Item onSelect={handleExportJSON} icon={<Download size={16} />}>
                     Save to...
                 </MainMenu.Item>
@@ -183,7 +215,7 @@ export default function ExcalidrawWrapper({
                 <MainMenu.DefaultItems.ChangeCanvasBackground />
             </MainMenu>
         );
-    }, [readOnly, onShowHelp, handleExportJSON, onGroupToggle, isGroupModeActive]);
+    }, [readOnly, onShowHelp, handleExportJSON, handleImportClick, onGroupToggle, isGroupModeActive]);
 
     if (!excalidrawLib) {
         return (
@@ -196,22 +228,31 @@ export default function ExcalidrawWrapper({
     const { Excalidraw, MainMenu, WelcomeScreen } = excalidrawLib;
 
     return (
-        <Excalidraw
-            key={excalidrawKey}
-            excalidrawAPI={handleSetApi}
-            initialData={initialData}
-            onChange={onChange}
-            theme="light"
-            viewModeEnabled={readOnly}
-            aiEnabled={false}
-            UIOptions={uiOptions}
-            validateEmbeddable={resolvedValidateEmbeddable}
-            renderEmbeddable={renderEmbeddable}
-        >
-            {renderMenu(MainMenu)}
-            <WelcomeScreen>
-                <React.Fragment />
-            </WelcomeScreen>
-        </Excalidraw>
+        <>
+            <input
+                ref={importInputRef}
+                type="file"
+                accept=".excalidraw,.json,application/json"
+                className="hidden"
+                onChange={handleImportChange}
+            />
+            <Excalidraw
+                key={excalidrawKey}
+                excalidrawAPI={handleSetApi}
+                initialData={initialData}
+                onChange={onChange}
+                theme="light"
+                viewModeEnabled={readOnly}
+                aiEnabled={false}
+                UIOptions={uiOptions}
+                validateEmbeddable={resolvedValidateEmbeddable}
+                renderEmbeddable={renderEmbeddable}
+            >
+                {renderMenu(MainMenu)}
+                <WelcomeScreen>
+                    <React.Fragment />
+                </WelcomeScreen>
+            </Excalidraw>
+        </>
     );
 }
