@@ -22,12 +22,34 @@ export const decodeJwtPayload = (token: string): JwtPayload => {
     return JSON.parse(atob(padded)) as JwtPayload;
 };
 
+let authRedirectInFlight = false;
+
+async function clearBrowserSessionAndRedirect() {
+    if (typeof window === 'undefined' || authRedirectInFlight) {
+        return;
+    }
+
+    authRedirectInFlight = true;
+    try {
+        const supabase = createBrowserSupabaseClient();
+        await supabase.auth.signOut({ scope: 'local' });
+    } catch {
+        // Best-effort local cleanup only.
+    }
+
+    const redirectTarget = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    if (!window.location.pathname.startsWith('/auth')) {
+        window.location.assign(`/auth?redirect=${encodeURIComponent(redirectTarget || '/dashboard')}`);
+    }
+}
+
 export async function getSessionAccessToken(): Promise<string | null> {
     const supabase = createBrowserSupabaseClient();
     const { data: { session } } = await supabase.auth.getSession();
-    if (session?.access_token) return session.access_token;
+    if (session?.access_token) {
+        return session.access_token;
+    }
 
-    const { data: refreshed } = await supabase.auth.refreshSession();
-    if (refreshed?.session?.access_token) return refreshed.session.access_token;
+    await clearBrowserSessionAndRedirect();
     return null;
 }
