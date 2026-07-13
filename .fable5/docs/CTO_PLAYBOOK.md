@@ -1356,6 +1356,33 @@ deferred un-awaited AI-resize builders. Axis snapshot at 76
 (unchanged): safety 19, ops 13, architecture 20, product 13,
 continuity 11.)
 
+(2026-07-13: PATCH-057 landed and passed review — the ordered
+container-drop cascade retired, and with it the component's LAST
+awaited raw builder: bare `await supabase` no longer exists anywhere
+in FreeformPadletCards. The interesting discipline here was verifying
+a four-way partial-failure branch (two writes, each independently
+resolved-or-rejected) rather than a single linear contract, and doing
+it by reading the actual channel-preserving helper's conditional
+against the legacy bare-await shape rather than trusting the spec's
+own derivation of those four branches — the same "verify the claim,
+not the document" habit from PATCH-056's review, applied to a shape
+with twice the branches. The ordering itself was protected
+structurally, not just asserted: the bound fence spans both awaits and
+the intermediate lookup as one span, so the extractor's own count gate
+would fail a reordering rather than merely a prose warning discouraging
+it. Landed on GPT-5.4: unit 251/28 (unchanged), tsc clean, boundaries
+clean, e2e 27/27 on a five-route-warmed server, port gate 0/0 before
+and after; one-file scope and the single-hunk diff held exactly. Zero
+disclosed defects of any kind — the fifth consecutive fully clean gate
+run. No credit: architecture capped at 20/20, same standing ruling.
+Twenty-sixth consecutive fully clean review of the implementation.
+Grandfather held at 2. FreeformPadletCards now has exactly two direct
+writes left, both deliberately deferred: the un-awaited AI-resize
+builders, whose retirement changes execution semantics and needs its
+own behavior ruling before any closeout is even considered. Axis
+snapshot at 76 (unchanged): safety 19, ops 13, architecture 20,
+product 13, continuity 11.)
+
 ## 13. The succession test
 
 You've absorbed this playbook when you can answer these without re-reading:
