@@ -1,3 +1,5 @@
+import { formatWeekHeaderLabel, formatWeekRangeLabel } from './dateUtils';
+
 type GanttColumn = {
   name: string;
   label: string;
@@ -89,6 +91,13 @@ export function configureGantt(
   isInit = false
 ): void {
   const colorOptions = ['#33B0B4', '#1E88E5', '#F2B134', '#43A047', '#E53935', '#9E9E9E'];
+
+  const escapeHtmlAttribute = (value: string): string =>
+    value
+      .replace(/&/g, '&amp;')
+      .replace(/"/g, '&quot;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
 
   const normalizeHexColor = (value?: string): string => {
     if (!value) return '';
@@ -396,7 +405,15 @@ export function configureGantt(
             scale_height: 52,
             min_column_width: 42,
             scales: [
-              { unit: 'week', step: 1, format: 'Week #%W' },
+              {
+                unit: 'week',
+                step: 1,
+                template: (date: Date) => {
+                  const label = formatWeekHeaderLabel(date);
+                  const range = formatWeekRangeLabel(date);
+                  return `<span class="gantt-week-scale-label" data-gantt-week-label="${escapeHtmlAttribute(label)}" data-gantt-week-range="${escapeHtmlAttribute(range)}">${label}</span>`;
+                },
+              },
               { unit: 'day', step: 1, format: '%D' },
             ],
           },
@@ -406,7 +423,15 @@ export function configureGantt(
             min_column_width: 86,
             scales: [
               { unit: 'month', step: 1, format: '%F %Y' },
-              { unit: 'week', step: 1, format: 'W%W' },
+              {
+                unit: 'week',
+                step: 1,
+                template: (date: Date) => {
+                  const label = `W${String(formatWeekHeaderLabel(date)).replace('Week #', '')}`;
+                  const range = formatWeekRangeLabel(date);
+                  return `<span class="gantt-week-scale-label" data-gantt-week-label="${escapeHtmlAttribute(formatWeekHeaderLabel(date))}" data-gantt-week-range="${escapeHtmlAttribute(range)}">${label}</span>`;
+                },
+              },
             ],
           },
         ],

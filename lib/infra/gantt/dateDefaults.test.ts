@@ -1,6 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Card } from '../../../types/kanban-canvas';
-import { buildLocalDate, formatLocalDate, getDefaultNewTaskDateRange, getLocalDateParts } from '../../../components/gantt-canvas/dateUtils';
+import {
+  buildLocalDate,
+  formatLocalDate,
+  formatWeekHeaderLabel,
+  formatWeekRangeLabel,
+  getDefaultNewTaskDateRange,
+  getLocalDateParts,
+} from '../../../components/gantt-canvas/dateUtils';
 import { mapCardToGanttTask } from '../../../components/gantt-canvas/mappers';
 
 describe('gantt date defaults', () => {
@@ -38,6 +45,13 @@ describe('gantt date defaults', () => {
 
     expect(formatLocalDate(startDate)).toBe('2026-07-13');
     expect(formatLocalDate(endDate)).toBe('2026-07-14');
+  });
+
+  it('formats week headers with a readable date range', () => {
+    const weekStart = new Date(2026, 5, 10, 9, 0, 0, 0);
+
+    expect(formatWeekHeaderLabel(weekStart)).toBe('Week #24');
+    expect(formatWeekRangeLabel(weekStart)).toBe('10-17 June 2026');
   });
 
   it('initializes an existing gantt item from persisted dates exactly', () => {

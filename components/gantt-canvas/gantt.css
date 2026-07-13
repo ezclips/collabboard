@@ -164,6 +164,50 @@
   opacity: 1;
 }
 
+.gantt-week-scale-label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 100%;
+  cursor: context-menu;
+  text-decoration: underline dotted transparent;
+  text-underline-offset: 3px;
+  transition: text-decoration-color 0.15s ease;
+}
+
+.gantt-week-scale-label:hover {
+  text-decoration-color: #94a3b8;
+}
+
+.gantt-week-range-popover {
+  position: fixed;
+  z-index: 10020;
+  min-width: 180px;
+  max-width: 220px;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.18);
+  padding: 10px 12px;
+  pointer-events: none;
+}
+
+.gantt-week-range-popover__label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #334155;
+  margin-bottom: 4px;
+}
+
+.gantt-week-range-popover__range {
+  font-size: 13px;
+  line-height: 1.35;
+  color: #0f172a;
+}
+
 /* Gantt lightbox color picker (aligned to Kanban editor color UX) */
 .gantt-lightbox-color {
   display: flex;

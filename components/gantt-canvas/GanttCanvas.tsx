@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import 'dhtmlx-gantt/codebase/dhtmlxgantt.css';
 import './gantt.css';
+import { CalendarDays } from 'lucide-react';
 import { useKanbanData, useKanbanPersistence, useKanbanReadonly } from '@/components/kanban-canvas/store';
 import { configureGantt } from './GanttConfig';
 import { bindGanttEvents } from './ganttEvents';
@@ -43,6 +44,12 @@ export function GanttCanvas() {
   const [zoom, setZoom] = useState<'day' | 'week' | 'month'>('week');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [parentTaskId, setParentTaskId] = useState<string | undefined>(undefined);
+  const [weekRangePopover, setWeekRangePopover] = useState<{
+    label: string;
+    range: string;
+    x: number;
+    y: number;
+  } | null>(null);
 
   const mapped = useMemo(
     () => ({
@@ -166,6 +173,53 @@ export function GanttCanvas() {
     }
   }, [mapped]);
 
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const handleContextMenu = (event: MouseEvent) => {
+      const target = event.target instanceof Element
+        ? event.target.closest<HTMLElement>('[data-gantt-week-range]')
+        : null;
+
+      if (!target) return;
+
+      event.preventDefault();
+      setWeekRangePopover({
+        label: target.dataset.ganttWeekLabel || 'Week',
+        range: target.dataset.ganttWeekRange || '',
+        x: event.clientX,
+        y: event.clientY,
+      });
+    };
+
+    container.addEventListener('contextmenu', handleContextMenu);
+    return () => {
+      container.removeEventListener('contextmenu', handleContextMenu);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!weekRangePopover) return;
+
+    const dismiss = () => setWeekRangePopover(null);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') dismiss();
+    };
+
+    window.addEventListener('pointerdown', dismiss);
+    window.addEventListener('scroll', dismiss, true);
+    window.addEventListener('resize', dismiss);
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      window.removeEventListener('pointerdown', dismiss);
+      window.removeEventListener('scroll', dismiss, true);
+      window.removeEventListener('resize', dismiss);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [weekRangePopover]);
+
   return (
     <div className="gantt-shell">
       <div className="gantt-toolbar">
@@ -195,6 +249,23 @@ export function GanttCanvas() {
         </div>
       </div>
       <div ref={containerRef} className="gantt-container" />
+      {weekRangePopover ? (
+        <div
+          className="gantt-week-range-popover"
+          style={{
+            left: `min(${weekRangePopover.x + 12}px, calc(100vw - 220px))`,
+            top: `min(${weekRangePopover.y + 12}px, calc(100vh - 96px))`,
+          }}
+          role="dialog"
+          aria-label={`${weekRangePopover.label} date range`}
+        >
+          <div className="gantt-week-range-popover__label">
+            <CalendarDays size={14} />
+            <span>{weekRangePopover.label}</span>
+          </div>
+          <div className="gantt-week-range-popover__range">{weekRangePopover.range}</div>
+        </div>
+      ) : null}
       <NewTaskModal
         isOpen={isModalOpen}
         onClose={() => {
