@@ -1,4 +1,5 @@
 import type { Card, Link, Row, Column } from '@/types/kanban-canvas';
+import { formatLocalDate } from './dateUtils';
 
 export type GanttLinkType = '0' | '1' | '2' | '3';
 
@@ -119,7 +120,7 @@ export function ganttProgressToCard(progress?: number): number {
 }
 
 export function mapCardToGanttTask(card: Card): GanttTask {
-  const startDate = toDateOnly(card.start_date) || toDateOnly(card.end_date) || new Date().toISOString().slice(0, 10);
+  const startDate = toDateOnly(card.start_date) || toDateOnly(card.end_date) || formatLocalDate(new Date());
   const endDate = toDateOnly(card.end_date) || addDays(startDate, 1);
 
   const isMilestoneCard = card.task_type?.toLowerCase() === 'milestone';

@@ -4,6 +4,7 @@ import { memo, useState, useEffect } from 'react';
 import { X } from 'lucide-react';
 import { useKanbanData, useKanbanPersistence } from '@/components/kanban-canvas/store';
 import type { Card } from '@/types/kanban-canvas';
+import { buildLocalDate, formatLocalDate, getLocalDateParts, getStartOfLocalDay } from './dateUtils';
 
 interface NewTaskModalProps {
   isOpen: boolean;
@@ -14,14 +15,15 @@ interface NewTaskModalProps {
 export const NewTaskModal = memo(function NewTaskModal({ isOpen, onClose, parentTaskId }: NewTaskModalProps) {
   const data = useKanbanData();
   const actions = useKanbanPersistence();
+  const initialDateParts = getLocalDateParts(new Date());
 
   const [label, setLabel] = useState('');
   const [description, setDescription] = useState('');
   const [selectedStage, setSelectedStage] = useState('');
   const [selectedType, setSelectedType] = useState<'Feature' | 'Task' | 'Milestone'>('Feature');
-  const [selectedDay, setSelectedDay] = useState(18);
-  const [selectedMonth, setSelectedMonth] = useState(1); // 0-indexed (February = 1)
-  const [selectedYear, setSelectedYear] = useState(2026);
+  const [selectedDay, setSelectedDay] = useState(initialDateParts.day);
+  const [selectedMonth, setSelectedMonth] = useState(initialDateParts.month);
+  const [selectedYear, setSelectedYear] = useState(initialDateParts.year);
   const [showStageDropdown, setShowStageDropdown] = useState(false);
   const [showTypeDropdown, setShowTypeDropdown] = useState(false);
 
@@ -29,22 +31,35 @@ export const NewTaskModal = memo(function NewTaskModal({ isOpen, onClose, parent
 
   const sortedColumns = [...data.columns].sort((a, b) => (a.order || 0) - (b.order || 0));
 
-  // Set default stage to first column
   useEffect(() => {
-    if (isOpen && !selectedStage && sortedColumns.length > 0) {
-      setSelectedStage(sortedColumns[0].id);
-    }
-  }, [isOpen, selectedStage, sortedColumns]);
+    if (!isOpen) return;
+
+    const today = getLocalDateParts(new Date());
+    setLabel('');
+    setDescription('');
+    setSelectedType('Feature');
+    setSelectedDay(today.day);
+    setSelectedMonth(today.month);
+    setSelectedYear(today.year);
+    setSelectedStage(sortedColumns[0]?.id || '');
+    setShowStageDropdown(false);
+    setShowTypeDropdown(false);
+  }, [isOpen, sortedColumns]);
 
   const handleSave = async () => {
     if (!label.trim()) return;
 
     const firstRow = [...data.rows].sort((a, b) => (a.order || 0) - (b.order || 0))[0];
 
-    // Calculate dates based on selected date
-    // For milestones, start_date = selected date (DHTMLX renders milestone at start_date)
-    const endDate = new Date(selectedYear, selectedMonth, selectedDay);
-    const startDate = selectedType === 'Milestone' ? endDate : new Date();
+    const startDate = getStartOfLocalDay(new Date());
+    const selectedEndDate = getStartOfLocalDay(
+      buildLocalDate({ day: selectedDay, month: selectedMonth, year: selectedYear })
+    );
+    const endDate = selectedEndDate < startDate ? startDate : selectedEndDate;
+    const startDateValue = selectedType === 'Milestone'
+      ? formatLocalDate(endDate)
+      : formatLocalDate(startDate);
+    const endDateValue = formatLocalDate(endDate);
 
     // Calculate order to place card at the bottom of the selected column
     const cardsInColumn = data.cards.filter(card => card.columnId === selectedStage);
@@ -59,8 +74,8 @@ export const NewTaskModal = memo(function NewTaskModal({ isOpen, onClose, parent
       task_type: selectedType,
       columnId: selectedStage,
       rowId: firstRow?.id,
-      start_date: startDate.toISOString(),
-      end_date: endDate.toISOString(),
+      start_date: startDateValue,
+      end_date: endDateValue,
       priority: 'medium',
       progress: 0,
       order: maxOrder + 1,
@@ -74,31 +89,19 @@ export const NewTaskModal = memo(function NewTaskModal({ isOpen, onClose, parent
 
     await actions.addCard(newCard);
 
-    // Reset form
-    setLabel('');
-    setDescription('');
-    setSelectedDay(18);
-    setSelectedMonth(1);
-    setSelectedYear(2026);
-    setSelectedType('Feature');
-
     onClose();
   };
 
   const handleDelete = () => {
-    setLabel('');
-    setDescription('');
-    setSelectedDay(18);
-    setSelectedMonth(1);
-    setSelectedYear(2026);
-    setSelectedStage('');
-    setSelectedType('Feature');
     onClose();
   };
 
   const calculateDaysDisplay = () => {
-    const start = new Date();
-    const end = new Date(selectedYear, selectedMonth, selectedDay);
+    const start = getStartOfLocalDay(new Date());
+    const selectedEnd = getStartOfLocalDay(
+      buildLocalDate({ day: selectedDay, month: selectedMonth, year: selectedYear })
+    );
+    const end = selectedEnd < start ? start : selectedEnd;
 
     const diffTime = Math.abs(end.getTime() - start.getTime());
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
@@ -257,7 +260,10 @@ export const NewTaskModal = memo(function NewTaskModal({ isOpen, onClose, parent
               <input
                 type="number"
                 value={selectedYear}
-                onChange={(e) => setSelectedYear(parseInt(e.target.value) || 2026)}
+                onChange={(e) => {
+                  const nextYear = parseInt(e.target.value, 10);
+                  if (!Number.isNaN(nextYear)) setSelectedYear(nextYear);
+                }}
                 className="w-24 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                 min="2020"
                 max="2100"
