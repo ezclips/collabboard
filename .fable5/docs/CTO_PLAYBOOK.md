@@ -1327,6 +1327,35 @@ claimed until that final census is read directly. Axis snapshot at 76
 (unchanged): safety 19, ops 13, architecture 20, product 13,
 continuity 11.)
 
+(2026-07-13: PATCH-056 landed and passed review — the task toggle
+retired, and the first slice since PATCH-053 that needed a genuinely
+new component-local helper rather than reusing the existing one. The
+review's real work was verifying a claim rather than a diff: the spec
+asserted the new OrThrow helper's rethrown cause is IDENTICAL to what
+the legacy site threw, and that claim rests on a fact about
+`postsRepository.ts` — that a resolved Supabase error is wrapped as
+`domainError('unavailable', ..., { cause: error })` — which the review
+re-read directly rather than accepting from the spec's prose. This is
+the same discipline this playbook keeps re-learning: a behavior claim
+that will gate a review is verified by reading the code the claim is
+about, not by trusting the document that makes the claim, even a
+document the reviewer wrote. The negative ruling in this spec is worth
+noting too — it explicitly forbids reusing the PATCH-053 helper at
+this site because that helper's resolved-error swallow is the wrong
+contract for a check-and-throw call, a reminder that a widely-reused
+helper is a trap as much as a convenience once a site's contract
+doesn't match it. Landed on GPT-5.4: unit 251/28 (unchanged), tsc
+clean, boundaries clean, e2e 27/27 on a five-route-warmed server, port
+gate 0/0 before and after; one-file scope and the two-hunk diff held
+exactly. Zero disclosed defects of any kind — the fourth consecutive
+fully clean gate run. No credit: architecture capped at 20/20, same
+standing ruling. Twenty-fifth consecutive fully clean review of the
+implementation. Grandfather held at 2. Only 4 direct writes remain in
+FreeformPadletCards: the two ordered cascade writes and the two
+deferred un-awaited AI-resize builders. Axis snapshot at 76
+(unchanged): safety 19, ops 13, architecture 20, product 13,
+continuity 11.)
+
 ## 13. The succession test
 
 You've absorbed this playbook when you can answer these without re-reading:
