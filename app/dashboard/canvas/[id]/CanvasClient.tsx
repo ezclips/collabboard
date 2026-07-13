@@ -89,6 +89,7 @@ import PlacementPrompt from '@/components/collabboard/PlacementPrompt';
 import { usePadletSave } from '@/hooks/canvas';
 import { useStableCanvasActions } from '@/hooks/canvas/useStableCanvasActions';
 import { debugCanvasLogger } from '@/lib/collabboard/debugCanvasLogger';
+import { collectDrawingOverlayDeletionIds } from '@/lib/infra/drawing/importScene';
 import { debounce, sanitizeLibraryMetadata } from '@/components/collabboard/canvas/engine/utils';
 import { segmentsIntersect } from '@/components/collabboard/canvas/engine/geometry';
 import { computeClickedSide } from '@/components/collabboard/canvas/engine/hitTest';
@@ -4959,6 +4960,38 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     await deletePadletById(id);
   }, []);
 
+  const handleDrawingLayoutDeleteOverlayPadlets = useCallback(async (rootIds: string[]) => {
+    const affectedIds = new Set(collectDrawingOverlayDeletionIds(
+      padlets.map((padlet) => ({
+        id: String(padlet.id),
+        type: padlet.type,
+        metadata: (padlet.metadata as Record<string, unknown> | null | undefined) ?? null,
+      })),
+      rootIds,
+    ));
+    if (affectedIds.size === 0) return;
+
+    setPadlets((prev) => prev.filter((padlet) => !affectedIds.has(String(padlet.id))));
+    if (selectedPadletId && affectedIds.has(String(selectedPadletId))) {
+      setSelectedPadletId(null);
+    }
+    if (selectedPadletIds.length > 0) {
+      setSelectedPadletIds(selectedPadletIds.filter((padletId) => !affectedIds.has(String(padletId))));
+    }
+
+    try {
+      const deletePosts = createDeletePostsCommand(createPostsRepository());
+      const result = await deletePosts({ postIds: [...affectedIds] }, { userId: null });
+      if (!result.ok) {
+        throw result.error.cause ?? result.error;
+      }
+    } catch (error) {
+      console.error('Failed to delete drawing overlay padlets:', error);
+      fetchData();
+      throw error;
+    }
+  }, [fetchData, padlets, selectedPadletId, selectedPadletIds, setSelectedPadletId, setSelectedPadletIds]);
+
   // --- Drawing Canvas image placement flow ---
   const [drawingPendingDraft, setDrawingPendingDraft] = useState<Partial<Padlet> | null>(null);
   const [drawingContainerPromptOpen, setDrawingContainerPromptOpen] = useState(false);
@@ -6729,6 +6762,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                 onAddPadlet={handleDrawingLayoutAddPadletWithContainerCheck}
                 onUpdatePadlet={handleDrawingLayoutUpdatePadlet}
                 onDeletePadlet={handleDrawingLayoutDeletePadlet}
+                onDeleteOverlayPadlets={handleDrawingLayoutDeleteOverlayPadlets}
                 ghostDraft={drawingGhostDraft}
                 onGhostDraftDropped={() => setDrawingGhostDraft(null)}
                 drawingAppStateRef={drawingAppStateRef}
@@ -8372,4 +8406,3 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   );
   // === END RENDER REGION (JSX ONLY) ===
 }
-

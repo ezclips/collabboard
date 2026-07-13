@@ -8,6 +8,9 @@ import dynamic from 'next/dynamic';
 import { getExcalidrawLibrary } from '@/lib/collabboard/excalidrawLibrary';
 import {
   buildDrawingSceneUpdate,
+  collectDrawingOverlayDeletionIds,
+  collectDrawingOverlayRootIds,
+  prepareImportedSceneForAdd,
   type ImportedDrawingScene,
 } from '@/lib/infra/drawing/importScene';
 import LibraryPanel from '@/components/collabboard/LibraryPanel';
@@ -567,6 +570,7 @@ interface DrawingLayoutProps {
   onAddPadlet: (postData: Partial<Padlet>) => Promise<Padlet | null>;
   onUpdatePadlet: (id: string, updates: Partial<Padlet>) => Promise<void>;
   onDeletePadlet?: (id: string) => Promise<void>;
+  onDeleteOverlayPadlets?: (rootIds: string[]) => Promise<void>;
   onPadletEdit?: (padlet: Padlet) => void;
   onEditPadletAsPost?: (padlet: Padlet) => void;
   readOnly?: boolean;
@@ -588,6 +592,7 @@ export default function DrawingLayout({
   onAddPadlet,
   onUpdatePadlet,
   onDeletePadlet,
+  onDeleteOverlayPadlets,
   onPadletEdit,
   onEditPadletAsPost,
   readOnly = false,
@@ -681,6 +686,7 @@ export default function DrawingLayout({
   const runtimePadletsRef = useRef<Padlet[]>(padlets);
   const runtimeInitialFilesRef = useRef<any>(null);
   const isApplyingImportedSceneRef = useRef(false);
+  const importPlacementCountRef = useRef(0);
 
   // Lasso and selection state
   const [mermaidModalOpen, setMermaidModalOpen] = useState(false);
@@ -1101,7 +1107,7 @@ export default function DrawingLayout({
     if (activeCount > 0) hasSeenElementsRef.current = true;
 
     // Intercept new unbound embeddables (drawn using the Container tool) to create container padlets
-    if (unboundEmbeddable && !createdContainerEmbeddableIdsRef.current.has(unboundEmbeddable.id)) {
+    if (!isApplyingImportedSceneRef.current && unboundEmbeddable && !createdContainerEmbeddableIdsRef.current.has(unboundEmbeddable.id)) {
       createdContainerEmbeddableIdsRef.current.add(unboundEmbeddable.id);
 
       const initializeContainerPadlet = async () => {
@@ -1175,7 +1181,28 @@ export default function DrawingLayout({
     setPendingImportedScene(null);
   }, []);
 
-  const handleConfirmImportedScene = useCallback(async () => {
+  const clearDrawingOverlayRuntimeState = useCallback(() => {
+    setContextMenu(null);
+    recentlyDraggedRef.current.clear();
+    recentlyNaturalResizedRef.current.clear();
+    lastEmbeddablePosRef.current.clear();
+    lastPadletSceneSyncRef.current.clear();
+    deletedEmbeddablePadletIdsRef.current.clear();
+    createdContainerEmbeddableIdsRef.current.clear();
+  }, []);
+
+  const getViewportCenter = useCallback(() => {
+    const latest = (excalidrawAPIRef.current ?? excalidrawAPI)?.getAppState?.() || appStateRef.current;
+    const zoom = latest?.zoom?.value || 1;
+    const scrollX = latest?.scrollX || 0;
+    const scrollY = latest?.scrollY || 0;
+    return {
+      x: (window.innerWidth / 2 / zoom) - scrollX,
+      y: (window.innerHeight / 2 / zoom) - scrollY,
+    };
+  }, [appStateRef, excalidrawAPI]);
+
+  const handleImportScene = useCallback(async (mode: 'replace' | 'add') => {
     const scene = pendingImportedScene;
     const api = excalidrawAPIRef.current ?? excalidrawAPI;
     if (!scene || !api) return;
@@ -1192,6 +1219,7 @@ export default function DrawingLayout({
 
       pendingPosTimersRef.current.forEach((timer) => clearTimeout(timer));
       pendingPosTimersRef.current.clear();
+      clearDrawingOverlayRuntimeState();
 
       if (saveInFlightRef.current) {
         await saveInFlightRef.current;
@@ -1204,21 +1232,60 @@ export default function DrawingLayout({
         latestAppState,
         api.getSceneElements?.() || runtimeSceneElementsRef.current,
       );
-      const importedFiles = restoredScene.files ?? {};
-      const mergedAppState = preserveImportedTransientAppState(
-        restoredScene.appState,
-        latestAppState,
-      );
-      const snapshot: DrawingSceneSnapshot = {
-        elements: restoredScene.elements as any[],
-        appState: mergedAppState,
-        files: importedFiles,
-        generation: saveGenerationRef.current,
-      };
+      const existingFilesBeforeImport = currentFilesRef.current ?? {};
+      const overlayRootIds =
+        mode === 'replace'
+          ? collectDrawingOverlayRootIds(paddletsRef.current as Array<{ id: string; type?: string | null; metadata?: Record<string, unknown> | null }>)
+          : [];
+      const overlayDeletionIds =
+        mode === 'replace'
+          ? collectDrawingOverlayDeletionIds(paddletsRef.current as Array<{ id: string; type?: string | null; metadata?: Record<string, unknown> | null }>, overlayRootIds)
+          : [];
+
+      const importedFiles = (restoredScene.files ?? {}) as Record<string, any>;
+      const importedElements = restoredScene.elements as any[];
+
+      const snapshot: DrawingSceneSnapshot =
+        mode === 'replace'
+          ? {
+              elements: importedElements,
+              appState: preserveImportedTransientAppState(restoredScene.appState, latestAppState),
+              files: importedFiles,
+              generation: saveGenerationRef.current,
+            }
+          : (() => {
+              const preparedImport = prepareImportedSceneForAdd({
+                elements: importedElements,
+                files: importedFiles,
+                viewportCenter: getViewportCenter(),
+                placementOffset: {
+                  x: importPlacementCountRef.current * 40,
+                  y: importPlacementCountRef.current * 40,
+                },
+              });
+              importPlacementCountRef.current += 1;
+              const currentElements = api.getSceneElements?.() || runtimeSceneElementsRef.current;
+              const selectedElementIds = preparedImport.elements.reduce((acc: Record<string, boolean>, element: any) => {
+                acc[element.id] = true;
+                return acc;
+              }, {});
+
+              return {
+                elements: [...currentElements, ...preparedImport.elements],
+                appState: preserveImportedTransientAppState({
+                  ...latestAppState,
+                  selectedElementIds,
+                  selectedGroupIds: {},
+                  activeTool: latestAppState?.activeTool,
+                }, latestAppState),
+                files: { ...existingFilesBeforeImport, ...preparedImport.files },
+                generation: saveGenerationRef.current,
+              };
+            })();
 
       isApplyingImportedSceneRef.current = true;
-      currentFilesRef.current = importedFiles;
-      appStateRef.current = mergedAppState;
+      currentFilesRef.current = snapshot.files;
+      appStateRef.current = snapshot.appState;
       hasSeenElementsRef.current = snapshot.elements.length > 0;
       activeElementCountRef.current = snapshot.elements.length;
       setElements(snapshot.elements);
@@ -1226,18 +1293,36 @@ export default function DrawingLayout({
       api.updateScene({
         ...buildDrawingSceneUpdate({
           elements: snapshot.elements,
-          appState: mergedAppState,
+          appState: snapshot.appState,
           commitToHistory: true,
         }),
       });
 
-      if (typeof api.addFiles === "function" && Object.keys(importedFiles).length > 0) {
-        api.addFiles(Object.values(importedFiles));
+      const filesToRegister =
+        mode === 'replace'
+          ? importedFiles
+          : Object.fromEntries(
+              Object.entries(snapshot.files).filter(([fileId]) => !existingFilesBeforeImport[fileId]),
+            );
+
+      if (typeof api.addFiles === "function" && Object.keys(filesToRegister).length > 0) {
+        api.addFiles(Object.values(filesToRegister));
       }
 
       dirtyDataRef.current = snapshot;
       await saveDrawingSnapshot(snapshot);
       dirtyDataRef.current = null;
+
+      if (mode === 'replace' && overlayRootIds.length > 0) {
+        await onDeleteOverlayPadlets?.(overlayRootIds);
+        if (overlayDeletionIds.length > 0) {
+          setElements((prev) => prev.filter((element: any) => {
+            const link = typeof element?.link === 'string' ? element.link : '';
+            return !overlayDeletionIds.includes(link.replace('padlet://', ''));
+          }));
+        }
+      }
+
       setPendingImportedScene(null);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Import failed.";
@@ -1246,7 +1331,15 @@ export default function DrawingLayout({
       isApplyingImportedSceneRef.current = false;
       setIsImportingScene(false);
     }
-  }, [appStateRef, excalidrawAPI, pendingImportedScene, saveDrawingSnapshot]);
+  }, [
+    appStateRef,
+    clearDrawingOverlayRuntimeState,
+    excalidrawAPI,
+    getViewportCenter,
+    onDeleteOverlayPadlets,
+    pendingImportedScene,
+    saveDrawingSnapshot,
+  ]);
 
   // â”€â”€ Slide CRUD helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -2666,11 +2759,19 @@ export default function DrawingLayout({
       {pendingImportedScene && !readOnly && (
         <div className="fixed inset-0 z-[10010] flex items-center justify-center bg-black/50 px-4">
           <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
-            <h2 className="text-lg font-semibold text-gray-900">Replace current drawing?</h2>
+            <h2 className="text-lg font-semibold text-gray-900">Import drawing</h2>
             <p className="mt-2 text-sm text-gray-600">
-              Replace the current drawing with the imported drawing?
+              Choose how to apply the imported drawing.
             </p>
             <div className="mt-6 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => handleImportScene('add')}
+                disabled={isImportingScene}
+                className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Add to current drawing
+              </button>
               <button
                 type="button"
                 onClick={handleCancelImportedScene}
@@ -2681,11 +2782,11 @@ export default function DrawingLayout({
               </button>
               <button
                 type="button"
-                onClick={handleConfirmImportedScene}
+                onClick={() => handleImportScene('replace')}
                 disabled={isImportingScene}
                 className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {isImportingScene ? 'Replacing...' : 'Replace drawing'}
+                {isImportingScene ? 'Importing...' : 'Replace current drawing'}
               </button>
             </div>
           </div>

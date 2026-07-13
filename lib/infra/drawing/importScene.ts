@@ -9,6 +9,12 @@ export type ImportedDrawingScene = {
   files: Record<string, unknown>;
 };
 
+type DrawingOverlayPadletLike = {
+  id: string;
+  type?: string | null;
+  metadata?: Record<string, unknown> | null;
+};
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
@@ -35,6 +41,178 @@ export const buildDrawingSceneUpdate = ({
   ...(appState !== undefined ? { appState } : {}),
   captureUpdate: getDrawingCaptureUpdate(commitToHistory),
 });
+
+const cloneValue = <T>(value: T): T => {
+  if (typeof structuredClone === "function") {
+    return structuredClone(value);
+  }
+  return JSON.parse(JSON.stringify(value)) as T;
+};
+
+const getSceneBounds = (elements: any[]) => {
+  const active = elements.filter((element) => !element?.isDeleted);
+  if (active.length === 0) {
+    return { minX: 0, minY: 0, maxX: 0, maxY: 0 };
+  }
+
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+
+  for (const element of active) {
+    const x = typeof element?.x === "number" ? element.x : 0;
+    const y = typeof element?.y === "number" ? element.y : 0;
+    const width = typeof element?.width === "number" ? element.width : 0;
+    const height = typeof element?.height === "number" ? element.height : 0;
+    minX = Math.min(minX, x);
+    minY = Math.min(minY, y);
+    maxX = Math.max(maxX, x + width);
+    maxY = Math.max(maxY, y + height);
+  }
+
+  return { minX, minY, maxX, maxY };
+};
+
+export const collectDrawingOverlayRootIds = (padlets: DrawingOverlayPadletLike[]) =>
+  padlets
+    .filter((padlet) => padlet.type !== "drawing" && !padlet.metadata?.parentId)
+    .map((padlet) => String(padlet.id));
+
+export const collectDrawingOverlayDeletionIds = (
+  padlets: DrawingOverlayPadletLike[],
+  rootIds = collectDrawingOverlayRootIds(padlets),
+) => {
+  const rootIdSet = new Set(rootIds.map(String));
+  const queue = [...rootIdSet];
+  const affected = new Set<string>();
+
+  while (queue.length > 0) {
+    const nextId = queue.shift()!;
+    if (affected.has(nextId)) continue;
+    affected.add(nextId);
+
+    for (const padlet of padlets) {
+      const parentId = padlet.metadata?.parentId;
+      if (typeof parentId === "string" && parentId === nextId) {
+        queue.push(String(padlet.id));
+      }
+    }
+  }
+
+  return [...affected];
+};
+
+export const prepareImportedSceneForAdd = ({
+  elements,
+  files,
+  viewportCenter,
+  placementOffset = { x: 0, y: 0 },
+}: {
+  elements: any[];
+  files: Record<string, any>;
+  viewportCenter: { x: number; y: number };
+  placementOffset?: { x: number; y: number };
+}) => {
+  const nextElements = cloneValue(elements);
+  const nextFiles = cloneValue(files);
+  const elementIdMap = new Map<string, string>();
+  const fileIdMap = new Map<string, string>();
+  const groupIdMap = new Map<string, string>();
+  const now = Date.now();
+
+  for (const element of nextElements) {
+    if (typeof element?.id === "string") {
+      elementIdMap.set(element.id, crypto.randomUUID());
+    }
+    if (Array.isArray(element?.groupIds)) {
+      for (const groupId of element.groupIds) {
+        if (typeof groupId === "string" && !groupIdMap.has(groupId)) {
+          groupIdMap.set(groupId, crypto.randomUUID());
+        }
+      }
+    }
+  }
+
+  for (const fileId of Object.keys(nextFiles)) {
+    fileIdMap.set(fileId, crypto.randomUUID());
+  }
+
+  const bounds = getSceneBounds(nextElements);
+  const importedCenterX = (bounds.minX + bounds.maxX) / 2;
+  const importedCenterY = (bounds.minY + bounds.maxY) / 2;
+  const offsetX = viewportCenter.x - importedCenterX + placementOffset.x;
+  const offsetY = viewportCenter.y - importedCenterY + placementOffset.y;
+
+  for (const element of nextElements) {
+    const originalId = element?.id;
+    if (typeof originalId === "string") {
+      element.id = elementIdMap.get(originalId) ?? originalId;
+    }
+
+    if (typeof element?.x === "number") {
+      element.x += offsetX;
+    }
+    if (typeof element?.y === "number") {
+      element.y += offsetY;
+    }
+
+    if (Array.isArray(element?.groupIds)) {
+      element.groupIds = element.groupIds.map((groupId: string) => groupIdMap.get(groupId) ?? groupId);
+    }
+
+    if (typeof element?.frameId === "string") {
+      element.frameId = elementIdMap.get(element.frameId) ?? null;
+    }
+
+    if (typeof element?.containerId === "string") {
+      element.containerId = elementIdMap.get(element.containerId) ?? null;
+    }
+
+    if (Array.isArray(element?.boundElements)) {
+      element.boundElements = element.boundElements.map((binding: any) => ({
+        ...binding,
+        id: typeof binding?.id === "string" ? elementIdMap.get(binding.id) ?? binding.id : binding?.id,
+      }));
+    }
+
+    if (element?.startBinding && typeof element.startBinding === "object" && typeof element.startBinding.elementId === "string") {
+      element.startBinding = {
+        ...element.startBinding,
+        elementId: elementIdMap.get(element.startBinding.elementId) ?? element.startBinding.elementId,
+      };
+    }
+
+    if (element?.endBinding && typeof element.endBinding === "object" && typeof element.endBinding.elementId === "string") {
+      element.endBinding = {
+        ...element.endBinding,
+        elementId: elementIdMap.get(element.endBinding.elementId) ?? element.endBinding.elementId,
+      };
+    }
+
+    if (typeof element?.fileId === "string") {
+      element.fileId = fileIdMap.get(element.fileId) ?? element.fileId;
+    }
+
+    element.updated = now;
+    element.version = typeof element?.version === "number" ? element.version + 1 : 1;
+    element.versionNonce = Math.floor(Math.random() * 1e9);
+  }
+
+  const remappedFiles: Record<string, any> = {};
+  for (const [fileId, file] of Object.entries(nextFiles)) {
+    const nextFileId = fileIdMap.get(fileId) ?? fileId;
+    remappedFiles[nextFileId] = {
+      ...file,
+      id: nextFileId,
+    };
+  }
+
+  return {
+    elements: nextElements,
+    files: remappedFiles,
+  };
+};
 
 export const parseImportedDrawingText = (text: string): ImportedDrawingScene => {
   let parsed: unknown;
