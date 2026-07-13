@@ -7,8 +7,8 @@ export interface GanttTask {
   id: string;
   text: string;
   description?: string;
-  start_date: string;
-  end_date: string;
+  start_date: string | Date;
+  end_date: string | Date;
   duration: number;
   progress: number;
   stage_id?: string;

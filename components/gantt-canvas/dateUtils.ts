@@ -16,6 +16,12 @@ export function getStartOfLocalDay(date: Date): Date {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate());
 }
 
+export function getDefaultNewTaskDateRange(now: Date = new Date()): { startDate: Date; endDate: Date } {
+  const startDate = getStartOfLocalDay(now);
+  const endDate = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate() + 1);
+  return { startDate, endDate };
+}
+
 export function buildLocalDate(parts: LocalDateParts): Date {
   return new Date(parts.year, parts.month, parts.day);
 }

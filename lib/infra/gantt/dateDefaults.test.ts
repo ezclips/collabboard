@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Card } from '../../../types/kanban-canvas';
-import { buildLocalDate, formatLocalDate, getLocalDateParts } from '../../../components/gantt-canvas/dateUtils';
+import { buildLocalDate, formatLocalDate, getDefaultNewTaskDateRange, getLocalDateParts } from '../../../components/gantt-canvas/dateUtils';
 import { mapCardToGanttTask } from '../../../components/gantt-canvas/mappers';
 
 describe('gantt date defaults', () => {
@@ -31,6 +31,13 @@ describe('gantt date defaults', () => {
 
     expect(task.start_date).toBe('2026-01-31');
     expect(task.end_date).toBe('2026-02-01');
+  });
+
+  it('seeds a newly created gantt task from today in local time', () => {
+    const { startDate, endDate } = getDefaultNewTaskDateRange(new Date(2026, 6, 13, 16, 45, 0, 0));
+
+    expect(formatLocalDate(startDate)).toBe('2026-07-13');
+    expect(formatLocalDate(endDate)).toBe('2026-07-14');
   });
 
   it('initializes an existing gantt item from persisted dates exactly', () => {

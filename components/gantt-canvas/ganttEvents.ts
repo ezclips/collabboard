@@ -7,6 +7,7 @@ import {
   type GanttLinkType,
   type GanttTask,
 } from './mappers';
+import { getDefaultNewTaskDateRange } from './dateUtils';
 
 type GanttLike = {
   attachEvent: (name: string, callback: (...args: unknown[]) => unknown) => string;
@@ -26,7 +27,11 @@ type GanttLike = {
   getChildren: (id: string | number) => string[];
 };
 
-type GanttTaskLike = Partial<GanttTask> & { text?: string };
+type GanttTaskLike = Omit<Partial<GanttTask>, 'start_date' | 'end_date'> & {
+  text?: string;
+  start_date?: string | Date;
+  end_date?: string | Date;
+};
 type GanttLinkLike = { id?: string | number; source?: string | number; target?: string | number; type?: string | number };
 
 type PersistenceActions = {
@@ -59,6 +64,16 @@ export function bindGanttEvents(params: {
 
   // Note: onTaskClick removed - Gantt tasks don't open the Kanban Editor modal
   // Only the "+" button opens the simple NewTaskModal for creating new tasks
+
+  eventIds.push(
+    gantt.attachEvent('onTaskCreated', ((task: GanttTaskLike) => {
+      const { startDate, endDate } = getDefaultNewTaskDateRange();
+      task.start_date = startDate;
+      task.end_date = endDate;
+      task.duration = 1;
+      return true;
+    }) as any)
+  );
 
   eventIds.push(
     gantt.attachEvent('onAfterTaskAdd', (async (rawId: string, task: GanttTaskLike) => {
