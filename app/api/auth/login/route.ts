@@ -57,12 +57,32 @@ function getSupabaseAnonServerClient() {
     throw new Error('Missing NEXT_PUBLIC_SUPABASE_ANON_KEY');
   }
 
-  return createClient(supabaseUrl, supabaseAnonKey, {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-    },
-  });
+  let retryAfterSeconds: number | null = null;
+
+  return {
+    getRetryAfterSeconds: () => retryAfterSeconds,
+    client: createClient(supabaseUrl, supabaseAnonKey, {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+      },
+      global: {
+        fetch: async (input, init) => {
+          const response = await fetch(input, init);
+          if (response.status === 429) {
+            const retryAfterHeader = response.headers.get('Retry-After');
+            if (retryAfterHeader) {
+              const parsed = Number(retryAfterHeader);
+              if (Number.isFinite(parsed) && parsed > 0) {
+                retryAfterSeconds = Math.ceil(parsed);
+              }
+            }
+          }
+          return response;
+        },
+      },
+    }),
+  };
 }
 
 async function fetchRecentFailures(emailHash: string, ipHash: string | null) {
@@ -246,7 +266,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const authClient = getSupabaseAnonServerClient();
+    const { client: authClient, getRetryAfterSeconds } = getSupabaseAnonServerClient();
     const { data, error } = await authClient.auth.signInWithPassword({ email, password });
 
     if (error || !data.session) {
@@ -266,8 +286,16 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         {
           error: getAuthFailureMessage(authErrorMessage),
+          retryAfterSeconds: providerRateLimited ? getRetryAfterSeconds() ?? 60 : undefined,
         },
-        { status: providerRateLimited ? 429 : 401 }
+        providerRateLimited
+          ? {
+              status: 429,
+              headers: {
+                'Retry-After': String(getRetryAfterSeconds() ?? 60),
+              },
+            }
+          : { status: 401 }
       );
     }
 
@@ -280,6 +308,26 @@ export async function POST(req: NextRequest) {
 
     if (sessionError) {
       throw new Error(sessionError.message);
+    }
+
+    const signedInUser = {
+      id: data.user?.id ?? data.session.user.id,
+      email: data.user?.email ?? data.session.user.email ?? email,
+      fullName:
+        (typeof data.user?.user_metadata?.full_name === 'string' && data.user.user_metadata.full_name) ||
+        (typeof data.session.user.user_metadata?.full_name === 'string' && data.session.user.user_metadata.full_name) ||
+        null,
+    };
+
+    const { error: profileError } = await routeSupabase.from('profiles').upsert({
+      id: signedInUser.id,
+      email: signedInUser.email,
+      display_name: signedInUser.fullName,
+      updated_at: new Date().toISOString(),
+    });
+
+    if (profileError) {
+      console.warn('Profile upsert after login failed:', profileError);
     }
 
     await Promise.all([
@@ -295,14 +343,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      user: {
-        id: data.user?.id ?? data.session.user.id,
-        email: data.user?.email ?? data.session.user.email ?? email,
-        fullName:
-          (typeof data.user?.user_metadata?.full_name === 'string' && data.user.user_metadata.full_name) ||
-          (typeof data.session.user.user_metadata?.full_name === 'string' && data.session.user.user_metadata.full_name) ||
-          null,
-      },
+      user: signedInUser,
     });
   } catch (error) {
     console.error('Login route error:', error);

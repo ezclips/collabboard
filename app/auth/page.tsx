@@ -1,48 +1,18 @@
 'use client';
 
-import { useState, useEffect, Suspense } from 'react';
+import { useState, useEffect, Suspense, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useSupabase } from '@/lib/supabase-provider';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import Icon from '@/components/AppIcon';
+import { createLoginSubmissionGate, parseRetryAfterSeconds } from '@/lib/infra/auth/loginSubmission';
 
 const MIN_PASSWORD_LENGTH = 15;
 const MAX_PASSWORD_LENGTH = 64;
 const SUPABASE_RATE_LIMIT_MESSAGE = 'Sign-in is temporarily rate-limited by Supabase. Try again in a few minutes.';
 const SUPABASE_RATE_LIMIT_COOLDOWN_MS = 5 * 60 * 1000;
-
-type LoginUser = {
-  id: string;
-  email?: string | null;
-  fullName?: string | null;
-};
-
-function mapSupabaseLoginError(error: { message?: string; code?: string } | null | undefined) {
-  const normalizedMessage = (error?.message || '').toLowerCase();
-  const normalizedCode = (error?.code || '').toLowerCase();
-
-  if (normalizedCode === 'email_not_confirmed' || normalizedMessage.includes('email not confirmed')) {
-    return 'Your email address is not confirmed yet.';
-  }
-
-  if (normalizedCode === 'over_request_rate_limit' || normalizedMessage.includes('rate limit')) {
-    return SUPABASE_RATE_LIMIT_MESSAGE;
-  }
-
-  if (normalizedCode === 'invalid_credentials' || normalizedMessage.includes('invalid login credentials')) {
-    return 'We could not sign you in with that email and password.';
-  }
-
-  return error?.message || 'Unable to sign in right now. Please try again.';
-}
-
-function isSupabaseRateLimitError(error: { message?: string; code?: string } | null | undefined) {
-  const normalizedMessage = (error?.message || '').toLowerCase();
-  const normalizedCode = (error?.code || '').toLowerCase();
-
-  return normalizedCode === 'over_request_rate_limit' || normalizedMessage.includes('rate limit');
-}
+const FALLBACK_LOGIN_COOLDOWN_SECONDS = SUPABASE_RATE_LIMIT_COOLDOWN_MS / 1000;
 
 function AuthForm() {
   const router = useRouter();
@@ -60,6 +30,7 @@ function AuthForm() {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [rateLimitedUntil, setRateLimitedUntil] = useState<number | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  const loginSubmissionGateRef = useRef(createLoginSubmissionGate());
   
   // Form data
   const [formData, setFormData] = useState({
@@ -86,6 +57,7 @@ function AuthForm() {
       setNow(nextNow);
       if (nextNow >= rateLimitedUntil) {
         setRateLimitedUntil(null);
+        loginSubmissionGateRef.current.clearCooldown();
       }
     }, 1000);
 
@@ -159,127 +131,70 @@ function AuthForm() {
     rateLimitedUntil && now < rateLimitedUntil ? Math.ceil((rateLimitedUntil - now) / 1000) : 0;
   const isLoginRateLimited = mode === 'login' && rateLimitSecondsRemaining > 0;
   const submitDisabled = loading || isLoginRateLimited;
+  const loginFieldDisabled = mode === 'login' ? submitDisabled : loading;
+
+  const applyLoginCooldown = (retryAfterSeconds: number) => {
+    loginSubmissionGateRef.current.startCooldown(retryAfterSeconds);
+    const nextNow = Date.now();
+    setNow(nextNow);
+    setRateLimitedUntil(nextNow + retryAfterSeconds * 1000);
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!validateForm()) return;
 
-    setLoading(true);
-    setError('');
-    setMessage('');
+    const submission = await loginSubmissionGateRef.current.submit(async () => {
+      setLoading(true);
+      setError('');
+      setMessage('');
 
-    try {
-      if (isLoginRateLimited) {
-        setError(`${SUPABASE_RATE_LIMIT_MESSAGE} Try again in ${rateLimitSecondsRemaining} seconds.`);
-        return;
-      }
-
-      let signedInUser: LoginUser | null = null;
-      const email = formData.email.trim().toLowerCase();
-
-      const preflightResponse = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          phase: 'preflight',
-          email,
-        }),
-      });
-      const preflightResult = await preflightResponse.json().catch(() => ({}));
-
-      if (!preflightResponse.ok) {
-        if (preflightResponse.status === 429) {
-          const retryAfterSeconds =
-            typeof preflightResult?.retryAfterSeconds === 'number' ? preflightResult.retryAfterSeconds : 60;
-          setRateLimitedUntil(Date.now() + retryAfterSeconds * 1000);
-        }
-
-        setError(
-          typeof preflightResult?.error === 'string'
-            ? preflightResult.error
-            : 'Unable to sign in right now. Please try again.'
-        );
-        return;
-      }
-
-      const { data, error: signInError } = await supabase.auth.signInWithPassword({
-        email,
-        password: formData.password,
-      });
-
-      if (signInError || !data.session) {
-        if (isSupabaseRateLimitError(signInError)) {
-          setRateLimitedUntil(Date.now() + SUPABASE_RATE_LIMIT_COOLDOWN_MS);
-        }
-
-        await fetch('/api/auth/login', {
+      try {
+        const email = formData.email.trim().toLowerCase();
+        const response = await fetch('/api/auth/login', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            phase: 'failure',
             email,
-            error: signInError?.message,
+            password: formData.password,
           }),
-        }).catch(() => undefined);
-
-        setError(mapSupabaseLoginError(signInError));
-        return;
-      }
-
-      const recordResponse = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          phase: 'success',
-          email,
-        }),
-      });
-      const recordResult = await recordResponse.json().catch(() => ({}));
-
-      if (recordResponse.ok && recordResult?.user && typeof recordResult.user.id === 'string') {
-        signedInUser = {
-          id: recordResult.user.id,
-          email: typeof recordResult.user.email === 'string' ? recordResult.user.email : email,
-          fullName: typeof recordResult.user.fullName === 'string' ? recordResult.user.fullName : null,
-        };
-      } else {
-        signedInUser = {
-          id: data.user?.id || data.session.user.id,
-          email: data.user?.email || data.session.user.email || email,
-          fullName:
-            (typeof data.user?.user_metadata?.full_name === 'string' && data.user.user_metadata.full_name) ||
-            (typeof data.session.user.user_metadata?.full_name === 'string' && data.session.user.user_metadata.full_name) ||
-            null,
-        };
-      }
-
-      if (signedInUser) {
-        const { error: profileError } = await supabase.from('profiles').upsert({
-          id: signedInUser.id,
-          email: signedInUser.email || formData.email || '',
-          display_name: signedInUser.fullName || formData.fullName,
-          updated_at: new Date().toISOString()
         });
+        const result = await response.json().catch(() => ({}));
 
-        if (profileError) {
-          console.warn('Profile upsert after login failed:', profileError);
+        if (!response.ok) {
+          if (response.status === 429) {
+            const retryAfterSeconds = parseRetryAfterSeconds(
+              response.headers.get('Retry-After'),
+              typeof result?.retryAfterSeconds === 'number'
+                ? result.retryAfterSeconds
+                : FALLBACK_LOGIN_COOLDOWN_SECONDS,
+            );
+            applyLoginCooldown(retryAfterSeconds);
+          }
+
+          setError(
+            typeof result?.error === 'string'
+              ? result.error
+              : 'Unable to sign in right now. Please try again.'
+          );
+          return;
         }
-      }
 
-      setMessage('Login successful! Redirecting...');
-      setTimeout(() => {
-        router.push(redirectPath);
-      }, 1000);
-    } catch {
-      setError('Login failed. Please try again.');
-    } finally {
-      setLoading(false);
+        setMessage('Login successful! Redirecting...');
+        window.setTimeout(() => {
+          window.location.assign(redirectPath);
+        }, 1000);
+      } catch {
+        setError('Login failed. Please try again.');
+      } finally {
+        setLoading(false);
+      }
+    });
+
+    if (!submission.accepted && submission.reason === 'cooldown') {
+      setError(`${SUPABASE_RATE_LIMIT_MESSAGE} Try again in ${submission.retryAfterSeconds} seconds.`);
     }
   };
 
@@ -441,7 +356,7 @@ function AuthForm() {
         )}
 
         {/* Forms */}
-        <form method="post" onSubmit={mode === 'login' ? handleLogin : mode === 'signup' ? handleSignup : handlePasswordReset}>
+        <form method="post" aria-disabled={submitDisabled} onSubmit={mode === 'login' ? handleLogin : mode === 'signup' ? handleSignup : handlePasswordReset}>
           <div className="space-y-4">
             {mode === 'signup' && (
               <div>
@@ -456,7 +371,7 @@ function AuthForm() {
                   onChange={handleInputChange}
                   placeholder="Enter your full name"
                   autoComplete="name"
-                  disabled={loading}
+                  disabled={loginFieldDisabled}
                   required
                 />
               </div>
@@ -497,7 +412,7 @@ function AuthForm() {
                     placeholder={mode === 'signup' ? 'Create a strong passphrase' : 'Enter your password'}
                     autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
                     maxLength={MAX_PASSWORD_LENGTH}
-                    disabled={loading}
+                    disabled={loginFieldDisabled}
                     required
                     className="pr-24"
                   />
