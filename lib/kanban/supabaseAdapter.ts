@@ -408,7 +408,13 @@ export async function loadKanbanScaffoldData(canvasId: string): Promise<KanbanFu
         ]);
 
         if (columnsRes.error) throw columnsRes.error;
-        if (columnGroupsRes.error) throw columnGroupsRes.error;
+        if (columnGroupsRes.error) {
+            if (columnGroupsRes.error.code === '42P01') {
+                // Allow older environments (before migration) to continue working without hard failure.
+            } else {
+                throw columnGroupsRes.error;
+            }
+        }
         if (swimlanesRes.error) throw swimlanesRes.error;
         if (membersRes.error) throw membersRes.error;
         if (linksRes.error) throw linksRes.error;
