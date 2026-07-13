@@ -11,7 +11,6 @@ import tsParser from '@typescript-eslint/parser';
 // NOTE: [ and ] are glob character classes — Next.js dynamic-route folders
 // like [id] must be escaped (\\[id\\]) or the ignore silently misses the file.
 const GRANDFATHERED_UI_FILES = [
-  'app/dashboard/canvas/\\[id\\]/CanvasClient.tsx',
 ];
 
 export default [

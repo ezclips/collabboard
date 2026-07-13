@@ -72,7 +72,7 @@ import { createSectionsRepository } from '@/lib/infra/canvas/sectionsRepository'
 import { getVerifiedAuthUser, onAuthSessionChanged, updateCurrentUserMetadata } from '@/lib/infra/supabase/authState';
 import { createStorageGateway } from '@/lib/infra/supabase/storage';
 import type { Padlet, BoardSection, PendingPostDraft, NewPostDragState, DropIndicatorState, CanvasLine } from '@/types/collabboard';
-import { User, Session } from '@supabase/supabase-js';
+import type { AuthUser, AuthSession } from '@/lib/domain/auth/user';
 import {
   StickyNote, Link, CheckSquare, MoveRight, MessageCircle,
   Image as ImageIcon, Upload, PenTool, Trash2, Bell, Table, X, Columns3,
@@ -199,7 +199,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   const supabase = useMemo(() => supabaseBrowser(), []);
   // === BEGIN SESSION + AUTH REGION ===
   // Session state - fetch once on mount and listen for changes
-  const [session, setSession] = useState<Session | null>(null);
+  const [session, setSession] = useState<AuthSession | null>(null);
   const [sessionReady, setSessionReady] = useState(false);
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -208,7 +208,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
 
   // Prevent hydration mismatch by only rendering after mount
   const [hasMounted, setHasMounted] = useState(false);
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<AuthUser | null>(null);
   const [currentWorkspaceRole, setCurrentWorkspaceRole] = useState<WorkspaceRole | null>(null);
   const [isToolbarCollapsed, setIsToolbarCollapsed] = useState(false);
   const [isMapToolbarCollapsed, setIsMapToolbarCollapsed] = useState(false);
@@ -250,7 +250,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       }
 
       try {
-        const workspace = await resolveWorkspaceForUser(user);
+        const workspace = await resolveWorkspaceForUser({ id: user.id, email: user.email ?? undefined });
         if (!cancelled) {
           setCurrentWorkspaceRole(workspace?.role ?? 'member');
         }
@@ -301,7 +301,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
 
         void updateCurrentUserMetadata(nextMetadata);
 
-        setUser((prevUser) => prevUser ? ({ ...prevUser, user_metadata: nextMetadata } as User) : prevUser);
+        setUser((prevUser) => prevUser ? ({ ...prevUser, user_metadata: nextMetadata } as AuthUser) : prevUser);
       }
 
       return next;
@@ -314,13 +314,13 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
 
     const fetchUser = async () => {
       const result = await getVerifiedAuthUser();
-      const currentUser = (result.ok ? result.value : null) as User | null;
+      const currentUser = (result.ok ? result.value : null) as AuthUser | null;
 
       if (mounted) {
         setUser(currentUser ?? null);
         // Create a minimal session-like object for compatibility
         if (currentUser) {
-          setSession({ user: currentUser } as Session);
+          setSession({ user: currentUser } as AuthSession);
         } else {
           setSession(null);
         }
@@ -333,8 +333,8 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     // Listen for auth state changes
     const unsubscribe = onAuthSessionChanged((_event, newSession) => {
       if (mounted) {
-        setSession(newSession as Session | null);
-        setUser((newSession?.user as User | undefined) ?? null);
+        setSession(newSession as AuthSession | null);
+        setUser((newSession?.user as AuthUser | undefined) ?? null);
         setSessionReady(true);
       }
     });
