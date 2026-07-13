@@ -1383,6 +1383,59 @@ own behavior ruling before any closeout is even considered. Axis
 snapshot at 76 (unchanged): safety 19, ops 13, architecture 20,
 product 13, continuity 11.)
 
+(2026-07-13: PATCH-058 issued as an architecture ruling rather than a
+migration — the endgame investigation of the two remaining AI-resize
+builders found they were INERT, proven by reading the installed
+`@supabase/postgrest-js` source (network call issued inside `then()`,
+never invoked on a bare un-awaited statement) and confirmed empirically
+with an instrumented-fetch probe against the installed package: zero
+fetch calls after the exact live statement shape, one after awaiting
+it. This reclassifies five patches of PATCH-053→057 deferral language
+("porting would change execution semantics") from cautious-but-vague to
+exactly correct: there were no execution semantics to preserve. It also
+surfaced a genuine, previously undiscovered P3 data-loss defect —
+AI-card resizes have never persisted, silently reverting on the next
+fetch — which no amount of behavior-preservation work could have found,
+because "preserve this behavior" was never the right question for code
+that has no behavior. No implementation was authorized; the tree froze
+at the PATCH-057 hash pending an owner choice between authorizing the
+fix (recommended, per P3) or authorizing deletion of the inert
+statements. No axis movement — a ruling with no code change earns
+nothing and costs nothing. LESSONS_LEARNED entry added: a census of
+builder expressions counts intents, not requests.)
+
+(2026-07-13: PATCH-059 landed and passed review — the owner authorized
+Option A, and the fix landed: AI-card resize persists for the first
+time in the product's history. This patch was reviewed with unusual
+care given a truth about self-authored specs: I wrote both the
+PATCH-058 ruling and the PATCH-059 spec, so the review re-verified the
+central technical claim from scratch by reading `command.ts` directly
+rather than trusting my own prior prose — `defineCommand` converts both
+validation failures and thrown exceptions into resolved Results, so the
+awaited command's promise can never reject, which is the entire basis
+for claiming the void'd launcher cannot produce an unhandled rejection.
+The spec explicitly forbade reusing either existing failure-preserving
+helper here, since both rethrow on an 'unknown' code — reusing one
+would have manufactured the exact unhandled-rejection risk the fix was
+designed to avoid; a second instance of the "same table, wrong
+contract" trap this playbook keeps re-learning, this time inverted (a
+helper too safe for its new context rather than too permissive).
+**+1 product 13→14** — the first patch in the postsRaw/FreeformPadletCards
+program whose value is a real bug fixed for users, not codebase
+consolidation; the precedent is PATCH-024's language exactly ("value
+lands directly on users rather than on the codebase"). No safety
+movement: the defect was found and disclosed by the CTO's own
+investigation, not caught in the wild, and process working as designed
+does not buy back the standing incident. No architecture movement:
+ceiling. Landed on GPT-5.4: unit 252/28 (one new test, passing), tsc
+clean, boundaries clean, e2e 27/27 on a five-route-warmed server, port
+gate 0/0 before and after; two-file scope and the three-plus-one-hunk
+diff held exactly. Zero disclosed defects of any kind. Twenty-seventh
+consecutive fully clean review of the implementation. Grandfather held
+at 2; the local Supabase client remains, deliberately orphaned, for a
+separate owner-gated closeout patch. Axis snapshot at 77: safety 19,
+ops 13, architecture 20, product 14, continuity 11.)
+
 ## 13. The succession test
 
 You've absorbed this playbook when you can answer these without re-reading:
