@@ -1436,6 +1436,36 @@ at 2; the local Supabase client remains, deliberately orphaned, for a
 separate owner-gated closeout patch. Axis snapshot at 77: safety 19,
 ops 13, architecture 20, product 14, continuity 11.)
 
+(2026-07-13: PATCH-060 landed and passed review — FreeformPadletCards'
+grandfather entry retires, 2→1, closing the loop opened by PATCH-058's
+ruling and PATCH-059's fix: the component is now fully boundary-clean,
+and this is the first time in the program's history it has been linted
+by `check:boundaries` at all. The review's distinguishing act was
+refusing to accept the spec's own negative-control claim on the
+strength of its prose: the reviewer independently restored the true
+pre-edit component bytes under the new config and re-ran the check,
+getting the exact bound failure signature, before trusting the
+positive result — the same "verify the claim, not the document"
+discipline this playbook keeps re-learning, applied here to a claim
+about what a linter WOULD do rather than what a repository already
+contains. No architecture movement despite a genuine grandfather
+shrink: the axis has sat at its 20/20 ceiling since the ruling that
+capped it, and a second grandfathered file (CanvasClient, proven
+independent by its own live `@supabase` value imports) still stands —
+one entry retiring does not reopen a capped axis when the underlying
+boundary risk (a second ungoverned file) is unchanged. Landed on
+GPT-5.4: unit 252/28 (unchanged), tsc clean, boundaries clean with the
+component now actually linted, e2e 27/27 on a five-route-warmed server
+incl. board-lifecycle, port gate 0/0 before and after; two-file scope
+and the four-plus-one-hunk diff held exactly, with the mixed-EOL
+config's raw bytes (including its 70 CR bytes) independently confirmed
+untouched outside the one bound line. Zero disclosed defects of any
+kind. Twenty-eighth consecutive fully clean review of the
+implementation. No full program closeout claimed — CanvasClient's
+entry remains the last one standing, its own future program. Axis
+snapshot at 77 (unchanged): safety 19, ops 13, architecture 20,
+product 14, continuity 11.)
+
 ## 13. The succession test
 
 You've absorbed this playbook when you can answer these without re-reading:
