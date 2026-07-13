@@ -1300,6 +1300,33 @@ ordered container-drop cascade, and the two deferred un-awaited
 AI-resize builders. Axis snapshot at 76 (unchanged): safety 19, ops 13,
 architecture 20, product 13, continuity 11.)
 
+(2026-07-13: PATCH-055 landed and passed review — the largest single
+direct-write reduction of the FreeformPadletCards strangling to date,
+12 sites in one patch, still zero new functions. This is also the
+first review in this thread where the reviewer had to check their own
+work twice over: I authored the spec last turn and reviewed the
+implementation this turn, so the review re-derived the pair-9-applies-
+twice claim, the byte-safe extractor's correctness, and every census
+number from the true pre-edit blob rather than trusting my own prior
+arithmetic. That discipline is the point of Pattern K's separation
+between authoring and reviewing even when both roles are filled by the
+same model in the same session — the value is in the independent
+re-derivation step, not in who did the deriving. Landed on GPT-5.4:
+unit 251/28 (unchanged), tsc clean, boundaries clean, e2e 27/27 on a
+five-route-warmed server, port gate 0/0 before and after; one-file
+scope and the 11-pair diff (pair 9 twice) held exactly, confirmed by
+direct hunk-by-hunk read rather than count alone. Zero disclosed
+defects of any kind — the third consecutive fully clean gate run. No
+credit: architecture capped at 20/20, same standing ruling. Twenty-
+fourth consecutive fully clean review of the implementation.
+Grandfather held at 2. Only 5 direct writes remain in
+FreeformPadletCards: the check-and-throw task toggle, the two ordered
+cascade writes, and the two deferred un-awaited AI-resize builders —
+close enough to see the end of this strangler, but no closeout is
+claimed until that final census is read directly. Axis snapshot at 76
+(unchanged): safety 19, ops 13, architecture 20, product 13,
+continuity 11.)
+
 ## 13. The succession test
 
 You've absorbed this playbook when you can answer these without re-reading:
