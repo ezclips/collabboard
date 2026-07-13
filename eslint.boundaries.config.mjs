@@ -12,7 +12,6 @@ import tsParser from '@typescript-eslint/parser';
 // like [id] must be escaped (\\[id\\]) or the ignore silently misses the file.
 const GRANDFATHERED_UI_FILES = [
   'app/dashboard/canvas/\\[id\\]/CanvasClient.tsx',
-  'components/collabboard/canvas/ui/FreeformPadletCards.tsx',
 ];
 
 export default [

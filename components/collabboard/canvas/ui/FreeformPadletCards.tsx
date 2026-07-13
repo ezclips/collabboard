@@ -3,9 +3,8 @@
 
 import React from 'react';
 import DOMPurify from 'dompurify';
-import type { User } from '@supabase/supabase-js';
+import type { AuthUser } from '@/lib/domain/auth/user';
 import type { Padlet } from '@/types/collabboard';
-import { supabaseBrowser } from '@/lib/supabase/browser';
 import { createUpdatePostFieldsCommand } from '@/lib/domain/canvas/posts';
 import { createPostsRepository } from '@/lib/infra/canvas/postsRepository';
 import ImageActionsToolbar from '@/components/collabboard/editors/ImageActionsToolbar';
@@ -144,7 +143,7 @@ export interface FreeformPadletCardsProps {
   rootPadlets: Padlet[];
   padlets: Padlet[];
   setPadlets: React.Dispatch<React.SetStateAction<Padlet[]>>;
-  user: User | null;
+  user: AuthUser | null;
   containerRef: React.RefObject<HTMLDivElement | null>;
 
   // Flags
@@ -180,9 +179,6 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
     closeAllToolbars, handlePadletMouseDown, getClickedSide,
     stableActions,
   } = props;
-  // Cookie-authenticated client — see useCanvasData.ts for why this must match
-  // supabaseBrowser() rather than the plain lib/supabase.ts singleton.
-  const supabase = React.useMemo(() => supabaseBrowser(), []);
   /**
    * PATCH-053: image-reaction writes already ignore a resolved Supabase error
    * but route a rejected builder into their local catch. Preserve both
