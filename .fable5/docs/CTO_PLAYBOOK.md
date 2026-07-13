@@ -1466,6 +1466,47 @@ entry remains the last one standing, its own future program. Axis
 snapshot at 77 (unchanged): safety 19, ops 13, architecture 20,
 product 14, continuity 11.)
 
+(2026-07-13: PATCH-061 landed and passed review — **the PATCH-002
+boundary-freeze program CLOSES at the gate level.** `GRANDFATHERED_UI_FILES`
+is empty; `check:boundaries` now lints the entire `components/**` +
+`app/**` tree with zero exceptions, six years' worth of "existing
+violators, frozen 2026-07-07" (the config's own words) fully retired.
+CanvasClient's last violation turned out to be a type-level fossil —
+one import line typing state that was already receiving domain-typed
+values from the auth infra and down-casting them back to supabase
+shapes — plus one real coupling (a workspace-role helper's stricter
+email type) that tsc caught during authoring and the spec adapted at
+the call site rather than widening a 14-caller shared helper. The
+review's two acts of independent verification both mattered here:
+first, re-deriving the true-blob reconstruction to settle the
+implementer's own disclosed CRLF mishap during their negative-control
+restore — the reconstruction from the true parent blob came back
+byte-identical to what was actually committed, closing the question
+without having to trust either party's account of what happened
+mid-implementation, only what landed. Second, independently re-running
+the negative control itself rather than accepting the spec's authoring
+claim: the true pre-edit CanvasClient under the new empty-list config
+was confirmed to fail with the exact bound signature before the
+positive result was trusted. No architecture movement: the axis has
+sat at its 20/20 ceiling for many patches, and a capped axis does not
+move for closing the loop that got it there — the credit for the
+program was already priced in when the cap was set. Landed on GPT-5.4:
+unit 252/28 (unchanged), tsc clean, boundaries clean with the full
+tree linted, e2e 27/27 on a five-route-warmed server incl.
+board-lifecycle, port gate 0/0 before and after; two-file scope and a
+tiny diffstat (9 insertions, 10 deletions) independently confirmed —
+no size, realtime, presence, or P3-swallow work bundled into a
+closeout patch, which would have been the easy shortcut and wasn't
+taken. Zero disclosed defects of any kind. Twenty-ninth consecutive
+fully clean review of the implementation. What remains, explicitly
+still open: CanvasClient's vestigial local Supabase client (disclosed,
+zero call sites, its own future cleanup), both components' size
+problems (8,375 and 6,351 lines), realtime/presence design, and the
+owner-gated P3 command-internal-swallow family. The GATE is closed; the
+architecture program is not finished, and no one claimed it was. Axis
+snapshot at 77 (unchanged): safety 19, ops 13, architecture 20,
+product 14, continuity 11.)
+
 ## 13. The succession test
 
 You've absorbed this playbook when you can answer these without re-reading:
