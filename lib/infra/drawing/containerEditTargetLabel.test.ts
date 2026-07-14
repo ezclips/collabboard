@@ -27,6 +27,10 @@ describe("getDrawingContainerEditTargetLabel", () => {
     expect(getDrawingContainerEditTargetLabel({ title: "Image", type: "image", metadata: { caption: "Test Label" } })).toBe("Test Label");
   });
 
+  it("falls back to Table for a legacy drawing table child titled Image", () => {
+    expect(getDrawingContainerEditTargetLabel({ title: "Image", type: "table" })).toBe("Table");
+  });
+
   it("keeps Image when it is the explicit title of a comment", () => {
     expect(getDrawingContainerEditTargetLabel({ title: "Image", type: "comment" })).toBe("Image");
   });

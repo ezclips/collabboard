@@ -75,6 +75,7 @@ function getMeaningfulTypeTitle(padlet: Padlet, typeLabel: string): string {
         normalized === type ||
         normalized === `new ${type}` ||
         normalized === `untitled ${type}` ||
+        (type === "table" && normalized === "image") ||
         normalized === "untitled"
     ) {
         return "";

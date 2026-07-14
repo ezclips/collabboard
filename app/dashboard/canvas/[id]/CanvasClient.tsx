@@ -5130,11 +5130,15 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       updated_at: nowIso,
       metadata: { childPadletIds: [childId], cardColor: '#ffffff' } as any,
     };
+    const childType = ((drawingPendingDraft as any).type || (drawingPendingDraft as any).kind || 'image') as Padlet['type'];
+    const childTitle = typeof (drawingPendingDraft as any).title === 'string'
+      ? (drawingPendingDraft as any).title.trim()
+      : '';
     const childPadlet: Padlet = {
       id: childId,
       board_id: canvasId,
-      type: ((drawingPendingDraft as any).type || (drawingPendingDraft as any).kind || 'image') as Padlet['type'],
-      title: (drawingPendingDraft as any).title || 'Image',
+      type: childType,
+      title: childTitle,
       content: typeof (drawingPendingDraft as any).content === 'string'
         ? (drawingPendingDraft as any).content
         : ((drawingPendingDraft as any).content != null ? JSON.stringify((drawingPendingDraft as any).content) : ''),

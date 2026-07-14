@@ -16,7 +16,12 @@ const isMeaningfulTitle = (title: string) => {
 
 const isTypePlaceholderTitle = (title: string, type: unknown) => {
   const semanticType = formatSemanticType(type);
-  return Boolean(semanticType) && title.toLowerCase() === semanticType.toLowerCase();
+  const normalizedTitle = title.toLowerCase();
+  const normalizedType = semanticType.toLowerCase();
+  return Boolean(semanticType) && (
+    normalizedTitle === normalizedType ||
+    (normalizedType === "table" && normalizedTitle === "image")
+  );
 };
 
 const getMetadataDisplayTitle = (metadata: Record<string, unknown> | null | undefined) => {
@@ -44,6 +49,6 @@ export const getDrawingContainerEditTargetLabel = (
   if (isMeaningfulTitle(title) && !isTypePlaceholderTitle(title, semanticSource)) return title;
   const metadataTitle = getMetadataDisplayTitle(padlet.metadata);
   if (metadataTitle) return metadataTitle;
-  if (isMeaningfulTitle(title)) return title;
+  if (isMeaningfulTitle(title) && !isTypePlaceholderTitle(title, semanticSource)) return title;
   return formatSemanticType(semanticSource);
 };
