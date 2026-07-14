@@ -14,6 +14,23 @@ rollback section); everything else is approved as authored.
 Role: implementation engineer after Fable approval
 Base commit: 2d4ce1fb31c5de7f20c98b61e85189a87fe9c32a
 
+**Amendment 5 (2026-07-14, temporary CTO authority — Fable unavailable 3
+days).** Ratifies the corrected pure/unit layer as accepted (line-ordering
+selected-plane fix, frame-mismatch target-frame fix, runtime-container
+delegation to `expandRuntimeContainerItems`, blank-slide-title fallback
+characterization; 51 focused / 424 full tests) per the independent Sonnet
+acceptance review (verdict: PASS WITH REQUIRED CHANGES). That review found
+the prior Playwright specs were hollow synthetic fixtures with no connection
+to the real Drawing route; the implementer has since replaced them with an
+honest `test.skip(true, "...")` naming the exact UI gap: the live Drawing
+Line tool has no reachable path to create a `CanvasLine` with
+`start_post_id`/`end_post_id` attached to app containers, and no deterministic
+way to seed a full disposable slide scene. This amendment authorizes the
+minimum test-only harness needed to close that gap so the approved §7.1/§7.2
+scenarios can run against the real application instead of being permanently
+skipped. See §5.3 for the full harness authorization. This amendment does
+not reopen or require redesign of the corrected unit helpers (§5.1/§5.2).
+
 **Bound commit message (use verbatim):**
 
 ```
@@ -180,14 +197,29 @@ Allowed to create only:
 - `e2e/characterization/drawing-line-bridge.spec.ts`
 - `e2e/characterization/drawing-presentation.spec.ts`
 
-Allowed to CREATE only if the two focused Playwright specs would otherwise
-duplicate shared board/canvas setup between themselves (CTO amendment: this
-file does not exist today — it is a create, not a modify; the only existing
-shared helper is `e2e/helpers/env.ts`, which must be reused, not copied):
+Allowed to CREATE (Amendment 5 — unconditionally authorized; supersedes the
+earlier "only if duplicative" condition, since the real gap is a missing
+seeding/cleanup path, not shared-setup duplication):
 
 - `e2e/characterization/drawingBridgeHarness.ts`
 
-No application source file may import the new characterization helpers.
+Allowed to MODIFY under Amendment 5 (to replace the honest-skip bodies with
+real harness-backed scenarios; the credential-skip guard and Playwright
+project/config must not change):
+
+- `e2e/characterization/drawing-line-bridge.spec.ts`
+- `e2e/characterization/drawing-presentation.spec.ts`
+
+Optional test-only support file, permitted under Amendment 5 ONLY if named
+here before implementation and only if essential to avoid duplicating fixture
+data between the two specs:
+
+- one additional file under `e2e/characterization/fixtures/` — NOT
+  pre-authorized; if the implementer believes one is essential, stop and
+  request a further narrow amendment naming the exact path.
+
+No application source file may import the new characterization helpers or
+the harness.
 
 Do not modify:
 
@@ -321,6 +353,84 @@ Required diagnostic fields:
 - `source`
 - `message`
 
+### 5.3 `drawingBridgeHarness.ts` (Amendment 5 — CTO-authorized test-only harness)
+
+Purpose: give the two Playwright specs a deterministic way to reach real
+application state that the existing UI cannot construct end-to-end (a
+`CanvasLine` with `start_post_id`/`end_post_id` attached to real app
+containers; a complete disposable slide scene with frames, native content,
+containers, and image fixtures).
+
+**Isolation (non-negotiable):**
+
+- Lives only at `e2e/characterization/drawingBridgeHarness.ts`.
+- Never imported by any production file. The production-import greps in §12
+  are extended to also cover this file (see updated grep below).
+- Introduces no production endpoint, feature flag, test hook, schema,
+  migration, dependency, config, or middleware change.
+- Does not touch the Excalidraw fork.
+
+**Authentication and environment:**
+
+- Reuses `e2e/helpers/env.ts` for credential/env access; does not duplicate it.
+- Uses the existing authenticated Playwright `setup` project / `storageState`.
+- Obeys `PW_BASE_URL` discipline exactly as the rest of `e2e/characterization/`.
+- Both specs retain `test.skip(!hasE2ECredentials, ...)`; no hardcoded
+  personal credentials anywhere in the harness or specs.
+
+**Disposable data:**
+
+- Every board/row the harness creates must use a unique, clearly-marked test
+  name/id (e.g. a `patch-064-harness-` prefix) so it can never collide with
+  or be mistaken for real user data.
+- Must never read, write, or delete an existing user's board.
+- Must track every created record/resource it seeds.
+- Must delete everything it created in `finally`/`afterAll`, including on
+  assertion failure — no test run may leave residual rows.
+- If deterministic cleanup cannot be guaranteed for a given piece of seeded
+  state, the harness must not seed that state; stop and report the gap
+  instead of seeding without cleanup.
+
+**Creation strategy — prefer real paths first:**
+
+- Prefer existing application/repository/API call paths (the same commands
+  the UI itself calls) to create containers, lines, frames, and content
+  wherever such a path exists and is deterministic.
+- Direct test-side writes (bypassing UI/product paths) are permitted only
+  where no real path exists, and only for the disposable records needed to
+  characterize currently-persisted structures already named in this spec:
+  - Drawing master scene content / app state / files
+  - app containers and child padlets
+  - `CanvasLine` rows with `start_post_id` / `end_post_id` attached
+  - Excalidraw frames and native scene elements
+  - uploaded-image fixture rows/assets already supported by the test
+    environment
+  - AI-image fixture rows only if deterministic fixture support already
+    exists; otherwise leave that one scenario narrowly skipped (see §7
+    AI-image note)
+- Any such direct write must: match the current live schema exactly (verify
+  against the repository/domain code, not assumption); be fully documented
+  in the harness source; be isolated to disposable records; be deterministically
+  deleted; and must not establish or imply any new production behavior
+  contract (it characterizes what already exists, it does not define new
+  behavior).
+
+**Minimal typed API (names may differ; responsibilities must not grow beyond
+this list without a further amendment):**
+
+- `createDisposableDrawingBoard(...)`
+- `seedDrawingContainers(...)`
+- `seedAttachedCanvasLines(...)`
+- `seedPresentationScene(...)`
+- `openDrawingBoard(page, boardId)`
+- `cleanupDrawingFixture(...)`
+
+The API must keep seeding/cleanup mechanics out of the two spec files (specs
+call the harness; they do not construct fixtures inline), expose only stable
+IDs/selectors the specs need, centralize cleanup in one place, and must not
+reimplement any production algorithm (sorting, binding resolution, geometry)
+— it only seeds and reads real state.
+
 ## 6. Required unit characterization tests
 
 Focused command:
@@ -444,6 +554,29 @@ is not already supported, do not add schema/config; report residual test data
 risk. Reuse `e2e/helpers/env.ts` for credential/env access; do not duplicate
 it.
 
+**Amendment 5 — real coverage via the harness.** Both specs must now use
+`drawingBridgeHarness.ts` (§5.3) to open a real Drawing route with seeded,
+disposable state and exercise real application DOM/components, replacing the
+prior honest `test.skip(true, ...)` bodies. Required rules:
+
+- Assertions must target real application selectors, real rendered
+  components, persisted fixture rows, or already-exposed application state.
+  No fabricated DOM nodes. `page.evaluate()` may inspect real DOM/state but
+  must not manufacture the behavior under test (no reimplementing sorting,
+  orientation, binding, or renderer logic inline).
+- Cover the practical, automatable subset of §7.1 and §7.2 below. If a listed
+  scenario genuinely cannot be triggered through the real UI even after
+  seeding, verify the real persisted/rendered state directly instead of
+  fabricating DOM, and document the exact limitation in the spec as a
+  narrowly-scoped, reason-stated skip — do not silently drop it.
+- AI-image scenarios (§7.2 #4 and #12 AI-specific parts) may remain narrowly
+  skipped with a stated reason if no deterministic AI fixture support exists;
+  this must not block the rest of the runtime freeze.
+- Credential-based skipping is unchanged and must remain first in both files.
+- `setup`-project results must be reported separately from the two
+  characterization test results (as in every prior gate run in this
+  program).
+
 ### 7.1 Line bridge browser scenarios
 
 1. Create two app containers and one back-plane line between them.
@@ -536,10 +669,15 @@ PATCH-064 must record these if still present at implementation time, but must no
 ## 9.5 Rollback (CTO amendment — required section)
 
 Additive-only: at most seven new files (four helpers/tests, two Playwright
-specs, optionally the shared harness) and zero modified production files.
-`git revert <implementation commit>` restores the exact pre-patch tree; the
-§11 hash fences prove nothing else moved. No schema, dependency, fork, or
-config surface is involved, so revert is a plain one-commit operation.
+specs, plus the now-authorized `drawingBridgeHarness.ts`) and zero modified
+production files. `git revert <implementation commit>` restores the exact
+pre-patch tree; the §11 hash fences prove nothing else moved. No schema,
+dependency, fork, or config surface is involved, so revert is a plain
+one-commit operation. Amendment 5 additionally requires: before revert (or
+before re-running), confirm no disposable harness-seeded records remain in
+the database — the harness's own cleanup proof (§12) is what makes revert
+safe; a revert must never be the only cleanup mechanism for leftover test
+data.
 
 ## 10. Stop conditions
 
@@ -557,6 +695,18 @@ Stop before editing if any condition occurs:
 - implementation would require production behavior changes
 - implementation would require schema/config/dependency changes
 - Playwright cannot reach a stable Drawing Canvas route after following `LESSONS_LEARNED` port discipline
+- (Amendment 5) deterministic cleanup of harness-seeded data cannot be
+  guaranteed for a required scenario
+- (Amendment 5) a production endpoint, feature flag, or test hook would be
+  needed to seed required state
+- (Amendment 5) existing app authentication/API paths cannot create the
+  required disposable records in isolation
+- (Amendment 5) the harness would need to read, write, or delete an existing
+  user's board
+- (Amendment 5) a direct-write schema assumption cannot be verified against
+  live repository/domain code
+- (Amendment 5) required runtime state cannot be seeded without widening
+  scope beyond the files named in §4/§5.3
 
 ## 11. Hash fences
 
@@ -627,9 +777,19 @@ Acceptance greps:
 ```bash
 rg -n "from ['\"]@/lib/infra/drawing/(lineBridge|presentationBridge)|from ['\"]\.*/(lineBridge|presentationBridge)" app components lib --glob "!lib/infra/drawing/*.test.ts"
 rg -n "lineBridge|presentationBridge" components/collabboard/canvas/layouts components/presentation app/dashboard/canvas
+rg -n "drawingBridgeHarness" app components lib
 ```
 
-Both greps must prove no production application import was introduced.
+All three greps must prove no production application import was introduced
+(the third confirms the harness itself is never imported outside `e2e/`).
+
+Amendment 5 additional required gates:
+
+- Real credentialed run: `npx playwright test e2e/characterization/drawing-line-bridge.spec.ts --project=characterization` against a warmed `PW_BASE_URL` server, with credentials present — must exercise the real Drawing route via the harness, not skip.
+- Real credentialed run: `npx playwright test e2e/characterization/drawing-presentation.spec.ts --project=characterization` — same requirement.
+- Credential-off proof: rerun both with credentials absent (or `E2E_SKIP_CREDENTIALS=1` if that convention is still in use) and confirm both skip cleanly at the credential guard.
+- Cleanup proof: after the credentialed run, independently query for any harness-seeded disposable board/rows (by the harness's naming convention) and confirm zero remain.
+- Re-verify all 31 hash fences after the full run (in addition to before).
 
 ## 13. Required final report for implementation
 
@@ -642,8 +802,13 @@ The implementer must report:
 - Playwright results
 - typecheck, boundaries, verify, build, and dev-ready results
 - hash-fence before/after results
-- production import grep result
+- production import grep result (including the harness grep)
 - manual matrix result or explicit manual-not-run statement
 - known defects recorded but not fixed
 - commit hash, if commit is authorized
 - push status, if push is authorized
+- (Amendment 5) harness API surface actually implemented
+- (Amendment 5) which §7.1/§7.2 scenarios run for real vs. remain narrowly
+  skipped, with reasons for each skip
+- (Amendment 5) cleanup proof: confirmation that zero harness-seeded records
+  remain after the full credentialed run

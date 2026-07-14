@@ -361,6 +361,35 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-14** — PATCH-064 Amendment 5 **APPROVED under temporary CTO
+  authority** (Fable unavailable ~3 days; narrow governance-only action, no
+  application or test code touched). Context: the six PATCH-064
+  implementation files remained uncommitted; an independent Sonnet
+  acceptance review of the corrected pure/unit layer returned **PASS WITH
+  REQUIRED CHANGES** — the four unit findings from the first review (selected
+  -line-plane ordering, frame-mismatch false positives, runtime-container
+  expansion reimplementing instead of delegating, untested blank-slide-title
+  fallback) were all confirmed fixed (51 focused / 424 full tests, 31/31 hash
+  fences, zero production imports), and the previously-hollow synthetic
+  Playwright specs had been correctly replaced with an honest
+  `test.skip(true, "...")` stating the real blocker: the live Drawing Line
+  tool has no reachable UI path to attach a `CanvasLine` to app containers,
+  and no deterministic way to seed a full disposable slide scene — so real
+  runtime coverage was impossible without a seeding harness. This amendment
+  authorizes exactly that: an unconditional (no longer duplication-gated)
+  test-only `e2e/characterization/drawingBridgeHarness.ts`, with permission to
+  modify the two Playwright specs to use it, under a detailed isolation/
+  disposability/cleanup/API boundary (§5.3 of the patch) — no production
+  source, schema, config, dependency, or Excalidraw fork change; disposable,
+  uniquely-named records only; deterministic `finally`/`afterAll` cleanup;
+  direct-write fixture creation permitted only where no real app/API path
+  exists and only for structures already named in the original census.
+  Ratifies the corrected unit layer as accepted without requiring redesign.
+  New stop conditions, gates (real credentialed runs, credential-off skip
+  proof, cleanup-proof query, re-verified 31/31 hashes, extended
+  production-import grep covering the harness itself), and final-report
+  fields added. Implementation may resume against the amended spec; the six
+  existing implementation files were not touched by this governance action.
 - **2026-07-14** — PATCH-064 AUTHORED + **APPROVED** (characterization-only;
   Drawing Bridge Hardening Program patch 3). Freezes the two remaining
   high-risk Drawing subsystems before any fix work: the LINE BRIDGE (app SVG
