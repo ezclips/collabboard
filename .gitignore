@@ -49,6 +49,7 @@ devserver.out.log
 tmp/
 error_Logs/
 devserver*.log
+.next-dev*.log
 *tsc_output.txt
 Sakai_Investments/
 *.bundle
