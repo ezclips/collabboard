@@ -5,12 +5,26 @@ type DrawingEditTargetLabelPadlet = {
 };
 
 const GENERIC_TITLES = new Set(["untitled"]);
+const DISPLAY_METADATA_KEYS = ["caption", "linkTitle", "todoTitle", "title"] as const;
 
 const toText = (value: unknown) => (typeof value === "string" ? value.trim() : "");
 
 const isMeaningfulTitle = (title: string) => {
   if (!title) return false;
   return !GENERIC_TITLES.has(title.toLowerCase());
+};
+
+const isTypePlaceholderTitle = (title: string, type: unknown) => {
+  const semanticType = formatSemanticType(type);
+  return Boolean(semanticType) && title.toLowerCase() === semanticType.toLowerCase();
+};
+
+const getMetadataDisplayTitle = (metadata: Record<string, unknown> | null | undefined) => {
+  for (const key of DISPLAY_METADATA_KEYS) {
+    const value = toText(metadata?.[key]);
+    if (isMeaningfulTitle(value)) return value;
+  }
+  return "";
 };
 
 const formatSemanticType = (value: unknown) => {
@@ -26,6 +40,10 @@ export const getDrawingContainerEditTargetLabel = (
   padlet: DrawingEditTargetLabelPadlet,
 ) => {
   const title = toText(padlet.title);
+  const semanticSource = padlet.type ?? padlet.metadata?.kind;
+  if (isMeaningfulTitle(title) && !isTypePlaceholderTitle(title, semanticSource)) return title;
+  const metadataTitle = getMetadataDisplayTitle(padlet.metadata);
+  if (metadataTitle) return metadataTitle;
   if (isMeaningfulTitle(title)) return title;
-  return formatSemanticType(padlet.type ?? padlet.metadata?.kind);
+  return formatSemanticType(semanticSource);
 };

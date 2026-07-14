@@ -23,8 +23,16 @@ describe("getDrawingContainerEditTargetLabel", () => {
     expect(getDrawingContainerEditTargetLabel({ title: "Untitled", type: "image" })).toBe("Image");
   });
 
+  it("uses image caption when the stored image title is a type placeholder", () => {
+    expect(getDrawingContainerEditTargetLabel({ title: "Image", type: "image", metadata: { caption: "Test Label" } })).toBe("Test Label");
+  });
+
   it("keeps Image when it is the explicit title of a comment", () => {
     expect(getDrawingContainerEditTargetLabel({ title: "Image", type: "comment" })).toBe("Image");
+  });
+
+  it("uses link metadata title when the stored link title is a type placeholder", () => {
+    expect(getDrawingContainerEditTargetLabel({ title: "Link", type: "link", metadata: { linkTitle: "Docs" } })).toBe("Docs");
   });
 
   it("uses an ordinary text post title", () => {
