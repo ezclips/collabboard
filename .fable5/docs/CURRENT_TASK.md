@@ -361,6 +361,57 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-14** — PATCH-062 landed and reviewed: **PASSED** (commit
+  `2a82b7b`, pushed to main). **The Drawing Bridge Hardening Program is
+  OPEN: the bridge contract is normative (PATCH-062 §0.3) and the
+  characterization net is live.** Independently re-verified against the
+  spec, not the implementer's report: scope exactly the two bound new
+  files (`lib/infra/drawing/bridge.ts` 319 lines, `bridge.test.ts` 460 —
+  both under ceiling, both `i/lf w/lf`); bound commit message verbatim;
+  all 16 MUST-NOT-CHANGE hashes held (no app source, fork, config, or
+  dependency touched); purity gates exact (react/next/supabase imports 0,
+  `console.` 0, single `./importScene` import source, `padlet://` literal
+  0 in bridge.ts — all link parsing delegates to
+  `extractPadletIdFromEmbeddableLink`, no second parser); isolation gate 0
+  (nothing imports the module except its test — zero runtime reachability,
+  zero behavior change by construction). All 30 bound tests present with
+  bound names T1–T30, deep-freeze discipline held; the T19 parity gate is
+  real (set-equality against the live `resolveSlidePadlets` on the ≥6-case
+  matrix, incl. the strict-inequality edge-touch exclusion). Gates re-run
+  by the reviewer: focused vitest 49/2 (bound), full suite 355/37 (bound),
+  `npm run verify` green end-to-end incl. production build, dev server
+  Ready in 2.1s on :3000, port gate 0 before/0 after. One accepted
+  interpretation ruling: `embeddable-frame-dangling` is checked for
+  app (padlet-linked) embeddables only — consistent with T26's
+  native-embeddable tolerance and the bridge's scope; recorded here so
+  063+ specs inherit the reading. Deferred, disclosed: the §6 runtime
+  observations (duplicate-link, paste-membership, slide-overlap, AI-child
+  repros on a live board) are review-stage CTO duties that bind PATCH-063's
+  before/after behavior, not 062 acceptance (062's §9 criteria are all
+  deterministic and all verified) — they run at the start of the 063
+  authoring session. Root causes RC-1…RC-6 stand as specified; no fix was
+  bundled. Doc-drift watchlist item from §0.2 remains open (`.agent/
+  skill.md` claims renderEmbeddable keys by padletId+renderSignature; live
+  code keys by padletId alone — owner-visible doc, not `.fable5/`).
+- **2026-07-14** — PATCH-062 AUTHORED (handoff-ready; **GPT-5.5 bound**,
+  GPT-5.4 explicitly not authorized — new semantics-bearing module whose
+  fixtures encode live behavior). First patch of the Drawing Bridge
+  Hardening Program: bridge contract (4 clauses), root-cause census
+  RC-1…RC-6 with exact sites (duplicate `padlet://` links from
+  fork-native + slide duplication vs first-match resolvers; verbatim
+  clipboard metadata paste; ≥3 divergent membership unions; slide-overlap
+  membership fallback; AI-child-blind slide previews; uncharacterized
+  z-order), pure helpers in NEW `lib/infra/drawing/bridge.ts` (P6 ruling:
+  `parsePadletLink` already exists as `extractPadletIdFromEmbeddableLink`
+  — reused, not duplicated; the H6/resolveSlidePadlets duality authorized
+  only under the T19 parity lock with the bridge helper as designated
+  survivor), 30 bound characterization tests, hash fences on 16 files,
+  additive-only rollback. Diagnostics wiring into DrawingLayout REFUSED
+  under the never-grow ceiling rule (3,078 lines); pure
+  `summarizeDrawingBridgeSnapshot` ships instead, wiring deferred. Unit
+  baseline re-run at authoring (325/36 — grew from 061's 252/28 via the
+  auth-fix commits `8e5e4b6`…`efe7332`, which also moved CanvasClient off
+  061's final hash; today's hashes bound instead).
 - **2026-07-13** — PATCH-061 landed and reviewed: **PASSED** (commit
   `1f74386`; independently re-derived against the LIVE on-disk spec at
   its authoritative commit `c96c46e`, not the implementer's report —
