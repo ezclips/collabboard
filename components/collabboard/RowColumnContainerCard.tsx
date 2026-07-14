@@ -430,7 +430,7 @@ export default function RowColumnContainerCard({
                                 e.stopPropagation();
                                 setOpenCommentsChildId(childCommentsOpen ? null : child.id);
                               }}
-                              className="flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors"
+                              className={`flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors ${canvasContext === "drawing" ? "!text-[10px] !px-1.5 !py-0.5 !bg-[#f3f4f6] !text-[#4b5563] hover:!bg-[#e5e7eb] !shadow-none" : ""}`}
                               title={childCommentsOpen
                                 ? 'Hide comments'
                                 : childDetachedComments.length > 0

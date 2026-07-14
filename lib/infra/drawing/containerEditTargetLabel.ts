@@ -1,3 +1,5 @@
+import { isPlaceholderTitle } from "../collabboard/postTitle";
+
 type DrawingEditTargetLabelPadlet = {
   title?: unknown;
   type?: unknown;
@@ -12,16 +14,6 @@ const toText = (value: unknown) => (typeof value === "string" ? value.trim() : "
 const isMeaningfulTitle = (title: string) => {
   if (!title) return false;
   return !GENERIC_TITLES.has(title.toLowerCase());
-};
-
-const isTypePlaceholderTitle = (title: string, type: unknown) => {
-  const semanticType = formatSemanticType(type);
-  const normalizedTitle = title.toLowerCase();
-  const normalizedType = semanticType.toLowerCase();
-  return Boolean(semanticType) && (
-    normalizedTitle === normalizedType ||
-    (normalizedType === "table" && normalizedTitle === "image")
-  );
 };
 
 const getMetadataDisplayTitle = (metadata: Record<string, unknown> | null | undefined) => {
@@ -46,9 +38,8 @@ export const getDrawingContainerEditTargetLabel = (
 ) => {
   const title = toText(padlet.title);
   const semanticSource = padlet.type ?? padlet.metadata?.kind;
-  if (isMeaningfulTitle(title) && !isTypePlaceholderTitle(title, semanticSource)) return title;
+  if (isMeaningfulTitle(title) && !isPlaceholderTitle(title, semanticSource)) return title;
   const metadataTitle = getMetadataDisplayTitle(padlet.metadata);
   if (metadataTitle) return metadataTitle;
-  if (isMeaningfulTitle(title) && !isTypePlaceholderTitle(title, semanticSource)) return title;
   return formatSemanticType(semanticSource);
 };

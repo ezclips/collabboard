@@ -10,6 +10,7 @@ import {
 import SafeHtmlContent from "@/components/collabboard/SafeHtmlContent";
 import type { Padlet } from "@/types/collabboard";
 import { buildYouTubeThumbCandidates, extractYouTubeId } from "@/lib/media/youtubeThumb";
+import { getMeaningfulTitle } from "@/lib/infra/collabboard/postTitle";
 
 type Props = {
     padlet: Padlet;
@@ -109,6 +110,7 @@ export default function ContainerChildPreviewCard({
     className,
 }: Props) {
     const type = normalizeType(padlet.type);
+    const tableTitle = getMeaningfulTitle(padlet.title, "table");
 
     // ✅ Robust comment detection (fixes "Comment renders as Note")
     const isComment = isCommentPost(padlet);
@@ -269,11 +271,13 @@ export default function ContainerChildPreviewCard({
                     {/* ========= TABLE PREVIEW (placeholder) ========= */}
                     {type === "table" && !isComment && (
                         <div className="mt-2">
-                            <SafeHtmlContent
-                                content={padlet.title || "Table"}
-                                className="block text-xs text-gray-700 line-clamp-1"
-                                mode="text"
-                            />
+                            {tableTitle && (
+                                <SafeHtmlContent
+                                    content={tableTitle}
+                                    className="block text-xs text-gray-700 line-clamp-1"
+                                    mode="text"
+                                />
+                            )}
                             <div className="mt-1 text-[11px] text-gray-500">Table content</div>
                         </div>
                     )}

@@ -49,6 +49,7 @@ import type { DiagramSubtype } from '@/lib/ai/contracts';
 import type { StableCanvasActions } from '@/hooks/canvas/useStableCanvasActions';
 import { useCanvasEditor } from '@/components/collabboard/canvas/contexts/CanvasEditorContext';
 import { useCanvasConfig } from '@/components/collabboard/canvas/contexts/CanvasConfigContext';
+import { getMeaningfulTitle } from '@/lib/infra/collabboard/postTitle';
 
 const DND_KIND_CONTAINER_MOVE = 'columns-container-move';
 
@@ -3495,14 +3496,19 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
               )}
 
               {/* Table Card Display */}
-              {padlet.type === 'table' && (
-                <div className="space-y-1">
-                  {/* Table Title */}
-                  <h4 className="text-xs font-semibold text-gray-800 mb-1">
-                    {padlet.title || 'Table'}
-                  </h4>
-                  {/* Mini table preview */}
-                  {(() => {
+              {padlet.type === 'table' && (() => {
+                const tableTitle = getMeaningfulTitle(padlet.title, 'table');
+
+                return (
+                  <div className="space-y-1">
+                    {/* Table Title */}
+                    {tableTitle && (
+                      <h4 className="text-xs font-semibold text-gray-800 mb-1">
+                        {tableTitle}
+                      </h4>
+                    )}
+                    {/* Mini table preview */}
+                    {(() => {
                     // CellStyle type for table cells
                     type CellStyle = {
                       bg?: string;
@@ -3589,9 +3595,10 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                         )}
                       </>
                     );
-                  })()}
-                </div>
-              )}
+                    })()}
+                  </div>
+                );
+              })()}
 
               {/* Container Card Display - uses RowColumnContainerCard for proper comment rendering */}
               {padlet.type === 'container' && (

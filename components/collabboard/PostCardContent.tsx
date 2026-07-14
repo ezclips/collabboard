@@ -13,6 +13,7 @@ import { extractAIContentFromPadletMetadata } from "@/lib/ai/normalize-ai-conten
 import { createToggleTaskCommand } from "@/lib/domain/canvas/posts";
 import { asUserId } from "@/lib/domain/core/ids";
 import { createPostsRepository } from "@/lib/infra/canvas/postsRepository";
+import { getMeaningfulTitle } from "@/lib/infra/collabboard/postTitle";
 
 type CellStyle = {
     bg?: string;
@@ -63,23 +64,6 @@ function getMeaningfulImageTitle(padlet: Padlet): string {
     if (!title) return "";
     const normalized = title.toLowerCase();
     if (normalized === "image" || normalized === "untitled") return "";
-    return title;
-}
-
-function getMeaningfulTypeTitle(padlet: Padlet, typeLabel: string): string {
-    const title = String(padlet.title ?? "").trim();
-    if (!title) return "";
-    const normalized = title.toLowerCase();
-    const type = typeLabel.trim().toLowerCase();
-    if (
-        normalized === type ||
-        normalized === `new ${type}` ||
-        normalized === `untitled ${type}` ||
-        (type === "table" && normalized === "image") ||
-        normalized === "untitled"
-    ) {
-        return "";
-    }
     return title;
 }
 
@@ -464,7 +448,7 @@ export default function PostCardContent({
         const cellStyles = tableData.cellStyles || {};
         const displayRows = rows.slice(0, 3);
         const displayCols = columns.slice(0, 3);
-        const tableTitle = getMeaningfulTypeTitle(padlet, "table");
+        const tableTitle = getMeaningfulTitle(padlet.title, "table");
 
         const getCellStyle = (rowIndex: number, colIndex: number): CellStyle => {
             const key = `${rowIndex}-${colIndex}`;

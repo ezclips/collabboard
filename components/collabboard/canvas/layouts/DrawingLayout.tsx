@@ -448,7 +448,7 @@ function DrawingEmbeddableCard({
             onExpandAvailabilityChange={setCanExpand}
             onNaturalHeight={(h) => {
               const stripH = 28;
-              const newHeight = Math.max(stripH + 20 + h, 80); // p-2 (16px) + 2px border + 2px buffer
+              const newHeight = Math.max(stripH + 22 + h, 80); // p-2 (16px) + 2px border + 4px buffer
               const excAPI = excalidrawAPIRef.current;
               if (!excAPI) return;
               const existing = excAPI.getSceneElements().find(
