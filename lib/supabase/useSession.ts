@@ -27,16 +27,13 @@ export function useSupabaseSession() {
     let mounted = true;
 
     (async () => {
-      console.log('[useSupabaseSession] Fetching session...');
-      const { data, error } = await supabase.auth.getSession();
-      console.log('[useSupabaseSession] getSession result:', { session: data.session?.user?.email, error });
+      const { data } = await supabase.auth.getSession();
       if (!mounted) return;
       setSession(data.session ?? null);
       setReady(true);
     })();
 
     const { data: sub } = supabase.auth.onAuthStateChange((_event, newSession) => {
-      console.log('[useSupabaseSession] Auth state changed:', _event, newSession?.user?.email);
       setSession(newSession ?? null);
       setReady(true);
     });
