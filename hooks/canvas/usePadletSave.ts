@@ -699,6 +699,7 @@ export function usePadletSave(params: UsePadletSaveParams) {
   // ============================================================================
   const saveTable = useCallback(async (data: SaveTableData) => {
     if (!canvasId || !padletToEdit) return;
+    const tableTitle = data.title.trim();
 
     // Preserve existing metadata (especially parentId for container children)
     const metadata = {
@@ -722,7 +723,7 @@ export function usePadletSave(params: UsePadletSaveParams) {
           .from('padlets')
           .insert({
             board_id: canvasId,
-            title: data.title || 'New Table',
+            title: tableTitle,
             content: data.content,
             type: 'table',
             position_x,
@@ -739,7 +740,7 @@ export function usePadletSave(params: UsePadletSaveParams) {
         const { error } = await supabase
           .from('padlets')
           .update({
-            title: data.title || 'New Table',
+            title: tableTitle,
             content: data.content,
             metadata,
             updated_at: new Date().toISOString(),
@@ -756,7 +757,7 @@ export function usePadletSave(params: UsePadletSaveParams) {
       } else {
         setPadlets(prev => prev.map(p =>
           p.id === padletToEdit!.id
-            ? { ...p, title: data.title || 'New Table', content: data.content, metadata }
+            ? { ...p, title: tableTitle, content: data.content, metadata }
             : p
         ));
       }

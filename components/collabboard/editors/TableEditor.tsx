@@ -132,7 +132,7 @@ const TABLE_VIEWPORT_WIDTH = TABLE_ROW_HEADER_WIDTH + TABLE_CELL_WIDTH * TABLE_V
 const TABLE_VIEWPORT_HEIGHT = TABLE_CELL_HEIGHT * (TABLE_VISIBLE_ROWS + 1);
 
 export default function TableEditor({
-    initialTitle = "New Table",
+    initialTitle = "",
     initialContent = "",
     onSave,
     onClose,

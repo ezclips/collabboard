@@ -185,7 +185,7 @@ export default function CanvasModals({
             setIsTableEditorOpen(false);
             setPadletToEdit(null);
           }}
-          initialTitle={padletToEdit?.title || 'New Table'}
+          initialTitle={padletToEdit?.title || ''}
           initialContent={padletToEdit?.content || ''}
           onSave={saveTable}
         />

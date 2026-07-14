@@ -1663,7 +1663,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       case 'table':
         return {
           ...basePayload,
-          title: draft.metadata?.tableTitle || 'Table',
+          title: typeof draft.metadata?.tableTitle === 'string' ? draft.metadata.tableTitle.trim() : '',
           content: draft.content || JSON.stringify(draft.metadata?.tableData || []),
           type: 'table',
           metadata: { ...draft.metadata, parentId },
@@ -5498,7 +5498,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         setPadletToEdit({
           id: 'new',
           board_id: canvasId,
-          title: 'New Table',
+          title: '',
           content: '{"columns":["A","B","C"],"rows":[["","",""],["","",""],["","",""]]}',
           type: 'table',
           position_x: 0,

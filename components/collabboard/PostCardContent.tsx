@@ -66,6 +66,22 @@ function getMeaningfulImageTitle(padlet: Padlet): string {
     return title;
 }
 
+function getMeaningfulTypeTitle(padlet: Padlet, typeLabel: string): string {
+    const title = String(padlet.title ?? "").trim();
+    if (!title) return "";
+    const normalized = title.toLowerCase();
+    const type = typeLabel.trim().toLowerCase();
+    if (
+        normalized === type ||
+        normalized === `new ${type}` ||
+        normalized === `untitled ${type}` ||
+        normalized === "untitled"
+    ) {
+        return "";
+    }
+    return title;
+}
+
 function asStringContent(v: unknown): string {
     if (typeof v === "string") return v;
     if (v == null) return "";
@@ -447,6 +463,7 @@ export default function PostCardContent({
         const cellStyles = tableData.cellStyles || {};
         const displayRows = rows.slice(0, 3);
         const displayCols = columns.slice(0, 3);
+        const tableTitle = getMeaningfulTypeTitle(padlet, "table");
 
         const getCellStyle = (rowIndex: number, colIndex: number): CellStyle => {
             const key = `${rowIndex}-${colIndex}`;
@@ -455,7 +472,7 @@ export default function PostCardContent({
 
         return (
             <div className="space-y-1 select-none">
-                <h4 className="text-xs font-semibold text-gray-800 mb-1">{padlet.title || "Table"}</h4>
+                {tableTitle && <h4 className="text-xs font-semibold text-gray-800 mb-1">{tableTitle}</h4>}
 
                 <div className="overflow-x-auto rounded border border-gray-200 bg-white">
                     <table className="w-full text-[9px]">
