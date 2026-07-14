@@ -267,6 +267,16 @@ export async function POST(req: NextRequest) {
     const { client: authClient, getRetryAfterSeconds } = getSupabaseAnonServerClient();
     const { data, error } = await authClient.auth.signInWithPassword({ email, password });
 
+    if (error) {
+      // Server-side only; logs provider error metadata, never credentials.
+      console.error('Supabase sign-in diagnostic', {
+        status: (error as { status?: number }).status ?? null,
+        code: (error as { code?: string }).code ?? null,
+        message: error.message,
+        retryAfterHeaderSeconds: getRetryAfterSeconds(),
+      });
+    }
+
     if (error || !data.session) {
       const authErrorMessage = error?.message;
       const providerRateLimited = isRateLimitError(authErrorMessage);

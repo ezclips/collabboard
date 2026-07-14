@@ -12,6 +12,10 @@ import {
   resolveLoginRateLimit,
   UNKNOWN_SUPABASE_LOGIN_RATE_LIMIT_MESSAGE,
 } from '@/lib/infra/auth/loginRateLimit';
+import {
+  clearAuthCookiesInBrowser,
+  resolveLoginPageSession,
+} from '@/lib/infra/auth/staleSessionCleanup';
 
 const MIN_PASSWORD_LENGTH = 15;
 const MAX_PASSWORD_LENGTH = 64;
@@ -68,23 +72,28 @@ function AuthForm() {
     return () => window.clearInterval(intervalId);
   }, [rateLimitedUntil]);
 
-  // Check if user is already logged in
+  // Check if user is already logged in — via cookie inspection only, never
+  // getSession(). getSession() on this page triggers a refresh-token exchange
+  // when the stored session is expired; with a stale token that exchange gets
+  // 429 (over_request_rate_limit) and poisons login before the user can even
+  // submit (2026-07-13). Stale sessions are cleared locally instead so no
+  // layer (browser client, middleware, route handlers) keeps retrying them.
   useEffect(() => {
-    const checkUser = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (shouldSwitchAccount) {
-        if (session) {
-          await supabase.auth.signOut();
-        }
-        return;
-      }
+    const { action, cookieNames } = resolveLoginPageSession({
+      cookieHeader: document.cookie,
+      nowMs: Date.now(),
+      switchAccount: shouldSwitchAccount,
+    });
 
-      if (session) {
-        router.push(redirectPath);
-      }
-    };
-    checkUser();
-  }, [supabase, router, redirectPath, shouldSwitchAccount]);
+    if (action === 'redirect') {
+      router.push(redirectPath);
+      return;
+    }
+
+    if (action === 'cleared') {
+      clearAuthCookiesInBrowser(cookieNames);
+    }
+  }, [router, redirectPath, shouldSwitchAccount]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value, type, checked } = e.target;

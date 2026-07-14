@@ -97,11 +97,9 @@ export default function SubscriptionPage() {
 
         try {
             setUpgrading(true);
-            let { data: { session } } = await supabase.auth.getSession();
-            if (!session) {
-                const refreshed = await supabase.auth.refreshSession();
-                session = refreshed.data.session;
-            }
+            // getSession() already refreshes an expired token internally; an
+            // extra refreshSession() on null just burns Supabase auth quota.
+            const { data: { session } } = await supabase.auth.getSession();
             if (!session?.access_token) {
                 throw new Error('No active session. Please sign in again.');
             }
@@ -131,11 +129,7 @@ export default function SubscriptionPage() {
     const handleOpenPortal = async () => {
         try {
             setOpeningPortal(true);
-            let { data: { session } } = await supabase.auth.getSession();
-            if (!session) {
-                const refreshed = await supabase.auth.refreshSession();
-                session = refreshed.data.session;
-            }
+            const { data: { session } } = await supabase.auth.getSession();
             if (!session?.access_token) {
                 throw new Error('No active session. Please sign in again.');
             }
