@@ -361,6 +361,27 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-14** — PATCH-063 REWRITTEN + **APPROVED** (corrective/retroactive
+  spec; GPT-5.4 acceptable). The original draft was unapproved and never
+  matched what shipped: five commits (`39ff3c1`…`625fdde`) landed under it, two
+  fixes sit uncommitted, and an independent review returned **PASS WITH
+  REQUIRED CHANGES**. The rewrite ratifies the good work (drawing edit-target
+  labels, table-title blanking on the create/edit/save chain, the drawing-only
+  literal comment-button colours that dodge the fork's `--color-gray-100`
+  override, the +2px container-clip buffer) and binds ONE corrective commit to
+  close the arc: a single shared pure placeholder helper
+  (`lib/infra/collabboard/postTitle.ts`) replacing the two divergent rules,
+  fixes for the two live blank-table surfaces the review caught
+  (`FreeformPadletCards.tsx:3502`, `ContainerChildPreviewCard.tsx:273`),
+  removal of the redundant `containerEditTargetLabel.ts` guard, and regression
+  tests. Editor-routing, comment data-model, frame/slide/lines/duplication/
+  clipboard/AI/fork/schema/config/deps all OUT of scope and hash-fenced. The
+  old draft's `postType.ts` resolver + routing goal are WITHDRAWN. Governance
+  note: the arc's five commits reached `main` without CTO approval of the spec
+  — a process breach recorded here; future Drawing-program patches must be
+  approved before implementation (SKILL §4, AI_WORKFLOW). Implementation not
+  started; the two uncommitted C/D edits remain in the working tree to be
+  bundled into the corrective commit.
 - **2026-07-14** — PATCH-062 landed and reviewed: **PASSED** (commit
   `2a82b7b`, pushed to main). **The Drawing Bridge Hardening Program is
   OPEN: the bridge contract is normative (PATCH-062 §0.3) and the
