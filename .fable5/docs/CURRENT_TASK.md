@@ -361,6 +361,54 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-15** — PATCH-064 **DONE (commit `2ed1455`), independent Sonnet
+  verdict: PASS** — Drawing Bridge Hardening Program patch 3 complete after
+  five independent review rounds (FAIL → 3× PASS WITH REQUIRED CHANGES →
+  PASS). Landed: exactly the seven Amendment-5-authorized files (lineBridge +
+  presentationBridge helpers/tests, two real-runtime Playwright specs, the
+  test-only drawingBridgeHarness). Final state independently verified: 424
+  unit tests / 41 files (51 focused / 2), 31/31 protected hashes intact
+  before AND after all runs, zero production imports of any characterization
+  helper or the harness, tsc/boundaries/verify/build green, fixture cleanup
+  COMPLETE via exact-ID + prefix proof on a separate query path. Real runtime
+  coverage now active: line rendering + full 8-role DOM matrix, real
+  header-drag movement (container moves; line geometry AND persisted row
+  unchanged — defect frozen), real editor-driven natural-height growth
+  (161.5→337.5px; line unchanged — outcome
+  `content-saved-height-increased-line-geometry-unchanged`), reload/nav
+  persistence, deletion, multi-line/container independence; presentation
+  frame discovery, titles, sidebar+fullscreen ordering, Slide 1=child A /
+  Slide 2=child B active-slide assertions, real thumbnails, uploaded-image
+  via `/templates/moodboard.png`, native text/shape blank-raster defect
+  honestly frozen (text 0 / shape 0 / total 0), fullscreen next/prev/exit,
+  close/reopen. Approved narrow skips (all Amendment-5-permitted): hit-path
+  pointer-click/edit-handle interaction (Excalidraw canvas pointer
+  interception — real trial-click timeout), AI-image (no deterministic
+  fixture), uploaded-image storage-cleanup note (documentation-only, no
+  storage object exists). Two accepted non-blocking findings carried to
+  PATCH-065: the pointer-interaction investigation and the
+  ordering-discrimination seed order (frame insertion order currently
+  coincides with sort order). Housekeeping: commit message landed as
+  "test(drawing): freeze line bridge and presentation behavior (PATCH-064)"
+  instead of the bound "characterize … invariants" text — content verified
+  correct, message-only deviation, recorded as with PATCH-063.
+- **2026-07-15** — PATCH-065 AUTHORED + **APPROVED** (test-only
+  investigation/characterization; Drawing Bridge Hardening Program patch 4).
+  Closes the two PATCH-064 carried findings: (A) back-line pointer-interaction
+  investigation — identify the real pointer-event path through the
+  DrawingLayout back-line event bridge vs. Excalidraw canvas interception,
+  classify the Playwright trial-click timeout (product defect vs. selector
+  error vs. overlay/z-index vs. bridge timing), and add real characterization
+  coverage; production changes NOT authorized unless a proven root cause is
+  brought back for an explicit amendment first. (B) restore the
+  discriminating presentation-ordering fixture (portrait seeded first,
+  landscape still expected first in the sidebar) while keeping the corrected
+  Slide 1/child A, Slide 2/child B assertions. Allowed files: the three
+  existing e2e files only. All PATCH-064 hash fences carry forward; 424-test
+  baseline bound; independent Sonnet review required before commit.
+  Implementation not started. After PATCH-065, the first production Drawing
+  Bridge refactor patch will be proposed — one root cause only, riding the
+  PATCH-062/064 regression net.
 - **2026-07-14** — PATCH-064 Amendment 5 **APPROVED under temporary CTO
   authority** (Fable unavailable ~3 days; narrow governance-only action, no
   application or test code touched). Context: the six PATCH-064
