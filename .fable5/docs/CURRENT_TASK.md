@@ -361,6 +361,35 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-14** — PATCH-064 AUTHORED + **APPROVED** (characterization-only;
+  Drawing Bridge Hardening Program patch 3). Freezes the two remaining
+  high-risk Drawing subsystems before any fix work: the LINE BRIDGE (app SVG
+  lines + back-plane event bridge + Excalidraw bindings — role priority,
+  start/end bindings, boundElements, hit/handle routing, move/resize,
+  persistence, deletion, multi-container independence) and the SLIDE
+  PREVIEW/PRESENTATION pipeline (frame discovery, current frameId-then-overlap
+  membership rule, sidebar sort `order→y→x` vs fullscreen raw scene order,
+  titles, orientation, thumbnail cache keys, runtime container expansion,
+  zero-size layer behavior). Two pure helper modules + 44 bound unit tests
+  (baseline re-run and bound at 373/39 → 417/41) + two Playwright
+  characterization specs (35 enumerated browser scenarios), 31 hash fences
+  all independently re-derived (31/31 match at base `2d4ce1f`). CTO review
+  verified the census by direct read and applied four amendments before
+  approval: Playwright project name corrected (`characterization`, not the
+  nonexistent `chromium`; PW_BASE_URL + credentials-skip discipline bound),
+  the optional e2e harness is a CREATE not a modify (file doesn't exist;
+  `e2e/helpers/env.ts` must be reused), `mergeSlideLayers` census precision
+  (two null paths) plus a node-env landmine warning (vitest has no
+  `document` — unit tests must use the pure input-characterization helper,
+  never call mergeSlideLayers), and the missing rollback section added.
+  Known defects (overlap-fallback slide inclusion, duplicate padlet links,
+  order divergence, AI-image gaps, zero-size unguardedness) are bound as
+  characterize-DON'T-fix. No production import of the new helpers permitted.
+  Housekeeping note: the PATCH-063 corrective commit landed as `2d4ce1f`
+  with message "fix(drawing): close container title and comment UI
+  regressions" instead of the bound message — content passed independent
+  review (PASS), the message deviation is recorded here as a minor process
+  note. Implementation of 064 not started.
 - **2026-07-14** — PATCH-063 REWRITTEN + **APPROVED** (corrective/retroactive
   spec; GPT-5.4 acceptable). The original draft was unapproved and never
   matched what shipped: five commits (`39ff3c1`…`625fdde`) landed under it, two
