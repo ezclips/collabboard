@@ -13,6 +13,7 @@ import {
   shouldAutoCreateDrawingContainer,
   type ImportedDrawingScene,
 } from '@/lib/infra/drawing/importScene';
+import { getDrawingContainerEditTargetLabel } from '@/lib/infra/drawing/containerEditTargetLabel';
 import LibraryPanel from '@/components/collabboard/LibraryPanel';
 import PostCardContent from '@/components/collabboard/PostCardContent';
 import EmbeddedCommentList from '@/components/collabboard/EmbeddedCommentList';
@@ -3044,11 +3045,7 @@ export default function DrawingLayout({
           padlet={contextMenu.padlet}
           openTargets={contextMenuOpenTargets}
           onOpenTarget={(p) => { onPadletEdit?.(p); setContextMenu(null); }}
-          getOpenTargetLabel={(p) => {
-            const title = String(p.title ?? "").trim();
-            if (title) return title;
-            return String(p.type ?? (p.metadata as any)?.kind ?? "post").replace(/_/g, " ");
-          }}
+          getOpenTargetLabel={getDrawingContainerEditTargetLabel}
           hasPaste={!!clipboard}
           onEdit={(p) => { onPadletEdit?.(p); setContextMenu(null); }}
           onEditPadletAsPost={onEditPadletAsPost ? (p) => { onEditPadletAsPost(p); setContextMenu(null); } : undefined}
