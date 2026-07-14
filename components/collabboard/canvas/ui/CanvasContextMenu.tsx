@@ -109,6 +109,7 @@ export function CanvasContextMenu({
   const [showEditSubmenu, setShowEditSubmenu] = useState(false);
   const orderedOpenTargets = useMemo(() => openTargets ?? [], [openTargets]);
   const hasOpenTargets = Boolean(isContainerType && orderedOpenTargets.length > 0 && onOpenTarget);
+  const singleOpenTarget = hasOpenTargets && orderedOpenTargets.length === 1 ? orderedOpenTargets[0] : null;
   const resolveOpenTargetLabel = (target: Padlet, idx: number) => {
     const custom = getOpenTargetLabel?.(target)?.trim();
     if (custom) return custom;
@@ -158,8 +159,12 @@ export function CanvasContextMenu({
       }}
     >
       <MenuItem
-        label={isComment ? "View comment" : hasOpenTargets ? "Edit post" : isContainerType && onEditPadletAsPost ? "Edit Post" : "Edit"}
+        label={isComment ? "View comment" : singleOpenTarget ? `Edit ${resolveOpenTargetLabel(singleOpenTarget, 0)}` : hasOpenTargets ? "Edit post" : isContainerType && onEditPadletAsPost ? "Edit Post" : "Edit"}
         onClick={() => {
+          if (singleOpenTarget) {
+            run(() => onOpenTarget?.(singleOpenTarget));
+            return;
+          }
           if (hasOpenTargets) {
             setShowEditSubmenu((v) => !v);
             return;
@@ -167,7 +172,7 @@ export function CanvasContextMenu({
           run(() => isContainerType && onEditPadletAsPost ? onEditPadletAsPost(padlet) : onEdit(padlet));
         }}
       />
-      {hasOpenTargets && showEditSubmenu && (
+      {hasOpenTargets && !singleOpenTarget && showEditSubmenu && (
         <div
           className="absolute left-[calc(100%-10px)] top-[10px] py-2 w-[220px] select-none"
           style={{
