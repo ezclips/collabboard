@@ -10,7 +10,7 @@
  * identical to the one in middleware.ts's `config.matcher`.
  */
 export const MIDDLEWARE_SESSION_SYNC_MATCHER =
-  '/((?!_next/static|_next/image|favicon.ico|api/|auth(/.*)?$).*)';
+  '/((?!_next/static/|_next/image(?:/|$)|favicon\\.ico$|api/|auth(?:/|$)).*)';
 
 /** True if the session-sync middleware runs on this pathname. */
 export const middlewareRunsOn = (pathname: string): boolean =>

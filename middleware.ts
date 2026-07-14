@@ -35,7 +35,7 @@ export const config = {
          * login page manages stale cookies itself (staleSessionCleanup), and
          * /auth/callback is a route handler that syncs its own cookies.
          *
-         * The exclusion is `auth(/.*)?$` (not a bare `auth` substring) so it
+         * The exclusion is `auth(?:/|$)` (not a bare `auth` substring) so it
          * matches exactly `/auth` and `/auth/...` and never accidentally
          * swallows an unrelated future route like `/authors` or
          * `/authenticate` (CTO review 2026-07-14). This literal must stay
@@ -45,6 +45,6 @@ export const config = {
          * since Next.js requires this array to be a static literal (no
          * imports) that it can analyze at build time.
          */
-        '/((?!_next/static|_next/image|favicon.ico|api/|auth(/.*)?$).*)',
+        '/((?!_next/static/|_next/image(?:/|$)|favicon\\.ico$|api/|auth(?:/|$)).*)',
     ],
 };
