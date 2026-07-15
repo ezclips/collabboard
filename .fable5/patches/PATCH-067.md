@@ -1,7 +1,10 @@
 # PATCH-067 - Diagnose Back-Line Context Menu Routing
 
 Status: APPROVED — ACTIVATED 2026-07-15 (base rebound, census refreshed —
-see §0.1). Diagnosis/characterization patch, test-only. No production
+see §0.1); AMENDED 2026-07-15 (§0.2: selected-state divergence accepted
+as R6 after a correct pre-edit STOP — State U success + State S failure
+is now the expected, unambiguously classified outcome).
+Diagnosis/characterization patch, test-only. No production
 change is authorized by this patch; if the census proves a single
 smallest production cause, the FIX is a separate future patch
 (PATCH-068) authorized by Fable on this patch's evidence, with a fresh
@@ -208,6 +211,149 @@ with console/DOM evidence:
 
 Any exit not reducible to R1–R6 with direct evidence: STOP, no
 implementation expansion, return to Fable.
+
+## 0.2 Amendment 1 (2026-07-15) — selected-state divergence accepted as R6
+
+**Trigger.** The implementer ran the live diagnosis at base `6693843`
+(all §0.1.3 pre-flight gates passed, 38/38 fences, spec still at
+`075360ab…`, zero files changed) and observed an outcome the activated
+table did not explicitly accept: **State U SUCCEEDS** (right-click on
+the unselected line opens the line context menu) while **State S
+FAILS** (edit-mode right-click resolves `midpoint-handle`, no menu).
+§0.1.5 was failure-oriented — R2 presumed State U also fails, and R6's
+"different exits" wording did not enumerate a *success* as an
+acceptable exit — so under the bound stop conditions the implementer
+correctly STOPPED with nothing edited. This amendment closes the gap.
+The STOP discipline worked as designed; the evidence is accepted.
+
+**Accepted live evidence (2026-07-15, base `6693843`).**
+
+- State U (fully unselected; no midpoint/point handles): right-click at
+  the line-body coordinate → `contextmenu-capture` guard passes →
+  lookup resolves `hit-path` → SimpleLineRenderer logs
+  `hit-path-contextmenu:before-stop` / `after-stop`
+  (`SimpleLineRenderer.tsx:709/715`) → `onSelectLine` +
+  `onContextMenu(lineId, x, y)` fire (`:719-720`) → the line becomes
+  selected AND the line context menu OPENS; Excalidraw's menu stays
+  absent. **The unselected back-line context-menu route works.**
+- State S (selected + edit mode via the frozen left-click → dblclick
+  sequence; `midpoint-handle: 1`, `point-handle: 2`): right-click at
+  the same coordinate → lookup resolves `midpoint-handle` → line menu
+  absent, Excalidraw menu absent. Matches Stage-0 and the frozen
+  committed evidence.
+
+**Root-cause boundary — re-confirmed from live source (all ten):**
+
+1. Only the hit-path carries the line `onContextMenu` callback
+   (`SimpleLineRenderer.tsx:708-721`).
+2. `midpoint-handle` (`:844-858`) and `point-handle` (`:818-840`) carry
+   only `onMouseDown`/`onClick` — no contextmenu handler.
+3. `BACK_LINE_INTERACTIVE_ROLE_PRIORITY` (`DrawingLayout.tsx:94-102`)
+   intentionally ranks point/midpoint/start/control/end/label handles
+   above `hit-path` (correct for drag routing).
+4. State U renders no edit handles (`isEditMode && isSelected` gate,
+   `SimpleLineRenderer.tsx:813`), so the lookup can only resolve
+   `hit-path`.
+5. State S (edit mode) renders the midpoint/point handles.
+6. The midpoint handle is positioned at the segment midpoint
+   (`cx/cy` averages, `:846-847`) — which IS the hit-path center the
+   test right-clicks on a 2-point line.
+7. Therefore the State-S lookup deterministically resolves
+   `midpoint-handle`.
+8. The synthetic contextmenu dispatched at that handle bubbles only to
+   the SVG root's suppress-only `onContextMenu`
+   (`SimpleLineRenderer.tsx:626-631`) — never to the line-menu
+   callback. Deaf-element path.
+9. The CanvasClient permission gate (`canUseFreeformEditButton`,
+   `CanvasClient.tsx:274`, consumed at `:3275-3278`) is proven
+   FUNCTIONAL by State U opening the menu — R4 is eliminated for this
+   environment.
+10. Excalidraw is not the primary failure: its menu is absent in BOTH
+    states (the bridge's capture-phase `stopPropagation`,
+    `DrawingLayout.tsx:2651-2652`, keeps `handleCanvasContextMenu`,
+    fork `App.tsx:11673`, out whenever the lookup succeeds), and
+    State U proves the app menu path end-to-end.
+
+**Amended classification table (supersedes §0.1.5's row definitions;
+names stable).** Exactly one row must be proven, with per-state
+console/DOM evidence:
+
+- **R1** — State S resolves a deaf edit handle instead of `hit-path`
+  AND State U ALSO fails (both states broken, S via role shadowing).
+- **R2** — State U resolves `hit-path` but the hit-path handler chain
+  fails (dispatch, handler receipt, or callback breaks) — menu does
+  not open in State U.
+- **R3** — the hit-path handler runs and the callbacks fire, but the
+  menu is suppressed or immediately cleared by a later handler.
+- **R4** — the CanvasClient callback is unwired or permission-gated
+  off (`canUseFreeformEditButton` false or `onContextMenu` prop
+  absent).
+- **R5** — a bridge guard exits and Excalidraw consumes the native
+  contextmenu (capture-order evidence required).
+- **R6 — selected-state divergence (the observed and expected row):**
+  State U resolves the context-menu-capable `hit-path`, the synthetic
+  dispatch reaches the hit-path handler, the CanvasClient callback
+  opens the line menu; State S resolves a higher-priority
+  `midpoint-handle` (or `point-handle`) that has NO line contextmenu
+  handler, so the dispatch never reaches the hit-path path, the line
+  menu stays absent, and Excalidraw's menu also stays absent because
+  the bridge consumed the real event. Root cause: edit-handle role
+  priority — correct for drag routing — shadows the only
+  contextmenu-capable role once edit mode renders handles over the
+  click point.
+
+Any outcome outside this amended table — including State U failing to
+open the menu, or State S unexpectedly opening it — remains a STOP.
+
+**Bound test outcomes (refines §0.1.4 and §3; fixed assertions, not
+adaptive).** The diagnosis test(s) in the single allowed file must
+deterministically prove BOTH states and classify the result as R6 in
+the annotation:
+
+- State U: line starts unselected; lookup/stack evidence; bridge
+  `contextmenu-capture` guardPassed with `foundTargetLineRole:
+  'hit-path'`; `hit-path-contextmenu:before-stop`/`after-stop`
+  diagnostics observed; line becomes selected; the LINE MENU OPENS
+  (real menu UI assertion); Excalidraw menu absent; geometry and
+  persisted rows unchanged.
+- State S: established ONLY via the frozen left-click → dblclick
+  sequence with its assertions intact; `midpoint-handle: 1` +
+  `point-handle: 2` present; right-click lookup resolves
+  `midpoint-handle` (or `point-handle` — record which); NO
+  `hit-path-contextmenu:*` diagnostic fires for that right-click; line
+  menu absent; Excalidraw menu absent; geometry and persisted rows
+  unchanged.
+- The test MUST FAIL if: State U's menu does not open; State U does
+  not resolve `hit-path`; State S unexpectedly resolves `hit-path`;
+  State S's menu unexpectedly opens; the edit handles are absent in
+  State S; geometry or persisted rows change; or any frozen PATCH-066
+  left-click/double-click assertion regresses. No
+  both-outcomes-acceptable branching.
+- §1's "the context menu does not open" purpose statement is refined:
+  the defect is CONFINED to the selected/edit-mode state; the
+  unselected route works and must now be frozen as working.
+
+**Informational only — likely PATCH-068 production candidate (NOT
+authorized here; a fresh PATCH-068 census and spec are mandatory):**
+preserve handle role priority for mousedown/drag routing, and for the
+CONTEXTMENU path only either route a handle-resolved lookup to the
+owning line's existing context-menu callback or deliberately fall back
+to the owning line's `hit-path` — without globally lowering handle
+priority, without touching left-click/double-click selection, and
+without altering geometry, persistence, or presentation. Do not
+implement any of this in PATCH-067.
+
+**Base/baseline continuity.** Governance base moves forward with this
+amendment's commit; the IMPLEMENTATION baselines are unchanged: sole
+allowed file `e2e/characterization/drawing-line-bridge.spec.ts` at
+`075360ab6a764b034ef7703e22ecdbaf34c135c1`, 38/38 immutable fences,
+§0.1.3 gate totals, cleanup zeros, PATCH-066 Amendment 1 auth
+procedure still in force, Sonnet PASS required before the
+implementation commit.
+
+**Additional stop conditions (extend §7):** State U no longer opens the
+line menu on rerun; State S no longer resolves an edit handle; evidence
+maps outside the amended table; any production fix is attempted.
 
 ## 1. Purpose — exactly one subsystem
 

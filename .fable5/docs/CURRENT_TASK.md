@@ -361,6 +361,38 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-15** — PATCH-067 **Amendment 1 APPROVED: selected-state
+  divergence accepted as R6.** The implementer ran the live diagnosis at
+  base `6693843` with every pre-flight gate passed (38/38 fences, spec
+  at `075360ab…`, unit 51/2 + 424/41, line 4 passed, presentation 2+2
+  skips, credential-off 4+4, cleanup zeros) and hit a correct pre-edit
+  STOP with ZERO files changed: **State U (unselected) SUCCEEDS** —
+  right-click resolves `hit-path`, `hit-path-contextmenu:before/after-
+  stop` diagnostics fire (`SimpleLineRenderer.tsx:709/715`), the line
+  selects and the LINE MENU OPENS, Excalidraw menu absent — while
+  **State S (selected + edit mode) FAILS** — lookup resolves
+  `midpoint-handle`, no menu. The activated table was failure-oriented
+  (R2 presumed U also fails; R6's "different exits" did not enumerate a
+  success), so the outcome was unlisted → STOP, as designed. CTO ruling:
+  evidence accepted; R6 redefined as the precise selected-state
+  divergence row (U succeeds through hit-path; S fails because
+  edit-handle role priority shadows the only contextmenu-capable role —
+  the 2-point line's midpoint handle sits exactly at the clicked
+  center, and no handle role carries `onContextMenu`; dispatch dies at
+  the suppress-only SVG root `:626-631`). All ten root-cause boundary
+  points re-confirmed from live source; R4 empirically eliminated
+  (State U proves the `canUseFreeformEditButton` gate + callback chain
+  work). Bound test outcomes are now fixed per state — the test FAILS
+  if U's menu doesn't open, U doesn't resolve hit-path, S resolves
+  hit-path, S's menu opens, S's handles are absent, geometry/rows
+  change, or any frozen PATCH-066 assertion regresses. PATCH-067
+  remains diagnosis-only, one allowed file
+  (`drawing-line-bridge.spec.ts` @ `075360ab…`), production fix
+  prohibited; the likely PATCH-068 candidate (contextmenu-only routing
+  from a resolved handle to the owning line's callback / hit-path
+  fallback, WITHOUT lowering drag priority) is recorded as
+  informational only, pending a fresh PATCH-068 census. Sonnet PASS
+  still bound before the implementation commit.
 - **2026-07-15** — PATCH-066 **DONE (commit
   `b1f4e1ace9f1665fbdada3eab7769a7b69f002fb`, Sonnet PASS)** — landed as
   the Amendment-2 test-only correction; exactly one file committed
