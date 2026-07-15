@@ -29,6 +29,7 @@ type DomDescriptor = {
 type PointerEventRecord = {
   type: string;
   button: number;
+  buttons: number;
   clientX: number;
   clientY: number;
   defaultPrevented: boolean;
@@ -166,6 +167,7 @@ async function installPointerRecorder(page: Page) {
       targetWindow.__patch065PointerRecords?.push({
         type: event.type,
         button: event.button,
+        buttons: event.buttons,
         clientX: Math.round(event.clientX),
         clientY: Math.round(event.clientY),
         defaultPrevented: event.defaultPrevented,
@@ -218,17 +220,28 @@ async function removePointerRecorder(page: Page) {
 
 async function lineInteractionState(page: Page, lineId: string) {
   const editPointsButton = page.getByTitle('Edit Points').first();
-  const duplicateButton = page.getByRole('button', { name: 'Duplicate', exact: true }).first();
   return {
     roles: await rolePresence(page, lineId),
     geometry: await lineGeometry(page, lineId),
     selected: await editPointsButton.isVisible().catch(() => false),
-    contextMenuVisible: await duplicateButton.isVisible().catch(() => false),
+    contextMenuVisible: await lineContextMenu(page).isVisible().catch(() => false),
   };
 }
 
 function findRoleCount(state: Awaited<ReturnType<typeof lineInteractionState>>, role: LineRole) {
   return state.roles[role];
+}
+
+function lineContextMenu(page: Page) {
+  return page
+    .locator('div.fixed')
+    .filter({ has: page.getByRole('button', { name: 'Duplicate', exact: true }) })
+    .filter({ has: page.getByRole('button', { name: 'Send to Back', exact: true }) })
+    .first();
+}
+
+function excalidrawContextMenu(page: Page) {
+  return page.locator('.context-menu').first();
 }
 
 async function waitForVisible(locator: ReturnType<Page['locator']>, timeout: number) {
@@ -262,6 +275,12 @@ function findConsolePayload(entries: ConsoleDiagnosticEntry[], phase: string) {
   return entries
     .map(consolePayload)
     .find((payload) => payload?.phase === phase) ?? null;
+}
+
+function hasConsolePayload(entries: ConsoleDiagnosticEntry[], phase: string) {
+  return entries
+    .map(consolePayload)
+    .some((payload) => payload?.phase === phase);
 }
 
 test.describe('drawing line bridge browser characterization (PATCH-064)', () => {
@@ -542,6 +561,10 @@ test.describe('drawing line bridge browser characterization (PATCH-064)', () => 
     const flushConsoleEntries = async () => {
       await Promise.all(consoleReads.splice(0, consoleReads.length));
     };
+    const readAndClearConsoleEntries = async () => {
+      await flushConsoleEntries();
+      return consoleEntries.splice(0, consoleEntries.length);
+    };
     page.on('console', consoleListener);
 
     try {
@@ -585,10 +608,132 @@ test.describe('drawing line bridge browser characterization (PATCH-064)', () => 
       );
       await installPointerRecorder(page);
 
+      await readAndClearConsoleEntries();
+      await clearPointerRecorder(page);
+      await page.mouse.click(center.x, center.y, { button: 'right' });
+      await waitForEventCycle(page);
+      const stateUConsoleEntries = await readAndClearConsoleEntries();
+      const stateUAfterContextMenu = await lineInteractionState(page, primaryLineId);
+      const stateUContextMenuRecords = await readPointerRecorder(page);
+      await clearPointerRecorder(page);
+      const stateULineMenuVisible = await waitForVisible(lineContextMenu(page), 2_000);
+      const stateUExcalidrawMenuVisible = await excalidrawContextMenu(page).isVisible().catch(() => false);
+      const stateULineRowsAfter = await fetchHarnessLineRows(supabase, fixture.boardId);
+      const stateULineGeometryAfter = await lineGeometry(page, primaryLineId);
+      const stateUOtherLineSnapshotsAfter = await Promise.all(
+        persistedOtherLinesBefore.map(async (row) => ({
+          lineId: String(row.id),
+          snapshot: await lineSnapshot(page, String(row.id)),
+        })),
+      );
+      const stateUContainerSnapshotsAfter = await Promise.all(
+        fixture.containerIds.map(async (containerId) => ({
+          containerId,
+          snapshot: await containerSnapshot(page, containerId),
+        })),
+      );
+      const stateUPhysicalTarget = stateUContextMenuRecords.find((entry) => entry.type === 'pointerdown')?.target
+        ?? stateUContextMenuRecords.find((entry) => entry.type === 'mousedown')?.target
+        ?? stateUContextMenuRecords.find((entry) => entry.type === 'contextmenu')?.target
+        ?? null;
+      const stateUContextMenuTargetLookup = findConsolePayload(stateUConsoleEntries, 'contextmenu-capture:target-lookup');
+      const stateUContextMenuCapture = findConsolePayload(stateUConsoleEntries, 'contextmenu-capture');
+      const stateURendererContextMenuBefore = findConsolePayload(stateUConsoleEntries, 'hit-path-contextmenu:before-stop');
+      const stateURendererContextMenuAfter = findConsolePayload(stateUConsoleEntries, 'hit-path-contextmenu:after-stop');
+
+      test.info().annotations.push({
+        type: 'patch-067-state-u',
+        description: JSON.stringify({
+          hitPathSelector,
+          center,
+          stack,
+          initialState: before,
+          records: stateUContextMenuRecords,
+          physicalTarget: stateUPhysicalTarget,
+          afterContextMenu: stateUAfterContextMenu,
+          bridgeDiagnostics: {
+            contextMenuCapture: stateUContextMenuCapture,
+            contextMenuTargetLookup: stateUContextMenuTargetLookup,
+          },
+          rendererDiagnostics: {
+            stateURendererContextMenuBefore,
+            stateURendererContextMenuAfter,
+          },
+          menu: {
+            lineMenuVisible: stateULineMenuVisible,
+            excalidrawMenuVisible: stateUExcalidrawMenuVisible,
+          },
+          invariants: {
+            geometryUnchanged: JSON.stringify(stateULineGeometryAfter) === JSON.stringify(primaryLineBefore.geometry),
+            persistedRowsUnchanged: JSON.stringify(stateULineRowsAfter) === JSON.stringify(persistedLineRowsBefore),
+            otherLinesUnchanged: JSON.stringify(stateUOtherLineSnapshotsAfter) === JSON.stringify(otherLineSnapshotsBefore),
+            containersUnchanged: JSON.stringify(stateUContainerSnapshotsAfter) === JSON.stringify(containerSnapshotsBefore),
+          },
+        }),
+      });
+
+      expect(before).toMatchObject({
+        selected: false,
+        contextMenuVisible: false,
+        roles: {
+          'visible-path': 1,
+          'hit-path': 1,
+          'start-handle': 0,
+          'end-handle': 0,
+          'midpoint-handle': 0,
+          'control-handle': 0,
+          'point-handle': 0,
+          'label-handle': 1,
+        },
+      });
+      expect(stateUPhysicalTarget).toMatchObject({
+        tag: 'canvas',
+        className: expect.stringContaining('excalidraw__canvas'),
+      });
+      expect(stateUContextMenuCapture).toMatchObject({
+        phase: 'contextmenu-capture',
+        guardPassed: true,
+        backTargetFound: true,
+        foundTargetLineId: primaryLineId,
+        foundTargetLineRole: 'hit-path',
+      });
+      expect(stateUContextMenuTargetLookup).toMatchObject({
+        phase: 'contextmenu-capture:target-lookup',
+        backTargetFound: true,
+        foundTargetLineId: primaryLineId,
+        foundTargetLineRole: 'hit-path',
+      });
+      expect(stateURendererContextMenuBefore).toMatchObject({
+        phase: 'hit-path-contextmenu:before-stop',
+        rendererLabel: 'back',
+        lineId: primaryLineId,
+      });
+      expect(stateURendererContextMenuAfter).toMatchObject({
+        phase: 'hit-path-contextmenu:after-stop',
+        rendererLabel: 'back',
+        lineId: primaryLineId,
+      });
+      expect(stateUAfterContextMenu).toMatchObject({
+        selected: true,
+        contextMenuVisible: true,
+        geometry: primaryLineBefore.geometry,
+      });
+      expect(stateULineMenuVisible).toBe(true);
+      expect(stateUExcalidrawMenuVisible).toBe(false);
+      expect(stateULineGeometryAfter).toEqual(primaryLineBefore.geometry);
+      expect(stateULineRowsAfter).toEqual(persistedLineRowsBefore);
+      expect(stateUOtherLineSnapshotsAfter).toEqual(otherLineSnapshotsBefore);
+      expect(stateUContainerSnapshotsAfter).toEqual(containerSnapshotsBefore);
+
+      await page.keyboard.press('Escape');
+      await expect(lineContextMenu(page)).toBeHidden({ timeout: 5_000 });
+      await readAndClearConsoleEntries();
+      await clearPointerRecorder(page);
+
       await page.mouse.click(center.x, center.y);
       await expect.poll(async () => (await lineInteractionState(page, primaryLineId)).selected, { timeout: 5_000 }).toBe(true);
       await waitForEventCycle(page);
-      await flushConsoleEntries();
+      const coordinateClickConsoleEntries = await readAndClearConsoleEntries();
       const afterCoordinateClick = await lineInteractionState(page, primaryLineId);
       const coordinateClickRecords = await readPointerRecorder(page);
       await clearPointerRecorder(page);
@@ -596,17 +741,20 @@ test.describe('drawing line bridge browser characterization (PATCH-064)', () => 
       await page.mouse.dblclick(center.x, center.y);
       await expect.poll(async () => (await lineInteractionState(page, primaryLineId)).selected, { timeout: 5_000 }).toBe(true);
       await waitForEventCycle(page);
-      await flushConsoleEntries();
+      const doubleClickConsoleEntries = await readAndClearConsoleEntries();
       const afterDoubleClick = await lineInteractionState(page, primaryLineId);
       const doubleClickRecords = await readPointerRecorder(page);
       await clearPointerRecorder(page);
 
+      const stateSStack = await elementsFromPoint(page, center.x, center.y);
+      await readAndClearConsoleEntries();
       await page.mouse.click(center.x, center.y, { button: 'right' });
       await waitForEventCycle(page);
-      await flushConsoleEntries();
-      const afterContextMenu = await lineInteractionState(page, primaryLineId);
-      const contextMenuRecords = await readPointerRecorder(page);
-      const contextMenuVisible = await waitForVisible(page.getByRole('button', { name: 'Duplicate', exact: true }).first(), 2_000);
+      const stateSConsoleEntries = await readAndClearConsoleEntries();
+      const stateSAfterContextMenu = await lineInteractionState(page, primaryLineId);
+      const stateSContextMenuRecords = await readPointerRecorder(page);
+      const stateSLineMenuVisible = await lineContextMenu(page).isVisible().catch(() => false);
+      const stateSExcalidrawMenuVisible = await excalidrawContextMenu(page).isVisible().catch(() => false);
       const persistedLineRowsAfter = await fetchHarnessLineRows(supabase, fixture.boardId);
       const primaryLineGeometryAfter = await lineGeometry(page, primaryLineId);
       const otherLineSnapshotsAfter = await Promise.all(
@@ -625,15 +773,24 @@ test.describe('drawing line bridge browser characterization (PATCH-064)', () => 
       const coordinateTarget = coordinateClickRecords.find((entry) => entry.type === 'pointerdown')?.target
         ?? coordinateClickRecords.find((entry) => entry.type === 'mousedown')?.target
         ?? null;
-      const mouseDownCapture = findConsolePayload(consoleEntries, 'mouse-down-capture');
-      const mouseDownTargetLookup = findConsolePayload(consoleEntries, 'mouse-down-capture:target-lookup');
-      const clickCapture = findConsolePayload(consoleEntries, 'click-capture');
-      const contextMenuTargetLookup = findConsolePayload(consoleEntries, 'contextmenu-capture:target-lookup');
-      const contextMenuCapture = findConsolePayload(consoleEntries, 'contextmenu-capture');
-      const rendererDragEntry = findConsolePayload(consoleEntries, 'line-drag-start:entry');
-      const rendererDragBranch = findConsolePayload(consoleEntries, 'line-drag-start:drag-branch');
-      const rendererPathClickBefore = findConsolePayload(consoleEntries, 'path-click:before-stop');
-      const rendererPathClickAfter = findConsolePayload(consoleEntries, 'path-click:after-stop');
+      const stateSPhysicalTarget = stateSContextMenuRecords.find((entry) => entry.type === 'pointerdown')?.target
+        ?? stateSContextMenuRecords.find((entry) => entry.type === 'mousedown')?.target
+        ?? stateSContextMenuRecords.find((entry) => entry.type === 'contextmenu')?.target
+        ?? null;
+      const mouseDownCapture = findConsolePayload(coordinateClickConsoleEntries, 'mouse-down-capture');
+      const mouseDownTargetLookup = findConsolePayload(coordinateClickConsoleEntries, 'mouse-down-capture:target-lookup');
+      const clickCapture = findConsolePayload(coordinateClickConsoleEntries, 'click-capture');
+      const contextMenuTargetLookup = findConsolePayload(stateSConsoleEntries, 'contextmenu-capture:target-lookup');
+      const contextMenuCapture = findConsolePayload(stateSConsoleEntries, 'contextmenu-capture');
+      const rendererDragEntry = findConsolePayload(coordinateClickConsoleEntries, 'line-drag-start:entry');
+      const rendererDragBranch = findConsolePayload(coordinateClickConsoleEntries, 'line-drag-start:drag-branch');
+      const rendererPathClickBefore = findConsolePayload(coordinateClickConsoleEntries, 'path-click:before-stop');
+      const rendererPathClickAfter = findConsolePayload(coordinateClickConsoleEntries, 'path-click:after-stop');
+      const stateSRendererContextMenuBeforePresent = hasConsolePayload(stateSConsoleEntries, 'hit-path-contextmenu:before-stop');
+      const stateSRendererContextMenuAfterPresent = hasConsolePayload(stateSConsoleEntries, 'hit-path-contextmenu:after-stop');
+      const stateSTargetRole = typeof contextMenuTargetLookup?.foundTargetLineRole === 'string'
+        ? contextMenuTargetLookup.foundTargetLineRole
+        : null;
       test.info().annotations.push({
         type: 'patch-066-stage0-proof',
         description: JSON.stringify({
@@ -642,12 +799,12 @@ test.describe('drawing line bridge browser characterization (PATCH-064)', () => 
           stack,
           coordinateClickRecords,
           doubleClickRecords,
-          contextMenuRecords,
-          contextMenuVisible,
+          contextMenuRecords: stateSContextMenuRecords,
+          contextMenuVisible: stateSLineMenuVisible,
           before,
           afterCoordinateClick,
           afterDoubleClick,
-          afterContextMenu,
+          afterContextMenu: stateSAfterContextMenu,
           bridgeDiagnostics: {
             mouseDownCapture,
             mouseDownTargetLookup,
@@ -663,20 +820,53 @@ test.describe('drawing line bridge browser characterization (PATCH-064)', () => 
           },
         }),
       });
-
-      expect(before).toMatchObject({
-        selected: false,
-        contextMenuVisible: false,
-        roles: {
-          'visible-path': 1,
-          'hit-path': 1,
-          'start-handle': 0,
-          'end-handle': 0,
-          'midpoint-handle': 0,
-          'control-handle': 0,
-          'point-handle': 0,
-          'label-handle': 1,
-        },
+      test.info().annotations.push({
+        type: 'patch-067-state-s',
+        description: JSON.stringify({
+          center,
+          stack: stateSStack,
+          initialState: afterDoubleClick,
+          records: stateSContextMenuRecords,
+          physicalTarget: stateSPhysicalTarget,
+          afterContextMenu: stateSAfterContextMenu,
+          bridgeDiagnostics: {
+            contextMenuCapture,
+            contextMenuTargetLookup,
+          },
+          rendererDiagnostics: {
+            hitPathContextMenuBeforePresent: stateSRendererContextMenuBeforePresent,
+            hitPathContextMenuAfterPresent: stateSRendererContextMenuAfterPresent,
+          },
+          menu: {
+            lineMenuVisible: stateSLineMenuVisible,
+            excalidrawMenuVisible: stateSExcalidrawMenuVisible,
+          },
+          targetRole: stateSTargetRole,
+          invariants: {
+            geometryUnchanged: JSON.stringify(primaryLineGeometryAfter) === JSON.stringify(primaryLineBefore.geometry),
+            persistedRowsUnchanged: JSON.stringify(persistedLineRowsAfter) === JSON.stringify(persistedLineRowsBefore),
+            otherLinesUnchanged: JSON.stringify(otherLineSnapshotsAfter) === JSON.stringify(otherLineSnapshotsBefore),
+            containersUnchanged: JSON.stringify(containerSnapshotsAfter) === JSON.stringify(containerSnapshotsBefore),
+          },
+        }),
+      });
+      test.info().annotations.push({
+        type: 'patch-067-classification',
+        description: JSON.stringify({
+          primaryRow: 'R6',
+          label: 'selected-state context-menu divergence',
+          stateU: {
+            hitPathWon: stateUContextMenuTargetLookup?.foundTargetLineRole === 'hit-path',
+            hitPathHandlerRan: Boolean(stateURendererContextMenuBefore && stateURendererContextMenuAfter),
+            lineMenuOpened: stateULineMenuVisible,
+          },
+          stateS: {
+            editHandleWon: stateSTargetRole === 'midpoint-handle' || stateSTargetRole === 'point-handle',
+            hitPathHandlerRan: stateSRendererContextMenuBeforePresent || stateSRendererContextMenuAfterPresent,
+            lineMenuOpened: stateSLineMenuVisible,
+          },
+          secondaryContributingCondition: 'edit-mode interactive-role priority places midpoint/point handles above hit-path; those handle roles do not own the line context-menu callback',
+        }),
       });
 
       expect(coordinateTarget).toMatchObject({
@@ -713,12 +903,19 @@ test.describe('drawing line bridge browser characterization (PATCH-064)', () => 
           'label-handle': 1,
         },
       });
-      expect(afterContextMenu).toMatchObject({
+      expect(stateSPhysicalTarget).toMatchObject({
+        tag: 'canvas',
+        className: expect.stringContaining('excalidraw__canvas'),
+      });
+      expect(stateSAfterContextMenu).toMatchObject({
         selected: true,
         contextMenuVisible: false,
         geometry: primaryLineBefore.geometry,
       });
-      expect(contextMenuVisible).toBe(false);
+      expect(stateSLineMenuVisible).toBe(false);
+      expect(stateSExcalidrawMenuVisible).toBe(false);
+      expect(findRoleCount(stateSAfterContextMenu, 'midpoint-handle')).toBe(1);
+      expect(findRoleCount(stateSAfterContextMenu, 'point-handle')).toBe(2);
 
       expect(mouseDownCapture).toMatchObject({
         phase: 'mouse-down-capture',
@@ -766,14 +963,18 @@ test.describe('drawing line bridge browser characterization (PATCH-064)', () => 
         guardPassed: true,
         backTargetFound: true,
         foundTargetLineId: primaryLineId,
-        foundTargetLineRole: 'midpoint-handle',
+        foundTargetLineRole: expect.stringMatching(/^(midpoint-handle|point-handle)$/),
       });
       expect(contextMenuTargetLookup).toMatchObject({
         phase: 'contextmenu-capture:target-lookup',
         backTargetFound: true,
         foundTargetLineId: primaryLineId,
-        foundTargetLineRole: 'midpoint-handle',
+        foundTargetLineRole: expect.stringMatching(/^(midpoint-handle|point-handle)$/),
       });
+      expect(stateSTargetRole === 'midpoint-handle' || stateSTargetRole === 'point-handle').toBe(true);
+      expect(stateSTargetRole).not.toBe('hit-path');
+      expect(stateSRendererContextMenuBeforePresent).toBe(false);
+      expect(stateSRendererContextMenuAfterPresent).toBe(false);
 
       expect(primaryLineGeometryAfter).toEqual(primaryLineBefore.geometry);
       expect(persistedLineRowsAfter).toEqual(persistedLineRowsBefore);
