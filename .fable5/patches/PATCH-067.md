@@ -1,21 +1,213 @@
 # PATCH-067 - Diagnose Back-Line Context Menu Routing
 
-Status: APPROVED - diagnosis/characterization patch, test-only. No
-production change is authorized by this patch; if the census proves a
-single smallest production cause, the FIX is a separate future patch
-authorized by Fable on this patch's evidence.
+Status: APPROVED — ACTIVATED 2026-07-15 (base rebound, census refreshed —
+see §0.1). Diagnosis/characterization patch, test-only. No production
+change is authorized by this patch; if the census proves a single
+smallest production cause, the FIX is a separate future patch
+(PATCH-068) authorized by Fable on this patch's evidence, with a fresh
+production census.
 Approved by the Fable CTO 2026-07-15.
 Role: implementation engineer after Fable approval.
-Sequencing: starts ONLY after the PATCH-066 test correction is committed
-following an explicit independent Sonnet PASS. Base commit: the PATCH-066
-implementation commit (re-derive and record its hash at pre-flight; if
-PATCH-066 has not landed, STOP).
+Sequencing: PATCH-066 test correction has LANDED with an explicit
+independent Sonnet PASS. **Base commit:
+`b1f4e1ace9f1665fbdada3eab7769a7b69f002fb`**
+(`test(drawing): freeze working back-line selection routing
+(PATCH-066)`). If HEAD at pre-flight is not this commit, re-derive and
+STOP on any fence mismatch.
 
 **Bound commit message (use verbatim):**
 
 ```
 test(drawing): characterize back-line context menu routing (PATCH-067)
 ```
+
+## 0.1 Activation (2026-07-15) — base rebound, census refreshed at b1f4e1a
+
+PATCH-066 landed as a test-only correction (commit `b1f4e1a`, Sonnet
+PASS, exactly one file: `e2e/characterization/drawing-line-bridge.spec.ts`,
+232 insertions / 80 deletions). The CTO re-read the COMMITTED test and
+re-derived the context-menu census from live source before activating
+this patch. Everything below in this section is bound and supersedes any
+conflicting detail in the original §2 census where noted.
+
+### 0.1.1 Committed-test facts (confirmed by reading the landed spec)
+
+- Left-click and double-click assertions are FIXED (unconditional
+  `toMatchObject`), settle-aware (`expect.poll` + double-rAF cycle wait),
+  and IMMUTABLE for this patch — a regression must FAIL, never be
+  absorbed.
+- No adaptive routing branch remains (the PATCH-065
+  `PointerClassification` union and its three-way accept-anything block
+  are gone).
+- The frozen role matrices: after left-click selection all handle roles
+  are 0 (label-handle 1); after DOUBLE-CLICK (edit-mode entry) the seeded
+  2-point line renders `midpoint-handle: 1, point-handle: 2`
+  (legacy start/control/end stay 0).
+- The committed right-click occurs AFTER the dblclick, and its frozen
+  evidence is: `contextmenu-capture` guardPassed true, lookup resolves
+  `midpoint-handle`, line menu absent (`contextMenuVisible: false`).
+
+### 0.1.2 Census corrections/additions (from live source at b1f4e1a)
+
+1. **Handles are an EDIT-MODE phenomenon, not a selection phenomenon.**
+   `SimpleLineRenderer.tsx:813`: edit handles render under
+   `isEditMode && isSelected`. A line selected by left-click alone
+   renders NO point/midpoint handles (frozen matrix confirms). The
+   Stage-0 `midpoint-handle` resolution therefore occurred in the
+   post-dblclick EDIT-MODE state — and for a 2-point line the midpoint
+   handle sits exactly at the segment midpoint, which IS the hit-path
+   center the test clicks. §2.2's "selected" wording is refined
+   accordingly; the required states in §3 are re-specified below.
+2. **The bridge contextmenu handler has NO button guard.**
+   `DrawingLayout.tsx:2573-2671` guard chain is exactly: reentrancy ref →
+   `activeToolType !== 'selection'` → target instanceof
+   HTMLCanvasElement → `excalidraw__canvas` class → fresh
+   `findBackLineInteractiveTargetAtPoint` lookup. Unlike
+   mousedown/click-capture there is no `event.button !== 0` rejection,
+   and the handler NULLS `bridgedBackLineInteractiveTargetRef` before
+   dispatch. On success it `preventDefault()`s + `stopPropagation()`s
+   the REAL contextmenu (suppressing both the native browser menu and —
+   via capture-phase stop — Excalidraw's own React `onContextMenu`
+   bubble handler), then dispatches a synthetic bubbling
+   `MouseEvent('contextmenu')` at the resolved element.
+3. **Only the hit-path is context-menu-capable.**
+   `SimpleLineRenderer.tsx:708-721` (hit-path): preventDefault +
+   stopPropagation + `onSelectLine(line.id)` +
+   `onContextMenu?.(line.id, e.clientX, e.clientY)`. NO handle role
+   (point/midpoint/start/control/end/label) registers `onContextMenu`
+   (verified per-role at `:801-865`). A synthetic contextmenu dispatched
+   at a handle bubbles up to the SVG ROOT's `onContextMenu`
+   (`SimpleLineRenderer.tsx:626-631`), which in edit/line mode only
+   `preventDefault()`s + `stopPropagation()`s — it opens nothing. That
+   is the deaf-element path.
+4. **CanvasClient menu state has a permission gate.**
+   `handleLineContextMenu` (`CanvasClient.tsx:3275-3278`) returns early
+   unless `canUseFreeformEditButton`
+   (= `canEditWorkspace(currentWorkspaceRole)`, `CanvasClient.tsx:274`)
+   — expected TRUE for the authenticated harness owner, but the
+   diagnosis must confirm it (an unexpectedly false gate is an R4-class
+   cause, not R1). Menu state `lineContextMenuState` renders via
+   CanvasModals (`CanvasClient.tsx:7793-7794`); the back-plane renderer
+   receives `onContextMenu={handleLineContextMenu}` at
+   `CanvasClient.tsx:6322`.
+5. **Excalidraw's own contextmenu path.** `handleCanvasContextMenu`
+   (fork `App.tsx:11673`) `preventDefault()`s and opens Excalidraw's
+   menu — but it is a BUBBLE-phase React handler on the canvas
+   (`App.tsx:1962/2287`), so whenever the bridge's capture handler
+   resolves a target and stops propagation, Excalidraw's menu never
+   runs. It can only race the app menu when the bridge lookup FAILS
+   (guard exit) and propagation continues.
+
+### 0.1.3 Refreshed fences and baselines (all re-derived at b1f4e1a)
+
+Authorized-change baseline (the ONLY modifiable file):
+
+```text
+e2e/characterization/drawing-line-bridge.spec.ts 075360ab6a764b034ef7703e22ecdbaf34c135c1
+```
+
+The pre-PATCH-066 hash `9853d10d…` is DEAD — any tree matching it means
+PATCH-066 is not landed; STOP.
+
+Immutable fences — 38 files, ALL verified matching at `b1f4e1a`
+(re-verify at pre-flight and after gates). The set is exactly PATCH-066
+§9's immutable set WITH DrawingLayout.tsx (Amendment 2), i.e. the 31
+PATCH-064 §11 fences (including
+`components/collabboard/canvas/layouts/DrawingLayout.tsx
+b3684e4c6226ec2ad77fbff3265de25339a7f471`,
+`components/collabboard/SimpleLineRenderer.tsx
+a38572a499d6aadf3002fa34f7a8e0e321220ea6`,
+`components/collabboard/canvas/ui/FreeformPadletCards.tsx
+1c12d24a42c45a279efb4da0de785b478e4ca385`, and the three Excalidraw fork
+files) plus:
+
+```text
+lib/infra/drawing/lineBridge.ts f0f6a0d177c53bb0cab89b9fa1d7b5e3910a3c2d
+lib/infra/drawing/lineBridge.test.ts 559087550bf4a0304501ad479555ab4f4ad636a4
+lib/infra/drawing/presentationBridge.ts b9d976bda880e2fe1a28a4099fdc3eebe6f79b38
+lib/infra/drawing/presentationBridge.test.ts dff458de747d673868b1eae2b695e41b4c3424d2
+e2e/helpers/env.ts 9514723cde157f7ae6e6815d4c142a0f430a1292
+e2e/characterization/drawingBridgeHarness.ts 85a6566dbb8cd16f19151133ed33b9872a97ff11
+e2e/characterization/drawing-presentation.spec.ts c6bfb4f01b0b4e5bd7654ee1405b6070141fbc09
+app/dashboard/canvas/[id]/CanvasClient.tsx 1c6864b46e1c5c9a52f9e771ee2e51793898ecd8
+```
+
+Bound pre-flight baselines (all reconfirmed on the PATCH-066 acceptance
+run at this base): setup 1 passed; credentialed line 4 passed;
+credentialed presentation 2 passed / 2 approved skips; credential-off
+line 4 skipped / presentation 4 skipped; focused Vitest 51/2; full
+Vitest 424/41; cleanup boards=0 / padlets=0 / canvasLines=0 (verified by
+an independent service-role query, not only the harness assertion);
+tsc / boundaries / verify / build green; zero production imports of
+lineBridge / presentationBridge / drawingBridgeHarness. PATCH-066
+Amendment 1's auth-state regeneration procedure remains in force.
+
+### 0.1.4 Required test states (supersedes the two-state wording in §2.2/§3)
+
+- **State U — unselected:** line starts unselected; only
+  visible-path / hit-path / label-handle exist (frozen pre-click
+  matrix). Right-click at the hit-path center. Expected lookup input has
+  no handles; record what the lookup resolves (census predicts
+  `hit-path` unless the label overlaps the center), the synthetic
+  dispatch target, whether the hit-path handler fires
+  (`[SimpleLineRenderer:event]` contextmenu diagnostics if emitted, plus
+  CanvasClient menu visibility), and whether the line menu opens.
+- **State S — selected + edit mode (Stage-0 reproduction):** establish
+  selection and edit mode STRICTLY through the frozen working sequence
+  (left-click → settle → dblclick → settle; assertions per the
+  committed test remain untouched). Verify `midpoint-handle: 1,
+  point-handle: 2` per the frozen matrix. Right-click the same
+  coordinate; record role-priority resolution (census predicts
+  `midpoint-handle` — it sits at the click point on a 2-point line),
+  synthetic dispatch target, any handler receipt, and menu visibility.
+- The intermediate plain-selected state (post left-click, pre dblclick,
+  no handles) needs no separate right-click; if the implementer can
+  record its lookup outcome without weakening the frozen assertions,
+  annotate it as supplementary evidence only.
+- The diagnosis MUST state whether the failure depends on the
+  selected/edit-mode state (different lookup resolutions per state) or
+  is state-independent (menu fails in both states).
+
+### 0.1.5 Classification table — revalidated (naming preserved, coverage bound)
+
+Exactly one row (or an evidence-ordered chain) must be proven per state,
+with console/DOM evidence:
+
+- **R1** — lookup resolves a handle role that has no contextmenu handler
+  (State S deaf-element path: synthetic event lands on
+  midpoint/point-handle, bubbles to the suppress-only SVG root, menu
+  never opens). Includes the sub-case where the non-left-button
+  mousedown rejection (`non-left-button`, by design) is load-bearing
+  for some required pre-contextmenu setup — record explicitly if the
+  evidence shows the bridged-target ref or any mousedown side effect is
+  actually needed by the contextmenu path (census says it is not: the
+  contextmenu handler does its own fresh lookup).
+- **R2** — the failure is ALSO present in State U where the lookup
+  resolves `hit-path`: the synthetic dispatch reaches the hit-path
+  handler (or fails to), yet the menu still does not open — cause is
+  deeper than role priority. Record which link breaks (dispatch,
+  handler receipt, callback invocation).
+- **R3** — the hit-path handler RUNS and calls the callbacks, but the
+  menu is suppressed or immediately cleared by a later handler
+  (document-level click-away, Excalidraw state write, overlay
+  unmount). Evidence: handler diagnostics fire AND
+  `lineContextMenuState` visibly sets then clears, or menu flashes.
+- **R4** — the callback chain is not wired or is gated off for
+  back-plane lines in the Drawing layout (e.g.
+  `canUseFreeformEditButton` false, `onContextMenu` prop absent on the
+  back-plane renderer instance, or `handleLineContextMenu` early
+  return). Evidence: handler fires, callback provably does not set
+  state.
+- **R5** — Excalidraw consumes the REAL contextmenu before the bridge
+  (capture-order evidence required — census predicts impossible while
+  the bridge guard passes, since the bridge stops propagation in
+  capture phase; only reachable on a bridge guard exit).
+- **R6** — the two states have DIFFERENT exits not jointly covered by
+  R1–R5, or another narrowly evidenced cause — report precisely, per
+  state.
+
+Any exit not reducible to R1–R6 with direct evidence: STOP, no
+implementation expansion, return to Fable.
 
 ## 1. Purpose — exactly one subsystem
 
@@ -137,8 +329,9 @@ dependency/middleware changes; no new files.
 ## 5. Allowed files
 
 - `e2e/characterization/drawing-line-bridge.spec.ts` — ONLY file.
-  Baseline: the hash landed by the PATCH-066 test-correction commit
-  (re-derive at pre-flight and record it in the report).
+  Baseline: `075360ab6a764b034ef7703e22ecdbaf34c135c1` (landed by
+  PATCH-066 commit `b1f4e1a`; bound in §0.1.3 — do not use the dead
+  pre-066 hash).
 
 Read-only and fenced: everything in PATCH-066 §9's immutable set INCLUDING
 `components/collabboard/canvas/layouts/DrawingLayout.tsx`
@@ -152,9 +345,10 @@ re-derive the full set from PATCH-066 §9 at pre-flight.
 
 ## 6. Verification gates
 
-- baseline before editing: full Vitest 424/41 (or the counts recorded at
-  the PATCH-066 landing, if rebound there), credentialed line spec green
-  per its post-066 state, presentation spec 2 passed / 2 approved skips;
+- baseline before editing: exactly the §0.1.3 bound totals (full Vitest
+  424/41, focused 51/2, setup 1 passed, credentialed line 4 passed,
+  presentation 2 passed / 2 approved skips, credential-off 4+4 skipped,
+  cleanup zeros);
 - after editing: same unit counts (test-only patch, no unit change);
   credentialed line spec green including the new context-menu
   characterization; presentation regression untouched and green;
@@ -168,15 +362,25 @@ re-derive the full set from PATCH-066 §9 at pre-flight.
 
 ## 7. Stop conditions
 
-- PATCH-066 test correction not landed with a Sonnet PASS;
-- any fence mismatch at any point;
-- the diagnosis cannot be reduced to one of R1–R6 with direct evidence;
+- HEAD at pre-flight is not `b1f4e1a`, or the committed line spec does
+  not hash to `075360ab…` before editing;
+- any of the 38 immutable fences differs at any point;
+- baseline totals (§0.1.3) differ materially;
+- the diagnosis cannot be reduced to one of R1–R6 (§0.1.5) with direct
+  evidence, per state;
+- State U and State S cannot be exercised independently in the one
+  allowed file;
 - characterizing the behavior would require any production change,
   instrumentation, endpoint, flag, or hook;
+- the PATCH-066 frozen left-click/double-click assertions would need
+  weakening;
 - a second file appears necessary;
-- cleanup stops being deterministic;
+- cleanup stops being deterministic, or a real (non-harness) user board
+  would be touched;
 - auth/setup failure persisting after one clean regeneration per
-  PATCH-066 Amendment 1's bound procedure (which remains in force).
+  PATCH-066 Amendment 1's bound procedure (which remains in force);
+- any production fix is attempted (the fix is PATCH-068, requiring a
+  fresh production census and separate Fable authorization).
 
 ## 8. Rollback
 

@@ -361,6 +361,61 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-15** — PATCH-066 **DONE (commit
+  `b1f4e1ace9f1665fbdada3eab7769a7b69f002fb`, Sonnet PASS)** — landed as
+  the Amendment-2 test-only correction; exactly one file committed
+  (`e2e/characterization/drawing-line-bridge.spec.ts`, 232 insertions /
+  80 deletions), pushed, main clean and level. Governance disposition:
+  the original production mandate was revoked by Amendment 2; NO
+  DrawingLayout production change was made; deterministic Stage-0
+  console evidence proved left-click routing already works; PATCH-067
+  remained unstarted throughout. Frozen working behavior now under fixed
+  assertions: left-click — canvas physically topmost and physically
+  targeted, bridge routes to the back-plane hit-path, line selects and
+  STAYS selected after the full event cycle (settle-aware poll +
+  post-cycle recheck), Edit Points / LineToolbar appears, geometry and
+  the persisted CanvasLine row unchanged; double-click — routes, stays
+  selected, `midpoint-handle: 1` + `point-handle: 2` appear (edit-mode
+  roles the seeded 2-point line actually renders; legacy
+  start/control/end stay 0), geometry/persistence unchanged;
+  context menu — still does NOT open, contextmenu lookup resolves
+  `midpoint-handle` after the dblclick edit-mode entry, failure is
+  separate from the working left/double-click paths and explicitly
+  deferred to PATCH-067. No adaptive routing branch remains — a
+  recurrence of the old non-routing state now FAILS the suite. Final
+  gates (independently rerun by Sonnet): setup 1 passed; credentialed
+  line 4 passed / credential-off 4 skipped; credentialed presentation
+  2 passed / 2 approved skips, credential-off 4 skipped; focused Vitest
+  51/2; full Vitest 424/41; 38/38 immutable fences before and after;
+  tsc, boundaries, verify, build green; cleanup boards=0 / padlets=0 /
+  canvasLines=0 via an independent service-role query; zero production
+  imports of lineBridge/presentationBridge/drawingBridgeHarness;
+  repository clean and synced.
+- **2026-07-15** — PATCH-067 **ACTIVATED** (§0.1 added): base rebound to
+  `b1f4e1a`; authorized-change baseline refreshed to the LANDED spec
+  hash `075360ab6a764b034ef7703e22ecdbaf34c135c1` (pre-066 hash declared
+  dead); all 38 immutable fences re-verified at the new base. Census
+  refreshed from live source with three corrections that sharpen the
+  diagnosis: (1) point/midpoint handles render only under
+  `isEditMode && isSelected` (`SimpleLineRenderer.tsx:813`) — the
+  Stage-0 midpoint-handle resolution is an EDIT-MODE state (right-click
+  followed dblclick; the 2-point line's midpoint handle sits exactly at
+  the hit-path center), so State S is bound as "selected + edit mode
+  via the frozen left-click→dblclick sequence" and State U as fully
+  unselected; (2) the bridge contextmenu-capture handler has NO
+  `button !== 0` guard, does a fresh lookup, nulls the bridged-target
+  ref, and its capture-phase stopPropagation is what keeps Excalidraw's
+  own bubble-phase `handleCanvasContextMenu` (fork `App.tsx:11673`)
+  out whenever the lookup succeeds; (3) only the hit-path carries
+  `onContextMenu` (`:708-721`) — a synthetic contextmenu at a handle
+  bubbles to the SVG root's suppress-only handler (`:626-631`), and the
+  CanvasClient callback is additionally gated by
+  `canUseFreeformEditButton` (`CanvasClient.tsx:3275-3278`, an R4
+  candidate the diagnosis must confirm true for the harness owner).
+  R1–R6 table revalidated with per-state evidence requirements (R6 now
+  explicitly covers divergent selected/unselected exits). Scope remains
+  diagnosis-only, one allowed file, Sonnet PASS bound before commit;
+  any production fix is PATCH-068 with a fresh census.
 - **2026-07-15** — PATCH-066 **Amendment 2 APPROVED: production mandate
   REVOKED — the left-click routing defect is DISPROVEN.** After the
   Amendment-1 auth repair succeeded (setup 1 passed, regenerated
