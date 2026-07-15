@@ -3,7 +3,10 @@
 Status: APPROVED — ACTIVATED 2026-07-15 (base rebound, census refreshed —
 see §0.1); AMENDED 2026-07-15 (§0.2: selected-state divergence accepted
 as R6 after a correct pre-edit STOP — State U success + State S failure
-is now the expected, unambiguously classified outcome).
+is now the expected, unambiguously classified outcome); AMENDED
+2026-07-15 (§0.3: diagnostic runs bound to a development server with
+`PW_BASE_URL` — the production webServer is unsupported for diagnostic
+assertions; committed test unchanged, no repair authorized).
 Diagnosis/characterization patch, test-only. No production
 change is authorized by this patch; if the census proves a single
 smallest production cause, the FIX is a separate future patch
@@ -354,6 +357,107 @@ implementation commit.
 **Additional stop conditions (extend §7):** State U no longer opens the
 line menu on rerun; State S no longer resolves an edit handle; evidence
 maps outside the amended table; any production fix is attempted.
+
+## 0.3 Amendment 2 (2026-07-15) — diagnostics bound to the development server
+
+**Trigger.** At pre-flight the implementer ran the committed line
+baseline WITHOUT `PW_BASE_URL`, which per `playwright.config.ts:48-55`
+starts the configured PRODUCTION webServer (`npm run start -- --port
+3100` after a build). Result: 3 passed / 1 failed — the committed
+PATCH-066 pointer test failed at its first unconditional diagnostic
+assertion (`expect(mouseDownCapture).toMatchObject({ phase:
+'mouse-down-capture', … })` with `mouseDownCapture === null`) while the
+REAL UI demonstrably worked (selection reached edit mode, Edit Points
+visible, handles visible). Zero files were changed; the implementer
+correctly STOPPED.
+
+**Cause — definitional, ruled from live source (CTO ruling A:
+environment contract mismatch; the committed test is NOT defective).**
+
+- `DEV_DRAWING_BRIDGE_DIAGNOSTICS = process.env.NODE_ENV !==
+  'production'` (`DrawingLayout.tsx:91`); every
+  `[DrawingLayout:back-line-bridge]` emission is gated by it
+  (`logBackLineBridgeDiagnostics` early-returns at `:2175`; the
+  target-lookup log is wrapped at `:2228`).
+- `DEV_LINE_RENDER_DIAGNOSTICS = process.env.NODE_ENV !== 'production'`
+  (`SimpleLineRenderer.tsx:6`); `logLineEventDiagnostics` early-returns
+  at `:15`.
+- Under `next start` (production), these log calls are UNREACHABLE:
+  `mouseDownCapture` is null by definition, not by flake or race. The
+  interaction itself still works — exactly what the implementer
+  observed.
+- The diagnostics-bearing assertions were authorized by PATCH-066 §8-A
+  point 8 explicitly as "dev server, read-only listener"; Stage 0
+  (PATCH-066 §4) was likewise bound to a dev server "so the diagnostics
+  are live". Every prior green run of this spec (PATCH-066 acceptance
+  4/4, Amendment-1 pre-flight 4/4, and a fresh CTO confirmation run
+  4/4 on 2026-07-15 at this exact HEAD and spec hash `075360ab…`) used
+  a warmed dev server with `PW_BASE_URL`. Dev-mode behavior is
+  deterministic; production-mode execution is UNSUPPORTED for
+  diagnostic-only assertions.
+
+**Console-collection design assessment (Task-3 record; no race found
+in the committed test).** The listener is attached via
+`page.on('console', …)` (Playwright-side; navigations and fast refresh
+cannot detach it) BEFORE navigation; each message's `arg.jsonValue()`
+reads are tracked in `consoleReads` and `flushConsoleEntries()` awaits
+them all before any `findConsolePayload` query — so
+observed-but-unserialized loss is excluded. `findConsolePayload`
+returns the FIRST payload matching a phase across the shared
+`consoleEntries` buffer: harmless for the committed single-pass test
+(one interaction per phase), but it WOULD conflate PATCH-067's TWO
+right-clicks (State U and State S both emit `contextmenu-capture`
+phases). **Bound consequence:** the PATCH-067 implementation must use
+per-state console buffers (or clear/flush + snapshot boundaries between
+State U and State S) so each state's diagnostics are attributed
+unambiguously. This is a design requirement inside the sole allowed
+file, not a test defect repair.
+
+**Bound environment contract for ALL PATCH-067 (and future
+drawing-diagnostic) runs:**
+
+1. Start a development server yourself: `npm run dev`, following the
+   LESSONS_LEARNED port discipline (inspect port 3000 first, attribute
+   any listener via `Get-NetTCPConnection`/`Get-CimInstance`, never
+   kill an unrelated process, use another free port if 3000 is taken,
+   stop only the server you started).
+2. Confirm development mode from the startup banner (`next dev` +
+   `Ready`) before running any spec.
+3. Run every diagnostic characterization with `PW_BASE_URL` pointing at
+   that server (e.g. `PW_BASE_URL=http://localhost:3000 npx playwright
+   test e2e/characterization/drawing-line-bridge.spec.ts
+   --project=characterization`). With `PW_BASE_URL` set the config
+   starts NO webServer.
+4. The Playwright-default production webServer (`:3100`) must NOT be
+   used for diagnostic assertions. Recording: production-mode execution
+   of this spec is unsupported and expected to fail its diagnostic
+   assertions while the app behaves correctly — that failure is an
+   environment error, not product or test evidence.
+5. The run's own in-test assertions double as the dev-mode proof: at
+   least one `[DrawingLayout:back-line-bridge]` payload must be
+   captured, or the run is invalid.
+6. No credential or cookie contents in any log or report; generated
+   `.next` output must never be staged (verify with `git status` after
+   builds).
+
+**Disposition.** The committed test remains UNCHANGED and remains the
+authorized baseline (`075360ab6a764b034ef7703e22ecdbaf34c135c1`); NO
+test correction, stabilization, or weakening is authorized by this
+amendment; no Stage-A repair exists. Sequencing: the implementer must
+first reproduce the line baseline GREEN (4 passed) under the bound
+dev-server contract above, then proceed directly to the State U /
+State S diagnosis per §0.2. The §0.2 R6 selected-state-divergence
+ruling is UNAFFECTED — it was derived from dev-mode evidence and is
+not reopened by a production-mode diagnostic absence.
+
+**Additional stop conditions (extend §7):** the dev-mode line baseline
+is not deterministically green under the bound contract (that would be
+real flake evidence — report, do not patch around); production-mode
+diagnostic suppression cannot be distinguished from a genuine capture
+race in some future observation; a production source change appears
+necessary; generated `.next` files become tracked or staged; State U /
+State S implementation begins before the dev-mode baseline rerun is
+green.
 
 ## 1. Purpose — exactly one subsystem
 

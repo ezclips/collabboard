@@ -361,6 +361,36 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-15** — PATCH-067 **Amendment 2 APPROVED: diagnostics bound
+  to the development server (ruling A — environment contract mismatch;
+  committed test NOT defective, no repair authorized).** Pre-edit STOP:
+  running the committed line baseline WITHOUT `PW_BASE_URL` let
+  `playwright.config.ts:48-55` start the PRODUCTION webServer
+  (`npm run start -- --port 3100`); result 3 passed / 1 failed — the
+  PATCH-066 pointer test's first unconditional diagnostic assertion
+  failed with `mouseDownCapture === null` while the real UI worked
+  (edit mode reached, handles visible). Zero files changed. Cause is
+  definitional, not a race: `DEV_DRAWING_BRIDGE_DIAGNOSTICS` and
+  `DEV_LINE_RENDER_DIAGNOSTICS` are both `process.env.NODE_ENV !==
+  'production'` (`DrawingLayout.tsx:91` gating `:2175`/`:2228`;
+  `SimpleLineRenderer.tsx:6` gating `:15`) — under `next start` the
+  log calls are unreachable. Dev-mode determinism reconfirmed by a
+  fresh CTO run at this HEAD: 4/4 green (third independent green dev
+  run at spec hash `075360ab…`). Collection-design review found no
+  race in the committed test (Playwright-side listener, flush barrier
+  before queries) but one bound consequence for 067: shared
+  first-match console buffers WOULD conflate the two State U/State S
+  right-clicks — per-state buffers/clear boundaries are required in
+  the implementation. Bound environment contract: self-started
+  `npm run dev` (LESSONS_LEARNED port discipline), dev banner
+  confirmed, `PW_BASE_URL` pointing at it, production `:3100`
+  webServer recorded as UNSUPPORTED for diagnostic assertions, at
+  least one bridge payload captured per run, `.next` never staged.
+  Sequencing: reproduce line baseline 4/4 green under the bound
+  contract, then proceed straight to State U / State S — no Stage-A
+  repair exists. §0.2's R6 selected-state-divergence ruling is
+  unaffected. Test-only scope, sole allowed file, and Sonnet-PASS
+  requirement unchanged.
 - **2026-07-15** — PATCH-067 **Amendment 1 APPROVED: selected-state
   divergence accepted as R6.** The implementer ran the live diagnosis at
   base `6693843` with every pre-flight gate passed (38/38 fences, spec
