@@ -71,6 +71,7 @@ type PngCensusEntry = {
 
 type DiagnosisRow = 'N1' | 'N2' | 'N3' | 'N4' | 'N5';
 type Patch070DecisionRow = 'F1' | 'F2' | 'F3' | 'F4' | 'F6' | 'F7';
+type Patch070Stage0BDecisionRow = 'G1a' | 'G1b' | 'G1c' | 'G1d' | 'G2' | 'G3' | 'G4';
 
 type ProbePixelSample = {
   r: number;
@@ -149,6 +150,12 @@ type Patch070ProbeSnapshot = {
   canvasTrace: ProbeCanvasTraceEntry[];
   fontStatusTimeline: ProbeFontEvent[];
   imageMounts: ProbeImageMountEvent[];
+};
+
+type RuntimeSlideDiagnosticRecord = {
+  kind: 'plan-computed' | 'effect-run' | 'effect-cleanup' | 'band-commit';
+  timestamp: number;
+  [key: string]: unknown;
 };
 
 async function nativeRasterCounts(page: Page) {
@@ -947,8 +954,10 @@ test.describe('drawing presentation browser characterization (PATCH-064)', () =>
           __patch070Stage0Probe?: {
             reset: () => void;
           };
+          __fable5RuntimeSlideDiagnostics?: RuntimeSlideDiagnosticRecord[];
         };
         windowWithProbe.__patch070Stage0Probe?.reset();
+        windowWithProbe.__fable5RuntimeSlideDiagnostics = [];
       });
       await page.getByTitle(/Next/).click();
       await expect(fullscreen.getByText('Slide 2 / 2', { exact: true })).toBeVisible();
@@ -972,6 +981,12 @@ test.describe('drawing presentation browser characterization (PATCH-064)', () =>
           fontStatusTimeline: [],
           imageMounts: [],
         } satisfies Patch070ProbeSnapshot;
+      });
+      const runtimeSlideDiagnostics = await page.evaluate(() => {
+        const windowWithDiagnostics = window as typeof window & {
+          __fable5RuntimeSlideDiagnostics?: RuntimeSlideDiagnosticRecord[];
+        };
+        return JSON.parse(JSON.stringify(windowWithDiagnostics.__fable5RuntimeSlideDiagnostics ?? [])) as RuntimeSlideDiagnosticRecord[];
       });
       const expectedFullscreenNativeBand = fullscreenPngCensus.find((entry) => entry.bandPosition === expectedNativeBand) ?? null;
       const fullscreenBelowBand = fullscreenPngCensus.find((entry) => entry.bandPosition === 'below') ?? null;
@@ -1079,6 +1094,165 @@ test.describe('drawing presentation browser characterization (PATCH-064)', () =>
         F6: 'F6: the fullscreen landscape probe reached a zero-area or invalid-dimension export artifact, so the missing above-band raster is bounded to degenerate export geometry.',
         F7: 'F7: the fullscreen landscape probe isolated a narrow deterministic cause that did not map cleanly onto the predefined F1/F2/F3/F4/F6 rows.',
       };
+      const stage0BStringArray = (value: unknown): string[] => (
+        Array.isArray(value) ? value.map((entry) => String(entry)) : []
+      );
+      const stage0BNullableStringArray = (value: unknown): (string | null)[] => (
+        Array.isArray(value) ? value.map((entry) => (typeof entry === 'string' ? entry : null)) : []
+      );
+      const stage0BNumberArray = (value: unknown): number[] => (
+        Array.isArray(value) ? value.filter((entry): entry is number => typeof entry === 'number') : []
+      );
+      const planComputedRecords = runtimeSlideDiagnostics.filter((record) => record.kind === 'plan-computed');
+      const effectRunRecords = runtimeSlideDiagnostics.filter((record) => record.kind === 'effect-run');
+      const effectCleanupRecords = runtimeSlideDiagnostics.filter((record) => record.kind === 'effect-cleanup');
+      const bandCommitRecords = runtimeSlideDiagnostics.filter((record) => record.kind === 'band-commit');
+      const landscapePlanComputedRecords = planComputedRecords.filter((record) => record.slideId === LANDSCAPE_FRAME_ID);
+      const landscapeEffectRunRecords = effectRunRecords.filter((record) => record.slideId === LANDSCAPE_FRAME_ID);
+      const landscapeEffectCleanupRecords = effectCleanupRecords.filter((record) => record.slideId === LANDSCAPE_FRAME_ID);
+      const landscapeBandCommitRecords = bandCommitRecords.filter((record) => record.slideId === LANDSCAPE_FRAME_ID);
+      const livePlanRecord = landscapePlanComputedRecords.at(-1) ?? null;
+      const liveEffectRunRecord = landscapeEffectRunRecords.at(-1) ?? null;
+      const liveInputElementOrder = Array.isArray(livePlanRecord?.inputElementIndexes)
+        ? livePlanRecord.inputElementIndexes
+        : [];
+      const liveInputElementIds = stage0BStringArray(livePlanRecord?.inputElementIds);
+      const liveInputFrameIds = stage0BNullableStringArray(livePlanRecord?.inputElementFrameIds);
+      const liveInputDeletedFlags = Array.isArray(livePlanRecord?.inputElementDeletedFlags)
+        ? livePlanRecord.inputElementDeletedFlags.map(Boolean)
+        : [];
+      const livePadletIds = stage0BStringArray(livePlanRecord?.padletIds);
+      const livePadletZIndexes = stage0BNumberArray(livePlanRecord?.padletZIndexes);
+      const liveResolvedPadletIds = stage0BStringArray(livePlanRecord?.resolvedPadletIds);
+      const liveResolvedPadletZIndexes = stage0BNumberArray(livePlanRecord?.resolvedPadletZIndexes);
+      const liveUnresolvedPadletIds = stage0BStringArray(livePlanRecord?.unresolvedPadletIds);
+      const liveNativeBelowIds = stage0BStringArray(livePlanRecord?.nativeBelowIds);
+      const liveNativeAboveIds = stage0BStringArray(livePlanRecord?.nativeAboveIds);
+      const liveNativeBelowCount = typeof livePlanRecord?.nativeBelowCount === 'number'
+        ? livePlanRecord.nativeBelowCount
+        : liveNativeBelowIds.length;
+      const liveNativeAboveCount = typeof livePlanRecord?.nativeAboveCount === 'number'
+        ? livePlanRecord.nativeAboveCount
+        : liveNativeAboveIds.length;
+      const liveNativeSummaries = SEEDED_NATIVE_IDS.map((id) => {
+        const liveIndex = liveInputElementIds.indexOf(id);
+        const orderEntry = Array.isArray(liveInputElementOrder)
+          ? liveInputElementOrder.find((entry) => typeof entry === 'object' && entry !== null && (entry as { id?: unknown }).id === id)
+          : null;
+        return {
+          id,
+          present: liveIndex >= 0,
+          frameId: liveIndex >= 0 ? liveInputFrameIds[liveIndex] ?? null : null,
+          isDeleted: liveIndex >= 0 ? liveInputDeletedFlags[liveIndex] ?? null : null,
+          sceneIndex: typeof (orderEntry as { sceneIndex?: unknown } | null)?.sceneIndex === 'number'
+            ? (orderEntry as { sceneIndex: number }).sceneIndex
+            : liveIndex >= 0
+              ? liveIndex
+              : null,
+          index: typeof (orderEntry as { index?: unknown } | null)?.index === 'number'
+            ? (orderEntry as { index: number }).index
+            : null,
+        };
+      });
+      const seededNativesPresentInLiveInput = liveNativeSummaries.every((summary) => summary.present);
+      const seededNativesHaveValidLiveFrameState = liveNativeSummaries.every((summary) => (
+        summary.frameId === LANDSCAPE_FRAME_ID && summary.isDeleted === false
+      ));
+      const seededNativesAbsentFromLiveBands = SEEDED_NATIVE_IDS.every((id) => (
+        !liveNativeBelowIds.includes(id) && !liveNativeAboveIds.includes(id)
+      ));
+      const livePadletResolutionMatchesNode = liveResolvedPadletIds.join('|') === compositionPlan.resolvedPadlets.map((entry) => String(entry.padlet.id)).join('|')
+        && liveResolvedPadletZIndexes.join('|') === resolvedPadletIndexes.join('|');
+      const livePadletsResolved = liveResolvedPadletIds.length === compositionPlan.resolvedPadlets.length
+        && liveUnresolvedPadletIds.length === 0;
+      const livePadletRange = liveResolvedPadletZIndexes.length > 0
+        ? {
+            first: Math.min(...liveResolvedPadletZIndexes),
+            last: Math.max(...liveResolvedPadletZIndexes),
+          }
+        : null;
+      const liveNativesInsideMiddleInterval = Boolean(livePadletRange) && liveNativeSummaries.every((summary) => (
+        typeof summary.sceneIndex === 'number'
+        && summary.sceneIndex >= livePadletRange!.first
+        && summary.sceneIndex <= livePadletRange!.last
+      ));
+      const effectAboveBranchCondition = liveEffectRunRecord?.aboveBranchCondition === true;
+      const effectBelowBranchCondition = liveEffectRunRecord?.belowBranchCondition === true;
+      const planRecomputed = landscapePlanComputedRecords.length > 0;
+      const effectReran = landscapeEffectRunRecords.length > 0;
+      const cleanupOccurred = landscapeEffectCleanupRecords.length > 0;
+      const belowCommitSequence = landscapeBandCommitRecords.filter((record) => record.band === 'below');
+      const aboveCommitSequence = landscapeBandCommitRecords.filter((record) => record.band === 'above');
+      const belowCommitted = belowCommitSequence.length > 0;
+      const aboveCommitted = aboveCommitSequence.length > 0;
+      const firstAboveCommitTimestamp = aboveCommitSequence[0]?.timestamp;
+      const cleanupBeforeAboveInvocation = typeof firstAboveCommitTimestamp === 'number'
+        ? landscapeEffectCleanupRecords.some((record) => typeof record.timestamp === 'number' && record.timestamp < firstAboveCommitTimestamp)
+        : false;
+      const effectTokens = landscapeEffectRunRecords
+        .map((record) => record.token)
+        .filter((token) => typeof token === 'number');
+      const commitTokens = landscapeBandCommitRecords
+        .map((record) => record.token)
+        .filter((token) => typeof token === 'number');
+      const cleanupTokens = landscapeEffectCleanupRecords
+        .map((record) => record.token)
+        .filter((token) => typeof token === 'number');
+      const tokenContinuity = {
+        effectTokens,
+        commitTokens,
+        cleanupTokens,
+        allCommitsMatchLatestEffectToken: effectTokens.length > 0
+          && commitTokens.every((token) => token === effectTokens.at(-1)),
+      };
+      const persistedOrderStable = preRunElementOrder.join('|') === postRunElementOrder.join('|');
+      const nodePlanStable = postRunNativeBelowIds.join('|') === nativeBelowIds.join('|')
+        && postRunNativeAboveIds.join('|') === nativeAboveIds.join('|')
+        && postRunCompositionPlan.resolvedPadlets.map((entry) => entry.zIndex).join('|') === resolvedPadletIndexes.join('|');
+      const stage0BRowMatches: Patch070Stage0BDecisionRow[] = [];
+      if (
+        seededNativesPresentInLiveInput
+        && seededNativesHaveValidLiveFrameState
+        && seededNativesAbsentFromLiveBands
+        && livePadletsResolved
+        && liveNativesInsideMiddleInterval
+      ) {
+        stage0BRowMatches.push('G1a');
+      }
+      if (
+        SEEDED_NATIVE_IDS.every((id) => !liveInputElementIds.includes(id))
+        && nativeAboveIds.join('|') === SEEDED_NATIVE_IDS.join('|')
+      ) {
+        stage0BRowMatches.push('G1b');
+      }
+      if (
+        seededNativesPresentInLiveInput
+        && !seededNativesHaveValidLiveFrameState
+        && seededNativesAbsentFromLiveBands
+      ) {
+        stage0BRowMatches.push('G1c');
+      }
+      if (!livePadletResolutionMatchesNode && liveNativeAboveCount === 0) {
+        stage0BRowMatches.push('G1d');
+      }
+      if (
+        landscapePlanComputedRecords.length === 1
+        && liveInputElementIds.length > 0
+        && persistedOrderStable
+        && nodePlanStable
+        && !seededNativesPresentInLiveInput
+      ) {
+        stage0BRowMatches.push('G2');
+      }
+      if ((liveNativeAboveCount > 0 || effectAboveBranchCondition) && selectedDecisionRow === 'F4') {
+        stage0BRowMatches.push('G3');
+      }
+      const selectedStage0BDecisionRow = stage0BRowMatches.length === 1 ? stage0BRowMatches[0] : 'G4';
+      const conciseStage0BRootCauseBoundary = selectedStage0BDecisionRow === 'G1a'
+        ? 'G1a: live RuntimeSlideRenderer input contains the seeded native elements with valid frame/deletion state, but the live band split leaves them in the uncovered middle interval, so the above branch is false and no above export is invoked.'
+        : selectedStage0BDecisionRow === 'G1d'
+          ? 'G1d: live RuntimeSlideRenderer padlet resolution diverges from the persisted Node-side plan by resolving an additional runtime padlet after the seeded natives; the shifted live padlet range leaves nativeAbove empty, so the above branch is false and no above export is invoked.'
+        : `${selectedStage0BDecisionRow}: Stage 0B isolated a live runtime composition mechanism requiring CTO amendment before any Stage 1 production fix.`;
 
       expect(fullscreenPngCensus.length).toBeGreaterThanOrEqual(1);
       expect(fullscreenBelowBand).not.toBeNull();
@@ -1232,7 +1406,52 @@ test.describe('drawing presentation browser characterization (PATCH-064)', () =>
           stage1Status: 'locked-pending-amendment',
         }),
       });
+      test.info().annotations.push({
+        type: 'patch-070-stage0b-live-runtime',
+        description: JSON.stringify({
+          baseStage0Row: 'F4',
+          selectedDecisionRow: selectedStage0BDecisionRow,
+          planComputedRecords,
+          effectRunRecords,
+          effectCleanupRecords,
+          bandCommitRecords,
+          liveInputElementOrder,
+          liveInputElementIds,
+          liveInputFrameIds,
+          liveInputDeletedFlags,
+          livePadletIds,
+          livePadletZIndexes,
+          liveResolvedPadletIds,
+          liveResolvedPadletZIndexes,
+          liveUnresolvedPadletIds,
+          liveNativeBelowIds,
+          liveNativeAboveIds,
+          liveNativeBelowCount,
+          liveNativeAboveCount,
+          liveNativeSummaries,
+          effectAboveBranchCondition,
+          effectBelowBranchCondition,
+          planRecomputed,
+          effectReran,
+          cleanupOccurred,
+          cleanupBeforeAboveInvocation,
+          cleanupSequence: landscapeEffectCleanupRecords,
+          belowCommitted,
+          aboveCommitted,
+          belowCommitSequence,
+          aboveCommitSequence,
+          tokenContinuity,
+          persistedOrderStable,
+          nodePlanStable,
+          stage0BRowMatches,
+          conciseRootCauseBoundary: conciseStage0BRootCauseBoundary,
+          stage1Status: 'locked-pending-amendment',
+        }),
+      });
+      expect(runtimeSlideDiagnostics.length).toBeGreaterThan(0);
       expect(selectedDecisionRow).toBe('F4');
+      expect(stage0BRowMatches).toEqual(['G1d']);
+      expect(selectedStage0BDecisionRow).toBe('G1d');
 
       await page.getByTitle(/Previous/).click();
       await expect(fullscreen.getByText('Slide 1 / 2', { exact: true })).toBeVisible();
