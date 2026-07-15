@@ -361,6 +361,82 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-15** — PATCH-068 **DONE (commit
+  `e2f0bbd2affdfe9215fa8ab2faa0780b8b0c1a6c`)** — first production fix
+  of the Drawing Bridge program, landed after Sonnet's initial PASS
+  WITH REQUIRED CHANGES (one blocking test gap: final invariant
+  snapshots were captured before the point-handle probe) was corrected
+  (snapshots rebound to true post-point-handle state,
+  `...AfterPointHandle` variables driving the final assertions and the
+  `patch-068-contextmenu-fix` annotation) and a focused re-review
+  returned PASS. Exactly two files: `DrawingLayout.tsx` (new hash
+  `93e5900f8df6468a466f8bfd0318f813393336a1`) and
+  `drawing-line-bridge.spec.ts` (`3e690d20614dee1c0b6c60a791f4031e9aa53833`).
+  Production correction: role-priority lookup and list UNCHANGED;
+  contextmenu-only normalization in
+  `resolveBackLineContextMenuDispatchTarget` — when the resolved role
+  is exactly `midpoint-handle` or `point-handle`, the synthetic
+  contextmenu dispatch target becomes the SAME line's back-plane
+  hit-path via
+  `[data-line-id="${CSS.escape(lineId)}"][data-line-role="hit-path"][data-line-renderer="back"]`,
+  falling back to the original target if unavailable; coordinates/
+  modifiers preserved; no direct callback invocation; pointerdown/
+  mousedown/click/dblclick/drag routing untouched. Final behavior:
+  State U unchanged (hit-path direct, menu opens); State S midpoint
+  AND point-handle both open the owning line's menu with matching
+  original/normalized line IDs, renderer diagnostics firing,
+  Excalidraw menu absent, selection + edit handles intact. Final
+  invariants proven post-point-handle: geometry, full/primary/other
+  persisted rows, unrelated rendered lines, containers — all
+  unchanged; no overlapping-line contamination. Gates: setup 1; line
+  4; presentation 2 + 2 approved skips; credential-off 4 + 4; focused
+  51/2; full 424/41; tsc/boundaries/verify/build green; cleanup zeros
+  (independent service-role query); 39/39 unique immutable fences
+  (historical "38" label noted stale); zero production imports;
+  repository clean and synced. **The back-line context-menu defect
+  (PATCH-067's R6) is FIXED.**
+- **2026-07-15** — Post-068 census + PATCH-069 **AUTHORED + APPROVED**
+  ("Diagnose Blank Native Raster in Presentation Slides",
+  diagnosis-only, base `e2f0bbd`). Candidate ranking (narrowest/safest
+  first): (1) **blank native slide raster** — user-visible (native
+  drawing content invisible in presentations), deterministic (frozen
+  `nativeRasterCounts` all-zero assertion), characterized, root cause
+  UNKNOWN → diagnosis-first, one test file — SELECTED; (2) line-follow
+  on container movement (PATCH-064-frozen) — deterministic and
+  characterized but the fix is feature-sized (attachment-anchor
+  design, persistence ownership, likely touching the CanvasClient
+  hotspot) and needs an intended-behavior ruling first; (3)
+  natural-height line-follow — same family as (2), excluded from any
+  joint patch unless one proven shared cause; (4) presentation frame
+  ordering divergence — deterministic but plausibly INTENDED
+  (position-sorted slides); needs a product ruling before any patch;
+  (5) duplication/membership family (PATCH-062 RC-1/2/3/6) — real but
+  needs fresh source+persistence mapping per sub-defect; (6) AI-image
+  slide omission — blocked on a deterministic fixture design; (7)
+  slide-overlap fallback (RC-4) — recorded, low; (8) residual
+  contextmenu roles (legacy start/control/end handles) — structurally
+  identical to the fixed pair but no harness reproduction path;
+  deferred. Census highlights grounding PATCH-069:
+  `planSlideComposition.ts:39-47` band split has a latent mid-band gap
+  (elements between padlet zIndexes vanish from BOTH bands — should
+  not bite the seeded fixture, must be proven);
+  `RuntimeSlideRenderer.tsx:127/:144` swallow export failures
+  SILENTLY; `renderExcalidrawSlideBase.ts:25` exports through the
+  fork build (`package.json:24` file: dep); the seeded native
+  elements are genuinely visible content (`drawingBridgeHarness.ts:
+  145-156/185-199`). N1–N5 classification bound (plan drops / silent
+  export failure / empty PNG / persisted-scene divergence / other),
+  discriminated deterministically by importing the PURE
+  `planSlideComposition` into the Node-side spec against the real
+  persisted scene + a browser PNG census — no production
+  instrumentation. Sole allowed file
+  `drawing-presentation.spec.ts` (@ `c6bfb4f0…`); 40 unique immutable
+  fences (39 carried − presentation spec + the two frozen PATCH-068
+  files), 40/40 verified at base; baselines freshly rerun green at
+  `e2f0bbd` (line 4, presentation 2+2, cred-off 4+4, 51/2, 424/41,
+  cleanup zeros, zero prod imports); dev-server diagnostic contract
+  and Amendment-1 auth procedure remain binding; Sonnet PASS required
+  before commit; any fix is PATCH-070 with a fresh census.
 - **2026-07-15** — PATCH-067 **DONE (commit
   `a181cdea2317a0d8a1602261c571d8a93721fcf8`, Sonnet PASS)** — landed
   as the diagnosis-only characterization, exactly one file
