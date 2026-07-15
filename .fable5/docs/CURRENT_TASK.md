@@ -361,6 +361,75 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-15** — PATCH-069 **DONE (commit
+  `05e913ef84c802b999bc4411d960873e4b21bb23`, Sonnet PASS)** — landed as
+  the diagnosis-only characterization, exactly one file
+  (`e2e/characterization/drawing-presentation.spec.ts`, new hash
+  `3ddcc987…`), pushed, main clean and level. **Final diagnosis: N2 —
+  the fullscreen above-band PNG never materializes**, proven with live
+  evidence under the bound dev-server contract. Persisted scene matches
+  seed (text `text-landscape` @ scene index 4, shape `shape-landscape`
+  @ index 5; visible, non-deleted, opaque, non-zero size). Composition
+  plan (REAL pure `planSlideComposition` imported Node-side against the
+  real persisted scene): padlet range 2..3, `nativeBelowIds=[]`,
+  `nativeAboveIds=[text-landscape, shape-landscape]`, expected band
+  `above`, nothing dropped — the latent mid-band gap did NOT affect
+  this fixture. Fullscreen: exactly one loaded data PNG (below band,
+  1280×720), blank for the native regions; the required above-band PNG
+  absent from the DOM entirely. Thumbnail: merged preview PNG present
+  with real native text+shape pixels (meaningful pixels + seeded-color
+  hits) — surface descriptor N5, not a competing primary. Root-cause
+  boundary: persisted data correct, composition planning correct,
+  defect fullscreen-runtime-specific; thumbnail rendering proves the
+  native content itself is exportable. Final gates: setup 1; line 4;
+  presentation 2 + 2 approved skips; credential-off 4 + 4; focused
+  51/2; full 424/41; tsc/boundaries/verify/build green (parallel
+  verify/build `.next/types` contention confirmed environmental —
+  sequential rerun clean); cleanup zeros (independent service-role
+  query); 40/40 immutable fences; zero production imports; repository
+  clean and synced.
+- **2026-07-15** — Post-069 census + PATCH-070 **AUTHORED + APPROVED**
+  ("Restore Fullscreen Native Above-Band Raster", **staged
+  diagnosis-first**, base `05e913e`). Fresh census findings that
+  narrow but cannot close the root cause: RuntimeSlideRenderer's below/
+  above exports are fully INDEPENDENT promise chains with separate
+  silent catches (`:114-127`/`:130-145`) — "one failed export blocks
+  the other" is structurally impossible; the fork's font loader
+  swallows load failures (`Fonts.ts:252-268`) — **the live Virgil CORS
+  error CANNOT reject an export and is ruled noise**; the observed
+  1280×720 below PNG proves `compositionPlan.frameElement` resolved
+  live (frame present at fullscreen time); the thumbnail path
+  (`createSlideRenderer.tsx:216-235`) runs the SAME
+  `renderExcalidrawSlideBase` on the SAME `nativeAboveElements` inside
+  a `Promise.all` and succeeds — since the below band is empty for
+  this fixture, the thumbnail's visible native content can only come
+  from the above-band canvas, proving the shared pipeline works for
+  these exact elements; both surfaces read the same DrawingLayout state
+  (runtime refs re-synced every render, `:695-697`) — staleness by
+  construction excluded; the only plan-divergence shape consistent with
+  a blank below PNG is the mid-band gap biting LIVE (order drift after
+  thumbnail caching). Surviving mechanisms — above export rejects (F1),
+  toDataURL throws (F2), commit suppressed by cancellation/token (F3),
+  runtime plan divergence (F4), degenerate bounds (F6) — are NOT
+  source-discriminable, so PATCH-070 is staged: **Stage 0** adds a
+  deterministic test-only probe (toDataURL trace, above-export-began
+  evidence, post-run persisted-order re-fetch + plan rerun, font-load
+  log) in the sole allowed spec file mapping the live behavior onto
+  exactly one bound decision row F1–F7 (annotation
+  `patch-070-stage0-probe`; all PATCH-069 assertions stay green);
+  **Stage 1** (production fix in `RuntimeSlideRenderer.tsx` only,
+  authorized hash `a407cccc…`, LOCKED during Stage 0) requires a named
+  CTO amendment binding the proven row to exactly one design class;
+  per-row designs bound, speculative combinations and thumbnail/planner
+  /fork/frame-order/AI-image scope rejected. 43 unique immutable fences
+  (39 carried from PATCH-069 + 4 fork census files: `Fonts.ts`,
+  `scene/export.ts`, `utils/src/export.ts`, `element/src/frame.ts`),
+  all verified at base; baselines bound (51/2, 424/41, setup 1, line 4,
+  presentation 2+2, cred-off 4+4, cleanup zeros, zero prod imports);
+  dev-server diagnostic contract binding; Sonnet PASS required per
+  stage; Stage-0 commit `test(drawing): probe fullscreen above-band
+  export runtime (PATCH-070 Stage 0)`; Stage-1 commit (reserved)
+  `fix(presentation): restore fullscreen native raster (PATCH-070)`.
 - **2026-07-15** — PATCH-068 **DONE (commit
   `e2f0bbd2affdfe9215fa8ab2faa0780b8b0c1a6c`)** — first production fix
   of the Drawing Bridge program, landed after Sonnet's initial PASS
