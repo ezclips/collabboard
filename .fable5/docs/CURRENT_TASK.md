@@ -361,6 +361,87 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-15** — PATCH-067 **DONE (commit
+  `a181cdea2317a0d8a1602261c571d8a93721fcf8`, Sonnet PASS)** — landed
+  as the diagnosis-only characterization, exactly one file
+  (`e2e/characterization/drawing-line-bridge.spec.ts`), pushed, main
+  clean and level. **Final diagnosis: R6 — selected-state
+  context-menu divergence**, proven with live browser evidence under
+  the bound dev-server contract. State U (unselected): target lookup
+  resolves `hit-path`, `contextmenu-capture` guardPassed true,
+  `hit-path-contextmenu:before-stop`/`after-stop` both fire, line
+  becomes selected, the app line context menu OPENS, Excalidraw's menu
+  stays absent. State S (selected + edit mode, established only via
+  the frozen real left-click → double-click sequence, `midpoint-handle:
+  1` / `point-handle: 2`): lookup resolves `midpoint-handle` at the
+  segment-center coordinate, no `hit-path-contextmenu:*` diagnostic
+  fires, the app menu stays absent, Excalidraw's menu stays absent.
+  Root-cause boundary confirmed: only the hit-path owns the line
+  `onContextMenu` path; edit handles intentionally outrank hit-path in
+  `BACK_LINE_INTERACTIVE_ROLE_PRIORITY` for drag routing; the
+  synthetic contextmenu dispatched at a handle bubbles only to the
+  SVG root's suppress-only handler; State U proves the CanvasClient
+  callback and `canUseFreeformEditButton` permission gate are
+  functional; Excalidraw is not the primary failure (absent in both
+  states, consumed by the bridge's capture-phase stop whenever the
+  lookup succeeds). Frozen invariants held throughout: left-click
+  selection, persistence, double-click edit mode, geometry, persisted
+  rows, unrelated lines, and containers all unchanged. Final gates
+  (dev-server contract, `PW_BASE_URL`, independently rerun by
+  Sonnet): setup 1 passed; line setup+3 active = 4 passed;
+  presentation 2 passed / 2 approved skips; credential-off line 4
+  skipped / presentation 4 skipped; focused Vitest 51/2; full Vitest
+  424/41; tsc, boundaries, verify, build green; cleanup boards=0 /
+  padlets=0 / canvasLines=0 via an independent service-role query;
+  **39/39 unique immutable fences matched** (the patch text's "38"
+  label was stale from before DrawingLayout.tsx was folded back in —
+  no duplicate or missing fence; corrected going forward); zero
+  production imports of lineBridge/presentationBridge/
+  drawingBridgeHarness; repository clean and synced.
+- **2026-07-15** — PATCH-068 **AUTHORED + APPROVED** ("Route Back-Line
+  Context Menu from Selected Edit Handles") — production fix patch,
+  base `a181cde`. Fresh census (not copied from PATCH-067's diagnosis)
+  confirmed the smallest safe design: inside
+  `handleBackLineBridgeContextMenuCapture`
+  (`DrawingLayout.tsx:2573-2671`) only, after
+  `findBackLineInteractiveTargetAtPoint` resolves an interactive
+  target, if its `data-line-role` is `midpoint-handle` or
+  `point-handle`, resolve that SAME line's `hit-path` element via an
+  exact `data-line-id`-scoped `querySelector` (not a coordinate-based
+  `elementsFromPoint` fallback, which could hit a different overlapping
+  line) and dispatch the synthetic `contextmenu` there instead, with
+  `clientX`/`clientY` preserved unchanged so the menu opens at the
+  real cursor position; if the scoped hit-path isn't found, fall back
+  to today's characterized (non-opening) behavior rather than guess.
+  Role-priority resolution itself (`BACK_LINE_INTERACTIVE_ROLE_PRIORITY`,
+  used by mousedown/click/dblclick/contextmenu alike) is UNTOUCHED —
+  only the contextmenu dispatch TARGET is normalized, so left-click,
+  drag, double-click, and handle editing are structurally unaffected.
+  `start-handle`/`control-handle`/`end-handle` are structurally
+  identical (same missing-contextmenu-handler shape) but are EXCLUDED
+  from this patch's authorized scope: the harness cannot currently seed
+  a legacy non-multipoint line, so there is no live regression path to
+  prove them — deferred to a future patch if that path is ever
+  exercised. Four alternative designs explicitly rejected (global
+  role-priority lowering — breaks handle drag/edit; adding
+  `onContextMenu` to every handle in SimpleLineRenderer — duplicates
+  callback wiring across an untouched file; calling CanvasClient's menu
+  callback directly from DrawingLayout — bypasses renderer event
+  ownership; unscoped `elementsFromPoint` fallback — overlap risk;
+  falling through to Excalidraw — wrong menu). Allowed files: EXACTLY
+  `components/collabboard/canvas/layouts/DrawingLayout.tsx`
+  (authorized-change baseline `b3684e4c6226ec2ad77fbff3265de25339a7f471`)
+  and `e2e/characterization/drawing-line-bridge.spec.ts` (authorized-
+  change baseline `cdffcd794ad3fae743a97a25ccb4572a72c4080a`); no new
+  file, no unit helper unless a genuinely tiny local (unexported)
+  function inside DrawingLayout.tsx is clearer — no separate file.
+  39 immutable fences bound (the 38 PATCH-067 carries minus
+  DrawingLayout.tsx, which now moves to authorized-change, plus
+  `LineContextMenu.tsx` newly fenced since it sits directly in the
+  call chain). Dev-server diagnostic contract (Amendment 2) remains in
+  force unchanged; no production logging changes for tests. GPT-5.5 may
+  implement but not commit; Sonnet PASS required before commit; Fable
+  closes PATCH-068 afterward.
 - **2026-07-15** — PATCH-067 **Amendment 2 APPROVED: diagnostics bound
   to the development server (ruling A — environment contract mismatch;
   committed test NOT defective, no repair authorized).** Pre-edit STOP:
