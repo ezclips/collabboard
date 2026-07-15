@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type ConsoleMessage, type Page } from '@playwright/test';
 import { hasE2ECredentials } from '../helpers/env';
 import {
   assertDrawingFixtureCleanup,
@@ -13,11 +13,6 @@ import {
 } from './drawingBridgeHarness';
 
 type LineRole = (typeof LINE_ROLES)[number];
-type PointerClassification =
-  | 'interaction works'
-  | 'wrong Playwright interaction/selector'
-  | 'overlay or z-index interception'
-  | 'event-bridge timing/routing issue';
 type DomDescriptor = {
   tag: string;
   className: string;
@@ -38,6 +33,11 @@ type PointerEventRecord = {
   clientY: number;
   defaultPrevented: boolean;
   target: DomDescriptor;
+};
+type ConsoleDiagnosticEntry = {
+  type: string;
+  text: string;
+  values: unknown[];
 };
 
 const LINE_ROLES = [
@@ -162,7 +162,7 @@ async function installPointerRecorder(page: Page) {
       };
     };
     const handler: EventListener = (event) => {
-      if (!(event instanceof MouseEvent)) return;
+      if (!(event instanceof MouseEvent) && !(event instanceof PointerEvent)) return;
       targetWindow.__patch065PointerRecords?.push({
         type: event.type,
         button: event.button,
@@ -173,7 +173,7 @@ async function installPointerRecorder(page: Page) {
       });
     };
     targetWindow.__patch065PointerHandler = handler;
-    for (const type of ['mousedown', 'click', 'dblclick', 'contextmenu']) {
+    for (const type of ['pointerdown', 'mousedown', 'click', 'dblclick', 'contextmenu']) {
       document.addEventListener(type, handler, true);
     }
   });
@@ -207,7 +207,7 @@ async function removePointerRecorder(page: Page) {
     };
     const targetWindow = window as PointerWindow;
     if (targetWindow.__patch065PointerHandler) {
-      for (const type of ['mousedown', 'click', 'dblclick', 'contextmenu']) {
+      for (const type of ['pointerdown', 'mousedown', 'click', 'dblclick', 'contextmenu']) {
         document.removeEventListener(type, targetWindow.__patch065PointerHandler, true);
       }
     }
@@ -238,6 +238,30 @@ async function waitForVisible(locator: ReturnType<Page['locator']>, timeout: num
   } catch {
     return false;
   }
+}
+
+async function waitForEventCycle(page: Page) {
+  await page.evaluate(async () => {
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => resolve());
+      });
+    });
+  });
+}
+
+function isConsolePayload(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function consolePayload(entry: ConsoleDiagnosticEntry) {
+  return entry.values.find(isConsolePayload) ?? null;
+}
+
+function findConsolePayload(entries: ConsoleDiagnosticEntry[], phase: string) {
+  return entries
+    .map(consolePayload)
+    .find((payload) => payload?.phase === phase) ?? null;
 }
 
 test.describe('drawing line bridge browser characterization (PATCH-064)', () => {
@@ -495,6 +519,30 @@ test.describe('drawing line bridge browser characterization (PATCH-064)', () => 
   test('characterizes real hit-path pointer routing, selection, edit handles, and context menu', async ({ page }) => {
     test.setTimeout(180_000);
     const { supabase, fixture } = await createDisposableDrawingBoard('line-pointer');
+    const consoleEntries: ConsoleDiagnosticEntry[] = [];
+    const consoleReads: Promise<void>[] = [];
+    const consoleListener = (message: ConsoleMessage) => {
+      const read = (async () => {
+        const values: unknown[] = [];
+        for (const arg of message.args()) {
+          try {
+            values.push(await arg.jsonValue());
+          } catch {
+            values.push(`[unserializable:${arg.toString()}]`);
+          }
+        }
+        consoleEntries.push({
+          type: message.type(),
+          text: message.text(),
+          values,
+        });
+      })();
+      consoleReads.push(read);
+    };
+    const flushConsoleEntries = async () => {
+      await Promise.all(consoleReads.splice(0, consoleReads.length));
+    };
+    page.on('console', consoleListener);
 
     try {
       await seedDrawingContainers(supabase, fixture);
@@ -503,7 +551,10 @@ test.describe('drawing line bridge browser characterization (PATCH-064)', () => 
 
       await openDrawingBoard(page, fixture.boardId);
 
-      const primaryLineId = String((await fetchHarnessLineRows(supabase, fixture.boardId))[0].id);
+      const persistedLineRowsBefore = await fetchHarnessLineRows(supabase, fixture.boardId);
+      const primaryLineId = String(persistedLineRowsBefore[0].id);
+      const persistedPrimaryLineBefore = persistedLineRowsBefore.find((row) => String(row.id) === primaryLineId);
+      const persistedOtherLinesBefore = persistedLineRowsBefore.filter((row) => String(row.id) !== primaryLineId);
       const hitPathSelector = `[data-line-id="${primaryLineId}"][data-line-role="hit-path"]`;
       const hitPath = page.locator(hitPathSelector).first();
       await expect(hitPath).toHaveCount(1);
@@ -519,71 +570,97 @@ test.describe('drawing line bridge browser characterization (PATCH-064)', () => 
       expect(canvasIndex).toBeLessThan(hitPathIndex);
 
       const before = await lineInteractionState(page, primaryLineId);
+      const primaryLineBefore = await lineSnapshot(page, primaryLineId);
+      const otherLineSnapshotsBefore = await Promise.all(
+        persistedOtherLinesBefore.map(async (row) => ({
+          lineId: String(row.id),
+          snapshot: await lineSnapshot(page, String(row.id)),
+        })),
+      );
+      const containerSnapshotsBefore = await Promise.all(
+        fixture.containerIds.map(async (containerId) => ({
+          containerId,
+          snapshot: await containerSnapshot(page, containerId),
+        })),
+      );
       await installPointerRecorder(page);
-      let locatorClickOutcome: { kind: 'succeeded' | 'failed'; message?: string };
-      try {
-        await hitPath.click({ timeout: 5_000 });
-        locatorClickOutcome = { kind: 'succeeded' };
-      } catch (error) {
-        locatorClickOutcome = {
-          kind: 'failed',
-          message: error instanceof Error ? error.message : String(error),
-        };
-      }
-      const afterLocatorClick = await lineInteractionState(page, primaryLineId);
-      const locatorRecords = await readPointerRecorder(page);
-      await clearPointerRecorder(page);
 
       await page.mouse.click(center.x, center.y);
+      await expect.poll(async () => (await lineInteractionState(page, primaryLineId)).selected, { timeout: 5_000 }).toBe(true);
+      await waitForEventCycle(page);
+      await flushConsoleEntries();
       const afterCoordinateClick = await lineInteractionState(page, primaryLineId);
       const coordinateClickRecords = await readPointerRecorder(page);
       await clearPointerRecorder(page);
-      const coordinateSelectionVisible = await waitForVisible(page.getByTitle('Edit Points').first(), 2_000);
 
       await page.mouse.dblclick(center.x, center.y);
+      await expect.poll(async () => (await lineInteractionState(page, primaryLineId)).selected, { timeout: 5_000 }).toBe(true);
+      await waitForEventCycle(page);
+      await flushConsoleEntries();
       const afterDoubleClick = await lineInteractionState(page, primaryLineId);
       const doubleClickRecords = await readPointerRecorder(page);
       await clearPointerRecorder(page);
-      const doubleClickHandleCount = findRoleCount(afterDoubleClick, 'start-handle')
-        + findRoleCount(afterDoubleClick, 'end-handle')
-        + findRoleCount(afterDoubleClick, 'control-handle');
 
       await page.mouse.click(center.x, center.y, { button: 'right' });
+      await waitForEventCycle(page);
+      await flushConsoleEntries();
       const afterContextMenu = await lineInteractionState(page, primaryLineId);
       const contextMenuRecords = await readPointerRecorder(page);
       const contextMenuVisible = await waitForVisible(page.getByRole('button', { name: 'Duplicate', exact: true }).first(), 2_000);
+      const persistedLineRowsAfter = await fetchHarnessLineRows(supabase, fixture.boardId);
+      const primaryLineGeometryAfter = await lineGeometry(page, primaryLineId);
+      const otherLineSnapshotsAfter = await Promise.all(
+        persistedOtherLinesBefore.map(async (row) => ({
+          lineId: String(row.id),
+          snapshot: await lineSnapshot(page, String(row.id)),
+        })),
+      );
+      const containerSnapshotsAfter = await Promise.all(
+        fixture.containerIds.map(async (containerId) => ({
+          containerId,
+          snapshot: await containerSnapshot(page, containerId),
+        })),
+      );
 
-      const coordinateTarget = coordinateClickRecords.find((entry) => entry.type === 'mousedown')?.target ?? null;
-      const clickWorked = afterCoordinateClick.selected || coordinateSelectionVisible;
-      const classification: PointerClassification =
-        clickWorked && locatorClickOutcome.kind === 'failed'
-          ? 'wrong Playwright interaction/selector'
-          : clickWorked
-            ? 'interaction works'
-            : coordinateTarget?.tag === 'canvas' && coordinateTarget.className.includes('excalidraw__canvas')
-              ? 'event-bridge timing/routing issue'
-              : 'overlay or z-index interception';
+      const coordinateTarget = coordinateClickRecords.find((entry) => entry.type === 'pointerdown')?.target
+        ?? coordinateClickRecords.find((entry) => entry.type === 'mousedown')?.target
+        ?? null;
+      const mouseDownCapture = findConsolePayload(consoleEntries, 'mouse-down-capture');
+      const mouseDownTargetLookup = findConsolePayload(consoleEntries, 'mouse-down-capture:target-lookup');
+      const clickCapture = findConsolePayload(consoleEntries, 'click-capture');
+      const contextMenuTargetLookup = findConsolePayload(consoleEntries, 'contextmenu-capture:target-lookup');
+      const contextMenuCapture = findConsolePayload(consoleEntries, 'contextmenu-capture');
+      const rendererDragEntry = findConsolePayload(consoleEntries, 'line-drag-start:entry');
+      const rendererDragBranch = findConsolePayload(consoleEntries, 'line-drag-start:drag-branch');
+      const rendererPathClickBefore = findConsolePayload(consoleEntries, 'path-click:before-stop');
+      const rendererPathClickAfter = findConsolePayload(consoleEntries, 'path-click:after-stop');
       test.info().annotations.push({
-        type: 'patch-065-pointer-investigation',
+        type: 'patch-066-stage0-proof',
         description: JSON.stringify({
           hitPathSelector,
           center,
           stack,
-          locatorClickOutcome,
-          locatorRecords,
           coordinateClickRecords,
           doubleClickRecords,
           contextMenuRecords,
-          coordinateSelectionVisible,
-          doubleClickHandleCount,
           contextMenuVisible,
           before,
-          afterLocatorClick,
           afterCoordinateClick,
           afterDoubleClick,
           afterContextMenu,
-          classification,
-          productionDefectCandidateProven: classification !== 'wrong Playwright interaction/selector' && classification !== 'interaction works',
+          bridgeDiagnostics: {
+            mouseDownCapture,
+            mouseDownTargetLookup,
+            clickCapture,
+            contextMenuTargetLookup,
+            contextMenuCapture,
+          },
+          rendererDiagnostics: {
+            rendererDragEntry,
+            rendererDragBranch,
+            rendererPathClickBefore,
+            rendererPathClickAfter,
+          },
         }),
       });
 
@@ -601,42 +678,117 @@ test.describe('drawing line bridge browser characterization (PATCH-064)', () => 
           'label-handle': 1,
         },
       });
-      if (locatorClickOutcome.kind === 'failed') {
-        expect(locatorClickOutcome.message).toContain('intercepts pointer events');
-        expect(afterLocatorClick.selected).toBe(false);
-      }
-      if (classification === 'wrong Playwright interaction/selector' || classification === 'interaction works') {
-        expect(coordinateTarget).toMatchObject({
-          tag: 'canvas',
-          className: expect.stringContaining('excalidraw__canvas'),
-        });
-        expect(afterCoordinateClick.selected || coordinateSelectionVisible).toBe(true);
-        expect(afterCoordinateClick.contextMenuVisible).toBe(false);
-        expect(findRoleCount(afterCoordinateClick, 'start-handle')).toBe(0);
-        expect(findRoleCount(afterDoubleClick, 'start-handle')).toBe(1);
-        expect(findRoleCount(afterDoubleClick, 'end-handle')).toBe(1);
-        expect(findRoleCount(afterDoubleClick, 'control-handle')).toBe(1);
-        expect(afterContextMenu.contextMenuVisible || contextMenuVisible).toBe(true);
-      } else if (classification === 'event-bridge timing/routing issue') {
-        expect(coordinateTarget).toMatchObject({
-          tag: 'canvas',
-          className: expect.stringContaining('excalidraw__canvas'),
-        });
-        expect(afterCoordinateClick.selected).toBe(false);
-        expect(coordinateSelectionVisible).toBe(false);
-        expect(doubleClickHandleCount).toBe(0);
-        expect(afterContextMenu.contextMenuVisible).toBe(false);
-        expect(contextMenuVisible).toBe(false);
-      } else {
-        expect(stack[0]).not.toMatchObject({
-          tag: 'canvas',
-          className: expect.stringContaining('excalidraw__canvas'),
-        });
-        expect(afterCoordinateClick.selected).toBe(false);
-        expect(doubleClickHandleCount).toBe(0);
-        expect(contextMenuVisible).toBe(false);
-      }
+
+      expect(coordinateTarget).toMatchObject({
+        tag: 'canvas',
+        className: expect.stringContaining('excalidraw__canvas'),
+      });
+      expect(afterCoordinateClick).toMatchObject({
+        selected: true,
+        contextMenuVisible: false,
+        geometry: primaryLineBefore.geometry,
+        roles: {
+          'visible-path': 1,
+          'hit-path': 1,
+          'start-handle': 0,
+          'end-handle': 0,
+          'midpoint-handle': 0,
+          'control-handle': 0,
+          'point-handle': 0,
+          'label-handle': 1,
+        },
+      });
+      expect(afterDoubleClick).toMatchObject({
+        selected: true,
+        contextMenuVisible: false,
+        geometry: primaryLineBefore.geometry,
+        roles: {
+          'visible-path': 1,
+          'hit-path': 1,
+          'start-handle': 0,
+          'end-handle': 0,
+          'midpoint-handle': 1,
+          'control-handle': 0,
+          'point-handle': 2,
+          'label-handle': 1,
+        },
+      });
+      expect(afterContextMenu).toMatchObject({
+        selected: true,
+        contextMenuVisible: false,
+        geometry: primaryLineBefore.geometry,
+      });
+      expect(contextMenuVisible).toBe(false);
+
+      expect(mouseDownCapture).toMatchObject({
+        phase: 'mouse-down-capture',
+        guardPassed: true,
+        activeToolType: 'selection',
+        backTargetFound: true,
+        foundTargetLineId: primaryLineId,
+        foundTargetLineRole: 'hit-path',
+      });
+      expect(mouseDownTargetLookup).toMatchObject({
+        phase: 'mouse-down-capture:target-lookup',
+        backTargetFound: true,
+        foundTargetLineId: primaryLineId,
+        foundTargetLineRole: 'hit-path',
+      });
+      expect(clickCapture).toMatchObject({
+        phase: 'click-capture',
+        guardPassed: true,
+        backTargetFound: true,
+        foundTargetLineId: primaryLineId,
+        foundTargetLineRole: 'hit-path',
+      });
+      expect(rendererDragEntry).toMatchObject({
+        phase: 'line-drag-start:entry',
+        rendererLabel: 'back',
+        lineId: primaryLineId,
+      });
+      expect(rendererDragBranch).toMatchObject({
+        phase: 'line-drag-start:drag-branch',
+        rendererLabel: 'back',
+        lineId: primaryLineId,
+      });
+      expect(rendererPathClickBefore).toMatchObject({
+        phase: 'path-click:before-stop',
+        rendererLabel: 'back',
+        lineId: primaryLineId,
+      });
+      expect(rendererPathClickAfter).toMatchObject({
+        phase: 'path-click:after-stop',
+        rendererLabel: 'back',
+        lineId: primaryLineId,
+      });
+      expect(contextMenuCapture).toMatchObject({
+        phase: 'contextmenu-capture',
+        guardPassed: true,
+        backTargetFound: true,
+        foundTargetLineId: primaryLineId,
+        foundTargetLineRole: 'midpoint-handle',
+      });
+      expect(contextMenuTargetLookup).toMatchObject({
+        phase: 'contextmenu-capture:target-lookup',
+        backTargetFound: true,
+        foundTargetLineId: primaryLineId,
+        foundTargetLineRole: 'midpoint-handle',
+      });
+
+      expect(primaryLineGeometryAfter).toEqual(primaryLineBefore.geometry);
+      expect(persistedLineRowsAfter).toEqual(persistedLineRowsBefore);
+      expect(persistedLineRowsAfter.find((row) => String(row.id) === primaryLineId)).toEqual(persistedPrimaryLineBefore);
+      expect(
+        persistedLineRowsAfter.filter((row) => String(row.id) !== primaryLineId),
+      ).toEqual(persistedOtherLinesBefore);
+      expect(otherLineSnapshotsAfter).toEqual(otherLineSnapshotsBefore);
+      expect(containerSnapshotsAfter).toEqual(containerSnapshotsBefore);
+      expect(stack[0]).toMatchObject({
+        tag: 'canvas',
+        className: expect.stringContaining('excalidraw__canvas'),
+      });
     } finally {
+      page.off('console', consoleListener);
       await removePointerRecorder(page).catch(() => undefined);
       await cleanupDrawingFixture(supabase, fixture);
       await expect(assertDrawingFixtureCleanup(supabase, fixture)).resolves.toEqual({
