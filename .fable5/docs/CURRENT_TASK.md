@@ -361,6 +361,54 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-16** — PATCH-070 **Stage 0 DONE (commit
+  `b9b754cefccd6569ed4e5ce858090609c6b76567`)** + **Stage 0B AUTHORIZED**
+  (Amendment 1). Stage 0 landed as the runtime discrimination probe,
+  exactly one file (`drawing-presentation.spec.ts`, now `ee2d3adb…`).
+  Review history: Sonnet round 1 PASS WITH REQUIRED CHANGES — the
+  test-owned pixel-analysis canvas contaminated production-export
+  attribution (F1 was initially over-selected on a bare canvas-size
+  match); corrected with explicit `markHarnessCanvas` provenance +
+  hard exclusion; focused re-review PASS, result reproduced in two
+  fresh dev-server sessions. **Proven row: F4** — after excluding
+  test-owned canvases, exactly one production export canvas exists in
+  the fullscreen window (the below band, stack-fingerprinted into the
+  fork's `exportToCanvas`); `aboveExportBegan=false`; no
+  above-attributable toDataURL call/return/throw; no above img mount
+  (raw MutationObserver timeline); persisted scene + Node-side plan
+  stable before/after. Stage-0 gates all green (setup 1, line 4,
+  presentation 2+2, cred-off 4+4, 51/2, 424/41, tsc/boundaries/
+  verify/build, cleanup zeros, 43/43 fences, zero prod imports).
+  Fresh live-runtime census then reconciled F4 with source:
+  **F4-C/D/E/F ruled out** (both export chains are created
+  synchronously in one effect body — below ran, so the body passed the
+  above branch; no key/remount hazard; the only guard IS the
+  empty-above condition), leaving **F4-A** (live plan empties the
+  above band: mid-band order divergence, frameId/deletion divergence,
+  natives absent, or padlet-resolution divergence) and **F4-B** (stale
+  input array) undiscriminated. Census keystone:
+  `DrawingLayout.tsx:1083-1089` commits Excalidraw changes to
+  `elements` state ONLY when the active element COUNT changes — any
+  count-preserving reorder/normalization/in-place mutation (incl. the
+  autosave-suppressed one-shot embeddable refresh) is invisible to
+  React state, thumbnails (cached), and render signatures; plus
+  `resolveSlidePadlets.ts:15` binds padlet zIndex to RAW live array
+  index. The discriminating values are React-local and browser-
+  unobservable (no window handle, no DOM plan attributes), so
+  **Stage 0B** authorizes a bound development-only diagnostic in
+  `RuntimeSlideRenderer.tsx` (@ `a407cccc…`, diagnostic-only, single
+  `NODE_ENV !== 'production'` guard, dev-only global
+  `__fable5RuntimeSlideDiagnostics`, four record kinds at four bound
+  insertion points, 200-entry cap, no control-flow/timing change, no
+  fix in the same stage) + spec-side reading/classification
+  (`patch-070-stage0b-probe`, decision table G1a-d/G2/G3/G4, STOP on
+  ambiguity). Stage-0B commit bound:
+  `test(drawing): observe live slide composition inputs (PATCH-070
+  Stage 0B)`. **Production fix remains LOCKED**; Stage 1 requires a
+  further named amendment binding one G-row to one §5 design;
+  G1a/G1d outcomes implicating planner/caller wiring require
+  STOP-and-redesign (those files stay fenced). 43/43 fences verified
+  at base `b9b754c`; all baselines carried; PATCH-071 not started.
 - **2026-07-15** — PATCH-069 **DONE (commit
   `05e913ef84c802b999bc4411d960873e4b21bb23`, Sonnet PASS)** — landed as
   the diagnosis-only characterization, exactly one file

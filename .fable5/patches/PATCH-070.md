@@ -1,8 +1,9 @@
 # PATCH-070 - Restore Fullscreen Native Above-Band Raster (staged, diagnosis-first)
 
-**Status:** AUTHORIZED — **Stage 0 only** (runtime discrimination probe).
-Stage 1 (the production fix) is **LOCKED** until a named CTO amendment binds
-exactly one decision row from §3 to exactly one design from §5.
+**Status:** AUTHORIZED — **Stage 0B** (live runtime composition probe; see
+§0.1 Amendment 1). Stage 0 is DONE (commit `b9b754c`, row **F4**). Stage 1
+(the production fix) remains **LOCKED** until a further named CTO amendment
+binds exactly one proven mechanism from §0.1.6 to exactly one design from §5.
 
 **Base commit (bind, verify before editing):**
 `05e913ef84c802b999bc4411d960873e4b21bb23`
@@ -17,6 +18,213 @@ exactly one decision row from §3 to exactly one design from §5.
 **Implementer:** GPT-5.5. **Reviewer:** Sonnet (independent, read-only,
 uncommitted diff, explicit PASS required before each stage's commit).
 **Closure:** Fable (CTO) after each stage lands.
+
+---
+
+## 0.1 Amendment 1 (2026-07-16) — Stage 0 closed at F4; Stage 0B authorized
+
+### 0.1.1 Stage 0 result (DONE, commit `b9b754cefccd6569ed4e5ce858090609c6b76567`)
+
+Bound Stage-0 message used verbatim. Sole file:
+`e2e/characterization/drawing-presentation.spec.ts` (now at
+`ee2d3adb968051cd7d761d6bbcc3b67439046a58`). Review history: initial Sonnet
+review PASS WITH REQUIRED CHANGES (blocker: the test-owned pixel-analysis
+canvas contaminated production-export attribution); corrected via explicit
+`markHarnessCanvas` provenance + hard exclusion; focused re-review PASS,
+reproduced identically in two fresh dev-server sessions.
+
+Proven row: **F4** — after excluding test-owned canvases, exactly one
+production export canvas exists in the fullscreen window (the below band,
+stack-fingerprinted into the fork's `exportToCanvas`), `aboveExportBegan =
+false`, no above-attributable `toDataURL` call/return/throw, no above-band
+img mount (raw MutationObserver timeline — not only final DOM state),
+persisted scene and Node-side plan stable before/after
+(`nativeAboveIds=[text-landscape, shape-landscape]`, padlet indexes [2,3]).
+F4 is a STOP row: **no production fix may be derived from F4 alone.**
+
+### 0.1.2 Live-runtime census (fresh, at base `b9b754c`)
+
+The runtime data path, end to end:
+
+- **Presentation start** — `handleStartPresentation`
+  (`DrawingLayout.tsx:1503-1508`): pure state
+  (`setPresentationStartId`/`setPresentationActive`); no scene snapshot, no
+  scene mutation. `FullscreenPresentation` mounts inline (`:3047-3056`) with
+  `slides={frames}` and `runtimeHelpers={runtimeSlideHelpers}`.
+- **Runtime props** — `FullscreenPresentation.tsx:229-231` calls
+  `runtimeHelpers.getSceneElements()/getPadlets()/getFiles()` on every
+  render; the helpers (`DrawingLayout.tsx:1916-1920`) read
+  `runtimeSceneElementsRef/runtimePadletsRef`, re-synced from state on every
+  DrawingLayout render (`:695-697`). `RuntimeSlideRenderer` receives the FULL
+  element array (no precomputed subset) plus `slide` (a `frames` entry,
+  `:1934-1945`, derived from the same `elements` state).
+- **THE LOAD-BEARING WIRING FACT** — `elements` state starts `[]`
+  (`DrawingLayout.tsx:671`) and is committed from Excalidraw's change
+  callback ONLY when the ACTIVE ELEMENT COUNT changes (`:1083-1089`,
+  `activeElementCountRef` gate — an explicit 60fps-GC optimization). Any
+  Excalidraw-side change that preserves the count — reordering, fractional
+  index normalization, frame-membership normalization, in-place element
+  mutation, the documented one-shot embeddable refresh (`updateScene`,
+  autosave-suppressed) — is NEVER committed to React state, never
+  re-renders DrawingLayout, never regenerates render signatures, and never
+  invalidates cached thumbnails. The state array's CONTENT can therefore
+  diverge from what the thumbnails captured, and from the true live scene,
+  without any observable React-side signal.
+- **Runtime plan** — `RuntimeSlideRenderer.tsx:53-61`: `useMemo` over
+  `[slide?.id, sceneElements, allPadlets]` calling the real
+  `planSlideComposition`. Recomputes at the Next-click (slide id changes),
+  reading whatever the state array holds at that instant.
+- **Band arithmetic is order-sensitive at two points** —
+  `resolveSlidePadlets.ts:15` assigns each padlet embeddable `zIndex` = its
+  RAW INDEX in the live input array (membership: `frameId` match, else
+  geometric overlap, `:34`); `planSlideComposition.ts:39-47` band-splits
+  native members by live `findIndex` against `firstPadletIndex`/
+  `lastPadletIndex`. Native membership requires live `frameId ===
+  slideFrame.id` and `!isDeleted` (`:8-15`).
+- **Export effect** — `RuntimeSlideRenderer.tsx:99-149`: guards are exactly
+  `!slide || !compositionPlan` (top) and
+  `compositionPlan.nativeAboveElements.length > 0` (`:130`). Both band
+  export chains are created SYNCHRONOUSLY in one effect body — no await, no
+  cleanup point, no state read between them. Render sequence: render → memo
+  plan → effect (token claim → below chain created → above chain created if
+  non-empty) → async resolutions gated by `!cancelled && canvas && token`.
+- **No remount hazard** — `RuntimeSlideRenderer` is rendered without a
+  `key` (`FullscreenPresentation.tsx:249-256`); slide navigation re-renders
+  the same instance.
+
+### 0.1.3 Reconciling F4 with source — row-by-row
+
+- **F4-C (guard prevents invocation): RULED OUT as an independent row.**
+  The only pre-invocation guards are the two above. Stage 0 proved the
+  below export ran and committed, so `slide` and `compositionPlan` were
+  truthy; the sole remaining guard IS the empty-above condition — F4-C
+  collapses into F4-A/F4-B.
+- **F4-D (cleanup/cancellation before the above call is created): RULED
+  OUT.** Both chains are created in the same synchronous effect body;
+  React cannot run cleanup mid-body. The below chain's existence (Stage 0)
+  proves the body executed past the above branch.
+- **F4-E (slide identity/key remount): RULED OUT.** No `key`; parent stays
+  mounted (`presentationActive` constant during the window).
+- **F4-F (StrictMode double-effect or other): RULED OUT as a cause of
+  "never began".** A double-invoked effect schedules both chains twice;
+  it cannot schedule only the below chain.
+- **F4-A (live plan has `nativeAboveElements=[]` at every effect run):
+  SUPPORTED and not yet discriminated.** Since below ran and above never
+  began, every effect run in the window had an empty above band. Consistent
+  live-input shapes (each individually possible under the `:1083-1089`
+  stale-state gate): (a) live array order diverged so the natives sit
+  strictly between the padlet indexes (mid-band gap live — the only order
+  shape also consistent with the BLANK below PNG); (b) natives' live
+  `frameId` no longer equals `frame-landscape` (Excalidraw normalization);
+  (c) natives absent from the state array; (d) `resolveSlidePadlets`
+  resolves different embeddable indexes live (e.g., `emb-slide-b` at a
+  shifted index widening the padlet range).
+- **F4-B (stale input array — populated plan never reaches the effect):
+  SUPPORTED and not yet discriminated.** The count-gated `setElements`
+  makes a stale state array a first-class mechanism; the thumbnail's
+  correct render (cached from panel-open time) vs. the fullscreen failure
+  (computed at Next-click) brackets a mutation window that React state
+  never observed.
+
+**Which mechanism is live is NOT source-determinable**, and the
+discriminating values (the plan's inputs and outputs as computed INSIDE
+`RuntimeSlideRenderer` at fullscreen time) are React-local: nothing exposes
+the live scene to the browser (grep: no `window` handle in
+`DrawingLayout.tsx`), and no DOM attribute reflects plan counts. Test-only
+observation cannot reach them. Per §4-alternatives, a narrow
+development-only diagnostic in `RuntimeSlideRenderer.tsx` is REQUIRED.
+
+### 0.1.4 Stage 0B — Observe Live Runtime Composition and Effect Invocation (AUTHORIZED)
+
+Diagnosis-only. **No fix of any kind rides this stage.**
+
+**Allowed files (exactly two):**
+
+| File | Pre-edit hash (bind) | Role |
+|---|---|---|
+| `components/presentation/runtime-slide/RuntimeSlideRenderer.tsx` | `a407cccc230ca74a36a443b5f701767856754230` | development-only diagnostic record ONLY (shape bound in §0.1.5) |
+| `e2e/characterization/drawing-presentation.spec.ts` | `ee2d3adb968051cd7d761d6bbcc3b67439046a58` | read the record, map to §0.1.6, annotate |
+
+**Bound Stage-0B commit message (verbatim):**
+`test(drawing): observe live slide composition inputs (PATCH-070 Stage 0B)`
+
+### 0.1.5 Bound diagnostic shape (RuntimeSlideRenderer.tsx)
+
+- Every diagnostic statement is guarded by a single module-level constant
+  `const DEV_RUNTIME_SLIDE_DIAGNOSTICS = process.env.NODE_ENV !==
+  'production';` (the established pattern). Production builds must be
+  byte-behavior-identical: no record, no global, no timing change.
+- Records push synchronously (allocation + `Array.push` only) into a
+  dev-only global `window.__fable5RuntimeSlideDiagnostics` (array), capped
+  at 200 entries (drop beyond cap); no network, no persistence, no console
+  requirement, no `CustomEvent` needed.
+- Exactly four record kinds, at exactly four insertion points:
+  1. `plan-computed` — inside the existing `useMemo` callback (`:53-61`),
+     after `planSlideComposition` returns: `{ kind, timestamp, slideId,
+     sceneElementCount, sceneElementIds (capped 50), nativeMemberSummaries
+     (for the seeded native ids when present: id, frameId, isDeleted, x, y,
+     width, height), resolvedPadlets ([{embeddableId, zIndex}]),
+     nativeBelowIds, nativeAboveIds, frameElementFound }`.
+  2. `effect-run` — inside the export effect (`:99-149`) immediately after
+     the token claim: `{ kind, timestamp, token, slideId, belowCount,
+     aboveCount, aboveBranchTaken, scale }`.
+  3. `effect-cleanup` — inside the existing cleanup function: `{ kind,
+     timestamp, token }`.
+  4. `band-commit` — inside each existing `.then`, recording the guard
+     outcome WITHOUT changing it: `{ kind, timestamp, token, band
+     ('below'|'above'), committed, suppressedBy ('cancelled'|'stale-token'|
+     'null-canvas'|null) }`.
+- Prohibited: any change to guards, deps, state, JSX, ordering, or
+  control flow; any `await`; any read that mutates; monkey-patching React,
+  Promise, `useEffect`, or imported modules; logging credentials or scene
+  text content beyond the two seeded native ids' geometry fields listed
+  above. Element ids and numeric geometry only.
+- The diagnostic is temporary: the eventual Stage 1 amendment either
+  removes it or explicitly converts it; it may not silently persist.
+
+**Spec side:** after the existing Stage-0 landscape window, read the global
+via `page.evaluate`, filter records for `slideId === 'frame-landscape'`,
+assert exactly one §0.1.6 row via fixed assertions, and attach a
+`patch-070-stage0b-probe` annotation carrying the raw records (capped) plus
+the selected row. All Stage-0 and PATCH-069 assertions remain intact and
+green (the defect is still present in Stage 0B).
+
+### 0.1.6 Stage 0B decision table (bind; exactly one row or STOP)
+
+| Row | Meaning | Bound discrimination (from `plan-computed`/`effect-run` records for the landscape slide) |
+|---|---|---|
+| **G1a** | live mid-band order divergence (F4-A/a) | natives present with correct `frameId`, but their live indexes fall inside `[min,max]` of `resolvedPadlets[].zIndex`; `nativeAboveIds=[]`, `nativeBelowIds=[]` |
+| **G1b** | natives absent from the live array (F4-A/c) | seeded native ids not in `sceneElementIds` / no `nativeMemberSummaries` |
+| **G1c** | native `frameId`/deletion divergence (F4-A/b) | natives present but `frameId !== 'frame-landscape'` or `isDeleted === true` |
+| **G1d** | padlet-resolution divergence (F4-A/d) | natives present + correct, but `resolvedPadlets` indexes/membership differ from `[2,3]` such that the band split empties |
+| **G2** | stale input array (F4-B) | `plan-computed` inputs contradict the SAME session's proven-good thumbnail content in a way attributable to the `:1083-1089` count gate (e.g., ids/order matching an earlier scene generation), with `effect-run.aboveCount === 0` throughout |
+| **G3** | anomaly: `aboveCount > 0` and/or `aboveBranchTaken === true` at any landscape `effect-run` | contradicts Stage 0 → STOP, report, no classification |
+| **G4** | another narrow deterministic mechanism | only with explicit record evidence naming it |
+
+Ambiguous, zero-row, or multi-row results → STOP. Each G-row maps to a §5
+design class ONLY via the next named amendment; G1a/G1d may implicate the
+planner or the caller wiring, which would require a STOP-and-redesign since
+`planSlideComposition.ts` and `DrawingLayout.tsx` remain fenced.
+
+### 0.1.7 Stage 0B stop conditions (additional to §10)
+
+- any production-visible behavior change from the diagnostic (guards,
+  timing, rendering, state);
+- the diagnostic requires touching any file beyond the two allowed;
+- records are empty/absent while the fullscreen window demonstrably ran;
+- G3 or any unlisted/multi-row result;
+- the temptation to fix anything in the same stage.
+
+### 0.1.8 Fences and gates for Stage 0B
+
+The 43-path immutable fence set of §8 is UNCHANGED and was re-verified
+43/43 at base `b9b754c`. All §11 gates apply to Stage 0B verbatim
+(including `tsc`, boundaries, focused 51/2, full 424/41, setup 1, line 4,
+presentation 2 passed / 2 approved skips, credential-off 4+4, cleanup
+zeros, zero production imports, sequential verify/build). The §9
+environment contract and §12 review flow apply verbatim; Sonnet must
+additionally verify the diagnostic's §0.1.5 shape compliance and
+production-inertness.
 
 ---
 
