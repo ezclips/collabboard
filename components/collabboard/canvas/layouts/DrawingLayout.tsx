@@ -2570,6 +2570,23 @@ export default function DrawingLayout({
     });
   }, [appStateRef, logBackLineBridgeDiagnostics]);
 
+  const resolveBackLineContextMenuDispatchTarget = useCallback((interactiveTarget: Element) => {
+    const interactiveRole = interactiveTarget.getAttribute('data-line-role');
+    if (interactiveRole !== 'midpoint-handle' && interactiveRole !== 'point-handle') {
+      return interactiveTarget;
+    }
+
+    const lineId = interactiveTarget.getAttribute('data-line-id');
+    if (!lineId) {
+      return interactiveTarget;
+    }
+
+    const sameLineHitPath = document.querySelector(
+      `[data-line-id="${CSS.escape(lineId)}"][data-line-role="hit-path"][data-line-renderer="back"]`,
+    );
+    return sameLineHitPath ?? interactiveTarget;
+  }, []);
+
   const handleBackLineBridgeContextMenuCapture = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     const activeToolType = appStateRef.current?.activeTool?.type ?? 'selection';
 
@@ -2636,6 +2653,8 @@ export default function DrawingLayout({
       return;
     }
 
+    const dispatchTarget = resolveBackLineContextMenuDispatchTarget(interactiveTarget);
+
     logBackLineBridgeDiagnostics({
       phase: 'contextmenu-capture',
       event,
@@ -2645,6 +2664,11 @@ export default function DrawingLayout({
       backTargetResolutionAttempted: true,
       backTargetFound: true,
       foundTarget: interactiveTarget,
+      extra: {
+        normalizedDispatchTargetLineId: dispatchTarget.getAttribute('data-line-id') ?? null,
+        normalizedDispatchTargetLineRole: dispatchTarget.getAttribute('data-line-role') ?? null,
+        normalizedDispatchTargetLineRenderer: dispatchTarget.getAttribute('data-line-renderer') ?? null,
+      },
     });
 
     bridgedBackLineInteractiveTargetRef.current = null;
@@ -2653,7 +2677,7 @@ export default function DrawingLayout({
 
     isDispatchingBackLineBridgeEventRef.current = true;
     try {
-      interactiveTarget.dispatchEvent(new MouseEvent('contextmenu', {
+      dispatchTarget.dispatchEvent(new MouseEvent('contextmenu', {
         bubbles: true,
         cancelable: true,
         clientX: event.clientX,
@@ -2668,7 +2692,7 @@ export default function DrawingLayout({
     } finally {
       isDispatchingBackLineBridgeEventRef.current = false;
     }
-  }, [appStateRef, findBackLineInteractiveTargetAtPoint]);
+  }, [appStateRef, findBackLineInteractiveTargetAtPoint, resolveBackLineContextMenuDispatchTarget]);
 
   if (isInitializing) {
     return <div className="flex-1 flex items-center justify-center p-8 text-gray-500">Initializing drawing canvas...</div>;

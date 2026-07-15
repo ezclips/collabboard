@@ -97,6 +97,17 @@ async function hitPathCenter(page: Page, lineId: string) {
   };
 }
 
+async function locatorCenter(page: Page, selector: string, index = 0) {
+  const box = await page.locator(selector).nth(index).boundingBox();
+  expect(box).not.toBeNull();
+  return {
+    x: Math.round(box!.x + box!.width / 2),
+    y: Math.round(box!.y + box!.height / 2),
+    width: Math.round(box!.width),
+    height: Math.round(box!.height),
+  };
+}
+
 async function elementsFromPoint(page: Page, x: number, y: number): Promise<DomDescriptor[]> {
   return page.evaluate(({ x: clientX, y: clientY }) => {
     const describe = (node: Element) => {
@@ -755,15 +766,15 @@ test.describe('drawing line bridge browser characterization (PATCH-064)', () => 
       const stateSContextMenuRecords = await readPointerRecorder(page);
       const stateSLineMenuVisible = await lineContextMenu(page).isVisible().catch(() => false);
       const stateSExcalidrawMenuVisible = await excalidrawContextMenu(page).isVisible().catch(() => false);
-      const persistedLineRowsAfter = await fetchHarnessLineRows(supabase, fixture.boardId);
-      const primaryLineGeometryAfter = await lineGeometry(page, primaryLineId);
-      const otherLineSnapshotsAfter = await Promise.all(
+      const persistedLineRowsAfterMidpointHandle = await fetchHarnessLineRows(supabase, fixture.boardId);
+      const primaryLineGeometryAfterMidpointHandle = await lineGeometry(page, primaryLineId);
+      const otherLineSnapshotsAfterMidpointHandle = await Promise.all(
         persistedOtherLinesBefore.map(async (row) => ({
           lineId: String(row.id),
           snapshot: await lineSnapshot(page, String(row.id)),
         })),
       );
-      const containerSnapshotsAfter = await Promise.all(
+      const containerSnapshotsAfterMidpointHandle = await Promise.all(
         fixture.containerIds.map(async (containerId) => ({
           containerId,
           snapshot: await containerSnapshot(page, containerId),
@@ -786,11 +797,44 @@ test.describe('drawing line bridge browser characterization (PATCH-064)', () => 
       const rendererDragBranch = findConsolePayload(coordinateClickConsoleEntries, 'line-drag-start:drag-branch');
       const rendererPathClickBefore = findConsolePayload(coordinateClickConsoleEntries, 'path-click:before-stop');
       const rendererPathClickAfter = findConsolePayload(coordinateClickConsoleEntries, 'path-click:after-stop');
-      const stateSRendererContextMenuBeforePresent = hasConsolePayload(stateSConsoleEntries, 'hit-path-contextmenu:before-stop');
-      const stateSRendererContextMenuAfterPresent = hasConsolePayload(stateSConsoleEntries, 'hit-path-contextmenu:after-stop');
+      const stateSRendererContextMenuBefore = findConsolePayload(stateSConsoleEntries, 'hit-path-contextmenu:before-stop');
+      const stateSRendererContextMenuAfter = findConsolePayload(stateSConsoleEntries, 'hit-path-contextmenu:after-stop');
       const stateSTargetRole = typeof contextMenuTargetLookup?.foundTargetLineRole === 'string'
         ? contextMenuTargetLookup.foundTargetLineRole
         : null;
+
+      await page.keyboard.press('Escape');
+      await expect(lineContextMenu(page)).toBeHidden({ timeout: 5_000 });
+      await readAndClearConsoleEntries();
+      await clearPointerRecorder(page);
+
+      const pointHandleSelector = `[data-line-id="${primaryLineId}"][data-line-role="point-handle"]`;
+      await expect(page.locator(pointHandleSelector)).toHaveCount(2);
+      const pointHandleCenter = await locatorCenter(page, pointHandleSelector, 1);
+      const pointHandleClickPoint = {
+        x: pointHandleCenter.x,
+        y: pointHandleCenter.y - 6,
+      };
+      const pointHandleStack = await elementsFromPoint(page, pointHandleClickPoint.x, pointHandleClickPoint.y);
+      await page.mouse.click(pointHandleClickPoint.x, pointHandleClickPoint.y, { button: 'right' });
+      await waitForEventCycle(page);
+      const pointHandleConsoleEntries = await readAndClearConsoleEntries();
+      const pointHandleAfterContextMenu = await lineInteractionState(page, primaryLineId);
+      const pointHandleContextMenuRecords = await readPointerRecorder(page);
+      const pointHandleLineMenuVisible = await waitForVisible(lineContextMenu(page), 2_000);
+      const pointHandleExcalidrawMenuVisible = await excalidrawContextMenu(page).isVisible().catch(() => false);
+      const pointHandlePhysicalTarget = pointHandleContextMenuRecords.find((entry) => entry.type === 'pointerdown')?.target
+        ?? pointHandleContextMenuRecords.find((entry) => entry.type === 'mousedown')?.target
+        ?? pointHandleContextMenuRecords.find((entry) => entry.type === 'contextmenu')?.target
+        ?? null;
+      const pointHandleContextMenuTargetLookup = findConsolePayload(pointHandleConsoleEntries, 'contextmenu-capture:target-lookup');
+      const pointHandleContextMenuCapture = findConsolePayload(pointHandleConsoleEntries, 'contextmenu-capture');
+      const pointHandleRendererContextMenuBefore = findConsolePayload(pointHandleConsoleEntries, 'hit-path-contextmenu:before-stop');
+      const pointHandleRendererContextMenuAfter = findConsolePayload(pointHandleConsoleEntries, 'hit-path-contextmenu:after-stop');
+      const pointHandleTargetRole = typeof pointHandleContextMenuTargetLookup?.foundTargetLineRole === 'string'
+        ? pointHandleContextMenuTargetLookup.foundTargetLineRole
+        : null;
+
       test.info().annotations.push({
         type: 'patch-066-stage0-proof',
         description: JSON.stringify({
@@ -834,8 +878,8 @@ test.describe('drawing line bridge browser characterization (PATCH-064)', () => 
             contextMenuTargetLookup,
           },
           rendererDiagnostics: {
-            hitPathContextMenuBeforePresent: stateSRendererContextMenuBeforePresent,
-            hitPathContextMenuAfterPresent: stateSRendererContextMenuAfterPresent,
+            hitPathContextMenuBefore: stateSRendererContextMenuBefore,
+            hitPathContextMenuAfter: stateSRendererContextMenuAfter,
           },
           menu: {
             lineMenuVisible: stateSLineMenuVisible,
@@ -843,10 +887,10 @@ test.describe('drawing line bridge browser characterization (PATCH-064)', () => 
           },
           targetRole: stateSTargetRole,
           invariants: {
-            geometryUnchanged: JSON.stringify(primaryLineGeometryAfter) === JSON.stringify(primaryLineBefore.geometry),
-            persistedRowsUnchanged: JSON.stringify(persistedLineRowsAfter) === JSON.stringify(persistedLineRowsBefore),
-            otherLinesUnchanged: JSON.stringify(otherLineSnapshotsAfter) === JSON.stringify(otherLineSnapshotsBefore),
-            containersUnchanged: JSON.stringify(containerSnapshotsAfter) === JSON.stringify(containerSnapshotsBefore),
+            geometryUnchanged: JSON.stringify(primaryLineGeometryAfterMidpointHandle) === JSON.stringify(primaryLineBefore.geometry),
+            persistedRowsUnchanged: JSON.stringify(persistedLineRowsAfterMidpointHandle) === JSON.stringify(persistedLineRowsBefore),
+            otherLinesUnchanged: JSON.stringify(otherLineSnapshotsAfterMidpointHandle) === JSON.stringify(otherLineSnapshotsBefore),
+            containersUnchanged: JSON.stringify(containerSnapshotsAfterMidpointHandle) === JSON.stringify(containerSnapshotsBefore),
           },
         }),
       });
@@ -862,13 +906,12 @@ test.describe('drawing line bridge browser characterization (PATCH-064)', () => 
           },
           stateS: {
             editHandleWon: stateSTargetRole === 'midpoint-handle' || stateSTargetRole === 'point-handle',
-            hitPathHandlerRan: stateSRendererContextMenuBeforePresent || stateSRendererContextMenuAfterPresent,
+            hitPathHandlerRan: Boolean(stateSRendererContextMenuBefore && stateSRendererContextMenuAfter),
             lineMenuOpened: stateSLineMenuVisible,
           },
           secondaryContributingCondition: 'edit-mode interactive-role priority places midpoint/point handles above hit-path; those handle roles do not own the line context-menu callback',
         }),
       });
-
       expect(coordinateTarget).toMatchObject({
         tag: 'canvas',
         className: expect.stringContaining('excalidraw__canvas'),
@@ -909,10 +952,10 @@ test.describe('drawing line bridge browser characterization (PATCH-064)', () => 
       });
       expect(stateSAfterContextMenu).toMatchObject({
         selected: true,
-        contextMenuVisible: false,
+        contextMenuVisible: true,
         geometry: primaryLineBefore.geometry,
       });
-      expect(stateSLineMenuVisible).toBe(false);
+      expect(stateSLineMenuVisible).toBe(true);
       expect(stateSExcalidrawMenuVisible).toBe(false);
       expect(findRoleCount(stateSAfterContextMenu, 'midpoint-handle')).toBe(1);
       expect(findRoleCount(stateSAfterContextMenu, 'point-handle')).toBe(2);
@@ -964,6 +1007,9 @@ test.describe('drawing line bridge browser characterization (PATCH-064)', () => 
         backTargetFound: true,
         foundTargetLineId: primaryLineId,
         foundTargetLineRole: expect.stringMatching(/^(midpoint-handle|point-handle)$/),
+        normalizedDispatchTargetLineId: primaryLineId,
+        normalizedDispatchTargetLineRole: 'hit-path',
+        normalizedDispatchTargetLineRenderer: 'back',
       });
       expect(contextMenuTargetLookup).toMatchObject({
         phase: 'contextmenu-capture:target-lookup',
@@ -973,20 +1019,125 @@ test.describe('drawing line bridge browser characterization (PATCH-064)', () => 
       });
       expect(stateSTargetRole === 'midpoint-handle' || stateSTargetRole === 'point-handle').toBe(true);
       expect(stateSTargetRole).not.toBe('hit-path');
-      expect(stateSRendererContextMenuBeforePresent).toBe(false);
-      expect(stateSRendererContextMenuAfterPresent).toBe(false);
+      expect(stateSRendererContextMenuBefore).toMatchObject({
+        phase: 'hit-path-contextmenu:before-stop',
+        rendererLabel: 'back',
+        lineId: primaryLineId,
+      });
+      expect(stateSRendererContextMenuAfter).toMatchObject({
+        phase: 'hit-path-contextmenu:after-stop',
+        rendererLabel: 'back',
+        lineId: primaryLineId,
+      });
 
-      expect(primaryLineGeometryAfter).toEqual(primaryLineBefore.geometry);
-      expect(persistedLineRowsAfter).toEqual(persistedLineRowsBefore);
-      expect(persistedLineRowsAfter.find((row) => String(row.id) === primaryLineId)).toEqual(persistedPrimaryLineBefore);
+      expect(pointHandlePhysicalTarget).toMatchObject({
+        tag: 'canvas',
+        className: expect.stringContaining('excalidraw__canvas'),
+      });
+      expect(pointHandleStack[0]).toMatchObject({
+        tag: 'canvas',
+        className: expect.stringContaining('excalidraw__canvas'),
+      });
+      expect(pointHandleStack).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          dataLineId: primaryLineId,
+          dataLineRole: 'point-handle',
+          dataLineRenderer: 'back',
+        }),
+      ]));
+      expect(pointHandleContextMenuCapture).toMatchObject({
+        phase: 'contextmenu-capture',
+        guardPassed: true,
+        backTargetFound: true,
+        foundTargetLineId: primaryLineId,
+        foundTargetLineRole: 'point-handle',
+        normalizedDispatchTargetLineId: primaryLineId,
+        normalizedDispatchTargetLineRole: 'hit-path',
+        normalizedDispatchTargetLineRenderer: 'back',
+      });
+      expect(pointHandleContextMenuTargetLookup).toMatchObject({
+        phase: 'contextmenu-capture:target-lookup',
+        backTargetFound: true,
+        foundTargetLineId: primaryLineId,
+        foundTargetLineRole: 'point-handle',
+      });
+      expect(pointHandleTargetRole).toBe('point-handle');
+      expect(pointHandleRendererContextMenuBefore).toMatchObject({
+        phase: 'hit-path-contextmenu:before-stop',
+        rendererLabel: 'back',
+        lineId: primaryLineId,
+      });
+      expect(pointHandleRendererContextMenuAfter).toMatchObject({
+        phase: 'hit-path-contextmenu:after-stop',
+        rendererLabel: 'back',
+        lineId: primaryLineId,
+      });
+      expect(pointHandleAfterContextMenu).toMatchObject({
+        selected: true,
+        contextMenuVisible: true,
+        geometry: primaryLineBefore.geometry,
+      });
+      expect(pointHandleLineMenuVisible).toBe(true);
+      expect(pointHandleExcalidrawMenuVisible).toBe(false);
+      expect(findRoleCount(pointHandleAfterContextMenu, 'midpoint-handle')).toBe(1);
+      expect(findRoleCount(pointHandleAfterContextMenu, 'point-handle')).toBe(2);
+
+      const persistedLineRowsAfterPointHandle = await fetchHarnessLineRows(supabase, fixture.boardId);
+      const primaryLineGeometryAfterPointHandle = await lineGeometry(page, primaryLineId);
+      const otherLineSnapshotsAfterPointHandle = await Promise.all(
+        persistedOtherLinesBefore.map(async (row) => ({
+          lineId: String(row.id),
+          snapshot: await lineSnapshot(page, String(row.id)),
+        })),
+      );
+      const containerSnapshotsAfterPointHandle = await Promise.all(
+        fixture.containerIds.map(async (containerId) => ({
+          containerId,
+          snapshot: await containerSnapshot(page, containerId),
+        })),
+      );
+
+      expect(primaryLineGeometryAfterPointHandle).toEqual(primaryLineBefore.geometry);
+      expect(persistedLineRowsAfterPointHandle).toEqual(persistedLineRowsBefore);
+      expect(persistedLineRowsAfterPointHandle.find((row) => String(row.id) === primaryLineId)).toEqual(persistedPrimaryLineBefore);
       expect(
-        persistedLineRowsAfter.filter((row) => String(row.id) !== primaryLineId),
+        persistedLineRowsAfterPointHandle.filter((row) => String(row.id) !== primaryLineId),
       ).toEqual(persistedOtherLinesBefore);
-      expect(otherLineSnapshotsAfter).toEqual(otherLineSnapshotsBefore);
-      expect(containerSnapshotsAfter).toEqual(containerSnapshotsBefore);
+      expect(otherLineSnapshotsAfterPointHandle).toEqual(otherLineSnapshotsBefore);
+      expect(containerSnapshotsAfterPointHandle).toEqual(containerSnapshotsBefore);
       expect(stack[0]).toMatchObject({
         tag: 'canvas',
         className: expect.stringContaining('excalidraw__canvas'),
+      });
+
+      test.info().annotations.push({
+        type: 'patch-068-contextmenu-fix',
+        description: JSON.stringify({
+          midpointOrCenterHandle: {
+            originalResolvedRole: stateSTargetRole,
+            originalResolvedLineId: contextMenuTargetLookup?.foundTargetLineId ?? null,
+            normalizedDispatchRole: contextMenuCapture?.normalizedDispatchTargetLineRole ?? null,
+            normalizedDispatchLineId: contextMenuCapture?.normalizedDispatchTargetLineId ?? null,
+            lineMenuVisible: stateSLineMenuVisible,
+            excalidrawMenuVisible: stateSExcalidrawMenuVisible,
+          },
+          pointHandle: {
+            clickPoint: pointHandleClickPoint,
+            stack: pointHandleStack,
+            originalResolvedRole: pointHandleTargetRole,
+            originalResolvedLineId: pointHandleContextMenuTargetLookup?.foundTargetLineId ?? null,
+            normalizedDispatchRole: pointHandleContextMenuCapture?.normalizedDispatchTargetLineRole ?? null,
+            normalizedDispatchLineId: pointHandleContextMenuCapture?.normalizedDispatchTargetLineId ?? null,
+            lineMenuVisible: pointHandleLineMenuVisible,
+            excalidrawMenuVisible: pointHandleExcalidrawMenuVisible,
+          },
+          invariants: {
+            geometryUnchanged: JSON.stringify(primaryLineGeometryAfterPointHandle) === JSON.stringify(primaryLineBefore.geometry),
+            persistedRowsUnchanged: JSON.stringify(persistedLineRowsAfterPointHandle) === JSON.stringify(persistedLineRowsBefore),
+            otherLinesUnchanged: JSON.stringify(otherLineSnapshotsAfterPointHandle) === JSON.stringify(otherLineSnapshotsBefore),
+            containersUnchanged: JSON.stringify(containerSnapshotsAfterPointHandle) === JSON.stringify(containerSnapshotsBefore),
+          },
+        }),
       });
     } finally {
       page.off('console', consoleListener);
