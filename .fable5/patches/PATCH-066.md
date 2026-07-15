@@ -13,6 +13,69 @@ Base commit: 77998fcbd2966e1c2e5d7b6ea4b0f0bf2b3035ce
 fix(drawing): route back-line pointer events through the bridge (PATCH-066)
 ```
 
+## 0.5 Amendment 1 (2026-07-15) — local auth storage-state regeneration
+
+**Context.** The implementer correctly hit a bound stop before Stage 0: the
+credentialed baseline cannot start because the LOCAL, GENERATED, IGNORED
+artifact `e2e/.auth/user.json` is malformed JSON (one extra trailing `}`;
+parse error at position 1070 / line 15 col 2). No files were changed.
+Verified for this amendment: the file is written by
+`e2e/auth.setup.ts:33` via `page.context().storageState({ path:
+AUTH_STATE_PATH })`, ignored by `.gitignore:58` (`e2e/.auth/`), untracked
+(`git ls-files` empty; `git check-ignore` matches), and consumed by the
+`characterization` project (`playwright.config.ts:45`).
+
+**Ruling.** Regeneration through the existing authenticated setup workflow
+is authorized. Manual editing of the file — including removing the single
+trailing brace — is NOT authorized, because an authoritative regeneration
+workflow exists (`setup` project). Hand-editing authentication artifacts is
+banned on principle: no cookie or credential content may ever be edited,
+inspected into reports, or logged.
+
+Bound rules:
+
+1. `e2e/.auth/user.json` is an ignored local test artifact, not an
+   implementation file. It is NOT added to §7 allowed files.
+2. It may be deleted (or moved aside) and regenerated ONLY by the existing
+   setup project: `npx playwright test --project=setup` (with
+   `PW_BASE_URL` per §12 port discipline), or implicitly via a
+   characterization run's `setup` dependency.
+3. It must never be staged or committed. `git status` must remain clean
+   throughout (the path is ignored; if it ever shows as tracked/staged —
+   STOP).
+4. Credentials come only from the existing approved mechanism
+   (`e2e/helpers/env.ts`: env vars / `.env.local`). No new credential
+   plumbing.
+5. No credential or cookie values may be printed in reports, logs, or
+   diagnostics — record only the file path and the parse result.
+6. The regenerated file must pass a JSON parse check (read + `JSON.parse`
+   succeeds; do not print contents).
+7. The `setup` project must complete with a pass (not a skip) in the
+   credentialed environment.
+8. The §10 baselines must then be rerun and match exactly: line 4 passed;
+   presentation 2 passed / 2 approved skips; credential-off line 4
+   skipped / presentation 4 skipped; cleanup zeros.
+9. Stage 0 remains prohibited until those baselines match.
+10. Any continuing auth/setup failure after one clean regeneration attempt
+    is a NEW stop condition — report to Fable; do not iterate.
+11. This amendment authorizes NO production or test source change of any
+    kind.
+12. The §7 two-file implementation boundary is unchanged:
+    `components/collabboard/canvas/layouts/DrawingLayout.tsx` and
+    `e2e/characterization/drawing-line-bridge.spec.ts`.
+
+Bound repair sequence: (1) confirm ignored + unstaged; (2) record path +
+parse failure only; (3) delete/move aside the malformed artifact; (4) run
+the setup project; (5) JSON-parse-check the regenerated file; (6) confirm
+`git status` clean; (7)–(9) rerun the §10 credentialed and credential-off
+baselines; (10) confirm cleanup zeros; (11) only then resume Stage 0.
+
+Additional stop conditions (extend §11): the file is tracked or staged;
+regeneration would require changing source/config; approved credentials
+are unavailable; setup writes credential values to logs; regenerated JSON
+is still malformed; credentialed baselines differ; cleanup fails; any
+implementation file changes before Stage 0.
+
 ## 1. Purpose — exactly one root cause
 
 The Drawing back-line event bridge fails to route real pointer interaction

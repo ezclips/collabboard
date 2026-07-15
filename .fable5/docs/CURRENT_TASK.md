@@ -361,6 +361,25 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-15** — PATCH-066 **Amendment 1 APPROVED** (environment repair
+  only; no scope change). The implementer hit a correct pre-edit STOP: the
+  credentialed baseline could not start because the local, generated,
+  gitignored `e2e/.auth/user.json` is malformed JSON (one extra trailing
+  `}`, parse error at line 15 col 2). No implementation, production, or
+  test files were changed; full Vitest baseline 424/41 and all fences had
+  already matched. CTO verification: the file is written by
+  `e2e/auth.setup.ts` (`storageState({ path: AUTH_STATE_PATH })`), ignored
+  via `.gitignore:58`, untracked, consumed by the `characterization`
+  project. Ruling: regenerate via the existing `setup` project only —
+  manual editing of auth artifacts (even one character) is prohibited
+  since an authoritative regeneration workflow exists; never stage/commit
+  the file; credentials only via `e2e/helpers/env.ts`; no credential
+  values in any log or report; JSON parse check required; then the full
+  §10 baselines (line 4 passed, presentation 2+2, credential-off 4+4,
+  cleanup zeros) must be rerun and match before Stage 0 resumes. A second
+  auth failure after one clean regeneration is a new STOP. The two-file
+  implementation boundary is unchanged. CTO did not perform the repair
+  (environment repair is implementer-executed under bound procedure).
 - **2026-07-15** — PATCH-065 **DONE (commit `77998fc`), independent Sonnet
   verdict: PASS** — Drawing Bridge Hardening Program patch 4 complete.
   Committed files: exactly the three authorized e2e files
