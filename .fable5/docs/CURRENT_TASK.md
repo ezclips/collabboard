@@ -361,6 +361,55 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-15** — PATCH-066 **Amendment 2 APPROVED: production mandate
+  REVOKED — the left-click routing defect is DISPROVEN.** After the
+  Amendment-1 auth repair succeeded (setup 1 passed, regenerated
+  `user.json` parses, file still ignored/unstaged, git clean) and ALL
+  bound baselines passed (line 4 passed, presentation 2 passed / 2
+  approved skips, credential-off 4+4 skipped, cleanup zeros), Stage 0's
+  console-captured diagnosis showed the full route WORKING for a real
+  coordinate left-click: activeToolType "selection", target lookup
+  hit-path found, mouse-down + click captures guardPassed:true,
+  SimpleLineRenderer received line-drag-start and path-click, the line
+  selected and REMAINED selected after the complete Excalidraw cycle,
+  handles appeared, geometry unchanged. Double-click also works. This
+  matches none of decision-table Rows B–E → unlisted exit → the
+  implementer correctly STOPPED with zero files changed. CTO ruling:
+  no production change authorized; DrawingLayout.tsx returns to the
+  immutable fence set (38 immutable fences); PATCH-066 is amended to
+  TEST-ONLY — sole allowed file `drawing-line-bridge.spec.ts`, new bound
+  commit message `test(drawing): freeze working back-line selection
+  routing (PATCH-066)`. Discrepancy explanation (bound after re-reading
+  the committed test): the earlier PATCH-065/baseline runs consistently
+  observed a real NON-DETERMINISTIC non-routing state (recorder saw no
+  dispatch AND probes saw no selection) while Stage 0 — identical
+  source, fences held — observed full success; that is an
+  observation/timing-sensitive intermittency, not a stable Row B–E
+  defect, so any production edit would be speculative and is prohibited.
+  The corrected test must assert the working behavior with fixed (not
+  adaptive) assertions so any recurrence of the non-routing state FAILS
+  loudly as new evidence. Context menu confirmed a SEPARATE root cause
+  (contextmenu lookup resolves midpoint-handle on a selected line;
+  only hit-path has an onContextMenu handler) — excluded from 066,
+  diagnosed by PATCH-067. Sonnet review still bound before the 066
+  test-correction commit.
+- **2026-07-15** — PATCH-067 AUTHORED + **APPROVED** (diagnosis/
+  characterization, test-only: "Diagnose Back-Line Context Menu
+  Routing"). Scope: fresh census of the right-button event sequence
+  (pointerdown/mousedown/contextmenu, capture order, button values, the
+  intentional non-left-button guards), target mutation between events
+  (why the lookup resolves midpoint-handle once selection succeeded and
+  whether role priority is correct for contextmenu routing), the
+  context-menu state path (LineContextMenu / CanvasClient
+  handleLineContextMenu / hit-path onContextMenu chain, Excalidraw's
+  handleCanvasContextMenu race), and a bound R1–R6 root-cause
+  classification covering both SELECTED and UNSELECTED line states.
+  Characterization freezes the current failing behavior honestly; the
+  production fix is a separate future patch on this evidence. Allowed
+  file: drawing-line-bridge.spec.ts only, baseline re-derived after the
+  PATCH-066 test correction lands with a Sonnet PASS (hard sequencing
+  stop). No production, fork, role-priority, or left-click/dblclick
+  changes. Implementation not started.
 - **2026-07-15** — PATCH-066 **Amendment 1 APPROVED** (environment repair
   only; no scope change). The implementer hit a correct pre-edit STOP: the
   credentialed baseline could not start because the local, generated,

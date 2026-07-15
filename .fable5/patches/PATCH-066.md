@@ -1,17 +1,140 @@
-# PATCH-066 - Repair Back-Line Pointer Event Routing
+# PATCH-066 - Back-Line Pointer Routing: Stage-0 Disproof and Test Correction
 
-Status: APPROVED - first production Drawing Bridge change of the hardening
-program, bound to a Stage-0 diagnosis and a closed decision table.
-Approved by the Fable CTO 2026-07-15 after a fresh live-code census
-(§3) cross-checked against the PATCH-065 runtime evidence.
+Status: AMENDED TO TEST-ONLY (Amendment 2, 2026-07-15). The original
+production repair mandate is REVOKED — Stage 0 landed on an unlisted exit
+that DISPROVES the deterministic left-click routing defect this patch was
+authorized to fix. No DrawingLayout.tsx change is authorized. The patch's
+remaining deliverable is the §8-A corrected pointer characterization test.
 Role: implementation engineer after Fable approval.
 Base commit: 77998fcbd2966e1c2e5d7b6ea4b0f0bf2b3035ce
 
-**Bound commit message (use verbatim):**
+**Bound commit message (use verbatim; replaces the original fix() message,
+which is void):**
 
 ```
-fix(drawing): route back-line pointer events through the bridge (PATCH-066)
+test(drawing): freeze working back-line selection routing (PATCH-066)
 ```
+
+## 0.6 Amendment 2 (2026-07-15) — Stage-0 disproof; production scope revoked
+
+**Stage-0 outcome (implementer report, accepted).** All Amendment-1
+prerequisites passed (auth regenerated via the setup project, JSON valid,
+file ignored/unstaged, git clean; baselines: line 4 passed, presentation
+2 passed / 2 approved skips, credential-off 4+4 skipped, cleanup zeros).
+The console-captured diagnosis then showed, for a real coordinate left
+click at the hit-path center: pointer-down-capture logged; activeToolType
+`"selection"`; mouse-down-capture target lookup `backTargetFound: true`
+(role `hit-path`); `guardPassed: true`; SimpleLineRenderer received
+`line-drag-start:entry` → `drag-branch`; click-capture `guardPassed:
+true`; SimpleLineRenderer received `path-click:before-stop`/`after-stop`;
+the line became selected, REMAINED selected after the full Excalidraw
+event cycle, applicable handles appeared, geometry unchanged
+(`M 480 250 L 620 270` / `#dc2626` / 3). Double-click also routed and
+settled selected with handles visible.
+
+**Ruling.**
+
+1. The alleged deterministic left-click selection defect is DISPROVEN
+   under deterministic diagnostic observation. The bridge routes
+   left-click end-to-end: guards pass, dispatch fires, SimpleLineRenderer
+   receives, selection persists.
+2. This maps to none of §5 Rows B/C/D/E — under this patch's own rules it
+   is an unlisted exit and the production mandate terminates. NO
+   production change is authorized. `DrawingLayout.tsx` is REMOVED from
+   §7 allowed files and returns to the immutable fence set at
+   `b3684e4c6226ec2ad77fbff3265de25339a7f471`.
+3. **PATCH-065 vs Stage-0 discrepancy — bound explanation.** The CTO
+   re-read the committed pointer test before ruling. Two facts hold
+   simultaneously: (a) the committed test's success probes are real but
+   narrow (`selected` = visibility of the `Edit Points` button, which
+   lives in `LineToolbar`, mounted by `CanvasClient.tsx:7333` for
+   `!isMapLayout && selectedLineId` — so it CAN observe a true
+   selection); (b) in the PATCH-065 runs and the PATCH-066 baseline run,
+   both the recorder (no synthetic re-dispatch) and the probes (no
+   selection) consistently reported the non-working state, while Stage 0
+   — with identical source, 36/36 fences held — observed the working
+   state. The honest conclusion is the Task-1D "diagnostics/timing
+   changed observation without any source change" class: the earlier
+   characterizations captured a real but NON-DETERMINISTIC non-routing
+   state (environment/timing-sensitive, e.g. dev-server warmup or
+   hydration-order effects), not a stable production defect. No single
+   guard/dispatch line is provably wrong; therefore no Row B–E fix
+   exists to apply, and any production edit would be speculative —
+   prohibited.
+4. Context-menu failure is a SEPARATE root cause and is EXCLUDED from
+   this patch: Stage 0 shows mousedown-capture correctly rejects
+   right-button (`non-left-button` — by design), contextmenu-capture
+   passes guards, but the target lookup resolves `midpoint-handle`
+   (present only because selection succeeded first and the selected line
+   renders handles that outrank `hit-path` in
+   `BACK_LINE_INTERACTIVE_ROLE_PRIORITY`), and the census shows only the
+   hit-path carries an `onContextMenu` handler
+   (`SimpleLineRenderer.tsx:708-721`). Diagnosed in PATCH-067, not here.
+5. Double-click currently works and is NOT part of any repair; the
+   corrected test records it as working.
+6. If the corrected test ever observes the non-routing state again, that
+   is a legitimate FAILURE (flake evidence), not something to absorb with
+   adaptive branches — see §8-A. Such a failure is new evidence for a
+   future patch and must be reported, not patched around.
+
+**Superseded sections.** §4 (Stage 0) is COMPLETE — its diagnosis is
+recorded above and must be preserved as a test annotation. §5 (decision
+table) is VOID — no row applies; the table must not be used to justify
+any edit. §6 exclusions remain in force. §8 is replaced by §8-A below.
+§7 allowed files are replaced by: ONLY
+`e2e/characterization/drawing-line-bridge.spec.ts` (baseline
+`9853d10d4a030ff615222825c02d0a16478e31a5`). §9's immutable set gains
+DrawingLayout.tsx back (38 immutable fences; one modifiable test file).
+§11 stop conditions apply unchanged except references to production
+editing, which is now categorically prohibited. §12 gates apply
+unchanged (unit counts must stay 51/2 and 424/41 — no unit files may
+change under test-only scope).
+
+## 8-A. Required test correction (replaces §8)
+
+Rework the pointer-routing test in
+`e2e/characterization/drawing-line-bridge.spec.ts` from adaptive
+classification branches to FIXED assertions of the Stage-0-proven working
+behavior:
+
+1. Keep, unweakened: the `elementsFromPoint` stack evidence (canvas
+   topmost, hit-path beneath), the physical-target proof (real
+   `page.mouse.click` events target the canvas), and the before 8-role
+   matrix.
+2. Assert left-click selection WORKS: after the coordinate click, the
+   line becomes selected in real DOM/state (LineToolbar / `Edit Points`
+   visibility and/or the selection affordances the current UI actually
+   renders), using a settle-aware wait (poll with an adequate timeout,
+   then re-assert after the event cycle completes to prove persistence —
+   the Stage-0 "still selected after the full cycle" fact).
+3. Assert applicable handles appear per current behavior (the seeded
+   multi-point line renders point/midpoint handles when selected/edit
+   mode — assert the roles the CURRENT implementation actually emits; do
+   not assert legacy start/control/end roles the seeded line never
+   renders).
+4. Record double-click as working (routes, settles selected, handles
+   visible).
+5. Keep the context-menu failure explicitly characterized (right-click
+   does not open the line menu; the contextmenu lookup resolves a handle
+   role on a selected line), with its Stage-0 evidence in the annotation
+   — do NOT hide, fix, or absorb it.
+6. Assert geometry and the persisted row remain unchanged throughout.
+7. Assert no unrelated selection (other lines' matrices unchanged;
+   containers unselected).
+8. Preserve the Stage-0 diagnosis (bridge + renderer console records) as
+   a committed test annotation; capturing bridge console diagnostics
+   live in the test is permitted (dev server, read-only listener).
+9. The test must NOT: fabricate DOM; alter pointer-events or z-index;
+   set selection state directly; invoke production callbacks directly;
+   keep any stale assertion that left-click routing fails; or use
+   adaptive both-outcomes-pass branching for the left-click path (a
+   regression back to non-routing must FAIL the test).
+10. All other tests in the file (rendering, matrix, movement,
+    natural-height, persistence, deletion, independence, cleanup,
+    credential skip) remain passing and unweakened.
+
+Independent Sonnet review of the uncommitted test correction is required;
+commit prohibited until explicit PASS.
 
 ## 0.5 Amendment 1 (2026-07-15) — local auth storage-state regeneration
 
