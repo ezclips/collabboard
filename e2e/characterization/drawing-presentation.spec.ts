@@ -93,14 +93,25 @@ test.describe('drawing presentation browser characterization (PATCH-064)', () =>
         .locator('.fixed.top-0.right-0.bottom-0.w-80')
         .getByText(/PATCH-064 (Landscape|Portrait)/)
         .allTextContents();
+      const seededFrameTitles = fixture.frameIds.map((frameId) => (
+        frameId === 'frame-portrait' ? 'PATCH-064 Portrait' : 'PATCH-064 Landscape'
+      ));
       expect(slideTitles).toEqual(['PATCH-064 Landscape', 'PATCH-064 Portrait']);
-      expect(fixture.frameIds).toEqual(['frame-landscape', 'frame-portrait']);
+      expect(seededFrameTitles).toEqual(['PATCH-064 Portrait', 'PATCH-064 Landscape']);
+      expect(slideTitles).not.toEqual(seededFrameTitles);
 
       await expect(page.getByAltText('Slide preview').first()).toBeVisible({ timeout: 60_000 });
 
       await page.getByRole('button', { name: /Start presentation/i }).last().click();
       const fullscreen = page.locator('div[style*="z-index: 9999"]').first();
       await expect(fullscreen.getByText('Slide 1 / 2', { exact: true })).toBeVisible({ timeout: 60_000 });
+      const slideOneHasPortraitChild = await fullscreen.getByText(new RegExp(`${fixture.prefix} child B`)).isVisible().catch(() => false);
+      const slideOneHasLandscapeChild = await fullscreen.getByText(new RegExp(`${fixture.prefix} child A`)).isVisible().catch(() => false);
+      expect(slideOneHasPortraitChild).toBe(true);
+      expect(slideOneHasLandscapeChild).toBe(false);
+
+      await page.getByTitle('Next (→)').click();
+      await expect(fullscreen.getByText('Slide 2 / 2', { exact: true })).toBeVisible();
       await expect(fullscreen.getByText(new RegExp(`${fixture.prefix} child A`))).toBeVisible({ timeout: 60_000 });
       await expect(fullscreen.getByAltText('PATCH-064 uploaded template image')).toBeVisible({ timeout: 60_000 });
       await expect(fullscreen.getByAltText('PATCH-064 uploaded template image')).toHaveAttribute('src', '/templates/moodboard.png');
@@ -111,11 +122,10 @@ test.describe('drawing presentation browser characterization (PATCH-064)', () =>
         total: 0,
         bounds: null,
       });
-      await page.getByTitle('Next (→)').click();
-      await expect(fullscreen.getByText('Slide 2 / 2', { exact: true })).toBeVisible();
-      await expect(fullscreen.getByText(new RegExp(`${fixture.prefix} child B`))).toBeVisible({ timeout: 60_000 });
+
       await page.getByTitle('Previous (←)').click();
       await expect(fullscreen.getByText('Slide 1 / 2', { exact: true })).toBeVisible();
+      await expect(fullscreen.getByText(new RegExp(`${fixture.prefix} child B`))).toBeVisible({ timeout: 60_000 });
       await fullscreen.getByText('End presentation', { exact: true }).click();
       await expect(fullscreen.getByText('Slide 1 / 2', { exact: true })).toHaveCount(0);
 

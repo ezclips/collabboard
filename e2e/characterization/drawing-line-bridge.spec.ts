@@ -12,6 +12,34 @@ import {
   type DrawingFixture,
 } from './drawingBridgeHarness';
 
+type LineRole = (typeof LINE_ROLES)[number];
+type PointerClassification =
+  | 'interaction works'
+  | 'wrong Playwright interaction/selector'
+  | 'overlay or z-index interception'
+  | 'event-bridge timing/routing issue';
+type DomDescriptor = {
+  tag: string;
+  className: string;
+  id: string | null;
+  title: string | null;
+  role: string | null;
+  pointerEvents: string;
+  zIndex: string;
+  dataLineId: string | null;
+  dataLineRole: string | null;
+  dataLineRenderer: string | null;
+  dataPadletId: string | null;
+};
+type PointerEventRecord = {
+  type: string;
+  button: number;
+  clientX: number;
+  clientY: number;
+  defaultPrevented: boolean;
+  target: DomDescriptor;
+};
+
 const LINE_ROLES = [
   'visible-path',
   'hit-path',
@@ -55,6 +83,161 @@ async function lineSnapshot(page: Page, lineId: string) {
     geometry: await lineGeometry(page, lineId),
     roles: await rolePresence(page, lineId),
   };
+}
+
+async function hitPathCenter(page: Page, lineId: string) {
+  const box = await page.locator(`[data-line-id="${lineId}"][data-line-role="hit-path"]`).first().boundingBox();
+  expect(box).not.toBeNull();
+  return {
+    x: Math.round(box!.x + box!.width / 2),
+    y: Math.round(box!.y + box!.height / 2),
+    width: Math.round(box!.width),
+    height: Math.round(box!.height),
+  };
+}
+
+async function elementsFromPoint(page: Page, x: number, y: number): Promise<DomDescriptor[]> {
+  return page.evaluate(({ x: clientX, y: clientY }) => {
+    const describe = (node: Element) => {
+      const element = node as HTMLElement | SVGElement;
+      const htmlElement = element instanceof HTMLElement ? element : null;
+      const styles = window.getComputedStyle(element);
+      return {
+        tag: element.tagName.toLowerCase(),
+        className: element.getAttribute('class') ?? '',
+        id: element.getAttribute('id'),
+        title: htmlElement?.title ?? element.getAttribute('title'),
+        role: element.getAttribute('role'),
+        pointerEvents: styles.pointerEvents,
+        zIndex: styles.zIndex,
+        dataLineId: element.getAttribute('data-line-id'),
+        dataLineRole: element.getAttribute('data-line-role'),
+        dataLineRenderer: element.getAttribute('data-line-renderer'),
+        dataPadletId: element.getAttribute('data-padlet-id'),
+      };
+    };
+    return document.elementsFromPoint(clientX, clientY).map(describe);
+  }, { x, y });
+}
+
+async function installPointerRecorder(page: Page) {
+  await page.evaluate(() => {
+    type PointerWindow = Window & typeof globalThis & {
+      __patch065PointerRecords?: PointerEventRecord[];
+      __patch065PointerHandler?: EventListener;
+    };
+    const targetWindow = window as PointerWindow;
+    targetWindow.__patch065PointerRecords = [];
+    const describe = (node: EventTarget | null): DomDescriptor => {
+      if (!(node instanceof Element)) {
+        return {
+          tag: 'unknown',
+          className: '',
+          id: null,
+          title: null,
+          role: null,
+          pointerEvents: '',
+          zIndex: '',
+          dataLineId: null,
+          dataLineRole: null,
+          dataLineRenderer: null,
+          dataPadletId: null,
+        };
+      }
+      const element = node as HTMLElement | SVGElement;
+      const htmlElement = element instanceof HTMLElement ? element : null;
+      const styles = window.getComputedStyle(element);
+      return {
+        tag: element.tagName.toLowerCase(),
+        className: element.getAttribute('class') ?? '',
+        id: element.getAttribute('id'),
+        title: htmlElement?.title ?? element.getAttribute('title'),
+        role: element.getAttribute('role'),
+        pointerEvents: styles.pointerEvents,
+        zIndex: styles.zIndex,
+        dataLineId: element.getAttribute('data-line-id'),
+        dataLineRole: element.getAttribute('data-line-role'),
+        dataLineRenderer: element.getAttribute('data-line-renderer'),
+        dataPadletId: element.getAttribute('data-padlet-id'),
+      };
+    };
+    const handler: EventListener = (event) => {
+      if (!(event instanceof MouseEvent)) return;
+      targetWindow.__patch065PointerRecords?.push({
+        type: event.type,
+        button: event.button,
+        clientX: Math.round(event.clientX),
+        clientY: Math.round(event.clientY),
+        defaultPrevented: event.defaultPrevented,
+        target: describe(event.target),
+      });
+    };
+    targetWindow.__patch065PointerHandler = handler;
+    for (const type of ['mousedown', 'click', 'dblclick', 'contextmenu']) {
+      document.addEventListener(type, handler, true);
+    }
+  });
+}
+
+async function readPointerRecorder(page: Page): Promise<PointerEventRecord[]> {
+  return page.evaluate(() => {
+    type PointerWindow = Window & typeof globalThis & {
+      __patch065PointerRecords?: PointerEventRecord[];
+    };
+    const targetWindow = window as PointerWindow;
+    return [...(targetWindow.__patch065PointerRecords ?? [])];
+  });
+}
+
+async function clearPointerRecorder(page: Page) {
+  await page.evaluate(() => {
+    type PointerWindow = Window & typeof globalThis & {
+      __patch065PointerRecords?: PointerEventRecord[];
+    };
+    const targetWindow = window as PointerWindow;
+    targetWindow.__patch065PointerRecords = [];
+  });
+}
+
+async function removePointerRecorder(page: Page) {
+  await page.evaluate(() => {
+    type PointerWindow = Window & typeof globalThis & {
+      __patch065PointerRecords?: PointerEventRecord[];
+      __patch065PointerHandler?: EventListener;
+    };
+    const targetWindow = window as PointerWindow;
+    if (targetWindow.__patch065PointerHandler) {
+      for (const type of ['mousedown', 'click', 'dblclick', 'contextmenu']) {
+        document.removeEventListener(type, targetWindow.__patch065PointerHandler, true);
+      }
+    }
+    delete targetWindow.__patch065PointerHandler;
+    delete targetWindow.__patch065PointerRecords;
+  });
+}
+
+async function lineInteractionState(page: Page, lineId: string) {
+  const editPointsButton = page.getByTitle('Edit Points').first();
+  const duplicateButton = page.getByRole('button', { name: 'Duplicate', exact: true }).first();
+  return {
+    roles: await rolePresence(page, lineId),
+    geometry: await lineGeometry(page, lineId),
+    selected: await editPointsButton.isVisible().catch(() => false),
+    contextMenuVisible: await duplicateButton.isVisible().catch(() => false),
+  };
+}
+
+function findRoleCount(state: Awaited<ReturnType<typeof lineInteractionState>>, role: LineRole) {
+  return state.roles[role];
+}
+
+async function waitForVisible(locator: ReturnType<Page['locator']>, timeout: number) {
+  try {
+    await expect(locator).toBeVisible({ timeout });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 test.describe('drawing line bridge browser characterization (PATCH-064)', () => {
@@ -309,9 +492,158 @@ test.describe('drawing line bridge browser characterization (PATCH-064)', () => 
     }
   });
 
-  test.skip('hit-path pointer selection, edit handles, and line context menu are narrowly skipped: selector [data-line-id][data-line-role="hit-path"] trial-click timed out because the Excalidraw canvas intercepted pointer events', async () => {
-    // The runtime test above asserts the real hit-path/label/visible DOM roles,
-    // a trial pointer target, and persisted row behavior without replacing
-    // unstable real pointer routing with synthetic DOM dispatch.
+  test('characterizes real hit-path pointer routing, selection, edit handles, and context menu', async ({ page }) => {
+    test.setTimeout(180_000);
+    const { supabase, fixture } = await createDisposableDrawingBoard('line-pointer');
+
+    try {
+      await seedDrawingContainers(supabase, fixture);
+      await seedAttachedCanvasLines(supabase, fixture);
+      await seedLineScene(supabase, fixture);
+
+      await openDrawingBoard(page, fixture.boardId);
+
+      const primaryLineId = String((await fetchHarnessLineRows(supabase, fixture.boardId))[0].id);
+      const hitPathSelector = `[data-line-id="${primaryLineId}"][data-line-role="hit-path"]`;
+      const hitPath = page.locator(hitPathSelector).first();
+      await expect(hitPath).toHaveCount(1);
+      await expect(page.locator(`[data-line-id="${primaryLineId}"][data-line-role="visible-path"]`)).toHaveCount(1);
+      await expect(page.locator('canvas.excalidraw__canvas').first()).toBeVisible({ timeout: 90_000 });
+
+      const center = await hitPathCenter(page, primaryLineId);
+      const stack = await elementsFromPoint(page, center.x, center.y);
+      const hitPathIndex = stack.findIndex((entry) => entry.dataLineId === primaryLineId && entry.dataLineRole === 'hit-path');
+      const canvasIndex = stack.findIndex((entry) => entry.tag === 'canvas' && entry.className.includes('excalidraw__canvas'));
+      expect(hitPathIndex).toBeGreaterThanOrEqual(0);
+      expect(canvasIndex).toBeGreaterThanOrEqual(0);
+      expect(canvasIndex).toBeLessThan(hitPathIndex);
+
+      const before = await lineInteractionState(page, primaryLineId);
+      await installPointerRecorder(page);
+      let locatorClickOutcome: { kind: 'succeeded' | 'failed'; message?: string };
+      try {
+        await hitPath.click({ timeout: 5_000 });
+        locatorClickOutcome = { kind: 'succeeded' };
+      } catch (error) {
+        locatorClickOutcome = {
+          kind: 'failed',
+          message: error instanceof Error ? error.message : String(error),
+        };
+      }
+      const afterLocatorClick = await lineInteractionState(page, primaryLineId);
+      const locatorRecords = await readPointerRecorder(page);
+      await clearPointerRecorder(page);
+
+      await page.mouse.click(center.x, center.y);
+      const afterCoordinateClick = await lineInteractionState(page, primaryLineId);
+      const coordinateClickRecords = await readPointerRecorder(page);
+      await clearPointerRecorder(page);
+      const coordinateSelectionVisible = await waitForVisible(page.getByTitle('Edit Points').first(), 2_000);
+
+      await page.mouse.dblclick(center.x, center.y);
+      const afterDoubleClick = await lineInteractionState(page, primaryLineId);
+      const doubleClickRecords = await readPointerRecorder(page);
+      await clearPointerRecorder(page);
+      const doubleClickHandleCount = findRoleCount(afterDoubleClick, 'start-handle')
+        + findRoleCount(afterDoubleClick, 'end-handle')
+        + findRoleCount(afterDoubleClick, 'control-handle');
+
+      await page.mouse.click(center.x, center.y, { button: 'right' });
+      const afterContextMenu = await lineInteractionState(page, primaryLineId);
+      const contextMenuRecords = await readPointerRecorder(page);
+      const contextMenuVisible = await waitForVisible(page.getByRole('button', { name: 'Duplicate', exact: true }).first(), 2_000);
+
+      const coordinateTarget = coordinateClickRecords.find((entry) => entry.type === 'mousedown')?.target ?? null;
+      const clickWorked = afterCoordinateClick.selected || coordinateSelectionVisible;
+      const classification: PointerClassification =
+        clickWorked && locatorClickOutcome.kind === 'failed'
+          ? 'wrong Playwright interaction/selector'
+          : clickWorked
+            ? 'interaction works'
+            : coordinateTarget?.tag === 'canvas' && coordinateTarget.className.includes('excalidraw__canvas')
+              ? 'event-bridge timing/routing issue'
+              : 'overlay or z-index interception';
+      test.info().annotations.push({
+        type: 'patch-065-pointer-investigation',
+        description: JSON.stringify({
+          hitPathSelector,
+          center,
+          stack,
+          locatorClickOutcome,
+          locatorRecords,
+          coordinateClickRecords,
+          doubleClickRecords,
+          contextMenuRecords,
+          coordinateSelectionVisible,
+          doubleClickHandleCount,
+          contextMenuVisible,
+          before,
+          afterLocatorClick,
+          afterCoordinateClick,
+          afterDoubleClick,
+          afterContextMenu,
+          classification,
+          productionDefectCandidateProven: classification !== 'wrong Playwright interaction/selector' && classification !== 'interaction works',
+        }),
+      });
+
+      expect(before).toMatchObject({
+        selected: false,
+        contextMenuVisible: false,
+        roles: {
+          'visible-path': 1,
+          'hit-path': 1,
+          'start-handle': 0,
+          'end-handle': 0,
+          'midpoint-handle': 0,
+          'control-handle': 0,
+          'point-handle': 0,
+          'label-handle': 1,
+        },
+      });
+      if (locatorClickOutcome.kind === 'failed') {
+        expect(locatorClickOutcome.message).toContain('intercepts pointer events');
+        expect(afterLocatorClick.selected).toBe(false);
+      }
+      if (classification === 'wrong Playwright interaction/selector' || classification === 'interaction works') {
+        expect(coordinateTarget).toMatchObject({
+          tag: 'canvas',
+          className: expect.stringContaining('excalidraw__canvas'),
+        });
+        expect(afterCoordinateClick.selected || coordinateSelectionVisible).toBe(true);
+        expect(afterCoordinateClick.contextMenuVisible).toBe(false);
+        expect(findRoleCount(afterCoordinateClick, 'start-handle')).toBe(0);
+        expect(findRoleCount(afterDoubleClick, 'start-handle')).toBe(1);
+        expect(findRoleCount(afterDoubleClick, 'end-handle')).toBe(1);
+        expect(findRoleCount(afterDoubleClick, 'control-handle')).toBe(1);
+        expect(afterContextMenu.contextMenuVisible || contextMenuVisible).toBe(true);
+      } else if (classification === 'event-bridge timing/routing issue') {
+        expect(coordinateTarget).toMatchObject({
+          tag: 'canvas',
+          className: expect.stringContaining('excalidraw__canvas'),
+        });
+        expect(afterCoordinateClick.selected).toBe(false);
+        expect(coordinateSelectionVisible).toBe(false);
+        expect(doubleClickHandleCount).toBe(0);
+        expect(afterContextMenu.contextMenuVisible).toBe(false);
+        expect(contextMenuVisible).toBe(false);
+      } else {
+        expect(stack[0]).not.toMatchObject({
+          tag: 'canvas',
+          className: expect.stringContaining('excalidraw__canvas'),
+        });
+        expect(afterCoordinateClick.selected).toBe(false);
+        expect(doubleClickHandleCount).toBe(0);
+        expect(contextMenuVisible).toBe(false);
+      }
+    } finally {
+      await removePointerRecorder(page).catch(() => undefined);
+      await cleanupDrawingFixture(supabase, fixture);
+      await expect(assertDrawingFixtureCleanup(supabase, fixture)).resolves.toEqual({
+        boards: 0,
+        padlets: 0,
+        canvasLines: 0,
+      });
+    }
   });
 });

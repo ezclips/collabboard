@@ -468,10 +468,10 @@ export async function seedPresentationScene(supabase: SupabaseClient, fixture: D
   fixture.uploadedImagePadletIds.push(uploadedImageId);
   const landscape = 'frame-landscape';
   const portrait = 'frame-portrait';
-  fixture.frameIds.push(landscape, portrait);
+  fixture.frameIds.push(portrait, landscape);
   await insertMasterPadlet(supabase, fixture, [
-    frameElement(landscape, 'PATCH-064 Landscape', 0, 0, 1280, 720),
     frameElement(portrait, 'PATCH-064 Portrait', 1400, 0, 720, 1280),
+    frameElement(landscape, 'PATCH-064 Landscape', 0, 0, 1280, 720),
     embeddableElement('emb-slide-a', a, 360, 120, 360, 260, landscape),
     embeddableElement('emb-uploaded-image', uploadedImageId, 780, 120, 320, 260, landscape),
     textElement('text-landscape', 'PATCH-064 native text', 80, 80, landscape),
