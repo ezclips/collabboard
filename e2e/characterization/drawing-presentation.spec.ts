@@ -70,6 +70,86 @@ type PngCensusEntry = {
 };
 
 type DiagnosisRow = 'N1' | 'N2' | 'N3' | 'N4' | 'N5';
+type Patch070DecisionRow = 'F1' | 'F2' | 'F3' | 'F4' | 'F6' | 'F7';
+
+type ProbePixelSample = {
+  r: number;
+  g: number;
+  b: number;
+  a: number;
+};
+
+type ProbeToDataUrlEntry = {
+  canvasId: number;
+  provenance: 'production-or-unknown' | 'test-harness';
+  width: number;
+  height: number;
+  timestamp: number;
+  result: 'returned' | 'threw';
+  dataUrlLength: number | null;
+  errorMessage: string | null;
+  topLeftPixel: ProbePixelSample | null;
+  centerPixel: ProbePixelSample | null;
+  bottomRightPixel: ProbePixelSample | null;
+};
+
+type ProbeCanvasTraceEntry = {
+  kind: 'createElement' | 'getContext' | 'markHarness';
+  canvasId: number;
+  provenance: 'production-or-unknown' | 'test-harness';
+  width: number;
+  height: number;
+  timestamp: number;
+  contextType: string | null;
+  excludedFromProductionAttribution: boolean;
+  stackFingerprint: string | null;
+};
+
+type ProbeCanvasSummary = {
+  canvasId: number;
+  provenance: 'production-or-unknown' | 'test-harness';
+  createdAt: number;
+  width: number;
+  height: number;
+  getContextCallCount: number;
+  getContextTimestamps: number[];
+  toDataUrlCallCount: number;
+  toDataUrlTimestamps: number[];
+  mountedInDom: boolean;
+  stackFingerprint: string | null;
+  excludedFromProductionAttribution: boolean;
+};
+
+type ProbeFontEvent = {
+  phase: 'call' | 'resolved' | 'rejected';
+  timestamp: number;
+  font: string;
+  detail: string | null;
+};
+
+type ProbeImageMountEvent = {
+  timestamp: number;
+  mutationType: string;
+  alt: string | null;
+  zIndex: string | null;
+  inferredBand: 'below' | 'above' | 'unknown';
+  naturalWidth: number;
+  naturalHeight: number;
+  mountedOrUpdated: boolean;
+  removed: boolean;
+  srcPrefix: string;
+  dataUrlLength: number;
+};
+
+type Patch070ProbeSnapshot = {
+  active: boolean;
+  resetAt: number;
+  allCanvasTrace: ProbeCanvasSummary[];
+  toDataUrlTrace: ProbeToDataUrlEntry[];
+  canvasTrace: ProbeCanvasTraceEntry[];
+  fontStatusTimeline: ProbeFontEvent[];
+  imageMounts: ProbeImageMountEvent[];
+};
 
 async function nativeRasterCounts(page: Page) {
   const nativeLayers = page.locator('img[src^="data:image/png"][alt=""]');
@@ -78,6 +158,9 @@ async function nativeRasterCounts(page: Page) {
     const source = img as HTMLImageElement;
     await source.decode().catch(() => undefined);
     const canvas = document.createElement('canvas');
+    (window as typeof window & {
+      __patch070Stage0Probe?: { markHarnessCanvas: (canvas: HTMLCanvasElement) => void };
+    }).__patch070Stage0Probe?.markHarnessCanvas(canvas);
     canvas.width = source.naturalWidth;
     canvas.height = source.naturalHeight;
     const context = canvas.getContext('2d');
@@ -206,6 +289,9 @@ async function collectPngCensus(
     const pixelSummary = (() => {
       if (!naturalWidth || !naturalHeight) return null;
       const canvas = document.createElement('canvas');
+      (window as typeof window & {
+        __patch070Stage0Probe?: { markHarnessCanvas: (canvas: HTMLCanvasElement) => void };
+      }).__patch070Stage0Probe?.markHarnessCanvas(canvas);
       canvas.width = naturalWidth;
       canvas.height = naturalHeight;
       const context = canvas.getContext('2d');
@@ -363,6 +449,332 @@ function recordConsoleSignal(entries: { type: string; text: string }[], message:
   }
 }
 
+async function installPatch070Probe(page: Page) {
+  await page.addInitScript(() => {
+    const windowWithProbe = window as typeof window & {
+      __patch070Stage0Probe?: {
+        markHarnessCanvas: (canvas: HTMLCanvasElement) => void;
+        reset: () => void;
+        snapshot: () => Patch070ProbeSnapshot;
+      };
+    };
+
+    if (windowWithProbe.__patch070Stage0Probe) return;
+
+    type CanvasMeta = ProbeCanvasSummary & { canvas: HTMLCanvasElement };
+
+    const canvasMeta = new WeakMap<HTMLCanvasElement, CanvasMeta>();
+    const canvasMetas: CanvasMeta[] = [];
+    let nextCanvasId = 1;
+    const state: Patch070ProbeSnapshot = {
+      active: false,
+      resetAt: 0,
+      allCanvasTrace: [],
+      toDataUrlTrace: [],
+      canvasTrace: [],
+      fontStatusTimeline: [],
+      imageMounts: [],
+    };
+
+    const ensureCanvasMeta = (canvas: HTMLCanvasElement) => {
+      const existing = canvasMeta.get(canvas);
+      if (existing) return existing;
+      const created: CanvasMeta = {
+        canvas,
+        canvasId: nextCanvasId++,
+        provenance: 'production-or-unknown',
+        createdAt: Date.now(),
+        width: canvas.width,
+        height: canvas.height,
+        getContextCallCount: 0,
+        getContextTimestamps: [],
+        toDataUrlCallCount: 0,
+        toDataUrlTimestamps: [],
+        mountedInDom: canvas.isConnected,
+        stackFingerprint: new Error().stack?.split('\n').slice(2, 7).map((line) => line.trim()).join(' | ') ?? null,
+        excludedFromProductionAttribution: false,
+      };
+      canvasMeta.set(canvas, created);
+      canvasMetas.push(created);
+      return created;
+    };
+
+    const refreshCanvasMeta = (canvas: HTMLCanvasElement, meta = ensureCanvasMeta(canvas)) => {
+      meta.width = canvas.width;
+      meta.height = canvas.height;
+      meta.mountedInDom = canvas.isConnected;
+      meta.excludedFromProductionAttribution = meta.provenance === 'test-harness';
+      return meta;
+    };
+
+    const canvasSummary = (meta: CanvasMeta): ProbeCanvasSummary => ({
+      canvasId: meta.canvasId,
+      provenance: meta.provenance,
+      createdAt: meta.createdAt,
+      width: meta.width,
+      height: meta.height,
+      getContextCallCount: meta.getContextCallCount,
+      getContextTimestamps: [...meta.getContextTimestamps],
+      toDataUrlCallCount: meta.toDataUrlCallCount,
+      toDataUrlTimestamps: [...meta.toDataUrlTimestamps],
+      mountedInDom: meta.mountedInDom,
+      stackFingerprint: meta.stackFingerprint,
+      excludedFromProductionAttribution: meta.excludedFromProductionAttribution,
+    });
+
+    const recordCanvasTrace = (
+      kind: ProbeCanvasTraceEntry['kind'],
+      canvas: HTMLCanvasElement,
+      contextType: string | null,
+      meta = ensureCanvasMeta(canvas),
+    ) => {
+      if (!state.active) return;
+      refreshCanvasMeta(canvas, meta);
+      state.canvasTrace.push({
+        kind,
+        canvasId: meta.canvasId,
+        provenance: meta.provenance,
+        width: canvas.width,
+        height: canvas.height,
+        timestamp: Date.now(),
+        contextType,
+        excludedFromProductionAttribution: meta.excludedFromProductionAttribution,
+        stackFingerprint: meta.stackFingerprint,
+      });
+    };
+
+    const readPixel = (
+      context: CanvasRenderingContext2D,
+      x: number,
+      y: number,
+    ): ProbePixelSample | null => {
+      try {
+        const data = context.getImageData(x, y, 1, 1).data;
+        return {
+          r: data[0] ?? 0,
+          g: data[1] ?? 0,
+          b: data[2] ?? 0,
+          a: data[3] ?? 0,
+        };
+      } catch {
+        return null;
+      }
+    };
+
+    const recordImage = (image: HTMLImageElement, mutationType: string, removed = false) => {
+      if (!state.active) return;
+      const src = image.currentSrc || image.getAttribute('src') || '';
+      if (!src.startsWith('data:image/png')) return;
+      const style = window.getComputedStyle(image);
+      const zIndex = style.zIndex || null;
+      state.imageMounts.push({
+        timestamp: Date.now(),
+        mutationType,
+        alt: image.getAttribute('alt'),
+        zIndex,
+        inferredBand: zIndex === '1' ? 'below' : zIndex === '3' ? 'above' : 'unknown',
+        naturalWidth: image.naturalWidth,
+        naturalHeight: image.naturalHeight,
+        mountedOrUpdated: image.isConnected && !removed,
+        removed,
+        srcPrefix: src.slice(0, 32),
+        dataUrlLength: src.length,
+      });
+    };
+
+    const scanNodeForImages = (node: Node, reason: string) => {
+      if (node instanceof HTMLImageElement) {
+        recordImage(node, reason);
+      }
+      if (node instanceof Element) {
+        node.querySelectorAll('img').forEach((image) => recordImage(image as HTMLImageElement, reason));
+      }
+    };
+
+    const originalCreateElement = Document.prototype.createElement;
+    Document.prototype.createElement = function createElementPatched(
+      this: Document,
+      ...args: Parameters<Document['createElement']>
+    ) {
+      const element = originalCreateElement.apply(this, args);
+      if (String(args[0]).toLowerCase() === 'canvas' && element instanceof HTMLCanvasElement) {
+        const meta = ensureCanvasMeta(element);
+        recordCanvasTrace('createElement', element, null, meta);
+      }
+      return element;
+    };
+
+    const originalGetContext = HTMLCanvasElement.prototype.getContext;
+    const patchedGetContext = function getContextPatched(
+      this: HTMLCanvasElement,
+      ...args: Parameters<HTMLCanvasElement['getContext']>
+    ) {
+      const meta = ensureCanvasMeta(this);
+      const timestamp = Date.now();
+      meta.getContextCallCount += 1;
+      meta.getContextTimestamps.push(timestamp);
+      recordCanvasTrace('getContext', this, typeof args[0] === 'string' ? args[0] : null, meta);
+      return originalGetContext.apply(this, args as [any, any]);
+    };
+    const canvasPrototype = HTMLCanvasElement.prototype as any;
+    canvasPrototype.getContext = patchedGetContext as any;
+
+    const originalToDataURL = HTMLCanvasElement.prototype.toDataURL;
+    HTMLCanvasElement.prototype.toDataURL = function toDataURLPatched(
+      this: HTMLCanvasElement,
+      ...args: Parameters<HTMLCanvasElement['toDataURL']>
+    ) {
+      const meta = ensureCanvasMeta(this);
+      const timestamp = Date.now();
+      meta.toDataUrlCallCount += 1;
+      meta.toDataUrlTimestamps.push(timestamp);
+      refreshCanvasMeta(this, meta);
+      const context = this.width > 0 && this.height > 0
+        ? originalGetContext.call(this, '2d') as CanvasRenderingContext2D | null
+        : null;
+      const topLeftPixel = context ? readPixel(context, 0, 0) : null;
+      const centerPixel = context
+        ? readPixel(context, Math.max(0, Math.floor(this.width / 2)), Math.max(0, Math.floor(this.height / 2)))
+        : null;
+      const bottomRightPixel = context
+        ? readPixel(context, Math.max(0, this.width - 1), Math.max(0, this.height - 1))
+        : null;
+
+      try {
+        const dataUrl = originalToDataURL.apply(this, args);
+        if (state.active) {
+          state.toDataUrlTrace.push({
+            canvasId: meta.canvasId,
+            provenance: meta.provenance,
+            width: this.width,
+            height: this.height,
+            timestamp,
+            result: 'returned',
+            dataUrlLength: dataUrl.length,
+            errorMessage: null,
+            topLeftPixel,
+            centerPixel,
+            bottomRightPixel,
+          });
+        }
+        return dataUrl;
+      } catch (error) {
+        if (state.active) {
+          state.toDataUrlTrace.push({
+            canvasId: meta.canvasId,
+            provenance: meta.provenance,
+            width: this.width,
+            height: this.height,
+            timestamp,
+            result: 'threw',
+            dataUrlLength: null,
+            errorMessage: error instanceof Error ? error.message : String(error),
+            topLeftPixel,
+            centerPixel,
+            bottomRightPixel,
+          });
+        }
+        throw error;
+      }
+    };
+
+    const fontSetPrototype = Object.getPrototypeOf(document.fonts) as FontFaceSet;
+    const originalFontLoad = fontSetPrototype.load;
+    fontSetPrototype.load = function loadPatched(this: FontFaceSet, ...args: Parameters<FontFaceSet['load']>) {
+      const font = String(args[0] ?? '');
+      if (state.active) {
+        state.fontStatusTimeline.push({
+          phase: 'call',
+          timestamp: Date.now(),
+          font,
+          detail: null,
+        });
+      }
+      return originalFontLoad.apply(this, args).then(
+        (result) => {
+          if (state.active) {
+            state.fontStatusTimeline.push({
+              phase: 'resolved',
+              timestamp: Date.now(),
+              font,
+              detail: Array.isArray(result) ? String(result.length) : null,
+            });
+          }
+          return result;
+        },
+        (error) => {
+          if (state.active) {
+            state.fontStatusTimeline.push({
+              phase: 'rejected',
+              timestamp: Date.now(),
+              font,
+              detail: error instanceof Error ? error.message : String(error),
+            });
+          }
+          throw error;
+        },
+      );
+    };
+
+    const observer = new MutationObserver((mutations) => {
+      if (!state.active) return;
+      for (const mutation of mutations) {
+        if (mutation.type === 'childList') {
+          mutation.addedNodes.forEach((node) => scanNodeForImages(node, 'childList:add'));
+          mutation.removedNodes.forEach((node) => {
+            if (node instanceof HTMLImageElement) {
+              recordImage(node, 'childList:remove', true);
+            }
+            if (node instanceof Element) {
+              node.querySelectorAll('img').forEach((image) => recordImage(image as HTMLImageElement, 'childList:remove', true));
+            }
+          });
+        }
+        if (mutation.type === 'attributes' && mutation.target instanceof HTMLImageElement) {
+          recordImage(mutation.target, `attr:${mutation.attributeName ?? 'unknown'}`);
+        }
+      }
+    });
+
+    const startObserver = () => {
+      if (document.documentElement) {
+        observer.observe(document.documentElement, {
+          subtree: true,
+          childList: true,
+          attributes: true,
+          attributeFilter: ['src', 'style'],
+        });
+      }
+    };
+    startObserver();
+    if (!document.documentElement) {
+      document.addEventListener('DOMContentLoaded', startObserver, { once: true });
+    }
+
+    windowWithProbe.__patch070Stage0Probe = {
+      markHarnessCanvas: (canvas: HTMLCanvasElement) => {
+        const meta = ensureCanvasMeta(canvas);
+        meta.provenance = 'test-harness';
+        meta.excludedFromProductionAttribution = true;
+        recordCanvasTrace('markHarness', canvas, null, meta);
+      },
+      reset: () => {
+        state.active = true;
+        state.resetAt = Date.now();
+        state.allCanvasTrace = [];
+        state.toDataUrlTrace = [];
+        state.canvasTrace = [];
+        state.fontStatusTimeline = [];
+        state.imageMounts = [];
+      },
+      snapshot: () => JSON.parse(JSON.stringify({
+        ...state,
+        allCanvasTrace: canvasMetas.map((meta) => canvasSummary(refreshCanvasMeta(meta.canvas, meta))),
+      })) as Patch070ProbeSnapshot,
+    };
+  });
+}
+
 test.describe('drawing presentation browser characterization (PATCH-064)', () => {
   test.skip(!hasE2ECredentials, 'E2E_EMAIL / E2E_PASSWORD not set (see .env.e2e.example)');
 
@@ -371,6 +783,7 @@ test.describe('drawing presentation browser characterization (PATCH-064)', () =>
     const { supabase, fixture } = await createDisposableDrawingBoard('presentation');
     const runtimeConsoleSignals: { type: string; text: string }[] = [];
     const runtimePageErrors: string[] = [];
+    await installPatch070Probe(page);
     page.on('console', (message) => recordConsoleSignal(runtimeConsoleSignals, message));
     page.on('pageerror', (error) => runtimePageErrors.push(error.message));
 
@@ -529,6 +942,14 @@ test.describe('drawing presentation browser characterization (PATCH-064)', () =>
       expect(slideOneHasPortraitChild).toBe(true);
       expect(slideOneHasLandscapeChild).toBe(false);
 
+      await page.evaluate(() => {
+        const windowWithProbe = window as typeof window & {
+          __patch070Stage0Probe?: {
+            reset: () => void;
+          };
+        };
+        windowWithProbe.__patch070Stage0Probe?.reset();
+      });
       await page.getByTitle(/Next/).click();
       await expect(fullscreen.getByText('Slide 2 / 2', { exact: true })).toBeVisible();
       await expect(fullscreen.getByText(new RegExp(`${fixture.prefix} child A`))).toBeVisible({ timeout: 60_000 });
@@ -536,6 +957,22 @@ test.describe('drawing presentation browser characterization (PATCH-064)', () =>
       await expect(fullscreen.getByAltText('PATCH-064 uploaded template image')).toHaveAttribute('src', '/templates/moodboard.png');
 
       const fullscreenPngCensus = await collectPngCensus(page, 'fullscreen', slideTitles, 2, 'PATCH-064 Landscape');
+      const patch070Probe = await page.evaluate(() => {
+        const windowWithProbe = window as typeof window & {
+          __patch070Stage0Probe?: {
+            snapshot: () => Patch070ProbeSnapshot;
+          };
+        };
+        return windowWithProbe.__patch070Stage0Probe?.snapshot() ?? {
+          active: false,
+          resetAt: 0,
+          allCanvasTrace: [],
+          toDataUrlTrace: [],
+          canvasTrace: [],
+          fontStatusTimeline: [],
+          imageMounts: [],
+        } satisfies Patch070ProbeSnapshot;
+      });
       const expectedFullscreenNativeBand = fullscreenPngCensus.find((entry) => entry.bandPosition === expectedNativeBand) ?? null;
       const fullscreenBelowBand = fullscreenPngCensus.find((entry) => entry.bandPosition === 'below') ?? null;
       const fullscreenRow = classifySurfaceDiagnosis({
@@ -556,6 +993,92 @@ test.describe('drawing presentation browser characterization (PATCH-064)', () =>
         ...runtimeConsoleSignals.map((entry) => ({ source: 'console', ...entry })),
         ...runtimePageErrors.map((message) => ({ source: 'pageerror', type: 'error', text: message })),
       ];
+      const activeCanvasIdSet = new Set([
+        ...patch070Probe.canvasTrace.map((entry) => entry.canvasId),
+        ...patch070Probe.toDataUrlTrace.map((entry) => entry.canvasId),
+      ]);
+      const activeCanvasTrace = patch070Probe.allCanvasTrace.filter((entry) => activeCanvasIdSet.has(entry.canvasId));
+      const allCanvasIds = activeCanvasTrace.map((entry) => entry.canvasId);
+      const harnessCanvasIds = activeCanvasTrace
+        .filter((entry) => entry.provenance === 'test-harness')
+        .map((entry) => entry.canvasId);
+      const productionCandidateCanvasIds = activeCanvasTrace
+        .filter((entry) => entry.provenance === 'production-or-unknown' && !entry.excludedFromProductionAttribution)
+        .map((entry) => entry.canvasId);
+      const productionCandidateCanvasIdSet = new Set(productionCandidateCanvasIds);
+      const productionToDataUrlEntries = patch070Probe.toDataUrlTrace.filter((entry) => productionCandidateCanvasIdSet.has(entry.canvasId));
+      const successfulProductionToDataUrlEntries = productionToDataUrlEntries.filter((entry) => entry.result === 'returned');
+      const thrownProductionToDataUrlEntries = productionToDataUrlEntries.filter((entry) => entry.result === 'threw');
+      const belowExportCanvasId = successfulProductionToDataUrlEntries[0]?.canvasId ?? null;
+      const nonEmptyFontEvents = patch070Probe.fontStatusTimeline.filter((entry) => entry.font.trim().length > 0);
+      const exportSizedProductionCandidateCanvasIds = activeCanvasTrace
+        .filter((entry) => (
+          entry.provenance === 'production-or-unknown'
+          && !entry.excludedFromProductionAttribution
+          && entry.width === (fullscreenBelowBand?.naturalWidth ?? 0)
+          && entry.height === (fullscreenBelowBand?.naturalHeight ?? 0)
+        ))
+        .map((entry) => entry.canvasId);
+      const exportSizedProductionCandidateCanvasTrace = patch070Probe.canvasTrace.filter((entry) => (
+        !entry.excludedFromProductionAttribution
+        && entry.contextType === '2d'
+        && entry.width === (fullscreenBelowBand?.naturalWidth ?? 0)
+        && entry.height === (fullscreenBelowBand?.naturalHeight ?? 0)
+      ));
+      const aboveAttributableToDataUrlEntries = productionToDataUrlEntries.filter((entry) => entry.canvasId !== belowExportCanvasId);
+      const attributableAboveTraceIndexes = patch070Probe.toDataUrlTrace.flatMap((entry, index) => (
+        aboveAttributableToDataUrlEntries.includes(entry) ? [index] : []
+      ));
+      const aboveExportBegan = exportSizedProductionCandidateCanvasIds.length > 1 || nonEmptyFontEvents.length > 0;
+      const aboveExportBeginEvidence = {
+        fontEvents: nonEmptyFontEvents,
+        allCanvasIds,
+        harnessCanvasIds,
+        productionCandidateCanvasIds,
+        exportSizedProductionCandidateCanvasIds,
+        exportSizedProductionCandidateCanvasTrace,
+        rawCanvasTrace: patch070Probe.canvasTrace.filter((entry) => entry.width > 0 || entry.height > 0),
+      };
+      const fullscreenAboveImgObserved = Boolean(expectedFullscreenNativeBand);
+      const fullscreenAboveImgEverMounted = patch070Probe.imageMounts.some((entry) => entry.zIndex === '3');
+      const fullscreenBelowImgObserved = Boolean(fullscreenBelowBand);
+      const aboveToDataUrlCalled = aboveAttributableToDataUrlEntries.length > 0;
+      const aboveToDataUrlReturned = aboveAttributableToDataUrlEntries.some((entry) => entry.result === 'returned');
+      const aboveToDataUrlThrew = aboveAttributableToDataUrlEntries.some((entry) => entry.result === 'threw');
+      const degenerateBoundsEvidence =
+        productionToDataUrlEntries.find((entry) => entry.width === 0 || entry.height === 0)
+        ?? patch070Probe.imageMounts.find((entry) => entry.zIndex === '3' && (entry.naturalWidth === 0 || entry.naturalHeight === 0))
+        ?? null;
+      const cancellationOrStaleSuppressionEvidence = aboveToDataUrlReturned && !fullscreenAboveImgObserved
+        ? {
+            aboveAttributableToDataUrlEntries,
+            fullscreenAboveImgObserved,
+            fullscreenAboveImgEverMounted,
+          }
+        : null;
+      const postRunPersistedScene = await fetchPersistedScene(supabase, fixture.masterPadletId!);
+      const postRunPersistedPadlets = await fetchBoardPadlets(supabase, fixture.boardId);
+      const postRunElementOrder = postRunPersistedScene.sceneElements.map((element) => element.id);
+      const preRunElementOrder = persistedScene.sceneElements.map((element) => element.id);
+      const postRunCompositionPlan = planSlideComposition(landscapeSlide, postRunPersistedScene.sceneElements, postRunPersistedPadlets);
+      const postRunNativeBelowIds = postRunCompositionPlan.nativeBelowElements.map((element) => String((element as { id: string }).id));
+      const postRunNativeAboveIds = postRunCompositionPlan.nativeAboveElements.map((element) => String((element as { id: string }).id));
+      const selectedDecisionRow: Patch070DecisionRow = (() => {
+        if (degenerateBoundsEvidence) return 'F6';
+        if (aboveToDataUrlThrew && !fullscreenAboveImgObserved) return 'F2';
+        if (aboveToDataUrlReturned && !fullscreenAboveImgObserved) return 'F3';
+        if (aboveExportBegan && !aboveToDataUrlCalled && !fullscreenAboveImgObserved) return 'F1';
+        if (!aboveExportBegan && !fullscreenAboveImgObserved) return 'F4';
+        return 'F7';
+      })();
+      const conciseRootCauseBoundaryByRow: Record<Patch070DecisionRow, string> = {
+        F1: 'F1: the isolated fullscreen above-band export begins but terminates before toDataURL; the exact rejected operation remains inside renderExcalidrawSlideBase.',
+        F2: 'F2: the fullscreen landscape above-band export reaches canvas serialization, but an above-band toDataURL attempt throws before the PNG can mount in the DOM.',
+        F3: 'F3: the fullscreen landscape above-band canvas serializes successfully, but the resulting PNG is suppressed before the above-band img ever mounts in the DOM.',
+        F4: 'F4: after excluding test-owned canvases, no fullscreen above-band export activity is observed despite stable persisted data and a correct Node-side plan; the remaining boundary is runtime plan/input divergence or suppression before export invocation.',
+        F6: 'F6: the fullscreen landscape probe reached a zero-area or invalid-dimension export artifact, so the missing above-band raster is bounded to degenerate export geometry.',
+        F7: 'F7: the fullscreen landscape probe isolated a narrow deterministic cause that did not map cleanly onto the predefined F1/F2/F3/F4/F6 rows.',
+      };
 
       expect(fullscreenPngCensus.length).toBeGreaterThanOrEqual(1);
       expect(fullscreenBelowBand).not.toBeNull();
@@ -587,6 +1110,11 @@ test.describe('drawing presentation browser characterization (PATCH-064)', () =>
         total: 0,
         bounds: null,
       });
+      expect(preRunElementOrder).toEqual(postRunElementOrder);
+      expect(postRunNativeBelowIds).toEqual(nativeBelowIds);
+      expect(postRunNativeAboveIds).toEqual(nativeAboveIds);
+      expect(postRunPersistedScene.rawContentLength).toBe(persistedScene.rawContentLength);
+      expect(fullscreenAboveImgObserved).toBe(false);
 
       test.info().annotations.push({
         type: 'patch-069-persisted-scene',
@@ -661,6 +1189,50 @@ test.describe('drawing presentation browser characterization (PATCH-064)', () =>
           conciseRootCauseBoundary: 'N2: plan keeps the native elements in the landscape above band, the browser-visible fullscreen runtime never materializes that above-band PNG in RuntimeSlideRenderer.tsx, and the thumbnail path still renders the native content.',
         }),
       });
+      test.info().annotations.push({
+        type: 'patch-070-stage0-probe',
+        description: JSON.stringify({
+          baseDiagnosis: 'N2',
+          selectedDecisionRow,
+          persistedSceneStable: preRunElementOrder.join('|') === postRunElementOrder.join('|'),
+          preRunElementOrder,
+          postRunElementOrder,
+          preRunPlan: {
+            nativeBelowIds,
+            nativeAboveIds,
+            resolvedPadletIndexes,
+          },
+          postRunPlan: {
+            nativeBelowIds: postRunNativeBelowIds,
+            nativeAboveIds: postRunNativeAboveIds,
+            resolvedPadletIndexes: postRunCompositionPlan.resolvedPadlets.map((entry) => entry.zIndex),
+          },
+          aboveExportBegan,
+          aboveExportBeginEvidence,
+          allCanvasTrace: activeCanvasTrace,
+          harnessCanvasIds,
+          productionCandidateCanvasIds,
+          exportSizedProductionCandidateCanvasIds,
+          rawImageMounts: patch070Probe.imageMounts,
+          toDataUrlTrace: patch070Probe.toDataUrlTrace,
+          attributableAboveTraceIndexes,
+          aboveToDataUrlCalled,
+          aboveToDataUrlReturned,
+          aboveToDataUrlThrew,
+          aboveDataUrlLength: aboveAttributableToDataUrlEntries.find((entry) => entry.result === 'returned')?.dataUrlLength ?? null,
+          fullscreenBelowImgObserved,
+          fullscreenAboveImgObserved,
+          fullscreenAboveImgEverMounted,
+          fontStatusTimeline: patch070Probe.fontStatusTimeline,
+          fontErrors: patch070Probe.fontStatusTimeline.filter((entry) => entry.phase === 'rejected'),
+          runtimeConsoleErrors: visibleRuntimeErrors,
+          cancellationOrStaleSuppressionEvidence,
+          degenerateBoundsEvidence,
+          conciseRootCauseBoundary: conciseRootCauseBoundaryByRow[selectedDecisionRow],
+          stage1Status: 'locked-pending-amendment',
+        }),
+      });
+      expect(selectedDecisionRow).toBe('F4');
 
       await page.getByTitle(/Previous/).click();
       await expect(fullscreen.getByText('Slide 1 / 2', { exact: true })).toBeVisible();
