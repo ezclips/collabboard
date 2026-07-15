@@ -361,6 +361,67 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-15** — PATCH-065 **DONE (commit `77998fc`), independent Sonnet
+  verdict: PASS** — Drawing Bridge Hardening Program patch 4 complete.
+  Committed files: exactly the three authorized e2e files
+  (`drawing-line-bridge.spec.ts`, `drawing-presentation.spec.ts`,
+  `drawingBridgeHarness.ts`). Verified root-cause evidence, all
+  independently reproduced by the reviewer: real hit-path midpoint at
+  x=550, y=260; `document.elementsFromPoint` shows
+  `canvas.excalidraw__canvas.interactive` (z-index 2) ABOVE the back-line
+  hit path (stack index 5); `locator.click()` times out with Playwright's
+  own message naming the canvas as intercepting pointer events; real
+  `page.mouse` mousedown/click/dblclick/contextmenu events all target the
+  canvas; NO line selection occurs, NO edit handles appear, NO line context
+  menu opens; the 8-role matrix is unchanged before/after every
+  interaction. Primary classification: **event-bridge timing/routing
+  issue**. Production defect proven: **yes** (coordinate-based real-event
+  evidence, not just a locator timeout). Also landed: discriminating
+  presentation ordering fixture (portrait seeded first, sidebar still
+  renders landscape first, with an explicit not-equal assertion against
+  insertion order) and honest fullscreen raw-order characterization
+  (Slide 1 = portrait/child B, Slide 2 = landscape/child A). Final gates:
+  424/41 full, 51/2 focused, 36/36 fences before AND after, line
+  Playwright 4 passed, presentation 2 passed / 2 approved skips,
+  credential-off 4+4 skipped, cleanup COMPLETE (independent query path),
+  zero production imports, tsc/boundaries/verify/build green, repo clean
+  and synced.
+- **2026-07-15** — PATCH-066 AUTHORED + **APPROVED** (first PRODUCTION
+  Drawing Bridge change of the program: repair back-line pointer event
+  routing). Fresh census re-derived the full pointer path from live code:
+  Excalidraw's interactive canvas handles `pointerdown` (React prop,
+  `App.tsx` `handleCanvasPointerDown`, `setPointerCapture` at
+  App.tsx:7159); DrawingLayout's bridge is five React CAPTURE handlers on
+  the wrapper div (DrawingLayout.tsx:2730-2737) — pointerdown is LOG-ONLY,
+  mousedown/click/dblclick/contextmenu each guard
+  (reentrancy → activeTool==='selection' → button → target-is-canvas →
+  `excalidraw__canvas` class → `findBackLineInteractiveTargetAtPoint`)
+  then re-dispatch a synthetic MouseEvent at the resolved hit-path;
+  SimpleLineRenderer's hit-path consumes them via React handlers
+  (`handleLineDragStart`, `handlePathClick` → clears Excalidraw selection
+  via `excalidrawAPIRef.updateScene` then `onSelectLine`;
+  CanvasClient:6309 owns `selectedLineId`). Census eliminations: no native
+  document/window capture mouse listeners active during a plain click (fork
+  greps: only textWysiwyg during text edit, Popover non-capture); nothing
+  inside Excalidraw can block an OUTER React capture handler; single React
+  instance. Decisive PATCH-065 fact: the document-capture recorder saw the
+  real mousedown+click at the canvas but NEVER a synthetic re-dispatch at
+  the hit-path — the bridge either was never invoked or exited on a guard.
+  The exact exit is deterministically discriminable in ONE run because
+  `DEV_DRAWING_BRIDGE_DIAGNOSTICS = NODE_ENV !== 'production'`
+  (DrawingLayout.tsx:91) logs every invocation and every
+  `guardFailedReason`, and SimpleLineRenderer logs every hit-path event —
+  PATCH-065 never captured console. PATCH-066 therefore binds a Stage-0
+  console-captured diagnosis plus a closed decision table mapping each
+  possible observed exit to ONE pre-authorized minimal DrawingLayout-only
+  fix (anything outside the table = STOP). Allowed files:
+  `components/collabboard/canvas/layouts/DrawingLayout.tsx` (production,
+  baseline `b3684e4c`) + `e2e/characterization/drawing-line-bridge.spec.ts`
+  (test, baseline `9853d10d`). 37 immutable fences incl. the harness,
+  presentation spec, SimpleLineRenderer, CanvasClient, fork files.
+  Selection is the target; context menu / double-click ride along ONLY if
+  Stage 0 proves the identical exit for them; otherwise defer. Independent
+  Sonnet review bound before commit. Implementation not started.
 - **2026-07-15** — PATCH-064 **DONE (commit `2ed1455`), independent Sonnet
   verdict: PASS** — Drawing Bridge Hardening Program patch 3 complete after
   five independent review rounds (FAIL → 3× PASS WITH REQUIRED CHANGES →
