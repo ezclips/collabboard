@@ -361,6 +361,45 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-17** — **PATCH-072 §0.3: named-launch test correction
+  authorized (Option A — keyboard activation)** after the accepted
+  spec (`1866f1a9…`) failed DETERMINISTICALLY twice more (clean rerun
+  + `--trace=on` retry: both exit 1, 1 failed/1 passed/2 skipped,
+  240 s timeout at `:1258` in `openNamedPresentation`; bottom-start
+  flip + Next/Prev/End passed live in the same runs). **Trace-proven
+  interceptor (CTO parsed trace.zip):** `<img alt="Slide preview"
+  class="absolute inset-0 …">` from a slide-row subtree —
+  `SlideThumbnail.tsx:26-31`. Geometry: the per-slide menu (`absolute
+  bottom-full z-50`, `PresentationPanel.tsx:402-406`) is clipped by
+  the card's `overflow-hidden` (`:341-348`); the TOPMOST item ('Start
+  presentation') has its click point above the card edge, where the
+  adjacent row's preview img receives `elementFromPoint` — permanent
+  geometric interception (401+ retries, always 'visible, enabled,
+  stable'; no animation → Option D rejected). Classified E2E
+  locator/state-management failure; NOT a product
+  ordering/FullscreenPresentation/DrawingLayout/comparator/startSlideId
+  defect (no product assertion failed; handler intact and
+  keyboard-reachable). **Flagged for the next census (out of scope, no
+  production edit authorized):** the same geometry suggests the top
+  per-slide menu items may be pointer-unreachable for mouse users
+  (upward menu clipped by card `overflow-hidden`). **Bound correction
+  (§0.3.4, test-only, exactly one):** in `openNamedPresentation`,
+  rescope `menuStart` to `slideCard.getByRole('button', { name:
+  'Start presentation', exact: true })`, assert `toHaveCount(1)` +
+  visible + enabled, then `focus()` + `toBeFocused()` +
+  `keyboard.press('Enter')` — real accessible button activation, same
+  React onClick, no force/dispatch/seams; ⋮-open click unchanged
+  (pointer-reachable, proven). Everything else frozen (no
+  assertion/fixture/annotation/timeout changes, no sleeps, no sixth
+  file); new E2E hash must be measured and reported after the edit.
+  Failed-run artifacts removed by CTO after evidence capture
+  (test-results/: .last-run.json, error-context.md, both trace.zip).
+  Verification: fresh dev server, presentation spec `--workers=1
+  --reporter=line` expected exit 0 / 2 passed / 2 skips, JSON pass for
+  the `patch-072-presentation-order` annotation, then remaining gates
+  → Sonnet → bound commit. Four non-E2E hashes re-verified identical
+  (`e72c3de0…`, `2f1d79c5…`, `655244b4…`, `b470a888…`). No
+  implementation commit exists; PATCH-073 NOT started.
 - **2026-07-16** — **PATCH-072 verification-state rebind (§0.2, Option
   A)** after the E2E hash drifted during post-report locator
   tightening. **Drift:** the implementation packet bound the

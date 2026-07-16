@@ -380,6 +380,161 @@ enters scope.
 
 ---
 
+## 0.3 Named-launch test correction (2026-07-17) — pointer interception proven; keyboard activation authorized
+
+### 0.3.1 Repeated verification stop (record)
+
+- The accepted spec at `1866f1a9f2362cc936a8f683ea4546c36c3b8da9` still
+  fails DETERMINISTICALLY: both the first clean rerun and the traced
+  retry (same command + `--trace=on`) returned exit 1, 1 failed /
+  1 passed / 2 skipped, main test timing out at 240000 ms at
+  `drawing-presentation.spec.ts:1258` inside `openNamedPresentation`.
+- The locator
+  `page.getByRole('button', { name: 'Start presentation', exact: true }).first()`
+  RESOLVES the intended per-slide menu item (visible, enabled, stable —
+  401+ actionability retries all pass), but **click delivery is blocked
+  by pointer interception**.
+- Before the named-launch phase, the SAME run passed live: bottom
+  Start → landscape Slide 1/2 → Next → portrait 2/2 → Previous →
+  landscape 1/2 → End. The production fix behavior is again confirmed
+  up to the named-launch phase.
+- No production file changed; the four non-E2E hashes re-verified
+  identical (§0.2.4). No new implementation hash exists yet. No commit
+  is authorized. PATCH-072 is NOT done.
+
+### 0.3.2 Trace-based interceptor identity (CTO-inspected, trace.zip parsed)
+
+The trace's interception message (two variants differing only in the
+thumbnail's base64 payload — the preview re-rendered between retry
+batches) names the interceptor exactly:
+
+`<img draggable="false" alt="Slide preview" class="absolute inset-0
+w-full h-full object-contain" src="data:image/png;base64,…"/> from
+<div class="group flex items-start gap-2">…</div> subtree intercepts
+pointer events`
+
+That is `SlideThumbnail`'s preview `<img>` (`SlideThumbnail.tsx:26-31`)
+inside a slide ROW wrapper. Source-level geometry: the per-slide menu
+(`absolute right-0 bottom-full mb-1 w-52 z-50`,
+`PresentationPanel.tsx:402-406`) is a DOM descendant of the slide CARD
+div, whose class list includes `overflow-hidden`
+(`PresentationPanel.tsx:341-348`); the menu's containing-block chain
+passes through that card, so the menu is CLIPPED at the card's top
+edge. "Start presentation" is the TOPMOST menu item; its click point
+lies above the card's top edge, in screen space painted by the
+adjacent row's preview image — `elementFromPoint` therefore returns
+the preview `<img>` on every retry. The interception is geometric and
+permanent (401+ retries over the full wait, element always reported
+"visible, enabled and stable"; no animation or transition involved —
+Option D rejected: there is nothing to settle or clear).
+
+**Classification: E2E locator/state-management failure — pointer
+interception.** Not established as a product ordering,
+FullscreenPresentation, DrawingLayout, comparator, or `startSlideId`
+semantic defect: no product assertion failed, and the menu item's
+real click handler is intact and keyboard-reachable.
+
+**Flag for the next census (out of PATCH-072 scope, no production edit
+authorized):** the same geometry implies the top per-slide menu items
+may be pointer-unreachable for mouse users in the real UI (the card's
+`overflow-hidden` clips the upward-opening menu). Recorded as a
+candidate UI concern for the PATCH-073+ census; it does NOT block
+PATCH-072's bound behavior, which is provable through the real
+accessible keyboard path.
+
+### 0.3.3 Ruling: OPTION A — keyboard activation (preferred order honored)
+
+Keyboard activation exercises the REAL application command: the menu
+item is a genuine `<button>`; focusing it and pressing Enter triggers
+the browser-native button activation → the same React `onClick` →
+`onStartPresentation?.(slide.id)`. No pointer layer involved, no
+force, no synthetic dispatch, no test seam. `.focus()` does not fire
+`mousedown`, so the panel's outside-mousedown menu-close listener
+cannot fire. Options B/C rejected while a preferred, more truthful
+path exists; Option D rejected per §0.3.2 (no transient state to
+wait out).
+
+### 0.3.4 Bound correction (exactly one, test-only)
+
+- File: `e2e/characterization/drawing-presentation.spec.ts`
+- Pre-correction hash (bind):
+  `1866f1a9f2362cc936a8f683ea4546c36c3b8da9`
+- Region: the `openNamedPresentation` helper only (currently
+  `:1251-1259`).
+- OLD action (verbatim):
+
+```ts
+const menuStart = page.getByRole('button', { name: 'Start presentation', exact: true }).first();
+await expect(menuStart).toBeVisible({ timeout: 60_000 });
+await menuStart.click();
+```
+
+- REPLACEMENT (verbatim; the only permitted change):
+
+```ts
+const menuStart = slideCard.getByRole('button', { name: 'Start presentation', exact: true });
+await expect(menuStart).toHaveCount(1);
+await expect(menuStart).toBeVisible({ timeout: 60_000 });
+await expect(menuStart).toBeEnabled();
+await menuStart.focus();
+await expect(menuStart).toBeFocused();
+await page.keyboard.press('Enter');
+```
+
+  Rationale for the locator rescope: `slideCard`-scoping makes the
+  match EXACTLY ONE element (the bottom Start button lives outside the
+  cards) and proves row association (Task-5 cardinality + row
+  requirements); the accessible name stays exact. The ⋮-opening click
+  (`slideCard.locator('button').last().click()`) is pointer-reachable
+  (footer region, unclipped — proven by both runs reaching the open
+  menu) and stays UNCHANGED.
+- Everything else FROZEN: no assertion changes, no fixture changes, no
+  annotation changes beyond mechanical line drift, no timeout-policy
+  change, no sleeps/retries, no production change, no additional file.
+- The NEW file hash MUST be measured and reported immediately after
+  the correction, before any run.
+
+### 0.3.5 Rejected workarounds (binding)
+
+Direct `useCanvasActions`/DrawingLayout handler calls; direct React
+callback invocation; DB insertion to simulate launch; removing or
+weakening named-launch assertions; substituting the bottom Start
+button for the per-slide path; `test.skip`; retry loops; arbitrary
+`waitForTimeout`; timeout increases; unscoped `.first()` without
+cardinality proof; coordinate clicks; `click({ force: true })` and
+`dispatchEvent('click')` (available under the preferred option — not
+needed); ANY production CSS/z-index/pointer-events change; editing
+`PresentationPanel.tsx` or `SlideThumbnail.tsx`; any sixth file.
+
+### 0.3.6 Verification contract after the correction
+
+1. Generated artifacts of the failed runs were removed by the CTO
+   AFTER capturing the evidence into this section (`test-results/`:
+   `.last-run.json`, `error-context.md`, both `trace.zip` files, incl.
+   the setup trace). Nothing tracked was altered.
+2. Re-verify the four non-E2E hashes (§0.2.4) unchanged; apply ONLY
+   §0.3.4; report the new E2E hash.
+3. One fresh self-started dev server (§8 port discipline), then:
+   `PW_BASE_URL=http://localhost:3000 npx playwright test e2e/characterization/drawing-presentation.spec.ts --workers=1 --reporter=line`
+   — expected **exit 0, 2 passed / 2 approved skips**.
+4. Fresh `--reporter=json` pass; extract the complete
+   `patch-072-presentation-order` annotation verbatim.
+5. Only after the presentation spec passes: the remaining bound
+   Playwright and deterministic gates (§0.2.5 list), fences 49/49,
+   then Sonnet review, then the bound commit.
+
+### 0.3.7 Stop conditions (this correction)
+
+STOP and return to governance if: keyboard activation still times out;
+the scoped locator does not resolve exactly one intended menu item;
+the item is not visible/enabled/focusable; Portrait vs Landscape
+launches cannot be distinguished deterministically; a production
+change is required; PresentationPanel/SlideThumbnail code is required;
+any assertion must weaken; a sixth file is required; timeout policy
+must change; another defect enters scope.
+
+---
+
 ## 1. Defect statement (fresh census at `3b863d5`)
 
 **The fullscreen presentation walks the slides in RAW SCENE ORDER while
