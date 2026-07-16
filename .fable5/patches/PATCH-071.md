@@ -1,12 +1,16 @@
 # PATCH-071 - Sanitize Membership Metadata on Drawing-Canvas Clone (staged, repro-first)
 
-**Status:** AUTHORIZED — Stage 0 (defect reproduction, test-only). Stage 1
-(the production fix) is pre-authorized CONTINGENT on Stage 0 confirming the
-censused defect exactly (§4); any divergence is a STOP, not latitude.
+**Status:** Stage 0 **DONE** (commit
+`af04779b9a8864d5bb9b75eb1f14d7888f7861d9`, Sonnet PASS, no required
+changes, **Stage 1 census CONFIRMED**). Stage 1 **ACTIVE — implementation
+authorized** under §0.1 Amendment 1 (rebased base, exact contract, exact
+test matrix). The §4 contingency is satisfied; the design is UNCHANGED
+from §3.
 
 **Base commit (bind, verify before editing):**
-`115a977be1797ce01811f7ed13beec3c682331cd`
-(`fix(presentation): restore fullscreen native raster (PATCH-070)`)
+Stage 0 base was `115a977…`. **Stage 1 base (bind):**
+`af04779b9a8864d5bb9b75eb1f14d7888f7861d9`
+(`test(drawing): characterize clone membership corruption (PATCH-071 Stage 0)`)
 
 **Bound commit messages (verbatim):**
 
@@ -16,6 +20,164 @@ censused defect exactly (§4); any divergence is a STOP, not latitude.
 **Implementer:** GPT-5.5. **Reviewer:** Sonnet (independent, read-only,
 uncommitted diff, explicit PASS required before each stage's commit).
 **Closure:** Fable (CTO) after each stage lands.
+
+---
+
+## 0.1 Amendment 1 (2026-07-16) — Stage 0 closed; Stage 1 ACTIVE
+
+### 0.1.1 Stage 0 result (DONE, commit `af04779b9a8864d5bb9b75eb1f14d7888f7861d9`)
+
+Bound Stage-0 message used verbatim; sole file
+`e2e/characterization/drawing-duplication.spec.ts` at
+`e786e91743681cfe7b49fcf0fbac28691eeaf8d0`; Sonnet PASS, no required
+changes, no governance amendment required. Evidence: exactly one active
+characterization test; real Duplicate AND Copy/Paste UI paths reachable
+(hover card → right-click the Edit pencil `data-post-menu-trigger` →
+labeled items `Duplicate`/`Copy`/`Paste`); clone identification DB-driven
+(title match excluding known ids); Duplicate → exactly one persisted
+clone; Copy alone → none; Paste → exactly one; originals byte-stable;
+ordinary metadata preserved; ALL SIX membership keys copied verbatim in
+BOTH paths (`parentId`, `childPadletIds` (array preserved), `sectionId`,
+`sectionPosition`, `position_in_timeline`, `wallPosition` (object
+preserved)); child rows still point at the ORIGINAL containers;
+classification `clone-membership-metadata-copied-verbatim`; command layer
+confirmed as fix owner; no second defect or production owner surfaced.
+**ParentId caveat (recorded, non-blocking):** the seeded `parentId` is
+intentionally falsy (`""`) because a truthy value classifies the row as a
+child and removes the root-card trigger; Stage 0 claims no
+truthy-parentId UI coverage; non-blocking because §0.1.4 strips the key
+regardless of truthiness. Stage-0 gates all green (setup 1; duplication
+2-with-deps / 1-no-deps; line 4; presentation 2+2; cred-off 2/4/4;
+focused 59/2; full 432/41; tsc/boundaries/verify/build; cleanup zeros
+incl. PATCH-071-specific; 48/48 fences; zero prod imports; repo
+clean/synced).
+
+### 0.1.2 Stage 1 activation and rebased bindings (at base `af04779`)
+
+The §4 gate is SATISFIED; Stage 1 is ACTIVE. Design unchanged from §3 —
+no redesign, no scope growth, no second defect. Fresh bindings, all
+measured at `af04779` this session:
+
+| File | Hash / check at `af04779` | Stage 1 role |
+|---|---|---|
+| `components/collabboard/canvas/hooks/useCanvasActions.ts` | `ee33f91794e48c479a1062e5a0aceaec612d1f63` (unchanged) | exactly two call-site edits + one import |
+| `e2e/characterization/drawing-duplication.spec.ts` | `e786e91743681cfe7b49fcf0fbac28691eeaf8d0` | fixed-state assertion flip |
+| `lib/infra/collabboard/clonedPostMetadata.ts` | ABSENT (verified) | NEW pure sanitizer |
+| `lib/infra/collabboard/clonedPostMetadata.test.ts` | ABSENT (verified) | NEW bound unit tests |
+
+No fifth file. The committed Stage-0 spec remains AUTHORIZED-CHANGE (it
+carries the flip), so the immutable-fence set is UNCHANGED: **48 unique
+paths, re-verified 48/48 at `af04779`**. Prohibitions restated:
+`DrawingLayout.tsx`, `CanvasContextMenu.tsx`, `RowColumnContainerCard.tsx`,
+`drawingBridgeHarness.ts`, resolver/schema/comment files,
+package/config/lock files, and `.fable5/**` during implementation.
+
+### 0.1.3 Exact sanitizer contract (binds §3, made precise)
+
+`sanitizeClonedPostMetadata(metadata)`:
+
+- accepts possibly-nullish metadata; `undefined` and `null` are returned
+  UNCHANGED (same value);
+- non-null object input returns a NEW SHALLOW object: every own
+  enumerable key copied by reference EXCEPT exactly the six bound keys,
+  which are removed REGARDLESS OF VALUE (must hold for `""`, `null`,
+  `false`, `0`, and truthy values alike): `parentId`, `childPadletIds`,
+  `sectionId`, `sectionPosition`, `position_in_timeline`, `wallPosition`;
+- unrelated nested objects keep their REFERENCES (no deep clone, no
+  recursion, no JSON round-trip);
+- the source object is never mutated;
+- no other key is removed or altered (comment keys, `zIndex`,
+  style/layout keys, `padlet://` links, ids all pass through untouched);
+- the six-key list follows the `sanitizeLibraryMetadata` precedent;
+  `sanitizeLibraryMetadata` itself is NOT modified (fenced file).
+
+Rejected (restated): JSON-serialization or deep cloning, schema
+validation, allowlisting, comment-key deletion, zIndex/style deletion,
+link changes, id changes, graph reconstruction, resolver dedupe,
+section/timeline/wall relayout.
+
+### 0.1.4 Exact call-site edits (useCanvasActions.ts)
+
+Exactly two production edits plus the import:
+
+1. `handleDuplicatePadlet`: `metadata: padlet.metadata` →
+   `metadata: sanitizeClonedPostMetadata(padlet.metadata)`.
+2. `handlePastePadlet`: `metadata: clipboard.metadata` →
+   `metadata: sanitizeClonedPostMetadata(clipboard.metadata)`.
+
+Everything else in the hook byte-identical: no refactor, no renaming, no
+toast/UI/layout changes, no clipboard redesign, no dependency-array
+changes beyond what the import mechanically requires (none expected —
+the sanitizer is a module-level pure import, not a hook value).
+
+### 0.1.5 Bound unit-test matrix (exact N = 9)
+
+`clonedPostMetadata.test.ts` contains EXACTLY these nine `it` blocks:
+
+1. returns `undefined` unchanged;
+2. returns `null` unchanged;
+3. returns a NEW empty object for an empty-object input (result not the
+   same reference);
+4. strips all six membership keys together (truthy values);
+5. strips each of the six keys regardless of value — table-driven over
+   the falsy values `""`, `null`, `false`, `0` and one truthy value per
+   key;
+6. preserves ordinary metadata keys verbatim (incl. a comment-like key
+   and a `zIndex` key passing through untouched);
+7. preserves unrelated nested object REFERENCES (same-identity
+   assertion — proves no deep clone);
+8. does not mutate the source object (snapshot/deep-freeze proof);
+9. removes no keys beyond the bound six (key-set equality on a mixed
+   input).
+
+**Updated bound totals:** new-helper gate
+`npx vitest run lib/infra/collabboard/clonedPostMetadata.test.ts` = 9
+passed / 1 file; historic focused gate unchanged 59/2; full Vitest
+becomes **441 passed / 42 files** (432+9, 41+1 — exact, no longer "N ≥ 6").
+
+### 0.1.6 E2E fixed-state flip (both Duplicate and Paste)
+
+The Stage-0 spec keeps its real UI trigger machinery UNWEAKENED (hover →
+pencil right-click → labeled items) and flips the metadata expectations:
+
+- clone ids remain new; originals remain byte-stable; child rows still
+  point at the ORIGINAL containers;
+- ordinary metadata preserved (`patch071OrdinaryMetadata`, `topStrip`,
+  harness marker) and visible content preserved (title-based clone
+  discovery keeps working);
+- ALL SIX membership keys ABSENT from both persisted clone rows
+  (key-presence assertions, not just value checks);
+- no graph repair attempted, no comment-store key in scope;
+- classification flips to `clone-membership-metadata-sanitized` with
+  `stage1Status: 'fixed'`; annotation evolves to
+  `patch-071-clone-membership-fix` (records: Stage-0 census reference,
+  both clone snapshots, absent-key census, originals-stable proof,
+  survivor-key proof, trigger paths).
+
+### 0.1.7 Stage 1 stop conditions (additional to §9)
+
+STOP if: Stage 0 behavior no longer reproduces at `af04779` before the
+fix is applied; any of the six keys differs from the confirmed census; a
+seventh key is proposed for removal; a comment-store key enters scope;
+more than two production call sites need edits; a fifth file is
+required; sanitizer ownership moves outside the command layer;
+DrawingLayout/CanvasContextMenu need changes; resolver or schema changes
+become necessary; ordinary metadata cannot remain preserved; child
+pointers would be rewritten; `padlet://` links would change; the e2e
+cannot prove persisted clone metadata; any of the 48 fences changes; a
+second defect is discovered.
+
+### 0.1.8 Baselines (verified fresh at `af04779` this session) and flow
+
+Setup 1; duplication spec 2-with-deps / 1-no-deps; line 4; presentation
+2 passed / 2 approved skips; cred-off duplication 2 skipped, line 4
+skipped, presentation 4 skipped; focused 59/2; full 432/41 (becomes
+441/42 after Stage 1); cleanup zeros (harness-scoped AND
+PATCH-071-specific); zero production imports; 48/48 fences. §8
+environment contract and §10 review flow apply verbatim; Sonnet PASS
+required before the Stage-1 commit. **Bound Stage-1 commit message
+(verbatim, unchanged):**
+`fix(drawing): sanitize membership metadata on canvas clone (PATCH-071)`
 
 ---
 

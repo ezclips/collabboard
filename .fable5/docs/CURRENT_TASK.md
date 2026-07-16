@@ -361,6 +361,50 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-16** — PATCH-071 **Stage 0 DONE (commit
+  `af04779b9a8864d5bb9b75eb1f14d7888f7861d9`, Sonnet PASS, no required
+  changes, census CONFIRMED)** + **Stage 1 ACTIVATED** (Amendment 1,
+  rebased at `af04779`). Stage 0 landed the sole authorized file
+  (`drawing-duplication.spec.ts`, `e786e917…`): one active
+  characterization test proving, through the REAL UI (hover card →
+  right-click Edit pencil → labeled `Duplicate`/`Copy`/`Paste`), that
+  both clone paths copy ALL SIX membership keys verbatim into the
+  persisted clone rows (DB-driven clone identification; Duplicate → one
+  clone, Copy alone → none, Paste → one; originals byte-stable; ordinary
+  metadata preserved; childPadletIds stays an array, wallPosition an
+  object; child rows still point at the originals; classification
+  `clone-membership-metadata-copied-verbatim`; command layer confirmed as
+  owner; no second defect). ParentId caveat recorded, non-blocking: the
+  seeded value is intentionally falsy (`""`) since a truthy parentId
+  removes the root-card trigger; the Stage-1 sanitizer strips the key
+  regardless of truthiness. Stage-0 gates all green (setup 1, duplication
+  2-with-deps/1-no-deps, line 4, presentation 2+2, cred-off 2/4/4,
+  focused 59/2, full 432/41, tsc/boundaries/verify/build, cleanup zeros
+  incl. PATCH-071-specific, 48/48 fences, zero prod imports). **Stage 1
+  ACTIVE, design unchanged:** four files exactly — NEW
+  `lib/infra/collabboard/clonedPostMetadata.ts` + NEW
+  `clonedPostMetadata.test.ts` (both verified ABSENT at base),
+  `useCanvasActions.ts` (`ee33f917…`, exactly two call-site edits +
+  import), the Stage-0 spec (`e786e917…`, fixed-state flip). Sanitizer
+  contract made exact (Amendment 1 §0.1.3): nullish passthrough
+  unchanged; new shallow object; exactly the six precedent keys removed
+  regardless of truthiness; nested references preserved (no deep clone /
+  JSON round-trip); no mutation; no other key touched;
+  `sanitizeLibraryMetadata` itself fenced. Unit-test matrix bound EXACT:
+  **N = 9** named tests → new-helper gate 9/1, focused unchanged 59/2,
+  full becomes **441/42**. E2E flip bound: six keys ABSENT from both
+  clone rows (key-presence assertions), originals/child-pointers/ordinary
+  metadata/visible content stable, triggers unweakened, classification →
+  `clone-membership-metadata-sanitized`, annotation →
+  `patch-071-clone-membership-fix`. Fence ruling: the committed Stage-0
+  spec stays authorized-change, so the immutable set is UNCHANGED at
+  **48 unique paths** (48/48 re-verified at `af04779`). All baselines
+  refreshed fresh at `af04779` this session (dev-server contract, own
+  server attributed/stopped, port free). Stop conditions extended
+  (§0.1.7). Bound Stage-1 commit message unchanged:
+  `fix(drawing): sanitize membership metadata on canvas clone
+  (PATCH-071)`. Sonnet PASS required before commit. PATCH-072 not
+  started.
 - **2026-07-16** — PATCH-070 **DONE (Stage 1 commit
   `115a977be1797ce01811f7ed13beec3c682331cd`, Sonnet PASS, no required
   changes)** + post-070 census + **PATCH-071 AUTHORIZED** ("Sanitize
