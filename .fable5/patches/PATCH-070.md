@@ -1,10 +1,12 @@
 # PATCH-070 - Restore Fullscreen Native Above-Band Raster (staged, diagnosis-first)
 
-**Status:** AUTHORIZED — **Stage 1** (composition planner lossless band
-closure; see §0.2 Amendment 2). Stage 0 is DONE (commit `b9b754c`, row
-**F4**). Stage 0B is DONE (commit `514b1d9`, row **G1d**, Sonnet PASS).
-Stage 1 is bound to §0.2.5's design EXACTLY; §5's original per-row designs
-are superseded for the F4/G1d path by Amendment 2.
+**Status:** **DONE** (2026-07-16, Stage 1 commit
+`115a977be1797ce01811f7ed13beec3c682331cd`, Sonnet PASS, no required
+changes; closed in CURRENT_TASK.md). Stage 0 DONE (`b9b754c`, row **F4**);
+Stage 0B DONE (`514b1d9`, row **G1d**); Stage 1 landed §0.2.5's design
+exactly — planner lossless band closure on one active-index domain,
+diagnostics fully removed (`RuntimeSlideRenderer.tsx` byte-identical to
+`a407cccc…`), fullscreen above-band raster restored.
 
 **Base commit (bind, verify before editing):**
 `05e913ef84c802b999bc4411d960873e4b21bb23`

@@ -361,6 +361,85 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-16** — PATCH-070 **DONE (Stage 1 commit
+  `115a977be1797ce01811f7ed13beec3c682331cd`, Sonnet PASS, no required
+  changes)** + post-070 census + **PATCH-071 AUTHORIZED** ("Sanitize
+  Membership Metadata on Drawing-Canvas Clone", staged repro-first, base
+  `115a977`). **PATCH-070 closure:** exactly the four authorized files
+  landed — `planSlideComposition.ts` (→ `2d3b0dc3…`: one activeElements
+  index domain via `activeIndexById`; below = activeIndex <
+  firstPadletActiveIndex, above = everything else; no eligible native
+  dropped or duplicated, band order preserved, plan shape/resolver/
+  runtime input unchanged, no middle-band field),
+  `RuntimeSlideRenderer.tsx` (restored BYTE-IDENTICAL to `a407cccc…` —
+  all Stage-0B diagnostics removed, zero diagnostic strings/global
+  writes), `presentationBridge.test.ts` (→ `8a503122…`, +8 additive
+  tests: S1–S7 + cross-scenario no-drop invariant),
+  `drawing-presentation.spec.ts` (→ `19d6e864…`, N2-era defect
+  assertions flipped, Stage-0/0B classification reads removed,
+  `patch-070-native-raster-fix` annotation). Fixed behavior proven live:
+  Node plan `nativeBelowIds=[]` /
+  `nativeAboveIds=[text-landscape, shape-landscape]`; fullscreen exactly
+  one below + one above PNG, above loaded 1280×720, meaningful pixels
+  10744 (text 1864 / shape 8784; seeded hits text 1960 / stroke 760 /
+  fill 8024); thumbnail unchanged (18911 meaningful px, no thumbnail
+  source touched); persisted scene unchanged (raw length 3435
+  before/after); frame order unchanged; the legitimate reconciliation
+  padlet remains visible and unfiltered. Gates: setup 1, line 4,
+  presentation 2+2 approved skips, cred-off 4+4, focused 59/2, full
+  432/41, diff-check/tsc/boundaries/verify/build green, cleanup zeros,
+  42/42 fences, zero prod imports, repo clean/synced. **Fresh census
+  (Task-2 sweep, ranked narrowest→broadest):** (1) **RC-2
+  clone-membership corruption — SELECTED as PATCH-071**: fresh source
+  read at `115a977` confirms `useCanvasActions.ts:110-126/:178-198` pass
+  `metadata` verbatim on Duplicate/Paste (consumer census: DrawingLayout
+  is the ONLY importer; trigger = card pencil `data-post-menu-trigger` →
+  `CanvasContextMenu` items, labeled, reachable; precedent rule exists in
+  `sanitizeLibraryMetadata` — six keys); deterministic, one production
+  file, P3-family corruption (copy renders original's children, edits
+  cross-link). (2) presentation frame-order divergence (sidebar
+  `order→y→x` vs fullscreen raw scene order) — deterministic +
+  characterized, but needs a product ruling on the canonical order and
+  flips frozen assertions; next in line. (3) RC-3 membership-union
+  consolidation — P6 refactor riding the existing net, not a defect fix.
+  (4) RC-1 duplicate `padlet://` links + resolver dedupe (070 census
+  measured no-dedupe, S5) — needs a duplication-semantics ruling
+  (clone-the-post vs shared-reference), element-level, fork-adjacent,
+  multi-file; design-first. (5) line-follow on container move +
+  natural-height (PATCH-064-frozen) — feature-sized attachment-anchor
+  contract needed first. (6) RC-5 AI-image slide omission — blocked on a
+  deterministic fixture design. (7) RC-4 slide-overlap fallback — now
+  LOAD-BEARING (070 proved reconciliation-inserted unframed embeddables
+  depend on it); any change needs membership-semantics design; record
+  only. (8) uploaded-image storage cleanup — doc-only note, no live
+  defect. (9) Connections side panel (Registry-Editor-style hierarchy,
+  connection search, select/center line) — FEATURE, needs a fresh
+  product/design spec + explicit roadmap approval; not stabilization.
+  Post-070 exposure check: none found in production; one test-infra note
+  recorded — the bridge wrapper `characterizeSlideComposition` passes
+  RAW elements to `resolveSlidePadlets` while the planner uses
+  activeElements internally (observability skew only when deleted
+  elements exist; production consumers unaffected). **PATCH-071 shape:**
+  Stage 0 = NEW `drawing-duplication.spec.ts` (sole file, harness reused
+  unmodified) freezing O1–O5 (menu reachability, Duplicate/Paste rows
+  copying `childPadletIds` verbatim, originals stable); Stage 1
+  (contingent on Stage 0 confirming the census) = NEW pure
+  `lib/infra/collabboard/clonedPostMetadata.ts` + tests (≥6; nullish
+  passthrough, six-key strip: parentId/childPadletIds/sectionId/
+  sectionPosition/position_in_timeline/wallPosition, unknown-key
+  preservation, non-mutation) + exactly two call-site edits in
+  `useCanvasActions.ts` (`ee33f917…`) + spec flip. Rejected: deep-copy
+  children (feature), command-layer sanitation (too broad), sanitizer
+  consolidation (separate P6 patch), RC-1 bundling, comment-key changes
+  (fenced duality). 48 unique immutable fences (070's 42 + the four 070
+  files re-frozen + `CanvasContextMenu.tsx` + `RowColumnContainerCard.tsx`),
+  48/48 verified at base. Baselines re-verified fresh at `115a977` this
+  session (59/2, 432/41, setup 1, line 4, presentation 2+2, cred-off
+  4+4, cleanup zeros, zero prod imports, RuntimeSlideRenderer
+  `a407cccc…`). Bound commits:
+  `test(drawing): characterize clone membership corruption (PATCH-071
+  Stage 0)` / `fix(drawing): sanitize membership metadata on canvas
+  clone (PATCH-071)`. Sonnet PASS required per stage.
 - **2026-07-16** — PATCH-070 **Stage 0B DONE (commit
   `514b1d9ab8f387d3a39d39ed7a13ae87fb36a07e`, Sonnet PASS)** + **Stage 1
   AUTHORIZED** (Amendment 2: composition planner lossless band closure).
