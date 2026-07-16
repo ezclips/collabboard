@@ -361,6 +361,46 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-16** — **PATCH-072 verification-state rebind (§0.2, Option
+  A)** after the E2E hash drifted during post-report locator
+  tightening. **Drift:** the implementation packet bound the
+  presentation spec at `b25158f2…`; the file now hashes
+  `1866f1a9f2362cc936a8f683ea4546c36c3b8da9` — packet STALE for that
+  file; no acceptance review may use the old hash; no commit
+  authorized yet; PATCH-072 NOT done. **Delta:** exact `b25158f2 →
+  1866f1a9` byte-delta unrecoverable (blob never staged; no editor
+  history); superseded by a FULL CTO review of the current file vs
+  HEAD (106+/13−): named-launch driver is one deterministic
+  `openNamedPresentation` helper (card by exact title → rounded-xl
+  ancestor → last button = ⋮ → exact-name 'Start presentation'
+  `.first()` = the menu item, which DOM-precedes the bottom button);
+  assertions STRENGTHENED (slide-2 landscape-child false, named-launch
+  counters, post-End counter absence); timeouts unchanged (standard
+  60_000, no test-timeout inflation, no sleeps/retries); cleanup block
+  untouched; 069/070/071 bodies untouched except the §6-authorized
+  slideIndex 2→1 re-anchor + probe-reset move + bottom-start flip;
+  everything in scope (§6 + §0.1.8 incl. bound annotation).
+  **Timeout classified B — E2E locator/state-management failure
+  (pre-correction file):** error-context snapshot at 240 s showed
+  sidebar canonical [Landscape, Portrait], Portrait ⋮ menu OPEN with
+  'Start presentation' rendered, NO fullscreen portal, page settled;
+  the run (1 failed/1 passed/2 skipped) had already passed the whole
+  bottom-start flip + Next/Prev/End live before dying in the
+  named-launch phase → last successful step: Portrait ⋮ menu opened;
+  pending op: activating the per-slide menu item (click never landed);
+  NOT a product failure — no production edit authorized, the four
+  production/new files re-verified byte-identical to the packet
+  (`e72c3de0…`, `2f1d79c5…`, `655244b4…`, `b470a888…`; DrawingLayout
+  re-checked = exactly the §0.1.5 edit). **E2E verification base
+  rebound to `1866f1a9…`.** Artifacts cleaned: `test-results/`
+  (.last-run.json + error-context.md) removed; playwright-report/
+  absent; auth state left (gitignored, not created by the run).
+  Refreshed packet (§0.2.5): verify 5 hashes + 49/49 fences, fresh
+  self-started dev server, presentation spec alone `--workers=1
+  --reporter=line` (JSON rerun for annotations), no source edits on
+  the first clean rerun, expected 2 passed/2 skipped, then remaining
+  gates → Sonnet review → bound commit. Implementation remains
+  UNCOMMITTED; no implementation commit exists; PATCH-073 NOT started.
 - **2026-07-16** — **PATCH-072 Amendment 1** (Option A: one two-owner
   fix; `DrawingLayout.tsx` authorized as the FIFTH file, restricted).
   **Blocked-attempt record:** the first implementation run STOPPED

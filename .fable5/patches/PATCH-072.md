@@ -230,6 +230,156 @@ STOP immediately, report, do not commit, if:
 
 ---
 
+## 0.2 Verification-state rebind (2026-07-16) — E2E hash drift after locator tightening
+
+### 0.2.1 Drift record
+
+- The initial five-file implementation report bound
+  `drawing-presentation.spec.ts` at
+  `b25158f2efd42104d5e4a31ed2abc68122f263e1`.
+- The file was subsequently edited during locator tightening (after the
+  first incomplete Playwright attempt). Its current hash is
+  `1866f1a9f2362cc936a8f683ea4546c36c3b8da9`.
+- The earlier implementation packet is therefore STALE for that file.
+  **No acceptance review may use the old E2E hash.**
+- No commit is authorized yet; PATCH-072 is NOT done.
+- The last presentation run (against the PRE-correction file) returned
+  1 failed / 1 passed / 2 skipped; the main presentation test timed out
+  after 240000 ms.
+- Generated `test-results/` artifacts from that run existed and were
+  removed by the CTO during this rebind (§0.2.6).
+
+### 0.2.2 Delta reconstruction and current-file review
+
+The exact byte delta `b25158f2 → 1866f1a9` is NOT reconstructible: the
+old blob was never staged (absent from the git object database, incl.
+dangling objects) and no editor local history holds the file. The
+ruling basis is instead a FULL review of the current file against HEAD
+(`19d6e86 → 1866f1a9`, 106 insertions / 13 deletions), which strictly
+supersedes the stale packet — every byte of the change was re-reviewed,
+not just the correction. Findings:
+
+- **Named-launch driver** (the tightened part): a single
+  `openNamedPresentation(slideTitle)` helper — resolve the slide card
+  by exact title → `xpath=ancestor::div[contains(@class,"rounded-xl")][1]`
+  (the card container) → `locator('button').last()` (with the menu
+  closed, the card's buttons are exactly [thumbnail, ⋮]; last = the ⋮
+  trigger) → `getByRole('button', { name: 'Start presentation',
+  exact: true }).first()` (two exact-name matches exist once the menu
+  is open: the menu item, which precedes the bottom Start button in DOM
+  order, and the bottom button; `.first()` deterministically selects
+  the menu item). Narrow and deterministic.
+- **Assertions:** NOT weakened — strengthened. Added:
+  `slideTwoHasLandscapeChild === false` on the portrait slide, both
+  named-launch counter/content proofs, counter-absence checks after
+  each End click.
+- **Timeouts:** unchanged policy — every new wait reuses the file's
+  standard `60_000`; the test-level timeout was NOT raised; no
+  `waitForTimeout`, no sleeps, no retry loops.
+- **Cleanup logic:** untouched (no diff in the finally block or the
+  cleanup assertions).
+- **PATCH-069/070/071 assertions:** bodies untouched except the
+  §6-AUTHORIZED changes: fullscreen census/annotation `slideIndex`
+  re-anchor 2 → 1, probe reset moved to immediately before the Start
+  click, and the bottom-start sequence flip (landscape first). The
+  `patch-070-native-raster-fix` annotation structure is unchanged.
+- **Scope:** everything in the diff maps to §6 + §0.1.8 (incl. the
+  bound `patch-072-presentation-order` annotation with
+  `defaultStartTarget` before/after, both named-launch results, and
+  classification
+  `fullscreen-slide-order-aligned-with-canonical-panel-order`). No
+  out-of-scope edit found.
+
+### 0.2.3 Timeout classification: **B — E2E locator/state-management failure** (pre-correction file)
+
+Evidence (`test-results/.../error-context.md` page snapshot at
+timeout, captured before cleanup):
+
+- Sidebar open in canonical order [Landscape, Portrait]; the PORTRAIT
+  row's ⋮ menu OPEN with the "Start presentation" item rendered and
+  enabled; NO fullscreen portal anywhere in the snapshot; page alive
+  and settled (not an environment hang → not C).
+- The test died in the NAMED-LAUNCH phase, which means the entire
+  bottom-start sequence — flip to landscape Slide 1/2, Next → portrait
+  2/2, Prev, End — had already PASSED live in that same run: the
+  production fix behavior was confirmed up to that point (→ not A/D;
+  no product assertion failed, and the reachable UI exposes the launch
+  action a manual click would trigger).
+- **Last confirmed successful step:** opening the Portrait per-slide ⋮
+  menu. **Pending operation at timeout:** activating the per-slide
+  "Start presentation" menu item (menu still open + no portal ⇒ the
+  click never landed; the pre-correction locator failed to resolve or
+  targeted an unclickable match). Caveat, stated honestly: the
+  pre-correction file bytes are unrecoverable, so the exact pending
+  Playwright call is inferred from the snapshot, not quoted from a
+  call log.
+
+### 0.2.4 Ruling: **OPTION A** — accept the current hash as the verification base
+
+`e2e/characterization/drawing-presentation.spec.ts` is bound at
+**`1866f1a9f2362cc936a8f683ea4546c36c3b8da9`** for verification and
+review. No source correction is authorized; **no production edit is
+authorized** (the timeout does not evidence a product defect). The four
+other implementation files were re-verified unchanged:
+
+```
+lib/infra/presentation/slideOrder.ts                     e72c3de0b2ee0d2f35a4fb66af8951f35ab38058
+lib/infra/presentation/slideOrder.test.ts                2f1d79c5d2b5ff9c5c1e08b23da5f27008f25db8
+components/presentation/FullscreenPresentation.tsx       655244b443c3869173996cb21a77f7d67c41c64b
+components/collabboard/canvas/layouts/DrawingLayout.tsx  b470a888e4015e57b757ba0c57a041f1b7d8adb9
+e2e/characterization/drawing-presentation.spec.ts        1866f1a9f2362cc936a8f683ea4546c36c3b8da9
+```
+
+DrawingLayout diff re-checked against §0.1.5: exactly one import + the
+fallback expression
+`fromSlideId ?? sortSlidesByPresentationOrder(activeFrames)[0]?.id ?? null`
+(defensively equivalent under the length guard); deps unchanged;
+nothing else.
+
+### 0.2.5 Refreshed verification packet (bind)
+
+- Verify the five §0.2.4 hashes EXACTLY before anything else; any
+  further drift → stop.
+- Fences 49/49 (§0.1.7) re-verified before and after the run.
+- One fresh SELF-STARTED `npm run dev` (port discipline per §8); then:
+  `PW_BASE_URL=http://localhost:3000 npx playwright test e2e/characterization/drawing-presentation.spec.ts --workers=1 --reporter=line`
+  — one worker, no concurrent suites, NO source edits during the first
+  clean rerun. Annotation extraction afterwards via a `--reporter=json`
+  run.
+- If the 240 s timeout recurs: capture and retain full evidence
+  (reporter output + error context; enable `--trace on` for the retry
+  only), report, STOP — do not edit sources to chase it.
+- The first clean rerun MUST report: exit code; exact totals (expected
+  2 passed / 2 skipped); exact last successful UI step; the verbatim
+  `patch-072-presentation-order` annotation; every generated artifact;
+  dev-server PID ownership/stop; port free afterward.
+- Only after the presentation spec passes may the remaining gates run
+  (helper 7/1, sanitizer 9/1, focused 59/2, full 448/43, remaining
+  Playwright suites, cred-off proofs, cleanup zeros, production-import
+  grep, tsc/boundaries, sequential verify/build), then Sonnet review,
+  then the bound commit.
+
+### 0.2.6 Artifact cleanup (executed during this rebind)
+
+Removed: `test-results/` (contained only `.last-run.json` and the main
+test's `error-context.md`). `playwright-report/` absent; no
+screenshots, videos, or traces existed. `e2e/.auth/user.json` LEFT in
+place (gitignored; NOT created by the failed run — its totals contained
+no setup pass; regenerate only via `--project=setup` if auth expires).
+No source or tracked file altered. Post-cleanup `git status`: exactly
+the three modified implementation files + untracked
+`lib/infra/presentation/` (the two new files).
+
+### 0.2.7 Stop conditions (additional, this phase)
+
+STOP and report if: any of the five §0.2.4 hashes drifts again before
+verification; the current file still hangs on a fresh clean run; a
+production file must change; a sixth file is required; any 069/070/071
+assertion weakens; artifacts cannot be cleaned safely; another defect
+enters scope.
+
+---
+
 ## 1. Defect statement (fresh census at `3b863d5`)
 
 **The fullscreen presentation walks the slides in RAW SCENE ORDER while
