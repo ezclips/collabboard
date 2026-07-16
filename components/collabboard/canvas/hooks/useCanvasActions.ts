@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
+import { sanitizeClonedPostMetadata } from "@/lib/infra/collabboard/clonedPostMetadata";
 import type { Padlet } from "@/types/collabboard";
 
 type SceneElement = {
@@ -118,7 +119,7 @@ export function useCanvasActions(params: UseCanvasActionsParams) {
         position_y: padlet.position_y + 30,
         width: padlet.width,
         height: padlet.height,
-        metadata: padlet.metadata,
+        metadata: sanitizeClonedPostMetadata(padlet.metadata),
       });
       if (created) onPadletCreated?.(created);
     },
@@ -190,7 +191,7 @@ export function useCanvasActions(params: UseCanvasActionsParams) {
         position_y: screenY / zoom - scrollY,
         width: clipboard.width,
         height: clipboard.height,
-        metadata: clipboard.metadata,
+        metadata: sanitizeClonedPostMetadata(clipboard.metadata),
       });
       if (created) onPadletCreated?.(created);
     },

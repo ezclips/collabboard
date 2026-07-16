@@ -65,17 +65,13 @@ function cloneMetadata(metadata: unknown): MetadataSnapshot {
   return JSON.parse(JSON.stringify(metadata)) as MetadataSnapshot;
 }
 
-function copiedMembershipKeys(original: MetadataSnapshot, clone: MetadataSnapshot) {
-  const copied: string[] = [];
+function expectMembershipKeysRemoved(clone: MetadataSnapshot) {
+  const removed: string[] = [];
   for (const key of MEMBERSHIP_KEYS) {
-    expect(clone[key]).toEqual(original[key]);
-    copied.push(key);
+    expect(Object.prototype.hasOwnProperty.call(clone, key)).toBe(false);
+    removed.push(key);
   }
-  expect(Array.isArray(clone.childPadletIds)).toBe(true);
-  expect(clone.wallPosition).toBeTruthy();
-  expect(typeof clone.wallPosition).toBe('object');
-  expect(Array.isArray(clone.wallPosition)).toBe(false);
-  return copied;
+  return removed;
 }
 
 async function fetchPadletRows(supabase: any, boardId: string): Promise<PadletRow[]> {
@@ -145,10 +141,10 @@ async function openPostMenu(page: Page, padletId: string, expectedLabel: string)
   };
 }
 
-test.describe('drawing clone membership metadata characterization (PATCH-071 Stage 0)', () => {
+test.describe('drawing clone membership metadata characterization (PATCH-071 Stage 1)', () => {
   test.skip(!hasE2ECredentials, 'E2E_EMAIL / E2E_PASSWORD not set (see .env.e2e.example)');
 
-  test('freezes verbatim membership metadata copying through Duplicate and Copy/Paste', async ({ page }) => {
+  test('proves clone membership metadata is sanitized through Duplicate and Copy/Paste', async ({ page }) => {
     test.setTimeout(180_000);
     const { supabase, fixture } = await createDisposableDrawingBoard('duplication');
 
@@ -193,8 +189,9 @@ test.describe('drawing clone membership metadata characterization (PATCH-071 Sta
       await duplicateButton.click();
       const duplicateRow = await waitForCloneByTitle(supabase, fixture.boardId, originalA, knownIdsBeforeDuplicate);
       expect(duplicateRow.id).not.toBe(originalA.id);
+      expect(duplicateRow.content).toBe(originalA.content);
       const duplicateMetadata = cloneMetadata(duplicateRow.metadata);
-      const duplicateCopiedKeys = copiedMembershipKeys(originalAMetadata, duplicateMetadata);
+      const duplicateRemovedKeys = expectMembershipKeysRemoved(duplicateMetadata);
       expect(duplicateMetadata.patch071OrdinaryMetadata).toBe(originalAMetadata.patch071OrdinaryMetadata);
       expect(duplicateMetadata.topStrip).toBe(originalAMetadata.topStrip);
 
@@ -203,14 +200,17 @@ test.describe('drawing clone membership metadata characterization (PATCH-071 Sta
       const copyButton = page.getByRole('button', { name: COMMAND_ACCESSIBLE_NAMES[COPY_LABEL] });
       await expect(copyButton).toBeVisible();
       await copyButton.click();
+      const rowsAfterCopy = await fetchPadletRows(supabase, fixture.boardId);
+      expect(rowsAfterCopy.find((row) => row.title === originalB.title && !knownIdsBeforePaste.has(row.id)) ?? null).toBeNull();
       const pasteTrigger = await openPostMenu(page, containerB.id, PASTE_LABEL);
       const pasteButton = page.getByRole('button', { name: COMMAND_ACCESSIBLE_NAMES[PASTE_LABEL] });
       await expect(pasteButton).toBeEnabled();
       await pasteButton.click();
       const pastedRow = await waitForCloneByTitle(supabase, fixture.boardId, originalB, knownIdsBeforePaste);
       expect(pastedRow.id).not.toBe(originalB.id);
+      expect(pastedRow.content).toBe(originalB.content);
       const pastedMetadata = cloneMetadata(pastedRow.metadata);
-      const pastedCopiedKeys = copiedMembershipKeys(originalBMetadata, pastedMetadata);
+      const pastedRemovedKeys = expectMembershipKeysRemoved(pastedMetadata);
       expect(pastedMetadata.patch071OrdinaryMetadata).toBe(originalBMetadata.patch071OrdinaryMetadata);
       expect(pastedMetadata.topStrip).toBe(originalBMetadata.topStrip);
 
@@ -226,6 +226,8 @@ test.describe('drawing clone membership metadata characterization (PATCH-071 Sta
 
       const duplicateChildVisible = await page.locator(`[data-padlet-id="${duplicateRow.id}"]`).getByText(childA.title).count();
       const pastedChildVisible = await page.locator(`[data-padlet-id="${pastedRow.id}"]`).getByText(childB.title).count();
+      expect(duplicateChildVisible).toBe(0);
+      expect(pastedChildVisible).toBe(0);
       const classification = {
         duplicateTriggerReachable: true,
         copyTriggerReachable: true,
@@ -238,26 +240,34 @@ test.describe('drawing clone membership metadata characterization (PATCH-071 Sta
         duplicatePostId: duplicateRow.id,
         pastedPostId: pastedRow.id,
         ordinaryMetadataPreserved: true,
-        copiedMembershipKeys: Array.from(new Set([...duplicateCopiedKeys, ...pastedCopiedKeys])),
-        duplicateMetadataSnapshot: duplicateMetadata,
-        pastedMetadataSnapshot: pastedMetadata,
+        removedMembershipKeys: Array.from(new Set([...duplicateRemovedKeys, ...pastedRemovedKeys])),
+        duplicateSanitizedMetadataSnapshot: duplicateMetadata,
+        pastedSanitizedMetadataSnapshot: pastedMetadata,
         originalMetadataSnapshot: {
           duplicateSource: originalAMetadata,
           pasteSource: originalBMetadata,
         },
-        originalRowsStable: true,
+        originalsStable: true,
         cloneRowsHaveNewIds: duplicateRow.id !== originalA.id && pastedRow.id !== originalB.id,
-        persistedStructures: {
-          duplicateChildPadletIdsIsArray: Array.isArray(duplicateMetadata.childPadletIds),
-          pastedChildPadletIdsIsArray: Array.isArray(pastedMetadata.childPadletIds),
-          duplicateWallPositionIsObject: typeof duplicateMetadata.wallPosition === 'object' && duplicateMetadata.wallPosition !== null,
-          pastedWallPositionIsObject: typeof pastedMetadata.wallPosition === 'object' && pastedMetadata.wallPosition !== null,
+        sanitizedKeyAbsence: {
+          duplicateParentIdRemoved: !Object.prototype.hasOwnProperty.call(duplicateMetadata, 'parentId'),
+          duplicateChildPadletIdsRemoved: !Object.prototype.hasOwnProperty.call(duplicateMetadata, 'childPadletIds'),
+          duplicateSectionIdRemoved: !Object.prototype.hasOwnProperty.call(duplicateMetadata, 'sectionId'),
+          duplicateSectionPositionRemoved: !Object.prototype.hasOwnProperty.call(duplicateMetadata, 'sectionPosition'),
+          duplicateTimelinePositionRemoved: !Object.prototype.hasOwnProperty.call(duplicateMetadata, 'position_in_timeline'),
+          duplicateWallPositionRemoved: !Object.prototype.hasOwnProperty.call(duplicateMetadata, 'wallPosition'),
+          pastedParentIdRemoved: !Object.prototype.hasOwnProperty.call(pastedMetadata, 'parentId'),
+          pastedChildPadletIdsRemoved: !Object.prototype.hasOwnProperty.call(pastedMetadata, 'childPadletIds'),
+          pastedSectionIdRemoved: !Object.prototype.hasOwnProperty.call(pastedMetadata, 'sectionId'),
+          pastedSectionPositionRemoved: !Object.prototype.hasOwnProperty.call(pastedMetadata, 'sectionPosition'),
+          pastedTimelinePositionRemoved: !Object.prototype.hasOwnProperty.call(pastedMetadata, 'position_in_timeline'),
+          pastedWallPositionRemoved: !Object.prototype.hasOwnProperty.call(pastedMetadata, 'wallPosition'),
         },
-        childParentPointersStillOriginal: {
+        childPointersStillOriginal: {
           childAParentId: (childAAfter.metadata as MetadataSnapshot).parentId,
           childBParentId: (childBAfter.metadata as MetadataSnapshot).parentId,
         },
-        visibleChildReuseProbe: {
+        visibleSanitizedContainerProbe: {
           duplicateCardShowsOriginalChildCount: duplicateChildVisible,
           pastedCardShowsOriginalChildCount: pastedChildVisible,
         },
@@ -268,18 +278,22 @@ test.describe('drawing clone membership metadata characterization (PATCH-071 Sta
           copyTrigger,
           pasteTrigger,
         },
-        exactCorruptionFamily: 'clone-membership-metadata-copied-verbatim',
-        futureOwner: 'command-layer metadata sanitation',
-        stage1Status: 'authorized-if-census-confirmed',
+        copyAloneCreatesNoClone: true,
+        exactCorruptionFamily: 'clone-membership-metadata-sanitized',
+        sanitizerOwner: 'command-layer metadata sanitation',
+        stage1Status: 'fixed',
+        exactlySixKeysRemoved: true,
+        noGraphRepairAttempted: true,
+        parentIdCaveat: 'seeded falsy parentId is removed unconditionally; this spec does not claim truthy-parentId UI reachability',
         nonImplicatedAreas: ['DrawingLayout', 'CanvasContextMenu', 'resolver', 'persistence schema'],
         commentStoreKeysInvolved: false,
       };
       test.info().annotations.push(
         { type: 'patch-071-stage0-trigger-path', description: JSON.stringify(classification.triggerPath) },
-        { type: 'patch-071-stage0-duplicate-metadata', description: JSON.stringify({ original: originalAMetadata, clone: duplicateMetadata }) },
-        { type: 'patch-071-stage0-copy-paste-metadata', description: JSON.stringify({ original: originalBMetadata, clone: pastedMetadata }) },
+        { type: 'patch-071-stage0-duplicate-metadata', description: JSON.stringify({ original: originalAMetadata, clone: duplicateMetadata, removedMembershipKeys: duplicateRemovedKeys }) },
+        { type: 'patch-071-stage0-copy-paste-metadata', description: JSON.stringify({ original: originalBMetadata, clone: pastedMetadata, removedMembershipKeys: pastedRemovedKeys }) },
         { type: 'patch-071-stage0-classification', description: JSON.stringify(classification) },
-        { type: 'patch-071-stage0-clone-census', description: JSON.stringify(classification) },
+        { type: 'patch-071-clone-membership-fix', description: JSON.stringify(classification) },
       );
     } finally {
       await cleanupDrawingFixture(supabase, fixture);
