@@ -23,6 +23,9 @@ export function planSlideComposition(
   const frameElement = activeElements.find((element) => element.id === slideFrame.id) ?? null;
   const resolvedPadlets = resolveSlidePadlets(slideFrame, activeElements, availablePadlets);
   const nativeFrameElements = activeElements.filter((element) => isNativeFrameMember(element, slideFrame));
+  const activeIndexById = new Map(
+    activeElements.map((element, activeIndex) => [element?.id, activeIndex]),
+  );
 
   if (resolvedPadlets.length === 0) {
     return {
@@ -33,17 +36,16 @@ export function planSlideComposition(
     };
   }
 
-  const firstPadletIndex = Math.min(...resolvedPadlets.map((entry) => entry.zIndex));
-  const lastPadletIndex = Math.max(...resolvedPadlets.map((entry) => entry.zIndex));
+  const firstPadletActiveIndex = Math.min(...resolvedPadlets.map((entry) => entry.zIndex));
 
   const nativeBelowElements = nativeFrameElements.filter((element) => {
-    const sceneIndex = sceneElements.findIndex((candidate) => candidate?.id === element.id);
-    return sceneIndex >= 0 && sceneIndex < firstPadletIndex;
+    const activeIndex = activeIndexById.get(element.id);
+    return typeof activeIndex === "number" && activeIndex < firstPadletActiveIndex;
   });
 
   const nativeAboveElements = nativeFrameElements.filter((element) => {
-    const sceneIndex = sceneElements.findIndex((candidate) => candidate?.id === element.id);
-    return sceneIndex >= 0 && sceneIndex > lastPadletIndex;
+    const activeIndex = activeIndexById.get(element.id);
+    return typeof activeIndex === "number" && activeIndex >= firstPadletActiveIndex;
   });
 
   return {

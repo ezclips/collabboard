@@ -59,6 +59,27 @@ const embeddable = (id: string, padletId: string, overrides: Record<string, unkn
   ...overrides,
 });
 
+const native = (id: string, overrides: Record<string, unknown> = {}) => ({
+  id,
+  type: "text",
+  frameId: "frame-a",
+  x: 0,
+  y: 0,
+  width: 100,
+  height: 40,
+  ...overrides,
+});
+
+function expectLosslessNativeBands(
+  composition: ReturnType<typeof characterizeSlideComposition>,
+  expectedNativeIds: string[],
+) {
+  const below = composition.nativeBelowIds;
+  const above = composition.nativeAboveIds;
+  expect([...below, ...above].sort()).toEqual([...expectedNativeIds].sort());
+  expect(below.filter((id) => above.includes(id))).toEqual([]);
+}
+
 describe("presentation bridge characterization", () => {
   describe("frame discovery", () => {
     it("active frame produces one slide", () => {
@@ -109,6 +130,168 @@ describe("presentation bridge characterization", () => {
     it("overlap fallback is characterized when app embeddable has no frameId", () => {
       const diagnostics = validatePresentationBridgeSnapshot({ elements: deepFreeze([frame(), embeddable("emb-a", "padlet-a", { frameId: null })]), padlets: [padlet("padlet-a")] });
       expect(diagnostics.map((row) => row.code)).toContain("slide-embeddable-overlap-fallback");
+    });
+
+    it("S1 keeps one-padlet native members before and after in existing bands", () => {
+      const composition = characterizeSlideComposition(
+        characterizeFrameSlides([frame()])[0],
+        deepFreeze([
+          frame(),
+          native("native-before"),
+          embeddable("emb-a", "padlet-a"),
+          native("native-after"),
+        ]),
+        [padlet("padlet-a")],
+      );
+
+      expect(composition.resolvedPadlets.map((entry) => entry.zIndex)).toEqual([2]);
+      expect(composition.nativeBelowIds).toEqual(["native-before"]);
+      expect(composition.nativeAboveIds).toEqual(["native-after"]);
+      expectLosslessNativeBands(composition, ["native-before", "native-after"]);
+    });
+
+    it("S2 keeps adjacent-padlet native members before and after in existing bands", () => {
+      const composition = characterizeSlideComposition(
+        characterizeFrameSlides([frame()])[0],
+        deepFreeze([
+          frame(),
+          native("native-before"),
+          embeddable("emb-a", "padlet-a"),
+          embeddable("emb-b", "padlet-b"),
+          native("native-after"),
+        ]),
+        [padlet("padlet-a"), padlet("padlet-b")],
+      );
+
+      expect(composition.resolvedPadlets.map((entry) => entry.zIndex)).toEqual([2, 3]);
+      expect(composition.nativeBelowIds).toEqual(["native-before"]);
+      expect(composition.nativeAboveIds).toEqual(["native-after"]);
+      expectLosslessNativeBands(composition, ["native-before", "native-after"]);
+    });
+
+    it("S3 assigns native members between two padlets to above without dropping them", () => {
+      const composition = characterizeSlideComposition(
+        characterizeFrameSlides([frame()])[0],
+        deepFreeze([
+          frame(),
+          embeddable("emb-a", "padlet-a"),
+          native("native-middle-a"),
+          native("native-middle-b", { type: "rectangle" }),
+          embeddable("emb-b", "padlet-b"),
+        ]),
+        [padlet("padlet-a"), padlet("padlet-b")],
+      );
+
+      expect(composition.resolvedPadlets.map((entry) => entry.zIndex)).toEqual([1, 4]);
+      expect(composition.nativeBelowIds).toEqual([]);
+      expect(composition.nativeAboveIds).toEqual(["native-middle-a", "native-middle-b"]);
+      expectLosslessNativeBands(composition, ["native-middle-a", "native-middle-b"]);
+    });
+
+    it("S4 assigns live G1d fixture-shape native members above while preserving the extra resolved padlet", () => {
+      const composition = characterizeSlideComposition(
+        characterizeFrameSlides([frame({ id: "frame-portrait", x: 2000 }), frame()])[1],
+        deepFreeze([
+          frame({ id: "frame-portrait", x: 2000 }),
+          frame(),
+          embeddable("emb-slide-a", "padlet-a"),
+          embeddable("emb-uploaded-image", "padlet-b"),
+          native("text-landscape"),
+          native("shape-landscape", { type: "rectangle" }),
+          embeddable("emb-slide-b", "padlet-portrait", { frameId: "frame-portrait" }),
+          embeddable("runtime-container-c", "padlet-c", { frameId: null, x: 160, y: 460, width: 320, height: 220 }),
+        ]),
+        [padlet("padlet-a"), padlet("padlet-b"), padlet("padlet-c"), padlet("padlet-portrait")],
+      );
+
+      expect(composition.resolvedPadlets.map((entry) => entry.zIndex)).toEqual([2, 3, 7]);
+      expect(composition.nativeBelowIds).toEqual([]);
+      expect(composition.nativeAboveIds).toEqual(["text-landscape", "shape-landscape"]);
+      expectLosslessNativeBands(composition, ["text-landscape", "shape-landscape"]);
+    });
+
+    it("S5 characterizes duplicate padlet links without dropping native members", () => {
+      const composition = characterizeSlideComposition(
+        characterizeFrameSlides([frame()])[0],
+        deepFreeze([
+          frame(),
+          embeddable("emb-a", "padlet-a"),
+          native("native-between"),
+          embeddable("emb-a-copy", "padlet-a"),
+        ]),
+        [padlet("padlet-a")],
+      );
+
+      expect(composition.resolvedPadlets.map((entry) => entry.padletId)).toEqual(["padlet-a", "padlet-a"]);
+      expect(composition.resolvedPadlets.map((entry) => entry.zIndex)).toEqual([1, 3]);
+      expect(composition.nativeBelowIds).toEqual([]);
+      expect(composition.nativeAboveIds).toEqual(["native-between"]);
+      expectLosslessNativeBands(composition, ["native-between"]);
+    });
+
+    it("S6 preserves an already-lossless below/above baseline outcome", () => {
+      const composition = characterizeSlideComposition(
+        characterizeFrameSlides([frame()])[0],
+        deepFreeze([
+          frame(),
+          native("native-before"),
+          embeddable("emb-a", "padlet-a"),
+          native("native-after"),
+        ]),
+        [padlet("padlet-a")],
+      );
+
+      expect(composition.nativeBelowIds).toEqual(["native-before"]);
+      expect(composition.nativeAboveIds).toEqual(["native-after"]);
+      expect(composition.resolvedPadlets).toMatchObject([{ padletId: "padlet-a", embeddableId: "emb-a" }]);
+    });
+
+    it("S7 uses the active index domain when deleted elements precede native members", () => {
+      const composition = characterizeSlideComposition(
+        characterizeFrameSlides([frame()])[0],
+        deepFreeze([
+          frame(),
+          embeddable("emb-a", "padlet-a"),
+          { ...native("deleted-gap"), isDeleted: true },
+          native("native-after-deleted"),
+          embeddable("emb-b", "padlet-b"),
+        ]),
+        [padlet("padlet-a"), padlet("padlet-b")],
+      );
+
+      expect(composition.resolvedPadlets.map((entry) => entry.zIndex)).toEqual([1, 4]);
+      expect(composition.nativeBelowIds).toEqual([]);
+      expect(composition.nativeAboveIds).toEqual(["native-after-deleted"]);
+      expectLosslessNativeBands(composition, ["native-after-deleted"]);
+    });
+
+    it("classifies every eligible native member exactly once across Stage 1 scenarios", () => {
+      const scenarios = [
+        {
+          elements: [frame(), native("native-before"), embeddable("emb-a", "padlet-a"), native("native-after")],
+          padlets: [padlet("padlet-a")],
+          expectedNativeIds: ["native-before", "native-after"],
+        },
+        {
+          elements: [frame(), embeddable("emb-a", "padlet-a"), native("native-middle"), embeddable("emb-b", "padlet-b")],
+          padlets: [padlet("padlet-a"), padlet("padlet-b")],
+          expectedNativeIds: ["native-middle"],
+        },
+        {
+          elements: [frame(), native("native-only-a"), native("native-only-b")],
+          padlets: [],
+          expectedNativeIds: ["native-only-a", "native-only-b"],
+        },
+      ];
+
+      for (const scenario of scenarios) {
+        const composition = characterizeSlideComposition(
+          characterizeFrameSlides([frame()])[0],
+          deepFreeze(scenario.elements),
+          scenario.padlets,
+        );
+        expectLosslessNativeBands(composition, scenario.expectedNativeIds);
+      }
     });
   });
 

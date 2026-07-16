@@ -9,9 +9,6 @@ import { planSlideComposition } from "@/components/presentation/slide-renderer/p
 import { renderExcalidrawSlideBase } from "@/components/presentation/slide-renderer/renderExcalidrawSlideBase";
 import { RuntimePadletLayer } from "./RuntimePadletLayer";
 
-const DEV_RUNTIME_SLIDE_DIAGNOSTICS =
-  process.env.NODE_ENV !== "production";
-
 type RuntimeSlideRendererProps = {
   slide: FrameSlide | undefined;
   sceneElements: readonly any[];
@@ -20,32 +17,6 @@ type RuntimeSlideRendererProps = {
   vpW: number;
   vpH: number;
 };
-
-type RuntimeSlideDiagnosticRecord = {
-  kind: "plan-computed" | "effect-run" | "effect-cleanup" | "band-commit";
-  timestamp: number;
-  [key: string]: unknown;
-};
-
-function recordRuntimeSlideDiagnostic(record: RuntimeSlideDiagnosticRecord) {
-  if (!DEV_RUNTIME_SLIDE_DIAGNOSTICS || typeof window === "undefined") return;
-
-  try {
-    const windowWithDiagnostics = window as typeof window & {
-      __fable5RuntimeSlideDiagnostics?: RuntimeSlideDiagnosticRecord[];
-    };
-    const records = Array.isArray(windowWithDiagnostics.__fable5RuntimeSlideDiagnostics)
-      ? windowWithDiagnostics.__fable5RuntimeSlideDiagnostics
-      : [];
-    records.push(record);
-    if (records.length > 200) {
-      records.splice(0, records.length - 200);
-    }
-    windowWithDiagnostics.__fable5RuntimeSlideDiagnostics = records;
-  } catch {
-    // Development-only diagnostics must never affect runtime behavior.
-  }
-}
 
 /**
  * Runtime slideshow renderer.
@@ -82,41 +53,7 @@ export function RuntimeSlideRenderer({
   const compositionPlan = useMemo(
     () => {
       if (!slide) return null;
-      const plan = planSlideComposition(slide, sceneElements, allPadlets);
-      recordRuntimeSlideDiagnostic({
-        kind: "plan-computed",
-        timestamp: Date.now(),
-        slideId: slide.id,
-        frameId: plan.frameElement?.id ?? null,
-        inputElementCount: sceneElements.length,
-        inputElementIds: sceneElements.map((element) => String(element?.id ?? "")),
-        inputElementTypes: sceneElements.map((element) => String(element?.type ?? "")),
-        inputElementFrameIds: sceneElements.map((element) => element?.frameId ?? null),
-        inputElementDeletedFlags: sceneElements.map((element) => Boolean(element?.isDeleted)),
-        inputElementIndexes: sceneElements.map((element, sceneIndex) => ({
-          id: String(element?.id ?? ""),
-          sceneIndex,
-          index: typeof element?.index === "number" ? element.index : null,
-        })),
-        padletIds: allPadlets.map((padlet) => String(padlet.id)),
-        padletZIndexes: allPadlets.map((padlet) => sceneElements.findIndex((element) => element?.link === `padlet://${padlet.id}`)),
-        resolvedPadletIds: plan.resolvedPadlets.map((entry) => String(entry.padlet.id)),
-        resolvedPadletZIndexes: plan.resolvedPadlets.map((entry) => entry.zIndex),
-        nativeBelowIds: plan.nativeBelowElements.map((element) => String(element?.id ?? "")),
-        nativeAboveIds: plan.nativeAboveElements.map((element) => String(element?.id ?? "")),
-        nativeBelowCount: plan.nativeBelowElements.length,
-        nativeAboveCount: plan.nativeAboveElements.length,
-        unresolvedPadletIds: allPadlets
-          .map((padlet) => String(padlet.id))
-          .filter((padletId) => !plan.resolvedPadlets.some((entry) => String(entry.padlet.id) === padletId)),
-        frameGeometry: {
-          x: typeof plan.frameElement?.x === "number" ? plan.frameElement.x : null,
-          y: typeof plan.frameElement?.y === "number" ? plan.frameElement.y : null,
-          width: typeof plan.frameElement?.width === "number" ? plan.frameElement.width : null,
-          height: typeof plan.frameElement?.height === "number" ? plan.frameElement.height : null,
-        },
-      });
-      return plan;
+      return planSlideComposition(slide, sceneElements, allPadlets);
     },
     // We intentionally depend on array identity — the parent recreates these when elements change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -166,22 +103,6 @@ export function RuntimeSlideRenderer({
     // discarded if a newer cycle has already started (stale async overwrite guard).
     const token = ++renderTokenRef.current;
     let cancelled = false;
-    recordRuntimeSlideDiagnostic({
-      kind: "effect-run",
-      timestamp: Date.now(),
-      token,
-      slideId: slide.id,
-      frameId: compositionPlan.frameElement?.id ?? null,
-      planPresent: Boolean(compositionPlan),
-      nativeBelowIds: compositionPlan.nativeBelowElements.map((element) => String(element?.id ?? "")),
-      nativeBelowCount: compositionPlan.nativeBelowElements.length,
-      nativeAboveIds: compositionPlan.nativeAboveElements.map((element) => String(element?.id ?? "")),
-      nativeAboveCount: compositionPlan.nativeAboveElements.length,
-      belowBranchCondition: true,
-      aboveBranchCondition: compositionPlan.nativeAboveElements.length > 0,
-      belowPngPresent: Boolean(belowPng),
-      abovePngPresent: Boolean(abovePng),
-    });
 
     const dpr = typeof window !== "undefined" ? Math.min(window.devicePixelRatio || 1, 2) : 1;
     // Render at scale × DPR for crisp HiDPI display
@@ -200,21 +121,7 @@ export function RuntimeSlideRenderer({
     })
       .then((canvas) => {
         if (!cancelled && canvas && renderTokenRef.current === token) {
-          const dataUrl = canvas.toDataURL("image/png");
-          recordRuntimeSlideDiagnostic({
-            kind: "band-commit",
-            timestamp: Date.now(),
-            band: "below",
-            token,
-            slideId: slide.id,
-            frameId: compositionPlan.frameElement?.id ?? null,
-            canvasWidth: canvas.width,
-            canvasHeight: canvas.height,
-            dataUrlLength: dataUrl.length,
-            cancelled,
-            guardPassed: true,
-          });
-          setBelowPng(dataUrl);
+          setBelowPng(canvas.toDataURL("image/png"));
         }
       })
       .catch(() => { /* silent — previous PNG stays visible */ });
@@ -231,41 +138,13 @@ export function RuntimeSlideRenderer({
       })
         .then((canvas) => {
           if (!cancelled && canvas && renderTokenRef.current === token) {
-            const dataUrl = canvas.toDataURL("image/png");
-            recordRuntimeSlideDiagnostic({
-              kind: "band-commit",
-              timestamp: Date.now(),
-              band: "above",
-              token,
-              slideId: slide.id,
-              frameId: compositionPlan.frameElement?.id ?? null,
-              canvasWidth: canvas.width,
-              canvasHeight: canvas.height,
-              dataUrlLength: dataUrl.length,
-              cancelled,
-              guardPassed: true,
-            });
-            setAbovePng(dataUrl);
+            setAbovePng(canvas.toDataURL("image/png"));
           }
         })
         .catch(() => { /* silent */ });
     }
 
-    return () => {
-      const cancelledBeforeCleanup = cancelled;
-      cancelled = true;
-      recordRuntimeSlideDiagnostic({
-        kind: "effect-cleanup",
-        timestamp: Date.now(),
-        token,
-        slideId: slide.id,
-        frameId: compositionPlan.frameElement?.id ?? null,
-        nativeBelowCount: compositionPlan.nativeBelowElements.length,
-        nativeAboveCount: compositionPlan.nativeAboveElements.length,
-        cancelledBeforeCleanup,
-        cancelledAfterCleanup: cancelled,
-      });
-    };
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [compositionPlan, files, scale]);
 

@@ -70,8 +70,6 @@ type PngCensusEntry = {
 };
 
 type DiagnosisRow = 'N1' | 'N2' | 'N3' | 'N4' | 'N5';
-type Patch070DecisionRow = 'F1' | 'F2' | 'F3' | 'F4' | 'F6' | 'F7';
-type Patch070Stage0BDecisionRow = 'G1a' | 'G1b' | 'G1c' | 'G1d' | 'G2' | 'G3' | 'G4';
 
 type ProbePixelSample = {
   r: number;
@@ -150,12 +148,6 @@ type Patch070ProbeSnapshot = {
   canvasTrace: ProbeCanvasTraceEntry[];
   fontStatusTimeline: ProbeFontEvent[];
   imageMounts: ProbeImageMountEvent[];
-};
-
-type RuntimeSlideDiagnosticRecord = {
-  kind: 'plan-computed' | 'effect-run' | 'effect-cleanup' | 'band-commit';
-  timestamp: number;
-  [key: string]: unknown;
 };
 
 async function nativeRasterCounts(page: Page) {
@@ -954,14 +946,15 @@ test.describe('drawing presentation browser characterization (PATCH-064)', () =>
           __patch070Stage0Probe?: {
             reset: () => void;
           };
-          __fable5RuntimeSlideDiagnostics?: RuntimeSlideDiagnosticRecord[];
         };
         windowWithProbe.__patch070Stage0Probe?.reset();
-        windowWithProbe.__fable5RuntimeSlideDiagnostics = [];
       });
       await page.getByTitle(/Next/).click();
       await expect(fullscreen.getByText('Slide 2 / 2', { exact: true })).toBeVisible();
       await expect(fullscreen.getByText(new RegExp(`${fixture.prefix} child A`))).toBeVisible({ timeout: 60_000 });
+      const extraRuntimePadlet = fullscreen.getByText(new RegExp(`${fixture.prefix} child C`));
+      await expect(extraRuntimePadlet).toBeVisible({ timeout: 60_000 });
+      const extraRuntimePadletStillLegitimate = await extraRuntimePadlet.isVisible().catch(() => false);
       await expect(fullscreen.getByAltText('PATCH-064 uploaded template image')).toBeVisible({ timeout: 60_000 });
       await expect(fullscreen.getByAltText('PATCH-064 uploaded template image')).toHaveAttribute('src', '/templates/moodboard.png');
 
@@ -981,12 +974,6 @@ test.describe('drawing presentation browser characterization (PATCH-064)', () =>
           fontStatusTimeline: [],
           imageMounts: [],
         } satisfies Patch070ProbeSnapshot;
-      });
-      const runtimeSlideDiagnostics = await page.evaluate(() => {
-        const windowWithDiagnostics = window as typeof window & {
-          __fable5RuntimeSlideDiagnostics?: RuntimeSlideDiagnosticRecord[];
-        };
-        return JSON.parse(JSON.stringify(windowWithDiagnostics.__fable5RuntimeSlideDiagnostics ?? [])) as RuntimeSlideDiagnosticRecord[];
       });
       const expectedFullscreenNativeBand = fullscreenPngCensus.find((entry) => entry.bandPosition === expectedNativeBand) ?? null;
       const fullscreenBelowBand = fullscreenPngCensus.find((entry) => entry.bandPosition === 'below') ?? null;
@@ -1013,7 +1000,6 @@ test.describe('drawing presentation browser characterization (PATCH-064)', () =>
         ...patch070Probe.toDataUrlTrace.map((entry) => entry.canvasId),
       ]);
       const activeCanvasTrace = patch070Probe.allCanvasTrace.filter((entry) => activeCanvasIdSet.has(entry.canvasId));
-      const allCanvasIds = activeCanvasTrace.map((entry) => entry.canvasId);
       const harnessCanvasIds = activeCanvasTrace
         .filter((entry) => entry.provenance === 'test-harness')
         .map((entry) => entry.canvasId);
@@ -1023,54 +1009,14 @@ test.describe('drawing presentation browser characterization (PATCH-064)', () =>
       const productionCandidateCanvasIdSet = new Set(productionCandidateCanvasIds);
       const productionToDataUrlEntries = patch070Probe.toDataUrlTrace.filter((entry) => productionCandidateCanvasIdSet.has(entry.canvasId));
       const successfulProductionToDataUrlEntries = productionToDataUrlEntries.filter((entry) => entry.result === 'returned');
-      const thrownProductionToDataUrlEntries = productionToDataUrlEntries.filter((entry) => entry.result === 'threw');
       const belowExportCanvasId = successfulProductionToDataUrlEntries[0]?.canvasId ?? null;
-      const nonEmptyFontEvents = patch070Probe.fontStatusTimeline.filter((entry) => entry.font.trim().length > 0);
-      const exportSizedProductionCandidateCanvasIds = activeCanvasTrace
-        .filter((entry) => (
-          entry.provenance === 'production-or-unknown'
-          && !entry.excludedFromProductionAttribution
-          && entry.width === (fullscreenBelowBand?.naturalWidth ?? 0)
-          && entry.height === (fullscreenBelowBand?.naturalHeight ?? 0)
-        ))
-        .map((entry) => entry.canvasId);
-      const exportSizedProductionCandidateCanvasTrace = patch070Probe.canvasTrace.filter((entry) => (
-        !entry.excludedFromProductionAttribution
-        && entry.contextType === '2d'
-        && entry.width === (fullscreenBelowBand?.naturalWidth ?? 0)
-        && entry.height === (fullscreenBelowBand?.naturalHeight ?? 0)
-      ));
       const aboveAttributableToDataUrlEntries = productionToDataUrlEntries.filter((entry) => entry.canvasId !== belowExportCanvasId);
-      const attributableAboveTraceIndexes = patch070Probe.toDataUrlTrace.flatMap((entry, index) => (
-        aboveAttributableToDataUrlEntries.includes(entry) ? [index] : []
-      ));
-      const aboveExportBegan = exportSizedProductionCandidateCanvasIds.length > 1 || nonEmptyFontEvents.length > 0;
-      const aboveExportBeginEvidence = {
-        fontEvents: nonEmptyFontEvents,
-        allCanvasIds,
-        harnessCanvasIds,
-        productionCandidateCanvasIds,
-        exportSizedProductionCandidateCanvasIds,
-        exportSizedProductionCandidateCanvasTrace,
-        rawCanvasTrace: patch070Probe.canvasTrace.filter((entry) => entry.width > 0 || entry.height > 0),
-      };
       const fullscreenAboveImgObserved = Boolean(expectedFullscreenNativeBand);
       const fullscreenAboveImgEverMounted = patch070Probe.imageMounts.some((entry) => entry.zIndex === '3');
       const fullscreenBelowImgObserved = Boolean(fullscreenBelowBand);
       const aboveToDataUrlCalled = aboveAttributableToDataUrlEntries.length > 0;
       const aboveToDataUrlReturned = aboveAttributableToDataUrlEntries.some((entry) => entry.result === 'returned');
       const aboveToDataUrlThrew = aboveAttributableToDataUrlEntries.some((entry) => entry.result === 'threw');
-      const degenerateBoundsEvidence =
-        productionToDataUrlEntries.find((entry) => entry.width === 0 || entry.height === 0)
-        ?? patch070Probe.imageMounts.find((entry) => entry.zIndex === '3' && (entry.naturalWidth === 0 || entry.naturalHeight === 0))
-        ?? null;
-      const cancellationOrStaleSuppressionEvidence = aboveToDataUrlReturned && !fullscreenAboveImgObserved
-        ? {
-            aboveAttributableToDataUrlEntries,
-            fullscreenAboveImgObserved,
-            fullscreenAboveImgEverMounted,
-          }
-        : null;
       const postRunPersistedScene = await fetchPersistedScene(supabase, fixture.masterPadletId!);
       const postRunPersistedPadlets = await fetchBoardPadlets(supabase, fixture.boardId);
       const postRunElementOrder = postRunPersistedScene.sceneElements.map((element) => element.id);
@@ -1078,181 +1024,14 @@ test.describe('drawing presentation browser characterization (PATCH-064)', () =>
       const postRunCompositionPlan = planSlideComposition(landscapeSlide, postRunPersistedScene.sceneElements, postRunPersistedPadlets);
       const postRunNativeBelowIds = postRunCompositionPlan.nativeBelowElements.map((element) => String((element as { id: string }).id));
       const postRunNativeAboveIds = postRunCompositionPlan.nativeAboveElements.map((element) => String((element as { id: string }).id));
-      const selectedDecisionRow: Patch070DecisionRow = (() => {
-        if (degenerateBoundsEvidence) return 'F6';
-        if (aboveToDataUrlThrew && !fullscreenAboveImgObserved) return 'F2';
-        if (aboveToDataUrlReturned && !fullscreenAboveImgObserved) return 'F3';
-        if (aboveExportBegan && !aboveToDataUrlCalled && !fullscreenAboveImgObserved) return 'F1';
-        if (!aboveExportBegan && !fullscreenAboveImgObserved) return 'F4';
-        return 'F7';
-      })();
-      const conciseRootCauseBoundaryByRow: Record<Patch070DecisionRow, string> = {
-        F1: 'F1: the isolated fullscreen above-band export begins but terminates before toDataURL; the exact rejected operation remains inside renderExcalidrawSlideBase.',
-        F2: 'F2: the fullscreen landscape above-band export reaches canvas serialization, but an above-band toDataURL attempt throws before the PNG can mount in the DOM.',
-        F3: 'F3: the fullscreen landscape above-band canvas serializes successfully, but the resulting PNG is suppressed before the above-band img ever mounts in the DOM.',
-        F4: 'F4: after excluding test-owned canvases, no fullscreen above-band export activity is observed despite stable persisted data and a correct Node-side plan; the remaining boundary is runtime plan/input divergence or suppression before export invocation.',
-        F6: 'F6: the fullscreen landscape probe reached a zero-area or invalid-dimension export artifact, so the missing above-band raster is bounded to degenerate export geometry.',
-        F7: 'F7: the fullscreen landscape probe isolated a narrow deterministic cause that did not map cleanly onto the predefined F1/F2/F3/F4/F6 rows.',
-      };
-      const stage0BStringArray = (value: unknown): string[] => (
-        Array.isArray(value) ? value.map((entry) => String(entry)) : []
-      );
-      const stage0BNullableStringArray = (value: unknown): (string | null)[] => (
-        Array.isArray(value) ? value.map((entry) => (typeof entry === 'string' ? entry : null)) : []
-      );
-      const stage0BNumberArray = (value: unknown): number[] => (
-        Array.isArray(value) ? value.filter((entry): entry is number => typeof entry === 'number') : []
-      );
-      const planComputedRecords = runtimeSlideDiagnostics.filter((record) => record.kind === 'plan-computed');
-      const effectRunRecords = runtimeSlideDiagnostics.filter((record) => record.kind === 'effect-run');
-      const effectCleanupRecords = runtimeSlideDiagnostics.filter((record) => record.kind === 'effect-cleanup');
-      const bandCommitRecords = runtimeSlideDiagnostics.filter((record) => record.kind === 'band-commit');
-      const landscapePlanComputedRecords = planComputedRecords.filter((record) => record.slideId === LANDSCAPE_FRAME_ID);
-      const landscapeEffectRunRecords = effectRunRecords.filter((record) => record.slideId === LANDSCAPE_FRAME_ID);
-      const landscapeEffectCleanupRecords = effectCleanupRecords.filter((record) => record.slideId === LANDSCAPE_FRAME_ID);
-      const landscapeBandCommitRecords = bandCommitRecords.filter((record) => record.slideId === LANDSCAPE_FRAME_ID);
-      const livePlanRecord = landscapePlanComputedRecords.at(-1) ?? null;
-      const liveEffectRunRecord = landscapeEffectRunRecords.at(-1) ?? null;
-      const liveInputElementOrder = Array.isArray(livePlanRecord?.inputElementIndexes)
-        ? livePlanRecord.inputElementIndexes
-        : [];
-      const liveInputElementIds = stage0BStringArray(livePlanRecord?.inputElementIds);
-      const liveInputFrameIds = stage0BNullableStringArray(livePlanRecord?.inputElementFrameIds);
-      const liveInputDeletedFlags = Array.isArray(livePlanRecord?.inputElementDeletedFlags)
-        ? livePlanRecord.inputElementDeletedFlags.map(Boolean)
-        : [];
-      const livePadletIds = stage0BStringArray(livePlanRecord?.padletIds);
-      const livePadletZIndexes = stage0BNumberArray(livePlanRecord?.padletZIndexes);
-      const liveResolvedPadletIds = stage0BStringArray(livePlanRecord?.resolvedPadletIds);
-      const liveResolvedPadletZIndexes = stage0BNumberArray(livePlanRecord?.resolvedPadletZIndexes);
-      const liveUnresolvedPadletIds = stage0BStringArray(livePlanRecord?.unresolvedPadletIds);
-      const liveNativeBelowIds = stage0BStringArray(livePlanRecord?.nativeBelowIds);
-      const liveNativeAboveIds = stage0BStringArray(livePlanRecord?.nativeAboveIds);
-      const liveNativeBelowCount = typeof livePlanRecord?.nativeBelowCount === 'number'
-        ? livePlanRecord.nativeBelowCount
-        : liveNativeBelowIds.length;
-      const liveNativeAboveCount = typeof livePlanRecord?.nativeAboveCount === 'number'
-        ? livePlanRecord.nativeAboveCount
-        : liveNativeAboveIds.length;
-      const liveNativeSummaries = SEEDED_NATIVE_IDS.map((id) => {
-        const liveIndex = liveInputElementIds.indexOf(id);
-        const orderEntry = Array.isArray(liveInputElementOrder)
-          ? liveInputElementOrder.find((entry) => typeof entry === 'object' && entry !== null && (entry as { id?: unknown }).id === id)
-          : null;
-        return {
-          id,
-          present: liveIndex >= 0,
-          frameId: liveIndex >= 0 ? liveInputFrameIds[liveIndex] ?? null : null,
-          isDeleted: liveIndex >= 0 ? liveInputDeletedFlags[liveIndex] ?? null : null,
-          sceneIndex: typeof (orderEntry as { sceneIndex?: unknown } | null)?.sceneIndex === 'number'
-            ? (orderEntry as { sceneIndex: number }).sceneIndex
-            : liveIndex >= 0
-              ? liveIndex
-              : null,
-          index: typeof (orderEntry as { index?: unknown } | null)?.index === 'number'
-            ? (orderEntry as { index: number }).index
-            : null,
-        };
-      });
-      const seededNativesPresentInLiveInput = liveNativeSummaries.every((summary) => summary.present);
-      const seededNativesHaveValidLiveFrameState = liveNativeSummaries.every((summary) => (
-        summary.frameId === LANDSCAPE_FRAME_ID && summary.isDeleted === false
-      ));
-      const seededNativesAbsentFromLiveBands = SEEDED_NATIVE_IDS.every((id) => (
-        !liveNativeBelowIds.includes(id) && !liveNativeAboveIds.includes(id)
-      ));
-      const livePadletResolutionMatchesNode = liveResolvedPadletIds.join('|') === compositionPlan.resolvedPadlets.map((entry) => String(entry.padlet.id)).join('|')
-        && liveResolvedPadletZIndexes.join('|') === resolvedPadletIndexes.join('|');
-      const livePadletsResolved = liveResolvedPadletIds.length === compositionPlan.resolvedPadlets.length
-        && liveUnresolvedPadletIds.length === 0;
-      const livePadletRange = liveResolvedPadletZIndexes.length > 0
-        ? {
-            first: Math.min(...liveResolvedPadletZIndexes),
-            last: Math.max(...liveResolvedPadletZIndexes),
-          }
-        : null;
-      const liveNativesInsideMiddleInterval = Boolean(livePadletRange) && liveNativeSummaries.every((summary) => (
-        typeof summary.sceneIndex === 'number'
-        && summary.sceneIndex >= livePadletRange!.first
-        && summary.sceneIndex <= livePadletRange!.last
-      ));
-      const effectAboveBranchCondition = liveEffectRunRecord?.aboveBranchCondition === true;
-      const effectBelowBranchCondition = liveEffectRunRecord?.belowBranchCondition === true;
-      const planRecomputed = landscapePlanComputedRecords.length > 0;
-      const effectReran = landscapeEffectRunRecords.length > 0;
-      const cleanupOccurred = landscapeEffectCleanupRecords.length > 0;
-      const belowCommitSequence = landscapeBandCommitRecords.filter((record) => record.band === 'below');
-      const aboveCommitSequence = landscapeBandCommitRecords.filter((record) => record.band === 'above');
-      const belowCommitted = belowCommitSequence.length > 0;
-      const aboveCommitted = aboveCommitSequence.length > 0;
-      const firstAboveCommitTimestamp = aboveCommitSequence[0]?.timestamp;
-      const cleanupBeforeAboveInvocation = typeof firstAboveCommitTimestamp === 'number'
-        ? landscapeEffectCleanupRecords.some((record) => typeof record.timestamp === 'number' && record.timestamp < firstAboveCommitTimestamp)
-        : false;
-      const effectTokens = landscapeEffectRunRecords
-        .map((record) => record.token)
-        .filter((token) => typeof token === 'number');
-      const commitTokens = landscapeBandCommitRecords
-        .map((record) => record.token)
-        .filter((token) => typeof token === 'number');
-      const cleanupTokens = landscapeEffectCleanupRecords
-        .map((record) => record.token)
-        .filter((token) => typeof token === 'number');
-      const tokenContinuity = {
-        effectTokens,
-        commitTokens,
-        cleanupTokens,
-        allCommitsMatchLatestEffectToken: effectTokens.length > 0
-          && commitTokens.every((token) => token === effectTokens.at(-1)),
-      };
       const persistedOrderStable = preRunElementOrder.join('|') === postRunElementOrder.join('|');
       const nodePlanStable = postRunNativeBelowIds.join('|') === nativeBelowIds.join('|')
         && postRunNativeAboveIds.join('|') === nativeAboveIds.join('|')
         && postRunCompositionPlan.resolvedPadlets.map((entry) => entry.zIndex).join('|') === resolvedPadletIndexes.join('|');
-      const stage0BRowMatches: Patch070Stage0BDecisionRow[] = [];
-      if (
-        seededNativesPresentInLiveInput
-        && seededNativesHaveValidLiveFrameState
-        && seededNativesAbsentFromLiveBands
-        && livePadletsResolved
-        && liveNativesInsideMiddleInterval
-      ) {
-        stage0BRowMatches.push('G1a');
-      }
-      if (
-        SEEDED_NATIVE_IDS.every((id) => !liveInputElementIds.includes(id))
-        && nativeAboveIds.join('|') === SEEDED_NATIVE_IDS.join('|')
-      ) {
-        stage0BRowMatches.push('G1b');
-      }
-      if (
-        seededNativesPresentInLiveInput
-        && !seededNativesHaveValidLiveFrameState
-        && seededNativesAbsentFromLiveBands
-      ) {
-        stage0BRowMatches.push('G1c');
-      }
-      if (!livePadletResolutionMatchesNode && liveNativeAboveCount === 0) {
-        stage0BRowMatches.push('G1d');
-      }
-      if (
-        landscapePlanComputedRecords.length === 1
-        && liveInputElementIds.length > 0
-        && persistedOrderStable
-        && nodePlanStable
-        && !seededNativesPresentInLiveInput
-      ) {
-        stage0BRowMatches.push('G2');
-      }
-      if ((liveNativeAboveCount > 0 || effectAboveBranchCondition) && selectedDecisionRow === 'F4') {
-        stage0BRowMatches.push('G3');
-      }
-      const selectedStage0BDecisionRow = stage0BRowMatches.length === 1 ? stage0BRowMatches[0] : 'G4';
-      const conciseStage0BRootCauseBoundary = selectedStage0BDecisionRow === 'G1a'
-        ? 'G1a: live RuntimeSlideRenderer input contains the seeded native elements with valid frame/deletion state, but the live band split leaves them in the uncovered middle interval, so the above branch is false and no above export is invoked.'
-        : selectedStage0BDecisionRow === 'G1d'
-          ? 'G1d: live RuntimeSlideRenderer padlet resolution diverges from the persisted Node-side plan by resolving an additional runtime padlet after the seeded natives; the shifted live padlet range leaves nativeAbove empty, so the above branch is false and no above export is invoked.'
-        : `${selectedStage0BDecisionRow}: Stage 0B isolated a live runtime composition mechanism requiring CTO amendment before any Stage 1 production fix.`;
+      const noNativeMembersDropped = nativeBelowIds.length + nativeAboveIds.length === SEEDED_NATIVE_IDS.length
+        && SEEDED_NATIVE_IDS.every((id) => nativeBelowIds.includes(id) || nativeAboveIds.includes(id));
+      const fullscreenAbovePngs = fullscreenPngCensus.filter((entry) => entry.bandPosition === 'above');
+      const fullscreenBelowPngs = fullscreenPngCensus.filter((entry) => entry.bandPosition === 'below');
 
       expect(fullscreenPngCensus.length).toBeGreaterThanOrEqual(1);
       expect(fullscreenBelowBand).not.toBeNull();
@@ -1264,31 +1043,55 @@ test.describe('drawing presentation browser characterization (PATCH-064)', () =>
         isDataPng: true,
         loadStatus: 'loaded',
       });
-      expect(expectedFullscreenNativeBand).toBeNull();
+      expect(expectedFullscreenNativeBand).not.toBeNull();
+      expect(expectedFullscreenNativeBand).toMatchObject({
+        surface: 'fullscreen',
+        slideIndex: 2,
+        slideTitle: 'PATCH-064 Landscape',
+        bandPosition: 'above',
+        isDataPng: true,
+        loadStatus: 'loaded',
+      });
+      expect(expectedFullscreenNativeBand?.naturalWidth ?? 0).toBeGreaterThan(0);
+      expect(expectedFullscreenNativeBand?.naturalHeight ?? 0).toBeGreaterThan(0);
       expect(fullscreenBelowBand?.pixelSummary).not.toBeNull();
       expect(fullscreenBelowBand?.pixelSummary?.nativeTextNonWhite ?? -1).toBe(0);
       expect(fullscreenBelowBand?.pixelSummary?.nativeShapeNonWhite ?? -1).toBe(0);
       expect(fullscreenBelowBand?.pixelSummary?.meaningfulNonBackgroundPixels ?? -1).toBe(0);
+      expect(expectedFullscreenNativeBand?.pixelSummary).not.toBeNull();
+      expect(expectedFullscreenNativeBand?.pixelSummary?.nativeTextNonWhite ?? 0).toBeGreaterThan(0);
+      expect(expectedFullscreenNativeBand?.pixelSummary?.nativeShapeNonWhite ?? 0).toBeGreaterThan(0);
+      expect(expectedFullscreenNativeBand?.pixelSummary?.meaningfulNonBackgroundPixels ?? 0).toBeGreaterThan(0);
+      expect(expectedFullscreenNativeBand?.pixelSummary?.seededColorHits.textColor ?? 0).toBeGreaterThan(0);
+      expect(expectedFullscreenNativeBand?.pixelSummary?.seededColorHits.shapeStroke ?? 0).toBeGreaterThan(0);
       expect(landscapeThumbnailPng?.pixelSummary).not.toBeNull();
       expect(landscapeThumbnailPng?.pixelSummary?.nativeTextNonWhite ?? 0).toBeGreaterThan(0);
       expect(landscapeThumbnailPng?.pixelSummary?.nativeShapeNonWhite ?? 0).toBeGreaterThan(0);
       expect(landscapeThumbnailPng?.pixelSummary?.meaningfulNonBackgroundPixels ?? 0).toBeGreaterThan(0);
-      expect(primaryRow).toBe('N2');
-      expect(fullscreenRow).toBe('N2');
+      expect(primaryRow).toBe('N5');
+      expect(fullscreenRow).toBe('N5');
       expect(thumbnailRow).toBe('N5');
+      expect(defectIsSurfaceSpecific).toBe(false);
+      expect(fullscreenAbovePngs).toHaveLength(1);
+      expect(fullscreenBelowPngs).toHaveLength(1);
+      expect(noNativeMembersDropped).toBe(true);
 
       const rasterCounts = await nativeRasterCounts(page);
-      expect(rasterCounts, `${NATIVE_TEXT_VALUE} / ${NATIVE_SHAPE_ID} current native PNG rendering defect`).toEqual({
-        text: 0,
-        shape: 0,
-        total: 0,
-        bounds: null,
-      });
+      expect(rasterCounts.text, `${NATIVE_TEXT_VALUE} current native PNG rendering`).toBeGreaterThan(0);
+      expect(rasterCounts.shape, `${NATIVE_SHAPE_ID} current native PNG rendering`).toBeGreaterThan(0);
+      expect(rasterCounts.total).toBeGreaterThan(0);
+      expect(rasterCounts.bounds).not.toBeNull();
       expect(preRunElementOrder).toEqual(postRunElementOrder);
       expect(postRunNativeBelowIds).toEqual(nativeBelowIds);
       expect(postRunNativeAboveIds).toEqual(nativeAboveIds);
       expect(postRunPersistedScene.rawContentLength).toBe(persistedScene.rawContentLength);
-      expect(fullscreenAboveImgObserved).toBe(false);
+      expect(fullscreenAboveImgObserved).toBe(true);
+      expect(fullscreenAboveImgEverMounted).toBe(true);
+      expect(fullscreenBelowImgObserved).toBe(true);
+      expect(aboveToDataUrlCalled).toBe(true);
+      expect(aboveToDataUrlReturned).toBe(true);
+      expect(aboveToDataUrlThrew).toBe(false);
+      expect(extraRuntimePadletStillLegitimate).toBe(true);
 
       test.info().annotations.push({
         type: 'patch-069-persisted-scene',
@@ -1336,12 +1139,22 @@ test.describe('drawing presentation browser characterization (PATCH-064)', () =>
         }),
       });
       test.info().annotations.push({
-        type: 'patch-069-classification',
+        type: 'patch-070-native-raster-fix',
         description: JSON.stringify({
+          originalDiagnosis: 'N2',
+          originalStage0Row: 'F4',
+          originalStage0BRow: 'G1d',
           primaryRow,
           fullscreenRow,
           thumbnailRow,
           defectIsSurfaceSpecific,
+          rootCause: 'planSlideComposition previously assigned native elements between the first and last padlet to neither below nor above, so fullscreen never received an above-band native raster.',
+          fixOwner: 'planSlideComposition',
+          fixedProductionPath: 'components/presentation/slide-renderer/planSlideComposition.ts',
+          planShapeChanged: false,
+          resolverChanged: false,
+          runtimeInputChanged: false,
+          diagnosticsRemoved: true,
           persistedSceneMatchesSeed,
           nativeElementIds: SEEDED_NATIVE_IDS,
           nativeElementIndexes,
@@ -1351,107 +1164,66 @@ test.describe('drawing presentation browser characterization (PATCH-064)', () =>
             above: nativeAboveIds,
           },
           expectedNativeBand,
+          fixedNativeBelowIds: nativeBelowIds,
+          fixedNativeAboveIds: nativeAboveIds,
+          resolvedPadletIndexes,
+          extraRuntimePadlet: {
+            padletId: `${fixture.prefix} child C`,
+            provenance: 'reconciliation-inserted, unpersisted embeddable resolved at runtime',
+            stillLegitimate: extraRuntimePadletStillLegitimate,
+          },
           fullscreenPngCount: fullscreenPngCensus.length,
+          fullscreenBelowPngCount: fullscreenBelowPngs.length,
+          fullscreenAbovePngCount: fullscreenAbovePngs.length,
+          abovePngDimensions: expectedFullscreenNativeBand
+            ? {
+                naturalWidth: expectedFullscreenNativeBand.naturalWidth,
+                naturalHeight: expectedFullscreenNativeBand.naturalHeight,
+                renderedBox: expectedFullscreenNativeBand.renderedBox,
+              }
+            : null,
           thumbnailPngCount: thumbnailPngCensus.length,
           nativeBandPngPresent: Boolean(expectedFullscreenNativeBand),
+          belowBandPngPresent: Boolean(fullscreenBelowBand),
           pixelAnalysis: {
             fullscreenBelowBand: fullscreenBelowBand?.pixelSummary ?? null,
-            fullscreenNativeBand: expectedFullscreenNativeBand?.pixelSummary ?? null,
+            fullscreenAboveBand: expectedFullscreenNativeBand?.pixelSummary ?? null,
             thumbnailLandscape: landscapeThumbnailPng?.pixelSummary ?? null,
           },
+          nativeRasterCounts: rasterCounts,
+          thumbnailInvariant: thumbnailRow === 'N5',
+          plannerInvariant: {
+            nodePlanStable,
+            noNativeMembersDropped,
+            postRunNativeBelowIds,
+            postRunNativeAboveIds,
+          },
+          persistedSceneInvariant: {
+            persistedOrderStable,
+            preRunElementOrder,
+            postRunElementOrder,
+            rawContentLengthBefore: persistedScene.rawContentLength,
+            rawContentLengthAfter: postRunPersistedScene.rawContentLength,
+          },
+          frameOrderInvariant: persistedOrderStable,
+          runtimeProbeEvidence: {
+            activeCanvasTrace,
+            harnessCanvasIds,
+            productionCandidateCanvasIds,
+            productionToDataUrlEntries,
+            aboveAttributableToDataUrlEntries,
+            aboveToDataUrlCalled,
+            aboveToDataUrlReturned,
+            aboveToDataUrlThrew,
+            fullscreenBelowImgObserved,
+            fullscreenAboveImgObserved,
+            fullscreenAboveImgEverMounted,
+            imageMounts: patch070Probe.imageMounts,
+          },
           visibleRuntimeErrors,
-          conciseRootCauseBoundary: 'N2: plan keeps the native elements in the landscape above band, the browser-visible fullscreen runtime never materializes that above-band PNG in RuntimeSlideRenderer.tsx, and the thumbnail path still renders the native content.',
+          conciseFixBoundary: 'The planner now assigns every eligible native member to exactly one existing band using a single active-index domain. Native members before the first resolved padlet remain below; all remaining native members render above. The legitimate runtime padlet remains resolved, while the seeded native text and shape are no longer dropped from fullscreen composition.',
         }),
       });
-      test.info().annotations.push({
-        type: 'patch-070-stage0-probe',
-        description: JSON.stringify({
-          baseDiagnosis: 'N2',
-          selectedDecisionRow,
-          persistedSceneStable: preRunElementOrder.join('|') === postRunElementOrder.join('|'),
-          preRunElementOrder,
-          postRunElementOrder,
-          preRunPlan: {
-            nativeBelowIds,
-            nativeAboveIds,
-            resolvedPadletIndexes,
-          },
-          postRunPlan: {
-            nativeBelowIds: postRunNativeBelowIds,
-            nativeAboveIds: postRunNativeAboveIds,
-            resolvedPadletIndexes: postRunCompositionPlan.resolvedPadlets.map((entry) => entry.zIndex),
-          },
-          aboveExportBegan,
-          aboveExportBeginEvidence,
-          allCanvasTrace: activeCanvasTrace,
-          harnessCanvasIds,
-          productionCandidateCanvasIds,
-          exportSizedProductionCandidateCanvasIds,
-          rawImageMounts: patch070Probe.imageMounts,
-          toDataUrlTrace: patch070Probe.toDataUrlTrace,
-          attributableAboveTraceIndexes,
-          aboveToDataUrlCalled,
-          aboveToDataUrlReturned,
-          aboveToDataUrlThrew,
-          aboveDataUrlLength: aboveAttributableToDataUrlEntries.find((entry) => entry.result === 'returned')?.dataUrlLength ?? null,
-          fullscreenBelowImgObserved,
-          fullscreenAboveImgObserved,
-          fullscreenAboveImgEverMounted,
-          fontStatusTimeline: patch070Probe.fontStatusTimeline,
-          fontErrors: patch070Probe.fontStatusTimeline.filter((entry) => entry.phase === 'rejected'),
-          runtimeConsoleErrors: visibleRuntimeErrors,
-          cancellationOrStaleSuppressionEvidence,
-          degenerateBoundsEvidence,
-          conciseRootCauseBoundary: conciseRootCauseBoundaryByRow[selectedDecisionRow],
-          stage1Status: 'locked-pending-amendment',
-        }),
-      });
-      test.info().annotations.push({
-        type: 'patch-070-stage0b-live-runtime',
-        description: JSON.stringify({
-          baseStage0Row: 'F4',
-          selectedDecisionRow: selectedStage0BDecisionRow,
-          planComputedRecords,
-          effectRunRecords,
-          effectCleanupRecords,
-          bandCommitRecords,
-          liveInputElementOrder,
-          liveInputElementIds,
-          liveInputFrameIds,
-          liveInputDeletedFlags,
-          livePadletIds,
-          livePadletZIndexes,
-          liveResolvedPadletIds,
-          liveResolvedPadletZIndexes,
-          liveUnresolvedPadletIds,
-          liveNativeBelowIds,
-          liveNativeAboveIds,
-          liveNativeBelowCount,
-          liveNativeAboveCount,
-          liveNativeSummaries,
-          effectAboveBranchCondition,
-          effectBelowBranchCondition,
-          planRecomputed,
-          effectReran,
-          cleanupOccurred,
-          cleanupBeforeAboveInvocation,
-          cleanupSequence: landscapeEffectCleanupRecords,
-          belowCommitted,
-          aboveCommitted,
-          belowCommitSequence,
-          aboveCommitSequence,
-          tokenContinuity,
-          persistedOrderStable,
-          nodePlanStable,
-          stage0BRowMatches,
-          conciseRootCauseBoundary: conciseStage0BRootCauseBoundary,
-          stage1Status: 'locked-pending-amendment',
-        }),
-      });
-      expect(runtimeSlideDiagnostics.length).toBeGreaterThan(0);
-      expect(selectedDecisionRow).toBe('F4');
-      expect(stage0BRowMatches).toEqual(['G1d']);
-      expect(selectedStage0BDecisionRow).toBe('G1d');
 
       await page.getByTitle(/Previous/).click();
       await expect(fullscreen.getByText('Slide 1 / 2', { exact: true })).toBeVisible();
