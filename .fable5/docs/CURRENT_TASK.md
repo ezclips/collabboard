@@ -361,6 +361,65 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-16** — **PATCH-072 Amendment 1** (Option A: one two-owner
+  fix; `DrawingLayout.tsx` authorized as the FIFTH file, restricted).
+  **Blocked-attempt record:** the first implementation run STOPPED
+  correctly under §9 — with the four-file change in place, the LIVE
+  Playwright gate failed at the bound fullscreen-open assertion
+  (portal showed PORTRAIT, counter Slide 2/2; bound fixed state:
+  LANDSCAPE, Slide 1/2). No code retained, no implementation commit,
+  worktree reverted clean and level with origin (`a59526e`); one empty
+  untracked `lib/infra/presentation/` dir survived the revert and was
+  removed during this amendment. **Root cause of the block:** the
+  bottom Start button (`PresentationPanel.tsx:509`) sends NO slide id;
+  `DrawingLayout.handleStartPresentation` (`:1503-1508`) resolves it to
+  raw `activeFrames[0].id` (portrait) → `startSlideId`; fullscreen must
+  preserve named-id semantics, so a fullscreen-only sort correctly maps
+  that id to ordered index 1 — the default-start producer lives
+  upstream in prohibited DrawingLayout. **Ownership re-census (all
+  entry paths, fresh at `a59526e`):** ONE coherent defect, TWO owner
+  sites — sequence (FullscreenPresentation walks `slides` raw:
+  `:78-82,:114,:210-224,:347,:363`) + default start target
+  (DrawingLayout `:1506`). Per-slide launch (`PresentationPanel:409`)
+  passes an explicit id and needs no third change once the sequence is
+  canonical (findIndex lands it at its canonical index). Exactly one
+  `handleStartPresentation` caller (`:3041`); `presentationStartId`
+  produced only at `:1506`, consumed only at `:3050`; panel and
+  fullscreen mounted only by DrawingLayout; no other opener
+  (`setPresentationActive(true)` only at `:1507`). Neither half alone
+  is coherent (sequence-only = the live failure; target-only = canonical
+  first id inside a raw sequence, labeled Slide 2/2) → NOT split
+  (072A/072B), NOT diagnosis-only. **Product ruling (bound, §0.1.4):**
+  no explicit id → open canonical `orderedSlides[0]`; explicit id →
+  open exactly that slide at its canonical index; Prev/Next/keyboard
+  follow canonical order; fullscreen counter must mean the same slide
+  as the panel numbering. **Amended DrawingLayout edit (§0.1.5,
+  smallest owner-consistent):** one import of the SAME pure helper +
+  the no-id fallback becomes
+  `fromSlideId ?? sortSlidesByPresentationOrder(activeFrames)[0].id`
+  inside `handleStartPresentation` only (deps unchanged; ≤2 net lines
+  on the over-ceiling file, bound never-grow exception; raw frames have
+  no `order` → `?? +Infinity` → same `y → x` semantics as the panel's
+  `order: null`). Rejected: panel passes `sortedSlides[0].id` (panel
+  IMMUTABLE; leaves the defective fallback live in the producer);
+  sorting `frames` at the mount site (global reorder — stop condition);
+  inline comparator duplication. **Amended scope (§0.1.6, hashes
+  measured fresh at `a59526e`):** five files — two NEW (absence
+  verified), `FullscreenPresentation.tsx` `caea1141…` (unchanged
+  design), `DrawingLayout.tsx` `93e5900f…` (§0.1.5 only),
+  presentation spec `19d6e864…` (§6 flip + named-launch proofs).
+  **Fences: 49/49 verified at `a59526e`** (50 minus DrawingLayout;
+  PresentationPanel `926f43ce…` stays IMMUTABLE). **Amended e2e
+  (§0.1.8, test COUNT unchanged 2+2):** persisted raw order
+  [Portrait, Landscape]; sidebar [Landscape, Portrait]; bottom Start →
+  LANDSCAPE Slide 1/2; Next → PORTRAIT 2/2; Prev; End; NEW per-slide ⋮
+  named launches — Portrait row → Slide 2/2, Landscape row → Slide
+  1/2; all 069/070/071 invariants green; annotation gains
+  `defaultStartTarget` before/after + both named-launch results.
+  Totals unchanged: helper 7/1, full 448/43. Bound commit message
+  unchanged: `fix(presentation): align fullscreen slide order with
+  panel order (PATCH-072)`. Sonnet PASS required before commit.
+  Implementation NOT started (post-amendment); PATCH-073 NOT started.
 - **2026-07-16** — PATCH-071 **DONE (Stage 1 commit
   `3b863d55ee6ae6ce9af0c7747c1bda1a82500e71`, Sonnet PASS, no required
   changes)** + fresh census + **PATCH-072 AUTHORIZED** ("Align Fullscreen

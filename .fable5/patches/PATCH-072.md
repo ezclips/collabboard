@@ -1,11 +1,19 @@
 # PATCH-072 - Align Fullscreen Slide Order with the Canonical Panel Order
 
-**Status:** AUTHORIZED — fix (single stage). The defect is deterministic,
-fully characterized, and the owner is exact; no diagnosis stage is needed.
+**Status:** AUTHORIZED — fix (single stage), **Amendment 1 applied**
+(2026-07-16) after the first implementation attempt stopped correctly
+under §9. Where Amendment 1 (§0.1) and the original sections conflict,
+**Amendment 1 wins**. The defect is deterministic, fully characterized,
+and now has TWO exact owner sites (§0.1.2); no diagnosis stage is
+needed.
 
-**Base commit (bind, verify before editing):**
-`3b863d55ee6ae6ce9af0c7747c1bda1a82500e71`
-(`fix(drawing): sanitize membership metadata on canvas clone (PATCH-071)`)
+**Base commit (bind, verify before editing):** the Amendment-1
+governance commit (successor of `a59526e74dd03d1873901e252a8d2786d0eddf60`,
+which touched only `.fable5/**`). All §0.1.6 source hashes were
+measured fresh at `a59526e` and are unchanged by governance-only
+commits; the implementer MUST re-verify every pre-edit hash and the
+§0.1.7 fence set (49/49) before editing.
+(Original authoring base: `3b863d55ee6ae6ce9af0c7747c1bda1a82500e71`.)
 
 **Bound implementation commit message (verbatim):**
 `fix(presentation): align fullscreen slide order with panel order (PATCH-072)`
@@ -13,6 +21,212 @@ fully characterized, and the owner is exact; no diagnosis stage is needed.
 **Implementer:** GPT-5.5. **Reviewer:** Sonnet (independent, read-only,
 uncommitted diff, explicit PASS required before commit).
 **Closure:** Fable (CTO) after landing.
+
+---
+
+## 0.1 Amendment 1 (2026-07-16) — blocked attempt; start-target ownership; DrawingLayout authorized
+
+### 0.1.1 Blocked implementation attempt (record)
+
+The first implementation run STOPPED correctly under the bound §9 stop
+conditions. No code was retained, no implementation commit exists, the
+worktree was reverted clean and stayed level with `origin/main`
+(`a59526e`). The failure was discovered by the LIVE Playwright gate,
+not by review:
+
+- With the authorized four-file change in place (helper + fullscreen
+  sort + spec flip), `drawing-presentation.spec.ts` failed at the bound
+  fullscreen-open assertion: the fullscreen portal was present but
+  displayed PORTRAIT content with counter **Slide 2 / 2**; the bound
+  fixed state requires LANDSCAPE, **Slide 1 / 2**.
+- Root cause of the block: the bottom **Start presentation** button
+  (`PresentationPanel.tsx:509`) calls `onStartPresentation?.()` with NO
+  slide id. `DrawingLayout.tsx` `handleStartPresentation`
+  (`:1503-1508`) resolves the absent id to `activeFrames[0].id` —
+  **raw scene order** (portrait in the fixture) — and passes it as
+  `startSlideId` (`:3050`). `FullscreenPresentation` must preserve
+  named-`startSlideId` semantics, so it correctly resolves that
+  portrait id to ordered index 1. A fullscreen-only sort can never
+  satisfy the bound default-start behavior; the producer of the default
+  id lives upstream in `DrawingLayout`, which §3 prohibited.
+- Cleanup residue: one EMPTY untracked directory
+  `lib/infra/presentation/` (git-invisible) survived the revert; the
+  CTO removed it during this amendment. Both new files verified ABSENT;
+  `git status --porcelain` = 0 entries.
+
+### 0.1.2 Ownership re-census (all entry paths traced fresh at `a59526e`)
+
+- **Bottom Start button** (`PresentationPanel.tsx:509`):
+  `onStartPresentation?.()` — no id → DrawingLayout fallback
+  `activeFrames[0].id` (`:1506`) → RAW scene order. **Defective.**
+- **Per-slide "Start presentation"** (`PresentationPanel.tsx:409`):
+  `onStartPresentation?.(slide.id)` — explicit id of the row the user
+  clicked (rows render in canonical `sortedSlides` order). Correct
+  intent; must keep opening exactly that slide.
+- **`handleStartPresentation` callers:** exactly ONE — the
+  `onStartPresentation` prop wiring at `DrawingLayout.tsx:3041`. No
+  keyboard shortcut, deep link, or other opener exists
+  (`setPresentationActive(true)` appears only at `:1507`; `false` only
+  at the overlay's `onClose`, `:3052`).
+- **`presentationStartId` producer/consumers:** produced only at
+  `:1506`; consumed only by the `FullscreenPresentation` mount
+  (`:3050`). `PresentationPanel` and `FullscreenPresentation` are each
+  mounted ONLY by `DrawingLayout` (repo-wide grep).
+- **Navigation after open** (`FullscreenPresentation.tsx`): start index
+  `findIndex` over the slides array (`:78-82`), `currentSlide =
+  slides[currentIdx]` (`:114`), keyboard ±1 (`:210-224`), Prev/Next
+  buttons ±1 (`:347`, `:363`), counter `Slide {currentIdx+1} /
+  {slides.length}` (`:358`).
+
+**Defect ruling: ONE coherent defect — "presentation playback ignores
+the canonical panel order" — with TWO owner sites** (Task-2 outcome 3):
+
+1. the fullscreen **sequence** (FullscreenPresentation walks its
+   `slides` prop raw), and
+2. the **default start target** (DrawingLayout's no-id fallback picks
+   the raw-first frame).
+
+Neither half alone reaches a coherent contract: sequence-only produces
+exactly the live failure above (default opens Slide 2/2); target-only
+(canonical first id into a raw sequence) opens landscape labeled
+**Slide 2 / 2** with Prev leading to portrait — still divergent from
+the panel numbering. Explicit named launches need NO third change: once
+the sequence is canonical, `findIndex` by id lands the named slide at
+its canonical index.
+
+### 0.1.3 Outcome: OPTION A — amend PATCH-072 as one two-owner fix
+
+- Not Option B (split): the two halves share one contract, one product
+  ruling, one fixture, one spec, and are NOT independently shippable to
+  coherent end states (each half alone ships a new inconsistency).
+- Not Option C (diagnosis-only): every entry path is traced above with
+  exact lines; the intended default-start semantics are evidenced in
+  §0.1.4. Nothing remains uncertain.
+
+### 0.1.4 Product ruling — default-start contract (bound)
+
+1. **No explicit slide id** (bottom Start button): open canonical
+   `orderedSlides[0]` — **Slide 1 / M**.
+2. **Explicit slide id** (per-slide menu, any future named launch):
+   open exactly that slide, at its canonical index (counter shows its
+   canonical position).
+3. **Navigation** (Prev/Next buttons, ArrowLeft/ArrowRight/PageUp/
+   PageDown/Space): follows canonical order.
+
+Evidence: the bottom button sits directly beneath the canonically
+sorted slide list whose visible numbering is `Slide ${idx + 1}` over
+`sortedSlides` (`PresentationPanel.tsx:321-323`); the per-slide menu
+item belongs to the specific row the user clicked; the fullscreen
+counter must mean the same slide as the panel numbering. "Start
+presentation" with nothing selected can only coherently mean "play the
+deck I see, from its first slide."
+
+### 0.1.5 DrawingLayout authorization — smallest safe change
+
+`DrawingLayout.tsx` IS now authorized, restricted to exactly:
+
+1. ONE import of the same pure helper:
+   `import { sortSlidesByPresentationOrder } from "@/lib/infra/presentation/slideOrder";`
+2. Inside `handleStartPresentation` (`:1503-1508`) ONLY, replace the
+   fallback so the no-id branch resolves the canonical first frame:
+   `setPresentationStartId(fromSlideId ?? sortSlidesByPresentationOrder(activeFrames)[0].id);`
+   The explicit-`fromSlideId` path stays behaviorally identical; the
+   dependency array (`[elements]`) is unchanged.
+
+Structural fit: raw Excalidraw frame elements carry numeric `x`/`y` and
+no `order` property (`undefined` → `?? +Infinity`), so the helper's
+effective order over frames is `y → x` — identical to the panel's
+semantics for `frames` (which bind `order: null`, `:1944`). No
+comparator duplication is introduced (same helper; parity already
+locked by unit test §5.7).
+
+Net growth: ≤ 2 lines on an over-ceiling file — explicitly authorized
+here as a bound never-grow exception; nothing else in the file may
+change. Prohibited within `DrawingLayout.tsx`: any global reordering of
+`activeFrames` or `frames`, any change to the `frames` derivation
+(`:1934-1956`), the reconciliation effect, the panel/fullscreen mount
+JSX, planner/resolver/thumbnail wiring, any other handler.
+
+**Rejected alternatives:** passing `sortedSlides[0].id` from the
+PresentationPanel bottom button (the panel is IMMUTABLE-fenced, and it
+would leave the defective raw fallback live in the producer for any
+future no-id caller); sorting `frames` at the mount site (global
+reorder — §9 stop condition; also perturbs thumbnail/panel inputs);
+duplicating the comparator inline in DrawingLayout (rejected
+duplication).
+
+### 0.1.6 Amended scope — exactly FIVE files (hashes measured fresh at `a59526e`)
+
+| File | Pre-edit state (bind) | Authorized change |
+|---|---|---|
+| `lib/infra/presentation/slideOrder.ts` | ABSENT (dir removed; verified) | NEW pure helper, §2.1 exactly (unchanged) |
+| `lib/infra/presentation/slideOrder.test.ts` | ABSENT (verified) | NEW, exactly the §5 matrix N=7 (unchanged) |
+| `components/presentation/FullscreenPresentation.tsx` | `caea11414929b0291e8d5d54513d50f55daf73b3` | §2.3 exactly (unchanged) |
+| `components/collabboard/canvas/layouts/DrawingLayout.tsx` | `93e5900f8df6468a466f8bfd0318f813393336a1` | §0.1.5 exactly — one import + one fallback expression |
+| `e2e/characterization/drawing-presentation.spec.ts` | `19d6e86495dc06f677d6efd88a59e6e07566f02c` | §6 flip + §0.1.8 named-launch proofs |
+
+No SIXTH file. `PresentationPanel.tsx`
+(`926f43cec98fadc610976081b58cb246ba00d501`) remains IMMUTABLE. All
+other §3 prohibitions stand.
+
+### 0.1.7 Amended fences — 49 unique paths
+
+The §4 50-path set MINUS `DrawingLayout.tsx` (moved to
+authorized-change). **Verified 49/49 at `a59526e`** during this
+amendment (no duplicate paths). Verify before editing and before the
+commit.
+
+### 0.1.8 Amended e2e design (extends §6; test COUNT unchanged: 2 active + 2 approved skips)
+
+Inside the existing main active test, the bound matrix becomes:
+
+1. persisted raw scene order remains `[Portrait, Landscape]` (existing
+   `seededFrameTitles` + persisted-scene invariants, unchanged);
+2. canonical panel/sidebar order remains `[Landscape, Portrait]`
+   (existing assertions unchanged, incl.
+   `slideTitles ≠ seededFrameTitles`);
+3. **bottom Start (no id) opens LANDSCAPE, Slide 1 / 2** (child A
+   visible, child C visible, uploaded image visible, child B NOT
+   visible) — the §6 flip, now satisfiable;
+4. Next → PORTRAIT, Slide 2 / 2 (child B visible); Prev → back to
+   landscape Slide 1 / 2; End presentation closes;
+5. **NEW named-launch proofs** (after the End click, before the
+   back-to-dashboard reopen): via the per-slide ⋮ menu → "Start
+   presentation" on the PORTRAIT row → fullscreen opens PORTRAIT,
+   **Slide 2 / 2** (child B visible); End; same flow on the LANDSCAPE
+   row → fullscreen opens LANDSCAPE, **Slide 1 / 2** (child A visible,
+   child B not); End;
+6. all carried 069/070/071 invariants stay green exactly as §6 binds
+   (probe reset before the Start click; landscape observation window
+   anchored at fullscreen-open/slideIndex 1; thumbnail N5; planner
+   plan; persisted scene; cleanup zeros);
+7. the `patch-072-presentation-order` annotation additionally records
+   `defaultStartTarget: { before: 'raw-activeFrames[0]', after:
+   'canonical-orderedSlides[0]' }` and the two named-launch results
+   (slide title + counter each).
+
+### 0.1.9 Expected totals (unchanged by this amendment)
+
+Helper 7/1; sanitizer 9/1; focused 59/2; full **448/43**; presentation
+spec 2 active + 2 approved skips; all other §7 baselines as bound.
+
+### 0.1.10 Amended stop conditions (in addition to §9, which stands except its DrawingLayout clause)
+
+STOP immediately, report, do not commit, if:
+
+- satisfying the default target requires globally reordering
+  `activeFrames`, the `frames` derivation, or any persisted scene
+  order;
+- explicit named `startSlideId` launches regress (either per-slide
+  menu row);
+- any caller beyond the single `onStartPresentation` wiring
+  (`:3041`) requires a behavior change;
+- `PresentationPanel.tsx` must change at all;
+- PDF/PPTX export order, sidebar order, or thumbnail order changes;
+- a SIXTH file is required;
+- planner/resolver/thumbnail code is required;
+- the presentation spec's test COUNT changes;
+- a second defect surfaces (fix nothing else — report).
 
 ---
 
@@ -85,15 +299,18 @@ scope. The temporary duality (inline comparator + helper) is authorized
 ONLY under the §5 parity-lock test (PATCH-062's duality-with-parity
 precedent) and its consolidation is queued as a follow-up.
 
-**Rejected alternatives:** sorting in `DrawingLayout.tsx` (fenced
-hotspot, never-grow rule); replacing the panel's inline comparator in
+**Rejected alternatives:** sorting the fullscreen SEQUENCE in
+`DrawingLayout.tsx` (fenced hotspot, never-grow rule — note: Amendment
+1 authorizes a separate, minimal DrawingLayout edit for the DEFAULT
+START TARGET only, §0.1.5; the sequence sort stays in
+FullscreenPresentation); replacing the panel's inline comparator in
 this patch (bundled refactor); mutating persisted scene/frame order
 (data change for a presentation-layer defect); changing
 `characterizeFrameSlides` or any bridge/test-only module; introducing a
 user-facing slide-reorder feature (`order` field authoring — future
 product work); touching planner/resolver/thumbnail files.
 
-## 3. Scope — allowed files (exactly four)
+## 3. Scope — allowed files (exactly four) — SUPERSEDED by §0.1.6 (exactly FIVE; DrawingLayout.tsx authorized per §0.1.5)
 
 | File | Pre-edit state (bind, at `3b863d5`) | Authorized change |
 |---|---|---|
@@ -102,13 +319,14 @@ product work); touching planner/resolver/thumbnail files.
 | `components/presentation/FullscreenPresentation.tsx` | `caea11414929b0291e8d5d54513d50f55daf73b3` | §2.3 exactly: one import + one memoized sort + `slides` → `orderedSlides` reads |
 | `e2e/characterization/drawing-presentation.spec.ts` | `19d6e86495dc06f677d6efd88a59e6e07566f02c` | §6 flip |
 
-No fifth file. Prohibited outright: `DrawingLayout.tsx`,
+No fifth file *(superseded: §0.1.6 authorizes `DrawingLayout.tsx` as
+the fifth file, restricted to §0.1.5)*. Prohibited outright:
 `PresentationPanel.tsx`, `planSlideComposition.ts`,
 `resolveSlidePadlets.ts`, `RuntimeSlideRenderer.tsx`, all thumbnail
 files, all bridge/harness/test-only modules, all PATCH-071 files, fork,
 schema, config, dependencies, `.fable5/**` during implementation.
 
-## 4. Immutable fences — 50 unique paths
+## 4. Immutable fences — 50 unique paths — SUPERSEDED by §0.1.7 (49 paths: DrawingLayout.tsx moved to authorized-change)
 
 The PATCH-071 48-path set carried, MINUS the two files above moving to
 authorized-change (`FullscreenPresentation.tsx`,
@@ -203,11 +421,13 @@ server; never commit generated artifacts.
 
 STOP immediately, report, do not commit, if:
 
-- base commit, any §3 pre-edit hash, or any of the 50 fences differs;
+- base commit, any §0.1.6 pre-edit hash, or any of the 49 fences
+  (§0.1.7) differs;
 - either new file already exists at base;
-- the fix requires touching `DrawingLayout.tsx`,
-  `PresentationPanel.tsx`, any bridge/planner/resolver/thumbnail file,
-  or ANY fifth file;
+- the fix requires touching `PresentationPanel.tsx`, any
+  bridge/planner/resolver/thumbnail file, or any SIXTH file
+  (*superseded clause: `DrawingLayout.tsx` is authorized per §0.1.5,
+  restricted edits only*);
 - sidebar order, PDF/PPTX export order, or panel behavior changes;
 - the parity-lock test cannot hold without changing the panel;
 - per-slide `startSlideId` start breaks;
@@ -231,9 +451,12 @@ no persisted-scene writes, no data impact.
 
 ## 12. Required final report
 
-Files + pre/post hashes; helper semantics proof (7/1); fullscreen
-sequence evidence (Slide 1 = landscape, Slide 2 = portrait, sidebar
-equality); re-anchored PATCH-070 fixed-state evidence at slideIndex 1;
-`patch-072-presentation-order` annotation verbatim; all gate totals
-(§7); cleanup proof; 50-fence result; production-import grep; commit
-hash + push status after Sonnet PASS.
+Files + pre/post hashes (all FIVE, §0.1.6); helper semantics proof
+(7/1); fullscreen sequence evidence (Slide 1 = landscape, Slide 2 =
+portrait, sidebar equality); DEFAULT-START evidence (bottom button →
+landscape Slide 1 / 2) and BOTH named-launch results (§0.1.8.5);
+re-anchored PATCH-070 fixed-state evidence at slideIndex 1;
+`patch-072-presentation-order` annotation verbatim (incl.
+`defaultStartTarget`); all gate totals (§7/§0.1.9); cleanup proof;
+**49**-fence result (§0.1.7); production-import grep; commit hash +
+push status after Sonnet PASS.
