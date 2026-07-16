@@ -1,9 +1,10 @@
 # PATCH-070 - Restore Fullscreen Native Above-Band Raster (staged, diagnosis-first)
 
-**Status:** AUTHORIZED — **Stage 0B** (live runtime composition probe; see
-§0.1 Amendment 1). Stage 0 is DONE (commit `b9b754c`, row **F4**). Stage 1
-(the production fix) remains **LOCKED** until a further named CTO amendment
-binds exactly one proven mechanism from §0.1.6 to exactly one design from §5.
+**Status:** AUTHORIZED — **Stage 1** (composition planner lossless band
+closure; see §0.2 Amendment 2). Stage 0 is DONE (commit `b9b754c`, row
+**F4**). Stage 0B is DONE (commit `514b1d9`, row **G1d**, Sonnet PASS).
+Stage 1 is bound to §0.2.5's design EXACTLY; §5's original per-row designs
+are superseded for the F4/G1d path by Amendment 2.
 
 **Base commit (bind, verify before editing):**
 `05e913ef84c802b999bc4411d960873e4b21bb23`
@@ -225,6 +226,276 @@ zeros, zero production imports, sequential verify/build). The §9
 environment contract and §12 review flow apply verbatim; Sonnet must
 additionally verify the diagnostic's §0.1.5 shape compliance and
 production-inertness.
+
+---
+
+## 0.2 Amendment 2 (2026-07-16) — Stage 0B closed at G1d; Stage 1 authorized (composition planner)
+
+### 0.2.1 Stage 0B result (DONE, commit `514b1d9ab8f387d3a39d39ed7a13ae87fb36a07e`)
+
+Bound Stage-0B message used verbatim; Sonnet PASS (independent gates, build
+inspection proved the diagnostic minifies to a hard no-op in production).
+Files landed: `RuntimeSlideRenderer.tsx` → `c4b4b80fa5d3fb71d0874db74580ceee83012b86`,
+`drawing-presentation.spec.ts` → `bbeb16c14cdcbc5c1c7be7eca50cabb1de8c33f8`.
+
+Proven row: **G1d** (single-row match, fixed assertions). Live landscape
+plan input: the 7 seeded elements in persisted order PLUS one live-only
+embeddable `177f9190-e7c3-4dd0-bc4a-b616305f6e97` (type `embeddable`,
+`frameId: null`, `isDeleted: false`, link `padlet://a12ed29e-…`, live scene
+index 7). Live resolved padlet zIndexes `[2,3,7]` vs Node-side `[2,3]`;
+both seeded natives (indexes 4, 5) fall strictly inside the widened
+interval → `nativeBelowIds=[]`, `nativeAboveIds=[]`, above branch false,
+zero above commits; token/cleanup timeline clean; persisted scene and
+Node-side plan stable throughout. G1a excluded by padlet-COUNT divergence
+(3 vs 2), G1b/G1c by native presence/validity, G2 by state freshness
+(count-gate passed: 7→8 IS a count change), G3 absent.
+
+### 0.2.2 Origin census of the live-only embeddable (fresh, at base `514b1d9`)
+
+The element's full lifecycle, traced to source:
+
+- **Identity:** it represents padlet `a12ed29e-…` = the harness's
+  **Container C** (`drawingBridgeHarness.ts:304-315`: real `container` row,
+  position 160,460, size 320×220, one child note) — a REAL padlet, seeded
+  in the DB, that `seedPresentationScene` (`:472-480`) deliberately gave
+  NO persisted scene embeddable (only containers A/B and the uploaded
+  image got one).
+- **Creation + insertion:** DrawingLayout's padlet↔scene reconciliation
+  effect (`DrawingLayout.tsx:1596-1762`) computes `missingEmbeddables` =
+  every non-drawing root padlet with no live scene embeddable
+  (`:1627-1629`) and inserts one via
+  `createEmbeddableElementForPadlet` (`:1540-1574`) — **`frameId: null`
+  by construction** (`:1565`), positioned at the padlet's stored
+  `position_x/y`, fresh random element id per session (hence `177f9190…`
+  is session-local). This is the documented self-healing scene sync, not
+  a test artifact.
+- **State visibility:** the synthetic `updateScene` fires `handleChange`;
+  the count gate (`:1086-1089`) PASSES because 7→8 is a count change, so
+  React state (and both presentation data paths — thumbnail getters
+  `:1903-1907` and runtime refs `:695-697`) truthfully hold 8 elements.
+  The `:1083-1089` count-gate staleness mechanism (F4-B/G2) was NOT the
+  live mechanism.
+- **Persistence exclusion — intentional:** the reconciliation write sets
+  `isSyncingEmbeddablesRef.current = true` (`:1746`) and
+  `commitToHistory: false` (`:1753`), so autosave is suppressed by design
+  (the standing guardrail against sync-triggered save cascades). The
+  element persists only when a later REAL user edit saves the scene; the
+  post-run DB re-fetch showing 7 elements is therefore correct behavior,
+  not data loss.
+- **Cleanup:** the same effect's orphan sweep (`:1615-1625`) removes
+  scene embeddables whose padlet is gone/child/drawing — the inverse
+  direction of the same invariant.
+- **Membership:** with `frameId: null`, slide membership comes from
+  `resolveSlidePadlets.ts:29-34`'s geometric-overlap fallback; Container
+  C's bbox (160..480 × 460..680) lies inside the landscape frame
+  (0,0,1280,720), so it resolves onto that slide — the same rule any
+  legitimate unframed post uses.
+
+**Ruling: the element is LEGITIMATE.** It is the canonical live
+representation of a real board post (not a duplicate — `a12ed29e` has
+exactly one live embeddable; not a placeholder, refresh copy, stale
+artifact, or upload helper). Its absence from the persisted scene is
+intentional and transient. It SHOULD exist during presentation: the live
+padlet layer correctly shows Container C on the landscape slide. The
+fixture's incomplete scene seeding is not a fixture bug — it reproduces a
+real product state (any padlet created outside the drawing scene, or
+before a scene save lands) and stays byte-untouched as the regression
+fixture for this defect.
+
+### 0.2.3 Ownership resolution — one defect, owned by the planner
+
+- **A. Runtime input/state ownership — NOT the owner.** Presentation must
+  consume the live element array as-is: it is the product truth, and the
+  extra embeddable is real content. There is no invalid artifact to
+  filter; filtering unpersisted embeddables would hide every freshly
+  reconciled/created post from presentation. No DrawingLayout change is
+  authorized.
+- **B. Padlet resolution — NOT the owner.** `resolveSlidePadlets`
+  correctly applies the membership model (frameId match, else geometric
+  overlap) to a legitimate element. Scene elements carry no persistence
+  provenance, and none should be invented: excluding "runtime-only"
+  embeddables would break legitimate unframed padlets and freshly created
+  posts. It does not dedupe duplicate links (measured, §0.2.4 S5) — noted,
+  but duplicates cannot arise from DrawingLayout's guarded paths and no
+  resolver change is authorized.
+- **C. Composition planning — THE owner.** Given this legitimate input,
+  `planSlideComposition.ts:39-47` drops every native member whose index
+  falls strictly between `firstPadletIndex` and `lastPadletIndex` from
+  BOTH bands — silently. The defect is GENERIC (any native between two
+  padlets; measured S3), strictly broader than the fixture, and affects
+  fullscreen AND thumbnail identically (same shared planner). A second
+  lossy shape lives in the same lines: resolved padlet zIndexes are
+  computed over `activeElements` while the native band split uses raw
+  `sceneElements.findIndex` — a deleted element preceding a native
+  inflates its raw index and can drop it outright (measured S7).
+
+**Defect count: ONE (Task-4 outcome 2).** "Defect A" (live-only embeddable
+enters presentation) is not a defect — that behavior is correct. No split
+patch; no further diagnosis stage; the origin and legitimacy are fully
+determined above.
+
+### 0.2.4 Measured planner scenario census (CTO dry-run of the REAL
+`planSlideComposition` at base `514b1d9`; scratch runner deleted after use)
+
+| # | Scene (active order) | resolved z | below | above | DROPPED |
+|---|---|---|---|---|---|
+| S1 | native, padlet, native | [2] | n-before | n-after | — |
+| S2 | native, padlet, padlet, native | [2,3] | n-before | n-after | — |
+| S3 | padlet, native, native, padlet | [1,4] | — | — | **n-mid1, n-mid2** |
+| S4 | padlet, padlet, native, native, unframed-overlap padlet (live G1d shape) | [1,2,5] | — | — | **n1, n2** |
+| S5 | padlet, native, dup-link padlet (same padlet id twice) | [1,3] | — | — | **n-mid** |
+| S6 | deleted el, padlet, native | [1] | — | n-after | — (raw-index bias, correct here) |
+| S7 | deleted el, native, padlet | [2] | — | — | **n-real** (domain mismatch) |
+
+S1/S2/S6 are lossless today and must stay byte-equal in outcome. S3–S5 and
+S7 are the defect surface. None of these scenarios exist in current unit
+coverage (`presentationBridge.test.ts` census: no mid-band, no
+range-widening, no duplicate-link, no deleted-element-shift test) — the
+bound unit tests of §0.2.6 close that gap inside Stage 1 itself; no
+separate characterization patch is needed because the lossy pre-fix
+behavior is the authorized change, not a behavior to freeze.
+
+### 0.2.5 Stage 1 — Composition Planner Lossless Band Closure (AUTHORIZED)
+
+**This amendment is the §5-F4 "planner ruling" and the §0.1.6
+STOP-and-redesign outcome: census has now proven planner output wrong on
+legitimate live input, so `planSlideComposition.ts` moves from fenced to
+authorized-change for exactly this design.**
+
+Bound design (exactly this; no latitude on semantics):
+
+1. Inside `planSlideComposition` only: compute ONE index domain — the
+   position of each element within the SAME `activeElements` array passed
+   to `resolveSlidePadlets` (e.g., one `Map<id, activeIndex>` built once).
+   The raw-`sceneElements` `findIndex` calls are removed.
+2. Band rule: `nativeBelowElements` = native members with
+   `activeIndex < firstPadletIndex`; `nativeAboveElements` = ALL other
+   native members (`activeIndex > firstPadletIndex`; equality is
+   impossible — padlet indexes belong to embeddables). Mid-interval
+   natives therefore raster in the ABOVE band.
+3. Invariant (bind as a unit test): for every input,
+   `nativeBelowElements ∪ nativeAboveElements` = the full
+   `nativeFrameElements` set — **no native member is ever dropped**.
+4. `SlideCompositionPlan` shape unchanged; `resolveSlidePadlets` unchanged;
+   the zero-padlet early return unchanged; element order within each band
+   preserved (activeElements order).
+5. Required scenario outcomes after the fix: S1/S2/S6 identical to
+   §0.2.4; S3 → above = [n-mid1, n-mid2]; S4 → above = [n1, n2];
+   S5 → above = [n-mid]; S7 → above = [n-real]. On the live fixture:
+   landscape natives land in the above band and the above PNG mounts with
+   content.
+
+Layering semantics, stated honestly: a mid-interval native paints above
+ALL live padlet cards, not interleaved between them. Exact interleaving is
+unrepresentable in the two-raster model; the above band is chosen because
+it guarantees content VISIBILITY (P3 — the current behavior is total
+loss; a below-band assignment could hide a native entirely behind a card
+it legally sits above). Scenes that are lossless today render identically.
+
+Rejected explicitly: full multi-band/segmentation plan (changes the plan
+shape and both consumers incl. the fenced thumbnail files — broad
+composition architecture, its own future patch if ever needed); any
+resolver provenance rule; any DrawingLayout/runtime filtering; any
+consumer-side compensation in `RuntimeSlideRenderer.tsx`; fixture edits.
+
+Thumbnail note: thumbnail FILES stay fenced and byte-untouched; thumbnail
+BEHAVIOR for mid-band scenes changes with the shared planner — that is the
+same defect healed at its root, and the fixture's N5 assertions remain
+green either way (7-element plan: natives above, unchanged; 8-element
+plan: natives now above instead of dropped).
+
+### 0.2.6 Stage 1 allowed files (exactly four) and bound requirements
+
+| File | Pre-edit hash (bind, at `514b1d9`) | Authorized change |
+|---|---|---|
+| `components/presentation/slide-renderer/planSlideComposition.ts` | `9524e6397e623fef905f213e80953b2a22e2423d` | the §0.2.5 design, nothing else |
+| `lib/infra/drawing/presentationBridge.test.ts` | `dff458de747d673868b1eae2b695e41b4c3424d2` | ADDITIVE only: new `it` blocks covering S1–S7 outcomes + the no-drop invariant via the existing `characterizeSlideComposition`; no existing test modified or deleted |
+| `components/presentation/runtime-slide/RuntimeSlideRenderer.tsx` | `c4b4b80fa5d3fb71d0874db74580ceee83012b86` | Stage-0B diagnostic REMOVAL ONLY — final file must be byte-identical to `a407cccc230ca74a36a443b5f701767856754230`; restore via `git cat-file blob b9b754c:components/presentation/runtime-slide/RuntimeSlideRenderer.tsx` written binary (never `git checkout` — CRLF smudge, see LESSONS), then `git hash-object` must print `a407cccc…` |
+| `e2e/characterization/drawing-presentation.spec.ts` | `bbeb16c14cdcbc5c1c7be7eca50cabb1de8c33f8` | evolve to the §7 fixed-state regression (details §0.2.7) |
+
+Unit-test placement is FORCED: vitest's include globs are
+`lib/domain/**/*.test.ts` + `lib/infra/**/*.test.ts` (measured at
+authoring) — a test file under `components/**` would silently never run.
+`presentationBridge.ts` itself stays fenced: `characterizeSlideComposition`
+already exposes `nativeBelowIds`/`nativeAboveIds`/`resolvedPadlets`, which
+is sufficient for all seven scenarios.
+
+Diagnostic removal policy (bind): remove `DEV_RUNTIME_SLIDE_DIAGNOSTICS`,
+the record type, `recordRuntimeSlideDiagnostic`, all four call sites, and
+the spec's diagnostic reads/classification block (`__fable5RuntimeSlideDiagnostics`
+must have zero references in production code after Stage 1; the byte-identity
+gate above enforces the production side maximally). No conversion to a
+permanent contract is approved.
+
+**Bound Stage-1 commit message (verbatim, unchanged from §12):**
+`fix(presentation): restore fullscreen native raster (PATCH-070)`
+
+### 0.2.7 Stage 1 required behavior and regression
+
+Production behavior: §7 applies verbatim (above-band PNG present, loaded,
+non-zero dims, native text+shape visible; below band unchanged; thumbnail
+N5 unchanged; persisted scene untouched; ordering untouched).
+
+E2e evolution (sole spec file): the N2-era defect assertions and the
+Stage-0/0B probe classifications that assert the DEFECT state (`F4` row
+selection, `G1d` row selection, `aboveExportBegan=false`, absent above
+img, all-zero native raster counts) FLIP or are superseded by fixed-state
+assertions; `patch-069-classification` evolves into
+`patch-070-native-raster-fix` exactly as §7 specifies, additionally
+recording: Stage 0 row F4, Stage 0B row G1d, the extra embeddable's
+padlet id + provenance (reconciliation-inserted, unpersisted), live padlet
+zIndexes, and the post-fix above-band evidence. Harness-canvas provenance
+plumbing (`markHarnessCanvas`) and any probe evidence the regression still
+needs MAY remain; the Stage-0B diagnostic reads MUST go (§0.2.6).
+Persisted-scene and Node-side-plan invariants stay green: the Node plan
+over the persisted 7-element scene is UNCHANGED by the fix (natives above,
+range [2,3] — no mid-interval natives there).
+
+Unit gates: focused Vitest becomes 51+N passed / 2 skipped and full
+becomes 424+N passed / 41 skipped, where N = the number of added `it`
+blocks (N ≥ 8: seven scenario tests + the no-drop invariant; exact N is
+declared in the implementation report and re-derived by the reviewer —
+these two totals are DERIVED baselines, not measured; a mismatch against
+the implementer's own declared N is a STOP, not an improvisation point).
+All other §11 gates and totals carry unchanged (setup 1, line 4,
+presentation 2 passed / 2 approved skips, credential-off 4+4, tsc,
+boundaries, sequential verify/build, cleanup zeros, zero production
+imports, §9 environment contract, §12 review flow with Sonnet PASS
+required before commit).
+
+### 0.2.8 Stage 1 fences (42 unique immutable paths)
+
+Delta from the §8 43-path set, all other 41 entries carried verbatim and
+re-verified 43/43 at base `514b1d9` during this amendment's census:
+
+- REMOVED (now authorized-change): `components/presentation/slide-renderer/planSlideComposition.ts`,
+  `lib/infra/drawing/presentationBridge.test.ts`
+- ADDED (plan-shape loophole closed):
+  `components/presentation/slide-renderer/types.ts a2825c8b4438cbb29e2ee1df2f94c1d3a4ff5fd5`
+
+`RuntimeSlideRenderer.tsx` and `drawing-presentation.spec.ts` remain
+authorized-change (per-file bindings in §0.2.6). `resolveSlidePadlets.ts`
+(`5dc7aa98…`), `DrawingLayout.tsx` (`93e5900f…`), all fork files, all
+thumbnail files, and the harness remain IMMUTABLE.
+
+### 0.2.9 Stage 1 stop conditions (additional to §10, which applies less
+its now-satisfied "planner change appears necessary" row — that row is
+superseded by this authorization; every other §10 row stands)
+
+STOP immediately, report, do not commit, if:
+
+- the fix requires touching ANY consumer (`RuntimeSlideRenderer.tsx`
+  beyond the bound byte-identity restoration, `createSlideRenderer.tsx`,
+  `mergeSlideLayers.ts`) or the plan shape in `types.ts`;
+- `resolveSlidePadlets.ts` requires any change;
+- any S1/S2/S6 outcome changes;
+- the above-band PNG is STILL absent after the planner fix on the live
+  fixture (a second defect — do not bundle a further fix);
+- thumbnail N5, persisted-scene, or Node-plan invariants break;
+- `RuntimeSlideRenderer.tsx` cannot reach byte-identity `a407cccc…`;
+- any existing test in `presentationBridge.test.ts` must be modified
+  (additive-only violation);
+- frame-order, AI-image, or uploaded-image scope appears.
 
 ---
 

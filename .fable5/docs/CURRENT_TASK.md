@@ -361,6 +361,62 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-16** — PATCH-070 **Stage 0B DONE (commit
+  `514b1d9ab8f387d3a39d39ed7a13ae87fb36a07e`, Sonnet PASS)** + **Stage 1
+  AUTHORIZED** (Amendment 2: composition planner lossless band closure).
+  Stage 0B landed diagnosis-only, exactly two files
+  (`RuntimeSlideRenderer.tsx` → `c4b4b80f…` dev-only diagnostics, proven
+  minified to a hard no-op in the production chunk;
+  `drawing-presentation.spec.ts` → `bbeb16c1…` reader/classifier).
+  **Proven row: G1d** — the live fullscreen plan input holds the 7 seeded
+  elements in persisted order PLUS one live-only embeddable
+  (`177f9190…`, `frameId: null`, link `padlet://a12ed29e…`, live index 7);
+  live resolved padlet zIndexes `[2,3,7]` vs Node-side `[2,3]`; both
+  natives (indexes 4,5) sit inside the widened interval → both bands
+  empty, above branch false, zero above commits; tokens/cleanup clean;
+  persisted scene + Node plan stable. **Origin census closed the
+  question:** the extra element is DrawingLayout's padlet↔scene
+  reconciliation (`:1627-1629`/`:1746-1755`) self-healing a REAL padlet —
+  the harness's Container C (seeded in DB, deliberately given no scene
+  embeddable by `seedPresentationScene`) — inserted `frameId: null` at the
+  padlet's stored position, autosave-suppressed BY DESIGN
+  (`isSyncingEmbeddablesRef`, `commitToHistory: false`), session-local
+  element id, resolving onto the landscape slide via the resolver's
+  geometric-overlap fallback (bbox 160..480×460..680 inside 0,0,1280,720).
+  **Ruling: the element is legitimate content; its DB absence is
+  intentional; presentation consuming it is CORRECT.** The count-gate
+  staleness mechanism (F4-B/G2) was NOT live (7→8 IS a count change).
+  **Ownership: composition planning — ONE defect** (Task-4 outcome 2):
+  `planSlideComposition.ts:39-47` silently drops every native between
+  `firstPadletIndex` and `lastPadletIndex` from BOTH bands. CTO dry-ran
+  the real planner on 7 scenarios (S1–S7, table in §0.2.4): mid-band drop
+  (S3), the live G1d shape (S4), duplicate-link widening (S5), and a
+  second lossy shape — raw-vs-active index-domain mismatch drops a native
+  preceded by a deleted element (S7). Runtime-input filtering (A) and
+  resolver provenance (B) REJECTED: no invalid artifact exists, and
+  excluding unpersisted embeddables would hide real posts. **Stage 1
+  bound design (§0.2.5):** single active-index domain + band rule
+  below = idx < firstPadletIndex, above = everything else (mid-interval
+  natives raster ABOVE — visibility per P3; exact interleaving is
+  unrepresentable in the two-raster model; all currently-lossless scenes
+  byte-equal in outcome); plan shape/resolver/consumers untouched;
+  full multi-band segmentation REJECTED as broad architecture. Allowed
+  files (4, §0.2.6): `planSlideComposition.ts` (`9524e639…`, unfenced by
+  this amendment per §5-F4's planner-ruling path),
+  `presentationBridge.test.ts` (`dff458de…`, ADDITIVE S1–S7 + no-drop
+  invariant tests — vitest include globs force `lib/**` placement),
+  `RuntimeSlideRenderer.tsx` (diagnostic REMOVAL to byte-identity
+  `a407cccc…` via `git cat-file` restore), spec (`bbeb16c1…`, §7
+  fixed-state flip + `patch-070-native-raster-fix` annotation). Fences:
+  42 unique immutable paths (43-set minus the two unfenced files, plus
+  `slide-renderer/types.ts a2825c8b…` closing the plan-shape loophole);
+  all 43 re-verified at `514b1d9` during the census. Baselines: focused
+  51+N/2, full 424+N/41 (N ≥ 8, declared + re-derived), all other gates
+  carried. Stage-1 commit message unchanged
+  (`fix(presentation): restore fullscreen native raster (PATCH-070)`);
+  Sonnet PASS required before commit; PATCH-071 not started. Follow-up
+  candidates recorded, NOT authorized: resolver duplicate-link dedupe,
+  count-gate staleness (G2-class latent), planner multi-band model.
 - **2026-07-16** — PATCH-070 **Stage 0 DONE (commit
   `b9b754cefccd6569ed4e5ce858090609c6b76567`)** + **Stage 0B AUTHORIZED**
   (Amendment 1). Stage 0 landed as the runtime discrimination probe,
