@@ -1,11 +1,14 @@
 # PATCH-071 - Sanitize Membership Metadata on Drawing-Canvas Clone (staged, repro-first)
 
-**Status:** Stage 0 **DONE** (commit
-`af04779b9a8864d5bb9b75eb1f14d7888f7861d9`, Sonnet PASS, no required
-changes, **Stage 1 census CONFIRMED**). Stage 1 **ACTIVE — implementation
-authorized** under §0.1 Amendment 1 (rebased base, exact contract, exact
-test matrix). The §4 contingency is satisfied; the design is UNCHANGED
-from §3.
+**Status:** **DONE** (2026-07-16; closed in CURRENT_TASK.md). Stage 0
+DONE (commit `af04779…`, Sonnet PASS, census confirmed, classification
+`clone-membership-metadata-copied-verbatim`). Stage 1 DONE (commit
+`3b863d55ee6ae6ce9af0c7747c1bda1a82500e71`, Sonnet PASS, no required
+changes) — `sanitizeClonedPostMetadata` landed exactly per §0.1.3 (six
+keys stripped regardless of truthiness, nullish passthrough, shallow
+copy, no mutation), exactly two call-site edits in `useCanvasActions.ts`,
+e2e flipped to `clone-membership-metadata-sanitized`; unit 9/1, full
+441/42, all gates green, 48/48 fences.
 
 **Base commit (bind, verify before editing):**
 Stage 0 base was `115a977…`. **Stage 1 base (bind):**

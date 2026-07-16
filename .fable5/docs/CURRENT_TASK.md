@@ -361,6 +361,86 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-16** — PATCH-071 **DONE (Stage 1 commit
+  `3b863d55ee6ae6ce9af0c7747c1bda1a82500e71`, Sonnet PASS, no required
+  changes)** + fresh census + **PATCH-072 AUTHORIZED** ("Align Fullscreen
+  Slide Order with the Canonical Panel Order", fix, single stage, base
+  `3b863d5`). **PATCH-071 closure:** Stage 0 (`af04779`, census
+  confirmed) + Stage 1 landed exactly the four authorized files —
+  NEW `lib/infra/collabboard/clonedPostMetadata.ts` (`7d6b6ee6…`,
+  `sanitizeClonedPostMetadata`: nullish passthrough, shallow copy,
+  nested references preserved, no mutation, exactly six keys removed
+  regardless of truthiness — parentId/childPadletIds/sectionId/
+  sectionPosition/position_in_timeline/wallPosition — no seventh key, no
+  deep clone/JSON/allowlist, sanitizeLibraryMetadata untouched), NEW
+  test file (`5b53e839…`, 9/1), `useCanvasActions.ts` (`b470cc3f…`,
+  exactly one import + two call sites: handleDuplicatePadlet,
+  handlePastePadlet; Copy unchanged, no hook refactor), e2e spec
+  (`28023cf0…`, real hover-pencil trigger paths preserved; Duplicate →
+  one clone, Copy alone → none, Paste → one; all six keys absent AS OWN
+  PROPERTIES on both clones; ordinary metadata + visible content
+  preserved; originals byte-stable; child pointers still on originals;
+  clone ids new and distinct; no graph repair; parentId caveat honestly
+  retained; classification `clone-membership-metadata-sanitized`).
+  Final gates: 9/1, 59/2, 441/42, setup 1, duplication 2/1, line 4,
+  presentation 2+2, cred-off 2/4/4, diff-check/tsc/boundaries/verify/
+  build green, cleanup zeros (harness + patch-071 scoped), 48/48
+  fences, zero prod imports, repo clean/synced. **Fresh census at
+  `3b863d5` (all fences held through 071, so prior source analyses
+  remain valid; re-verified key sites by direct read):** (1)
+  **presentation frame-order divergence — SELECTED as PATCH-072**:
+  canonical rule `order ?? ∞ → y → x` lives in
+  `PresentationPanel.tsx:71-81` and already governs the panel list, PDF
+  export, AND PPTX export (`:156-158`); `FullscreenPresentation.tsx`
+  alone walks its `slides` prop unsorted (`:78-82,:114,:215,:363`),
+  mounted with raw scene order (`DrawingLayout.tsx:3047-3056`);
+  divergence explicitly frozen in the spec (`:918-920`
+  slideTitles≠seededFrameTitles; `:938-942` portrait-first fullscreen).
+  Deterministic, characterized, exact owner, product ruling now made:
+  **canonical = panel order** (three of four surfaces already agree).
+  (2) duplicate `padlet://` links — needs a duplication-semantics
+  product ruling (clone-the-post vs shared reference), element-level +
+  resolver interaction; design-first; NOT bundled with 071's metadata
+  work. (3) membership-union consolidation — REFACTOR (P6), not a
+  user-visible defect; rides an existing net later. (4) line-follow
+  (move + natural-height) — needs the attachment-anchor product
+  contract first; move/resize may be one or two causes, undetermined;
+  feature-sized. (5) AI images in presentation — still blocked on a
+  deterministic fixture; layer (persistence/asset-map/export/runtime)
+  undetermined. (6) overlap fallback — still LOAD-BEARING
+  (PATCH-070-proven for reconciliation-inserted embeddables); no change
+  without membership-semantics design. (7) uploaded-image cleanup —
+  documentation-only, no runtime defect. (8) duplicate identity
+  (element/line/post ids) — no evidence of id-level duplication defect;
+  distinct from membership metadata (071) and from link duplication
+  (RC-1). (9) post-071 regressions — none (all baselines green at
+  HEAD). (10) Connections side panel — FEATURE (Registry-Editor tree,
+  search, select/center line); requires a dedicated product/design
+  spec + explicit roadmap approval; not stabilization. **PATCH-072
+  shape:** four files — NEW `lib/infra/presentation/slideOrder.ts`
+  (pure `sortSlidesByPresentationOrder`, structural generic, stable,
+  non-mutating) + NEW `slideOrder.test.ts` (exactly N=7 incl. the
+  §5 parity-lock authorizing the temporary comparator duality —
+  PresentationPanel stays byte-untouched, consolidation queued),
+  `FullscreenPresentation.tsx` (`caea1141…` → memoized sort, all
+  internal `slides` reads switch to `orderedSlides`, nothing else),
+  presentation spec (`19d6e864…` → fullscreen sequence flips to
+  [Landscape, Portrait], landscape observation window re-anchors to
+  fullscreen-open/slideIndex 1, ALL 069/070/071 invariants stay green,
+  new `patch-072-presentation-order` annotation). Rejected: sorting in
+  DrawingLayout (fenced hotspot), panel-comparator swap (bundled
+  cleanup), persisted-order mutation, bridge/planner changes, slide
+  reorder feature. Fences: **50 unique immutable paths** (071's 48 − 2
+  unfenced + 4 PATCH-071 files frozen at committed hashes), 50/50
+  verified at base; new files + `lib/infra/presentation/` dir verified
+  ABSENT. Expected totals post-fix: helper 7/1, sanitizer 9/1, focused
+  59/2, full **448/43**; Playwright counts unchanged (presentation
+  stays 2+2, flipped content). All baselines re-verified fresh at
+  `3b863d5` this session (dev-server contract, own PID
+  attributed/stopped). Bound commit:
+  `fix(presentation): align fullscreen slide order with panel order
+  (PATCH-072)`. Sonnet PASS required before commit. Implementation NOT
+  started.
 - **2026-07-16** — PATCH-071 **Stage 0 DONE (commit
   `af04779b9a8864d5bb9b75eb1f14d7888f7861d9`, Sonnet PASS, no required
   changes, census CONFIRMED)** + **Stage 1 ACTIVATED** (Amendment 1,
