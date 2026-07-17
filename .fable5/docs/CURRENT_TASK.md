@@ -361,6 +361,95 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-17** - **PATCH-073 Stage 1 DONE (implementation commit
+  `b68cdad4485ad7c4767a735c4bf30762ee4739e4`, Sonnet PASS, no required
+  changes)** + fresh post-073 census completed at HEAD + **PATCH-074
+  AUTHORIZED as diagnosis-only**. **PATCH-073 closure:** exact committed
+  scope = `PresentationPanel.tsx` (`e811fa95...`),
+  `presentation-menu-pointer.spec.ts` (`c78d2c8e...`),
+  `drawing-presentation.spec.ts` (`8c7aa641...`). Final defect:
+  per-slide menu top actions were pointer-unreachable because the menu
+  was owned by a clipped card while positioned outside the card's
+  visible region; keyboard remained intact. Final fix: row wrapper owns
+  the real menu trigger + menu; menu sits outside the clipped card; card
+  keeps `overflow-hidden`; no portal/fixed positioning/viewport
+  observer/SlideThumbnail change; placement rule = below for
+  single-slide + non-last multi-slide rows, above for the last row of a
+  multi-slide list. Carried locator corrected narrowly to row scope via
+  `/parent::div`; assertion block remained byte-preserved. Final
+  characterization state = `per-slide-menu-pointer-reachable` at
+  1280x720 and 1440x900; 2 rows, 7 items/row, 14 observations/viewport,
+  all `visibleFraction=1`, all `elementFromPoint` hits item/descendant,
+  Start + Share pointer activation succeed on both rows, lower actions
+  pointer-reachable, keyboard preserved, menu close semantics correct,
+  landscape = Slide 1/2 child A, portrait = Slide 2/2 child B, bottom
+  global Start unaffected, PATCH-072 ordering unaffected, thumbnail
+  clipping preserved, `cardOverflowChanged:false`,
+  `SlideThumbnailChanged:false`, `portalUsed:false`,
+  `fullscreenOrderingChanged:false`. Stage-1 annotation safety fixed:
+  pointerError data URLs redacted before truncation, no raw
+  `data:image/` or `;base64,`, credential-like fields redacted, 1500
+  char cap retained, repeated retry noise collapsed. **Fresh baseline
+  re-verification at `b68cdad` (all rerun live this session):** Stage-1
+  spec 2/1/2, presentation 2+2, duplication 2/1/2-skipped, line
+  4/4-skipped, helper 7/1, sanitizer 9/1, focused 59/2, full 448/43,
+  diff-check/tsc/boundaries/verify/build green, cleanup zeros for all
+  PATCH-064 harness prefixes plus PATCH-071/072/073, zero production
+  imports, repo clean/synced, port 3000 free, artifacts absent.
+  **Follow-up notes recorded WITHOUT reopening PATCH-073:** (1)
+  row-position menu placement verified only at two viewports -> accepted
+  product behavior for now, future responsive-hardening candidate rather
+  than a reopened defect; (2) per-slide menu Escape close is not part of
+  PATCH-073, currently lacks an explicit product/accessibility ruling,
+  and stays a separate narrow candidate; (3) retry-error sanitizer is
+  now functioning and needs no standalone patch - at most future test
+  utility consolidation if broader reuse appears; (4) timeout-safe
+  harness cleanup remains the top infra follow-up. **Fresh ranked
+  census at `b68cdad`:** (1) timeout-safe drawing harness cleanup -
+  defect / deterministic / shared harness-spec owner / small test-only
+  file set / diagnosis-first / **Priority 1**; (2) Escape close for
+  per-slide menus - hardening / reproducible but product expectation and
+  analogous-menu parity still need a ruling / **Priority 2**; (3)
+  duplicate `padlet://` links - defect candidate but clone-vs-shared
+  semantics still unresolved / **Priority 3**; (4) comparator
+  parity/consolidation - hardening+refactor only, no current reachable
+  user mismatch (`PresentationPanel` inline comparator at `:71-79`,
+  helper at `slideOrder.ts`, frames still bind `order:null`) /
+  **Priority 4**; (5) line-follow behavior - user-visible but still
+  blocked on attachment-contract/product ruling / **Priority 5**; (6)
+  membership-union consolidation - refactor/architecture work, no fresh
+  user-visible defect / **Priority 6**; (7) AI images in presentation -
+  user-visible possibility but deterministic fixture still absent and
+  failing layer unresolved (`PresentationContainerCard` ignores AI child
+  fields; `PresentationPadletCard` image source ignores AI asset
+  fields) / **Priority 7**; (8) overlap fallback - still load-bearing
+  (`resolveSlidePadlets.ts:29-35`), untouched without a new membership
+  design / **Priority 8**; (9) uploaded-image storage cleanup -
+  documentation only / **Priority 9**; (10) Connections side panel -
+  feature/roadmap only / **Priority 10**. **PATCH-074 selected
+  narrowly:** diagnosis-only, title **"Timeout-Safe Drawing Harness
+  Cleanup Ownership Characterization"**, base `b68cdad`, exact allowed
+  file = NEW `e2e/characterization/drawing-harness-cleanup.spec.ts`
+  only (absence verified), no production source, no harness/config
+  edits. The spec shells out to child Playwright runs against the owned
+  dev server to freeze four cases - normal pass, assertion failure,
+  real test timeout, hard-killed child process - and records which
+  paths do or do not leave prefix-scoped residue. Bound fences = **6
+  unique paths**: `drawingBridgeHarness.ts` `85a6566d...`,
+  `drawing-presentation.spec.ts` `8c7aa641...`,
+  `drawing-line-bridge.spec.ts` `3e690d20...`,
+  `drawing-duplication.spec.ts` `28023cf0...`,
+  `presentation-menu-pointer.spec.ts` `c78d2c8e...`,
+  `playwright.config.ts` `5864c984...`. Bound new-spec totals: 2 passed
+  with deps / 1 no-deps / 2 cred-off skipped. Cleanup contract:
+  disposable prefixes only, no broad query, manual prefix-scoped sweep
+  required after the hard-kill case. Stop if a second tracked file, any
+  production edit, any fence drift, any broad cleanup query, or any need
+  to weaken carried suites appears. Bound PATCH-074 implementation
+  commit: `test(e2e): characterize timeout-safe drawing harness cleanup
+  ownership (PATCH-074)`. Governance commit only; PATCH-074
+  implementation NOT started.
+
 - **2026-07-17** — **PATCH-073 Stage 1 CONSTRAINED + expanded to
   THREE files (Amendment 2, classification C, OPTION B)** after the
   uncommitted Stage 1 implementation went green on its target spec

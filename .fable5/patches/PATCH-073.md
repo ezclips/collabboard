@@ -7,6 +7,17 @@ Amendment 1 (§0.1), constrained and expanded to exactly THREE files
 by Amendment 2 (§0.2)**; where §0.2, §0.1, and the Stage 0 sections
 conflict, §0.2 wins.
 
+**Closure update (2026-07-17):** Stage 1 is **DONE** at commit
+`b68cdad4485ad7c4767a735c4bf30762ee4739e4` (Sonnet PASS, no required
+changes). Final production fix: the row wrapper now owns the per-slide
+menu trigger and menu, the menu sits outside the clipped card, the card
+keeps `overflow-hidden`, placement is deterministic (`top-full mt-1`
+for single-slide and non-last multi-slide rows, `bottom-full mb-1` for
+the last row of a multi-slide list), and the carried locator moved to
+row scope via `/parent::div` without weakening assertions. Follow-up
+notes were recorded separately in governance closeout; PATCH-073 is
+closed.
+
 **Base commit (bind, verify before editing):**
 `27e4018f2f83ad33b592ef85773aa240f1a7c9ca`
 (`fix(presentation): align fullscreen slide order with panel order (PATCH-072)`)
