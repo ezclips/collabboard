@@ -9,6 +9,7 @@ import {
   cleanupDrawingFixture,
   createDisposableDrawingBoard,
   openDrawingBoard,
+  registerDrawingCleanup,
   seedDrawingContainers,
   seedPresentationScene,
 } from './drawingBridgeHarness';
@@ -18,6 +19,8 @@ const NATIVE_TEXT_ID = 'text-landscape';
 const NATIVE_SHAPE_ID = 'shape-landscape';
 const LANDSCAPE_FRAME_ID = 'frame-landscape';
 const SEEDED_NATIVE_IDS = [NATIVE_TEXT_ID, NATIVE_SHAPE_ID] as const;
+
+registerDrawingCleanup(test);
 
 type PersistedSceneElement = {
   id: string;

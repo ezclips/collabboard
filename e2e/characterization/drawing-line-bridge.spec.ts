@@ -6,6 +6,7 @@ import {
   createDisposableDrawingBoard,
   fetchHarnessLineRows,
   openDrawingBoard,
+  registerDrawingCleanup,
   seedAttachedCanvasLines,
   seedDrawingContainers,
   seedLineScene,
@@ -51,6 +52,8 @@ const LINE_ROLES = [
   'point-handle',
   'label-handle',
 ] as const;
+
+registerDrawingCleanup(test);
 
 async function lineGeometry(page: Page, lineId: string) {
   return page.locator(`[data-line-id="${lineId}"][data-line-role="visible-path"]`).first().evaluate((node) => ({

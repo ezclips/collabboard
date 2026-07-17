@@ -79,8 +79,8 @@ import { test, expect } from '@playwright/test';
 import fs from 'fs';
 import {
   assertDrawingFixtureCleanup,
-  cleanupDrawingFixture,
   createDisposableDrawingBoard,
+  registerDrawingCleanup,
   seedAttachedCanvasLines,
   seedDrawingContainers,
   seedLineScene,
@@ -104,13 +104,14 @@ function record(kind, payload) {
   }) + '\\n');
 }
 
+registerDrawingCleanup(test);
+
 test.afterEach(async ({}, testInfo) => {
   record('afterEach:start', { status: testInfo.status, expectedStatus: testInfo.expectedStatus });
   if (!cleanupContext) {
     record('afterEach:skipped');
     return;
   }
-  await cleanupDrawingFixture(cleanupContext.supabase, cleanupContext.fixture);
   const counts = await assertDrawingFixtureCleanup(cleanupContext.supabase, cleanupContext.fixture);
   record('afterEach:complete', { ...counts, status: testInfo.status, expectedStatus: testInfo.expectedStatus });
 });
@@ -599,11 +600,12 @@ test.describe('PATCH-074 drawing harness cleanup ownership characterization', ()
           uncoveredFailureModes: ['OS crash during parent sweep', 'database outage during cleanup'],
           userDataProtection: { prefixScoped: true },
           broadDeleteUsed: false,
+          cleanupOwnerImplemented: 'shared-registered-afterEach',
           productionChanged: false,
           harnessChanged: false,
           configChanged: false,
           recommendedStage1Owner: recommendedOwner,
-          stage1Status: 'amendment-required',
+          stage1Status: 'implemented',
           exactClassification,
         }),
       });

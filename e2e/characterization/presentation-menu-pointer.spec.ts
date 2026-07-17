@@ -7,6 +7,7 @@ import {
   createHarnessClient,
   createDisposableDrawingBoard,
   openDrawingBoard,
+  registerDrawingCleanup,
   seedDrawingContainers,
   seedPresentationScene,
 } from './drawingBridgeHarness';
@@ -31,6 +32,8 @@ const VIEWPORTS = [
   { width: 1280, height: 720 },
   { width: 1440, height: 900 },
 ] as const;
+
+registerDrawingCleanup(test);
 
 type BoxRecord = { x: number; y: number; width: number; height: number };
 

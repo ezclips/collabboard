@@ -31,6 +31,15 @@ type SeededContainers = {
   children: { id: string; title: string; parentId: string }[];
 };
 
+type RegisteredDrawingCleanup = {
+  supabase: SupabaseClient;
+  fixture: DrawingFixture;
+};
+
+type PlaywrightTest = typeof import('@playwright/test').test;
+
+const registeredDrawingFixtures: RegisteredDrawingCleanup[] = [];
+
 function readEnvLocal(key: string): string {
   try {
     const raw = fs.readFileSync(path.join(process.cwd(), '.env.local'), 'utf8');
@@ -234,6 +243,29 @@ async function insertMasterPadlet(supabase: SupabaseClient, fixture: DrawingFixt
   fixture.masterPadletId = data.id;
 }
 
+export function registerDrawingCleanup(test: PlaywrightTest): void {
+  test.afterEach(async () => {
+    const failures: string[] = [];
+
+    while (registeredDrawingFixtures.length > 0) {
+      const entry = registeredDrawingFixtures.shift()!;
+
+      try {
+        await cleanupDrawingFixture(entry.supabase, entry.fixture);
+        await assertDrawingFixtureCleanup(entry.supabase, entry.fixture);
+      } catch (error) {
+        failures.push(
+          `prefix=${entry.fixture.prefix} boardId=${entry.fixture.boardId}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+
+    if (failures.length > 0) {
+      throw new Error(`PATCH-074 shared drawing cleanup failed: ${failures.join('; ')}`);
+    }
+  });
+}
+
 export async function createDisposableDrawingBoard(label: string): Promise<{ supabase: SupabaseClient; fixture: DrawingFixture }> {
   const supabase = await createHarnessClient();
   const { data: userData, error: userError } = await supabase.auth.getUser();
@@ -253,19 +285,21 @@ export async function createDisposableDrawingBoard(label: string): Promise<{ sup
     .select('id,title')
     .single();
   if (error) throw error;
+  const fixture: DrawingFixture = {
+    prefix,
+    boardId: data.id,
+    boardTitle: data.title,
+    masterPadletId: null,
+    containerIds: [],
+    childIds: [],
+    lineIds: [],
+    frameIds: [],
+    uploadedImagePadletIds: [],
+  };
+  registeredDrawingFixtures.push({ supabase, fixture });
   return {
     supabase,
-    fixture: {
-      prefix,
-      boardId: data.id,
-      boardTitle: data.title,
-      masterPadletId: null,
-      containerIds: [],
-      childIds: [],
-      lineIds: [],
-      frameIds: [],
-      uploadedImagePadletIds: [],
-    },
+    fixture,
   };
 }
 

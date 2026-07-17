@@ -5,6 +5,7 @@ import {
   cleanupDrawingFixture,
   createDisposableDrawingBoard,
   openDrawingBoard,
+  registerDrawingCleanup,
   seedDrawingContainers,
   seedLineScene,
 } from './drawingBridgeHarness';
@@ -38,6 +39,8 @@ const MEMBERSHIP_KEYS = [
   'position_in_timeline',
   'wallPosition',
 ] as const;
+
+registerDrawingCleanup(test);
 
 function metadataFor(containerId: string, childId: string, label: 'A' | 'B'): MetadataSnapshot {
   return {
