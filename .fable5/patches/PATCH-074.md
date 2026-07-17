@@ -1,10 +1,11 @@
 # PATCH-074 - Timeout-Safe Drawing Harness Cleanup Ownership Characterization
 
-**Status:** Diagnosis **DONE** (2026-07-17, commit
+**Status:** **DONE** — Diagnosis DONE (2026-07-17, commit
 `54aa88dbb9753396e8aa192d68647ab05ddbaff2`, Sonnet PASS after one
-annotation-contract correction). **Stage 1 ACTIVE — fix authorized at
-LEVEL 1 by Amendment 1 (§0.A)**; where §0.A and the diagnosis sections
-conflict, §0.A wins. **Implementer:** GPT-5.5. **Reviewer:** Sonnet
+annotation-contract correction); Stage 1 DONE at LEVEL 1 (2026-07-17,
+commit `6487dc53df73c01e09c25961576db80036c182ba`, Sonnet PASS, no
+required changes — see §0.B for closure record and the one non-blocking
+follow-up). **Implementer:** GPT-5.5. **Reviewer:** Sonnet
 (independent, read-only, uncommitted diff, explicit PASS required before
 commit). **Closure:** Fable (CTO) after landing.
 
@@ -205,6 +206,92 @@ required; NO commit before PASS; then commit and push; Fable closes.
 
 **Bound Stage 1 commit message (verbatim):**
 `test(e2e): add shared timeout-safe drawing cleanup owner (PATCH-074 Stage 1)`
+
+---
+
+## 0.B Closure (2026-07-17) — PATCH-074 DONE
+
+### 0.B.1 Stage 1 closure record
+
+Committed at `6487dc53df73c01e09c25961576db80036c182ba`, Sonnet PASS,
+no required changes. Six files landed exactly as bound in §0.A.5:
+
+| File | Committed hash |
+|---|---|
+| `e2e/characterization/drawingBridgeHarness.ts` | `7a94d7220df3d47f2fe6feefd2c8e31670af9f00` |
+| `e2e/characterization/drawing-presentation.spec.ts` | `ddab83381605dbdcdda4d1a0cea3cafe010f55c5` |
+| `e2e/characterization/drawing-line-bridge.spec.ts` | `7507b06af492bce7fca25a7a4daeee4400d428f3` |
+| `e2e/characterization/drawing-duplication.spec.ts` | `87f88df19246eca5430db71987d573a1c7a5fa0b` |
+| `e2e/characterization/presentation-menu-pointer.spec.ts` | `0206ef3bc8cf7e1500831b51fb44ac4cc1df4dc8` |
+| `e2e/characterization/drawing-harness-cleanup.spec.ts` | `5345c42d79e3c40286ba9902085977983a012e64` |
+
+**Final shipped behavior:** a worker-local in-memory registry
+(`registeredDrawingFixtures`) stores exact disposable drawing fixture
+identities; `createDisposableDrawingBoard` registers each fixture only
+after its board insert succeeds; `registerDrawingCleanup(test)`
+installs the shared owner as one `test.afterEach` per importing spec;
+the hook drains the registry, calling the pre-existing
+`cleanupDrawingFixture` (exact board/padlet/line IDs) then
+`assertDrawingFixtureCleanup` (exact zero-state verification) per
+entry; failures are aggregated per entry and thrown once, loudly, at
+the end (no silent catch); all four carried specs' original in-body
+`finally` blocks remain byte-preserved as local defense (double
+cleanup is a verified no-op via Postgres delete-on-no-match
+semantics); no prefix-wide hook discovery, no global teardown, no
+manifest/temp-file registry, no `playwright.config.ts` change, no
+production change.
+
+**Accepted lifecycle coverage — supported:** normal completion,
+expected assertion failure, ordinary Playwright test timeout while
+`afterEach` executes. **Unsupported (unchanged):** killed
+cmd/orchestrator/worker subtree, whole-runner termination, machine/CI
+interruption, dev-server crash, worker-only crash with a surviving
+runner (not separately proven). **Manual rule retained:** interrupted
+runs require an exact-fixture or prefix-scoped manual sweep with
+verified zero final counts; Stage 1 makes NO interruption-safety
+claim anywhere in code, comments, or the annotation.
+
+**Final classification (unchanged, re-verified live):**
+`aftereach-sufficient-for-timeout-not-interruption`.
+
+**Final scenario matrix (identical to the diagnosis, re-proven through
+the shipped shared owner):** normal-pass — exit 0, finally ran, shared
+afterEach ran, residue 0/0/0. assertion-failure — exit 0 (genuine
+expected failure via `test.fail` + real thrown assertion), finally
+ran, shared afterEach ran, 0/0/0. test-timeout — exit 1, finally did
+NOT run, shared afterEach ran, 0/0/0. hard-kill — exit 1, neither hook
+ran, immediate residue exactly 1 board / 7 padlets / 3 canvas lines,
+parent exact-fixture sweep restored 0/0/0.
+
+**Final gates (independently re-verified this session):** PATCH-074
+2 passed with deps / 1 passed `--no-deps` / 2 skipped credential-off;
+presentation 2 passed / 2 approved skips; duplication 2 passed with
+deps / 1 passed `--no-deps` / 2 skipped credential-off; line 4 passed
+/ 4 skipped credential-off; menu-pointer 2 passed with deps / 1 passed
+`--no-deps` / 2 skipped credential-off; helper 7/1; sanitizer 9/1;
+focused drawing 59/2; full Vitest 448/43; `git diff --check`/tsc/
+boundaries/verify/build all green; cleanup zeros across all nine
+tracked prefixes (`patch-064-harness-presentation-`,
+`-duplication-`, `-line-`, `-line-natural-height-`, `-line-pointer-`,
+`patch-071-harness-`, `patch-072-harness-`, `patch-073-harness-`,
+`patch-064-harness-patch-074-cleanup-`); 13/13 fences held throughout;
+no generated artifacts; no orphan process; port 3000 free; repo clean.
+
+### 0.B.2 Non-blocking follow-up (recorded, PATCH-074 NOT reopened)
+
+The committed Stage 1 annotation (`patch-074-harness-cleanup-
+ownership`) still reports `harnessChanged: false`, which is stale —
+`drawingBridgeHarness.ts` was intentionally, authorizedly modified as
+Stage 1's core mechanism (§0.A.4/§0.A.5). This field is cosmetic
+diagnostic telemetry only: it does not gate any assertion, does not
+appear in any bound "must remain X" contract for Stage 1 (§0.A.7 binds
+`broadDeleteUsed`/`productionChanged`/`configChanged`, not
+`harnessChanged`), and does not affect safety, cleanup correctness, or
+governance conformance. **Classification: tiny test-annotation
+follow-up — fold into the next patch that touches
+`drawing-harness-cleanup.spec.ts`** (do not open a standalone patch;
+annotation truthfulness here is not load-bearing enough to justify one
+on its own).
 
 ---
 

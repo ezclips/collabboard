@@ -361,6 +361,67 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-17** — **PATCH-074 DONE end-to-end (Stage 1 commit
+  `6487dc53df73c01e09c25961576db80036c182ba`, Sonnet PASS, no required
+  changes) + fresh census + PATCH-075 AUTHORIZED (fix-ready, narrow)**.
+  **Stage 1 closure:** six files landed exactly as bound — harness
+  `7a94d722…` (worker-local registry + `registerDrawingCleanup`), four
+  carried specs `ddab8338…`/`7507b06a…`/`87f88df1…`/`0206ef3b…` (one
+  import + one `registerDrawingCleanup(test)` call each, all `finally`
+  blocks byte-preserved), 074 spec `5345c42d…` (child switched to the
+  real shared owner, `stage1Status: 'implemented'`). Identical
+  scenario matrix re-proven live through the shipped owner: normal-pass
+  0/0/0, assertion-failure 0/0/0, test-timeout (finally did NOT run,
+  shared afterEach DID) 0/0/0, hard-kill (neither hook ran) 1/7/3 →
+  parent sweep 0/0/0. Classification unchanged:
+  `aftereach-sufficient-for-timeout-not-interruption`. All bound totals
+  green (074 2/1/2; presentation 2+2; duplication 2/1+2 skip; line
+  4+4 skip; menu-pointer 2/1+2 skip; helper 7/1; sanitizer 9/1; focused
+  59/2; full 448/43; verify+build; 13/13 fences; cleanup zero across
+  nine prefixes). **Non-blocking follow-up recorded (PATCH-074 NOT
+  reopened):** the committed annotation's `harnessChanged: false` is
+  stale since the harness was intentionally modified — classified
+  **tiny test-annotation follow-up, fold into the next patch touching
+  `drawing-harness-cleanup.spec.ts`**; not load-bearing enough for a
+  standalone patch. **Fresh 9-candidate census at `6487dc5`**
+  (supersedes all prior censuses): #1 Escape-close for per-slide menus
+  — real deterministic defect, `PresentationPanel.tsx`'s ⋮ menu has no
+  Escape handler while the codebase's own `LineContextMenu.tsx`
+  already implements the exact idiom (keydown-Escape → `onClose()`);
+  the existing `presentation-menu-pointer.spec.ts` annotation even
+  carries a hardcoded untested `escapeSupported: false` placeholder —
+  **SELECTED, fix-ready, no design ruling needed**. #2 Duplicate
+  `padlet://` links — real defect (`DrawingLayout.handleDuplicateSlide`
+  clones the Excalidraw wrapper but keeps the original embeddable
+  `link`, so "duplicated" slides silently share the same underlying
+  padlet) but semantics (deep-clone vs intentional shared reference)
+  are undefined — diagnosis/design-first, NOT bundled into PATCH-075.
+  #3 Comparator parity — NaN/-Infinity divergence proven unreachable;
+  refactor-only, deprioritized per instruction (no authorization solely
+  for consolidation). #4 Line-follow — no explicit attachment-semantics
+  statement exists; diagnosis-first, no live complaint. #5 Membership-
+  union — explicitly deferred by `.fable5/CLAUDE.md` non-negotiable
+  rule #9 (planned migration phase; no opportunistic fixing). #6
+  AI-images-in-presentation — blocked on the existing approved-skip
+  (no deterministic fixture). #7 Overlap fallback — already-
+  characterized intentional PATCH-064 fallback path, no evidence it is
+  currently wrong, low urgency. #8 Uploaded-image storage cleanup —
+  test-infrastructure gap only, explicitly not to be bundled with a
+  product-defect patch. #9 Connections side panel — feature, kept
+  deferred (no roadmap decision to prioritize it). **PATCH-075 —
+  Per-Slide Menu Escape-Close Parity, fix-authorized, exactly two
+  files:** `PresentationPanel.tsx` (`e811fa95…`, extend the existing
+  per-slide-menu `useEffect` with a mirrored `keydown`-Escape listener
+  — no new effect, no focus-management addition, header menu untouched)
+  + `presentation-menu-pointer.spec.ts` (`0206ef3b…`, add a real
+  Escape-close proof per row per viewport and flip the hardcoded
+  `escapeSupported` literal to a derived boolean). **18 fences**
+  measured at `6487dc5` (13 carried + `LineContextMenu.tsx` reference-
+  only + the four now-stable drawing/harness files). Bound totals
+  unchanged elsewhere; menu-pointer spec stays 2/1/2. Bound commit:
+  `fix(presentation): close per-slide menu on Escape (PATCH-075)`.
+  Sonnet PASS required before commit. PATCH-075 implementation NOT
+  started.
 - **2026-07-17** — **PATCH-074 diagnosis DONE (commit
   `54aa88dbb9753396e8aa192d68647ab05ddbaff2`, blob `5e32d6cd…`, Sonnet
   PASS after one annotation-contract correction) + Stage 1 AUTHORIZED
