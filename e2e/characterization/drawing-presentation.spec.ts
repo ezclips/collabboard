@@ -1249,11 +1249,11 @@ test.describe('drawing presentation browser characterization (PATCH-064)', () =>
       await expect(fullscreen.getByText('Slide 1 / 2', { exact: true })).toHaveCount(0);
 
       const openNamedPresentation = async (slideTitle: 'PATCH-064 Portrait' | 'PATCH-064 Landscape') => {
-        const slideCard = sidebar
+        const slideRow = sidebar
           .getByText(slideTitle, { exact: true })
-          .locator('xpath=ancestor::div[contains(@class,"rounded-xl")][1]');
-        await slideCard.locator('button').last().click();
-        const menuStart = slideCard.getByRole('button', { name: 'Start presentation', exact: true });
+          .locator('xpath=ancestor::div[contains(@class,"rounded-xl")][1]/parent::div');
+        await slideRow.locator('button').last().click();
+        const menuStart = slideRow.getByRole('button', { name: 'Start presentation', exact: true });
         await expect(menuStart).toHaveCount(1);
         await expect(menuStart).toBeVisible({ timeout: 60_000 });
         await expect(menuStart).toBeEnabled();
