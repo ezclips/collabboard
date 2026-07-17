@@ -1,9 +1,10 @@
 # PATCH-073 — Per-Slide Presentation Menu Pointer Reachability (Stage 0: Deterministic Pointer Characterization)
 
-**Status:** AUTHORIZED — **diagnosis-only (Stage 0)**. Stage 1 (any
-product fix) is CONTINGENT on Stage 0's outcome and is NOT designed or
-authorized by this document; activating it requires a named amendment
-with fresh bindings.
+**Status:** Stage 0 **DONE** (2026-07-17, commit
+`e4b1ae77d480f580c4dd905d3000700ed272ca86`, Sonnet PASS, one
+non-blocking follow-up). **Stage 1 ACTIVE — fix authorized by
+Amendment 1 (§0.1)**; where §0.1 and the Stage 0 sections conflict,
+§0.1 wins.
 
 **Base commit (bind, verify before editing):**
 `27e4018f2f83ad33b592ef85773aa240f1a7c9ca`
@@ -15,6 +16,178 @@ with fresh bindings.
 **Implementer:** GPT-5.5. **Reviewer:** Sonnet (independent, read-only,
 uncommitted diff, explicit PASS required before commit).
 **Closure:** Fable (CTO) after landing.
+
+---
+
+## 0.1 Amendment 1 (2026-07-17) — Stage 0 closed CONFIRMED; Stage 1 fix authorized
+
+### 0.1.1 Stage 0 closure record
+
+Commit `e4b1ae77d480f580c4dd905d3000700ed272ca86`
+(`test(presentation): characterize per-slide menu pointer reachability (PATCH-073 Stage 0)`),
+one file, `e2e/characterization/presentation-menu-pointer.spec.ts`
+at `0a216384664ac68dd655916a8d8ab0459f35c19d`. Sonnet PASS.
+
+Observed at 1280×720, both rows (Landscape, Portrait), 7 items each,
+14 observations: **classification `pointer-intercepted-top-items`** —
+"Start presentation" and "Share presentation" have visible fraction
+**0** on BOTH rows (Preview ≈ 0.54; lower items 1); `elementFromPoint`
+resolves to the panel header toolbar (Landscape row) or the adjacent
+row's `SlideThumbnail` img / title (Portrait row); genuine bounded
+pointer clicks on both top items were intercepted; keyboard focus +
+Enter opened the correct slide on both rows (Landscape → Slide 1/2 +
+child A; Portrait → Slide 2/2 + child B). No force/dispatch/
+coordinates/seams; pointerError data-URLs redacted before the 1500-char
+cap; annotation free of `data:image/` and `;base64,`. All carried
+gates green (new spec 2/1/2; presentation 2+2; duplication 2/1; line
+4; cred-off 2/4/4; 7/1, 9/1, 59/2, 448/43; tsc/boundaries/verify/
+build; cleanup zeros; 54/54 fences).
+
+**Follow-ups recorded WITHOUT reopening Stage 0:** (1) the
+repeated-retry-noise regex never matches live Playwright output
+(quality-only; fixed in Stage 1's authorized spec edit, §0.1.6); (2)
+viewport caveat — Stage 0 measured 1280×720 only; Stage 1 repairs the
+STRUCTURAL clipping defect and verifies at a second viewport (§0.1.7).
+
+### 0.1.2 Fix-readiness ruling (Task-2 answers, explicit)
+
+Deterministic real-user defect: **YES** (geometry + hit-test + genuine
+pointer interception, reproduced across two independent review runs).
+Owner sufficiently identified: **YES** — `PresentationPanel.tsx` ONLY.
+Behavior narrow: **YES** (one menu's placement). Fix without menu
+architecture redesign: **YES**. Stage 0 spec convertible to prove the
+fixed state: **YES**. Files: PresentationPanel + the Stage 0 spec —
+**nothing else**. SlideThumbnail necessary: **NO** (incidental
+interceptor). Portal required: **NO** (§0.1.3). Sidebar ordering,
+slide actions, keyboard behavior, fullscreen behavior altered: **NO**.
+
+### 0.1.3 Candidate evaluation and accepted design
+
+Two clipping ancestors govern the menu: the card's `overflow-hidden`
+(`:341-348`) and the slide LIST's `overflow-auto` (`:314`), which can
+scroll only POSITIVE overflow — content above the list's content top
+(negative overflow) is unreachable forever.
+
+- **Candidate A alone (direction flip inside the card):** REJECTED —
+  the card clips the menu in BOTH directions (downward exits the
+  card's bottom edge).
+- **Candidate B alone (move menu out of the card, keep bottom-full):**
+  REJECTED — the first row's upward menu extends above the list's
+  content top = negative overflow = still unreachable (Stage 0's
+  Landscape interceptor was the panel HEADER, exactly this geometry).
+- **Candidate D (remove the card's `overflow-hidden`):** REJECTED —
+  same first-row failure as B, plus bottom-corner visual risk (the
+  square-cornered `bg-gray-50` footer under `rounded-xl`); partial
+  fix + possible second UI defect.
+- **Candidate C (portal):** NOT REQUIRED — heavier lifecycle/
+  positioning/scroll ownership; local placement CAN be made correct;
+  remains the explicit fallback ONLY via a further named amendment.
+- **ACCEPTED — Candidate B+A (row-level menu + deterministic
+  direction rule):** move the menu JSX out of the card into the ROW
+  wrapper (`div.group.flex.items-start.gap-2`, which becomes
+  `relative`), right-aligned as today (`right-0`, `w-52`, `z-50`,
+  own `rounded-xl`/`overflow-hidden` retained); placement rule:
+  **`top-full mt-1` (below the row) for every row EXCEPT the last;
+  `bottom-full mb-1` (above the row) for the last row**
+  (`idx === sortedSlides.length - 1`). The menu then always extends
+  INTO existing scrollable list content (over the adjacent row) — no
+  clipping ancestor between the menu and the hit-test surface for any
+  row; it scrolls WITH the list; single-slide boards fall into the
+  below-branch whose positive overflow IS scrollable. `slideMenuRef`,
+  the outside-mousedown close listener, item JSX, handlers, and row
+  association (menu rendered inside the same `sortedSlides.map`
+  iteration) all stay byte-equivalent; only the wrapper location,
+  the `relative` class on the row, and the placement classes change.
+
+### 0.1.4 Accepted behavior (bind)
+
+All seven per-slide menu items pointer-reachable via GENUINE pointer
+clicks on BOTH rows (no force/dispatch/coordinates); keyboard
+activation still works; each row's action still targets its own slide;
+bottom global Start presentation unaffected; PATCH-072 fullscreen
+ordering unaffected; menu closes on item action and on outside click;
+NO new visual clipping of card thumbnails (card keeps
+`overflow-hidden`; `SlideThumbnail.tsx` untouched).
+
+### 0.1.5 Stage 1 scope — allowed files (exactly two; hashes at `e4b1ae7`, measured fresh)
+
+| File | Pre-edit hash (bind) | Authorized change |
+|---|---|---|
+| `components/presentation/PresentationPanel.tsx` | `926f43cec98fadc610976081b58cb246ba00d501` | §0.1.3 exactly: row wrapper gains `relative`; menu JSX moves to row level with the direction rule; NOTHING else (comparator, sortedSlides, exports, bottom button, modals, thumbnails all byte-preserved) |
+| `e2e/characterization/presentation-menu-pointer.spec.ts` | `0a216384664ac68dd655916a8d8ab0459f35c19d` | §0.1.6 flip + retry-regex quality fix |
+
+No third file. `SlideThumbnail.tsx` (`b26524ae…`) PROHIBITED and
+fenced. Harness, all bridges, planner/resolver/thumbnail files, all
+PATCH-071/072 files, DrawingLayout, config, dependencies: prohibited.
+
+### 0.1.6 Stage 1 e2e contract (bind; test COUNT unchanged: 1 active)
+
+- Expected classification flips to **`pointer-reachable-all-items`**;
+  add explicit before/after fields:
+  `previousClassification: 'pointer-intercepted-top-items'` and
+  `previousTopItemVisibleFraction: 0` (the Stage 0 diagnosis is
+  REPLACED by recorded history, not erased).
+- All 14 `elementFromPoint` probes must resolve item-or-descendant;
+  genuine pointer click on the TOP item must ACTIVATE on both rows
+  (fullscreen opens on the correct slide, then End); keyboard checks
+  RETAINED on both rows; geometry (bbox) records retained; the
+  card-clip-rect record may be kept as history but its intersection no
+  longer implies clipping (the menu now legitimately lives outside the
+  card) — do not assert against it.
+- pointerError sanitization retained for failure diagnostics; the
+  dead `repeatedRetryPattern` is corrected narrowly (lookahead must
+  not be satisfiable by the immediately following retry line) — the
+  Sonnet-suggested shape is acceptable.
+- No force/dispatch/coordinates/sleeps/timeout inflation (3 s bounded
+  trials stay).
+
+### 0.1.7 Viewport contract (bind)
+
+Primary full matrix at **1280×720** (Playwright default). Secondary
+reduced check at **1440×900** (`page.setViewportSize` in the same
+test): re-open the menu on BOTH rows; all seven items'
+`elementFromPoint` must resolve item-or-descendant; one genuine
+pointer activation (Portrait row top item) must succeed. Runtime stays
+bounded (single test).
+
+### 0.1.8 Stage 1 fences — 53 unique paths
+
+The Stage 0 54-path set MINUS `PresentationPanel.tsx` (moved to
+authorized-change). **Verified 53/53 at `e4b1ae7`** during this
+amendment (no duplicates). The Stage 0 spec file is authorized-change
+(bound above), not a fence. Verify before editing and before commit.
+
+### 0.1.9 Expected totals (bind)
+
+Stage 1 spec: 2 passed with deps / 1 passed `--no-deps` / 2 skipped
+credential-off. Carried: presentation 2+2; duplication 2/1; line 4;
+cred-off duplication 2 / line 4 / presentation 4; helper 7/1;
+sanitizer 9/1; focused 59/2; full **448/43** (no unit files change);
+tsc/boundaries/sequential verify+build green; cleanup zeros
+(prefix-scoped, incl. timeout-leak sweep after any killed run);
+zero production bridge imports.
+
+### 0.1.10 Stage 1 stop conditions
+
+STOP immediately, report, do not commit, if: a THIRD file is required;
+`SlideThumbnail.tsx` must change; a portal becomes necessary (fallback
+needs its own amendment); menu semantics/items/handlers change; the
+keyboard path regresses; row-to-slide association breaks; sidebar
+order, PDF/PPTX, thumbnails, or PATCH-072 fullscreen ordering change;
+card thumbnail visuals regress; pointer reachability remains
+viewport-dependent after the fix (either bound viewport fails);
+force/dispatch would be needed; any 53-fence or pre-edit hash drifts;
+another defect surfaces.
+
+### 0.1.11 Review, commit, closure
+
+Sonnet independent review of the uncommitted two-file diff (re-runs
+gates, re-derives hashes, extracts the annotation from a JSON run);
+explicit PASS required; then commit with the bound message and push;
+Fable closes.
+
+**Bound Stage 1 commit message (verbatim):**
+`fix(presentation): make per-slide menu pointer reachable (PATCH-073 Stage 1)`
 
 ---
 

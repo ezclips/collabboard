@@ -361,6 +361,63 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-17** — **PATCH-073 Stage 0 DONE (commit
+  `e4b1ae77d480f580c4dd905d3000700ed272ca86`, Sonnet PASS, one
+  non-blocking follow-up) + Stage 1 ACTIVATED (Amendment 1, Option A —
+  fix authorized)**. **Stage 0 closure:** one committed file,
+  `presentation-menu-pointer.spec.ts` (`0a216384…`); classification
+  **`pointer-intercepted-top-items`** at 1280×720 — both rows, 7 items
+  each, 14 observations; Start/Share visible fraction **0** on BOTH
+  rows (Preview ≈0.54, lower items 1); elementFromPoint → panel header
+  toolbar (Landscape) / adjacent-row SlideThumbnail img + title
+  (Portrait); genuine bounded pointer clicks intercepted on both top
+  items; keyboard focus+Enter opened the correct slide both rows
+  (1/2 + child A; 2/2 + child B). Test safety held: no
+  force/dispatch/coordinates/callbacks, no production/harness edits,
+  data-URLs redacted BEFORE the 1500-char cap, no `data:image/` or
+  `;base64,` in the annotation. Final Stage 0 gates: new spec 2/1/2,
+  presentation 2+2, duplication 2/1, line 4, cred-off 2/4/4, helper
+  7/1, sanitizer 9/1, focused 59/2, full 448/43, tsc/boundaries/
+  verify/build green, cleanup complete (no timeout leak in the final
+  packet), 54/54 fences, repo clean/synced. **Follow-ups (Stage 0 not
+  reopened):** retry-noise regex never matched live output
+  (quality-only — fixed inside Stage 1's authorized spec edit);
+  viewport caveat (Stage 0 = 1280×720 only → Stage 1 fixes the
+  STRUCTURE and verifies a second viewport). **Real-user impact
+  ruling:** deterministic pointer defect — mouse users cannot reach
+  Start/Share presentation in the per-slide ⋮ menu on ANY row;
+  keyboard users can. **Ownership ruling:** `PresentationPanel.tsx`
+  inline menu — TWO clipping ancestors: card `overflow-hidden`
+  (:341-348) clips both directions, and the slide list's
+  `overflow-auto` (:314) makes upward (negative) overflow permanently
+  unreachable for the first row; SlideThumbnail incidental.
+  **Stage 1 decision: OPTION A**, accepted design **Candidate B+A —
+  row-level menu + deterministic direction rule**: menu JSX moves out
+  of the card into the row wrapper (row gains `relative`), right-0
+  w-52 z-50 retained; `top-full mt-1` (below) for every row EXCEPT the
+  last, `bottom-full mb-1` (above) for the last row — the menu always
+  extends into existing scrollable list content, no clipping ancestor
+  remains, scrolls with the list, single-slide boards fall into the
+  scrollable below-branch. Rejected: direction-flip inside the card
+  (clipped both ways), out-of-card bottom-full only and
+  overflow-hidden removal (first row still dies on the list's
+  negative-overflow), portal (not required; fallback via named
+  amendment only), SlideThumbnail edits, z-index tuning, keyboard-only
+  acceptance, menu redesign. **Scope: exactly two files** —
+  `PresentationPanel.tsx` (`926f43ce…`, §0.1.3 change only) + the
+  Stage 0 spec (`0a216384…`, flip to `pointer-reachable-all-items`
+  with before/after history fields, all-14 elementFromPoint proofs,
+  top-item pointer ACTIVATION both rows, keyboard retained, retry-regex
+  fix, 1440×900 secondary viewport check). **Fences: 53/53 verified at
+  `e4b1ae7`** (54 minus PresentationPanel; SlideThumbnail stays
+  fenced/prohibited). Bound totals unchanged (spec 2/1/2, full
+  448/43). Bound Stage 1 commit:
+  `fix(presentation): make per-slide menu pointer reachable
+  (PATCH-073 Stage 1)`. Sonnet PASS required before commit. All
+  baselines re-verified live at `e4b1ae7` this session (dev-server
+  contract, own PID attributed/stopped, port freed; verify+build
+  sequential; cleanup zeros all four prefixes; zero prod bridge
+  imports). Stage 1 implementation NOT started; PATCH-074 NOT started.
 - **2026-07-17** — PATCH-072 **DONE (implementation commit
   `27e4018f2f83ad33b592ef85773aa240f1a7c9ca`, Sonnet PASS, no required
   changes)** + fresh census + **PATCH-073 AUTHORIZED** ("Per-Slide
