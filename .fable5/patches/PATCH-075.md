@@ -1,9 +1,11 @@
 # PATCH-075 — Per-Slide Menu Escape-Close Parity
 
-**Status:** SPEC READY — fix-authorized. **Implementer:** GPT-5.5.
-**Reviewer:** Sonnet (independent, read-only, uncommitted diff,
-explicit PASS required before commit). **Closure:** Fable (CTO) after
-landing.
+**Status:** DONE — closed 2026-07-17. Implementation commit
+`9cde5cdb4583cddb31364315138fa3daa872ac5d` (bound message verbatim),
+Sonnet independent review PASS (no required changes). Closure record
+in §13. **Implementer:** GPT-5.5. **Reviewer:** Sonnet (independent,
+read-only, uncommitted diff, explicit PASS required before commit).
+**Closure:** Fable (CTO) after landing.
 
 **Base commit (bind, verify before editing):**
 `6487dc53df73c01e09c25961576db80036c182ba`
@@ -216,3 +218,55 @@ Files + pre/post hashes; exact Escape-close proof per row per
 viewport; flipped `escapeSupported` evidence; all §7 gate totals;
 18-fence result; cleanup proof; production-import grep; commit hash +
 push status after PASS.
+
+---
+
+## 13. Closure record (Fable CTO, 2026-07-17)
+
+**Landed exactly as bound.** Implementation commit
+`9cde5cdb4583cddb31364315138fa3daa872ac5d`, message verbatim
+`fix(presentation): close per-slide menu on Escape (PATCH-075)`.
+Committed blobs (verified via `git ls-tree` at the commit):
+
+| File | Pre-edit (§4 bind) | Committed |
+|---|---|---|
+| `components/presentation/PresentationPanel.tsx` | `e811fa9524c2e6ff40c0e4a6124931da1ad6176e` | `02699748271241cacaca27fa93a8a78e7d8b2e0d` |
+| `e2e/characterization/presentation-menu-pointer.spec.ts` | `0206ef3bc8cf7e1500831b51fb44ac4cc1df4dc8` | `50d68dff08730a231470ac48306702b02c3ca45b` |
+
+**Sonnet independent review: PASS**, no required changes, all hashes
+and 18/18 fences independently re-derived.
+
+**Final defect statement:** the row-scoped per-slide presentation menu
+supported action close, outside-click close, and row-switch close, but
+remained open when the user pressed Escape.
+
+**Final production fix (exact shape, verified in review):** the
+existing per-slide-menu `useEffect` (dep `[openMenuId]`) was extended
+with a `handleEscape` keydown handler (`event.key === 'Escape'` →
+`setOpenMenuId(null)`), registered beside the existing `mousedown`
+listener and removed through the same effect cleanup. No second
+effect; no new state or ref; no focus-management change; no
+`preventDefault`/`stopPropagation`; header ⋮ menu untouched; no
+action, ordering, placement, card, fullscreen, or selection change.
+
+**Final observed behavior (live, per row per viewport):** at both
+`1280×720` and `1440×900`, for both `PATCH-064 Landscape` and
+`PATCH-064 Portrait`: menu opens normally, all seven actions present,
+real Escape closes the menu, fullscreen does not open, Share UI does
+not open, no action triggers, the menu reopens afterward, and
+row-to-slide association is unchanged.
+
+**Final annotation:** `actionClose: true`, `outsideClickClose: true`,
+`rowSwitchClose: true`, **`escapeSupported: true`** — now DERIVED from
+live row/viewport observations (hardcoded literal removed). PATCH-073
+history, pointer reachability, Start/Share paths, and keyboard-Enter
+path all intact.
+
+**Final gates:** PATCH-075/menu-pointer 2 w/deps / 1 `--no-deps` / 2
+skipped cred-off; PATCH-074 cleanup spec 2/1/2; presentation 2 passed
++ 2 approved skips; duplication 2/1 + bound cred-off skips; line 4 +
+bound cred-off skips; helper 7/1; sanitizer 9/1; focused drawing
+59/2; full Vitest 448/43; `git diff --check`/typecheck/boundaries/
+verify/build all passed. Cleanup: boards 0 / padlets 0 / canvas lines
+0 across all nine tracked prefixes; no generated artifacts; port 3000
+free; 18/18 fences; repository clean and synchronized.

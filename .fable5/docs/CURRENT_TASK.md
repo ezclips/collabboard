@@ -361,6 +361,62 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-17** — **PATCH-075 DONE (commit
+  `9cde5cdb4583cddb31364315138fa3daa872ac5d`, Sonnet PASS, no required
+  changes) + fresh census + PATCH-076 AUTHORIZED (diagnosis-only)**.
+  **PATCH-075 closure:** two files landed exactly as bound —
+  `PresentationPanel.tsx` `02699748…` (existing per-slide-menu
+  `useEffect` extended with a keydown-Escape handler beside the
+  existing mousedown listener, same cleanup; no second effect, no
+  focus change, header menu untouched) +
+  `presentation-menu-pointer.spec.ts` `50d68dff…` (real Escape-close
+  proof per row per viewport; `escapeSupported` flipped from hardcoded
+  `false` to a DERIVED boolean, observed `true` at both viewports for
+  both rows; no action fired, menu reopens, associations intact). All
+  bound totals green (menu-pointer 2/1/2; 074 2/1/2; presentation 2+2;
+  duplication 2/1+2 skip; line 4+4 skip; helper 7/1; sanitizer 9/1;
+  focused 59/2; full 448/43; verify+build; 18/18 fences; cleanup zero
+  across nine prefixes). **Fresh census at `9cde5cd`** (supersedes all
+  prior): #1 Duplicate `padlet://` links — **SELECTED, diagnosis-only
+  (OPTION B)**: `handleDuplicateSlide` (`DrawingLayout.tsx:1408-1435`)
+  spreads children preserving `link` verbatim, so duplicated slides
+  share one underlying padlet row; deletion path (`:1078-1107`) fires
+  `onDeletePadlet` on ANY deleted linked embeddable and the orphan
+  sweep (`:1615-1636`) then removes the original's embeddable —
+  code-derived "duplicate, remove the duplicate, lose the original's
+  container" P3-class cascade; position-sync contention on one row
+  (`padletsByLink`). Semantics (deep-clone vs shared reference)
+  remain undefined in all docs → fix BLOCKED on the bound §3 product
+  question; characterize first. #2 Line-follow — `lineBridge.ts` has
+  ZERO attachment semantics (verified); diagnosis-first, no complaint.
+  #3 Comparator — non-finite proven unreachable (`Number.isFinite`
+  guard live at `slideOrder.ts:7-8`); refactor-only, not eligible.
+  #4 AI images — approved skip verbatim unchanged (`:1357`), no
+  fixture capability appeared; still blocked. #5 Overlap fallback —
+  intentional, unexercised-when-`frameId`-present, low urgency. #6
+  Uploaded-image storage cleanup — test-infra only, skip unchanged
+  (`:1352`). #7 Connections side panel — feature, deferred; NO roadmap
+  decision taken (stabilization demonstrably incomplete — live defects
+  still surfacing). #8 No new defect from PATCH-075 verification. #9
+  Membership-union — deferred by CLAUDE.md rule #9. PATCH-074's
+  stale-`harnessChanged` follow-up stays pending (076 does not touch
+  the cleanup spec). **PATCH-076 — Duplicate-Slide Shared `padlet://`
+  Reference Diagnosis, diagnosis-only, exactly ONE new file:**
+  `e2e/characterization/drawing-slide-duplication.spec.ts` (absence at
+  base verified), driving real `'Duplicate slide'`/`'Remove slide'`
+  menu actions; annotation with seven bound literal fields
+  (`newPadletRowsAfterDuplicate`, `sharedLinkEmbeddableCount`,
+  `duplicateRendersSameChild`, `removeDuplicateDeletedSharedRow`,
+  `originalContainerLostAfterRemove`, `classification`, `prefix` — all
+  observation-derived; contradiction of the hypothesis is a valid
+  outcome). **22 fences** measured at `9cde5cd` (the 18 carried incl.
+  post-075 hashes for `PresentationPanel.tsx`/menu-pointer spec, plus
+  `resolveSlidePadlets.ts` + `planSlideComposition.ts`). Expected: new
+  spec 2/1/2; all carried totals unchanged; full 448/43; cleanup zero
+  across TEN prefixes (new: `patch-064-harness-patch-076-dup-`).
+  Bound commit: `test(e2e): characterize duplicate-slide shared padlet
+  link behavior (PATCH-076)`. Sonnet PASS required before commit.
+  PATCH-076 implementation NOT started.
 - **2026-07-17** — **PATCH-074 DONE end-to-end (Stage 1 commit
   `6487dc53df73c01e09c25961576db80036c182ba`, Sonnet PASS, no required
   changes) + fresh census + PATCH-075 AUTHORIZED (fix-ready, narrow)**.
