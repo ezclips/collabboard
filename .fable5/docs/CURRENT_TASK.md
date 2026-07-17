@@ -361,6 +361,44 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-17** — **PATCH-074 diagnosis DONE (commit
+  `54aa88dbb9753396e8aa192d68647ab05ddbaff2`, blob `5e32d6cd…`, Sonnet
+  PASS after one annotation-contract correction) + Stage 1 AUTHORIZED
+  (Amendment 1 §0.A, OPTION A, LEVEL 1)**. **Diagnosis:** classification
+  `aftereach-sufficient-for-timeout-not-interruption`, observation-
+  derived from four real subprocess scenarios — normal-pass (exit 0,
+  finally+afterEach ran, 0/0/0), assertion-failure (exit 0 via
+  `test.fail` + genuine thrown assertion, finally+afterEach ran, 0/0/0),
+  test-timeout (exit 1, **finally did NOT run, afterEach DID**, 0/0/0),
+  hard-kill (owned cmd/orchestrator/worker subtree taskkilled — neither
+  hook ran, residue exactly 1 board/7 padlets/3 lines, parent exact-
+  fixture sweep → 0/0/0). All eleven O5 annotation fields incl. four
+  real scenario prefixes; no credentials emitted. NOT tested:
+  worker-only crash with surviving runner, whole-runner termination,
+  machine/CI interruption, dev-server crash. **Infrastructure census:**
+  CI runs Playwright directly with NO E2E credentials → drawing suites
+  SKIP in CI (local box is the only real environment); no custom
+  fixtures; no global teardown reserved; harness is the shared import
+  point; worker-local module state needs no manifest. **Candidates:**
+  shared registered afterEach ACCEPTED (proven mechanism, fixes the
+  real recurring timeout-leak class from PATCH-072/census follow-up
+  #2); global teardown rejected (untested case, config+manifest cost);
+  external parent rejected (none exists; CI never runs these suites);
+  layered rejected (complexity > defect); no-fix rejected. **Target
+  LEVEL 1** — timeout-safe, explicitly NOT interruption-safe; killed
+  runs keep the manual prefix-scoped sweep rule. **Stage 1 scope:
+  exactly six files** (harness `85a6566d…` registry +
+  `registerDrawingCleanup`; four carried specs one-line registration
+  each `8c7aa641…`/`3e690d20…`/`28023cf0…`/`c78d2c8e…`; 074 spec
+  `5e32d6cd…` child switches to the shared owner as the deterministic
+  verification + bound annotation flip to `stage1Status:
+  'implemented'`). Finally blocks stay byte-preserved as local defense;
+  exact-ID cleanup only; no config/production change; **13 fences**
+  measured at `54aa88d`. All totals bound unchanged (074 2/1/2 with
+  identical matrix; full 448/43). Bound Stage 1 commit:
+  `test(e2e): add shared timeout-safe drawing cleanup owner (PATCH-074
+  Stage 1)`. Sonnet PASS required before commit. Stage 1 implementation
+  NOT started; PATCH-075 NOT started.
 - **2026-07-17** - **PATCH-073 Stage 1 DONE (implementation commit
   `b68cdad4485ad7c4767a735c4bf30762ee4739e4`, Sonnet PASS, no required
   changes)** + fresh post-073 census completed at HEAD + **PATCH-074

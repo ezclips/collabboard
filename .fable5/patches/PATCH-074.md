@@ -1,7 +1,10 @@
 # PATCH-074 - Timeout-Safe Drawing Harness Cleanup Ownership Characterization
 
-**Status:** SPEC READY - diagnosis-only characterization, no production
-source changes. **Implementer:** GPT-5.5. **Reviewer:** Sonnet
+**Status:** Diagnosis **DONE** (2026-07-17, commit
+`54aa88dbb9753396e8aa192d68647ab05ddbaff2`, Sonnet PASS after one
+annotation-contract correction). **Stage 1 ACTIVE — fix authorized at
+LEVEL 1 by Amendment 1 (§0.A)**; where §0.A and the diagnosis sections
+conflict, §0.A wins. **Implementer:** GPT-5.5. **Reviewer:** Sonnet
 (independent, read-only, uncommitted diff, explicit PASS required before
 commit). **Closure:** Fable (CTO) after landing.
 
@@ -11,6 +14,197 @@ commit). **Closure:** Fable (CTO) after landing.
 
 **Bound implementation commit message (verbatim):**
 `test(e2e): characterize timeout-safe drawing harness cleanup ownership (PATCH-074)`
+
+---
+
+## 0.A Amendment 1 (2026-07-17) — diagnosis closed CONFIRMED; Stage 1 cleanup owner authorized (LEVEL 1)
+
+### 0.A.1 Diagnosis closure record
+
+Committed at `54aa88dbb9753396e8aa192d68647ab05ddbaff2` (blob
+`5e32d6cd15fc626df0deaad86382f3e6589f6efc`), Sonnet PASS (first pass
+surfaced the missing literal §2 O5 annotation fields incl. `prefixes`;
+the corrected packet re-reviewed and PASSed with all eleven fields and
+four real scenario-scoped prefixes).
+
+**Final classification (observation-derived, asserted in-test):**
+`aftereach-sufficient-for-timeout-not-interruption`.
+
+**Scenario evidence (subprocess, real DB counts):** normal-pass — exit
+0, finally ran, afterEach ran, residue 0/0/0. assertion-failure — exit
+0 (genuine expected failure via `test.fail` + real thrown assertion,
+proven by `testInfo.status='failed'/expectedStatus='failed'`), finally
+ran, afterEach ran, 0/0/0. test-timeout — exit 1, finally DID NOT run,
+afterEach ran, 0/0/0. hard-kill (owned cmd/Playwright orchestrator +
+worker subtree killed via bounded `taskkill /pid <owned> /t /f`) —
+neither hook ran, immediate residue 1 board / 7 padlets / 3 canvas
+lines, parent exact-fixture sweep restored 0/0/0.
+
+**Ownership finding:** in-process `afterEach` is sufficient for normal
+completion, expected assertion failure, and ordinary Playwright test
+timeout while the runner lifecycle survives; in-body `finally` is NOT
+timeout-safe; both are bypassed by forcible subtree termination, which
+requires a surviving external boundary. The repository has no shared
+drawing `afterEach` owner, no global teardown, and no external cleanup
+supervisor. NOT deterministically tested: worker-only crash with a
+surviving orchestrator, whole parent-runner termination, machine/CI
+interruption, dev-server crash.
+
+**Final gates at closure:** 074 spec 2/1/2; carried presentation 2+2,
+duplication 2/1(+2 skipped), line 4(+4 skipped), menu-pointer 2/1/2;
+helper 7/1; sanitizer 9/1; focused 59/2; full 448/43; diff-check/tsc/
+boundaries/verify/build green; 6/6 fences; all prefixes 0/0/0; no
+artifacts; no orphan process; port 3000 free.
+
+### 0.A.2 Infrastructure findings (measured at `54aa88d`)
+
+- `playwright.config.ts`: `fullyParallel: true`, workers 2 local /
+  default CI, retries 2 CI, NO globalSetup/globalTeardown, no teardown
+  project (nothing reserved).
+- CI (`.github/workflows/ci.yml`) invokes `npm run test:e2e` directly —
+  no wrapper, no always()-post-step, and NO E2E credentials in CI
+  (anon key only) → the drawing characterization suites SKIP in CI.
+  The only real execution environment is the local dev box.
+- No `test.extend` custom fixtures anywhere in `e2e/`.
+- `drawingBridgeHarness.ts` is already the single shared import point
+  of all five drawing specs; it can host a registry with no circular
+  imports (it imports only `@playwright/test`, supabase, fs/path,
+  `helpers/env`).
+- Fixture prefixes embed timestamp+random → no collision risk; DB
+  access in hooks is plain supabase-js (no browser needed).
+- Module state is per worker process → a worker-local registry needs no
+  manifest, no temp files, no cross-worker coordination.
+
+### 0.A.3 Candidate evaluation and target level
+
+- **A — shared registered `afterEach` (ACCEPTED):** mechanism proven by
+  the diagnosis in this exact architecture; fixes the historically REAL
+  leak class (test timeout aborting in-body `finally` — the PATCH-072
+  incident and census follow-up #2); worker-local; no config change; no
+  manifest.
+- **B — global teardown (REJECTED for now):** only helps in the
+  untested worker-crash-with-surviving-runner case; requires a config
+  edit plus a prefix manifest with staleness/concurrency questions;
+  may return later as a secondary net via its own patch.
+- **C — external parent / CI post-step (REJECTED):** no such parent
+  exists; CI never runs these suites (no credentials); a local wrapper
+  is new operational surface that dies with the console group on
+  Ctrl+C anyway. Too broad for this defect.
+- **D — layered all-three (REJECTED):** complexity exceeds the defect.
+- **E — no fix (REJECTED):** the timeout-leak class is recurring and
+  cheaply closable with a proven mechanism.
+
+**Accepted target: LEVEL 1.** Supported after Stage 1: normal
+completion, expected assertion failure, ordinary Playwright test
+timeout. Explicitly UNSUPPORTED (unchanged): forcible subtree kill,
+whole-runner termination, worker-only crash, machine/CI interruption,
+dev-server crash — for those, the documented operational rule remains:
+run a prefix-scoped sweep and verify zeros. Stage 1 must NOT be
+described as interruption-safe.
+
+### 0.A.4 Accepted design (bind)
+
+`drawingBridgeHarness.ts` gains a worker-local module-level registry
+and one new export:
+
+- `createDisposableDrawingBoard(...)` pushes `{ supabase, fixture }`
+  onto the registry before returning (behavior otherwise unchanged; no
+  signature changes to any existing export).
+- `registerDrawingCleanup(t)` (t = the calling spec's `test` object)
+  installs ONE `t.afterEach` that DRAINS the registry: for each entry,
+  `cleanupDrawingFixture(supabase, fixture)` then
+  `assertDrawingFixtureCleanup(supabase, fixture)` (exact fixture
+  identity only), removing entries as processed. Cleanup failures are
+  NOT swallowed — the hook throws.
+- Idempotency: draining after an in-body `finally` already cleaned is a
+  no-op (exact-ID deletes; assert returns zeros).
+- Concurrency: registry is worker-local; only one test runs at a time
+  per worker; NO cross-worker manifest, NO temp files, NO prefix-wide
+  deletion anywhere in the hook.
+
+Each of the four carried drawing specs adds exactly ONE top-level
+`registerDrawingCleanup(test);` call (plus the import name in the
+existing harness import list). Every in-body `finally`, assertion,
+annotation, and test count stays byte-preserved (finally remains the
+fast local defense).
+
+`drawing-harness-cleanup.spec.ts` becomes the deterministic
+verification vehicle: its CHILD template switches its cleanup owner
+from the inline `cleanupContext` afterEach to the SHARED
+`registerDrawingCleanup` owner (markers `afterEach:start`/
+`afterEach:complete` still emitted; `afterEach:complete` must reflect
+post-drain zero counts). The scenario matrix, exits, hard-kill residue
+1/7/3, parent sweep, and totals stay IDENTICAL — this proves the real
+shipped registry under assertion-failure and timeout in a subprocess.
+Annotation flip (bound): add
+`cleanupOwnerImplemented: 'shared-registered-afterEach'` and change
+`stage1Status` to `'implemented'`; `recommendedOwner`/
+`recommendedBoundary`/classification and all other fields unchanged.
+
+### 0.A.5 Stage 1 scope — allowed files (exactly six; hashes at `54aa88d`, measured)
+
+| File | Pre-edit hash (bind) | Authorized change |
+|---|---|---|
+| `e2e/characterization/drawingBridgeHarness.ts` | `85a6566dbb8cd16f19151133ed33b9872a97ff11` | registry + `registerDrawingCleanup` + push in `createDisposableDrawingBoard`; NOTHING else |
+| `e2e/characterization/drawing-presentation.spec.ts` | `8c7aa6416a6b18236dd46f0833c2c0811717592b` | one import name + one `registerDrawingCleanup(test)` call |
+| `e2e/characterization/drawing-line-bridge.spec.ts` | `3e690d20614dee1c0b6c60a791f4031e9aa53833` | same |
+| `e2e/characterization/drawing-duplication.spec.ts` | `28023cf08388d9c732a592c82da8506a9e77c03d` | same |
+| `e2e/characterization/presentation-menu-pointer.spec.ts` | `c78d2c8eef508b47036869fd922c03ce5a416cf4` | same |
+| `e2e/characterization/drawing-harness-cleanup.spec.ts` | `5e32d6cd15fc626df0deaad86382f3e6589f6efc` | §0.A.4 child-owner switch + bound annotation flip only |
+
+No seventh file. NO new tracked file may be created.
+`playwright.config.ts` and all production source PROHIBITED.
+
+### 0.A.6 Immutable fences — 13 unique paths (hashes at `54aa88d`, measured)
+
+```text
+playwright.config.ts                                    5864c98436dde10809de67cb40c564c05e98ff6d
+e2e/helpers/env.ts                                      9514723cde157f7ae6e6815d4c142a0f430a1292
+components/presentation/PresentationPanel.tsx           e811fa9524c2e6ff40c0e4a6124931da1ad6176e
+components/presentation/SlideThumbnail.tsx              b26524ae5c02ac7d73622a02f05ecfb5145a20a8
+components/presentation/FullscreenPresentation.tsx      655244b443c3869173996cb21a77f7d67c41c64b
+components/collabboard/canvas/layouts/DrawingLayout.tsx b470a888e4015e57b757ba0c57a041f1b7d8adb9
+lib/infra/presentation/slideOrder.ts                    e72c3de0b2ee0d2f35a4fb66af8951f35ab38058
+lib/infra/presentation/slideOrder.test.ts               2f1d79c5d2b5ff9c5c1e08b23da5f27008f25db8
+lib/infra/drawing/lineBridge.ts                         f0f6a0d177c53bb0cab89b9fa1d7b5e3910a3c2d
+lib/infra/drawing/presentationBridge.ts                 b9d976bda880e2fe1a28a4099fdc3eebe6f79b38
+lib/infra/drawing/bridge.ts                             ed26c312610a386711f658662e82d29dd48c5890
+lib/infra/collabboard/clonedPostMetadata.ts             7d6b6ee6e127a0db8161c09afdf31a54f44ac575
+components/collabboard/canvas/hooks/useCanvasActions.ts b470cc3fca2a1c10ac2b035c3d9c2ec1a9d7512e
+```
+
+Verify before editing and before commit.
+
+### 0.A.7 Expected totals (bind; ALL unchanged)
+
+074 spec 2 with-deps / 1 no-deps / 2 cred-off skipped, IDENTICAL
+scenario matrix (incl. hard-kill 1/7/3 → sweep 0/0/0); presentation
+2+2; duplication 2/1 (+2 cred-off); line 4 (+4 cred-off); menu-pointer
+2/1/2; helper 7/1; sanitizer 9/1; focused 59/2; full 448/43 (no unit
+files change); tsc/boundaries/sequential verify+build green; cleanup
+zeros for ALL prefixes; zero production bridge/harness imports; no
+generated artifacts; environment contract §6 unchanged.
+
+### 0.A.8 Stage 1 stop conditions
+
+STOP immediately, report, do not commit, if: a SEVENTH file or any new
+file is required; `playwright.config.ts` or any production file must
+change; any prefix-wide or broad deletion appears inside a hook; any
+`finally` block or existing assertion must be weakened or removed; any
+suite count changes; the 074 scenario matrix changes beyond the bound
+annotation flip; cleanup errors would be silently swallowed; a
+cross-worker manifest or temp-file registry becomes necessary; any
+fence or pre-edit hash drifts; a second defect surfaces.
+
+### 0.A.9 Review, commit, closure
+
+Sonnet independent review of the uncommitted six-file diff (re-runs
+all §0.A.7 gates incl. a fresh JSON annotation extraction proving the
+child scenarios now clean through the SHARED owner); explicit PASS
+required; NO commit before PASS; then commit and push; Fable closes.
+
+**Bound Stage 1 commit message (verbatim):**
+`test(e2e): add shared timeout-safe drawing cleanup owner (PATCH-074 Stage 1)`
 
 ---
 
