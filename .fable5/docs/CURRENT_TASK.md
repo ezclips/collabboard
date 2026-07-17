@@ -361,6 +361,51 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-17** — **PATCH-073 Stage 1 CONSTRAINED + expanded to
+  THREE files (Amendment 2, classification C, OPTION B)** after the
+  uncommitted Stage 1 implementation went green on its target spec
+  (2/1/2, both viewports, fresh annotation) but broke the carried
+  `drawing-presentation.spec.ts`: `:1257` `toHaveCount(1)` → 0
+  (5 000 ms, 13 resolutions) because the PATCH-072 named-launch helper
+  scopes trigger + menu through the title's nearest `.rounded-xl`
+  ancestor (the card) — snapshot proved `:1255` silently clicked the
+  PREVIEW button (`[active]`, menu never opened) since the implementer
+  co-located the ⋮ trigger with the menu at row level. **Audit
+  findings:** (1) unauthorized card-line change (`overflow-hidden`
+  removed, `relative` added — violates §0.1.4/§0.1.5, reintroduces the
+  rejected Candidate-D footer-corner risk) → revert bound; (2)
+  unauthorized footer `justify-between` drop → revert bound; (3)
+  trigger co-location ACCEPTED and codified — Amendment 1's "menu-only
+  move + byte-equivalent slideMenuRef/outside-close" was internally
+  inconsistent (CTO authoring error; the ref boundary spans
+  trigger+menu); (4) annotation evidence-integrity defect:
+  `cardOverflowChanged: false` while the diff changed the card
+  overflow line — becomes accurate after revert (1), fresh JSON run
+  required; (5) second Amendment-1 authoring error: single-slide
+  boards land in the ABOVE-branch under `idx === length-1`,
+  contradicting the bound below-branch sentence → expression corrected
+  to `sortedSlides.length > 1 && idx === sortedSlides.length - 1`.
+  **Carried-locator ruling:** incidental internal coupling — it breaks
+  under ANY valid §0.1.3 realization (menu cannot stay inside the
+  overflow-hidden card); the real contract (title, real ⋮, exact
+  "Start presentation", keyboard, row association) survives at row
+  scope. Two-file alternatives all rejected (menu-only move breaks ref
+  semantics AND still fails the lookup; fake `rounded-xl` on the row
+  prohibited; declipped card = rejected Candidate D). **Scope now
+  exactly three files:** `PresentationPanel.tsx` (`2475dbed…`, three
+  bound corrections only), `presentation-menu-pointer.spec.ts`
+  (`c78d2c8e…`, NO further edits), `drawing-presentation.spec.ts`
+  (`e6e84823…`, §0.2.7 locator-only: xpath gains `/parent::div`,
+  `slideCard`→`slideRow` rename allowed, assertion block
+  byte-preserved). **Fences 52/52 verified** (53 minus the carried
+  spec; `fences073S2_check.txt`). Totals unchanged (carried
+  presentation must return to 2+2). Owned dev-server PID 11028
+  stopped, port 3000 free; `patch-073-menu-pointer.json` +
+  `test-results/` removed after full annotation extraction; no source
+  files touched in cleanup. Bound Stage 1 commit message UNCHANGED;
+  Sonnet three-file review + PASS required before commit. No
+  implementation commit exists; Stage 1 NOT complete; PATCH-074 NOT
+  started.
 - **2026-07-17** — **PATCH-073 Stage 0 DONE (commit
   `e4b1ae77d480f580c4dd905d3000700ed272ca86`, Sonnet PASS, one
   non-blocking follow-up) + Stage 1 ACTIVATED (Amendment 1, Option A —

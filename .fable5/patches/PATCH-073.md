@@ -3,8 +3,9 @@
 **Status:** Stage 0 **DONE** (2026-07-17, commit
 `e4b1ae77d480f580c4dd905d3000700ed272ca86`, Sonnet PASS, one
 non-blocking follow-up). **Stage 1 ACTIVE — fix authorized by
-Amendment 1 (§0.1)**; where §0.1 and the Stage 0 sections conflict,
-§0.1 wins.
+Amendment 1 (§0.1), constrained and expanded to exactly THREE files
+by Amendment 2 (§0.2)**; where §0.2, §0.1, and the Stage 0 sections
+conflict, §0.2 wins.
 
 **Base commit (bind, verify before editing):**
 `27e4018f2f83ad33b592ef85773aa240f1a7c9ca`
@@ -188,6 +189,221 @@ Fable closes.
 
 **Bound Stage 1 commit message (verbatim):**
 `fix(presentation): make per-slide menu pointer reachable (PATCH-073 Stage 1)`
+
+---
+
+## 0.2 Amendment 2 (2026-07-17) — Stage 1 constrained: carried-locator scope + implementation corrections
+
+### 0.2.1 Incident record (measured, not asserted)
+
+The uncommitted Stage 1 implementation makes its target spec green
+(2 with-deps / 1 `--no-deps` / 2 cred-off skipped; both bound
+viewports; fresh JSON annotation extracted and inspected) but breaks
+the carried characterization:
+
+- **Failing test:** `e2e/characterization/drawing-presentation.spec.ts:780`
+  — "discovers real seeded frames and opens the real presentation UI".
+- **Failing assertion:** `:1257` `await expect(menuStart).toHaveCount(1)`
+  — expected 1, received 0; 5 000 ms timeout; locator resolved to 0
+  elements 13 times. No force/timeout tampering involved.
+- **Failing locator (verbatim from the artifact):**
+  `locator('.fixed.top-0.right-0.bottom-0.w-80').getByText('PATCH-064 Portrait', { exact: true }).locator('xpath=ancestor::div[contains(@class,"rounded-xl")][1]').getByRole('button', { name: 'Start presentation', exact: true })`
+- **Last browser state (page snapshot):** panel open, both rows
+  present, NO menu open, and the Portrait row's "Slide preview"
+  button shown `[active]` — i.e. the helper's
+  `slideCard.locator('button').last().click()` (`:1255`) clicked the
+  PREVIEW button, not the ⋮ trigger, because the ⋮ is no longer
+  inside the card; the menu was never opened. The `toHaveCount`
+  failure at `:1257` is the first *asserted* failure; the causal
+  failure is the silent wrong-element click at `:1255`.
+- **Environment:** owned dev-server PID 11028
+  (`node …next\dist\server\lib\start-server.js`) stopped; port 3000
+  verified FREE; no other process touched. `patch-073-menu-pointer.json`
+  preserved until its annotation was fully extracted (recorded below),
+  then removed together with `test-results/` (no `playwright-report/`
+  existed). No source file changed during cleanup; `git status` shows
+  exactly the two authorized modified files.
+
+### 0.2.2 DOM-ancestry finding (Task-2 determinations, explicit)
+
+- The old test still finds the intended row title: YES (snapshot
+  shows `PATCH-064 Portrait` inside the panel).
+- Selected `.rounded-xl` ancestor: still the CARD div (now
+  `relative flex-1 min-w-0 rounded-xl border transition-all` in the
+  uncommitted diff) — nearest rounded-xl ancestor of the title.
+- ⋮ trigger inside that ancestor: **NO** — the implementer moved the
+  entire trigger wrapper (trigger + conditional menu) out of the card
+  to a row-level sibling `div.relative.flex-shrink-0.self-end.mb-2`.
+- Menu rendered outside that ancestor: **YES** (row-level wrapper).
+- Failure point: locating the ⋮ trigger (silent wrong click) AND
+  locating "Start presentation" (asserted count 0). Menu opening and
+  activation were never reached.
+- Contract nature: the carried locator encodes INCIDENTAL internal
+  structure (nearest styling-class ancestor + "last button in card"
+  heuristic). The legitimate public contract — real visible title,
+  real ⋮ trigger, exact-name "Start presentation" button, keyboard
+  activation, row-to-slide association — survives intact at ROW
+  scope. The locator breaks under ANY valid realization of the
+  accepted §0.1.3 design, because the menu cannot remain a descendant
+  of the overflow-hidden card (that was the Stage 0 defect).
+- Stage 1 product behavior: CORRECT for the bound two-row fixture
+  (annotation: all 14 probes item-or-descendant at BOTH viewports,
+  visibleFraction 1 for all items, top-item pointer ACTIVATION on
+  both rows, keyboard retained, menuClose action/outside/row-switch
+  all true, placementDirection below-row/above-row per the rule) —
+  subject to the two corrections in §0.2.3.
+
+### 0.2.3 Conformance audit of the uncommitted diff vs §0.1.3–§0.1.5
+
+Deviations from the bound design (all measured from the diff at
+pre-correction hash `2475dbe…`):
+
+1. **Card class line changed** — `overflow-hidden` REMOVED and
+   `relative` ADDED. §0.1.4 bound "card keeps `overflow-hidden`";
+   §0.1.5 bound "NOTHING else". Both changes are unnecessary (the
+   menu no longer lives in the card) and reintroduce exactly the
+   bottom-corner visual risk §0.1.3 cited when REJECTING Candidate D
+   (square-cornered `bg-gray-50` footer under `rounded-xl`). MUST be
+   reverted.
+2. **Footer class line changed** — `justify-between` dropped.
+   Unauthorized; with the ⋮ gone the class is inert, so restoring the
+   base string is zero-risk and shrinks the diff. MUST be reverted.
+3. **⋮ trigger moved with the menu** (co-located row-level wrapper)
+   instead of the bound "menu JSX only". Root cause: **Amendment 1's
+   own text was internally inconsistent** — "menu JSX moves out" and
+   "`slideMenuRef` + outside-mousedown close stay byte-equivalent"
+   are not co-implementable, because the ref boundary is the wrapper
+   containing trigger AND menu; splitting them either breaks
+   close-on-outside/trigger-toggle semantics or forces handler edits
+   §0.1.5 prohibited. The implementer chose the ONLY realization that
+   preserves handler semantics byte-equivalent. **ACCEPTED and
+   codified** (§0.2.6); the visual cost is a ~24px relocation of the
+   ⋮ from the card footer to the row's right edge, evidenced working
+   by the annotation's menuClose/activation records.
+4. **Annotation evidence-integrity finding:** the emitted annotation
+   reports `cardOverflowChanged: false` while the diff provably
+   changed the card's overflow line. False evidence field. After
+   correction (1) the field becomes accurate; Sonnet must re-derive
+   it from a FRESH JSON run against the corrected diff.
+5. **Second Amendment-1 authoring inconsistency:** §0.1.3 claims
+   "single-slide boards fall into the below-branch", but the bound
+   expression `idx === sortedSlides.length - 1` puts a single slide
+   in the ABOVE-branch (bottom-full → negative overflow above the
+   list's content top → clipped, the Stage 0 defect re-created for
+   single-slide boards). The implementer implemented the bound
+   expression literally. Corrected in §0.2.6 so the expression
+   matches the already-bound sentence.
+
+### 0.2.4 Classification (exactly one): **C**
+
+Both the production structure and the carried locator require
+correction. The production RELOCATION is correct and stays; the two
+unauthorized class-line changes and the direction-rule expression
+need narrow correction inside the already-authorized file. The
+carried locator is coupled to obsolete internal card ownership and
+needs a narrow, locator-only update. (Not B: the diff violates bound
+§0.1.4/§0.1.5 terms. Not A: no two-file structure preserves the
+locator — see §0.2.5.)
+
+### 0.2.5 Two-file-compatible alternatives — evaluated and REJECTED
+
+1. *Trigger stays in card, menu-only outside:* breaks `slideMenuRef`
+   byte-equivalence (risk of item-mousedown closing the menu before
+   its click handler fires — dead menu items — or prohibited handler
+   edits); and the carried `menuStart` lookup STILL fails because the
+   menu is outside the card. Preserves nothing.
+2. *Make the row the `.rounded-xl` ancestor:* requires adding
+   `rounded-xl` to a non-rounded structural row (a fake class that
+   misrepresents component ownership — explicitly prohibited) or
+   stripping `rounded-xl` from the card (visual redesign pulling the
+   checkbox into the "card"). Rejected.
+3. *Keep title+trigger+menu inside a declipped card (only thumbnail
+   keeps `overflow-hidden`):* is Candidate D, already rejected in
+   §0.1.3 for the footer bottom-corner risk; locator compatibility
+   must not be bought with clipping-architecture changes. Rejected.
+
+No smaller production structure preserves the carried locator. The
+third file is added because the locator is structurally stale, not to
+silence the regression.
+
+### 0.2.6 Decision: **OPTION B** — Stage 1 scope becomes exactly THREE files
+
+| File | Pre-correction hash (bind) | Authorized change |
+|---|---|---|
+| `components/presentation/PresentationPanel.tsx` | `2475dbedb44201b052542f487b209e3f2cf3b6bd` (uncommitted; base was `926f43ce…`) | Exactly three corrections, NOTHING else: (a) card class line restored verbatim to base: `"flex-1 min-w-0 rounded-xl border transition-all overflow-hidden",` (remove `relative`, restore `overflow-hidden`); (b) footer class line restored verbatim to base: `className="px-3 py-2 border-t border-gray-100 bg-gray-50 flex items-center justify-between gap-2"`; (c) direction rule becomes `const isLastRow = sortedSlides.length > 1 && idx === sortedSlides.length - 1;`. The co-located row-level wrapper (`relative flex-shrink-0 self-end mb-2`, trigger + conditional menu, `menuPlacementClassName` interpolation, byte-equivalent items/handlers/refs) is CODIFIED as the accepted §0.1.3 realization. |
+| `e2e/characterization/presentation-menu-pointer.spec.ts` | `c78d2c8eef508b47036869fd922c03ce5a416cf4` (uncommitted; base was `0a216384…`) | NO further edits authorized. |
+| `e2e/characterization/drawing-presentation.spec.ts` | `e6e84823b2d4e04fd329086317fd6dc5f8f67420` (committed at HEAD `b7ed947`, working tree level — verified) | §0.2.7 locator-only edit inside `openNamedPresentation`, NOTHING else. |
+
+No fourth file. `SlideThumbnail.tsx` remains PROHIBITED and fenced.
+
+### 0.2.7 Bound carried-test correction (locator-only, exact)
+
+Inside `openNamedPresentation` (currently `:1251–1263`) ONLY:
+
+- The ancestor xpath gains `/parent::div` (the card's parent IS the
+  row wrapper that now contains title, ⋮ trigger, and menu):
+  `.locator('xpath=ancestor::div[contains(@class,"rounded-xl")][1]/parent::div')`
+- Identifier rename `slideCard` → `slideRow` is permitted within the
+  helper only (the name must not lie about what it selects).
+- `slideRow.locator('button').last()` remains the trigger click
+  (before opening, the row's buttons are exactly [Slide preview, ⋮];
+  `.last()` = the real ⋮). `menuStart` re-scopes to `slideRow`.
+- The assertion block `:1257–1262` (`toHaveCount(1)`, `toBeVisible`
+  60 s, `toBeEnabled`, `focus`, `toBeFocused`, `keyboard.press('Enter')`)
+  stays BYTE-PRESERVED. Both call sites unchanged. No other line in
+  the file changes. No force, no dispatchEvent, no broad selector,
+  no assertion change, no timeout change, no PATCH-069/070/071/072
+  behavior or annotation change, no annotation weakening.
+
+### 0.2.8 Stage 1 fences — 52 unique paths
+
+The Amendment-1 53-path set MINUS
+`e2e/characterization/drawing-presentation.spec.ts` (moved to
+authorized-change). **Verified 52/52 against the working tree during
+this amendment** (list: `fences073S2_check.txt`; zero mismatches, 52
+unique). Verify again before editing and before commit.
+
+### 0.2.9 Preserved Stage 1 behavior (unchanged, re-bound)
+
+Everything in §0.1.4/§0.1.6/§0.1.7 still binds: all seven items
+pointer-reachable via genuine clicks on BOTH rows at BOTH viewports
+(1280×720 full matrix, 1440×900 secondary); Start AND Share genuine
+pointer success; keyboard path preserved; correct slide association;
+menu close semantics; card thumbnail clipping preserved (restored by
+§0.2.6a); classification `pointer-reachable-all-items` with history
+fields; PATCH-072 ordering and bottom Start unchanged; no
+force/dispatch/coordinates; no SlideThumbnail or harness edits; no
+portal without a further named amendment.
+
+### 0.2.10 Expected totals after correction (bind; unchanged from §0.1.9)
+
+Stage 1 spec 2/1/2; **carried presentation 2 passed / 2 approved
+skips (the regression must be GONE)**; duplication 2/1; line 4;
+cred-off duplication 2 / line 4 / presentation 4; helper 7/1;
+sanitizer 9/1; focused 59/2; full 448/43; tsc/boundaries/sequential
+verify+build green; cleanup zeros (prefix-scoped, incl. timeout-leak
+sweep after any killed run); zero production bridge imports; no
+generated artifacts left behind; a FRESH JSON annotation run whose
+`cardOverflowChanged` reports accurately against the final diff.
+
+### 0.2.11 Stop conditions (additive to §0.1.10)
+
+STOP immediately, report, do not commit, if: a FOURTH file is
+required; `SlideThumbnail.tsx` must change; a portal becomes
+necessary; any carried assertion must be weakened; menu
+actions/ordering change; keyboard behavior regresses; slide
+association breaks; thumbnail clipping regresses; PATCH-072 ordering
+changes; force/dispatch is needed; any 52-fence or bound
+pre-correction hash drifts; another defect enters scope.
+
+### 0.2.12 Review, commit, closure (unchanged flow)
+
+Sonnet independent review of the uncommitted THREE-file diff (re-runs
+all §0.2.10 gates, re-derives all hashes, extracts the annotation
+from a fresh JSON run); explicit PASS required; NO commit before
+PASS; then commit with the UNCHANGED bound Stage 1 message
+(`fix(presentation): make per-slide menu pointer reachable (PATCH-073 Stage 1)`)
+and push; Fable closes.
 
 ---
 
