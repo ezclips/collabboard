@@ -361,6 +361,52 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-17** — **PATCH-072 §0.4: persisted-scene drift investigated
+  live; classification B; Option B bound (semantic invariant replaces
+  byte-length)**. Keyboard correction (§0.3) VALIDATED: first clean run
+  at spec `a687c999…` passed (exit 0, 2 passed/2 skips) — pointer
+  interception closed. The fresh JSON rerun then failed at `:1097`
+  (rawContentLength 3435→3534, +99, at 20.8 s) while `:1094-1096`
+  PASSED in the same run (same 7 element IDs, same order, same plan
+  bands → no insertion/removal/reorder). **CTO live diagnosis** (DB
+  watcher scratch polling the master padlet content at 250 ms under a
+  self-started dev server; no source edits): two full spec runs BOTH
+  passed (35.2 s / 14.8 s) with the fixture scene at exactly ONE
+  version = seeded 3435/7-element baseline (pre-run snapshot = seeded
+  constant, confirmed twice); passing runs write nothing — the +99 is
+  a rare timing-dependent flush. **Writer identified** via residue
+  scenes: the PRE-EXISTING DrawingLayout load-stability machinery
+  (2026-03-19 doc) — full-flush signature measured: 8th
+  reconciliation-inserted embeddable + version 2/3 + 9-10-digit
+  versionNonce + renderSignature 285-299 chars (len ≈5450); the
+  failing run saw a PARTIAL metadata-only flush (7 elements, ≈+63
+  nonce digits + small serialization fields). PATCH-072 paths proven
+  write-free (slideOrder pure; fullscreen render-only; DrawingLayout =
+  one setState expression). **Side finding:** FIVE leaked
+  `patch-064-harness-presentation-%` boards from the earlier 240 s
+  TIMEOUT runs (timeout aborts in-body finally cleanup;
+  assertion-failed runs clean) — non-causal (reads are
+  masterPadletId-scoped); CTO deleted prefix-scoped residue (5 boards
+  / 40 padlets / 0 canvas_lines; zero remaining, verified); harness
+  timeout-safe cleanup flagged for the next census (harness change NOT
+  authorized now). **Ruling (Option B, §0.4.7):** replace `:1097` ONLY
+  — OLD raw-length equality → NEW
+  `expect(postRunPersistedScene.sceneElements).toEqual(persistedScene.sceneElements)`;
+  invariant fields explicit (id/type/x/y/width/height/frameId/colors/
+  opacity/isDeleted/text/originalText/name/link, exact order+count via
+  coerceSceneElement); excluded app-managed metadata
+  (version/versionNonce/updated/customData.renderSignature); strictly
+  stronger on semantics (catches any persisted runtime embeddable,
+  membership/geometry/link/text drift), drops only byte-count
+  equality; `:1094-1096` + annotation rawContentLengthBefore/After
+  untouched; NO production change; new hash required after edit.
+  Artifacts removed after capture (.codex json, test-results); scratch
+  deleted; own dev-server PIDs (npm wrapper + surviving next child)
+  attributed and stopped; port 3000 verified free. Next: apply §0.4.7
+  → line run (exit 0, 2+2) → JSON annotation pass → remaining gates →
+  Sonnet → bound commit. If the NEW semantic assertion ever fails:
+  STOP to governance (real persisted-membership signal). No
+  implementation commit exists; PATCH-073 NOT started.
 - **2026-07-17** — **PATCH-072 §0.3: named-launch test correction
   authorized (Option A — keyboard activation)** after the accepted
   spec (`1866f1a9…`) failed DETERMINISTICALLY twice more (clean rerun

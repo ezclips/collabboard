@@ -535,6 +535,161 @@ must change; another defect enters scope.
 
 ---
 
+## 0.4 Persisted-scene drift investigation (2026-07-17) — classification B; semantic invariant replaces byte-length
+
+### 0.4.1 Record (new stop, distinct from the locator defect)
+
+- The §0.3 keyboard-activation correction is VALIDATED: the first clean
+  presentation run at spec `a687c99904f0d61b7630667940cf92429620bd23`
+  passed (exit 0, 2 passed / 2 approved skips); pointer interception is
+  resolved and closed.
+- The required fresh JSON-reporter rerun then failed at `:1097`:
+  `expect(postRunPersistedScene.rawContentLength).toBe(persistedScene.rawContentLength)`
+  — expected **3435**, received **3534** (+99 bytes). Failure at 20.8 s
+  into the main test; the setup project passed.
+- No commit is authorized; no Sonnet acceptance review is authorized;
+  PATCH-072 is NOT done. No source edit occurred before this
+  classification.
+
+### 0.4.2 Evidence and CTO live diagnosis
+
+- JSON reporter + error context inspected. Decisive same-run facts: the
+  three assertions immediately BEFORE the failure PASSED —
+  `preRunElementOrder === postRunElementOrder` (`:1094`) and both
+  native plan-band comparisons (`:1095-1096`). Element count stayed 7,
+  IDs and order identical, plan identical. The failing run's scene
+  bytes are unrecoverable from artifacts (assertion-failed runs DO run
+  their `finally` cleanup, which deleted the fixture).
+- Pre-run snapshot provenance: `persistedScene` is read at `:794`
+  BEFORE the browser opens the board — it is the seeded content.
+  Seeded baseline = **3435 bytes / 7 elements** (`frame-portrait`,
+  `frame-landscape`, `emb-slide-a`, `emb-uploaded-image`,
+  `text-landscape`, `shape-landscape`, `emb-slide-b`; all `version 1`,
+  1-digit `versionNonce`, no `customData`), CONFIRMED LIVE twice.
+- CTO diagnosis (no source edits; scratch DB watcher polling the
+  harness master padlet's `content` every 250 ms under a self-started
+  dev server): TWO full diagnostic spec runs, BOTH passed (35.2 s /
+  14.8 s), and in BOTH the fixture's scene had exactly ONE persisted
+  version — the seeded 3435 bytes. Passing runs write NOTHING; the
+  +99 write is a rare, timing-dependent event.
+
+### 0.4.3 Residue discovery and cleanup (side finding, not causal)
+
+The watcher found FIVE leaked `patch-064-harness-presentation-%`
+boards predating the diagnosis (timestamps `…5836768-9ffc6p`,
+`…6082624-piu9mc`, `…6209168-iscnpx`, `…6560151-nr7mao`,
+`…9665684-jy5ng7`) — fixtures of the earlier 240 s TIMEOUT runs: a
+test killed by timeout never completes its in-body `finally` cleanup,
+while assertion-failed runs do. NOT causal for the +99
+(`fetchPersistedScene` is `masterPadletId`-scoped). Their scenes
+captured the app's FULL flush signature: **8 elements** (7 seeded + 1
+reconciliation-inserted embeddable, `frameId: null`, `padlet://`
+link), `version 2/3`, 9-10-digit `versionNonce`, `renderSignature`
+(285-299 chars) added to every `padlet://` embeddable — len ≈
+5447-5451 (+ ≈ 2015). CTO deleted the residue prefix-scoped: **5
+boards / 40 padlets / 0 canvas_lines; zero remaining (verified)**.
+Flagged for the next census (harness change NOT authorized now): the
+harness should survive test-timeout aborts (prefix-scoped pre-run
+sweep or teardown-phase cleanup).
+
+### 0.4.4 Semantic before/after for the failing run
+
+rawContentLength 3435 → 3534; element count 7 → 7; ordered ID list
+IDENTICAL (proven in-run, `:1094`); native below/above bands IDENTICAL
+(`:1095-1096`); no element added or removed (an insertion flush is
+EXCLUDED — it changes count/order, as the residue scenes show); frame
+membership unchanged (plan equality); the Container C runtime
+embeddable remained live-only; no presentation-order field exists in
+or was written to persisted elements. Field-level split of the +99 is
+not byte-recoverable (fixture deleted), but is bounded by the measured
+flush signature: app-managed metadata growth on the SAME 7 elements
+(1-digit → 9/10-digit `versionNonce` ≈ +63 across 7 elements, plus
+small app-added serialization fields), i.e. a PARTIAL metadata flush
+landing before the `:1030` read.
+
+### 0.4.5 Ownership
+
+`slideOrder.ts` is pure (no imports, no side effects, new array);
+`FullscreenPresentation.tsx` renders with a `useMemo` sort (no
+persistence); the DrawingLayout change is one fallback expression
+feeding `setPresentationStartId`. NONE can write scene content. The
+active writer in this flow is the PRE-EXISTING DrawingLayout
+load-stability machinery (documented 2026-03-19): embeddable
+reconciliation bumps `version`/`versionNonce`/`updated`, adds
+`customData.renderSignature`, may insert missing embeddables; its
+persistence timing relative to the `:1030` read is nondeterministic
+(observed: 0 writes in three passing runs; partial +99 flush in the
+one failing run; full flush in long/hung sessions).
+
+### 0.4.6 Classification: **B** — pre-existing reconciliation/autosave behavior exposed by rerunning the spec
+
+Not A: PATCH-072 paths are read-only and semantic membership was
+stable in the failing run. Not C: reads are fixture-id-scoped; the
+residue is real but non-causal; the failing run's own fixture was
+fresh, and the preceding passing run's cleanup was assertion-verified.
+Not D-alone: the byte-length proxy IS brittle, but a real pre-existing
+write occurs — B is the root cause; the governance action below
+replaces the brittle proxy. Not E: the writer's exact signature was
+measured live.
+
+### 0.4.7 Ruling: OPTION B — one E2E-only assertion correction (bound)
+
+- File: `e2e/characterization/drawing-presentation.spec.ts`; current
+  hash (bind): `a687c99904f0d61b7630667940cf92429620bd23`; region:
+  line `:1097` ONLY.
+- OLD (verbatim):
+  `expect(postRunPersistedScene.rawContentLength).toBe(persistedScene.rawContentLength);`
+- NEW (verbatim):
+  `expect(postRunPersistedScene.sceneElements).toEqual(persistedScene.sceneElements);`
+- **Invariant fields (explicit):** via `coerceSceneElement`
+  (`:211-230`) the compared arrays carry id, type, x, y, width,
+  height, frameId, strokeColor, backgroundColor, opacity, isDeleted,
+  text, originalText, name, link — deep-equal in exact order and
+  count. **Excluded (app-managed metadata, already outside the
+  coercion):** version, versionNonce, updated, customData (incl.
+  renderSignature), serialization-only fields.
+- This is STRICTLY STRONGER than byte-length on everything semantic:
+  any added/removed/reordered element (incl. a persisted runtime
+  embeddable), any geometry/link/text/color/name/deletion drift on any
+  seeded element FAILS it; only byte-count equality (which forbade the
+  documented legitimate metadata persistence) is dropped. `:1094-1096`
+  stay byte-untouched; the annotation's `rawContentLengthBefore/After`
+  stays as report-only observability; no fixture change, no other
+  assertion change, no production change, no additional file. The new
+  file hash MUST be measured and reported immediately after the edit.
+- Task-7 protections all hold: seeded membership stable, no native
+  lost, no unexpected persisted runtime embeddable, raw order
+  [Portrait, Landscape] stable, planner untouched, raster assertions
+  untouched, live-only runtime padlet understanding unchanged.
+
+### 0.4.8 Artifact handling (executed)
+
+Evidence extracted into this section, then removed:
+`.codex-patch072-playwright.json`, `test-results/` (error-context);
+`playwright-report/` absent. CTO scratch scripts (scene watcher,
+residue cleanup) deleted, never tracked. Diagnostic dev server: own
+PIDs attributed by command line (npm wrapper + surviving
+`next start-server.js` child) and stopped; **port 3000 verified
+free**. Snapshot data retained only in the session scratchpad.
+
+### 0.4.9 Refreshed verification contract
+
+1. Apply §0.4.7 exactly; report the new E2E hash; re-verify the four
+   non-E2E hashes (§0.2.4) unchanged.
+2. Fresh self-started dev server; line-reporter presentation run
+   (expected exit 0, 2 passed / 2 approved skips).
+3. Fresh JSON pass; extract the complete
+   `patch-072-presentation-order` annotation verbatim.
+4. Then the remaining §0.2.5 gates, fences 49/49, Sonnet review, bound
+   commit.
+5. STOP back to governance if: the NEW semantic assertion fails on a
+   fresh run (that is a REAL persisted-membership signal, not a tweak
+   target); any hash drifts; a production change is needed; a sixth
+   file is needed; any assertion must weaken; another defect enters
+   scope.
+
+---
+
 ## 1. Defect statement (fresh census at `3b863d5`)
 
 **The fullscreen presentation walks the slides in RAW SCENE ORDER while
