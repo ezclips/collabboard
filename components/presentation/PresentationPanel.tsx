@@ -130,8 +130,17 @@ export function PresentationPanel({
       if (slideMenuRef.current && !slideMenuRef.current.contains(e.target as Node))
         setOpenMenuId(null);
     };
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setOpenMenuId(null);
+      }
+    };
     document.addEventListener("mousedown", handle);
-    return () => document.removeEventListener("mousedown", handle);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("mousedown", handle);
+      document.removeEventListener("keydown", handleEscape);
+    };
   }, [openMenuId]);
 
   // Global header ⋮ menu

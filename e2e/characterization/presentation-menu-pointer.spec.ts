@@ -392,6 +392,7 @@ test.describe('presentation menu pointer reachability characterization (PATCH-07
           rowSwitchClose: false,
           escapeSupported: false,
         };
+        const escapeChecks: boolean[] = [];
 
         const firstOutsideProbe = await openMenuForRow(page, sidebar, ROW_TITLES[0]);
         await page.getByText('Presentation', { exact: true }).click();
@@ -416,6 +417,25 @@ test.describe('presentation menu pointer reachability characterization (PATCH-07
           const slideCard = await getSlideCard(slideRow);
           await slideCard.locator('button').first().click();
 
+          const expectedCounter = slideTitle === 'PATCH-064 Portrait' ? 'Slide 2 / 2' : 'Slide 1 / 2';
+          const expectedChildText = slideTitle === 'PATCH-064 Portrait' ? `${fixture.prefix} child B` : `${fixture.prefix} child A`;
+          const unexpectedChildText = slideTitle === 'PATCH-064 Portrait' ? `${fixture.prefix} child A` : `${fixture.prefix} child B`;
+          const fullscreenCounter = page.getByText(expectedCounter, { exact: true });
+          const shareHeading = page.getByText('Share presentation slides', { exact: true });
+          let pointerError: string | null = null;
+
+          const escapeProbe = await openMenuForRow(page, sidebar, slideTitle);
+          expect(escapeProbe.names).toEqual([...MENU_ITEM_NAMES]);
+          await page.keyboard.press('Escape');
+          await expect(escapeProbe.menu).toHaveCount(0);
+          await expect(fullscreenCounter).toHaveCount(0);
+          await expect(shareHeading).toHaveCount(0);
+          escapeChecks.push(
+            (await escapeProbe.menu.count()) === 0 &&
+            (await fullscreenCounter.count()) === 0 &&
+            (await shareHeading.count()) === 0
+          );
+
           const initialProbe = await openMenuForRow(page, sidebar, slideTitle);
           expect(initialProbe.names).toEqual([...MENU_ITEM_NAMES]);
           expect(initialProbe.placementDirection).toBe(index === ROW_TITLES.length - 1 ? 'above-row' : 'below-row');
@@ -430,12 +450,6 @@ test.describe('presentation menu pointer reachability characterization (PATCH-07
               pointerResult: measured.name === 'Start presentation' ? 'pointer-activated' : 'pointer-reachable',
             });
           }
-
-          const expectedCounter = slideTitle === 'PATCH-064 Portrait' ? 'Slide 2 / 2' : 'Slide 1 / 2';
-          const expectedChildText = slideTitle === 'PATCH-064 Portrait' ? `${fixture.prefix} child B` : `${fixture.prefix} child A`;
-          const unexpectedChildText = slideTitle === 'PATCH-064 Portrait' ? `${fixture.prefix} child A` : `${fixture.prefix} child B`;
-          const fullscreenCounter = page.getByText(expectedCounter, { exact: true });
-          let pointerError: string | null = null;
 
           try {
             await initialProbe.items[0].click({ timeout: 3_000 });
@@ -512,6 +526,7 @@ test.describe('presentation menu pointer reachability characterization (PATCH-07
           });
         }
 
+        menuClose.escapeSupported = escapeChecks.length === ROW_TITLES.length && escapeChecks.every(Boolean);
         const currentClassification = classifyRows(rowObservations);
         expect(currentClassification).toBe(CURRENT_CLASSIFICATION);
 
