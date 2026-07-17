@@ -361,6 +361,98 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-17** — PATCH-072 **DONE (implementation commit
+  `27e4018f2f83ad33b592ef85773aa240f1a7c9ca`, Sonnet PASS, no required
+  changes)** + fresh census + **PATCH-073 AUTHORIZED** ("Per-Slide
+  Presentation Menu Pointer Reachability", diagnosis-only Stage 0,
+  base `27e4018`). **PATCH-072 closure:** exactly the five authorized
+  files landed — NEW `lib/infra/presentation/slideOrder.ts`
+  (`e72c3de0…`, pure `sortSlidesByPresentationOrder`: finite explicit
+  order ascending → non-finite/unordered after → y → x → stable ties;
+  readonly input, new array, zero mutation) + NEW `slideOrder.test.ts`
+  (`2f1d79c5…`, exactly 7 incl. parity lock),
+  `FullscreenPresentation.tsx` (`655244b4…`, one import + one memoized
+  `orderedSlides` governing startSlideId lookup, currentSlide, cache
+  invalidation, prefetch, keyboard nav, Next/Prev bounds, counter — no
+  raw-order fallback, no redesign), `DrawingLayout.tsx` (`b470a888…`,
+  +2/−1: explicit fromSlideId preserved, no-ID fallback → first
+  canonical frame, deps/caller unchanged), presentation spec
+  (`e6e84823…`, canonical-order flip + real-⋮-menu named launches via
+  focus+Enter + semantic sceneElements equality replacing raw
+  byte-length; annotation
+  `fullscreen-slide-order-aligned-with-canonical-panel-order`). Live
+  behavior: raw scene [Portrait, Landscape] unchanged; panel
+  [Landscape, Portrait]; bottom Start → Landscape 1/2; Next →
+  Portrait 2/2; Prev → Landscape 1/2; named Portrait → 2/2; named
+  Landscape → 1/2; counter now agrees with panel numbering.
+  Unchanged surfaces verified: PresentationPanel `926f43ce…`,
+  SlideThumbnail `b26524ae…`, PDF/PPTX/thumbnail/planner/resolver/
+  membership/raster/reconciliation. Final gates all green (presentation
+  2+2, setup 1, duplication 2/1, line 4, cred-off 2/4/4, helper 7/1,
+  sanitizer 9/1, focused 59/2, full 448/43, diff-check/tsc/boundaries/
+  verify/build, cleanup zeros, 49/49 fences, zero prod imports, repo
+  clean/synced). **Follow-up notes recorded WITHOUT reopening
+  PATCH-072:** (1) comparator parity — helper treats NaN/−Infinity as
+  unordered, panel's inline `?? +Infinity` does not; production frames
+  normalize `order: null`, so no current user-visible defect;
+  candidate for later consolidation/parity hardening. (2) per-slide
+  menu pointer reachability — 072 trace proved the top ⋮-menu items
+  can be pointer-intercepted by an adjacent SlideThumbnail img;
+  keyboard works; possible real mouse-user defect → PATCH-073.
+  (3) timeout-safe harness cleanup — Playwright test timeout aborts
+  in-body `finally`; five leaked fixtures were found+cleaned in §0.4;
+  test-infrastructure defect candidate, NOT product behavior.
+  **Fresh census at `27e4018` (all baselines re-run live this session
+  under the dev-server contract, own PID attributed/stopped, port
+  freed):** (1) **per-slide menu pointer interception — SELECTED as
+  PATCH-073, diagnosis-first**: real-Chromium hit-test evidence (072
+  §0.3.2 trace: SlideThumbnail img intercepted the menu item through
+  401+ stable retries) + source geometry (menu `absolute bottom-full
+  z-50` at PresentationPanel:402-406 is clipped by the card's
+  `overflow-hidden` :341-348; menu ≈290px > card ≈215px → top items
+  clipped on EVERY row); keyboard reachable; real-user impact highly
+  likely but measured incidentally at one viewport/row/item → Stage 0
+  must verify per-item/per-row with `document.elementFromPoint` +
+  genuine pointer clicks and freeze the result; exact owner boundary:
+  PresentationPanel inline non-portaled menu (SlideThumbnail
+  innocent); NOT a broad menu-architecture problem. (2) timeout-safe
+  harness cleanup — proven mechanism, test-infra only, prefix-scoped,
+  known leak risk; fix-shaped but ownership (afterEach vs global
+  teardown vs per-spec) needs one determination; strong PATCH-074
+  candidate; NOT bundled with 073 (product+infra bundling prohibited).
+  (3) comparator parity/consolidation — unreachable edge hardening +
+  P6 consolidation; NOT a defect today (frames bind order:null); no
+  patch solely for dedupe; queue with the panel-comparator
+  consolidation follow-up. (4) duplicate `padlet://` links — still
+  needs the clone-vs-shared-reference product ruling; design-first;
+  resolver dedupe NOT assumed correct. (5) membership-union
+  consolidation — refactor (P6), no user-visible evidence. (6)
+  line-follow (move + natural-height) — feature-sized; attachment
+  contract still unresolved. (7) AI images in presentation — still
+  blocked on a deterministic fixture; failing layer undetermined. (8)
+  overlap fallback — still LOAD-BEARING (070-proven); untouched absent
+  new design. (9) uploaded-image storage cleanup — documentation-only.
+  (10) Connections side panel — FEATURE (Registry-Editor hierarchy,
+  search, filters, select/center); dedicated product spec + roadmap
+  approval required; not stabilization. **PATCH-073 shape:** Stage 0
+  diagnosis-only, exactly ONE new file
+  `e2e/characterization/presentation-menu-pointer.spec.ts` (absence
+  verified); harness reused UNMODIFIED (fenced); observables O1-O6
+  (per-row per-item bbox/visible-fraction/elementFromPoint/genuine
+  pointer trial/keyboard control; annotation
+  `patch-073-menu-pointer-reachability`; classification one of
+  pointer-intercepted-top-items / pointer-reachable-all-items /
+  mixed-per-row — freeze what is OBSERVED); no
+  force/dispatch/coordinates/sleeps; Stage 1 (PresentationPanel-owned
+  placement fix) contingent via named amendment only. Fences: **54
+  unique paths verified 54/54 at `27e4018`** (072's 49 carried + 5
+  PATCH-072 files frozen; PresentationPanel + SlideThumbnail already
+  members, stay IMMUTABLE). Bound new-spec totals: 2 passed with deps
+  / 1 no-deps / 2 cred-off skipped; all carried baselines unchanged
+  (448/43 etc.). Bound Stage 0 commit:
+  `test(presentation): characterize per-slide menu pointer
+  reachability (PATCH-073 Stage 0)`. Sonnet PASS required before
+  commit. Implementation NOT started.
 - **2026-07-17** — **PATCH-072 §0.4: persisted-scene drift investigated
   live; classification B; Option B bound (semantic invariant replaces
   byte-length)**. Keyboard correction (§0.3) VALIDATED: first clean run

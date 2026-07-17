@@ -1,11 +1,14 @@
 # PATCH-072 - Align Fullscreen Slide Order with the Canonical Panel Order
 
-**Status:** AUTHORIZED — fix (single stage), **Amendment 1 applied**
-(2026-07-16) after the first implementation attempt stopped correctly
-under §9. Where Amendment 1 (§0.1) and the original sections conflict,
-**Amendment 1 wins**. The defect is deterministic, fully characterized,
-and now has TWO exact owner sites (§0.1.2); no diagnosis stage is
-needed.
+**Status:** **DONE** (2026-07-17; closed in CURRENT_TASK.md).
+Implementation commit `27e4018f2f83ad33b592ef85773aa240f1a7c9ca`
+(`fix(presentation): align fullscreen slide order with panel order
+(PATCH-072)`), Sonnet PASS, no required changes, one non-blocking
+follow-up note (comparator NaN/-Infinity parity — recorded in the
+closure log). History: Amendment 1 (§0.1, two-owner scope), §0.2
+verification rebind, §0.3 keyboard-activation correction, §0.4
+semantic persisted-scene invariant. Where Amendment 1 (§0.1) and the
+original sections conflict, **Amendment 1 wins**.
 
 **Base commit (bind, verify before editing):** the Amendment-1
 governance commit (successor of `a59526e74dd03d1873901e252a8d2786d0eddf60`,
