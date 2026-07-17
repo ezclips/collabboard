@@ -1,7 +1,11 @@
 # PATCH-076 — Duplicate-Slide Shared `padlet://` Reference Diagnosis
 
-**Status:** SPEC READY — **diagnosis-only** (NO production change, NO
-harness change, NO fix — a fix is BLOCKED on the §3 product ruling).
+**Status:** SPEC AMENDED (Amendment 1, §0.A, 2026-07-18) —
+**diagnosis-only** (NO production change, NO harness change, NO fix —
+a fix is BLOCKED on the §3 product ruling). First candidate reviewed
+by Sonnet: **PASS WITH REQUIRED CHANGES** — the two required
+corrections are authorized and bound in §0.A; the corrected candidate
+requires a fresh Sonnet review before commit.
 **Implementer:** GPT-5.5. **Reviewer:** Sonnet (independent,
 read-only, uncommitted diff, explicit PASS required before commit).
 **Closure:** Fable (CTO) after landing.
@@ -43,6 +47,182 @@ not fix it in this patch.
 
 ---
 
+## 0.A Amendment 1 — persistence diagnosis contract (Fable CTO, 2026-07-18)
+
+### 0.A.1 Review record
+
+Sonnet independently reviewed the first uncommitted candidate
+(`e2e/characterization/drawing-slide-duplication.spec.ts`, hash
+`cf58547c5db9abd3c172cc24693160f7faa45461`). Verdict:
+**PASS WITH REQUIRED CHANGES.**
+
+Confirmed by the reviewer with live evidence: exact one-file scope;
+candidate hash exact; absence contract valid; 22/22 fences matched;
+real `'Duplicate slide'` and `'Remove slide'` menu actions (no
+synthetic events, no force clicks, real confirmation dialog); one
+active test; shared cleanup owner + local `finally`; no product fix;
+PATCH-076 totals 2/1/2 green; all carried browser totals green; all
+deterministic gates green (helper 7/1, sanitizer 9/1, focused 59/2,
+full 448/43, verify+build); cleanup zero across ten prefixes; no
+artifacts; PATCH-077 not started.
+
+**Key new finding (reviewer-verified twice, including once with an
+explicit 3.5 s wait beyond the app's ~2 s save debounce):** the
+duplicated slide is **never persisted** to the master scene at all —
+`duplicateSlideId`/`duplicateChildSceneId`/`duplicateLinkValue` were
+`null` in every persisted-scene read, immediate AND settled. The live
+client renders the duplicate (and it resolves the shared backing
+child), but a reload would silently lose the duplicate entirely. The
+existing `sharedLinkEmbeddableCount: 1` therefore counts only the
+source's own persisted embeddable and must not be read as proof of a
+second persisted shared-link reference.
+
+Two required corrections were found; both are accepted and bound
+below. Both are additive/derivation-hardening changes inside the one
+allowed file; neither expands scope.
+
+### 0.A.2 Required change 1 — explicit persistence observation (bind)
+
+Add ONE literal annotation field:
+
+- **`duplicatePersistedToDatabase`** (`boolean`) — derived EXACTLY as
+  `duplicateSlideId !== null && duplicateChildSceneId !== null &&
+  duplicateLinkValue !== null`, where those three identities are taken
+  from the **settled** persisted-master-scene read defined in §0.A.4
+  (never from the immediate post-UI read alone). Expected value for
+  the currently observed behavior: **`false`**. If the duplicate DOES
+  appear in the persisted scene at any point during the settlement
+  window, the three identity fields must bind to it and this field
+  becomes `true` — a valid, faithfully recorded outcome.
+
+The existing seven fields are preserved unchanged in name; two get
+hardened derivations (§0.A.4, §0.A.5) but identical meaning shape.
+
+### 0.A.3 Classification ruling (bind) — OPTION B, enum amended
+
+CTO ruling: with `duplicatePersistedToDatabase: false` proven,
+`shared-reference-with-deletion-cascade` **materially understates the
+persistence finding** — the observed behavior is not two persisted
+references sharing a row; it is a live-client-only duplicate whose
+removal still cascades onto the shared backing row. The enum gains
+one deliberately chosen literal. Amended decision table (bind,
+complete, in order):
+
+1. `newPadletRowsAfterDuplicate > 0` → **`independent-clone`**
+2. else if `removeDuplicateDeletedSharedRow && originalContainerLostAfterRemove`:
+   - `duplicatePersistedToDatabase === true` →
+     **`shared-reference-with-deletion-cascade`**
+   - `duplicatePersistedToDatabase === false` →
+     **`unpersisted-duplicate-with-deletion-cascade`**
+3. else → **`shared-reference-deletion-guarded`**
+
+Expected classification for the currently observed behavior:
+**`unpersisted-duplicate-with-deletion-cascade`**.
+
+Documented scope of the term "shared reference" wherever it appears
+in this patch: proven at the **live client rendering and
+deletion-behavior level** (the rendered duplicate resolves the same
+backing child; removing it deletes the shared row) — NOT as two
+persisted embeddables. The persistence distinction is carried solely
+by `duplicatePersistedToDatabase`.
+
+### 0.A.4 Persistence-settlement proof (bind)
+
+The settled persisted state must be established deterministically,
+not by a single immediate read or a lone sleep:
+
+- After the duplicate row is visible in the sidebar, POLL the
+  persisted master scene (re-fetch + re-parse) at intervals of
+  ≤ 1 000 ms across a bound settlement window of ≥ 6 000 ms total
+  (strictly exceeding the app's ~2 000 ms save debounce with margin),
+  recording on each iteration whether a second frame bearing the
+  source slide title (or any embeddable with the source link outside
+  the source frame) has appeared.
+- The FINAL read of that window is the **settled read** — the sole
+  derivation basis for `duplicateSlideId`, `duplicateChildSceneId`,
+  `duplicateLinkValue`, `duplicatePersistedToDatabase`, and
+  `sharedLinkEmbeddableCount`.
+- The immediate first read MAY additionally be recorded (evidence
+  fields) but must not drive any of the eight bound fields.
+- The final report must distinguish: immediate persisted state,
+  settled persisted state, and whether the duplicate EVER appeared
+  during the window.
+- A single sleep-then-read is PROHIBITED; the per-test timeout stays
+  240 000 ms (no inflation — the added polling fits).
+
+### 0.A.5 Deterministic shared-row deletion proof (bind)
+
+Replace the one-shot post-removal row read with
+`expect.poll(..., { timeout: 15_000 })` that repeatedly queries the
+EXACT known source backing-row ID (`fetchBoardPadletById`-style,
+`.eq('id', sourceContainerId)`) until it is absent. Required
+properties: exact row ID only; no prefix-wide query; no broad
+deletion; no whole-test timeout increase; no retry of the UI action;
+no swallowed query error; runs after the real `'Remove slide'`
+action and completes before local `finally`/shared `afterEach`
+cleanup; `removeDuplicateDeletedSharedRow` derives from the poll
+outcome. If the row remains present at poll expiry, record
+`removeDuplicateDeletedSharedRow: false` faithfully and classify per
+the §0.A.3 table (a guarded outcome is valid) — do not fail the
+diagnosis solely because the cascade did not fire, and do not retry.
+
+### 0.A.6 Amended annotation contract (bind — exactly EIGHT fields)
+
+| Field | Definition |
+|---|---|
+| `newPadletRowsAfterDuplicate` | Count of padlet rows in the fixture board (`.eq('board_id', …)`) after duplication whose IDs were NOT present before, via Set-based ID diff — never a bare total-count comparison. |
+| `sharedLinkEmbeddableCount` | The number of persisted live-scene embeddables carrying the source child's exact `padlet://` link after duplication, taken from the SETTLED read (§0.A.4). **A value of 1 may mean only the source embeddable persisted; it must NOT be interpreted as proof of an additional persisted duplicate reference — `duplicatePersistedToDatabase` carries that distinction.** |
+| `duplicateRendersSameChild` | Whether the duplicated slide, launched through the real presentation UI, visibly renders the seeded source child (live client evidence). |
+| `duplicatePersistedToDatabase` | §0.A.2 — settled-read conjunction `duplicateSlideId !== null && duplicateChildSceneId !== null && duplicateLinkValue !== null`. |
+| `removeDuplicateDeletedSharedRow` | §0.A.5 — exact-ID `expect.poll` absence outcome for the known source backing-row ID after the real Remove action, before cleanup. |
+| `originalContainerLostAfterRemove` | Whether the surviving original slide has lost its rendered container after duplicate removal (primary evidence: live presentation launch of the surviving row; scene/resolver observations may corroborate). |
+| `classification` | §0.A.3 amended four-value enum, derived by the bound decision table. |
+| `prefix` | The real fixture prefix used (must start with `patch-064-harness-patch-076-dup-`). |
+
+No ninth field. Supplementary raw evidence (identity values, row
+counts, resolver/planner observations, immediate-vs-settled records)
+stays welcome in the annotation payload but the eight names above are
+the bound contract.
+
+### 0.A.7 Newly surfaced product question (record only, unresolved)
+
+In addition to the §3 clone-vs-reference question: **should duplicated
+slides be persisted as independent scene/frame objects, and at what
+point?** (Currently the duplicate exists only in the live client and
+is silently lost on reload.) No fix is authorized; both questions go
+to the owner after this diagnosis lands.
+
+### 0.A.8 Scope, totals, and stop conditions (amended)
+
+Allowed implementation file remains EXACTLY
+`e2e/characterization/drawing-slide-duplication.spec.ts` (still a new
+file; absence contract unchanged). Hash
+`cf58547c5db9abd3c172cc24693160f7faa45461` is the PRE-correction hash
+and will change; the post-correction hash is NOT bound in advance and
+must be measured at review. Unchanged: base
+`9cde5cdb4583cddb31364315138fa3daa872ac5d`; all 22 §5 fences; expected
+browser totals (new spec 2/1/2); carried browser totals; deterministic
+totals (full Vitest 448/43); environment contract; cleanup contract
+(ten prefixes); bound implementation commit message
+`test(e2e): characterize duplicate-slide shared padlet link behavior (PATCH-076)`.
+
+ADDITIONAL hard stops (on top of §9): a second file is required; any
+existing file must change; a production fix is needed; a harness
+change is needed; the classification cannot be supported honestly
+from the observations; persistence settlement cannot be observed
+deterministically; exact backing-row deletion cannot be polled
+deterministically; any timeout inflation; retrying the UI action;
+force click; `dispatchEvent`; direct callback invocation; direct
+product-state mutation; another defect entering scope (report only).
+
+The corrected candidate goes back to Sonnet for a fresh independent
+review (re-derive hash, re-verify 22/22 fences + one-file scope,
+re-run all modes, re-extract the eight-field annotation, verify the
+settled-read and exact-ID-poll derivations); explicit PASS required
+before the bound commit.
+
+---
+
 ## 1. Defect statement (code-derived evidence at base `9cde5cd`)
 
 `handleDuplicateSlide` (`DrawingLayout.tsx:1408-1435`) duplicates a
@@ -78,6 +258,12 @@ Downstream mechanics that make this consequential (all at base):
   two copies contend for one persisted `position_x/y`.
 
 ## 2. Diagnosis boundary (bind — observe, do NOT fix)
+
+> **Amendment 1 note:** the field table below is SUPERSEDED by the
+> eight-field contract in §0.A.6, the classification enum by §0.A.3,
+> and the derivation rules by §0.A.4/§0.A.5. The behavioral flow
+> (real UI actions, observation-only, contradiction-is-valid) is
+> unchanged.
 
 ONE new characterization spec proves the user-visible consequences
 end-to-end through the real UI (per-slide ⋮ menu actions

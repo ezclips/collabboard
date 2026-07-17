@@ -361,6 +361,44 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-18** — **PATCH-076 AMENDED (Amendment 1 §0.A) after Sonnet
+  review: PASS WITH REQUIRED CHANGES on the first candidate**
+  (`drawing-slide-duplication.spec.ts`, pre-correction hash
+  `cf58547c…`). Reviewer confirmed everything structural (one-file
+  scope, 22/22 fences, real Duplicate/Remove menu actions, 2/1/2
+  totals, carried gates, deterministic gates, cleanup zero across ten
+  prefixes) and surfaced a decisive persistence finding, verified
+  twice incl. a 3.5 s wait past the ~2 s save debounce: **the
+  duplicated slide is NEVER persisted to the master scene** —
+  duplicate slide/child/link identities stayed `null` in every
+  persisted read; the live client renders it, but a reload silently
+  loses it; `sharedLinkEmbeddableCount: 1` counted only the source's
+  own embeddable. **Bound corrections:** (1) new eighth literal field
+  `duplicatePersistedToDatabase` (settled-read conjunction of the
+  three duplicate identities being non-null; expected `false`); (2)
+  exact-ID `expect.poll` (15 s) replaces the one-shot post-Remove
+  backing-row read, deriving `removeDuplicateDeletedSharedRow` (a
+  surviving row records `false` faithfully → guarded classification,
+  no retry). **Classification ruling OPTION B — enum amended** with
+  the deliberate literal `unpersisted-duplicate-with-deletion-cascade`
+  (chosen for the persisted-state truth: not two persisted references,
+  but a live-only duplicate whose removal still cascades onto the
+  shared backing row); full four-value decision table bound in
+  §0.A.3; "shared reference" everywhere in the patch now explicitly
+  means live-rendering/deletion-level, not two persisted embeddables.
+  **Persistence-settlement contract:** poll the persisted master scene
+  at ≤1 s intervals across a ≥6 s window; settled (final) read is the
+  sole derivation basis; immediate read is evidence-only; report must
+  distinguish immediate/settled/ever-appeared; sleep-only is
+  prohibited; per-test timeout stays 240 s. **Newly surfaced product
+  question recorded (unresolved, no fix authorized):** should
+  duplicated slides be persisted as independent scene/frame objects,
+  and at what point? Joins the §3 clone-vs-reference question for the
+  owner after landing. Scope/base/fences/totals/commit message all
+  unchanged (§0.A.8); post-correction hash deliberately NOT pre-bound;
+  corrected candidate requires a fresh Sonnet PASS before the bound
+  commit. Candidate spec NOT modified by governance; no product fix;
+  PATCH-077 NOT started.
 - **2026-07-17** — **PATCH-075 DONE (commit
   `9cde5cdb4583cddb31364315138fa3daa872ac5d`, Sonnet PASS, no required
   changes) + fresh census + PATCH-076 AUTHORIZED (diagnosis-only)**.
