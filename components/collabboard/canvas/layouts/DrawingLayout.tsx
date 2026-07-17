@@ -14,6 +14,7 @@ import {
   type ImportedDrawingScene,
 } from '@/lib/infra/drawing/importScene';
 import { getDrawingContainerEditTargetLabel } from '@/lib/infra/drawing/containerEditTargetLabel';
+import { sortSlidesByPresentationOrder } from '@/lib/infra/presentation/slideOrder';
 import LibraryPanel from '@/components/collabboard/LibraryPanel';
 import PostCardContent from '@/components/collabboard/PostCardContent';
 import EmbeddedCommentList from '@/components/collabboard/EmbeddedCommentList';
@@ -1503,7 +1504,7 @@ export default function DrawingLayout({
   const handleStartPresentation = useCallback((fromSlideId?: string) => {
     const activeFrames = elements.filter((el: any) => el.type === 'frame' && !el.isDeleted);
     if (activeFrames.length === 0) return;
-    setPresentationStartId(fromSlideId ?? activeFrames[0].id);
+    setPresentationStartId(fromSlideId ?? sortSlidesByPresentationOrder(activeFrames)[0]?.id ?? null);
     setPresentationActive(true);
   }, [elements]);
 

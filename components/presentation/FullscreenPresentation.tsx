@@ -8,6 +8,7 @@ import type { FrameSlide, RenderSlideToPNG } from "./PresentationPanel";
 import type { Padlet } from "@/types/collabboard";
 import PostCardContent from "@/components/collabboard/PostCardContent";
 import { RuntimeSlideRenderer } from "./runtime-slide/RuntimeSlideRenderer";
+import { sortSlidesByPresentationOrder } from "@/lib/infra/presentation/slideOrder";
 
 /**
  * Strategy switch.
@@ -72,12 +73,13 @@ export function FullscreenPresentation({
   runtimeHelpers?: RuntimeSlideHelpers;
 }) {
   const usingRuntime = USE_RUNTIME_LIVE_SLIDESHOW && !!runtimeHelpers;
+  const orderedSlides = useMemo(() => sortSlidesByPresentationOrder(slides), [slides]);
 
   const USE_LEGACY_CONTENT_PADLET_OVERLAY = false;
 
   const [currentIdx, setCurrentIdx] = useState(() => {
     if (!startSlideId) return 0;
-    const idx = slides.findIndex((s) => s.id === startSlideId);
+    const idx = orderedSlides.findIndex((s) => s.id === startSlideId);
     return idx >= 0 ? idx : 0;
   });
 
@@ -111,7 +113,7 @@ export function FullscreenPresentation({
     return () => window.removeEventListener("resize", measure);
   }, []);
 
-  const currentSlide = slides[currentIdx];
+  const currentSlide = orderedSlides[currentIdx];
 
   // Rectangle where the slide image actually renders (matching object-fit:contain)
   const overlayRect = useMemo(() => {
@@ -163,7 +165,7 @@ export function FullscreenPresentation({
     setPngs((prev) => {
       let changed = false;
       const next = { ...prev };
-      for (const slide of slides) {
+      for (const slide of orderedSlides) {
         const cacheKey = getSlideCacheKey(slide);
         if (renderedKeysRef.current[slide.id] && renderedKeysRef.current[slide.id] !== cacheKey) {
           delete next[slide.id];
@@ -173,7 +175,7 @@ export function FullscreenPresentation({
       }
       return changed ? next : prev;
     });
-  }, [slides, getSlideCacheKey]);
+  }, [orderedSlides, getSlideCacheKey]);
 
   // Render current + pre-fetch adjacent slides (PNG path only).
   // On initial mount, wait double-RAF so the canvas has settled before capture.
@@ -182,9 +184,9 @@ export function FullscreenPresentation({
     if (usingRuntime) return;
 
     const doRender = () => {
-      renderSlide(slides[currentIdx]);
-      renderSlide(slides[currentIdx + 1]);
-      renderSlide(slides[currentIdx - 1]);
+      renderSlide(orderedSlides[currentIdx]);
+      renderSlide(orderedSlides[currentIdx + 1]);
+      renderSlide(orderedSlides[currentIdx - 1]);
     };
     if (!hasMountedRef.current) {
       hasMountedRef.current = true;
@@ -199,7 +201,7 @@ export function FullscreenPresentation({
     }
     doRender();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentIdx, slides, usingRuntime]);
+  }, [currentIdx, orderedSlides, usingRuntime]);
 
   useEffect(() => {
     cancelledRef.current = false;
@@ -212,7 +214,7 @@ export function FullscreenPresentation({
       if (e.key === "Escape") { onClose(); return; }
       if (e.key === "ArrowRight" || e.key === "PageDown" || e.key === " ") {
         e.preventDefault();
-        setCurrentIdx((i) => Math.min(slides.length - 1, i + 1));
+        setCurrentIdx((i) => Math.min(orderedSlides.length - 1, i + 1));
       }
       if (e.key === "ArrowLeft" || e.key === "PageUp") {
         e.preventDefault();
@@ -221,7 +223,7 @@ export function FullscreenPresentation({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [slides.length, onClose]);
+  }, [orderedSlides.length, onClose]);
 
   const currentPng = currentSlide ? pngs[currentSlide.id] : null;
 
@@ -355,13 +357,13 @@ export function FullscreenPresentation({
         </button>
 
         <span className="text-white text-sm font-medium min-w-[80px] text-center tabular-nums">
-          Slide {currentIdx + 1} / {slides.length}
+          Slide {currentIdx + 1} / {orderedSlides.length}
         </span>
 
         <button
           type="button"
-          onClick={() => setCurrentIdx((i) => Math.min(slides.length - 1, i + 1))}
-          disabled={currentIdx >= slides.length - 1}
+          onClick={() => setCurrentIdx((i) => Math.min(orderedSlides.length - 1, i + 1))}
+          disabled={currentIdx >= orderedSlides.length - 1}
           className="w-9 h-9 rounded-xl flex items-center justify-center text-white hover:bg-white/20 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
           title="Next (→)"
         >

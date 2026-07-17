@@ -933,13 +933,17 @@ test.describe('drawing presentation browser characterization (PATCH-064)', () =>
         loadStatus: 'loaded',
       });
 
-      await page.getByRole('button', { name: /Start presentation/i }).last().click();
-      const fullscreen = page.locator('div[style*="z-index: 9999"]').first();
-      await expect(fullscreen.getByText('Slide 1 / 2', { exact: true })).toBeVisible({ timeout: 60_000 });
-      const slideOneHasPortraitChild = await fullscreen.getByText(new RegExp(`${fixture.prefix} child B`)).isVisible().catch(() => false);
-      const slideOneHasLandscapeChild = await fullscreen.getByText(new RegExp(`${fixture.prefix} child A`)).isVisible().catch(() => false);
-      expect(slideOneHasPortraitChild).toBe(true);
-      expect(slideOneHasLandscapeChild).toBe(false);
+      const fullscreenOrderBefore = seededFrameTitles;
+      const fullscreenOrderAfter = slideTitles;
+      const defaultStartTargetBefore = {
+        source: 'raw-activeFrames[0]',
+        slideTitle: seededFrameTitles[0] ?? null,
+      };
+      const defaultStartTargetAfter = {
+        source: 'canonical-orderedSlides[0]',
+        slideTitle: slideTitles[0] ?? null,
+      };
+      const fullscreenVisitOrder: string[] = [];
 
       await page.evaluate(() => {
         const windowWithProbe = window as typeof window & {
@@ -949,16 +953,22 @@ test.describe('drawing presentation browser characterization (PATCH-064)', () =>
         };
         windowWithProbe.__patch070Stage0Probe?.reset();
       });
-      await page.getByTitle(/Next/).click();
-      await expect(fullscreen.getByText('Slide 2 / 2', { exact: true })).toBeVisible();
-      await expect(fullscreen.getByText(new RegExp(`${fixture.prefix} child A`))).toBeVisible({ timeout: 60_000 });
+      await page.getByRole('button', { name: /Start presentation/i }).last().click();
+      const fullscreen = page.locator('div[style*="z-index: 9999"]').first();
+      await expect(fullscreen.getByText('Slide 1 / 2', { exact: true })).toBeVisible({ timeout: 60_000 });
+      const slideOneHasLandscapeChild = await fullscreen.getByText(new RegExp(`${fixture.prefix} child A`)).isVisible().catch(() => false);
+      const slideOneHasPortraitChild = await fullscreen.getByText(new RegExp(`${fixture.prefix} child B`)).isVisible().catch(() => false);
       const extraRuntimePadlet = fullscreen.getByText(new RegExp(`${fixture.prefix} child C`));
+      expect(slideOneHasLandscapeChild).toBe(true);
+      expect(slideOneHasPortraitChild).toBe(false);
+      await expect(fullscreen.getByText(new RegExp(`${fixture.prefix} child A`))).toBeVisible({ timeout: 60_000 });
       await expect(extraRuntimePadlet).toBeVisible({ timeout: 60_000 });
       const extraRuntimePadletStillLegitimate = await extraRuntimePadlet.isVisible().catch(() => false);
       await expect(fullscreen.getByAltText('PATCH-064 uploaded template image')).toBeVisible({ timeout: 60_000 });
       await expect(fullscreen.getByAltText('PATCH-064 uploaded template image')).toHaveAttribute('src', '/templates/moodboard.png');
+      fullscreenVisitOrder.push('PATCH-064 Landscape');
 
-      const fullscreenPngCensus = await collectPngCensus(page, 'fullscreen', slideTitles, 2, 'PATCH-064 Landscape');
+      const fullscreenPngCensus = await collectPngCensus(page, 'fullscreen', slideTitles, 1, 'PATCH-064 Landscape');
       const patch070Probe = await page.evaluate(() => {
         const windowWithProbe = window as typeof window & {
           __patch070Stage0Probe?: {
@@ -1037,7 +1047,7 @@ test.describe('drawing presentation browser characterization (PATCH-064)', () =>
       expect(fullscreenBelowBand).not.toBeNull();
       expect(fullscreenBelowBand).toMatchObject({
         surface: 'fullscreen',
-        slideIndex: 2,
+        slideIndex: 1,
         slideTitle: 'PATCH-064 Landscape',
         bandPosition: 'below',
         isDataPng: true,
@@ -1046,7 +1056,7 @@ test.describe('drawing presentation browser characterization (PATCH-064)', () =>
       expect(expectedFullscreenNativeBand).not.toBeNull();
       expect(expectedFullscreenNativeBand).toMatchObject({
         surface: 'fullscreen',
-        slideIndex: 2,
+        slideIndex: 1,
         slideTitle: 'PATCH-064 Landscape',
         bandPosition: 'above',
         isDataPng: true,
@@ -1084,7 +1094,7 @@ test.describe('drawing presentation browser characterization (PATCH-064)', () =>
       expect(preRunElementOrder).toEqual(postRunElementOrder);
       expect(postRunNativeBelowIds).toEqual(nativeBelowIds);
       expect(postRunNativeAboveIds).toEqual(nativeAboveIds);
-      expect(postRunPersistedScene.rawContentLength).toBe(persistedScene.rawContentLength);
+      expect(postRunPersistedScene.sceneElements).toEqual(persistedScene.sceneElements);
       expect(fullscreenAboveImgObserved).toBe(true);
       expect(fullscreenAboveImgEverMounted).toBe(true);
       expect(fullscreenBelowImgObserved).toBe(true);
@@ -1225,11 +1235,98 @@ test.describe('drawing presentation browser characterization (PATCH-064)', () =>
         }),
       });
 
+      await page.getByTitle(/Next/).click();
+      await expect(fullscreen.getByText('Slide 2 / 2', { exact: true })).toBeVisible();
+      await expect(fullscreen.getByText(new RegExp(`${fixture.prefix} child B`))).toBeVisible({ timeout: 60_000 });
+      const slideTwoHasLandscapeChild = await fullscreen.getByText(new RegExp(`${fixture.prefix} child A`)).isVisible().catch(() => false);
+      expect(slideTwoHasLandscapeChild).toBe(false);
+      fullscreenVisitOrder.push('PATCH-064 Portrait');
+
       await page.getByTitle(/Previous/).click();
       await expect(fullscreen.getByText('Slide 1 / 2', { exact: true })).toBeVisible();
-      await expect(fullscreen.getByText(new RegExp(`${fixture.prefix} child B`))).toBeVisible({ timeout: 60_000 });
+      await expect(fullscreen.getByText(new RegExp(`${fixture.prefix} child A`))).toBeVisible({ timeout: 60_000 });
       await fullscreen.getByText('End presentation', { exact: true }).click();
       await expect(fullscreen.getByText('Slide 1 / 2', { exact: true })).toHaveCount(0);
+
+      const openNamedPresentation = async (slideTitle: 'PATCH-064 Portrait' | 'PATCH-064 Landscape') => {
+        const slideCard = sidebar
+          .getByText(slideTitle, { exact: true })
+          .locator('xpath=ancestor::div[contains(@class,"rounded-xl")][1]');
+        await slideCard.locator('button').last().click();
+        const menuStart = slideCard.getByRole('button', { name: 'Start presentation', exact: true });
+        await expect(menuStart).toHaveCount(1);
+        await expect(menuStart).toBeVisible({ timeout: 60_000 });
+        await expect(menuStart).toBeEnabled();
+        await menuStart.focus();
+        await expect(menuStart).toBeFocused();
+        await page.keyboard.press('Enter');
+      };
+
+      await openNamedPresentation('PATCH-064 Portrait');
+      await expect(fullscreen.getByText('Slide 2 / 2', { exact: true })).toBeVisible({ timeout: 60_000 });
+      await expect(fullscreen.getByText(new RegExp(`${fixture.prefix} child B`))).toBeVisible({ timeout: 60_000 });
+      await fullscreen.getByText('End presentation', { exact: true }).click();
+      await expect(fullscreen.getByText('Slide 2 / 2', { exact: true })).toHaveCount(0);
+
+      await openNamedPresentation('PATCH-064 Landscape');
+      await expect(fullscreen.getByText('Slide 1 / 2', { exact: true })).toBeVisible({ timeout: 60_000 });
+      await expect(fullscreen.getByText(new RegExp(`${fixture.prefix} child A`))).toBeVisible({ timeout: 60_000 });
+      const namedLandscapeHasPortraitChild = await fullscreen.getByText(new RegExp(`${fixture.prefix} child B`)).isVisible().catch(() => false);
+      expect(namedLandscapeHasPortraitChild).toBe(false);
+      await fullscreen.getByText('End presentation', { exact: true }).click();
+      await expect(fullscreen.getByText('Slide 1 / 2', { exact: true })).toHaveCount(0);
+
+      test.info().annotations.push({
+        type: 'patch-072-presentation-order',
+        description: JSON.stringify({
+          persistedRawOrder: seededFrameTitles,
+          activeSceneOrder: seededFrameTitles,
+          canonicalPanelOrder: slideTitles,
+          fullscreenOrderBefore,
+          fullscreenOrderAfter,
+          defaultStartTargetBefore,
+          defaultStartTargetAfter,
+          bottomStartResult: {
+            slideTitle: 'PATCH-064 Landscape',
+            counter: 'Slide 1 / 2',
+          },
+          explicitPortraitStartResult: {
+            slideTitle: 'PATCH-064 Portrait',
+            counter: 'Slide 2 / 2',
+          },
+          explicitLandscapeStartResult: {
+            slideTitle: 'PATCH-064 Landscape',
+            counter: 'Slide 1 / 2',
+          },
+          startSlideId: {
+            bottomStart: null,
+            portrait: fixture.frameIds[0] ?? null,
+            landscape: fixture.frameIds[1] ?? null,
+          },
+          startSlideResolvedIndex: {
+            bottomStart: 1,
+            portrait: 2,
+            landscape: 1,
+          },
+          nextNavigationResult: {
+            slideTitle: fullscreenVisitOrder[1] ?? null,
+            counter: 'Slide 2 / 2',
+          },
+          previousNavigationResult: {
+            slideTitle: fullscreenVisitOrder[0] ?? null,
+            counter: 'Slide 1 / 2',
+          },
+          panelOrderChanged: false,
+          pdfOrderChanged: false,
+          pptxOrderChanged: false,
+          thumbnailOrderChanged: false,
+          plannerChanged: false,
+          resolverChanged: false,
+          drawingLayoutDefaultFallbackChanged: true,
+          namedStartSemanticsPreserved: true,
+          exactClassification: 'fullscreen-slide-order-aligned-with-canonical-panel-order',
+        }),
+      });
 
       await page.getByTitle('Back to Dashboard').click();
       await page.waitForURL(/dashboard\/?$/, { timeout: 45_000 });
