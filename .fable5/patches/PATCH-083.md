@@ -1,6 +1,10 @@
 # PATCH-083 — Drawing Scene Save Supersession Diagnosis
 
-**Status:** SPEC READY — **diagnosis-only** (NO production change, NO
+**Status:** **DONE** (2026-07-18) — landed as commit
+`0683b965d3821088a4ed9812693f408e0dcfa280`, blob
+`c6cc4feaa6f2320932232a993b70cda73c9e584c`, independent Sonnet PASS
+(freshly re-derived twice), three stable runs zero drift both passes.
+Closure record in §12. Was: SPEC READY — **diagnosis-only** (NO production change, NO
 harness change, NO fork change, NO fix, NO instrumentation seam — the
 question must be answered with real-UI E2E observation plus the
 read-only browser-console listener bound in §2; if that proves
@@ -388,3 +392,102 @@ census #2 fix's regression scope; all §6 gate totals; 27-fence result
 + all absence gates + one-file scope proof; cleanup proof across
 sixteen prefixes; production-import grep; commit hash + push status
 after PASS.
+
+## 12. Closure record (CTO, 2026-07-18)
+
+**Landed:** commit `0683b965d3821088a4ed9812693f408e0dcfa280`
+(`test(e2e): characterize drawing scene save supersession
+(PATCH-083)`), single new file
+`e2e/characterization/drawing-save-supersession.spec.ts`, blob
+`c6cc4feaa6f2320932232a993b70cda73c9e584c` (993 insertions).
+Independent Sonnet review: **PASS, freshly re-derived twice** (both
+passes: 27/27 fences, all absence gates, one-file scope, three stable
+runs each, zero field drift, zero classification drift).
+
+**Final twenty-six-field diagnosis (identical every run, both
+passes):** Flow A (Add only): addRowAppeared/zoomToFitApplied/
+addFrameLiveAfterFit/addEverPersisted/addPersistedSettled all TRUE,
+saveErrorObserved FALSE. Flow B (rapid Add→Duplicate):
+addRowAppeared/duplicateRowAppeared/zoomToFitApplied/
+addFrameLiveAfterFit/duplicateFrameLiveAfterFit TRUE;
+addEverPersisted/addPersistedSettled/duplicateEverPersisted/
+duplicatePersistedSettled FALSE; saveErrorObserved FALSE. Flow C
+(Duplicate only): duplicateRowAppeared/zoomToFitApplied/
+duplicateFrameLiveAfterFit TRUE; duplicateEverPersisted/
+duplicatePersistedSettled FALSE; saveErrorObserved FALSE.
+**`classification: add-superseded-by-rapid-duplicate`**.
+
+**Final diagnosis:** isolated Add persists reliably; rapid
+Add→Duplicate prevents the Add frame from appearing in ANY persisted
+snapshot; Duplicate never appears in persistence in either Duplicate
+flow; no exact production drawing-save error observed; no transient
+Duplicate persistence observed at the bound 1-second cadence; the
+live scene is valid before the failure; the defect boundary is
+narrowed to the debounced save/persistence path. "Superseded" is a
+behavioral label, not proof of the exact mechanism. No production fix
+implemented.
+
+**Prefix correction (bound):** the §4/§6/§8 single bound prefix
+`patch-064-harness-patch-083-supersession-` was NOT used by the
+landed spec. Actual prefixes (bound here as the authoritative
+record): `patch-064-harness-patch-083-flow-a-`,
+`patch-064-harness-patch-083-flow-b-`,
+`patch-064-harness-patch-083-flow-c-` — one per disposable board.
+Corrected total tracked cleanup-prefix count: **18** (fifteen prior +
+these three), not 16. Sonnet reviewed and accepted this as a
+non-blocking governance-wording mismatch, not a candidate defect; all
+prefixes verified zero at both review passes.
+
+**Timing evidence (bound):** Add→Duplicate interval independently
+trace-measured twice: ~1.77 s and ~1.75 s — comfortably within the
+≤5 s rapid bound. Flow A's Add first appeared in persistence at
+~2.1 s (matching the ~2 s debounce plus write latency — strong
+corroboration that Flow A's save fired on the debounce). Flows B and
+C remained at the seeded two-frame set for the ENTIRE ≥20 s window
+(21 samples, one distinct snapshot); final stable tails ≥6 s
+everywhere.
+
+**PATCH-080 comparison:** 080 proved isolated Add persists after its
+own settlement window; Flow A reproduces that exactly; rapid
+Add→Duplicate changes the outcome and suppresses the Add save;
+isolated Add is NOT broken.
+
+**PATCH-082 comparison:** 082 proved valid live Duplicate frame and
+child content in both flows; 083 proves that valid live content
+still fails to become durable; the remaining boundary is between
+live scene mutation and persistence.
+
+**Closure-time read-only discovery (recorded for PATCH-084):** the
+save chain is `saveDrawingSnapshot` → `onUpdatePadlet` =
+`handleDrawingLayoutUpdatePadlet` (`CanvasClient.tsx` ~4948) →
+`updateDrawingLayoutPadlet` (`useCanvasData.ts` 566–590) →
+`canvas.updatePostFields` (`lib/domain/canvas/posts.ts` 660–665) →
+`SupabasePostsRepository.updateFieldsById`
+(`lib/infra/canvas/postsRepository.ts` 142–150) →
+`supabase.from('padlets').update(fields)`. A RESOLVED Supabase error
+becomes `code:'unavailable'` and takes `updateDrawingLayoutPadlet`'s
+**silent rollback branch (NO logging of any kind)**; only a THROWN
+'unknown' logs — and logs `'Failed to update padlet:'`, a DIFFERENT
+string from DrawingLayout's `'Failed to save drawing to master
+padlet'` (which can never fire through this path, since
+`updateDrawingLayoutPadlet` never rejects). Additionally
+`updateDrawingLayoutPadlet` silently returns without writing if the
+target id is missing from `padletsRef` (line 568). PATCH-083's
+`saveErrorObserved:false` is therefore correct but WEAKER than it
+appears: a resolved-error write failure was invisible to its bound
+substring. This does NOT reopen 083 (it observed exactly what it
+bound); it defines 084's question.
+
+**Final gates:** 083 spec 2/1/2, three stable runs (×2 review
+passes); carried: divergence 2/1/2, clone-shape 2/1/2, add-dup
+2/1/2, rename-state 2/1/2, slide-duplication 2/1/2, menu-pointer
+2/1/2, harness-cleanup 2/1/2, presentation approved totals,
+duplication 2/1/2, line-bridge approved totals; deterministic:
+slideOrder 7/1, clonedPostMetadata 9/1, focused drawing 59/2, full
+Vitest 448/43, typecheck/boundaries/`git diff --check`/sequential
+verify+build green. Cleanup: 18 tracked prefixes zero; Board A
+cleaned before B before C; no Remove/deletion/direct DB write; no
+artifacts; port 3000 free. (Auth-staleness incident reproduced a
+seventh and eighth time during the two review passes; sanctioned
+`--project=setup` refresh resolved both; environmental,
+non-blocking.)

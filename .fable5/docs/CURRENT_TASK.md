@@ -361,6 +361,68 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-18** — **PATCH-083 DONE (commit
+  `0683b965d3821088a4ed9812693f408e0dcfa280`, blob `c6cc4fea…`, Sonnet
+  PASS freshly re-derived TWICE, three stable runs zero drift both
+  passes) + fresh census + PATCH-084 AUTHORIZED (diagnosis-only,
+  FINAL before the fix)**. **Final twenty-six-field diagnosis:**
+  Flow A (Add only) all-TRUE incl. `addPersistedSettled`; Flow B
+  (rapid Add→Duplicate, interval trace-measured ~1.75–1.77 s)
+  actions/fit/live all TRUE but `addEverPersisted`/
+  `addPersistedSettled`/`duplicateEverPersisted`/
+  `duplicatePersistedSettled` ALL FALSE; Flow C (Duplicate only)
+  live TRUE, persistence FALSE; `saveErrorObserved` FALSE everywhere;
+  **`classification: add-superseded-by-rapid-duplicate`**. Flow A
+  persisted at ~2.1 s (debounce+latency corroboration); Flows B/C
+  stayed at the seeded pair for the entire ≥20 s window. **Prefix
+  correction (bound):** 083's spec used
+  `patch-064-harness-patch-083-flow-a-/-b-/-c-`, NOT the single
+  bound `…-supersession-` prefix; tracked cleanup-prefix total is
+  **18**, not 16; Sonnet accepted as non-blocking. **PATCH-080/082
+  comparisons:** isolated Add NOT broken (083 Flow A reproduces
+  080); 082's valid live clone content still fails to become
+  durable; boundary = live scene mutation vs persistence.
+  **Closure-time read-only discovery (decisive):** the save chain
+  `saveDrawingSnapshot` → `handleDrawingLayoutUpdatePadlet` →
+  `updateDrawingLayoutPadlet` (useCanvasData.ts 566–590) →
+  `canvas.updatePostFields` → `updateFieldsById` →
+  `supabase.from('padlets').update()` NEVER rejects: a resolved
+  error takes a SILENT rollback (no logging); the thrown branch logs
+  `'Failed to update padlet:'` — a different string from 083's bound
+  substring; DrawingLayout's own save-error catch is unreachable.
+  083's `saveErrorObserved:false` is correct but weaker than it
+  appears. **Fix readiness ruling: NOT statically provable** which
+  of (a) save never sent / (b) sent-and-silently-rejected /
+  (c) sent-accepted-then-overwritten holds — three different fixes —
+  so OPTION B chosen, sharpened to wire-level E2E observation (no
+  unit seam needed). **Census:** 1) wire diagnosis (SELECTED),
+  2) save-path fix (blocked on 1; semantics + five-flow regression
+  matrix A–E now BOUND in 084 §7), 3) deep-clone fix (after 2),
+  4) silent save-error handling (folded into 2), 5–6 subsumed by 1,
+  7–8 frame-geometry family, 9–13 deferred. **PATCH-084 — Drawing
+  Save Wire-Level Diagnosis, diagnosis-only, exactly ONE new file**
+  `e2e/characterization/drawing-save-wire.spec.ts`: 083's three
+  flows verbatim + passive `page.on('request'/'response')` capture
+  of `/rest/v1/padlets` writes (method/status/id-presence
+  booleans/bounded bodies, NO auth material, `page.route`
+  PROHIBITED) + TWO console substrings (083's plus
+  `'Failed to update padlet:'`) + 083-method settlement. THIRTY-FOUR
+  bound fields; enum (7, bound order): `wire-observation-unsound` |
+  `control-content-write-missing` | `duplicate-save-never-sent` |
+  `duplicate-save-rejected` |
+  `duplicate-save-accepted-then-overwritten` |
+  `duplicate-save-accepted-but-lost` | `mixed-wire-state` — outcome
+  NOT hardcoded. **31 blob-ID fences** at base `0683b96` (083's 27 +
+  its landed spec + newly fenced useCanvasData.ts /
+  lib/domain/canvas/posts.ts / lib/infra/canvas/postsRepository.ts).
+  Bound prefixes (all three, explicit):
+  `patch-064-harness-patch-084-wire-a-/-b-/-c-`; cleanup zero across
+  TWENTY-ONE prefixes. Expected: new spec 2/1/2 ×3 stable
+  (classification drift = STOP); `test.setTimeout(300_000)`; carried
+  unchanged (supersession now carried 2/1/2); full 448/43. Bound
+  commit: `test(e2e): characterize drawing save wire-level behavior
+  (PATCH-084)`. Sonnet PASS required before commit. PATCH-084
+  implementation NOT started.
 - **2026-07-18** — **PATCH-082 DONE (commit
   `69c7abf024e2b10e68e9670518be9d128a69a120`, blob `5d3cccb6…`, Sonnet
   PASS, three stable runs zero drift) + fresh census + PATCH-083
