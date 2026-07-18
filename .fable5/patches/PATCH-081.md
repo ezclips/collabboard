@@ -1,6 +1,9 @@
 # PATCH-081 — Duplicate Slide Live-Scene Clone-Shape Diagnosis
 
-**Status:** SPEC READY — **diagnosis-only** (NO production change, NO
+**Status:** DONE — closed 2026-07-18 (closure record in §12).
+Implementation commit `718c99127adb6a39a7ed185e68b9817a5cea5b25`,
+blob `147ae0aeae503a36fd5e8e42d6cd3045b34b38c3`, Sonnet independent
+PASS. Was: SPEC READY — **diagnosis-only** (NO production change, NO
 harness change, NO fork change, NO fix — the PATCH-076 §0.B.2
 deep-clone ruling may NOT be implemented under this patch). Successor
 question to PATCH-080: the suppression is Duplicate-specific or
@@ -308,3 +311,68 @@ divergence point and the deep-clone fix owner; all §6 gate totals;
 25-fence result + all absence gates + one-file scope proof; cleanup
 proof across fourteen prefixes; production-import grep; commit hash +
 push status after PASS.
+
+## 12. Closure record (Fable CTO, 2026-07-18)
+
+**Landed:** commit `718c99127adb6a39a7ed185e68b9817a5cea5b25`
+(`test(e2e): characterize duplicate-slide live clone shape
+(PATCH-081)`), exactly one new file at blob
+`147ae0aeae503a36fd5e8e42d6cd3045b34b38c3`. HEAD == origin/main.
+Sonnet independent review: **PASS** (25/25 blob-ID fences, all
+absence gates, one-file scope, three live reproductions
+byte-identical — zero drift; the no-live-frame result independently
+re-verified via a throwaway zoom-to-fit check).
+
+**Final ten-field diagnosis (all runs):**
+`duplicateRowAppeared: true`,
+`duplicateFrameInLiveSceneImmediate: false`,
+`duplicateChildRenderedImmediate: false`,
+`duplicateFrameLiveStable: false`,
+`duplicateChildRenderedStable: false`,
+`sourceChildStillRendered: true`, `duplicatePersistedSettled: false`,
+`duplicateChildrenPersistedSettled: false`,
+**`classification: sidebar-only-duplicate`**, `prefix`:
+fixture-specific. `duplicateFrameId` was `null` in every run — no
+fresh frame-label id EVER appeared.
+
+**Diagnosis summary:** the real Duplicate action creates a third
+presentation-sidebar row; no fresh drawing-canvas frame-label id
+appears; no duplicate child/card render appears; the source frame and
+child remain fully intact; nothing of the duplicate reaches
+persistence; the duplicate row remains visible after settlement. The
+narrowest PROVEN divergence boundary is between the sidebar/outer
+React `elements` state (which must hold the duplicate frame — the
+sidebar derives from it) and the direct Excalidraw live-scene
+observables. The exact internal cause remains unresolved. No
+production fix was implemented.
+
+**State-dependent PATCH-080 refinement (recorded):** PATCH-080's
+Add-then-Duplicate flow observed a fresh live frame-label id for the
+duplicate; PATCH-081's Duplicate-only flow consistently observed
+none. Both specs faithfully measured their bounded flows; this is a
+real state-dependent divergence, not a locator or viewport defect in
+either spec. Likely relevance: a prior Add action refreshes or
+alters the outer React `elements` state before Duplicate runs.
+(Residual caveat for the successor: the flow-A zoom-to-fit spot
+checks used an unverified keyboard shortcut — PATCH-082 binds a
+VERIFIED fit before label derivation to close this.)
+
+**PATCH-076 interpretation (recorded):** 076 measured
+FullscreenPresentation content resolution; 081 measured direct
+drawing live-scene frame/child existence — distinct layers. 081
+neither disproves nor fully confirms 076; it sharpens the five-way
+separation among presentation sidebar state, outer React `elements`
+state, Excalidraw live scene, FullscreenPresentation resolver
+output, and persisted scene.
+
+**Gates (all bound totals met):** new spec 2/1/2 ×3 stable; carried —
+add-dup 2/1/2, rename-state 2/1/2, slide-duplication 2/1/2,
+menu-pointer 2/1/2, harness-cleanup 2/1/2, presentation approved
+totals, duplication 2/1/2, line-bridge approved totals; deterministic
+— helper 7/1, sanitizer 9/1, focused drawing 59/2, full Vitest
+448/43, typecheck/boundaries/verify/build/`git diff --check` green.
+Cleanup: all FOURTEEN tracked prefixes 0/0/0; no Remove; no duplicate
+deletion; no direct padlet-row creation; no artifacts; port 3000
+free. The `e2e/.auth/user.json` staleness incident recurred a fifth
+time (four specs in one `--no-deps` batch); resolved via the
+sanctioned `--project=setup` refresh — environmental.

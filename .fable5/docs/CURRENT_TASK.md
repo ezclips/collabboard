@@ -361,6 +361,54 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-18** — **PATCH-081 DONE (commit
+  `718c99127adb6a39a7ed185e68b9817a5cea5b25`, blob `147ae0ae…`, Sonnet
+  PASS, three stable runs zero drift) + fresh census + PATCH-082
+  AUTHORIZED (diagnosis-only)**. **Final ten-field diagnosis:**
+  `duplicateRowAppeared: true`; ALL live-scene signals FALSE
+  (frame-label immediate/stable, child-render immediate/stable —
+  `duplicateFrameId` null in every run); `sourceChildStillRendered:
+  true`; persistence FALSE for frame and children;
+  **`classification: sidebar-only-duplicate`**. **Narrowest proven
+  divergence boundary:** sidebar/outer React `elements` state (which
+  must hold the duplicate — the sidebar derives from it) vs the
+  direct Excalidraw live-scene observables; internal cause
+  unresolved; no fix implemented. **State-dependent PATCH-080
+  refinement (bound):** Add-then-Duplicate (080) showed a fresh live
+  frame label; Duplicate-only (081) never does — both specs faithful;
+  real state dependence, likely tied to Add refreshing the outer
+  `elements` state before Duplicate; residual caveat: 081-era fit
+  checks used an unverified Shift+1 ⇒ 082 binds VERIFIED fit.
+  **PATCH-076 interpretation (bound):** five-way layer separation
+  sharpened (sidebar state / outer React state / live scene /
+  presentation resolver / persisted scene); 076 neither disproved nor
+  fully confirmed. **Census:** 1) divergence diagnosis Flow A vs
+  Flow B (SELECTED), 2) deep-clone fix (blocked on 1; must regress
+  BOTH flows when authorized), 3) stale handler-state family, 4-5)
+  frame-geometry diagnosis→fix, 6-10 deferred. **PATCH-082 —
+  Duplicate Outer-State/Live-Scene Divergence Diagnosis,
+  diagnosis-only, exactly ONE new file**
+  `e2e/characterization/drawing-duplicate-divergence.spec.ts`
+  (absence verified; PATCH-077 path stays permanently absent): ONE
+  active test, TWO sequential disposable boards — Flow A (Duplicate
+  only) and Flow B (Add slide below, then Duplicate) — each with
+  baseline → real action(s) → **VERIFIED zoom-to-fit** (real
+  empty-canvas selection click + real Shift+1, zoom display read
+  before/after; labels derived from POST-fit read only) → settled
+  persistence (PATCH-076 method). Rename/Remove/deletion/reload/
+  FullscreenPresentation/drag and any further canvas interaction
+  PROHIBITED. FOURTEEN bound fields (five per flow + `flowB_addRowAppeared`
+  + `classification` + `prefixA`/`prefixB`); enum (7, bound order):
+  `divergence-observation-unsound` | `unexpected-duplicate-persistence`
+  | `prior-add-enables-live-frame` | `no-live-frame-in-either-flow` |
+  `live-frame-in-both-flows` | `inverse-state-dependence` |
+  `mixed-divergence-state` — outcome NOT hardcoded. 26 blob-ID fences
+  at base `718c991` (081's 25 + its landed spec). Expected: new spec
+  2/1/2 ×3 stable; carried unchanged (clone-shape now carried 2/1/2);
+  full 448/43; cleanup zero across FIFTEEN prefixes. Bound commit:
+  `test(e2e): characterize duplicate outer-state live-scene
+  divergence (PATCH-082)`. Sonnet PASS required before commit.
+  PATCH-082 implementation NOT started.
 - **2026-07-18** — **PATCH-080 DONE (commit
   `34d9d54371a0bcc6dd360dc06394130fad918afe`, blob `9a6c7b42…`, Sonnet
   PASS, six coherent runs zero drift) + fresh census + PATCH-081
