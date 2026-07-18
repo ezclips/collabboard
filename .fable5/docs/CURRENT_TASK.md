@@ -361,6 +361,62 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-18** — **PATCH-076 DONE (commit
+  `eff21fc6eab97a45d05dd2a888e56c32d14e900b`, blob `fc20ef81…`, Sonnet
+  PASS after two correction cycles) + product ruling + fresh census +
+  PATCH-077 AUTHORIZED (diagnosis-only)**. **Final diagnosis:**
+  classification `unpersisted-duplicate-with-deletion-cascade` — real
+  Duplicate slide renders the source's seeded child live but creates
+  no padlet row AND never reaches the persisted master scene (settled
+  ≥6 s observation, all duplicate identities null,
+  `duplicatePersistedToDatabase: false`); real Remove slide on the
+  live-only duplicate deletes the ORIGINAL backing row (exact-ID poll,
+  2 s stable absence, rows 8→7) leaving the surviving original
+  logically linked in scene JSON but resolving/rendering nothing.
+  Three sequential reviewer runs fully coherent. All gates green
+  (076 2/1/2; carried browser suites unchanged; full 448/43;
+  verify+build; cleanup zero across ten prefixes). **Product ruling
+  (PATCH-076 §0.B.2, binding): OPTION A — independent deep clone.**
+  Duplicate persists as a new frame with fresh child IDs; referenced
+  container rows are CLONED (existing `clonedPostMetadata` idiom);
+  deleting the duplicate touches only its cloned rows; original stays
+  intact; duplicate survives reload. Rationale: canvas Ctrl+D already
+  defines duplicate-as-deep-clone (P6), reference-counting (OPTION B)
+  would be new unowned architecture, and P3 forbids
+  edit-one-edits-both surprise mutation. **Fix gating (§0.B.3):** the
+  deep-clone fix is NOT yet authorized — PATCH-076 proved THAT the
+  duplicate never persists, not WHY (handleChange provably executes:
+  the cascade fired from it; the fork invokes onChange for
+  programmatic updateScene at `App.tsx:3382` — suppression mechanism
+  undetermined from static reading). **Fresh census at `eff21fc`:**
+  #1 duplicate-slide fix — semantics ruled, persistence mechanism
+  unknown → **diagnosis-first, SELECTED**; the never-persists finding
+  is the "new defect surfaced during 076" (folded in). #2 line-follow
+  — still no attachment contract, no complaint. #3 AI images — still
+  fixture-blocked. #4 overlap fallback — low. #5 uploaded-image
+  storage cleanup — test-infra only. #6 Connections side panel —
+  feature, deferred (stabilization demonstrably incomplete). **PATCH-
+  077 — Slide-Action Persistence Boundary Diagnosis, diagnosis-only,
+  exactly ONE new file** `e2e/characterization/drawing-slide-persistence.spec.ts`
+  (absence verified): drive real `'Rename slide'` (inline input +
+  Enter), `'Add slide below'`, and a `'Duplicate slide'` re-proof in
+  that bound order, each observed via the PATCH-076 settled method
+  (≤1 s poll, ≥6 s window, settled read is sole basis); Remove slide
+  PROHIBITED. Five bound literal fields: `renameSlidePersisted`,
+  `addSlideBelowPersisted`, `duplicateSlidePersisted`,
+  `classification` (`duplicate-specific-persistence-suppression` |
+  `menu-scene-actions-never-persist` |
+  `menu-actions-persist-duplicate-included` |
+  `mixed-persistence-boundary`), `prefix`
+  (`patch-064-harness-patch-077-persist-`). The outcome partitions
+  fix ownership: duplicate-specific → `handleDuplicateSlide`; family-
+  wide → the handleChange→debounce→performSave boundary. **23 fences**
+  measured at `eff21fc` (the 22 carried + landed
+  `drawing-slide-duplication.spec.ts` `fc20ef81…`). Expected: new spec
+  2/1/2; all carried totals unchanged; full 448/43; cleanup zero
+  across ELEVEN prefixes. Bound commit: `test(e2e): characterize
+  slide-action persistence boundary (PATCH-077)`. Sonnet PASS required
+  before commit. PATCH-077 implementation NOT started.
 - **2026-07-18** — **PATCH-076 AMENDED (Amendment 1 §0.A) after Sonnet
   review: PASS WITH REQUIRED CHANGES on the first candidate**
   (`drawing-slide-duplication.spec.ts`, pre-correction hash

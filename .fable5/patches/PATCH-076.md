@@ -1,11 +1,11 @@
 # PATCH-076 — Duplicate-Slide Shared `padlet://` Reference Diagnosis
 
-**Status:** SPEC AMENDED (Amendment 1, §0.A, 2026-07-18) —
-**diagnosis-only** (NO production change, NO harness change, NO fix —
-a fix is BLOCKED on the §3 product ruling). First candidate reviewed
-by Sonnet: **PASS WITH REQUIRED CHANGES** — the two required
-corrections are authorized and bound in §0.A; the corrected candidate
-requires a fresh Sonnet review before commit.
+**Status:** DONE — closed 2026-07-18. Implementation commit
+`eff21fc6eab97a45d05dd2a888e56c32d14e900b` (bound message verbatim),
+blob `fc20ef8160417b6eeb59f4662ab89ceb1af5a167`, Sonnet PASS (after
+one stale-evidence correction cycle plus the Amendment 1 cycle).
+Closure record + product ruling in §0.B. Diagnosis-only throughout —
+no production change was made.
 **Implementer:** GPT-5.5. **Reviewer:** Sonnet (independent,
 read-only, uncommitted diff, explicit PASS required before commit).
 **Closure:** Fable (CTO) after landing.
@@ -220,6 +220,91 @@ review (re-derive hash, re-verify 22/22 fences + one-file scope,
 re-run all modes, re-extract the eight-field annotation, verify the
 settled-read and exact-ID-poll derivations); explicit PASS required
 before the bound commit.
+
+---
+
+## 0.B Closure record + product ruling (Fable CTO, 2026-07-18)
+
+### 0.B.1 Final diagnosis (landed at `eff21fc6eab97a45d05dd2a888e56c32d14e900b`)
+
+The real `'Duplicate slide'` UI action succeeds and the duplicate
+appears in the live client, rendering the source slide's seeded child
+— but **no new padlet row is created** and the duplicate
+slide/frame/child/link **never appears in the persisted master scene**
+across a settled ≥6 s / ≤1 s-interval observation window
+(`duplicatePersistedToDatabase: false`,
+`duplicateEverAppearedDuringSettlement: false`, all three duplicate
+identities `null`, immediate AND settled). The real `'Remove slide'`
+action on that live-only duplicate **deletes the original backing
+row** (exact-ID poll `deleted-within-timeout`; settled-removal
+snapshot: `finalSourceBackingRowId: null`, source ID absent from the
+final board row set, rows 8→7, `rowsRemovedByIntentionalAction: 1`,
+2 s continuous stable absence proven). The surviving original slide
+remains logically linked in scene JSON
+(`sourceContainerStillLinkedInScene: true`) but resolver and planner
+resolve no backing row (`[]`) and the surviving slide no longer
+renders its child (`remainingPresentationShowsChild: false`).
+
+**Final eight-field annotation:** `newPadletRowsAfterDuplicate: 0`,
+`sharedLinkEmbeddableCount: 1`, `duplicateRendersSameChild: true`,
+`duplicatePersistedToDatabase: false`,
+`removeDuplicateDeletedSharedRow: true`,
+`originalContainerLostAfterRemove: true`,
+`classification: unpersisted-duplicate-with-deletion-cascade`,
+fixture-specific `prefix`. **Stability:** three fresh sequential
+reviewer runs fully coherent, zero contradiction or drift.
+
+**Gates at closure:** PATCH-076 spec 2/1/2; carried menu-pointer
+2/1/2, harness-cleanup 2/1/2, presentation 2+2 approved skips,
+duplication 2/1/2, line 4+4 skips; helper 7/1; sanitizer 9/1; focused
+59/2; full Vitest 448/43; typecheck/boundaries/verify/build green;
+cleanup zero across ten prefixes; no artifacts; port free.
+
+**Known-unknown recorded honestly:** the diagnosis proved THAT the
+duplicated slide never reaches the persisted master scene, not WHY.
+The deletion cascade proves `handleChange` executes (it fired
+`onDeletePadlet`), and the fork's render callback invokes
+`props.onChange` for programmatic `updateScene` calls
+(`excalidraw_fork/.../App.tsx:3382`) — so the suppression mechanism
+(autosave path, sync-effect interaction, or something else) is
+UNDETERMINED from static reading. This is the §0.B.3 blocker.
+
+### 0.B.2 Product-semantics ruling (bind — answers §3 and §0.A.7)
+
+**RULING: OPTION A — independent deep clone.** When a slide is
+duplicated: the duplicate persists as a new frame; duplicated scene
+children get fresh IDs; every referenced container padlet row is
+CLONED to a new row (sanitized via the existing `clonedPostMetadata`
+idiom); deleting the duplicate affects only the duplicate's cloned
+rows; the original remains fully intact; the duplicate survives
+reload.
+
+Rationale: (1) the codebase already defines "duplicate" as deep clone
+— canvas Ctrl+D duplication creates a NEW padlet row with sanitized
+clone metadata, proven by `drawing-duplication.spec.ts`; P6 (one
+implementation per concern) demands slide duplication match that
+established semantic. (2) P3 (never lose user work): OPTION B
+(shared reference with safe lifetime) requires reference-counting /
+ownership machinery that does not exist anywhere in this codebase —
+high-risk new architecture — and "editing a duplicate silently edits
+the original" is itself surprise-data-mutation behavior. (3) Every
+mainstream competitor's "Duplicate slide" is an independent copy.
+OPTION B and OPTION C are REJECTED.
+
+The §0.A.7 persistence question is answered by the same ruling:
+duplicated slides MUST be persisted as independent scene/frame
+objects at the normal autosave boundary, surviving reload.
+
+### 0.B.3 Fix gating
+
+A production fix is NOT yet authorized. The deep-clone fix cannot be
+bounded until the persistence-suppression mechanism (§0.B.1
+known-unknown) is diagnosed: a link-cloning fix shipped on top of an
+undiagnosed never-persists defect would still lose the duplicate on
+reload (stranding freshly cloned rows) and would be guesswork.
+PATCH-077 (diagnosis-only, persistence boundary) is authorized to
+close exactly that gap; the deep-clone fix follows in a later patch
+against PATCH-077's findings.
 
 ---
 
