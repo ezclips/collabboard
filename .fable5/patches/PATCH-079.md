@@ -1,6 +1,9 @@
 # PATCH-079 — Rename-Sidebar Frame-Signature Refresh (production fix)
 
-**Status:** FIX AUTHORIZED — narrow production fix, first fix in the
+**Status:** DONE — closed 2026-07-18 (closure record in §12).
+Implementation commit `9a11a234835242cfb51360ca95762ee1790eec2f`,
+Sonnet independent PASS. Was: FIX AUTHORIZED — narrow production fix,
+first fix in the
 rename-state family. Authorized by the PATCH-078 closure ruling (the
 true state owner is identified to the exact lines; diagnosis complete).
 **Implementer:** GPT-5.5. **Reviewer:** Sonnet (independent,
@@ -236,3 +239,53 @@ the asserting spec; all §6 gate totals; 22/22 fence result + absence
 conditions; cleanup proof across twelve prefixes; production-import
 grep; explicit statement that census #4 behavior is unchanged; commit
 hash + push status after PASS.
+
+## 12. Closure record (Fable CTO, 2026-07-18)
+
+**Landed:** commit `9a11a234835242cfb51360ca95762ee1790eec2f`
+(`fix(drawing): refresh slide sidebar on frame rename (PATCH-079)`),
+exactly the two authorized files:
+`components/collabboard/canvas/layouts/DrawingLayout.tsx` at blob
+`5455597d486fd917c4983a18e47445e2b1c9314d` and
+`e2e/characterization/drawing-slide-rename-state.spec.ts` at blob
+`513d07bfe99898455d13d7048a53da90c3b5d401`. HEAD == origin/main.
+Sonnet independent review: **PASS** (two full review passes, each
+with fresh 22/22 fence re-derivation, full-diff structural audit, and
+three independent live stability runs — six clean reviewer runs
+total, zero drift).
+
+**Final implementation (as ruled in §2, faithfully delivered):** one
+retained `frameNameSigRef`; deterministic active-frame signature of
+ordered `[frame id, frame name]` tuples accumulated inside the
+EXISTING `handleChange` element pass (no second traversal); refresh
+gate extended from count-only to count-OR-signature;
+`setElements` remains conditional; the scene-import path seeds the
+ref synchronously; persistence/debounce/save, ordering, and selection
+logic untouched; NO geometry fields in the signature.
+
+**Fixed behavior (asserted by the regression spec, three stable
+runs):** rename input accepted; live frame label updates; sidebar
+updates within the 15 s window (near-immediately); sidebar stays
+correct across the row-switch probe; settled persistence succeeds;
+reload correct; final annotation all-true with
+**`classification: sidebar-updates-correctly`** — derived, not
+hardcoded (the derivation chain is unchanged from PATCH-078).
+
+**Explicit exclusions (intact):** frame geometry is NOT in the
+signature — frame-geometry sidebar staleness (census #4) remains an
+open, uncharacterized defect; duplicate-slide behavior untouched;
+Add-slide-below behavior untouched; PATCH-077's draft path remains
+permanently prohibited.
+
+**Gates (all bound totals met):** amended spec 2/1/2 with three
+sequential stable runs; carried — slide-duplication 2/1/2,
+menu-pointer 2/1/2, harness-cleanup 2/1/2, presentation 2 passed/2
+approved skips, duplication 2/1/2, line-bridge 4 passed/4 skipped;
+deterministic — helper 7/1, sanitizer 9/1, focused drawing 59/2, full
+Vitest 448/43, typecheck/boundaries/verify/build green. Cleanup:
+local `finally` owner; all twelve tracked prefixes 0/0/0; no test
+artifacts; port 3000 free; repo clean and synchronized. The
+`e2e/.auth/user.json` staleness incident recurred once per review
+pass on `drawing-duplication --no-deps`; resolved each time via the
+sanctioned `--project=setup` refresh — environmental, not a code
+defect (now reproduced across three independent sessions).

@@ -114,6 +114,17 @@ master scene (PATCH-076) when `handleRenameSlide`'s DOES
 permanently prohibited; the successor patch must bind a fresh path.
 No implementation ever existed for PATCH-077; nothing to revert.
 
+**Successor authorized (2026-07-18, at PATCH-079 closure):**
+**PATCH-080 — Add/Duplicate Slide Persistence Boundary Diagnosis**
+(diagnosis-only, fresh path
+`e2e/characterization/drawing-slide-add-dup-persistence.spec.ts`,
+Rename and Remove prohibited). The residual open questions carried
+there: Rename persists (PATCH-078) and its sidebar defect is fixed
+(PATCH-079) — Rename is OUT of the uncertainty set; Add slide below
+remains uncharacterized; Duplicate renders live but does not persist
+(PATCH-076) and its removal deletes the source backing row; the
+suppression mechanism is still unidentified.
+
 ---
 
 ## 0. Fresh census (from source snapshot `eff21fc`, superseding prior source censuses; implement from governance HEAD `b1cf263`)

@@ -361,6 +361,53 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-18** — **PATCH-079 DONE (commit
+  `9a11a234835242cfb51360ca95762ee1790eec2f`, blobs `5455597d…` /
+  `513d07bf…`, Sonnet PASS across two full review passes, six clean
+  reviewer runs zero drift) + fresh census + PATCH-080 AUTHORIZED
+  (diagnosis-only)**. **Fix landed:** rename-sidebar staleness
+  resolved via one retained `frameNameSigRef` — ordered active-frame
+  `[id, name]` signature accumulated in the EXISTING `handleChange`
+  pass; refresh gate now count-OR-signature; `setElements` still
+  conditional; import path seeds the ref; save/debounce/ordering
+  untouched; NO geometry in the signature. Regression spec now
+  ASSERTS `sidebar-updates-correctly` (all eight fields true-path,
+  derivation unchanged). **Explicit exclusions:** frame-geometry
+  staleness (census #3) remains open; Duplicate/Add behavior
+  untouched; PATCH-077 draft path permanently prohibited.
+  **PATCH-077 remains SUPERSEDED** — residual question transferred:
+  Rename is OUT (persists + fixed); Add slide below uncharacterized;
+  Duplicate renders live but never persists and its removal deletes
+  the source backing row; mechanism unidentified. **New census
+  insight (read-only):** ALL slide-menu handlers build `updateScene`
+  payloads from React `elements` STATE (`DrawingLayout.tsx:1396-1471`);
+  Add/AddBelow share Duplicate's APPEND shape while Rename's
+  map-replace persists → PATCH-080 discriminates action- vs
+  shape-specific suppression; also flagged (census #3 family, do not
+  fix): Add/Duplicate after a frame drag could replace the scene from
+  a stale-geometry base. **PATCH-080 — Add/Duplicate Slide
+  Persistence Boundary Diagnosis, diagnosis-only, exactly ONE new
+  file** `e2e/characterization/drawing-slide-add-dup-persistence.spec.ts`
+  (absence verified; PATCH-077 path stays absent): bound order Add
+  slide below → settled persistence (PATCH-076 method) → Duplicate
+  slide → settled persistence → single end reload. Rename/Remove and
+  deleting the duplicate PROHIBITED; no dragging. NINE bound fields:
+  `addSlideVisible`, `addSlidePersisted`, `addSlideSurvivedReload`,
+  `duplicateSlideVisible`, `duplicateRendersSourceChild`,
+  `duplicateSlidePersisted`, `duplicateSurvivedReload`,
+  `classification` (`mixed-slide-persistence-state` |
+  `add-persists-duplicate-does-not` |
+  `neither-add-nor-duplicate-persists` |
+  `both-add-and-duplicate-persist` |
+  `add-does-not-persist-duplicate-persists`, derived in bound order,
+  soundness gate first), `prefix`
+  (`patch-064-harness-patch-080-adddup-`). 24 blob-ID fences at base
+  `9a11a23` (PATCH-079's 22 + its two landed files). Expected: new
+  spec 2/1/2 ×3 stable; carried totals unchanged (rename regression
+  now carried 2/1/2); full 448/43; cleanup zero across THIRTEEN
+  prefixes. Bound commit: `test(e2e): characterize add/duplicate
+  slide persistence boundary (PATCH-080)`. Sonnet PASS required
+  before commit. PATCH-080 implementation NOT started.
 - **2026-07-18** — **PATCH-078 DONE (commit
   `e239880295d333478314d414f21de051c065e3aa`, blob `d70b8e51…`, Sonnet
   PASS, six coherent runs zero drift) + PATCH-077 SUPERSEDED (§0.B) +
