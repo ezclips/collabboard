@@ -175,6 +175,30 @@ NOT containing `duplicateFrameId`), `flowC_duplicatePersistedSettled`,
 `flowC_padletWriteCount`, `flowC_updateErrorLogged`.
 Global (4): `classification`, `prefixA`, `prefixB`, `prefixC`.
 
+**Stability interpretation (bind):** the primary annotation REMAINS
+THIRTY-FOUR fields. Stability is evaluated in TWO classes:
+
+- **Semantic required fields (zero drift required across the three
+  stable runs):** every action/live field, every
+  content-write-attempt/success field, every persistence field, every
+  error field, and `classification`.
+- **Diagnostic count fields (reported every run, equality NOT
+  required):** `flowA_padletWriteCount`, `flowB_padletWriteCount`,
+  `flowC_padletWriteCount`.
+
+The three diagnostic count fields are bound literally to the total
+`/rest/v1/padlets` write-request category already defined above:
+
+- numeric and non-negative;
+- derived from the literal raw write category for that flow window;
+- NOT filtered to content-only or target-only writes;
+- NOT deduplicated into logical snapshots;
+- NO hardcoded expected count;
+- variation alone does NOT block PASS.
+
+A material count-pattern change that alters or undermines the wire
+diagnosis still blocks and must be reported in full.
+
 EVIDENCE annotation (separate): per-flow full request/response
 records (bounded per §2), console texts, label-id sets, zoom values,
 frame ids, full persisted time series + settled sets.
@@ -275,6 +299,17 @@ e2e/characterization/drawing-save-supersession.spec.ts     c6cc4feaa6f2320932232
 
 ## 6. Expected totals (bind)
 
+**Governance amendment (2026-07-18, supersedes any implication that
+all 34 fields require numeric equality across runs):**
+
+- semantic required fields: ZERO drift across the three stable runs;
+- `classification`: ZERO drift across the three stable runs;
+- diagnostic count fields
+  (`flowA_padletWriteCount`/`flowB_padletWriteCount`/`flowC_padletWriteCount`):
+  report exact numeric values per run; equality is NOT required;
+- if the raw-count pattern changes materially enough to alter the wire
+  diagnosis, STOP and report.
+
 New spec: **2 passed with dependencies / 1 passed `--no-deps` / 2
 skipped credential-off** (exactly one active test), THREE sequential
 stable runs (classification drift = STOP; write-count fields may
@@ -327,6 +362,26 @@ apikey values — strip/omit headers entirely); sequential
 `verify`/`build`, never under a dev server; never commit generated
 artifacts.
 
+## 8a. Accepted implementation note (governance amendment,
+2026-07-18)
+
+Current uncommitted candidate blob accepted for resumed verification:
+`280d37545e9d638c5eb8d883ffa99beefa5da308`
+(previous candidate blob
+`1ba17aca900b991ae87fc95fc08fb3a7f8a95164`).
+
+Accepted correction already made in the candidate:
+
+- listeners remain installed before board open;
+- request counting starts at actual flow start;
+- this removes pre-open cross-flow bleed.
+
+Observed remaining raw-count variation after that correction is
+treated as genuine in-window nondeterministic metadata traffic within
+the literal raw `/rest/v1/padlets` write category, not as
+authorization for further candidate reinterpretation of the three
+diagnostic count fields.
+
 ## 9. Cleanup contract
 
 `registerDrawingCleanup(test)` (shared owner) + per-board local
@@ -356,6 +411,9 @@ STOP immediately, report, do not commit, if:
   callback invocation, direct product-state mutation, or a per-test
   timeout above 300 000 ms;
 - classification drifts across the three stable runs;
+- any semantic required field drifts across the three stable runs;
+- any diagnostic count field ceases to be numeric/non-negative, or
+  its pattern changes materially enough to alter the wire diagnosis;
 - the observed combination requires a classification outside the §3
   enum (report, do not extend);
 - a second distinct defect surfaces (report only);
@@ -363,6 +421,14 @@ STOP immediately, report, do not commit, if:
   patch observes; the census #2 fix is gated on its result.
 
 ## 11. Review and commit flow (bind)
+
+**Governance amendment (2026-07-18):** Sonnet's stability review must
+require ZERO drift for the semantic required fields and
+`classification`. The three raw count fields
+(`flowA_padletWriteCount`/`flowB_padletWriteCount`/`flowC_padletWriteCount`)
+must be reported for every run without reinterpretation; variation
+alone does not fail review unless the count pattern changes materially
+enough to alter the wire diagnosis.
 
 GPT-5.5 implements WITHOUT committing; Sonnet independently reviews
 the uncommitted single-new-file diff (re-derives the blob ID,
@@ -381,6 +447,12 @@ fix with the §7 semantics and regression matrix.
 `test(e2e): characterize drawing save wire-level behavior (PATCH-084)`
 
 ## 12. Required final report
+
+**Governance amendment (2026-07-18):** the final report must keep the
+annotation at THIRTY-FOUR fields. For the three diagnostic count
+fields, report the exact numeric value from each stable run and state
+whether the observed variation was diagnostically material; do NOT
+require equality across runs.
 
 New file + blob ID; all thirty-four annotation fields per run; the
 full bounded request/response log per flow (method, URL, id-presence
