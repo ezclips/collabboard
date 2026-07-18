@@ -1,7 +1,8 @@
 # PATCH-077 — Slide-Action Persistence Boundary Diagnosis
 
-**Status:** BLOCKED — closed without implementation 2026-07-18 (stop
-record in §0.A). A deterministic Rename-slide UI-state contradiction
+**Status:** SUPERSEDED — closed 2026-07-18 (disposition in §0.B;
+previously BLOCKED, stop record in §0.A). A deterministic
+Rename-slide UI-state contradiction
 entered scope during the FIRST required action, before any valid
 persistence-boundary classification was possible. The §1 persistence
 question is PRESERVED (not discarded) and resumes only after
@@ -87,6 +88,31 @@ rename step either characterized, separated from persistence, or
 re-specified against the true state owner. No persistence fix and no
 rename fix may be authorized before PATCH-078's diagnosis identifies
 the true state owner.
+
+## 0.B Disposition — SUPERSEDED (Fable CTO, 2026-07-18, ruled at PATCH-078 closure)
+
+PATCH-078 landed (`e239880`, Sonnet PASS) and answered the Rename
+branch of this patch's §1 question: Rename's programmatic
+`updateScene` mutation DOES persist
+(`count-gated-stale-sidebar-persisted`); only the in-session sidebar
+model is stale. Therefore the "whole menu-driven `updateScene` family
+never persists" hypothesis is FALSE, and this contract — which bound
+Rename as the first of three sequenced actions, and whose fence table
+predates the corrected blob-ID method's carried set — is stale in
+both its action sequence and its framing.
+
+**Ruling (TASK OPTION C): close as SUPERSEDED.** The unresolved
+remainder of the §1 question is explicitly TRANSFERRED, not
+discarded: a future narrower diagnosis-only patch (candidate for
+PATCH-080, authored after PATCH-079 lands) must characterize the
+persistence boundary for **`Add slide below`** and **`Duplicate
+slide` only** (Rename removed — answered), asking specifically why
+`handleDuplicateSlide`'s scene mutation does NOT reach the persisted
+master scene (PATCH-076) when `handleRenameSlide`'s DOES
+(PATCH-078). This spec's never-created path
+`e2e/characterization/drawing-slide-persistence.spec.ts` remains
+permanently prohibited; the successor patch must bind a fresh path.
+No implementation ever existed for PATCH-077; nothing to revert.
 
 ---
 

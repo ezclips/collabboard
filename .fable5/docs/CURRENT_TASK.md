@@ -361,6 +361,50 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-18** — **PATCH-078 DONE (commit
+  `e239880295d333478314d414f21de051c065e3aa`, blob `d70b8e51…`, Sonnet
+  PASS, six coherent runs zero drift) + PATCH-077 SUPERSEDED (§0.B) +
+  fresh census + PATCH-079 AUTHORIZED (production fix)**. **Final
+  diagnosis (§1 hypothesis CONFIRMED):**
+  `classification: count-gated-stale-sidebar-persisted` — real Rename
+  accepts the title, the live frame label updates immediately, the
+  sidebar row stays stale through the 15 s window AND a row-switch
+  probe, the SETTLED persisted scene carries the new title (immediate
+  read still old — normal debounce), and a real reload hydrates the
+  sidebar correctly. Owner: sidebar `frames` derive from React
+  `elements` state whose refresh is count-gated
+  (`DrawingLayout.tsx:1084-1090`); a pure rename changes no count.
+  Defect is state synchronization, NOT persistence. Downstream
+  per-frame signature machinery (`:1935-1956`) already exists but
+  never runs because the gate blocks the render. **PATCH-077 ruling
+  (OPTION C): SUPERSEDED** — Rename branch answered (it persists ⇒
+  "whole updateScene family never persists" is FALSE); the remaining
+  Add-slide-below + Duplicate boundary question TRANSFERRED to a
+  future narrower diagnosis (PATCH-080 candidate, after 079); its
+  draft path stays permanently prohibited. **Census:** 1)
+  rename-sidebar fix (SELECTED), 2) Add/Duplicate persistence
+  diagnosis, 3) duplicate deep-clone fix (blocked on 2), 4) NEW
+  census-only sibling: frame-GEOMETRY sidebar staleness (drag →
+  stale thumbnails/order in-session, uncharacterized — do not fix
+  opportunistically), 5-9) line-follow / image-storage / overlap /
+  AI-images / connections-panel deferred. **PATCH-079 — FIX
+  AUTHORIZED, exactly TWO existing files, NO new files:**
+  `DrawingLayout.tsx` (starting blob `b470a888…`) — extend the
+  count-gate with a frame NAME signature (id+name of active frames,
+  accumulated in the EXISTING element pass; geometry excluded to
+  preserve the anti-drag-churn rationale; rejected: unconditional
+  setElements, deep equality, PresentationPanel second source of
+  truth, fork changes) — and `drawing-slide-rename-state.spec.ts`
+  (starting blob `d70b8e51…`) converted to an ASSERTING regression
+  spec (`sidebarTitleUpdatedWithinWindow === true`,
+  `classification === 'sidebar-updates-correctly'`, persistence +
+  reload asserted; derivation logic unmodified). 22 blob-ID fences at
+  base `e239880` (= PATCH-078's 23 minus DrawingLayout). Expected:
+  amended spec 2/1/2 ×3 stable; carried totals unchanged; full
+  448/43; cleanup zero across the same TWELVE prefixes. Bound commit:
+  `fix(drawing): refresh slide sidebar on frame rename (PATCH-079)`.
+  Sonnet PASS required before commit. PATCH-079 implementation NOT
+  started.
 - **2026-07-18** — **PATCH-077 BLOCKED (stop record §0.A, no
   implementation ever created) + PATCH-078 AUTHORIZED (diagnosis-only,
   Rename-Slide State-Ownership)**. **Stop:** during PATCH-077's FIRST

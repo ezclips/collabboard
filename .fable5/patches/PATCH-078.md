@@ -1,6 +1,9 @@
 # PATCH-078 — Rename-Slide State-Ownership Diagnosis
 
-**Status:** SPEC READY — **diagnosis-only** (NO production change, NO
+**Status:** DONE — closed 2026-07-18 (closure record in §12).
+Implementation commit `e239880295d333478314d414f21de051c065e3aa`,
+blob `d70b8e5130b9bf4250eba0c972f754647a578716`, Sonnet independent
+PASS. Was **diagnosis-only** (NO production change, NO
 harness change, NO fork change, NO fix — neither the rename defect
 nor the persistence family may be fixed under this patch). Authorized
 by the PATCH-077 §0.A blocked-stop ruling (OPTION B).
@@ -258,3 +261,66 @@ the preserved PATCH-077 persistence question; all §6 gate totals;
 23-fence result + both absence gates + one-file scope proof; cleanup
 proof across twelve prefixes; production-import grep; commit hash +
 push status after PASS.
+
+## 12. Closure record (Fable CTO, 2026-07-18)
+
+**Landed:** commit `e239880295d333478314d414f21de051c065e3aa`
+(`test(e2e): characterize rename-slide state ownership (PATCH-078)`),
+exactly one new file
+`e2e/characterization/drawing-slide-rename-state.spec.ts` at blob
+`d70b8e5130b9bf4250eba0c972f754647a578716`. HEAD == origin/main.
+Sonnet independent review: **PASS** (23/23 blob-ID fences at base and
+HEAD; both absence gates; one-file scope; three independent live
+reproductions byte-identical to the implementer's three runs — six
+coherent runs total, zero drift).
+
+**Final diagnosis (confirmed, code-corroborated):** the real Rename
+UI action accepts the replacement title; real Enter exits rename
+mode; the live Excalidraw frame label updates immediately; the
+presentation sidebar row remains stale for the full 15 s window;
+switching to the other slide and back does not refresh the row; the
+IMMEDIATE persisted scene still holds the old title while the SETTLED
+persisted scene (≥ 6 s poll window) holds the new title; a real full
+reload hydrates the sidebar with the new title; frame identities
+stable; exactly two slides throughout.
+
+**Final eight-field annotation (all six runs):**
+`inputAcceptedRename: true`, `sidebarTitleUpdatedWithinWindow: false`,
+`newTitleVisibleElsewhere: true` (excalidraw frame-name label),
+`sidebarUpdatedAfterRowSwitch: false`, `persistedTitleUpdated: true`,
+`sidebarUpdatedAfterReload: true`,
+**`classification: count-gated-stale-sidebar-persisted`**,
+`prefix`: fixture-specific.
+
+**Ownership ruling (the §1 hypothesis is CONFIRMED):**
+`handleRenameSlide` updates the live scene via `updateScene`; normal
+autosave persists it (`dirtyDataRef` set unconditionally,
+`:1155-1170`); reload imports the renamed frame correctly. The
+in-session sidebar is stale because its React `elements` model
+refreshes ONLY when the active element COUNT changes
+(`DrawingLayout.tsx:1084-1090`); a pure rename changes no count. The
+defect is **state synchronization/ownership, not persistence**.
+Notably, per-frame signature/version machinery already exists
+DOWNSTREAM in the `frames` derivation (`:1935-1956`,
+`frameSigsRef`/`frameVersionsRef`) but runs during render — which the
+count-gate prevents from ever happening on a pure rename.
+
+**PATCH-077 implication:** Rename's programmatic-`updateScene`
+mutation DOES persist, so the branch "no menu-driven `updateScene`
+action ever persists" is FALSE. Duplicate-slide non-persistence
+(PATCH-076) is therefore action- or mutation-shape-specific; Add
+slide below remains uncharacterized. PATCH-077 disposition ruled in
+its §0.B (superseded — see PATCH-077.md).
+
+**Gates (all bound totals met):** new spec 2/1/2 with three stable
+sequential live runs; carried browser — slide-duplication 2/1/2,
+menu-pointer 2/1/2, harness-cleanup 2/1/2, presentation 2 passed/2
+approved skips, duplication 2/1/2, line-bridge 4 passed/4 skipped;
+deterministic — helper 7/1, sanitizer 9/1, focused drawing 59/2, full
+Vitest 448/43, typecheck/boundaries/verify/build green. Cleanup:
+local `finally` owner; all TWELVE tracked prefixes 0 boards/0
+padlets/0 canvas lines; no `test-results/`, `playwright-report/`, or
+JSON reporter artifacts; port 3000 free; repo clean and synchronized.
+An `e2e/.auth/user.json` staleness incident recurred during both
+implementation and review; resolved both times via the sanctioned
+`--project=setup` refresh — environmental, not a code defect.
