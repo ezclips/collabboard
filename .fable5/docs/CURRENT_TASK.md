@@ -361,6 +361,58 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-18** — **PATCH-082 DONE (commit
+  `69c7abf024e2b10e68e9670518be9d128a69a120`, blob `5d3cccb6…`, Sonnet
+  PASS, three stable runs zero drift) + fresh census + PATCH-083
+  AUTHORIZED (diagnosis-only)**. **Final fourteen-field diagnosis:**
+  both flows TRUE for row-appearance, verified fit (zoom 100%→60%
+  every run), post-fit fresh duplicate frame label AND second live
+  child render; BOTH `duplicatePersistedSettled: false`;
+  **`classification: live-frame-in-both-flows`**. **PATCH-081
+  correction (ruled):** 081's pre-fit observation stands, but its
+  `sidebar-only-duplicate` interpretation was TOO STRONG — verified
+  fit proves the duplicate frame+child were already in the live scene,
+  off-viewport; `Shift+1` = fork `actionZoomToFit`, pure viewport math
+  over the EXISTING scene (reveals, cannot create); 081 classification
+  SUPERSEDED/refined. **PATCH-080 timing comparison (ruled):** 080
+  settled Add separately and Add persisted; 082's rapid Add→Duplicate
+  with ONE combined settlement left NEITHER new frame settled — not
+  proof Add never persists, but evidence an unsettled save may be
+  superseded/dropped by a rapid later action; bound into 083 and the
+  fix's regression matrix. **Divergence boundary now:** live clone
+  construction is GOOD in both flows; the loss is entirely on the
+  save/persistence path (silent `console.error` swallow sites in
+  `saveDrawingSnapshot` identified read-only at closure). **Census:**
+  1) save-supersession diagnosis Flows A/B/C (SELECTED), 2) deep-clone
+  fix (blocked on 1), 3) rapid-action supersession (folded into 1),
+  4) stale handler-state family, 5) save-swallow observation (folded),
+  6-7) frame-geometry diagnosis→fix, 8-12 deferred. **Duplicate fix
+  NOT ready:** mechanism candidates bounded to four (onChange
+  suppression / server rejection behind the silent catch / stale
+  last-write-wins overwrite / rapid-action cancellation) but none
+  proven — OPTION B chosen. **PATCH-083 — Drawing Scene Save
+  Supersession Diagnosis, diagnosis-only, exactly ONE new file**
+  `e2e/characterization/drawing-save-supersession.spec.ts`: ONE
+  active test, THREE sequential disposable boards — Flow A (Add
+  alone, full settlement), Flow B (Add then IMMEDIATELY Duplicate ≤5 s,
+  one combined settlement), Flow C (Duplicate only) — each with
+  read-only `page.on('console')` error listener (bound exact substring
+  `Failed to save drawing to master padlet`), persisted frame-id TIME
+  SERIES (≤1000 ms cadence, ≥20 s window, settled = final ≥6 s
+  stable), and VERIFIED fit (082 methodology) per flow. TWENTY-SIX
+  bound fields; enum (7, bound order):
+  `supersession-observation-unsound` | `save-error-observed` |
+  `duplicate-transient-then-lost` | `add-superseded-by-rapid-duplicate`
+  | `add-persists-duplicate-never` | `no-new-frame-persists` |
+  `mixed-supersession-state` — outcome NOT hardcoded. 27 blob-ID
+  fences at base `69c7abf` (082's 26 + its landed spec). Expected: new
+  spec 2/1/2 ×3 stable (classification drift = STOP);
+  `test.setTimeout(300_000)` explicitly bound (three-flow exception to
+  the prior 240 s cap); carried unchanged (divergence now carried
+  2/1/2); full 448/43; cleanup zero across SIXTEEN prefixes. Bound
+  commit: `test(e2e): characterize drawing scene save supersession
+  (PATCH-083)`. Sonnet PASS required before commit. PATCH-083
+  implementation NOT started.
 - **2026-07-18** — **PATCH-081 DONE (commit
   `718c99127adb6a39a7ed185e68b9817a5cea5b25`, blob `147ae0ae…`, Sonnet
   PASS, three stable runs zero drift) + fresh census + PATCH-082

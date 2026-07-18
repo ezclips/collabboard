@@ -1,6 +1,10 @@
 # PATCH-082 — Duplicate Outer-State/Live-Scene Divergence Diagnosis
 
-**Status:** SPEC READY — **diagnosis-only** (NO production change, NO
+**Status:** **DONE** (2026-07-18) — landed as commit
+`69c7abf024e2b10e68e9670518be9d128a69a120`, blob
+`5d3cccb693f57022c9e9aa44522bee6f59552332`, independent Sonnet PASS,
+three stable runs zero drift. Closure record in §12. Was: SPEC READY —
+**diagnosis-only** (NO production change, NO
 harness change, NO fork change, NO fix, NO instrumentation seam — the
 question must be answered with real-UI E2E observation only; if that
 proves impossible, STOP and report rather than adding a seam).
@@ -318,3 +322,79 @@ mechanism and the deep-clone fix's regression scope; all §6 gate
 totals; 26-fence result + all absence gates + one-file scope proof;
 cleanup proof across fifteen prefixes; production-import grep;
 commit hash + push status after PASS.
+
+## 12. Closure record (CTO, 2026-07-18)
+
+**Landed:** commit `69c7abf024e2b10e68e9670518be9d128a69a120`
+(`test(e2e): characterize duplicate outer-state live-scene divergence
+(PATCH-082)`), single new file
+`e2e/characterization/drawing-duplicate-divergence.spec.ts`, blob
+`5d3cccb693f57022c9e9aa44522bee6f59552332` (628 insertions).
+Independent Sonnet review: **PASS** (26/26 fences re-derived, all
+absence gates, one-file scope, three fresh stable runs zero drift,
+verified-fit mechanism independently confirmed both architecturally —
+`actionZoomToFit` computes bounds purely from existing scene elements,
+so fit REVEALS and cannot CREATE — and empirically via a precise
+replica of the spec's `findEmptyCanvasPoint` methodology).
+
+**Final fourteen-field diagnosis (identical across all three runs):**
+
+- `flowA_duplicateRowAppeared: true`
+- `flowA_zoomToFitApplied: true`
+- `flowA_duplicateFrameLabelAfterFit: true`
+- `flowA_duplicateChildRenderAfterFit: true`
+- `flowA_duplicatePersistedSettled: false`
+- `flowB_addRowAppeared: true`
+- `flowB_duplicateRowAppeared: true`
+- `flowB_zoomToFitApplied: true`
+- `flowB_duplicateFrameLabelAfterFit: true`
+- `flowB_duplicateChildRenderAfterFit: true`
+- `flowB_duplicatePersistedSettled: false`
+- `classification: live-frame-in-both-flows`
+- `prefixA` / `prefixB`: fixture-specific, distinct per run
+
+**Final diagnosis:** Duplicate-only produces a real sidebar row;
+Add-then-Duplicate produces both expected rows; the VERIFIED
+empty-canvas click + real `Shift+1` succeeded in both flows every run
+(zoom 100% → 60%); BOTH flows reveal a fresh live duplicate frame
+label AND a second live duplicate child/card render after fit; NEITHER
+duplicate reaches settled persistence. A prior Add is NOT required for
+the live duplicate to exist. The persistence failure therefore occurs
+AFTER a valid live scene has been created. No production fix was
+implemented.
+
+**PATCH-081 correction/refinement (ruled):** PATCH-081 correctly
+observed no duplicate frame label before verified fit (this spec's
+pre-fit reads reproduce that absence exactly), but its stronger
+`sidebar-only-duplicate` interpretation was TOO STRONG: verified
+zoom-to-fit proves the duplicate frame and child were already in the
+live scene, merely off-viewport/unrendered. `Shift+1` maps to the
+fork's `actionZoomToFit`, a pure viewport/zoom action whose bounds are
+derived from the existing scene state — it reveals content, it cannot
+create content. PATCH-081 remains valid as a pre-fit observation; its
+classification is SUPERSEDED/refined by this patch's
+`live-frame-in-both-flows`.
+
+**PATCH-080 timing comparison (ruled):** PATCH-080 settled Add
+separately (own ≥6 s window) BEFORE Duplicate and observed Add
+persist. PATCH-082 performs Add and Duplicate back-to-back with ONE
+combined settlement after both; in that design the settled persisted
+set contained NEITHER Add NOR Duplicate. This does not prove Add never
+persists — it suggests an unsettled Add save may be superseded,
+delayed, or dropped by a rapid later action. This timing distinction
+is bound into PATCH-083's design and the eventual fix's regression
+matrix.
+
+**Final gates:** PATCH-082 spec 2/1/2 ×3 stable; carried: clone-shape
+2/1/2, add-dup 2/1/2, rename-state 2/1/2, slide-duplication 2/1/2,
+menu-pointer 2/1/2, harness-cleanup 2/1/2, presentation approved
+totals unchanged, duplication 2/1/2, line-bridge approved totals
+unchanged; deterministic: slideOrder 7/1, clonedPostMetadata 9/1,
+focused drawing 59/2, full Vitest 448/43, typecheck/boundaries/
+`git diff --check`/sequential verify+build all green. Cleanup: zeros
+across all FIFTEEN prefixes; Board A cleaned before Board B; no
+Remove, no deletion, no direct padlet-row creation; no
+reporter/Playwright artifacts committed; port 3000 free. (Sixth
+reproduction of the environmental `e2e/.auth/user.json` staleness
+incident occurred during carried `--no-deps` batches; resolved via the
+sanctioned `--project=setup` refresh; non-blocking.)
