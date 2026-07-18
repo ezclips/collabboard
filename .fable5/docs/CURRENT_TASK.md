@@ -361,6 +361,65 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-19** — **PATCH-084 DONE (commit
+  `6f9681d5f17b6770f9d08eeb110641dea24453c9`, blob `280d3754…`, Sonnet
+  PASS, zero semantic/classification drift ×3 runs) + fresh census +
+  PATCH-085 AUTHORIZED (**FIX AUTHORIZED** — first production fix of
+  the persistence family)**. **Final classification:**
+  `duplicate-save-never-sent` (every run). Flow A control: Add
+  content write observed + accepted + persisted. Flows B/C: NO
+  qualifying content-bearing write containing any new frame id ever
+  reached `/rest/v1/padlets`; neither console substring observed;
+  diagnostic raw counts A=20 / B≈34-36 / C≈35-37 (non-material
+  variation per the amended two-class stability contract, which is
+  recorded in the closure). Timing: Add→Duplicate ≈2.23 s
+  (evidence) / ≈1.75 s (trace). **Wire ruling:** the defect occurs
+  BEFORE rejection/overwrite/loss — client-side; "never sent" =
+  bounded passive-window claim. **083 comparison:** refined, not
+  discarded; Duplicate-only proves it is not solely rapid-action
+  supersession; isolated Add healthy. **Closure-time exact-owner
+  ruling (decisive):** slide handlers never call `setElements` →
+  the sidebar row proves `handleChange` fired → onChange suppression
+  ELIMINATED; first post-Duplicate onChange ARMED the 2 s debounce;
+  zero wire writes ⇒ the debounce was PERPETUALLY RESET
+  (**starvation**) by sub-2 s flag-false onChange churn. Statically
+  proven churn generator: `handleDuplicateSlide` clones children
+  PRESERVING `link` → two live embeddables share one `padlet://` id
+  dx=width+80 apart, while move detection keys `lastEmbeddablePosRef`
+  BY PADLET ID → deterministic FALSE DRAG every onChange scan →
+  800 ms position-write storm (the observed ~15 extra non-content
+  writes in B/C) → `setPadlets` → sync effect → `updateScene` → more
+  onChanges → sub-2 s loop; also overwrites the shared row's
+  position with the clone's coords (can drag the ORIGINAL onto the
+  clone). **Census:** 1) element-keyed move-detection fix
+  (SELECTED), 2) coalescing (subsumed), 3) onChange suppression
+  (ruled out), 4) debounce semantics (channel, unchanged), 5-6
+  (ruled out), 7) silent-error visibility (later), 8) deep-clone
+  rows (after this), 9-14 deferred, 15) shared-row position
+  overwrite (same root cause, fixed here). **PATCH-085 — Drawing
+  Duplicate Persistence Fix, TWO files:** production
+  `components/collabboard/canvas/layouts/DrawingLayout.tsx`
+  (starting blob `5455597d…`; ONLY the bounded §2 sites: re-key
+  move-detection tracking to ELEMENT id; save target stays padlet
+  id; debounces/locks/handlers/error paths untouched) + NEW
+  regression spec
+  `e2e/characterization/drawing-duplicate-persistence.spec.ts`
+  (ONE test, FOUR boards, prefixes
+  `patch-064-harness-patch-085-fix-a-/-b-/-c-/-d-`,
+  `test.setTimeout(420_000)` bound): Flow A Add persists (control);
+  Flow B rapid Add→Dup ≤5 s BOTH persist; Flow C Dup-only persists;
+  Flow D Add, ≥2.5 s wait, Dup — both persist; E/F via passive write
+  counts (STOP if >60/flow), G by diff inspection (no error-path
+  touch). Carried observational specs' pass/fail totals MUST stay
+  unchanged; their classifications WILL legitimately change
+  (e.g. 083→mixed-supersession-family, 084→mixed-wire-family) —
+  expected, reported, non-blocking. **31 blob-ID fences** at base
+  `6f9681d` (084's set − DrawingLayout.tsx + 084's landed spec).
+  Cleanup zero across TWENTY-FIVE prefixes. Expected: new spec 2/1/2
+  ×3 stable (assertion failure = STOP, not flake); full 448/43.
+  Bound commit: `fix(drawing): key embeddable move detection by
+  element id (PATCH-085)`. Sonnet PASS required before commit.
+  PATCH-085 implementation NOT started.
 - **2026-07-18** — **PATCH-083 DONE (commit
   `0683b965d3821088a4ed9812693f408e0dcfa280`, blob `c6cc4fea…`, Sonnet
   PASS freshly re-derived TWICE, three stable runs zero drift both

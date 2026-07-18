@@ -1,6 +1,10 @@
 # PATCH-084 — Drawing Save Wire-Level Diagnosis
 
-**Status:** SPEC READY — **diagnosis-only** (NO production change, NO
+**Status:** **DONE** (2026-07-19) — landed as commit
+`6f9681d5f17b6770f9d08eeb110641dea24453c9`, blob
+`280d37545e9d638c5eb8d883ffa99beefa5da308`, independent Sonnet PASS,
+zero semantic/classification drift across three fresh runs. Closure
+record in §13. Was: SPEC READY — **diagnosis-only** (NO production change, NO
 harness change, NO fork change, NO fix, NO instrumentation seam, NO
 request interception/modification — pure read-only Playwright
 request/response/console observation; if the question cannot be
@@ -462,3 +466,98 @@ shape it implies; all §6 gate totals; 31-fence result + absence
 gates + one-file scope proof; cleanup proof across twenty-one
 prefixes; production-import grep; commit hash + push status after
 PASS.
+
+## 13. Closure record (CTO, 2026-07-19)
+
+**Landed:** commit `6f9681d5f17b6770f9d08eeb110641dea24453c9`
+(`test(e2e): characterize drawing save wire-level behavior
+(PATCH-084)`), single new file
+`e2e/characterization/drawing-save-wire.spec.ts`, blob
+`280d37545e9d638c5eb8d883ffa99beefa5da308` (1274 insertions).
+Independent Sonnet review: **PASS**.
+
+**Final classification (every run, zero drift):**
+**`duplicate-save-never-sent`**.
+
+**Final diagnosis summary:** Flow A (control): Add row/fit/live all
+true; content-bearing target write containing the Add frame id
+observed and accepted (2xx); Add persisted settled. Flow B (rapid
+Add→Duplicate, within bound): both rows and both live frames true;
+NO qualifying content-bearing write containing Add, NO qualifying
+combined write, NO qualifying Duplicate content write; neither
+persisted. Flow C (Duplicate only): row/fit/live true; NO qualifying
+content-bearing write containing the Duplicate id; not persisted.
+Both bound console substrings
+(`Failed to save drawing to master padlet`,
+`Failed to update padlet:`): never observed.
+
+**Wire-level ruling (bound):** isolated Add reaches the observed
+content-save path and persists; Duplicate-only and rapid
+Add→Duplicate emit NO qualifying content save into the observed
+`/rest/v1/padlets` path at all — the defect occurs BEFORE the
+rejected / accepted-then-overwritten / accepted-but-lost branches.
+`duplicate-save-never-sent` means no qualifying request was observed
+in the bounded passive listener window; it is not a claim that no
+invisible internal event could ever occur. No production fix was
+implemented in this patch.
+
+**PATCH-083 comparison:** 083 proved valid live content with no
+durable persistence; 084 discriminated the missing wire event. 083's
+behavioral `add-superseded-by-rapid-duplicate` label is REFINED, not
+discarded: the Duplicate-only result proves this is not solely a
+rapid-action supersession problem. Isolated Add remains healthy.
+
+**Accepted amendment (recorded):** the primary annotation remains 34
+fields; semantic fields require zero drift; the three raw
+`padletWriteCount` fields are diagnostic (literal total
+`/rest/v1/padlets` writes inside each flow window; small variation
+non-blocking); the accepted candidate correction (blob
+`1ba17aca…` → `280d375…`) moved counting start to actual flow start
+while listeners still attach before board open.
+
+**Final reviewed stability:** semantic fields zero drift;
+classification zero drift; diagnostic counts non-material — Sonnet
+fresh counts: run 1 A=20/B=35/C=35; run 2 A=20/B=34/C=36; run 3
+A=20/B=36/C=37. **Timing:** Add→Duplicate ≈2.232 s (evidence-derived,
+one run) and ≈1.747 s (independent trace) — both within the ≤5 s
+bound.
+
+**Gates:** 084 spec 2/1/2, three stable dependency-backed runs;
+carried: all 11 specs green (sanctioned setup refresh applied where
+the environmental stale-auth signature appeared — ninth
+reproduction); deterministic: `git diff --check`/typecheck/
+boundaries green, slideOrder 7/1, clonedPostMetadata 9/1, focused
+drawing 59/2, full Vitest 448/43, verify+build green. Cleanup:
+wire-a/-b/-c and the broad `patch-064-harness-` prefix all zero
+(boards/padlets/canvas lines); no manual cleanup in successful runs;
+no artifacts; port 3000 free.
+
+**Closure-time exact-owner ruling (decisive, read-only — the basis
+for PATCH-085):** the slide handlers call ONLY
+`excalidrawAPI.updateScene` and never `setElements`
+(`DrawingLayout.tsx` 1396–1452); since the sidebar row provably
+appears in every flow, `handleChange` (its only other refresher)
+DID fire with the duplicate elements — onChange suppression is
+ELIMINATED and Add/Duplicate share one arming path. The first
+post-Duplicate onChange arms the save (both suppression flags false
+at that moment). Only a flag-false onChange resets the armed 2000 ms
+debounce, and a fired save would have appeared on the wire —
+therefore the observed zero content writes over >20 s prove the
+debounce was PERPETUALLY RESET by sub-2 s flag-false onChange churn
+(**debounce starvation**). The statically proven churn generator:
+`handleDuplicateSlide` clones children PRESERVING `link`
+(1442–1449), creating two live embeddables that share one
+`padlet://` id at positions dx = width+80 apart, while the
+move-detection map `lastEmbeddablePosRef` is keyed BY PADLET ID
+(1074–1091) — so every onChange scan deterministically alternates
+the stored position between the two elements and detects a FALSE
+DRAG (dx ≥ epsilon) on every pass → `schedulePadletPositionSave`
+(800 ms) position-write storm (the observed ~15 extra non-content
+wire writes in B/C: ≈35 vs A=20) → `setPadlets` → embeddable-sync
+effect → `updateScene` → further onChanges → repeat under 2 s
+indefinitely. The same defect also lets the sync effect overwrite
+the shared row's position with the clone's coordinates and then move
+the ORIGINAL element onto the clone. Ruling: the fix is client-side
+(restore effective save firing by eliminating the deterministic
+false-drag oscillator — key move detection by ELEMENT id), narrow,
+and does NOT require deep-clone row semantics.
