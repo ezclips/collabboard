@@ -1,9 +1,13 @@
 # PATCH-077 — Slide-Action Persistence Boundary Diagnosis
 
-**Status:** SPEC READY — **diagnosis-only** (NO production change, NO
-harness change, NO fork change, NO fix). The duplicate-slide
-deep-clone fix (semantics ruled in PATCH-076 §0.B.2) is BLOCKED on
-this diagnosis and lands in a LATER patch.
+**Status:** BLOCKED — closed without implementation 2026-07-18 (stop
+record in §0.A). A deterministic Rename-slide UI-state contradiction
+entered scope during the FIRST required action, before any valid
+persistence-boundary classification was possible. The §1 persistence
+question is PRESERVED (not discarded) and resumes only after
+PATCH-078 characterizes the rename contradiction. No implementation
+file was ever created for this patch; the contract below is retained
+unchanged as the historical record.
 **Implementer:** GPT-5.5. **Reviewer:** Sonnet (independent,
 read-only, uncommitted diff, explicit PASS required before commit).
 **Closure:** Fable (CTO) after landing.
@@ -18,6 +22,71 @@ read-only, uncommitted diff, explicit PASS required before commit).
 
 **Bound implementation commit message (verbatim):**
 `test(e2e): characterize slide-action persistence boundary (PATCH-077)`
+
+---
+
+## 0.A Blocked-stop record (Fable CTO, 2026-07-18)
+
+**Preflight (all passed):** new-file absence at base, HEAD, and
+worktree; 23/23 Git-blob fences matched at both the behavioral/source
+base `eff21fc` and the governance HEAD; all base/current fenced blobs
+identical; corrected `git rev-parse <commit>:<path>` verification
+contract worked.
+
+**Runtime stop (deterministic, real UI):** the implementer drove the
+real Rename flow — row menu → `'Rename slide'` → real inline textbox
+→ typed a deterministic replacement title → real Enter → rename mode
+exited. Then: the presentation sidebar row title did NOT change
+within the bound 60 s window (still `PATCH-064 Portrait`) while the
+replacement title WAS visible elsewhere on the page — contradictory
+title state after a single real action. STOP condition correctly
+honored; draft spec deleted; artifacts removed; nothing committed.
+
+**Stop classification (code-derived, Fable):** composite of TASK
+options **B + E** — a stale slide-row **state** defect, NOT assumed
+to be delayed persistence. Ownership path inspected read-only:
+
+- `commitRename` (`PresentationPanel.tsx:117-121`) edits local
+  `renameValue` and calls `onRenameSlide(id, value)`.
+- `handleRenameSlide` (`DrawingLayout.tsx:1448-1454`) writes `name`
+  onto the frame element and calls `excalidrawAPI.updateScene` — the
+  LIVE scene receives the new title (the canvas frame label the fork
+  renders from live scene is the "elsewhere" that showed it).
+- The fork fires `onChange` → `handleChange`, but the React
+  `elements` state refresh is **count-gated**
+  (`DrawingLayout.tsx:1084-1090`: `setElements` only when the active
+  element COUNT changes). Rename changes no count → `elements` state
+  keeps the old name forever (the only other `setElements` site is
+  the scene-import path `:1300`).
+- The sidebar renders `frames: FrameSlide[]` derived from that stale
+  `elements` state (`:1935-1946`) → the row title can NEVER update
+  after a pure rename until a count-changing event, a scene import,
+  or a reload. The 60 s window was irrelevant.
+- `handleChange` still sets `dirtyDataRef` unconditionally
+  (`:1155-1170`) → 2 s debounce → `performSave` — so the renamed
+  title MAY well reach the persisted master scene while the sidebar
+  stays stale. NOT assumed (PATCH-076 proved programmatic-updateScene
+  persistence cannot be presumed); it is a bound PATCH-078
+  observation.
+
+Title representations identified in the real flow: (1) inline input
+`renameValue`; (2) live scene frame `name`; (3) canvas-rendered frame
+label (from live scene); (4) React `elements` state (stale); (5)
+sidebar `frames` derivation (stale); (6) persisted master-scene frame
+name (unknown); (7) slide thumbnail (derived — possibly stale).
+(1)-(3) should equal (4)-(7) after commit; they provably do not.
+
+**Governance ruling: OPTION B.** PATCH-077 is preserved unchanged as
+a blocked historical record; **PATCH-078 — Rename-Slide
+State-Ownership Diagnosis** (diagnosis-only) is authorized to
+characterize the contradiction. The §1 persistence-boundary question
+(do Rename/Add persist while Duplicate does not, or does the whole
+menu-driven `updateScene` family fail to persist?) is explicitly
+preserved and will be re-authorized after PATCH-078 lands — with the
+rename step either characterized, separated from persistence, or
+re-specified against the true state owner. No persistence fix and no
+rename fix may be authorized before PATCH-078's diagnosis identifies
+the true state owner.
 
 ---
 

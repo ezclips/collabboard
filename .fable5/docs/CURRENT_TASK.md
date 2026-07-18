@@ -361,6 +361,56 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-18** — **PATCH-077 BLOCKED (stop record §0.A, no
+  implementation ever created) + PATCH-078 AUTHORIZED (diagnosis-only,
+  Rename-Slide State-Ownership)**. **Stop:** during PATCH-077's FIRST
+  required action, the real Rename flow (menu → `'Rename slide'` →
+  real inline input → deterministic title → real Enter, rename mode
+  exited) left contradictory title state: the sidebar row kept
+  `PATCH-064 Portrait` across the 60 s window while the replacement
+  title was visible elsewhere on the page. Implementer honored the
+  stop, deleted the draft, cleaned artifacts; preflight had passed
+  (23/23 blob-ID fences at base `eff21fc` AND governance HEAD, both
+  absence gates). **CTO classification (code-derived, TASK options
+  B+E composite — NOT assumed to be delayed persistence):**
+  `handleRenameSlide` (`DrawingLayout.tsx:1448-1454`) writes `name`
+  into the LIVE scene via `updateScene` (the fork-rendered canvas
+  frame label is the "elsewhere"); the sidebar renders `frames`
+  derived from React `elements` STATE (`:1935-1946`) whose refresh is
+  **count-gated** (`:1084-1090` — `setElements` only on active-count
+  change; only other site is scene-import `:1300`); a pure rename
+  changes no count → the sidebar model can never refresh in-session.
+  `dirtyDataRef` is still set unconditionally (`:1155-1170`), so the
+  renamed title MAY reach persistence despite the stale sidebar —
+  bound as an observation, not assumed. **Governance ruling OPTION B:**
+  PATCH-077 preserved unchanged as a blocked historical record; its
+  persistence-boundary question (Rename/Add vs Duplicate, or whole
+  menu-updateScene family) explicitly PRESERVED, resuming only after
+  PATCH-078 lands. **PATCH-078 — diagnosis-only, exactly ONE new
+  file** `e2e/characterization/drawing-slide-rename-state.spec.ts`
+  (absence verified; PATCH-077's `drawing-slide-persistence.spec.ts`
+  must REMAIN absent): real Rename only (Duplicate/Add/Remove
+  prohibited), bound order act → immediate UI state → row-switch
+  probe → settled persistence (PATCH-076 method) → real reload. EIGHT
+  bound literal fields: `inputAcceptedRename`,
+  `sidebarTitleUpdatedWithinWindow`, `newTitleVisibleElsewhere`,
+  `sidebarUpdatedAfterRowSwitch`, `persistedTitleUpdated`,
+  `sidebarUpdatedAfterReload`, `classification`
+  (`rename-input-flow-broken` | `sidebar-updates-correctly` |
+  `rename-not-applied-to-scene` |
+  `count-gated-stale-sidebar-persisted` |
+  `count-gated-stale-sidebar-unpersisted` | `mixed-rename-state`,
+  derived in bound order), `prefix`
+  (`patch-064-harness-patch-078-rename-`). 23 blob-ID fences carried
+  (verify via `git rev-parse <base>:<path>`, never raw-byte SHA-1).
+  Expected: new spec 2/1/2; carried totals unchanged; full 448/43;
+  cleanup zero across TWELVE prefixes (ten tracked + legacy
+  `patch-064-harness-patch-077-persist-` draft residue + new
+  `patch-064-harness-patch-078-rename-`). Bound commit: `test(e2e):
+  characterize rename-slide state ownership (PATCH-078)`. Sonnet PASS
+  required before commit. NO rename fix and NO persistence fix
+  authorized until the true state owner is identified. PATCH-078
+  implementation NOT started.
 - **2026-07-18** — **PATCH-076 DONE (commit
   `eff21fc6eab97a45d05dd2a888e56c32d14e900b`, blob `fc20ef81…`, Sonnet
   PASS after two correction cycles) + product ruling + fresh census +
