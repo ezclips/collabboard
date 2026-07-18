@@ -8,16 +8,20 @@ this diagnosis and lands in a LATER patch.
 read-only, uncommitted diff, explicit PASS required before commit).
 **Closure:** Fable (CTO) after landing.
 
-**Base commit (bind, verify before editing):**
+**Behavioral/source base commit (bind, verify before editing):**
 `eff21fc6eab97a45d05dd2a888e56c32d14e900b`
 (`test(e2e): characterize duplicate-slide shared padlet link behavior (PATCH-076)`)
+
+**Current governance HEAD (implementation start point):**
+`b1cf263641913d17ac7b7aa4b52204204194926d`
+(`docs(fable): close PATCH-076 and authorize PATCH-077`)
 
 **Bound implementation commit message (verbatim):**
 `test(e2e): characterize slide-action persistence boundary (PATCH-077)`
 
 ---
 
-## 0. Fresh census (from HEAD `eff21fc`, superseding all prior censuses)
+## 0. Fresh census (from source snapshot `eff21fc`, superseding prior source censuses; implement from governance HEAD `b1cf263`)
 
 | # | Candidate | Classification | User-visible | Deterministic repro | Characterized | Owner | Files (est.) | Design ruling needed | Diagnosis-first / fix-ready | Architecture risk | Priority |
 |---|---|---|---|---|---|---|---|---|---|---|
@@ -119,7 +123,7 @@ NO other file may change. Production source, the Excalidraw fork, the
 harness, all existing specs, `playwright.config.ts`, and all `.fable5`
 docs are PROHIBITED (governance files are CTO-only).
 
-## 4. Immutable fences — 23 unique paths (hashes at `eff21fc`, measured fresh)
+## 4. Immutable fences — 23 unique paths (full Git blob IDs at `eff21fc`, measured fresh)
 
 ```text
 playwright.config.ts                                       5864c98436dde10809de67cb40c564c05e98ff6d
@@ -148,7 +152,32 @@ e2e/characterization/drawing-slide-duplication.spec.ts     fc20ef8160417b6eeb59f
 ```
 
 New-file absence gate: `e2e/characterization/drawing-slide-persistence.spec.ts`
-must NOT exist at base (verified); no OTHER new file may appear.
+must NOT exist at the base tree, the current governance-HEAD tree, or the
+working tree; no OTHER new file may appear.
+
+**Fence semantics ruling (bind):**
+
+- each hash in §4 is the full Git blob ID for that path in the tree of the
+  behavioral/source base commit `eff21fc6eab97a45d05dd2a888e56c32d14e900b`
+- verify each fence with
+  `git rev-parse eff21fc6eab97a45d05dd2a888e56c32d14e900b:<path>`
+  or an equivalent tree/blob query such as
+  `git ls-tree eff21fc6eab97a45d05dd2a888e56c32d14e900b -- <path>`
+- additionally verify the current implementation start point still carries
+  the same blob using
+  `git rev-parse b1cf263641913d17ac7b7aa4b52204204194926d:<path>`
+  or `git rev-parse HEAD:<path>` when `HEAD` is that governance commit
+- governance-only commits after the behavioral/source base do NOT invalidate
+  PATCH-077 when all 23 fenced blobs remain identical
+- working-tree byte SHA-1 values are NOT the fence identity for this patch;
+  do NOT substitute `Get-FileHash`, raw file-byte SHA-1, or a working-tree
+  `git hash-object` result for the bound Git blob ID unless the exact blob
+  bytes are first read from Git without line-ending/filter drift
+
+The 2026-07-18 false `0/23` stop was caused by the wrong identity check:
+working-tree SHA-1/file-byte hashing was compared against Git blob IDs.
+The fence table itself is correct.
+
 Verify fences + absence before editing and before commit.
 
 ## 5. Expected totals (bind)
@@ -188,8 +217,9 @@ kill → sweep and report per the PATCH-074 rule.
 
 STOP immediately, report, do not commit, if:
 
-- base commit, any §4 fence (23/23), or the new-file absence check
-  differs;
+- the behavioral/source base commit is missing, any §4 base-tree blob differs,
+  any §4 current-governance-HEAD blob differs from its base-tree blob, or the
+  new-file absence check differs;
 - ANY existing file must change (production, fork, harness, spec,
   config);
 - a SECOND new file is required;
@@ -211,7 +241,8 @@ STOP immediately, report, do not commit, if:
 
 GPT-5.5 implements WITHOUT committing; Sonnet independently reviews
 the uncommitted single-new-file diff (re-derives the hash, re-verifies
-23/23 fences + one-file scope + absence gate, re-runs all §5 modes,
+23/23 base-tree blob IDs + current-governance-HEAD equality + one-file
+scope + absence gate, re-runs all §5 modes,
 extracts the five-field annotation from a fresh JSON reporter run,
 verifies every field is settled-read-derived and the classification
 follows the bound enum); explicit PASS required; NO commit before
@@ -227,5 +258,5 @@ New file + hash; all five annotation fields with observed values;
 per-action immediate vs settled evidence; the derived classification
 and what it implies for the deep-clone fix's ownership; all §5 gate
 totals; 23-fence result + one-file scope proof; cleanup proof across
-eleven prefixes; production-import grep; commit hash + push status
-after PASS.
+eleven prefixes; production-import grep; current implementation start
+HEAD; bound behavioral/source base; commit hash + push status after PASS.

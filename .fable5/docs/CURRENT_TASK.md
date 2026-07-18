@@ -411,12 +411,17 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
   (`patch-064-harness-patch-077-persist-`). The outcome partitions
   fix ownership: duplicate-specific → `handleDuplicateSlide`; family-
   wide → the handleChange→debounce→performSave boundary. **23 fences**
-  measured at `eff21fc` (the 22 carried + landed
-  `drawing-slide-duplication.spec.ts` `fc20ef81…`). Expected: new spec
-  2/1/2; all carried totals unchanged; full 448/43; cleanup zero
-  across ELEVEN prefixes. Bound commit: `test(e2e): characterize
-  slide-action persistence boundary (PATCH-077)`. Sonnet PASS required
-  before commit. PATCH-077 implementation NOT started.
+  are full Git blob IDs bound to the behavioral/source snapshot
+  `eff21fc` (the 22 carried + landed
+  `drawing-slide-duplication.spec.ts` `fc20ef81…`) and must be
+  verified via `git rev-parse <base>:<path>` plus equality at the
+  governance implementation start HEAD `b1cf263`; governance-only
+  movement from `eff21fc` to `b1cf263` does not invalidate PATCH-077
+  when all 23 blobs match. Expected: new spec 2/1/2; all carried
+  totals unchanged; full 448/43; cleanup zero across ELEVEN prefixes.
+  Bound commit: `test(e2e): characterize slide-action persistence
+  boundary (PATCH-077)`. Sonnet PASS required before commit. PATCH-077
+  implementation NOT started.
 - **2026-07-18** — **PATCH-076 AMENDED (Amendment 1 §0.A) after Sonnet
   review: PASS WITH REQUIRED CHANGES on the first candidate**
   (`drawing-slide-duplication.spec.ts`, pre-correction hash
