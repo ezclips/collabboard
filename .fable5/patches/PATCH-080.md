@@ -1,6 +1,9 @@
 # PATCH-080 — Add/Duplicate Slide Persistence Boundary Diagnosis
 
-**Status:** SPEC READY — **diagnosis-only** (NO production change, NO
+**Status:** DONE — closed 2026-07-18 (closure record in §12).
+Implementation commit `34d9d54371a0bcc6dd360dc06394130fad918afe`,
+blob `9a6c7b42a6b476fe74d74483a7fa057a4cf61e7e`, Sonnet independent
+PASS. Was: SPEC READY — **diagnosis-only** (NO production change, NO
 harness change, NO fork change, NO fix — the duplicate-persistence
 defect and the deep-clone semantics ruling of PATCH-076 §0.B.2 may
 NOT be implemented under this patch). Successor to the SUPERSEDED
@@ -309,3 +312,71 @@ the census #2 fix gate; all §6 gate totals; 24-fence result + all
 absence gates + one-file scope proof; cleanup proof across thirteen
 prefixes; production-import grep; commit hash + push status after
 PASS.
+
+## 12. Closure record (Fable CTO, 2026-07-18)
+
+**Landed:** commit `34d9d54371a0bcc6dd360dc06394130fad918afe`
+(`test(e2e): characterize add/duplicate slide persistence boundary
+(PATCH-080)`), exactly one new file at blob
+`9a6c7b42a6b476fe74d74483a7fa057a4cf61e7e`. HEAD == origin/main.
+Sonnet independent review: **PASS** (24/24 blob-ID fences, both
+absence gates, one-file scope, three independent live reproductions
+byte-identical to the implementer's — zero drift; the critical
+live-child-render measurement was independently proven trustworthy
+via an unscoped total-card count that stayed at 4 even after a full
+zoom-to-fit, ruling out the viewport/virtualization confound).
+
+**Final nine-field result (all six runs):** `addSlideVisible: true`,
+`addSlidePersisted: true`, `addSlideSurvivedReload: true`,
+`duplicateSlideVisible: true`, `duplicateRendersSourceChild: false`,
+`duplicateSlidePersisted: false`, `duplicateSurvivedReload: false`,
+**`classification: mixed-slide-persistence-state`**, `prefix`:
+fixture-specific.
+
+**Final diagnosis:** Add slide below creates a distinct visible frame
+that persists after settlement and survives reload with the same
+frame identity. Duplicate creates a distinct visible sidebar row (and
+a live canvas frame-name label with a fresh frame id) but produces NO
+second drawing-canvas embeddable render, NEVER reaches the settled
+persisted scene (not even transiently — `sharedSettledDuplicateLinkCount`
+stayed 1), and does not survive reload. Since Add and Duplicate share
+the append-style `updateScene` mutation shape and Add persists, the
+append shape alone is NOT the failure: the suppression is
+**Duplicate-specific or clone-shape-specific**. No production fix was
+implemented.
+
+**PATCH-076 discrepancy ruling (bound):** PATCH-076's
+`duplicateRendersSameChild: true` was measured through
+**FullscreenPresentation** content resolution
+(resolver/planner-driven), while PATCH-080 measured **direct
+drawing-canvas embeddable rendering** (`renderEmbeddable` →
+`DrawingEmbeddableCard`). These are separate rendering pipelines; the
+discrepancy is flow-dependent, not a proven locator defect in either
+spec. Duplicate NON-persistence is confirmed across both patches;
+PATCH-076's live-render dimension was not fully reproduced and both
+findings stand in their own pipeline.
+
+**Accepted deviation (recorded, non-blocking, retroactively bound):**
+the landed spec's mixed-state gate is a strict superset of §3 rule 1
+— it additionally routes persistence/reload INCONSISTENCY
+(`persisted but did not survive reload`, either action) to the
+conservative `mixed-slide-persistence-state` bucket. These extra
+checks never weaken the gate, introduced no new literal, and altered
+no observed result (the bound rule-1 condition alone already
+triggered `mixed` in every run via `duplicateRendersSourceChild:
+false`). Sonnet reviewed and accepted as non-blocking; the CTO hereby
+binds the stricter gate as the accepted §3 semantics for this landed
+spec.
+
+**Gates (all bound totals met):** new spec 2/1/2 ×3 stable; carried —
+rename-state 2/1/2, slide-duplication 2/1/2, menu-pointer 2/1/2,
+harness-cleanup 2/1/2, presentation approved totals, duplication
+2/1/2, line-bridge approved totals; deterministic — helper 7/1,
+sanitizer 9/1, focused drawing 59/2, full Vitest 448/43,
+typecheck/boundaries/verify/build/`git diff --check` green. Cleanup:
+all THIRTEEN tracked prefixes 0/0/0; no Remove action; duplicate
+never deleted; no reporter/Playwright artifacts; port 3000 free. The
+`e2e/.auth/user.json` staleness incident recurred once more
+(`drawing-duplication --no-deps`), resolved via the sanctioned
+`--project=setup` refresh — environmental, four independent
+reproductions to date.

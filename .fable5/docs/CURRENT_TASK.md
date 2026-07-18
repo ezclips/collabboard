@@ -361,6 +361,59 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-18** — **PATCH-080 DONE (commit
+  `34d9d54371a0bcc6dd360dc06394130fad918afe`, blob `9a6c7b42…`, Sonnet
+  PASS, six coherent runs zero drift) + fresh census + PATCH-081
+  AUTHORIZED (diagnosis-only)**. **Final nine-field result:** Add
+  visible/persisted/survived-reload all TRUE with same frame
+  identity; Duplicate visible TRUE but `duplicateRendersSourceChild`
+  FALSE, persisted FALSE, survived-reload FALSE;
+  `classification: mixed-slide-persistence-state` (soundness gate —
+  no second live child render). **Diagnosis:** Add and Duplicate
+  share the append-style `updateScene` mutation, and Add persists ⇒
+  append shape alone is NOT the failure; suppression is
+  Duplicate-specific or clone-shape-specific. **PATCH-076
+  discrepancy ruling (bound):** 076 measured FullscreenPresentation
+  content RESOLUTION; 080 measured direct drawing-canvas embeddable
+  RENDERING — separate pipelines, flow-dependent, no proven locator
+  defect; duplicate non-persistence confirmed by both. **Accepted
+  deviation (bound):** 080's mixed-gate also routes persistence/
+  reload inconsistency to `mixed` — stricter-only, altered no result,
+  Sonnet-accepted. **Fork facts (read-only, recorded for 081):**
+  embeddables render one `.excalidraw__embeddable-container` per
+  scene ELEMENT gated by `embedsValidationStatus` (fork
+  `App.tsx:1463-1501`), auto-validated on every `componentDidUpdate`
+  (`:3240`) ⇒ a scene-present duplicate child SHOULD render; PATCH-080
+  proved no container ever appears (even after zoom-to-fit) while the
+  duplicate frame LABEL does ⇒ strong inference: duplicate frame
+  reaches the live scene, children do not (or vanish instantly) —
+  divergence point still unproven ⇒ deep-clone fix stays BLOCKED.
+  **PATCH-081 — Duplicate Slide Live-Scene Clone-Shape Diagnosis,
+  diagnosis-only, exactly ONE new file**
+  `e2e/characterization/drawing-duplicate-clone-shape.spec.ts`
+  (absence verified; PATCH-077 path stays permanently absent): bound
+  order baseline → real Duplicate only → immediate live observation
+  (new frame-label id; source-card count OR container-count signal) →
+  settled persistence (PATCH-076 method, sole persistence basis;
+  child ids/links recorded when observable) → post-settlement live
+  stability re-read. Add/Rename/Remove/deletion/reload/
+  FullscreenPresentation/drag PROHIBITED. TEN bound fields:
+  `duplicateRowAppeared`, `duplicateFrameInLiveSceneImmediate`,
+  `duplicateChildRenderedImmediate`, `duplicateFrameLiveStable`,
+  `duplicateChildRenderedStable`, `sourceChildStillRendered`,
+  `duplicatePersistedSettled`, `duplicateChildrenPersistedSettled`,
+  `classification` (`mixed-duplicate-clone-state` |
+  `sidebar-only-duplicate` | `frame-with-shared-child-identities` |
+  `complete-live-clone-unpersisted` |
+  `frame-with-cloned-children-unpersisted` | `frame-only-duplicate`,
+  derived in bound order, soundness first, outcome NOT hardcoded),
+  `prefix` (`patch-064-harness-patch-081-dupshape-`). 25 blob-ID
+  fences at base `34d9d54` (080's 24 + its landed spec). Expected:
+  new spec 2/1/2 ×3 stable; carried unchanged (add-dup now carried
+  2/1/2); full 448/43; cleanup zero across FOURTEEN prefixes. Bound
+  commit: `test(e2e): characterize duplicate-slide live clone shape
+  (PATCH-081)`. Sonnet PASS required before commit. PATCH-081
+  implementation NOT started.
 - **2026-07-18** — **PATCH-079 DONE (commit
   `9a11a234835242cfb51360ca95762ee1790eec2f`, blobs `5455597d…` /
   `513d07bf…`, Sonnet PASS across two full review passes, six clean
