@@ -125,6 +125,16 @@ const preserveImportedTransientAppState = (nextAppState: any, currentAppState: a
   editingLinearElement: null,
 });
 
+const buildActiveFrameNameSignature = (elements: readonly any[]) => {
+  let signature = '';
+  for (let i = 0; i < elements.length; i++) {
+    const el = elements[i];
+    if (el?.isDeleted || el?.type !== 'frame') continue;
+    signature += `${JSON.stringify([el.id, el.name ?? null])}\n`;
+  }
+  return signature;
+};
+
 const getElementClassNameForDiagnostics = (node: Element | null) => {
   if (!node) return null;
   const className = node.className as string | { baseVal?: string } | undefined;
@@ -635,6 +645,7 @@ export default function DrawingLayout({
   const paddletsRef = useRef<Padlet[]>(padlets);
   // Track active element count to avoid O(N) reduce on every Excalidraw onChange (60fps during drag)
   const activeElementCountRef = useRef(0);
+  const frameNameSigRef = useRef('');
   // Set to true once we've received at least one onChange with non-empty elements after load
   const hasSeenElementsRef = useRef(false);
   // Run one post-load embeddable refresh so bound arrows/media settle after the
@@ -1042,12 +1053,16 @@ export default function DrawingLayout({
     const activeElements = [];
     let unboundEmbeddable = null;
     let deletedEmbeddables = null;
+    let frameNameSig = '';
 
     for (let i = 0; i < elements.length; i++) {
       const el = elements[i];
       if (!el.isDeleted) {
         activeCount++;
         activeElements.push(el);
+        if (el.type === 'frame') {
+          frameNameSig += `${JSON.stringify([el.id, el.name ?? null])}\n`;
+        }
         if (el.type === "embeddable" && !el.link) {
           unboundEmbeddable = el;
         }
@@ -1084,8 +1099,9 @@ export default function DrawingLayout({
     // Only trigger a React re-render of the DrawingLayout if the number of active elements changed
     // (e.g. user added or deleted something, not just dragging an existing element)
     // Uses a ref counter (O(1)) instead of prev.reduce() (O(N)) to avoid 60fps GC pauses during drag.
-    if (activeElementCountRef.current !== activeCount) {
+    if (activeElementCountRef.current !== activeCount || frameNameSigRef.current !== frameNameSig) {
       activeElementCountRef.current = activeCount;
+      frameNameSigRef.current = frameNameSig;
       setElements(elements);
     }
 
@@ -1297,6 +1313,7 @@ export default function DrawingLayout({
       appStateRef.current = snapshot.appState;
       hasSeenElementsRef.current = snapshot.elements.length > 0;
       activeElementCountRef.current = snapshot.elements.length;
+      frameNameSigRef.current = buildActiveFrameNameSignature(snapshot.elements);
       setElements(snapshot.elements);
 
       api.updateScene({

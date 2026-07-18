@@ -20,8 +20,8 @@ const MENU_ITEM_NAMES = [
   'Remove slide',
 ] as const;
 const RENAME_ITEM_INDEX = 4;
-const PRIMARY_ANNOTATION = 'patch-078-rename-state-diagnosis' as const;
-const PATCH_078_PREFIX = 'patch-064-harness-patch-078-rename-' as const;
+const PRIMARY_ANNOTATION = 'patch-079-rename-state-regression' as const;
+const PATCH_079_PREFIX = 'patch-064-harness-patch-079-rename-' as const;
 const SOURCE_SLIDE_TITLE = 'PATCH-064 Portrait' as const;
 const OTHER_SLIDE_TITLE = 'PATCH-064 Landscape' as const;
 const REPLACEMENT_TITLE = 'PATCH-064 Portrait renamed' as const;
@@ -164,19 +164,19 @@ async function newTitleObservedOutsideSidebar(page: Page, sidebar: Locator, fram
   return { observed: false, where: null, labelText };
 }
 
-test.describe('drawing slide rename state-ownership diagnosis (PATCH-078)', () => {
+test.describe('drawing slide rename sidebar refresh regression (PATCH-079)', () => {
   test.skip(!hasE2ECredentials, 'E2E_EMAIL / E2E_PASSWORD not set (see .env.e2e.example)');
 
-  test('characterizes rename-slide title state ownership through the real presentation UI', async ({ page }) => {
+  test('keeps the presentation sidebar in sync after a real rename', async ({ page }) => {
     test.setTimeout(240_000);
 
-    const { supabase, fixture } = await createDisposableDrawingBoard('patch-078-rename');
+    const { supabase, fixture } = await createDisposableDrawingBoard('patch-079-rename');
 
     try {
       await seedDrawingContainers(supabase, fixture);
       await seedPresentationScene(supabase, fixture);
 
-      expect(fixture.prefix.startsWith(PATCH_078_PREFIX)).toBe(true);
+      expect(fixture.prefix.startsWith(PATCH_079_PREFIX)).toBe(true);
 
       const seededElements = activeSceneElements(await fetchMasterPadletRow(supabase, fixture.masterPadletId!));
       const sourceFrameId = fixture.frameIds.find((frameId) => {
@@ -380,6 +380,14 @@ test.describe('drawing slide rename state-ownership diagnosis (PATCH-078)', () =
           postReloadRowCount: await rowsAfterReload.count(),
         }),
       });
+
+      expect(inputAcceptedRename).toBe(true);
+      expect(sidebarTitleUpdatedWithinWindow).toBe(true);
+      expect(newTitleVisibleElsewhere).toBe(true);
+      expect(sidebarUpdatedAfterRowSwitch).toBe(true);
+      expect(persistedTitleUpdated).toBe(true);
+      expect(sidebarUpdatedAfterReload).toBe(true);
+      expect(classification).toBe('sidebar-updates-correctly');
     } finally {
       await cleanupDrawingFixture(supabase, fixture);
       await expect(assertDrawingFixtureCleanup(supabase, fixture)).resolves.toEqual({
