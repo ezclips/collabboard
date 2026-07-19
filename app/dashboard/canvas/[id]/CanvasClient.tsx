@@ -4956,6 +4956,18 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     await updateDrawingLayoutPadlet(id, normalizedUpdates);
   }, [updateDrawingLayoutPadlet]);
 
+  const handleDrawingLayoutUpdatePadletStrict = useCallback(async (id: string, updates: Partial<Padlet>) => {
+    const normalizedUpdates = { ...updates };
+    if (typeof normalizedUpdates.position_x === 'number') {
+      normalizedUpdates.position_x = Math.round(normalizedUpdates.position_x);
+    }
+    if (typeof normalizedUpdates.position_y === 'number') {
+      normalizedUpdates.position_y = Math.round(normalizedUpdates.position_y);
+    }
+    await updatePostFieldsOrThrow(id, normalizedUpdates);
+    setPadlets((prev) => prev.map((p) => (p.id === id ? { ...p, ...normalizedUpdates } : p)));
+  }, [setPadlets, updatePostFieldsOrThrow]);
+
   const handleDrawingLayoutDeletePadlet = useCallback(async (id: string) => {
     await deletePadletById(id);
   }, []);
@@ -6776,6 +6788,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                 padletsLoaded={!loading}
                 onAddPadlet={handleDrawingLayoutAddPadletWithContainerCheck}
                 onUpdatePadlet={handleDrawingLayoutUpdatePadlet}
+                onUpdatePadletStrict={handleDrawingLayoutUpdatePadletStrict}
                 onDeletePadlet={handleDrawingLayoutDeletePadlet}
                 onDeleteOverlayPadlets={handleDrawingLayoutDeleteOverlayPadlets}
                 ghostDraft={drawingGhostDraft}

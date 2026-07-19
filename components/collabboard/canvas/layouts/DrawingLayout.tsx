@@ -29,6 +29,7 @@ import { useCanvasActions } from '@/components/collabboard/canvas/hooks/useCanva
 import { MessageSquarePlus, Library, MonitorPlay, X, Workflow, Pencil, ChevronDown, ChevronUp } from 'lucide-react';
 import { contrastIconColor } from '@/components/collabboard/shells/CardShell';
 import CustomMermaidModal from './CustomMermaidModal';
+import { sanitizeClonedPostMetadata } from '@/lib/infra/collabboard/clonedPostMetadata';
 
 const ExcalidrawWrapper = dynamic(
   () => import('@/components/collabboard/editors/ExcalidrawWrapper'),
@@ -581,6 +582,7 @@ interface DrawingLayoutProps {
   padletsLoaded?: boolean;
   onAddPadlet: (postData: Partial<Padlet>) => Promise<Padlet | null>;
   onUpdatePadlet: (id: string, updates: Partial<Padlet>) => Promise<void>;
+  onUpdatePadletStrict: (id: string, updates: Partial<Padlet>) => Promise<void>;
   onDeletePadlet?: (id: string) => Promise<void>;
   onDeleteOverlayPadlets?: (rootIds: string[]) => Promise<void>;
   onPadletEdit?: (padlet: Padlet) => void;
@@ -603,6 +605,7 @@ export default function DrawingLayout({
   padletsLoaded = false,
   onAddPadlet,
   onUpdatePadlet,
+  onUpdatePadletStrict,
   onDeletePadlet,
   onDeleteOverlayPadlets,
   onPadletEdit,
@@ -1423,7 +1426,104 @@ export default function DrawingLayout({
     setTimeout(() => excalidrawAPI.scrollToContent([newFrame], { fitToContent: true, animate: true, duration: 400 }), 50);
   }, [excalidrawAPI, elements, makeFrameElement]);
 
-  const handleDuplicateSlide = useCallback((id: string) => {
+  const cloneLinkedRowsForDuplicateSlide = useCallback(async (children: any[], dx: number) => {
+    const createdIds: string[] = [];
+    const clonedLinkByElementId = new Map<string, string>();
+    const padletsById = new Map(padlets.map((padlet) => [String(padlet.id), padlet] as const));
+
+    const createClone = async (
+      source: Padlet,
+      metadata: Padlet['metadata'],
+      position: { x: number; y: number },
+    ) => {
+      const created = await onAddPadlet({
+        board_id: canvasId,
+        type: source.type,
+        title: source.title,
+        content: source.content,
+        file_url: source.file_url,
+        file_name: source.file_name,
+        file_type: source.file_type,
+        file_size: source.file_size,
+        image_url: source.image_url,
+        position_x: position.x,
+        position_y: position.y,
+        width: source.width,
+        height: source.height,
+        metadata,
+      });
+      if (!created) {
+        throw new Error(`Failed to clone drawing duplicate row ${source.id}`);
+      }
+      createdIds.push(created.id);
+      return created;
+    };
+
+    try {
+      for (const child of children) {
+        if (child.type !== 'embeddable' || typeof child.link !== 'string' || !child.link.startsWith('padlet://')) {
+          continue;
+        }
+
+        const sourceContainerId = child.link.replace('padlet://', '');
+        const sourceContainer = padletsById.get(sourceContainerId);
+        if (!sourceContainer) {
+          throw new Error(`Cannot duplicate slide: missing linked row ${sourceContainerId}`);
+        }
+
+        const sourceMetadata = (sourceContainer.metadata ?? {}) as Record<string, any>;
+        const sourceChildIds = Array.isArray(sourceMetadata.childPadletIds)
+          ? sourceMetadata.childPadletIds.map((childId: unknown) => String(childId))
+          : [];
+        const sourceChildRows = sourceChildIds.map((childId) => {
+          const sourceChild = padletsById.get(childId);
+          if (!sourceChild) {
+            throw new Error(`Cannot duplicate slide: missing linked child row ${childId}`);
+          }
+          return sourceChild;
+        });
+
+        const clonedContainerMetadata = {
+          ...sanitizeClonedPostMetadata(sourceMetadata),
+          childPadletIds: [],
+        } as Padlet['metadata'];
+        const clonedContainer = await createClone(sourceContainer, clonedContainerMetadata, {
+          x: (sourceContainer.position_x ?? child.x ?? 0) + dx,
+          y: sourceContainer.position_y ?? child.y ?? 0,
+        });
+
+        const clonedChildIds: string[] = [];
+        for (const sourceChild of sourceChildRows) {
+          const clonedChildMetadata = {
+            ...sanitizeClonedPostMetadata((sourceChild.metadata ?? {}) as Record<string, any>),
+            parentId: clonedContainer.id,
+          } as Padlet['metadata'];
+          const clonedChild = await createClone(sourceChild, clonedChildMetadata, {
+            x: sourceChild.position_x ?? 0,
+            y: sourceChild.position_y ?? 0,
+          });
+          clonedChildIds.push(clonedChild.id);
+        }
+
+        await onUpdatePadletStrict(clonedContainer.id, {
+          metadata: {
+            ...clonedContainerMetadata,
+            childPadletIds: clonedChildIds,
+          },
+        });
+        clonedLinkByElementId.set(child.id, `padlet://${clonedContainer.id}`);
+      }
+    } catch (error) {
+      if (onDeletePadlet) {
+        await Promise.allSettled([...createdIds].reverse().map((createdId) => onDeletePadlet(createdId)));
+      }
+      throw error;
+    }
+
+    return clonedLinkByElementId;
+  }, [canvasId, onAddPadlet, onDeletePadlet, onUpdatePadletStrict, padlets]);
+
+  const handleDuplicateSlide = useCallback(async (id: string) => {
     if (!excalidrawAPI) return;
     const frame = elements.find((el: any) => el.id === id && el.type === 'frame');
     if (!frame) return;
@@ -1440,17 +1540,23 @@ export default function DrawingLayout({
       updated: Date.now(),
     };
 
-    const newChildren = children.map((child: any) => ({
-      ...child,
-      id: crypto.randomUUID(),
-      x: child.x + dx,
-      frameId: newFrameId,
-      versionNonce: Math.floor(Math.random() * 1e9),
-      updated: Date.now(),
-    }));
+    try {
+      const clonedLinkByElementId = await cloneLinkedRowsForDuplicateSlide(children, dx);
+      const newChildren = children.map((child: any) => ({
+        ...child,
+        id: crypto.randomUUID(),
+        x: child.x + dx,
+        frameId: newFrameId,
+        link: clonedLinkByElementId.get(child.id) ?? child.link,
+        versionNonce: Math.floor(Math.random() * 1e9),
+        updated: Date.now(),
+      }));
 
-    excalidrawAPI.updateScene({ elements: [...elements, newFrame, ...newChildren] });
-  }, [excalidrawAPI, elements]);
+      excalidrawAPI.updateScene({ elements: [...elements, newFrame, ...newChildren] });
+    } catch (error) {
+      console.error('Failed to duplicate drawing slide:', error);
+    }
+  }, [cloneLinkedRowsForDuplicateSlide, excalidrawAPI, elements]);
 
   const handleRemoveSlide = useCallback((id: string) => {
     if (!excalidrawAPI) return;
