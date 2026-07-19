@@ -361,6 +361,39 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-19** — **PATCH-085 Amendment 1 — presentation
+  characterization correction (OPTION B) after a correctly-honored
+  stop condition.** Implementer stopped on the bound carried-totals
+  condition: `drawing-presentation.spec.ts:1100`
+  (persisted-scene pre/post equality) failed — `emb-slide-a`/`-b`
+  heights 260→153. **CTO forensics (candidate untouched, blobs
+  `a92bb25…`/`b0ab5ea…` verified before and after):** production
+  diff audited hunk-by-hunk = EXACTLY the authorized keying change
+  (no geometry code); candidate reproduction deterministic ×2 (ONLY
+  the two heights change; x/y/width/order/links byte-stable;
+  distinct links — no shared-link involvement); **base comparison
+  via detached worktree at `6f9681d` (base DrawingLayout
+  `5455597…`): 2 passed/2 skipped** — the same live conformance
+  occurs at base but is never persisted (autosave starved; stale
+  seeded 260 survives). Mechanism closed: `onNaturalHeight`
+  (~460–479, untouched) measures card content and updates the scene
+  WITHOUT the sync flag → legitimately arms the 2 s autosave with
+  conformed height 153 (= max(28+22+content, 80)); move detection
+  writes x/y only — 260 was seeded JSON frozen by the defect.
+  **Classification B: the carried characterization encoded the
+  defect (frozen persistence) as an invariant; 153 is
+  product-correct; NOT a geometry regression.** Amendment: allowed
+  files 2→3 (presentation spec, starting blob `ddab8338…`, smallest
+  `:1100`-region assertion/evidence update only: keep
+  order/ids/x/y/width/links byte-stable assertions; slide-embeddable
+  heights assert the conformed live value with 153 recorded; seeded
+  260 recorded, not asserted post-run); fences 31→30 (presentation
+  spec removed); carried totals must RETURN fully green including
+  presentation 2/2; bound geometry invariant: any third value,
+  non-determinism, or any OTHER element changing = STOP. Sonnet
+  reviews ALL THREE files. Resumption from the UNCHANGED candidate
+  blobs; PATCH-086 NOT started; cleanup verified zero after
+  forensics; worktree removed; port 3000 free.
 - **2026-07-19** — **PATCH-084 DONE (commit
   `6f9681d5f17b6770f9d08eeb110641dea24453c9`, blob `280d3754…`, Sonnet
   PASS, zero semantic/classification drift ×3 runs) + fresh census +

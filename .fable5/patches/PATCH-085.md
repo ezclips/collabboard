@@ -170,10 +170,13 @@ values as evidence of the fix, not as regressions.
 |---|---|---|
 | `components/collabboard/canvas/layouts/DrawingLayout.tsx` | production fix (bounded §2 sites ONLY) | `5455597d486fd917c4983a18e47445e2b1c9314d` |
 | `e2e/characterization/drawing-duplicate-persistence.spec.ts` | NEW regression spec | absent at base (absence gate) |
+| `e2e/characterization/drawing-presentation.spec.ts` | carried-characterization correction (Amendment 1 §12 ONLY — smallest assertion/evidence update at the `:1100` persisted-scene equality) | `ddab83381605dbdcdda4d1a0cea3cafe010f55c5` |
 
-No third file. No unit-test file is authorized: the touched logic is
+No fourth file. No unit-test file is authorized: the touched logic is
 component-internal with no exported seam, and extracting one is out
-of scope for this narrow fix.
+of scope for this narrow fix. (Allowed files were TWO at authoring;
+expanded to THREE by Amendment 1 after the bound stop condition —
+see §12.)
 
 Absence gates: the new spec path absent at base and in the worktree
 before implementation;
@@ -181,12 +184,16 @@ before implementation;
 `.fable5/patches/PATCH-077-draft.md` permanently absent at base,
 HEAD, and worktree; PATCH-086 not started.
 
-## 6. Immutable fences (bind — 31, Git blob IDs)
+## 6. Immutable fences (bind — 30 after Amendment 1, Git blob IDs)
 
 Verify each with `git rev-parse 6f9681d…:<path>` and equality at the
 current governance HEAD. Blob-ID method only (never raw file SHA-1 /
 `Get-FileHash`). PATCH-084's fence set minus the now-allowed
-`DrawingLayout.tsx`, plus 084's landed spec.
+`DrawingLayout.tsx`, plus 084's landed spec. **Amendment 1 (§12)
+removed `e2e/characterization/drawing-presentation.spec.ts` from
+this fence list (it is now the third allowed file) — the list below
+retains its row for historical binding, but it is NO LONGER a fence;
+effective fence count is THIRTY.**
 
 ```text
 playwright.config.ts                                       5864c98436dde10809de67cb40c564c05e98ff6d
@@ -297,3 +304,107 @@ counts vs the 084 baseline (storm gone); carried totals (unchanged)
 deterministic totals; 31-fence result + absence gates + two-file
 scope proof; cleanup across twenty-five prefixes; commit hash + push
 status after PASS.
+
+## 12. Amendment 1 (CTO, 2026-07-19) — presentation characterization
+correction after the bound stop condition
+
+**Event:** the implementer correctly STOPPED on the §9 carried-totals
+condition: `drawing-presentation.spec.ts` failed at `:1100`
+(`expect(postRunPersistedScene.sceneElements).toEqual(
+persistedScene.sceneElements)`) — persisted heights of `emb-slide-a`
+and `emb-slide-b` changed 260 → 153. Candidate blobs at the stop:
+DrawingLayout.tsx `a92bb25cf3608f5a74d3b27fc779c6a1b4b0a300`, new
+regression spec `b0ab5ea55195e3aab5a43aa8e73e88cd136723f4`.
+
+**CTO forensic findings (all read-only; candidate untouched):**
+
+1. **Production diff audit:** the DrawingLayout.tsx diff is EXACTLY
+   the authorized §2 identity change (three hunks, all
+   `lastEmbeddablePosRef` keying pId → element id; save target
+   unchanged). NO geometry, sync-application, payload, or clone code
+   touched.
+2. **Assertion meaning:** the `:1100` equality binds "the persisted
+   scene never changes during a passive presentation session" — the
+   pre-read occurs BEFORE the board is first opened.
+3. **Fixture truth:** scene embeddables seeded at height 260; the
+   linked container ROWS seeded at height 220; the real measured
+   card content produces the natural height
+   `max(28 + 22 + scrollHeight, 80)` = **153** via the
+   `onNaturalHeight` path (DrawingLayout ~460–479), which calls
+   `updateScene` WITHOUT the sync flag — a legitimate,
+   INTENDED live scene change whose onChange arms the 2 s autosave.
+   This path is untouched by the candidate; live geometry is
+   identical at base and candidate.
+4. **Reproduction (candidate):** deterministic ×2 — identical
+   failure, ONLY the two heights 260 → 153; x/y/width/order/ids and
+   every other element byte-stable; links distinct (no shared-link
+   involvement in this fixture).
+5. **Base comparison (detached worktree at `6f9681d`, base
+   DrawingLayout blob `5455597…`):** 2 passed / 2 skipped — at base
+   the SAME live conformance to 153 occurs but is NEVER persisted:
+   the armed autosave is starved by the base churn defect
+   (PATCH-084's proven mechanism family), so the stale seeded 260
+   survives the session.
+6. **Move-detection payload:** position saves write x/y only; no
+   width/height is ever written by move detection (old or new). The
+   260 value was NOT produced by geometry writes — it was seeded
+   JSON preserved by the persistence defect.
+
+**Classification: B — defect correction exposes previously
+defect-frozen characterized geometry.** 153 is the product-correct
+conformed height (natural-height subsystem, intended, untouched);
+260 was the seeded value that persisted ONLY because the old defect
+prevented the autosave from ever firing during a session. The
+carried characterization encoded the DEFECT (frozen persistence) as
+an invariant. This is a characterization correction, NOT a product
+geometry change.
+
+**Governance action: OPTION B.**
+`e2e/characterization/drawing-presentation.spec.ts` becomes the
+THIRD allowed file, starting blob (bind, verified against base with
+`git rev-parse 6f9681d…:e2e/characterization/drawing-presentation.spec.ts`):
+`ddab83381605dbdcdda4d1a0cea3cafe010f55c5`.
+Authorized change: the SMALLEST assertion/evidence update at the
+`:1100` equality region ONLY:
+
+- keep asserting element ORDER, ids, types, frameIds, links,
+  isDeleted, x, y, and width byte-stable pre→post;
+- for `emb-slide-a` and `emb-slide-b` HEIGHTS only: assert the
+  post-run persisted height equals the natural-height-conformed
+  LIVE value — derived from the live scene (or the deterministic
+  observed value 153 with the derivation recorded in the evidence
+  annotation); the pre-run seeded value remains 260 and must be
+  recorded, not asserted as the post-run expectation;
+- update/extend the nearby evidence annotation minimally to record
+  both values and the derivation;
+- NO other assertion, fixture, flow, or helper change.
+
+**Bound geometry invariant (for this patch and Sonnet review):** the
+re-keying changes tracking identity only; persisted x/y/width and
+all non-slide-embeddable geometry must remain byte-stable through
+the presentation session; the two slide-embeddable heights must
+persist at the conformed natural height (observed deterministic
+value 153) — NOT at the stale seeded 260, and NOT at any third
+value. If any run shows a third value, non-deterministic heights, or
+any OTHER element changing: STOP (that would be classification A/C
+territory, not this amendment).
+
+**Effective contract changes:** allowed files 2 → 3 (§5); fences
+31 → 30 (§6 — presentation spec removed); §7/§9 carried-totals
+language now reads: all carried pass/fail totals green WITH the
+amended presentation spec (its totals must RETURN to
+2 passed / 2 skipped); Sonnet reviews ALL THREE files and must
+independently re-derive the base-vs-candidate geometry evidence
+(base preservation of 260 need not be re-run in a worktree; the CTO
+base run is recorded here, but Sonnet must verify the candidate-side
+determinism and the smallest-change property of the spec edit).
+
+**Resumption:** implementation resumes FROM the current candidate
+blobs (`a92bb25…` production, `b0ab5ea…` regression spec — both
+UNCHANGED by this amendment and NOT to be reverted). Remaining work:
+the §12 spec correction, then rerun: focused PATCH-085 gates (already
+green — rerun the presentation spec to 2/2 ×2 stable + one full
+three-run stability pass of the regression spec), the remaining
+carried gates (drawing-duplication, drawing-line-bridge, plus a full
+carried batch re-confirmation), the deterministic closeout chain,
+cleanup across twenty-five prefixes, then Sonnet review.
