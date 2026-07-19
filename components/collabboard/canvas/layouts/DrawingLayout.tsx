@@ -1073,8 +1073,9 @@ export default function DrawingLayout({
         // as a user drag and schedule an 800ms position save -> fetchData -> sync cascade.
         if (el.type === "embeddable" && typeof el.link === "string" && el.link.startsWith("padlet://")) {
           const pId = el.link.replace("padlet://", "");
+          const embeddableKey = el.id;
           if (!isSyncingEmbeddablesRef.current && !zoomChanged) {
-            const lastPos = lastEmbeddablePosRef.current.get(pId);
+            const lastPos = lastEmbeddablePosRef.current.get(embeddableKey);
             if (
               lastPos &&
               (Math.abs(lastPos.x - el.x) >= POSITION_SYNC_EPSILON ||
@@ -1088,7 +1089,7 @@ export default function DrawingLayout({
           }
           // Always track last known position (including sync-effect writes and zoom changes)
           // so the next handleChange after a sync/zoom doesn't falsely detect a user drag.
-          lastEmbeddablePosRef.current.set(pId, { x: el.x, y: el.y });
+          lastEmbeddablePosRef.current.set(embeddableKey, { x: el.x, y: el.y });
         }
       } else if (onDeletePadlet && el.type === "embeddable" && typeof el.link === "string" && el.link.startsWith("padlet://")) {
         if (!deletedEmbeddables) deletedEmbeddables = [];
@@ -1754,7 +1755,7 @@ export default function DrawingLayout({
     // This is belt-and-suspenders alongside the isSyncingEmbeddablesRef guard.
     for (const el of [...refreshedEmbeddables, ...missingEmbeddables]) {
       if (typeof el.link === "string" && el.link.startsWith("padlet://")) {
-        lastEmbeddablePosRef.current.set(el.link.replace("padlet://", ""), { x: el.x, y: el.y });
+        lastEmbeddablePosRef.current.set(el.id, { x: el.x, y: el.y });
       }
     }
 

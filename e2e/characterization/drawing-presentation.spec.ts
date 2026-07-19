@@ -1034,6 +1034,20 @@ test.describe('drawing presentation browser characterization (PATCH-064)', () =>
       const postRunPersistedPadlets = await fetchBoardPadlets(supabase, fixture.boardId);
       const postRunElementOrder = postRunPersistedScene.sceneElements.map((element) => element.id);
       const preRunElementOrder = persistedScene.sceneElements.map((element) => element.id);
+      const naturalHeightTargets = [
+        { sceneId: 'emb-slide-a', padletId: fixture.containerIds[0]! },
+        { sceneId: 'emb-slide-b', padletId: fixture.containerIds[1]! },
+      ] as const;
+      const liveConformedHeightBySceneId = new Map(
+        await Promise.all(naturalHeightTargets.map(async ({ sceneId, padletId }) => {
+          const renderedHeight = await page.locator(`[data-padlet-id="${padletId}"]`).first().evaluate((node) => {
+            const embeddableContainer = node.closest('.excalidraw__embeddable-container') as HTMLElement | null;
+            if (!embeddableContainer) return null;
+            return Math.round(embeddableContainer.getBoundingClientRect().height);
+          });
+          return [sceneId, renderedHeight] as const;
+        })),
+      );
       const postRunCompositionPlan = planSlideComposition(landscapeSlide, postRunPersistedScene.sceneElements, postRunPersistedPadlets);
       const postRunNativeBelowIds = postRunCompositionPlan.nativeBelowElements.map((element) => String((element as { id: string }).id));
       const postRunNativeAboveIds = postRunCompositionPlan.nativeAboveElements.map((element) => String((element as { id: string }).id));
@@ -1045,6 +1059,20 @@ test.describe('drawing presentation browser characterization (PATCH-064)', () =>
         && SEEDED_NATIVE_IDS.every((id) => nativeBelowIds.includes(id) || nativeAboveIds.includes(id));
       const fullscreenAbovePngs = fullscreenPngCensus.filter((entry) => entry.bandPosition === 'above');
       const fullscreenBelowPngs = fullscreenPngCensus.filter((entry) => entry.bandPosition === 'below');
+      const preRunSceneById = new Map(persistedScene.sceneElements.map((element) => [element.id, element] as const));
+      const postRunSceneById = new Map(postRunPersistedScene.sceneElements.map((element) => [element.id, element] as const));
+      const heightInvariantExceptions = new Set<string>(naturalHeightTargets.map(({ sceneId }) => sceneId));
+      const naturalHeightEvidence = naturalHeightTargets.map(({ sceneId }) => {
+        const seededElement = preRunSceneById.get(sceneId);
+        const persistedElement = postRunSceneById.get(sceneId);
+        const liveConformedHeight = liveConformedHeightBySceneId.get(sceneId) ?? null;
+        return {
+          sceneId,
+          seededHeight: seededElement?.height ?? null,
+          liveConformedHeight,
+          persistedHeight: persistedElement?.height ?? null,
+        };
+      });
 
       expect(fullscreenPngCensus.length).toBeGreaterThanOrEqual(1);
       expect(fullscreenBelowBand).not.toBeNull();
@@ -1097,7 +1125,27 @@ test.describe('drawing presentation browser characterization (PATCH-064)', () =>
       expect(preRunElementOrder).toEqual(postRunElementOrder);
       expect(postRunNativeBelowIds).toEqual(nativeBelowIds);
       expect(postRunNativeAboveIds).toEqual(nativeAboveIds);
-      expect(postRunPersistedScene.sceneElements).toEqual(persistedScene.sceneElements);
+      const liveConformedHeights = naturalHeightEvidence.map((entry) => entry.liveConformedHeight);
+      expect(liveConformedHeights).toEqual([153, 153]);
+      for (const entry of naturalHeightEvidence) {
+        expect(entry.seededHeight).toBe(260);
+        expect(entry.persistedHeight).toBe(entry.liveConformedHeight);
+      }
+      for (const seededElement of persistedScene.sceneElements) {
+        const postRunElement = postRunSceneById.get(seededElement.id);
+        expect(postRunElement).toBeTruthy();
+        expect(postRunElement?.id).toBe(seededElement.id);
+        expect(postRunElement?.type).toBe(seededElement.type);
+        expect(postRunElement?.frameId ?? null).toBe(seededElement.frameId ?? null);
+        expect(postRunElement?.link ?? null).toBe(seededElement.link ?? null);
+        expect(postRunElement?.isDeleted ?? false).toBe(seededElement.isDeleted ?? false);
+        expect(postRunElement?.x).toBe(seededElement.x);
+        expect(postRunElement?.y).toBe(seededElement.y);
+        expect(postRunElement?.width).toBe(seededElement.width);
+        if (!heightInvariantExceptions.has(seededElement.id)) {
+          expect(postRunElement?.height).toBe(seededElement.height);
+        }
+      }
       expect(fullscreenAboveImgObserved).toBe(true);
       expect(fullscreenAboveImgEverMounted).toBe(true);
       expect(fullscreenBelowImgObserved).toBe(true);
@@ -1116,6 +1164,7 @@ test.describe('drawing presentation browser characterization (PATCH-064)', () =>
           elements: persistedElementSummaries,
           textElement: persistedTextElement,
           shapeElement: persistedShapeElement,
+          postRunNaturalHeightEvidence: naturalHeightEvidence,
         }),
       });
       test.info().annotations.push({
