@@ -361,6 +361,56 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-19** — **PATCH-087 DONE (commit
+  `ba0c8f904d71f255045261497bf2803698ac206f`, independent read-only
+  review PASS, blob `a2fb3ae…`, +6/−7 lines) + fresh census +
+  PATCH-088 AUTHORIZED (test-INFRA fix, grouped carried runner)**.
+  **Final 087 ruling:** the drawing content save used the void
+  channel (both bound-substring catches dead for persistence
+  failures; `performSave` cleared `dirtyDataRef` pre-await → failed
+  save silently dropped the snapshot, work lost on reload). Fix:
+  `saveDrawingSnapshot` → `onUpdatePadletStrict` (resolved AND
+  thrown failures propagate), redundant inner catch removed (ONE
+  failure path, `Failed to save drawing to master padlet` logs
+  ONCE), failed snapshot re-armed to `dirtyDataRef` only-if-null
+  (newer snapshot always wins), no retry loop/timer/trigger, scene
+  never rolled back; success semantics byte-equivalent; all other
+  callers + CanvasClient/useCanvasData/posts/postsRepository
+  untouched; 085/086 intact. Gates: duplicate-persistence 2/1/2 +
+  3× stable, no save-error substring on healthy runs, content 2xx
+  present; carried 14 green (initial long batch hit the KNOWN
+  auth-expiry signature — sanctioned refresh + individual
+  `--no-deps` reruns only); deterministic 7/1, 9/1, 59/2, 448/43,
+  verify+build; cleanup 29 prefixes zero; ports 3000/4000 free.
+  **Census at `ba0c8f9`:** #1 SELECTED — long-batch auth-token
+  expiry (mechanism proven: setup runs once per invocation; token
+  outlives 8–17-min batches; alphabetical tail fails at
+  `Back to Dashboard`; 10+ incidents across 083–087; grouped short
+  invocations always pass). #2 container-drop caller cluster
+  (~307/487/496/520 — non-atomic childPadletIds/parentId writes,
+  per-site silent catches, orphaned children on reload) = leading
+  PATCH-089 production candidate, needs bounded design ruling;
+  #3 comments caller (~1939) HIGH severity but comment-store
+  duality (Phase 3) — after the cluster; #4 position saves
+  (~932/942) intentionally best-effort, DEFER by design; #5 broader
+  contract consistency later; #6 PATCH-081 stays RETIRED-BY-NOTE;
+  #7 frame/sidebar — no characterized defect; #8–12 deferred;
+  #14 none. Full bound caller table in PATCH-088 §4. **PATCH-088 —
+  Carried-Suite Grouped Runner, ONE new file:**
+  `e2e/run-carried-groups.mjs` (absence-gated): runs the 14 carried
+  specs as bounded sequential groups (≤4 specs AND ≤~4 min each,
+  own invocation → own fresh setup login), requires `PW_BASE_URL`,
+  detects the exact `Back to Dashboard` timeout signature →
+  explicit `AUTH-EXPIRY (INFRASTRUCTURE)` classification + one
+  sanctioned refresh + ONE retry of that group (incident reported
+  even when retry passes); non-signature failures fail immediately
+  (never retried, never masked); no credentials/headers in output;
+  no config/harness/spec/production/package changes (all fenced).
+  **36 blob-ID fences** (self-verified 36/36; DrawingLayout now
+  fenced at `a2fb3ae…`). Bound commit: `test(e2e): grouped
+  carried-suite runner with auth-expiry classification
+  (PATCH-088)`. Independent read-only PASS required before commit.
+  PATCH-088 implementation NOT started.
 - **2026-07-19** — **PATCH-086 DONE (commit
   `7dab2086bfde47178c0b50ce48aa74905ef0fc51`, independent read-only
   reviewer Kepler PASS after Amendment 1; blobs `a028dd6…`

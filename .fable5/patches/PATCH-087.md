@@ -1,9 +1,13 @@
 # PATCH-087 — Drawing Content-Save Failure Visibility (Strict Update Channel)
 
-**Status:** **FIX AUTHORIZED** — first fix of the silent-error
-family, scoped to its single highest-risk caller: the drawing
-CONTENT save. Narrowest scope yet: ONE production file, bounded to
-the `saveDrawingSnapshot`/`performSave` region. NO new spec file,
+**Status:** **DONE** — landed as commit
+`ba0c8f904d71f255045261497bf2803698ac206f`
+(`fix(drawing): surface content-save failures via strict update channel (PATCH-087)`),
+independent read-only review PASS; closure record in §12. First fix
+of the silent-error family, scoped to its single highest-risk
+caller: the drawing CONTENT save. Narrowest scope yet: ONE
+production file (6 insertions / 7 deletions), bounded to the
+`saveDrawingSnapshot`/`performSave` region. NO new spec file,
 NO new prefixes, NO harness change, NO CanvasClient change, NO
 useCanvasData change, NO retry timer or new save trigger.
 **Implementer:** GPT-5.5. **Reviewer:** independent read-only
@@ -242,3 +246,54 @@ conformance; carried totals + stability runs; deterministic totals;
 prefixes; explicit confirmations (no other caller migrated, one log
 per failure, re-arm never clobbers newer snapshots, 085/086 regions
 intact, no seam, no timer); commit hash + push status after PASS.
+
+## 12. Closure record (CTO, 2026-07-19)
+
+**Landed:** commit `ba0c8f904d71f255045261497bf2803698ac206f`
+(`fix(drawing): surface content-save failures via strict update channel (PATCH-087)`),
+HEAD == origin/main at closure. ONE file, exact blob:
+`components/collabboard/canvas/layouts/DrawingLayout.tsx`
+`a2fb3aebf0f66967c40c1765b5bf69b2e853d05c` (+6/−7 lines).
+**Independent read-only review: PASS.**
+
+**Exact defect (final):** the drawing-content persistence used the
+non-strict update channel; resolved repository failures and caught
+thrown failures never rejected to DrawingLayout, so
+`saveDrawingSnapshot`'s failure catch could not observe a real
+persistence failure; `performSave` cleared `dirtyDataRef` before
+awaiting persistence — a failed content save silently dropped the
+snapshot and user changes could disappear after reload with no
+visible signal.
+
+**Exact fix (final):** `saveDrawingSnapshot` now uses
+`onUpdatePadletStrict` (propagates resolved AND thrown failures);
+the redundant inner catch was removed — ONE failure path remains
+and the existing exact message
+`Failed to save drawing to master padlet` logs ONCE per failed
+attempt; the failed snapshot is restored to `dirtyDataRef` ONLY
+when it is still null (a newer snapshot is never overwritten);
+`performSave` still clears before awaiting; NO retry loop, NO new
+timer/trigger, NO immediate forced retry; the editor scene remains
+authoritative and is never rolled back. Success semantics
+unchanged: no false error logging, no duplicate writes, no
+save-target/payload/debounce change.
+
+**Preserved:** every other `onUpdatePadlet` caller byte-unchanged;
+CanvasClient.tsx, useCanvasData.ts, posts.ts, postsRepository.ts
+untouched; 085 element-key tracking intact; 086 deep-clone +
+strict-rewire intact; no deletion/geometry/presentation/deep-clone
+semantic change; no auth material; no instrumentation seam.
+
+**Verification at closure:** focused —
+`drawing-duplicate-persistence` 2 passed dep / 1 passed
+`--no-deps` / 2 skipped credential-off; three stable dependency
+runs (2 passed each); no save-error substring on healthy runs;
+content-bearing 2xx writes present. Carried — all 14 specs green;
+the initial long batch hit the KNOWN auth-expiry signature,
+recovered ONLY via sanctioned setup refresh + individual
+`--no-deps` reruns (no source edits; no totals changed).
+Deterministic — diff-check, tsc, boundaries, slideOrder 7/1,
+clonedPostMetadata 9/1, focused drawing 59/2, full Vitest
+**448/43**, verify, standalone build. Cleanup — 29 prefixes zero
+(boards/padlets/canvasLines/cloned child rows 0, no orphans), no
+artifacts, ports 3000/4000 free, no repo-owned runtime process.
