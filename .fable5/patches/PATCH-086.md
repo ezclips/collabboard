@@ -1,11 +1,15 @@
 # PATCH-086 — Duplicate Slide Deep-Clone Independence (MODEL A)
 
-**Status:** **FIX AUTHORIZED** — second production fix of the
-duplicate family. Narrow scope: ONE production file (bounded to the
-`handleDuplicateSlide` region + one local clone-orchestration
-helper) + ONE new regression spec. NO harness change, NO fork
-change, NO deletion-path redesign, NO error-path (useCanvasData)
-change, NO frame-geometry change, NO presentation-mode change.
+**Status:** **DONE** — landed as commit
+`7dab2086bfde47178c0b50ce48aa74905ef0fc51`
+(`fix(drawing): deep-clone linked rows on duplicate slide (PATCH-086)`),
+independent read-only reviewer (Kepler) PASS after Amendment 1;
+closure record in §13. Second production fix of the duplicate
+family. Final scope: TWO production files (DrawingLayout clone
+orchestration + the Amendment 1 CanvasClient strict-prop wiring) +
+ONE new regression spec. NO harness change, NO fork change, NO
+deletion-path redesign, NO error-path (useCanvasData) change, NO
+frame-geometry change, NO presentation-mode change.
 **Implementer:** GPT-5.5. **Reviewer:** Sonnet (independent,
 read-only, uncommitted diff, explicit PASS required before commit).
 **Closure:** Fable (CTO) after landing.
@@ -418,3 +422,84 @@ wiring + rewire call-site switch + spec assertion, then rerun:
 focused 086 gates (2/1/2 + three-run stability), carried 13-spec
 totals, deterministic closeout, cleanup across twenty-nine
 prefixes, then Sonnet review of all three files.
+
+## 13. Closure record (CTO, 2026-07-19)
+
+**Landed:** commit `7dab2086bfde47178c0b50ce48aa74905ef0fc51`
+(`fix(drawing): deep-clone linked rows on duplicate slide (PATCH-086)`),
+HEAD == origin/main at closure. Three files, exact blobs:
+`app/dashboard/canvas/[id]/CanvasClient.tsx`
+`a028dd65c1935068a7206a67db869a8f5345011a` (+13 lines);
+`components/collabboard/canvas/layouts/DrawingLayout.tsx`
+`a7b81a1915cbe570cb57850c17088e30d4daf81c`;
+`e2e/characterization/drawing-duplicate-deep-clone.spec.ts`
+`0644447cc2bea1b21c9b47ba03b7d69de2617fb7` (804 lines).
+**Independent review history:** two FAILs on the pre-Amendment
+candidate — the parent-rewire failure could not propagate through
+the void `onUpdatePadlet` callback; Amendment 1 (§12) expanded
+scope narrowly to CanvasClient (strict throwing callback); final
+independent read-only review (Kepler): **PASS**.
+
+**Final product semantic (MODEL A, delivered):** Duplicate slide
+now creates a fresh frame element id, fresh child element ids, a
+fresh cloned container row, fresh cloned child-card rows, rewired
+`parentId`/`childPadletIds`, preserved child order, equivalent
+initial visible content, independent future edits, and deletion
+isolation in BOTH directions. Metadata per the bound §2 table:
+visible content + display metadata copied
+(`sanitizeClonedPostMetadata`), upload/file POINTERS copied (no
+storage-object duplication), comments not cloned (detached stores
+stay with the source), fresh timestamps, inserting user owns the
+clones, excluded relations remain source-attached.
+
+**Exact production changes:** CanvasClient — ONE strict handler
+(`handleDrawingLayoutUpdatePadletStrict`: normalizes exactly like
+the non-strict path, `await updatePostFieldsOrThrow` with NO
+catch-and-continue, local `setPadlets` merge only AFTER confirmed
+success) + the `onUpdatePadletStrict` prop pass. DrawingLayout —
+clone orchestration creates ALL rows before scene mutation; the
+parent rewire uses the STRICT callback and must confirm before
+`updateScene`; failure enters compensation (reverse creation order,
+only this attempt's rows), exactly ONE visible `console.error`,
+source rows untouched, no half-created duplicate ever enters the
+scene. Ordinary `onUpdatePadlet` callers byte-unchanged. UNTOUCHED:
+`useCanvasData.ts`, `posts.ts`, `postsRepository.ts`, all deletion
+production paths. **PATCH-085 preserved:** element-keyed move
+tracking intact, persistence target still padlet id, debounce and
+save scheduling unchanged, no write-storm regression, duplicate
+persistence healthy.
+
+**Flow results (three-run stable):** A fresh frame id ✓; B fresh
+child element ids ✓; C fresh cloned container + child-card row ids,
+scene links point at cloned rows ✓; D initial equivalence, order
+preserved, metadata per table ✓; E duplicate edit does not alter
+source ✓; F source edit does not alter duplicate ✓; G deleting the
+duplicate leaves the source intact and reloadable ✓; H deleting the
+source leaves the duplicate intact and reloadable ✓; I rapid
+Add→Duplicate persists both with fresh linked rows ✓; J no orphan
+cloned rows after cleanup ✓; K failure path confirmed by
+inspection: strict rewire failure propagates, no scene mutation
+before confirmed persistence, narrow compensation, one visible
+error, source untouched ✓. **Passive wire evidence:** a 2xx
+`/rest/v1/padlets` PATCH targeting/containing the cloned container
+id, payload carrying `childPadletIds` with the fresh cloned
+child-row ids, observed BEFORE settlement.
+
+**Gates at closure:** focused — dependency 2 passed / `--no-deps`
+1 passed / credential-off 2 skipped; JSON reporter expected 2,
+unexpected 0, flaky 0; three stable dependency runs. Carried — all
+13 specs green (known auth expiry recovered ONLY via sanctioned
+setup refresh; affected specs rerun individually, `--no-deps` where
+required; no source edits; no totals changed). Deterministic —
+diff-check, tsc, boundaries, focused Vitest, full **448/43**,
+verify, standalone build all green. Cleanup — all 29 tracked
+prefixes zero (boards/padlets/canvasLines 0), cloned child rows 0,
+no orphan cloned containers, no source rows deleted, no artifacts,
+port 3000 free.
+
+**Exclusions preserved:** no deletion-path production changes, no
+debounce changes, no broader save-path changes, no geometry or
+presentation changes, no storage-object duplication, no comment
+cloning, no auth-material capture, no instrumentation seam, no
+harness changes, no Playwright config changes, no package/lockfile
+changes.

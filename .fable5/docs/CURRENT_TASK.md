@@ -361,6 +361,61 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-19** — **PATCH-086 DONE (commit
+  `7dab2086bfde47178c0b50ce48aa74905ef0fc51`, independent read-only
+  reviewer Kepler PASS after Amendment 1; blobs `a028dd6…`
+  CanvasClient / `a7b81a1…` DrawingLayout / `0644447…` deep-clone
+  spec) + fresh census + PATCH-087 AUTHORIZED (FIX,
+  content-save failure visibility)**. **MODEL A delivered:**
+  Duplicate slide creates fresh frame/child element ids, fresh
+  cloned container + child-card rows, rewired
+  `parentId`/`childPadletIds`, preserved order, equivalent initial
+  content, independent edits, deletion isolation BOTH directions;
+  metadata per bound table (pointers copied, no storage
+  duplication, comments stay with source, fresh timestamps,
+  inserting user owns clones). Strict contract landed: CanvasClient
+  `handleDrawingLayoutUpdatePadletStrict` (normalize →
+  `updatePostFieldsOrThrow`, no catch-and-continue, post-success
+  merge) wired as `onUpdatePadletStrict`; rewire confirmed before
+  `updateScene`; failure → reverse-order narrow compensation + ONE
+  console.error; sources untouched. Flows A–K green (K by
+  inspection); passive wire evidence: 2xx PATCH with cloned
+  container id + fresh child ids before settlement. Gates: focused
+  2/1/2 + JSON 2/0/0 + 3× stable; carried 13 green (sanctioned
+  auth-refresh recovery only); deterministic full 448/43 +
+  verify/build; cleanup 29 prefixes zero. 085 preserved
+  (element-key tracking, debounces, no storm). useCanvasData/
+  posts/postsRepository/deletion paths untouched; ordinary
+  `onUpdatePadlet` callers unchanged. **Census at `7dab208`:** #1
+  SELECTED — drawing content-save silent failure
+  (`saveDrawingSnapshot` uses the void channel; both
+  `"Failed to save drawing to master padlet"` catches are DEAD for
+  persistence failures; `performSave` clears `dirtyDataRef` before
+  saving → failed save silently drops the snapshot, work lost on
+  reload; strict channel already plumbed). #2 remaining non-strict
+  callers — after this; #3 contract-consistency design patch —
+  later; **#5 PATCH-081 RETIRED-BY-NOTE** (derivation timing-stale:
+  its immediate live-scene probe races the now-async duplicate →
+  label can never self-correct; spec stays untouched/green;
+  `drawing-duplicate-deep-clone.spec.ts` is now the authoritative
+  duplicate characterization); #6/#7 frame/sidebar — no
+  characterized defect remains (079 `sidebar-updates-correctly`,
+  080 both-persist), diagnosis-first if a repro appears; #13 auth
+  expiry — dedicated infra patch justified but ranked below this
+  P3, deferred; #14 none. **PATCH-087 — Drawing Content-Save
+  Failure Visibility, ONE file:** `DrawingLayout.tsx` (starting
+  blob `a7b81a1…`; `saveDrawingSnapshot`/`performSave` ONLY: switch
+  content save to `onUpdatePadletStrict`, one log per failed
+  attempt, re-arm `dirtyDataRef` only-if-null, no new
+  timer/trigger; all other callers byte-unchanged; 085/086 regions
+  byte-intact). NO new spec/prefixes: acceptance = 14 carried specs
+  green with saveError watchers silent + 3× duplicate-persistence
+  stability + failure path by inspection. **35 blob-ID fences**
+  (self-verified 35/35 at base; CanvasClient + both 086 specs now
+  fenced). Bound commit: `fix(drawing): surface content-save
+  failures via strict update channel (PATCH-087)`. Independent
+  read-only PASS required before commit. PATCH-087 implementation
+  NOT started.
 - **2026-07-19** — **PATCH-086 Amendment 1 — error-propagation
   scope (Classification B / OPTION A) after a correctly-honored
   stop condition and two Sonnet FAILs.** Blocker: the §3
