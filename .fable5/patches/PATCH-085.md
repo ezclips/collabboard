@@ -1,8 +1,12 @@
 # PATCH-085 — Drawing Duplicate Persistence Fix (Element-Keyed Move Detection)
 
-**Status:** **FIX AUTHORIZED** — first production fix of the
-persistence family. Narrow scope: ONE production file (bounded edit
-sites within it) + ONE new regression spec. NO harness change, NO
+**Status:** **DONE** — landed as commit
+`ef2a8234d686b8cba5c7430132affbbb552f9a63`
+(`fix(drawing): key embeddable move detection by element id (PATCH-085)`),
+Sonnet independent PASS, closure record in §13. First production fix
+of the persistence family. Narrow scope held: ONE production file
+(bounded edit sites within it) + ONE new regression spec + the
+Amendment 1 characterization correction. NO harness change, NO
 fork change, NO deep-clone row semantics, NO frame-geometry change,
 NO presentation-mode change.
 **Implementer:** GPT-5.5. **Reviewer:** Sonnet (independent,
@@ -408,3 +412,91 @@ three-run stability pass of the regression spec), the remaining
 carried gates (drawing-duplication, drawing-line-bridge, plus a full
 carried batch re-confirmation), the deterministic closeout chain,
 cleanup across twenty-five prefixes, then Sonnet review.
+
+## 13. Closure record (CTO, 2026-07-19)
+
+**Landed:** commit `ef2a8234d686b8cba5c7430132affbbb552f9a63`
+(`fix(drawing): key embeddable move detection by element id (PATCH-085)`),
+HEAD == origin/main at closure. Three files, exact blobs:
+`components/collabboard/canvas/layouts/DrawingLayout.tsx`
+`a92bb25cf3608f5a74d3b27fc779c6a1b4b0a300`;
+`e2e/characterization/drawing-duplicate-persistence.spec.ts`
+`b0ab5ea55195e3aab5a43aa8e73e88cd136723f4`;
+`e2e/characterization/drawing-presentation.spec.ts`
+`6bbd6deb83106d38a0a524253ee95ac3f6bdaa2f`. **Sonnet independent
+review: PASS** (full 27-task protocol, all facts re-derived from
+scratch, three independent stability runs, own carried batch + gates).
+
+**Exact production fix:** move-detection identity re-keyed —
+`lastEmbeddablePosRef` reads/writes keyed by Excalidraw ELEMENT id
+(`el.id`) instead of padlet id, at the three bounded sites
+(handleChange detection ~1074-1092 and the sync-effect pre-seed
+~1755-1758). The persistence target remains the padlet id parsed
+from the `padlet://` link (`schedulePadletPositionSave(pId, …)`
+byte-unchanged). Final technical ruling: duplicated embeddables can
+share one padlet link; padlet-keyed tracking conflated distinct
+scene elements; their differing coordinates re-appeared as movement
+on every scan; the repeated position writes drove sync churn; the
+churn perpetually reset the 2000 ms content-save debounce
+(starvation); element-keyed tracking gives each scene element an
+independent movement baseline, so Duplicate-touching scenes now
+reach drawing-content persistence. Debounce timing unchanged; save
+scheduling not broadened; persistence identity unchanged.
+
+**Final behavioral results (regression spec, three-run stable in
+BOTH implementer and Sonnet passes):** Flow A isolated Add persists
+(control, no regression). Flow B rapid Add→Duplicate — both
+persisted, no stale overwrite; Sonnet-measured intervals 1023 / 987
+/ 858 ms (implementer: 1088 / 898 / 983 ms), all ≤5 s bound. Flow C
+Duplicate-only persists, duplicate child rendered, content save
+fired. Flow D settled-Add then Duplicate — Add persisted before
+Duplicate (Sonnet waits 2692 / 3282 / 2745 ms, all ≥2.5 s), final
+persistence contains both. Write-storm result: raw writes A/B/C/D =
+18/18/18/19 every run (threshold ≤60), content writes 10/10/10/11
+every run, ≥1 content-bearing save in every mutating flow, zero
+starvation, zero bound console errors, zero product-action retries.
+
+**Amendment 1 geometry ruling (final):** seeded emb-slide-a/b
+heights 260/260; live natural-height-conformed value 153
+(`max(28+22+content, 80)` via untouched `onNaturalHeight`);
+persisted post-fix value 153 for both, deterministic in every run.
+Only those two heights change; order/ids/types/frameIds/links/
+isDeleted/x/y/width and all other heights byte-stable. 260 persisted
+before this patch ONLY because autosave starvation froze the seeded
+JSON; 153 is product-correct; the production fix did not alter any
+geometry algorithm; the spec was corrected only to remove the stale
+defect-frozen invariant.
+
+**Carried characterization shifts (evidence of the fix, not
+regressions; no diagnosis spec was edited; totals all unchanged):**
+083 → `mixed-supersession-state`; 084 → `mixed-wire-state`; 080 →
+`mixed-slide-persistence-state`; 076 →
+`shared-reference-with-deletion-cascade` with
+`duplicatePersistedToDatabase: true`; 073 →
+`pointer-reachable-all-items`; 082 →
+`unexpected-duplicate-persistence`; 081 label remains
+`sidebar-only-duplicate` (its detector requires fresh independent
+cloned rows) while its raw evidence now shows the duplicated frame
+persisted-and-settled and shared-link count 2 — deep-clone
+independence remains unresolved and out of PATCH-085 scope
+(census #8 → PATCH-086).
+
+**Gates at closure:** regression spec 2 passed dep / 1 passed
+`--no-deps` / 2 skipped credential-off, three stable dependency runs
+(twice over: implementer + Sonnet). Presentation spec 2 passed /
+2 skipped ×2 with 260/153/153 stable. All 12 carried specs green;
+the known auth-token-expiry incident during long batches was
+recovered ONLY via sanctioned `--project=setup` refreshes + per-spec
+reruns (no source edits; artifact remains untracked). Deterministic:
+`git diff --check`, tsc, boundaries, slideOrder 7/1,
+clonedPostMetadata 9/1, focused drawing 59/2, full Vitest 448/43,
+verify, standalone build, production-import grep — all green.
+Cleanup: all 25 bound prefixes zero + legacy `patch-077-persist-`
+zero + umbrella `patch-064-harness-` sweep zero (boards/padlets/
+canvasLines 0/0/0); no artifacts; port 3000 free.
+
+**Exclusions preserved:** no debounce change, no broader save-path
+change, no geometry-algorithm change, no presentation-mode change,
+no deep-clone semantic change, no harness change, no Playwright
+config change, no package/lockfile change, no instrumentation seam,
+no auth material captured.

@@ -1,0 +1,322 @@
+# PATCH-086 — Duplicate Slide Deep-Clone Independence (MODEL A)
+
+**Status:** **FIX AUTHORIZED** — second production fix of the
+duplicate family. Narrow scope: ONE production file (bounded to the
+`handleDuplicateSlide` region + one local clone-orchestration
+helper) + ONE new regression spec. NO harness change, NO fork
+change, NO deletion-path redesign, NO error-path (useCanvasData)
+change, NO frame-geometry change, NO presentation-mode change.
+**Implementer:** GPT-5.5. **Reviewer:** Sonnet (independent,
+read-only, uncommitted diff, explicit PASS required before commit).
+**Closure:** Fable (CTO) after landing.
+
+**Behavioral/source base commit AND implementation start HEAD (bind):**
+`ef2a8234d686b8cba5c7430132affbbb552f9a63`
+(`fix(drawing): key embeddable move detection by element id (PATCH-085)`;
+HEAD == origin/main == base at authoring time)
+
+**Bound implementation commit message (verbatim):**
+`fix(drawing): deep-clone linked rows on duplicate slide (PATCH-086)`
+
+---
+
+## 0. Census at authoring (2026-07-19, from `ef2a823`)
+
+| # | Candidate | Class | Status |
+|---|---|---|---|
+| 1 | **Duplicate deep-clone independence (fresh linked rows, PATCH-076 OPTION A / MODEL A)** | defect FIX | **SELECTED (this patch)** — persistence no longer blocks it (085); owner statically proven (§1) |
+| 2 | Shared linked-padlet row semantics | defect | SUBSUMED by #1 — the shared row IS the defect |
+| 3 | Duplicate deletion cascade (removing duplicate deletes original's row) | defect | SUBSUMED by #1 — fresh rows make the cascade structurally impossible; asserted by Flows G/H |
+| 4 | Fresh cloned padlet-row creation | mechanism | the implementation of #1 (existing `sanitizeClonedPostMetadata` + `onAddPadlet` idiom) |
+| 5 | Original/duplicate deletion isolation | assertion | acceptance criterion of #1 (Flows G/H) |
+| 6 | PATCH-081 stale `sidebar-only-duplicate` classification | observation | resolves BY OBSERVATION after #1 (its fresh-row detector flips true); no spec edit; report the shift at closure |
+| 7 | Silent Supabase resolved-error handling (P3 visibility) | defect | SEPARATE later patch — NOT required here: the drawing row-CREATE path (`addDrawingLayoutPadlet` → `createPost`) already THROWS on failure, a visible channel Flow K binds to. Do NOT bundle (§9) |
+| 8 | Frame-geometry sidebar staleness | defect (uncharacterized) | after the duplicate family |
+| 9 | Frame/sidebar position synchronization | defect (uncharacterized) | after the duplicate family |
+| 10 | Line-follow behavior | hardening | deferred — still no attachment contract |
+| 11 | Uploaded-image storage cleanup | hardening | deferred — clone copies `file_url` POINTER only (no new storage objects), so #1 adds no cleanup burden |
+| 12 | AI images in presentation | feature | deferred (fixture-blocked, approved skip) |
+| 13 | Overlap fallback | hardening | low, deferred |
+| 14 | Connections side-panel planning | feature | deferred until stabilization ruled complete |
+| 15 | Long-batch auth-token expiry (test infra) | environment | DEFERRED as a future infra patch; sanctioned per-spec `--project=setup` recovery documented; NOT a product defect; not bundled |
+| 16 | New defect exposed by 085 | — | NONE observed (all gates green at closure; only the known auth incident) |
+
+## 1. Exact defect (bind — statically proven at 085/086 census)
+
+`handleDuplicateSlide` (`DrawingLayout.tsx` ~1426–1453 at base)
+clones the frame and its children with fresh ELEMENT ids but the
+`...child` spread PRESERVES `link` — the duplicate's embeddables
+reference the SAME `padlet://<id>` container row as the source. No
+row is created. Consequences (076/081/084/085 evidence):
+
+1. duplicate and original render the same backing row — an edit to
+   either's row content is visible in both (P3 surprise mutation);
+2. `handleRemoveSlide` on the duplicate marks its embeddables
+   `isDeleted` → `handleChange`'s deleted-embeddable branch
+   (~1109–1124) fires `onDeletePadlet` on the SHARED id (container
+   rows have no `metadata.parentId`, so the guard does not protect
+   them) → the ORIGINAL's backing row is deleted while the original
+   still links to it (the PATCH-076 deletion cascade, rows 8→7);
+3. PATCH-081's fresh-row detector stays false
+   (`settledSharedLinkCount: 2`) — its `sidebar-only-duplicate`
+   label is stale evidence of this defect.
+
+Persistence itself is healthy since 085 (duplicate frame + link-
+sharing children persist and settle). The ONLY authorized repair is
+giving the duplicate its own rows.
+
+## 2. Bound product semantic — MODEL A (independent deep clone)
+
+Confirmed against repository product intent: PATCH-076 §0.B.2
+already ruled this BINDINGLY (OPTION A — independent deep clone;
+canvas Ctrl+D defines duplicate-as-deep-clone, P6; reference
+counting would be new unowned architecture; P3 forbids
+edit-one-edits-both). MODEL B (shared reference) and MODEL C
+(presentation-only) are REJECTED.
+
+Meaning of "Duplicate slide" (bind):
+
+- fresh frame ELEMENT id (already true);
+- fresh child ELEMENT ids (already true);
+- fresh linked CONTAINER ROW per linked child, cloned from the
+  source row; the duplicate's scene child `link` points at the NEW
+  row id;
+- fresh CHILD-CARD rows for the source container's
+  `metadata.childPadletIds`, cloned with `parentId` rewritten to the
+  new container row; the new container's `childPadletIds` lists the
+  fresh child ids IN SOURCE ORDER (one level deep — a child that is
+  itself a container gets the shell-clone Ctrl+D semantic);
+- independent future edits (Flows E/F);
+- deleting the duplicate touches ONLY its cloned rows (Flow G);
+  deleting the original leaves the duplicate intact (Flow H).
+
+Bound data treatment for cloned rows (Ctrl+D precedent, P6 — the
+`sanitizeClonedPostMetadata` idiom is the single sanctioned
+sanitizer; do NOT write a second one):
+
+| Data | Treatment |
+|---|---|
+| `content`, `title`, `type`, `color`, `width`/`height` | copied |
+| metadata (display) | copied via `sanitizeClonedPostMetadata`, then `parentId`/`childPadletIds` explicitly REWIRED to the fresh ids |
+| embedded metadata comments/votes/assignees | follow the metadata copy exactly as Ctrl+D does (copied); DETACHED comment stores keyed by padlet id remain with the SOURCE (not migrated) |
+| uploads (`file_url`/`file_name`/`file_type`/`file_size`) | pointer copied; NO storage object duplication |
+| timestamps | new (server defaults) |
+| ownership/author | the inserting user (server default) |
+| card order | source `childPadletIds` order preserved |
+| position (`position_x/y`) | source values offset consistently with the scene `dx` where applicable; child rows keep source-relative placement |
+| nested relations beyond one level | NOT cloned (shell semantic), bind and report |
+
+## 3. Authorized fix (bind — smallest safe scope)
+
+In `components/collabboard/canvas/layouts/DrawingLayout.tsx` ONLY
+(starting blob `a92bb25cf3608f5a74d3b27fc779c6a1b4b0a300`):
+
+- extend `handleDuplicateSlide` (and at most ONE new local async
+  helper in the same file) to: (1) for each child with a
+  `padlet://` link, CREATE the cloned container row and its cloned
+  child-card rows via the EXISTING `onAddPadlet` prop +
+  `sanitizeClonedPostMetadata` import (row creation BEFORE any
+  scene mutation); (2) only after ALL rows are created, call
+  `updateScene` with the duplicate elements whose `link` values
+  point at the fresh row ids;
+- transactional bind (Supabase has no client transaction): on ANY
+  row-creation failure — the create path throws — do NOT modify the
+  scene at all, best-effort delete any already-created clone rows
+  via the existing `onDeletePadlet` prop, and surface ONE
+  `console.error` in the existing DrawingLayout error style. The
+  scene must never be half-mutated (Flow K, verified by inspection);
+- the 085 landed hunks (element-keyed `lastEmbeddablePosRef`) must
+  remain byte-intact.
+
+PROHIBITED: touching `handleRemoveSlide`/the deleted-embeddable
+branch or any deletion logic (isolation must come from fresh rows
+alone); touching move detection, debounces, save scheduling, locks,
+or the sync effect; modifying `useCanvasData`/`useCanvasActions`/
+`clonedPostMetadata` (all fenced); any new save trigger or seam;
+`page.route`-style test seams; harness edits; edits outside the
+bounded region. If fresh-row cloning proves insufficient without
+deletion-path changes, STOP and report (§9) — do NOT widen.
+
+## 4. Regression matrix (bind) and the new spec
+
+ONE new spec `e2e/characterization/drawing-duplicate-deep-clone.spec.ts`
+(ONE active test, FOUR sequential disposable boards, existing
+harness only, `registerDrawingCleanup(test)` at module scope,
+per-board try/finally + zero-assertion, `test.setTimeout(420_000)`;
+bound prefixes `patch-064-harness-patch-086-clone-a-` / `-b-` /
+`-c-` / `-d-`):
+
+- **Board A (Flows A–D)** — real Duplicate; ASSERT fresh frame id,
+  fresh child element ids, fresh linked row id (persisted link ≠
+  source row id; shared-link count for the source row returns to 1
+  in the settled scene), cloned container row + cloned child rows
+  exist with rewired `parentId`/`childPadletIds`, and source and
+  duplicate initially render equivalent content (child card text
+  visible in both).
+- **Board B (Flows E–F)** — edit the duplicate's row content via the
+  real UI; ASSERT source row/render unchanged; edit the source;
+  ASSERT duplicate unchanged.
+- **Board C (Flows G–H)** — real Remove slide on the duplicate;
+  ASSERT the SOURCE row survives (exact-id poll, ≥2 s stable
+  presence) and source still renders after reload; separately
+  duplicate again, remove the ORIGINAL; ASSERT the duplicate's
+  cloned rows survive and render after reload.
+- **Board D (Flow I)** — rapid Add→Duplicate (≤5 s); ASSERT both
+  persist settled (085 semantics carried) AND the duplicate's links
+  are fresh.
+- **Flow J** — per-board cleanup zero-assertions prove no orphan
+  cloned rows escape the fixture (`assertDrawingFixtureCleanup`
+  0/0/0 per board, cleanup owned by the local finally blocks).
+- **Flow K (inspection, no browser flow)** — clone failure
+  visibility: Sonnet verifies from the diff that rows are created
+  before any scene mutation, that the failure path deletes created
+  clones best-effort, surfaces a `console.error`, and never
+  half-mutates the scene. No failure injection (no `page.route`).
+
+Passive write counts per board (084/085 method): raw
+`/rest/v1/padlets` writes must stay ≤60 (STOP threshold); expected
+elevation over 085 levels is the +N row-create POSTs (bounded by
+1 container + its child count per duplicate).
+
+Settlement method: persisted polls ≤1000 ms cadence, window
+≥20 000 ms, settled = final ≥6000 ms stable (085 method).
+
+**Expected carried shifts (bound, non-blocking, totals unchanged):**
+081 clone-shape — fresh-row detector flips TRUE
+(`duplicateChildIdsAreFresh: true`, shared-link count 1); its
+derived label leaves `sidebar-only-duplicate`. 076 slide-duplication
+— deletion-cascade observation disappears (exact-row poll survives);
+classification shifts again. 085 regression spec — write counts rise
+by the row-create POSTs but stay ≪60; all assertions must remain
+green. Report every shift at review and closure.
+
+## 5. Allowed files (bind)
+
+| File | Role | Starting blob at base `ef2a823` |
+|---|---|---|
+| `components/collabboard/canvas/layouts/DrawingLayout.tsx` | production fix (§3 bounded region ONLY) | `a92bb25cf3608f5a74d3b27fc779c6a1b4b0a300` |
+| `e2e/characterization/drawing-duplicate-deep-clone.spec.ts` | NEW regression spec | absent at base (absence gate) |
+
+No third file. No unit-test file: the orchestration is
+component-internal with no exported seam (085 precedent); the
+sanitizer's own tests are fenced and already green.
+
+Absence gates: the new spec path absent at base and worktree before
+implementation;
+`e2e/characterization/drawing-slide-persistence.spec.ts` AND
+`.fable5/patches/PATCH-077-draft.md` permanently absent at base,
+HEAD, and worktree; PATCH-087 not started.
+
+## 6. Immutable fences (bind — 33, Git blob IDs)
+
+Verify each with `git rev-parse ef2a823…:<path>` and equality at the
+current governance HEAD. Blob-ID method only (never raw file SHA-1 /
+`Get-FileHash`). The 085 fence set, PLUS both 085 landed specs, PLUS
+`clonedPostMetadata.test.ts` (the clone idiom's tests now guard this
+patch's central dependency). `DrawingLayout.tsx` is NOT fenced (it
+is the allowed production file).
+
+```text
+playwright.config.ts                                           5864c98436dde10809de67cb40c564c05e98ff6d
+e2e/helpers/env.ts                                             9514723cde157f7ae6e6815d4c142a0f430a1292
+components/presentation/PresentationPanel.tsx                  02699748271241cacaca27fa93a8a78e7d8b2e0d
+components/presentation/SlideThumbnail.tsx                     b26524ae5c02ac7d73622a02f05ecfb5145a20a8
+components/presentation/FullscreenPresentation.tsx             655244b443c3869173996cb21a77f7d67c41c64b
+components/presentation/slide-renderer/resolveSlidePadlets.ts  5dc7aa9868cf7b0514d66e2dfc11551b2d9085aa
+components/presentation/slide-renderer/planSlideComposition.ts 2d3b0dc3c46cdc03fde5aa0b8a949cd94e5d0d89
+components/collabboard/menus/LineContextMenu.tsx               aaf16af230a76139377c4250f93485824000593e
+lib/infra/presentation/slideOrder.ts                           e72c3de0b2ee0d2f35a4fb66af8951f35ab38058
+lib/infra/presentation/slideOrder.test.ts                      2f1d79c5d2b5ff9c5c1e08b23da5f27008f25db8
+lib/infra/drawing/lineBridge.ts                                f0f6a0d177c53bb0cab89b9fa1d7b5e3910a3c2d
+lib/infra/drawing/presentationBridge.ts                        b9d976bda880e2fe1a28a4099fdc3eebe6f79b38
+lib/infra/drawing/bridge.ts                                    ed26c312610a386711f658662e82d29dd48c5890
+lib/infra/collabboard/clonedPostMetadata.ts                    7d6b6ee6e127a0db8161c09afdf31a54f44ac575
+lib/infra/collabboard/clonedPostMetadata.test.ts               5b53e839d66e399c1357a7656109496c65a2e5d1
+components/collabboard/canvas/hooks/useCanvasActions.ts        b470cc3fca2a1c10ac2b035c3d9c2ec1a9d7512e
+components/collabboard/canvas/hooks/useCanvasData.ts           2e158f1278a395b5028083e8f387a22e4daf5b60
+lib/domain/canvas/posts.ts                                     5af51ef0cec14c014072529eda673e81a87c4b8b
+lib/infra/canvas/postsRepository.ts                            3a74731730ef047f023465dd65d86700fe878e74
+e2e/characterization/drawingBridgeHarness.ts                   7a94d7220df3d47f2fe6feefd2c8e31670af9f00
+e2e/characterization/drawing-presentation.spec.ts              6bbd6deb83106d38a0a524253ee95ac3f6bdaa2f
+e2e/characterization/drawing-line-bridge.spec.ts               7507b06af492bce7fca25a7a4daeee4400d428f3
+e2e/characterization/drawing-duplication.spec.ts               87f88df19246eca5430db71987d573a1c7a5fa0b
+e2e/characterization/drawing-harness-cleanup.spec.ts           5345c42d79e3c40286ba9902085977983a012e64
+e2e/characterization/presentation-menu-pointer.spec.ts         50d68dff08730a231470ac48306702b02c3ca45b
+e2e/characterization/drawing-slide-duplication.spec.ts         fc20ef8160417b6eeb59f4662ab89ceb1af5a167
+e2e/characterization/drawing-slide-rename-state.spec.ts        513d07bfe99898455d13d7048a53da90c3b5d401
+e2e/characterization/drawing-slide-add-dup-persistence.spec.ts 9a6c7b42a6b476fe74d74483a7fa057a4cf61e7e
+e2e/characterization/drawing-duplicate-clone-shape.spec.ts     147ae0aeae503a36fd5e8e42d6cd3045b34b38c3
+e2e/characterization/drawing-duplicate-divergence.spec.ts      5d3cccb693f57022c9e9aa44522bee6f59552332
+e2e/characterization/drawing-save-supersession.spec.ts         c6cc4feaa6f2320932232a993b70cda73c9e584c
+e2e/characterization/drawing-save-wire.spec.ts                 280d37545e9d638c5eb8d883ffa99beefa5da308
+e2e/characterization/drawing-duplicate-persistence.spec.ts     b0ab5ea55195e3aab5a43aa8e73e88cd136723f4
+```
+
+## 7. Expected totals (bind)
+
+New spec: **2 passed with dependencies / 1 passed `--no-deps` /
+2 skipped credential-off**, THREE sequential stable dependency runs
+(any failed assertion is a STOP, not a flake to retry silently).
+Carried: all 13 browser specs' pass/fail totals UNCHANGED (the 12
+carried + the 085 regression spec; §4 classification/evidence
+shifts are EXPECTED and must be reported); helper 7/1; sanitizer
+9/1; focused drawing 59/2; full Vitest **448/43**; `git diff
+--check`/tsc/boundaries/sequential verify+build green; zero
+production imports of bridge/harness modules; 33/33 fences;
+DrawingLayout.tsx diff strictly within the §3 bounded region
+(Sonnet verifies hunk-by-hunk, including that the 085 hunks remain
+byte-intact).
+Cleanup zeros across **TWENTY-NINE** prefixes: the twenty-five
+tracked prefixes plus this patch's four §4 prefixes.
+
+## 8. Environment contract (binding, unchanged)
+
+Self-started `npm run dev -- --port 3000` + explicit `PW_BASE_URL`;
+port discipline; auth refresh only via `--project=setup` (long-batch
+token expiry is a KNOWN environmental incident — recover ONLY by
+sanctioned refresh + per-spec reruns, report separately from
+product results); no credential contents; passive network listeners
+only (no `page.route`, no auth headers); sequential `verify`/
+`build`, never under a dev server; never commit generated artifacts.
+
+## 9. Stop conditions
+
+STOP immediately, report, do not commit, if:
+
+- base commit, any §6 fence (33/33), or any §5 absence gate differs;
+- the fix requires ANY edit outside the §3 bounded region, a third
+  file, a harness change, a fork change, or ANY deletion-path edit;
+- Flow G or H fails after the bounded fix (deletion isolation does
+  not follow from fresh rows alone) — report the evidence, do NOT
+  patch the deletion branch;
+- any flow's raw write count exceeds 60;
+- the 085 regression spec regresses in ANY assertion;
+- any carried spec's pass/fail totals change;
+- the clone orchestration requires touching useCanvasData error
+  handling (census #7 stays separate) or a new seam;
+- the scene can be half-mutated on a row-creation failure;
+- comments/votes/uploads demand storage duplication or a metadata
+  treatment outside the §2 table — that is a product decision, not
+  an implementation call.
+
+## 10. Review and commit flow (bind)
+
+Implementer delivers the uncommitted two-file diff + full report
+(both blob IDs re-derived; three-run stability; carried totals;
+deterministic totals; fence result; cleanup proof). Sonnet performs
+the independent read-only review (re-derives everything, runs its
+own three stability passes, audits Flow K by inspection, verifies
+the 085 hunks byte-intact) and must return an explicit PASS before
+the implementer commits with the bound message and pushes. CTO
+closes with a fresh census afterward.
+
+## 11. Required final report
+
+Exact two changed paths + final blobs; full production diff; §2
+semantic-table conformance; per-flow evidence (fresh ids, isolation
+polls, equivalence checks, write counts); three-run stability;
+carried totals + classification shifts (081/076/085 expected);
+deterministic totals; 33-fence result + absence gates; cleanup
+across twenty-nine prefixes; explicit confirmations (no deletion-
+path edit, no debounce/move-detection edit, 085 hunks intact, no
+seam, no auth capture); commit hash + push status after PASS.

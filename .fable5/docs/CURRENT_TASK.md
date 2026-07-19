@@ -361,6 +361,62 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-19** — **PATCH-085 DONE (commit
+  `ef2a8234d686b8cba5c7430132affbbb552f9a63`, Sonnet independent
+  PASS, three blobs `a92bb25…` production / `b0ab5ea…` regression
+  spec / `6bbd6de…` amended presentation spec) + fresh census +
+  PATCH-086 AUTHORIZED (FIX, deep clone)**. **Final fix ruling:**
+  move detection re-keyed padlet-id → ELEMENT id at the three
+  bounded sites; persistence target unchanged (padlet id from
+  `padlet://` link); shared-link false-drag oscillator eliminated →
+  2000 ms content-save debounce no longer starved → Duplicate flows
+  persist. Flows A–D all green ×3 in BOTH implementer and Sonnet
+  passes (Sonnet intervals 1023/987/858 ms; D waits 2692/3282/2745
+  ms; raw writes 18/18/18/19 vs ≤60; content 10/10/10/11; zero
+  errors). Amendment 1 geometry final: seeded 260 → live/persisted
+  conformed 153 for the two slide embeddables only; 260 was
+  defect-frozen persistence. Carried shifts recorded (083
+  `mixed-supersession-state`, 084 `mixed-wire-state`, 080
+  `mixed-slide-persistence-state`, 076
+  `shared-reference-with-deletion-cascade` + persisted:true, 073
+  `pointer-reachable-all-items`, 082
+  `unexpected-duplicate-persistence`; 081 label stale by design —
+  fresh-row detector). All gates green (12 carried specs; 7/1, 9/1,
+  59/2, 448/43; verify+build; 25-prefix + umbrella cleanup zero;
+  auth-expiry incidents recovered ONLY via sanctioned setup
+  refreshes — recorded as deferred test-infra census #15).
+  **Fresh census at `ef2a823`:** #1 duplicate deep-clone
+  independence — SELECTED (subsumes shared-row semantics, deletion
+  cascade, fresh-row creation, deletion isolation; 081 stale label
+  resolves by observation); #7 silent resolved-error handling —
+  separate later patch (clone path throws, so NOT needed for 086);
+  #8/#9 frame-geometry/sidebar sync — after duplicate family;
+  #10–14 deferred; #15 long-batch auth expiry — deferred infra
+  patch; #16 no new defect from 085. **Product semantic BOUND:
+  MODEL A — independent deep clone** (re-affirms PATCH-076 §0.B.2;
+  Ctrl+D precedent P6; P3 forbids edit-one-edits-both and the
+  proven remove-duplicate-deletes-original cascade). **PATCH-086 —
+  Duplicate Slide Deep-Clone Independence, TWO files:** production
+  `DrawingLayout.tsx` (starting blob `a92bb25…`; `handleDuplicateSlide`
+  region + ONE local helper ONLY: clone container row + child rows
+  via existing `onAddPadlet` + `sanitizeClonedPostMetadata`,
+  rewire `parentId`/`childPadletIds`/links, rows BEFORE scene,
+  abort + best-effort compensating deletes + one console.error on
+  failure; NO deletion-path edit — isolation must follow from fresh
+  rows or STOP) + NEW spec
+  `e2e/characterization/drawing-duplicate-deep-clone.spec.ts`
+  (ONE test, FOUR boards, prefixes
+  `patch-064-harness-patch-086-clone-a-/-b-/-c-/-d-`; Flows A–D
+  fresh ids + equivalence, E/F edit isolation, G/H deletion
+  isolation with reloads, I rapid Add→Dup carryover, J cleanup
+  zeros, K failure-path by inspection). **33 blob-ID fences** at
+  base `ef2a823` (085 set + both landed specs +
+  `clonedPostMetadata.test.ts`). Expected: new spec 2/1/2 ×3
+  stable; carried 13 specs' totals unchanged (081/076/085 evidence
+  shifts expected); full 448/43; cleanup zero across TWENTY-NINE
+  prefixes. Bound commit: `fix(drawing): deep-clone linked rows on
+  duplicate slide (PATCH-086)`. Sonnet PASS required before commit.
+  PATCH-086 implementation NOT started.
 - **2026-07-19** — **PATCH-085 Amendment 1 — presentation
   characterization correction (OPTION B) after a correctly-honored
   stop condition.** Implementer stopped on the bound carried-totals
