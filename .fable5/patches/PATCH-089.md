@@ -1,7 +1,9 @@
 # PATCH-089 — Container-Drop Relationship Persistence Diagnosis
 
-**Status:** **DIAGNOSIS AUTHORIZED** (diagnosis-only — NO
-production fix in this patch). ONE new characterization spec. NO
+**Status:** **DONE** (2026-07-19, commit
+`92d742f27c550cf3d62b6ad8a1563b0ad09de5a2`, independent read-only
+review **PASS**; closure record §12). Diagnosis-only — NO
+production fix in this patch. ONE new characterization spec. NO
 production change, NO harness change, NO config change, NO
 failure injection, NO instrumentation seam.
 **Implementer:** GPT-5.5. **Reviewer:** independent read-only
@@ -283,3 +285,121 @@ totals; deterministic totals; 37-fence result + absence gates;
 cleanup across thirty-two prefixes; explicit confirmations (no
 production/harness/config change, no injection, no seam, no auth
 capture); commit hash + push status after PASS.
+
+---
+
+## 12. Closure record (CTO, 2026-07-19)
+
+**Landed:** commit `92d742f27c550cf3d62b6ad8a1563b0ad09de5a2`
+(`test(e2e): characterize container-drop relationship persistence
+(PATCH-089)`), exactly one new file
+`e2e/characterization/drawing-container-drop.spec.ts`, blob
+`32750636c1146f5bf8da3e7f9987838b26c5169b` (683 lines).
+Independent read-only review: **PASS** (all 23 tasks re-derived
+live: repository state, 37/37 fences at base AND governance HEAD,
+absence gates, full-file architecture audit, live spec executions
+with annotation capture ×2 byte-identical, three sequential
+dependency-backed runs, carried runner, deterministic gates,
+scope/cleanup/artifact audits).
+
+### Diagnosis result (bound)
+
+**Selected real action:**
+`toolbar-note-editor-save-placement-prompt-add-to-existing-ghost-drag`
+— visible Note toolbar button → NoteEditor → overlay save →
+PlacementPrompt → "Add to Existing" → native HTML5 drag of the
+rendered ghost onto the visible container card. Genuinely driven
+(Playwright `dragTo` of visible elements); no callback invocation,
+no custom event dispatch, no hidden-handler access, no direct
+state mutation, no `page.evaluate` internals call.
+
+- **Flow A (drop):** DRIVABLE. Child created; settled persistence
+  showed `parent.childPadletIds` contains child AND
+  `child.parentId` == parent; reload preserved BOTH directions;
+  child rendered in destination; no orphan; duplicate-parent
+  count 1. Per-flow classification `drop-persists-consistently`.
+- **Flow B (cross-container move):** **action-not-drivable** —
+  honestly recorded. The existing child rendered inside
+  `RowColumnContainerCard` exposes NO draggable ancestor carrying
+  `text/padlet-id` (read-only DOM probe evidence recorded). No
+  hidden handler, no synthetic event, no persistence bypass was
+  used. NO runtime duplicate-parent claim was made.
+- **Flow C (repeat):** DRIVABLE. Repeated real action persisted
+  consistently; reload preserved consistency; no product-action
+  retry; duplicate-parent count 1.
+
+**Passive wire order for driven drops (both A and C, stable):**
+1. child create `POST /rest/v1/padlets` → **201** (payload carries
+   `parentId`; ~0.4s);
+2. parent `childPadletIds` `PATCH` → **204** (~0.5s);
+3. child `parentId` `PATCH` → **204** (~2.7s, the content-save
+   debounce window).
+
+**No old-parent removal write was observed in any flow.** All-2xx
+sequences do NOT imply atomicity — the three writes are separate
+requests with independent failure points. Runtime evidence and
+source-inspection evidence were kept strictly separate in the
+recorded annotations (`sourceInspectionFindings` labeled
+`statically-derived-from-DrawingLayout` vs
+`runtimeObservedFindings`).
+
+### Source-derived findings (re-confirmed at closure)
+
+- **Library-drop (header-strip fallback, ~292–311):** child
+  creation precedes parent append; the entire sequence sits in
+  `catch { /* silent */ }`; a parent-append failure leaves an
+  orphan (created row, no parent reference).
+- **Existing-card drop (~482–499):** new-parent append and child
+  `parentId` update are TWO sequential writes, both on the
+  NON-STRICT void channel; no old-parent removal path exists
+  anywhere; failure visibility is absent. Cross-container
+  duplication remains structurally possible but was NOT
+  runtime-proven because the move action is not drivable.
+- **Draft-drop (~501–526):** child creation precedes parent
+  append; same orphan hazard (no site catch; the void channel
+  swallows regardless).
+
+### Final classification (bound): `mixed-drop-state`
+
+Meaning, precisely: Flows A and C persisted consistently; Flow B
+was `action-not-drivable`; NO runtime duplicate-parent claim was
+made. The diagnosis established (1) partial UI drivability of the
+container-drop surface and (2) the exact persistence ordering a
+PATCH-090 fix must protect.
+
+**Non-blocking reviewer observation (recorded, not actioned):**
+when the visible ghost is consumed but no child row is
+subsequently found, the spec falls back to `action-not-drivable`
+rather than a distinct "drivable-but-unpersisted" value. That
+branch did NOT occur in any accepted run and did not affect
+acceptance. It must NOT be silently converted into production
+evidence; tighten only in a future spec revision if the branch
+ever fires.
+
+### Final verification (accepted totals)
+
+- Focused: dependency mode **2 passed**; `--no-deps` **1 passed**;
+  credential-off **2 skipped**; THREE sequential dependency-backed
+  runs all passed with byte-identical classification/drivability
+  data across independent annotation captures; JSON reporter pass
+  succeeded and output was removed.
+- Carried: PATCH-088 grouped runner — **14/14 groups passed,
+  14/14 specs accounted for, 0 auth-expiry incidents,
+  0 non-signature failures**, exit 0.
+- Deterministic: `git diff --check` clean; tsc clean; boundaries
+  clean; slideOrder **7/1**; clonedPostMetadata **9/1**; focused
+  drawing **59/2**; full Vitest **448/43**; `npm run verify`
+  green; `npm run build` green (sequential, no dev server).
+- Cleanup: all three PATCH-089 prefixes reached boards 0 /
+  padlets 0 / canvasLines 0 in every run; no orphan child rows;
+  `test-results/.last-run.json` confirmed ignored/generated and
+  removed before commit; no artifacts remain; ports 3000/4000
+  free.
+
+### Exclusions preserved
+
+No production change; no harness change; no Playwright config
+change; no existing-spec change; no package/lockfile change; no
+new dependency; no hidden-handler call; no synthetic drag/drop
+bypass; no request/response modification; no failure injection;
+no auth material captured. Prohibited paths remained absent.

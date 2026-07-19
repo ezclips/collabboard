@@ -361,6 +361,56 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-19** — **PATCH-089 DONE (commit
+  `92d742f27c550cf3d62b6ad8a1563b0ad09de5a2`, independent read-only
+  review PASS, spec blob `3275063…`, 683 lines) + fresh census +
+  PATCH-090 AUTHORIZED (FIX, atomic container child
+  create-and-append)**. **089 final:** container-drop diagnosis
+  landed. Selected real action
+  `toolbar-note-editor-save-placement-prompt-add-to-existing-ghost-drag`
+  (Note toolbar → NoteEditor → PlacementPrompt → "Add to
+  Existing" → native drag of the visible ghost). Flow A drivable +
+  consistent (both directions persisted, reload preserved,
+  duplicate-parent count 1); Flow B **action-not-drivable**
+  (rendered child exposes no `text/padlet-id` drag source; no
+  synthetic bypass used; NO runtime duplicate-parent claim); Flow C
+  drivable + consistent, no retry. Wire order (stable): child POST
+  201 → parent childPadletIds PATCH 204 → child parentId PATCH 204
+  (~2.7s debounce); NO old-parent removal write observed; 2xx ≠
+  atomicity. Source findings kept separate from runtime: library
+  site creates-then-appends inside a silent catch (orphan hazard);
+  existing-card drop = two sequential non-strict writes, no
+  old-parent removal path; draft site same orphan hazard. Final
+  classification **mixed-drop-state** (= partial UI drivability;
+  A/C consistent, B not drivable). Non-blocking reviewer
+  observation recorded (ghost-consumed-but-no-row fallback branch;
+  never fired; not production evidence). Gates: focused 2/1/2 + 3
+  stable runs; runner 14/14, 0 incidents; deterministic 7/1, 9/1,
+  59/2, 448/43, verify+build green; cleanup 0/0/0 ×3 prefixes; no
+  artifacts. **Closure inspection:** NO live component sets
+  `text/padlet-id` (setters only in `.bak` files) → cross-container
+  move ruled **intended but currently inaccessible** — a separate
+  UI-drivability defect; affordance-restore patch must precede any
+  move-correctness fix. **090 authorized (FIX):** shared
+  library/draft create-and-append atomicity in DrawingLayout.tsx
+  ONLY (blob `a2fb3ae…`): extend `DrawingEmbeddableCardProps` with
+  the already-mounted `onUpdatePadletStrict`/`onDeletePadlet`, ONE
+  shared helper `linkCreatedChildToContainer` — strict append, on
+  throw best-effort compensation delete of ONLY the newly created
+  row, exactly one visible error, no retry/timer; library-site
+  silent catch replaced; move handler BYTE-KEPT (any move edit =
+  STOP). MODEL A persistence-first (086 precedent); create channel
+  unchanged (already safe: null-return + rollback + single log).
+  New spec `drawing-container-link.spec.ts` (prefixes
+  `patch-064-harness-patch-090-link-a-/-b-/-c-`), Flows A–F,
+  failure path by source inspection (NO injection seam). Totals
+  bound: new spec 2/1/2 ×3; runner 14 UNCHANGED + separate 089-spec
+  invocation 2 passed (runner list NOT modified this patch);
+  448/43; 38/38 fences (089 set − DrawingLayout→allowed + 089 spec
+  + RowColumnContainerCard `e58167d…`); cleanup zeros across
+  THIRTY-FIVE prefixes. Commit message bound:
+  `fix(drawing): atomic container child create-and-append with compensation (PATCH-090)`.
+
 - **2026-07-19** — **PATCH-088 DONE (commit
   `22d3f1fc18cfbed3ffad372ed67aa71de8d0cfab`, independent read-only
   review PASS, runner blob `6a04d94…`, 345 lines) + fresh census +
