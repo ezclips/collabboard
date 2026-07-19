@@ -1,9 +1,11 @@
 # PATCH-090 — Atomic Container Child Create-and-Append (Library + Draft Drops)
 
-**Status:** **FIX AUTHORIZED** (production fix — the shared
+**Status:** **DONE** (2026-07-20, commit
+`637ab5dc82b2c4965520eca7b4c3ab3d4cbbfd44`, independent read-only
+review **PASS**; closure record §12). Production fix — the shared
 library/draft create-and-append operation ONLY; existing-card
-MOVE semantics are OUT OF SCOPE, see §3). ONE production file +
-ONE new regression spec.
+MOVE semantics were OUT OF SCOPE (§3) and remained untouched. ONE
+production file + ONE new regression spec.
 **Implementer:** GPT-5.5. **Reviewer:** independent read-only
 reviewer (explicit PASS required before commit).
 **Closure:** Fable (CTO) after landing.
@@ -344,3 +346,125 @@ across thirty-five prefixes; explicit confirmations (no move-path
 edit, no CanvasClient/hook/config/harness change, no injection, no
 retry/timer, single visible error path, compensation bounded to
 created rows); commit hash + push status after PASS.
+
+---
+
+## 12. Closure record (CTO, 2026-07-20)
+
+**Landed:** commit `637ab5dc82b2c4965520eca7b4c3ab3d4cbbfd44`
+(`fix(drawing): atomic container child create-and-append with
+compensation (PATCH-090)`), exactly two files:
+`components/collabboard/canvas/layouts/DrawingLayout.tsx` →
+`965fcd721390484aa674bbec9994bb48c45b84ff` (+64/−38, 12 hunks, all
+within the authorized regions) and NEW
+`e2e/characterization/drawing-container-link.spec.ts` →
+`07ec5ad379e53b11764c0ac7fd48a26ae4e365a3` (524 lines).
+Independent read-only review: **PASS** (all 30 tasks re-derived
+live: 38/38 fences at base AND governance HEAD, full hunk audit,
+live flow runs with annotation capture, three stability runs,
+carried gates, deterministic gates, scope/cleanup/artifact audits).
+
+### Product defect (recorded)
+
+Library-drop and draft-drop created the child row FIRST, then
+appended to the parent's `childPadletIds` via the NON-STRICT void
+update channel: an append failure could be invisible (hook-level
+silent rollback), leaving a successfully created child ORPHANED
+(row persisted with `parentId`, no parent lists it). The library
+header-strip site additionally wrapped the whole sequence in
+`catch { /* silent */ }`. Locally-successful-looking behavior did
+NOT guarantee confirmed parent linkage.
+
+### Fix (recorded)
+
+Both authorized sites now use ONE shared helper
+`createAndLinkChildToContainer`: child creation stays on the
+existing creation channel (already null-safe with rollback + one
+log); the parent `childPadletIds` append uses
+`onUpdatePadletStrict` (throwing); existing child order preserved;
+the fresh child id appended EXACTLY once (explicit duplicate
+guard); strict parent persistence confirms BEFORE successful local
+settlement (the strict handler's post-success merge is the only
+local mutation point). No Result contract introduced; the
+thrown-error convention remains consistent.
+
+### Failure behavior (recorded)
+
+Create failure stops before any append (no server row → no orphan
+possible). Strict append failure enters the helper catch: ONLY the
+newly created child is compensated, via best-effort deletion
+(`Promise.allSettled([onDeletePadlet(created.id)])` — cannot
+rethrow); the parent is not deleted; pre-existing children are not
+deleted; no source row is modified by compensation; exactly ONE
+visible error is emitted — `Failed to link child to container` —
+and callers do not log again; no retry, no timer, no forced retry;
+NO silent catch remains at the link operation.
+
+**Library-site parse behavior (separate):** payload parsing has
+its own narrow error path — `Failed to parse drawing library drop
+payload` — distinct from link failure; no duplicate or misleading
+logging.
+
+### Preserved behavior (recorded)
+
+Draft ghost-drag visible flow intact; existing-card move handler
+BYTE-IDENTICAL (no old-parent removal added, no move semantics
+added, no draggable move affordance restored); CanvasClient,
+hooks, repositories, harness, config, package/lockfiles all
+untouched. Prior patches intact: 085 element-keyed movement
+tracking + padlet-id persistence target; 086 deep-clone helper +
+strict cloned-parent rewire + clone compensation; 087 strict
+drawing-content save + failed-snapshot re-arm; 089 diagnosis spec
+untouched — re-run post-fix: finalClassification remains
+`mixed-drop-state`, Flow B remains `action-not-drivable`, no
+runtime move-correctness claim introduced.
+
+### Regression results (accepted)
+
+- **Flow A:** one real visible ghost drop — fresh child id, parent
+  references the child exactly once, `child.parentId` == parent,
+  reload preserves the relationship, no orphan, no duplicate,
+  zero errors.
+- **Flow B:** two sequential real drops into the SAME container —
+  two fresh ids, each referenced exactly once, append order
+  preserved, both `parentId`s match, reload preserves both, zero
+  errors.
+- **Flow C:** bounded repeated real drops — every child fresh,
+  linked exactly once, matching `parentId`, reload consistent,
+  append order preserved, no write storm, zero errors, no
+  product-action retry.
+- **Flow D (wire):** child `POST`→201, then parent
+  `childPadletIds` `PATCH`→204, then the later child-content
+  `PATCH`→204 where existing behavior emits it. The later content
+  PATCH is NOT the parent-link confirmation point; local
+  settlement is accepted only after the strict parent-append
+  confirmation.
+- **Flow E (source):** create precedes strict append; strict
+  failure reaches compensation; compensation targets only the
+  created child; one visible error; no caller duplicate logging;
+  no retry/timer; move handler not involved.
+- **Flow F:** cleanup zero after every board.
+
+### Final verification (accepted totals)
+
+Focused 090: dependency **2 passed** / `--no-deps` **1 passed** /
+credential-off **2 skipped**; JSON reporter 2 passed (output
+removed); three stable dependency-backed runs. Carried 089:
+**2 passed**, classification preserved. PATCH-088 runner:
+**14/14 groups, 14/14 specs, all passed, 0 auth-expiry incidents,
+0 non-signature failures.** Deterministic: diff-check, tsc,
+boundaries, slideOrder **7/1**, clonedPostMetadata **9/1**,
+focused drawing **59/2**, full Vitest **448/43**, verify, build —
+all green. Cleanup: all 35 tracked prefixes zero (boards 0 /
+padlets 0 / canvas lines 0 / orphan child rows 0); no source rows
+lost; `test-results/.last-run.json` confirmed ignored/generated
+and removed before commit; no artifacts; ports 3000/4000 free; no
+repo-owned runtime process.
+
+### Exclusions preserved
+
+No existing-card move change; no old-parent removal; no geometry,
+position-save, comment, drawing-content-save, deep-clone,
+deletion-path, or presentation change; no auth-material capture;
+no instrumentation seam; no failure injection. Prohibited paths
+remained absent.

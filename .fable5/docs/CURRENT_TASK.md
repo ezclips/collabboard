@@ -361,6 +361,58 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-20** — **PATCH-090 DONE (commit
+  `637ab5dc82b2c4965520eca7b4c3ab3d4cbbfd44`, independent read-only
+  review PASS, DrawingLayout `965fcd7…`, new spec `07ec5ad…`) +
+  fresh census + PATCH-091 AUTHORIZED (DIAGNOSIS, drawing-layout
+  comment persistence)**. **090 final:** library/draft
+  create-and-append is now atomic-or-compensated via ONE shared
+  helper `createAndLinkChildToContainer` — create on the existing
+  channel, parent `childPadletIds` append via
+  `onUpdatePadletStrict` (order preserved, exactly-once guard),
+  strict confirmation before local settlement; on append failure
+  best-effort compensation deletes ONLY the created child
+  (`allSettled`), exactly one visible error `Failed to link child
+  to container`, no retry/timer; library-site silent catch
+  replaced (separate narrow parse error `Failed to parse drawing
+  library drop payload`); move handler BYTE-KEPT; CanvasClient/
+  hooks/repos/harness untouched; 085/086/087 regions intact; 089
+  spec re-run post-fix: `mixed-drop-state` + Flow B
+  `action-not-drivable` preserved. Flows A/B/C real ghost-drops
+  green (exactly-once links, order preserved, reload consistent,
+  zero errors); wire: POST 201 → childPadletIds PATCH 204 →
+  later content PATCH 204 (not the link confirmation); failure
+  path verified by source inspection (no injection). Gates:
+  2/1/2 + 3 stable runs; runner 14/14, 0 incidents; 7/1, 9/1,
+  59/2, 448/43, verify+build; cleanup zeros across 35 prefixes.
+  **Census/design rulings:** move affordance = DEDICATED DRAG
+  HANDLE (RowColumnContainerCard has zero drag attributes;
+  whole-card drag conflicts with editors); move transactional
+  model = MODEL C preferred (atomic Postgres RPC; precedent:
+  `import_workspace_bundle`, board-members RPC) — client-only
+  three-write move can strand half-states; safe sequencing:
+  092 = atomic move persistence, 093 = handle + move regression;
+  affordance-only patch exposing the non-atomic handler is
+  PROHIBITED. Census CORRECTION: other-layout comment handlers
+  (CanvasClient ~6594/6676/6756) are result-checked with
+  toast — the DRAWING layout's internal
+  `handleUpdateChildComments` (~1959–1964) is the outlier:
+  fire-and-forget non-strict `onUpdatePadlet`, silent comment
+  loss possible (P3). **091 authorized (DIAGNOSIS-only):** ONE
+  new spec `drawing-comment-persistence.spec.ts` (prefixes
+  `patch-064-harness-patch-091-comment-a-/-b-/-c-`), real-UI
+  ADD/EDIT+REMOVE/RAPID flows on seeded comment posts, persisted
+  field evidence (`comments` vs `detachedComments`), passive
+  wire, source-inspection Flow E, cleanup Flow F; classification
+  `comment-persists-consistently | comment-write-lost-or-overwritten |
+  comment-divergence-observed | action-not-drivable |
+  mixed-comment-state`; `canvas_comments` store OUT of scope.
+  Totals bound: 2/1/2 ×3; runner 14 + separate 089 (2 passed,
+  classification preserved) + 090 (2 passed) invocations; 448/43;
+  40/40 fences; cleanup zeros across THIRTY-EIGHT prefixes.
+  Commit message bound:
+  `test(e2e): characterize drawing comment persistence (PATCH-091)`.
+
 - **2026-07-19** — **PATCH-089 DONE (commit
   `92d742f27c550cf3d62b6ad8a1563b0ad09de5a2`, independent read-only
   review PASS, spec blob `3275063…`, 683 lines) + fresh census +
