@@ -207,7 +207,9 @@ type DrawingEmbeddableCardProps = {
   excalidrawAPIRef: React.RefObject<any>;
   appStateRef: React.RefObject<any>;
   onUpdatePadlet: (id: string, updates: Partial<Padlet>) => Promise<void>;
+  onUpdatePadletStrict: (id: string, updates: Partial<Padlet>) => Promise<void>;
   onAddPadlet: (postData: Partial<Padlet>) => Promise<Padlet | null>;
+  onDeletePadlet?: (id: string) => Promise<void>;
   canvasId: string;
   currentUserId?: string;
   currentUserName?: string;
@@ -228,7 +230,9 @@ function DrawingEmbeddableCard({
   excalidrawAPIRef,
   appStateRef,
   onUpdatePadlet,
+  onUpdatePadletStrict,
   onAddPadlet,
+  onDeletePadlet,
   canvasId,
   currentUserId,
   currentUserName,
@@ -258,6 +262,40 @@ function DrawingEmbeddableCard({
 
   const showExpandToggle = isContainer && canExpand;
 
+  const createAndLinkChildToContainer = async (
+    containerId: string,
+    postData: Partial<Padlet>,
+  ): Promise<Padlet | null> => {
+    const created = await onAddPadlet(postData);
+    if (!created) return null;
+
+    try {
+      const container = allPadlets.find(p => p.id === containerId);
+      if (!container) throw new Error(`Container ${containerId} not found`);
+      const currentChildren = Array.isArray(container.metadata?.childPadletIds)
+        ? container.metadata.childPadletIds.map((childId) => String(childId))
+        : [];
+      const nextChildren = currentChildren.includes(created.id)
+        ? currentChildren
+        : [...currentChildren, created.id];
+
+      await onUpdatePadletStrict(containerId, {
+        metadata: {
+          ...container.metadata,
+          childPadletIds: nextChildren,
+        },
+      });
+
+      return created;
+    } catch (error) {
+      if (onDeletePadlet) {
+        await Promise.allSettled([onDeletePadlet(created.id)]);
+      }
+      console.error('Failed to link child to container', error);
+      return null;
+    }
+  };
+
   return (
     <div
       data-padlet-id={padlet.id}
@@ -283,32 +321,29 @@ function DrawingEmbeddableCard({
         if (!libPayload) return;
         e.preventDefault();
         e.stopPropagation();
+        let libData: any;
         try {
-          const libData = JSON.parse(libPayload);
-          const _as = appStateRef.current;
-          const _zoom = _as?.zoom?.value || 1;
-          const _centerX = (window.innerWidth / 2 / _zoom) - (_as?.scrollX || 0);
-          const _centerY = (window.innerHeight / 2 / _zoom) - (_as?.scrollY || 0);
-          const created = await onAddPadlet({
-            board_id: canvasId,
-            type: (libData.type || libData.kind || 'text') as Padlet['type'],
-            title: libData.title || 'New Post',
-            content: typeof libData.content === 'string' ? libData.content : JSON.stringify(libData.content ?? ''),
-            file_url: libData.file_url || undefined,
-            position_x: _centerX,
-            position_y: _centerY,
-            metadata: { parentId: padlet.id } as any,
-            width: libData.width || 300,
-            height: libData.height || 200,
-          });
-          if (created) {
-            const container = allPadlets.find(p => p.id === padlet.id);
-            const kids = (container?.metadata as any)?.childPadletIds ?? [];
-            await onUpdatePadlet(padlet.id, {
-              metadata: { ...(container?.metadata as any), childPadletIds: [...kids, created.id] }
-            });
-          }
-        } catch { /* silent */ }
+          libData = JSON.parse(libPayload);
+        } catch (error) {
+          console.error('Failed to parse drawing library drop payload', error);
+          return;
+        }
+        const _as = appStateRef.current;
+        const _zoom = _as?.zoom?.value || 1;
+        const _centerX = (window.innerWidth / 2 / _zoom) - (_as?.scrollX || 0);
+        const _centerY = (window.innerHeight / 2 / _zoom) - (_as?.scrollY || 0);
+        await createAndLinkChildToContainer(padlet.id, {
+          board_id: canvasId,
+          type: (libData.type || libData.kind || 'text') as Padlet['type'],
+          title: libData.title || 'New Post',
+          content: typeof libData.content === 'string' ? libData.content : JSON.stringify(libData.content ?? ''),
+          file_url: libData.file_url || undefined,
+          position_x: _centerX,
+          position_y: _centerY,
+          metadata: { parentId: padlet.id } as any,
+          width: libData.width || 300,
+          height: libData.height || 200,
+        });
       } : undefined}
     >
       {/* Drag handle -- 3-column grid: [expand | title | pencil] */}
@@ -503,7 +538,7 @@ function DrawingEmbeddableCard({
               const _zoom2 = _as2?.zoom?.value || 1;
               const _centerX2 = (window.innerWidth / 2 / _zoom2) - (_as2?.scrollX || 0);
               const _centerY2 = (window.innerHeight / 2 / _zoom2) - (_as2?.scrollY || 0);
-              const created = await onAddPadlet({
+              await createAndLinkChildToContainer(containerId, {
                 ...draftPayload,
                 board_id: canvasId,
                 position_x: draftPayload.position_x ?? _centerX2,
@@ -513,17 +548,6 @@ function DrawingEmbeddableCard({
                   parentId: containerId
                 }
               });
-              if (created) {
-                const container = allPadlets.find(p => p.id === containerId);
-                if (!container) return;
-                const currentChildren = container.metadata?.childPadletIds || [];
-                await onUpdatePadlet(containerId, {
-                  metadata: {
-                    ...container.metadata,
-                    childPadletIds: [...currentChildren, created.id]
-                  }
-                });
-              }
             }}
           />
         ) : (() => {
@@ -1954,7 +1978,9 @@ export default function DrawingLayout({
         excalidrawAPIRef={excalidrawAPIRef}
         appStateRef={appStateRef}
         onUpdatePadlet={onUpdatePadlet}
+        onUpdatePadletStrict={onUpdatePadletStrict}
         onAddPadlet={onAddPadlet}
+        onDeletePadlet={onDeletePadlet}
         canvasId={canvasId}
         currentUserId={currentUserId}
         currentUserName={currentUserName}
@@ -1973,7 +1999,7 @@ export default function DrawingLayout({
         }}
       />
     );
-  }, [canvasId, currentUserAvatar, currentUserId, currentUserName, fetchData, handleContextMenu, handleUpdateChildComments, onAddPadlet, readOnly, savePadletPositionWithLock]);
+  }, [canvasId, currentUserAvatar, currentUserId, currentUserName, fetchData, handleContextMenu, handleUpdateChildComments, onAddPadlet, onDeletePadlet, onUpdatePadletStrict, readOnly, savePadletPositionWithLock]);
 
   // Stable viewport accessor for useCanvasActions -- reads appStateRef at call time so
   // callbacks never stale-close over scroll/zoom and never recreate on pan.
