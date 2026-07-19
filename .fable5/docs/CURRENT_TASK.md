@@ -361,6 +361,59 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-19** — **PATCH-088 DONE (commit
+  `22d3f1fc18cfbed3ffad372ed67aa71de8d0cfab`, independent read-only
+  review PASS, runner blob `6a04d94…`, 345 lines) + fresh census +
+  PATCH-089 AUTHORIZED (DIAGNOSIS, container-drop relationships)**.
+  **088 final:** grouped carried runner lands the auth-expiry fix —
+  14 bound specs as 14 sequential one-spec groups (each own
+  invocation → fresh setup login, one worker), requires
+  `PW_BASE_URL` (no invented default), invokes
+  `node_modules/playwright/cli.js` via `process.execPath`.
+  Classifier `AUTH-EXPIRY (INFRASTRUCTURE)` requires ALL of:
+  timeout marker + locator/wait context +
+  `getByTitle('Back to Dashboard')` + harness/openDrawingBoard
+  context (never fires on mere timeouts/nav failures/401s/login
+  pages). Retry: exact-signature only, ONE setup refresh + ONE
+  `--no-deps` group retry max, failed retry stays failed, incident
+  reported even on recovery; non-signature failures never retried.
+  No credentials/cookies/headers/env dumps/auth-state in output; no
+  DB cleanup by the runner. Accepted run: 14/14 groups first-try,
+  0 incidents, exit 0; an earlier oversized grouping naturally
+  PROVED the bounded branch (classified, refreshed once, retried
+  once, retry failure NOT masked). Deterministic 7/1, 9/1, 59/2,
+  448/43, verify+build; one new file only; no dependency added;
+  import audit clean. **Census at `22d3f1f`:** #1 SELECTED —
+  container-drop cluster DIAGNOSIS (statically proven: site ~307
+  create-then-append inside `catch { /* silent */ }` → orphan
+  hazard; ~487/496 two-write append+reparent NON-ATOMIC with NO
+  old-parent removal — drop target guards only self/same-container,
+  so a cross-container move structurally leaves the child in BOTH
+  parents; ~520 same orphan hazard; runtime
+  reachability/drivability UNPROVEN → fix would be speculative);
+  positions best-effort (defer), comments store-duality (after
+  cluster), seven-site family later, 081 stays RETIRED-BY-NOTE,
+  frame/sidebar no repro, rest deferred, no new 088 issue.
+  **Bound invariant (TARGET, PATCH-090 gates on it):** both-or-
+  neither persistence of `childPadletIds` ⟺ `parentId`, single
+  parent, order preserved, move removes from old parent, failed
+  ops leave prior state, no orphans/duplicates; transactional
+  TARGET = MODEL A (persistence-first + compensation, 086
+  precedent); MODEL B rejected. **PATCH-089 — Container-Drop
+  Relationship Persistence Diagnosis, ONE new file:**
+  `e2e/characterization/drawing-container-drop.spec.ts` (ONE test,
+  ≤3 boards, prefixes `patch-064-harness-patch-089-drop-a-/-b-/-c-`;
+  Flow A drop both-directions + reload, B move → duplicate-parent
+  check, C rapid repeats, D passive wire order, E source
+  inspection, F cleanup zeros; observational — bound
+  `action-not-drivable` value allowed when the real UI can't drive
+  a flow, never fabricate actions). Expected: 2/1/2 ×3 coherent;
+  carried 14 via the 088 runner unchanged; 448/43; cleanup across
+  THIRTY-TWO prefixes. **37 blob-ID fences** (self-verified 37/37;
+  runner now fenced). Bound commit: `test(e2e): characterize
+  container-drop relationship persistence (PATCH-089)`. Independent
+  read-only PASS required before commit. PATCH-089 implementation
+  NOT started.
 - **2026-07-19** — **PATCH-087 DONE (commit
   `ba0c8f904d71f255045261497bf2803698ac206f`, independent read-only
   review PASS, blob `a2fb3ae…`, +6/−7 lines) + fresh census +

@@ -1,9 +1,13 @@
 # PATCH-088 — Carried-Suite Grouped Runner with Auth-Expiry Classification (Test Infrastructure)
 
-**Status:** **INFRA FIX AUTHORIZED** — test infrastructure ONLY.
-ONE new runner script. NO application-source change, NO
-product-auth semantic change, NO Playwright-config change, NO
-harness change, NO spec change, NO package/lockfile change.
+**Status:** **DONE** — landed as commit
+`22d3f1fc18cfbed3ffad372ed67aa71de8d0cfab`
+(`test(e2e): grouped carried-suite runner with auth-expiry classification (PATCH-088)`),
+independent read-only review PASS; closure record in §12. Test
+infrastructure ONLY. ONE new runner script (345 lines). NO
+application-source change, NO product-auth semantic change, NO
+Playwright-config change, NO harness change, NO spec change, NO
+package/lockfile change.
 **Implementer:** GPT-5.5. **Reviewer:** independent read-only
 reviewer (explicit PASS required before commit).
 **Closure:** Fable (CTO) after landing.
@@ -258,3 +262,57 @@ cleanup across twenty-nine prefixes; explicit confirmations (no
 config/harness/spec/production/package change, ≤1 retry per group,
 non-signature failures never retried, no auth material in output);
 commit hash + push status after PASS.
+
+## 12. Closure record (CTO, 2026-07-19)
+
+**Landed:** commit `22d3f1fc18cfbed3ffad372ed67aa71de8d0cfab`,
+ONE new file `e2e/run-carried-groups.mjs`, blob
+`6a04d94e6bcc71fdd6e647f5961707607ad1317d` (345 lines).
+**Independent read-only review: PASS.**
+
+**Infrastructure problem (final):** long carried invocations reused
+one setup-created auth state; later specs outlived it; failures
+appeared as route-readiness timeouts at
+`getByTitle('Back to Dashboard')` and were repeatedly misread as
+possible product regressions; sanctioned setup refresh + shorter
+reruns always restored the specs. Test infrastructure, not
+application behavior.
+
+**Runner behavior (final):** plain Node ESM, no new dependency;
+REQUIRES `PW_BASE_URL` (exits non-zero when missing, never invents
+a default); runs EXACTLY the 14 bound carried specs as 14
+sequential one-spec groups, each its own Playwright invocation
+(first run preserves the normal setup dependency), one worker, no
+concurrency; invokes `node_modules/playwright/cli.js` via
+`process.execPath`.
+
+**Auth-expiry classifier (final):** classification
+`AUTH-EXPIRY (INFRASTRUCTURE)` requires ALL bound evidence —
+timeout marker + locator/wait context +
+`getByTitle('Back to Dashboard')` + `drawingBridgeHarness.ts`/
+`openDrawingBoard` context. It does NOT classify on: any timeout,
+any navigation failure, any login page, any 401, or any failed
+test. **Retry behavior:** only exact-signature failures eligible;
+ONE setup refresh max; ONE group retry max (via `--no-deps`); no
+recursion, no infinite loop, no retry of non-signature failures; a
+failed retry remains a failure; the incident is reported even when
+recovery succeeds. **Security/output:** no credentials, cookies,
+authorization headers, environment dumps, or auth-state contents in
+any output; all 14 specs accounted for; per-group results emitted;
+correct final exit status; the runner performs NO database cleanup
+(cleanup stays spec-owned).
+
+**Verification (final accepted run):** 14 groups / 14 specs
+accounted for / 14 groups passed FIRST TRY / 0 auth-expiry
+incidents / 0 non-signature failures / exit 0. An earlier oversized
+grouping naturally exercised the bounded branch: exact signature
+classified as infrastructure, one setup refresh, one retry, the
+retry's failure REMAINED a failure and the runner stopped without
+masking it — the classifier and the no-masking contract are proven
+by observation, not only inspection. Deterministic gates:
+diff-check, tsc, boundaries, slideOrder 7/1, clonedPostMetadata
+9/1, focused drawing 59/2, full Vitest **448/43**, verify,
+standalone build — all green. Scope/cleanup: exactly one new file,
+no existing file changed, no dependency added, production import
+audit clean, no artifacts, ports 3000/4000 free, no repo-owned
+runtime process.
