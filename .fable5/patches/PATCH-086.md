@@ -194,12 +194,14 @@ green. Report every shift at review and closure.
 
 | File | Role | Starting blob at base `ef2a823` |
 |---|---|---|
-| `components/collabboard/canvas/layouts/DrawingLayout.tsx` | production fix (§3 bounded region ONLY) | `a92bb25cf3608f5a74d3b27fc779c6a1b4b0a300` |
-| `e2e/characterization/drawing-duplicate-deep-clone.spec.ts` | NEW regression spec | absent at base (absence gate) |
+| `components/collabboard/canvas/layouts/DrawingLayout.tsx` | production fix (§3 bounded region ONLY) | `a92bb25cf3608f5a74d3b27fc779c6a1b4b0a300` — **Amendment 1: resume from candidate blob `d47b2f00640df8f426d9fb1b30d142179cbeb870`** |
+| `e2e/characterization/drawing-duplicate-deep-clone.spec.ts` | NEW regression spec | absent at base (absence gate) — **Amendment 1: resume from candidate blob `b618a8ce01b3836b2afffba77a66dd8fb99559e8`** |
+| `app/dashboard/canvas/[id]/CanvasClient.tsx` | **Amendment 1 (§12) ONLY** — strict rewire prop wiring, bounded to ONE new handler + ONE prop pass, ≤20 added lines | `1c6864b46e1c5c9a52f9e771ee2e51793898ecd8` |
 
-No third file. No unit-test file: the orchestration is
-component-internal with no exported seam (085 precedent); the
-sanitizer's own tests are fenced and already green.
+No fourth file (Amendment 1 expanded TWO → THREE after the
+correctly-honored §9 stop; see §12). No unit-test file: the
+orchestration is component-internal with no exported seam (085
+precedent); the sanitizer's own tests are fenced and already green.
 
 Absence gates: the new spec path absent at base and worktree before
 implementation;
@@ -320,3 +322,99 @@ deterministic totals; 33-fence result + absence gates; cleanup
 across twenty-nine prefixes; explicit confirmations (no deletion-
 path edit, no debounce/move-detection edit, 085 hunks intact, no
 seam, no auth capture); commit hash + push status after PASS.
+
+## 12. Amendment 1 (CTO, 2026-07-19) — error-propagation scope for the parent rewire
+
+**Trigger (correctly honored):** Sonnet returned FAIL twice on one
+scope-level defect: the §3 contract requires NO half-mutated scene
+on ANY failed required persistence step, and the parent
+`childPadletIds` REWIRE is such a step — but the candidate's only
+available channel, the `onUpdatePadlet` prop, RESOLVES VOID on
+every failure (`useCanvasData.updateDrawingLayoutPadlet` 566–590:
+a resolved Supabase error takes the silent-rollback branch, a
+thrown error is caught/logged/rolled back — neither rejects to the
+caller). The implementer correctly refused to widen scope (§9 stop
+condition). The candidate is otherwise conformant: rows before
+scene, reverse-order `Promise.allSettled` compensation over
+`createdIds`, one `console.error`, source rows untouched, 085 hunks
+intact, all green gates.
+
+**CTO chain ruling (read-only derived):**
+`DrawingLayout.onUpdatePadlet: (id, updates) => Promise<void>` ←
+`CanvasClient.handleDrawingLayoutUpdatePadlet` (4948–4957) ←
+`useCanvasData.updateDrawingLayoutPadlet` (566–590, the silent
+point) → `canvas.updatePostFields` → `postsRepository.updateFieldsById`.
+The repository ALREADY owns the visible-failure primitive:
+`useCanvasData.updatePostFieldsOrThrow` (655–661, PATCH-051 idiom
+family) throws on BOTH resolved and thrown failures, is exported
+(739), and is already destructured by CanvasClient (358; used as
+`updatePadletById` at 5941). **Classification B — candidate
+incomplete; narrow callback-contract expansion required. Governance
+OPTION A — amend scope.** No prerequisite patch: census #7 (the
+BROAD silent-error family) remains a later dedicated patch;
+PATCH-086 consumes the existing throwing channel AS-IS.
+
+**Chosen error contract (bind — thrown-error, repo `*OrThrow`
+convention; do NOT mix with a Result return):**
+
+- `app/dashboard/canvas/[id]/CanvasClient.tsx` (starting blob
+  `1c6864b46e1c5c9a52f9e771ee2e51793898ecd8`): add ONE handler
+  `handleDrawingLayoutUpdatePadletStrict(id, updates)` that
+  (1) normalizes exactly as `handleDrawingLayoutUpdatePadlet` does,
+  (2) `await updatePostFieldsOrThrow(id, normalizedUpdates)` — NO
+  catch-and-continue, failures propagate to the caller,
+  (3) ONLY AFTER the confirmed success applies the local
+  `setPadlets` merge (same shape as the optimistic path's merge —
+  but post-confirmation, so NO rollback branch); plus ONE prop pass
+  `onUpdatePadletStrict={handleDrawingLayoutUpdatePadletStrict}` at
+  the DrawingLayout mount. **≤20 added lines total, NO other
+  CanvasClient change** (bounded exception to the over-ceiling
+  file-growth rule, acknowledged strangler debt).
+- `DrawingLayout.tsx` (resume from candidate `d47b2f0…`): add the
+  REQUIRED prop `onUpdatePadletStrict: (id: string, updates:
+  Partial<Padlet>) => Promise<void>` to BOTH prop-type blocks +
+  destructuring, and switch ONLY the clone rewire call in
+  `cloneLinkedRowsForDuplicateSlide` from `onUpdatePadlet` to
+  `onUpdatePadletStrict`. NO fallback to `onUpdatePadlet` for the
+  rewire; every other call site keeps `onUpdatePadlet` unchanged.
+- `useCanvasData.ts`, `posts.ts`, `postsRepository.ts`: UNTOUCHED
+  (all remain fenced; `updatePostFieldsOrThrow` is consumed as-is).
+
+**Failure/compensation semantics (bind, unchanged in spirit, now
+truthful):** all row creations AND the parent rewire must be
+confirmed (throwing channels) BEFORE `updateScene`; any failure →
+no scene mutation at all, reverse-order best-effort deletes of the
+rows created by THIS attempt, exactly ONE `console.error`
+(`'Failed to duplicate drawing slide:'`), source rows never
+mutated.
+
+**Regression additions (bind):** the new spec (resume from
+candidate `b618a8c…`) adds the SMALLEST additive passive-wire
+assertion: a 2xx `/rest/v1/padlets` PATCH carrying the cloned
+container id AND the rewired `childPadletIds` is observed before
+settlement (positive-path rewire confirmation). The negative path
+(rewire failure → no scene mutation, compensation, one error)
+remains Flow K BY INSPECTION — no failure injection, no
+`page.route`, no instrumentation seam. Sonnet additionally verifies
+by inspection: the rewire call site has no catch-and-continue; the
+existing `onUpdatePadlet` callers are byte-unchanged; the 085 hunks
+remain byte-intact.
+
+**Effective contract changes:** allowed files 2 → 3 (§5); fences
+UNCHANGED at 33/33 (CanvasClient was never fenced; the fenced
+update-path files stay fenced AND untouched); §7 carried totals now
+also require the amended spec's rewire-confirmation assertion
+green; §9 gains: any CanvasClient edit beyond the bounded handler +
+prop pass, any catch around the strict rewire call, or any
+`useCanvasData`/`posts.ts`/`postsRepository.ts` modification = STOP.
+Commit message UNCHANGED:
+`fix(drawing): deep-clone linked rows on duplicate slide (PATCH-086)`.
+Sonnet reviews ALL THREE files; NO commit before explicit PASS.
+
+**Resumption:** implementation resumes FROM the current candidate
+blobs (`d47b2f0…` production, `b618a8c…` spec — ACCEPTED as the
+starting point, not reverted). Remaining work: the §12 strict-prop
+wiring + rewire call-site switch + spec assertion, then rerun:
+focused 086 gates (2/1/2 + three-run stability), carried 13-spec
+totals, deterministic closeout, cleanup across twenty-nine
+prefixes, then Sonnet review of all three files.

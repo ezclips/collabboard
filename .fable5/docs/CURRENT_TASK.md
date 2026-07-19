@@ -361,6 +361,35 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-19** — **PATCH-086 Amendment 1 — error-propagation
+  scope (Classification B / OPTION A) after a correctly-honored
+  stop condition and two Sonnet FAILs.** Blocker: the §3
+  no-half-mutated-scene contract covers the parent
+  `childPadletIds` REWIRE, but `onUpdatePadlet` →
+  `updateDrawingLayoutPadlet` (useCanvasData 566–590) NEVER rejects
+  (resolved error → silent rollback; thrown → caught/logged) — the
+  candidate could not truthfully confirm the rewire before
+  `updateScene`. Candidate otherwise conformant (rows-before-scene,
+  reverse-order compensation, one console.error, sources untouched,
+  085 hunks intact, all gates green; blobs `d47b2f0…` production /
+  `b618a8c…` spec — ACCEPTED as resumption point, unchanged by
+  governance). **Ruling:** the repo already owns the visible-failure
+  primitive — `updatePostFieldsOrThrow` (PATCH-051 idiom, exported,
+  already destructured in CanvasClient) — so NO prerequisite patch,
+  NO useCanvasData/posts/postsRepository change (they stay fenced);
+  census #7 broad family remains later. **Amendment:** allowed
+  files 2 → 3 — `app/dashboard/canvas/[id]/CanvasClient.tsx`
+  (starting blob `1c6864b4…`) bounded to ONE
+  `handleDrawingLayoutUpdatePadletStrict` handler (normalize →
+  `await updatePostFieldsOrThrow` → post-confirmation `setPadlets`
+  merge; ≤20 lines, bounded over-ceiling exception) + ONE prop pass;
+  DrawingLayout adds the REQUIRED `onUpdatePadletStrict` prop and
+  switches ONLY the clone-rewire call site; spec adds the smallest
+  additive passive-wire assertion (2xx PATCH bearing cloned
+  container id + rewired childPadletIds); negative path stays Flow K
+  by inspection. Fences UNCHANGED 33/33. Commit message unchanged.
+  Sonnet reviews ALL THREE files; no commit before PASS. PATCH-087
+  NOT started.
 - **2026-07-19** — **PATCH-085 DONE (commit
   `ef2a8234d686b8cba5c7430132affbbb552f9a63`, Sonnet independent
   PASS, three blobs `a92bb25…` production / `b0ab5ea…` regression
