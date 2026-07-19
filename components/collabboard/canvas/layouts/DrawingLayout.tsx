@@ -1000,7 +1000,7 @@ export default function DrawingLayout({
     if (elements.length === 0 && !hasSeenElementsRef.current) return;
 
     try {
-      const savePromise = onUpdatePadlet(mp.id, {
+      const savePromise = onUpdatePadletStrict(mp.id, {
         content: JSON.stringify(elements),
         metadata: {
           ...mp.metadata,
@@ -1008,11 +1008,7 @@ export default function DrawingLayout({
           drawingFiles: JSON.stringify(files)
         }
       });
-      const trackedSave = savePromise
-        .then(() => undefined)
-        .catch((e) => {
-          console.error("Failed to save drawing to master padlet", e);
-        });
+      const trackedSave = savePromise.then(() => undefined);
       saveInFlightRef.current = trackedSave;
       try {
         await trackedSave;
@@ -1023,8 +1019,11 @@ export default function DrawingLayout({
       }
     } catch (e) {
       console.error("Failed to save drawing to master padlet", e);
+      if (dirtyDataRef.current === null) {
+        dirtyDataRef.current = snapshot;
+      }
     }
-  }, [onUpdatePadlet, readOnly]); // masterPadlet removed -- read from ref inside
+  }, [onUpdatePadletStrict, readOnly]); // masterPadlet removed -- read from ref inside
 
   const performSave = useCallback(async () => {
     const snapshot = dirtyDataRef.current;
