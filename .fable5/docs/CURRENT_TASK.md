@@ -361,6 +361,75 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-20** — **PATCH-094 DONE (commit
+  `aee4322aa36dcaac7a3b28443a21e19285e6db60`, independent read-only
+  review PASS, spec blob `7e7d8e0…`, 891 lines) + fresh census +
+  PATCH-095 AUTHORIZED (DESIGN-ONLY, atomic cross-container move
+  contract — zero code, zero migration)**. **094 final:** Flow A
+  (Enter-save) — exactly one comment-bearing PATCH, 204, in every
+  one of 4 independent runs; comment ID/userId/userName/timestamp
+  all stable; `detachedComments` unchanged; local/persisted/reload
+  all agreed. Classification `edit-save-consistent`. Flow B (Escape
+  cancel after a real text change) — zero comment-bearing writes in
+  every run; original confirmed text restored and persisted.
+  Classification `edit-cancel-consistent`. Shift+Enter honestly
+  recorded `not-attempted-within-bound-scope`. Final classification
+  `edit-save-consistent`, stable across all runs. **Rulings (bind):**
+  the source-proven synchronous `editingCommentId` clear (before the
+  strict update confirms) is a CHARACTERIZED DESIGN RISK, not a
+  proven defect — no fix authorized absent a real failure; the
+  source-plausible Enter+onBlur double-invocation path did NOT
+  manifest in any of 4 runs (exactly one write every time) — no
+  duplicate-save fix authorized absent a deterministic repro.
+  **091→093→094 now form a complete, non-contradictory evidence
+  chain** (narrow probe miss → delayed-mount proof → save/cancel
+  proof); no historical evidence rewritten. Gates: 2/1/1(JSON) + 3
+  stable runs; 093 passed (`editor-mounts-and-is-drivable` +
+  `inside-comment-row` + `not-reachable-through-existing-harness`
+  all preserved); 092 passed; 091 passed (`mixed-comment-state`
+  preserved); 090 passed; 089 passed (`mixed-drop-state` preserved);
+  runner 14/14, 0 incidents (dev server correctly kept running
+  throughout this review — no operator error recurred); 7/1, 9/1,
+  59/2, 448/43, verify+build green; cleanup zero. **Product
+  interpretation:** normal comment EDIT save AND cancel are both
+  CURRENTLY WORKING; no comment-EDIT/duplicate-save/strict-channel/
+  store-migration fix is justified. **Fresh census (30 items):**
+  atomic cross-container move ranked **P0 for design** — with
+  SHARPER new evidence than 090-094's prior framing: `supabase/BASELINE.md`
+  (authored 2026-07-06, never updated) documents that
+  `supabase/migrations/` does NOT rebuild the live database
+  (historical drift from hand-applied/SQL-editor changes);
+  reconciliation is explicitly blocked on Docker + a DB password;
+  Docker Desktop's engine was confirmed NOT RUNNING at this census;
+  no `supabase/config.toml`; no CI migration validation; the
+  `supabase` CLI is not a project dependency (resolves via ad-hoc
+  `npx`); a machine-local, gitignored `supabase/.temp/linked-project.json`
+  shows a remote project link exists on this machine but is NOT
+  committed/shareable tooling (if anything, a risk factor, since it
+  means `db push --linked` could bypass all safeguards above).
+  Blocker classification: **F, multiple** — B (no confirmed
+  deployment owner/process) + C (no usable local test environment).
+  PATCH-088 genuine setup-flake signature (4 occurrences now,
+  distinct from 093's one-off reviewer `ERR_CONNECTION_REFUSED`)
+  reassessed from LOW to MEDIUM, still not actioned. **095
+  authorized as OPTION A — atomic move DESIGN, governance-only, zero
+  code/migration:** binds the exact `move_child_between_containers`
+  RPC contract (signature, transaction boundary, row-locking order,
+  conflict-vs-idempotent distinction, same-parent no-op, SECURITY
+  INVOKER ruling reaffirmed, same-board-only RLS assumption, throwing
+  error contract), the repository/hook/UI integration plan, the
+  three test layers and which are blocked vs. buildable, the
+  deployment prerequisites and forward-only rollback plan. No
+  implementation, migration, or new file is authorized — this is a
+  contract for a FUTURE, separately-numbered patch once the owner
+  resolves the BASELINE.md blockers. Fence set carried forward
+  unchanged (46 + the newly-landed 094 spec = **47**, raw/unique/
+  header/hard-stop counts all verified to agree at 47 before
+  authorization; one stray "46" reference in an early draft was
+  caught and corrected to 47 before commit). Carried 089-094
+  evidence unweakened. No bound commit message — this patch has no
+  code deliverable; a future implementation patch will bind its own.
+
 - **2026-07-20** — **PATCH-093 DONE (commit
   `4dc94a7bab9a57d9143a8fe77bcd9e94cf87f33f`, independent read-only
   review PASS, spec blob `cdc9062…`, 749 lines) + fresh census +

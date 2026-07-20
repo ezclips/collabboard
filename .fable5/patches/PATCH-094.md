@@ -1,9 +1,10 @@
 # PATCH-094 — Comment EDIT Save-Persistence Diagnosis (Drawing Layout)
 
-**Status:** **DIAGNOSIS AUTHORIZED**. ONE new characterization
-spec only. No production file may be touched. No move work, no
-metadata-store migration, no `canvas_comments` scope, no TipTap
-refactor, no PATCH-092 strict-channel change.
+**Status:** **DONE** (commit `aee4322aa36dcaac7a3b28443a21e19285e6db60`,
+independent read-only review PASS). ONE new characterization spec
+landed, exactly as bound. No production file was touched. No move
+work, no metadata-store migration, no `canvas_comments` scope, no
+TipTap refactor, no PATCH-092 strict-channel change.
 
 **Implementer:** GPT-5.5. **Reviewer:** independent read-only
 reviewer (explicit PASS required before commit).
@@ -518,3 +519,158 @@ proof; explicit confirmations (no production file touched, no
 PATCH-092 strict-channel change, no move-path edit, no injection, no
 fabricated contrast surface, no hidden handler); commit hash + push
 status after PASS.
+
+## 19. Closure record (2026-07-20)
+
+**Landed:** commit `aee4322aa36dcaac7a3b28443a21e19285e6db60`
+(`test(e2e): characterize drawing comment EDIT save persistence
+(PATCH-094)`), HEAD == origin/main at closure time. One file, exactly
+as bound: `e2e/characterization/drawing-comment-edit-save.spec.ts`
+(blob `7e7d8e05ef8203b87e011a16acfcdc912a7dbc70`, 891 lines).
+Independent read-only review: **PASS**.
+
+**Diagnosis question (carried from 093):** 093 proved the self-owned
+DrawingLayout comment editor mounts and is genuinely drivable, but
+093 only entered edit mode and cancelled via Escape — it never
+changed text and pressed Enter to save. 094 was authorized to
+characterize the real Enter-to-save round trip and an
+Escape-after-a-real-change cancellation, while PATCH-092's strict
+persistence channel had to remain completely untouched.
+
+**Flow A — Enter save (final result):** the target comment was
+created through real visible Add + Send actions; self-ownership
+proven against `currentUserId`; Edit visible and enabled; a real
+Edit click occurred; row-local `.ProseMirror[contenteditable="true"]`
+mounted and was drivable; text was changed through the real
+contenteditable editor; a real `Enter` key was used; **exactly one
+comment-bearing PATCH occurred, response status 204**, in every one
+of four independent live executions (1 dependency-mode + 1 no-deps/
+JSON + 3 stability runs) — no duplicate Enter-plus-blur save
+manifested in any run; comment `id` remained stable; `userId`
+remained stable; `userName`/author representation remained stable;
+timestamp presence remained stable; `detachedComments` remained
+unchanged; local, persisted, and reload states agreed on the edited
+text in every run; no duplicate comment; no lost write; no local/
+persisted divergence. **Flow A classification: `edit-save-consistent`**,
+stable across all runs.
+
+**Flow B — Escape cancel (final result):** the editor was reopened
+through the real visible Edit control; text was changed to a
+genuinely different value through the real editor; a real `Escape`
+key was used; **zero comment-bearing writes occurred** in every run;
+the confirmed (originally saved) text was restored and remained
+displayed; persisted `metadata.comments` remained unchanged; reload
+remained unchanged; comment `id` remained stable; author remained
+stable; `detachedComments` remained unchanged. **Flow B
+classification: `edit-cancel-consistent`**, stable across all runs.
+
+**Shift+Enter:** honestly recorded as `not-attempted-within-bound-scope`
+in every run — no product-support claim was fabricated; skipping it
+did not weaken Flow A or Flow B evidence, both of which were fully
+driven through real UI independent of this flow.
+
+**Final classification: `edit-save-consistent`**, stable across all
+four independent executions performed during the review.
+
+**Annotation:** `patch-094-drawing-comment-edit-save-evidence`,
+present with all required fields in every run; no full HTML, auth
+material, or unrelated payloads printed.
+
+**Synchronous edit-mode-close ordering ruling (bind, precisely
+worded):** source inspection (re-confirmed against the fenced,
+unchanged `EmbeddedCommentList.tsx:139-142`) proves that `onSaveEdit`
+invokes `onEditComment` and then SYNCHRONOUSLY clears
+`editingCommentId` — the source does NOT await the downstream
+strict persistence result before leaving edit mode. Runtime evidence
+did NOT prove any failure arising from this ordering: across every
+accepted run, the real Enter-save round-trip, persistence, and
+reload were fully consistent. **This synchronous close is therefore
+a CHARACTERIZED DESIGN RISK, not a proven user-visible defect** — no
+production fix is authorized based on this ordering alone; a future
+fix would require either a new proven failure or an explicit product
+decision to await persistence before closing edit mode (neither
+exists yet).
+
+**Duplicate-save ruling (bind, precisely worded):** source inspection
+found a plausible `Enter`-plus-`onBlur` double-invocation path (both
+independently call `handleSaveEdit`). Runtime evidence across every
+accepted run (4 independent executions) showed **exactly one
+comment-bearing write** for the Enter-save action — the
+double-invocation hypothesis did NOT manifest under real interaction
+in this environment. **No duplicate-save fix is authorized** absent
+a deterministic reproduction, which does not currently exist.
+
+**Source/runtime separation:**
+- *Runtime:* real Add/Edit/Enter/Escape actions in every run; one
+  Enter comment-bearing PATCH with 204; zero Escape comment-bearing
+  writes; stable ID, author, and timestamp-presence results; local/
+  persisted/reload consistency; no duplicate, lost-write, or
+  divergence evidence; `detachedComments` unchanged throughout.
+- *Source:* Enter/Escape handling in `CommentRow.tsx`; `onSaveEdit`
+  callback ordering and the synchronous `editingCommentId` clear in
+  `EmbeddedCommentList.tsx`; the strict, awaited, single-catch
+  `DrawingLayout.tsx` update path (092, unchanged); `metadata.comments`
+  routing (unchanged); the possible Enter/`onBlur` double-save path
+  (characterized as a risk, not confirmed as a defect); failure
+  behavior remained source-only, since failure injection was
+  correctly never authorized or used.
+
+**Architecture preservation (confirmed):** diagnosis-only; one new
+spec; zero production changes; `CommentRow.tsx`/`EmbeddedCommentList.tsx`/
+`CommentEditor.tsx`/`DrawingLayout.tsx` byte-unchanged; PATCH-092's
+strict channel untouched; no comment-persistence-store change; no
+harness/config/package/lockfile change; no `page.route` or network
+mutation; no hidden handler; no synthetic event dispatch; no failure
+injection; zero `canvas_comments` access; no auth material captured.
+
+**Final verification totals:**
+- Focused PATCH-094: dependency mode 2 passed; `--no-deps` 1 passed;
+  credential-off (`E2E_SKIP_CREDENTIALS=1`) 1 skipped; JSON reporter
+  1 passed (output removed); three additional stable dependency-
+  backed runs, all passed. One Enter comment-bearing write stable
+  (204) in every run; zero Escape comment-bearing writes stable in
+  every run; final classification stable at `edit-save-consistent`;
+  zero cleanup residue in every run.
+- Carried 093: passed; `editor-mounts-and-is-drivable`,
+  `inside-comment-row`, and `not-reachable-through-existing-harness`
+  all preserved exactly, no weakening of timing evidence.
+- Carried 092: passed, strict comment persistence intact.
+- Carried 091: passed; `mixed-comment-state` preserved; the original
+  narrower EDIT probe remains unchanged; self-owned ownership proof
+  remains valid.
+- Carried 090: passed, atomic create-and-link intact.
+- Carried 089: passed; `mixed-drop-state` preserved.
+- PATCH-088 runner: 14/14 groups, 14/14 specs, all passed first try,
+  0 auth-expiry incidents, 0 non-signature failures (the dev server
+  was correctly kept running throughout this review's runner
+  invocation — no operator error recurred).
+- Deterministic: `git diff --check` passed; `tsc --noEmit` passed;
+  `check:boundaries` passed; slideOrder 7/1; clonedPostMetadata 9/1;
+  focused drawing 59/2; full Vitest 448/43; `npm run verify` passed;
+  `npm run build` passed.
+- Cleanup: all PATCH-094 prefixes reached zero (boards 0, padlets 0,
+  canvasLines 0) in every run; no test-created comments or orphan
+  rows remained; generated `test-results/.last-run.json` removed
+  before commit; no other artifacts remained; ports 3000/4000 free;
+  no repo-owned runtime process active at closure.
+
+**46/46 fences:** unaffected by this patch's landing (the new spec is
+the allowed file, not a fence entry); verified again at closure — 0
+mismatches.
+
+**Product interpretation (bind):** normal comment EDIT save is
+CURRENTLY WORKING; normal Escape cancellation is CURRENTLY WORKING.
+No production comment-EDIT fix is justified. No duplicate-save fix
+is justified. No strict-persistence fix is required. No comment-store
+migration is required. **PATCH-091, PATCH-093, and PATCH-094 together
+now form a complete, non-contradictory evidence chain:** 091's
+narrower probe genuinely did not observe the editor within its own
+timeout/selector combination; 093 added timing checkpoints and
+proved the editor mounts (with latency) and is drivable; 094 proved
+a real save and a real cancel both round-trip correctly through
+PATCH-092's strict channel. No historical runtime evidence from 091
+or 093 is retired or rewritten by this closure — this closure adds a
+cross-reference, it does not revise the record.
+
+**Governance commit for this closure:** see CURRENT_TASK.md log
+entry dated 2026-07-20 (PATCH-094 closure + PATCH-095 authorization).
