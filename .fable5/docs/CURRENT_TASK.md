@@ -361,6 +361,82 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-20** — **PATCH-093 DONE (commit
+  `4dc94a7bab9a57d9143a8fe77bcd9e94cf87f33f`, independent read-only
+  review PASS, spec blob `cdc9062…`, 749 lines) + fresh census +
+  PATCH-094 AUTHORIZED (DIAGNOSIS, comment EDIT save persistence)**.
+  **093 final:** the target comment was created via a real ADD,
+  ownership proven (`hasCurrentUserId: true`); Edit was present and
+  enabled; a real click occurred; `.ProseMirror[contenteditable="true"]`
+  mounted `inside-comment-row`; the editor was genuinely drivable
+  across all five independent live runs; no immediate visible reset;
+  no dedicated Save/Cancel (Enter saves, Escape cancels, per source);
+  Escape left the original text unchanged; zero comment-bearing
+  writes during edit entry; persisted/reload state unchanged. Final
+  classification `editor-mounts-and-is-drivable`, stable across all
+  runs. **Timing refinement (bind):** focus stayed on the Edit
+  button through 50/60ms and shifted to the editor only later within
+  the bounded 3000ms window — 093 does not claim focus moved
+  immediately, only that it was observed to shift within the window.
+  **091/093 reconciliation:** NOT contradictory — 091's own wording
+  already scopes its EDIT finding to "did not appear within the
+  observed window" (Interpretation A, bounded by its own probe), not
+  a categorical non-drivability claim; 093 added timing checkpoints
+  091 didn't use and found the delayed mount. 091's ADD/REMOVE/RAPID
+  evidence and its EDIT observation are RETAINED unchanged — no
+  governance rewrite of PATCH-091 was needed or performed. The
+  `immediatelyRender:false` + conditional `EditorContent` mount
+  latency is recorded as a HYPOTHESIS only, not proven; transformed-
+  canvas incompatibility remains explicitly unproven. Gates: 2/1/1
+  (JSON) + 3 stable runs, classification/location/contrast all
+  stable; 092 passed; 091 passed (`mixed-comment-state` + EDIT
+  `action-not-drivable` under its own probe, unweakened); 090 passed;
+  089 passed (`mixed-drop-state` preserved); runner 14/14, 0
+  incidents (the reviewer's own `ERR_CONNECTION_REFUSED` from
+  stopping the dev server before invoking the runner was disclosed
+  as operator error, explicitly NOT a product or runner signature,
+  and explicitly NOT usable as evidence for retry hardening); 7/1,
+  9/1, 59/2, 448/43, verify+build green; cleanup zero. **Product
+  interpretation correction:** 093 disproves the earlier provisional
+  assumption that the DrawingLayout comment editor was categorically
+  non-drivable — no production EDIT-mount fix is justified; a
+  TipTap/transform/event-propagation/CSS fix remains unauthorized
+  absent a new proven user-visible failure. **A gap remains:** 093
+  only entered edit mode and cancelled via Escape on an UNCHANGED
+  comment — it never verified a real Enter-to-save round-trip.
+  **Fresh census (33 items):** comment EDIT save-persistence ranked
+  **P0** — fully reachable, uncharacterized; source inspection
+  (`EmbeddedCommentList.tsx:139-142`) found that `onSaveEdit` closes
+  edit mode SYNCHRONOUSLY, before the async PATCH-092 strict update
+  confirms — a plausible (not proven) double-invocation risk was
+  also flagged where `onBlur` and `Enter` could both call
+  `handleSaveEdit`. Move-atomicity (P1) revalidated unchanged,
+  still correctly blocked on an owner-confirmed deployment plan.
+  Runner hardening reassessed: the genuine three-occurrence
+  browser/context-close signature remains at "ready" but unactioned;
+  the reviewer's own `ERR_CONNECTION_REFUSED` was explicitly excluded
+  from consideration as it was operator error, not a product/runner
+  signature. **094 authorized (DIAGNOSIS-only):** ONE new spec
+  `drawing-comment-edit-save.spec.ts` (prefixes
+  `patch-064-harness-patch-094-comment-edit-save-a-/-b-`), Flow A
+  (real Enter-save round-trip, wire capture, persisted readback,
+  ID/author stability, reload), Flow B (Escape-after-a-real-change
+  cancellation contrast — 093 only tested Escape with no change
+  made), Flow C (conditional Shift+Enter, skippable without
+  fabricating a result), Flow D (source inspection, no injection),
+  Flow E (cleanup); bound classifications: `edit-save-consistent` |
+  `edit-save-lost-write` | `edit-save-duplicate-write` |
+  `edit-save-local-persisted-divergence` | `edit-cancel-consistent`
+  | `edit-cancel-writes-unexpectedly` |
+  `edit-save-action-not-drivable` | `mixed-edit-save-state`. No
+  change to PATCH-092's strict channel authorized. Totals bound:
+  focused totals TBD by implementer per §4; **46/46** fences (093
+  set of 45 + the landed 093 spec itself, newly fenced) — raw,
+  unique-path, header, hard-stop, and final-report counts all
+  verified to agree at 46 before authorization; carried 089/090/091/
+  092/093 unchanged. Commit message bound:
+  `test(e2e): characterize drawing comment EDIT save persistence (PATCH-094)`.
+
 - **2026-07-20** — **PATCH-092 DONE (commit
   `5f93ed54b7a643b17f0ffa849e873d71c07d1f85`, independent read-only
   review PASS, DrawingLayout `ad4e8fd…`, new spec `f57b46c…`, 631

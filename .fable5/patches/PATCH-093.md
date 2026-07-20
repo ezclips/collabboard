@@ -1,9 +1,10 @@
 # PATCH-093 — Comment EDIT UI Diagnosis (Drawing Layout)
 
-**Status:** **DIAGNOSIS AUTHORIZED**. ONE new characterization
-spec only. No production file may be touched. No move work, no
-metadata-store migration, no `canvas_comments` scope, no TipTap
-refactor.
+**Status:** **DONE** (commit `4dc94a7bab9a57d9143a8fe77bcd9e94cf87f33f`,
+independent read-only review PASS). ONE new characterization spec
+landed, exactly as bound. No production file was touched. No move
+work, no metadata-store migration, no `canvas_comments` scope, no
+TipTap refactor.
 
 **Implementer:** GPT-5.5. **Reviewer:** independent read-only
 reviewer (explicit PASS required before commit).
@@ -483,3 +484,162 @@ production file touched, no move-path edit, no comment-persistence-
 path edit, no CanvasClient/hook/config/harness/migration change, no
 injection, no fabricated contrast surface); commit hash + push
 status after PASS.
+
+## 17. Closure record (2026-07-20)
+
+**Landed:** commit `4dc94a7bab9a57d9143a8fe77bcd9e94cf87f33f`
+(`test(e2e): characterize drawing comment EDIT UI defect
+(PATCH-093)`), HEAD == origin/main at closure time. One file, exactly
+as bound: `e2e/characterization/drawing-comment-edit.spec.ts` (blob
+`cdc90628ecdb12e70e5fa41d444688d1b3ccb481`, 749 lines). Independent
+read-only review: **PASS**.
+
+**Original diagnosis question (091):** PATCH-091 proved a
+self-owned comment existed, the Edit button was visible and
+enabled, and a real click occurred — but its narrower probe did not
+observe the TipTap/ProseMirror editor within its own bounded window;
+no comment-bearing persistence write occurred and persisted/reload
+state remained unchanged. The cause was unresolved: was the editor
+genuinely non-drivable, or had 091's probe simply not waited long
+enough / used too narrow a selector?
+
+**PATCH-093 result:** the target comment was created through the
+real visible Add-comment flow; ownership was proven against
+`currentUserId` (`hasCurrentUserId: true`); Edit was present and
+enabled; the real Edit button was clicked; `.ProseMirror[contenteditable="true"]`
+mounted inside the target row; the editor was genuinely drivable;
+editor location was `inside-comment-row`; no conflicting second
+editor or portal-mounted editor was found anywhere on the page; no
+immediate visible reset occurred across five independent live
+executions; no dedicated Save/Cancel buttons exist (confirmed
+against source — Enter saves, Escape cancels); Escape left the
+original text unchanged; zero comment-bearing writes occurred
+during edit entry; persisted `metadata.comments` remained unchanged;
+reload preserved the original comment text. **Final classification:
+`editor-mounts-and-is-drivable`**, stable across all five
+independent live runs performed during the review (1 dependency-mode
++ 1 `--no-deps` + 3 stability runs).
+
+**Timing refinement (bind, precisely worded):** the editor's
+presence was stable through the full bounded 3000ms observation
+window once it appeared. Raw focus evidence showed focus remained
+on the Edit **button** through the earliest checkpoints (50ms,
+60ms) and shifted to the editor only at a later checkpoint (between
+60ms and 250ms in the review's live runs) — this patch does NOT
+claim focus moved to the editor immediately, only that it was
+observed to shift within the bounded window. **PATCH-091 and
+PATCH-093 are NOT contradictory:** 091's narrower probe genuinely
+did not observe a mounted, drivable editor within the timeout/
+selector combination it used at the time; 093 added explicit timing
+checkpoints out to 3000ms specifically to test whether the editor
+mounts later than a naive check would assume, and found that it
+does. **PATCH-093 refines rather than invalidates PATCH-091** — it
+does not retroactively prove 091's observation was wrong; it adds
+the missing timing dimension that 091 did not probe for.
+
+**Likely explanation — bound as a HYPOTHESIS only, not proven:**
+`immediatelyRender: false` on the TipTap editor, the fresh
+conditional `EditorContent` mount on every edit-entry, and the
+resulting latency between the click and a reliably queryable editor
+are PLAUSIBLE contributing factors to the observed delay between
+the earliest checkpoints and the later ones where the editor became
+present. This patch does **NOT** claim transformed-canvas
+(pan/zoom ancestor) incompatibility as proven — that theory remains
+an open, unconfirmed hypothesis from the PATCH-093 census, not a
+runtime finding of this patch.
+
+**Contrast-layout ruling:** `RowCanvas` (the named contrast owner)
+was not reachable through the existing authorized drawing harness;
+reaching it would have required routing, fixture, harness, or
+production changes, none of which were authorized or used. No
+contrast environment was fabricated. **Contrast result:
+`not-reachable-through-existing-harness`**.
+
+**Source/runtime separation:**
+- *Runtime:* visible Add + Send created the self-owned comment; Edit
+  visible and enabled; real click; editor mounted inside the target
+  row; `contentEditableCount`/`proseMirrorCount` both reached 1 and
+  remained so; focus shifted later within the bounded window; zero
+  comment-bearing writes during edit entry; Escape preserved the
+  original text; persisted/reload state unchanged.
+- *Source:* `CommentRow`'s ownership gate (`canEdit`); Edit toggles
+  `isEditing`; `EditorContent` mounts conditionally inside the
+  `isEditing` branch; no dedicated Save/Cancel buttons exist; Enter
+  saves, Escape cancels (per source); `CommentEditor.tsx` (a
+  SEPARATE modal, not this inline row UI) also uses TipTap with
+  `immediatelyRender:false`; `stopPropagation` exists on the editing
+  wrapper; `preventDefault` absence and transformed-ancestor
+  interaction theories remain UNCONFIRMED hypotheses, not proven
+  causes.
+
+**Architecture preservation (confirmed):** diagnosis-only; one new
+spec; zero production changes; `CommentRow.tsx`/`CommentEditor.tsx`/
+`EmbeddedCommentList.tsx`/`DrawingLayout.tsx` byte-unchanged; no
+comment-persistence-path change (PATCH-092's strict channel
+untouched); no harness/config/package/lockfile change; no
+`page.route` or network mutation; no hidden handler; no synthetic
+event; no failure injection; zero `canvas_comments` access; no auth
+material captured in any wire evidence.
+
+**Final verification totals:**
+- Focused PATCH-093: dependency mode 2 passed; `--no-deps` 1 passed;
+  credential-off (`E2E_SKIP_CREDENTIALS=1`) 1 skipped; JSON reporter
+  1 passed (output removed); three additional stable
+  dependency-backed runs, all passed. Classification stable at
+  `editor-mounts-and-is-drivable`; editor location stable at
+  `inside-comment-row`; contrast ruling stable at
+  `not-reachable-through-existing-harness`; zero cleanup residue in
+  every run.
+- Carried 092: passed, strict comment persistence intact.
+- Carried 091: passed; `mixed-comment-state` preserved; EDIT
+  remains `action-not-drivable` under its OWN original narrower
+  probe (091's spec file and evidence are unchanged and were not
+  weakened); self-owned ownership evidence remains valid.
+- Carried 090: passed.
+- Carried 089: passed; `mixed-drop-state` preserved.
+- PATCH-088 runner: 14/14 groups, 14/14 specs, all passed, 0
+  auth-expiry incidents, 0 non-signature failures.
+- Deterministic: `git diff --check` passed; `tsc --noEmit` passed;
+  `check:boundaries` passed; slideOrder 7/1; clonedPostMetadata 9/1;
+  focused drawing 59/2; full Vitest 448/43; `npm run verify` passed;
+  build passed.
+- Cleanup: all PATCH-093 prefixes reached zero (boards 0, padlets 0,
+  canvasLines 0) in every run; no test-created comments remained;
+  generated `test-results/.last-run.json` removed before commit; no
+  other artifacts remained; ports 3000/4000 free; no repo-owned
+  runtime process active at closure.
+
+**Reviewer operational note (disclosed, not a product or runner
+finding):** during the independent review, an `ERR_CONNECTION_REFUSED`
+occurred on the reviewer's first attempt at the PATCH-088 grouped
+runner because the reviewer had stopped the dev server before
+invoking the runner. This is NOT an application signature, NOT a
+runner signature, and is explicitly NOT evidence for any retry
+hardening — it was operator/process-management error on the
+reviewer's part, corrected by restarting the dev server, after which
+the runner passed 14/14 cleanly. Recorded here for transparency
+only; it does not affect this patch's evidence or verdict.
+
+**45/45 fences:** unchanged from PATCH-093's own authoring
+(unaffected by this patch's landing, since the fence list does not
+include the new spec itself — it is the allowed file). Verified
+again at closure — 0 mismatches.
+
+**Product interpretation correction (bind):** PATCH-093 disproves
+the earlier PROVISIONAL assumption that the DrawingLayout inline
+comment editor was categorically non-drivable. The editor mounts and
+is drivable; the earlier PATCH-091 finding was a genuine result of
+that test's own narrower probe timing, not a false observation. **No
+production EDIT-mount fix is currently justified** — there is no
+longer a demonstrated defect in mounting/drivability to fix. A
+TipTap, transform-ancestor, event-propagation, or CSS fix is NOT
+authorized without a separate, newly-proven user-visible failure. A
+future edit-**save**-persistence characterization remains warranted
+and is NOT yet covered: PATCH-093 only entered edit mode and
+cancelled via Escape — it never changed text and pressed Enter to
+save, so whether a genuine save round-trips correctly through
+PATCH-092's strict channel is still unverified. This gap is
+addressed by the fresh census below.
+
+**Governance commit for this closure:** see CURRENT_TASK.md log
+entry dated 2026-07-20 (PATCH-093 closure + PATCH-094 authorization).
