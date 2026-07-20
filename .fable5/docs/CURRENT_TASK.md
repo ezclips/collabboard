@@ -361,6 +361,62 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-21** — **PATCH-095 DONE — DESIGN COMPLETE / IMPLEMENTATION
+  BLOCKED (governance commit `75fd669…`) + fresh census + PATCH-096
+  AUTHORIZED (FIX, bounded PATCH-088 setup-close runner hardening)**.
+  **095 closure:** zero code/spec/production files were ever touched
+  by 095 — no implementer candidate existed, so no independent code
+  review was performed or required; the governance commit itself was
+  the entire delivered scope. The atomic move remains exactly as
+  non-atomic and inaccessible as before 095 — this is NOT a behavior
+  change. **Blocker classification reaffirmed: F, multiple** — (1) no
+  trustworthy migration baseline (`supabase/BASELINE.md` documents
+  `supabase/migrations/` does NOT rebuild the live DB; reconciliation
+  blocked on Docker + DB password); (2) no usable local DB test
+  environment (Docker engine confirmed not running again at this
+  census; no `config.toml`); (3) no confirmed deployment owner/
+  procedure; (4) no CI validation; (5) the machine-local gitignored
+  `supabase/.temp/linked-project.json` remains a risk factor, not
+  approved tooling; (6) the `supabase` CLI is not a pinned project
+  dependency. Implementation stays blocked until the owner supplies
+  all nine prerequisites (baseline reconciliation, migration
+  location — already satisfied, DB credential process, working local
+  environment or approved alternative, named deployment owner,
+  documented deploy command, documented rollback, CI/repeatable
+  validation, SECURITY INVOKER confirmation). The full
+  `move_child_between_containers` RPC contract, integration sequence,
+  and test-layer blocked/buildable split are preserved unchanged in
+  095 §19. **Fresh census (22 items):** with comment work (091-094)
+  and move design (095) both closed, the PATCH-088 genuine setup
+  browser/context/page-close signature — now confirmed via read-only
+  runner inspection to have ZERO existing detection logic in
+  `e2e/run-carried-groups.mjs` (only the unrelated 4-part
+  `AUTH_EXPIRY_SIGNATURE` exists) and to currently abort the ENTIRE
+  14-group run on any occurrence — is precisely and safely
+  classifiable: setup-project-only + exact `Target page, context or
+  browser has been closed` text + absence of any `[characterization]`
+  line (proving the product spec never started) + explicit exclusion
+  of `ERR_CONNECTION_REFUSED` and the existing auth-expiry signature.
+  Ranked **P0**, selected for PATCH-096. Comment edge-cases
+  (Shift+Enter, empty/whitespace edit, blur-without-Enter, rapid
+  Enter) assessed and NOT authorized — no product-contract requirement
+  exists and all are smaller than runner hardening. Atomic move
+  implementation reaffirmed blocked, unchanged, no new owner evidence.
+  **096 authorized (FIX, runner-only):** ONE file,
+  `e2e/run-carried-groups.mjs` — adds one new signature constant/
+  detection function (checked only after the existing, unweakened
+  auth-expiry check fails), one new bounded one-retry branch, and two
+  new separately-tracked counters (`setupCloseIncidents`,
+  `recoveredSetupCloseIncidents`) — auth-expiry and setup-close totals
+  are never merged. `ERR_CONNECTION_REFUSED` is explicitly and
+  permanently excluded from ever triggering this retry. No production
+  file, test spec, `playwright.config.ts`, or `auth.setup.ts` change
+  authorized. Fence set: 47 (095's) minus the now-allowed runner file
+  = **46/46**, raw/unique/header/hard-stop/final-report counts all
+  verified to agree at 46 before authorization. Carried 089-095
+  evidence unweakened. Commit message bound:
+  `fix(e2e): bound one retry for genuine setup browser/context-close failures (PATCH-096)`.
+
 - **2026-07-20** — **PATCH-094 DONE (commit
   `aee4322aa36dcaac7a3b28443a21e19285e6db60`, independent read-only
   review PASS, spec blob `7e7d8e0…`, 891 lines) + fresh census +

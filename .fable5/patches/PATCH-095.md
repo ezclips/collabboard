@@ -1,13 +1,19 @@
 # PATCH-095 — Atomic Cross-Container Move: Design Contract (No Code)
 
-**Status:** **DESIGN AUTHORIZED — GOVERNANCE-ONLY, NO IMPLEMENTATION**.
-This patch binds an exact SQL/RPC contract, invariant, and repository/
-UI integration plan for a FUTURE implementation patch. It authorizes
-ZERO new files, ZERO production changes, and ZERO migration code.
-Nothing in this patch may be executed until a successor
-implementation patch is separately authorized, which itself requires
-the owner to first resolve the migration/deployment blockers
-documented in §9.
+**Status:** **DONE — DESIGN COMPLETE / IMPLEMENTATION BLOCKED**
+(governance commit `75fd669189e62dcc56aeda9d1c1ba87fcec54194`). This
+patch bound an exact SQL/RPC contract, invariant, and repository/UI
+integration plan for a FUTURE implementation patch. It authorized
+ZERO new files, ZERO production changes, and ZERO migration code, and
+delivered exactly that — no code or test candidate ever existed for
+this patch, so no independent code review was performed or required;
+the governance commit itself completed the entire authorized scope.
+**This patch must NOT be presented as having delivered atomic move
+behavior** — the move remains exactly as non-atomic and
+affordance-inaccessible as it was before this patch. A FUTURE,
+separately-numbered and separately-authorized implementation patch
+must resolve the migration/deployment blockers in §9 before any
+code, migration, or RPC may be authored.
 
 **Implementer:** none — this patch has no code deliverable.
 **Reviewer:** independent read-only reviewer verifies internal
@@ -564,3 +570,105 @@ Confirmation that zero code/spec/production files changed; the exact
 §9 blocker classification and evidence; the §7/§8 contract summary;
 47/47 fence result; explicit confirmation that no implementation was
 authorized or performed; confirmation `PATCH-096.md` is absent.
+
+## 19. Closure record (2026-07-21)
+
+**Landed:** governance commit
+`75fd669189e62dcc56aeda9d1c1ba87fcec54194`
+(`docs(fable): close PATCH-094 and authorize PATCH-095`), HEAD ==
+origin/main at closure time. Zero production, test, spec, harness,
+config, or migration files were touched — confirmed again at closure
+via `git diff --name-only` against the authoring HEAD, which shows
+only `.fable5/docs/CURRENT_TASK.md` and `.fable5/patches/PATCH-095.md`
+itself. **No implementation candidate ever existed for this patch,
+so no independent code-review PASS was required or performed** — the
+governance commit that authored this document's §4/§7/§8 contract
+WAS the entire authorized and delivered scope. **The atomic move
+remains exactly as non-atomic, and the drag-handle affordance remains
+exactly as inaccessible, as before this patch** — this closure record
+explicitly does NOT claim any behavior change occurred.
+
+**Blocker classification (reaffirmed, bind): F — multiple blockers.**
+Concrete, individually-verified blockers as of this closure:
+
+1. **No trustworthy migration baseline** — `supabase/BASELINE.md`
+   states `supabase/migrations/` does NOT reproduce the live
+   database; historical SQL-editor changes created schema drift; the
+   repository's own migrations cannot currently be treated as
+   authoritative.
+2. **No usable local database test environment** — Docker Desktop's
+   engine was confirmed NOT RUNNING (re-verified at authoring); no
+   `supabase/config.toml` exists; local migration/RPC verification
+   cannot currently be performed.
+3. **No confirmed deployment owner or procedure** — no committed
+   documentation establishes who applies database changes or through
+   what approved production deployment flow; no safe authorization
+   exists for direct remote deployment.
+4. **No CI validation** — no GitHub Actions workflow rebuilds the
+   schema, validates migrations, or runs a database-contract test.
+5. **Remote-link risk** — the machine-local, gitignored
+   `supabase/.temp/linked-project.json` exists (confirmed untracked
+   via `git ls-files`) but is NOT committed tooling and NOT an
+   approved deployment contract; it must never be used to bypass the
+   missing safeguards above.
+6. **Tooling not pinned** — the `supabase` CLI is not a project
+   dependency; it resolves via ad-hoc `npx`, not a reproducible,
+   version-pinned toolchain.
+
+**Implementation remains blocked** until the repository owner
+supplies explicit, verifiable evidence for ALL of: an authoritative
+schema baseline (BASELINE.md's reconciliation completed); a confirmed
+migration authoring location (already exists — `supabase/migrations/`
+— this is the one prerequisite already satisfied); a database
+password or an approved credential process; a working local
+Supabase/Docker environment, or an explicit owner-approved
+alternative; a named deployment owner; a documented deployment
+command/process; a documented rollback procedure; a CI or other
+repeatable validation mechanism; and confirmation that SECURITY
+INVOKER is supported and intended for this function (the design
+default per §7, not yet tested against a live environment).
+
+**Preserved future contract (bind, unchanged from §7/§8):** the
+`move_child_between_containers` RPC — same-board operation only;
+`p_child_id`/`p_source_parent_id`/`p_destination_parent_id`
+arguments; conflict check against the child's actual current parent
+under row lock; single-transaction atomicity with full rollback on
+any failure; deterministic lock ordering (sorted by id) to prevent
+deadlocks; source removal + destination append exactly once + child
+`parentId` update, all in one commit; same-parent no-op;
+duplicate-parent and stale-source prevention; unrelated ordering and
+metadata preservation; rapid/repeated-move conflict-vs-idempotent
+distinction (already-applied → success no-op; genuinely stale →
+thrown error); SECURITY INVOKER (reaffirmed, existing `padlets` RLS
+already scopes access via `auth.uid()`); throwing-only error
+contract, no Result mixing; NO client-side compensation (unlike 090's
+create-and-append case — this contract is atomic at the database
+layer). The integration sequence for a future implementation patch
+remains, in order: (1) migration/RPC; (2) verified database
+contract/types if needed; (3) repository adapter
+(`postsRepository.moveChildBetweenContainers`); (4) hook/`useCanvasData`
+boundary; (5) `CanvasClient` strict callback; (6) `DrawingLayout`'s
+`onDropExistingPadlet` rewire (replacing, not exposing alongside, the
+current two-write sequence); (7) database-level contract test
+(BLOCKED today); (8) repository/integration test (buildable today,
+NOT authorized by this patch); (9) E2E move regression (BLOCKED
+today); (10) ONLY after (1)-(9) are proven safe: the dedicated
+drag-handle affordance. **The existing inaccessible three-write move
+handler (`DrawingLayout.tsx` ~522/531) must NOT be exposed** until
+this sequence completes.
+
+**Test-layer status at closure (bind, unchanged):**
+- *Blocked today:* database migration execution; RPC transaction
+  test; local database integration test; production deployment
+  verification.
+- *Potentially buildable only after the database contract exists:*
+  repository unit test; adapter contract test; E2E cross-container
+  move regression.
+- No placeholder test was created or is authorized that assumes a
+  nonexistent RPC.
+
+**47/47 fences:** reaffirmed at closure — 0 mismatches, no code drift
+occurred during this patch's lifetime.
+
+**Governance commit for this closure:** see CURRENT_TASK.md log entry
+dated 2026-07-21 (PATCH-095 closure + PATCH-096 authorization).
