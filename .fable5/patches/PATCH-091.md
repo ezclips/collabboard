@@ -1,7 +1,10 @@
 # PATCH-091 — Drawing-Layout Comment Persistence Diagnosis
 
-**Status:** **DIAGNOSIS AUTHORIZED** (diagnosis-only — NO
-production fix in this patch). ONE new characterization spec. NO
+**Status:** **DONE** (2026-07-20, commit
+`e4ac7e63b114b8ba5289cab56e7adbcd0e4d8cdb`, independent read-only
+review history: initial PASS WITH REQUIRED CHANGES → corrected
+focused re-review PASS; closure record §12). Diagnosis-only — NO
+production fix landed. ONE new characterization spec. NO
 production change, NO harness change, NO config change, NO
 failure injection, NO instrumentation seam.
 **Implementer:** GPT-5.5. **Reviewer:** independent read-only
@@ -294,3 +297,144 @@ across thirty-eight prefixes; explicit confirmations (no
 production/harness/config change, no injection, no seam, no auth
 capture, no hidden handlers, no synthetic events); commit hash +
 push status after PASS.
+
+---
+
+## 12. Closure record (CTO, 2026-07-20)
+
+**Landed:** commit `e4ac7e63b114b8ba5289cab56e7adbcd0e4d8cdb`
+(`test(e2e): characterize drawing comment persistence (PATCH-091)`),
+exactly one new file
+`e2e/characterization/drawing-comment-persistence.spec.ts` (870
+lines), landed blob `c8b32bc2ba7c8b34b8e5a8279a693e0736411bcf`.
+
+### Diagnosis target (recorded)
+
+`DrawingLayout.tsx`'s `handleUpdateChildComments` (~1959–1964)
+routes every comment ADD/EDIT/REMOVE through the NON-STRICT,
+UN-AWAITED `onUpdatePadlet` channel: no local catch observes
+failure, no visible error path exists — local state can appear
+updated while a persistence failure silently rolls back (or is
+swallowed deeper in the hook). Runtime store shape and UI
+drivability were unproven before this diagnosis.
+`canvas_comments` stayed entirely out of scope throughout.
+
+### Authoritative store ruling (recorded)
+
+`DrawingLayout` reads and writes `metadata.comments`;
+`detachedComments` stayed empty and non-divergent in every driven
+flow; no `canvas_comments` query or mutation occurred anywhere;
+persisted comment ids stayed stable where observed; `userId`,
+`userName`, and `timestamp` fields were present on every measured
+row.
+
+### Review history (recorded)
+
+**Initial candidate** (blob `6e894d10948f9aab019f7e253360dc32822e1bb4`,
+never committed): Flow B seeded its EDIT target with
+`userId: 'anonymous'`; `CommentRow.tsx` gates the Edit button on
+`comment.userId === currentUserId` (always the real authenticated
+user, never `'anonymous'`) — so the initial "action-not-drivable"
+result tested foreign-comment permissions, not genuine self-owned
+editability. Initial independent verdict: **PASS WITH REQUIRED
+CHANGES**.
+
+**Correction** (landed blob `c8b32bc2ba7c8b34b8e5a8279a693e0736411bcf`):
+Flow B now creates its EDIT target through one real visible ADD
+action; the resulting comment's self-ownership is proven via
+`hasCurrentUserId` (derived from `supabase.auth.getUser()`, not
+hardcoded); the visible Edit button reports enabled; the actual
+`editWireCapture.finish()` result is retained (no more hardcoded
+`wireSequence: []`); the not-drivable path now asserts, from real
+passive evidence, that zero comment-bearing writes occurred.
+Focused re-review verdict: **PASS**.
+
+### Final runtime findings (recorded)
+
+- **Flow A — ADD:** drivable; local count increased; `metadata.comments`
+  persisted the new comment; `detachedComments` empty; `PATCH`→204;
+  reload preserved it; no lost write, no divergence.
+- **Flow B setup ADD:** drivable; created the self-owned edit
+  target; `hasCurrentUserId: true`, proven from persisted data.
+- **Flow B — EDIT:** visible Edit control existed and was ENABLED
+  (ownership no longer the blocker); real click performed; the
+  TipTap/ProseMirror editor surface did not appear within the
+  observed window — **action-not-drivable for a genuine UI
+  reason**, no longer a permission artifact. Actual wire capture
+  retained one incidental `PATCH` touching the target padlet with
+  NEITHER `comments` NOR `detachedComments` present — zero
+  relevant comment-bearing writes occurred (asserted, not
+  assumed). Persisted/reload state unchanged; no lost-write or
+  divergence claim.
+- **Flow B — REMOVE:** drivable; removed the intended self-owned
+  comment; `metadata.comments` persisted the removal;
+  `detachedComments` empty; `PATCH`→204; reload preserved deletion;
+  no unrelated comment touched.
+- **Flow C — RAPID:** two real ADD actions driven; both persisted;
+  two comment-bearing `PATCH`es→204/204; reload preserved both; no
+  stale overwrite, no lost write, no product-action retry.
+
+### Passive wire findings (recorded)
+
+Only `/rest/v1/padlets` writes observed. ADD: comment-bearing
+`PATCH`→204. REMOVE: comment-bearing `PATCH`→204. RAPID: two
+comment-bearing `PATCH`es→204/204. EDIT: one incidental
+relevant-padlet `PATCH` with `commentsFieldPresent: false` and
+`detachedCommentsFieldPresent: false` — zero comment-bearing
+writes. No headers/cookies/credentials/tokens/auth-state/full
+payloads captured; no request/response modification.
+
+### Final classification: `mixed-comment-state`
+
+Meaning: ADD persisted consistently; REMOVE persisted
+consistently; RAPID preserved both writes; EDIT was genuinely
+action-not-drivable despite an enabled, self-owned Edit control;
+no runtime lost-write finding; no stable comments/detachedComments
+divergence observed. Computed from the corrected evidence, not
+forced to match the prior (pre-correction) value.
+
+### Source-derived findings (recorded, kept separate from runtime)
+
+`DrawingLayout`: `handleUpdateChildComments` uses non-strict
+`onUpdatePadlet`, the call is not awaited, no local catch exists,
+no visible failure path exists. Contrast handlers (CanvasClient
+~6594/6676/6756): result-checked, gate local success behavior,
+emit console/toast on failure — untouched. Static findings were
+not converted into a runtime loss claim anywhere in the accepted
+evidence.
+
+### Final verification (accepted totals)
+
+Focused: dependency **2 passed** / `--no-deps` **1 passed** /
+credential-off **2 skipped**; JSON reporter 2 passed (output
+removed); three corrected stable dependency-backed runs. Carried:
+PATCH-090 **passed**; PATCH-089 **passed**, `mixed-drop-state` and
+Flow B `action-not-drivable` both preserved. PATCH-088 runner
+(final focused re-review run): **14/14 groups, 14/14 specs, first
+try, 0 auth-expiry incidents, 0 non-signature failures**. Separately
+recorded: the earlier full review's independent carried-runner
+execution had ONE transient first-run
+browser/context-closed-during-setup non-signature failure,
+correctly NOT classified as auth-expiry (missing the bound
+signature), followed by a clean full retry — recorded as
+environmental runner flakiness for future runner-hardening
+consideration, not a product regression. Deterministic:
+diff-check, tsc, boundaries, slideOrder **7/1**, clonedPostMetadata
+**9/1**, focused drawing **59/2**, full Vitest **448/43**, verify,
+build — all green.
+
+### Cleanup (recorded)
+
+All PATCH-091 A/B/C prefixes reached boards 0 / padlets 0 /
+canvas lines 0 in every accepted run; no test-created
+comment-bearing rows remained; `test-results/.last-run.json`
+confirmed ignored/generated and removed before commit; no
+artifacts remain; ports 3000/4000 free; no repo-owned runtime
+process.
+
+### Exclusions preserved
+
+No production change; no config change; no harness change; no
+existing-spec change; no package/lockfile change; no hidden-handler
+invocation; no synthetic event bypass; no failure injection; no
+`canvas_comments` access; no auth-material capture.

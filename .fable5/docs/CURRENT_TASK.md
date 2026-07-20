@@ -361,6 +361,60 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-20** — **PATCH-091 DONE (commit
+  `e4ac7e63b114b8ba5289cab56e7adbcd0e4d8cdb`, independent review
+  history: initial PASS WITH REQUIRED CHANGES → corrected focused
+  re-review PASS, landed spec `c8b32bc…`, 870 lines) + fresh census
+  + PATCH-092 AUTHORIZED (FIX, strict comment persistence) + move
+  sequencing REVISED**. **091 final:** `handleUpdateChildComments`
+  (non-strict, un-awaited `onUpdatePadlet`) statically proven +
+  runtime characterized. Store ruling: `metadata.comments`
+  authoritative for the drawing comment-post UI; `detachedComments`
+  empty/non-divergent; `canvas_comments` untouched. Review history:
+  initial Flow B seeded an anonymous-owned EDIT target (foreign-
+  ownership artifact, `CommentRow.tsx` gates Edit on
+  `comment.userId === currentUserId`) → corrected to create the
+  EDIT target via a real ADD + `hasCurrentUserId` proof + retained
+  actual wire capture with an explicit zero-comment-write assertion
+  for the not-drivable path. Corrected result: ADD/REMOVE/RAPID all
+  drivable and consistent; EDIT stays `action-not-drivable` for a
+  **genuine** UI reason (enabled button, editor surface doesn't
+  appear) — no longer a permission artifact. Final classification
+  `mixed-comment-state`. Gates: 2/1/2 + 3 stable runs; 090 passed;
+  089 passed (`mixed-drop-state` + Flow B `action-not-drivable`
+  preserved); runner 14/14 clean (one transient browser/context-
+  close non-signature failure was observed in an earlier full
+  review pass, correctly not misclassified as auth-expiry,
+  resolved by retry — recorded as environmental flakiness, not
+  actioned); 7/1, 9/1, 59/2, 448/43, verify+build green; cleanup
+  zero. **Census/move-sequencing revision:** the 090-closure
+  ruling (`092 = atomic move persistence, 093 = drag handle +
+  regression`) is REVISED — this repo has no local Supabase CLI
+  stack, no `supabase/config.toml`, no migration test/deploy path,
+  so MODEL C (atomic RPC) is not implementation-ready this
+  session; move-atomicity is deferred to a dedicated design patch
+  once the owner confirms a deployment plan (RLS ruling recorded:
+  SECURITY INVOKER preferred, existing `padlets` UPDATE RLS
+  already scopes access; throwing-channel contract). PATCH-093
+  stays reserved for the drag handle + move regression, contingent
+  on that design patch landing first. **092 authorized (FIX)
+  instead:** rewire `handleUpdateChildComments` to
+  `onUpdatePadletStrict` (already mounted since 086/090), await
+  it, confirm-then-show semantics (086/087/090 precedent), exactly
+  one visible error, comments/detachedComments routing and the
+  EDIT-UI defect (ranked separately as a diagnosis-first candidate,
+  root cause not deterministically isolated — TipTap
+  `immediatelyRender:false` + conditional `EditorContent` mount +
+  canvas-transform ancestor are plausible contributing factors, not
+  confirmed) both untouched. New spec
+  `drawing-comment-strict-persistence.spec.ts` (prefixes
+  `patch-064-harness-patch-092-comment-a-/-b-`), Flows A (confirm-
+  then-show tripwire)/B (rapid)/C (source inspection, no
+  injection)/D (cleanup). Totals bound: focused totals TBD by
+  implementer per §3; 40/40 fences (091 set − DrawingLayout→allowed
+  + 091 spec); carried 089/090/091 unchanged. Commit message bound:
+  `fix(drawing): strict comment persistence with visible failure path (PATCH-092)`.
+
 - **2026-07-20** — **PATCH-090 DONE (commit
   `637ab5dc82b2c4965520eca7b4c3ab3d4cbbfd44`, independent read-only
   review PASS, DrawingLayout `965fcd7…`, new spec `07ec5ad…`) +
