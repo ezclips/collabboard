@@ -361,6 +361,67 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-20** — **PATCH-092 DONE (commit
+  `5f93ed54b7a643b17f0ffa849e873d71c07d1f85`, independent read-only
+  review PASS, DrawingLayout `ad4e8fd…`, new spec `f57b46c…`, 631
+  lines) + fresh census + PATCH-093 AUTHORIZED (DIAGNOSIS, comment
+  EDIT UI defect)**. **092 final:** `handleUpdateChildComments`
+  rewired to the strict, awaited `onUpdatePadletStrict` channel with
+  exactly one `console.error('Failed to update comment', error)`
+  catch; confirm-then-show semantics proven (source-level guarantee
+  via the strict channel's own post-success merge, not just timing
+  inference); ADD/REMOVE/RAPID all persist consistently through
+  `metadata.comments`; `detachedComments` stayed empty; zero
+  duplicates, zero lost writes, zero visible errors on success;
+  failure path verified by source inspection only (no injection
+  seam authorized). Move handler, `createAndLinkChildToContainer`,
+  085/086/087/090 regions, and the 091 EDIT `action-not-drivable`
+  diagnosis all confirmed byte-unchanged. Gates: 2/1/2 + 3 stable
+  runs; 091 passed (`mixed-comment-state` + EDIT `action-not-drivable`
+  preserved); 090 passed; 089 passed (`mixed-drop-state` + Flow B
+  `action-not-drivable` preserved); runner 14/14 clean (one more
+  transient browser/context-close non-signature setup failure was
+  observed on the review's first attempt — third occurrence across
+  090/091/092 reviews — correctly not misclassified as auth-expiry,
+  resolved by retry, now re-ranked "ready for a narrowly-scoped
+  hardening patch" rather than "insufficient signal," see 093 §9);
+  7/1, 9/1, 59/2, 448/43, verify+build green; cleanup zero. **Fresh
+  census (26 items):** comment EDIT UI defect ranked **P0** — the
+  root cause is still NOT deterministically isolated after a deeper
+  read-only inspection of `CommentRow.tsx`/`CommentEditor.tsx`/
+  `EmbeddedCommentList.tsx` (new evidence: `EmbeddedCommentList` is
+  ALSO used by `RowCanvas.tsx`, a different canvas system without
+  DrawingLayout's pan/zoom transform ancestor — supports but does
+  not confirm a DrawingLayout-specific mechanism; plausible
+  contributing factors remain the conditional `EditorContent`
+  mount + `immediatelyRender:false` + unverified `setTimeout`
+  timing, and a `stopPropagation`-without-`preventDefault` pattern
+  that would not stop a capture-phase ancestor listener). Move-
+  atomicity design (P1) revalidated unchanged and still correctly
+  blocked on an owner-confirmed migration/deployment plan (repo
+  still has no `supabase/config.toml`/local CLI/migration test
+  path); PATCH-088 runner flakiness re-ranked from "insufficient
+  signal" to "ready" after a third occurrence, but not actioned
+  this patch. **093 authorized (DIAGNOSIS-only):** ONE new spec
+  `drawing-comment-edit.spec.ts` (prefixes
+  `patch-064-harness-patch-093-comment-edit-a-/-b-`), Flow A
+  (self-owned real-UI EDIT drivability observation, no hidden
+  handler), Flow B (contrast layout if reachable through the
+  existing harness only — no fabricated surface), Flow C (source
+  inspection, no instrumentation seam), Flow D (cleanup); bound
+  classifications: `editor-mounts-and-is-drivable` |
+  `edit-state-set-but-editor-not-mounted` |
+  `editor-mounted-outside-expected-subtree` |
+  `edit-state-immediately-reset` | `drawing-layout-only-edit-defect`
+  | `global-comment-edit-defect` | `action-not-drivable` |
+  `mixed-edit-state`. A production fix (Option B) is explicitly NOT
+  authorized until this diagnosis isolates a deterministic cause.
+  Totals bound: focused totals TBD by implementer per §4; 43/43
+  fences (092 set + `CommentRow.tsx`/`CommentEditor.tsx`/
+  `EmbeddedCommentList.tsx` newly fenced); carried 089/090/091/092
+  unchanged. Commit message bound:
+  `test(e2e): characterize drawing comment EDIT UI defect (PATCH-093)`.
+
 - **2026-07-20** — **PATCH-091 DONE (commit
   `e4ac7e63b114b8ba5289cab56e7adbcd0e4d8cdb`, independent review
   history: initial PASS WITH REQUIRED CHANGES → corrected focused

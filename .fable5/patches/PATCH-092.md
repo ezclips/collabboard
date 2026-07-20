@@ -1,11 +1,12 @@
 # PATCH-092 — Strict Drawing-Layout Comment Persistence
 
-**Status:** **FIX AUTHORIZED** (production fix — the drawing-layout
-comment ADD/EDIT/REMOVE persistence channel ONLY; existing-card
-MOVE atomicity is OUT OF SCOPE and its sequencing is REVISED at
-this closure, see §0; the comment EDIT UI-not-drivable defect is
-OUT OF SCOPE, see §0). ONE production file + ONE new regression
-spec.
+**Status:** **DONE** (commit `5f93ed54b7a643b17f0ffa849e873d71c07d1f85`,
+independent read-only review PASS). Production fix — the
+drawing-layout comment ADD/EDIT/REMOVE persistence channel ONLY;
+existing-card MOVE atomicity remained OUT OF SCOPE and its
+sequencing stayed REVISED per §0; the comment EDIT UI-not-drivable
+defect remained OUT OF SCOPE per §0. ONE production file + ONE new
+regression spec, exactly as bound.
 **Implementer:** GPT-5.5. **Reviewer:** independent read-only
 reviewer (explicit PASS required before commit).
 **Closure:** Fable (CTO) after landing.
@@ -393,3 +394,142 @@ confirmations (no move-path edit, no EDIT-UI-defect edit, no
 CanvasClient/hook/config/harness/migration change, no injection,
 no retry/timer, single visible error path); commit hash + push
 status after PASS.
+
+## 13. Closure record (2026-07-20)
+
+**Landed:** commit `5f93ed54b7a643b17f0ffa849e873d71c07d1f85`
+(`fix(drawing): strict comment persistence with visible failure
+path (PATCH-092)`), HEAD == origin/main at closure time. Two
+files, exactly as bound: `components/collabboard/canvas/layouts/DrawingLayout.tsx`
+(blob `ad4e8fd56fee633cd6322352f8a8d6310ca7e823`) and NEW
+`e2e/characterization/drawing-comment-strict-persistence.spec.ts`
+(blob `f57b46ccf913244f85cbc206f70f6da34d439db6`, 631 lines).
+Independent read-only review: **PASS**, zero blocking or
+non-blocking findings.
+
+**Defect (proven at 091, fixed here):** `handleUpdateChildComments`
+(~1959–1964) called the NON-STRICT, un-awaited `onUpdatePadlet` for
+every comment ADD/EDIT/REMOVE; the underlying channel applied the
+metadata change to local state OPTIMISTICALLY before the network
+call resolved, then silently rolled back on a resolved repository
+failure or logged-and-rolled-back on a thrown failure — the caller
+had zero visibility either way. No local catch existed; no visible
+failure path existed; local state could appear updated without
+confirmed persistence.
+
+**Fix landed:** `handleUpdateChildComments` is now `async`; it
+calls `await onUpdatePadletStrict(childId, { metadata:
+{ ...(child.metadata as any), [field]: comments } })` inside a
+`try`; the non-strict `onUpdatePadlet` is no longer used in this
+handler; `useCallback` deps moved from `[onUpdatePadlet]` to
+`[onUpdatePadletStrict]`. Metadata routing (`options?.field ||
+'comments'`) and the metadata-spread-plus-one-field-replacement
+payload shape are byte-unchanged. No manual local merge was
+introduced — local settlement remains owned entirely by the strict
+channel's own post-success `setPadlets` merge (086/090
+convention). No Result contract was introduced; the thrown-error
+convention stays consistent with every other DrawingLayout strict
+call site.
+
+**Failure behavior (bind, confirmed by source inspection — no
+injection seam authorized or used):** a strict rejection enters
+exactly ONE narrow catch; exact message `Failed to update comment`;
+no duplicate caller logging; no retry; no timer; no compensation
+(comments is a plain full-array field replacement — no created row
+to roll back, unlike 090's create-and-append case); no optimistic
+local settlement; no swallowed rejection; on failure the comments
+array remains at the last confirmed state (pre-change list stays
+visible, not a guessed post-change one).
+
+**Success behavior (runtime-proven):** real visible ADD persisted
+through `metadata.comments` (PATCH→204); real visible REMOVE
+persisted the same way (PATCH→204); two rapid visible ADDs both
+persisted, order preserved; `detachedComments` remained empty
+throughout; reload matched the persisted state in every run; zero
+duplicate comments; zero lost updates; zero visible errors on any
+success path.
+
+**Confirm-then-show methodology (bind):** runtime evidence was
+consistent with confirm-then-show — the regression spec observed
+the persistence response/readback before its local-settlement
+assertion, and did not make an unsupported absolute claim that
+local DOM mutation could not have preceded network confirmation.
+The strict channel's source path (`onUpdatePadletStrict` →
+CanvasClient's `handleDrawingLayoutUpdatePadletStrict` →
+`updatePostFieldsOrThrow` then `setPadlets` only on success) proves
+local merge occurs only after successful persistence — this is a
+source-level guarantee, not merely an inferred one from timing
+alone.
+
+**Source/runtime separation:**
+- *Runtime:* ADD PATCH→204; REMOVE PATCH→204; rapid ADD
+  PATCHes→204/204; persisted readback matched in every case;
+  reload matched; `detachedComments` remained empty throughout.
+- *Source:* handler is `async`; `onUpdatePadletStrict` is awaited;
+  the non-strict channel is absent from the handler; exactly one
+  catch/error path exists; no manual local settlement exists
+  outside the strict channel's own merge; no retry/timer; metadata
+  routing preserved byte-for-byte; move handler and EDIT UI
+  untouched.
+
+**Preserved behavior (confirmed unchanged):** `onDropExistingPadlet`
+(move handler) byte-kept, no move affordance introduced; no
+migration/RPC/backend surface added; `createAndLinkChildToContainer`
+and its two 090 call sites unchanged; PATCH-085 movement logic
+intact; PATCH-086 deep-clone and compensation intact; PATCH-087
+strict drawing save intact; PATCH-090 atomic child create-and-link
+intact; PATCH-091 diagnosis intact — EDIT remains
+`action-not-drivable` for the same genuine (non-artifactual) UI
+reason. `EmbeddedCommentList.tsx`, `CommentRow.tsx`,
+`CommentEditor.tsx` byte-unchanged. `CanvasClient.tsx`, hooks,
+repositories, config, package/lockfiles byte-unchanged.
+`canvas_comments` remained fully out of scope (zero references in
+either changed file).
+
+**Final verification totals:**
+- Focused PATCH-092: dependency mode 2 passed; `--no-deps` 1
+  passed; credential-off 2 skipped; JSON reporter 2 passed (output
+  removed); three additional stable dependency-backed runs, all
+  passed.
+- Carried 091: passed; `finalClassification` remained
+  `mixed-comment-state`; EDIT remained `action-not-drivable`; the
+  self-owned ownership proof remained valid.
+- Carried 090: passed.
+- Carried 089: passed; `finalClassification` remained
+  `mixed-drop-state`; Flow B remained `action-not-drivable`.
+- PATCH-088 runner: 14/14 groups, 14/14 specs, all passed, 0
+  auth-expiry incidents, 0 non-signature failures on the attempt
+  that mattered (see flake note below).
+- Deterministic: `git diff --check` passed; `tsc --noEmit` passed;
+  `check:boundaries` passed; slideOrder 7/1; clonedPostMetadata
+  9/1; focused drawing 59/2; full Vitest 448/43; `npm run verify`
+  passed; build passed.
+- Cleanup: broad drawing prefix zero; PATCH-092 A/B prefixes zero;
+  boards 0, padlets 0, canvasLines 0 on every board; no
+  comment-bearing test rows remained; generated
+  `test-results/.last-run.json` was removed before commit; no other
+  artifacts remained; ports 3000/4000 free; no repo-owned runtime
+  process active at closure.
+
+**Transient environmental flake (disclosed, not a regression):**
+during the independent review's focused dependency-mode run, the
+FIRST attempt failed with `page/context/browser closed` during
+setup authentication — the same non-signature failure class
+already recorded at the 091 closure. It was correctly NOT
+classified as auth-expiry (missing all four required markers); an
+immediate retry passed cleanly; all subsequent runs (three
+stability runs, all carried-gate runs, and the PATCH-088 runner)
+were uniformly clean with zero further incidents. The leftover
+`error-context.md` artifact from the failed attempt was removed
+before the review continued. Recorded as environmental runner
+flakiness, not attributable to this patch's content — see §10
+census item 14 for the disposition of this recurring signal.
+
+**40/40 fences:** verified at base `e4ac7e63b114b8ba5289cab56e7adbcd0e4d8cdb`
+and at landed HEAD — 0 mismatches. §4 absence gates: new spec
+absent at base (confirmed before implementation); permanently
+prohibited paths (`e2e/characterization/drawing-slide-persistence.spec.ts`,
+`.fable5/patches/PATCH-077-draft.md`) remained absent throughout.
+
+**Governance commit for this closure:** see CURRENT_TASK.md log
+entry dated 2026-07-20 (PATCH-092 closure + PATCH-093 authorization).
