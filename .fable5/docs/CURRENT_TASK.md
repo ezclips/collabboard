@@ -416,11 +416,35 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
   | `global-comment-edit-defect` | `action-not-drivable` |
   `mixed-edit-state`. A production fix (Option B) is explicitly NOT
   authorized until this diagnosis isolates a deterministic cause.
-  Totals bound: focused totals TBD by implementer per §4; 43/43
-  fences (092 set + `CommentRow.tsx`/`CommentEditor.tsx`/
-  `EmbeddedCommentList.tsx` newly fenced); carried 089/090/091/092
+  Totals bound: focused totals TBD by implementer per §4; **45/45**
+  fences (092 set of 40 + the landed 092 production file and spec
+  (2) + `CommentRow.tsx`/`CommentEditor.tsx`/`EmbeddedCommentList.tsx`
+  newly fenced (3) — corrected from an original stated 43/43 to the
+  actual 45 unique entries the code block always contained, see the
+  2026-07-20 amendment entry below); carried 089/090/091/092
   unchanged. Commit message bound:
   `test(e2e): characterize drawing comment EDIT UI defect (PATCH-093)`.
+
+- **2026-07-20** — **PATCH-093 governance correction: immutable-fence
+  count fixed from a stated 43/43 to the actual 45/45 (commit
+  `63f5d19…` → amended).** Implementation preflight correctly
+  stopped before creating any file when it found the §6 code block
+  contained 45 unique path/blob entries against a prose requirement
+  of 43 — all 45 resolved identically at implementation base
+  `5f93ed5…` and at governance HEAD `63f5d19…`, with zero duplicates
+  and zero malformed entries. Root cause: an arithmetic error at
+  authoring time (40 inherited + 2 landed-092 files + 3 newly-fenced
+  comment-UI files = 45, miscomputed as 43). All prose/preflight/
+  review/final-report count references in `PATCH-093.md` corrected
+  to 45/45; no fence entry was removed or added — the code block was
+  already correct and untouched. No production or test file was
+  touched at any point. PATCH-093's title, diagnosis-only status,
+  one-file scope, allowed new spec
+  (`e2e/characterization/drawing-comment-edit.spec.ts`),
+  implementation-start HEAD (`5f93ed5…`), classification values,
+  flow matrix, cleanup contract, carried totals, and hard-stop
+  conditions are all UNCHANGED. Implementation may resume only from
+  this amended governance HEAD.
 
 - **2026-07-20** — **PATCH-091 DONE (commit
   `e4ac7e63b114b8ba5289cab56e7adbcd0e4d8cdb`, independent review

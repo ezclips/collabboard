@@ -275,14 +275,15 @@ base, HEAD, and worktree (verified again at this authoring —
 confirmed absent); PATCH-094 not started (not yet reserved for any
 specific successor — see §12).
 
-## 6. Immutable fences (bind — 43, Git blob IDs)
+## 6. Immutable fences (bind — 45, Git blob IDs)
 
 Verify each with `git rev-parse 5f93ed5:<path>` and equality at the
 current governance HEAD. Blob-ID method only. The 092 fence set
-(40) PLUS the landed 092 production file and spec, PLUS the three
-comment-UI files newly read during this census (`CommentRow.tsx`,
-`CommentEditor.tsx`, `EmbeddedCommentList.tsx`) — all of which this
-patch reads but must NOT modify.
+(40) PLUS the landed 092 production file and spec (2), PLUS the
+three comment-UI files newly read during this census
+(`CommentRow.tsx`, `CommentEditor.tsx`, `EmbeddedCommentList.tsx`)
+— all of which this patch reads but must NOT modify. **40 + 2 + 3 =
+45.**
 
 ```text
 playwright.config.ts                                           5864c98436dde10809de67cb40c564c05e98ff6d
@@ -421,7 +422,7 @@ Connections side-panel feature planning.
 
 STOP immediately, report, do not commit, if:
 
-- base commit, any §6 fence (43/43), or any §5 absence gate differs;
+- base commit, any §6 fence (45/45), or any §5 absence gate differs;
 - the diagnosis spec touches ANY production file (`CommentRow.tsx`,
   `CommentEditor.tsx`, `EmbeddedCommentList.tsx`, `DrawingLayout.tsx`,
   or any other) — comment-persistence scope must NOT drift into
@@ -465,7 +466,7 @@ artifacts.
 
 Implementer delivers the uncommitted ONE-file diagnosis spec +
 report (blob re-derived; Flow A/B/C/D results; carried totals;
-deterministic totals; 43-fence result; cleanup proof). The
+deterministic totals; 45-fence result; cleanup proof). The
 independent read-only reviewer re-derives everything and must
 return an explicit PASS before the implementer commits with the
 bound message and pushes. CTO closes; a future production-fix patch
@@ -476,7 +477,7 @@ isolates a deterministic, boundable cause.
 
 Exact one new path + final blob; Flow A/B/C/D results including the
 exact classification chosen (from §4's bound list only); carried
-totals (089/090/091/092 unchanged); deterministic totals; 43-fence
+totals (089/090/091/092 unchanged); deterministic totals; 45-fence
 result + absence gates; cleanup proof; explicit confirmations (no
 production file touched, no move-path edit, no comment-persistence-
 path edit, no CanvasClient/hook/config/harness/migration change, no
