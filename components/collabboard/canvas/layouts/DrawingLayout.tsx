@@ -1956,12 +1956,16 @@ export default function DrawingLayout({
   }, [excalidrawAPI, key, padletsLoaded]);
 
   // Persists updated comments array for any padlet (root comment posts + container children)
-  const handleUpdateChildComments = useCallback((childId: string, comments: any[], options?: { field?: 'comments' | 'detachedComments' }) => {
+  const handleUpdateChildComments = useCallback(async (childId: string, comments: any[], options?: { field?: 'comments' | 'detachedComments' }) => {
     const child = paddletsRef.current.find(p => p.id === childId);
     if (!child) return;
     const field = options?.field || 'comments';
-    onUpdatePadlet(childId, { metadata: { ...(child.metadata as any), [field]: comments } });
-  }, [onUpdatePadlet]);
+    try {
+      await onUpdatePadletStrict(childId, { metadata: { ...(child.metadata as any), [field]: comments } });
+    } catch (error) {
+      console.error('Failed to update comment', error);
+    }
+  }, [onUpdatePadletStrict]);
 
   const renderEmbeddable = useCallback((element: any) => {
     const link = typeof element?.link === "string" ? element.link : "";
