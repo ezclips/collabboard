@@ -361,6 +361,52 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-21** — **PATCH-097 AUTHORIZED (FIX) — custom slider/player
+  AI Container rendering gap.** Independent read-only investigation
+  (Sonnet, CTO role) of a user-reported defect: an AI Container
+  (`type: 'ai-component'`, UI label "New AI Drawing") renders correctly
+  in the normal canvas/editor but shows as an effectively blank card
+  in the custom fullscreen slider/player. **Root cause, evidenced with
+  exact file/line citations:** neither
+  `RuntimePresentationPadletCard.tsx` nor `RuntimeContainerChildCard.tsx`
+  (the two card renderers the player actually mounts, traced through
+  the full call chain `FullscreenPresentation.tsx` →
+  `RuntimeSlideRenderer.tsx` → `RuntimePadletLayer.tsx` →
+  `expandRuntimeContainerItems.ts`) has a dispatch branch for
+  `ai-component` — both fall through to a generic text/caption
+  fallback that reads only `padlet.content`, while the AI component's
+  actual generated HTML lives exclusively in
+  `metadata.savedAIComponent.code`/`aiComponentCode`/`aiRawCode`,
+  resolved only via `resolveSavedAIHtmlFromMetadata()`
+  (`lib/ai/normalize-ai-content.ts:100`) — the same function the
+  editor's own renderer already calls
+  (`FreeformPadletCards.tsx:3196`). This is a pure rendering-dispatch
+  gap, not a membership/filtering/geometry/snapshot defect —
+  `resolveSlidePadlets.ts`'s `type==='drawing'` exclusion (line 25,
+  unrelated/pre-existing/intentional-looking) and
+  `resolveRuntimeContainerChildren.ts`'s type-agnostic child
+  resolution were both re-confirmed uninvolved. **Also discovered but
+  explicitly NOT bundled:** the slide-editing preview renderer
+  (`slide-renderer/PresentationPadletCard.tsx`) has the identical gap
+  — recorded as a real, separate, smaller follow-up candidate for a
+  future patch, per the user's exact scope request limiting this
+  patch to "the custom slider/player." **Authorized fix:** add one
+  `ai-component` branch to each of the two runtime-slide card files,
+  rendering via the same `AIComponentRenderer` +
+  `resolveSavedAIHtmlFromMetadata` pairing the editor already trusts,
+  with no interactive resize handle (the player is read-only).
+  Bound: 3 allowed files (2 modified + 1 new characterization spec
+  `e2e/characterization/presentation-ai-component-render.spec.ts`),
+  59/59 immutable fences (46 carried from PATCH-096's closure + the
+  now-landed `run-carried-groups.mjs` blob + 12 newly-fenced
+  presentation/AI dependency files this investigation directly
+  implicated), full absence-gate set, deterministic/live gate
+  expectations carried unchanged from 089-096. Commit message bound:
+  `fix(presentation): render AI-component containers in the runtime slider/player (PATCH-097)`.
+  Implementation role: GPT-5.5. Independent review: Kepler primary,
+  Gemini 3.1 Pro fallback — NOT Sonnet, per the permanent role
+  separation below.
+
 - **2026-07-21** — **ROLE CHANGE: Sonnet is now the permanent CTO /
   governance owner**, replacing the prior "Fable (CTO)" persona used
   through PATCH-095. Named roles going forward: Sonnet (CTO/governance
