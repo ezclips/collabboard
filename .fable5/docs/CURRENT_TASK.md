@@ -361,6 +361,83 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-21** — **Design investigation of the AI Container
+  snapshot/export defect — PATCH-098 still NOT authorized (two
+  concrete, resolved-in-detail blockers, plus one significant new
+  discovery about PATCH-097 itself).** Traced the full snapshot/export
+  call chain (`PresentationPanel.tsx`/`useSlideThumbnails.ts`/
+  `ExportMenu.tsx`/`SharePresentationModal.tsx`/
+  `PresentationPreviewModal.tsx` → `createSlideRenderer.tsx`'s
+  `renderSlideToPNG` → `renderPadletOverlayToCanvas` → off-screen
+  `createRoot` mount → 2 chained `requestAnimationFrame` ticks →
+  `html2canvas` → unmount) and the full `useAIComponent.ts` lifecycle
+  (confirmed genuinely async: `container.innerHTML` set inside a
+  `useEffect`, `isLoading` only flips false once every `<img>` fires
+  `onload`/`onerror` or was already `.complete` — unbounded for
+  uncached images). **Confirmed: 2 RAF ticks are insufficient**
+  whenever AI content contains images not already cached, and are not
+  formally guaranteed even for text-only content.
+  **Key discovery #1 — a proven, shipped precedent already exists:**
+  `AIComponentExportMenu.tsx`'s `waitForDiagramRender()` (lines
+  143-159) already implements exactly the recommended contract —
+  polls a `data-ai-render-state` DOM attribute every 100ms up to a
+  3000ms timeout before calling `html2canvas`, with "proceed anyway"
+  as the deterministic fallback — used today for the single-card PDF
+  export path. This validates **Option 4 (ready-signal + bounded
+  timeout + best-effort fallback) as the recommended contract** over
+  best-effort-only (unreliable), fixed-delay (still non-deterministic),
+  pure ready-signal-with-no-timeout (unsafe — a stuck render could hang
+  export indefinitely), and a static placeholder (would require an
+  owner product decision this session cannot make unilaterally).
+  **Key discovery #2 — materially more important, changes the
+  priority of the whole investigation:** tracing where that
+  `data-ai-render-state` marker originates
+  (`components/ai/renderers/CodeDiagramRenderer.tsx`) revealed that the
+  EDITOR's actual AI-content rendering path is `AIContentRenderer.tsx`
+  + `normalizeAIContent()`, which dispatches across FIVE content
+  kinds — `legacy_html` (→ `AIComponentRenderer`, the ONLY path
+  PATCH-097 used), `legacy_lesson_board`, and `structured` (→
+  `CodeDiagramRenderer`/`ChartDiagramRenderer`/
+  `TimelineDiagramRenderer`/`ComparisonDiagramRenderer`/
+  `PhotoCardRenderer`/`WorkshopBoardRenderer`/
+  `StructuredLessonBoardRenderer`, per subtype). The `legacy_`
+  prefixing strongly implies `structured` is the CURRENT/modern saved
+  format. `resolveSavedAIHtmlFromMetadata()` — which **PATCH-097 used
+  directly in the runtime player** (`RuntimePresentationPadletCard.tsx`/
+  `RuntimeContainerChildCard.tsx`) — only reads the legacy HTML
+  metadata fields and returns an empty string for anything saved in
+  the structured/envelope format. **This means PATCH-097's already-
+  landed runtime-player fix likely does not render current/modern
+  AI-generated content at all — only the legacy HTML shape.** This is
+  independent of, and predates, the export-timing question, and it
+  changes what the correct foundation for any export-path fix should
+  even be (building export-readiness logic on
+  `resolveSavedAIHtmlFromMetadata()`/`AIComponentRenderer` alone would
+  replicate the same incomplete coverage). **Test-infrastructure
+  blocker (re-confirmed, unchanged from the prior investigation):**
+  `vitest.config.ts` is `environment: 'node'` with `include` hard-
+  scoped to `lib/domain/**/*.test.ts` and `lib/infra/**/*.test.ts`
+  only; no `jsdom`/`happy-dom`/`@testing-library/react` exists in
+  `package.json`; zero `.test.tsx` files exist anywhere in this repo.
+  A deterministic test of the DOM-mounting, `html2canvas`-dependent
+  readiness-wait orchestration is not possible today without either a
+  new devDependency or a Playwright approach that conflicts with this
+  program's established "no fragile pixel assertions"/"no
+  instrumentation seam" discipline. **Decision: PATCH-098 remains NOT
+  authorized**, now for two concrete, resolved-in-detail reasons
+  rather than vague ambiguity: (1) the test-infrastructure gap, and
+  (2) the newly-discovered PATCH-097 content-shape coverage gap, which
+  should be investigated and likely corrected FIRST — independently of
+  and before any export-timing work — since export-path work built on
+  the same incomplete `legacy_html`-only foundation would need to be
+  redone. **Recommended next step (not yet authorized, requires
+  owner/CTO follow-up):** a focused, narrowly-scoped investigation of
+  whether PATCH-097's runtime-player fix needs a corrective follow-up
+  to dispatch through `AIContentRenderer`/`normalizeAIContent()`
+  (matching the editor's actual behavior) rather than
+  `resolveSavedAIHtmlFromMetadata()`/`AIComponentRenderer` alone.
+  `.fable5/patches/PATCH-098.md` was NOT created.
+
 - **2026-07-21** — **PATCH-097 DONE (commit `973e5688…`) + slide-
   editing-preview twin defect investigated — PATCH-098 NOT
   authorized (recorded as a candidate, not forced).** **097 closure:**
