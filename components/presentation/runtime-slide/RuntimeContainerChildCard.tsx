@@ -5,8 +5,8 @@
 
 import React from "react";
 import type { Padlet } from "@/types/collabboard";
-import AIComponentRenderer from "@/components/collabboard/AIComponentRenderer";
-import { resolveSavedAIHtmlFromMetadata } from "@/lib/ai/normalize-ai-content";
+import AIContentRenderer from "@/components/ai/AIContentRenderer";
+import { extractAIContentFromPadletMetadata } from "@/lib/ai/normalize-ai-content";
 import {
   getBorder,
   getImg,
@@ -98,14 +98,17 @@ export default function RuntimeContainerChildCard({
   };
 
   if (normalizedType === "ai-component") {
+    const aiContent = extractAIContentFromPadletMetadata(padlet.metadata) ?? { html: "" };
     return (
       <div style={shellStyle}>
-        <AIComponentRenderer
-          code={resolveSavedAIHtmlFromMetadata(padlet.metadata)}
-          padletId={padlet.id}
-          width={Number(padlet.width) || 500}
-          height={Number(padlet.height) || 400}
-          isExpanded
+        <AIContentRenderer
+          content={aiContent}
+          legacyHtmlProps={{
+            padletId: padlet.id,
+            width: Number(padlet.width) || 500,
+            height: Number(padlet.height) || 400,
+            isExpanded: true,
+          }}
         />
       </div>
     );
