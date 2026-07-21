@@ -361,6 +361,105 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-21** — **PATCH-099 CLOSED (commit `63766a9`) — PATCH-098
+  reassessed and still NOT authorized; PATCH-100 NOT authorized; one
+  new narrower, always-true defect identified for future
+  consideration.** Independently re-verified the landed PATCH-099
+  commit directly (not solely from the implementer/reviewer report):
+  HEAD == origin/main == `63766a9bd0c6b820f10e2bec0661a96909a74ca0`,
+  exact bound commit message, exactly the three bound paths at their
+  exact bound blobs, both diffs re-derived and matching §2 exactly
+  (plus one safe unspecified-but-consistent `?? { html: "" }`
+  fallback), all fenced/prohibited files
+  (`AIContentRenderer.tsx`, `persistence.ts`, the PATCH-097 legacy
+  spec) confirmed bit-for-bit unchanged, 62/62 fences re-verified.
+  Full closure record appended to `.fable5/patches/PATCH-099.md` §11.
+  **PATCH-098 reassessment:** now that the authoritative AI renderer
+  path is understood, traced every `html2canvas` call site
+  (`createSlideRenderer.tsx`'s `renderPadletOverlayToCanvas` — the
+  slide thumbnail/PDF/PPTX/share/preview pipeline;
+  `AIComponentExportMenu.tsx`'s single-card PDF export;
+  `useCanvasActions.ts`'s `renderPadletToCanvas` — captures an
+  already-mounted, already-rendered editor DOM node, a materially
+  different and lower-risk timing profile, out of scope here;
+  `lib/collabboard/thumbnailGenerator.ts` — generic board-level
+  capture, unrelated to AI-content rendering, out of scope). Checked
+  every structured renderer
+  (`ChartDiagramRenderer`/`TimelineDiagramRenderer`/
+  `ComparisonDiagramRenderer`/`PhotoCardRenderer`/
+  `WorkshopBoardRenderer`/`StructuredLessonBoardRenderer`/
+  `LessonBoardRenderer`) for async state: **all are synchronous** —
+  no `useState`/`useEffect`/async work, ready immediately on mount.
+  Only `CodeDiagramRenderer.tsx` (flowchart/mindmap) is asynchronous
+  and exposes the `data-ai-render-state` readiness marker that
+  `waitForDiagramRender()` already polls. Legacy HTML
+  (`AIComponentRenderer`/`useAIComponent.ts`) remains genuinely
+  asynchronous for image-bearing content with **no readiness marker
+  exposed at all** — confirmed unchanged from the prior investigation.
+  **New discovery, independent of timing:** `createSlideRenderer.tsx`'s
+  `renderPadletOverlayToCanvas` renders AI Containers through
+  `PresentationPadletCard.tsx`/`PresentationContainerCard.tsx` (the
+  slide-editing preview twin, explicitly deferred in PATCH-097 §9 and
+  confirmed still untouched, blob `bbcef06c8b8de29e455ec4748e7ea2762f0c1052`
+  unchanged) — which has **no `ai-component` dispatch branch at all**
+  (not even the legacy-HTML-only branch PATCH-097 originally added to
+  the runtime cards). This means every AI Container — legacy or
+  structured, synchronous or asynchronous — renders blank in every
+  thumbnail/PDF/PPTX/share/preview surface today, unconditionally,
+  regardless of RAF/html2canvas timing. This is a real, exact,
+  timing-independent defect, separate from and simpler than the
+  readiness/timeout question that originally motivated PATCH-098.
+  **Test-strategy blocker (still unresolved, not removed by
+  PATCH-099):** `renderPadletOverlayToCanvas`'s off-screen host is
+  mounted to `document.body` only transiently — created, awaited (2
+  RAF ticks), captured via `html2canvas`, then unmounted/removed in a
+  `finally` block, all within roughly one to a few animation frames
+  for every synchronous content shape. Playwright can only reliably
+  observe DOM content that persists for at least one polling interval
+  (~100ms); the synchronous-shape window is far shorter and not
+  practically pollable without new test-only instrumentation (a
+  production hook exposing render-complete state, or slowing the
+  pipeline under test) — both of which exceed "narrowly bounded, no
+  renderer redesign." No jsdom/mocked-`html2canvas` infrastructure
+  exists (confirmed again, unchanged: `vitest.config.ts` still
+  `environment: 'node'`, scoped to `lib/domain`/`lib/infra` only, zero
+  `.test.tsx` files repo-wide). A bounded-wait/readiness contract
+  (Option 4) for the Mermaid-diagram and legacy-HTML-with-images
+  shapes would therefore ship with **no deterministic test binding
+  it** — exactly the bar the user set for not authorizing a patch.
+  **Decision: PATCH-098/full readiness-and-timeout contract remains
+  NOT authorized** — the test-infrastructure blocker is unchanged.
+  **Decision: PATCH-100 (as titled, "render structured AI Containers
+  reliably in slide snapshot and export surfaces," bundling both the
+  missing branch AND the readiness/timeout contract) is NOT
+  authorized** for the same reason — the readiness/timeout half of
+  that scope has no deterministic test strategy available today.
+  **Recorded for future consideration, NOT authorized in this
+  turn:** the narrower, timing-independent missing-branch defect in
+  `PresentationPadletCard.tsx` (add the same `AIContentRenderer` +
+  `extractAIContentFromPadletMetadata()` branch PATCH-099 just added
+  to the runtime cards, best-effort only, no new readiness contract)
+  IS deterministically testable for the six synchronous content
+  shapes via the same "seed real content, assert real render output"
+  Playwright pattern already used by PATCH-097/099, since those
+  shapes are guaranteed ready well within the existing 2-RAF window
+  regardless of the transient-mount problem. It would leave Mermaid
+  diagrams and image-bearing legacy HTML exactly as broken in
+  snapshots as they are today (unconditionally blank) — neither
+  better nor worse — rather than claiming to fix "reliably" for all
+  shapes. This is a legitimate, smaller candidate distinct from the
+  bundled PATCH-100 scope above, but was not authorized unilaterally
+  in this turn since it changes the scope the user specifically
+  outlined; it is flagged here for an explicit decision on splitting
+  it out. **Remaining blockers, precisely:** (1) no deterministic
+  Playwright or Vitest strategy exists for asserting readiness/timeout
+  behavior on the transient off-screen snapshot host without new
+  production instrumentation or a jsdom/mocked-html2canvas dependency;
+  (2) `PresentationPadletCard.tsx`/`PresentationContainerCard.tsx`
+  still have zero AI-content dispatch, a separate, simpler,
+  potentially splittable defect. No production or test code was
+  touched by this governance turn.
+
 - **2026-07-21** — **PATCH-099 AUTHORIZED — corrective follow-up to
   PATCH-097: runtime player only renders legacy-HTML AI content,
   structured/modern content renders blank.** Focused read-only

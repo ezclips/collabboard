@@ -1,6 +1,8 @@
 # PATCH-099 — Render Current Structured AI Content in the Runtime Slider/Player (Corrective Follow-up to PATCH-097)
 
-**Status:** **AUTHORIZED** (not yet implemented).
+**Status:** **DONE** (commit `63766a9bd0c6b820f10e2bec0661a96909a74ca0`).
+Exactly the three bound paths landed at their exact blobs. No other
+production file was touched.
 
 **Implementer:** GPT-5.5. **Reviewer:** independent read-only
 reviewer (Kepler primary, Gemini 3.1 Pro fallback) — PASS required
@@ -406,3 +408,81 @@ totals (089-097 unchanged); deterministic totals; 62-fence result +
 absence gates; cleanup proof; explicit confirmations (no file outside
 §4 touched, no resize handle exposed, no export-path file touched,
 `slide-renderer/*` untouched); commit hash + push status after PASS.
+
+## 11. Closure record (2026-07-21)
+
+**Landed:** commit `63766a9bd0c6b820f10e2bec0661a96909a74ca0`
+(`fix(presentation): render structured AI content in the runtime
+slider/player via AIContentRenderer (PATCH-099)`), HEAD == origin/main
+at closure time. Exactly the three bound paths landed at their exact
+blobs: `RuntimePresentationPadletCard.tsx` →
+`479a1f234550b08c4d5501fd67061f51212e3233`,
+`RuntimeContainerChildCard.tsx` →
+`bbc753638d7549ed2cd11c8392cd1e1782c5000f`,
+`presentation-ai-component-structured-render.spec.ts` →
+`2efbfb9047fabce3cae3d5730d1a42a431b788bf`. Independent read-only
+review verdict: **PASS**, obtained before commit. The 62/62
+fence-count governance correction (commit `4729e0b`) was completed
+and pushed before this commit landed.
+
+**Diff scope (re-verified at closure, by the CTO directly via
+`git diff <base-blob> <landed-blob>`, not solely from the implementer
+report):** both files replace the legacy-only
+`AIComponentRenderer`/`resolveSavedAIHtmlFromMetadata()` call with
+`AIContentRenderer` fed by `extractAIContentFromPadletMetadata(padlet.metadata)
+?? { html: "" }`, passing `legacyHtmlProps={{ padletId, width, height,
+isExpanded: true }}` and no `onExportTargetReady`. No other line
+changed in either file. Exactly matches §2. The `?? { html: "" }`
+fallback (not explicitly specified in §2 but consistent with its
+intent) safely handles `extractAIContentFromPadletMetadata()`'s
+`undefined` return for empty metadata, preserving the existing "No AI
+component generated yet" empty-state behavior via
+`normalizeAIContent()`'s `legacy_html` path with an empty string.
+
+**Fenced/prohibited files independently re-verified unchanged at the
+landed commit:** `components/ai/AIContentRenderer.tsx` →
+`0a030caa982b479ff042f15fd3e4a229119044ef` (unchanged),
+`lib/ai/persistence.ts` → `d8ec23850c9f05b7d20d0bb71147e32baf7cf358`
+(unchanged), PATCH-097 legacy spec
+(`presentation-ai-component-render.spec.ts`) →
+`63a93b3e75f69e3c9a3a46a23f2351f008955bd1` (bit-for-bit unchanged,
+confirmed).
+
+**Corrective classification (bind):** PATCH-097 supported legacy HTML
+AI content only. PATCH-099 corrects the gap: the runtime player now
+supports current structured `metadata.aiComponentJson` content
+(structured lesson boards, diagrams, charts, timelines, comparisons,
+photo cards, workshop boards) via the same authoritative path the
+editor canvas uses —
+`extractAIContentFromPadletMetadata()` → `AIContentRenderer` →
+`normalizeAIContent()` → `deserializePersistedAIContent()` — in both
+the top-level runtime card and the nested runtime container-child
+card. Legacy HTML compatibility is preserved unchanged. Read-only
+behavior (no resize handle, no export-target wiring) is preserved.
+PATCH-098/export timing was not touched by this patch.
+
+**Live spec result (per the independent reviewer's report, PATCH-099
+new spec):** `presentation-ai-component-structured-render.spec.ts`
+passed Flows A-E, 3/3 stability runs — structured content marker
+visible both as a direct slide member and as a container-child
+member, legacy HTML unaffected (Flow C), no resize handle exposed
+(Flow D), cleanup reached zero (Flow E).
+
+**Carried gates (per the independent reviewer's report):** PATCH-097
+legacy spec (`presentation-ai-component-render.spec.ts`) passed
+unchanged; PATCH-096 grouped runner 14/14 groups, 14/14 specs, 0
+incidents; PATCH-089/090/091/093/094 classifications unchanged.
+
+**Deterministic gates:** slideOrder 7/1; clonedPostMetadata 9/1;
+focused drawing 59/2; full Vitest 448/43; `tsc --noEmit` passed;
+`check:boundaries` passed; `npm run verify` passed; `npm run build`
+passed.
+
+**Fence result:** 62/62, 0 mismatches (independently re-verified by
+the CTO directly against the landed commit, not solely from the
+implementer/reviewer report).
+
+**Cleanup/process state:** all cleanup counts reached zero; ports
+3000/4000 free; no repo-owned runtime process left running.
+
+**No hard-stop condition (§8) was triggered.**
