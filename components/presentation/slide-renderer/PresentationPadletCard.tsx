@@ -3,6 +3,11 @@
 /* eslint-disable @next/next/no-img-element */
 
 import React from "react";
+import AIContentRenderer from "@/components/ai/AIContentRenderer";
+import {
+  extractAIContentFromPadletMetadata,
+  normalizeAIContent,
+} from "@/lib/ai/normalize-ai-content";
 import type { Padlet } from "@/types/collabboard";
 
 type PresentationPadletCardProps = {
@@ -88,6 +93,33 @@ function getSnippet(padlet: Padlet, maxLength: number): string {
   );
 }
 
+function PresentationAISnapshotContent({ padlet }: { padlet: Padlet }) {
+  const aiContent = extractAIContentFromPadletMetadata(padlet.metadata) ?? { html: "" };
+  const kind = normalizeAIContent(aiContent).kind;
+
+  React.useLayoutEffect(() => {
+    if (process.env.NODE_ENV === "production") return;
+    window.dispatchEvent(new CustomEvent("collabboard-ai-snapshot-rendered", {
+      detail: {
+        padletId: padlet.id,
+        kind,
+      },
+    }));
+  }, [kind, padlet.id]);
+
+  return (
+    <AIContentRenderer
+      content={aiContent}
+      legacyHtmlProps={{
+        padletId: padlet.id,
+        width: Number(padlet.width) || 500,
+        height: Number(padlet.height) || 400,
+        isExpanded: true,
+      }}
+    />
+  );
+}
+
 export default function PresentationPadletCard({
   padlet,
   variant = "default",
@@ -122,6 +154,14 @@ export default function PresentationPadletCard({
   const topStrip = typeof padlet.metadata?.topStrip === "string" && padlet.metadata.topStrip !== "transparent"
     ? padlet.metadata.topStrip
     : null;
+
+  if (normalizedType === "ai-component") {
+    return (
+      <div style={shellStyle}>
+        <PresentationAISnapshotContent padlet={padlet} />
+      </div>
+    );
+  }
 
   if (normalizedType === "image" || (previewImage && (normalizedType === "file" || normalizedType === "card" || normalizedType === "drawing"))) {
     return (
