@@ -361,6 +361,69 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-21** — **PATCH-097 DONE (commit `973e5688…`) + slide-
+  editing-preview twin defect investigated — PATCH-098 NOT
+  authorized (recorded as a candidate, not forced).** **097 closure:**
+  landed exactly the bound 3-path/blob set; independent review PASS;
+  both runtime card files (`RuntimePresentationPadletCard.tsx`,
+  `RuntimeContainerChildCard.tsx`) gained the exact one-branch
+  `ai-component` fix with no resize handle exposed; new spec passed
+  Flows A-D (3/3 stability); PATCH-096 runner 14/14/0-incidents;
+  deterministic gates all green (slideOrder 7/1, clonedPostMetadata
+  9/1, focused drawing 59/2, full Vitest 448/43); cleanup zero;
+  `slide-renderer/PresentationPadletCard.tsx` confirmed untouched
+  (blob unchanged from fencing). **Preview-twin investigation (fresh,
+  independent, re-derived from current HEAD, Sonnet/CTO role):**
+  re-read `PresentationPadletCard.tsx`/`PresentationContainerCard.tsx`
+  and traced their FULL call chain — a materially important correction
+  to the originally-assumed framing: these two components are **not**
+  a live interactive preview surface at all. They have exactly two
+  importers repo-wide, and both routes lead into
+  `createSlideRenderer.tsx`'s `renderPadletOverlayToCanvas`, which
+  mounts them into a **temporary off-screen React root**, waits
+  exactly **two `requestAnimationFrame` ticks**, snapshots the DOM via
+  `html2canvas` into a PNG, then immediately unmounts and tears down
+  the host. This one-shot snapshot (`renderSlideToPNG`) is what
+  actually feeds slide-panel thumbnails (`useSlideThumbnails.ts`), PDF
+  export, PPTX export, `SharePresentationModal.tsx`, and
+  `PresentationPreviewModal.tsx` — there is no persistent live-DOM
+  mount anywhere. **Root cause confirmed identical to PATCH-097:**
+  `PresentationPadletCard.tsx` has no `ai-component` branch and falls
+  through to the same `padlet.content` text fallback (blob
+  `bbcef06c…`, confirmed unchanged since PATCH-097's fencing).
+  **Why this is NOT a safe clean twin of PATCH-097:** PATCH-097's fix
+  was safe specifically because `FullscreenPresentation` is a
+  persistent live page giving `AIComponentRenderer`'s async post-mount
+  content injection (`useAIComponent`'s `useEffect`) unbounded real
+  time to finish. Here, the same component would get only 2 RAF ticks
+  before `html2canvas` fires and the tree is torn down — adding the
+  render branch alone is a strict, non-regressive improvement but does
+  NOT resolve whether the snapshot reliably captures the AI content in
+  time, which is a genuine, unresolved product-contract question
+  (should exports wait for async AI content, and if so how, given the
+  wait mechanism is shared by every other padlet type currently
+  snapshotted successfully?) — a materially larger, shared-blast-
+  radius change than PATCH-097's isolated fix. There is also no
+  established low-risk characterization-test strategy for this defect
+  the way 089-097 all tested live DOM assertions — the only
+  user-visible artifact here is a PNG from a one-shot canvas capture;
+  a meaningful regression test would require pixel-sampling a captured
+  image, a new and fragile technique never used in this program.
+  **Decision: PATCH-098 is NOT authorized.** The defect is real,
+  evidenced, and narrowly bounded in terms of the render-branch fix
+  itself, but fails the "free of unresolved product-contract
+  ambiguity" and "testable via the established pattern" bars — not
+  because the fix is large, but because doing it safely requires
+  either an owner product decision on export-timing behavior or
+  accepting a differently-tested (pixel-sampling-based) regression
+  spec, neither of which the CTO role can resolve unilaterally.
+  Recorded as an evidenced, bounded-but-not-yet-safe candidate for a
+  future patch, pending either: (a) an owner decision on acceptable
+  export-timing behavior for async-loading padlet content, or (b) an
+  explicit acceptance of pixel-sampling-based Playwright regression
+  tests as a new, sanctioned technique for this program.
+  `.fable5/patches/PATCH-098.md` was NOT created.
+
 - **2026-07-21** — **PATCH-097 AUTHORIZED (FIX) — custom slider/player
   AI Container rendering gap.** Independent read-only investigation
   (Sonnet, CTO role) of a user-reported defect: an AI Container

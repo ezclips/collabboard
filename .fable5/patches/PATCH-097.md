@@ -1,18 +1,19 @@
 # PATCH-097 — Render Application-Owned AI Containers in the Custom Slider/Player
 
-**Status:** **FIX AUTHORIZED**. TWO modified files
+**Status:** **DONE** (commit
+`973e5688a007ddcf4345d36bc28c0fcfe4aa6999`). TWO modified files
 (`RuntimePresentationPadletCard.tsx`, `RuntimeContainerChildCard.tsx`)
-plus ONE new characterization spec. No other production file may be
-touched. No migration, RPC, or move work of any kind enters scope.
-No change to the slide-editing preview renderer
-(`slide-renderer/PresentationPadletCard.tsx`) — that is a separately
-discovered, NOT-yet-authorized twin defect (see §9).
+plus ONE new characterization spec, landed exactly as bound. No other
+production file was touched. No migration, RPC, or move work entered
+scope. The slide-editing preview renderer
+(`slide-renderer/PresentationPadletCard.tsx`) was left untouched, as
+required — see PATCH-098 for its evaluation.
 
 **Implementer:** GPT-5.5. **Reviewer:** independent read-only
-reviewer (Kepler primary, Gemini 3.1 Pro fallback) — explicit PASS
-required before commit. Sonnet (CTO/governance owner) authorized
-this patch and must NOT perform its review.
-**Closure:** Sonnet (CTO) after landing.
+reviewer (Kepler/Gemini 3.1 Pro) — **PASS**, obtained before commit.
+Sonnet (CTO/governance owner) authorized this patch and did not
+perform its review.
+**Closure:** Sonnet (CTO), 2026-07-21.
 
 **Behavioral/source base commit AND implementation start HEAD (bind):**
 `acda97ccc015d6456c0e050e71ad3d41e5ae9ff2`
@@ -370,3 +371,64 @@ absence gates; cleanup proof; explicit confirmations (no file outside
 §4 touched, no resize handle exposed, no `type==='drawing'` rendering
 added, `slide-renderer/PresentationPadletCard.tsx` untouched); commit
 hash + push status after PASS.
+
+## 12. Closure record (2026-07-21)
+
+**Landed:** commit `973e5688a007ddcf4345d36bc28c0fcfe4aa6999`
+(`fix(presentation): render AI-component containers in the runtime
+slider/player (PATCH-097)`), HEAD == origin/main at closure time.
+Exactly the three bound paths landed at their exact blobs:
+`RuntimePresentationPadletCard.tsx` → `0f6ec08ece8a012493c494b98e7c6949e6a99050`,
+`RuntimeContainerChildCard.tsx` → `e1065e8ebae962a5bfaa03454a548b5a2944cf6f`,
+`presentation-ai-component-render.spec.ts` →
+`63a93b3e75f69e3c9a3a46a23f2351f008955bd1`. Independent read-only
+review verdict: **PASS**, obtained before commit.
+
+**Diff scope (re-verified at closure):** re-derived both diffs
+directly (`git diff <base-blob> <landed-blob>`) — each file gained
+exactly one new `normalizedType === "ai-component"` branch rendering
+`<AIComponentRenderer code={resolveSavedAIHtmlFromMetadata(padlet.metadata)}
+padletId={padlet.id} width={...} height={...} isExpanded />` inside
+the file's existing `shellStyle` wrapper, with NO
+`onResize`/`onResizeEnd`/`onExpandAvailabilityChange`/
+`onExportTargetReady` wired — confirming no interactive resize handle
+is exposed in the read-only player (per `AIComponentRenderer.tsx:209`'s
+own conditional gate on `onResize`). No other line changed in either
+file. Fixed in both the top-level runtime presentation card
+(`RuntimePresentationPadletCard.tsx`) and the nested runtime container
+child card (`RuntimeContainerChildCard.tsx`), exactly as bound. The
+existing "No AI component generated yet" empty-state fallback inside
+`AIComponentRenderer.tsx:131-137` is preserved and reused as-is — no
+new empty-state branch was added.
+
+**Live spec result (per the independent reviewer's report):** the new
+`presentation-ai-component-render.spec.ts` passed Flows A-D — 3/3
+stability runs — with the AI content marker visible both as a direct
+slide member and as a container-child member, editor-mode control
+assertion holding in Flow A, and reload stability confirmed in Flow C.
+Cleanup reached zero on every run.
+
+**Carried gates (per the independent reviewer's report):** PATCH-096
+grouped runner 14/14 groups, 14/14 specs, 0 incidents; focused carried
+presentation-related specs (PATCH-089/090/091/093/094) passed with
+their bound classifications unchanged.
+
+**Deterministic gates:** slideOrder 7/1; clonedPostMetadata 9/1;
+focused drawing 59/2; full Vitest 448/43; `tsc --noEmit` passed;
+`check:boundaries` passed; `npm run verify` passed; `npm run build`
+passed.
+
+**Cleanup/process state:** all cleanup counts reached zero; no
+leftover artifacts beyond the gitignored `.last-run.json`; no
+repo-owned runtime process left running at review close.
+
+**Deferred, confirmed still untouched:** the slide-editing preview
+renderer (`slide-renderer/PresentationPadletCard.tsx`) was explicitly
+left unmodified — the `git show --name-only` output for this commit
+contains no path under `slide-renderer/`, confirming the twin defect
+remains exactly as it was, now evaluated separately under PATCH-098.
+
+**No hard-stop condition (§8) was triggered.** No file outside §4's
+three was touched; no resize handle was exposed; no `type==='drawing'`
+rendering was added; carried PATCH-089 through PATCH-096 evidence was
+not weakened; PATCH-098 did not exist prior to this closure.
