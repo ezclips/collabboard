@@ -361,6 +361,68 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-21** — **ROLE CHANGE: Sonnet is now the permanent CTO /
+  governance owner**, replacing the prior "Fable (CTO)" persona used
+  through PATCH-095. Named roles going forward: Sonnet (CTO/governance
+  — closes patches, runs census, authorizes scope, commits/pushes
+  governance only, never implements or self-reviews), GPT-5.5
+  (implementer — authorized files only, never commits before PASS,
+  never self-reviews), Kepler (primary independent read-only
+  reviewer), Gemini 3.1 Pro (fallback reviewer, used only if Kepler
+  unavailable). No role may approve its own work; governance and
+  review are never combined for the same patch.
+
+- **2026-07-21** — **PATCH-096 DONE (commit `cb296448…`) + fresh
+  census — no PATCH-097 authorized.** **096 closure:** landed exactly
+  the bound one-file change to `e2e/run-carried-groups.mjs` (blob
+  `bf76160…`) — a new `SETUP_CLOSE_SIGNATURE`/`detectSetupClose` pair
+  checked only after the unweakened, byte-unchanged
+  `AUTH_EXPIRY_SIGNATURE`/`detectAuthExpiry` fails, one bounded
+  one-retry branch (full dependency mode, re-attempting a fresh
+  `[setup]`), and two new counters
+  (`setupCloseIncidents`/`recoveredSetupCloseIncidents`) tracked
+  completely separately from the existing auth-expiry counters.
+  Independent review: **PASS**. Live grouped-runner result: 14
+  groups, 14 specs, 14 final passes, 0 auth-expiry incidents, 0
+  setup-close incidents, 0 non-signature failures — the rare genuine
+  signature was not naturally exercised live during review (as
+  expected, it remains rare/non-reproducible-on-demand), so the new
+  retry branch's correctness rests on source inspection + a manual
+  five-condition detector-matrix walkthrough, not a live-fire
+  observation; this is recorded honestly, not oversold. Deterministic
+  gates all green (slideOrder 7/1, clonedPostMetadata 9/1, focused
+  drawing 59/2, full Vitest 448/43, typecheck/boundaries/verify/build
+  all passed). **Fresh post-096 census (independently re-verified,
+  not reused):** re-ran `tsc --noEmit` (clean), `check:boundaries`
+  (clean), full Vitest (448/43, clean), `npm run build` (clean, no
+  warnings) — zero new failing tests, type errors, boundary
+  violations, or build warnings anywhere in the repo. Re-checked
+  atomic-move deployment readiness live: Docker Desktop's engine is
+  STILL unreachable (`docker info` succeeds for the client but fails
+  to reach `dockerDesktopLinuxEngine`), `supabase/config.toml` is
+  still absent, `supabase/BASELINE.md` is unchanged since its
+  2026-07-06 commit (no new owner evidence), no CI workflow validates
+  schema/migrations (`ci.yml` only references Supabase secrets as
+  build/test env vars) — blocker classification F (multiple) stands,
+  unchanged from 095's closure. Searched all `onUpdatePadlet(` call
+  sites repo-wide (`DrawingLayout.tsx` ~522/531 move-write and
+  ~956/966 position-write, plus newly-checked
+  `WallLayoutRenderer.tsx`, `ColumnsLayoutRenderer.tsx`,
+  `useCanvasActions.ts`'s `savePadletPosition`) — all four additional
+  sites are the same intentional best-effort position/layout-write
+  class already ruled DEFER-by-design (088 §4); no new distinct
+  silent-loss candidate found. Comment edge-cases (Shift+Enter,
+  empty/whitespace edit, blur-without-Enter, rapid Enter) remain
+  small, unproven, and without a documented product-contract
+  requirement — still correctly deferred, not bundled speculatively.
+  **Conclusion: no candidate currently meets the bar for a bounded,
+  evidenced, deployment-independent PATCH-097** — recording this
+  explicitly rather than forcing a patch. `.fable5/patches/PATCH-097.md`
+  was NOT created. The repository is in a fully green, fully
+  characterized, deliberately paused state pending either (a) new
+  owner-supplied deployment/migration evidence unblocking atomic
+  move, or (b) a genuinely new defect surfacing in future work.
+
 - **2026-07-21** — **PATCH-095 DONE — DESIGN COMPLETE / IMPLEMENTATION
   BLOCKED (governance commit `75fd669…`) + fresh census + PATCH-096
   AUTHORIZED (FIX, bounded PATCH-088 setup-close runner hardening)**.

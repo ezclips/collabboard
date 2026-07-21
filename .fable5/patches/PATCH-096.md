@@ -1,14 +1,16 @@
 # PATCH-096 — Bounded PATCH-088 Setup-Close Runner Hardening
 
-**Status:** **FIX AUTHORIZED (runner hardening only)**. ONE
-modified file: `e2e/run-carried-groups.mjs`. No production file may
-be touched. No test spec may be touched. No migration, RPC, or move
-work of any kind enters scope. No auth-expiry classification logic
-may be weakened.
+**Status:** **DONE** (commit
+`cb296448440cef1c076e1861796c6ca928b046ed`). ONE modified file:
+`e2e/run-carried-groups.mjs`. No production file was touched. No
+test spec was touched. No migration, RPC, or move work entered
+scope. No auth-expiry classification logic was weakened.
 
 **Implementer:** GPT-5.5. **Reviewer:** independent read-only
-reviewer (explicit PASS required before commit).
-**Closure:** Fable (CTO) after landing.
+reviewer — **PASS**, obtained before commit.
+**Closure:** Sonnet (CTO), permanent governance owner as of
+2026-07-21 (see role-assignment note in CURRENT_TASK.md — replaces
+the prior "Fable (CTO)" persona used through PATCH-095).
 
 **Behavioral/source base commit AND implementation start HEAD (bind):**
 `75fd669189e62dcc56aeda9d1c1ba87fcec54194`
@@ -389,3 +391,76 @@ change, `AUTH_EXPIRY_SIGNATURE` logic unchanged and unweakened,
 `ERR_CONNECTION_REFUSED` never matches the new retry, no migration/
 RPC/move work, no linked-project state used); commit hash + push
 status after PASS.
+
+## 15. Closure record (2026-07-21)
+
+**Landed:** commit `cb296448440cef1c076e1861796c6ca928b046ed`
+(`fix(e2e): bound one retry for genuine setup browser/context-close
+failures (PATCH-096)`), HEAD == origin/main at closure time. Exactly
+one committed path, `e2e/run-carried-groups.mjs`, landed blob
+`bf76160368a2e6b274aa379efa681021ddc55582` (verified again at
+closure via `git rev-parse cb296448…:e2e/run-carried-groups.mjs`).
+Independent read-only review verdict: **PASS**, obtained before
+commit, per §13's bound flow.
+
+**Diff scope (re-verified at closure):** exactly the bound §3
+change — one new `SETUP_CLOSE_SIGNATURE` constant (four sub-patterns:
+setup-project marker, exact `Target page, context or browser has been
+closed` text, characterization-project-absence check, and the
+`ERR_CONNECTION_REFUSED` exclusion); one new `detectSetupClose`
+function, invoked only when `detectAuthExpiry` has already returned
+false (auth-expiry keeps absolute precedence, checked first,
+byte-unchanged); one new `else if` branch in the per-group loop
+performing exactly one retry (full dependency mode, no `--no-deps`,
+correctly re-attempting a fresh `[setup]` run since the setup project
+itself is what failed); two new counters
+(`setupCloseIncidents`/`recoveredSetupCloseIncidents`) tracked and
+reported completely separately from the existing
+`authExpiryIncidents`/`recoveredIncidents` counters — never merged;
+`printSummary`'s signature and header row extended accordingly.
+`AUTH_EXPIRY_SIGNATURE`, `detectAuthExpiry`, `assertConfiguration`,
+`GROUPS`, `CARRIED_SPECS`, and every other prior line are
+byte-unchanged.
+
+**Live grouped-runner result (per the independent reviewer's report):**
+14 groups, 14 specs, 14 final passes; auth-expiry incidents: 0;
+setup-close incidents: 0; recovered setup-close incidents: 0;
+non-signature failures: 0. **The rare genuine setup browser/context-
+close signature was NOT naturally exercised during this review's live
+run** (it remains rare and not reproducible on demand, as documented
+since the 090/091/092 reviews) — the new retry branch's correctness
+was validated by source inspection against the exact §2 five-condition
+signature (setup-project-only AND exact error text AND absence of any
+`[characterization]` line AND explicit non-match on
+`ERR_CONNECTION_REFUSED` AND explicit non-match on the unweakened
+`AUTH_EXPIRY_SIGNATURE`) plus a manual detector-matrix walkthrough
+confirming each condition independently gates correctly, NOT by
+observing the retry branch fire on a genuine live incident. This is
+recorded honestly, not as a live-fire proof.
+
+**Deterministic gates (independently confirmed):** slideOrder 7/1;
+clonedPostMetadata 9/1; focused drawing 59/2; full Vitest 448/43;
+`tsc --noEmit` passed; `check:boundaries` passed; `npm run verify`
+passed; `npm run build` passed; `git diff --check` passed.
+
+**Cleanup/process/artifact state:** all carried-run cleanup counts
+reached zero; no `test-results/` beyond the gitignored
+`.last-run.json`; no `playwright-report/`, traces, screenshots, or
+scratch scripts; no repo-owned Node/Playwright process left running;
+ports 3000/4000 confirmed free at review close.
+
+**46/46 fences and all absence gates** (candidate — n/a, this patch
+modified an existing allowed file rather than adding a new one — the
+46-entry fence set from §5, `PATCH-097.md`, the permanently-prohibited
+paths, and `drawing-slide-persistence.spec.ts`/`PATCH-077-draft.md`)
+were reconfirmed clean by the independent reviewer prior to PASS.
+
+**No hard-stop condition (§10) was triggered.** No production file,
+test spec, `playwright.config.ts`, or `auth.setup.ts` was touched; the
+`AUTH_EXPIRY_SIGNATURE` logic was not weakened, reordered, or merged
+with the new counter; `ERR_CONNECTION_REFUSED` cannot trigger the new
+retry (explicit exclusion confirmed in source); no migration, RPC, or
+move-affordance work entered scope; no machine-local linked-project
+state was used; carried PATCH-089 through PATCH-095 evidence was not
+weakened (this patch touches no file any of those patches depend on
+for evidence); PATCH-097 did not exist prior to this closure.
