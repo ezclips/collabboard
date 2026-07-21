@@ -361,6 +361,56 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-21** — **PATCH-100 (narrow, timing-independent
+  synchronous-shape scope) evaluated and NOT authorized — deterministic
+  test strategy could not be bound.** Re-confirmed the narrow defect
+  is real and unconditional: `PresentationPadletCard.tsx` (the
+  component `createSlideRenderer.tsx`'s `renderPadletOverlayToCanvas`
+  uses for every thumbnail/PDF/PPTX/share/preview surface) has no
+  `normalizedType === 'ai-component'` branch at all — falls to its
+  generic default (title/snippet text), not even the "No AI component
+  generated yet" fallback. `PresentationContainerCard.tsx` needs no
+  change: it already delegates its primary child to
+  `PresentationPadletCard` (`variant="compact"`), so fixing the one
+  file would cover both top-level and nested cases — EXCEPT
+  `pickPrimaryChild()` has no special preference for `ai-component`
+  children (only picks one via its image/media/link/text priority
+  order or a bare `children[0]` fallback), a pre-existing,
+  out-of-scope container cover-selection behavior, not part of this
+  defect. Re-confirmed all six target renderers
+  (`ChartDiagramRenderer`/`TimelineDiagramRenderer`/
+  `ComparisonDiagramRenderer`/`PhotoCardRenderer`/
+  `WorkshopBoardRenderer`/`StructuredLessonBoardRenderer`) are fully
+  synchronous; only `CodeDiagramRenderer` (Mermaid) is async.
+  **Test-strategy search (exhaustive):** traced every downstream
+  consumer of `renderSlideToPNG` looking for an already-existing
+  stable, non-transient surface to assert against instead of racing
+  the off-screen host — `PresentationPreviewModal.tsx`'s big-preview
+  `<img>` and thumbnail strip, `useSlideThumbnails.ts`, `exportToPDF.ts`
+  (`pdf.addImage(png, ...)` — the entire slide embedded as ONE
+  rasterized image, no text layer), `exportToPPTX.ts` (same, a base64
+  PNG image, no extractable text). **Every one of them terminates in
+  an opaque raster image with no extractable DOM or text** — there is
+  no stable hook or visible preview path anywhere in the existing
+  pipeline. The only non-opaque surface is the transient off-screen
+  host itself (`createSlideRenderer.tsx`'s
+  `renderPadletOverlayToCanvas`: mount → 2 RAF → `html2canvas` → unmount
+  in a `finally` block) — precisely the node this program's own bar
+  disallows racing in a test. **Decision: PATCH-100 NOT authorized.**
+  The fix itself is simple and the defect is real, but no deterministic
+  existing-infrastructure Playwright strategy can prove it without
+  either (a) racing the transient host (explicitly disallowed), or
+  (b) adding new production instrumentation to expose render-complete
+  state for tests — which is new scope beyond the two-file plan
+  evaluated here and would need its own explicit authorization.
+  **Remaining blocker, precisely:** a decision is needed on whether to
+  accept a deliberately-racing test (with an explicit, documented
+  exception) or authorize a minimal, explicitly-scoped, non-user-visible
+  test hook before this fix (or the broader PATCH-098 readiness
+  contract) can be authorized. No production or test code was touched
+  by this governance turn; `.fable5/patches/PATCH-100.md` was not
+  created.
+
 - **2026-07-21** — **PATCH-099 CLOSED (commit `63766a9`) — PATCH-098
   reassessed and still NOT authorized; PATCH-100 NOT authorized; one
   new narrower, always-true defect identified for future
