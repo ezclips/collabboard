@@ -1,6 +1,8 @@
 # PATCH-100 — Render Synchronous Structured AI Containers in Snapshot Surfaces with Deterministic Capture Observation
 
-**Status:** **AUTHORIZED** (not yet implemented).
+**Status:** **DONE** (commit `6df5d6c2a08a3d7a6f89cd1ca4f0384caeb07f1c`).
+Exactly the two bound paths landed at their exact blobs. No other
+production file was touched.
 
 **Implementer:** GPT-5.5. **Reviewer:** independent read-only
 reviewer (Kepler primary, Gemini 3.1 Pro fallback) — PASS required
@@ -459,3 +461,87 @@ gates; cleanup proof; explicit confirmations (no file outside §4
 touched, no resize handle exposed, no export-orchestration file
 touched, instrumentation confirmed inert in a production build);
 commit hash + push status after PASS.
+
+## 11. Closure record (2026-07-22)
+
+**Landed:** commit `6df5d6c2a08a3d7a6f89cd1ca4f0384caeb07f1c`
+(`fix(presentation): render synchronous structured AI containers in
+snapshot surfaces (PATCH-100)`), HEAD == origin/main at closure time.
+Exactly the two bound paths landed at their exact blobs:
+`PresentationPadletCard.tsx` →
+`cfc6d7b49bdcae93134a4944339f6649f8547510`,
+`presentation-snapshot-ai-component-render.spec.ts` →
+`76f9c84c9c79a5a96c6f9f8cb0e57dc007bb16cf`. Independent read-only
+review verdict: **PASS**, obtained before commit.
+
+**Diff scope (re-verified at closure, by the CTO directly via
+`git diff <base-blob> <landed-blob>`):** the implementer factored the
+new branch into a small local `PresentationAISnapshotContent`
+sub-component (necessary since React's hooks rules require
+`useLayoutEffect` to be called unconditionally at a component's top
+level, not inside a conditional branch of the parent render function)
+that computes `aiContent`/`kind`, dispatches the gated
+`collabboard-ai-snapshot-rendered` `CustomEvent` via `useLayoutEffect`
+(guarded by `process.env.NODE_ENV === "production"` early-return), and
+renders `AIContentRenderer` with exactly the governed `legacyHtmlProps`
+(`padletId`, `width`, `height`, `isExpanded: true`) and no
+`onExportTargetReady`/resize/edit callbacks. The main component gained
+one new `normalizedType === "ai-component"` branch wrapping this
+sub-component in the existing `shellStyle` div. No other line changed.
+This is a minimal, compliant realization of §2 — a sound
+implementation choice, not a deviation.
+
+**Fenced/prohibited files independently re-verified unchanged at the
+landed commit:** all 71 §5 fences re-checked directly against the
+landed commit — 0 mismatches, including
+`createSlideRenderer.tsx`, `PresentationContainerCard.tsx`,
+`AIComponentRenderer.tsx`, `normalize-ai-content.ts`, `persistence.ts`,
+`CodeDiagramRenderer.tsx`, `AIComponentExportMenu.tsx`, every
+export-orchestration file (`useSlideThumbnails.ts`,
+`PresentationPreviewModal.tsx`, `exportToPDF.ts`, `exportToPPTX.ts`,
+`SharePresentationModal.tsx`, `ExportMenu.tsx`), and both carried
+specs (PATCH-097 `presentation-ai-component-render.spec.ts` and
+PATCH-099 `presentation-ai-component-structured-render.spec.ts`) —
+all bit-for-bit identical to base.
+
+**Corrective classification (bind):** snapshot surfaces (thumbnails,
+PDF export, PPTX export, share preview, preview modal) now render
+synchronous structured AI content (structured lesson boards, charts,
+comparisons, photo cards, workshop boards, non-Mermaid timelines) and
+legacy HTML/legacy lesson boards through the same authoritative path
+as the editor canvas and the PATCH-097/099 runtime cards. Both
+top-level and nested-in-container snapshot paths are covered (the
+latter via `PresentationContainerCard`'s existing delegation to
+`PresentationPadletCard`, unmodified). The `collabboard-ai-snapshot-rendered`
+event is confirmed production-inert (gated on
+`process.env.NODE_ENV !== "production"`), payload limited to
+`{ padletId, kind }`. No change to capture timing, `html2canvas`,
+persistence, schema, or runtime-fullscreen behavior. Mermaid/code
+diagram readiness, network-image readiness, image-bearing legacy HTML
+readiness, and any timeout/retry contract or capture-scheduling change
+remain explicitly deferred and untouched.
+
+**Live spec result (per the independent reviewer's report, PATCH-100
+new spec):** `presentation-snapshot-ai-component-render.spec.ts`
+passed Flows A-F, 3/3 stability runs — structured content events
+recorded (correct `kind`) for both a top-level and a nested AI
+Container before capture, legacy HTML unaffected (Flow D), no
+resize/edit controls exposed (Flow E), cleanup reached zero (Flow F).
+
+**Carried gates (per the independent reviewer's report):** PATCH-097
+and PATCH-099 specs passed unchanged; PATCH-096 grouped runner 14/14
+groups, 14/14 specs, 0 incidents; PATCH-089/090/091/093/094
+classifications unchanged.
+
+**Deterministic gates:** slideOrder 7/1; clonedPostMetadata 9/1;
+focused drawing 59/2; full Vitest 448/43; `tsc --noEmit` passed;
+`check:boundaries` passed; `npm run verify` passed; `npm run build`
+passed.
+
+**Fence result:** 71/71, 0 mismatches (independently re-verified by
+the CTO directly against the landed commit).
+
+**Cleanup/process state:** all cleanup counts reached zero; ports
+3000/4000 free; no repo-owned runtime process left running.
+
+**No hard-stop condition (§8) was triggered.**

@@ -361,6 +361,67 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-22** — **PATCH-100 CLOSED (commit `6df5d6c`) — PATCH-101
+  AUTHORIZED (bounded Mermaid diagram readiness only; image readiness
+  split out and remains deferred).** Independently re-verified the
+  landed PATCH-100 commit directly: HEAD == origin/main ==
+  `6df5d6c2a08a3d7a6f89cd1ca4f0384caeb07f1c`, exact bound commit
+  message, exactly the two bound paths at their exact bound blobs
+  (`cfc6d7b`, `76f9c84`), diff re-derived and matching §2's intent
+  (implementer factored the branch into a small
+  `PresentationAISnapshotContent` sub-component — necessary since
+  React's hooks rules require `useLayoutEffect` at a component's top
+  level, not inside a conditional branch — a sound, compliant
+  realization, not a deviation), all 71 fenced files confirmed
+  bit-for-bit unchanged. Full closure record appended to
+  `.fable5/patches/PATCH-100.md` §11. **Async snapshot/export
+  reassessment:** re-inspected `createSlideRenderer.tsx`,
+  `AIComponentExportMenu.tsx`'s `waitForDiagramRender()`,
+  `CodeDiagramRenderer.tsx`'s `data-ai-render-state` marker, and
+  `lib/ai/diagram-engine.ts`'s `renderDiagramCode()` (confirmed always
+  settles — wrapped in `try/catch`, no possible indefinite hang under
+  normal conditions, meaning a genuine timeout cannot be reliably
+  reproduced naturally in a test; a deterministic test of the
+  fallback branch requires a test-only override, not a "slow diagram"
+  fixture). **Decision: split the async problem.** Mermaid readiness
+  can be safely and narrowly authorized now: the marker and the
+  100ms/3000ms/proceed-anyway contract already exist and are already
+  proven in production (`AIComponentExportMenu.tsx`'s single-card PDF
+  export) — reusing them for the slide-snapshot pipeline requires only
+  a new local, independent implementation inside
+  `createSlideRenderer.tsx` (deliberately NOT extracted into a shared
+  module with `AIComponentExportMenu.tsx`, to keep zero regression
+  risk on the already-working single-card path). Image-bearing legacy
+  HTML readiness has no existing marker and would require modifying
+  `AIComponentRenderer.tsx`/`useAIComponent.ts` — files shared by the
+  editor canvas and both PATCH-097/099 runtime cards, a materially
+  larger blast radius — and remains explicitly deferred, NOT
+  authorized. **Test strategy:** extends PATCH-100's proven pattern —
+  a second production-inert, `NODE_ENV`-gated `CustomEvent`
+  (`collabboard-ai-snapshot-capture-wait`, payload
+  `{waitedMs, timedOut, pendingCount}` only) dispatched from
+  `createSlideRenderer.tsx` right before `html2canvas`, registered by
+  the test before triggering the Preview modal — no racing. The
+  timeout/fallback branch is proven deterministically via a
+  non-production-only override
+  (`window.__patch101TimeoutOverrideMs`, same gating convention) that
+  lets the test force a near-instant timeout, since a real Mermaid
+  render reliably exceeds the forced bound — avoiding any fragile
+  wall-clock assumption. **PATCH-101 AUTHORIZED:**
+  `.fable5/patches/PATCH-101.md` created — single production file
+  (`createSlideRenderer.tsx`), one new spec
+  (`presentation-snapshot-diagram-readiness.spec.ts`), 73 immutable
+  fences (71 carried from PATCH-100 minus `createSlideRenderer.tsx`
+  itself, plus `PresentationPadletCard.tsx` re-fenced now that
+  PATCH-100 landed it, plus the PATCH-100 spec carried forward as an
+  explicit regression gate, plus `lib/ai/diagram-engine.ts`).
+  `AIComponentExportMenu.tsx`, `CodeDiagramRenderer.tsx`, and all
+  runtime/editor AI files remain fenced and untouched. GPT-5.5
+  implements; independent reviewer (Kepler primary, Gemini 3.1 Pro
+  fallback) required before commit; Sonnet will not review its own
+  authorization. No production or test code was touched by this
+  governance turn.
+
 - **2026-07-21** — **PATCH-100 AUTHORIZED — minimal, non-user-visible
   test instrumentation unblocked the deterministic test-strategy gate
   that stalled the prior turn.** Re-examined the prior conclusion ("no
