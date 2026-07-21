@@ -247,13 +247,19 @@ present and UNMODIFIED at base and post-implementation (blob
 `63a93b3e75f69e3c9a3a46a23f2351f008955bd1` must match exactly, before
 and after).
 
-## 5. Immutable fences (bind — 61, Git blob IDs)
+## 5. Immutable fences (bind — 62, Git blob IDs)
 
 Verify each with `git rev-parse ef83e38:<path>` and equality at the
-current governance HEAD. The full 59-entry set carried unchanged from
-PATCH-097's closure (identical paths, blobs unchanged since), PLUS 2
-newly-fenced files directly relied upon by this patch's fix but
-explicitly prohibited from modification = **61**.
+current governance HEAD. The 59-entry set carried unchanged from
+PATCH-097's closure (identical paths, blobs unchanged since), PLUS 3
+newly-fenced files: `components/ai/AIContentRenderer.tsx` and
+`lib/ai/persistence.ts` (both relied upon by this patch's fix but
+explicitly prohibited from modification), and
+`e2e/characterization/presentation-ai-component-render.spec.ts` (the
+PATCH-097 legacy spec — a new file introduced by PATCH-097 itself and
+therefore not part of PATCH-097's own frozen 59-entry fence list, now
+fenced here as immutable since it must remain bit-for-bit unchanged
+by this patch) = **62**.
 
 ```text
 playwright.config.ts                                           5864c98436dde10809de67cb40c564c05e98ff6d
@@ -321,7 +327,7 @@ lib/ai/persistence.ts                                          d8ec23850c9f05b7d
 ```
 
 **Fence-count consistency (bind — verified before authorization):**
-raw entries = 61; unique paths = 61; unique path/blob pairs = 61;
+raw entries = 62; unique paths = 62; unique path/blob pairs = 62;
 duplicates = 0; malformed = 0.
 
 ## 6. Deterministic and live gates (bind)
@@ -356,7 +362,7 @@ scripts left behind. Ports 3000/4000 free at close.
 
 STOP immediately, report, do not commit, if:
 
-- base commit, any §5 fence (61/61), or any §4 absence gate differs;
+- base commit, any §5 fence (62/62), or any §4 absence gate differs;
 - any file outside §4's three is touched;
 - the PATCH-097 spec (`presentation-ai-component-render.spec.ts`) is
   modified in any way — its blob must be bit-for-bit identical
@@ -385,7 +391,7 @@ STOP immediately, report, do not commit, if:
 Implementer delivers the uncommitted three-file diff + report (blobs
 re-derived; exact renderer swap verified against §2; new spec passing
 Flows A-E; PATCH-097 spec blob unchanged; carried/deterministic
-totals; 61-fence result; cleanup proof). The independent reviewer
+totals; 62-fence result; cleanup proof). The independent reviewer
 (Kepler primary, Gemini 3.1 Pro fallback — NOT Sonnet) re-derives
 everything live and must return an explicit PASS before the
 implementer commits with the bound message and pushes. Sonnet (CTO)
@@ -396,7 +402,7 @@ closes only after PASS + landing are independently confirmed.
 Exact three changed/added paths + final blobs; the exact renderer
 swap verified against §2 in both files; new spec Flow A-E results;
 explicit confirmation the PATCH-097 spec blob is unchanged; carried
-totals (089-097 unchanged); deterministic totals; 61-fence result +
+totals (089-097 unchanged); deterministic totals; 62-fence result +
 absence gates; cleanup proof; explicit confirmations (no file outside
 §4 touched, no resize handle exposed, no export-path file touched,
 `slide-renderer/*` untouched); commit hash + push status after PASS.

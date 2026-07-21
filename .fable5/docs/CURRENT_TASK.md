@@ -412,9 +412,11 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
   rather than extending the PATCH-097 spec, to avoid mixing
   legacy/structured evidence or risking the already-landed PATCH-097
   regression gate; the PATCH-097 spec blob is fenced as immutable
-  (must stay bit-for-bit unchanged). 61 immutable fences bound (the 59
+  (must stay bit-for-bit unchanged). 62 immutable fences bound (the 59
   carried from PATCH-097 plus `AIContentRenderer.tsx` and
-  `persistence.ts`, both relied upon but prohibited from modification).
+  `persistence.ts`, both relied upon but prohibited from modification,
+  plus the PATCH-097 legacy spec itself, newly fenced here as
+  immutable).
   No production or test code touched by this governance turn — see
   `.fable5/patches/PATCH-099.md` for the full binding scope. PATCH-098
   (export timing) remains separately unresolved and not reopened by
