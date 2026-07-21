@@ -361,6 +361,65 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-21** — **PATCH-099 AUTHORIZED — corrective follow-up to
+  PATCH-097: runtime player only renders legacy-HTML AI content,
+  structured/modern content renders blank.** Focused read-only
+  corrective investigation of PATCH-097's runtime rendering,
+  confirming the concern raised in the prior design-investigation
+  entry below. Traced the authoritative AI content model: the current
+  save path (`AIContentEditModal.tsx:686`, `AIContentConvertModal.tsx:146`,
+  `AIComponentEditor.tsx:375`, all via `usePadletSave.ts:1278/1328`'s
+  `serializeAIContentForPersistence()`) writes a structured envelope
+  (`{mode, version:1, data, meta}`) into `metadata.aiComponentJson` for
+  every shape except legacy HTML (diagrams, charts, timelines,
+  comparisons, photo cards, workshop boards, and structured lesson
+  boards). The editor canvas reads this correctly via
+  `extractAIContentFromPadletMetadata()` → `AIContentRenderer` →
+  `normalizeAIContent()` → `deserializePersistedAIContent()`
+  (`lib/ai/persistence.ts:176`), which dispatches to the correct
+  per-shape renderer. PATCH-097's runtime cards
+  (`RuntimePresentationPadletCard.tsx`, `RuntimeContainerChildCard.tsx`)
+  instead call `resolveSavedAIHtmlFromMetadata()` directly — a
+  legacy-HTML-only resolver that never reads `aiComponentJson` and
+  returns `''` for all structured content, which the runtime's
+  `AIComponentRenderer` then displays as its generic "No AI component
+  generated yet" empty state, indistinguishable from a never-generated
+  container. **Confirmed via the PATCH-097 spec itself:** every seeded
+  fixture in `presentation-ai-component-render.spec.ts` uses only
+  `savedAIComponent.code`/`aiComponentCode`/`aiRawCode` — zero coverage
+  of `aiComponentJson`/structured content, so the spec's PASS never
+  exercised the majority of current AI-Container saves.
+  **Classification: C** (fundamentally wrong renderer path for
+  structured content; classification A only for legacy HTML).
+  **User impact:** any AI Container generated through the current
+  editor flows and placed on a slide (directly or nested in a
+  container) renders blank in the fullscreen player today, unless its
+  metadata happens to still carry a legacy HTML field.
+  **Smallest safe correction (authorized as PATCH-099, not a renumbered
+  PATCH-098 — that number stays reserved for the separately-tracked
+  export-timing work):** in both runtime card files, replace the
+  direct `AIComponentRenderer`/`resolveSavedAIHtmlFromMetadata()` call
+  with `AIContentRenderer` fed by
+  `extractAIContentFromPadletMetadata(padlet.metadata)`, passing
+  `legacyHtmlProps={{padletId, width, height, isExpanded: true}}` to
+  preserve exact current legacy-HTML sizing with zero behavior change,
+  and no `onExportTargetReady` (export timing stays excluded, read-only
+  semantics preserved — no resize handle). This reuses the editor's
+  exact authoritative rendering path rather than duplicating
+  content-shape logic, per PATCH_REFERENCE discipline. New, separate
+  characterization spec
+  (`presentation-ai-component-structured-render.spec.ts`) required
+  rather than extending the PATCH-097 spec, to avoid mixing
+  legacy/structured evidence or risking the already-landed PATCH-097
+  regression gate; the PATCH-097 spec blob is fenced as immutable
+  (must stay bit-for-bit unchanged). 61 immutable fences bound (the 59
+  carried from PATCH-097 plus `AIContentRenderer.tsx` and
+  `persistence.ts`, both relied upon but prohibited from modification).
+  No production or test code touched by this governance turn — see
+  `.fable5/patches/PATCH-099.md` for the full binding scope. PATCH-098
+  (export timing) remains separately unresolved and not reopened by
+  this entry.
+
 - **2026-07-21** — **Design investigation of the AI Container
   snapshot/export defect — PATCH-098 still NOT authorized (two
   concrete, resolved-in-detail blockers, plus one significant new
