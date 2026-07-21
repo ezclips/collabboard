@@ -84,6 +84,13 @@ const AUTH_EXPIRY_SIGNATURE = {
   harness: /drawingBridgeHarness\.ts|openDrawingBoard/,
 };
 
+const SETUP_CLOSE_SIGNATURE = {
+  setupProject: /\[setup\].*auth\.setup\.ts/i,
+  targetClosed: /Target page, context or browser has been closed/i,
+  characterizationProject: /\[characterization\]/i,
+  connectionRefused: /ERR_CONNECTION_REFUSED/i,
+};
+
 const PLAYWRIGHT_COMMAND = process.execPath;
 const PLAYWRIGHT_ARGS_PREFIX = ['node_modules/playwright/cli.js', 'test'];
 let activeChild = null;
@@ -130,6 +137,15 @@ function detectAuthExpiry(output) {
     && AUTH_EXPIRY_SIGNATURE.locatorWait.test(output)
     && AUTH_EXPIRY_SIGNATURE.backToDashboard.test(output)
     && AUTH_EXPIRY_SIGNATURE.harness.test(output);
+}
+
+function detectSetupClose(output, setupCloseRetryConsumed) {
+  return !setupCloseRetryConsumed
+    && SETUP_CLOSE_SIGNATURE.setupProject.test(output)
+    && SETUP_CLOSE_SIGNATURE.targetClosed.test(output)
+    && !SETUP_CLOSE_SIGNATURE.characterizationProject.test(output)
+    && !SETUP_CLOSE_SIGNATURE.connectionRefused.test(output)
+    && !detectAuthExpiry(output);
 }
 
 function extractTotals(output) {
@@ -226,6 +242,8 @@ async function main() {
   const results = [];
   let authExpiryIncidents = 0;
   let recoveredIncidents = 0;
+  let setupCloseIncidents = 0;
+  let recoveredSetupCloseIncidents = 0;
   let nonSignatureFailures = 0;
 
   console.log('PATCH-088 carried-suite grouped runner');
@@ -244,6 +262,7 @@ async function main() {
     const firstRun = await runGroup(group);
     const firstPassed = firstRun.code === 0;
     const authExpiryDetected = firstPassed ? false : detectAuthExpiry(firstRun.output);
+    const setupCloseDetected = firstPassed || authExpiryDetected ? false : detectSetupClose(firstRun.output, false);
     let setupRefresh = null;
     let retry = null;
     let finalPassed = firstPassed;
@@ -269,6 +288,20 @@ async function main() {
           printFailureOutput(retry);
         }
       }
+    } else if (!firstPassed && setupCloseDetected) {
+      setupCloseIncidents += 1;
+      console.log('SETUP-CLOSE (INFRASTRUCTURE, not a product failure)');
+      console.log(`First attempt exit code: ${firstRun.code}`);
+      printFailureOutput(firstRun);
+      console.log('Retry attempt: 1');
+      retry = await runGroup(group);
+      finalPassed = retry.code === 0;
+      finalCode = retry.code;
+      if (finalPassed) {
+        recoveredSetupCloseIncidents += 1;
+      } else {
+        printFailureOutput(retry);
+      }
     } else if (!firstPassed) {
       nonSignatureFailures += 1;
       printFailureOutput(firstRun);
@@ -281,6 +314,7 @@ async function main() {
       specs: group.specs,
       firstRun: firstPassed ? 'passed' : 'failed',
       authExpiryDetected: authExpiryDetected ? 'yes' : 'no',
+      setupCloseDetected: setupCloseDetected ? 'yes' : 'no',
       setupRefresh: setupRefresh ? (setupRefresh.code === 0 ? 'passed' : 'failed') : 'not run',
       retry: retry ? (retry.code === 0 ? 'passed' : 'failed') : 'not run',
       final: finalPassed ? 'passed' : 'failed',
@@ -291,6 +325,7 @@ async function main() {
 
     console.log(`First-run result: ${groupResult.firstRun}`);
     console.log(`Auth-expiry signature detected: ${groupResult.authExpiryDetected}`);
+    console.log(`Setup-close signature detected: ${groupResult.setupCloseDetected}`);
     console.log(`Retry result: ${groupResult.retry}`);
     console.log(`Final group result: ${groupResult.final}`);
     console.log(`Reported totals: ${groupResult.totals}`);
@@ -299,23 +334,23 @@ async function main() {
 
     if (!finalPassed) {
       console.log('Stopping after failed group.');
-      printSummary(results, startedAt, authExpiryIncidents, recoveredIncidents, nonSignatureFailures, finalCode || 1);
+      printSummary(results, startedAt, authExpiryIncidents, recoveredIncidents, setupCloseIncidents, recoveredSetupCloseIncidents, nonSignatureFailures, finalCode || 1);
       process.exit(finalCode || 1);
     }
   }
 
-  printSummary(results, startedAt, authExpiryIncidents, recoveredIncidents, nonSignatureFailures, 0);
+  printSummary(results, startedAt, authExpiryIncidents, recoveredIncidents, setupCloseIncidents, recoveredSetupCloseIncidents, nonSignatureFailures, 0);
 }
 
-function printSummary(results, startedAt, authExpiryIncidents, recoveredIncidents, nonSignatureFailures, exitStatus) {
+function printSummary(results, startedAt, authExpiryIncidents, recoveredIncidents, setupCloseIncidents, recoveredSetupCloseIncidents, nonSignatureFailures, exitStatus) {
   const groupsPassedFirstTry = results.filter((result) => result.firstRun === 'passed').length;
   const finalPassed = results.filter((result) => result.final === 'passed').length;
   const accountedSpecs = results.reduce((count, result) => count + result.specs.length, 0);
 
   console.log('Final carried-suite summary');
-  console.log('Group | First run | Auth expiry | Setup refresh | Retry | Final | Totals | Elapsed');
+  console.log('Group | First run | Auth expiry | Setup close | Setup refresh | Retry | Final | Totals | Elapsed');
   for (const result of results) {
-    console.log(`${result.number}. ${result.name} | ${result.firstRun} | ${result.authExpiryDetected} | ${result.setupRefresh} | ${result.retry} | ${result.final} | ${result.totals} | ${result.elapsed}`);
+    console.log(`${result.number}. ${result.name} | ${result.firstRun} | ${result.authExpiryDetected} | ${result.setupCloseDetected} | ${result.setupRefresh} | ${result.retry} | ${result.final} | ${result.totals} | ${result.elapsed}`);
   }
   console.log(`All 14 specs accounted for: ${accountedSpecs === 14 ? 'yes' : 'no'} (${accountedSpecs}/14)`);
   console.log(`Number of groups: ${GROUPS.length}`);
@@ -323,6 +358,8 @@ function printSummary(results, startedAt, authExpiryIncidents, recoveredIncident
   console.log(`Groups finally passed: ${finalPassed}/${GROUPS.length}`);
   console.log(`Auth-expiry incidents: ${authExpiryIncidents}`);
   console.log(`Groups recovered after sanctioned refresh: ${recoveredIncidents}`);
+  console.log(`Setup-close incidents: ${setupCloseIncidents}`);
+  console.log(`Groups recovered after setup-close retry: ${recoveredSetupCloseIncidents}`);
   console.log(`Non-signature failures: ${nonSignatureFailures}`);
   console.log(`Total elapsed: ${formatDuration(Date.now() - startedAt)}`);
   console.log(`Final exit status: ${exitStatus}`);
