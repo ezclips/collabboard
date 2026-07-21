@@ -361,6 +361,60 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-21** — **PATCH-100 AUTHORIZED — minimal, non-user-visible
+  test instrumentation unblocked the deterministic test-strategy gate
+  that stalled the prior turn.** Re-examined the prior conclusion ("no
+  deterministic Playwright strategy exists without racing the
+  transient off-screen host") and found a design that avoids the race
+  entirely: a `useLayoutEffect`-dispatched `window` `CustomEvent`
+  (`collabboard-ai-snapshot-rendered`), fired from inside the SAME new
+  `ai-component` branch being added to
+  `PresentationPadletCard.tsx`, gated behind
+  `process.env.NODE_ENV !== 'production'` — the exact dev-diagnostics
+  gating convention already used in this codebase
+  (`DrawingLayout.tsx`'s `DEV_DRAWING_BRIDGE_DIAGNOSTICS`,
+  `SimpleLineRenderer.tsx`'s `DEV_LINE_RENDER_DIAGNOSTICS`).
+  `useLayoutEffect` guarantees the event fires synchronously after
+  DOM commit and strictly before the browser's next paint/RAF, per
+  React's documented effect-flush ordering — i.e. deterministically
+  before `renderPadletOverlayToCanvas`'s two chained
+  `requestAnimationFrame` calls and the subsequent `html2canvas`
+  capture, with zero race window. The Playwright test registers the
+  listener (buffering events into a plain array) BEFORE triggering
+  the Preview modal, eliminating any race between registration and
+  firing — it never observes the transient DOM host at all. Payload
+  is minimal and non-sensitive: `{ padletId, kind }`, where `kind` is
+  one of the five `NormalizedAIContent` enum values already defined
+  in `lib/ai/normalize-ai-content.ts` — no HTML, no AI-generated text,
+  no metadata contents. This adds no network request, no persistence
+  write, no timing change to the production capture path (a
+  `CustomEvent` dispatch is a synchronous, sub-millisecond, one-way
+  side observation `createSlideRenderer.tsx` is entirely unaware of
+  and unmodified by). **Confirmed unconditional defect (unchanged from
+  prior turn):** `PresentationPadletCard.tsx` has no `ai-component`
+  branch; `PresentationContainerCard.tsx` needs no change since it
+  already delegates its primary child through
+  `PresentationPadletCard`. **Confirmed synchronous families (source
+  re-verified):** structured lesson boards, charts, comparisons, photo
+  cards, workshop boards, non-Mermaid timelines, plus legacy HTML and
+  legacy lesson boards (both already synchronous). **Confirmed
+  excluded, unchanged:** Mermaid/code diagrams
+  (`CodeDiagramRenderer`) and image-bearing legacy HTML remain exactly
+  as unreliable in snapshots as today — this patch cannot make them
+  worse (currently 100% blank regardless). **PATCH-100 authorized**:
+  `.fable5/patches/PATCH-100.md` created — single production file
+  (`PresentationPadletCard.tsx`), one new characterization spec
+  (`presentation-snapshot-ai-component-render.spec.ts`), 71 immutable
+  fences (the 62 carried from PATCH-099's closure minus
+  `PresentationPadletCard.tsx` itself, which becomes this patch's
+  allowed/modified file, plus 9 newly-fenced snapshot/export-consumer
+  and async-primitive files this patch explicitly must not touch, plus
+  the PATCH-099 structured spec now carried forward as an explicit
+  immutable regression gate). GPT-5.5 implements; independent reviewer
+  (Kepler primary, Gemini 3.1 Pro fallback) required before commit;
+  Sonnet will not review its own authorization. No production or test
+  code was touched by this governance turn.
+
 - **2026-07-21** — **PATCH-100 (narrow, timing-independent
   synchronous-shape scope) evaluated and NOT authorized — deterministic
   test strategy could not be bound.** Re-confirmed the narrow defect
