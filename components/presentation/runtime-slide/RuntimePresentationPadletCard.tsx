@@ -5,6 +5,8 @@
 
 import React from "react";
 import type { Padlet } from "@/types/collabboard";
+import AIComponentRenderer from "@/components/collabboard/AIComponentRenderer";
+import { resolveSavedAIHtmlFromMetadata } from "@/lib/ai/normalize-ai-content";
 import RuntimePresentationContainerCard from "./RuntimePresentationContainerCard";
 
 type RuntimePresentationPadletCardProps = {
@@ -117,6 +119,20 @@ export default function RuntimePresentationPadletCard({
   // ── Container ─────────────────────────────────────────────────────────────
   if (normalizedType === "container") {
     return <RuntimePresentationContainerCard padlet={padlet} allPadlets={allPadlets} />;
+  }
+
+  if (normalizedType === "ai-component") {
+    return (
+      <div style={shellStyle}>
+        <AIComponentRenderer
+          code={resolveSavedAIHtmlFromMetadata(padlet.metadata)}
+          padletId={padlet.id}
+          width={Number(padlet.width) || 500}
+          height={Number(padlet.height) || 400}
+          isExpanded
+        />
+      </div>
+    );
   }
 
   // ── Image / File / Card / Drawing ─────────────────────────────────────────
