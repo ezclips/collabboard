@@ -559,3 +559,196 @@ one bound corrective sub-step (its own local fractional-index fix); no
 PATCH-104 work of any kind.
 
 **Do not authorize PATCH-104.**
+
+## 13. Delayed-image readiness investigation and amendment (bind, 2026-07-22)
+
+**Reported live result with §12's corrective sub-step applied**
+(blobs `createSlideRenderer.tsx` → `a15659f7fc3e1ae1d5825bf68df22f3190bfa41e`,
+`presentation-snapshot-image-readiness.spec.ts` →
+`74013f2b2d9afee2fe8d0fa5d0601762af31ef55`): run 1 = 2 passed, 3
+skipped (serial-mode cascade after the first failure — matches file
+order exactly: error/forced-timeout/mermaid-carry), 1 unexpected. The
+failing test, `waits for a delayed legacy HTML image load before
+capture`
+(`presentation-snapshot-image-readiness.spec.ts:406`), timed out after
+90s on the predicate `delayed-image wait event observes settlement
+before timeout` — expected `true`, received `false`.
+
+**Root cause, traced by source (not independently live-verified this
+turn — I do not have live browser/network-execution tooling in this
+environment; the mechanism below is fully determined by documented
+browser behavior plus the exact code paths involved, but GPT-5.5 must
+confirm it live before treating it as closed — see required gates):**
+
+1. `createSlideRenderer.tsx`'s snapshot host
+   (`components/presentation/slide-renderer/createSlideRenderer.tsx:68-77`)
+   is created with `position: fixed; left: -100000px` — deliberately
+   far outside any viewport, by design, since it exists only for
+   `html2canvas` capture.
+2. `hooks/useAIComponent.ts`'s `applyImageEnhancements()`
+   (lines 24-96, confirmed **unmodified** by PATCH-102's diff and
+   already explicitly prohibited from modification by §2) sets
+   `img.loading = 'lazy'` unconditionally on every `<img>` inside
+   legacy-HTML AI content (line 44), for every render of that content
+   anywhere in the app — live board, editor, and this offscreen
+   snapshot host alike. If `img.complete` is false at that moment, it
+   also sets `data-ai-image-state="loading"` (line 92) and relies
+   entirely on the image's own native `load`/`error` events to flip the
+   marker (lines 58-79).
+3. Native `loading="lazy"` uses `IntersectionObserver` against the
+   viewport (or nearest scrollable ancestor) to decide when to actually
+   start the fetch. An element permanently positioned at
+   `left: -100000px` can never intersect the viewport — the browser
+   will defer the fetch indefinitely. Because
+   `applyImageEnhancements()` runs synchronously (inside the AI-content
+   component's own `useEffect`, itself flushed as a React 18 passive
+   effect before the double-`requestAnimationFrame` in
+   `createSlideRenderer.tsx:185` resolves) immediately after
+   `container.innerHTML = normalizedHtml` inserts the `<img>`, the
+   `loading = 'lazy'` assignment lands before the browser's normal
+   (task-queued, not synchronous) image-fetch dispatch — so the
+   deferral takes effect for real, non-cached images.
+4. This explains every observed data point precisely: the
+   "cached-image" test (a `data:` URI, `img.complete` true
+   near-instantly regardless of `loading`) and the "no-image" test
+   (zero `<img>` elements, `onAnyImageSettled()` fires immediately) do
+   not depend on the fetch ever starting, and both passed. The
+   "delayed-image" test uses a real `https://` URL requiring an actual
+   network fetch — which, inside this permanently off-viewport host,
+   never begins, so `data-ai-image-state` never leaves `"loading"`,
+   `pendingCount` never reaches 0 on its own, and the predicate
+   requiring `timedOut === false && pendingCount === 0` can never
+   become true — it can only ever resolve via the governed 3000ms
+   timeout path (`timedOut: true`), which the test correctly does NOT
+   accept for this scenario. This is not specific to PATCH-102's
+   candidate: `applyImageEnhancements()` and the host's
+   `left: -100000px` positioning both predate this patch entirely,
+   confirmed unmodified by its diff.
+
+**Verification of the wait mechanism itself (Phase 5) — confirmed
+correct, no change needed:** the combined selector
+(`[data-ai-render-state="loading"], [data-ai-image-state="loading"]`),
+the shared 3000ms default timeout (`resolveSnapshotTimeoutMs()`), the
+100ms poll cadence, the pending-count recomputation each poll, the
+zero-pending early resolve, the `collabboard-ai-snapshot-capture-wait`
+event name and `{waitedMs, timedOut, pendingCount}` payload, and the
+proceed-after-timeout (non-throwing) behavior are all exactly as
+specified and unchanged by this investigation's proposed fix. **The
+defect is not in the wait mechanism — it is that the thing being
+waited for can never resolve naturally inside this specific host.**
+
+**Classification: H — the image remains loading beyond the governed
+timeout, due to a genuine, pre-existing production defect** (not test-route
+error, not an invalid fulfilled response, not a wrong-event
+observation, not caching): `page.route()` interception, the fulfilled
+PNG body, and the event/listener wiring were all independently traced
+and found correct — the route pattern is an exact string match against
+the seeded `<img src>` (`https://patch-102.test/delayed.png`), the
+fulfilled body is a valid decodable PNG buffer (`SYNTHETIC_PNG`,
+already proven decodable by the "forced-timeout" test's own fixture
+using the identical buffer), and `installSnapshotWaitBuffer` registers
+its listener before `openPreviewModal` triggers capture (matching the
+established PATCH-100/101 instrumentation pattern used unmodified
+here). None of A/B/C/D/E/F/G apply; G (production selector not
+observing legacy markers) is close but incorrect — the selector DOES
+observe `data-ai-image-state`, correctly; the marker itself simply
+never updates.
+
+**Minimum safe fix (bind) — production correction, scoped to the
+already-authorized file, no new file, no change to
+`useAIComponent.ts`:**
+
+In `components/presentation/slide-renderer/createSlideRenderer.tsx`,
+immediately after `sanitizeExportOverlayColors(host);`
+(line 186) and before computing `pendingAtStart` (line 187), add:
+
+```ts
+host.querySelectorAll<HTMLImageElement>('img[loading="lazy"]').forEach((img) => {
+  img.loading = 'eager';
+});
+```
+
+This forces any `<img>` inside the offscreen snapshot host that
+`applyImageEnhancements()` marked `loading="lazy"` to switch to eager
+loading — per documented browser behavior, changing an already-deferred
+image's `loading` attribute from `lazy` to `eager` triggers the
+deferred fetch to begin immediately, rather than waiting indefinitely
+for an intersection that this permanently off-viewport host can never
+produce. This does not touch `useAIComponent.ts`, does not change
+`applyImageEnhancements()`'s behavior for the live board or editor
+(where lazy-loading remains genuinely useful), and does not change the
+wait mechanism, event, timeout, or poll cadence in any way — it only
+ensures the offscreen host's own images are eligible to actually
+settle within the governed window the wait mechanism already enforces
+correctly.
+
+**§2 amendment (supersedes the prior "no other line in
+`createSlideRenderer.tsx` may change" restriction for this one
+addition only):** the exact block above is now an additional
+authorized change to `createSlideRenderer.tsx`, on top of §2's already-authorized
+selector generalization. Every other prohibition in §2 remains in full
+force, in particular: no change to `useAIComponent.ts`,
+`applyImageEnhancements()`, `data-ai-render-state` semantics, or any
+other file in §2's prohibited list; no change to the 3000ms timeout,
+100ms poll cadence, event name, or payload shape; no new npm
+dependency.
+
+**Required live gates (bind, non-skip real results required for
+all):**
+
+1. The delayed-image test — **at least 3 consecutive real runs**, each
+   producing a wait event with `waitedMs > 0`, `timedOut === false`,
+   `pendingCount === 0`, and `waitedMs < 3000`, and the Preview modal
+   populating.
+2. The full `presentation-snapshot-image-readiness.spec.ts` suite (all
+   6 tests, no serial-mode skip cascade) — no-image, cached-image,
+   delayed-image, image-error, forced-timeout, and Mermaid-carry all
+   passing with real (non-skipped) results.
+3. PATCH-097, PATCH-099, PATCH-100, PATCH-101 spec blobs confirmed
+   unchanged; all four passing.
+4. `drawing-line-bridge.spec.ts -g "renders seeded attached"` and the
+   full `drawing-line-bridge.spec.ts` (PATCH-103 coexistence).
+5. `drawing-presentation.spec.ts` (PATCH-103 §9-§12's scenario).
+6. PATCH-096 grouped runner — exactly 14 groups, 14 specs, 14 final
+   passes, zero non-signature failures, exit code 0.
+7. Cleanup proof (board-prefix cleanup reaching zero; no leftover
+   `test-results/`/`playwright-report/`/JSON reporter output; ports
+   3000/4000 free at close).
+
+**Hard-stop conditions (bind, in addition to §8):** STOP immediately,
+report, do not commit, if:
+
+- any change lands in `useAIComponent.ts`, `applyImageEnhancements()`,
+  or any other file in §2's prohibited list;
+- the eager-load correction is applied anywhere other than
+  `createSlideRenderer.tsx`'s offscreen snapshot-host path (in
+  particular, not applied to the live board or editor rendering path);
+- the wait mechanism's selector, timeout, poll cadence, event name, or
+  payload shape changes;
+- the delayed-image assertion is weakened, relaxed, or removed instead
+  of made to genuinely pass;
+- any of the required live gates fails or is skip-only;
+- PATCH-096 does not report exactly 14/14/14, zero non-signature
+  failures, exit code 0;
+- credentials are printed, logged, or committed anywhere;
+- the PATCH-102 stash (already restored, per §12) or any file is left
+  in an inconsistent state without an honest governance update.
+
+**Bound implementation commit message (verbatim, supersedes the
+document header's original message for the eager-load addition —
+combined with the already-bound §2 change into one commit):**
+`fix(presentation): force eager image loading in offscreen snapshot host before legacy-image readiness wait (PATCH-102)`
+
+**Review and commit flow:** implementer applies exactly the eager-load
+correction above (plus the already-restored §12 candidate content) to
+`createSlideRenderer.tsx`, re-runs every gate listed above with real
+output, and delivers a report matching §11's required-final-report
+shape plus explicit before/after evidence for the delayed-image
+mechanism (network panel or `img.complete`/`naturalWidth` state at
+each poll, if obtainable). The independent reviewer (Kepler primary,
+Gemini 3.1 Pro fallback — NOT Sonnet) re-derives everything live and
+must return an explicit PASS before commit. Sonnet (CTO) does not
+treat this classification as final until that live PASS confirms the
+traced mechanism matches reality.
+
+**Do not authorize PATCH-104.**

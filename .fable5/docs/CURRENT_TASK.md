@@ -361,6 +361,51 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-22** — **PATCH-102 §13 amendment — delayed-image readiness
+  failure traced to a genuine, pre-existing production defect (not a
+  test-route or event-wiring issue), scoped correction authorized
+  inside the already-authorized `createSlideRenderer.tsx`.** With
+  §12's fractional-index corrective sub-step applied
+  (`presentation-snapshot-image-readiness.spec.ts` →
+  `74013f2b2d9afee2fe8d0fa5d0601762af31ef55`), 2 passed / 3 skipped
+  (serial-mode cascade) / 1 failed: the delayed-image test timed out
+  after 90s waiting for a settlement event that never arrived. Traced
+  by source (not independently live-verified this turn — no live
+  browser tooling available; requires GPT-5.5 live confirmation):
+  `createSlideRenderer.tsx`'s offscreen snapshot host is positioned
+  `left: -100000px` (permanently off-viewport, by design, for
+  `html2canvas`); `hooks/useAIComponent.ts`'s `applyImageEnhancements()`
+  (unmodified by PATCH-102, already prohibited from change by §2) sets
+  `img.loading = 'lazy'` unconditionally on every legacy-HTML `<img>`;
+  native lazy-loading uses `IntersectionObserver` against the viewport,
+  which an element 100,000px off-screen can never intersect — so the
+  fetch for any real (non-cached, non-instantly-complete) image never
+  begins, `data-ai-image-state` never leaves `"loading"`, and the wait
+  can only ever resolve via the 3000ms timeout path, which the test
+  correctly refuses to accept as "settled naturally." Confirmed this
+  explains every data point: cached-image (data URI, instantly
+  complete) and no-image (zero `<img>` elements) tests passed; only the
+  real-network-fetch delayed-image test failed. Verified the wait
+  mechanism itself (combined selector, 3000ms timeout, 100ms poll,
+  event/payload shape) is correct and unchanged — classified **H**,
+  the underlying marker simply never flips. Minimum safe fix
+  authorized: inside `createSlideRenderer.tsx` only, immediately after
+  `sanitizeExportOverlayColors(host)` and before the readiness check,
+  force any `img[loading="lazy"]` within the offscreen host to
+  `loading = 'eager'`, triggering its deferred fetch immediately — does
+  not touch `useAIComponent.ts`, does not change live-board/editor
+  lazy-loading, does not change the wait mechanism/timeout/event. §2
+  amended to permit this one additional block; every other §2
+  prohibition remains in force. New bound commit message:
+  `fix(presentation): force eager image loading in offscreen snapshot host before legacy-image readiness wait (PATCH-102)`.
+  Required live gates bound in §13: 3x delayed-image stability, full
+  6-test suite, PATCH-097/099/100/101 blob-unchanged + passing,
+  PATCH-103 coexistence (drawing-line-bridge, drawing-presentation),
+  PATCH-096 grouped runner at exactly 14/14/14. No candidate file
+  modified this turn; PATCH-102 stash already restored per §12 (not
+  re-touched); PATCH-104 not started. Recorded in `PATCH-102.md` new
+  §13. Governance-only commit follows.
+
 - **2026-07-22** — **PATCH-103 CLOSED (DONE), independent PASS,
   commit `75343360c510571fecf584637a58e8a4211ee63a`. PATCH-102 stash
   verified intact (read-only inspection only) and resumption
