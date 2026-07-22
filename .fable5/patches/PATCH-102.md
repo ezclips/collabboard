@@ -1,6 +1,10 @@
 # PATCH-102 — Bounded Legacy-HTML Image Readiness Wait in Slide Snapshot Capture
 
-**Status:** **AUTHORIZED** (not yet implemented).
+**Status:** **AUTHORIZED, RESUMING** (blocked by PATCH-103 from
+2026-07-22 until PATCH-103 closed DONE on the same date at commit
+`75343360c510571fecf584637a58e8a4211ee63a`; see §12 for the
+restoration/resumption plan and one additional bound prerequisite
+found in this candidate's own spec file).
 
 **Implementer:** GPT-5.5. **Reviewer:** independent read-only
 reviewer (Kepler primary, Gemini 3.1 Pro fallback) — PASS required
@@ -436,3 +440,122 @@ for slides with no pending Mermaid/image content, wait budget shared
 not additive, timeout override confirmed inert in a production build,
 `AIComponentRenderer.tsx`/`useAIComponent.ts`/`AIComponentExportMenu.tsx`
 untouched); commit hash + push status after PASS.
+
+## 12. PATCH-103 prerequisite resolved — restoration and resumption plan (bind, 2026-07-22)
+
+**PATCH-103 closed DONE** at commit
+`75343360c510571fecf584637a58e8a4211ee63a`
+(`fix(e2e): exempt padlet-record-synced embeddable width from the
+exact-seed-geometry invariant (PATCH-103)`), independent PASS
+confirmed, HEAD == origin/main, working tree clean. Full closure
+record: `PATCH-103.md`'s own status line and CURRENT_TASK.md.
+
+**Stash verification (read-only inspection, stash not popped/dropped/
+modified):** `stash@{0}` = `PATCH-102-candidate-before-PATCH-103`,
+confirmed via `git rev-parse stash@{0}:...`, `git rev-parse
+stash@{0}^3:...` (the untracked-file commit), and `git ls-tree -r
+--name-only stash@{0}^3` — contains **exactly**:
+
+- modified: `components/presentation/slide-renderer/createSlideRenderer.tsx`,
+  blob `a15659f7fc3e1ae1d5825bf68df22f3190bfa41e` — matches expected.
+- untracked: `e2e/characterization/presentation-snapshot-image-readiness.spec.ts`,
+  blob `0c6ef9ce0789c9612d0ab450e04d20c3e026d1c0` — matches expected.
+
+No other file present in either the index or untracked commit of the
+stash. Stash identity confirmed exact.
+
+**Compatibility classification: A for git-mechanical restoration —
+confirmed, not assumed.** `stash@{0}`'s base commit
+(`stash@{0}^1` = `8a3f111994f7074c32be599b55edf3bc8a4c8e85`) and current
+governance HEAD were diffed directly:
+`git diff --stat stash@{0}^1 HEAD` shows changes in exactly 5 paths —
+the 2 governance docs and PATCH-103's 3 bound files
+(`DrawingLayout.tsx`, `drawingBridgeHarness.ts`,
+`drawing-presentation.spec.ts`). **`createSlideRenderer.tsx` is
+byte-identical between the stash's base and current HEAD**
+(`39b7b18bf107b87ff135242f1391ec2490442036` both before and after,
+confirmed by direct blob comparison, not inferred from the stat diff
+alone) — PATCH-103 touched zero lines anywhere under
+`components/presentation/`. A `git stash apply`/`pop` of this stash is
+therefore a guaranteed clean three-way merge with no possible conflict
+on the one modified file, and the one new file has no counterpart to
+conflict with.
+
+**A second, independent finding, NOT assumed away (Phase 4's explicit
+instruction) — PATCH-102's own new spec file carries a latent instance
+of the exact defect class PATCH-103 was created to fix, and PATCH-103
+did NOT and could not have fixed it (out of its bound scope):**
+`presentation-snapshot-image-readiness.spec.ts` defines its own local,
+unexported `sceneBase()`/`frameElement()`/`embeddableElement()`
+fixture builders (it cannot import the harness's equivalents — none of
+`nextFixtureFractionalIndex`, `embeddableElement`, `frameElement`, etc.
+in `drawingBridgeHarness.ts` are exported, confirmed by grep) and its
+local `sceneBase()` still hard-codes `index: null`, byte-for-byte the
+same defect PATCH-103 §0 fixed in the shared harness. PATCH-103's own
+investigation record explicitly named this exact file as inheriting
+the same fixture pattern and remaining unfixed by its scope (§0: "every
+spec that copies the same `sceneBase()`-style local builder
+pattern... and PATCH-102's own still-uncommitted
+`presentation-snapshot-image-readiness.spec.ts` — inherits the same
+`index: null` fixture data"). Left uncorrected, every one of this
+spec's 6 tests will hit the same `InvalidFractionalIndexError` PATCH-103
+exists to prevent, before ever reaching the assertions PATCH-102 is
+meant to characterize — this is not a hypothetical, it is the
+identical mechanism already proven live across §0/§0.1 of PATCH-103.
+
+**Net restoration workflow (bind) — authorized, with one bound
+corrective sub-step required before any live gate is attempted:**
+
+1. Read-only re-verify the stash (`git stash list`, blob checks above)
+   immediately before applying — already done this turn, re-confirm at
+   restoration time.
+2. `git stash apply stash@{0}` (apply, not pop, so the stash is not
+   dropped until restoration and the full gate matrix below are
+   independently proven) against current HEAD
+   (`75343360c510571fecf584637a58e8a4211ee63a`). Confirm via
+   `git diff --name-only` that exactly the two expected paths are
+   dirty and `git hash-object` shows the two expected blobs unchanged
+   from the stash.
+3. **Bound corrective sub-step (new, narrowly scoped, required before
+   §6's live gates):** in
+   `e2e/characterization/presentation-snapshot-image-readiness.spec.ts`
+   only, add a local fractional-index generator identical in scheme to
+   `drawingBridgeHarness.ts`'s `nextFixtureFractionalIndex()`
+   (deterministic, monotonically increasing, e.g. `a000001, a000002,
+   ...` — do not import from `drawingBridgeHarness.ts`, since it does
+   not export this helper and re-exporting it would require reopening
+   the closed PATCH-103), and replace this file's own `index: null`
+   literal in its local `sceneBase()` with a call to it. This is the
+   ONLY change authorized beyond the already-stashed candidate content
+   — no other line in either of the two restored files may change.
+4. Re-run every PATCH-102 gate already bound in §6/§7/§8/§11 of this
+   document against the restored + corrected candidate: the full Flow
+   A-G authenticated live matrix, confirmation PATCH-097/099/100/101
+   spec blobs remain unchanged, the 75-fence carried set, absence
+   gates, deterministic totals, cleanup proof.
+5. Additionally re-run, given PATCH-103 just changed
+   `drawingBridgeHarness.ts`/`DrawingLayout.tsx`: `drawing-line-bridge.spec.ts
+   -g "renders seeded attached"`, full `drawing-line-bridge.spec.ts`,
+   `drawing-presentation.spec.ts` (§9-§12's now-closed scenario), and
+   the PATCH-096 grouped runner at exactly 14/14/14 with zero
+   non-signature failures and exit code 0 — proving PATCH-103's landed
+   fix and PATCH-102's restored candidate coexist cleanly.
+6. Only after a fresh independent PASS (Kepler primary, Gemini 3.1 Pro
+   fallback — NOT Sonnet) covering both the restored candidate and the
+   corrective sub-step does the implementer commit with this
+   document's already-bound commit message (§ header) and push.
+   Sonnet (CTO) does not drop the stash until this PASS is obtained and
+   the commit lands — if the corrective sub-step or any gate fails, the
+   stash is left exactly as restored (or re-stashed under the same
+   name) and this section is amended honestly, not silently retried.
+
+**Explicitly prohibited by this restoration:** no change to
+`DrawingLayout.tsx` or `drawingBridgeHarness.ts` (both remain closed
+under PATCH-103, blobs `539f85b127db938d7ee6c72d32fe913cb88f35f1` and
+`9388086c4354e69290d9de2b7e1f2ecedcd15c45`); no change to
+`createSlideRenderer.tsx` beyond what the stash already carries; no
+change to `presentation-snapshot-image-readiness.spec.ts` beyond the
+one bound corrective sub-step (its own local fractional-index fix); no
+PATCH-104 work of any kind.
+
+**Do not authorize PATCH-104.**

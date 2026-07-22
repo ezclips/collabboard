@@ -361,6 +361,50 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-22** — **PATCH-103 CLOSED (DONE), independent PASS,
+  commit `75343360c510571fecf584637a58e8a4211ee63a`. PATCH-102 stash
+  verified intact (read-only inspection only) and resumption
+  authorized, with one newly-discovered, narrowly-scoped corrective
+  sub-step bound before its live gates may run.** Independently
+  re-verified (not taking the report on faith): HEAD == origin/main ==
+  the landed commit, working tree clean, exact three committed paths
+  and blobs match (`DrawingLayout.tsx` →
+  `539f85b127db938d7ee6c72d32fe913cb88f35f1`, `drawingBridgeHarness.ts`
+  → `9388086c4354e69290d9de2b7e1f2ecedcd15c45`,
+  `drawing-presentation.spec.ts` → `6e926ca7b31fede71cedfc9350de980c5eaf6cc9`).
+  Full closure record (§13) appended to `PATCH-103.md`. Stash
+  `PATCH-102-candidate-before-PATCH-103` verified via read-only
+  commands only (`git rev-parse stash@{0}:...`,
+  `stash@{0}^3:...`, `git ls-tree`, `git diff --stat`) — never popped,
+  applied, or dropped — confirmed to contain exactly the two expected
+  paths at exactly the two expected blobs, no unrelated file.
+  Git-mechanical restoration classified **A**: `createSlideRenderer.tsx`
+  is byte-identical (`39b7b18bf107b87ff135242f1391ec2490442036`)
+  between the stash's base commit and current HEAD — PATCH-103 touched
+  zero lines under `components/presentation/` — so a stash apply is a
+  guaranteed clean merge. However, a second, independent finding was
+  proven by source rather than assumed away: PATCH-102's own new spec
+  (`presentation-snapshot-image-readiness.spec.ts`) defines its own
+  local, unexported fixture builders (it cannot import the harness's,
+  none are exported) and its local `sceneBase()` still hard-codes
+  `index: null` — the exact defect class PATCH-103 exists to fix,
+  explicitly flagged as inherited-but-unfixed in PATCH-103's own §0.
+  Left alone, this candidate's 6 tests would hit the same
+  `InvalidFractionalIndexError` PATCH-103 just resolved elsewhere.
+  Authorized restoration workflow (bound in `PATCH-102.md` §12):
+  `git stash apply` (not pop, until proven), then one narrowly-scoped
+  corrective sub-step — add a local deterministic fractional-index
+  generator inside `presentation-snapshot-image-readiness.spec.ts`
+  only, mirroring `drawingBridgeHarness.ts`'s
+  `nextFixtureFractionalIndex()` — before any of PATCH-102's live gates
+  are attempted, plus re-running drawing-line-bridge,
+  drawing-presentation, and the PATCH-096 grouped runner to prove
+  coexistence with the just-landed PATCH-103 fix. No change authorized
+  to `DrawingLayout.tsx`, `drawingBridgeHarness.ts`, or
+  `createSlideRenderer.tsx` beyond what the stash already carries.
+  PATCH-104 not started, not authorized. Governance-only commit
+  follows this entry.
+
 - **2026-07-22** — **PATCH-103 §12 amendment — width-invariant failure
   traced and resolved by source (classification B), third instance of
   the same "test finally reaches real, pre-existing mount behavior"

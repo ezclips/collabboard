@@ -1,8 +1,11 @@
 # PATCH-103 — Fix Excalidraw Fractional-Index Fixtures AND Runtime Element Construction (Prerequisite to PATCH-102 Live Review)
 
-**Status:** **AUTHORIZED, AMENDED** (not yet implemented in its amended
-form). This is an infrastructure prerequisite, NOT a PATCH-102
-amendment and NOT new feature scope.
+**Status:** **DONE (closed 2026-07-22, commit
+`75343360c510571fecf584637a58e8a4211ee63a`) — independent review PASS.**
+This was an infrastructure prerequisite, NOT a PATCH-102 amendment and
+NOT new feature scope. See the closure record at the end of this
+document for the full landed result and PATCH-102 resumption
+authorization.
 
 **Amendment (2026-07-22):** the original one-file harness-only design
 was INCOMPLETE. The current uncommitted candidate
@@ -1152,3 +1155,64 @@ live and must return an explicit PASS with real (non-skipped) output
 before the implementer commits with the bound message above and
 pushes. Only after this lands and closes does PATCH-102's independent
 review resume.
+
+## 13. Closure record (bind, 2026-07-22)
+
+**Landed implementation commit:** `75343360c510571fecf584637a58e8a4211ee63a`
+— `fix(e2e): exempt padlet-record-synced embeddable width from the
+exact-seed-geometry invariant (PATCH-103)`. Independently verified by
+the CTO role (not the implementer or reviewer) via `git show`/`git
+rev-parse` directly against the landed commit:
+
+- committed paths (exactly three, confirmed via `git show --name-only`):
+  `components/collabboard/canvas/layouts/DrawingLayout.tsx`,
+  `e2e/characterization/drawingBridgeHarness.ts`,
+  `e2e/characterization/drawing-presentation.spec.ts`.
+- committed blobs (confirmed via `git rev-parse <commit>:<path>`):
+  `DrawingLayout.tsx` → `539f85b127db938d7ee6c72d32fe913cb88f35f1`;
+  `drawingBridgeHarness.ts` → `9388086c4354e69290d9de2b7e1f2ecedcd15c45`;
+  `drawing-presentation.spec.ts` → `6e926ca7b31fede71cedfc9350de980c5eaf6cc9`.
+- HEAD == origin/main == `75343360c510571fecf584637a58e8a4211ee63a`;
+  working tree clean at closure.
+- independent review verdict: **PASS**.
+
+**What this patch fixed, end to end (§0-§12):** E2E fixtures
+(`drawingBridgeHarness.ts`) now assign deterministic, valid fractional
+indices instead of hard-coded `null` (§0); production-created drawing
+frames and embeddables (`makeFrameElement`,
+`createEmbeddableElementForPadlet` in `DrawingLayout.tsx`) no longer
+enter the scene with null indices, using the fork's own
+`syncInvalidIndicesImmutable()` at every raw-construction call site
+(§0.1); duplicate-slide index collisions are normalized through the
+same fork helper (§2); an anti-churn gate
+(`hasInvalidFractionalIndex()`/`needsIndexSync`) prevents the automatic
+embeddable-sync effect from normalizing already-valid scenes
+unnecessarily, resolving the PATCH-100 scene-reference-churn regression
+(§8); `drawing-presentation.spec.ts` now waits for Container C's mount
+synchronization before capturing its order baseline (§11) and for
+debounced natural-height persistence before its height assertion (§10);
+settled width is asserted against the two governed embeddables' linked
+padlet records rather than their raw seed value, since width is
+deterministically synced from the padlet record by pre-existing,
+PATCH-103-unrelated production behavior (§12); strict, unweakened
+order/geometry assertions remain for every unaffected element and
+field.
+
+**Full gate results at closure (as independently reported and
+verified):** authenticated live matrix passed; PATCH-096 grouped
+runner 14/14; focused drawing suite reported as 59/2 (as supplied by
+the closure report — the CTO role did not independently re-run this
+suite; carried forward as reported, not re-verified); full
+Vitest 448/43; typecheck, boundaries, verify, and build all passed;
+cleanup and process checks (ports 3000/4000 free, no repository-owned
+runtime process, generated artifacts absent) passed.
+
+**PATCH-102 stash status at closure:** `PATCH-102-candidate-before-PATCH-103`
+verified present and untouched (read-only inspection only — not
+popped, applied, or dropped during this closure). See `PATCH-102.md`
+§12 for the full restoration/resumption authorization, stash-content
+verification, and the one additional bound corrective sub-step
+required in that candidate's own spec file before its live gates may
+be attempted.
+
+**PATCH-104:** not started, not authorized by this closure.
