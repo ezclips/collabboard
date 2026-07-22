@@ -361,6 +361,55 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-22** — **PATCH-102 BLOCKED — independent review FAILED on
+  missing E2E credentials; classification C (no credentials available
+  in this environment), NOT a defect in the patch or the credential
+  contract.** The PATCH-102 candidate (`createSlideRenderer.tsx` →
+  `a15659f7fc3e1ae1d5825bf68df22f3190bfa41e`,
+  `presentation-snapshot-image-readiness.spec.ts` →
+  `0c6ef9ce0789c9612d0ab450e04d20c3e026d1c0`) remains uncommitted and
+  intact — independently re-verified: HEAD == origin/main ==
+  `7a0d6fbe5690c2048078222eb19a30b3cbf0935e`, exactly the two
+  authorized paths changed (one modified, one untracked), candidate
+  blobs match exactly, zero staged files, no unauthorized untracked
+  files, PATCH-103 absent. Every non-live review finding already
+  PASSED (75/75 fences, production diff audit, image-marker contract,
+  shared timeout/polling/fallback behavior, test construction,
+  exclusions, TypeScript, boundaries, focused and full Vitest) — the
+  block is specifically the authenticated Playwright live gates, which
+  guard-skip without `E2E_EMAIL`/`E2E_PASSWORD`. **Credential-contract
+  investigation:** confirmed the mechanism itself is sound and
+  documented (`.env.e2e.example`, `e2e/helpers/env.ts`,
+  `e2e/auth.setup.ts`) — exactly two variables, `E2E_EMAIL` and
+  `E2E_PASSWORD`, sourced from either the real process environment or
+  a gitignored `.env.local` (never committed — confirmed
+  `.gitignore:31` excludes `.env*`); `auth.setup.ts` explicitly
+  skips-with-reason when absent, by design, so a dedicated test
+  account is required, not a production account. **Confirmed by direct
+  presence checks only (no values read, none searched outside
+  established locations, no personal files inspected):** `E2E_EMAIL`
+  and `E2E_PASSWORD` are unset in the current process environment;
+  `.env.local`, `.env`, and `.env.production` are all absent from the
+  repository directory. **Classification: C — no credentials
+  available** in this environment via any approved channel (not B,
+  since no ambiguous-provenance credential was found at all; not D,
+  since the loading mechanism itself is correct, documented, and
+  unchanged — this is a provisioning gap, not a broken contract).
+  **PATCH-102 remains blocked.** No amendment was made to weaken,
+  remove, or reclassify the authenticated live gates, and none is
+  authorized — skip-only output is not an acceptable substitute for
+  the governed live assertions (PATCH-102's own §10/§11, and every
+  prior patch's carried-gate requirement). **Required to unblock:** the
+  environment owner (or whoever administers the dedicated Supabase E2E
+  test account for this project) must provision `E2E_EMAIL`/
+  `E2E_PASSWORD` for a dedicated, non-production, email-confirmed
+  Supabase test user into the review environment — either via a local
+  `.env.local` (matching `.env.e2e.example`'s template, never
+  committed) or via process-environment variables set before
+  `npx playwright test` runs. No secret value was read, guessed,
+  generated, or persisted into any tracked file, log, or governance
+  record as part of this investigation.
+
 - **2026-07-22** — **PATCH-101 CLOSED (commit `5c36305`) — PATCH-102
   AUTHORIZED (legacy-HTML image readiness, reusing an existing,
   unmodified, already-shipped marker discovered this turn).**
