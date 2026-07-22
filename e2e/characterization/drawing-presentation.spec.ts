@@ -261,6 +261,150 @@ async function fetchPersistedScene(
   };
 }
 
+async function waitForNaturalHeightPersistence(
+  supabase: SupabaseClient,
+  masterPadletId: string,
+  targets: readonly { sceneId: string }[],
+  liveConformedHeightBySceneId: Map<string, number | null>,
+): Promise<{
+  converged: boolean;
+  persistedScene: { sceneElements: PersistedSceneElement[]; rawContentLength: number };
+  targetIds: string[];
+  expectedHeightsBySceneId: Record<string, number | null>;
+  latestPersistedHeightsBySceneId: Record<string, number | null>;
+  foundBySceneId: Record<string, boolean>;
+  waitDurationMs: number;
+  timeoutMs: number;
+  pollingIntervalMs: number;
+  attempts: number;
+}> {
+  const pollingIntervalMs = 500;
+  const timeoutMs = 20_000;
+  const startedAt = Date.now();
+  const targetIds = targets.map((target) => target.sceneId);
+  const expectedHeightsBySceneId = Object.fromEntries(
+    targetIds.map((sceneId) => [sceneId, liveConformedHeightBySceneId.get(sceneId) ?? null]),
+  ) as Record<string, number | null>;
+  let attempts = 0;
+  let latestPersistedScene = await fetchPersistedScene(supabase, masterPadletId);
+  let latestPersistedHeightsBySceneId: Record<string, number | null> = {};
+  let foundBySceneId: Record<string, boolean> = {};
+
+  while (Date.now() - startedAt <= timeoutMs) {
+    attempts += 1;
+    latestPersistedScene = await fetchPersistedScene(supabase, masterPadletId);
+    const persistedSceneById = new Map(latestPersistedScene.sceneElements.map((element) => [element.id, element] as const));
+    latestPersistedHeightsBySceneId = Object.fromEntries(
+      targetIds.map((sceneId) => [sceneId, persistedSceneById.get(sceneId)?.height ?? null]),
+    ) as Record<string, number | null>;
+    foundBySceneId = Object.fromEntries(
+      targetIds.map((sceneId) => [sceneId, persistedSceneById.has(sceneId)]),
+    ) as Record<string, boolean>;
+    const converged = targetIds.every((sceneId) => (
+      foundBySceneId[sceneId]
+      && latestPersistedHeightsBySceneId[sceneId] === expectedHeightsBySceneId[sceneId]
+    ));
+    if (converged) {
+      return {
+        converged: true,
+        persistedScene: latestPersistedScene,
+        targetIds,
+        expectedHeightsBySceneId,
+        latestPersistedHeightsBySceneId,
+        foundBySceneId,
+        waitDurationMs: Date.now() - startedAt,
+        timeoutMs,
+        pollingIntervalMs,
+        attempts,
+      };
+    }
+    await new Promise((resolve) => setTimeout(resolve, pollingIntervalMs));
+  }
+
+  return {
+    converged: false,
+    persistedScene: latestPersistedScene,
+    targetIds,
+    expectedHeightsBySceneId,
+    latestPersistedHeightsBySceneId,
+    foundBySceneId,
+    waitDurationMs: Date.now() - startedAt,
+    timeoutMs,
+    pollingIntervalMs,
+    attempts,
+  };
+}
+
+async function waitForContainerEmbeddableSync(
+  supabase: SupabaseClient,
+  masterPadletId: string,
+  targetContainerId: string,
+): Promise<{
+  converged: boolean;
+  persistedScene: { sceneElements: PersistedSceneElement[]; rawContentLength: number };
+  targetContainerId: string;
+  expectedPadletLink: string;
+  matchingEmbeddableFound: boolean;
+  latestMatchingIds: string[];
+  latestElementOrder: string[];
+  waitDurationMs: number;
+  timeoutMs: number;
+  pollingIntervalMs: number;
+  attempts: number;
+}> {
+  const pollingIntervalMs = 500;
+  const timeoutMs = 20_000;
+  const startedAt = Date.now();
+  const expectedPadletLink = `padlet://${targetContainerId}`;
+  let attempts = 0;
+  let latestPersistedScene = await fetchPersistedScene(supabase, masterPadletId);
+  let latestMatchingIds: string[] = [];
+  let latestElementOrder: string[] = latestPersistedScene.sceneElements.map((element) => element.id);
+
+  while (Date.now() - startedAt <= timeoutMs) {
+    attempts += 1;
+    latestPersistedScene = await fetchPersistedScene(supabase, masterPadletId);
+    latestMatchingIds = latestPersistedScene.sceneElements
+      .filter((element) => (
+        element.type === 'embeddable'
+        && element.link === expectedPadletLink
+        && !element.isDeleted
+      ))
+      .map((element) => element.id);
+    latestElementOrder = latestPersistedScene.sceneElements.map((element) => element.id);
+    if (latestMatchingIds.length > 0) {
+      return {
+        converged: true,
+        persistedScene: latestPersistedScene,
+        targetContainerId,
+        expectedPadletLink,
+        matchingEmbeddableFound: true,
+        latestMatchingIds,
+        latestElementOrder,
+        waitDurationMs: Date.now() - startedAt,
+        timeoutMs,
+        pollingIntervalMs,
+        attempts,
+      };
+    }
+    await new Promise((resolve) => setTimeout(resolve, pollingIntervalMs));
+  }
+
+  return {
+    converged: false,
+    persistedScene: latestPersistedScene,
+    targetContainerId,
+    expectedPadletLink,
+    matchingEmbeddableFound: false,
+    latestMatchingIds,
+    latestElementOrder,
+    waitDurationMs: Date.now() - startedAt,
+    timeoutMs,
+    pollingIntervalMs,
+    attempts,
+  };
+}
+
 async function fetchBoardPadlets(supabase: SupabaseClient, boardId: string): Promise<Padlet[]> {
   const { data, error } = await supabase
     .from('padlets')
@@ -903,6 +1047,30 @@ test.describe('drawing presentation browser characterization (PATCH-064)', () =>
       const visitedUrl = await openDrawingBoard(page, fixture.boardId);
       expect(visitedUrl).toContain(`/dashboard/canvas/${fixture.boardId}`);
       await expect(page.locator(`[data-padlet-id="${fixture.containerIds[0]}"]`).first()).toBeVisible({ timeout: 90_000 });
+      const containerEmbeddableSync = await waitForContainerEmbeddableSync(
+        supabase,
+        fixture.masterPadletId!,
+        fixture.containerIds[2]!,
+      );
+      test.info().annotations.push({
+        type: 'patch-103-container-embeddable-sync-wait',
+        description: JSON.stringify(containerEmbeddableSync),
+      });
+      expect(
+        containerEmbeddableSync.converged,
+        JSON.stringify({
+          targetContainerId: containerEmbeddableSync.targetContainerId,
+          expectedPadletLink: containerEmbeddableSync.expectedPadletLink,
+          matchingEmbeddableFound: containerEmbeddableSync.matchingEmbeddableFound,
+          latestMatchingIds: containerEmbeddableSync.latestMatchingIds,
+          latestElementOrder: containerEmbeddableSync.latestElementOrder,
+          waitDurationMs: containerEmbeddableSync.waitDurationMs,
+          timeoutMs: containerEmbeddableSync.timeoutMs,
+          pollingIntervalMs: containerEmbeddableSync.pollingIntervalMs,
+          attempts: containerEmbeddableSync.attempts,
+        }),
+      ).toBe(true);
+      const settledScene = containerEmbeddableSync.persistedScene;
 
       await page.getByTitle('Present Frames').click();
       const sidebar = page.locator('.fixed.top-0.right-0.bottom-0.w-80');
@@ -1030,10 +1198,7 @@ test.describe('drawing presentation browser characterization (PATCH-064)', () =>
       const aboveToDataUrlCalled = aboveAttributableToDataUrlEntries.length > 0;
       const aboveToDataUrlReturned = aboveAttributableToDataUrlEntries.some((entry) => entry.result === 'returned');
       const aboveToDataUrlThrew = aboveAttributableToDataUrlEntries.some((entry) => entry.result === 'threw');
-      const postRunPersistedScene = await fetchPersistedScene(supabase, fixture.masterPadletId!);
-      const postRunPersistedPadlets = await fetchBoardPadlets(supabase, fixture.boardId);
-      const postRunElementOrder = postRunPersistedScene.sceneElements.map((element) => element.id);
-      const preRunElementOrder = persistedScene.sceneElements.map((element) => element.id);
+      const preRunElementOrder = settledScene.sceneElements.map((element) => element.id);
       const naturalHeightTargets = [
         { sceneId: 'emb-slide-a', padletId: fixture.containerIds[0]! },
         { sceneId: 'emb-slide-b', padletId: fixture.containerIds[1]! },
@@ -1048,6 +1213,32 @@ test.describe('drawing presentation browser characterization (PATCH-064)', () =>
           return [sceneId, renderedHeight] as const;
         })),
       );
+      const naturalHeightPersistence = await waitForNaturalHeightPersistence(
+        supabase,
+        fixture.masterPadletId!,
+        naturalHeightTargets,
+        liveConformedHeightBySceneId,
+      );
+      test.info().annotations.push({
+        type: 'patch-103-natural-height-persistence-wait',
+        description: JSON.stringify(naturalHeightPersistence),
+      });
+      expect(
+        naturalHeightPersistence.converged,
+        JSON.stringify({
+          targetIds: naturalHeightPersistence.targetIds,
+          expectedHeightsBySceneId: naturalHeightPersistence.expectedHeightsBySceneId,
+          latestPersistedHeightsBySceneId: naturalHeightPersistence.latestPersistedHeightsBySceneId,
+          foundBySceneId: naturalHeightPersistence.foundBySceneId,
+          waitDurationMs: naturalHeightPersistence.waitDurationMs,
+          timeoutMs: naturalHeightPersistence.timeoutMs,
+          pollingIntervalMs: naturalHeightPersistence.pollingIntervalMs,
+          attempts: naturalHeightPersistence.attempts,
+        }),
+      ).toBe(true);
+      const postRunPersistedScene = naturalHeightPersistence.persistedScene;
+      const postRunPersistedPadlets = await fetchBoardPadlets(supabase, fixture.boardId);
+      const postRunElementOrder = postRunPersistedScene.sceneElements.map((element) => element.id);
       const postRunCompositionPlan = planSlideComposition(landscapeSlide, postRunPersistedScene.sceneElements, postRunPersistedPadlets);
       const postRunNativeBelowIds = postRunCompositionPlan.nativeBelowElements.map((element) => String((element as { id: string }).id));
       const postRunNativeAboveIds = postRunCompositionPlan.nativeAboveElements.map((element) => String((element as { id: string }).id));
@@ -1062,6 +1253,8 @@ test.describe('drawing presentation browser characterization (PATCH-064)', () =>
       const preRunSceneById = new Map(persistedScene.sceneElements.map((element) => [element.id, element] as const));
       const postRunSceneById = new Map(postRunPersistedScene.sceneElements.map((element) => [element.id, element] as const));
       const heightInvariantExceptions = new Set<string>(naturalHeightTargets.map(({ sceneId }) => sceneId));
+      const widthInvariantExceptions = new Set<string>(naturalHeightTargets.map(({ sceneId }) => sceneId));
+      const postRunPersistedPadletsById = new Map(postRunPersistedPadlets.map((padlet) => [String(padlet.id), padlet] as const));
       const naturalHeightEvidence = naturalHeightTargets.map(({ sceneId }) => {
         const seededElement = preRunSceneById.get(sceneId);
         const persistedElement = postRunSceneById.get(sceneId);
@@ -1071,6 +1264,20 @@ test.describe('drawing presentation browser characterization (PATCH-064)', () =>
           seededHeight: seededElement?.height ?? null,
           liveConformedHeight,
           persistedHeight: persistedElement?.height ?? null,
+        };
+      });
+      const widthConformanceEvidence = naturalHeightTargets.map(({ sceneId }) => {
+        const persistedElement = postRunSceneById.get(sceneId);
+        const linkedPadletId = persistedElement?.link?.startsWith('padlet://')
+          ? persistedElement.link.slice('padlet://'.length)
+          : null;
+        const linkedPadlet = linkedPadletId ? postRunPersistedPadletsById.get(linkedPadletId) : null;
+        return {
+          sceneId,
+          persistedWidth: persistedElement?.width ?? null,
+          link: persistedElement?.link ?? null,
+          linkedPadletId,
+          linkedPadletWidth: linkedPadlet?.width ?? null,
         };
       });
 
@@ -1141,7 +1348,19 @@ test.describe('drawing presentation browser characterization (PATCH-064)', () =>
         expect(postRunElement?.isDeleted ?? false).toBe(seededElement.isDeleted ?? false);
         expect(postRunElement?.x).toBe(seededElement.x);
         expect(postRunElement?.y).toBe(seededElement.y);
-        expect(postRunElement?.width).toBe(seededElement.width);
+        if (!widthInvariantExceptions.has(seededElement.id)) {
+          expect(postRunElement?.width).toBe(seededElement.width);
+        } else {
+          const linkedPadletLink = postRunElement?.link ?? null;
+          expect(linkedPadletLink, `${seededElement.id} width-conformed embeddable must retain a padlet link`).not.toBeNull();
+          expect(linkedPadletLink?.startsWith('padlet://'), `${seededElement.id} width-conformed embeddable link must use padlet://`).toBe(true);
+          const linkedPadletId = linkedPadletLink!.slice('padlet://'.length);
+          expect(linkedPadletId.length, `${seededElement.id} width-conformed embeddable link must include a padlet id`).toBeGreaterThan(0);
+          const linkedPadlet = postRunPersistedPadletsById.get(linkedPadletId);
+          expect(linkedPadlet, `${seededElement.id} linked padlet ${linkedPadletId} must exist`).toBeTruthy();
+          expect(Number.isFinite(linkedPadlet?.width), `${seededElement.id} linked padlet ${linkedPadletId} must expose a finite width`).toBe(true);
+          expect(postRunElement?.width).toBe(linkedPadlet!.width);
+        }
         if (!heightInvariantExceptions.has(seededElement.id)) {
           expect(postRunElement?.height).toBe(seededElement.height);
         }
@@ -1165,6 +1384,7 @@ test.describe('drawing presentation browser characterization (PATCH-064)', () =>
           textElement: persistedTextElement,
           shapeElement: persistedShapeElement,
           postRunNaturalHeightEvidence: naturalHeightEvidence,
+          postRunWidthConformanceEvidence: widthConformanceEvidence,
         }),
       });
       test.info().annotations.push({

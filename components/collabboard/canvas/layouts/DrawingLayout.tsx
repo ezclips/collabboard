@@ -15,6 +15,7 @@ import {
 } from '@/lib/infra/drawing/importScene';
 import { getDrawingContainerEditTargetLabel } from '@/lib/infra/drawing/containerEditTargetLabel';
 import { sortSlidesByPresentationOrder } from '@/lib/infra/presentation/slideOrder';
+import { syncInvalidIndicesImmutable, validateFractionalIndices } from '@excalidraw/element';
 import LibraryPanel from '@/components/collabboard/LibraryPanel';
 import PostCardContent from '@/components/collabboard/PostCardContent';
 import EmbeddedCommentList from '@/components/collabboard/EmbeddedCommentList';
@@ -125,6 +126,28 @@ const preserveImportedTransientAppState = (nextAppState: any, currentAppState: a
   editingGroupId: null,
   editingLinearElement: null,
 });
+
+const syncSceneElementIndices = (elements: any[]): any[] => {
+  const syncedElements = syncInvalidIndicesImmutable(elements as any);
+  return syncedElements ? Array.from(syncedElements.values()) : elements;
+};
+
+const hasInvalidFractionalIndex = (elements: any[]): boolean => {
+  try {
+    validateFractionalIndices(elements as any, {
+      shouldThrow: true,
+      includeBoundTextValidation: false,
+      ignoreLogs: true,
+      reconciliationContext: undefined,
+    });
+    return false;
+  } catch (error) {
+    if ((error as { code?: string })?.code === 'ELEMENT_HAS_INVALID_INDEX') {
+      return true;
+    }
+    throw error;
+  }
+};
 
 const buildActiveFrameNameSignature = (elements: readonly any[]) => {
   let signature = '';
@@ -1414,7 +1437,6 @@ export default function DrawingLayout({
     version: 1,
     versionNonce: Math.floor(Math.random() * 1e9),
     updated: Date.now(),
-    index: null,
     boundElements: null,
     link: null,
     locked: false,
@@ -1422,7 +1444,8 @@ export default function DrawingLayout({
 
   const handleAddSlide = useCallback(() => {
     if (!excalidrawAPI) return;
-    const activeFrames = elements.filter((el: any) => el.type === 'frame' && !el.isDeleted);
+    const currentElements = excalidrawAPI.getSceneElements();
+    const activeFrames = currentElements.filter((el: any) => el.type === 'frame' && !el.isDeleted);
     let x = 0, y = 0;
     if (activeFrames.length > 0) {
       const last = activeFrames.reduce((best: any, el: any) =>
@@ -1431,23 +1454,28 @@ export default function DrawingLayout({
       y = last.y;
     }
     const newFrame = makeFrameElement(x, y, `Slide ${activeFrames.length + 1}`);
-    excalidrawAPI.updateScene({ elements: [...elements, newFrame] });
-    setTimeout(() => excalidrawAPI.scrollToContent([newFrame], { fitToContent: true, animate: true, duration: 400 }), 50);
-  }, [excalidrawAPI, elements, makeFrameElement]);
+    const indexedElements = syncSceneElementIndices([...currentElements, newFrame]);
+    const indexedFrame = indexedElements.find((el: any) => el.id === newFrame.id) ?? newFrame;
+    excalidrawAPI.updateScene({ elements: indexedElements });
+    setTimeout(() => excalidrawAPI.scrollToContent([indexedFrame], { fitToContent: true, animate: true, duration: 400 }), 50);
+  }, [excalidrawAPI, makeFrameElement]);
 
   const handleAddSlideBelow = useCallback((id: string) => {
     if (!excalidrawAPI) return;
-    const frame = elements.find((el: any) => el.id === id && el.type === 'frame');
+    const currentElements = excalidrawAPI.getSceneElements();
+    const frame = currentElements.find((el: any) => el.id === id && el.type === 'frame');
     if (!frame) return;
-    const activeFrames = elements.filter((el: any) => el.type === 'frame' && !el.isDeleted);
+    const activeFrames = currentElements.filter((el: any) => el.type === 'frame' && !el.isDeleted);
     const newFrame = makeFrameElement(
       frame.x,
       frame.y + frame.height + 80,
       `Slide ${activeFrames.length + 1}`
     );
-    excalidrawAPI.updateScene({ elements: [...elements, newFrame] });
-    setTimeout(() => excalidrawAPI.scrollToContent([newFrame], { fitToContent: true, animate: true, duration: 400 }), 50);
-  }, [excalidrawAPI, elements, makeFrameElement]);
+    const indexedElements = syncSceneElementIndices([...currentElements, newFrame]);
+    const indexedFrame = indexedElements.find((el: any) => el.id === newFrame.id) ?? newFrame;
+    excalidrawAPI.updateScene({ elements: indexedElements });
+    setTimeout(() => excalidrawAPI.scrollToContent([indexedFrame], { fitToContent: true, animate: true, duration: 400 }), 50);
+  }, [excalidrawAPI, makeFrameElement]);
 
   const cloneLinkedRowsForDuplicateSlide = useCallback(async (children: any[], dx: number) => {
     const createdIds: string[] = [];
@@ -1575,7 +1603,7 @@ export default function DrawingLayout({
         updated: Date.now(),
       }));
 
-      excalidrawAPI.updateScene({ elements: [...elements, newFrame, ...newChildren] });
+      excalidrawAPI.updateScene({ elements: syncSceneElementIndices([...elements, newFrame, ...newChildren]) });
     } catch (error) {
       console.error('Failed to duplicate drawing slide:', error);
     }
@@ -1707,7 +1735,6 @@ export default function DrawingLayout({
       seed: Math.floor(Math.random() * 2000000000),
       version: 1,
       versionNonce: Math.floor(Math.random() * 1e9),
-      index: null,
       isDeleted: false,
       groupIds: [],
       frameId: null,
@@ -1730,9 +1757,10 @@ export default function DrawingLayout({
     );
     if (alreadyExists) return;
     const embeddable = createEmbeddableElementForPadlet(padlet);
+    const indexedElements = syncSceneElementIndices([...currentElements, embeddable]);
     excalidrawAPI.updateScene({
       ...buildDrawingSceneUpdate({
-        elements: [...currentElements, embeddable],
+        elements: indexedElements,
         appState: {
           ...excalidrawAPI.getAppState()
         },
@@ -1876,7 +1904,12 @@ export default function DrawingLayout({
       });
 
     lastPadletSceneSyncRef.current = nextSceneSync;
-    if (missingEmbeddables.length === 0 && orphanedIds.size === 0 && !needsSceneRefresh) return;
+    const combinedElements = [
+      ...nextElements,
+      ...missingEmbeddables,
+    ];
+    const needsIndexSync = hasInvalidFractionalIndex(combinedElements);
+    if (missingEmbeddables.length === 0 && orphanedIds.size === 0 && !needsSceneRefresh && !needsIndexSync) return;
 
     // Pre-update lastEmbeddablePosRef to match what we're about to write.
     // If handleChange fires asynchronously (after setTimeout clears isSyncingEmbeddablesRef),
@@ -1892,17 +1925,19 @@ export default function DrawingLayout({
     // React batches setState (used inside updateScene) as microtasks, so handleChange
     // fires before the setTimeout(0) reset — giving us a clean one-shot guard.
     isSyncingEmbeddablesRef.current = true;
+    const indexedElements = needsIndexSync ? syncSceneElementIndices(combinedElements) : combinedElements;
+    const indexedElementsById = new Map(indexedElements.map((el: any) => [el.id, el]));
+    const syncedEmbeddables = [...refreshedEmbeddables, ...missingEmbeddables].map((el: any) =>
+      indexedElementsById.get(el.id) ?? el
+    );
     excalidrawAPI.updateScene({
       ...buildDrawingSceneUpdate({
-        elements: [
-          ...nextElements,
-          ...missingEmbeddables,
-        ],
+        elements: indexedElements,
         commitToHistory: false,
       }),
     });
     if (typeof (excalidrawAPI as any).updateBoundElements === "function") {
-      [...refreshedEmbeddables, ...missingEmbeddables].forEach((el: any) => {
+      syncedEmbeddables.forEach((el: any) => {
         (excalidrawAPI as any).updateBoundElements(el);
       });
     }

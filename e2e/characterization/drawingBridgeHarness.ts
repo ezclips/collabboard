@@ -87,6 +87,13 @@ function now(): string {
   return new Date().toISOString();
 }
 
+let fixtureElementIndexCounter = 0;
+
+function nextFixtureFractionalIndex(): string {
+  fixtureElementIndexCounter += 1;
+  return `a${String(fixtureElementIndexCounter).padStart(6, '0')}`;
+}
+
 function embeddableElement(id: string, padletId: string, x: number, y: number, width = 320, height = 220, frameId: string | null = null): Json {
   return {
     id,
@@ -107,7 +114,7 @@ function embeddableElement(id: string, padletId: string, x: number, y: number, w
     seed: 1,
     version: 1,
     versionNonce: 1,
-    index: null,
+    index: nextFixtureFractionalIndex(),
     isDeleted: false,
     groupIds: [],
     frameId,
@@ -142,7 +149,7 @@ function frameElement(id: string, name: string, x: number, y: number, width: num
     version: 1,
     versionNonce: 1,
     updated: Date.now(),
-    index: null,
+    index: nextFixtureFractionalIndex(),
     boundElements: null,
     link: null,
     locked: false,
@@ -173,7 +180,7 @@ function textElement(id: string, text: string, x: number, y: number, frameId: st
     version: 1,
     versionNonce: 1,
     updated: Date.now(),
-    index: null,
+    index: nextFixtureFractionalIndex(),
     boundElements: null,
     link: null,
     locked: false,
@@ -215,7 +222,7 @@ function rectangleElement(id: string, x: number, y: number, frameId: string): Js
     version: 1,
     versionNonce: 1,
     updated: Date.now(),
-    index: null,
+    index: nextFixtureFractionalIndex(),
     boundElements: null,
     link: null,
     locked: false,
