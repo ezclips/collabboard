@@ -361,6 +361,54 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-22** — **PATCH-103 AMENDED — the harness-only fix was
+  correct but incomplete; a second, production-facing null-index
+  source confirmed in `DrawingLayout.tsx`.** The retained,
+  already-correct harness candidate
+  (`drawingBridgeHarness.ts`, blob `9388086c4354e69290d9de2b7e1f2ecedcd15c45`,
+  deterministic `a000001, a000002, ...` fixture indices) passed
+  authentication (1/1) but failed its first non-AI drawing gate
+  (`drawing-line-bridge.spec.ts -g "renders seeded attached"`), still
+  waiting for `[data-padlet-id]`, with error context showing a
+  **runtime-created** (not seeded) embeddable carrying `index: null`.
+  **Traced to source:** `DrawingLayout.tsx` contains two independent
+  raw-element-construction functions hard-coding `index: null` —
+  `createEmbeddableElementForPadlet` (line ~1710, used whenever any
+  non-drawing padlet needs representation on a drawing board — this
+  runs automatically on essentially every real board load with any
+  non-drawing padlet present, and is exactly what
+  `drawing-line-bridge.spec.ts`'s failing scenario exercises) and
+  `makeFrameElement` (line ~1417, used by the add/duplicate-slide
+  actions). Both bypass Excalidraw's own element-creation APIs, the
+  same mistake as the harness but in real, user-reachable production
+  code. **`buildDrawingSceneUpdate`
+  (`lib/infra/drawing/importScene.ts:38-50`) was investigated and
+  explicitly rejected** as the fix location despite being the single
+  shared chokepoint for 10 `updateScene` call sites — its own existing
+  test (`importScene.test.ts:104-119`) asserts elements pass through
+  UNCHANGED using non-Excalidraw stub objects; adding index
+  normalization there would break that test and mix an unrelated
+  concern into a generic payload builder. **Revised classification: E
+  — multiple independent null-index paths** (the harness path, fixed
+  and retained; the `DrawingLayout.tsx` production path, newly
+  confirmed) — not a general Excalidraw migration, exactly two named
+  functions in one file. **Amended PATCH-103 scope:** retain the
+  harness candidate unchanged; add
+  `components/collabboard/canvas/layouts/DrawingLayout.tsx` as a
+  second allowed file — in both `createEmbeddableElementForPadlet` and
+  `makeFrameElement`, replace the hard-coded `index: null` with the
+  fork's own `syncInvalidIndicesImmutable()`
+  (`fractionalIndex.ts:222`), applied to the live sibling array at
+  insertion time (never a hand-computed/hard-coded index). No change
+  to `importScene.ts`, the Excalidraw fork, or the PATCH-102 candidate.
+  Amended commit message:
+  `fix(e2e,canvas): assign valid fractional indices to seeded and runtime-created Excalidraw elements (PATCH-103)`.
+  Full detail in `.fable5/patches/PATCH-103.md` (amended). The
+  PATCH-102 named stash (`PATCH-102-candidate-before-PATCH-103`)
+  remains present, untouched, and unpopped throughout this
+  investigation. No production or test code was touched by this
+  governance turn.
+
 - **2026-07-22** — **PATCH-103 AUTHORIZED (prerequisite to PATCH-102
   live review) — Excalidraw fractional-index invariant crash traced
   to a pre-existing E2E harness fixture defect, NOT a PATCH-102

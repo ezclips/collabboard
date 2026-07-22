@@ -1,8 +1,21 @@
-# PATCH-103 — Fix Excalidraw Fractional-Index Fixtures in the Drawing E2E Harness (Prerequisite to PATCH-102 Live Review)
+# PATCH-103 — Fix Excalidraw Fractional-Index Fixtures AND Runtime Element Construction (Prerequisite to PATCH-102 Live Review)
 
-**Status:** **AUTHORIZED** (not yet implemented). This is an
-infrastructure prerequisite, NOT a PATCH-102 amendment and NOT new
-feature scope.
+**Status:** **AUTHORIZED, AMENDED** (not yet implemented in its amended
+form). This is an infrastructure prerequisite, NOT a PATCH-102
+amendment and NOT new feature scope.
+
+**Amendment (2026-07-22):** the original one-file harness-only design
+was INCOMPLETE. The current uncommitted candidate
+(`e2e/characterization/drawingBridgeHarness.ts`,
+blob `9388086c4354e69290d9de2b7e1f2ecedcd15c45`, deterministic
+`a000001, a000002, ...` fixture indices) is CORRECT and RETAINED
+unchanged — it fixed every seed-time fixture path. It failed its first
+authenticated live gate (`drawing-line-bridge.spec.ts -g "renders
+seeded attached"`) not because the fixture fix was wrong, but because a
+SECOND, independent, production-facing source of `index: null` exists
+and was not yet in scope — see §0.1. This amendment adds exactly one
+more file to scope (`DrawingLayout.tsx`) without altering anything
+about the retained harness change.
 
 **Implementer:** GPT-5.5. **Reviewer:** independent read-only
 reviewer (Kepler primary, Gemini 3.1 Pro fallback) — PASS required
@@ -16,8 +29,9 @@ origin/main at authoring time). **The PATCH-102 candidate remains
 uncommitted and out of scope for this patch** — do not stage, commit,
 or reference it.
 
-**Bound implementation commit message (verbatim):**
-`fix(e2e): assign valid fractional indices to seeded Excalidraw drawing fixtures (PATCH-103)`
+**Bound implementation commit message (verbatim, amended — see §6 for
+the current authoritative text):**
+`fix(e2e,canvas): assign valid fractional indices to seeded and runtime-created Excalidraw elements (PATCH-103)`
 
 ---
 
@@ -106,6 +120,68 @@ this is not an implementation defect introduced by PATCH-102's
 candidate. The candidate requires no changes and must not be modified
 by this patch.
 
+## 0.1 Amendment investigation — the second, production-facing source (bind, 2026-07-22)
+
+**Live-gate result that triggered this amendment:** with the harness
+fix applied, authentication passed (1/1), but the first non-AI drawing
+gate (`drawing-line-bridge.spec.ts -g "renders seeded attached"`)
+still failed waiting for `[data-padlet-id]`, with error context
+showing a **runtime-created** embeddable (not a seeded fixture) with
+`index: null`. Remaining gates were correctly not run.
+
+**Root cause, confirmed by source:**
+`components/collabboard/canvas/layouts/DrawingLayout.tsx` contains TWO
+raw Excalidraw-element-construction functions that hard-code
+`index: null`, independent of the E2E harness and independent of each
+other:
+
+1. `createEmbeddableElementForPadlet` (line ~1690-1722, `index: null`
+   at line 1710) — constructs a raw embeddable object for any
+   non-drawing padlet that needs representation on a drawing board.
+   Called from `insertPadletEmbeddable` (line ~1732) and from the
+   padlet-embeddable sync effect (line ~1777, batched as
+   `missingEmbeddables`, passed into `excalidrawAPI.updateScene(...)`
+   at line ~1896 via `buildDrawingSceneUpdate`). This effect runs
+   automatically whenever the padlet list changes for a drawing
+   board — i.e. on essentially every real board load that has any
+   non-drawing padlet on it. This is the exact code path
+   `drawing-line-bridge.spec.ts`'s "renders seeded attached" scenario
+   exercises, and the exact code path any real user hits by placing
+   any padlet on a drawing board.
+2. `makeFrameElement` (line ~1393-1421, `index: null` at line 1417) —
+   constructs a raw frame element, used by `handleAddSlide`,
+   `handleAddSlideBelow`, and `handleDuplicateSlide` (the "add
+   slide"/"duplicate slide" UI actions).
+
+Both bypass Excalidraw's own element-creation APIs entirely (raw
+object literals), exactly mirroring the harness's original mistake,
+but in **production application code**, not test fixtures. This is
+confirmed reachable by real end users, not merely by tests — any user
+placing a padlet on a drawing board, or adding/duplicating a slide,
+constructs an element via one of these two functions.
+
+**`buildDrawingSceneUpdate` (`lib/infra/drawing/importScene.ts:38-50`)
+was investigated and REJECTED as the fix location.** It is the single
+shared chokepoint through which 10 `updateScene` call sites in
+`DrawingLayout.tsx` route their elements, which made it an attractive
+single-point fix — but its own existing test
+(`lib/infra/drawing/importScene.test.ts:104-119`) asserts `elements`
+passes through **unchanged**, using deliberately minimal non-Excalidraw
+stub objects (`{ id: "el-1" }`) unrelated to fractional-index
+correctness. Adding Excalidraw-specific index normalization here would
+both break that existing, correctly-scoped test and mix an unrelated
+concern into a generic scene-update-payload builder. `importScene.ts`
+is therefore explicitly PROHIBITED from modification by this patch —
+see §2.1's amended prohibited list.
+
+**Revised classification: E — multiple independent null-index paths
+exist** (not A alone): the E2E harness fixture path (fixed, retained,
+test-only) AND the `DrawingLayout.tsx` production-construction path
+(newly confirmed, real-user-reachable). This is not evidence of a
+"general Excalidraw migration" — it is exactly two named functions in
+one file, both raw object literals bypassing Excalidraw's own APIs,
+both fixable the same way.
+
 ## 1. Product/test contract (bind)
 
 Every E2E fixture-seeded Excalidraw element (frame, embeddable,
@@ -125,30 +201,56 @@ instead of `null`.
 - No change to PATCH-097/099/100/101/102's own governed scope, tests,
   timeouts, or selectors.
 
-## 2. Exact allowed change (bind)
+## 2. Exact allowed change (bind, amended)
 
-**File:** `e2e/characterization/drawingBridgeHarness.ts` only.
+**File 1 (retained, unchanged, already correct):**
+`e2e/characterization/drawingBridgeHarness.ts` — the current
+uncommitted candidate at blob `9388086c4354e69290d9de2b7e1f2ecedcd15c45`
+is KEPT AS-IS. No further changes to this file are authorized or
+required by this amendment.
 
-Replace each `index: null` literal (lines 110, 145, 176, 218) with a
-valid fractional-index string, generated by a small local helper
-(e.g. a simple monotonically-increasing base-62/fractional-indexing
-generator, or by importing an existing fractional-index generator
-already vendored in the Excalidraw fork if one is safely importable
-from a Playwright/Node test context — the implementer must verify
-importability before choosing that path and fall back to a minimal
-local generator if the fork's module has browser-only dependencies).
-The generated indices must satisfy `validateFractionalIndices()` for
-the exact element ordering each existing spec already assumes.
+**File 2 (new, amended scope):**
+`components/collabboard/canvas/layouts/DrawingLayout.tsx`.
 
-**Explicitly prohibited (bind):** no change to any spec file's
-element-count, ids, positions, types, `versionNonce`, or any other
-field; no change to `DrawingLayout.tsx`; no change to any file under
-`components/collabboard/canvas/excalidraw_fork/`; no change to
-PATCH-102's candidate files
-(`createSlideRenderer.tsx`,
+In BOTH `createEmbeddableElementForPadlet` and `makeFrameElement`,
+replace the hard-coded `index: null` with a call to the fork's own
+`syncInvalidIndicesImmutable()`
+(`components/collabboard/canvas/excalidraw_fork/packages/element/src/fractionalIndex.ts:222`)
+applied to the complete resulting elements array — i.e. the existing
+scene elements (from `excalidrawAPI.getSceneElements()`) plus the
+newly-constructed raw element(s) — immediately before each
+`updateScene` call that introduces one of these raw elements, so the
+new element(s) receive a correctly-ordered, valid fractional index
+relative to their real siblings at the moment of insertion. Do NOT
+hand-compute or hard-code an index value directly in either
+constructor function — always derive it via the fork's own utility,
+using the live sibling array at insertion time, not a static/global
+counter.
+
+The implementer must grep `DrawingLayout.tsx` for every call site that
+passes a raw, newly-constructed element (from `createEmbeddableElementForPadlet`,
+`makeFrameElement`, or any other similarly-shaped raw-construction
+helper discovered during implementation) into `updateScene`, and apply
+this treatment at each one — enumerate every call site touched in the
+final report (`grep -n "createEmbeddableElementForPadlet\|makeFrameElement" components/collabboard/canvas/layouts/DrawingLayout.tsx`
+is the minimum required verification command; note in the report
+whether it found additional raw-construction sites beyond the two
+named here).
+
+**Explicitly prohibited (bind, amended):** no change to
+`lib/infra/drawing/importScene.ts`/`buildDrawingSceneUpdate` (rejected
+in §0.1 — would break its own existing test and mixes an unrelated
+concern); no change to any spec file's element-count, ids, positions,
+types, `versionNonce`, or any other field; no change to any file under
+`components/collabboard/canvas/excalidraw_fork/` (the fork's own
+`syncInvalidIndicesImmutable` is imported and used, not modified); no
+change to PATCH-102's candidate files (`createSlideRenderer.tsx`,
 `presentation-snapshot-image-readiness.spec.ts`); no new npm
-dependency unless strictly required to import an existing, already-
-vendored fork utility (prefer a small local helper over adding one).
+dependency; no change to any geometry, position, binding, frame
+relationship, `versionNonce`, `seed`, or `updated` field on any element
+— `index` assignment only; no broad refactor of `DrawingLayout.tsx`
+beyond the two named functions and their direct `updateScene` call
+sites.
 
 ## 3. Verification (bind)
 
@@ -180,36 +282,56 @@ Same as every prior patch in this program: board prefix cleanup must
 reach zero; no leftover `test-results/`/`playwright-report/`/JSON
 reporter output; ports 3000/4000 free at close.
 
-## 5. Hard stop conditions (bind)
+## 5. Hard stop conditions (bind, amended)
 
 STOP immediately, report, do not commit, if:
 
-- any file outside `drawingBridgeHarness.ts` is touched;
+- any file outside `drawingBridgeHarness.ts` and `DrawingLayout.tsx`
+  is touched (in particular: `importScene.ts` or any Excalidraw fork
+  file);
+- `drawingBridgeHarness.ts` is modified beyond its already-landed
+  candidate state (blob `9388086c4354e69290d9de2b7e1f2ecedcd15c45`);
 - the PATCH-102 candidate (`createSlideRenderer.tsx`,
   `presentation-snapshot-image-readiness.spec.ts`) is modified, staged,
   or committed as part of this patch;
-- `DrawingLayout.tsx` or any Excalidraw fork file is touched;
+- the PATCH-102 named stash (`PATCH-102-candidate-before-PATCH-103`) is
+  popped, applied, rewritten, or dropped;
 - any spec's element count, ids, positions, or non-index fields change;
+- any element's geometry, binding, frame relationship, `versionNonce`,
+  `seed`, or `updated` field changes as a side effect of the index fix;
+- an index value is hard-coded/hand-computed anywhere instead of
+  derived via `syncInvalidIndicesImmutable()`;
 - credentials are printed, logged, or committed anywhere;
 - any of the re-run specs still fails to render `[data-padlet-id]`
   elements after the fix;
 - cleanup cannot reach zero.
 
-## 6. Review and commit flow (bind)
+## 6. Review and commit flow (bind, amended)
 
-Implementer delivers the uncommitted single-file diff + report (exact
-index values assigned; all six-plus re-run specs' real results, not
-skip-only; cleanup proof). The independent reviewer (Kepler primary,
-Gemini 3.1 Pro fallback — NOT Sonnet) re-derives everything live,
-using the same approved credential-loading procedure, and must return
-an explicit PASS — with real (non-skipped) assertion output pasted —
-before the implementer commits with the bound message and pushes.
+Implementer delivers the uncommitted two-file diff + report (exact
+`DrawingLayout.tsx` call sites touched, confirming `syncInvalidIndicesImmutable()`
+was used rather than a hand-computed index; the harness file confirmed
+unchanged from its already-landed candidate blob; all six-plus re-run
+specs' real results, not skip-only; cleanup proof). The independent
+reviewer (Kepler primary, Gemini 3.1 Pro fallback — NOT Sonnet)
+re-derives everything live, using the same approved credential-loading
+procedure, and must return an explicit PASS — with real (non-skipped)
+assertion output pasted, specifically confirming
+`drawing-line-bridge.spec.ts -g "renders seeded attached"` now passes
+— before the implementer commits with the bound message and pushes.
 Only after this patch lands and is closed does PATCH-102's independent
 review resume, using the same approved credentials.
 
+**Bound implementation commit message (verbatim, amended):**
+`fix(e2e,canvas): assign valid fractional indices to seeded and runtime-created Excalidraw elements (PATCH-103)`
+
 ## 7. Required final report
 
-Exact file changed + final blob; exact index values assigned per
-element; full real (non-skip) results for every spec listed in §3;
-cleanup proof; explicit confirmation the PATCH-102 candidate was not
-touched; commit hash + push status after PASS.
+Exact files changed + final blobs (both `drawingBridgeHarness.ts` and
+`DrawingLayout.tsx`); exact `DrawingLayout.tsx` call sites touched and
+confirmation `syncInvalidIndicesImmutable()` was used at each; full
+real (non-skip) results for every spec listed in §3, PLUS explicit
+confirmation `drawing-line-bridge.spec.ts -g "renders seeded attached"`
+passes; cleanup proof; explicit confirmation the PATCH-102 candidate
+and its named stash were not touched; commit hash + push status after
+PASS.
