@@ -1861,3 +1861,271 @@ immediately, report, do not commit, if:
 - credentials are printed, logged, or committed anywhere.
 
 **Do not authorize PATCH-104.**
+
+## §22 — remaining Preview-modal failure after §21 stabilization: a second unmemoized dependency one call-site upstream (bind)
+
+**Trigger:** live delayed-image runs after §21 landed uncommitted:
+run 1 pass, run 2 pass, run 3 fail — "Preview modal exposes a
+populated snapshot image" timed out with the modal stuck on
+"Rendering slide…". No route error, no
+`InvalidFractionalIndexError`. Five-run stability gate stopped at
+run 3; full Phase 8 matrix not yet run.
+
+### Phase 1 — candidate integrity (verified)
+
+```
+HEAD == origin/main == 706b094e8d892c552809347a82fde9e18a98af87
+git diff --name-only:
+  components/collabboard/canvas/layouts/DrawingLayout.tsx
+  components/presentation/slide-renderer/createSlideRenderer.tsx
+git ls-files --others --exclude-standard:
+  e2e/characterization/presentation-snapshot-image-readiness.spec.ts
+DrawingLayout.tsx blob: 891da1049284954bbfcf4b0d093e7facb1f9137d (matches report)
+createSlideRenderer.tsx blob: ef8c1a9b7a9521a6a68d40e661ee50effff986fd (unchanged since §13)
+spec blob: 3100c8aa087b585321975797b62d5b8fdd725e42 (matches report)
+PresentationPreviewModal.tsx / PresentationPanel.tsx / useSlideThumbnails.ts:
+  all three restored to their exact bound blobs (matches report)
+git diff --cached --name-only: (empty)
+git stash list: stash@{0}: On main: PATCH-102-candidate-before-PATCH-103 (untouched)
+PATCH-104.md: absent
+```
+
+Exactly three candidate paths, zero staged files, stash present, PATCH-104 not started — confirmed.
+
+### Phase 2 — §21 audit (bind: correct and stable)
+
+`git diff` on `DrawingLayout.tsx` shows exactly one hunk, lines
+2092-2096, and nothing else:
+
+```diff
+   const slideRenderer = useMemo(() => createSlideRenderer({
+-    getSceneElements: () => elements,
+-    getPadlets: () => padlets,
+-    getFiles: () => currentFilesRef.current ?? initialFiles ?? null,
+-  }), [elements, initialFiles, padlets]);
++    getSceneElements: () => runtimeSceneElementsRef.current,
++    getPadlets: () => runtimePadletsRef.current,
++    getFiles: () => currentFilesRef.current ?? runtimeInitialFilesRef.current ?? null,
++  }), []);
+```
+
+Verified: `runtimeSceneElementsRef.current = elements;` /
+`runtimePadletsRef.current = padlets;` /
+`runtimeInitialFilesRef.current = initialFiles;` (lines 757-759) are
+unconditional top-level statements executed every render, before any
+effect runs — byte-identical to the immutable fence, untouched.
+`renderSlideToPNG`'s only dependency is `[slideRenderer]`
+(line 2099-2101, unchanged), and `slideRenderer` now has a
+permanently stable identity. `createSlideRenderer` is a static
+module-level import. **Classification: A — correct and stable.**
+§21 fully eliminated the `slideRenderer`/`renderSlideToPNG` churn it
+targeted. The remaining failure has a different cause.
+
+### Phase 3/4 — trace found a second, independent unmemoized dependency (source-proven, no diagnostic needed)
+
+`PresentationPreviewModal.tsx` (restored, byte-identical to blob
+`5116031b27f73bb7616f4024b197824c6718aa17`) computes, at line 33:
+
+```ts
+const currentSlide = slides[currentIndex];
+```
+
+— not memoized. Its identity is only as stable as the `slides` array
+and its elements. `currentIndex` (line 27-31) is itself memoized on
+`[currentId, slides]`, so if `slides` changes reference every render,
+`currentIndex`'s memo also re-executes, though the numeric index it
+returns is typically unchanged — the real exposure is `slides[idx]`
+picking up whatever object currently lives at that index.
+
+Traced `slides`' origin: `PresentationPanel.tsx:71-81`:
+
+```ts
+const sortedSlides = useMemo(() => {
+  const s = [...slides];
+  s.sort((a, b) => { ... });
+  return s;
+}, [slides]);
+```
+
+`sortedSlides` is properly memoized — but keyed on the `slides` prop
+it receives from `PresentationPanel`'s caller. That prop is `frames`,
+passed at `DrawingLayout.tsx:3217`: `<PresentationPanel slides={frames} .../>`.
+
+`frames` itself, at `DrawingLayout.tsx:2123-2145`, is **not wrapped
+in `useMemo` at all** — it is a plain `const` recomputed on every
+`DrawingLayout` render:
+
+```ts
+const frames: FrameSlide[] = (elements as any[])
+  .filter((el: any) => el.type === 'frame' && !el.isDeleted)
+  .map((el: any) => {
+    const baseSlide = { id: el.id, name: el.name ?? null, x: el.x, y: el.y,
+      width: el.width, height: el.height, order: null } satisfies FrameSlide;
+    const sig = slideRenderer.getSlideRenderSignature(baseSlide);
+    if (frameSigsRef.current[el.id] !== sig) {
+      frameSigsRef.current[el.id] = sig;
+      frameVersionsRef.current[el.id] = (frameVersionsRef.current[el.id] ?? 0) + 1;
+    }
+    return { ...baseSlide, contentVersion: frameVersionsRef.current[el.id] ?? 0, renderSignature: sig };
+  });
+```
+
+Every invocation returns a **brand-new array of brand-new object
+literals**, even when nothing about any frame changed — because
+`.filter().map()` always allocates fresh objects, and this runs on
+every `DrawingLayout` render (i.e. on the same near-every-scene-tick
+cadence as the `elements`/`padlets` churn §21 already fixed one call
+site downstream from). This new array/new objects flow straight
+through `sortedSlides` (memo busts because its own dependency
+`slides` changed) into `PresentationPreviewModal`'s `slides` prop and
+`currentSlide`, restarting the big-preview effect
+(`[open, currentSlide, renderSlideToPNG, getSlideCacheKey]`) and the
+thumbnail-strip effect (`[open, slides, renderSlideToPNG, getSlideCacheKey]`)
+on every tick — independent of §21, because neither effect's other
+three dependencies are the culprit here (`getSlideCacheKey` is
+`useCallback(..., [])`, stable; `open` is a boolean state value;
+`renderSlideToPNG` is now stable per Phase 2).
+
+This is not a hypothesis requiring diagnostic instrumentation to
+locate — the mechanism is definitional from the source
+(`.map()` always allocates new objects; no memo wraps it) — the same
+standard this session has required before asserting a classification
+without proof. **Classification: C — `currentSlide` (and `slides`)
+change identity despite the same semantic frame set, because `frames`
+in `DrawingLayout.tsx` is never memoized.**
+
+### Phase 5 — minimal temporary diagnostic (authorized, for live confirmation only)
+
+Because §18's confident-but-wrong classification is the standing
+lesson, source-proof alone does not close this without one live
+confirmation pass. Authorize the smallest possible temporary
+diagnostic, scoped exactly as requested:
+
+- `PresentationPreviewModal.tsx` only. On each big-preview effect
+  start: record `effectRunId` (incrementing ref), `open`,
+  a per-reference generation counter for `currentSlide` and for
+  `renderSlideToPNG` (via a `WeakMap<object, number>` / `WeakMap<Function, number>`
+  assigning the next counter value the first time a reference is
+  seen — no function source ever serialized), `getSlideCacheKey`'s
+  generation counter, and start timestamp, via a
+  `process.env.NODE_ENV !== "production"`-gated
+  `window.dispatchEvent(new CustomEvent("collabboard-ai-preview-result-diagnostic", ...))`
+  (same event name/shape as §20, reintroduced temporarily). On
+  resolve/reject: `effectRunId`, `cancelled`, `accepted`, `resultLength`,
+  error message if rejected, whether `setBigPng` executed.
+- Delayed-image spec test buffer only: consume the event, do not
+  change behavior, timing, or assertions.
+- Do not restore the full §19 (`createSlideRenderer.tsx`) diagnostic
+  surface — it already exonerated the image-readiness/zero-wait path
+  in §20 and is not implicated here.
+- Do not add thumbnail-strip diagnostics unless the main-effect
+  evidence is inconclusive.
+
+### Phase 6/7 — required live evidence and classification to bind
+
+Require focused delayed-image runs until either the modal-stuck
+failure reproduces once with diagnostics active, or five consecutive
+passes occur. Report, per run: Preview-main start count; the
+`currentSlide` and `renderSlideToPNG` generation-counter sequence
+(expect `renderSlideToPNG`'s generation to stay at 1 throughout, and
+`currentSlide`'s generation to increment on every tick, proving Phase
+3/4's source-level classification C); resolves/rejects/cancelled/
+accepted/`setBigPng` executions; oklch errors; final modal state.
+
+### Phase 8 — ruling on oklch (unchanged from §21)
+
+Not yet reproduced on a stable semantic render since the fix has not
+landed; the §21 ruling stands — governed by pre-existing
+`sanitizeExportOverlayColors()`, exposed only by churn, gated by the
+"zero oklch across 5 runs" requirement in Phase 8 of §21. If a stable
+semantic render (post-fix, generation counters flat) still rejects
+with the oklch error, that disproves this ruling and must be reopened
+as its own question — do not paper over it.
+
+### Phase 9 — governance decision (bind: option 1 — §21 correct; a second, source-proven unstable dependency must be stabilized)
+
+**Exact authorized production correction** (for `DrawingLayout.tsx`
+only, replacing lines 2123-2145; starting blob for this turn is the
+current uncommitted candidate `891da1049284954bbfcf4b0d093e7facb1f9137d`):
+introduce structural-sharing memoization so `frames` keeps the same
+array reference AND the same per-frame object references whenever
+nothing about the frame set actually changed, reusing the existing
+`frameSigsRef`/`frameVersionsRef` signature machinery:
+
+```ts
+const frames: FrameSlide[] = useMemo(() => {
+  const frameEls = (elements as any[]).filter((el: any) => el.type === 'frame' && !el.isDeleted);
+  let changed = frameEls.length !== framesArrayRef.current.length;
+  const next: FrameSlide[] = frameEls.map((el: any) => {
+    const baseSlide = {
+      id: el.id, name: el.name ?? null, x: el.x, y: el.y,
+      width: el.width, height: el.height, order: null,
+    } satisfies FrameSlide;
+    const sig = slideRenderer.getSlideRenderSignature(baseSlide);
+    if (frameSigsRef.current[el.id] !== sig) {
+      frameSigsRef.current[el.id] = sig;
+      frameVersionsRef.current[el.id] = (frameVersionsRef.current[el.id] ?? 0) + 1;
+    }
+    const contentVersion = frameVersionsRef.current[el.id] ?? 0;
+    const prev = frameObjectsRef.current[el.id];
+    if (
+      prev &&
+      prev.name === baseSlide.name && prev.x === baseSlide.x && prev.y === baseSlide.y &&
+      prev.width === baseSlide.width && prev.height === baseSlide.height &&
+      prev.contentVersion === contentVersion && prev.renderSignature === sig
+    ) {
+      return prev;
+    }
+    changed = true;
+    const slide: FrameSlide = { ...baseSlide, contentVersion, renderSignature: sig };
+    frameObjectsRef.current[el.id] = slide;
+    return slide;
+  });
+  if (!changed) {
+    changed = next.some((s, i) => framesArrayRef.current[i]?.id !== s.id);
+  }
+  if (changed) {
+    framesArrayRef.current = next;
+  }
+  return framesArrayRef.current;
+}, [elements]);
+```
+
+with two new refs declared alongside `frameVersionsRef`/`frameSigsRef`
+(lines 689-690): `const framesArrayRef = useRef<FrameSlide[]>([]);` and
+`const framesObjectsRef = useRef<Record<string, FrameSlide>>({});`.
+The `contentPadlets` statement that currently shares a line with the
+old `frames` computation (`}); const contentPadlets = ...`) must be
+preserved as its own statement, unchanged in behavior.
+
+**Exact temporary diagnostic to add and later remove:**
+`PresentationPreviewModal.tsx` — the `collabboard-ai-preview-result-diagnostic`
+event and generation-counter `WeakMap`s described in Phase 5, plus the
+matching spec test buffer. Both must be fully removed before final
+commit, same as §19/§20.
+
+**Hard-stop conditions (bind, in addition to §8/§13-§21):** STOP,
+report, do not commit, if: any file outside `DrawingLayout.tsx`,
+`PresentationPreviewModal.tsx`, and the spec is touched; the `frames`
+memoization changes any semantic behavior (ordering, filtering,
+`contentVersion` semantics) rather than only reference-stability;
+`createSlideRenderer.tsx` is touched at all this turn; the diagnostic
+is not fully removed before commit; oklch recurs on a
+generation-flat stable render; any required live gate fails or is
+skip-only; PATCH-096 is not exactly 14/14/14; credentials are
+printed, logged, or committed anywhere.
+
+**Full validation matrix:** identical to §21 Phase 8 (5x delayed-image
+clean passes with zero oklch/route/fractional-index errors; one-off
+generation-counter verification pass proving `currentSlide`'s
+generation is flat across the whole session for a fixed selection and
+`renderSlideToPNG`'s generation stays at 1; full six-scenario suite;
+PATCH-101/100/099/097; PATCH-089/090/091/093/094; PATCH-103
+coexistence — critical, `DrawingLayout.tsx` touched again; PATCH-096
+14/14/14; full deterministic matrix; fresh independent review
+(Kepler/Gemini, not Sonnet) before commit.
+
+**Bound implementation commit message (verbatim):**
+`fix(presentation): memoize frame-slide identity to stop Preview-effect restarts from unmemoized frame construction (PATCH-102)`
+
+**Do not authorize PATCH-104.**

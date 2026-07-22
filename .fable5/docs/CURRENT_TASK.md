@@ -361,6 +361,37 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-23** — **PATCH-102 §22 — second, independent unmemoized
+  dependency found one call-site upstream of §21's fix.** Live runs
+  after §21 landed uncommitted: 2/3 delayed-image passes, run 3 failed
+  identically to the pre-§21 symptom (modal stuck on "Rendering
+  slide…"). §21 itself audited and confirmed correct/stable
+  (classification A) — `slideRenderer`/`renderSlideToPNG` are now
+  permanently stable. Source trace found `PresentationPreviewModal.tsx`'s
+  `currentSlide = slides[currentIndex]` (unmemoized) is only as stable
+  as the `slides` array it indexes; that array traces back through
+  `PresentationPanel.tsx`'s properly-memoized `sortedSlides` to its
+  source, `DrawingLayout.tsx:2123-2145`'s `frames` — a plain
+  `.filter().map()` `const`, never wrapped in `useMemo`, allocating
+  brand-new array + brand-new per-frame objects on every
+  `DrawingLayout` render (same tick cadence §21 already fixed one
+  call site downstream from). Classification C, proven from source
+  (no diagnostic needed to locate it — `.map()` always allocates).
+  Authorized: a structural-sharing memoization of `frames` reusing the
+  existing `frameSigsRef`/`frameVersionsRef` signature machinery (two
+  new refs: `framesArrayRef`, `framesObjectsRef`) so both the array
+  and each per-frame object keep their prior reference when nothing
+  about that frame changed. A minimal temporary diagnostic (generation
+  counters via `WeakMap`, same event pattern as §20) was authorized in
+  `PresentationPreviewModal.tsx` only, for one live confirmation pass
+  before final acceptance — not because the source trace is in doubt,
+  but because §18's confident-but-wrong classification is the standing
+  lesson against skipping live proof. §13/§15 retained unchanged;
+  `createSlideRenderer.tsx` untouched this turn; oklch ruling from §21
+  unchanged pending a generation-flat stable-render check. No file
+  committed or implemented this turn — governance-only. PATCH-104 not
+  started.
+
 - **2026-07-23** — **PATCH-102 §21 — root cause PROVEN (not
   hypothesized): `DrawingLayout.tsx:2092-2096`'s `slideRenderer`
   useMemo depends on reactive `elements`/`padlets`, churning
