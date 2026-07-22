@@ -361,6 +361,53 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-22** — **PATCH-103 §11 amendment — element-order assertion
+  failure traced and resolved by source (classification C), same class
+  of defect as §9/§10, scoped fix inside the already-authorized
+  `drawing-presentation.spec.ts`, no new file.** With §10's height-poll
+  fix applied, runs 1-2 passed outright; run 3 failed AFTER height
+  convergence at `expect(preRunElementOrder).toEqual(postRunElementOrder)`
+  — `postRunElementOrder` contained one extra runtime-created
+  embeddable id appended at the end. Root cause confirmed deterministic
+  by source: `drawingBridgeHarness.ts`'s `seedDrawingContainers()`
+  seeds THREE containers into `fixture.containerIds`, but
+  `seedPresentationScene()` only creates scene embeddables for the
+  first two (`const [a, b] = fixture.containerIds`) — `containerIds[2]`
+  ("Container C") never gets a seeded embeddable. `DrawingLayout.tsx`'s
+  pre-existing, PATCH-103-unrelated automatic missing-embeddable sync
+  effect deterministically auto-embeds any non-drawing padlet lacking
+  one, on every board mount — real, intended, already-shipped
+  production behavior (§0.1), not a duplicate/orphan/regression. The
+  extra embeddable is legitimate. The real defect: `preRunElementOrder`
+  was derived from a raw Supabase read taken immediately after seeding,
+  before `openDrawingBoard` was ever called — it could never reflect
+  this deterministic mount-time auto-embed. This spec never previously
+  reached this assertion (blocked earlier by the pre-existing
+  fractional-index crash), so it was never exercised against real mount
+  behavior before now. Fix: add a bounded wait
+  (`waitForContainerEmbeddableSync`, timeout `20_000`ms, interval
+  `500`ms, matching the existing `waitForNaturalHeightPersistence`
+  convention) polling for `containerIds[2]`'s embeddable to land,
+  called right after board-open and before presentation interactions
+  begin; redefine `preRunElementOrder` from that settled snapshot
+  instead of the raw pre-seed read. Every other use of the original
+  seed snapshot (native-element checks, seeded-height lookups, the
+  per-element completeness loop) is left untouched. The order assertion
+  itself stays an exact, unweakened `toEqual`. No change authorized to
+  `DrawingLayout.tsx`, `drawingBridgeHarness.ts`, or the seed functions
+  (adding Container C's embeddable to the seed would mask real mount
+  behavior, not fix the test). New bound commit message:
+  `fix(e2e): capture post-mount-sync baseline before drawing-presentation order assertion (PATCH-103)`.
+  8 required live gates bound in §11 (3x full-scenario runs including
+  both height and order assertions, targeted + full
+  drawing-line-bridge, PATCH-097/099/100/101, PATCH-096 grouped runner
+  requiring exactly 14/14/14 with zero non-signature failures and exit
+  code 0). Candidate files unchanged this turn; PATCH-102 stash
+  untouched; PATCH-104 not started. Recorded in `PATCH-103.md` new
+  §11. Generated artifacts (`test-results/`, `.next/trace`) confirmed
+  gitignored, not candidate changes, cleaned up after this entry.
+  Governance-only commit follows.
+
 - **2026-07-22** — **PATCH-103 §9 resolved (definitive); §10 amendment
   authorizes a scoped, test-only fix — a third file added to scope.**
   Live investigation (3 focused runs) confirmed: live DOM heights

@@ -29,9 +29,9 @@ origin/main at authoring time). **The PATCH-102 candidate remains
 uncommitted and out of scope for this patch** — do not stage, commit,
 or reference it.
 
-**Bound implementation commit message (verbatim, amended — see §10 for
-the current authoritative text, superseding §6):**
-`fix(e2e): poll persisted drawing scene for debounced-save convergence before height assertion (PATCH-103)`
+**Bound implementation commit message (verbatim, amended — see §11 for
+the current authoritative text, superseding §6 and §10):**
+`fix(e2e): capture post-mount-sync baseline before drawing-presentation order assertion (PATCH-103)`
 
 **Second amendment (2026-07-22):** §8's PATCH-100 scene-reference-churn
 regression is resolved (gate applied, verification matrix passed). A
@@ -40,7 +40,15 @@ further, independent, live-verified failure surfaced next
 investigated in §9, definitively classified in §9's resolution as a
 pre-existing test-readiness gap (not a production regression), and
 fixed by a scoped, test-only amendment in §10 (a bounded persistence
-poll, one new file: `drawing-presentation.spec.ts`). §10 is now the
+poll, one new file: `drawing-presentation.spec.ts`).
+
+**Third amendment (2026-07-22):** with §10's height-poll fix applied,
+a further failure surfaced in the same spec: the element-order
+assertion. Investigated and definitively resolved by source in §11 —
+a second, independent instance of the same class of defect as §9/§10
+(a test baseline captured before a legitimate, deterministic
+production behavior lands), fixed the same way (a bounded, targeted
+wait), in the same already-authorized file. §11 is now the
 authoritative scope/commit-message/gate list for this patch.
 
 ---
@@ -682,6 +690,239 @@ amendment):** STOP immediately, report, do not commit, if:
 - PATCH-096 does not report exactly 14/14/14, zero non-signature
   failures, exit code 0;
 - credentials are printed, logged, or committed anywhere;
+- cleanup cannot reach zero.
+
+**Review and commit flow:** implementer applies the single authorized
+change to `drawing-presentation.spec.ts` only, delivers the diff +
+report (final blob, full real results for all 8 required gates,
+cleanup proof, confirmation the other two candidate files and the
+PATCH-102 stash are untouched). The independent reviewer (Kepler
+primary, Gemini 3.1 Pro fallback — NOT Sonnet) re-derives everything
+live and must return an explicit PASS with real (non-skipped) output
+before the implementer commits with the bound message above and
+pushes. Only after this lands and closes does PATCH-102's independent
+review resume.
+
+## 11. Element-order assertion investigation and amendment (bind, 2026-07-22)
+
+**Reported live result with §10's height-poll fix applied** (blobs
+`drawingBridgeHarness.ts` → `9388086c4354e69290d9de2b7e1f2ecedcd15c45`,
+`DrawingLayout.tsx` → `539f85b127db938d7ee6c72d32fe913cb88f35f1`,
+`drawing-presentation.spec.ts` → `307774a894d867e7001d5236be0ec12efe447cab`):
+runs 1-2 passed outright (height poll converged in 1 attempt, ~110-125ms).
+Run 3 failed **after** height convergence (5 poll attempts, 2265ms) at
+`expect(preRunElementOrder).toEqual(postRunElementOrder)` — the
+persisted-height assertion itself no longer failed. `postRunElementOrder`
+contained one additional runtime-created embeddable id, appended at the
+end, not present in `preRunElementOrder`.
+
+**Root cause, confirmed by source (deterministic, not a timing
+coincidence — reproducible on every run once the wait converges slowly
+enough to observe it):**
+
+1. `drawingBridgeHarness.ts`'s `seedDrawingContainers()` (lines
+   313-410) seeds **three** containers — `containerA`, `containerB`,
+   `containerC` — and pushes all three into `fixture.containerIds`
+   (line 396).
+2. `seedPresentationScene()` (lines 490-522) destructures only the
+   first two (`const [a, b] = fixture.containerIds;`, line 491) and
+   inserts scene embeddables for exactly those two
+   (`emb-slide-a` → `a`, `emb-slide-b` → `b`). **`containerC`
+   (`fixture.containerIds[2]`) is never given a scene embeddable by
+   any seed function this spec calls** — confirmed by reading every
+   line of `seedPresentationScene`'s `insertMasterPadlet(...)` element
+   list (7 elements: 2 frames, `emb-slide-a`, `emb-uploaded-image`,
+   `text-landscape`, `shape-landscape`, `emb-slide-b` — zero reference
+   to `containerC`).
+3. `DrawingLayout.tsx`'s automatic missing-embeddable sync effect
+   (unchanged by PATCH-103 — only its index-sync gate condition was
+   added in §0.1/§8, not the `missingEmbeddables` detection itself)
+   computes `missingEmbeddables` as every `nonDrawingRootPadlet` whose
+   `padlet://<id>` link has no existing scene embeddable. `containerC`
+   satisfies this on every single board mount, deterministically,
+   because it is a real, persisted, non-drawing padlet on the board
+   with no seeded embeddable — this is exactly the pre-existing,
+   intended production behavior documented in §0.1 ("any real user
+   placing a padlet on a drawing board" triggers this). The effect
+   appends the new embeddable to the end of the elements array
+   (`combinedElements = [...nextElements, ...missingEmbeddables]`,
+   unchanged by PATCH-103) — matching the reported symptom exactly
+   ("additional... ID appended at the end").
+4. `preRunElementOrder` (`drawing-presentation.spec.ts:1107`) is
+   derived from `persistedScene` — the raw Supabase read taken at line
+   871, **immediately after seeding, before `openDrawingBoard` is ever
+   called** (line 977). It can never include `containerC`'s auto-embed,
+   because that embed only happens once Excalidraw actually mounts and
+   the sync effect runs. `postRunElementOrder` is derived from a scene
+   fetched after the board has been open and settled for the
+   presentation-mode interactions — by which point the deterministic,
+   one-time auto-embed has already landed. The two baselines were never
+   going to match, independent of any test flakiness: **run 3 "failing
+   after 5 poll attempts" is simply the run where the height-poll
+   helper's retries gave the (already-inevitable) auto-embed enough
+   wall-clock time to land before the order comparison ran; runs 1-2
+   "passing" would be masking the same defect if the auto-embed hadn't
+   yet committed to the DB at the moment of comparison** — this is not
+   evidence the defect is intermittent, only evidence of exactly how
+   thin the race margin is. This spec could never previously reach this
+   assertion (§0/§0.1's pre-existing `InvalidFractionalIndexError`
+   blocked it), so it has never been exercised against real production
+   mount behavior before now.
+
+**Whether the extra embeddable is legitimate, duplicate, orphan, or
+residue:** legitimate. It is not a duplicate (no embeddable for
+`containerC` existed before); not an orphan (the opposite — a real,
+persisted padlet that lacked an embeddable, not a stale embeddable
+whose padlet is gone); not test residue (created fresh, deterministically,
+every run, by the fixture's own board-mount, not leaked from a prior
+run — cleanup counts were not implicated). It is real, intended,
+already-shipped production behavior that this test had simply never
+run far enough to observe before PATCH-103.
+
+**Clean-base A/B:** not independently re-executed live by the CTO role
+this turn — the root cause here is fully deterministic and provable
+from static source (unlike §9's timing question, there is no
+ambiguity to resolve live: `seedPresentationScene` unconditionally
+omits `containerC`'s embeddable on every invocation, and the sync
+effect's `missingEmbeddables` detection is unconditional and untouched
+by PATCH-103's diff). Per §0/§0.1's already-established finding, clean
+governance HEAD cannot reach this assertion at all (still blocked by
+the original fractional-index crash before `[data-padlet-id]`
+renders), so it could not have exposed or hidden this behavior either
+way. A live re-confirmation is still required before commit (see gates
+below), using a temporary stash named exactly
+`PATCH-103-candidate-for-order-comparison` (distinct from
+`PATCH-102-candidate-before-PATCH-103` and both prior comparison
+stashes) if the implementer wishes to re-verify the clean-HEAD-blocked
+premise directly, but it is not what determines the fix here.
+
+**Intended order contract (Phase 4 — determined from the test's own
+surrounding structure, not from this failure alone):** the assertion's
+purpose, read alongside its neighbors (PNG-census stability checks,
+`postRunCompositionPlan` stability, `noNativeMembersDropped`, and —
+critically — the separate per-seeded-element completeness loop at
+line 1231 that already checks every *originally seeded* element is
+still present and unchanged in the post-run scene, by id, individually,
+without requiring the two full id-lists to be identical) is to prove
+that **viewing/interacting with presentation mode does not reorder or
+corrupt already-settled scene elements**. It was never meant to assert
+byte-identical scene contents between "the instant after raw seed
+insertion" and "after presentation-mode interaction" — the existing
+per-element loop already deliberately allows the post-run scene to be
+a superset check on identity/type/frameId/link, not a set-equality
+check. The correct baseline for the order-stability assertion is the
+scene **as it looks once genuinely settled after board mount** (i.e.
+including the deterministic one-time embeddable auto-sync), captured
+*before* presentation-mode interactions begin — not the raw pre-seed
+snapshot.
+
+**Definitive classification: C — preRun order is captured before
+legitimate scene synchronization completes.** Not A (no duplicate
+created), not B/G (no over-broad assertion in isolation — the
+assertion's exactness is correct, only its baseline timing is wrong),
+not D (no stale/foreign data — the extra element belongs to this exact
+fixture's own `containerC`), not E (no cleanup/isolation failure —
+reproducible from a single run's own seed data, not leaked from a
+prior run). PATCH-103 did not cause this: it is the same class of
+"test reaches further than it ever has, and its baseline predates a
+real mount-time behavior" defect as §9/§10's persisted-height gap, not
+a new production regression.
+
+**Authorized fix (bind) — scoped entirely inside the already-authorized
+file, no new file added to scope:**
+
+`e2e/characterization/drawing-presentation.spec.ts`, current blob
+`307774a894d867e7001d5236be0ec12efe447cab` (§10's landed candidate),
+amended as follows and only as follows:
+
+1. Add one new helper, `waitForContainerEmbeddableSync`, matching the
+   existing `waitForNaturalHeightPersistence` shape exactly
+   (lines 264-330-ish): a `while (Date.now() - startedAt <= timeoutMs)`
+   poll loop calling `fetchPersistedScene()`, **timeout `20_000`ms,
+   polling interval `500`ms** (same bound values as
+   `waitForNaturalHeightPersistence`), checking whether the persisted
+   scene contains an active (`!isDeleted`) `embeddable` element whose
+   `link === \`padlet://${fixture.containerIds[2]}\``. Return the same
+   diagnostic shape convention (`converged`, the settled
+   `persistedScene`, `waitDurationMs`, `timeoutMs`, `pollingIntervalMs`,
+   `attempts`) so a timeout produces a useful failure message
+   identifying that `containerC`'s embeddable never synced.
+2. Immediately after the existing `[data-padlet-id]` visibility wait
+   (line 979) and *before* the "Present Frames" click (line 981), call
+   this new helper and require `converged === true` via an `expect(...)`
+   assertion (mirroring §10's `naturalHeightPersistence.converged`
+   pattern) with the same non-hidden-failure diagnostic requirement —
+   a timeout must fail loudly, not be swallowed.
+3. Capture the settled scene from this new helper's returned
+   `persistedScene` into a new local (e.g. `settledScene`), and change
+   `preRunElementOrder` (currently line 1107) to derive from
+   `settledScene.sceneElements`, not from `persistedScene` (the line-871
+   raw pre-seed read).
+4. **Leave every other use of `persistedScene` unchanged** — the frame
+   lookup (line 873), native-element checks (lines 883-889), the
+   `seededHeight` lookups via `preRunSceneById` (line 1163, sourced from
+   `persistedScene`), and the per-seeded-element completeness loop
+   (line 1231) all continue to read the original line-871 raw seed
+   snapshot exactly as today. Only the order-assertion's baseline
+   changes.
+5. `postRunElementOrder`, the height-poll helper, and the height/order
+   assertions themselves (lines 1222, 1225-1230) are **not** changed in
+   wording or strictness — `expect(preRunElementOrder).toEqual(postRunElementOrder)`
+   remains an exact `toEqual`, not relaxed to a subset/superset check.
+
+**Explicitly prohibited by this amendment (bind):** no change to
+`DrawingLayout.tsx` or `drawingBridgeHarness.ts` (both remain at their
+already-verified blobs); no change to `seedDrawingContainers`/
+`seedPresentationScene`'s seeded element set (do not add `containerC`'s
+embeddable to the seed instead — that would hide the real mount-time
+behavior this test should be allowed to observe); no relaxing of the
+order assertion to a subset/contains check; no change to any other
+assertion, fixture value, or selector in
+`drawing-presentation.spec.ts`; no fixed/arbitrary sleep; no change to
+`PATCH-102`'s files or its named stash; no governance changes beyond
+this amendment.
+
+**Bound implementation commit message (verbatim, supersedes §6 and
+§10):**
+`fix(e2e): capture post-mount-sync baseline before drawing-presentation order assertion (PATCH-103)`
+
+**Required live gates after this amendment (bind, non-skip real
+results required for all — supersedes §10's gate list):**
+
+1. `drawing-presentation.spec.ts`'s full scenario — **at least 3
+   consecutive real runs**, all passing, including both the
+   persisted-height convergence (§10) and the order assertion (§11).
+2. `drawing-line-bridge.spec.ts -g "renders seeded attached"` (targeted
+   gate).
+3. Full `drawing-line-bridge.spec.ts`.
+4. PATCH-097 spec.
+5. PATCH-099 spec.
+6. PATCH-100 spec.
+7. PATCH-101 spec.
+8. PATCH-096 grouped runner — must report **14 groups configured, 14
+   specs configured, 14 final passes, zero non-signature failures,
+   exit code 0**. Skip-only results do not count as passes.
+
+**Hard-stop conditions (bind, supersedes §5/§10 for this amendment):**
+STOP immediately, report, do not commit, if:
+
+- any file outside `drawing-presentation.spec.ts` is touched;
+- `DrawingLayout.tsx` or `drawingBridgeHarness.ts` changes from their
+  bound blobs;
+- the PATCH-102 candidate or its named stash is modified, popped,
+  applied, or dropped;
+- the new wait helper uses a fixed sleep instead of a genuine poll
+  loop;
+- the order assertion is weakened to anything other than an exact
+  `toEqual` over the corrected baseline;
+- the seed functions are changed to add `containerC`'s embeddable
+  (masking the behavior instead of accounting for it);
+- any of the 8 required live gates fails or is skip-only;
+- PATCH-096 does not report exactly 14/14/14, zero non-signature
+  failures, exit code 0;
+- credentials are printed, logged, or committed anywhere;
+- generated artifacts (`test-results/`, `.next/trace`,
+  `playwright-report/`) are committed;
 - cleanup cannot reach zero.
 
 **Review and commit flow:** implementer applies the single authorized
