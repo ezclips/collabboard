@@ -1592,3 +1592,272 @@ limited to these exact two paths (`fs.rmSync('test-results', {recursive:true, fo
 authorized; no other path may be touched.
 
 **Do not authorize PATCH-104.**
+
+## 21. Root cause proven — churn source identified; minimal product fix authorized (bind, 2026-07-23)
+
+**§20's diagnostic proved exactly what it was designed to prove, and
+this time the hypothesis held.** Diagnostics confirm: the delayed-image
+readiness mechanism works correctly in **every** captured attempt
+(captures 1/2/3/23, all `pendingAtStart:1`, genuinely unresolved at
+inspection, settling before timeout) — the zero-wait mechanism is not
+implicated in this run. The Preview-main effect ran **43 times**;
+attempt 1 produced a valid, non-empty result (298898 bytes) that
+resolved with `cancelledAtResolution: true` — discarded solely because
+the owning effect had already restarted before its own promise
+settled. **Classification: A — the first valid Preview-main result
+resolves but is discarded because `cancelled === true`,** exactly as
+scoped in Phase 6 — confirmed by direct evidence (`resultAccepted:
+false`, `setBigPng` did not execute), not inferred.
+
+**Exact unstable reference and its creation site — traced and
+confirmed by source (not inferred):**
+`components/collabboard/canvas/layouts/DrawingLayout.tsx:2092-2096`:
+
+```ts
+const slideRenderer = useMemo(() => createSlideRenderer({
+  getSceneElements: () => elements,
+  getPadlets: () => padlets,
+  getFiles: () => currentFilesRef.current ?? initialFiles ?? null,
+}), [elements, initialFiles, padlets]);
+
+const renderSlideToPNG = useCallback((slide, opts) => (
+  slideRenderer.renderSlideToPNG(slide, opts)
+), [slideRenderer]);
+```
+
+`slideRenderer`'s `useMemo` depends directly on `elements` (the live
+Excalidraw scene-elements React state) and `padlets` — both of which
+change reference on essentially every meaningful scene tick (natural
+height/width conformance, the automatic embeddable-sync effect,
+position debounce writes — all independently confirmed to fire
+frequently on this exact fixture across the PATCH-103 investigation).
+Every such change recreates `slideRenderer`, which recreates
+`renderSlideToPNG` (its own dependency), which — via
+`PresentationPreviewModal.tsx`'s two effects'
+`[open, currentSlide/slides, renderSlideToPNG, getSlideCacheKey]`
+dependency arrays — restarts **both** the big-preview and
+thumbnail-strip effects on every one of those ticks. 43 restarts over
+one test's lifetime is fully consistent with this and requires no
+further explanation of "which specific tick" changed on each restart —
+the mechanism is `elements`/`padlets` churning generally, not one
+specific singular event.
+
+**Callback stabilization is proven sufficient, not merely assumed:**
+this exact file already contains the correct pattern, unmodified,
+13 lines below the defect —
+`runtimeSlideHelpers` (lines 2104-2109):
+
+```ts
+// Keep the helper identity stable and read fresh scene data from refs at call time.
+const runtimeSlideHelpers = useMemo((): RuntimeSlideHelpers => ({
+  getSceneElements: () => runtimeSceneElementsRef.current,
+  getPadlets: () => runtimePadletsRef.current,
+  getFiles: () => currentFilesRef.current ?? runtimeInitialFilesRef.current ?? null,
+}), []);
+```
+
+— and the refs it reads (`runtimeSceneElementsRef`, `runtimePadletsRef`,
+`runtimeInitialFilesRef`) are **already** kept unconditionally current
+on every render (lines 757-759: `runtimeSceneElementsRef.current =
+elements; runtimePadletsRef.current = padlets;
+runtimeInitialFilesRef.current = initialFiles;`). Applying the
+identical pattern to `slideRenderer` — reading the same existing refs
+instead of the reactive variables, with an empty dependency array — is
+a **direct precedent match already proven correct in this same file for
+the same class of problem**, not a new mechanism being introduced
+speculatively.
+
+**Classification: B — stabilize `slideRenderer`'s identity by
+correcting its dependency inputs to the existing ref-based pattern.**
+Not A (the instability is in `slideRenderer`, one level upstream of
+`renderSlideToPNG` — fixing at the source, per the preferred approach,
+removes the need to touch `renderSlideToPNG`'s own `useCallback` at
+all); not C (no need to key `PresentationPreviewModal`'s effects on
+semantic identity instead of reference identity — once the reference
+itself is stable, reference-identity dependency arrays work correctly
+and require no change in that file); not D/E (no generation-token or
+last-valid-result-preservation mechanism is needed — eliminating the
+false churn is simpler and lower-risk than compensating for it in two
+separate consumer effects).
+
+**§18/oklch relationship — Phase 3 resolved:** attempt 1 (the *only*
+cold, non-restarted render) succeeded with a valid 298898-byte result
+and **no** oklch error; every oklch rejection occurred only in
+restarts 2-43. This is strong evidence (not yet a second independent
+live proof, but internally consistent and requiring no further
+unproven assumption) that **stabilizing the render reference is likely
+sufficient to make the oklch symptom moot in this test**, since there
+will be exactly one render attempt per semantic slide-selection going
+forward. This does **not** retroactively certify
+`sanitizeExportOverlayColors()`'s color-property coverage as complete
+in general — only that no evidence currently shows it failing on a
+genuine first/only render. Classified per Phase 5: **oklch is already
+governed by another mechanism** (`sanitizeExportOverlayColors()` +
+`containsUnsupportedColorFunction()`, `createSlideRenderer.tsx:79-120`,
+pre-existing and unmodified by PATCH-102) **and only exposed by
+churn** — not a genuine new PATCH-102 snapshot-host defect requiring
+its own fix in this patch. This is bound as a hypothesis validated by
+the required "zero oklch errors across 5 consecutive runs" gate below,
+not asserted as permanently closed — if oklch recurs even once with
+churn eliminated, that disproves this classification and reopens the
+question as its own prerequisite.
+
+**Also newly explaining the earlier zero-wait failures (not certain,
+flagged as a plausible unification, not asserted as proven):** it is
+plausible the original zero-wait observations (§9/§18/§19) were
+themselves instances of this same churn — under 43 overlapping
+concurrent render attempts, React's effect/paint scheduling could
+plausibly fall behind for some individual attempt, causing its own
+child `<img>`/marker to not yet exist at the moment of its own
+`pendingAtStart` check. If true, §18's no-cache headers were solving a
+problem that was never actually about caching. This is not required to
+be proven before authorizing the churn fix — it is recorded so the
+required 5-run stability gate below is understood as testing both
+failure modes simultaneously, not as a coincidence.
+
+## Phase 6 ruling — diagnostic and §18 disposition
+
+**All §19/§20 diagnostics must be fully removed** — none is
+authorized as permanent. This means:
+
+- `createSlideRenderer.tsx` returns to its exact §13 landed content
+  (blob `ef8c1a9b7a9521a6a68d40e661ee50effff986fd`) — the capture
+  counter, `collabboard-ai-snapshot-capture-diagnostic` event, and
+  `diagnosticSurface` parameter are removed entirely; the eager-load
+  block from §13 is the only thing that remains.
+- `PresentationPreviewModal.tsx` returns to its exact original tracked
+  content (blob `5116031b27f73bb7616f4024b197824c6718aa17`) — the
+  `collabboard-ai-preview-result-diagnostic` events, effect-run
+  counters, and `diagnosticSurface` reads are removed entirely. **No
+  permanent change is needed in this file** — the fix lives entirely
+  upstream in `DrawingLayout.tsx`.
+- `useSlideThumbnails.ts` and `PresentationPanel.tsx` return to their
+  exact pre-diagnostic tracked content — the `diagnosticSurface`
+  passthrough plumbing added for §20's surface-labeling is removed
+  entirely from both. **No permanent change needed in either file.**
+- The spec (`presentation-snapshot-image-readiness.spec.ts`) removes
+  the capture-diagnostic buffer, the preview-result-diagnostic buffer,
+  and both failure-dump blocks — retaining only: §12's deterministic
+  indices, §15's `inFlightHandlers`/`requestCount` synchronization
+  (retained — solved the proven teardown race, no evidence it's
+  unnecessary), and the existing delayed-image/Preview-modal product
+  assertions unchanged.
+
+**§18 no-cache headers: REMOVE, as a disproven attempted fix.** They
+were introduced specifically to explain the zero-wait symptom via a
+caching theory that a live run subsequently disproved; the actual root
+cause has now been identified as effect-reference churn, entirely
+unrelated to HTTP caching. Retaining response headers that address a
+mechanism proven not to be the cause adds complexity without a
+justified purpose — removed per Phase 6's explicit instruction to
+remove disproven fixes rather than retain them by default.
+
+**§15 in-flight route synchronization: RETAINED**, unaffected by this
+section — it solves an independently-proven, still-relevant route
+teardown race unrelated to the render-effect churn fixed here.
+
+## Phase 7 — exact authorized final file set (bind, supersedes prior scope for final acceptance)
+
+**Allowed files (five total — the minimum genuinely required, not all
+files diagnostics happened to touch):**
+
+1. `components/collabboard/canvas/layouts/DrawingLayout.tsx` — **new
+   to PATCH-102's scope**, starting blob (its current, PATCH-103-closed
+   state) `539f85b127db938d7ee6c72d32fe913cb88f35f1`. **Exact
+   authorized change, and only this change:** replace `slideRenderer`'s
+   `useMemo` (lines 2092-2096) with:
+   ```ts
+   const slideRenderer = useMemo(() => createSlideRenderer({
+     getSceneElements: () => runtimeSceneElementsRef.current,
+     getPadlets: () => runtimePadletsRef.current,
+     getFiles: () => currentFilesRef.current ?? runtimeInitialFilesRef.current ?? null,
+   }), []);
+   ```
+   No change to `renderSlideToPNG`'s own `useCallback`, to
+   `runtimeSlideHelpers`, to `runtimeSceneElementsRef`/
+   `runtimePadletsRef`/`runtimeInitialFilesRef`'s existing per-render
+   assignment (lines 757-759, already correct, already unconditional),
+   or to any other line in this 3000+-line file.
+2. `components/presentation/slide-renderer/createSlideRenderer.tsx` —
+   remove all §19 diagnostics; final state must be byte-identical to
+   blob `ef8c1a9b7a9521a6a68d40e661ee50effff986fd`.
+3. `components/presentation/PresentationPreviewModal.tsx` — remove all
+   §20 diagnostics; final state must be byte-identical to blob
+   `5116031b27f73bb7616f4024b197824c6718aa17`.
+4. `components/presentation/useSlideThumbnails.ts` — remove
+   diagnostic passthrough; final state must be byte-identical to its
+   tracked pre-diagnostic content (verify via `git show HEAD:<path>`).
+5. `components/presentation/PresentationPanel.tsx` — remove diagnostic
+   passthrough; final state must be byte-identical to its tracked
+   pre-diagnostic content (verify via `git show HEAD:<path>`).
+6. `e2e/characterization/presentation-snapshot-image-readiness.spec.ts`
+   — remove both diagnostic buffers/dumps and §18's response headers;
+   retain §12 and §15 exactly.
+
+**Explicitly prohibited:** any change to `drawingBridgeHarness.ts` or
+any other PATCH-103-bound file; any change to
+`sanitizeExportOverlayColors()`/`containsUnsupportedColorFunction()`
+or any other color-handling code (not authorized absent the oklch gate
+failing); any change to `renderSlideToPNG`'s own `useCallback`
+signature; any change to `PresentationPreviewModal.tsx`'s effect
+dependency arrays, `cancelled` semantics, or `setBigPng` (the fix is
+upstream — this file must end up textually unchanged from its
+pre-diagnostic state); any generation-token/request-id mechanism (not
+needed); any change to §15's synchronization logic; any change to the
+delayed-image or Preview-modal product assertions.
+
+**Immutable fence (bind):** the two `runtimeSceneElementsRef.current =
+elements;` / `runtimePadletsRef.current = padlets;` /
+`runtimeInitialFilesRef.current = initialFiles;` assignment lines
+(757-759) and the `runtimeSlideHelpers` block (2104-2109) must remain
+byte-identical before and after — the fix reads them, it does not
+touch them.
+
+**Bound implementation commit message (verbatim):**
+`fix(presentation): stabilize slide-renderer identity to prevent Preview-effect restart churn (PATCH-102)`
+
+## Phase 8 — required validation (bind, supersedes §16 for final acceptance)
+
+1. **Delayed-image focused test — 5 consecutive real passes**, each
+   with: a genuine pending image and non-zero settlement, a populated
+   Preview modal, zero route errors, **zero oklch errors**, zero
+   `InvalidFractionalIndexError`.
+2. **Effect-stability proof:** with diagnostics temporarily
+   re-enabled for this one verification pass only (or an equivalent
+   one-off check), confirm exactly one semantic Preview-main render
+   per slide selection (not 43) — `setBigPng` executes, the modal
+   leaves "Rendering slide..." — then remove the diagnostics again
+   before final commit (they must not ship either way).
+3. Full `presentation-snapshot-image-readiness.spec.ts` six-scenario
+   suite — all six, no skip cascade, zero unexpected failures.
+4. PATCH-101/100/099/097 specs — blobs unchanged, all passing.
+5. PATCH-089/090/091/093/094 — all carried, real results.
+6. PATCH-103 coexistence: targeted + full `drawing-line-bridge.spec.ts`,
+   `drawing-presentation.spec.ts` — **critically important now**, since
+   this patch touches `DrawingLayout.tsx` again after PATCH-103 closed
+   it; every PATCH-103 assertion must still hold with this additional
+   change layered on top.
+7. PATCH-096 grouped runner — 14/14/14, zero non-signature failures,
+   exit code 0.
+8. Deterministic matrix: `git diff --check`; `npx tsc --noEmit`;
+   `npm run check:boundaries`; `slideOrder` 7/1; `clonedPostMetadata`
+   9/1; focused drawing 59/2; full Vitest 448/43; `npm run verify`;
+   `npm run build`.
+9. Fresh independent review (Kepler primary, Gemini 3.1 Pro fallback —
+   NOT Sonnet) required before commit, given the expanded scope
+   (`DrawingLayout.tsx` reopened) and the removal of §18.
+
+**Hard-stop conditions (bind, in addition to §8/§13-§20):** STOP
+immediately, report, do not commit, if:
+
+- any file outside the six listed in Phase 7 is touched;
+- `DrawingLayout.tsx` changes anywhere other than the exact
+  `slideRenderer` `useMemo` block;
+- any §19/§20 diagnostic remains in the committed candidate;
+- oklch errors recur with churn eliminated (reopen as its own
+  question, do not paper over);
+- any of the required live gates fails or is skip-only;
+- PATCH-096 does not report exactly 14/14/14;
+- credentials are printed, logged, or committed anywhere.
+
+**Do not authorize PATCH-104.**

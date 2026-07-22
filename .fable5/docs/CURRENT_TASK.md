@@ -361,6 +361,67 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-23** — **PATCH-102 §21 — root cause PROVEN (not
+  hypothesized): `DrawingLayout.tsx:2092-2096`'s `slideRenderer`
+  useMemo depends on reactive `elements`/`padlets`, churning
+  `renderSlideToPNG`'s reference on every scene tick and restarting
+  both of `PresentationPreviewModal`'s effects 43 times, discarding a
+  valid first result via its own `cancelled` guard. Minimal fix
+  authorized: reuse the exact ref-based pattern already proven correct
+  13 lines below (`runtimeSlideHelpers`) — DrawingLayout.tsx newly
+  added back to PATCH-102 scope for this one change. §18 headers ruled
+  disproven and ordered removed; §15 retained; all §19/§20 diagnostics
+  ordered fully removed from all five touched files.** §20's diagnostic
+  confirmed the readiness mechanism works in every capture
+  (pendingAtStart=1, genuine unresolved state, settles before timeout)
+  — zero-wait is not implicated this run. Preview-main effect ran 43
+  times; attempt 1 produced a valid 298898-byte result that resolved
+  with `cancelledAtResolution:true` — discarded solely because its own
+  effect had already restarted. Classified **A** (proven, not
+  inferred): first valid result resolves but is discarded as stale.
+  Traced the exact unstable reference to `slideRenderer`'s `useMemo([elements,
+  initialFiles, padlets])` in `DrawingLayout.tsx` — both `elements` and
+  `padlets` churn on essentially every scene tick (natural
+  height/width conformance, the automatic embeddable sync, position
+  debounce — all independently established during PATCH-103). Found
+  the fix already proven correct in the SAME file: `runtimeSlideHelpers`
+  (13 lines below) reads `runtimeSceneElementsRef`/`runtimePadletsRef`/
+  `runtimeInitialFilesRef` — refs already kept unconditionally current
+  every render (lines 757-759) — via an empty-deps `useMemo`. Applying
+  the identical pattern to `slideRenderer` eliminates the churn without
+  losing data freshness. Classified **B** (stabilize at the source).
+  Oklch: attempt 1 (the only non-restarted render) succeeded with no
+  oklch error; only restarts 2-43 hit it — classified as already
+  governed by the pre-existing `sanitizeExportOverlayColors()` and only
+  exposed by churn, not a new PATCH-102 defect requiring its own fix —
+  bound as a hypothesis validated by a required "zero oklch errors
+  across 5 runs" gate, not asserted as closed. Flagged (not proven) that
+  the original zero-wait failures may also have been the same churn
+  mechanism (scheduler falling behind under 43 overlapping renders),
+  unifying both open blockers under one root cause. Diagnostic
+  disposition: ALL §19/§20 instrumentation removed from
+  `createSlideRenderer.tsx` (back to exact §13 blob),
+  `PresentationPreviewModal.tsx` (back to exact original tracked
+  blob, no permanent change needed), `useSlideThumbnails.ts` and
+  `PresentationPanel.tsx` (both back to pre-diagnostic tracked
+  content, no permanent change needed). §18 no-cache headers ordered
+  REMOVED (disproven attempted fix, no longer relevant once churn is
+  the identified cause). §15 in-flight sync RETAINED (solves an
+  independently-proven, unrelated route-teardown race). Final
+  authorized file set (6 total): `DrawingLayout.tsx` (new, one exact
+  `useMemo` change only), `createSlideRenderer.tsx`,
+  `PresentationPreviewModal.tsx`, `useSlideThumbnails.ts`,
+  `PresentationPanel.tsx` (all four diagnostics-removed-only), and the
+  spec (diagnostics + §18 removed, §12/§15 retained). New bound commit
+  message:
+  `fix(presentation): stabilize slide-renderer identity to prevent Preview-effect restart churn (PATCH-102)`.
+  Full validation matrix bound in §21/Phase 8, including a one-off
+  effect-stability re-verification pass and PATCH-103 coexistence
+  gates (critical since `DrawingLayout.tsx` is reopened after its own
+  closure). No candidate file modified this governance turn; PATCH-102
+  stash untouched; PATCH-104 not started. Recorded in `PATCH-102.md`
+  new §21. Governance-only commit follows.
+
 - **2026-07-23** — **PATCH-102 §20 — §19's diagnostic proved the
   zero-wait mechanism is NOT what's failing anymore (image genuinely
   present/pending, all 3 waits settle normally); new downstream
