@@ -361,6 +361,40 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-22** — **PATCH-103 §9 resolved (definitive); §10 amendment
+  authorizes a scoped, test-only fix — a third file added to scope.**
+  Live investigation (3 focused runs) confirmed: live DOM heights
+  `[153, 153]`, immediate persisted-DB read `[260, 260]`; after the
+  existing ~2000ms debounced autosave completed, persisted content
+  showed `[153, 153]` — production persistence converges correctly.
+  Clean-base A/B confirmed clean HEAD never reaches this assertion
+  (still blocked earlier by the original fractional-index crash).
+  Definitive classification: **B — pre-existing debounced-save timing
+  gap in the TEST, newly reachable after PATCH-103**, not a production
+  regression (no geometry corruption, no revert, no stale
+  serialization, `saveDrawingSnapshot` unaffected). Root cause: the
+  test performs a single immediate `fetchPersistedScene()` call
+  (`drawing-presentation.spec.ts:1033`) with no wait for the debounce
+  to land. Amended PATCH-103 to add exactly one more file
+  (`e2e/characterization/drawing-presentation.spec.ts`, starting blob
+  `6bbd6deb83106d38a0a524253ee95ac3f6bdaa2f`) authorizing a bounded
+  persistence-poll replacing that single read — timeout `20_000`ms,
+  interval `500`ms, matching the repo's existing convention
+  (`waitForFramePersisted` in `drawing-duplicate-persistence.spec.ts`),
+  polling by exact scene-element id (`emb-slide-a`/`emb-slide-b`),
+  requiring BOTH targets to converge exactly to their already-measured
+  live-conformed heights before returning, with full diagnostics on
+  timeout. No assertion weakened; no production/persistence code
+  touched; PATCH-102 stash untouched; PATCH-104 not started. New bound
+  commit message:
+  `fix(e2e): poll persisted drawing scene for debounced-save convergence before height assertion (PATCH-103)`.
+  8 required live gates bound in §10 (3x persisted-height runs,
+  targeted + full drawing-line-bridge, PATCH-097/099/100/101, PATCH-096
+  grouped runner requiring exactly 14/14/14 with zero non-signature
+  failures and exit code 0). Recorded in `PATCH-103.md` §9 resolution +
+  new §10. Governance-only commit follows this entry; no candidate file
+  modified this turn.
+
 - **2026-07-22** — **PATCH-103 §8 resolved; new §9 investigation opened
   (unresolved) — drawing-presentation persisted-height failure traced
   to a pre-existing gap, provisionally classification B, not

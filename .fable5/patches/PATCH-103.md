@@ -29,9 +29,19 @@ origin/main at authoring time). **The PATCH-102 candidate remains
 uncommitted and out of scope for this patch** — do not stage, commit,
 or reference it.
 
-**Bound implementation commit message (verbatim, amended — see §6 for
-the current authoritative text):**
-`fix(e2e,canvas): assign valid fractional indices to seeded and runtime-created Excalidraw elements (PATCH-103)`
+**Bound implementation commit message (verbatim, amended — see §10 for
+the current authoritative text, superseding §6):**
+`fix(e2e): poll persisted drawing scene for debounced-save convergence before height assertion (PATCH-103)`
+
+**Second amendment (2026-07-22):** §8's PATCH-100 scene-reference-churn
+regression is resolved (gate applied, verification matrix passed). A
+further, independent, live-verified failure surfaced next
+(`drawing-presentation.spec.ts`'s persisted-height assertion) —
+investigated in §9, definitively classified in §9's resolution as a
+pre-existing test-readiness gap (not a production regression), and
+fixed by a scoped, test-only amendment in §10 (a bounded persistence
+poll, one new file: `drawing-presentation.spec.ts`). §10 is now the
+authoritative scope/commit-message/gate list for this patch.
 
 ---
 
@@ -535,3 +545,152 @@ PATCH-103 proceed toward its existing §6/§7 review flow — amended
 further if the live evidence shows an actual code change is required,
 or left as-is with a separately-scoped prerequisite patch authorized if
 the gap proves pre-existing and unrelated to the index-sync mechanism.
+
+**§9 resolution (2026-07-22) — definitive, live-verified.** Three
+focused candidate runs failed identically at
+`drawing-presentation.spec.ts:1132`. Observed initially: live DOM
+heights `[153, 153]`, persisted DB heights `[260, 260]`. Observed after
+the existing debounced save completed: the master-padlet content write
+reflected `[153, 153]` — i.e. **production persistence converges to
+the correct live-conformed heights**; it just hadn't landed yet at the
+moment the test read it. Clean-base A/B confirmed clean HEAD fails
+earlier, waiting for `[data-padlet-id]`, and never reaches the
+persisted-height assertion at all.
+
+**Definitive classification: B — pre-existing debounced-save timing
+gap, newly reachable after PATCH-103.** Not a regression: PATCH-103
+does not corrupt geometry, revert 153 to 260, serialize stale scene
+data, or break `saveDrawingSnapshot`. The defect is entirely in the
+test: `fetchPersistedScene()` is called as a single immediate read
+(`drawing-presentation.spec.ts:1033`) with no wait for the existing
+~2000ms debounced autosave (`DrawingLayout.tsx`'s
+`autoSaveTimerRef`/`performSave`, unchanged by this patch) to land.
+This closes the investigation opened in §9 above — no further live
+tracing required before authorizing the fix below.
+
+## 10. Amendment — bounded persistence-readiness wait in the test (bind, 2026-07-22)
+
+**Scope addition.** PATCH-103 is amended to add exactly one more file
+to its authorized scope:
+
+3. `e2e/characterization/drawing-presentation.spec.ts` — starting blob
+   `6bbd6deb83106d38a0a524253ee95ac3f6bdaa2f` (current HEAD content,
+   unmodified as of this amendment).
+
+**Final authorized PATCH-103 paths (bind, supersedes §2):**
+
+1. `e2e/characterization/drawingBridgeHarness.ts` — retained, unchanged,
+   blob `9388086c4354e69290d9de2b7e1f2ecedcd15c45`.
+2. `components/collabboard/canvas/layouts/DrawingLayout.tsx` — retained,
+   unchanged, blob `539f85b127db938d7ee6c72d32fe913cb88f35f1`.
+3. `e2e/characterization/drawing-presentation.spec.ts` — new, starting
+   blob `6bbd6deb83106d38a0a524253ee95ac3f6bdaa2f`.
+
+**Exact change authorized in file 3, and only this change:** replace
+the single immediate `await fetchPersistedScene(supabase,
+fixture.masterPadletId!)` call at line 1033 with a bounded polling wait
+that reuses the repo's existing persistence-wait convention (see
+`waitForFramePersisted` in
+`e2e/characterization/drawing-duplicate-persistence.spec.ts:555-605` —
+same shape: a `while (Date.now() - startedAt <= timeoutMs)` loop
+re-querying `fetchPersistedScene()`, sleeping `pollingIntervalMs`
+between attempts, returning full diagnostics on both the converged and
+timed-out paths).
+
+**Bound contract for the new wait helper:**
+
+- **Timeout:** `20_000` ms (matches `waitForFramePersisted`'s bound
+  timeout for the same debounced-autosave mechanism).
+- **Polling interval:** `500` ms (matches `waitForFramePersisted`).
+- **Element matching strategy:** poll by the exact scene element ids
+  already used by the test (`emb-slide-a`, `emb-slide-b` — the
+  `naturalHeightTargets` scene ids at line 1037-1040), not by index or
+  type — read each target element's persisted `height` from
+  `fetchPersistedScene()`'s returned `sceneElements`, matched by `id`.
+- **Convergence condition:** the helper must not return "converged"
+  until **both** target elements' persisted heights exactly equal
+  their own already-measured `liveConformedHeightBySceneId` value (no
+  averaging, no rounding beyond what `liveConformedHeightBySceneId`
+  already applies at line 1046, no partial convergence — one element
+  converging is not sufficient).
+- **On timeout:** return the same diagnostic shape as
+  `waitForFramePersisted` (converged flag, last-observed persisted
+  heights per target id, live-conformed heights per target id,
+  `waitDurationMs`, `pollingIntervalMs`) so the existing assertions at
+  lines 1130-1133 produce a useful failure message identifying exactly
+  which target id(s) failed to converge and what value they were stuck
+  at — do not swallow a timeout into a silent pass.
+- **No fixed `sleep`/`setTimeout` substitute for the loop** — must be a
+  genuine poll-until-condition, not a single delay guess.
+- **The assertions themselves (lines 1130-1133) are NOT weakened**:
+  `expect(entry.seededHeight).toBe(260)` and
+  `expect(entry.persistedHeight).toBe(entry.liveConformedHeight)`
+  remain byte-identical in intent — the wait only changes when
+  `postRunPersistedScene` is captured, not what is asserted against it.
+  `liveConformedHeightBySceneId` continues to be measured from the live
+  DOM exactly as today, before or independent of the new wait.
+
+**Explicitly prohibited by this amendment (bind):** no change to
+`DrawingLayout.tsx` save/debounce logic, `performSave`,
+`saveDrawingSnapshot`, any persistence repository, or Supabase code; no
+change to the Excalidraw fork; no change to `package.json` or any
+lockfile; no change to PATCH-102's files
+(`createSlideRenderer.tsx`, `presentation-snapshot-image-readiness.spec.ts`)
+or its named stash (`PATCH-102-candidate-before-PATCH-103`); no change
+to any other assertion, fixture, seed value, or element id in
+`drawing-presentation.spec.ts` beyond the single `fetchPersistedScene`
+call site being replaced with the bounded wait; no fixed/arbitrary
+sleep; no relaxing of `liveConformedHeights` expected values (`[153,
+153]`) or `seededHeight` (`260`); no governance changes beyond this
+amendment.
+
+**Required live gates after this amendment (bind, non-skip real
+results required for all):**
+
+1. `drawing-presentation.spec.ts`'s persisted-height scenario — **at
+   least 3 consecutive real runs**, all converging within the 20s
+   timeout, all producing `persistedHeight === liveConformedHeight`.
+2. `drawing-line-bridge.spec.ts -g "renders seeded attached"` (targeted
+   gate).
+3. Full `drawing-line-bridge.spec.ts`.
+4. PATCH-097 spec.
+5. PATCH-099 spec.
+6. PATCH-100 spec.
+7. PATCH-101 spec.
+8. PATCH-096 grouped runner (`node e2e/run-carried-groups.mjs`) —
+   must report **14 groups configured, 14 specs configured, 14 final
+   passes, zero non-signature failures, exit code 0**. Skip-only
+   results do not count as passes for any of the above.
+
+**Bound implementation commit message (verbatim, supersedes §6):**
+`fix(e2e): poll persisted drawing scene for debounced-save convergence before height assertion (PATCH-103)`
+
+**Hard-stop conditions (bind, amended — supersedes §5 for this
+amendment):** STOP immediately, report, do not commit, if:
+
+- any file outside the three named in this section is touched;
+- either of the two already-verified candidate files
+  (`drawingBridgeHarness.ts`, `DrawingLayout.tsx`) changes from its
+  bound blob;
+- the PATCH-102 candidate or its named stash is modified, popped,
+  applied, or dropped;
+- the wait helper uses a fixed sleep instead of a genuine poll loop;
+- the wait helper accepts partial convergence (only one of the two
+  target ids matching);
+- any assertion's expected value is changed/weakened;
+- any of the 8 required live gates above fails or is skip-only;
+- PATCH-096 does not report exactly 14/14/14, zero non-signature
+  failures, exit code 0;
+- credentials are printed, logged, or committed anywhere;
+- cleanup cannot reach zero.
+
+**Review and commit flow:** implementer applies the single authorized
+change to `drawing-presentation.spec.ts` only, delivers the diff +
+report (final blob, full real results for all 8 required gates,
+cleanup proof, confirmation the other two candidate files and the
+PATCH-102 stash are untouched). The independent reviewer (Kepler
+primary, Gemini 3.1 Pro fallback — NOT Sonnet) re-derives everything
+live and must return an explicit PASS with real (non-skipped) output
+before the implementer commits with the bound message above and
+pushes. Only after this lands and closes does PATCH-102's independent
+review resume.
