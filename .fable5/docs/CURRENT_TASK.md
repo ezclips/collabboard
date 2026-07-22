@@ -361,6 +361,58 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-22** — **PATCH-103 investigation (unresolved) — PATCH-100
+  regression traced to a plausible scene-reference-churn mechanism;
+  live confirmation NOT independently re-executed by the CTO role this
+  turn, disclosed explicitly.** With the amended two-file candidate
+  applied (`drawingBridgeHarness.ts` unchanged at
+  `9388086c4354e69290d9de2b7e1f2ecedcd15c45`; `DrawingLayout.tsx` at
+  `cdd015bd9edcea0d8ea1df18ebd6e90bbe810289`), the implementer reported:
+  auth setup, `drawing-line-bridge.spec.ts -g "renders seeded attached"`,
+  PATCH-097, PATCH-099, and PATCH-101 PASS; PATCH-100 FAILS on "Preview
+  modal exposes a populated snapshot image"; no
+  `InvalidFractionalIndexError` observed; canvas now renders past the
+  previous blocker. Traced the diff
+  (`git diff components/collabboard/canvas/layouts/DrawingLayout.tsx`)
+  and found the automatic missing-embeddable sync effect calls
+  `syncSceneElementIndices()`/`syncInvalidIndicesImmutable()`
+  UNCONDITIONALLY on every effect run, not gated on whether an invalid
+  index is actually present. The fork's own JSDoc
+  (`fractionalIndex.ts:217-221`) warns this utility "could modify the
+  elements which were not moved" — i.e. it can reassign new
+  version/reference identity to already-valid siblings, including the
+  frame element, on every padlet-list tick. Separately,
+  `PresentationPreviewModal.tsx:48-79`'s big-preview render effect
+  cancels its in-flight `renderSlideToPNG(...).then(...)` and restarts
+  whenever `currentSlide` or `renderSlideToPNG` changes reference —
+  both independently confirmed source facts. Combined, these give a
+  specific, falsifiable mechanism: if the frame's reference churns
+  faster than one snapshot call resolves, `setBigPng` is never reached
+  and the preview image never populates — exactly matching the
+  reported symptom, with no crash. **This was NOT independently
+  live-confirmed by the CTO this turn** (no browser-inspection tooling
+  available beyond Bash/Playwright CLI, and a rigorous 3x-repeat plus
+  clean-base A/B stash comparison was not personally re-executed) —
+  disclosed explicitly rather than fabricated. **Provisional
+  classification: E (scene reference churn from an unconditionally-
+  firing sync effect), not B (not asserted as random flakiness).**
+  **PATCH-103 candidate remains UNCOMMITTED and UNCHANGED** — no code
+  was modified as part of this investigation, per instruction. **Next
+  required step (not yet authorized as a code change):** gate the
+  automatic sync effect so `syncSceneElementIndices()`/`updateScene`
+  fires only when the combined array actually contains an
+  element with a missing/invalid index, not unconditionally on every
+  effect pass — mirroring PATCH-101's "only wait when something is
+  actually pending" philosophy. The implementer must apply this
+  narrowly, then independently verify via the exact live matrix this
+  turn could not complete: PATCH-100 re-run at least 3 times, PLUS a
+  clean-base (pre-PATCH-103) comparison using a separately-named stash
+  (`PATCH-103-candidate-for-clean-base-comparison`, distinct from the
+  preserved `PATCH-102-candidate-before-PATCH-103`), before this
+  amendment can be accepted as resolving the regression. PATCH-102's
+  named stash remains present, untouched, and unpopped throughout. No
+  production or test code was touched by this governance turn.
+
 - **2026-07-22** — **PATCH-103 AMENDED — the harness-only fix was
   correct but incomplete; a second, production-facing null-index
   source confirmed in `DrawingLayout.tsx`.** The retained,

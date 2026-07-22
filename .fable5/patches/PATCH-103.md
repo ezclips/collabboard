@@ -335,3 +335,76 @@ confirmation `drawing-line-bridge.spec.ts -g "renders seeded attached"`
 passes; cleanup proof; explicit confirmation the PATCH-102 candidate
 and its named stash were not touched; commit hash + push status after
 PASS.
+
+## 8. PATCH-100 regression investigation (bind, 2026-07-22 — unresolved, candidate NOT amended by this section)
+
+**Reported live result with the candidate applied** (blobs
+`drawingBridgeHarness.ts` → `9388086c4354e69290d9de2b7e1f2ecedcd15c45`,
+`DrawingLayout.tsx` → `cdd015bd9edcea0d8ea1df18ebd6e90bbe810289`): auth
+setup, `drawing-line-bridge.spec.ts -g "renders seeded attached"`,
+PATCH-097, PATCH-099, and PATCH-101 PASS. PATCH-100 FAILS on "Preview
+modal exposes a populated snapshot image." No
+`InvalidFractionalIndexError`; canvas renders past the previous
+blocker.
+
+**Traced mechanism (source-confirmed, NOT independently live-verified
+by the CTO role this turn — disclosed, not fabricated):** the
+candidate's automatic missing-embeddable sync effect
+(`DrawingLayout.tsx`, the effect building `missingEmbeddables`) calls
+`syncSceneElementIndices()` (which wraps
+`syncInvalidIndicesImmutable()`) **unconditionally on every effect
+run**, regardless of whether the combined array actually contains an
+invalid index. The fork's own JSDoc on `syncInvalidIndices`/
+`syncInvalidIndicesImmutable`
+(`fractionalIndex.ts:217-221`) states it "could modify the elements
+which were not moved" — i.e. it can assign a new instance
+(new version/reference identity) to already-valid sibling elements,
+including the frame, on every call. Separately,
+`PresentationPreviewModal.tsx:48-79`'s big-preview render effect
+cancels its in-flight `renderSlideToPNG(...).then(...)` and restarts
+whenever `currentSlide` or `renderSlideToPNG` changes reference. If the
+frame's reference churns on every padlet-list tick faster than one
+snapshot call resolves, `setBigPng` is never reached — the preview
+image never populates. This matches the reported symptom exactly (no
+crash, canvas renders, only the async image-populate assertion fails).
+
+**Provisional classification: E — scene-reference churn from an
+unconditionally-firing sync effect.** NOT classified as B (flake) or G
+(infrastructure) — those require the repeated clean-base comparison
+this investigation did not perform. This classification is provisional
+pending the live verification below.
+
+**Required next step (NOT yet authorized as applied — the candidate
+remains exactly as reported, unmodified by this section):** gate the
+automatic sync effect so `syncSceneElementIndices()`/`updateScene`
+fires only when the combined array actually contains at least one
+element with a missing/invalid fractional index (e.g. check via the
+fork's own `validateFractionalIndices`/an equivalent presence check
+before calling `syncInvalidIndicesImmutable`), exactly mirroring
+PATCH-101's "only wait when something is actually pending" design.
+Scope stays inside `DrawingLayout.tsx`'s existing sync effect — no new
+file, no change to `PresentationPreviewModal.tsx`, no change to
+`createSlideRenderer.tsx` or any PATCH-102 file.
+
+**Required verification before this amendment is accepted as
+resolving the regression (bind):**
+
+1. PATCH-100 re-run at least 3 times with the gated fix applied — all
+   3 must show the Preview modal image populating.
+2. A clean-base (pre-PATCH-103) comparison, using a temporary stash
+   named exactly `PATCH-103-candidate-for-clean-base-comparison`
+   (distinct from the preserved `PATCH-102-candidate-before-PATCH-103`
+   — do not touch that one), confirming PATCH-100 behaves as it did
+   before any PATCH-103 change (i.e. still blocked by the original
+   fractional-index crash, not by this churn symptom) — proving the
+   regression is specific to the unconditional-sync design, not
+   present on clean HEAD.
+3. Re-verify PATCH-097/099/101, `drawing-line-bridge.spec.ts -g
+   "renders seeded attached"`, and the PATCH-096 grouped runner remain
+   green after the gating change.
+4. Candidate blobs for both files verified before and after any stash
+   operation; the PATCH-102 named stash confirmed present and
+   untouched throughout.
+
+Only after this verification is pasted with real (non-skip) output
+does PATCH-103 proceed to commit under its existing §6/§7 review flow.
