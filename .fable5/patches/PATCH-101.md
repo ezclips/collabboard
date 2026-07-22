@@ -1,6 +1,8 @@
 # PATCH-101 — Bounded Mermaid Diagram Readiness Wait in Slide Snapshot Capture
 
-**Status:** **AUTHORIZED** (not yet implemented).
+**Status:** **DONE** (commit `5c363053d83c702344c445b338e6ea9df5861e9b`).
+Exactly the two bound paths landed at their exact blobs. No other
+production file was touched.
 
 **Implementer:** GPT-5.5. **Reviewer:** independent read-only
 reviewer (Kepler primary, Gemini 3.1 Pro fallback) — PASS required
@@ -428,3 +430,85 @@ gates; cleanup proof; explicit confirmations (no file outside §4
 touched, zero added latency for non-Mermaid content, timeout override
 confirmed inert in a production build, `AIComponentExportMenu.tsx`
 untouched); commit hash + push status after PASS.
+
+## 12. Closure record (2026-07-22)
+
+**Landed:** commit `5c363053d83c702344c445b338e6ea9df5861e9b`
+(`fix(presentation): wait for Mermaid diagram readiness before slide
+snapshot capture (PATCH-101)`), HEAD == origin/main at closure time.
+Exactly the two bound paths landed at their exact blobs:
+`createSlideRenderer.tsx` → `39b7b18bf107b87ff135242f1391ec2490442036`,
+`presentation-snapshot-diagram-readiness.spec.ts` →
+`adcc30bb14461fba3253e533385f9f1ec18fef8c`. Independent read-only
+review verdict: **PASS**, obtained before commit. Note: this patch's
+own §5 fence table contained a self-inflicted governance error at
+authoring time — the `lib/ai/diagram-engine.ts` blob was recorded
+incorrectly; corrected before implementation began (commit `245102b`,
+`docs(fable): correct PATCH-101 diagram-engine fence blob`) and
+re-verified against every other governed blob at that time with no
+other discrepancies.
+
+**Diff scope (re-verified at closure, by the CTO directly via
+`git diff <base-blob> <landed-blob>`):** exactly two new module-level
+functions (`resolveSnapshotTimeoutMs()`, `waitForSnapshotDiagramReadiness()`)
+and one inserted block inside `renderPadletOverlayToCanvas`, placed
+between the existing two-RAF wait/`sanitizeExportOverlayColors` call
+and the existing `html2canvas(...)` call — matching §2 exactly.
+`waitForSnapshotDiagramReadiness()` polls
+`host.querySelectorAll('[data-ai-render-state="loading"]')` every
+100ms via `setTimeout`, resolving with `timedOut: false` once the
+count reaches 0 or `timedOut: true` at the 3000ms (or overridden)
+deadline. The wait is entered ONLY when `pendingAtStart > 0`. The
+`collabboard-ai-snapshot-capture-wait` event fires only when
+`process.env.NODE_ENV !== "production"`, payload exactly
+`{waitedMs, timedOut, pendingCount}`. No other line in the file
+changed; `html2canvas`'s call, options, and the rest of
+`renderSlideToPNG`/`getSlideRenderSignature` are byte-identical to
+base.
+
+**Fenced/prohibited files independently re-verified unchanged at the
+landed commit:** all 73 §5 fences re-checked directly against the
+landed commit — 0 mismatches, including `PresentationPadletCard.tsx`,
+`PresentationContainerCard.tsx`, `CodeDiagramRenderer.tsx`,
+`AIComponentExportMenu.tsx`, `AIComponentRenderer.tsx`,
+`useAIComponent.ts`, `normalize-ai-content.ts`, `persistence.ts`,
+`diagram-engine.ts` (at its corrected blob), and all three carried
+specs (PATCH-097, PATCH-099, PATCH-100) — all bit-for-bit identical
+to base.
+
+**Corrective classification (bind):** slide-snapshot capture now waits
+up to 3000ms (100ms polling) for any Mermaid/code-diagram content to
+leave its `loading` state before calling `html2canvas`, with a
+best-effort proceed-anyway fallback on timeout — no thrown error, no
+user-visible delay for non-Mermaid slides (zero-latency no-wait path
+confirmed when `pendingAtStart === 0`). `waitForDiagramRender()` in
+`AIComponentExportMenu.tsx` remains fully independent and untouched.
+Legacy HTML image readiness remains explicitly out of scope and
+untouched by this patch.
+
+**Live spec result (per the independent reviewer's report, PATCH-101
+new spec):** `presentation-snapshot-diagram-readiness.spec.ts` passed
+Flows A-E, 3/3 stability runs — ready-path Mermaid diagram captured
+with `pendingCount === 0`/`timedOut === false`; forced-timeout
+override (`window.__patch101TimeoutOverrideMs = 50`) produced
+`timedOut === true` with capture still completing; non-Mermaid
+synchronous content (carried from PATCH-100) showed zero added
+latency.
+
+**Carried gates (per the independent reviewer's report):** PATCH-097,
+PATCH-099, and PATCH-100 specs passed unchanged; PATCH-096 grouped
+runner 14/14 groups, 14/14 specs, 0 incidents; PATCH-089/090/091/093/094
+classifications unchanged.
+
+**Deterministic gates:** slideOrder 7/1; clonedPostMetadata 9/1;
+focused drawing 59/2; full Vitest 448/43; `tsc --noEmit` passed;
+`check:boundaries` passed; `npm run verify` passed; `npm run build`
+passed.
+
+**Fence result:** 73/73, 0 mismatches (independently re-verified by
+the CTO directly against the landed commit).
+
+**Cleanup/process state:** all cleanup counts reached zero; ports
+3000/4000 free; no repo-owned runtime process left running.
+
+**No hard-stop condition (§8) was triggered.**

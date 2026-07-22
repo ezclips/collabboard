@@ -361,6 +361,60 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-22** — **PATCH-101 CLOSED (commit `5c36305`) — PATCH-102
+  AUTHORIZED (legacy-HTML image readiness, reusing an existing,
+  unmodified, already-shipped marker discovered this turn).**
+  Independently re-verified the landed PATCH-101 commit directly: HEAD
+  == origin/main == `5c363053d83c702344c445b338e6ea9df5861e9b`, exact
+  bound commit message, exactly the two bound paths at their exact
+  bound blobs (`39b7b18`, `adcc30b`), diff re-derived and matching §2
+  exactly, all 73 fenced files (at the corrected `diagram-engine.ts`
+  blob — a self-inflicted governance fence-blob typo caught and fixed
+  before implementation via commit `245102b`) confirmed bit-for-bit
+  unchanged. Full closure record appended to
+  `.fable5/patches/PATCH-101.md` §12. **Legacy-HTML image-readiness
+  investigation — key discovery:** `hooks/useAIComponent.ts`'s
+  `applyImageEnhancements()` ALREADY sets `data-ai-image-state`
+  (`'loading'`/`'loaded'`/`'error'`) on every `<img>` inside legacy-HTML
+  AI content, unmodified, already driving today's production fade-in
+  styling — functionally identical in shape to Mermaid's
+  `data-ai-render-state` marker PATCH-101 already reused. This means
+  **no change to `AIComponentRenderer.tsx`/`useAIComponent.ts` is
+  needed at all** — the "materially larger blast radius" concern
+  recorded when PATCH-101 deferred this was based on an incomplete
+  reading of `useAIComponent.ts`; a closer look this turn found the
+  marker already exists. Settlement semantics already correct for
+  direct reuse: cached/complete images settle synchronously
+  (`img.complete && naturalWidth > 0`), failed images already count as
+  settled via `onerror`→`markSettled()`, and the timing precedent
+  (`useEffect`, not `useLayoutEffect`, reliably flushing before the
+  2-RAF snapshot check) is the exact same assumption already proven
+  correct by PATCH-101's landed spec. **Scope boundary, explicitly
+  confirmed:** this marker covers ONLY legacy-HTML `<img>` tags —
+  `PhotoCardRenderer.tsx` renders images via `next/image` with no
+  comparable marker (a separate, unaddressed, NOT-evidenced gap,
+  explicitly excluded), and CSS `background-image`/font readiness have
+  no marker anywhere in this codebase (also excluded). Cross-origin
+  canvas-tainting risk (`useCORS: true`) is pre-existing and unchanged
+  by this patch, not newly introduced. **PATCH-102 AUTHORIZED:**
+  `.fable5/patches/PATCH-102.md` created — single production file
+  (`createSlideRenderer.tsx`, generalizing PATCH-101's combined-wait
+  selector from Mermaid-only to
+  `'[data-ai-render-state="loading"], [data-ai-image-state="loading"]'`,
+  ONE shared 3000ms budget, not additive), one new spec
+  (`presentation-snapshot-image-readiness.spec.ts`, using
+  `page.route()` to deterministically control image response timing —
+  no wall-clock racing, no real network dependency), 75 immutable
+  fences (73 carried from PATCH-101 plus the PATCH-101 spec now
+  carried as a regression gate plus `PhotoCardRenderer.tsx` fenced to
+  prove its separate gap stays untouched). `AIComponentRenderer.tsx`,
+  `useAIComponent.ts`, `AIComponentExportMenu.tsx`, and
+  `CodeDiagramRenderer.tsx` remain fenced and untouched. GPT-5.5
+  implements; independent reviewer (Kepler primary, Gemini 3.1 Pro
+  fallback) required before commit; Sonnet will not review its own
+  authorization. No production or test code was touched by this
+  governance turn.
+
 - **2026-07-22** — **PATCH-100 CLOSED (commit `6df5d6c`) — PATCH-101
   AUTHORIZED (bounded Mermaid diagram readiness only; image readiness
   split out and remains deferred).** Independently re-verified the
