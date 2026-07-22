@@ -361,6 +361,44 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-22** — **PATCH-102 §15/§16/§17 — §14 diagnostic proved
+  classification B (page/context teardown races an in-flight delayed
+  route handler); minimal spec-only synchronization fix authorized;
+  diagnostic instrumentation ordered removed; large final live-gate
+  matrix bound; unrelated temp trace artifacts ruled non-blocking.**
+  §14's 3-run diagnostic (13/17/100 route invocations) proved: every
+  invocation used a distinct `Request` object (not one handler
+  double-fulfilling); every request was a genuine GET for the same
+  image URL from either the dashboard or an `about:blank` frame; the
+  product assertion and Preview capture always completed successfully
+  *before* the observed `route.fulfill: Route is already handled!`
+  error, which came from a later, still-in-flight invocation (run 1:
+  invocations 11-13 incomplete when diagnostics were collected).
+  Classified **B**: the test's `finally` calls `page.unroute()` without
+  first confirming every outstanding 500ms-delayed handler has
+  settled, so an in-flight handler's eventual `fulfill()` races
+  page/context teardown. Fix authorized (spec-only, no production
+  change): track in-flight handler promises in a `Set`, await
+  `Promise.allSettled([...inFlightHandlers])` before `page.unroute()`,
+  keep a plain request counter asserted `>= 1` (not an exact count —
+  proven legitimately variable), and continue rethrowing any real route
+  error (no broad catch-and-ignore authorized). §14's diagnostic array,
+  console.log dump, and `WeakMap`/sequence-counter ordered removed —
+  only the functional in-flight-tracking `Set` and the minimal counter
+  survive. `createSlideRenderer.tsx` (the §13 eager-load fix) stays
+  unchanged. Bound commit message:
+  `fix(e2e): await in-flight delayed route handlers before unrouting in presentation snapshot image readiness spec (PATCH-102)`.
+  §16 binds the full final acceptance gate matrix (5x delayed-image
+  stability, full 6-scenario suite, PATCH-101/100/099/097/089/090/091/093/094,
+  PATCH-103 coexistence, PATCH-096 at 14/14/14, and the full
+  deterministic gate list including slideOrder 7/1, clonedPostMetadata
+  9/1, focused drawing 59/2, full Vitest 448/43). §17 records 5
+  generated temp trace directories from §14's runs as outside the
+  repository and non-blocking (identities logged, not touched, deletion
+  explicitly not authorized here). No candidate file modified this
+  turn; PATCH-102 stash untouched; PATCH-104 not started. Recorded in
+  `PATCH-102.md` new §15/§16/§17. Governance-only commit follows.
+
 - **2026-07-22** — **PATCH-102 §14 — duplicate route-handling
   investigation; NO fix authorized, diagnostic instrumentation only.**
   §13's eager-load fix confirmed landed exactly as authorized

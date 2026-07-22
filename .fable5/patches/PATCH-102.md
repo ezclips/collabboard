@@ -890,3 +890,185 @@ immediately, report, do not commit, if:
 - credentials are printed, logged, or committed anywhere.
 
 **Do not authorize PATCH-104.**
+
+## 15. Route-lifecycle synchronization amendment (bind, 2026-07-22)
+
+**§14's diagnostic instrumentation proved its purpose and is now
+disposed of per this section.** Diagnostic blob
+`ab0d80abed6c7fba810dcb78b23fc4ff002620ab` confirmed, across 3 runs
+(13/17/100 route invocations respectively), that:
+
+- every invocation carried a **distinct** Playwright `Request` object
+  (verified via the diagnostic's own `WeakMap<Request, number>`
+  sequencing) — this is not one handler double-fulfilling a single
+  request.
+- every request was a genuine `GET` for the exact same image URL,
+  originating from either the live dashboard frame or an `about:blank`
+  frame (the offscreen snapshot host's `createRoot` render target).
+- the delayed-image readiness assertion and Preview capture completed
+  successfully **before** the observed failure in run 1 — the failing
+  `route.fulfill: Route is already handled!` came from a **later**,
+  still-in-flight invocation (run 1: invocations 11-13 still
+  incomplete when `finally`'s diagnostics were collected), not from
+  anything the product assertion depends on.
+
+**Classification: B — page/context teardown races an in-flight
+delayed route handler**, refined from §14's two open hypotheses.
+Neither open question from §14 blocks this classification:
+html-canvas-vs-other-frame attribution for each `about:blank` request
+remains formally unconfirmed, but it no longer matters — the fix does
+not depend on WHICH subsystem issues a given request, only on the
+fact that requests can legitimately keep arriving for as long as the
+page/frames are alive, and the test's `finally` block calls
+`page.unroute(imageUrl)` without first confirming every in-flight
+500ms-delayed handler has completed. Once cleanup deletes the
+underlying board/padlets and the test function returns, Playwright
+begins tearing down the page/context for the next serial test; a
+handler still awaiting its artificial delay at that moment has its
+eventual `route.fulfill()` call race against that teardown, producing
+exactly the observed error on a request that has nothing to do with
+the (already-passed) product assertion. This matches Phase 2 options
+A/B/C combined — the precise trigger is teardown-timing, not a single
+isolated mechanism, and no further live distinction between them is
+required to author a correct fix: **the fix must make `page.unroute()`
+wait for every outstanding handler to settle, not guess about the CDP
+internals of why the race manifests as this specific error text.**
+
+**Minimum safe correction (bind) — spec-only, in the already-authorized
+file, no production change, no broad error suppression:**
+
+`e2e/characterization/presentation-snapshot-image-readiness.spec.ts`,
+current diagnostic blob `ab0d80abed6c7fba810dcb78b23fc4ff002620ab`,
+amended in the delayed-image test only:
+
+1. **Route registration strategy — unchanged in shape:** keep the
+   single exact-string `page.route(imageUrl, handler)` registration.
+   The handler must continue to support an unlimited number of
+   distinct requests, fulfilling each exactly once with the same
+   deterministic delayed response (500ms artificial delay,
+   `SYNTHETIC_PNG` body, `status: 200`, `contentType: 'image/png'` —
+   byte-identical to the current candidate; no header or timing
+   change).
+2. **In-flight tracking strategy:** maintain a single `Set<Promise<void>>`
+   (e.g. `inFlightHandlers`) scoped to the test. On each route
+   invocation, create the handler's async work as its own promise, add
+   it to the set immediately, and remove it from the set in a
+   `.finally()` attached to that same promise — regardless of whether
+   the handler's `route.fulfill()` resolved or threw. This replaces
+   §14's `routeDiagnostics` array and its per-invocation timing/URL/
+   frame logging; the `WeakMap<Request, number>` sequencing counter is
+   no longer needed (its one job — proving distinct-Request identity —
+   is already proven and closed by this section) and must be removed.
+3. **Request counter — retained, minimal:** keep a single plain
+   incrementing counter (e.g. `requestCount`) for the sole purpose of
+   the required assertion below; remove `requestSequenceCount` and the
+   `WeakMap`.
+4. **Cleanup order (bind, this is the actual fix):** in the test's
+   `finally` block, **before** calling `page.unroute(imageUrl)`, await
+   every promise currently in `inFlightHandlers`
+   (`await Promise.allSettled([...inFlightHandlers])`) — this must
+   happen strictly after `expectPreviewCaptureCompletes`/cleanup have
+   already run (their success is unaffected either way) and strictly
+   before `page.unroute()`. Only after every tracked handler has
+   settled does `page.unroute(imageUrl)` run.
+5. **Request-count assertion:** `expect(requestCount).toBeGreaterThanOrEqual(1)`
+   — proving at least one request was observed, without asserting an
+   exact count (the diagnostic proved the count is legitimately
+   variable — 13/17/100 across three runs — and asserting a specific
+   number would be flaky by construction).
+6. **No broad catch-and-ignore of any route error.** The handler's
+   existing `try { ... } catch (error) { ...; throw error; }`
+   structure (currently used for §14's diagnostic capture) is
+   simplified to no longer need diagnostic fields, but **must continue
+   to rethrow** any error from `route.fulfill()` — do not swallow
+   "Route is already handled!" or any other route error. If the
+   in-flight-await fix is correct, no such error should occur again;
+   if one still does, the test must fail loudly, not silently pass.
+7. **Diagnostic disposition (Phase 4):** remove the `routeDiagnostics`
+   array, the `console.log('PATCH-102-DELAYED-DIAGNOSTIC', ...)` dump,
+   `requestSequences`/`requestSequenceCount`, and `testStartedAt`'s
+   diagnostic-only timing fields entirely. The final file must not
+   retain excessive per-invocation logging or a global diagnostic
+   buffer — only the `inFlightHandlers` set (functional, not
+   diagnostic) and the single `requestCount` counter survive.
+8. **Unchanged, byte-for-byte:** the delayed-image product assertion
+   (`waitedMs > 0 && timedOut === false && pendingCount === 0`, and
+   `waitEvent?.waitedMs` `< 3000`), `expectPreviewCaptureCompletes`,
+   the cleanup contract (`cleanupAndAssertBounded`,
+   `{ boards: 0, padlets: 0, canvasLines: 0 }`), the 500ms artificial
+   delay, `SYNTHETIC_PNG`, response status/content-type, and every
+   other test in the file (no-image, cached-image, image-error,
+   forced-timeout, Mermaid-carry) — none of these may change.
+9. **Production file unchanged:** `createSlideRenderer.tsx` remains at
+   blob `ef8c1a9b7a9521a6a68d40e661ee50effff986fd` — the eager-load fix
+   is retained exactly as landed in §13; no reversion, no further
+   change.
+
+**Hard-stop conditions (bind, in addition to §8/§13/§14):** STOP
+immediately, report, do not commit, if:
+
+- `createSlideRenderer.tsx` changes at all;
+- any route error is caught and suppressed without rethrowing;
+- `page.unroute()` is called before all tracked in-flight handler
+  promises have settled;
+- the request-count assertion is changed to assert an exact count
+  instead of `>= 1`;
+- any diagnostic logging/buffer from §14 remains in the final file;
+- the delayed-image product assertion, cleanup contract, artificial
+  delay, or response body/headers change in any way;
+- any other test in the file changes;
+- any of the required live gates (§ below) fails or is skip-only;
+- credentials are printed, logged, or committed anywhere.
+
+**Bound implementation commit message (verbatim):**
+`fix(e2e): await in-flight delayed route handlers before unrouting in presentation snapshot image readiness spec (PATCH-102)`
+
+## 16. Required live gates (bind, supersedes prior gate lists for final PATCH-102 acceptance)
+
+1. Delayed-image test — **5 consecutive real runs**: all pass, at
+   least one request observed each run, at least one settled readiness
+   event (`waitedMs > 0, timedOut: false, pendingCount: 0`) each run,
+   **zero route errors**, zero guard/skip results.
+2. Full `presentation-snapshot-image-readiness.spec.ts` six-scenario
+   suite — all six execute, no serial-mode skip cascade, zero
+   unexpected failures.
+3. PATCH-101 spec. 4. PATCH-100 spec. 5. PATCH-099 spec. 6. PATCH-097
+   spec. 7. PATCH-089. 8. PATCH-090. 9. PATCH-091. 10. PATCH-093.
+   11. PATCH-094 — all carried specs green, real (non-skip) results.
+12. PATCH-103 coexistence: `drawing-line-bridge.spec.ts -g "renders
+    seeded attached"`, full `drawing-line-bridge.spec.ts`,
+    `drawing-presentation.spec.ts`.
+13. PATCH-096 grouped runner: 14 groups, 14 specs, 14 final passes,
+    zero non-signature failures, exit code 0.
+14. Deterministic gates: `git diff --check`; `npx tsc --noEmit`;
+    `npm run check:boundaries`; `slideOrder` unit suite 7/1;
+    `clonedPostMetadata` unit suite 9/1; focused drawing suite 59/2;
+    full Vitest 448/43; `npm run verify`; `npm run build`.
+
+All results must be real, non-skipped output — skip-only results do
+not satisfy any of the above.
+
+## 17. Temporary trace-artifact disposition (bind, 2026-07-22)
+
+The following generated temp directories, produced by §14's
+instrumented runs, remain **outside the repository** (confirmed via
+`git status`/`git ls-files --others --exclude-standard` showing zero
+untracked paths matching these names) and are recorded here for
+audit continuity, not as repository artifacts:
+
+- `patch102-section14-run1-e7142591ce9e45528c9647a04f93864c`
+- `patch102-section14-run2-456fc828132e45bd86335b0a8dabedd8`
+- `patch102-section14-run3-8a0018c1efd14439b4a2b5c7107d8ed0`
+- `patch102-stability-1-1ffabbcf2fbb44908f3d72bf8b0d4125`
+- `patch102-trace-f8b4e6a277ed4f77b813b3d4f82d9fbc`
+
+These are generated trace-extraction output outside the repo's working
+tree (not tracked, not gitignored-but-present, not part of any
+candidate diff) and do not block patch acceptance provided: their
+identities are recorded (above), they contain only generated trace
+output, and the repository itself is clean apart from the authorized
+candidate. Deletion of this unrelated temp content is explicitly NOT
+authorized by this governance turn — it is out of scope for PATCH-102
+and must not be touched here.
+
+**Do not authorize PATCH-104.**
