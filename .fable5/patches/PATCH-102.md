@@ -1259,3 +1259,137 @@ final acceptance):**
 `fix(e2e): disable HTTP caching for the delayed legacy-image fixture in presentation snapshot readiness spec (PATCH-102)`
 
 **Do not authorize PATCH-104.**
+
+## 19. §18 disproven for this failure mode; capture-scoped diagnostic authorized (bind, 2026-07-22 — NO FIX AUTHORIZED YET)
+
+**§18 is proven insufficient, alone, to guarantee the intended
+scenario — but not proven wrong or harmful.** The live run used the
+§18-headers candidate (`route.fulfill()` now includes
+`Cache-Control: no-store, no-cache, must-revalidate` per the prior
+amendment) and still produced **every** readiness event at
+`waitedMs=0, timedOut=false, pendingCount=0` — with ~94 fulfilled and
+~41 aborted requests still occurring. This directly disproves my prior
+theory that browser/render caching alone explained the zero-wait
+result: caching is now defeated at the HTTP layer, and the test still
+fails identically. **I am not repeating that theory or asserting a new
+one without proof — the prior turn's confident-but-wrong classification
+is exactly the mistake to avoid repeating.**
+
+**New load-bearing evidence, not yet explained by anything on record:**
+~94 + ~41 ≈ **135 total request attempts in one test run**, when the
+test intends at most a small, fixed number of capture attempts (the
+presentation sidebar's own thumbnail render via `useSlideThumbnails.ts`,
+the explicit "Preview slide" modal's big-preview render, and —
+newly discovered by source this turn —
+**`PresentationPreviewModal.tsx` itself contains a SECOND internal
+render loop** (lines ~108-121, a `for (const s of slides)` thumbnail-strip
+render inside the modal, independent of the sidebar's own thumbnail
+mechanism) alongside its big-preview render effect (lines ~46-79,
+already implicated in PATCH-103 §8's scene-reference-churn
+investigation for a *different* symptom). None of these, even summed,
+naturally explain 135 attempts for a one-slide fixture — something is
+causing far more capture attempts than the three intentional call
+sites account for. **This magnitude discrepancy is itself unexplained
+evidence and must not be ignored or assumed benign.**
+
+**Why no root-cause letter is bound this turn:** the spec currently has
+**no visibility into the offscreen snapshot host's actual DOM state**
+at the moment of its readiness check — `host` is a private local
+variable inside `createSlideRenderer.tsx`'s closure, torn down
+(`root.unmount(); host.remove();`) before the test could ever inspect
+it even if it tried. The test only ever observes: (a) network-level
+route invocations (aggregate counts, already gathered — insufficient
+per the explicit instruction not to infer from aggregates alone), and
+(b) the existing `collabboard-ai-snapshot-capture-wait` event, which
+carries only `{waitedMs, timedOut, pendingCount}` — no per-image
+detail, no capture-attempt identity, no indication of which call site
+triggered it. **Asserting any of Phase 6's lettered classifications
+right now would repeat the same error §18 already made: confident
+inference from aggregate/indirect signals instead of direct
+observation of the actual DOM state at the actual moment of failure.**
+Classification is therefore **I — unresolved**, with the precise
+missing observation stated above (per-capture image state at
+`pendingAtStart` inspection, plus an accounting for the 135-request
+volume).
+
+**Authorized next step — diagnostic instrumentation only, no fix, no
+assertion change, no behavior change:**
+
+Because the missing observation requires visibility inside `host`
+(which only `createSlideRenderer.tsx` has access to), this diagnostic
+**must** touch that production file — permitted under this section's
+explicit carve-out, exactly the same production-inert, test-only-gated
+pattern already used for the existing `collabboard-ai-snapshot-capture-wait`
+event (itself originally authorized the same way under earlier
+patches in this program). This is diagnostic instrumentation, not a
+behavioral change, and does not constitute "modifying the production
+contract" — every addition is inert when `process.env.NODE_ENV ===
+"production"` and does not alter `pendingAtStart`, `waitResult`, the
+existing event, the eager-load mutation, the selector, the timeout, or
+html2canvas's call.
+
+**`createSlideRenderer.tsx` (additive only, gated, new event, no
+existing line changed):**
+
+1. A capture-attempt counter (closure-scoped to `createSlideRenderer`'s
+   returned functions, incremented once per `renderPadletOverlayToCanvas`
+   call — a plain integer, no behavior implication).
+2. Immediately after computing `pendingAtStart` (existing line,
+   unchanged), and only when `process.env.NODE_ENV !== "production"`,
+   snapshot every `<img>` currently in `host` (not only ones matching
+   the readiness selector) into a plain array of
+   `{ src, loading, dataAiImageState: img.dataset.aiImageState ?? null, complete, naturalWidth, naturalHeight }`.
+3. After `html2canvas(host, ...)` resolves (existing call, unchanged),
+   and only when `process.env.NODE_ENV !== "production"`, dispatch a
+   **new**, separate event —
+   `collabboard-ai-snapshot-capture-diagnostic` — carrying:
+   `{ captureId, hostCreatedAtMs, slidePadletIds, pendingAtStart, images, waitedMs, timedOut, pendingCount }`.
+   This event is additional to, not a replacement for, the existing
+   `collabboard-ai-snapshot-capture-wait` event, which must continue to
+   fire exactly as it does today.
+4. No other line in `createSlideRenderer.tsx` changes. §13's eager-load
+   block and §15-equivalent behavior (none applicable here) are
+   untouched.
+
+**`presentation-snapshot-image-readiness.spec.ts` (delayed-image test
+only):**
+
+1. Buffer the new `collabboard-ai-snapshot-capture-diagnostic` event
+   the same way `__patch102WaitEvents` is already buffered
+   (registered before `openPreviewModal` triggers any capture).
+2. Do **not** change the existing assertion, the route handler, §15's
+   in-flight tracking, or §18's headers.
+3. On failure (already the case via the existing `finally` diagnostic
+   logging pattern), dump the full buffered diagnostic array so the
+   per-capture record is available in the test report.
+4. Run the delayed-image test enough times to reproduce the failure at
+   least once (the existing 90s-timeout single run is sufficient to
+   trigger it, per this turn's evidence) and report, for **every**
+   buffered capture attempt: `captureId`, `hostCreatedAtMs` deltas
+   between consecutive captures (to quantify the churn rate), whether
+   the intended delayed-image src appears in `images` at all, and for
+   each occurrence: `loading`, `dataAiImageState`, `complete`,
+   `naturalWidth` at that exact inspection moment.
+
+**Hard-stop conditions (bind, in addition to §8/§13-§18):** STOP
+immediately, report, do not commit, if:
+
+- any existing behavior, timing, selector, event, or assertion changes
+  as a side effect of adding this diagnostic;
+- the diagnostic is used as a justification to weaken or bypass the
+  delayed-image assertion instead of explaining it;
+- a fix is proposed or applied before the per-capture diagnostic data
+  is actually captured and reported;
+- the 135-request volume anomaly is left unexplained in the report;
+- credentials are printed, logged, or committed anywhere.
+
+**§13, §15, §18 disposition:** all three **retained unchanged**. §13
+(eager-load) and §15 (in-flight sync) remain independently proven
+correct by their own dedicated evidence (images do load when genuinely
+inspected pending; zero route-teardown errors this run or any prior
+run). §18 (no-cache headers) is retained as correct response hygiene
+with no evidence against it, but its necessity for *this* failure mode
+is now proven insufficient alone — it stays in place pending the
+diagnostic, not removed for lack of a reason.
+
+**Do not authorize PATCH-104.**

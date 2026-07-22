@@ -361,6 +361,43 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-23** — **PATCH-102 §19 — §18's no-cache-header theory
+  DISPROVEN live (every readiness event still `0/false/0` with headers
+  applied); no new root-cause classification bound; capture-scoped
+  diagnostic authorized instead, touching `createSlideRenderer.tsx`
+  additively (no fix yet).** The §18 candidate was run live and failed
+  identically to before caching was defeated — proving the caching
+  theory wrong rather than confirming it, and explicitly avoided
+  repeating that mistake by asserting a new unproven mechanism this
+  turn. New evidence: ~94 fulfilled + ~41 aborted requests (~135 total)
+  occurred in one test run, when only ~2-3 intentional capture call
+  sites exist (sidebar thumbnail, explicit Preview modal's big-render,
+  and a newly-found second internal thumbnail-strip loop inside
+  `PresentationPreviewModal.tsx`) — this magnitude gap is unexplained
+  and flagged as load-bearing, not dismissed. Root cause classified
+  **I — unresolved**, because the test currently has zero visibility
+  into the offscreen snapshot host's actual DOM/image state at the
+  moment of its readiness check (`host` is a private closure variable
+  in `createSlideRenderer.tsx`, torn down before the test could ever
+  inspect it) — asserting any specific mechanism now would repeat the
+  same confident-inference error that just failed. Authorized:
+  diagnostic-only instrumentation, additive and gated
+  (`NODE_ENV !== "production"`), in `createSlideRenderer.tsx` (a new,
+  separate `collabboard-ai-snapshot-capture-diagnostic` event carrying
+  per-capture id, host-creation timestamp, every image's src/loading/
+  data-ai-image-state/complete/naturalWidth at inspection time, plus
+  the existing wait fields) and in the spec (buffer + report only) —
+  explicitly permitted by this turn's carve-out since only production
+  code has access to `host`'s internals, mirroring the same
+  test-hook pattern already used for the existing wait event. No
+  existing behavior/timing/selector/assertion may change as a side
+  effect. §13/§15/§18 all retained unchanged — none disproven, only
+  §18 proven insufficient alone for this specific failure mode. No fix
+  authorized until the per-capture data is captured and the 135-request
+  volume is explained. No candidate file modified this governance turn;
+  PATCH-102 stash untouched; PATCH-104 not started. Recorded in
+  `PATCH-102.md` new §19. Governance-only commit follows.
+
 - **2026-07-22** — **PATCH-102 §18 — zero-wait stability failure traced
   to missing cache-defeating response headers (classification A), not
   a recurrence of the §15 route-teardown race (proven eliminated: zero
