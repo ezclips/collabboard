@@ -752,3 +752,141 @@ treat this classification as final until that live PASS confirms the
 traced mechanism matches reality.
 
 **Do not authorize PATCH-104.**
+
+## 14. Duplicate route-handling investigation (bind, 2026-07-22 — diagnostic step only, no fix yet authorized)
+
+**§13's eager-load correction is CONFIRMED LANDED as authorized** —
+verified via `git diff` against blob
+`ef8c1a9b7a9521a6a68d40e661ee50effff986fd`: exactly the one authorized
+block added (`host.querySelectorAll<HTMLImageElement>('img[loading="lazy"]').forEach(...)`),
+inserted at exactly the authorized location, nothing else in the file
+changed. **Retained — this investigation found no evidence against
+it** (the reported single passing run, with real settlement events at
+`waitedMs` 551/880/1373, confirms the eager-load fix does make the
+image settle naturally; the new failure is a *different* mechanism
+that only surfaces once settlement succeeds and `html2canvas` actually
+runs against a loaded image).
+
+**Exact route registrations and ownership, verified by source (not
+live) — confirmed clean, no overlap:**
+
+- `presentation-snapshot-image-readiness.spec.ts` registers
+  `page.route()` exactly **three** times total in the whole file — once
+  per test, each with a **distinct, non-overlapping URL** unique to
+  that test: `https://patch-102.test/delayed.png` (line 410,
+  delayed-image test), `https://patch-102.test/error.png` (line 445,
+  image-error test), `https://patch-102.test/timeout.png` (line 471,
+  forced-timeout test). Each test unroutes its own URL in its own
+  `finally` block (lines 434, 460, 502). No test's route pattern can
+  match another test's URL.
+- No `context.route()` call anywhere in this file.
+- No route registration of any kind in `drawingBridgeHarness.ts` or
+  `e2e/helpers/*.ts` (grepped, zero matches).
+- `playwright.config.ts:21` — `retries: process.env.CI ? 2 : 0` — if
+  this was run outside CI, Playwright performed zero automatic test
+  retries; even where retries apply, Playwright allocates a fresh
+  browser context (and therefore a fresh, unregistered route table)
+  per retry, so a retry could not itself carry over a stale route
+  registration from a prior attempt.
+
+**Conclusion: the double-handling is not caused by the test's own
+route bookkeeping** — registration is single, scoped, and cleanly
+torn down. The duplicate request must originate from the underlying
+browser/rendering pipeline issuing a second real request to the exact
+same URL within one test execution.
+
+**Exact double-handling sequence, as reported (not independently
+live-traced this turn — no live network-panel tooling available in
+this environment):** within a single run, the delayed-image test's
+route handler (`fulfillSyntheticPngAfterDelay`, 500ms artificial delay)
+was invoked, awaited its delay, and called `route.fulfill()`
+successfully once (matching the earlier single-pass success with real
+`waitedMs` values). On the subsequent required-stability run, the
+identical registered handler raised `route.fulfill: Route is already
+handled!` — Playwright's own error for calling a terminal action
+(`fulfill`/`continue`/`abort`) more than once against what it
+considers the same intercepted request lifecycle. The failed trace
+then showed only zero-wait events, consistent with the image never
+settling naturally in that run (the second/conflicting request
+attempt likely aborted or errored before either fulfill could
+complete cleanly).
+
+**Most evidence-aligned hypothesis (NOT proven — requires live
+instrumentation before being treated as fact):** `createSlideRenderer.tsx`'s
+`html2canvas(host, { ..., useCORS: true, ... })` call
+(line 203-207, confirmed via grep — `useCORS: true` is set) runs
+**after** the readiness wait resolves. html2canvas's own internal
+resource loader is documented to perform its **own independent fetch**
+of each `<img src>` it encounters while rasterizing — separate from
+whatever the live DOM `<img>` element already did — specifically to
+obtain CORS-safe pixel data when `useCORS` is enabled. Before §13's
+eager-load fix, the DOM image never loaded at all (permanently
+deferred), so html2canvas's own secondary fetch attempt (if any) may
+have been masked by the same never-resolving state, or by the fact the
+test never reached a passing state to observe it. Now that §13 makes
+the DOM image load successfully and the wait resolve, `html2canvas`'s
+own subsequent fetch of the identical URL becomes newly observable —
+and if Playwright, in a rare but documented edge case, treats a
+same-URL request that arrives while a prior interception's async
+handler is still settling (our 500ms artificial delay) as reusing
+handling state rather than a fully independent `Route`, that would
+produce exactly the observed "already handled" error. This is a
+**hypothesis, not a proven finding** — it is not live-verified, and an
+equally plausible alternative (a genuine browser-level retry/reload of
+the same image request, independent of html2canvas) has not been
+ruled out either.
+
+**Root-cause classification: NOT YET PROVEN — instrumentation
+required.** Per explicit instruction, no corrective implementation
+step is authorized until the route-ownership mechanism is proven live.
+Both live candidate mechanisms (html2canvas's own secondary
+image-fetch under `useCORS: true`, vs. a genuine duplicate/retried
+browser-level request) remain open until instrumented evidence
+distinguishes them.
+
+**Minimum safe spec-only correction: NOT YET SUPPORTED.** A
+defensive fix exists in principle (e.g. tolerating a second terminal
+action on an already-handled route, or counting/bounding requests
+instead of assuming exactly one) but authorizing it now would mean
+guessing at the mechanism rather than proving it — explicitly
+prohibited this turn. No fix of any kind is authorized in this
+section.
+
+**Authorized next step — diagnostic instrumentation only, in the
+already-authorized spec file, no production file touched:** add a
+non-invasive request-observation counter to the delayed-image test
+only (mirroring the existing `installSnapshotWaitBuffer`/
+`__patch102WaitEvents` pattern already used in this file — a buffered,
+test-only array, no production code involved): wrap the existing route
+handler to record, for every invocation, the request URL, a
+monotonically increasing invocation index, and whether that
+invocation's `route.fulfill()` succeeded or threw (capturing the
+error message rather than letting it propagate uncaught), without
+changing the route's actual fulfillment behavior or timing in any way.
+Run the delayed-image test with this instrumentation at least 3
+consecutive times and report the exact per-run invocation count and
+outcome for each. This is a **read-only diagnostic addition** — it
+must not swallow, retry, or alter any request's outcome, and must not
+be treated as a fix.
+
+**Request-count and cleanup contract (bind, pending proof):** once the
+invocation count is proven (1 vs. 2, and whether the second is from
+html2canvas or a genuine duplicate), the spec's cleanup contract
+(`page.unroute(imageUrl)` in `finally`, board-prefix cleanup reaching
+zero) remains unchanged and must continue to pass regardless of the
+final fix shape — the diagnostic counter itself must be cleared/reset
+per test run and must not leak state across tests or contribute to any
+cleanup-count assertion.
+
+**Hard-stop conditions (bind, in addition to §8/§13):** STOP
+immediately, report, do not commit, if:
+
+- any production file is touched by this diagnostic step (it is
+  spec-only, by design);
+- the diagnostic instrumentation itself swallows, retries, or alters
+  any route's fulfillment behavior (it must observe only);
+- a corrective fix is applied before the invocation count and source
+  are proven live;
+- credentials are printed, logged, or committed anywhere.
+
+**Do not authorize PATCH-104.**

@@ -361,6 +361,38 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-22** — **PATCH-102 §14 — duplicate route-handling
+  investigation; NO fix authorized, diagnostic instrumentation only.**
+  §13's eager-load fix confirmed landed exactly as authorized
+  (`createSlideRenderer.tsx` → `ef8c1a9b7a9521a6a68d40e661ee50effff986fd`,
+  verified via `git diff`) and retained — evidence supports it (a real
+  passing run showed genuine settlement events, `waitedMs` 551/880/1373,
+  `timedOut:false`, `pendingCount:0`). New failure surfaced only once
+  settlement started succeeding: the required 3-run stability check
+  hit `route.fulfill: Route is already handled!` on run 1, followed by
+  a trace containing only zero-wait events. Verified by source: this
+  spec registers `page.route()` exactly 3 times total (once per test),
+  each with a distinct, non-overlapping URL, each cleanly unrouted in
+  its own `finally` — no overlap, no global/context-level interceptor
+  anywhere in the harness, `retries: 0` outside CI. The double-handling
+  is therefore NOT the spec's own route bookkeeping — it must be a
+  genuine second request to the same URL within one test run. Most
+  evidence-aligned (but NOT proven — no live network-panel tooling
+  available) hypothesis: `html2canvas(host, { useCORS: true, ... })`
+  (confirmed set) performs its own documented, independent image fetch
+  separate from the DOM's own `<img>` load, now newly reachable because
+  §13 makes the DOM image actually load for the first time. An
+  alternative (genuine browser-level request retry, unrelated to
+  html2canvas) has not been ruled out either. Per explicit instruction,
+  **no corrective fix authorized this turn** — only a read-only,
+  spec-only diagnostic addition (a request-invocation counter/logger
+  mirroring the existing wait-event buffer pattern) to prove the exact
+  invocation count and source live before any fix is considered. No
+  candidate file modified by this governance turn; PATCH-102 stash
+  status unchanged (already restored per §12, not re-touched);
+  PATCH-104 not started. Recorded in `PATCH-102.md` new §14.
+  Governance-only commit follows.
+
 - **2026-07-22** — **PATCH-102 §13 amendment — delayed-image readiness
   failure traced to a genuine, pre-existing production defect (not a
   test-route or event-wiring issue), scoped correction authorized
