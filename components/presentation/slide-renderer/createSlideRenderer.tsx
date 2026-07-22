@@ -15,6 +15,41 @@ import type { CreateSlideRendererArgs, SlideRenderHelpers } from "./types";
 const USE_LEGACY_POSTCARD_OVERLAY = false;
 const USE_Z_BAND_COMPOSITION = true;
 
+function resolveSnapshotTimeoutMs(): number {
+  if (
+    process.env.NODE_ENV !== "production"
+    && typeof window !== "undefined"
+    && typeof (window as any).__patch101TimeoutOverrideMs === "number"
+  ) {
+    return (window as any).__patch101TimeoutOverrideMs;
+  }
+  return 3000;
+}
+
+function waitForSnapshotDiagramReadiness(
+  host: HTMLElement,
+  timeoutMs: number,
+): Promise<{ waitedMs: number; timedOut: boolean; pendingCount: number }> {
+  return new Promise((resolve) => {
+    const startedAt = Date.now();
+    const deadline = startedAt + timeoutMs;
+    const poll = () => {
+      const pendingCount = host.querySelectorAll('[data-ai-render-state="loading"]').length;
+      const waitedMs = Date.now() - startedAt;
+      if (pendingCount === 0) {
+        resolve({ waitedMs, timedOut: false, pendingCount });
+        return;
+      }
+      if (Date.now() >= deadline) {
+        resolve({ waitedMs, timedOut: true, pendingCount });
+        return;
+      }
+      setTimeout(poll, 100);
+    };
+    poll();
+  });
+}
+
 export function createSlideRenderer({
   getSceneElements,
   getPadlets,
@@ -148,6 +183,19 @@ export function createSlideRenderer({
     try {
       await new Promise((resolve) => window.requestAnimationFrame(() => window.requestAnimationFrame(resolve)));
       sanitizeExportOverlayColors(host);
+      const pendingAtStart = host.querySelectorAll('[data-ai-render-state="loading"]').length;
+      const waitResult = pendingAtStart > 0
+        ? await waitForSnapshotDiagramReadiness(host, resolveSnapshotTimeoutMs())
+        : { waitedMs: 0, timedOut: false, pendingCount: 0 };
+      if (process.env.NODE_ENV !== "production") {
+        window.dispatchEvent(new CustomEvent("collabboard-ai-snapshot-capture-wait", {
+          detail: {
+            waitedMs: waitResult.waitedMs,
+            timedOut: waitResult.timedOut,
+            pendingCount: waitResult.pendingCount,
+          },
+        }));
+      }
       return await html2canvas(host, {
         backgroundColor: null,
         scale: opts.scale ?? 2,
