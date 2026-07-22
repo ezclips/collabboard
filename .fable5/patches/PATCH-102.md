@@ -1393,3 +1393,202 @@ is now proven insufficient alone — it stays in place pending the
 diagnostic, not removed for lack of a reason.
 
 **Do not authorize PATCH-104.**
+
+## 20. Preview-result lifecycle investigation (bind, 2026-07-23 — leading hypothesis identified, NOT yet proven, further diagnostic authorized, no fix)
+
+**§19's diagnostic worked exactly as designed and answered its own
+question cleanly.** Run 2's capture diagnostics prove: the delayed
+image is genuinely present in every observed snapshot host, genuinely
+unresolved (`complete: false, naturalWidth: 0`) at first inspection,
+`pendingAtStart` correctly equals 1, and all three observed waits
+settle normally before timeout (`532`/`872`/`1424` ms, all
+`timedOut: false`). **The original zero-wait mechanism is not what
+failed here.** The new failure is downstream: readiness and
+`html2canvas` both complete, the diagnostic event fires, and yet the
+Preview modal never shows a populated image.
+
+**Preview-result pipeline, traced by source (confirmed by re-reading
+the current file, not from memory):**
+`PresentationPreviewModal.tsx`'s big-preview effect (lines 48-79) is
+the sole owner of `bigPng` (the state the "Preview modal exposes a
+populated snapshot image" assertion depends on). Its structure:
+
+```
+useEffect(() => {
+  if (!open || !currentSlide) return;
+  setBigPng(null);
+  let cancelled = false;
+  ...
+  render(); // or double-RAF on first open
+  return () => { cancelled = true; };
+}, [open, currentSlide, renderSlideToPNG, getSlideCacheKey]);
+```
+
+where `render()` calls `renderSlideToPNG(...).then((png) => { if
+(!cancelled) setBigPng(png); })`. **Every time this effect re-runs —
+driven by `open`, `currentSlide`, or `renderSlideToPNG` changing
+reference — the previous in-flight render's eventual resolution is
+discarded**, because `cancelled` was flipped `true` by the earlier
+run's own cleanup before its promise settled. A **second, structurally
+identical** effect exists immediately below (lines 101-129, the
+thumbnail-strip warm render) with the **same** dependency shape
+(`[open, slides, renderSlideToPNG, getSlideCacheKey]`) and the same
+cancel-on-cleanup pattern. Both effects share exposure to the same two
+upstream references (`slides`/`currentSlide`, `renderSlideToPNG`) — if
+either churns on the parent's re-renders (neither is guaranteed
+memoized from what this file alone shows), **both effects restart
+together**, which plausibly explains why 3 captures clustered within
+~112ms of each other (a single upstream re-render event restarting two
+effects at once) rather than one effect looping on itself.
+
+**Leading hypothesis (structurally confirmed to exist in source; NOT
+yet proven to be what actually happened in the failing run — no live
+instrumentation of `cancelled`/`setBigPng` exists yet):** the
+big-preview effect re-ran at least once (matching capture 1→2's
++95ms gap and 2→3's +17ms gap) before its own prior attempt's promise
+resolved, discarding that attempt via `cancelled`. If the effect
+restarted **again** after capture 3 began (unobserved — the diagnostic
+event only fires after a capture's own `html2canvas` completes, so a
+4th+ restart that itself never got superseded before the 90s test
+timeout would never appear in the buffer at all), capture 3's own
+eventual `setBigPng` call would also be discarded, leaving `bigPng`
+permanently `null` and the modal stuck on "Rendering slide..." — this
+matches the observed symptom exactly without requiring any capture
+beyond the 3 already seen.
+
+**Classification: J — still unresolved**, with a specific,
+source-confirmed, testable leading hypothesis spanning **B and C**
+(the Preview-main result is discarded as stale by its own effect's
+cancellation guard, most plausibly because a concurrent or later
+effect re-run — driven by an unmemoized `slides`/`currentSlide`/
+`renderSlideToPNG` reference upstream of this modal — restarts the
+capture before it resolves). This is **not** asserted as final: unlike
+§18's caching theory (which was falsified by a live run), this
+hypothesis has not yet been tested against live evidence at all, and
+per this program's own recent lesson, it must not be treated as proven
+until it is. Not classified F (the diagnostic already proves the image
+is present and unresolved — not empty/absent); not H (only one
+`currentSlide`/frame exists in this fixture, so a wrong-instance theory
+has no distinguishing evidence either way yet); not E (a valid result
+existing but its loading state never clearing is exactly what B/C
+would also produce — indistinguishable without the effect-level
+instrumentation below).
+
+**Authorized next step — diagnostic instrumentation only, no fix, no
+assertion change:**
+
+Source alone identifies a specific, credible mechanism but does not
+prove: (a) whether `cancelled` was actually `true` at any of the
+3 observed captures' resolution time, (b) whether a 4th+ restart
+occurred beyond the observation window, (c) which of `open`/
+`currentSlide`/`renderSlideToPNG` actually changed reference to trigger
+each restart, (d) which of the 3 observed captures is this specific
+effect versus the thumbnail-strip effect versus the sidebar's own
+separate thumbnail mechanism. Per Phase 4, additive, gated,
+non-behavioral instrumentation is authorized in:
+
+**`components/presentation/PresentationPreviewModal.tsx`** (new file
+added to diagnostic scope this section — a deviation from PATCH-102's
+original §2 prohibited list, justified the same way §19 already
+justified touching `createSlideRenderer.tsx`: strictly test-only-gated,
+additive, inert in production, required because only this component
+has access to its own `cancelled`/`setBigPng`/effect-rerun state):
+
+1. In the big-preview effect (lines 48-79) and the thumbnail-strip
+   effect (lines 101-129), when `process.env.NODE_ENV !== "production"`
+   only: dispatch a new event, e.g.
+   `collabboard-ai-preview-result-diagnostic`, at effect-run start
+   (`{ surface: 'preview-main' | 'preview-thumbnail-strip', effectRunId, startedAtMs }`)
+   and again at the `.then`/`await` callback site
+   (`{ surface, effectRunId, resolvedAtMs, cancelledAtResolution: cancelled, resultAccepted: !cancelled, resultLength: png?.length ?? null }`
+   — length only, never the PNG data itself). `effectRunId` is a
+   simple per-effect incrementing counter (via a ref), proving exactly
+   how many times each effect actually ran and whether each run's
+   result was accepted or discarded.
+2. No change to `cancelled`'s actual semantics, `setBigPng`, the
+   dependency arrays, the double-RAF first-open handling, or any
+   rendered output — purely observational.
+
+**Optional, minimal, read-only surface labeling on the existing §19
+event** — extend `RenderSlideOptions`/`renderSlideToPNG`'s call sites
+relevant to this test's flow only (`useSlideThumbnails.ts`,
+`PresentationPreviewModal.tsx`'s two call sites) with an optional,
+gated `diagnosticSurface` hint threaded through to
+`createSlideRenderer.tsx`'s existing
+`collabboard-ai-snapshot-capture-diagnostic` event, so `captureId`s can
+be correlated to a human-readable surface without guessing from
+creation order. Do **not** touch `SharePresentationModal.tsx`,
+`exportToPDF.ts`, `exportToPPTX.ts`, or `FullscreenPresentation.tsx` —
+irrelevant to this test's flow and out of scope.
+
+**Hard-stop conditions (bind, in addition to §8/§13-§19):** STOP
+immediately, report, do not commit, if:
+
+- any change to `cancelled` semantics, `setBigPng`, dependency arrays,
+  or rendered output in `PresentationPreviewModal.tsx`;
+- any file outside the diagnostic scope above is touched;
+- a fix is proposed before the effect-level diagnostic data is
+  captured and reported;
+- the Preview-modal assertion is weakened instead of explained;
+- credentials are printed, logged, or committed anywhere.
+
+## Phase 7 ruling — status of the original zero-wait blocker
+
+**Not closed.** One diagnostic run not reproducing it is insufficient
+evidence to retire it — it could be a genuinely intermittent, separate
+timing race (e.g. a rare ordering where a capture's own readiness
+check runs before its child effects flush, per the open question
+raised in §19) that simply didn't recur in this run. **Required
+reproduction threshold before the zero-wait failure can be considered
+resolved or superseded:** the delayed-image test must pass its full
+**5-consecutive-run** stability gate (§16/§18) with the §19/§20
+diagnostics active throughout, so that if zero-wait recurs, it will be
+captured with full per-capture image-state detail rather than
+re-opening an under-instrumented investigation. Until 5 consecutive
+clean passes are observed, both the zero-wait failure and the
+Preview-stuck failure remain open, tracked separately.
+
+## Phase 8 ruling — diagnostic code disposition
+
+**Temporary — must not remain in the final candidate.** The
+module-scoped capture counter and both `collabboard-ai-snapshot-capture-diagnostic`/
+`collabboard-ai-preview-result-diagnostic` events (and the optional
+surface-label passthrough) are diagnostic-only and must be removed
+(or reduced to the minimal permanent form governance explicitly
+authorizes at final review — none is authorized as permanent yet)
+before PATCH-102's candidate is presented for independent review or
+commit. This mirrors §14's disposition of its own diagnostic
+instrumentation.
+
+## Phase 9 ruling — §18 headers disposition
+
+**Keep temporarily; do not decide finally yet.** The no-cache headers
+were proven insufficient *alone* to prevent the zero-wait failure, but
+were never proven wrong, harmful, or unnecessary — removing them now
+would remove a legitimate cache-hygiene safeguard for no evidentiary
+reason, and could reintroduce cache-based non-determinism as a
+*second*, compounding variable while the Preview-result lifecycle
+question is still open. Final disposition (keep permanently, reduce,
+or remove) is deferred to the point where both the zero-wait and
+Preview-stuck questions are resolved and the fixture's final shape is
+known.
+
+## Phase 10 ruling — cleanup
+
+`test-results/` and `.next/trace` remain present (generated,
+gitignored, confirmed via `git status`/`git ls-files --others
+--exclude-standard` to be absent from any tracked or candidate diff).
+Authorized safe cleanup, scoped to exactly these two repository-local
+paths only (no broader directory deletion authorized):
+
+```powershell
+Remove-Item -LiteralPath "test-results" -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath ".next\trace" -Force -ErrorAction SilentlyContinue
+```
+
+or equivalently, if PowerShell policy blocks it, a Node one-liner
+limited to these exact two paths (`fs.rmSync('test-results', {recursive:true, force:true})`,
+`fs.rmSync('.next/trace', {force:true})`) — either method is
+authorized; no other path may be touched.
+
+**Do not authorize PATCH-104.**

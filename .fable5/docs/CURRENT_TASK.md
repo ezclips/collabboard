@@ -361,6 +361,54 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-23** — **PATCH-102 §20 — §19's diagnostic proved the
+  zero-wait mechanism is NOT what's failing anymore (image genuinely
+  present/pending, all 3 waits settle normally); new downstream
+  failure ("Rendering slide..." stuck forever) traced to a specific,
+  source-confirmed, but not-yet-live-proven leading hypothesis in
+  `PresentationPreviewModal.tsx`'s cancel-on-cleanup effect pattern.
+  Diagnostic-only instrumentation authorized in that file (new
+  production scope, deviating from PATCH-102's original prohibited
+  list, same justification as §19); NO fix authorized.** Run 2's
+  capture diagnostics confirmed: delayed image present, genuinely
+  unresolved (`complete:false, naturalWidth:0`) at inspection,
+  `pendingAtStart=1` correctly, all 3 waits settled normally
+  (532/872/1424ms, `timedOut:false`) before the new failure
+  ("Preview modal exposes a populated snapshot image" timed out at
+  90s). Re-read `PresentationPreviewModal.tsx` directly (not from
+  memory) and confirmed its big-preview effect (lines 48-79, sole
+  owner of `bigPng`) and its thumbnail-strip effect (lines 101-129)
+  both use a `cancelled`-flag cancel-on-cleanup pattern keyed to
+  `[open, currentSlide/slides, renderSlideToPNG, getSlideCacheKey]` —
+  if either effect re-runs before its own render promise resolves, the
+  earlier attempt's `setBigPng`/thumb-write is silently discarded. The
+  observed captures' tight clustering (+95ms, +17ms) is consistent with
+  a shared upstream reference (`slides`/`currentSlide`/`renderSlideToPNG`)
+  churning and restarting both effects together; a 4th+ restart beyond
+  the 3 observed (which would never appear in the buffer, since the
+  diagnostic only fires after a capture's own html2canvas completes)
+  would fully explain the modal staying stuck forever. Classified
+  **J — unresolved**, with a specific, testable, but NOT yet
+  live-confirmed leading hypothesis spanning **B/C** — explicitly not
+  asserted as final, learning directly from §18's confident-but-wrong
+  precedent. Authorized: additive, `NODE_ENV`-gated diagnostic events
+  in `PresentationPreviewModal.tsx` (effect-run IDs, cancelled-at-resolution,
+  result-accepted, result length only — never content) plus an
+  optional read-only surface-label passthrough on the 3 relevant
+  `renderSlideToPNG` call sites for this test's flow only. Phase 7:
+  the original zero-wait blocker is NOT closed by one non-reproduction
+  — requires a full clean 5-consecutive-run pass with diagnostics
+  active before being considered resolved. Phase 8: both diagnostics
+  are temporary, must be removed before final candidate review. Phase
+  9: §18 headers retained temporarily — proven insufficient alone, not
+  proven wrong or unnecessary; final disposition deferred until both
+  open questions resolve. Phase 10: cleanup for `test-results/` and
+  `.next/trace` authorized via a scoped PowerShell `Remove-Item` (or
+  equivalent Node one-liner) limited to exactly those two paths. No
+  candidate file modified this governance turn; PATCH-102 stash
+  untouched; PATCH-104 not started. Recorded in `PATCH-102.md` new
+  §20. Governance-only commit follows.
+
 - **2026-07-23** — **PATCH-102 §19 — §18's no-cache-header theory
   DISPROVEN live (every readiness event still `0/false/0` with headers
   applied); no new root-cause classification bound; capture-scoped
