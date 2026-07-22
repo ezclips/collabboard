@@ -326,7 +326,7 @@ components/ai/renderers/CodeDiagramRenderer.tsx                80d05e5ce1c6e2a17
 e2e/characterization/presentation-ai-component-structured-render.spec.ts 2efbfb9047fabce3cae3d5730d1a42a431b788bf
 components/presentation/slide-renderer/PresentationPadletCard.tsx cfc6d7b49bdcae93134a4944339f6649f8547510
 e2e/characterization/presentation-snapshot-ai-component-render.spec.ts 76f9c84c9c79a5a96c6f9f8cb0e57dc007bb16cf
-lib/ai/diagram-engine.ts                                       ec267a24d80cf6ee5add71ee02a9b1af8a6e3c8b
+lib/ai/diagram-engine.ts                                       e68c3e47bf8751560cc47eac91f7edbcac4b471e
 ```
 
 **Fence-count consistency (bind — verified before authorization):**
