@@ -361,6 +361,44 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-22** — **PATCH-103 §8 resolved; new §9 investigation opened
+  (unresolved) — drawing-presentation persisted-height failure traced
+  to a pre-existing gap, provisionally classification B, not
+  independently live-verified by the CTO role this turn (disclosed).**
+  §8 resolution: reported results confirm the anti-churn gate
+  (`hasInvalidFractionalIndex()`/`needsIndexSync`) was applied to
+  `DrawingLayout.tsx` (blob now
+  `539f85b127db938d7ee6c72d32fe913cb88f35f1`, `git diff` reviewed
+  directly) and the required verification matrix passed: PATCH-100
+  candidate stability 3/3, clean-base A/B confirmed clean HEAD still
+  hits the original `InvalidFractionalIndexError` (regression was
+  specific to the unconditional-sync design), plus
+  `drawing-line-bridge` targeted gate, PATCH-097/099/100/101, and the
+  full `drawing-line-bridge.spec.ts` file all green. New failure:
+  `drawing-presentation.spec.ts` and PATCH-096 group-12 fail
+  `expect(entry.persistedHeight).toBe(entry.liveConformedHeight)` —
+  live conformed height 153 vs. persisted (stale seeded) height 260.
+  Traced via static source only (no live browser/DB tooling available
+  this turn): `fetchPersistedScene()` reads the master drawing padlet's
+  `padlets.content` column, written by the existing
+  `handleChange`→`dirtyDataRef`→`performSave`→`saveDrawingSnapshot`
+  debounced autosave chain — confirmed via `git diff` that PATCH-103's
+  candidate touches ZERO lines of this chain, nor
+  `onNaturalHeight`/`recentlyNaturalResizedRef`/the height-lock
+  comparison (`DrawingLayout.tsx` lines ~519-538, ~1859-1873, ~1893) —
+  all byte-identical to clean HEAD. Because this test previously always
+  crashed with `InvalidFractionalIndexError` before reaching this
+  assertion (§0/§0.1), and PATCH-103's diff never touches the
+  height-persistence mechanism, provisionally classified **B — PATCH-103
+  exposes a pre-existing persistence gap, not a regression it
+  introduces** — pending the required live A/B (temporary stash
+  `PATCH-103-candidate-for-height-comparison`, distinct from both the
+  preserved `PATCH-102-candidate-before-PATCH-103` and the already-used
+  `PATCH-103-candidate-for-clean-base-comparison`). Candidate retained,
+  unmodified. PATCH-103 not committed. PATCH-102 stash untouched.
+  PATCH-104 not started. Recorded in `PATCH-103.md` §8 resolution note
+  + new §9. Governance-only commit follows this entry.
+
 - **2026-07-22** — **PATCH-103 investigation (unresolved) — PATCH-100
   regression traced to a plausible scene-reference-churn mechanism;
   live confirmation NOT independently re-executed by the CTO role this

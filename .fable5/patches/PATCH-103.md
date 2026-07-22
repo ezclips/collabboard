@@ -408,3 +408,130 @@ resolving the regression (bind):**
 
 Only after this verification is pasted with real (non-skip) output
 does PATCH-103 proceed to commit under its existing §6/§7 review flow.
+
+**§8 resolution (2026-07-22):** the reported PATCH-103 results confirm
+the gated fix was applied and the required verification matrix was
+run: PATCH-100 candidate stability 3/3 real runs; clean-base A/B
+proved clean HEAD still fails the original `InvalidFractionalIndex`
+crash before `[data-padlet-id]` (i.e. the churn regression is specific
+to the unconditional-sync design, not present on clean HEAD);
+`drawing-line-bridge` targeted gate, PATCH-097, PATCH-099, PATCH-100,
+PATCH-101, and the full `drawing-line-bridge.spec.ts` file all PASS.
+Current candidate `DrawingLayout.tsx` blob
+`539f85b127db938d7ee6c72d32fe913cb88f35f1` includes the
+`hasInvalidFractionalIndex()` gate confirmed via `git diff` (the
+automatic sync effect's early-return now reads
+`!needsIndexSync` alongside the pre-existing checks, and
+`indexedElements` is only recomputed via `syncSceneElementIndices()`
+when `needsIndexSync` is true). §8 is **resolved** — superseded by §9
+below, which covers a newly-surfaced, independent failure.
+
+## 9. Drawing-presentation persisted-height investigation (bind, 2026-07-22 — unresolved, candidate NOT amended by this section)
+
+**Reported live result with the §8-resolved candidate applied:**
+`drawing-presentation.spec.ts` and PATCH-096 grouped-runner
+`group-12-drawing-presentation` FAIL. Exact assertion
+(`e2e/characterization/drawing-presentation.spec.ts:1132`):
+`expect(entry.persistedHeight).toBe(entry.liveConformedHeight)` —
+`liveConformedHeight` measured at 153 (`getBoundingClientRect().height`
+on `.excalidraw__embeddable-container`, line 1041-1049),
+`persistedHeight` read at 260 (the original seeded value) from
+`fetchPersistedScene()` (line 246-256), which reads the master drawing
+padlet's `padlets.content` column directly — the same whole-scene JSON
+written by the existing debounced autosave (`handleChange` →
+`dirtyDataRef` → `performSave` → `saveDrawingSnapshot`,
+`DrawingLayout.tsx:1075-1239`). All 14 PATCH-096 groups were not
+reached (12/14 accounted, stopped on this failure per protocol); no
+auth-expiry or setup-close incidents; 1 non-signature failure.
+
+**Traced mechanism, static source only (NOT independently live-verified
+by the CTO role this turn — disclosed, not fabricated; I do not have
+live browser/network/DB inspection tooling in this environment):**
+
+1. The whole-scene autosave path is unchanged by PATCH-103's diff. `git
+   diff -- DrawingLayout.tsx` confirms zero hunks touch `handleChange`,
+   `performSave`, `dirtyDataRef`, `onNaturalHeight`,
+   `recentlyNaturalResizedRef`, or the height-lock comparison
+   (`heightLocked`/`pendingHeight`, lines ~1859-1873, ~1893). Every line
+   of that mechanism is byte-identical to clean governance HEAD.
+2. `onNaturalHeight` (line ~519-538) is the only place that writes a
+   "natural" (content-measured) height into the scene, via a direct
+   `excalidrawAPI.updateScene({ ..., height: newHeight })` outside the
+   `isSyncingEmbeddablesRef` guard — this call should reach
+   `handleChange` normally, get captured into `dirtyDataRef`, and be
+   persisted by the next debounced `performSave`. Nothing in the diff
+   changes this.
+3. The automatic padlet-embeddable sync effect's height-lock mechanism
+   (`heightLocked = pendingHeight !== undefined && el.height ===
+   pendingHeight`) is also unchanged. It exists specifically to stop
+   the sync effect from reverting a natural-resize height back to the
+   padlet record's stale DB height (`nextHeight = linkedPadlet.height ??
+   280`) while a natural resize is pending DB catch-up.
+4. **This test could never previously reach this assertion.** Before
+   PATCH-103, every drawing E2E spec (including this one) crashed with
+   `InvalidFractionalIndexError` before any `[data-padlet-id]` element
+   rendered (§0/§0.1). `drawing-presentation.spec.ts`'s height
+   assertions execute well after the fullscreen PNG census and native
+   raster-count checks — deep into a flow this test has never
+   completed in this governance program.
+
+**Provisional classification: B — PATCH-103 exposes a pre-existing
+persistence gap, not a regression it introduces.** The mechanism that
+would need to be broken for this to be an A/E-style regression (the
+height-lock/autosave chain) is untouched by the diff; the only thing
+PATCH-103 changed is that the test now runs far enough to reach this
+assertion at all. NOT classified as C (stale test expectation) or D
+(intentionally visual-only) without proving the product contract
+first (Phase 6 requirement) — no prior governance record in this
+program states persisted height is allowed to diverge from live
+conformed height, and the test's own construction (asserting equality)
+implies the opposite intent. NOT classified as F (async/debounce race)
+or G (test-data contamination) without the live A/B this investigation
+did not perform.
+
+**Product contract (bind, pending live confirmation):** presentation
+conformance that naturally resizes an embeddable's rendered height
+must result in that height being persisted to the drawing scene same
+as any other natural resize — i.e. `onNaturalHeight`'s existing
+contract ("hold scene height until DB catches up") is presumed to
+already cover this case. If live tracing shows the 153px conformance
+value is produced by a code path other than `onNaturalHeight` (e.g.
+presentation/snapshot-side CSS sizing that has no natural-resize
+persistence hook at all), the contract question becomes whether that
+separate code path was always expected to feed the same
+`onNaturalHeight`/height-lock bridge, or whether it is a distinct,
+previously-unbuilt persistence gap — this cannot be resolved from
+source alone and requires live confirmation of which mechanism
+actually produces 153.
+
+**Required investigation before any code change is authorized (bind):**
+
+1. Live reproduction of the failing `drawing-presentation.spec.ts`
+   assertion, repeated at least 3 times, capturing: whether
+   `onNaturalHeight` fires at all during the test's run; the exact
+   scene element height immediately after any `onNaturalHeight` call;
+   whether a subsequent sync-effect `updateScene` call reverts it;
+   whether `recentlyNaturalResizedRef` is ever populated for the target
+   padlet IDs; the exact sequence/timing of `handleChange` calls versus
+   the 2000ms `performSave` debounce; console/page errors; network
+   failures on the padlet-update path.
+2. Clean-base A/B using a temporary stash named exactly
+   `PATCH-103-candidate-for-height-comparison` (distinct from both
+   `PATCH-102-candidate-before-PATCH-103` and the already-used
+   `PATCH-103-candidate-for-clean-base-comparison`) — confirming clean
+   HEAD cannot even reach this assertion (still blocked by the original
+   fractional-index crash), which would further support classification
+   B over A/E.
+3. Verify candidate blobs before and after any stash operation; verify
+   the PATCH-102 stash remains present and untouched throughout.
+
+**Candidate status:** retained, unmodified — no code was changed
+during this investigation. Do not commit PATCH-103. Do not restore or
+modify the PATCH-102 stash. Do not begin PATCH-104.
+
+Only after this verification is pasted with real (non-skip) output,
+and a definitive (non-provisional) classification is reached, does
+PATCH-103 proceed toward its existing §6/§7 review flow — amended
+further if the live evidence shows an actual code change is required,
+or left as-is with a separately-scoped prerequisite patch authorized if
+the gap proves pre-existing and unrelated to the index-sync mechanism.
