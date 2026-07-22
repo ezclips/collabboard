@@ -29,9 +29,9 @@ origin/main at authoring time). **The PATCH-102 candidate remains
 uncommitted and out of scope for this patch** — do not stage, commit,
 or reference it.
 
-**Bound implementation commit message (verbatim, amended — see §11 for
-the current authoritative text, superseding §6 and §10):**
-`fix(e2e): capture post-mount-sync baseline before drawing-presentation order assertion (PATCH-103)`
+**Bound implementation commit message (verbatim, amended — see §12 for
+the current authoritative text, superseding §6, §10, and §11):**
+`fix(e2e): exempt padlet-record-synced embeddable width from the exact-seed-geometry invariant (PATCH-103)`
 
 **Second amendment (2026-07-22):** §8's PATCH-100 scene-reference-churn
 regression is resolved (gate applied, verification matrix passed). A
@@ -49,6 +49,14 @@ a second, independent instance of the same class of defect as §9/§10
 (a test baseline captured before a legitimate, deterministic
 production behavior lands), fixed the same way (a bounded, targeted
 wait), in the same already-authorized file. §11 is now the
+authoritative scope/commit-message/gate list for this patch.
+
+**Fourth amendment (2026-07-22):** with §11's order-baseline fix
+applied, a further failure surfaced in the same spec: the per-seeded-element
+width invariant. Investigated and definitively resolved by source in
+§12 — a genuine pre-existing production behavior (unrelated to
+PATCH-103's diff), fixed by a scoped, test-only geometry-assertion
+refinement in the same already-authorized file. §12 is now the
 authoritative scope/commit-message/gate list for this patch.
 
 ---
@@ -917,6 +925,215 @@ STOP immediately, report, do not commit, if:
   `toEqual` over the corrected baseline;
 - the seed functions are changed to add `containerC`'s embeddable
   (masking the behavior instead of accounting for it);
+- any of the 8 required live gates fails or is skip-only;
+- PATCH-096 does not report exactly 14/14/14, zero non-signature
+  failures, exit code 0;
+- credentials are printed, logged, or committed anywhere;
+- generated artifacts (`test-results/`, `.next/trace`,
+  `playwright-report/`) are committed;
+- cleanup cannot reach zero.
+
+**Review and commit flow:** implementer applies the single authorized
+change to `drawing-presentation.spec.ts` only, delivers the diff +
+report (final blob, full real results for all 8 required gates,
+cleanup proof, confirmation the other two candidate files and the
+PATCH-102 stash are untouched). The independent reviewer (Kepler
+primary, Gemini 3.1 Pro fallback — NOT Sonnet) re-derives everything
+live and must return an explicit PASS with real (non-skipped) output
+before the implementer commits with the bound message above and
+pushes. Only after this lands and closes does PATCH-102's independent
+review resume.
+
+## 12. Width-invariant investigation and amendment (bind, 2026-07-22)
+
+**Reported live result with §11's order fix applied** (blobs
+`drawingBridgeHarness.ts` → `9388086c4354e69290d9de2b7e1f2ecedcd15c45`,
+`DrawingLayout.tsx` → `539f85b127db938d7ee6c72d32fe913cb88f35f1`,
+`drawing-presentation.spec.ts` → `ad681770e0f3c169ee5161747f1d82c14cad9325`):
+Container C sync converged (5 attempts, 2290ms), settled pre-run order
+correct (8 ids, Container C's auto-embed
+`ffde9c37-f039-4dee-ae2f-699cdd786819` appended last), natural-height
+persistence converged (1 attempt, 81ms, `[153, 153]`). Both §10 and §11
+blockers passed. New failure at
+`drawing-presentation.spec.ts:1335`: `expect(postRunElement?.width).toBe(seededElement.width)`
+— expected seeded width `360`, received persisted width `320`.
+
+**Exact failing element (Phase 2):** `emb-slide-a`, type `embeddable`,
+linked `padlet://<containerA id>` (`fixture.containerIds[0]`). Seeded
+geometry (`embeddableElement('emb-slide-a', a, 360, 120, 360, 260,
+landscape)`, `drawingBridgeHarness.ts:490-521`): `x=360, y=120,
+width=360, height=260, frameId=frame-landscape`. Post-run: `x`/`y`/
+`frameId` unchanged; `height` correctly conformed to `153` (already
+covered by the existing `heightInvariantExceptions`); **only `width`**
+changed, from `360` to `320`. The same mechanism affects `emb-slide-b`
+(seeded `width=340`, also linked to a container whose own record width
+is `320`) — the loop throws on `emb-slide-a` first (it appears first
+in `persistedScene.sceneElements` order) so `emb-slide-b`'s identical
+defect is masked by the first thrown assertion, not absent.
+
+**Source of width 320, traced exactly (Phase 4):**
+`seedDrawingContainers()` (`drawingBridgeHarness.ts:313-356`) seeds
+Container A's and Container B's own `padlets.width` column as `320`
+(both containers, `width: 320, height: 220`) — a value deliberately
+**different** from the scene embeddables' seeded widths (`emb-slide-a`
+= 360, `emb-slide-b` = 340; two different canary values, evidently
+chosen to make any overwrite individually detectable). `DrawingLayout.tsx`'s
+automatic embeddable-sync effect (the same effect implicated in §8 and
+§11 — unchanged by PATCH-103's diff in this respect) computes, for
+every linked embeddable, `nextWidth = linkedPadlet.width ?? 320`
+(reading the padlet's own DB record) and — unlike height, which is
+protected by `heightLocked`/`recentlyNaturalResizedRef` — applies it
+**unconditionally**: `width: nextWidth` inside the `refreshed` object,
+gated only by `el.width !== nextWidth` in `needsRefresh`, with no
+width-lock equivalent. This effect runs on this exact fixture's every
+mount for a reason wholly independent of PATCH-103: Container C's
+missing embeddable (§11) alone makes `missingEmbeddables.length !== 0`,
+which already fails the early-return's first clause regardless of
+PATCH-103's added `needsIndexSync` term. **The width-320 transition
+happens inside this pre-existing sync effect, at board mount, the
+first time it runs — not during presentation-mode interaction, not
+during save serialization, and not restored afterward** (nothing in
+the traced code path reverts width once set).
+
+**Whether this is live-before-persistence or persistence-only:** the
+scene write (`excalidrawAPI.updateScene`) happens first, synchronously
+setting the live DOM/scene width to 320; the subsequent debounced
+autosave (§9/§10's mechanism, unchanged) merely persists that
+already-live value. Persistence is not stale or reading the wrong
+object — it faithfully reflects what the sync effect already set live.
+
+**Clean-base A/B:** not independently re-executed live this turn — as
+with §11, the mechanism is deterministically provable from static
+source: `git diff` confirms `nextWidth`/`width: nextWidth`/`needsRefresh`'s
+width clause are byte-identical to clean HEAD, and the trigger
+(Container C's missing embeddable) is itself pre-existing and
+independent of PATCH-103's `needsIndexSync` gate. Per §0/§0.1/§11's
+already-established finding, clean HEAD cannot reach this assertion at
+all (still blocked earlier by the fractional-index crash), so it could
+not have exposed or hidden this behavior either way — this again
+mirrors §11's situation exactly, not a new investigative question.
+
+**Product contract (Phase 5):** the surrounding assertions already
+demonstrate the test's own established pattern for auto-conformed
+geometry — `heightInvariantExceptions` exists specifically because
+height is deliberately, deterministically conformed for these same two
+elements, and the test still asserts a *specific* expected value
+(`persistedHeight === liveConformedHeight`) rather than merely dropping
+coverage. Width is conformed by a **different**, non-content-driven
+mechanism (synced to the linked padlet's own authoritative `width`
+column, not measured from rendered content — there is no "natural
+width" callback anywhere in `DrawingLayout.tsx`, confirmed by grep),
+but the correct contract shape is the same: **exemption + a specific
+replacement assertion, not silent coverage loss.** This matches Phase
+5 option **C** (both width and height may be conformed to
+renderer/product constraints) combined with **D**'s spirit (the
+authoritative source for width is the linked record, distinct from
+height's content-driven path) — not **A** (exact-preservation is not
+the real contract, precisely because this deterministic sync effect
+predates PATCH-103 and is not something this patch may change) and not
+**F** (320 is not asserted anywhere as a canonical constant — it is
+this fixture's specific container width, incidental to this test).
+
+**Flagged, explicitly NOT authorized for action in this patch:** the
+absence of a width-lock analogous to `heightLocked` means any real user
+who resizes an embeddable's width via Excalidraw's own resize handles
+would have that resize silently reverted the next time this sync
+effect runs for any unrelated reason (a new padlet, an orphan cleanup,
+or the index-sync gate). This is a plausible, pre-existing product gap
+— but it is a `DrawingLayout.tsx` production-behavior question, out of
+scope for this test-readiness prerequisite patch, and is NOT
+authorized for a fix here. If confirmed, it should be raised as its
+own separately-scoped, separately-authorized candidate patch after
+PATCH-102/103 close — not folded into this amendment.
+
+**Definitive classification: B — PATCH-103 exposes a pre-existing
+automatic width-conformance behavior.** Not A (no width-related line
+in the diff); not C (the seeded width is not "incompatible," it is a
+deliberately different canary value the sync effect was always going
+to overwrite once reachable); not E (persistence is not stale — it
+faithfully reflects the already-live sync); not G (the correct element
+is matched — `emb-slide-a`'s `id` and `link` are exactly right); not H
+(the fixture geometry is valid, just deliberately distinct from the
+padlet record, precisely to make this observable).
+
+**Authorized fix (bind) — scoped entirely inside the already-authorized
+file, no new file added to scope:**
+
+`e2e/characterization/drawing-presentation.spec.ts`, current blob
+`ad681770e0f3c169ee5161747f1d82c14cad9325` (§11's landed candidate),
+amended as follows and only as follows:
+
+1. Add a `widthInvariantExceptions` set, identical in construction to
+   the existing `heightInvariantExceptions`
+   (`new Set<string>(naturalHeightTargets.map(({ sceneId }) => sceneId))`
+   — i.e. `emb-slide-a` and `emb-slide-b`).
+2. Guard the width assertion at line 1335 the same way the height
+   assertion is already guarded at line 1336:
+   `if (!widthInvariantExceptions.has(seededElement.id)) { expect(postRunElement?.width).toBe(seededElement.width); }`.
+3. For the exempted elements, add a specific replacement assertion
+   (not silent coverage loss) verifying the deterministic conformance
+   target: build a lookup from `postRunPersistedPadlets` (already
+   fetched at line 1240 — no new query) by padlet id (extracted from
+   `postRunElement.link`, stripping the `padlet://` prefix, mirroring
+   the existing pattern used for `naturalHeightTargets`), and assert
+   `postRunElement?.width` equals that linked padlet's own `width`
+   field (expected `320` for both `emb-slide-a` and `emb-slide-b` given
+   the current fixture, but the assertion must compare against the
+   fetched value, not a hard-coded `320`, so it stays correct if the
+   fixture's container width ever changes).
+4. Leave every other assertion in the per-seeded-element loop (lines
+   1325-1338: id, type, frameId, link, isDeleted, x, y, and the
+   existing height-exception logic) completely unchanged.
+
+**Explicitly prohibited by this amendment (bind):** no change to
+`DrawingLayout.tsx` or `drawingBridgeHarness.ts` (both remain at their
+already-verified blobs) — in particular, no width-lock mechanism is
+authorized here, however plausible the flagged gap above; no change to
+`seedDrawingContainers`/`seedPresentationScene`'s seeded geometry
+values (360/340/320 stay exactly as seeded — changing them to make
+widths match would hide the real conformance behavior this test should
+observe); no relaxing of the width assertion to a range/tolerance
+check when a specific expected value (`linkedPadlet.width`) is
+available; no change to the height assertions, order assertions, or
+any other assertion/fixture/selector in `drawing-presentation.spec.ts`;
+no fixed/arbitrary sleep; no change to PATCH-102's files or its named
+stash; no governance changes beyond this amendment.
+
+**Bound implementation commit message (verbatim, supersedes §6, §10,
+and §11):**
+`fix(e2e): exempt padlet-record-synced embeddable width from the exact-seed-geometry invariant (PATCH-103)`
+
+**Required live gates after this amendment (bind, non-skip real
+results required for all — supersedes §10/§11's gate lists):**
+
+1. `drawing-presentation.spec.ts`'s full scenario — **at least 3
+   consecutive real runs**, all passing, covering height convergence
+   (§10), order stability (§11), and the width-invariant exemption
+   (§12) together.
+2. `drawing-line-bridge.spec.ts -g "renders seeded attached"` (targeted
+   gate).
+3. Full `drawing-line-bridge.spec.ts`.
+4. PATCH-097 spec.
+5. PATCH-099 spec.
+6. PATCH-100 spec.
+7. PATCH-101 spec.
+8. PATCH-096 grouped runner — must report **14 groups configured, 14
+   specs configured, 14 final passes, zero non-signature failures,
+   exit code 0**. Skip-only results do not count as passes.
+
+**Hard-stop conditions (bind, supersedes §5/§10/§11 for this
+amendment):** STOP immediately, report, do not commit, if:
+
+- any file outside `drawing-presentation.spec.ts` is touched;
+- `DrawingLayout.tsx` or `drawingBridgeHarness.ts` changes from their
+  bound blobs (including any width-lock addition — explicitly out of
+  scope, see the flagged-gap note above);
+- the PATCH-102 candidate or its named stash is modified, popped,
+  applied, or dropped;
+- the width assertion is weakened to a range/tolerance instead of an
+  exact comparison against the linked padlet's fetched `width`;
+- any seeded geometry value (360/340/320/position/frame) is changed to
+  avoid the observed conformance instead of accounting for it;
 - any of the 8 required live gates fails or is skip-only;
 - PATCH-096 does not report exactly 14/14/14, zero non-signature
   failures, exit code 0;

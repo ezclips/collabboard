@@ -361,6 +361,50 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-22** — **PATCH-103 §12 amendment — width-invariant failure
+  traced and resolved by source (classification B), third instance of
+  the same "test finally reaches real, pre-existing mount behavior"
+  class as §9/§11, scoped fix inside the already-authorized
+  `drawing-presentation.spec.ts`, no new file.** With §11's order fix
+  applied, all prior blockers passed (Container C sync converged,
+  order stable, height converged `[153,153]`); new failure at
+  `drawing-presentation.spec.ts:1335`: `emb-slide-a` seeded width `360`
+  persisted as `320`. Root cause confirmed deterministic by source:
+  `seedDrawingContainers()` seeds Container A/B's own `padlets.width`
+  column as `320`, deliberately different from the scene embeddables'
+  seeded widths (`emb-slide-a`=360, `emb-slide-b`=340 — distinct canary
+  values). `DrawingLayout.tsx`'s pre-existing automatic embeddable-sync
+  effect (unchanged by PATCH-103) computes `nextWidth =
+  linkedPadlet.width ?? 320` and applies it **unconditionally** — unlike
+  height, which has an explicit `heightLocked` protection, width has no
+  equivalent lock. This effect runs on every mount of this fixture for
+  a reason independent of PATCH-103 (Container C's missing embeddable,
+  §11, alone triggers it). The width-320 transition happens live, at
+  mount, inside this effect — not during presentation interaction, not
+  during save, and never restored. Classified **B — pre-existing
+  automatic width-conformance behavior**, not a PATCH-103 regression.
+  Flagged but explicitly NOT authorized for action: the missing
+  width-lock could mean a real user's manual embeddable resize silently
+  reverts whenever this sync effect runs for any unrelated reason — a
+  plausible separate future product patch, out of scope here. Fix:
+  add a `widthInvariantExceptions` set mirroring the existing
+  `heightInvariantExceptions` (same two ids), guard the exact-width
+  check the same way height is already guarded, and add a specific
+  replacement assertion for the exempted elements verifying persisted
+  width equals the linked padlet's own fetched `width` (not a
+  hard-coded 320). No change authorized to `DrawingLayout.tsx`,
+  `drawingBridgeHarness.ts`, or seeded geometry values. New bound
+  commit message:
+  `fix(e2e): exempt padlet-record-synced embeddable width from the exact-seed-geometry invariant (PATCH-103)`.
+  8 required live gates bound in §12 (3x full-scenario runs covering
+  height/order/width together, targeted + full drawing-line-bridge,
+  PATCH-097/099/100/101, PATCH-096 grouped runner requiring exactly
+  14/14/14 with zero non-signature failures and exit code 0). Candidate
+  files unchanged this turn; PATCH-102 stash untouched; PATCH-104 not
+  started. Recorded in `PATCH-103.md` new §12. Generated artifacts
+  (`test-results/`, `.next/trace`) confirmed gitignored, cleaned up
+  after this entry. Governance-only commit follows.
+
 - **2026-07-22** — **PATCH-103 §11 amendment — element-order assertion
   failure traced and resolved by source (classification C), same class
   of defect as §9/§10, scoped fix inside the already-authorized
