@@ -1072,3 +1072,190 @@ authorized by this governance turn — it is out of scope for PATCH-102
 and must not be touched here.
 
 **Do not authorize PATCH-104.**
+
+## 18. Zero-wait stability investigation and amendment (bind, 2026-07-22)
+
+**§15's route-lifecycle fix is confirmed working and retained.** Runs
+1-2 of the required 5-run stability gate passed with genuine settlement
+events (`315/827/1601` and `645`, all `false/0`), variable fulfilled
+counts (12/100) and abort counts (3/24), and **zero** "Route is already
+handled!" errors across all 3 runs, including the failing one. §15's
+classification-B fix is proven to have eliminated the teardown race
+entirely — this is a **different, new failure**, correctly not
+conflated with the prior one.
+
+**Exact lifecycle timeline (traced by source; NOT independently
+live-instrumented per capture this turn — no live browser tooling
+available in this environment; the per-capture diagnostic Phase 3
+calls for has not been executed and is flagged as still required
+before this classification is treated as final):**
+
+`openPreviewModal()` (lines 299-311) performs, in order: (1) click
+"Present Frames" — entering presentation mode, which mounts the
+presentation **sidebar**, itself rendering a **thumbnail** for the one
+seeded slide (a full `renderSlideToPNG`/`createSlideRenderer` snapshot
+capture, independent of and prior to anything the test explicitly
+requests); (2) wait for `"Slides (1)"` visible; (3) click the slide's
+menu button; (4) click "Preview slide" — triggering a **second**,
+separate snapshot capture for the big-preview modal; (5) wait for the
+modal's slide title visible. **Both (1)'s thumbnail and (4)'s preview
+independently call `renderPadletOverlayToCanvas`, each creating its own
+fresh offscreen host and fresh `<img>` element for the exact same
+seeded `<img src="https://patch-102.test/delayed.png">`.** Additionally,
+`seedLegacyHtmlSlide`'s ai-component padlet is embedded directly in the
+master drawing scene (not only inside the Presentation frame), so it
+is plausible the **live board's own on-canvas render** (mounted by
+`openDrawingBoard`, before `openPreviewModal` is ever called) also
+renders this same legacy HTML and independently fetches the same URL,
+via the same, unmodified `applyImageEnhancements()`/§13 eager-load
+path, well before either snapshot capture begins.
+
+**Cache/reuse findings (Phase 4) — the decisive, source-provable
+fact:** `route.fulfill({ status: 200, contentType: 'image/png', body:
+SYNTHETIC_PNG })` (lines 417-421) sets **no cache-control headers at
+all** — no `Cache-Control: no-store`, no `Pragma: no-cache`, no
+`Expires: 0`. A fulfilled Playwright route response populates the
+browser's normal HTTP/memory cache exactly like a real network
+response unless explicitly told not to. Chromium's aggressive
+same-document in-memory resource cache routinely serves a **second**
+request for the **identical URL** within the same page/session
+instantly, without re-hitting the network layer (and therefore without
+re-triggering `page.route()` or incurring the artificial delay a
+second time) — this is standard, well-documented browser behavior, not
+speculative. Every one of run 3's requests still reached
+`page.route()` (94 fulfilled, 42 aborted — the route handler clearly
+still fired many times), which is consistent with **some** requests
+being genuinely fresh network fetches while **others** — specifically
+whichever capture attempt(s) happen to run *after* an earlier
+same-URL fetch already resolved within the same test — are served from
+cache before ever reaching the "loading" marker state the readiness
+check depends on. This explains the non-determinism precisely: runs
+1-2 apparently had at least one capture attempt whose own `<img>`
+element was still genuinely pending at first inspection; run 3
+apparently did not — every capture's image was already resolved
+(cached) by the time its readiness check ran.
+
+**Whether the live board warmed the URL, and whether the asserted
+event belonged to the "intended" capture:** not proven by live
+per-capture instrumentation this turn (Phase 3's required diagnostic
+was not executed — flagged, not skipped). It does not need to be
+proven to select the correct fix: the test's own assertion
+(`events.some(...)`) already does not — and, per §7 below, **should
+not need to** — distinguish which specific capture (thumbnail vs.
+preview vs. any live-board render) produced the qualifying event; it
+only requires that genuine pending-then-settled behavior is observed
+**at least once**. The defect is that caching allows it to happen
+**zero** times in a run, not that the test is watching the wrong
+event.
+
+**Classification: A — browser/renderer caching allows the snapshot-host
+image to be immediately complete, because the fulfilled response
+carries no cache-defeating headers**, with the most likely specific
+mechanism being either the live board's own render or an earlier
+capture (sidebar thumbnail) warming the exact same URL before a later
+capture's readiness inspection runs (option B/C are both plausible
+specific instances of A; the fix does not require distinguishing
+between them, since eliminating caching entirely removes the
+race regardless of which source would otherwise have won it). Not D
+(the delay itself, 500ms, is unchanged and was already proven
+sufficient in runs 1-2 whenever a fresh fetch actually occurred); not
+E (the assertion's `.some()` scan is appropriate given §7's contract,
+not a bug); not F (the intended delayed `<img>` is present in every
+run, including run 3 — its element identity isn't in question, only
+whether its *request* was fresh).
+
+**Product/test contract (Phase 7) — determined, not assumed:** the
+original test name and governance intent (§0/§3 of this document)
+require **case 1**: a real loading marker must exist at first readiness
+inspection, then settle before timeout — not merely "the delayed
+request occurred at some point." §13's production fix and §15's
+synchronization fix both exist specifically to prove genuine
+wait-then-settle behavior works; a test that could pass via a
+cache-warmed zero-wait capture would not actually be exercising that
+behavior on every run. **The fixture must be corrected to guarantee
+case 1 deterministically — the production assertion and wait mechanism
+are not weakened; the caching gap in the test's own response headers is
+the defect being corrected.**
+
+**Minimum safe fix (bind) — spec-only, no URL-uniqueness scheme or
+capture-attempt targeting required:**
+
+In `e2e/characterization/presentation-snapshot-image-readiness.spec.ts`,
+delayed-image test only, add explicit cache-defeating response headers
+to the existing `route.fulfill()` call in `handleDelayedImageRoute`
+(lines 417-421):
+
+```ts
+await route.fulfill({
+  status: 200,
+  contentType: 'image/png',
+  headers: {
+    'Cache-Control': 'no-store, no-cache, must-revalidate',
+    'Pragma': 'no-cache',
+    'Expires': '0',
+  },
+  body: SYNTHETIC_PNG,
+});
+```
+
+This is sufficient by itself to guarantee every one of Phase 8's
+required properties: it forces **every** request to the URL — whether
+from the live board's own render, the sidebar thumbnail capture, or
+the Preview modal capture — to bypass any cache and re-enter the
+network/route layer fresh, incurring the artificial 500ms delay
+independently each time. This makes the `.some()` scan correct by
+construction (any capture attempt in the test will now genuinely
+observe pending-then-settled state), removes the need for a
+unique-URL-per-attempt scheme or explicit capture-attempt
+identification, and requires no change to the delayed-image product
+assertion, the 500ms delay value, `SYNTHETIC_PNG`, §15's
+`inFlightHandlers`/`requestCount` mechanism, or any other test in the
+file.
+
+**Explicitly NOT authorized by this amendment:** a unique delayed-image
+URL per test run or per capture attempt (unnecessary once caching is
+disabled, and would complicate §15's in-flight tracking for no
+benefit); increasing the artificial delay beyond 500ms (unnecessary —
+runs 1-2 already proved 500ms is sufficient whenever the fetch is
+genuinely fresh); explicit capture-attempt identification/filtering of
+the `.some()` scan (unnecessary once every capture is guaranteed
+fresh); any change to `createSlideRenderer.tsx` (§13's eager-load fix
+remains exactly as landed, blob
+`ef8c1a9b7a9521a6a68d40e661ee50effff986fd`); any change to §15's
+`inFlightHandlers`/`requestCount`/cleanup-ordering logic; any change to
+any other test in the file.
+
+**Required live evidence before this is accepted as resolved (bind):**
+
+1. **5 consecutive real runs** of the delayed-image test, all passing,
+   each producing at least one genuine settlement event
+   (`waitedMs > 0, timedOut === false, pendingCount === 0`,
+   `waitedMs < 3000`), zero route errors, zero zero-wait-only runs.
+2. Ideally (not gating, since the no-store fix is correct regardless),
+   confirmation via a quick live check that requests now consistently
+   exhibit non-zero delay regardless of ordering — if GPT-5.5 can
+   cheaply capture this, include it in the report; if not, the 5-run
+   pass/fail result alone is sufficient proof.
+3. The full §16 gate matrix, unchanged: full 6-scenario suite,
+   PATCH-101/100/099/097/089/090/091/093/094, PATCH-103 coexistence,
+   PATCH-096 at exactly 14/14/14, and the full deterministic gate list.
+
+**Hard-stop conditions (bind, in addition to §8/§13/§14/§15/§16):**
+STOP immediately, report, do not commit, if:
+
+- `createSlideRenderer.tsx` changes at all;
+- §15's `inFlightHandlers`/`requestCount`/cleanup-ordering changes;
+- a unique-URL scheme, capture-attempt filtering, or delay-value change
+  is introduced instead of the no-store header fix;
+- the delayed-image product assertion is weakened (e.g. accepting
+  `waitedMs === 0` as passing, or reducing `.some()` to always-true);
+- any zero-wait-only run still occurs across the 5 required runs;
+- any route error (including "already handled") recurs;
+- any of the required live gates fails or is skip-only;
+- credentials are printed, logged, or committed anywhere.
+
+**Bound implementation commit message (verbatim, supersedes §15's for
+final acceptance):**
+`fix(e2e): disable HTTP caching for the delayed legacy-image fixture in presentation snapshot readiness spec (PATCH-102)`
+
+**Do not authorize PATCH-104.**

@@ -361,6 +361,47 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-22** — **PATCH-102 §18 — zero-wait stability failure traced
+  to missing cache-defeating response headers (classification A), not
+  a recurrence of the §15 route-teardown race (proven eliminated: zero
+  "already handled" errors across all 3 runs including the failing
+  one).** 5-run stability gate stopped on run 3: runs 1-2 passed with
+  genuine settlement events; run 3 saw every readiness event at
+  `0/false/0` — no pending state ever observed, despite 94 fulfilled +
+  42 aborted requests still occurring. Traced by source (not
+  live-instrumented per-capture this turn — flagged, not skipped):
+  `openPreviewModal()` triggers **two** independent snapshot captures
+  (the presentation sidebar's thumbnail render, then the explicit
+  "Preview slide" modal render), each creating its own fresh offscreen
+  host + `<img>` for the same seeded URL; the ai-component padlet is
+  also embedded directly in the live drawing scene, so the live board's
+  own render may warm the same URL even earlier. The decisive,
+  source-provable fact: `route.fulfill()` sets **no cache-control
+  headers at all** — no `Cache-Control: no-store`, no `Pragma`, no
+  `Expires`. Chromium's in-memory resource cache serves a second
+  request to the identical URL within the same page instantly,
+  bypassing the network layer (and the artificial delay) entirely —
+  explaining exactly why *some* runs observe genuine pending state
+  (whichever capture's fetch happens to run first) while others (run
+  3) do not (every capture's image was already cache-resolved by the
+  time its readiness check ran). Classified **A**. Confirmed via §7
+  contract analysis that the test's `.some()`-over-all-events design is
+  correct as-is and does not need capture-attempt targeting — once
+  caching is eliminated, every capture attempt is guaranteed fresh, so
+  the existing scan becomes correct by construction. Minimum safe fix
+  authorized: add `Cache-Control: no-store, no-cache, must-revalidate`
+  + `Pragma: no-cache` + `Expires: 0` to the existing `route.fulfill()`
+  call in the delayed-image test only — no URL-uniqueness scheme, no
+  delay-value change, no capture-attempt filtering, no change to
+  `createSlideRenderer.tsx` or §15's in-flight-tracking logic. New
+  bound commit message:
+  `fix(e2e): disable HTTP caching for the delayed legacy-image fixture in presentation snapshot readiness spec (PATCH-102)`.
+  Required live evidence: 5 consecutive passing runs with zero
+  zero-wait-only runs and zero route errors, plus the unchanged full
+  §16 gate matrix. No candidate file modified this turn; PATCH-102
+  stash untouched; PATCH-104 not started. Recorded in `PATCH-102.md`
+  new §18. Governance-only commit follows.
+
 - **2026-07-22** — **PATCH-102 §15/§16/§17 — §14 diagnostic proved
   classification B (page/context teardown races an in-flight delayed
   route handler); minimal spec-only synchronization fix authorized;
