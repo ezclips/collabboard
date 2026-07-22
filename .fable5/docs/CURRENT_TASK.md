@@ -361,6 +361,62 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-22** — **PATCH-103 AUTHORIZED (prerequisite to PATCH-102
+  live review) — Excalidraw fractional-index invariant crash traced
+  to a pre-existing E2E harness fixture defect, NOT a PATCH-102
+  regression.** Investigated the reported canvas crash (authentication
+  and board creation succeed; canvas crashes before `[data-padlet-id]`
+  renders; Excalidraw fractional-indices invariant error; reproduces
+  across restarts; `.next` deletion ruled out as cause). **Root cause,
+  confirmed by source:** `DrawingLayout.tsx:895` loads the master
+  drawing padlet's scene via a raw
+  `setInitialElements(JSON.parse(drawingPadlet.content))` with no
+  restoration step — not itself a defect, since elements created
+  through Excalidraw's own UI/API always carry a valid fractional
+  index. The actual incompatibility is in
+  `e2e/characterization/drawingBridgeHarness.ts` (the SHARED harness
+  behind the entire drawing E2E suite), whose `embeddableElement()`/
+  `frameElement()`/other builders hard-code `index: null` (confirmed
+  at lines 110/145/176/218) — these synthetic elements bypass
+  Excalidraw's element factories entirely via raw Supabase inserts. The
+  vendored fork's `validateFractionalIndices()`
+  (`fractionalIndex.ts:43`) throws `InvalidFractionalIndexError` on any
+  invalid/null index once elements load through `initialData` —
+  long-standing fork behavior, unchanged since March 2026 (confirmed
+  via `git log`; the only two fork-related commits in history are
+  tracking-mechanism changes, not code-logic changes).
+  `versionNonce: 1` is confirmed incidental — the validator inspects
+  only `index`, never `versionNonce`. **Classification: A — E2E
+  fixture incompatibility**, not a production defect, not a fork
+  regression, not dependency drift, not a build-cache issue, and NOT
+  caused by PATCH-102 (none of PATCH-097 through 102 touch the
+  harness, `DrawingLayout.tsx`, or the fork — all three remain fenced
+  across every one of those patches' governance records). PATCH-102's
+  own new spec inherits the identical harness pattern faithfully,
+  exactly as every prior patch's spec did — it is not implicated and
+  requires no changes. **Notable, not re-litigated:** this is most
+  likely the first time in this governance thread that a genuinely
+  authenticated live session has actually opened a harness-seeded
+  drawing board; prior patches' "live PASS" claims were accepted from
+  independent-reviewer reports per this program's standing closure
+  pattern (CTO re-verifies diffs/blobs/fences directly, relies on the
+  reviewer's report for live execution) and were never independently
+  re-executed by the CTO role — a pre-existing verification-depth gap,
+  flagged for awareness. **PATCH-102 remains blocked** pending this
+  prerequisite. **PATCH-103 AUTHORIZED:**
+  `.fable5/patches/PATCH-103.md` created — single file
+  (`drawingBridgeHarness.ts`), replacing each `index: null` literal
+  with a valid fractional-index string satisfying the fork's own
+  validator, verified by re-running every previously-blocked drawing
+  E2E spec (PATCH-097/099/100/101/096-runner plus at least one
+  non-AI-content drawing spec) with real, non-skip-only assertions.
+  No new spec required. The PATCH-102 candidate remains untouched and
+  out of scope for this patch; PATCH-102's own review resumes only
+  after PATCH-103 lands and closes, using the same approved
+  credential-loading procedure. GPT-5.5 implements; independent
+  reviewer (Kepler primary, Gemini 3.1 Pro fallback) required before
+  commit; Sonnet will not review its own authorization.
+
 - **2026-07-22** — **PATCH-102 BLOCKED — independent review FAILED on
   missing E2E credentials; classification C (no credentials available
   in this environment), NOT a defect in the patch or the credential
