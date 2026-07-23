@@ -2375,3 +2375,300 @@ remainder of §21/§22 Phase 8 resumes):**
 `test(presentation): widen PATCH-101 forced-timeout fixture to survive churn-free single-capture timing (PATCH-102)`
 
 **Do not authorize PATCH-104.**
+
+## §24 — stepCount scaling proven unsafe (hard Mermaid edge-limit wall); deterministic render-hold authorized instead (bind)
+
+**Trigger:** implementing §23's authorized correction by raising the
+forced-timeout fixture's `stepCount` (600, then 1000) did not
+stabilize the timing race and, at 1000, produced a **materially
+different** failure — the diagram never left "Rendering diagram…"
+and "Mermaid 'Syntax error in text'" content was observed. Implementer
+correctly stopped rather than pushing `stepCount` higher.
+
+### Phase 1 — candidate integrity (verified)
+
+```
+HEAD == origin/main == 48abebb4843620b5edf724d83a8d1e2ddb5e4f73
+DrawingLayout.tsx blob: eb9c5fd5fb3590dfc0cd4f25a5c88c47d34eb56b (unchanged, matches)
+createSlideRenderer.tsx blob: ef8c1a9b7a9521a6a68d40e661ee50effff986fd (unchanged, matches)
+presentation-snapshot-image-readiness.spec.ts blob: 3100c8aa087b585321975797b62d5b8fdd725e42 (untracked, matches)
+presentation-snapshot-diagram-readiness.spec.ts blob: c226888e6f3857e7a33ed5959163c42ec0614558 (matches — stepCount=1000 state)
+git diff --cached --name-only: (empty)
+git stash list: stash@{0}: On main: PATCH-102-candidate-before-PATCH-103 (untouched)
+PATCH-104.md: absent
+```
+
+Exactly four candidate paths, zero staged files, stash present,
+PATCH-104 not started — confirmed.
+
+### Phase 2 — Mermaid fixture-generator inspection (live-proven, not inferred)
+
+Reproduced the exact `flowchartEnvelope()` string-generation algorithm
+(spec lines 142-171) for `stepCount` 180, 600, and 1000, and validated
+each generated string directly against the repository's installed
+Mermaid 11.13.0 (`mermaid.parse()` and `mermaid.render()`, in a real
+browser page, not a Node/jsdom shim) via a scratch script — deleted
+after use, never part of the governed candidate set:
+
+| stepCount | chars | `-->` edges | `mermaid.parse()` | `mermaid.render()` |
+|---|---|---|---|---|
+| 180 | 7,168 | 182 | `true` (`flowchart-v2`) | **ok**, 353,328-char SVG |
+| 600 | 24,388 | 602 | `false` | **fails**: `Edge limit exceeded. 500 edges found, but the limit is 500.` |
+| 1000 | 40,794 | 1,002 | `false` | **fails**: same edge-limit error |
+
+Node-ID generation itself is not the defect: `.padStart(2, '0')`
+only pads shorter numbers, never truncates longer ones, so IDs stay
+unique at every tested `stepCount` (confirmed: unique ID count equals
+expected node count at all three sizes, no collisions). The exact
+mechanism is Mermaid's own hardcoded safety ceiling —
+`mermaid.mermaidAPI.getConfig().maxEdges === 500` — read directly from
+the same installed version `lib/ai/diagram-engine.ts` initializes with
+(`mermaid.initialize({...})`, no `maxEdges` override present, so the
+library default of 500 applies). Each generated fixture produces
+`stepCount + 2` edges (the loop's `stepCount` edges, plus the initial
+`start-->step01` edge, plus the trailing `stepN+1-->done` edge), so the
+safe ceiling is **`stepCount <= 496`** (498 edges) — any value at or
+above roughly 498 silently crosses into `mermaid.render()` throwing,
+which `renderDiagramCode()` (`lib/ai/diagram-engine.ts:52-57`) catches
+and returns as `{ ok: false, reason: error.message }`, which
+`CodeDiagramRenderer.tsx` (line 63) turns into `setPhase({ phase:
+'failed' })` — and `data-ai-render-state={phase.phase}` (line 80) then
+reads `"failed"`, not `"loading"`. The generic "Syntax error in text"
+text observed at `stepCount=1000` is Mermaid's own top-level
+diagram-detection/parse wrapper message for this class of failure —
+functionally the same edge-limit rejection as the more specific
+`render()` error, not a distinct second defect.
+
+### Phase 3 — validity vs. render cost (bind)
+
+`stepCount` scaling is **not** a valid lever for buying more render-time
+margin beyond ~496 steps — past that point the fixture stops being a
+"slow, genuinely valid diagram" and becomes an always-failing one,
+regardless of machine speed. **Classification: C — valid Mermaid
+syntax at moderate sizes, but Mermaid rejects the fixture outright once
+graph size crosses its own hardcoded resource limit** (not B: the
+generated text is grammatically valid Mermaid at every size tested;
+what fails is a post-parse safety check, confirmed by `mermaid.parse()`
+itself returning `false` only once edges exceed 500, with the exact,
+named `maxEdges` config field cross-checked live). This also explains
+attempt 1 (`stepCount=600`) reporting only the *original* timing-race
+symptom rather than a visibly distinct error: 602 edges already
+exceeds 500, so `phase` almost certainly flipped to `'failed'` (not
+`'loading'`) before the first `pendingAtStart` check in
+`createSlideRenderer.tsx`, which reads as "nothing pending" — the same
+observable symptom as §23's original race (`timedOut:true` never
+appears), just for a different underlying reason. The visible
+"Syntax error" text only became legible to the implementer at
+`stepCount=1000` because the failure was slow enough this time to be
+caught mid-transition or the on-canvas (non-offscreen) copy displayed
+it long enough to notice. Both 600 and 1000 are equally invalid;
+600 is not a safe intermediate value.
+
+### Phase 4 — lifecycle divergence (bind)
+
+At `stepCount<=~496` (e.g. 180): fixture seeded → board opens →
+`CodeDiagramRenderer` mounts, `data-ai-render-state="loading"` →
+`renderDiagramCode` awaits `mermaid.render()` (valid, real work) →
+override installed → wait listener installed → presentation surface
+opens → captures begin → `createSlideRenderer` reads the override →
+`pendingAtStart` is whatever the real render's progress happens to be
+at that moment (the §23 timing race) → if `>0`, timeout event
+dispatches correctly → capture proceeds → Preview image appears. This
+path is production-correct but timing-dependent, per §23.
+
+At `stepCount>=~498` (600, 1000): the same sequence diverges at
+"`renderDiagramCode` awaits `mermaid.render()`" — the promise **rejects**
+almost immediately (edge-limit check happens during parse/graph-build,
+not layout, so it fails fast, not slowly) — `phase` becomes `'failed'`
+essentially before or very close to the first `pendingAtStart` check,
+so `pendingAtStart` reads 0 (or transiently 1 then 0 before the 50ms
+override deadline), and the forced-timeout event never fires with
+`timedOut:true`, regardless of how long the test waits. This is a
+**different failure than §23's original race** — not a slow-render
+timing miss, but a fixture that can no longer ever enter a genuine,
+sustained pending state at all.
+
+### Phase 5 — production timeout contract (bind: intact, unchanged, confirmed again)
+
+`createSlideRenderer.tsx` (blob `ef8c1a9b7a9521a6a68d40e661ee50effff986fd`,
+untouched since §13) still correctly reads
+`__patch101TimeoutOverrideMs`, applies it to the shared readiness wait,
+dispatches the wait event with well-formed
+`waitedMs`/`timedOut`/`pendingCount`, and proceeds with capture after a
+genuine timeout — none of this changed. What changed under
+`stepCount` scaling is that the *input fixture itself* stopped being
+capable of presenting a genuine, sustained "loading" state at all,
+which is a test-fixture defect, not a regression in the timeout
+contract. No production blob changes.
+
+### Phase 6 — minimum deterministic fixture (bind: authorize a test-only render-hold seam, new to this patch's file scope)
+
+`stepCount` cannot be scaled further for margin (Phase 3). Of the five
+alternatives offered, options 1/2/4 (a CPU-independent, deterministic
+hold on the loading state) are the only ones that meet every required
+property — valid syntax, guaranteed `pendingCount > 0` at capture time,
+triggers the existing timeout path unchanged, allows capture to
+proceed, no sleeps, no churn, no assertion weakening, and (critically,
+proven by Phase 2/3) **no dependence on graph size or CPU speed**.
+Option 5 (capture-attempt targeting) does not solve the underlying
+problem — it does not change whether the diagram is genuinely pending
+at whichever capture is targeted. Option 3 (moderate diagram + existing
+override) is exactly what the *original* `stepCount=180` fixture
+already was, which is what produced §23's flaky race in the first
+place — it does not add determinism, only variance.
+
+**Authorized new file (extends PATCH-102's carried-regression scope):**
+`lib/ai/diagram-engine.ts`, starting blob `e68c3e47bf8751560cc47eac91f7edbcac4b471e`
+(current tracked HEAD state, unmodified). This is the smallest true
+seam: the one shared, already-test-friendly module every diagram
+render passes through, one call site, no JSX/DOM concerns.
+`components/ai/renderers/CodeDiagramRenderer.tsx` (blob
+`80d05e5ce1c6e2a17aa5e5d97afc8cb0a6f6819d`) is inspected but **not**
+authorized for change — no edit is needed there; `phase.phase` and
+`data-ai-render-state={phase.phase}` already do exactly what this fix
+needs once `renderDiagramCode` itself is held.
+
+**Exact authorized production change**, in
+`lib/ai/diagram-engine.ts`, additive only, mirroring the exact
+`__patch101TimeoutOverrideMs` pattern already established in
+`createSlideRenderer.tsx` (same non-production gate, same "read a
+window global, no-op unless a characterization test sets it" shape):
+
+```ts
+declare global {
+  interface Window {
+    __patch101DiagramRenderHoldMs?: number;
+  }
+}
+
+export async function renderDiagramCode(code: string): Promise<DiagramRenderResult> {
+  try {
+    const mermaid = await loadMermaid();
+    if (
+      process.env.NODE_ENV !== "production"
+      && typeof window !== "undefined"
+      && typeof window.__patch101DiagramRenderHoldMs === "number"
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, window.__patch101DiagramRenderHoldMs));
+    }
+    const id = `ai-diagram-${++_seq}`;
+    const { svg } = await mermaid.render(id, code);
+    return { ok: true, svg };
+  } catch (error) {
+    return {
+      ok: false,
+      reason: error instanceof Error ? error.message : "Diagram render failed.",
+    };
+  }
+}
+```
+
+The hold runs *before* `mermaid.render()` is even called, so
+`phase` stays `'loading'` (and `data-ai-render-state="loading"`) for
+the full hold duration regardless of the diagram's actual size or the
+machine's speed — `pendingAtStart` in `createSlideRenderer.tsx` is now
+guaranteed `>0` for any capture that begins within that window,
+independent of Mermaid render cost. The existing forced-timeout
+override (50ms) still fires and dispatches `timedOut:true` correctly
+during the hold; capture still proceeds afterward exactly as governed
+by §13's shared timeout path — nothing about the timeout contract
+itself changes. This hook is inert in production
+(`NODE_ENV==="production"` short-circuits it) and inert in every other
+characterization test unless that test explicitly sets
+`window.__patch101DiagramRenderHoldMs`.
+
+### Phase 7 — ruling on stepCount (bind: revert to 180; adopt render-hold as the deterministic mechanism)
+
+`stepCount` returns to its original, proven-valid value of `180` in
+the forced-timeout test — do not use 600 or 1000 or any other
+untested value; do not attempt to find a "just under 496" compromise
+value, since that buys negligible, still-CPU-dependent margin and
+reintroduces exactly §23's flakiness at a smaller scale. In its place,
+the test sets `window.__patch101TimeoutOverrideMs = 50` (unchanged) and
+a new `window.__patch101DiagramRenderHoldMs` (bind: `5000` — comfortably
+larger than the 50ms override and the ~90s test-level timeout budget
+per capture, small enough not to bloat the test's own runtime
+materially) *before* opening the presentation surface, and deletes both
+in the test's `finally` block (mirroring the existing
+`delete window.__patch101TimeoutOverrideMs` cleanup already present at
+spec.ts:551-553).
+
+**Exact expected spec blob transition:** the currently uncommitted
+`stepCount=1000` state (blob `c226888e6f3857e7a33ed5959163c42ec0614558`)
+is superseded — the next candidate must revert `stepCount` back to
+`180` (i.e. functionally equivalent to blob
+`adcc30bb14461fba3253e533385f9f1ec18fef8c`'s fixture-size choice, but
+not byte-identical to it, since the render-hold set/delete lines are
+new additions) and add exactly the `window.__patch101DiagramRenderHoldMs`
+set (before `openPreviewModal`) and delete (in the `finally` block,
+alongside the existing override delete) in
+`presentation-snapshot-diagram-readiness.spec.ts`. No other line in
+that file changes.
+
+**Exact assertion contract (unchanged, bind):** `timedOut === true`,
+`pendingCount > 0`, `waitedMs >= 50`, `waitedMs < 30_000`, and the
+final populated-Preview-image poll all remain exactly as currently
+written — none of this needed to change; the fixture becomes capable
+of satisfying them deterministically instead of by chance.
+
+**Hard-stop conditions (bind, in addition to all prior sections):**
+STOP, report, do not commit, if: any file other than
+`lib/ai/diagram-engine.ts` and
+`presentation-snapshot-diagram-readiness.spec.ts` is touched;
+`CodeDiagramRenderer.tsx` or any other AI-renderer file is touched;
+`stepCount` is raised above 180 for this fixture again without a fresh
+authorization; the render-hold is not gated behind
+`process.env.NODE_ENV !== "production"`; the hold delays anything
+other than the point immediately before `mermaid.render()`; any
+existing assertion (`timedOut`, `pendingCount`, `waitedMs` bounds) is
+weakened; the hold is not deleted in the test's `finally` block; any
+required live gate fails or is skip-only; PATCH-096 is not exactly
+14/14/14; credentials are printed, logged, or committed anywhere.
+
+### Phase 8 — cleanup ruling (bind)
+
+Authorize exactly:
+
+```powershell
+Remove-Item -LiteralPath "test-results" -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath ".next\trace" -Force -ErrorAction SilentlyContinue
+```
+
+No broader cleanup authorized. (This turn's own investigation already
+removed `test-results/` and `.next/trace` and left no residual scratch
+files, dev servers, or listening ports in the repository-owned
+process/port set; `presentation-snapshot-diagram-readiness.spec.ts`'s
+`stepCount=1000` state remains the current uncommitted candidate until
+the Phase 7 correction is implemented.)
+
+### Full validation matrix (supersedes §23's matrix's first item only — the fixture itself, not the gate order)
+
+1. `presentation-snapshot-diagram-readiness.spec.ts` forced-timeout
+   test — **five consecutive real passes**, each with a genuine
+   `timedOut:true` event (`pendingCount > 0`, `waitedMs` in
+   `[50, 30_000)`), capture proceeding, zero skips, zero oklch/route/
+   index errors, and confirmation the render-hold was actually engaged
+   (e.g. via the same wait-event data already asserted — no new
+   diagnostic needed).
+2. Full `presentation-snapshot-diagram-readiness.spec.ts` — all four
+   tests, no skip cascade.
+3. Five clean PATCH-102 delayed-image runs.
+4. Full PATCH-102 six-scenario suite.
+5. PATCH-100/099/097 and PATCH-089/090/091/093/094 — all carried, real
+   results.
+6. PATCH-103 coexistence: targeted + full `drawing-line-bridge.spec.ts`,
+   `drawing-presentation.spec.ts`.
+7. PATCH-096 grouped runner — 14/14/14, zero non-signature failures,
+   exit code 0.
+8. Deterministic matrix: `git diff --check`; `npx tsc --noEmit`;
+   `npm run check:boundaries`; `slideOrder` 7/1; `clonedPostMetadata`
+   9/1; focused drawing 59/2; full Vitest 448/43; `npm run verify`;
+   `npm run build`.
+9. Fresh independent review (Kepler primary, Gemini 3.1 Pro fallback —
+   not Sonnet) required before commit, given the expanded file scope
+   (`lib/ai/diagram-engine.ts` newly touched).
+
+**Bound implementation commit message (verbatim):**
+`test(presentation): replace unsafe stepCount scaling with a deterministic diagram-render hold for the PATCH-101 forced-timeout fixture (PATCH-102)`
+
+**Do not authorize PATCH-104.**

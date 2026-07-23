@@ -361,6 +361,44 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-23** — **PATCH-102 §24 — stepCount scaling for the
+  PATCH-101 forced-timeout fixture PROVEN unsafe (hard Mermaid
+  edge-limit wall), replaced with a deterministic render-hold.**
+  Attempting §23's authorized fix (raise `stepCount` for more
+  render-time margin) failed at 600 and, more visibly, at 1000, with a
+  materially different error ("Syntax error in text", diagram stuck on
+  "Rendering diagram..."). Live-validated the generated Mermaid source
+  for stepCount 180/600/1000 directly against the repo's installed
+  Mermaid 11.13.0 (`mermaid.parse()`/`mermaid.render()` in a real
+  browser page): 180 → 182 edges, valid, renders fine; 600 → 602 edges
+  and 1000 → 1002 edges both fail identically with `Edge limit
+  exceeded. 500 edges found, but the limit is 500` — Mermaid's own
+  hardcoded `maxEdges: 500` default (confirmed via
+  `mermaid.mermaidAPI.getConfig()`), not configurable from diagram
+  source. Safe ceiling is `stepCount <= 496`; 600 was already unsafe
+  (its failure just presented identically to §23's original race,
+  since a failed-parse flips `data-ai-render-state` to `"failed"`, not
+  `"loading"`, so `pendingAtStart` reads 0 either way). Classified C:
+  valid syntax at moderate size, rejected by Mermaid's own resource
+  limit past a hard threshold — stepCount is not a safe lever for
+  buying more render-time margin. Authorized instead: revert
+  `stepCount` to 180 (proven valid) and add a new, additive,
+  non-production-gated test-only render-hold seam in
+  `lib/ai/diagram-engine.ts` (`window.__patch101DiagramRenderHoldMs`,
+  mirroring the existing `__patch101TimeoutOverrideMs` pattern in
+  `createSlideRenderer.tsx`) that holds `renderDiagramCode` before
+  calling `mermaid.render()`, keeping `data-ai-render-state="loading"`
+  for a fixed, CPU/graph-size-independent duration (5000ms) — no
+  production behavior change outside test mode, no assertion weakened,
+  `CodeDiagramRenderer.tsx` untouched. `lib/ai/diagram-engine.ts`
+  (starting blob `e68c3e47bf8751560cc47eac91f7edbcac4b471e`) newly
+  added to PATCH-102's carried-regression file scope. Cleanup command
+  for `test-results/`/`.next/trace` bound to the exact PowerShell
+  `Remove-Item` pair already used; this turn's own investigation
+  artifacts (scratch scripts, a temporary static file server used only
+  to validate Mermaid parsing) were fully removed and no repository-
+  owned process/port remains. PATCH-104 not started.
+
 - **2026-07-23** — **PATCH-102 §23 — carried PATCH-101 forced-timeout
   regression LIVE-REPRODUCED and classified E (pre-existing test
   design gap exposed by §22, not a product regression).** With §22
