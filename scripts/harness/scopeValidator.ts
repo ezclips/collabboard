@@ -3,7 +3,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { join } from 'node:path';
 import type { PatchManifest } from './manifestSchema';
-import type { ScopeValidationResult } from './types';
+import type { LandedCommitValidationResult, ScopeValidationResult } from './types';
 
 const execFileAsync = promisify(execFile);
 export interface CommandResult { readonly code: number; readonly stdout: string; readonly stderr: string }
@@ -14,6 +14,11 @@ export interface ScopeValidationOptions {
   readonly commandRunner?: CommandRunner;
   readonly fileExists?: (path: string) => boolean;
   readonly generatedArtifactCandidates?: readonly string[];
+}
+export interface LandedCommitValidationOptions {
+  readonly repoRoot: string;
+  readonly commandRunner?: CommandRunner;
+  readonly reportedTestTotals?: { readonly tests: number; readonly files: number };
 }
 
 const defaultRunner: CommandRunner = async (command, args, cwd) => {
@@ -79,5 +84,64 @@ export async function validateScope(manifest: PatchManifest, options: ScopeValid
     headMatchesExpected: 'HEAD does not match the expected commit', originMatchesHead: 'origin/main does not match HEAD', baseCommitMatches: 'HEAD does not match manifest baseCommit', changedPathsWithinAllowed: 'changed paths exceed the manifest allowlist', stagedFilesEmpty: 'staged files are present', untrackedFilesWithinAllowed: 'untracked paths exceed the manifest allowlist', prohibitedPathsAbsent: 'a prohibited path is present', diffCheckClean: 'git diff --check reported whitespace errors', stashPolicySatisfied: 'stash policy is not satisfied', generatedArtifactsWithinAllowlist: 'generated artifacts exceed the allowlist', candidateBlobsMatch: 'candidate blob hashes do not match', commitMessageMatches: 'commit message does not match',
   };
   const violations = (Object.entries(checks) as Array<[keyof typeof checks, boolean | 'not-checked']>).filter(([, value]) => value === false).map(([key]) => labels[key]);
+  return { ok: violations.length === 0, violations, checks };
+}
+
+export async function validateLandedCommit(manifest: PatchManifest, landedCommit: string, options: LandedCommitValidationOptions): Promise<LandedCommitValidationResult> {
+  const run = options.commandRunner ?? defaultRunner;
+  const execute = (args: readonly string[]) => run('git', args, options.repoRoot);
+  const exists = await execute(['cat-file', '-e', landedCommit]);
+  const baseChecks = {
+    landedCommitExists: exists.code === 0,
+    parentMatchesBaseCommit: false,
+    landedFilesWithinAllowed: false,
+    prohibitedPathsAbsentFromLandedCommit: false,
+    landedCommitMessageMatches: false,
+    landedBlobsMatch: manifest.candidateBlobs ? false : 'not-checked' as const,
+    testTotalsMatch: manifest.expectedTestTotals?.unit && options.reportedTestTotals ? false : 'not-checked' as const,
+  };
+
+  if (!baseChecks.landedCommitExists) {
+    return {
+      ok: false,
+      violations: ['landed commit does not exist'],
+      checks: baseChecks,
+    };
+  }
+
+  const [parent, landedFilesOutput, message] = await Promise.all([
+    execute(['rev-parse', `${landedCommit}^`]),
+    execute(['show', '--name-only', '--format=', landedCommit]),
+    execute(['log', '-1', '--format=%s', landedCommit]),
+  ]);
+  const landedFiles = lines(landedFilesOutput.stdout);
+  let landedBlobsMatch: LandedCommitValidationResult['checks']['landedBlobsMatch'] = manifest.candidateBlobs ? true : 'not-checked';
+  if (manifest.candidateBlobs) {
+    for (const [path, expected] of Object.entries(manifest.candidateBlobs)) {
+      const actual = await execute(['rev-parse', `${landedCommit}:${path}`]);
+      if (actual.code !== 0 || actual.stdout.trim() !== expected) landedBlobsMatch = false;
+    }
+  }
+
+  const checks: LandedCommitValidationResult['checks'] = {
+    landedCommitExists: true,
+    parentMatchesBaseCommit: parent.code === 0 && parent.stdout.trim() === manifest.baseCommit,
+    landedFilesWithinAllowed: landedFilesOutput.code === 0 && landedFiles.every((path) => isAllowed(path, manifest.allowedFiles)),
+    prohibitedPathsAbsentFromLandedCommit: landedFilesOutput.code === 0 && landedFiles.every((path) => !isAllowed(path, manifest.prohibitedFiles)),
+    landedCommitMessageMatches: message.code === 0 && message.stdout.trim() === manifest.exactCommitMessage,
+    landedBlobsMatch,
+    testTotalsMatch: manifest.expectedTestTotals?.unit && options.reportedTestTotals ? options.reportedTestTotals.tests === manifest.expectedTestTotals.unit.tests && options.reportedTestTotals.files === manifest.expectedTestTotals.unit.files : 'not-checked',
+  };
+
+  const labels: Record<keyof LandedCommitValidationResult['checks'], string> = {
+    landedCommitExists: 'landed commit does not exist',
+    parentMatchesBaseCommit: 'landed commit parent does not match manifest baseCommit',
+    landedFilesWithinAllowed: 'landed commit files exceed the manifest allowlist',
+    prohibitedPathsAbsentFromLandedCommit: 'landed commit includes a prohibited path',
+    landedCommitMessageMatches: 'landed commit message does not match',
+    landedBlobsMatch: 'landed blob hashes do not match',
+    testTotalsMatch: 'reported test totals do not match manifest expectedTestTotals',
+  };
+  const violations = (Object.entries(checks) as Array<[keyof LandedCommitValidationResult['checks'], boolean | 'not-checked']>).filter(([, value]) => value === false).map(([key]) => labels[key]);
   return { ok: violations.length === 0, violations, checks };
 }

@@ -20,6 +20,7 @@
     ,"harness:server:stop": "vite-node scripts/harness/serverCli.ts stop"
     ,"harness:server:status": "vite-node scripts/harness/serverCli.ts status"
     ,"harness:validate-scope": "vite-node scripts/harness/validateScope.ts"
+    ,"harness:validate-landed": "vite-node scripts/harness/validateLandedCommit.ts"
     ,"test:harness:integration": "vite-node scripts/harness/serverLifecycle.integration.ts"
   },
   "dependencies": {

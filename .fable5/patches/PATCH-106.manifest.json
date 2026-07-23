@@ -1,0 +1,48 @@
+{
+  "patchId": "PATCH-106",
+  "baseCommit": "a1354fb1bcd662cb069f39e5774e30e0191a3324",
+  "allowedFiles": [
+    "scripts/harness/scopeValidator.ts",
+    "scripts/harness/types.ts",
+    "scripts/harness/scopeValidator.test.ts",
+    "package.json",
+    "scripts/harness/validateLandedCommit.ts",
+    ".fable5/patches/PATCH-106.manifest.json"
+  ],
+  "prohibitedFiles": [
+    "app/**",
+    "components/**",
+    "lib/domain/**",
+    "lib/infra/**",
+    "e2e/**",
+    "playwright.config.ts",
+    "eslint.boundaries.config.mjs",
+    "package-lock.json",
+    ".fable5/patches/PATCH-0*.md",
+    ".fable5/patches/PATCH-105.manifest.json",
+    "scripts/harness/serverLifecycle.ts",
+    "scripts/harness/serverCli.ts",
+    "scripts/harness/manifestSchema.ts",
+    "scripts/harness/validateScope.ts",
+    "scripts/harness/serverLifecycle.integration.ts",
+    "scripts/harness/fixtures/tinyServer.mjs"
+  ],
+  "allowedUntrackedFiles": [
+    "scripts/harness/validateLandedCommit.ts",
+    ".fable5/patches/PATCH-106.manifest.json"
+  ],
+  "generatedArtifactPaths": ["test-results", "playwright-report", ".next/trace"],
+  "stashPolicy": "must-be-empty",
+  "requiredCommands": [
+    { "label": "harness-unit", "command": "npx", "args": ["vitest", "run", "scripts/harness"] },
+    { "label": "landed-history", "command": "npm", "args": ["run", "harness:validate-landed", "--", ".fable5/patches/PATCH-106.manifest.json", "ab7de32e1d941b11ddfb5897de6a92fbfde5d904"] },
+    { "label": "scope", "command": "npm", "args": ["run", "harness:validate-scope", "--", ".fable5/patches/PATCH-106.manifest.json"] },
+    { "label": "typecheck", "command": "npx", "args": ["tsc", "--noEmit"] },
+    { "label": "boundaries", "command": "npm", "args": ["run", "check:boundaries"] },
+    { "label": "unit", "command": "npx", "args": ["vitest", "run"] },
+    { "label": "verify", "command": "npm", "args": ["run", "verify"] },
+    { "label": "build", "command": "npm", "args": ["run", "build"] }
+  ],
+  "expectedTestTotals": { "unit": { "tests": 479, "files": 47 } },
+  "exactCommitMessage": "feat(harness): add post-commit/landed manifest validation mode (PATCH-106)"
+}

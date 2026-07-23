@@ -49,3 +49,17 @@ export interface ScopeValidationResult {
     readonly commitMessageMatches: boolean | 'not-checked';
   };
 }
+
+export interface LandedCommitValidationResult {
+  readonly ok: boolean;
+  readonly violations: readonly string[];
+  readonly checks: {
+    readonly landedCommitExists: boolean;
+    readonly parentMatchesBaseCommit: boolean;
+    readonly landedFilesWithinAllowed: boolean;
+    readonly prohibitedPathsAbsentFromLandedCommit: boolean;
+    readonly landedCommitMessageMatches: boolean;
+    readonly landedBlobsMatch: boolean | 'not-checked';
+    readonly testTotalsMatch: boolean | 'not-checked';
+  };
+}
