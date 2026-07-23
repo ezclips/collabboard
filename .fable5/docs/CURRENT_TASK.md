@@ -361,6 +361,38 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-24** — **PATCH-107 CORRECTED (§12a/§12b, validation-phase
+  split) — before implementation began, candidate not yet started.**
+  CTO governance turn resolving a drafting error caught before any
+  code was written. Verified current state first: HEAD == origin/main
+  == `8c33b1d6b16df7779e92bc36a762e995ccd052ad`, clean tree, empty
+  stash, PATCH-107 unimplemented. Root cause: the original §12
+  "Validation matrix" listed a post-commit `harness:validate-landed`
+  check (needing a `<landed-sha>` that only exists after a commit)
+  inside the same flat gate list as the pre-review, pre-commit gates,
+  immediately followed by "leave the candidate uncommitted" — an
+  unsatisfiable pairing, since a landed-commit check requires a landed
+  commit and "leave uncommitted" guarantees none exists yet. Split
+  `PATCH-107.md` §12 into **§12a** (Phase 1 — uncommitted
+  implementation validation: worktree unit tests, the real
+  fixture-repo integration test, pre-commit manifest scope validation,
+  typecheck, boundaries, full Vitest, verify, build,
+  process/port/worktree/branch/filesystem cleanup, independent
+  review — none of which reference or require a PATCH-107 commit) and
+  **§12b** (Phase 2 — post-commit landed validation:
+  `harness:validate-landed` against `HEAD`, run only after a separate,
+  explicit CTO commit-authorization action has both occurred and the
+  reviewed commit has actually landed; its failure is a hard stop
+  before closure, not before commit). Added §12c recording the root
+  cause for the permanent record, and updated the §13 hard-stop
+  clause to reference the split phases explicitly. No change to
+  PATCH-107's implementation scope, interfaces, tests, safety fences,
+  model assignment, or bound commit message — this was purely a
+  lifecycle-phase correction. Governance-only commit
+  (`.fable5/patches/PATCH-107.md`, `.fable5/docs/CURRENT_TASK.md`); no
+  harness/product files touched; PATCH-107 remains unimplemented;
+  PATCH-108 not started.
+
 - **2026-07-24** — **PATCH-106 CLOSED (commit `3cd496f4cf81127d0a73ce40f4d6afc23f89b340`,
   `feat(harness): add post-commit/landed manifest validation mode
   (PATCH-106)`) — CTO post-landing verification PASSED; PATCH-107

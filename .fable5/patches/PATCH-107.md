@@ -370,7 +370,16 @@ needs no change — report which), 0 deleted, 0 renamed.
 `node:net`, `node:crypto` only. Reuses `vite-node` (PATCH-105 §9a) and
 `zod` (already present, for the manifest pilot).
 
-## 12. Validation matrix (bind)
+## 12. Validation matrix (bind — split into two non-overlapping
+lifecycle phases; corrected 2026-07-24, see §12c for the root cause)
+
+### 12a. Phase 1 — uncommitted implementation validation (bind; gates
+independent review and, later, commit authorization)
+
+Every gate below must pass **while the candidate remains uncommitted.**
+None of them may reference or depend on a PATCH-107 implementation
+commit, because no such commit exists yet at this phase — there is
+nothing for a "landed" check to validate.
 
 1. `npx vitest run scripts/harness` — all existing 21 tests still
    green, plus the new tests from §10, growing only.
@@ -380,28 +389,71 @@ needs no change — report which), 0 deleted, 0 renamed.
    repo.
 3. `npm run harness:validate-scope -- .fable5/patches/PATCH-107.manifest.json` —
    pre-commit mode, run against PATCH-107's own candidate while it
-   remains uncommitted.
-4. `npm run harness:validate-landed -- .fable5/patches/PATCH-107.manifest.json <landed-sha>` —
-   run once this candidate lands, as the real-history sanity target
-   for PATCH-106's post-commit mode (mirroring PATCH-106 §7 item 2's
-   own use of PATCH-105's landed commit).
-5. `npx tsc --noEmit` — clean.
-6. `npm run check:boundaries` — clean, no-op confirmation.
-7. Full `npx vitest run` — must remain 479+ tests / 47+ files, growing
+   remains uncommitted. Expects `ok:true`,
+   `commitMessageMatches: 'not-checked'` (no commit exists yet).
+4. `npx tsc --noEmit` — clean.
+5. `npm run check:boundaries` — clean, no-op confirmation.
+6. Full `npx vitest run` — must remain 479+ tests / 47+ files, growing
    only by the new test cases, never shrinking or newly failing.
-8. `npm run verify` — full green.
-9. `npm run build` — clean (confirm no dev server running first).
-10. Windows process/port/worktree/branch/filesystem cleanup checks:
-    confirm via `git worktree list`, `git branch --list
-    'harness/worktree/*'`, and directory listing of
-    `.fable5/worktrees/` that zero harness-owned worktrees, branches,
-    or metadata files remain after the full test run.
-11. Fresh independent review (DeepSeek V4 Pro primary, Kepler/Gemini
+7. `npm run verify` — full green.
+8. `npm run build` — clean (confirm no dev server running first).
+9. Windows process/port/worktree/branch/filesystem cleanup checks:
+   confirm via `git worktree list`, `git branch --list
+   'harness/worktree/*'`, and directory listing of
+   `.fable5/worktrees/` that zero harness-owned worktrees, branches,
+   or metadata files remain after the full test run.
+10. Fresh independent review (DeepSeek V4 Pro primary, Kepler/Gemini
     3.1 Pro fallback — NOT Sonnet) required before commit.
 
-**The implementer must leave the candidate uncommitted** after all
-gates pass — report results and await explicit commit authorization,
-exactly as PATCH-105/106 required.
+**The implementer must leave the candidate uncommitted** after every
+Phase 1 gate passes and independent review returns PASS — report
+results and await explicit commit authorization from the CTO, exactly
+as PATCH-105/106 required. No Phase 1 gate is satisfied by, or
+requires, a PATCH-107 commit existing.
+
+### 12b. Phase 2 — post-commit landed validation (bind; runs only
+after explicit commit authorization has been given and the reviewed
+candidate has actually been committed with the exact bound message)
+
+This phase does not exist, and cannot be run, until Phase 1 is fully
+green, independent review is PASS, and a separate, explicit CTO
+governance action has authorized and recorded the commit. Once that
+commit exists:
+
+1. `npm run harness:validate-landed -- .fable5/patches/PATCH-107.manifest.json HEAD` —
+   confirms the just-landed commit's parent matches the manifest's
+   `baseCommit`, its changed files are exactly the bound scope, and
+   its message matches `exactCommitMessage` — mirroring PATCH-106 §7
+   item 2's own use of PATCH-105's landed commit as a real-history
+   sanity target, now applied to PATCH-107's own landing.
+2. **Failure of this check is a hard stop before closure** — if
+   `ok:false` for any reason other than the already-understood,
+   expected `commitMessageMatches: 'not-checked'`-while-uncommitted
+   shape (which cannot apply here, since this phase only runs after a
+   commit exists), the CTO must diagnose and resolve it — exactly as
+   the CTO did for PATCH-106's own pre-existing manifest-baseline
+   incidents — before recording PATCH-107 as DONE.
+3. The companion `harness:validate-scope` run against the same
+   manifest will correctly report `ok:false` at this point
+   (`headMatchesExpected`/`baseCommitMatches` false,
+   `commitMessageMatches: true`) — this is the same expected,
+   non-broken post-commit shape ruled at PATCH-105's and PATCH-106's
+   closures, not a new regression to chase.
+
+### 12c. Root cause of the original contradiction (bind, for the
+record)
+
+The original §12 listed Phase 2's landed-validation command
+(`harness:validate-landed ... <landed-sha>`) inside the same flat,
+undifferentiated list as Phase 1's pre-review gates, immediately
+followed by "leave the candidate uncommitted." Those two instructions
+cannot both be satisfied by the same gate: a landed-commit check
+requires a landed commit, and "leave uncommitted" guarantees one does
+not yet exist at that point in the lifecycle. §12a/§12b above resolve
+this by making explicit what was previously implicit: Phase 1 gates
+the uncommitted candidate through independent review; Phase 2 gates
+closure, strictly after a separate, explicit commit-authorization
+action, and is never a prerequisite for that authorization itself.
 
 ## 13. Hard-stop conditions (bind)
 
@@ -421,7 +473,13 @@ integration test (§10) fails or leaves residual state; a blanket `git
 worktree prune` is ever called; Explorer agents, retrieval memory,
 remote sandboxes, a Test Runner/evidence-bundle system, automated
 model handoffs, or a new CanvasClient extraction are introduced under
-this patch's scope; any required gate in §12 fails or is skipped.
+this patch's scope; any required Phase 1 gate in §12a fails or is
+skipped before independent review or commit authorization; a
+PATCH-107 commit is created or requested before every §12a gate has
+passed and independent review has returned PASS; §12b's post-commit
+landed validation is run, or its failure is treated as resolved,
+before an explicit, separate CTO commit-authorization action has both
+occurred and actually landed the reviewed commit.
 
 ## 14. Health ledger
 
