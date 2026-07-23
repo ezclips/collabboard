@@ -361,6 +361,40 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-23** — **PATCH-106 CORRECTED (§0a, implementation-baseline
+  fix) — before implementation began, candidate not yet started.**
+  CTO governance turn resolving a drafting error caught by Codex
+  before any code was written. Verified current state first: branch
+  `main`, HEAD == origin/main == `f8394a5c5c2132cb791de72b3491b11ac31b796d`,
+  clean tree, empty stash. Root cause: PATCH-106.md's original "Base
+  commit" line and its manifest-pilot spec both stated
+  `ab7de32e1d941b11ddfb5897de6a92fbfde5d904` (PATCH-105's landed
+  implementation commit) as the implementation base/`baseCommit` —
+  but `f8394a5` (the PATCH-105-closure/PATCH-106-authorization
+  governance commit) landed *after* `ab7de32e`, making it stale as a
+  base the instant it was pushed, exactly per PATCH-105 §7a's own
+  bound lifecycle rule (a patch's base must always be the current
+  authoritative governance HEAD, not a fixed historical commit copied
+  from an earlier closure). Distinguished the two values precisely:
+  `f8394a5` = current governance HEAD = PATCH-106's actual
+  implementation base and manifest `baseCommit`; `ab7de32e` = a fixed,
+  never-moving historical artifact, used *only* as the CLI argument to
+  the §7 item 2 real-history sanity check proving the new
+  `validateLandedCommit` mode works against real repo history — never
+  a working-tree state to check out, reset, or detach to. Corrected
+  both stale occurrences in `PATCH-106.md` (the "Base commit" line and
+  the manifest-pilot file-scope spec), added a new §0a section
+  documenting the distinction with a lookup table, added a hard-stop
+  against checking out/resetting to `ab7de32e`, and clarified §7 item
+  3 to state pre-review self-validation expects `HEAD` to remain
+  `f8394a5` throughout implementation. No change to PATCH-106's file
+  scope, interfaces, tests, dependencies, or model assignment — this
+  was purely a baseline-reference correction caught before any code
+  was written. Governance-only commit
+  (`.fable5/patches/PATCH-106.md`, `.fable5/docs/CURRENT_TASK.md`); no
+  harness/product files touched; PATCH-106 remains unimplemented;
+  PATCH-107 not started.
+
 - **2026-07-23** — **PATCH-105 CLOSED (commit `ab7de32e1d941b11ddfb5897de6a92fbfde5d904`,
   `chore(harness): add bounded server lifecycle, patch manifests, and
   scope validation (PATCH-105)`) — CTO post-landing verification

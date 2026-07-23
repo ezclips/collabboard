@@ -30,7 +30,34 @@ Gemini 3.1 Pro fallback) — PASS required before commit. Sonnet
 perform its review. **Authored:** Sonnet (CTO), 2026-07-23.
 
 **Base commit (bind — implementation must start here):**
-`ab7de32e1d941b11ddfb5897de6a92fbfde5d904` (PATCH-105's landed HEAD).
+`f8394a5c5c2132cb791de72b3491b11ac31b796d` (the current authoritative
+governance HEAD as of PATCH-105's closure/PATCH-106's authorization —
+**not** `ab7de32e1d941b11ddfb5897de6a92fbfde5d904`, which is PATCH-105's
+landed implementation commit and is used *only* as the fixed
+real-history validation target in §7 item 2's sanity check, per §1a
+below. Do not conflate the two.)
+
+### 0a. Base-commit vs. historical validation target (bind — corrects
+a drafting error caught before implementation began)
+
+This patch's original draft stated `ab7de32e1d941b11ddfb5897de6a92fbfde5d904`
+(PATCH-105's landed commit) as the implementation base. That was
+wrong: per PATCH-105 §7a's manifest-lifecycle rule, a patch's
+implementation base must always be the **current authoritative
+governance HEAD**, and `f8394a5` (the PATCH-105-closure /
+PATCH-106-authorization commit) landed *after* `ab7de32e` — making
+`ab7de32e` stale as a base the moment `f8394a5` was pushed. The two
+values serve entirely different, non-conflatable purposes here:
+
+| Value | Meaning | Where it's used |
+|---|---|---|
+| `f8394a5c5c2132cb791de72b3491b11ac31b796d` | current authoritative governance HEAD; PATCH-106's implementation base; `PATCH-106.manifest.json`'s `baseCommit` | implementation start point, pre-commit self-validation |
+| `ab7de32e1d941b11ddfb5897de6a92fbfde5d904` | PATCH-105's landed implementation commit; a **fixed historical artifact**, never moves | the §7 item 2 real-history sanity-check argument to `validateLandedCommit` only — proving the new post-commit mode works against real repo history, not a base for anything |
+
+**Do not check out, reset, or detach to `ab7de32e`.** The implementer
+stays on current `main` throughout; `ab7de32e` is passed only as a
+string argument to the new CLI being built, exactly like any other
+test fixture value — it is never a working-tree state to occupy.
 
 **Bound implementation commit message (verbatim):**
 `feat(harness): add post-commit/landed manifest validation mode (PATCH-106)`
@@ -172,7 +199,10 @@ the file under the repo's file-size conventions) with at minimum:
 1. `scripts/harness/validateLandedCommit.ts`
 2. `.fable5/patches/PATCH-106.manifest.json` (this patch pilots itself
    on its own new post-commit mode, matching PATCH-105's precedent —
-   `baseCommit`: `ab7de32e1d941b11ddfb5897de6a92fbfde5d904`)
+   `baseCommit`: `f8394a5c5c2132cb791de72b3491b11ac31b796d`, the
+   current governance HEAD per §0a — **not**
+   `ab7de32e1d941b11ddfb5897de6a92fbfde5d904`, which remains only the
+   fixed argument to the §7 item 2 real-history sanity check)
 
 **Modified files (3):**
 - `scripts/harness/scopeValidator.ts` — add the new exported
@@ -212,6 +242,9 @@ harness code only reads that file; it never invokes Vitest).
 3. `npm run harness:validate-scope -- .fable5/patches/PATCH-106.manifest.json` —
    the existing pre-commit mode, run against PATCH-106's own candidate
    while it remains uncommitted (this patch pilots itself, per §6).
+   Expects `HEAD` to still equal `f8394a5c5c2132cb791de72b3491b11ac31b796d`
+   (the manifest's `baseCommit`, per §0a) throughout implementation —
+   `ok:true` with `commitMessageMatches: 'not-checked'`.
 4. `npx tsc --noEmit` — clean.
 5. `npm run check:boundaries` — clean, no-op confirmation (no
    `components/**`/`app/**` files touched).
@@ -245,7 +278,12 @@ pre-commit validation; the sanity check against PATCH-105's real
 landed commit (§7 item 2) fails; Explorer agents, retrieval memory,
 remote sandboxes, Git-worktree isolation, automated model handoffs, or
 a new CanvasClient extraction are introduced under this patch's scope;
-any required gate in §7 fails or is skipped.
+any required gate in §7 fails or is skipped; the working tree is ever
+checked out, reset, or detached to `ab7de32e1d941b11ddfb5897de6a92fbfde5d904`
+or any commit other than remaining on current `main` (per §0a,
+`ab7de32e` is a fixed historical CLI argument only, never a working
+-tree state to occupy); `PATCH-106.manifest.json`'s `baseCommit` is
+set to any value other than `f8394a5c5c2132cb791de72b3491b11ac31b796d`.
 
 ## 9. Health ledger
 
