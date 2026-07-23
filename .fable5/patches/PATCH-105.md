@@ -401,6 +401,103 @@ New file `.fable5/patches/PATCH-105.manifest.json`, validated against
 **Do not migrate PATCH-001 through PATCH-104 to manifest form in this
 patch.** This is a pilot on ONE new patch (itself), not a backfill.
 
+## 7a. Manifest baseline lifecycle (bind — root-caused after the §9a
+amendment produced a stale-manifest self-validation failure)
+
+**Root cause of the observed failure.** After §9a's governance
+amendment commit (`82e43ee`) landed, `git rev-parse HEAD` legitimately
+advanced past the manifest's recorded `baseCommit`
+(`c1e1bdc2e1a258db04a75679fdb2351b59d8ef33`) — but that advance was a
+**governance-only documentation commit**, not the PATCH-105 candidate
+being committed. `scopeValidator.ts` uses exactly one signal to decide
+whether a candidate commit has happened: `headValue ===
+manifest.baseCommit`. While true, it correctly defers
+`exactCommitMessage` checking (`'not-checked'`) because no commit
+distinct from the base exists yet to check a message against. The
+manifest was simply never resynced to the new governance HEAD after
+`82e43ee` landed, so the validator — correctly, not incorrectly —
+reported `headMatchesExpected: false`, `baseCommitMatches: false`,
+and (as a direct consequence of the stale-baseline branch) attempted
+and failed `commitMessageMatches` against the current HEAD's actual
+(governance) commit message. **This is not a validator defect.** The
+phase-aware `headValue === baseCommit ? 'not-checked' : ...` gate is
+correct and must not be changed, weakened, or removed. What was
+missing was a bound lifecycle rule for keeping `baseCommit` in sync
+with governance HEAD across amendments. That rule is bound here.
+
+**Manifest field semantics (bind, clarifies §7):**
+- `baseCommit` = the current **authoritative governance HEAD** this
+  candidate's diff is measured against. It is NOT a fixed
+  "authorization-time" constant — it MUST be advanced every time a
+  governance-only commit lands on `main` while this candidate remains
+  active and uncommitted, because such commits never touch any of the
+  14 candidate paths and therefore never invalidate the candidate's
+  diff — they only move `HEAD` out from under a stale baseline.
+- The validator's separate `--expected-head` CLI option (`options.expectedHead`)
+  is an optional override for one-off invocations (e.g., asserting a
+  specific hash mid-investigation) and defaults to `manifest.baseCommit`
+  when omitted. It does not need to be passed in normal usage — keeping
+  `baseCommit` current makes the default correct.
+- `exactCommitMessage` is checked **only once `HEAD` has diverged from
+  `baseCommit`** — i.e., only once an actual commit (the candidate's
+  own) has landed on top of the base. Before that point the check is
+  `'not-checked'` by design; this is correct pre-commit behavior, not
+  a gap.
+
+**Manifest lifecycle rules (bind):**
+1. **Initial authorization:** `baseCommit` = governance HEAD at the
+   moment the authorizing patch commit lands (as originally bound in
+   §7).
+2. **Implementation start:** the implementer reads `baseCommit` from
+   the manifest as-is; it must equal `git rev-parse HEAD` at that
+   moment (self-validation will fail loudly if not — this is the
+   "wrong base" catch).
+3. **Governance amendment while a candidate is active:** the CTO's
+   amendment commit touches only `.fable5/docs/CURRENT_TASK.md` and
+   `.fable5/patches/PATCH-*.md` — never the manifest (the manifest is
+   a candidate-scope file). Immediately after such a commit, the CTO
+   must state the new governance HEAD in the continuation prompt and
+   direct the implementer to update **only** the manifest's
+   `baseCommit` field (and re-run self-validation) before proceeding
+   — this is a manifest-content edit within the implementer's existing
+   candidate scope, not a new file, not a scope expansion.
+4. **Pre-review self-validation:** must show `headMatchesExpected: true`,
+   `baseCommitMatches: true`, `commitMessageMatches: 'not-checked'`
+   (candidate still uncommitted) and every other check `true`.
+5. **Pre-commit validation:** identical to (4) — the candidate must
+   still be uncommitted and passing against the current `baseCommit`
+   immediately before the CTO issues commit authorization.
+6. **Post-commit validation:** once the candidate itself is committed,
+   `HEAD` will diverge from the (unchanged) `baseCommit` specifically
+   because of the candidate's own new commit — at that point
+   `commitMessageMatches` correctly activates and must show `true`
+   against `exactCommitMessage`.
+
+This design continues to catch: implementation started on the wrong
+base (rule 2), a stale manifest after unrelated governance movement
+(rule 3, this incident), unexpected HEAD movement of any other kind
+(`headMatchesExpected`/`baseCommitMatches` still fail loudly), a wrong
+commit message after the candidate actually commits (rule 6), and
+unauthorized scope changes (`changedPathsWithinAllowed` /
+`untrackedFilesWithinAllowed` / `prohibitedPathsAbsent`, all
+unaffected by this amendment).
+
+**Exact correction authorized for this incident (bind):** the
+implementer updates **only** the `baseCommit` field inside
+`.fable5/patches/PATCH-105.manifest.json` from
+`c1e1bdc2e1a258db04a75679fdb2351b59d8ef33` to
+`82e43eed12f92f96a5bf3d8e33376117420013e6` (the current governance
+HEAD as of this amendment). No other field, file, or line changes. No
+`scripts/harness/*.ts` source changes. No schema change to
+`manifestSchema.ts`. No logic change to `scopeValidator.ts`.
+
+**Revised self-validation command:**
+`npm run harness:validate-scope -- .fable5/patches/PATCH-105.manifest.json`
+— expected result: `ok: true`, every check `true` except
+`candidateBlobsMatch` (`'not-checked'`, no `candidateBlobs` field
+bound for this pilot per §7) and `commitMessageMatches`
+(`'not-checked'`, candidate still uncommitted).
+
 ## 8. Required tests (bind — unit-first, mocked boundaries; one small integration fixture)
 
 All co-located under `scripts/harness/`, using the existing `vitest`
@@ -615,7 +712,12 @@ patch; a commit or push is issued automatically; the manifest pilot
 (§7) fails its own validation; Explorer agents, retrieval memory,
 remote sandboxes, automated model handoffs, or a new CanvasClient
 extraction are introduced under this patch's scope; any required gate
-in §10 fails or is skipped.
+in §10 fails or is skipped; the manifest's `baseCommit` is edited to
+any value other than the exact governance HEAD stated by the CTO in a
+continuation prompt (§7a); any field in the manifest other than
+`baseCommit` is changed as part of a baseline resync; the
+`scopeValidator.ts` phase-aware `commitMessageMatches` gate is
+weakened, bypassed, or removed to make a stale-baseline failure pass.
 
 ## 12. Health ledger (bind)
 

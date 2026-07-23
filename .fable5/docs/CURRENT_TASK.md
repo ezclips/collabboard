@@ -361,6 +361,44 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-23** — **PATCH-105 AMENDED (§7a, manifest baseline lifecycle)
+  — candidate preserved, still uncommitted.** CTO governance turn
+  resolving a manifest self-validation failure surfaced after the §9a
+  amendment. Verified candidate integrity first: HEAD == origin/main
+  == `82e43eed12f92f96a5bf3d8e33376117420013e6`, exactly 14 governed
+  paths, zero staged, empty stash, no lockfile change. Harness unit
+  tests (3 files/13 tests) and the integration fixture (ephemeral port
+  59309, clean start/stop) already passing; the `vite-node` fix from
+  §9a confirmed intact and unmodified. The blocker:
+  `harness:validate-scope` reported `HEAD does not match the expected
+  commit`, `HEAD does not match manifest baseCommit`, and `commit
+  message does not match`. Root cause: the §9a amendment commit
+  (`82e43ee`) is a governance-only documentation commit that legitimately
+  advanced `HEAD` past the manifest's recorded `baseCommit`
+  (`c1e1bdc...`) without ever touching any of the 14 candidate paths —
+  the manifest was simply never resynced afterward. Read
+  `scopeValidator.ts` directly and confirmed its phase-aware gate
+  (`headValue === baseCommit ? 'not-checked' : <check message>` for
+  `commitMessageMatches`) is **correct as written**: it is designed to
+  skip the commit-message check until the candidate itself has
+  actually been committed (`HEAD` diverging from `baseCommit` for that
+  reason), not for any other kind of HEAD movement. No validator or
+  schema change authorized or needed. Bound a full manifest-baseline
+  lifecycle (§7a in `PATCH-105.md`): `baseCommit` represents the
+  current authoritative governance HEAD and must be resynced by the
+  implementer — as a manifest-content edit within existing candidate
+  scope, never a new CTO-authored file — every time a governance-only
+  commit lands while the candidate remains active/uncommitted. Exact
+  correction authorized: update only the `baseCommit` field in
+  `.fable5/patches/PATCH-105.manifest.json` from `c1e1bdc...` to
+  `82e43eed12f92f96a5bf3d8e33376117420013e6`; no other field, file, or
+  validator logic changes. Added matching hard-stop bullets to §11.
+  Governance-only commit (`.fable5/patches/PATCH-105.md`,
+  `.fable5/docs/CURRENT_TASK.md`); the PATCH-105 candidate itself (14
+  paths) was NOT touched by this turn and remains uncommitted, pending
+  Codex 5.6 applying the §7a `baseCommit` resync and re-running
+  self-validation.
+
 - **2026-07-23** — **PATCH-105 AMENDED (§9a, runner-strategy fix) — candidate
   preserved, still uncommitted.** CTO governance turn resolving a
   `tsx` runner mismatch discovered by Codex 5.6 mid-implementation.
