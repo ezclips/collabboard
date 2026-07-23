@@ -355,7 +355,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     updateLineLocal, saveLineToDb, updateLine, deleteLine, duplicateLine, handleChangeLineLayer,
     updatePadletContent, updatePadletTitle,
     addPadletFromLibraryItem, addFreeformCardPadlet, addDrawingLayoutPadlet, updateDrawingLayoutPadlet,
-    insertPostOrThrow, insertPostPreservingFailureChannels, insertPostAndSelectOrThrow, updatePostFieldsSwallowResolved, updatePostFieldsOrThrow, updatePostFieldsPreservingFailureChannels, deletePostSwallowResolved, deletePostOrThrow,
+    insertPostOrThrow, insertPostPreservingFailureChannels, insertPostAndSelectOrThrow, createContainerOrThrow, dropDraftIntoContainerOrThrow, updatePostFieldsSwallowResolved, updatePostFieldsOrThrow, updatePostFieldsPreservingFailureChannels, deletePostSwallowResolved, deletePostOrThrow,
   } = useCanvasData({ canvasId, dispatch });
 
   // Auto-open a specific padlet from a share link (?openPadlet=id).
@@ -573,7 +573,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
 
     // Persist
     try {
-      await insertPostOrThrow(newContainer);
+      await createContainerOrThrow(newContainer);
       toast.success('Container created');
     } catch (err) {
       console.error("Failed to create container:", err);
@@ -617,7 +617,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     };
     setPadlets(prev => [...prev, newContainer]);
     try {
-      await insertPostOrThrow(newContainer);
+      await createContainerOrThrow(newContainer);
     } catch (err) {
       console.error('Failed to create container:', err);
       toast.error('Failed to create container');
@@ -639,20 +639,19 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       },
     };
     try {
-      const created = await insertPostAndSelectOrThrow(newPadletData);
+      const container = padlets.find(p => p.id === containerId);
+      const created = await dropDraftIntoContainerOrThrow(
+        newPadletData,
+        containerId,
+        container ? (container.metadata as Record<string, unknown>) : null,
+      );
       if (!created) throw new Error('Insert returned no data');
       setPadlets(prev => [...prev, created]);
-      const container = padlets.find(p => p.id === containerId);
-      if (container) {
-        const currentChildren = (container.metadata as any)?.childPadletIds ?? [];
-        await updatePostFieldsSwallowResolved(containerId, {
-          metadata: {
-            ...(container.metadata as any),
-            childPadletIds: [...currentChildren, created.id],
-          },
-        });
-      }
     } catch (err) {
+      const created = (err as { created?: Padlet } | null)?.created;
+      if (created) {
+        setPadlets(prev => prev.some(p => p.id === created.id) ? prev : [...prev, created]);
+      }
       console.error('Failed to drop draft into container:', err);
       toast.error('Failed to add to container');
     }

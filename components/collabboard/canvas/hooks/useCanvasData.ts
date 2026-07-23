@@ -11,6 +11,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabaseBrowser } from '@/lib/supabase/browser';
 import {
+  createCreateContainerCommand,
+  createDropDraftIntoContainerCommand,
+} from '@/lib/domain/canvas/containers';
+import {
   createCreateLineCommand,
   createDeleteLineCommand,
   createUpdateLineCommand,
@@ -637,6 +641,34 @@ export function useCanvasData({ canvasId, dispatch }: UseCanvasDataParams) {
     return result.value;
   }, []);
 
+  const createContainerOrThrow = useCallback(async (row: any) => {
+    const createContainer = createCreateContainerCommand(createPostsRepository());
+    const result = await createContainer({ row }, { userId: null });
+    if (!result.ok) {
+      throw result.error.cause ?? result.error;
+    }
+  }, []);
+
+  const dropDraftIntoContainerOrThrow = useCallback(async (
+    row: any,
+    containerId: string,
+    containerMetadata: Record<string, unknown> | null,
+  ): Promise<any> => {
+    const dropDraftIntoContainer = createDropDraftIntoContainerCommand(createPostsRepository());
+    const result = await dropDraftIntoContainer(
+      { row, containerId, containerMetadata },
+      { userId: null },
+    );
+    if (!result.ok) {
+      const created = (result.error.details as { created?: unknown } | undefined)?.created;
+      if (created !== undefined) {
+        throw Object.assign(result.error.cause ?? result.error, { created });
+      }
+      throw result.error.cause ?? result.error;
+    }
+    return result.value;
+  }, []);
+
   /**
    * PATCH-052: the final postsRaw update family splits three pre-existing
    * failure contracts. The six bare-await CanvasClient calls ignored a
@@ -735,6 +767,8 @@ export function useCanvasData({ canvasId, dispatch }: UseCanvasDataParams) {
     insertPostOrThrow,
     insertPostPreservingFailureChannels,
     insertPostAndSelectOrThrow,
+    createContainerOrThrow,
+    dropDraftIntoContainerOrThrow,
     updatePostFieldsSwallowResolved,
     updatePostFieldsOrThrow,
     updatePostFieldsPreservingFailureChannels,
