@@ -361,6 +361,52 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-23** — **PATCH-102 §25 — legacy-image-error Preview
+  failure traced to a pre-existing sanitizer gap exposed by a
+  React-state/DOM-attribute race, not an image-readiness defect.**
+  With §24's render-hold validated (PATCH-101 5/5, delayed-image 5/5),
+  the full PATCH-102 image-readiness suite failed on "treats a legacy
+  HTML image error as settled and still captures" — modal stuck on
+  "Rendering slide...". Live-reproduced (dev server started/torn down
+  this turn) 3+ times plus a scratch diagnostic 5 more times: 3/6
+  crashed with `Attempting to parse an unsupported color function
+  "oklch"` inside html2canvas's gradient-color-stop parser, 3/6 passed
+  cleanly — a genuine intermittent race, not a deterministic defect.
+  A `pageerror`-triggered synchronous DOM snapshot of the offscreen
+  host at crash time captured the smoking gun: `AIComponentRenderer.tsx`'s
+  own loading skeleton (`animate-pulse bg-gradient-to-br
+  from-neutral-100 via-neutral-50 to-neutral-100`, Tailwind 4's
+  oklch-based palette) still physically present in the clone, even
+  though the `<img>`'s `data-ai-image-state` had already flipped to
+  `'error'`. Root cause: `applyImageEnhancements`'s `img.onerror`
+  (`hooks/useAIComponent.ts:58-71`) sets the DOM attribute
+  *synchronously* in the same tick it calls `onAnyImageSettled()` →
+  `setIsLoading(false)`, but the React re-render that actually removes
+  the skeleton lands on the *next* commit — a real, narrow window
+  where `createSlideRenderer.tsx`'s readiness selector (which only
+  reads the DOM attribute) correctly reports "settled" while the
+  skeleton's gradient is still in the DOM. `sanitizeExportOverlayColors()`
+  (pre-existing, §13-era, unmodified since) only ever covered flat-color
+  properties (`color`, `background-color`, `border-*-color`,
+  `box-shadow`, `outline-color`, `text-decoration-color`) — never
+  `background-image`, where gradients live — so it never neutralized
+  this. Explains why only the fastest-failing image scenario
+  (`route.abort('failed')`, near-instant) exposes it: the other legacy-
+  image tests all have either an instantly-complete image or a real,
+  longer delay, giving React's commit time to land first. Classified
+  C (readiness completes correctly; html2canvas is what rejects) —
+  refined: not on the image itself, but on an unrelated component's
+  gradient utility caught mid-transition by this specific race.
+  Authorized: extend `sanitizeExportOverlayColors()` with one new
+  `background-image` entry in its existing `styleFallbacks` list,
+  neutralizing (not parsing) any gradient containing an unsupported
+  color function — `createSlideRenderer.tsx` only, no other file
+  touched, `AIComponentRenderer.tsx`/`useAIComponent.ts` untouched,
+  readiness contract and all test assertions unchanged. §21/§22/§24
+  preserved unchanged, not reopened. This turn's dev server and
+  scratch diagnostic were fully torn down; ports 3000/4000 confirmed
+  free. PATCH-104 not started.
+
 - **2026-07-23** — **PATCH-102 §24 — stepCount scaling for the
   PATCH-101 forced-timeout fixture PROVEN unsafe (hard Mermaid
   edge-limit wall), replaced with a deterministic render-hold.**

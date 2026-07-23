@@ -2672,3 +2672,307 @@ the Phase 7 correction is implemented.)
 `test(presentation): replace unsafe stepCount scaling with a deterministic diagram-render hold for the PATCH-101 forced-timeout fixture (PATCH-102)`
 
 **Do not authorize PATCH-104.**
+
+## §25 — legacy-image-error Preview failure: a pre-existing sanitizer gap exposed by a React-state/DOM-attribute race, not an image-readiness defect (bind)
+
+**Trigger:** with §24's render-hold implemented and validated (PATCH-101
+forced-timeout 5/5, full PATCH-101 spec 5/5, delayed-image 5/5), the
+full PATCH-102 image-readiness suite failed at "treats a legacy HTML
+image error as settled and still captures" — Preview modal stuck on
+"Rendering slide…", no populated image within 90s. Serial-mode cascade
+skipped 2 subsequent tests.
+
+### Phase 1 — candidate integrity (verified)
+
+```
+HEAD == origin/main == 931db83f93e05826d2946f2ffda83f66a10c4fdc
+DrawingLayout.tsx blob: eb9c5fd5fb3590dfc0cd4f25a5c88c47d34eb56b (unchanged, matches)
+createSlideRenderer.tsx blob: ef8c1a9b7a9521a6a68d40e661ee50effff986fd (unchanged, matches)
+lib/ai/diagram-engine.ts blob: 51f8bccf49ff7ec4ec2736e487d8b64585341e76 (matches — §24 render-hold)
+presentation-snapshot-diagram-readiness.spec.ts blob: 8e23de8604a0f9169695adfac6ac97767dfcf80d (matches — §24 fixture)
+presentation-snapshot-image-readiness.spec.ts blob: 3100c8aa087b585321975797b62d5b8fdd725e42 (untracked, matches)
+git diff --cached --name-only: (empty)
+git stash list: stash@{0}: On main: PATCH-102-candidate-before-PATCH-103 (untouched)
+PATCH-104.md: absent
+```
+
+Exactly five candidate paths, zero staged files, stash present,
+PATCH-104 not started — confirmed.
+
+### Phase 2 — live reproduction (this turn: dev server started, used,
+and torn down solely for this investigation)
+
+Ran the exact failing test 3+ times against the unmodified candidate,
+plus a scratch diagnostic (identical seed/open-modal flow, `page.on('console'/'pageerror')`
+listeners, a `pageerror`-triggered synchronous DOM snapshot of the
+offscreen host, and a slow poll dumping wait events/image state/preview
+population — deleted after use, never part of the governed candidate
+set) run 5 more times to catch the failure with enough detail:
+
+| run | outcome | detail |
+|---|---|---|
+| real test, run 1 | fail (unrelated) | cold dev-server auth.setup timeout, discounted, matches every prior turn's cold-start pattern |
+| real test, run 2 | **fail** | reproduces exactly: `waitEvents.every(timedOut===false && pendingCount===0)` — passed; `expectPreviewCaptureCompletes` — 90s timeout, image never populated |
+| diagnostic, run 1 | **fail** (crash) | `pageerror`: `Attempting to parse an unsupported color function "oklch"`, full stack through html2canvas's `linearGradient`/`parseColorStop`/`CSSParsedDeclaration`/`ElementContainer`/`parseNodeTree` |
+| diagnostic, run 2 | pass | wait events settled (`pendingCount:0` x3), preview populated within 2s, no crash |
+| diagnostic, run 3 | pass | same |
+| diagnostic, run 4 | **fail** (crash) | identical oklch stack trace |
+| diagnostic, run 5 | **fail** (crash) | identical oklch stack trace; **on-crash DOM snapshot captured** |
+
+3 of 6 diagnostic/real attempts crashed with the identical oklch
+stack trace; the other 3 completed cleanly. No route, Mermaid, or
+invalid-index errors in any run.
+
+**The on-crash DOM snapshot (captured synchronously from the `pageerror`
+handler, before the offscreen host's own `finally { host.remove() }`
+could run) is the decisive evidence:**
+
+```html
+<div class="relative h-full w-full overflow-hidden rounded-2xl border border-black/10 bg-white shadow-sm" data-padlet-id="...">
+  <div class="absolute inset-0 z-10 animate-pulse bg-gradient-to-br from-neutral-100 via-neutral-50 to-neutral-100">
+    <div class="flex h-full w-full flex-col gap-3 p-4">...</div>
+  </div>
+  <div class="w-full overflow-hidden rounded-lg bg-gray-50/30">
+    <div class="ai-component-renderer flex min-h-[150px] w-full items-center justify-center overflow-hidden opacity-0">
+      <section data-patch-102-marker="..."><h2>...</h2>
+        <img src="https://patch-102.test/error.png" data-ai-image-state="loading" style="opacity: 0; ...">
+        <p>...</p>
+      </section>
+    </div>
+  </div>
+</div>
+```
+
+The `bg-gradient-to-br from-neutral-100 via-neutral-50 to-neutral-100`
+class is a genuine Tailwind gradient utility, traced to
+`components/collabboard/AIComponentRenderer.tsx`'s own loading skeleton
+(class `ai-component-renderer`, confirmed as the exact and only source
+of that class name and the shimmer markup in the repository) —
+rendered by `useAIComponent`'s `isLoading` state, which starts `true`
+and does not flip to `false` until `applyImageEnhancements`'s
+`onAnyImageSettled()` callback fires. Tailwind 4 resolves this gradient
+utility's color stops through its default oklch-based palette, exactly
+like the `--color-*` custom properties confirmed present on every node
+in the same snapshot.
+
+### Phase 3/4/5 — the exact race (bind, proven, not inferred)
+
+`applyImageEnhancements`'s `img.onerror` handler (`hooks/useAIComponent.ts:58-71`)
+does two things in strict sequence, synchronously, in one JS tick:
+1. `img.dataset.aiImageState = 'error'` — an immediate, synchronous DOM
+   mutation.
+2. `markSettled()` → once every image has settled, calls
+   `onAnyImageSettled()`, which is `() => setIsLoading(false)` from
+   `useAIComponent` — a **React state update**, whose corresponding
+   re-render (which is what actually removes
+   `AIComponentRenderer`'s skeleton `<div className="... animate-pulse
+   bg-gradient-to-br ...">` from the DOM) does not commit synchronously
+   — it lands on React's next render pass, strictly after step 1.
+
+`createSlideRenderer.tsx`'s readiness gate
+(`SNAPSHOT_READINESS_SELECTOR = '[data-ai-render-state="loading"],
+[data-ai-image-state="loading"]'`) reads only the DOM attribute set in
+step 1 — it has no visibility into `AIComponentRenderer`'s separate
+`isLoading` React state or its skeleton. This means there is a real,
+non-zero window — between step 1's DOM mutation and step 2's React
+commit — during which `pendingAtStart` correctly reads `0` (by its own,
+narrower definition of "pending") while the skeleton, with its
+gradient, is **still physically present** in the offscreen clone.
+`waitForSnapshotDiagramReadiness` (or the `pendingAtStart>0` bypass)
+correctly reports settlement in this window — the readiness contract
+itself is not violated, it simply was never designed to know about a
+third, independent loading indicator. If `html2canvas(host, ...)` is
+invoked while still inside that window, it walks a DOM containing the
+skeleton's gradient and throws on the unsanitized oklch color stop,
+because `sanitizeExportOverlayColors()` (created in an earlier §13-era
+turn, unmodified since) only ever sanitized flat-color properties
+(`color`, `background-color`, `border-*-color`, `box-shadow`,
+`outline-color`, `text-decoration-color`) — never `background-image`,
+where gradients live.
+
+This explains every observed data point: intermittency (the race
+window is real but narrow — sometimes React's commit lands first,
+sometimes html2canvas's double-RAF-delayed check lands first); why the
+*other* legacy-image tests in this same suite never hit it (a
+data-URI/already-`complete` image settles synchronously enough that
+the two steps are effectively simultaneous; the delayed-image and
+forced-timeout fixtures both have deliberately long, real delays —
+500ms and a forced 100ms-with-real-network-round-trip respectively —
+giving React's commit ample time to land before capture; only a
+`route.abort('failed')`, which resolves as fast as the browser's
+network stack can fail a request, compresses the whole settle sequence
+tightly enough to make the race practically observable); and why it is
+not specific to *this* patch's own changes — `sanitizeExportOverlayColors()`,
+`AIComponentRenderer`'s skeleton, and `useAIComponent`'s settle
+sequence all predate §21-§24 and are untouched by them.
+
+**Preview-effect stability re-checked (Phase 6, bind: intact, not the
+cause here):** the image-error scenario opens the modal once; nothing
+in this failure mode touches `elements`/`padlets`/`frames` identity —
+the image's error state is DOM-local to the offscreen clone and is not
+plumbed through any `contentVersion`/`renderSignature` recomputation.
+§21/§22's stabilization is not implicated and was not re-disturbed.
+
+### Phase 7 — classification (bind: C, precisely characterized)
+
+**C — the readiness wait completes correctly (per its own, narrower
+contract), but `html2canvas` rejects** — not on the errored image
+itself (which is already correctly replaced by the fallback SVG and
+loaded by capture time in every run, crashing or not), but on an
+unrelated loading-skeleton's Tailwind gradient utility that a
+React-state-vs-DOM-attribute commit race can leave physically present
+in the clone at exactly the moment of capture. Not A (the image marker
+does transition to `'error'` — confirmed via the non-crashing runs'
+wait-event data and via the crash snapshot itself showing the
+mutation already present alongside the still-there skeleton). Not B
+(no evidence of a fresh unresolved request in the clone — the crash
+snapshot's `<img>` still carries the ORIGINAL broken URL because the
+snapshot was taken mid-transition, not because a new request started).
+Not D (nothing is discarded — the promise never resolves at all; it
+rejects, unhandled). Not E (no frame/render-identity churn is
+implicated, per Phase 6). Not F (the test route behaves exactly as
+intended — `route.abort('failed')` does produce the intended browser
+error state; the issue is downstream of that, in an unrelated
+component's skeleton).
+
+### Phase 8 — minimum safe correction (bind: extend the existing sanitizer, do not touch AIComponentRenderer/useAIComponent)
+
+Per the required constraints, the fix must not touch live editor
+behavior, the error-marker contract, or bounded readiness, and must
+not special-case this one test. The narrowest, most precedent-consistent
+correction: **extend `sanitizeExportOverlayColors()` in
+`createSlideRenderer.tsx`** (already the single existing mechanism for
+neutralizing unsupported color functions in the offscreen host, already
+in this patch's authorized scope, already proven safe in production
+since its original introduction) **to also check `background-image`**,
+neutralizing it (not attempting to parse/rewrite the gradient) whenever
+`containsUnsupportedColorFunction` matches anywhere in its computed
+value:
+
+```ts
+const styleFallbacks: Array<[string, string, string]> = [
+  ["color", computed.color, colorFallback],
+  ["background-color", computed.backgroundColor, exportSafeBackground],
+  ["background-image", computed.backgroundImage, "none"],
+  ["border-color", computed.borderColor, exportSafeBorder],
+  ["border-top-color", computed.borderTopColor, exportSafeBorder],
+  ["border-right-color", computed.borderRightColor, exportSafeBorder],
+  ["border-bottom-color", computed.borderBottomColor, exportSafeBorder],
+  ["border-left-color", computed.borderLeftColor, exportSafeBorder],
+  ["box-shadow", computed.boxShadow, exportSafeShadow],
+  ["outline-color", computed.outlineColor, exportSafeOutline],
+  ["text-decoration-color", computed.textDecorationColor, colorFallback],
+];
+```
+
+(one new line, `["background-image", computed.backgroundImage, "none"]`,
+inserted after `background-color`; no other line in
+`sanitizeExportOverlayColors`, `containsUnsupportedColorFunction`, or
+`toExportSafeColor` changes). This:
+- affects only the temporary snapshot host (`sanitizeExportOverlayColors`
+  is called only on `host`, never the live DOM — unchanged);
+- preserves live editor/runtime image and skeleton behavior entirely
+  (`AIComponentRenderer.tsx`, `useAIComponent.ts`, and the skeleton
+  markup itself are untouched — not authorized for this patch);
+- preserves the `data-ai-image-state`/readiness contract exactly as
+  governed;
+- allows capture to proceed once the gradient is neutralized (the
+  skeleton, if still present in the race window, renders as a flat,
+  harmless `bg-gray-50`/transparent-adjacent surface instead of
+  crashing html2canvas — the capture already tolerates this same
+  in-flux moment for every other flat-color property);
+- does not hide unrelated html2canvas errors (only the identical,
+  already-established `containsUnsupportedColorFunction` check is
+  reused, not broadened to swallow other error classes);
+- does not touch successful or loading *images* (`background-image` on
+  the `<img>` elements themselves is not set by this codebase — only
+  `background-color`; the sanitizer change targets decorative
+  container gradients, and only when they contain an unsupported color
+  function, exactly like every other property in this list already
+  does);
+- does not weaken any test assertion — the image-error test's
+  `timedOut`/`pendingCount`/populated-image checks are unchanged.
+
+**Authorized files (extends nothing beyond `createSlideRenderer.tsx`,
+already in scope):** `createSlideRenderer.tsx`, starting blob
+`ef8c1a9b7a9521a6a68d40e661ee50effff986fd` (current candidate, §13-era
+state, unmodified until this fix). No other file is authorized for
+this correction — `AIComponentRenderer.tsx`, `useAIComponent.ts`, and
+`presentation-snapshot-image-readiness.spec.ts` are inspected but not
+touched.
+
+**Hard-stop conditions (bind, in addition to all prior sections):**
+STOP, report, do not commit, if: any file other than
+`createSlideRenderer.tsx` is touched; `AIComponentRenderer.tsx` or
+`hooks/useAIComponent.ts` is touched; the `styleFallbacks` change
+affects any property other than adding the one `background-image`
+entry; any existing sanitizer property/fallback is altered; the
+`data-ai-image-state`/`data-ai-render-state` contract or
+`SNAPSHOT_READINESS_SELECTOR` changes; any image-readiness test
+assertion is weakened; the fix attempts to parse or rewrite the
+gradient value instead of neutralizing it wholesale; any required live
+gate fails or is skip-only; PATCH-096 is not exactly 14/14/14;
+credentials are printed, logged, or committed anywhere.
+
+### Phase 9 — preserve passed work (bind)
+
+Retained, unchanged, not reopened:
+- `DrawingLayout.tsx` blob `eb9c5fd5fb3590dfc0cd4f25a5c88c47d34eb56b`
+- `lib/ai/diagram-engine.ts` blob `51f8bccf49ff7ec4ec2736e487d8b64585341e76`
+- `presentation-snapshot-diagram-readiness.spec.ts` blob `8e23de8604a0f9169695adfac6ac97767dfcf80d`
+- `presentation-snapshot-image-readiness.spec.ts` blob `3100c8aa087b585321975797b62d5b8fdd725e42`
+
+§21/§22/§24 are not reopened on account of this distinct, unrelated
+scenario's failure.
+
+### Phase 10 — cleanup ruling (bind)
+
+Authorize exactly:
+
+```powershell
+Remove-Item -LiteralPath "test-results" -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath ".next\trace" -Force -ErrorAction SilentlyContinue
+```
+
+or, if PowerShell policy continues to block deletion, a Node script
+restricted to exactly these two paths:
+
+```js
+const fs = require('fs');
+for (const p of ['test-results', '.next/trace']) {
+  fs.rmSync(p, { recursive: true, force: true });
+}
+```
+
+No broader cleanup authorized. (This turn's own investigation already
+removed its scratch diagnostic spec and left no residual files, dev
+servers, or listening ports.)
+
+### Required validation matrix (adds the image-error gate as its own explicit prerequisite; supersedes nothing already bound)
+
+1. Image-error scenario — **five consecutive passes**: marker settles
+   to `'error'`, readiness finishes without timeout
+   (`timedOut===false, pendingCount===0` on every buffered event),
+   Preview image populates, zero route/oklch/index/Mermaid errors.
+2. Five delayed-image passes (already achieved; re-confirm).
+3. Full PATCH-102 image-readiness suite — all seven tests, no skip
+   cascade.
+4. Full PATCH-101 diagram-readiness suite (already 5/5; re-confirm
+   since `createSlideRenderer.tsx` is touched again).
+5. PATCH-100/099/097 and PATCH-089/090/091/093/094 — all carried, real
+   results.
+6. PATCH-103 coexistence: targeted + full `drawing-line-bridge.spec.ts`,
+   `drawing-presentation.spec.ts`.
+7. PATCH-096 grouped runner — 14/14/14, zero non-signature failures,
+   exit code 0.
+8. Deterministic matrix: `git diff --check`; `npx tsc --noEmit`;
+   `npm run check:boundaries`; `slideOrder` 7/1; `clonedPostMetadata`
+   9/1; focused drawing 59/2; full Vitest 448/43; `npm run verify`;
+   `npm run build`.
+9. Fresh independent review (Kepler primary, Gemini 3.1 Pro fallback —
+   not Sonnet) required before commit.
+
+**Bound implementation commit message (verbatim):**
+`fix(presentation): sanitize unsupported gradient color functions in the offscreen snapshot host (PATCH-102)`
+
+**Do not authorize PATCH-104.**
