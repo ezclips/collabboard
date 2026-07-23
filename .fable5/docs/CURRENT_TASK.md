@@ -361,6 +361,56 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-23** — **PATCH-104 DRAFTED (not implemented):** extract
+  the Column-Layout container-creation command family (four functions,
+  `CanvasClient.tsx` lines 530-660, delimited by its own `// ---
+  Container Creation Logic (Column Layout) ---` comment block) onto
+  the canvas ops seam, following the exact Pattern K shape PATCH-026
+  established. Selected over five other surveyed candidates (column
+  reorder — too narrow, a single function not a family; freeform
+  board-appearance persistence — mixed concern with `localStorage`;
+  timeline/scheduler families — medium/medium-high entanglement with
+  drag-and-drop and ordering state; drawing-layout CRUD/cascade family
+  — high risk, PATCH-095's cross-container-move contract is still
+  DESIGN COMPLETE/IMPLEMENTATION BLOCKED, do not reopen). Confirmed via
+  fresh source reading (not memory): no raw Supabase call remains in
+  `CanvasClient.tsx` to extract (`GRANDFATHERED_UI_FILES` empty since
+  PATCH-061, `check:boundaries` already clean) — the container-creation
+  group is pure business-rule ORCHESTRATION on top of the
+  already-domain-backed `lib/domain/canvas/posts.ts`/
+  `lib/infra/canvas/postsRepository.ts` seam. Two new commands
+  authorized in a NEW `lib/domain/canvas/containers.ts`
+  (`canvas.createContainer`, `canvas.dropDraftIntoContainer`) — checked
+  against every existing neighbor (`canvas.createContainerWithPost`,
+  `canvas.groupPostIntoContainer`, `canvas.attachPostToSchedulerContainer`)
+  and confirmed materially distinct in behavior (different
+  throw/swallow semantics, different insert-vs-insertReturning need,
+  different conditional-update-only-if-locally-found behavior) — no P6
+  duplicate-implementation violation. No existing characterization
+  spec covers this behavior (confirmed by grep — the only "container"
+  hits in `e2e/characterization/` are the unrelated Excalidraw
+  drawing-canvas container/frame system); a new
+  `canvas-container-creation.spec.ts` is required and bound. Two
+  deliberately-preserved behavioral quirks documented and explicitly
+  NOT to be fixed: the asymmetric success toast (prompt-driven creation
+  shows one, direct at-position creation does not) and the "container
+  not found locally" silent skip on drop (the new post is still
+  created even if its container isn't in local state to receive the
+  child-id append). Full patch document at `.fable5/patches/PATCH-104.md`
+  binds exact allowed/prohibited files, immutable fences (only lines
+  530-660 and the 350-359 hook-destructure list in `CanvasClient.tsx`
+  may change), absence gates, unit/characterization/E2E validation
+  matrix, and hard-stop conditions. Implementer: GPT-5.5. Reviewer:
+  Kepler primary/Gemini 3.1 Pro fallback/DeepSeek acceptable alternate
+  — not Sonnet. **Health ledger ruling: option B — the stale numeric
+  score (76, last set in the PATCH-030 era per CTO_PLAYBOOK §12) is
+  formally retired, not carried forward and not recalculated here**;
+  a fresh 5-axis re-score requires operational-integrity evidence
+  (backups, secrets posture) not re-verified this session and is its
+  own separate governance follow-up, not fabricated inside this
+  authoring turn. PATCH-104 is drafted only — not implemented, no
+  product/test file touched this turn.
+
 - **2026-07-23** — **PATCH-102 CLOSED (commit `86c0b8620025ea1fbae7eb6c030e1dbead76932f`,
   `fix(presentation): sanitize unsupported gradient color functions in
   the offscreen snapshot host (PATCH-102)`) — CTO post-landing
