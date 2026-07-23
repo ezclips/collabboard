@@ -1,0 +1,254 @@
+# PATCH-106 — Post-Commit Manifest Validation Mode
+
+**Purpose:** add a second, additive validation mode to the PATCH-105
+harness that checks an already-landed commit against a patch manifest
+using git-history commands (`git show`, `git log`, `git diff <a> <b>`),
+instead of the existing pre-commit mode's working-tree checks. Also
+wires up the manifest's already-declared but currently unused
+`expectedTestTotals` field by comparing it against a pre-produced
+Vitest JSON report. This closes the exact gap identified in
+PATCH-105.md §13's closure: today, confirming a landed commit
+conforms to its manifest is done by hand (`git show --name-only`,
+manual eyeballing); there is no command for it.
+
+**This is NOT:** a rewrite of `validateScope`'s existing pre-commit
+behavior (untouched, unit-tested, independently reviewed — do not
+modify its existing exported function or its existing tests beyond
+adding new ones). NOT a Git-worktree isolation foundation. NOT a Test
+Runner/evidence-bundle system. NOT an Explorer agent. NOT retrieval
+memory. NOT an automated handoff orchestrator. NOT a fix to any
+CanvasClient/product code. Each of those remains a distinct, separate,
+not-yet-authorized future patch.
+
+**Status:** AUTHORIZED, NOT STARTED.
+
+**Implementer:** Codex 5.6 Terra (moderate, well-bound scope; does not
+require Codex 5.6 Sol's complex Windows/worktree capability). **Reviewer:**
+independent read-only reviewer (DeepSeek V4 Pro primary, Kepler or
+Gemini 3.1 Pro fallback) — PASS required before commit. Sonnet
+(CTO/governance owner) authored/authorized this patch and must NOT
+perform its review. **Authored:** Sonnet (CTO), 2026-07-23.
+
+**Base commit (bind — implementation must start here):**
+`ab7de32e1d941b11ddfb5897de6a92fbfde5d904` (PATCH-105's landed HEAD).
+
+**Bound implementation commit message (verbatim):**
+`feat(harness): add post-commit/landed manifest validation mode (PATCH-106)`
+
+---
+
+## 1. Root cause / motivation (bind)
+
+PATCH-105's `validateScope()` has exactly one mode, built around the
+invariant `HEAD === manifest.baseCommit` meaning "candidate still
+uncommitted." Once a reviewed candidate lands, `HEAD` necessarily
+diverges from `baseCommit` for the correct reason (the candidate's own
+commit) — and `validateScope()` will always report `ok:false` with
+`headMatchesExpected`/`baseCommitMatches` violations, even for a
+perfectly landed patch. This was ruled, in PATCH-105 §13, as *expected,
+not broken* — but it means there is no automated way to ask "does
+commit X actually conform to manifest Y" without a human manually
+running `git show --name-only`, `git log -1 --format=%s`, and
+`git hash-object` and eyeballing the results, exactly as the CTO did
+during PATCH-104's and PATCH-105's closures. Additionally,
+`manifestSchema.ts`'s `expectedTestTotals` field has existed since
+PATCH-105 but is never read or compared by any code — a declared,
+dead contract.
+
+## 2. New interface (bind)
+
+Add to `scripts/harness/scopeValidator.ts` (new exported function,
+**existing `validateScope` export and its behavior are not modified**):
+
+```ts
+export interface LandedCommitValidationOptions {
+  readonly repoRoot: string;
+  readonly commandRunner?: CommandRunner;
+  readonly reportedTestTotals?: { readonly tests: number; readonly files: number };
+}
+
+export async function validateLandedCommit(
+  manifest: PatchManifest,
+  landedCommit: string,
+  options: LandedCommitValidationOptions,
+): Promise<LandedCommitValidationResult>;
+```
+
+Add to `scripts/harness/types.ts`:
+
+```ts
+export interface LandedCommitValidationResult {
+  readonly ok: boolean;
+  readonly violations: readonly string[];
+  readonly checks: {
+    readonly landedCommitExists: boolean;
+    readonly parentMatchesBaseCommit: boolean;
+    readonly landedFilesWithinAllowed: boolean;
+    readonly prohibitedPathsAbsentFromLandedCommit: boolean;
+    readonly landedCommitMessageMatches: boolean;
+    readonly landedBlobsMatch: boolean | 'not-checked';
+    readonly testTotalsMatch: boolean | 'not-checked';
+  };
+}
+```
+
+**Bound checks:**
+- `landedCommitExists`: `git cat-file -e <landedCommit>` (or
+  `git rev-parse --verify`) succeeds.
+- `parentMatchesBaseCommit`: `git rev-parse <landedCommit>^` equals
+  `manifest.baseCommit` exactly.
+- `landedFilesWithinAllowed`: every path from
+  `git show --name-only --format="" <landedCommit>` matches
+  `manifest.allowedFiles` via the existing `isAllowed`/`matches` glob
+  logic (reused, not reimplemented).
+- `prohibitedPathsAbsentFromLandedCommit`: none of those paths match
+  `manifest.prohibitedFiles`.
+- `landedCommitMessageMatches`: `git log -1 --format=%s <landedCommit>`
+  equals `manifest.exactCommitMessage` exactly.
+- `landedBlobsMatch`: `'not-checked'` if `manifest.candidateBlobs` is
+  absent; otherwise, for each `[path, expectedBlob]` entry, confirm
+  `git rev-parse <landedCommit>:<path>` equals `expectedBlob`.
+- `testTotalsMatch`: `'not-checked'` if `manifest.expectedTestTotals`
+  is absent OR `options.reportedTestTotals` is not supplied; otherwise
+  a strict equality compare of `tests`/`files`. **The validator never
+  runs Vitest itself** — `reportedTestTotals` is supplied by the CLI
+  from a pre-existing Vitest JSON reporter file the caller already
+  produced (e.g. `vitest run --reporter=json --outputFile=...`,
+  already supported by the installed Vitest, zero new dependency).
+
+## 3. New CLI (bind)
+
+New file `scripts/harness/validateLandedCommit.ts`:
+```
+vite-node scripts/harness/validateLandedCommit.ts <manifest-path> <landed-commit-sha> [--reported-totals-file <path>]
+```
+Prints exactly one JSON object (`LandedCommitValidationResult`) to
+stdout; exits 0 if `ok`, 1 otherwise — matching `validateScope.ts`'s
+existing convention exactly.
+
+New `package.json` script: `"harness:validate-landed": "vite-node scripts/harness/validateLandedCommit.ts"`.
+
+## 4. Security and safety fences (bind, in addition to all standing
+repo rules and PATCH-105's §6 fences, which remain in force)
+
+No secrets printed. No `.env.local` read or exposed. No file deletion
+by this validator (read-only, like its predecessor). No commit, push,
+or stash operation triggered by this code. No test execution triggered
+by this code — `reportedTestTotals` is read from a file path the
+caller supplies, never invoked or spawned by the validator. No product
+code (`app/**`, `components/**`, `lib/domain/**`, `lib/infra/**`)
+touched. No change to `validateScope()`'s existing exported behavior
+or its existing tests (only new tests may be added, for the new
+function). Windows-first; all git subprocess calls reuse the existing
+`CommandRunner`/`execFileAsync` pattern already in `scopeValidator.ts`.
+
+## 5. Required tests (bind — unit-first, mocked git via injected
+`CommandRunner`, same pattern as `scopeValidator.test.ts`)
+
+Extend `scripts/harness/scopeValidator.test.ts` (or add a sibling
+`validateLandedCommit.test.ts` — implementer's choice, whichever keeps
+the file under the repo's file-size conventions) with at minimum:
+1. fully conforming landed commit → `ok:true`, all applicable checks
+   true, `landedBlobsMatch`/`testTotalsMatch` `'not-checked'` when
+   their manifest fields are absent.
+2. landed commit's parent does not match `baseCommit` → violation.
+3. a file outside `allowedFiles` present in the landed commit →
+   violation.
+4. a prohibited path present in the landed commit → violation.
+5. commit message mismatch → violation.
+6. `candidateBlobs` present and matching → `landedBlobsMatch: true`.
+7. `candidateBlobs` present and one mismatching → `landedBlobsMatch: false`.
+8. `expectedTestTotals` present, `reportedTestTotals` supplied and
+   matching → `testTotalsMatch: true`.
+9. `expectedTestTotals` present, `reportedTestTotals` supplied and NOT
+   matching → `testTotalsMatch: false`, `ok:false`.
+10. commit does not exist (`landedCommitExists: false`) → immediate
+    `ok:false`, no other git calls required to still resolve cleanly
+    (no unhandled rejection).
+
+## 6. Exact file scope (bind)
+
+**New files (2):**
+1. `scripts/harness/validateLandedCommit.ts`
+2. `.fable5/patches/PATCH-106.manifest.json` (this patch pilots itself
+   on its own new post-commit mode, matching PATCH-105's precedent —
+   `baseCommit`: `ab7de32e1d941b11ddfb5897de6a92fbfde5d904`)
+
+**Modified files (3):**
+- `scripts/harness/scopeValidator.ts` — add the new exported
+  `validateLandedCommit` function only; `validateScope` and all
+  existing exports/behavior unchanged.
+- `scripts/harness/types.ts` — add the new `LandedCommitValidationResult`
+  type only.
+- `scripts/harness/scopeValidator.test.ts` — add new test cases only
+  (§5); do not modify or delete any existing test.
+- `package.json` — add exactly one new script,
+  `"harness:validate-landed"`, invoking the new CLI via `vite-node`
+  (matching PATCH-105 §9a's runner convention — do not use `tsx`).
+
+**Prohibited paths (must NOT change):** everything PATCH-105 §9
+prohibited, plus `scripts/harness/serverLifecycle.ts`,
+`scripts/harness/serverCli.ts`, `scripts/harness/manifestSchema.ts`,
+`scripts/harness/validateScope.ts`, `scripts/harness/serverLifecycle.integration.ts`,
+`scripts/harness/fixtures/tinyServer.mjs`, and PATCH-105's own manifest
+file — none of PATCH-105's landed files are touched except the three
+modified files named above, and even those only by addition.
+
+**Expected file count:** 2 new, 3 modified, 0 deleted, 0 renamed.
+
+**Dependency choices:** zero new dependencies. Reuses `vite-node`
+(PATCH-105 §9a), `zod` (already present), Vitest's already-supported
+`--reporter=json` flag for producing the optional totals file (the
+harness code only reads that file; it never invokes Vitest).
+
+## 7. Validation matrix (bind)
+
+1. `npx vitest run scripts/harness` — all existing 13 tests still
+   green, plus the new tests from §5, growing only.
+2. `npm run harness:validate-landed -- .fable5/patches/PATCH-106.manifest.json ab7de32e1d941b11ddfb5897de6a92fbfde5d904` —
+   sanity-check against PATCH-105's own already-landed commit (a real,
+   known-good landed commit) to confirm the new mode works against
+   real repository history, not just mocks.
+3. `npm run harness:validate-scope -- .fable5/patches/PATCH-106.manifest.json` —
+   the existing pre-commit mode, run against PATCH-106's own candidate
+   while it remains uncommitted (this patch pilots itself, per §6).
+4. `npx tsc --noEmit` — clean.
+5. `npm run check:boundaries` — clean, no-op confirmation (no
+   `components/**`/`app/**` files touched).
+6. Full `npx vitest run` — must remain 471+ tests / 47+ files, growing
+   only by the new test cases, never shrinking or newly failing.
+7. `npm run verify` — full green.
+8. `npm run build` — clean (confirm no dev server running first, per
+   SKILL.md's standing hazard).
+9. Windows process/port checks: confirm zero residual process/port
+   state (this patch spawns no long-lived process — it only shells out
+   to `git`, synchronously, per invocation).
+10. Fresh independent review (DeepSeek V4 Pro primary, Kepler/Gemini
+    3.1 Pro fallback — NOT Sonnet) required before commit.
+
+**The implementer must leave the candidate uncommitted** after all
+gates pass — report results and await explicit commit authorization,
+exactly as PATCH-105 required.
+
+## 8. Hard-stop conditions (bind)
+
+STOP, report, do not commit, if: any file outside §6's exact list is
+touched; `validateScope()`'s existing exported behavior or any existing
+test is modified or removed; any new runtime dependency is added; the
+new validator ever spawns/invokes Vitest, `npm`, or any test runner
+itself (it must only read a pre-existing report file when one is
+supplied); any secret or `.env.local` content is printed, logged, or
+committed; the new validator or its CLI ever deletes a file; a stash
+is created or dropped by any file in this patch; a commit or push is
+issued automatically; the manifest pilot (§6, item 2) fails its own
+pre-commit validation; the sanity check against PATCH-105's real
+landed commit (§7 item 2) fails; Explorer agents, retrieval memory,
+remote sandboxes, Git-worktree isolation, automated model handoffs, or
+a new CanvasClient extraction are introduced under this patch's scope;
+any required gate in §7 fails or is skipped.
+
+## 9. Health ledger
+
+Unchanged ruling (option B, retired) — not recalculated here.
+
+**Do not authorize PATCH-107.**

@@ -5,9 +5,9 @@ manifests, automated scope validation, and structured results — a
 narrow infrastructure foundation, not a rewrite of the governance
 process itself.
 
-**Status:** **IN PROGRESS — runner-strategy amendment bound (§9a);
-implementer to apply the `tsx`→`vite-node` script-line fix and
-re-validate before requesting independent review.**
+**Status:** **DONE.** Landed commit
+`ab7de32e1d941b11ddfb5897de6a92fbfde5d904` (exact bound message,
+below). Independent review PASS. See §13 for full closure record.
 
 **Implementer:** Codex 5.6. **Reviewer:** independent read-only
 reviewer (DeepSeek V4 Pro primary, Kepler or Gemini 3.1 Pro fallback)
@@ -725,4 +725,66 @@ Unchanged from PATCH-104's ruling (option B, retired) — this patch
 does not attempt a fresh numeric score either; that remains its own
 separate, not-yet-scheduled governance follow-up.
 
-**Do not authorize PATCH-106.**
+## 13. Closure (bind — CTO post-landing verification)
+
+**Landed commit:** `ab7de32e1d941b11ddfb5897de6a92fbfde5d904`, exact
+bound message
+`chore(harness): add bounded server lifecycle, patch manifests, and scope validation (PATCH-105)`.
+Verified directly: branch `main`, HEAD == origin/main == the landed
+commit, clean working tree, zero staged files, zero untracked files,
+empty stash, `package-lock.json` unchanged, `git diff HEAD^ HEAD
+--check` clean, and `git show --name-only --format="" HEAD` returns
+exactly the 14 governed paths from §9 (as amended by §9a's
+`tsx`→`vite-node` script fix) — no more, no fewer.
+
+**Independent review:** PASS, confirming the exact 14 candidate paths
+and blobs, the server-lifecycle design, manifest schema, scope
+validator, package/vitest changes, test quality, harness tests (3
+files / 13 tests), the integration test, scope validation, TypeScript,
+boundaries, full Vitest (**47 files / 471 tests** — up from the
+pre-patch 44/458 baseline, consistent with exactly 3 new harness test
+files and the existing suite otherwise untouched), `verify`, `build`,
+and clean cleanup/process state. Reviewer: independent (not Sonnet),
+per this patch's standing reviewer binding.
+
+**Runner amendment (§9a):** `tsx` was found to be a transitive/locked
+dependency only, absent from `node_modules/.bin`; all five new
+`package.json` harness scripts were bound to use `vite-node` instead
+(already installed as part of the `vitest@3.2.7` tree) — zero new
+dependencies, zero lockfile change. Confirmed still in effect in the
+landed commit.
+
+**Manifest baseline amendments (§7a):** the manifest's `baseCommit`
+was resynced twice during the active-candidate window as unrelated
+governance-only commits advanced `main` (`c1e1bdc`→`82e43ee`→`25ba2cb`),
+per the bound manifest-lifecycle rules. The final pre-commit value,
+`25ba2cba6a8c96375b79b8ee36ac557b7c33f6d0`, is exactly
+`HEAD^` of the landed commit — confirmed directly above.
+
+**Post-commit manifest lifecycle ruling (ties to §7a rule 6):**
+running `npm run harness:validate-scope -- .fable5/patches/PATCH-105.manifest.json`
+against the landed state correctly reports `ok:false` with exactly
+two violations — `headMatchesExpected` and `baseCommitMatches` — and
+correctly reports `commitMessageMatches: true`. This is the **exact,
+expected, non-broken shape** for a manifest whose `baseCommit` is (by
+design) the commit the candidate was built on top of, once that
+candidate has actually landed one commit past it. It is **not** a
+regression and required no manifest edit at closure. However, this
+closure turn identifies a genuine, narrow gap the current single-mode
+validator does not cover: there is no dedicated way to ask "does
+commit `X` conform to this manifest" using git-history commands
+(`git show`/`git diff <base> <landed>`) rather than working-tree
+state — today that confirmation was done by hand (this section, and
+Phase 1 above). This gap, plus the pre-existing dead
+`expectedTestTotals` schema field (declared, never read or compared
+by `scopeValidator.ts`), are carried forward as the seed of PATCH-106
+(see CURRENT_TASK.md for the fresh harness census and PATCH-106's
+exact scope). No change to `scopeValidator.ts`'s pre-commit semantics
+is authorized or needed as part of this closure.
+
+**Remaining implementation blocker:** none. PATCH-105 is fully landed,
+reviewed, and functionally verified.
+
+**Do not authorize PATCH-106 implementation from this section alone
+— see the separate PATCH-106.md authorization for its own exact
+scope, model assignment, and hard-stops.**

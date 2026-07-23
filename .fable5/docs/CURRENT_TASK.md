@@ -361,6 +361,74 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-23** — **PATCH-105 CLOSED (commit `ab7de32e1d941b11ddfb5897de6a92fbfde5d904`,
+  `chore(harness): add bounded server lifecycle, patch manifests, and
+  scope validation (PATCH-105)`) — CTO post-landing verification
+  PASSED; PATCH-106 drafted and authorized (not implemented).**
+  Verified: branch `main`, HEAD == origin/main, clean tree, zero
+  staged/untracked files, empty stash, `package-lock.json` unchanged,
+  `git diff HEAD^ HEAD --check` clean, exactly the 14 governed paths
+  landed (as amended by §9a's `tsx`→`vite-node` fix). Independent
+  review PASS recorded: exact paths/blobs, server-lifecycle design,
+  manifest schema, scope validator, package/vitest changes, test
+  quality, harness tests (3 files/13 tests), integration test, scope
+  validation, TypeScript, boundaries, full Vitest (**47 files/471
+  tests**, up from the pre-patch 44/458 baseline), `verify`, `build`,
+  clean process/port state — as reported, not independently
+  re-executed live by Sonnet this closure turn.
+  **Post-commit manifest lifecycle ruling:** running
+  `harness:validate-scope` against the now-landed state correctly
+  reports `ok:false` (`headMatchesExpected`/`baseCommitMatches` both
+  false, `commitMessageMatches: true`) — this is the *expected,
+  non-broken* shape once a reviewed candidate has landed one commit
+  past its `baseCommit`; confirmed directly via `git rev-parse HEAD^`
+  == the manifest's final resynced `baseCommit`
+  (`25ba2cba6a8c96375b79b8ee36ac557b7c33f6d0`). No manifest edit was
+  needed or made at closure. `PATCH-105.md` §13 records the full
+  closure and this ruling.
+  **Fresh harness census (post-PATCH-105):** bounded server lifecycle
+  — functional for the basic owned start/stop/status case, integration
+  -tested against a real ephemeral-port process, but the
+  already-healthy-unowned / port-conflict-unhealthy paths are only
+  unit-mocked, never exercised against a real occupied port. Scope
+  validation — mature for the pre-commit gate; **no post-commit/landed
+  -commit validation mode exists** (today's manual `git show`/`git log`
+  eyeballing is the only way to confirm a landed commit conforms — the
+  exact gap PATCH-106 closes). Manifest lifecycle — bound in prose
+  (§7a) but entirely manual: `baseCommit` resync after a governance
+  amendment is a human/CTO-stated value with no automation. Structured
+  -result coverage — every CLI emits one JSON object, but nothing
+  aggregates multiple gate results into a single evidence bundle for
+  review — humans still copy-paste JSON blobs between agents in chat
+  (this whole session is proof). **`expectedTestTotals` is declared in
+  `manifestSchema.ts` but never read or compared by any code** — a
+  dead field, confirmed via grep. Windows process reliability — good:
+  PID-scoped `taskkill /PID <pid> /T /F`, confirmed clean stop and
+  port-free-after-stop, zero orphaned processes in this repo at
+  closure time. No Git-worktree or sandbox isolation exists anywhere —
+  all agents share the single host working tree. No retrieval-based
+  governance memory exists. No distinct Explorer or Tester agent roles
+  exist yet — only implementer and reviewer.
+  **PATCH-106 drafted** ("Post-Commit Manifest Validation Mode" — a
+  narrow, additive second validation mode plus wiring up the dead
+  `expectedTestTotals` field via an optionally-supplied pre-existing
+  Vitest JSON report; explicitly NOT worktree isolation, NOT a Test
+  Runner/evidence bundle, NOT an Explorer, NOT retrieval, NOT an
+  orchestrator — each deferred as its own separate future patch, in
+  the user's stated priority order). New exported
+  `validateLandedCommit()` in `scopeValidator.ts` (existing
+  `validateScope()` untouched), new CLI
+  `scripts/harness/validateLandedCommit.ts`, new npm script
+  `harness:validate-landed`, new `PATCH-106.manifest.json` (this patch
+  pilots itself again, per PATCH-105 precedent) — 2 new files, 3
+  modified (all by addition only), zero new dependencies. Full scope,
+  interfaces, tests, validation matrix, and hard-stops bound in
+  `.fable5/patches/PATCH-106.md`. Implementer: Codex 5.6 Terra.
+  Reviewer: DeepSeek V4 Pro primary, Kepler/Gemini 3.1 Pro fallback —
+  not Sonnet. Health ledger: unchanged from PATCH-104's ruling (option
+  B, retired). PATCH-106 authorized only — not implemented.
+  **Do not authorize PATCH-107.**
+
 - **2026-07-23** — **PATCH-105 AMENDED (§7a, manifest baseline lifecycle)
   — candidate preserved, still uncommitted.** CTO governance turn
   resolving a manifest self-validation failure surfaced after the §9a
