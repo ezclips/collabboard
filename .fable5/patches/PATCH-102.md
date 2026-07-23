@@ -2129,3 +2129,249 @@ coexistence — critical, `DrawingLayout.tsx` touched again; PATCH-096
 `fix(presentation): memoize frame-slide identity to stop Preview-effect restarts from unmemoized frame construction (PATCH-102)`
 
 **Do not authorize PATCH-104.**
+
+## §23 — carried PATCH-101 forced-timeout regression exposed by §22 (live-reproduced, bind)
+
+**Trigger:** with §22 implemented (`DrawingLayout.tsx` blob
+`eb9c5fd5fb3590dfc0cd4f25a5c88c47d34eb56b`, structural-sharing `frames`
+memoization) and PATCH-102's own six-scenario suite fully green (5/5
+delayed-image, 7/7 total), the carried PATCH-101 regression gate
+failed: `presentation-snapshot-diagram-readiness.spec.ts` › "proceeds
+with capture on the deterministic forced timeout path" — "forced-
+timeout wait event was not buffered within 90s." Serial-mode cascade
+skipped the following test. Full remaining Phase 8 matrix withheld by
+the hard-stop.
+
+### Phase 1 — candidate integrity (verified)
+
+```
+HEAD == origin/main == 22740eec6ebcfcc4140137eebb379fef9b62288b
+DrawingLayout.tsx blob: eb9c5fd5fb3590dfc0cd4f25a5c88c47d34eb56b (matches report)
+createSlideRenderer.tsx blob: ef8c1a9b7a9521a6a68d40e661ee50effff986fd (unchanged)
+presentation-snapshot-image-readiness.spec.ts blob: 3100c8aa087b585321975797b62d5b8fdd725e42 (matches, untracked)
+presentation-snapshot-diagram-readiness.spec.ts: tracked, NOT in git diff --name-only,
+  NOT in untracked list — confirmed unchanged from HEAD (blob adcc30bb14461fba3253e533385f9f1ec18fef8c)
+PresentationPreviewModal.tsx / PresentationPanel.tsx / useSlideThumbnails.ts: all three restored (matches)
+git diff --cached --name-only: (empty)
+git stash list: stash@{0}: On main: PATCH-102-candidate-before-PATCH-103 (untouched)
+PATCH-104.md: absent
+```
+
+Exactly three candidate paths, PATCH-101's own spec byte-identical to
+its tracked HEAD version (the regression is not a spec edit), zero
+staged files, stash present, PATCH-104 not started — confirmed.
+
+### Phase 2 — live reproduction (bind: this environment has no
+standing dev server or browser session; one was started, used, and
+torn down solely for this investigation, per the disclosure already
+on record in this session that live E2E execution is not normally
+available here — this turn it was, and the following are genuine
+live results, not relayed or fabricated)
+
+A dev server was started on port 3000 (`PW_BASE_URL=http://localhost:3000`).
+The exact forced-timeout test
+(`-g "proceeds with capture on the deterministic forced timeout path"`)
+was run **three times** against the unmodified §22 candidate, plus a
+structurally-equivalent scratch diagnostic (same seed/open/capture
+flow, additional non-asserting event dump, deleted after use — never
+part of the governed candidate set) was run twice more to inspect the
+raw event timeline without risking a fourth assertion-driven failure
+mode. Results:
+
+| # | Script | Outcome | Failure point |
+|---|---|---|---|
+| 1 | real spec | fail (unrelated) | `auth.setup.ts` — stale browser context on cold server; not reproduced again, discounted |
+| 2 | real spec | **fail** | forced-timeout wait event never buffered — 90s poll exhausted, zero `timedOut:true` events ever seen |
+| 3 | scratch diagnostic | pass | 3 wait events observed within ~5s of modal-visible: `{waitedMs:655,timedOut:false,pendingCount:0}`, `{waitedMs:314,timedOut:false,pendingCount:0}`, `{waitedMs:4588-4611,timedOut:true,pendingCount:1}` — override, dispatch, and timeout semantics all fired exactly as designed |
+| 4 | scratch diagnostic | **fail** | modal itself never became visible within 90s (same failure mode as run 6) |
+| 5 | scratch diagnostic | pass | same 3-event pattern as run 3, values consistent (`~650ms`/`~false/0`, `~350ms`/`false/0`, `~4.6s`/`true/1`) |
+| 6 | real spec | **fail** | modal itself never became visible within 90s (`openPreviewModal`'s own assertion, not the wait-event assertion) |
+
+3 of 5 substantive attempts failed (two distinct failure points: no
+`timedOut:true` event ever arriving, or the modal never painting at
+all within 90s); 2 of 5 passed with the mechanism behaving exactly as
+specified. The scratch diagnostic is line-for-line structurally
+identical to the governed test's seed/open/capture flow (same
+`sceneBase`/`frameElement`/`embeddableElement`/`flowchartEnvelope`
+shape, same 180-step count, same `openPreviewModal`-equivalent click
+sequence, override set before modal open, buffers installed before
+override) — it failed with the **same** "modal never visible" mode
+once, and passed twice, ruling out a script-specific artifact and
+confirming the flakiness is inherent to the interaction between the
+current candidate and this fixture, not to a difference between the
+two scripts.
+
+Every wait event observed, in both passing runs, carried well-formed
+`waitedMs`/`timedOut`/`pendingCount` fields; the override was read
+correctly (`timedOut:true` only appeared with `pendingCount:1`, and
+only after the override's 50ms floor); no oklch, route, or
+`InvalidFractionalIndexError` occurred in any of the six attempts.
+
+### Phase 3/4 — test contract and §22 interaction (bind)
+
+The forced-timeout test seeds a deliberately large (180-step) Mermaid
+flowchart specifically so the diagram is still mid-render — i.e.
+`host.querySelectorAll('[data-ai-render-state="loading"], ...')`
+still returns >0 — at the moment `createSlideRenderer.tsx`'s
+`pendingAtStart` check runs, so the forced 50ms override reliably
+trips `timedOut:true` rather than the "already finished" `timedOut:false,
+pendingCount:0` path. This design already existed before this
+session's PATCH-102 work — §21/§22 did not write this test or choose
+180 steps.
+
+Before §21, `DrawingLayout.tsx`'s `slideRenderer` (and, transitively,
+`renderSlideToPNG`) churned on every scene tick, restarting
+`PresentationPreviewModal`'s effects dozens of times per open (proven
+at 43 restarts in §20's diagnostic). Cancellation
+(`if (!cancelled) setBigPng(png)`) only discards a stale *result* — it
+does not abort the underlying `renderSlideToPNG` promise, so every one
+of those restarts still ran a full, independent
+clone-mount-wait-capture cycle to completion, each dispatching its own
+wait event at its own moment in time. With dozens of independent
+sampling attempts spread across the diagram's full render duration,
+the test's implicit assumption — "some capture will land while the
+diagram is still pending" — held by sheer volume, incidentally,
+regardless of how fast or slow Mermaid happened to render on a given
+run. §21 and §22 (this patch's own authorized fixes) correctly
+eliminated that churn: the live evidence above confirms exactly one
+(or a small, fixed handful — sidebar-thumbnail, modal-main,
+modal-thumbnail-strip) capture attempt now occurs, all clustered in a
+narrow window right after modal-open. Whether that narrow window
+overlaps the diagram's genuinely-pending state is no longer
+guaranteed by volume — it depends on this run's actual Mermaid
+render/layout speed relative to the fixed few sampling points, which
+varies enough (main-thread contention, JIT warmup, machine load) to
+sometimes miss the window entirely (event fires with `pendingCount:0`
+because rendering hasn't started or has already finished) or, in the
+worst observed case, to make the *entire* Mermaid render + capture
+work costly enough to delay ordinary UI paint (the modal's own title
+text) past the test's 90s ceiling.
+
+This is not a hypothetical — it is exactly what the two independent
+failure modes observed in Phase 2 show, and it is definitional once
+churn is removed: the test never had a mechanism of its own to
+guarantee the pending window is hit; it borrowed one, incidentally,
+from a defect this patch was authorized to fix. **Classification: E —
+§22 (together with §21) removes incidental repeated captures that
+PATCH-101's forced-timeout test always implicitly, silently depended
+upon.** This is a pre-existing PATCH-101 test-design gap, not a §21/§22
+product regression.
+
+### Phase 5 — production contract (bind: intact, unchanged)
+
+Both passing live runs show `createSlideRenderer.tsx` (blob
+`ef8c1a9b7a9521a6a68d40e661ee50effff986fd`, untouched by this patch)
+still: reads `__patch101TimeoutOverrideMs` correctly; dispatches
+`collabboard-ai-snapshot-capture-wait` with well-formed
+`waitedMs`/`timedOut`/`pendingCount`; proceeds with capture after a
+genuine timeout (`timedOut:true, pendingCount:1` observed, followed by
+a successful `html2canvas` capture in the same run); shares one
+timeout path for Mermaid/legacy-image readiness, per §13's governed
+contract. No PATCH-102 change altered override lookup timing, event
+dispatch timing, or timeout semantics — what changed is *how many*
+independent chances exist to sample the pending window, which is a
+property of `DrawingLayout.tsx`'s render cadence, not of
+`createSlideRenderer.tsx`.
+
+### Phase 6 — classification (bind: E)
+
+Live-proven per Phases 2-4 above. Not A (override installed in time —
+buffers registered in `createSeededBoard`/`installSnapshotEventBuffers`,
+override set, *then* modal opened, in both the governed test and the
+scratch diagnostic — confirmed by source and by the diagnostic's own
+successful runs reading the override correctly). Not C (no evidence of
+listener-registration-after-event; the diagnostic's listener, installed
+identically early, still sometimes missed the window — because the
+event that should carry `timedOut:true` sometimes never fires at all,
+not because it fires unheard). Not F (production did enter the forced-
+timeout path correctly in 2/5 attempts with correct data). Not G (the
+render/capture pipeline did not throw or fail in either passing run).
+**E, live-reproduced:** the number of independent capture attempts is
+now fixed and small; whether any of them samples the genuinely-pending
+window is a race against Mermaid's real render speed that the test
+never guarded against.
+
+### Phase 7 — minimum safe correction (bind: spec-only)
+
+Production is not implicated (Phase 5). Per the explicit prohibitions
+(no render-churn restoration, no `timedOut` weakening, no accepting a
+missing event, no arbitrary sleeps, no production broadening, no error
+suppression), the correction stays entirely inside
+`presentation-snapshot-diagram-readiness.spec.ts`, using the same
+lever the test's own author already used to distinguish this fixture
+from the "ready-before-timeout" case: diagram size, i.e. real render
+cost, as the deterministic mechanism widening the pending-observation
+window — not a sleep, not a churn restoration, not a weakened
+assertion.
+
+**Exact authorized correction:** in the forced-timeout test (spec
+lines 514-562), increase the seeded diagram's `stepCount` from `180`
+to a larger fixed value sufficient to keep
+`host.querySelectorAll(SNAPSHOT_READINESS_SELECTOR)` non-empty across
+the full window in which the (now fixed, small number of) capture
+attempts fire, on the slowest machine the live gate is run on. Do not
+guess a single magic number and stop — the implementer must determine
+it empirically via the required live gate below, starting from a
+substantially larger value (e.g. 600) and increasing further only if
+the 5-run gate is not clean, reporting the exact final value chosen
+and the evidence for it. The existing `.some(event => event.timedOut
+=== true)` assertion, and the `pendingCount > 0` / `waitedMs >= 50` /
+`waitedMs < 30_000` bounds, must not change — the fix is to make the
+diagram slow enough that the existing, correct assertion reliably
+observes what it was always designed to observe.
+
+**Hard-stop conditions (bind, in addition to prior sections):** STOP,
+report, do not commit, if: any file other than
+`presentation-snapshot-diagram-readiness.spec.ts` is touched; the
+`timedOut === true`, `pendingCount > 0`, `waitedMs >= 50`, or
+`waitedMs < 30_000` assertions are weakened or removed; any sleep/wait
+is added outside the existing `expect.poll` machinery; any production
+file (`createSlideRenderer.tsx`, `DrawingLayout.tsx`,
+`CodeDiagramRenderer.tsx`, or any AI-component renderer) is touched;
+`stepCount` is raised without a live gate proving the new value's
+stability; any of the required live gates fails or is skip-only;
+PATCH-096 is not exactly 14/14/14; credentials are printed, logged, or
+committed anywhere.
+
+### Phase 8 — preserve the passing §22 candidate (bind)
+
+Retained, unchanged, not reopened:
+- `DrawingLayout.tsx` blob `eb9c5fd5fb3590dfc0cd4f25a5c88c47d34eb56b`
+- `createSlideRenderer.tsx` blob `ef8c1a9b7a9521a6a68d40e661ee50effff986fd`
+- `presentation-snapshot-image-readiness.spec.ts` blob `3100c8aa087b585321975797b62d5b8fdd725e42`
+
+No structural-sharing or renderer-identity work is reopened on account
+of a carried test's timing-margin defect.
+
+**Full validation matrix (supersedes nothing already required —
+adds the PATCH-101 gate as its own explicit prerequisite before the
+remainder of §21/§22 Phase 8 resumes):**
+
+1. `presentation-snapshot-diagram-readiness.spec.ts` forced-timeout
+   test — **five consecutive real passes**, each with a genuine
+   `timedOut:true` event (`pendingCount > 0`, `waitedMs` in
+   `[50, 30_000)`), capture proceeding, zero skips, zero oklch/route/
+   index errors.
+2. Full `presentation-snapshot-diagram-readiness.spec.ts` — all four
+   tests, no skip cascade.
+3. Five clean PATCH-102 delayed-image runs (already achieved on this
+   candidate; re-confirm alongside the above, since the dev server/
+   environment will be freshly started for this pass).
+4. Full PATCH-102 six-scenario suite (already 7/7; re-confirm).
+5. PATCH-100/099/097 and PATCH-089/090/091/093/094 — all carried, real
+   results.
+6. PATCH-103 coexistence: targeted + full `drawing-line-bridge.spec.ts`,
+   `drawing-presentation.spec.ts`.
+7. PATCH-096 grouped runner — 14/14/14, zero non-signature failures,
+   exit code 0.
+8. Deterministic matrix: `git diff --check`; `npx tsc --noEmit`;
+   `npm run check:boundaries`; `slideOrder` 7/1; `clonedPostMetadata`
+   9/1; focused drawing 59/2; full Vitest 448/43; `npm run verify`;
+   `npm run build`.
+9. Fresh independent review (Kepler primary, Gemini 3.1 Pro fallback —
+   not Sonnet) required before commit.
+
+**Bound implementation commit message (verbatim):**
+`test(presentation): widen PATCH-101 forced-timeout fixture to survive churn-free single-capture timing (PATCH-102)`
+
+**Do not authorize PATCH-104.**

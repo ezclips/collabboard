@@ -361,6 +361,42 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-23** — **PATCH-102 §23 — carried PATCH-101 forced-timeout
+  regression LIVE-REPRODUCED and classified E (pre-existing test
+  design gap exposed by §22, not a product regression).** With §22
+  fully passing (5/5 delayed-image, 7/7 six-scenario suite), the
+  carried `presentation-snapshot-diagram-readiness.spec.ts`
+  forced-timeout test failed: "forced-timeout wait event was not
+  buffered within 90s." A dev server was started in this environment
+  and the exact test run 3 times plus a structurally-identical scratch
+  diagnostic run 2 more times (5 total): 2 passed with the
+  override/dispatch/timeout mechanism firing exactly as designed
+  (`timedOut:true, pendingCount:1` after the diagnostic correctly read
+  the 50ms override), 3 failed across two distinct modes (no
+  `timedOut:true` event ever arriving in 90s, or the modal itself never
+  becoming visible in 90s). Root cause: this test seeds a 180-step
+  Mermaid diagram specifically so it is still mid-render when captured
+  — before §21/§22, `DrawingLayout.tsx`'s pre-existing render churn
+  (43 Preview-effect restarts, none of which abort the underlying
+  capture promise on cancellation) gave dozens of independent sampling
+  attempts spread across the diagram's render window, incidentally
+  guaranteeing at least one landed mid-render regardless of actual
+  Mermaid speed. §21/§22 correctly eliminated that churn, leaving only
+  a small fixed number of capture attempts clustered right after
+  modal-open — whether they land mid-render is now a genuine race
+  against real render speed the test never guarded against. Production
+  (`createSlideRenderer.tsx`, unchanged, blob `ef8c1a9b7a9521a6a68d40e661ee50effff986fd`)
+  confirmed intact via the 2 passing runs. Authorized: a spec-only fix
+  in `presentation-snapshot-diagram-readiness.spec.ts` widening the
+  seeded diagram's `stepCount` (starting point 600, tuned empirically
+  via the required 5-consecutive-pass live gate) — no assertion
+  weakened, no production file touched, no render churn restored. §22
+  candidate (`DrawingLayout.tsx` blob `eb9c5fd5fb3590dfc0cd4f25a5c88c47d34eb56b`)
+  preserved unchanged. Dev server and all scratch/diagnostic artifacts
+  created for this investigation were torn down; repository state
+  returned to exactly the three governed candidate paths. PATCH-104
+  not started.
+
 - **2026-07-23** — **PATCH-102 §22 — second, independent unmemoized
   dependency found one call-site upstream of §21's fix.** Live runs
   after §21 landed uncommitted: 2/3 delayed-image passes, run 3 failed
