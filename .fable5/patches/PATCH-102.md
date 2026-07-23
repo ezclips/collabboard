@@ -1,10 +1,12 @@
 # PATCH-102 — Bounded Legacy-HTML Image Readiness Wait in Slide Snapshot Capture
 
-**Status:** **AUTHORIZED, RESUMING** (blocked by PATCH-103 from
+**Status:** **DONE (closed 2026-07-23, commit
+`86c0b8620025ea1fbae7eb6c030e1dbead76932f`) — CTO post-landing
+verification PASSED.** (Previously blocked by PATCH-103 from
 2026-07-22 until PATCH-103 closed DONE on the same date at commit
 `75343360c510571fecf584637a58e8a4211ee63a`; see §12 for the
 restoration/resumption plan and one additional bound prerequisite
-found in this candidate's own spec file).
+found in this candidate's own spec file. See §26 for closure record.)
 
 **Implementer:** GPT-5.5. **Reviewer:** independent read-only
 reviewer (Kepler primary, Gemini 3.1 Pro fallback) — PASS required
@@ -2976,3 +2978,115 @@ servers, or listening ports.)
 `fix(presentation): sanitize unsupported gradient color functions in the offscreen snapshot host (PATCH-102)`
 
 **Do not authorize PATCH-104.**
+
+## §26 — post-landing verification and closure (bind, 2026-07-23)
+
+**Landed commit:** `86c0b8620025ea1fbae7eb6c030e1dbead76932f`
+(`fix(presentation): sanitize unsupported gradient color functions in
+the offscreen snapshot host (PATCH-102)`), branch `main`, HEAD ==
+origin/main at verification time.
+
+**Phase 1 (bind — verified):** `git status --short --untracked-files=all`
+empty (clean tree); exactly the five governed files touched (`git show
+--name-only --format="" HEAD`): `DrawingLayout.tsx`,
+`createSlideRenderer.tsx`, `lib/ai/diagram-engine.ts`,
+`presentation-snapshot-diagram-readiness.spec.ts`,
+`presentation-snapshot-image-readiness.spec.ts`; `git diff HEAD^ HEAD
+--check` clean (no whitespace errors); zero staged files; zero
+untracked files; PATCH-104.md absent; stash
+`stash@{0}: On main: PATCH-102-candidate-before-PATCH-103` present.
+
+**Phase 2 (bind — verified):** all five landed blobs match exactly:
+
+| file | landed blob | expected |
+|---|---|---|
+| `DrawingLayout.tsx` | `eb9c5fd5fb3590dfc0cd4f25a5c88c47d34eb56b` | match |
+| `createSlideRenderer.tsx` | `5ff32b6e19956091ede521ca5fa5d9a3662a592a` | match |
+| `lib/ai/diagram-engine.ts` | `51f8bccf49ff7ec4ec2736e487d8b64585341e76` | match |
+| `presentation-snapshot-diagram-readiness.spec.ts` | `8e23de8604a0f9169695adfac6ac97767dfcf80d` | match |
+| `presentation-snapshot-image-readiness.spec.ts` | `3100c8aa087b585321975797b62d5b8fdd725e42` | match |
+
+Additionally verified `createSlideRenderer.tsx`'s landed content is
+*exactly* the §25 authorization and nothing else: a blob-to-blob diff
+between the pre-§25 candidate blob (`ef8c1a9b7a9521a6a68d40e661ee50effff986fd`)
+and the landed blob (`5ff32b6e19956091ede521ca5fa5d9a3662a592a`) shows
+a single one-line insertion —
+`["background-image", computed.backgroundImage, "none"]` — and
+nothing else. No hard-stop condition from §21-§25 was violated.
+
+**Independent review:** PASS (Kepler/Gemini, not Sonnet), confirming
+the five candidate blobs, governance/fence compliance, product
+contract, image-error 5/5, delayed-image 5/5, full PATCH-102 suite,
+full PATCH-101 suite, carried PATCH-089-100 gates, PATCH-103
+coexistence, PATCH-096 14/14/14, TypeScript, boundaries, focused and
+full Vitest, `verify`, `build`, and cleanup/process state — reported
+to this governance turn by the user, not independently re-executed by
+Sonnet (no live E2E/build tooling standing in this turn; the §21-§25
+investigations' own live reproductions were exploratory diagnostics
+run by Sonnet directly, not a substitute for the bound independent
+reviewer's own full-matrix run, which is the actual gating review of
+record here).
+
+**PATCH-102 status: DONE.** No remaining implementation blocker. Every
+hard-stop condition bound across §1-§25 was satisfied or superseded by
+a later, live-proven correction; the final landed state resolves the
+full chain: §13 (eager image loading) → §15 (route-teardown sync) →
+§21 (slideRenderer ref-stabilization) → §22 (frame structural sharing)
+→ §24 (deterministic Mermaid render-hold, replacing unsafe stepCount
+scaling) → §25 (offscreen-host gradient sanitization). **PATCH-104
+implementation has not been started and is not authorized by this
+section.**
+
+## §27 — preserved stash inspection and disposition (bind)
+
+`stash@{0}: On main: PATCH-102-candidate-before-PATCH-103` inspected
+without applying (`git stash show --stat`, `--name-status`, `-p`, and
+its untracked-files component via its third parent commit).
+
+**Structure:** the stash commit (`8a3f111`) has three parents —
+`9bf8933` (base commit at stash time, message `docs(fable): authorize
+Excalidraw seed normalization prerequisite`), `401c4df` (index), and
+`4776fac` (untracked-files-at-stash-time, confirming `git stash -u` was
+used). This means the stash carries two components: a tracked-file
+diff and a bundle of files that were untracked at stash time.
+
+**Tracked component:** `git stash show --stat`/`-p` shows exactly one
+file, `createSlideRenderer.tsx`, 3 insertions/2 deletions — introducing
+the `SNAPSHOT_READINESS_SELECTOR` constant
+(`'[data-ai-render-state="loading"], [data-ai-image-state="loading"]'`)
+and using it in place of the original Mermaid-only inline selector in
+two places. `grep -n "SNAPSHOT_READINESS_SELECTOR"` against current
+HEAD's `createSlideRenderer.tsx` shows this exact constant and both use
+sites present, byte-for-byte, unchanged, at lines 17/38/191 — this is
+the very first commit of PATCH-102's own multi-turn build-up, fully
+carried forward and built upon by every subsequent §13-§25 section.
+
+**Untracked component:** the third parent contains one file,
+`e2e/characterization/presentation-snapshot-image-readiness.spec.ts`
+(528 lines at stash time, vs. 565 lines in the landed HEAD version). A
+line-diff (`git diff --no-index --ignore-space-at-eol`) between the
+stashed spec and the current landed spec shows **only additions, zero
+removals**: `nextFixtureFractionalIndex()` replacing hardcoded
+`index: null` (the §12 fractional-index fix) and the
+`inFlightHandlers`/`requestCount` in-flight route-handler
+synchronization (the §15 fix) are the entire delta. Every scenario,
+assertion, and helper present in the stashed spec exists, unmodified,
+in the current landed spec.
+
+**Classification: A — the stash contains only content already
+represented in current HEAD.** Not B (it is not merely "obsolete
+pre-PATCH-103 content" in the sense of containing abandoned work — it
+IS represented, not just superseded-and-discarded), not C (no unique
+work was found — the diff confirms strict-subset status for both
+components), not D (nothing conflict-prone or uniquely recoverable —
+every line is already present in a newer, strictly-more-complete
+form).
+
+**Ruling: safe to drop.** Final pre-drop identity check performed as
+required: both the tracked-file content and the untracked-file content
+were independently diffed against current HEAD in this same turn (not
+assumed from prior sessions), both confirmed as strict subsets with
+zero unique material. `stash@{0}` (`8a3f111`) is authorized for
+removal via `git stash drop stash@{0}`, executed in this same
+governance turn — see the Phase 4 verification below for the resulting
+empty `git stash list`.

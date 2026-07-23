@@ -361,6 +361,62 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-23** — **PATCH-102 CLOSED (commit `86c0b8620025ea1fbae7eb6c030e1dbead76932f`,
+  `fix(presentation): sanitize unsupported gradient color functions in
+  the offscreen snapshot host (PATCH-102)`) — CTO post-landing
+  verification PASSED; PATCH-102 stash dropped; fresh census run.**
+  Verified: branch `main`, HEAD == origin/main, working tree clean,
+  zero staged/untracked files, exactly the five governed files landed,
+  all five blobs match exactly (`DrawingLayout.tsx`
+  `eb9c5fd5fb3590dfc0cd4f25a5c88c47d34eb56b`, `createSlideRenderer.tsx`
+  `5ff32b6e19956091ede521ca5fa5d9a3662a592a` — confirmed via
+  blob-to-blob diff against the pre-§25 candidate that the ONLY change
+  is the authorized one-line `background-image` sanitizer entry,
+  `diagram-engine.ts` `51f8bccf49ff7ec4ec2736e487d8b64585341e76`, both
+  specs matching exactly), independent Kepler/Gemini PASS recorded
+  (reported by the user; not independently re-executed live by Sonnet
+  in this closure turn — no standing dev server/browser session).
+  PATCH-102.md §26 records the closure; §27 records the stash
+  disposition.
+  **Stash `PATCH-102-candidate-before-PATCH-103` inspected and
+  DROPPED**: its tracked component (`createSlideRenderer.tsx`,
+  introducing `SNAPSHOT_READINESS_SELECTOR`) and untracked component
+  (an early 528-line `presentation-snapshot-image-readiness.spec.ts`)
+  were both diffed directly against current HEAD in this turn — both
+  proved to be strict subsets with zero unique content (classification
+  A), so the stash was dropped (`8a3f111994f7074c32be599b55edf3bc8a4c8e85`);
+  `git stash list` now empty.
+  **Fresh census (re-run this turn, not reused from prior sessions):**
+  `npx tsc --noEmit` clean; `npm run check:boundaries` clean, zero
+  errors; `GRANDFATHERED_UI_FILES` in `eslint.boundaries.config.mjs` is
+  now an **empty array** — zero remaining grandfathered files; full
+  Vitest 448 passed / 43 files, matching every previously-bound total;
+  two stray direct-`@supabase/*`-import hits found are both `.bak`/
+  `.backup_*` files (not matched by the boundaries glob, not real
+  violations — housekeeping note only, not a gate failure).
+  `CanvasClient.tsx` is 8,436 lines and `FreeformPadletCards.tsx` is
+  6,358 lines — both essentially unchanged this session (all of
+  PATCH-089–102 was presentation/slide-renderer work, not CanvasClient
+  strangling) — **CanvasClient.tsx remains the largest architectural
+  risk**, unchanged in kind from CLAUDE.md's standing note. The
+  CTO_PLAYBOOK §12 health ledger's last numeric entry found in this
+  doc is **76**, dated to the PATCH-030 era — it has **not** been
+  incrementally maintained through PATCH-031–102; a full 5-axis
+  re-score (which also requires operational-integrity evidence —
+  backups, secrets posture — not re-verified this turn) is a distinct,
+  dedicated task, not fabricated here from stale momentum.
+  **PATCH-104 has no drafted scope anywhere in this repository** —
+  every prior mention across this entire session and PATCH-103's own
+  closure is exclusively a "not started/not authorized" guard, never a
+  scope. Given ROADMAP.md's standing direction (continue the
+  `CanvasClient.tsx` command-by-command strangler extraction toward
+  `lib/domain`, `BoardStore`/`BoardUiStore`), PATCH-104 is very likely
+  the next CanvasClient strangler group in that sequence, but its
+  exact file scope, fences, and characterization requirements have not
+  been authored and must not be improvised inside a closure turn —
+  **drafting PATCH-104 is its own next governance action**, not yet
+  started.
+
 - **2026-07-23** — **PATCH-102 §25 — legacy-image-error Preview
   failure traced to a pre-existing sanitizer gap exposed by a
   React-state/DOM-attribute race, not an image-readiness defect.**
