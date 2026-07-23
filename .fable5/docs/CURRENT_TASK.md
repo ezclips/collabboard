@@ -361,6 +361,85 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-24** — **PATCH-106 CLOSED (commit `3cd496f4cf81127d0a73ce40f4d6afc23f89b340`,
+  `feat(harness): add post-commit/landed manifest validation mode
+  (PATCH-106)`) — CTO post-landing verification PASSED; PATCH-107
+  drafted and authorized (not implemented).** Verified: branch `main`,
+  HEAD == origin/main, clean tree, zero staged/untracked files, empty
+  stash, `package-lock.json` unchanged, `git diff HEAD^ HEAD --check`
+  clean, exactly the six governed paths landed, `HEAD^` exactly equal
+  to the manifest's `baseCommit` (closing the loop on PATCH-106's own
+  §0a base-commit correction). Independent review PASS recorded: exact
+  paths/blobs, `validateScope()` behavior fully preserved, new
+  `validateLandedCommit` implementation, new CLI, manifest-lifecycle
+  distinction, harness tests (3 files/21 tests, up from 3/13), full
+  Vitest (**47 files/479 tests**, up from 47/471), TypeScript,
+  boundaries, verify, build, clean process state — as reported, not
+  independently re-executed live except where noted below.
+  **Landed-validation re-verified live this closure turn:**
+  `npm run harness:validate-landed -- .fable5/patches/PATCH-106.manifest.json HEAD`
+  → exit 0, `ok:true`, all applicable checks true, zero mutation
+  (`git status` clean before/after), zero residual process/port state.
+  The companion `harness:validate-scope` run against the same manifest
+  post-commit correctly still reports `ok:false`
+  (`headMatchesExpected`/`baseCommitMatches` false,
+  `commitMessageMatches: true`) — reconfirmed as the same expected,
+  non-broken lifecycle shape ruled at PATCH-105's closure, not a
+  regression. `PATCH-106.md` §10 records the full closure.
+  **Fresh harness census (post-PATCH-105/106):** bounded server
+  lifecycle — unchanged from PATCH-105's census, still only lightly
+  tested against real port contention. Pre-commit scope validation —
+  mature, unchanged, zero regressions across two more patches built on
+  top of it. Landed-commit validation — now mature and proven twice
+  (against PATCH-105's own landed commit at PATCH-106's authorization,
+  and against PATCH-106's own landed commit this turn) — the exact gap
+  from PATCH-105's closure is closed. Manifest lifecycle — the §7a/§0a
+  resync rule has now been exercised three times across two patches
+  and held correctly every time, including through one drafting error
+  (PATCH-106's original stale base commit) caught and corrected before
+  implementation began. Windows process handling — confirmed clean
+  again (ports 3000/4000 free, no residual process). Structured JSON
+  coverage — every harness CLI still emits exactly one JSON object;
+  unchanged. **Remaining manual steps, confirmed unchanged by this
+  census:** humans (the CTO, in chat) still relay every prompt and
+  every JSON result between the CTO and the implementer by hand — no
+  automated handoff exists. Candidates and reviewers still share the
+  single main working tree — **no isolation exists**: a concurrent
+  implementation and review are not provably safe, temporary
+  build/test artifacts and dev-server ports could collide if two turns
+  ever overlapped, and branch/stash state remains a single shared
+  resource any agent could disturb. No Git-worktree or container
+  isolation exists anywhere in the repo (confirmed via grep — zero
+  hits for "worktree" under `scripts/harness/`). No retrieval-based
+  governance memory exists. No distinct Explorer or Tester agent roles
+  exist yet — only implementer and reviewer.
+  **PATCH-107 drafted** ("Isolated Git-Worktree Execution Foundation" —
+  a narrow create/list/remove/prune primitive for disposable,
+  harness-owned local Git worktrees, built from an exact base commit
+  with a uniquely-namespaced branch or detached state, distinct port
+  allocation, and a JSON ownership-metadata registry as the sole
+  source of truth for what the harness is allowed to touch; explicitly
+  NOT a Test Runner/evidence bundle, NOT an Explorer, NOT retrieval,
+  NOT an orchestrator, and does NOT yet wire any implementer/reviewer
+  role into the worktree — that remains a separate future patch, per
+  the user's stated priority order). New
+  `scripts/harness/worktreeLifecycle.ts`/`.test.ts`/`worktreeCli.ts`/
+  `worktreeLifecycle.integration.ts` plus a new
+  `PATCH-107.manifest.json` (this patch pilots itself again) — 5 new
+  files, up to 3 modified (`types.ts` additive-only, `package.json`
+  five new scripts, one `.gitignore` line for
+  `.fable5/worktrees/`), zero new dependencies (native
+  `child_process`/`fs`/`path`/`os`/`net`/`crypto` only). Full
+  interfaces, ownership-metadata format, path/branch/port rules,
+  env-file policy, cleanup semantics, tests, validation matrix, and
+  hard-stops bound in `.fable5/patches/PATCH-107.md`. Implementer:
+  **Codex 5.6 Sol** (not Terra — this patch's Windows Git-worktree
+  /branch/path/port architecture is materially more complex than
+  PATCH-105/106's work). Reviewer: DeepSeek V4 Pro primary,
+  Kepler/Gemini 3.1 Pro fallback — not Sonnet. Health ledger: unchanged
+  (option B, retired). PATCH-107 authorized only — not implemented.
+  **Do not authorize PATCH-108.**
+
 - **2026-07-23** — **PATCH-106 CORRECTED (§0a, implementation-baseline
   fix) — before implementation began, candidate not yet started.**
   CTO governance turn resolving a drafting error caught by Codex

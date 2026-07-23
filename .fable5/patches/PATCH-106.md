@@ -20,7 +20,9 @@ memory. NOT an automated handoff orchestrator. NOT a fix to any
 CanvasClient/product code. Each of those remains a distinct, separate,
 not-yet-authorized future patch.
 
-**Status:** AUTHORIZED, NOT STARTED.
+**Status:** **DONE.** Landed commit
+`3cd496f4cf81127d0a73ce40f4d6afc23f89b340` (exact bound message,
+below). Independent review PASS. See §10 for full closure record.
 
 **Implementer:** Codex 5.6 Terra (moderate, well-bound scope; does not
 require Codex 5.6 Sol's complex Windows/worktree capability). **Reviewer:**
@@ -289,4 +291,57 @@ set to any value other than `f8394a5c5c2132cb791de72b3491b11ac31b796d`.
 
 Unchanged ruling (option B, retired) — not recalculated here.
 
-**Do not authorize PATCH-107.**
+## 10. Closure (bind — CTO post-landing verification)
+
+**Landed commit:** `3cd496f4cf81127d0a73ce40f4d6afc23f89b340`, exact
+bound message
+`feat(harness): add post-commit/landed manifest validation mode (PATCH-106)`.
+Verified directly: branch `main`, HEAD == origin/main == the landed
+commit, clean working tree, zero staged/untracked files, empty stash,
+`package-lock.json` unchanged, `git diff HEAD^ HEAD --check` clean,
+and `git show --name-only --format="" HEAD` returns exactly the six
+governed paths from §6 — `.fable5/patches/PATCH-106.manifest.json`,
+`package.json`, `scripts/harness/scopeValidator.test.ts`,
+`scripts/harness/scopeValidator.ts`, `scripts/harness/types.ts`,
+`scripts/harness/validateLandedCommit.ts` — no more, no fewer.
+`HEAD^` (`f8394a5c5c2132cb791de72b3491b11ac31b796d`) confirmed exactly
+equal to the manifest's `baseCommit` per §0a, closing the loop on this
+patch's own base-commit correction.
+
+**Independent review:** PASS, confirming the exact six candidate paths
+and blobs, `validateScope()`'s existing behavior fully preserved (no
+regression to PATCH-105's pre-commit mode), the new
+`validateLandedCommit` implementation, the new landed-validation CLI,
+the manifest-lifecycle/historical-target distinction (§0a), harness
+tests (**3 files / 21 tests** — up from PATCH-105's 3/13, consistent
+with the new test cases added to the existing `scopeValidator.test.ts`
+rather than a new file), full Vitest (**47 files / 479 tests** — up
+from the pre-patch 47/471 baseline, consistent with exactly 8 new
+test cases and zero new/removed test files elsewhere), TypeScript,
+boundaries, `verify`, `build`, and clean process/cleanup state.
+Reviewer: independent (not Sonnet), per this patch's standing reviewer
+binding.
+
+**Landed-validation verification (this closure turn, live, read-only):**
+`npm run harness:validate-landed -- .fable5/patches/PATCH-106.manifest.json HEAD`
+→ exit 0, `{"ok":true,"violations":[],"checks":{"landedCommitExists":true,"parentMatchesBaseCommit":true,"landedFilesWithinAllowed":true,"prohibitedPathsAbsentFromLandedCommit":true,"landedCommitMessageMatches":true,"landedBlobsMatch":"not-checked","testTotalsMatch":"not-checked"}}`.
+Confirmed zero mutation (`git status` clean before and after) and zero
+residual process/port state.
+
+**Post-commit pre-commit-scope validation:** `harness:validate-scope`
+against this same manifest post-commit correctly reports `ok:false`
+(`headMatchesExpected`/`baseCommitMatches` both false,
+`commitMessageMatches: true`) — this is the **same expected,
+non-broken lifecycle shape** ruled in PATCH-105 §13, now doubly
+confirmed by PATCH-106's own landing: a manifest's pre-commit mode is
+*supposed* to read as "out of bounds" once its candidate has landed
+one commit past `baseCommit`. This is not a regression and required
+no manifest edit.
+
+**Remaining implementation blocker:** none. PATCH-106 is fully landed,
+reviewed, and functionally verified — both its own pre-commit and its
+new post-commit validation modes behave exactly as designed.
+
+**PATCH-107:** authorized separately (see `PATCH-107.md`) as the
+isolated Git-worktree execution foundation — not implemented as part
+of this closure.
