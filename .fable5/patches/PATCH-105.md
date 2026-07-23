@@ -5,7 +5,9 @@ manifests, automated scope validation, and structured results — a
 narrow infrastructure foundation, not a rewrite of the governance
 process itself.
 
-**Status:** **AUTHORIZED, NOT STARTED.**
+**Status:** **IN PROGRESS — runner-strategy amendment bound (§9a);
+implementer to apply the `tsx`→`vite-node` script-line fix and
+re-validate before requesting independent review.**
 
 **Implementer:** Codex 5.6. **Reviewer:** independent read-only
 reviewer (DeepSeek V4 Pro primary, Kepler or Gemini 3.1 Pro fallback)
@@ -467,8 +469,10 @@ toolchain (no new test runner):
   script line is altered): `"harness:server:start"`,
   `"harness:server:stop"`, `"harness:server:status"`,
   `"harness:validate-scope"`, `"test:harness:integration"`, each
-  invoking the corresponding file above via `tsx`. No dependency
-  version bump, no new `dependencies`/`devDependencies` entry.
+  invoking the corresponding file above via **`vite-node`** (see §9a
+  amendment below — supersedes the original `tsx` binding). No
+  dependency version bump, no new `dependencies`/`devDependencies`
+  entry.
 
 **Prohibited paths (must NOT change):** `app/**`, `components/**`,
 `lib/domain/**`, `lib/infra/**`, any existing `e2e/**` spec,
@@ -479,22 +483,99 @@ toolchain (no new test runner):
 
 **Dependency choices:** zero new dependencies. `zod` (already present)
 for manifest validation; native `node:child_process`, `node:http`,
-`node:net`/`fetch`, `node:fs` for the lifecycle helper; `tsx` (already
-a devDependency, already used by `scripts/test-ai-prompts.ts`) for
-running the two CLI entry points and the integration script.
+`node:net`/`fetch`, `node:fs` for the lifecycle helper; **`vite-node`**
+(already installed locally as part of the existing `vitest`
+dependency tree — see §9a) for running the two CLI entry points and
+the integration script.
+
+### 9a. Runner-strategy amendment (bind — supersedes `tsx` in §9 above)
+
+**Root cause.** The original §9 binding assumed `tsx` was usable the
+same way `scripts/test-ai-prompts.ts` uses it (`npx tsx ...`). Live
+inspection of the PATCH-105 candidate found: `tsx` is not a direct
+`devDependency` in `package.json`; it exists only as a transitive,
+locked entry in `package-lock.json` (`^4.8.1`, pulled in by another
+package's subtree) and is **not** present in `node_modules/.bin`. The
+five new `package.json` script lines in the candidate invoke bare
+`tsx` (not `npx tsx`), which fails immediately — `tsx` does not
+resolve on `PATH` or via local `node_modules/.bin`. Using `npx tsx`
+instead would not fix this deterministically: `npx` would attempt to
+resolve `tsx` as a top-level install and, finding none locally in a
+directly-installed form, would fall through to a registry-mediated
+install — non-deterministic, network-dependent, and exactly the kind
+of implicit dependency addition PATCH-105 forbids.
+
+**Options considered:**
+
+| Option | Files changed | New dependency | Lockfile change | Windows | Reliability | Verdict |
+|---|---|---|---|---|---|---|
+| A. Add `tsx` as explicit devDependency | package.json + lockfile | Yes | Yes | fine | fine | rejected — PATCH-105 forbids new dependencies; unnecessary given B |
+| B. Use `vite-node` (already in `node_modules/.bin`, ships with the installed `vitest@3.2.7`) | package.json only | **No** | **No** | confirmed | confirmed — same engine as the harness's own passing Vitest suite | **selected** |
+| C. Node native type-stripping (`node file.ts`) | package.json only | No | No | untested here; Node v24.11.1 supports it unflagged but requires explicit `.ts` extensions on relative imports, which the candidate's source does not use | unproven, adds a new unverified execution mode | rejected — real risk, no proven advantage over B |
+| D. Precompile harness CLIs via `tsc` before invocation | + build step, +2 script wrapper lines | No | No | fine | adds a build/dist step this repo has no precedent for | rejected — more moving parts than B for no gain |
+| E. Convert CLI entry points/integration fixture to `.mjs` | renames 3 of the 12 governed files | No | No | fine | loses static typing on entry points | rejected — needlessly changes the bound file list; B avoids this entirely |
+
+**Verification performed (read-only, no candidate files modified):**
+`node_modules/.bin/vite-node scripts/harness/validateScope.ts
+.fable5/patches/PATCH-105.manifest.json` was run directly against the
+live candidate. It executed cleanly — correct TS transform, correct
+relative-import resolution, correct `zod` schema parse, correct `git`
+shell-out — and returned
+`{"ok":true,"violations":[],"checks":{...all true...}}`, i.e. the
+scope validator, run through `vite-node`, confirms the current
+14-path candidate against its own manifest. This is direct proof `vite-node`
+is a drop-in, zero-dependency, zero-lockfile-change replacement for
+the non-functional `tsx` binding.
+
+**Selected strategy (bind):** replace `tsx` with `vite-node` in all
+five new `package.json` script lines. No other file in the 14-path
+candidate needs to change — the `.ts` source files themselves are
+already written in engine-agnostic, erasable-only TypeScript (no
+enums, no namespaces, no decorators, no parameter properties;
+confirmed by direct grep) and need no edits. `vitest.config.ts`
+needs no change beyond what §9 already bound. No lockfile change is
+authorized or required. No new dependency is authorized or required.
+
+**Exact script lines (bind, replaces the corresponding lines in the
+candidate's current `package.json` diff):**
+```
+"harness:server:start": "vite-node scripts/harness/serverCli.ts start"
+"harness:server:stop": "vite-node scripts/harness/serverCli.ts stop"
+"harness:server:status": "vite-node scripts/harness/serverCli.ts status"
+"harness:validate-scope": "vite-node scripts/harness/validateScope.ts"
+"test:harness:integration": "vite-node scripts/harness/serverLifecycle.integration.ts"
+```
+
+**Exact validation commands for this amendment:**
+1. `node_modules/.bin/vite-node scripts/harness/validateScope.ts .fable5/patches/PATCH-105.manifest.json` → `ok:true`, all checks true (already confirmed above; re-run after the `package.json` edit to confirm no regression).
+2. `npm run harness:validate-scope -- .fable5/patches/PATCH-105.manifest.json` → same result, now via the npm script.
+3. `npm run harness:server:status` → structured JSON, does not touch or alter PID 24732 (read-only port probe against the default `http://127.0.0.1:3000`).
+4. All ten §10 gates, unchanged in substance, now passing with `vite-node` in place of `tsx`.
+
+**Candidate disposition:** the current 14-path candidate **remains
+valid** and is preserved as-is except for the one-line-per-script edit
+to `package.json` described above. No file is renamed, added, or
+removed. No `.ts` source file needs modification.
 
 ## 10. Validation matrix (bind)
 
 1. `npx vitest run scripts/harness` (or the extended default
    `npm run test:unit`, since `vitest.config.ts` now includes this
    path) — all new unit tests green, mocked boundaries only.
-2. `npm run test:harness:integration` — the one real-process lifecycle
-   test against `tinyServer.mjs`, green, and confirmed to leave zero
-   residual process/port state afterward.
+2. `npm run test:harness:integration` (now running via `vite-node` per
+   §9a) — the one real-process lifecycle test against
+   `tinyServer.mjs`, using a dynamically-allocated ephemeral port (not
+   port 3000 — confirmed already correct in the candidate), green, and
+   confirmed to leave zero residual process/port state afterward, and
+   confirmed not to touch the unrelated process already holding port
+   3000 (PID 24732 at time of this amendment — irrelevant to the
+   ephemeral-port integration test, must remain untouched throughout).
 3. `npm run harness:validate-scope -- .fable5/patches/PATCH-105.manifest.json`
-   run against the live PATCH-105 candidate itself before commit —
-   must report `ok: true` with every check passing (this is the
-   manifest pilot proving itself against its own rules).
+   (now running via `vite-node` per §9a) run against the live
+   PATCH-105 candidate itself before commit — must report `ok: true`
+   with every check passing (this is the manifest pilot proving itself
+   against its own rules; already spot-verified during this
+   amendment's investigation).
 4. `npx tsc --noEmit` — clean (this includes `scripts/harness/**`,
    already covered by the root `tsconfig.json`'s scope — confirm no
    `scripts/**` exclusion exists; if one is found, report it rather

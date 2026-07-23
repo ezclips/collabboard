@@ -361,6 +361,51 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-23** — **PATCH-105 AMENDED (§9a, runner-strategy fix) — candidate
+  preserved, still uncommitted.** CTO governance turn resolving a
+  `tsx` runner mismatch discovered by Codex 5.6 mid-implementation.
+  Verified candidate integrity first: HEAD == origin/main ==
+  `c1e1bdc2e1a258db04a75679fdb2351b59d8ef33`, exactly 14 governed
+  paths changed (2 modified, 12 new), zero staged, no lockfile change,
+  empty stash, no commit/push. Root cause: the candidate's five new
+  `package.json` scripts invoke bare `tsx`, but `tsx` is only a
+  transitive/locked entry in `package-lock.json` (not a direct
+  devDependency) and is absent from `node_modules/.bin` — the scripts
+  cannot run as written, and PATCH-105 forbids adding it as an
+  explicit dependency. Inspected `node_modules/.bin` and found
+  `vite-node` (v3.2.4) already present — it ships as part of the
+  already-installed `vitest@3.2.7` dependency tree, the same engine
+  already used to run the harness's own passing unit tests (13
+  tests/3 files, confirmed green). Directly verified `vite-node` runs
+  the harness CLI unmodified: `vite-node scripts/harness/validateScope.ts
+  .fable5/patches/PATCH-105.manifest.json` executed cleanly (correct
+  TS transform, correct relative-import resolution, correct `zod`
+  parse, correct `git` shell-out) and returned `ok:true` with every
+  scope check passing — direct proof the current 14-path candidate
+  already satisfies its own manifest, and that `vite-node` is a
+  drop-in replacement requiring zero new dependency and zero lockfile
+  change. Confirmed via grep that none of the harness `.ts` source
+  files use enums/namespaces/decorators/parameter properties, so no
+  source edit is needed — only the five `package.json` script lines
+  change (`tsx` → `vite-node`). Also confirmed the integration fixture
+  (`serverLifecycle.integration.ts` + `tinyServer.mjs`) already
+  allocates a dynamic ephemeral port via `net.createServer().listen(0,
+  ...)` rather than assuming port 3000 — no correction needed there;
+  the unrelated process holding port 3000 (PID 24732) was not touched
+  and is irrelevant to the integration test. Bound the exact five
+  replacement script lines and the exact re-validation commands in
+  `PATCH-105.md` §9a; `PATCH-105.md`'s header status updated to IN
+  PROGRESS. Rejected alternatives: adding `tsx` as an explicit
+  devDependency (forbidden — new dependency), Node native
+  type-stripping (unproven here, requires explicit `.ts` import
+  extensions the candidate doesn't use), precompiling via `tsc`
+  (unneeded build step), renaming CLI entry points to `.mjs` (needlessly
+  changes the bound 12-file list). Governance-only commit
+  (`.fable5/patches/PATCH-105.md`, `.fable5/docs/CURRENT_TASK.md`);
+  the PATCH-105 candidate itself (14 paths) was NOT touched by this
+  turn and remains uncommitted, pending Codex 5.6 applying the
+  §9a script-line fix and re-running the full §10 validation matrix.
+
 - **2026-07-23** — **PATCH-104 CLOSED (commit `684651a7d2ca15ce45a1b68220cf3fdfc0d0fb43`,
   `refactor(canvas): extract the container-creation group onto the
   canvas ops seam -- 4 commands, Pattern K (PATCH-104)`) — CTO
