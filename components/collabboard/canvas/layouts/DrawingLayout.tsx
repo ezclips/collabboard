@@ -688,6 +688,8 @@ export default function DrawingLayout({
   // Per-frame content version tracking: increments when elements inside a frame change
   const frameVersionsRef = useRef<Record<string, number>>({});
   const frameSigsRef = useRef<Record<string, string>>({});
+  const framesArrayRef = useRef<FrameSlide[]>([]);
+  const framesObjectsRef = useRef<Record<string, FrameSlide>>({});
   const initializedRef = useRef(false);
   const drawingRootRef = useRef<HTMLDivElement | null>(null);
   const topFloatingToolbarRef = useRef<HTMLDivElement | null>(null);
@@ -2090,10 +2092,10 @@ export default function DrawingLayout({
   });
 
   const slideRenderer = useMemo(() => createSlideRenderer({
-    getSceneElements: () => elements,
-    getPadlets: () => padlets,
-    getFiles: () => currentFilesRef.current ?? initialFiles ?? null,
-  }), [elements, initialFiles, padlets]);
+    getSceneElements: () => runtimeSceneElementsRef.current,
+    getPadlets: () => runtimePadletsRef.current,
+    getFiles: () => currentFilesRef.current ?? runtimeInitialFilesRef.current ?? null,
+  }), []);
 
   // Render a single Excalidraw frame to a PNG dataURL (used by PresentationPanel + export path)
   const renderSlideToPNG = useCallback((slide: FrameSlide, opts: RenderSlideOptions): Promise<string> => (
@@ -2120,9 +2122,10 @@ export default function DrawingLayout({
     }
   }, [elements, excalidrawAPI]);
 
-  const frames: FrameSlide[] = (elements as any[])
-    .filter((el: any) => el.type === 'frame' && !el.isDeleted)
-    .map((el: any) => {
+  const frames: FrameSlide[] = useMemo(() => {
+    const frameEls = (elements as any[]).filter((el: any) => el.type === 'frame' && !el.isDeleted);
+    let changed = frameEls.length !== framesArrayRef.current.length;
+    const next: FrameSlide[] = frameEls.map((el: any) => {
       const baseSlide = {
         id: el.id,
         name: el.name ?? null,
@@ -2137,12 +2140,35 @@ export default function DrawingLayout({
         frameSigsRef.current[el.id] = sig;
         frameVersionsRef.current[el.id] = (frameVersionsRef.current[el.id] ?? 0) + 1;
       }
-      return {
-        ...baseSlide,
-        contentVersion: frameVersionsRef.current[el.id] ?? 0,
-        renderSignature: sig,
-      };
-    }); const contentPadlets = padlets.filter(p => p.type !== 'drawing' && p.type !== 'comment' && p.id !== masterPadlet?.id);
+      const contentVersion = frameVersionsRef.current[el.id] ?? 0;
+      const prev = framesObjectsRef.current[el.id];
+      if (
+        prev &&
+        prev.id === baseSlide.id &&
+        prev.name === baseSlide.name &&
+        prev.x === baseSlide.x &&
+        prev.y === baseSlide.y &&
+        prev.width === baseSlide.width &&
+        prev.height === baseSlide.height &&
+        prev.contentVersion === contentVersion &&
+        prev.renderSignature === sig
+      ) {
+        return prev;
+      }
+      changed = true;
+      const slide: FrameSlide = { ...baseSlide, contentVersion, renderSignature: sig };
+      framesObjectsRef.current[el.id] = slide;
+      return slide;
+    });
+    if (!changed) {
+      changed = next.some((s, i) => framesArrayRef.current[i]?.id !== s.id);
+    }
+    if (changed) {
+      framesArrayRef.current = next;
+    }
+    return framesArrayRef.current;
+  }, [elements]);
+  const contentPadlets = padlets.filter(p => p.type !== 'drawing' && p.type !== 'comment' && p.id !== masterPadlet?.id);
 
   const hasSavedViewportOnInit = useMemo(() => {
     const scrollX = initialAppState?.scrollX;

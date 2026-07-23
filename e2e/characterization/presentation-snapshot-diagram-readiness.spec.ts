@@ -44,6 +44,7 @@ declare global {
     __patch100Events?: SnapshotRenderedEvent[];
     __patch101WaitEvents?: SnapshotWaitEvent[];
     __patch101TimeoutOverrideMs?: number;
+    __patch101DiagramRenderHoldMs?: number;
   }
 }
 
@@ -522,6 +523,7 @@ test.describe('presentation snapshot Mermaid readiness (PATCH-101)', () => {
     try {
       await page.evaluate(() => {
         window.__patch101TimeoutOverrideMs = 50;
+        window.__patch101DiagramRenderHoldMs = 5000;
       });
       const modal = await openPreviewModal(page, seeded.slideTitle);
 
@@ -550,6 +552,7 @@ test.describe('presentation snapshot Mermaid readiness (PATCH-101)', () => {
     } finally {
       await page.evaluate(() => {
         delete window.__patch101TimeoutOverrideMs;
+        delete window.__patch101DiagramRenderHoldMs;
       }).catch(() => undefined);
       if (cleanupCounts.boards !== 0) {
         await expect(cleanupAndAssertBounded(supabase, fixture)).resolves.toEqual({

@@ -6,6 +6,12 @@ export type DiagramRenderResult =
   | { ok: true; svg: string }
   | { ok: false; reason: string };
 
+declare global {
+  interface Window {
+    __patch101DiagramRenderHoldMs?: number;
+  }
+}
+
 // Singleton: resolved promise holds the initialized mermaid instance.
 let ready: Promise<typeof import('mermaid').default> | null = null;
 
@@ -46,6 +52,17 @@ let _seq = 0;
 export async function renderDiagramCode(code: string): Promise<DiagramRenderResult> {
   try {
     const mermaid = await loadMermaid();
+    const renderHoldMs = typeof window !== 'undefined'
+      ? window.__patch101DiagramRenderHoldMs
+      : undefined;
+    if (
+      process.env.NODE_ENV !== 'production'
+      && typeof renderHoldMs === 'number'
+      && Number.isFinite(renderHoldMs)
+      && renderHoldMs >= 0
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, renderHoldMs));
+    }
     const id = `ai-diagram-${++_seq}`;
     const { svg } = await mermaid.render(id, code);
     return { ok: true, svg };

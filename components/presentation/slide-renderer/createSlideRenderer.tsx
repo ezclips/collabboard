@@ -14,6 +14,7 @@ import type { CreateSlideRendererArgs, SlideRenderHelpers } from "./types";
 
 const USE_LEGACY_POSTCARD_OVERLAY = false;
 const USE_Z_BAND_COMPOSITION = true;
+const SNAPSHOT_READINESS_SELECTOR = '[data-ai-render-state="loading"], [data-ai-image-state="loading"]';
 
 function resolveSnapshotTimeoutMs(): number {
   if (
@@ -34,7 +35,7 @@ function waitForSnapshotDiagramReadiness(
     const startedAt = Date.now();
     const deadline = startedAt + timeoutMs;
     const poll = () => {
-      const pendingCount = host.querySelectorAll('[data-ai-render-state="loading"]').length;
+      const pendingCount = host.querySelectorAll(SNAPSHOT_READINESS_SELECTOR).length;
       const waitedMs = Date.now() - startedAt;
       if (pendingCount === 0) {
         resolve({ waitedMs, timedOut: false, pendingCount });
@@ -100,6 +101,7 @@ export function createSlideRenderer({
         const styleFallbacks: Array<[string, string, string]> = [
           ["color", computed.color, colorFallback],
           ["background-color", computed.backgroundColor, exportSafeBackground],
+          ["background-image", computed.backgroundImage, "none"],
           ["border-color", computed.borderColor, exportSafeBorder],
           ["border-top-color", computed.borderTopColor, exportSafeBorder],
           ["border-right-color", computed.borderRightColor, exportSafeBorder],
@@ -183,7 +185,10 @@ export function createSlideRenderer({
     try {
       await new Promise((resolve) => window.requestAnimationFrame(() => window.requestAnimationFrame(resolve)));
       sanitizeExportOverlayColors(host);
-      const pendingAtStart = host.querySelectorAll('[data-ai-render-state="loading"]').length;
+      host.querySelectorAll<HTMLImageElement>('img[loading="lazy"]').forEach((img) => {
+        img.loading = 'eager';
+      });
+      const pendingAtStart = host.querySelectorAll(SNAPSHOT_READINESS_SELECTOR).length;
       const waitResult = pendingAtStart > 0
         ? await waitForSnapshotDiagramReadiness(host, resolveSnapshotTimeoutMs())
         : { waitedMs: 0, timedOut: false, pendingCount: 0 };
