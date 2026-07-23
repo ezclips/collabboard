@@ -9,7 +9,7 @@ export default defineConfig({
     },
   },
   test: {
-    include: ['lib/domain/**/*.test.ts', 'lib/infra/**/*.test.ts'],
+    include: ['lib/domain/**/*.test.ts', 'lib/infra/**/*.test.ts', 'scripts/harness/**/*.test.ts'],
     environment: 'node',
   },
 });

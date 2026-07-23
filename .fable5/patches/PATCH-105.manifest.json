@@ -1,0 +1,48 @@
+{
+  "patchId": "PATCH-105",
+  "baseCommit": "25ba2cba6a8c96375b79b8ee36ac557b7c33f6d0",
+  "allowedFiles": [
+    "scripts/harness/types.ts",
+    "scripts/harness/serverLifecycle.ts",
+    "scripts/harness/serverLifecycle.test.ts",
+    "scripts/harness/manifestSchema.ts",
+    "scripts/harness/manifestSchema.test.ts",
+    "scripts/harness/scopeValidator.ts",
+    "scripts/harness/scopeValidator.test.ts",
+    "scripts/harness/serverCli.ts",
+    "scripts/harness/validateScope.ts",
+    "scripts/harness/fixtures/tinyServer.mjs",
+    "scripts/harness/serverLifecycle.integration.ts",
+    ".fable5/patches/PATCH-105.manifest.json",
+    "package.json",
+    "vitest.config.ts"
+  ],
+  "prohibitedFiles": ["app/dashboard/canvas/[id]/CanvasClient.tsx", "lib/domain/canvas/*", "components/**", "app/**", "lib/infra/**", "e2e/**", "playwright.config.ts", "eslint.boundaries.config.mjs", ".fable5/patches/PATCH-0*.md"],
+  "allowedUntrackedFiles": [
+    "scripts/harness/types.ts",
+    "scripts/harness/serverLifecycle.ts",
+    "scripts/harness/serverLifecycle.test.ts",
+    "scripts/harness/manifestSchema.ts",
+    "scripts/harness/manifestSchema.test.ts",
+    "scripts/harness/scopeValidator.ts",
+    "scripts/harness/scopeValidator.test.ts",
+    "scripts/harness/serverCli.ts",
+    "scripts/harness/validateScope.ts",
+    "scripts/harness/fixtures/tinyServer.mjs",
+    "scripts/harness/serverLifecycle.integration.ts",
+    ".fable5/patches/PATCH-105.manifest.json"
+  ],
+  "generatedArtifactPaths": ["test-results", "playwright-report", ".next/trace"],
+  "stashPolicy": "must-be-empty",
+  "requiredCommands": [
+    { "label": "diff-check", "command": "git", "args": ["diff", "--check"] },
+    { "label": "typecheck", "command": "npx", "args": ["tsc", "--noEmit"] },
+    { "label": "boundaries", "command": "npm", "args": ["run", "check:boundaries"] },
+    { "label": "harness-unit", "command": "npx", "args": ["vitest", "run", "scripts/harness"] },
+    { "label": "unit", "command": "npx", "args": ["vitest", "run"] },
+    { "label": "verify", "command": "npm", "args": ["run", "verify"] },
+    { "label": "build", "command": "npm", "args": ["run", "build"] }
+  ],
+  "expectedTestTotals": { "unit": { "tests": 458, "files": 44 } },
+  "exactCommitMessage": "chore(harness): add bounded server lifecycle, patch manifests, and scope validation (PATCH-105)"
+}

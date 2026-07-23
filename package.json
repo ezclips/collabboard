@@ -16,6 +16,11 @@
     "ai:test:generation": "npx tsx scripts/test-ai-prompts.ts --suite generation",
     "ai:test:conversion": "npx tsx scripts/test-ai-prompts.ts --suite conversion",
     "ai:test:classify": "npx tsx scripts/test-ai-prompts.ts --suite classify"
+    ,"harness:server:start": "vite-node scripts/harness/serverCli.ts start"
+    ,"harness:server:stop": "vite-node scripts/harness/serverCli.ts stop"
+    ,"harness:server:status": "vite-node scripts/harness/serverCli.ts status"
+    ,"harness:validate-scope": "vite-node scripts/harness/validateScope.ts"
+    ,"test:harness:integration": "vite-node scripts/harness/serverLifecycle.integration.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
