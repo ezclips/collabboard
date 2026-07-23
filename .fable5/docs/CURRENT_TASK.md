@@ -361,6 +361,69 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-23** — **PATCH-104 CLOSED (commit `684651a7d2ca15ce45a1b68220cf3fdfc0d0fb43`,
+  `refactor(canvas): extract the container-creation group onto the
+  canvas ops seam -- 4 commands, Pattern K (PATCH-104)`) — CTO
+  post-landing verification PASSED; PATCH-105 drafted and authorized
+  (not implemented).** Verified: branch `main`, HEAD == origin/main,
+  clean tree, exactly the five governed files landed, `git diff HEAD^
+  HEAD --check` clean. Directly re-diffed
+  `app/dashboard/canvas/[id]/CanvasClient.tsx` against its pre-patch
+  state and confirmed the change is confined to exactly the two bound
+  regions (the 350-359 hook-destructure list and lines within 530-660)
+  — no line outside those ranges touched. Directly read the new
+  `lib/domain/canvas/containers.ts` and confirmed both preserved quirks
+  from the bound behavior contract are intact in the landed code: the
+  "container not found locally" skip (`containerMetadata === null` →
+  `ok(created)`, no update attempt) and the "post created but
+  container-update failed" case (the error carries `created` in its
+  `details`, letting `CanvasClient.tsx`'s new `catch` block still add
+  the post to local state). No new repository method was added — both
+  new commands reuse only pre-existing `insert`/`insertReturning`/
+  `updateFieldsById`. Independent review PASS recorded (10 domain
+  tests, full Vitest 458/44 — +10 tests/+1 file over the pre-patch
+  448/43 baseline, consistent with exactly one new test file — `verify`,
+  `build`, PATCH-096 14/14/14, cleanup all green), as reported by the
+  user, not independently re-executed live by Sonnet this closure turn.
+  PATCH-104.md §10 records the full closure.
+  **PATCH-105 drafted** ("Fable Harness Reliability Foundation" — a
+  narrow infrastructure patch, NOT a CanvasClient extraction): bounded
+  owned dev-server lifecycle (start/poll/stop with PID-ownership
+  tracking, duplicate-startup refusal, Windows-safe scoped process
+  termination, all waits bounded), a JSON+Zod patch-manifest schema
+  (zero new dependencies — `zod` already used throughout
+  `lib/domain`), an automated Git/filesystem scope validator (fails
+  nonzero on any violation: base-commit mismatch, unauthorized
+  changed/staged/untracked/prohibited paths, dirty `diff --check`,
+  stash-policy violation, generated-artifact-allowlist violation,
+  candidate-blob or commit-message mismatch), and structured JSON
+  results throughout. Diagnosed the exact gap from this session's own
+  repeated firsthand pain: no server-lifecycle helper existed anywhere
+  in the repo (every PATCH-102 §21-§25 live-reproduction turn
+  hand-rolled the same start/poll/kill sequence from scratch, in raw
+  Bash/PowerShell, no shared timeout budget, no structured result);
+  `e2e/run-carried-groups.mjs` already proves bounded child-process
+  spawning and structured totals-extraction is an accepted pattern here
+  (precedent reused, not reinvented) but assumes a server is already
+  running and does nothing for scope-checking. Twelve new files under
+  a new small `scripts/harness/` sub-namespace (mirroring the
+  `lib/domain/canvas/`+`lib/infra/canvas/` sibling-file convention),
+  two minimally modified files (`vitest.config.ts` gains one
+  `test.include` glob entry; `package.json` gains five new npm
+  scripts) — zero new runtime dependencies. PATCH-105 is its own first
+  manifest pilot (`.fable5/patches/PATCH-105.manifest.json`, created by
+  the implementer using the real HEAD they observe at implementation
+  start — not fabricated with a guessed hash in this authoring turn).
+  Explicitly out of scope and hard-stop-bound against: Explorer agents,
+  retrieval memory, remote sandboxes, automated model handoffs, any new
+  CanvasClient extraction, and migrating any historical patch to
+  manifest form. Implementer: Codex 5.6. Reviewer: DeepSeek V4 Pro
+  primary, Kepler/Gemini 3.1 Pro fallback — not Sonnet. The implementer
+  must leave the candidate uncommitted after all gates pass, pending
+  explicit commit authorization. Health ledger: unchanged from
+  PATCH-104's ruling (option B, retired). PATCH-105 authorized only —
+  not implemented, no product/test file touched this turn.
+
 - **2026-07-23** — **PATCH-104 DRAFTED (not implemented):** extract
   the Column-Layout container-creation command family (four functions,
   `CanvasClient.tsx` lines 530-660, delimited by its own `// ---

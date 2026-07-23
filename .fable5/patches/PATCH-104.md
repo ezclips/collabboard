@@ -1,6 +1,8 @@
 # PATCH-104 — Extract the Column-Layout Container-Creation Command Family from CanvasClient
 
-**Status:** **AUTHORIZED, NOT STARTED.**
+**Status:** **DONE (closed 2026-07-23, commit
+`684651a7d2ca15ce45a1b68220cf3fdfc0d0fb43`) — CTO post-landing
+verification PASSED. See §10 for closure record.**
 
 **Implementer:** GPT-5.5. **Reviewer:** independent read-only reviewer
 (Kepler primary, Gemini 3.1 Pro fallback, DeepSeek acceptable
@@ -393,3 +395,53 @@ score either, unless a dedicated rescoring pass (its own governance
 action, out of scope here) has run first.
 
 **Do not authorize PATCH-105.**
+
+## §10 — post-landing verification and closure (bind, 2026-07-23)
+
+**Landed commit:** `684651a7d2ca15ce45a1b68220cf3fdfc0d0fb43`
+(`refactor(canvas): extract the container-creation group onto the
+canvas ops seam -- 4 commands, Pattern K (PATCH-104)`), branch `main`,
+HEAD == origin/main at verification time.
+
+**Verified (bind):** `git status --short --untracked-files=all` empty
+(clean tree); exactly the five governed files landed
+(`CanvasClient.tsx`, `useCanvasData.ts`,
+`canvas-container-creation.spec.ts`, `containers.test.ts`,
+`containers.ts`); `git diff HEAD^ HEAD --check` clean; zero staged,
+zero untracked; stash empty. `git diff HEAD^ HEAD -- ':(literal)app/dashboard/canvas/[id]/CanvasClient.tsx'`
+inspected directly and confirmed confined to exactly the two bound
+regions — the 350-359 hook-destructure list (adds
+`createContainerOrThrow`, `dropDraftIntoContainerOrThrow`) and lines
+within 530-660 (`handleCreateContainerFromPrompt`,
+`handleCreateContainerAt`, `handleDropDraftIntoContainer`) — no line
+outside those ranges changed. `lib/domain/canvas/containers.ts`
+inspected directly: reuses only the pre-existing `insertReturning`/
+`updateFieldsById`/`insert` repository methods (no new repository
+method added, per §3's prohibition); `dropDraftIntoContainerSchema`'s
+`containerMetadata: z.record(...).nullable()` and the execute body's
+`created` value carried through the error's `details` on a subsequent
+`updateFieldsById` failure faithfully preserve both documented quirks
+(§2): the "container not found locally" skip (`containerMetadata ===
+null` short-circuits to `ok(created)` with no update attempt) and the
+"post created but container-update failed" case (the error carries
+`created` in its `details`, letting the caller still add it to local
+state — matching `CanvasClient.tsx`'s new `catch` block reading
+`(err as { created?: Padlet } | null)?.created`).
+
+**Independent review:** PASS (Kepler/Gemini/DeepSeek-class, not
+Sonnet), confirming exact repository identity, exact five candidate
+blobs, allowed-file/line fences, domain-command purity, thin hook
+wrappers, preserved toast asymmetry, preserved silent
+missing-container behavior, 10 domain tests, PATCH-104 E2E
+characterization, `board-lifecycle.spec.ts` regression, PATCH-096
+grouped runner 14/14/14, TypeScript, boundaries, full Vitest 458
+tests/44 files (+10 tests/+1 file over the pre-patch 448/43 baseline,
+consistent with exactly one new test file), `verify`, `build`, cleanup
+and final Git state — reported to this governance turn by the user,
+not independently re-executed live by Sonnet in this closure turn.
+
+**PATCH-104 status: DONE.** No remaining implementation blocker. Both
+deliberately-preserved behavioral quirks (asymmetric success toast;
+silent skip on missing-container) confirmed intact in the landed code.
+**No follow-on patch (PATCH-105) has been implemented by this
+closure.**
