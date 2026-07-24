@@ -56,3 +56,4 @@ Sakai_Investments/
 test-results/
 playwright-report/
 e2e/.auth/
+.fable5/worktrees/
