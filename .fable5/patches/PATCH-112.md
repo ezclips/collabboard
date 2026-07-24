@@ -61,7 +61,9 @@ placement/move path assign or clear `element.frameId`... then narrow
 `resolveSlidePadlets`... " — this patch executes exactly that plan,
 now that the manual-drag question is resolved).
 
-**Status:** AUTHORIZED, NOT STARTED.
+**Status:** **DONE.** Landed commit
+`ed185240cd2c585723fa88be79bfda8e8b3e8157` (exact bound message,
+below). See closure section at the end of this document.
 
 **Implementer:** **Codex 5.6 Terra** — the fix spans a live DOM
 pointer-capture drag-commit path (`DrawingLayout.tsx`), a new shared
@@ -447,4 +449,27 @@ is committed without explicit CTO authorization.
 
 Not applicable to a product patch.
 
-**Do not authorize PATCH-113.**
+## 9. Closure (bind — CTO post-landing verification)
+
+**Landed commit:** `ed185240cd2c585723fa88be79bfda8e8b3e8157`, parent
+`5c18d6ca4d762f0e9f48f46374978aafa0165e91`, exact bound message
+`fix(presentation): assign frame membership on post-card drag commit and narrow the geometric fallback (PATCH-112)`.
+Verified directly: `git show --name-only --format="" HEAD` returns
+exactly the seven governed paths from §5 (as amended by §4b-1) — no
+more, no fewer. Clean `git diff HEAD^ HEAD --check`, no lockfile
+change, empty stash. Live-reran the full suite this closure turn:
+**552/552 tests passing**, including the T19 fix from the §4b-1
+amendment.
+
+**Remaining implementation blocker:** none. PATCH-112 is fully landed
+and functionally verified. Independent review PASS was recorded prior
+to this closure turn per the implementer's report.
+
+**Note:** this closure was performed retroactively — the candidate was
+committed and pushed outside this conversation thread; this turn
+verifies the landed state matches everything PATCH-112.md bound rather
+than re-authorizing anything already done.
+
+**Do not authorize PATCH-113 implementation from this section alone —
+see the separate PATCH-113.md for its own scope. As of this closure,
+PATCH-113 drafting may proceed.**

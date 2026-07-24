@@ -371,6 +371,51 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-24** — **PATCH-112 CLOSED (commit `ed185240cd2c585723fa88be79bfda8e8b3e8157`,
+  `fix(presentation): assign frame membership on post-card drag commit
+  and narrow the geometric fallback (PATCH-112)`) — CTO post-landing
+  verification PASSED, performed retroactively (the candidate landed
+  outside this conversation thread).** Verified: parent
+  `5c18d6c` matches, exactly the seven governed paths (as amended by
+  §4b-1) landed, clean `git diff HEAD^ HEAD --check`, no lockfile
+  change, empty stash. Live-reran the full suite this closure turn:
+  **552/552 passing**, including the T19 fix. `PATCH-112.md` §9
+  records the closure. **PATCH-113 drafting may now proceed** (per
+  PATCH-112's own hard-stop, which blocked authorization until
+  closure).
+  **New bug report received separately, mid-session:** the user
+  reported being unable to drag/edit a comment card in external
+  Chrome when a container card is visually stacked close enough above
+  it; works fine after moving the container away, works in the VS
+  Code-hosted browser, and — critically, per the user's own follow-up
+  testing — moving the container far enough in **any** of up/left/right
+  also resolves it, not just up. A research pass traced this to a
+  real, source-confirmed mechanism, unrelated to PATCH-105–112: every
+  `padlet://`-linked embeddable (container, comment, any post card) has
+  `pointer-events: all` unconditionally, overriding Excalidraw's normal
+  click-through shield (`excalidraw_fork/.../App.tsx:1699-1709`); there
+  is no z-index differentiation beyond scene order
+  (`App.tsx:1479`, `css/styles.scss:785-813`); and a container's height
+  auto-grows via a `ResizeObserver` with **no upper bound**
+  (`DrawingLayout.tsx:524-543`, `Math.max` only, no ceiling). A
+  container with enough wrapped content can grow tall enough to
+  geometrically overlap a sibling card below it on the canvas; because
+  both cards have always-on pointer-events with no shield, whichever
+  is higher in z-order wins hit-testing for the whole overlap region,
+  blocking the other's drag handle/Edit button. The user's up/left
+  /right-all-work finding is confirmed to be consistent with (not
+  contradictory to) a pure axis-aligned-bounding-box overlap
+  explanation — moving far enough in any of the four directions breaks
+  the X-overlap or Y-overlap the rectangle-intersection test requires.
+  The user asked to follow this session's formal patch process and
+  requested a written fix proposal before any code is written.
+  PATCH-113 is being drafted as a **proposal document with two fix
+  -scope options** (narrow: clamp the container's unbounded height
+  growth at its trigger; broader: fix the underlying always-on
+  -pointer-events/no-shield gap shared by every padlet card type) for
+  the user to choose between before authorization — not yet authorized
+  for implementation.
+
 - **2026-07-24** — **PATCH-112 AMENDED (§4b-1, stale bridge.test.ts T19)
   — before commit, candidate not yet complete.** CTO governance turn
   authorizing exactly one additional file after the implementer's full
