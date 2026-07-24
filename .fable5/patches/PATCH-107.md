@@ -19,7 +19,9 @@ items remains its own separate, not-yet-authorized future patch, per
 the user's stated priority order (Test Runner next, then Explorer,
 then retrieval, then orchestration).
 
-**Status:** AUTHORIZED, NOT STARTED.
+**Status:** **DONE.** Landed commit
+`fe339d93d9231ecfa745e23ba5471e82af04b533` (exact bound message,
+below). Independent review PASS. See §15 for full closure record.
 
 **Implementer:** **Codex 5.6 Sol** (not Terra) — this patch's Windows
 Git-worktree/branch/path/port architecture (collision detection via
@@ -485,4 +487,56 @@ occurred and actually landed the reviewed commit.
 
 Unchanged ruling (option B, retired) — not recalculated here.
 
-**Do not authorize PATCH-108.**
+## 15. Closure (bind — CTO post-landing verification)
+
+**Landed commit:** `fe339d93d9231ecfa745e23ba5471e82af04b533`, exact
+bound message
+`feat(harness): add isolated git-worktree lifecycle foundation (PATCH-107)`.
+Verified directly: branch `main`, HEAD == origin/main == the landed
+commit, clean working tree, zero staged/untracked files, empty stash,
+`package-lock.json` unchanged, `git diff HEAD^ HEAD --check` clean,
+and `git show --name-only --format="" HEAD` returns exactly the eight
+governed paths from §11 —
+`.fable5/patches/PATCH-107.manifest.json`, `.gitignore`,
+`package.json`, `scripts/harness/types.ts`,
+`scripts/harness/worktreeCli.ts`,
+`scripts/harness/worktreeLifecycle.integration.ts`,
+`scripts/harness/worktreeLifecycle.test.ts`,
+`scripts/harness/worktreeLifecycle.ts` — no more, no fewer. Confirmed
+via `git worktree list` that only the main worktree exists, `git
+branch --list 'harness/worktree/*'` returns nothing, and
+`.fable5/worktrees` does not exist on disk — zero residual harness
+-owned worktree/branch/metadata state.
+
+**Independent review:** PASS.
+
+**Post-commit landed validation (re-verified live this closure turn,
+read-only):**
+`npm run harness:validate-landed -- .fable5/patches/PATCH-107.manifest.json HEAD`
+→ exit 0,
+`{"ok":true,"violations":[],"checks":{"landedCommitExists":true,"parentMatchesBaseCommit":true,"landedFilesWithinAllowed":true,"prohibitedPathsAbsentFromLandedCommit":true,"landedCommitMessageMatches":true,"landedBlobsMatch":"not-checked","testTotalsMatch":"not-checked"}}`.
+Confirmed zero mutation (`git status` clean before/after) and zero
+residual process/port state (ports 3000/4000 free). This is the exact
+§12b Phase 2 gate this patch's own governance amendment (2026-07-24,
+"correct PATCH-107 landed-validation phase") defined — it passed
+cleanly on the first post-commit run, with no lifecycle contradiction
+recurring.
+
+**Post-commit pre-commit-scope validation:** as expected per
+PATCH-105 §13/PATCH-106 §10's standing ruling,
+`harness:validate-scope` against this same manifest post-commit
+reports `ok:false` (`headMatchesExpected`/`baseCommitMatches` false,
+`commitMessageMatches: true`) — the same expected, non-broken
+lifecycle shape, not a regression.
+
+**Remaining implementation blocker:** none. PATCH-107 is fully landed,
+reviewed, and functionally verified — the isolated Git-worktree
+primitive (create/list/remove/prune, ownership metadata, path/branch
+/port rules, cleanup semantics) is in place. No implementer/reviewer
+role runs inside a worktree yet — that remains out of scope for this
+patch, per §0/§1, and is a candidate consideration for a future patch
+distinct from PATCH-108.
+
+**PATCH-108:** authorized separately (see `PATCH-108.md`) as the
+dedicated Test Runner and structured evidence bundle — not
+implemented as part of this closure.

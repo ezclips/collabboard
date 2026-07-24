@@ -361,6 +361,75 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-24** — **PATCH-107 CLOSED (commit `fe339d93d9231ecfa745e23ba5471e82af04b533`,
+  `feat(harness): add isolated git-worktree lifecycle foundation
+  (PATCH-107)`) — CTO post-landing verification PASSED; PATCH-108
+  drafted and authorized (not implemented).** Verified: branch `main`,
+  HEAD == origin/main, clean tree, zero staged/untracked files, empty
+  stash, `package-lock.json` unchanged, `git diff HEAD^ HEAD --check`
+  clean, exactly the eight governed paths landed. Confirmed via `git
+  worktree list` that only the main worktree exists, `git branch
+  --list 'harness/worktree/*'` returns nothing, and `.fable5/worktrees`
+  does not exist on disk. Independent review PASS recorded.
+  **Landed-validation re-verified live this closure turn:**
+  `npm run harness:validate-landed -- .fable5/patches/PATCH-107.manifest.json HEAD`
+  → exit 0, `ok:true`, all applicable checks true, zero mutation, zero
+  residual process/port state — the first PATCH-107 §12b Phase 2 gate
+  run since that lifecycle-phase governance correction, passing
+  cleanly on the first attempt. Companion `harness:validate-scope`
+  correctly still `ok:false` (expected post-commit divergence, not a
+  regression, per the now-standing PATCH-105/106 ruling).
+  `PATCH-107.md` §15 records the full closure.
+  **Fresh harness census (post-PATCH-105/106/107):** the isolated
+  Git-worktree primitive (create/list/remove/prune, ownership
+  metadata, path/branch/port rules, cleanup semantics) is now built
+  and landed, but **nothing yet runs inside a worktree automatically**
+  — it remains an unused primitive until a consumer wires it up.
+  Landed-commit and pre-commit scope validation both mature and
+  unchanged across three more patches with zero regressions. Manifest
+  lifecycle rule now exercised across four patches, including two
+  caught drafting/phase errors (PATCH-106's stale base commit,
+  PATCH-107's landed-validation-phase contradiction), both corrected
+  before implementation began each time — the correction pattern
+  itself is now proven reliable. Windows process/worktree/branch state
+  confirmed clean again this turn. **The single largest remaining
+  manual step, confirmed by direct inspection:** every harness CLI
+  still emits its own one-off JSON object, but nothing sequences a
+  manifest's `requiredCommands` (a schema field that has existed since
+  PATCH-105 and has never once been read by any code) or aggregates
+  results — the CTO and implementer have hand-run every validation
+  -matrix gate one at a time across all seven patches so far and
+  relayed raw JSON between turns in chat. Candidates and reviewers
+  still share the single main working tree by default (the new
+  worktree primitive is available but unused). No retrieval-based
+  governance memory exists. No distinct Explorer or Tester agent roles
+  exist yet — only implementer and reviewer.
+  **PATCH-108 drafted** ("Dedicated Test Runner and Structured
+  Evidence Bundle" — reads a manifest's `requiredCommands`, runs them
+  strictly sequentially, captures exit codes/durations/log references
+  /parsed Vitest totals, optionally uses a PATCH-107 owned worktree
+  and/or a PATCH-105 owned server — both imported unmodified — and
+  emits one JSON evidence bundle; explicitly never touches Git
+  staging/commits/pushes/stashes, never decides a failure is
+  acceptable, never automates implementer/reviewer handoffs, and is
+  not combined with Explorer, retrieval, remote sandboxing, or
+  orchestration). 5 new files
+  (`testRunner.ts`/`.test.ts`/`testRunnerCli.ts`/`.integration.ts`/
+  `PATCH-108.manifest.json` — this patch pilots itself again), 3
+  modified (`types.ts` additive-only, `package.json` two new scripts,
+  one `.gitignore` line for `.fable5/evidence/`), zero new
+  dependencies. Validation matrix pre-split into Phase 1/Phase 2 from
+  the start (§8a/§8b), applying PATCH-107's own governance correction
+  proactively rather than retrofitting it. Full interfaces, evidence
+  schema, safety fences, tests, and hard-stops bound in
+  `.fable5/patches/PATCH-108.md`. Implementer: Codex 5.6 Terra (this
+  patch orchestrates already-built, already-reviewed primitives rather
+  than introducing new deep Windows git/path plumbing — Sol's added
+  capability is not required). Reviewer: DeepSeek V4 Pro primary,
+  Kepler/Gemini 3.1 Pro fallback — not Sonnet. Health ledger: unchanged
+  (option B, retired). PATCH-108 authorized only — not implemented.
+  **Do not authorize PATCH-109.**
+
 - **2026-07-24** — **PATCH-107 CORRECTED (§12a/§12b, validation-phase
   split) — before implementation began, candidate not yet started.**
   CTO governance turn resolving a drafting error caught before any
