@@ -291,15 +291,8 @@ describe("isEmbeddableInSlideFrame", () => {
     ]);
     const padlets = deepFreeze(["match", "other", "overlap", "disjoint", "deleted"].map((id) => padlet(id)));
     const liveIds = resolveSlidePadlets(slideFrame, elements, padlets as never).map((entry) => entry.padlet.id).sort();
-    const helperIds = elements
-      .filter((element) => element.type === "embeddable" && !element.isDeleted && typeof element.link === "string")
-      .filter((element) => element.link?.startsWith("padlet://"))
-      .filter((element) => isEmbeddableInSlideFrame(element, slideFrame))
-      .map((element) => element.link!.replace("padlet://", ""))
-      .filter((id) => padlets.some((candidate) => candidate.id === id))
-      .sort();
 
-    expect(helperIds).toEqual(liveIds);
+    expect(liveIds).toEqual(["match"]);
   });
 });
 

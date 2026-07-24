@@ -11,10 +11,10 @@ import {
 import { resolveSlidePadlets } from '@/components/presentation/slide-renderer/resolveSlidePadlets';
 import { planSlideComposition } from '@/components/presentation/slide-renderer/planSlideComposition';
 
-const PATCH_111_LABEL = 'patch-111-frame-membership';
-const SLIDE_TITLE = 'PATCH-111 Frame';
-const NOTE_TITLE = 'PATCH-111 post card';
-const NOTE_CONTENT = 'PATCH-111 frame membership post card';
+const PATCH_112_LABEL = 'patch-112-frame-membership';
+const SLIDE_TITLE = 'PATCH-112 Frame';
+const NOTE_TITLE = 'PATCH-112 post card';
+const NOTE_CONTENT = 'PATCH-112 frame membership post card';
 const SLIDE_COUNTER = /Slide 1 \/ \d+/;
 
 registerDrawingCleanup(test);
@@ -260,7 +260,7 @@ async function observePhase(
   await page.locator('[data-padlet-id]').first().waitFor({ timeout: 90_000 });
   const master = await fetchMasterPadletRow(supabase, fixture.masterPadletId!);
   const elements = activeSceneElements(master);
-  const frame = elements.find((element) => element.type === 'frame' && element.id === 'patch-111-frame');
+  const frame = elements.find((element) => element.type === 'frame' && element.name === SLIDE_TITLE);
   const embeddable = elements.find((element) => element.type === 'embeddable' && element.link === `padlet://${padletId}`);
   expect(frame).toBeTruthy();
 
@@ -334,7 +334,7 @@ async function observePersistedModelPhase(
 ): Promise<PhaseObservation> {
   const master = await fetchMasterPadletRow(supabase, fixture.masterPadletId!);
   const elements = activeSceneElements(master);
-  const frame = elements.find((element) => element.type === 'frame' && element.id === 'patch-111-frame');
+  const frame = elements.find((element) => element.type === 'frame' && element.name === SLIDE_TITLE);
   const embeddable = elements.find((element) => element.type === 'embeddable' && element.link === `padlet://${padletId}`);
   expect(frame).toBeTruthy();
 
@@ -356,55 +356,93 @@ async function observePersistedModelPhase(
   };
 }
 
+async function dragPostCardToScenePosition(
+  page: Page,
+  padletId: string,
+  sceneElement: SceneElement,
+  targetPosition: { x: number; y: number },
+): Promise<void> {
+  const card = page.locator(`[data-padlet-id="${padletId}"]`).first();
+  const handle = card.locator('.cursor-grab').first();
+  await expect(handle).toBeVisible({ timeout: 60_000 });
+  const handleBox = await handle.boundingBox();
+  if (!handleBox) throw new Error(`Drag handle for ${padletId} has no bounding box`);
+
+  const viewport = page.viewportSize();
+  if (!viewport) throw new Error('Playwright viewport is unavailable');
+  const zoomLabel = (await page.getByRole('button', { name: /^\d+%$/ }).first().textContent())?.trim();
+  const zoom = Number.parseFloat(zoomLabel ?? '') / 100;
+  if (!Number.isFinite(zoom) || zoom <= 0) throw new Error(`Invalid Excalidraw zoom label: ${zoomLabel}`);
+  const sceneDeltaX = targetPosition.x - sceneElement.x;
+  const sceneDeltaY = targetPosition.y - sceneElement.y;
+  const pointerX = handleBox.x + handleBox.width / 2;
+  const pointerY = handleBox.y + handleBox.height / 2;
+  const destinationX = pointerX + sceneDeltaX * zoom;
+  const destinationY = pointerY + sceneDeltaY * zoom;
+
+  if (destinationX < 0 || destinationX > viewport.width || destinationY < 0 || destinationY > viewport.height) {
+    throw new Error(`Drag destination for ${padletId} is outside the viewport: ${destinationX},${destinationY}`);
+  }
+
+  await page.mouse.move(pointerX, pointerY);
+  await page.mouse.down();
+  for (let step = 1; step <= 6; step += 1) {
+    await page.mouse.move(
+      pointerX + (destinationX - pointerX) * step / 6,
+      pointerY + (destinationY - pointerY) * step / 6,
+    );
+  }
+  await page.mouse.up();
+}
+
 function cleanupAndAssert(supabase: any, fixture: DrawingFixture) {
   return cleanupDrawingFixture(supabase, fixture).then(() => assertDrawingFixtureCleanup(supabase, fixture));
 }
 
-test.describe('drawing slide frame membership and clipping characterization (PATCH-111)', () => {
+test.describe('drawing slide frame membership and clipping characterization (PATCH-112)', () => {
   test.skip(!hasE2ECredentials, 'E2E_EMAIL / E2E_PASSWORD not set (see .env.e2e.example)');
 
   test('characterizes post-card frameId, overlap fallback, clipping, and reload membership through live presentation', async ({ page }) => {
     test.setTimeout(300_000);
 
-    const { supabase, fixture } = await createDisposableDrawingBoard(PATCH_111_LABEL);
+    const { supabase, fixture } = await createDisposableDrawingBoard(PATCH_112_LABEL);
     let cleanedUp = false;
 
     try {
       const padletId = await insertPostCard(supabase, fixture);
-      const frame = frameElement('patch-111-frame', SLIDE_TITLE);
-      const otherFrameId = 'patch-111-other-frame';
+      const frame = frameElement('patch-112-frame', SLIDE_TITLE);
+      const otherFrameId = 'patch-112-other-frame';
       fixture.frameIds.push(frame.id);
-      const insideWithFrameId = embeddableElement('patch-111-card', padletId, 100, 120, 300, 180, frame.id);
+      const insideWithFrameId = embeddableElement('patch-112-card', padletId, 100, 120, 300, 180, frame.id);
       await insertMasterPadlet(supabase, fixture, [frame, insideWithFrameId]);
 
       await openDrawingBoard(page, fixture.boardId);
 
-      const insideObservation = await observePhase(page, supabase, fixture, padletId, 'inside-matching-frameId', 'patch-111-inside.png');
+      const insideObservation = await observePhase(page, supabase, fixture, padletId, 'inside-matching-frameId', 'patch-112-inside.png');
       expect(insideObservation.sceneFrameId).toBe(frame.id);
       expect(insideObservation.resolvedPadletIds).toEqual([padletId]);
       expect(insideObservation.previewVisible).toBe(true);
 
-      const sliverNoFrameId = embeddableElement('patch-111-card', padletId, 1279, 120, 300, 180, null);
+      const sliverNoFrameId = embeddableElement('patch-112-card', padletId, 1279, 120, 300, 180, null);
       await updateMasterScene(supabase, fixture, [frame, sliverNoFrameId]);
-      const sliverObservation = await observePhase(page, supabase, fixture, padletId, 'sliver-overlap-no-frameId', 'patch-111-sliver.png');
+      const sliverObservation = await observePhase(page, supabase, fixture, padletId, 'sliver-overlap-no-frameId', 'patch-112-sliver.png');
       expect(sliverObservation.sceneFrameId).toBeNull();
-      expect(sliverObservation.resolvedPadletIds).toEqual([padletId]);
-      expect(sliverObservation.previewVisible).toBe(true);
-      expect(sliverObservation.parentOverflow).toBe('hidden');
+      expect(sliverObservation.resolvedPadletIds).toEqual([]);
+      expect(sliverObservation.previewVisible).toBe(false);
 
-      const outsideNoFrameId = embeddableElement('patch-111-card', padletId, 1500, 120, 300, 180, null);
+      const outsideNoFrameId = embeddableElement('patch-112-card', padletId, 1500, 120, 300, 180, null);
       await updateMasterScene(supabase, fixture, [frame, outsideNoFrameId]);
       const outsideObservation = await observePersistedModelPhase(supabase, fixture, padletId, 'outside-no-frameId-after-reload');
       expect(outsideObservation.sceneFrameId).toBeNull();
       expect(outsideObservation.resolvedPadletIds).toEqual([]);
 
-      const mismatchedFrameId = embeddableElement('patch-111-card', padletId, 100, 120, 300, 180, otherFrameId);
+      const mismatchedFrameId = embeddableElement('patch-112-card', padletId, 100, 120, 300, 180, otherFrameId);
       await updateMasterScene(supabase, fixture, [frame, mismatchedFrameId]);
       const mismatchObservation = await observePersistedModelPhase(supabase, fixture, padletId, 'inside-different-frameId');
       expect(mismatchObservation.sceneFrameId).toBe(otherFrameId);
       expect(mismatchObservation.resolvedPadletIds).toEqual([]);
 
-      const nativeNoFrameId = rectangleElement('patch-111-native-overlap', 100, 120, null);
+      const nativeNoFrameId = rectangleElement('patch-112-native-overlap', 100, 120, null);
       await updateMasterScene(supabase, fixture, [frame, nativeNoFrameId]);
       const nativeObservation = await observePersistedModelPhase(supabase, fixture, padletId, 'native-overlap-no-frameId');
       expect(nativeObservation.resolvedPadletIds).toEqual([]);
@@ -412,11 +450,11 @@ test.describe('drawing slide frame membership and clipping characterization (PAT
 
       const annotation = {
         selectedRealAction: 'seeded-persisted-scene-phases-rendered-through-real-drawing-board-and-live-presentation',
-        dragActionDrivability: 'action-not-drivable',
-        actionEvidence: 'No stable public DOM handle identifies an Excalidraw embeddable by scene id for a deterministic Playwright drag; the spec records the same persisted frameId/geometry states and live presentation output without invoking hidden product handlers.',
+        dragActionDrivability: 'action-covered-by-following-live-drag-scenarios',
+        actionEvidence: 'The post-card drag-handle strip is a plain DOM pointer-capture target, so the following scenarios drive its public mouse interaction and inspect persisted scene state after reload.',
         observations: [insideObservation, sliverObservation, outsideObservation, mismatchObservation, nativeObservation],
       };
-      test.info().annotations.push({ type: 'patch-111-frame-membership', description: JSON.stringify(annotation) });
+      test.info().annotations.push({ type: 'patch-112-frame-membership', description: JSON.stringify(annotation) });
 
       await cleanupAndAssert(supabase, fixture);
       cleanedUp = true;
@@ -424,6 +462,77 @@ test.describe('drawing slide frame membership and clipping characterization (PAT
       if (!cleanedUp) {
         await cleanupAndAssert(supabase, fixture);
       }
+    }
+  });
+
+  test('dragging a post-card into a frame assigns frameId and survives reload', async ({ page }) => {
+    test.setTimeout(300_000);
+
+    const { supabase, fixture } = await createDisposableDrawingBoard(PATCH_112_LABEL);
+    let cleanedUp = false;
+
+    try {
+      const padletId = await insertPostCard(supabase, fixture);
+      const frame = frameElement('patch-112-drag-frame', SLIDE_TITLE);
+      const outside = embeddableElement('patch-112-drag-card', padletId, 1300, 120, 300, 180, null);
+      fixture.frameIds.push(frame.id);
+      await insertMasterPadlet(supabase, fixture, [frame, outside]);
+      await page.setViewportSize({ width: 1600, height: 1000 });
+      await openDrawingBoard(page, fixture.boardId);
+
+      await dragPostCardToScenePosition(page, padletId, outside, { x: 900, y: 120 });
+      await expect.poll(async () => {
+        const elements = activeSceneElements(await fetchMasterPadletRow(supabase, fixture.masterPadletId!));
+        const moved = elements.find((element) => element.id === outside.id);
+        return { x: moved?.x, y: moved?.y };
+      }, { timeout: 60_000 }).not.toEqual({ x: outside.x, y: outside.y });
+      await expect.poll(async () => {
+        const elements = activeSceneElements(await fetchMasterPadletRow(supabase, fixture.masterPadletId!));
+        return elements.find((element) => element.id === outside.id);
+      }, { timeout: 60_000 }).toMatchObject({ x: 900, y: 120, frameId: frame.id });
+
+      const reloaded = await observePhase(page, supabase, fixture, padletId, 'drag-into-frame-after-reload', 'patch-112-drag-into.png');
+      expect(reloaded.sceneFrameId).toBe(frame.id);
+      expect(reloaded.resolvedPadletIds).toEqual([padletId]);
+      expect(reloaded.previewVisible).toBe(true);
+
+      await cleanupAndAssert(supabase, fixture);
+      cleanedUp = true;
+    } finally {
+      if (!cleanedUp) await cleanupAndAssert(supabase, fixture);
+    }
+  });
+
+  test('dragging a post-card to a sliver overlap clears frameId and excludes it after reload', async ({ page }) => {
+    test.setTimeout(300_000);
+
+    const { supabase, fixture } = await createDisposableDrawingBoard(PATCH_112_LABEL);
+    let cleanedUp = false;
+
+    try {
+      const padletId = await insertPostCard(supabase, fixture);
+      const frame = frameElement('patch-112-drag-out-frame', SLIDE_TITLE);
+      const inside = embeddableElement('patch-112-drag-out-card', padletId, 100, 120, 300, 180, frame.id);
+      fixture.frameIds.push(frame.id);
+      await insertMasterPadlet(supabase, fixture, [frame, inside]);
+      await page.setViewportSize({ width: 1600, height: 1000 });
+      await openDrawingBoard(page, fixture.boardId);
+
+      await dragPostCardToScenePosition(page, padletId, inside, { x: 1279, y: 120 });
+      await expect.poll(async () => {
+        const elements = activeSceneElements(await fetchMasterPadletRow(supabase, fixture.masterPadletId!));
+        return elements.find((element) => element.id === inside.id);
+      }, { timeout: 60_000 }).toMatchObject({ x: 1279, y: 120, frameId: null });
+
+      const reloaded = await observePhase(page, supabase, fixture, padletId, 'drag-to-sliver-after-reload', 'patch-112-drag-out.png');
+      expect(reloaded.sceneFrameId).toBeNull();
+      expect(reloaded.resolvedPadletIds).toEqual([]);
+      expect(reloaded.previewVisible).toBe(false);
+
+      await cleanupAndAssert(supabase, fixture);
+      cleanedUp = true;
+    } finally {
+      if (!cleanedUp) await cleanupAndAssert(supabase, fixture);
     }
   });
 });

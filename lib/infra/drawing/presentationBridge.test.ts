@@ -176,16 +176,14 @@ describe("presentation bridge characterization", () => {
       expect(composition.resolvedPadlets).toEqual([]);
     });
 
-    it("includes a one-pixel app embeddable sliver overlap when frameId is absent", () => {
+    it("excludes a one-pixel app embeddable sliver overlap when frameId is absent under PATCH-112 center-point containment", () => {
       const composition = characterizeSlideComposition(
         characterizeFrameSlides([frame()])[0],
         deepFreeze([frame(), embeddable("emb-a", "padlet-a", { x: 1279, y: 120, width: 300, frameId: null })]),
         [padlet("padlet-a")],
       );
 
-      expect(composition.resolvedPadlets).toMatchObject([
-        { padletId: "padlet-a", embeddableId: "emb-a", localX: 1279, width: 300, usedOverlapFallback: true },
-      ]);
+      expect(composition.resolvedPadlets).toEqual([]);
     });
 
     it("excludes a one-pixel app embeddable sliver overlap when frameId points elsewhere", () => {
@@ -196,6 +194,18 @@ describe("presentation bridge characterization", () => {
       );
 
       expect(composition.resolvedPadlets).toEqual([]);
+    });
+
+    it("includes an embeddable with frameId freshly assigned on drag commit as explicit membership", () => {
+      const composition = characterizeSlideComposition(
+        characterizeFrameSlides([frame()])[0],
+        deepFreeze([frame(), embeddable("emb-a", "padlet-a", { x: 100, y: 120, frameId: "frame-a" })]),
+        [padlet("padlet-a")],
+      );
+
+      expect(composition.resolvedPadlets).toMatchObject([
+        { padletId: "padlet-a", embeddableId: "emb-a", usedOverlapFallback: false },
+      ]);
     });
 
     it("excludes an edge-adjacent app embeddable because overlap uses strict inequalities", () => {

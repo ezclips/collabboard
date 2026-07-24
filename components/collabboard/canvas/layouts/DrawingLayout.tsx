@@ -31,6 +31,7 @@ import { MessageSquarePlus, Library, MonitorPlay, X, Workflow, Pencil, ChevronDo
 import { contrastIconColor } from '@/components/collabboard/shells/CardShell';
 import CustomMermaidModal from './CustomMermaidModal';
 import { sanitizeClonedPostMetadata } from '@/lib/infra/collabboard/clonedPostMetadata';
+import { resolveFrameMembership } from '@/lib/infra/drawing/frameMembership';
 
 const ExcalidrawWrapper = dynamic(
   () => import('@/components/collabboard/editors/ExcalidrawWrapper'),
@@ -427,7 +428,11 @@ function DrawingEmbeddableCard({
             const pointerScene = toSceneCoords(ue.clientX, ue.clientY, appState);
             const newX = pointerScene.x - grabOffsetX;
             const newY = pointerScene.y - grabOffsetY;
-            const updatedSceneEl = { ...sceneEl, x: newX, y: newY };
+            const membership = resolveFrameMembership(
+              { ...sceneEl, x: newX, y: newY, frameId: null },
+              excAPI.getSceneElements().filter((el: any) => el.type === 'frame' && !el.isDeleted),
+            );
+            const updatedSceneEl = { ...sceneEl, x: newX, y: newY, frameId: membership.frameId };
 
             excAPI.updateScene({
               ...buildDrawingSceneUpdate({

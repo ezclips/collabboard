@@ -1,5 +1,6 @@
 import type { Padlet } from "@/types/collabboard";
 import type { FrameSlide } from "@/components/presentation/PresentationPanel";
+import { resolveFrameMembership } from "@/lib/infra/drawing/frameMembership";
 import type { ResolvedSlidePadlet } from "./types";
 
 export function resolveSlidePadlets(
@@ -8,8 +9,7 @@ export function resolveSlidePadlets(
   availablePadlets: Padlet[],
 ): ResolvedSlidePadlet[] {
   const padletsById = new Map(availablePadlets.map((padlet) => [String(padlet.id), padlet] as const));
-  const frameRight = slideFrame.x + slideFrame.width;
-  const frameBottom = slideFrame.y + slideFrame.height;
+  const frames = sceneElements.filter((element: any) => element.type === "frame" && !element.isDeleted);
 
   return sceneElements
     .map((element: any, zIndex: number) => ({ element, zIndex }))
@@ -24,14 +24,8 @@ export function resolveSlidePadlets(
       const padlet = padletsById.get(padletId);
       if (!padlet || padlet.type === "drawing") return null;
 
-      const elementRight = element.x + element.width;
-      const elementBottom = element.y + element.height;
-      const overlapsFrame =
-        element.x < frameRight
-        && elementRight > slideFrame.x
-        && element.y < frameBottom
-        && elementBottom > slideFrame.y;
-      const inFrame = element.frameId ? element.frameId === slideFrame.id : overlapsFrame;
+      const membership = resolveFrameMembership(element, frames);
+      const inFrame = membership.frameId === slideFrame.id;
 
       if (!inFrame) return null;
 
