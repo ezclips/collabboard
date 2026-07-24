@@ -236,3 +236,38 @@ export type CoordinatorResult =
   | CoordinatorInvalidManifestResult;
 
 export type CoordinatorCliResult = CoordinatorResult;
+
+export interface EvidenceValidationOptions {
+  readonly evidenceRoot: string;
+  readonly fileExists?: (path: string) => boolean;
+}
+
+export type EvidenceValidationCheckValue = boolean | 'not-checked';
+
+export interface EvidenceValidationResult {
+  readonly ok: boolean;
+  readonly violations: readonly string[];
+  readonly checks: {
+    readonly bundleShapeValid: boolean;
+    readonly patchIdMatches: boolean;
+    readonly requiredCommandsRepresented: boolean;
+    readonly noExtraCommandRecords: boolean;
+    readonly noDuplicateCommandRecords: boolean;
+    readonly orderMatches: boolean;
+    readonly exitCodeConsistency: boolean;
+    readonly stoppedEarlyConsistency: boolean;
+    readonly expectedTestTotalsGoverned: EvidenceValidationCheckValue;
+    readonly overallOkConsistency: boolean;
+    readonly logFilesExistWithinRoot: boolean;
+  };
+  readonly schemaErrors: readonly string[];
+  readonly logValidation: {
+    readonly checkedPaths: readonly string[];
+    readonly missingPaths: readonly string[];
+    readonly escapedPaths: readonly string[];
+  };
+}
+
+export type EvidenceValidatorCliResult =
+  | EvidenceValidationResult
+  | { readonly ok: false; readonly reason: 'invalid-arguments' | 'invalid-manifest' | 'invalid-bundle' | 'operation-failed'; readonly message: string };
