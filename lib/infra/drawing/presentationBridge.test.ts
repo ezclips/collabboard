@@ -132,6 +132,124 @@ describe("presentation bridge characterization", () => {
       expect(diagnostics.map((row) => row.code)).toContain("slide-embeddable-overlap-fallback");
     });
 
+    it("includes an inside app embeddable with a matching frameId without fallback", () => {
+      const composition = characterizeSlideComposition(
+        characterizeFrameSlides([frame()])[0],
+        deepFreeze([frame(), embeddable("emb-a", "padlet-a", { x: 100, y: 120, frameId: "frame-a" })]),
+        [padlet("padlet-a")],
+      );
+
+      expect(composition.resolvedPadlets).toMatchObject([
+        { padletId: "padlet-a", embeddableId: "emb-a", localX: 100, localY: 120, usedOverlapFallback: false },
+      ]);
+    });
+
+    it("includes an inside app embeddable with no frameId via overlap fallback", () => {
+      const composition = characterizeSlideComposition(
+        characterizeFrameSlides([frame()])[0],
+        deepFreeze([frame(), embeddable("emb-a", "padlet-a", { x: 100, y: 120, frameId: null })]),
+        [padlet("padlet-a")],
+      );
+
+      expect(composition.resolvedPadlets).toMatchObject([
+        { padletId: "padlet-a", embeddableId: "emb-a", localX: 100, localY: 120, usedOverlapFallback: true },
+      ]);
+    });
+
+    it("excludes an outside app embeddable with no frameId", () => {
+      const composition = characterizeSlideComposition(
+        characterizeFrameSlides([frame()])[0],
+        deepFreeze([frame(), embeddable("emb-a", "padlet-a", { x: 1400, y: 120, frameId: null })]),
+        [padlet("padlet-a")],
+      );
+
+      expect(composition.resolvedPadlets).toEqual([]);
+    });
+
+    it("excludes an outside app embeddable with a different frameId", () => {
+      const composition = characterizeSlideComposition(
+        characterizeFrameSlides([frame()])[0],
+        deepFreeze([frame(), embeddable("emb-a", "padlet-a", { x: 1400, y: 120, frameId: "frame-b" })]),
+        [padlet("padlet-a")],
+      );
+
+      expect(composition.resolvedPadlets).toEqual([]);
+    });
+
+    it("includes a one-pixel app embeddable sliver overlap when frameId is absent", () => {
+      const composition = characterizeSlideComposition(
+        characterizeFrameSlides([frame()])[0],
+        deepFreeze([frame(), embeddable("emb-a", "padlet-a", { x: 1279, y: 120, width: 300, frameId: null })]),
+        [padlet("padlet-a")],
+      );
+
+      expect(composition.resolvedPadlets).toMatchObject([
+        { padletId: "padlet-a", embeddableId: "emb-a", localX: 1279, width: 300, usedOverlapFallback: true },
+      ]);
+    });
+
+    it("excludes a one-pixel app embeddable sliver overlap when frameId points elsewhere", () => {
+      const composition = characterizeSlideComposition(
+        characterizeFrameSlides([frame()])[0],
+        deepFreeze([frame(), embeddable("emb-a", "padlet-a", { x: 1279, y: 120, width: 300, frameId: "frame-b" })]),
+        [padlet("padlet-a")],
+      );
+
+      expect(composition.resolvedPadlets).toEqual([]);
+    });
+
+    it("excludes an edge-adjacent app embeddable because overlap uses strict inequalities", () => {
+      const composition = characterizeSlideComposition(
+        characterizeFrameSlides([frame()])[0],
+        deepFreeze([frame(), embeddable("emb-a", "padlet-a", { x: 1280, y: 120, frameId: null })]),
+        [padlet("padlet-a")],
+      );
+
+      expect(composition.resolvedPadlets).toEqual([]);
+    });
+
+    it("uses explicit frameId over geometry when two frames overlap", () => {
+      const slides = characterizeFrameSlides(deepFreeze([
+        frame(),
+        frame({ id: "frame-b", name: "Slide B", x: 200, y: 0, width: 1280, height: 720 }),
+      ]));
+      const elements = deepFreeze([
+        frame(),
+        frame({ id: "frame-b", name: "Slide B", x: 200, y: 0, width: 1280, height: 720 }),
+        embeddable("emb-a", "padlet-a", { x: 240, y: 120, frameId: "frame-a" }),
+      ]);
+
+      expect(characterizeSlideComposition(slides[0], elements, [padlet("padlet-a")]).resolvedPadlets).toMatchObject([
+        { padletId: "padlet-a", embeddableId: "emb-a", usedOverlapFallback: false },
+      ]);
+      expect(characterizeSlideComposition(slides[1], elements, [padlet("padlet-a")]).resolvedPadlets).toEqual([]);
+    });
+
+    it("emits overlap-fallback diagnostics exactly for fallback membership", () => {
+      const fallbackDiagnostics = validatePresentationBridgeSnapshot({
+        elements: deepFreeze([frame(), embeddable("emb-fallback", "padlet-a", { frameId: null })]),
+        padlets: [padlet("padlet-a")],
+      });
+      const cleanDiagnostics = validatePresentationBridgeSnapshot({
+        elements: deepFreeze([frame(), embeddable("emb-clean", "padlet-a")]),
+        padlets: [padlet("padlet-a")],
+      });
+
+      expect(fallbackDiagnostics.filter((row) => row.code === "slide-embeddable-overlap-fallback")).toHaveLength(1);
+      expect(cleanDiagnostics.filter((row) => row.code === "slide-embeddable-overlap-fallback")).toHaveLength(0);
+    });
+
+    it("excludes overlapping native non-embeddable elements without frameId", () => {
+      const composition = characterizeSlideComposition(
+        characterizeFrameSlides([frame()])[0],
+        deepFreeze([frame(), native("native-overlap", { frameId: null, x: 100, y: 120 })]),
+        [],
+      );
+
+      expect(composition.nativeBelowIds).toEqual([]);
+      expect(composition.nativeAboveIds).toEqual([]);
+    });
+
     it("S1 keeps one-padlet native members before and after in existing bands", () => {
       const composition = characterizeSlideComposition(
         characterizeFrameSlides([frame()])[0],

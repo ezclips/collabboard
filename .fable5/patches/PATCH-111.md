@@ -251,13 +251,59 @@ new §5 "Findings" section appended to this document before closure)
    If yes, propose it as an exact diff in the §5 Findings section for
    separate CTO authorization — **do not apply it in this patch.**
 
-## 5. Findings (to be appended by the implementer before requesting
-review — do not leave this section absent)
+## 5. Findings
+PATCH-111 implementation findings:
 
-*(Populated during implementation: answers to §4's five questions,
-citing the exact new test results from §3, plus a stated "smallest
-likely fix boundary" — which specific function(s)/line(s) a future fix
-patch would most plausibly touch, without actually touching them here.)*
+1. `element.frameId` is the decisive membership signal when it is
+   present. The deterministic unit cases in
+   `lib/infra/drawing/presentationBridge.test.ts` cover an inside
+   embeddable with matching `frameId`, an outside embeddable with a
+   different `frameId`, and a geometry-overlapping embeddable with a
+   different `frameId`; all show that explicit `frameId` wins over
+   geometry. The live characterization spec records the included
+   matching-`frameId` and no-`frameId` sliver-overlap states through the
+   real drawing board and presentation preview, then records the
+   exclusion states through persisted model observations. The
+   real drag action is currently classified as `action-not-drivable`
+   because there is no stable public DOM handle that identifies an
+   Excalidraw embeddable by scene id for a deterministic Playwright
+   drag without invoking hidden product handlers. That means this patch
+   proves the persisted/rendered membership rules, but does not prove
+   that a manual drag into a frame always assigns `frameId` for app
+   embeddables.
+2. The any-overlap fallback appears accidental or compatibility-driven,
+   not a product requirement. The current rule in
+   `resolveSlidePadlets` includes an embeddable without `frameId` when
+   its rectangle overlaps by a one-pixel sliver and excludes it when it
+   is merely edge-adjacent because the rule uses strict `<`/`>`
+   inequalities. No investigated product path documents a stricter
+   "fully inside" or "center point inside" policy.
+3. The embeddable-vs-native asymmetry is real and observable at the
+   presentation bridge boundary. New unit coverage shows a native
+   rectangle with identical overlapping geometry and no `frameId` is
+   excluded from `planSlideComposition`, while a post-card embeddable in
+   the same membership class is included by `resolveSlidePadlets`. The
+   live characterization spec records the same asymmetry in the
+   persisted model, while the runtime presentation path is exercised for
+   included post-card clipping.
+4. Persistence preserves whatever `frameId` value is stored in the
+   master drawing scene. The live spec reloads persisted scene states
+   with matching `frameId`, no `frameId`, and a different `frameId`; the
+   bridge model after reload follows those stored values exactly. This
+   patch does not prove manual drag-generated `frameId` persistence
+   because the real drag action is not deterministically drivable from
+   the available public DOM.
+5. Smallest likely follow-up fix boundary: make the post-card
+   embeddable placement/move path assign or clear `element.frameId`
+   consistently with Excalidraw frame membership before persistence,
+   then narrow `resolveSlidePadlets` to treat geometric overlap as
+   legacy fallback only if the CTO explicitly wants backward
+   compatibility. The most plausible product files for a future,
+   separately authorized fix are
+   `components/collabboard/canvas/layouts/DrawingLayout.tsx` around the
+   app-embeddable scene update/persistence path and
+   `components/presentation/slide-renderer/resolveSlidePadlets.ts`
+   around the fallback policy. No product fix is applied in PATCH-111.
 
 ## 6. Exact file scope (bind)
 
