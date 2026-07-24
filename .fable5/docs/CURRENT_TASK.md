@@ -371,6 +371,45 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-24** — **PATCH-112 AMENDED (§4b-1, stale bridge.test.ts T19)
+  — before commit, candidate not yet complete.** CTO governance turn
+  authorizing exactly one additional file after the implementer's full
+  `npx vitest run` gate exposed a stale test outside PATCH-112's
+  original six-file scope. Verified current state first: HEAD ==
+  origin/main == `4bdc1bad42d04c4296aebdd3f5a619ed0ee5d109`, the six
+  originally-authorized candidate paths changed and nothing else,
+  empty stash, no lockfile change. Live-reran the full suite this
+  turn: confirmed exactly one failure —
+  `lib/infra/drawing/bridge.test.ts`'s T19. Traced the root cause
+  directly rather than trusting the failure message alone: T19 has no
+  hardcoded expected array — it cross-checks `resolveSlidePadlets`
+  (now correctly fixed) against `isEmbeddableInSlideFrame`, a
+  **third, separate production implementation** of frame-membership
+  logic exported from `lib/infra/drawing/bridge.ts` (a
+  diagnostic/summary module, not part of the live rendering path —
+  confirmed via repo-wide grep that no `app/`/`components/`/other
+  `lib/` file imports it, only its own test file does) that still
+  implements the old any-overlap rule and was never in scope for
+  PATCH-112 to touch. This is not a live production inconsistency —
+  it's a dormant, currently-unused helper exposed only by this one
+  cross-check test. Authorized the narrowest possible fix: change
+  T19's assertion from the stale cross-check to a direct assertion
+  against the corrected result (`expect(liveIds).toEqual(["match"])`),
+  confined entirely to `bridge.test.ts`; `bridge.ts` itself
+  (`isEmbeddableInSlideFrame`) is explicitly left unchanged, its
+  reconciliation with the new shared `resolveFrameMembership` utility
+  deferred to a future, separately-authorized patch, not folded in
+  here. All other tests in `bridge.test.ts` (T16-T18, T20+) are
+  unaffected and must remain unchanged. PATCH-112's file count updated
+  from six to seven (2 new, 5 modified); scope, interfaces, safety
+  fences, categories A-G ruling, model assignment, reviewer
+  assignment, and bound commit message all unchanged. Governance-only
+  commit (`.fable5/patches/PATCH-112.md`, `.fable5/docs/CURRENT_TASK.md`);
+  the PATCH-112 candidate's six original files were NOT touched by
+  this turn and remain uncommitted, pending Codex 5.6 Terra applying
+  the one additional T19 fix and re-running the full validation
+  matrix.
+
 - **2026-07-24** — **PATCH-111 CLOSED (commit `c41e19a6a011eaa73fdb9b96b666f5ec52ecbb3d`,
   `test(presentation): characterize frame-membership and clipping
   behavior for post cards (PATCH-111)`) — CTO post-landing

@@ -272,6 +272,56 @@ intentional behavior change):
   proving the render path trusts drag-assigned membership the same way
   it trusts any other explicit `frameId`.
 
+### 4b-1. Amendment — one additional stale test exposed by the full
+`npx vitest run` gate (bind — added 2026-07-24, after the candidate
+above was otherwise complete and passing focused tests)
+
+`lib/infra/drawing/bridge.test.ts`'s `T19 matches resolveSlidePadlets
+inclusion across the shared fixture matrix` fails under the full
+suite. **Root cause, confirmed by direct trace (not assumed from the
+failure message alone):** T19 does not contain a hardcoded expected
+array — it computes `liveIds` from the real, now-fixed
+`resolveSlidePadlets` and `helperIds` from `isEmbeddableInSlideFrame`,
+a **separate, third production implementation** of frame-membership
+logic exported from `lib/infra/drawing/bridge.ts` (line 178) — a
+diagnostic/summary module (`summarizeDrawingBridgeSnapshot` et al.)
+that this patch's scope never touched and was never asked to touch.
+`isEmbeddableInSlideFrame` still implements the old any-overlap rule
+verbatim and is not itself part of the live rendering/persistence
+path — confirmed by repo-wide grep: its only consumers are its own
+defining file and `bridge.test.ts`; no `app/`, `components/`, or other
+`lib/` file imports it. **This is not a live production
+inconsistency** — it is a dormant, currently-unused diagnostic helper
+that happens to still encode the old rule, exposed only because T19
+cross-checks it against the real, fixed path. Separately, T19's
+`elements` fixture contains no `type: "frame"` scene element at all,
+so `resolveSlidePadlets`'s (correct, intentional) derivation of
+candidate frames by scanning `sceneElements` for `type === "frame"`
+finds zero candidates regardless of the center-point-vs-any-overlap
+policy change — meaning this specific fixture would exclude "overlap"
+under the fixed code for this reason too. Both explanations agree on
+the outcome; the fix does not need to adjudicate between them.
+
+**Authorized fix (bind — the only change to `bridge.test.ts`):**
+change T19's assertion from a cross-check against the now-stale
+`isEmbeddableInSlideFrame` helper into a direct assertion against the
+correct, intentional post-PATCH-112 result:
+```ts
+expect(liveIds).toEqual(["match"]);
+```
+(replacing `expect(helperIds).toEqual(liveIds)`). If the implementer
+judges it clearer to retain the `helperIds` computation alongside a
+comment explaining why it is no longer asserted against, that is
+acceptable; removing the now-unused `helperIds` computation entirely
+is also acceptable. **No line in `lib/infra/drawing/bridge.ts` changes
+under this amendment** — `isEmbeddableInSlideFrame` is left exactly as
+it is; reconciling it with `resolveFrameMembership` (it currently is
+not consulted by any live code path, so this is a cleanup opportunity,
+not a defect) is explicitly deferred to a future, separately
+-authorized patch, not folded into PATCH-112. T16, T17, T18, and every
+other test in `bridge.test.ts` are unaffected and must remain
+unchanged and green.
+
 ### 4c. Live Playwright characterization, extend
 `e2e/characterization/drawing-slide-frame-membership.spec.ts`:
 - **This drag path is drivable, unlike PATCH-111's native-Excalidraw
@@ -311,6 +361,12 @@ intentional behavior change):
 4. `e2e/characterization/drawing-slide-frame-membership.spec.ts` — add
    the two new drag scenarios per §4c; update only the one scenario
    whose asserted outcome this patch intentionally changes.
+5. `lib/infra/drawing/bridge.test.ts` — **(added by the 2026-07-24
+   amendment, §4b-1)** update T19's assertion only, exactly as bound
+   in §4b-1 (replace the stale cross-check with a direct assertion
+   against the corrected `liveIds`); no other test in this file
+   changes; no line in the sibling production file
+   `lib/infra/drawing/bridge.ts` changes.
 
 **Prohibited paths (must NOT change):** `planSlideComposition.ts`
 (native-element membership is explicitly out of scope — no fallback
@@ -320,12 +376,14 @@ existed there and none is added), `RuntimeSlideRenderer.tsx`,
 `DrawingLayout.tsx` besides the one `handleUp` closure named above
 (in particular, `handleMove`, embeddable creation
 (`createEmbeddableElementForPadlet`), frame lifecycle handlers, and
-every other drag/drop path in the file), `FreeformPadletCards.tsx`,
+every other drag/drop path in the file), `lib/infra/drawing/bridge.ts`
+(the production file `isEmbeddableInSlideFrame` lives in — only its
+*test* file may change, per §4b-1), `FreeformPadletCards.tsx`,
 `components/collabboard/canvas/excalidraw_fork/**`, and every
 `scripts/harness/**` file (this is a product patch — no infrastructure
 file may be touched).
 
-**Expected file count:** 2 new, 4 modified, 0 deleted.
+**Expected file count:** 2 new, 5 modified, 0 deleted.
 
 **Dependency choices:** zero new dependencies — pure TypeScript
 functions and existing test tooling only.
@@ -338,7 +396,10 @@ functions and existing test tooling only.
    cases green, including the one intentionally-updated case and the
    one new drag-assigned case.
 3. Full `npx vitest run` — must remain at or above the pre-patch
-   baseline, never shrinking or newly failing elsewhere.
+   baseline, never shrinking or newly failing elsewhere. This must
+   include `lib/infra/drawing/bridge.test.ts` passing in full
+   (specifically T19, per the §4b-1 amendment) — the full-suite gate
+   is not satisfied while T19 fails.
 4. The extended Playwright spec (§4c), run against a live dev server
    (`PW_BASE_URL=http://localhost:3000`, never built under a running
    dev server) — skips cleanly without credentials; with credentials,
@@ -375,8 +436,12 @@ existing test is weakened or deleted rather than intentionally,
 documentedly updated for this patch's own behavior change; a new
 dependency is added; `FreeformPadletCards.tsx` or any
 `excalidraw_fork/**` file is touched; any `scripts/harness/**` file is
-touched; any required gate in §6 fails or is skipped; the candidate is
-committed without explicit CTO authorization.
+touched; `lib/infra/drawing/bridge.ts` (the production file) is
+modified in any way, including to "fix" `isEmbeddableInSlideFrame` —
+that reconciliation is explicitly deferred to a future, separate
+patch (§4b-1); any test in `bridge.test.ts` other than T19's assertion
+is changed; any required gate in §6 fails or is skipped; the candidate
+is committed without explicit CTO authorization.
 
 ## 8. Health ledger
 
