@@ -190,3 +190,49 @@ export type SpawnRunner = (
 export type TestRunnerCliResult =
   | EvidenceBundle
   | { readonly ok: false; readonly reason: 'invalid-arguments' | 'malformed-manifest' | 'operation-failed'; readonly message: string };
+
+export interface CoordinatorOptions {
+  readonly repoRoot: string;
+  readonly manifestPath?: string;
+  readonly patchId?: string;
+  readonly isolated?: boolean;
+  readonly worktreeId?: string;
+  readonly logDir?: string;
+  readonly commandTimeoutMs?: number;
+  readonly runner?: (manifest: import('./manifestSchema').PatchManifest, options: TestRunnerOptions) => Promise<EvidenceBundle>;
+}
+
+export type CoordinatorCompletedResult = {
+  readonly ok: boolean;
+  readonly reason: 'completed';
+  readonly patchId: string;
+  readonly manifestPath: string;
+  readonly worktree: { readonly requested: boolean; readonly worktreeId: string | null };
+  readonly evidence: EvidenceBundle;
+};
+
+export type CoordinatorInvalidArgumentsResult = {
+  readonly ok: false;
+  readonly reason: 'invalid-arguments';
+  readonly message: string;
+};
+
+export type CoordinatorManifestNotFoundResult = {
+  readonly ok: false;
+  readonly reason: 'manifest-not-found';
+  readonly manifestPath: string;
+};
+
+export type CoordinatorInvalidManifestResult = {
+  readonly ok: false;
+  readonly reason: 'invalid-manifest';
+  readonly message: string;
+};
+
+export type CoordinatorResult =
+  | CoordinatorCompletedResult
+  | CoordinatorInvalidArgumentsResult
+  | CoordinatorManifestNotFoundResult
+  | CoordinatorInvalidManifestResult;
+
+export type CoordinatorCliResult = CoordinatorResult;
