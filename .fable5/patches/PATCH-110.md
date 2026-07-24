@@ -39,7 +39,10 @@ judge; this patch's only question is "does this bundle accurately and
 completely represent what the manifest required," not "was the run
 good."
 
-**Status:** AUTHORIZED, NOT STARTED.
+**Status:** **DONE.** Landed commit
+`d7e5431a96a4d889ca4b582223867b3f3283c6f6` (exact bound message,
+below). Independent review PASS. See closure section at the end of
+this document for the full record.
 
 **Implementer:** **GPT-5.5** — this patch is a pure
 validation/composition layer (structural + semantic checks over
@@ -432,4 +435,82 @@ reviewed commit.
 
 Unchanged ruling (option B, retired) — not recalculated here.
 
-**Do not authorize PATCH-111.**
+## 10. Closure (bind — CTO post-landing verification)
+
+**Landed commit:** `d7e5431a96a4d889ca4b582223867b3f3283c6f6`, parent
+`b5dacbbab7d99de48dba2f0c88aedcf0898e0f2f`, exact bound message
+`feat(harness): add evidence-bundle verification layer (PATCH-110)`.
+Verified directly: branch `main`, HEAD == origin/main == the landed
+commit, clean working tree, zero staged/untracked files, empty stash,
+`package-lock.json` unchanged, `git diff HEAD^ HEAD --check` clean,
+and `git show --name-only --format="" HEAD` returns exactly the eight
+governed paths from §6 —
+`.fable5/patches/PATCH-110.manifest.json`, `package.json`,
+`scripts/harness/evidenceSchema.ts`,
+`scripts/harness/evidenceValidator.integration.ts`,
+`scripts/harness/evidenceValidator.test.ts`,
+`scripts/harness/evidenceValidator.ts`,
+`scripts/harness/evidenceValidatorCli.ts`, `scripts/harness/types.ts`
+— no more, no fewer. Confirmed `.fable5/evidence` and
+`.fable5/worktrees` both absent on disk, only the main worktree
+exists, and no `harness/worktree/*` branches exist.
+
+**Independent review:** PASS.
+
+**Post-commit landed validation (re-verified live this closure turn,
+read-only):**
+`npm run harness:validate-landed -- .fable5/patches/PATCH-110.manifest.json HEAD`
+→ exit 0,
+`{"ok":true,"violations":[],"checks":{"landedCommitExists":true,"parentMatchesBaseCommit":true,"landedFilesWithinAllowed":true,"prohibitedPathsAbsentFromLandedCommit":true,"landedCommitMessageMatches":true,"landedBlobsMatch":"not-checked","testTotalsMatch":"not-checked"}}`.
+Confirmed zero mutation. Note: a live, non-harness-owned `node.exe`
+process was found listening on port 3000 during this closure turn
+(started 2026-07-24 10:44:46, well before this turn) — not created by
+any harness command, not touched, and irrelevant to this read-only
+landed-validation check, which never binds a port.
+
+**Post-commit pre-commit-scope validation:** as expected per the
+standing PATCH-105–109 ruling, `harness:validate-scope` against this
+same manifest post-commit reports `ok:false`
+(`headMatchesExpected`/`baseCommitMatches` false,
+`commitMessageMatches: true`) — the same expected, non-broken
+lifecycle shape, not a regression.
+
+**Remaining implementation blocker:** none. PATCH-110 is fully landed,
+reviewed, and functionally verified — the evidence-bundle verification
+layer is in place, closing the loop on PATCH-108's output.
+
+## 11. Harness milestone: PATCH-105–110 complete (bind)
+
+PATCH-105 through PATCH-110 together now provide:
+- **bounded server lifecycle** (PATCH-105) — owned start/stop/status
+  for a dev server, PID-scoped, bounded waits, never terminates a
+  process it didn't spawn;
+- **pre-commit scope validation** (PATCH-105) — manifest-driven
+  working-tree/staged/untracked/prohibited-path/stash checks;
+- **post-commit landed validation** (PATCH-106) — the same manifest
+  checked against an already-landed commit via git-history commands;
+- **isolated Git worktrees** (PATCH-107) — disposable, harness-owned,
+  ownership-registry-tracked worktrees with hard main-worktree
+  immunity;
+- **manifest-driven test execution** (PATCH-108) — sequential
+  `requiredCommands` execution with bounded timeouts, optional owned
+  worktree/server composition, stop-on-failure;
+- **structured evidence bundles** (PATCH-108) — one JSON artifact per
+  run, capturing exit codes, durations, log references, parsed test
+  totals;
+- **patch-ID/worktree resolution** (PATCH-109) — a thin convenience
+  layer resolving a patch ID to its manifest and generating safe
+  worktree IDs, composing PATCH-108 unmodified;
+- **evidence-bundle validation** (PATCH-110) — confirming a produced
+  bundle is complete, correctly ordered, internally consistent, and
+  that its referenced logs exist where claimed.
+
+**No further harness/infrastructure patch is authorized at this time.**
+There is no PATCH-111 infrastructure work. Any future harness work
+requires a concrete, evidence-based need surfaced during real product
+development — not a census-driven "what's still missing" exercise
+repeated for its own sake, which is exactly how PATCH-105 through
+PATCH-110 were each selected in turn. **Focus returns to the drawing
+canvas and slider behavior.** PATCH-111 (see `PATCH-111.md`) is
+authorized as a product characterization/investigation patch, not an
+infrastructure patch.

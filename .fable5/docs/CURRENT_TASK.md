@@ -8,6 +8,16 @@
 Work flows through numbered patches in `.fable5/patches/` designed by the CTO model
 and executed by implementation models (SKILL.md).
 
+**Harness/infrastructure milestone (PATCH-105–110) declared complete
+2026-07-24** — bounded server lifecycle, pre-/post-commit scope
+validation, isolated worktrees, manifest-driven test execution,
+evidence bundles, patch-ID resolution, and evidence-bundle validation
+are all landed. No further infrastructure patch is authorized without
+a concrete need found during real product work. **Current focus:**
+PATCH-111, a drawing-canvas frame/slide-membership and post-card
+-clipping characterization investigation (not an infrastructure
+patch) — see the Log below for full detail.
+
 **Last patch:** `PATCH-001` — **DONE (2026-07-07, commit 9b8bed2).** Authenticated
 characterization harness + wall board lifecycle test. `npm run test:e2e` = 6 pass
 with credentials; skips cleanly without. Run against a live dev server with
@@ -360,6 +370,81 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 - Excalidraw fork has its own `node_modules` committed (major repo bloat); handle carefully in a later phase — it backs a `file:` dependency.
 
 ## Log
+
+- **2026-07-24** — **PATCH-110 CLOSED (commit `d7e5431a96a4d889ca4b582223867b3f3283c6f6`,
+  `feat(harness): add evidence-bundle verification layer (PATCH-110)`)
+  — CTO post-landing verification PASSED. HARNESS MILESTONE
+  (PATCH-105–110) DECLARED COMPLETE. PATCH-111 drafted and authorized
+  as the first product/canvas investigation patch (not implemented).**
+  Verified: branch `main`, HEAD == origin/main, clean tree, zero
+  staged/untracked files, empty stash, `package-lock.json` unchanged,
+  `git diff HEAD^ HEAD --check` clean, exactly the eight governed
+  paths landed with parent `b5dacbb` matching the manifest's
+  `baseCommit`. Confirmed `.fable5/evidence`/`.fable5/worktrees` both
+  absent, only the main worktree exists, no `harness/worktree/*`
+  branches. Independent review PASS recorded.
+  **Landed-validation re-verified live this closure turn:**
+  `npm run harness:validate-landed -- .fable5/patches/PATCH-110.manifest.json HEAD`
+  → exit 0, `ok:true`, all applicable checks true, zero mutation.
+  Companion `harness:validate-scope` correctly still `ok:false`
+  (expected post-commit divergence, per the standing PATCH-105–109
+  ruling). Note: a live, non-harness-owned `node.exe` process (PID
+  5788) was found listening on port 3000 during this closure turn,
+  started 2026-07-24 10:44:46 — not created by any harness command,
+  not touched, irrelevant to the read-only landed-validation check.
+  `PATCH-110.md` §10 records the full closure.
+  **HARNESS MILESTONE DECLARED COMPLETE (§11 of `PATCH-110.md`):**
+  PATCH-105 through PATCH-110 together provide bounded server
+  lifecycle, pre-commit scope validation, post-commit landed
+  validation, isolated Git worktrees, manifest-driven test execution,
+  structured evidence bundles, patch-ID/worktree resolution, and
+  evidence-bundle validation. **No further harness/infrastructure
+  patch is authorized at this time. There is no PATCH-111
+  infrastructure work.** Any future harness work requires a concrete,
+  evidence-based need surfaced during real product development, not a
+  repeated census-driven "what's still missing" exercise — which is
+  exactly the pattern that correctly produced six consecutive,
+  individually-justified infrastructure patches and has now reached
+  its natural, deliberate stopping point. **Focus returns to the
+  drawing canvas and slider/frame behavior.**
+  **PATCH-111 drafted** ("Drawing Canvas Frame (Slide) Membership and
+  Clipping Characterization" — investigation/characterization only,
+  not a fix, not an infrastructure patch). A dedicated research pass
+  (Explore agent) found: there is no component literally named
+  "slider" — the "bounded preview window" is Excalidraw's native
+  `frame` element type wrapped by this app's `FrameSlide` domain type
+  for a presentation/slides feature; post cards are matched to frames
+  via `element.frameId` when present, falling back to **any**
+  geometric bounds-overlap (not containment) when `frameId` is absent
+  (`resolveSlidePadlets.ts:29-34`); this exact ambiguity is already
+  instrumented in production via a
+  `"slide-embeddable-overlap-fallback"` diagnostic
+  (`presentationBridge.ts`), a strong signal of a known, live risk;
+  clipping is purely CSS `overflow: hidden`, never computed; native
+  (non-embeddable) frame children have no such geometric fallback at
+  all, an asymmetry versus embeddables that is itself a
+  characterization target; `FreeformPadletCards.tsx` is a confirmed
+  -unrelated, separate canvas stack, explicitly out of scope. PATCH-111
+  binds: a live Playwright reproduction scenario (drag a post card
+  across a frame boundary, save/reload, observe `frameId`/membership/
+  clipping); a 10-case unit characterization matrix extending
+  `lib/infra/drawing/presentationBridge.test.ts`; five explicit
+  investigation questions to be answered in a required §5 "Findings"
+  section before closure (including whether one narrowly-scoped, safe
+  fix can be proposed — proposed only, never applied in this patch);
+  and an explicit prohibition on touching any of the actual
+  implementation files, `FreeformPadletCards.tsx`, the vendored
+  Excalidraw fork, or any harness file. 1-2 new files (a new e2e
+  characterization spec, conditionally a new unit-test sibling file),
+  2 modified (`presentationBridge.test.ts` additive-only, this
+  patch's own `.md` for its Findings section). Implementer: **Codex
+  5.6 Terra** (the canvas architecture — a 3,314-line frame-lifecycle
+  owner, four coordinate systems, an already-instrumented production
+  diagnostic — was judged materially complex enough to cross the
+  CTO's own stated Terra-over-GPT-5.5 threshold). Reviewer: DeepSeek
+  V4 Pro primary, Kepler/Gemini 3.1 Pro fallback — not Sonnet.
+  **Do not authorize PATCH-112 until PATCH-111's findings are reviewed
+  by the CTO.**
 
 - **2026-07-24** — **PATCH-109 CLOSED (commit `984c2867147acf1c6f9a5de7d4c7a6ed85ac0a64`,
   `feat(harness): add patch-id/worktree resolution layer for the test
