@@ -361,6 +361,74 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-24** — **PATCH-108 CLOSED (commit `8d4176f21fb9f1ee4fa41631de25fd1ad30cb922`,
+  `feat(harness): add manifest-driven test runner and evidence bundle
+  (PATCH-108)`) — CTO post-landing verification PASSED; PATCH-109
+  drafted and authorized (not implemented), with its scope narrowed
+  from the originally-preferred concept after direct code inspection.**
+  Verified: branch `main`, HEAD == origin/main, clean tree, zero
+  staged/untracked files, empty stash, `package-lock.json` unchanged,
+  `git diff HEAD^ HEAD --check` clean, exactly the eight governed
+  paths landed. Confirmed `.fable5/evidence` and `.fable5/worktrees`
+  both absent, only the main worktree exists, no `harness/worktree/*`
+  branches. Independent review PASS recorded.
+  **Landed-validation re-verified live this closure turn:**
+  `npm run harness:validate-landed -- .fable5/patches/PATCH-108.manifest.json HEAD`
+  → exit 0, `ok:true`, all applicable checks true, zero mutation, zero
+  residual process/port state — the second consecutive patch (after
+  PATCH-107) to pass its own proactively-bound §8b Phase 2 gate
+  cleanly on the first post-commit run. Companion `harness:validate
+  -scope` correctly still `ok:false` (expected post-commit divergence,
+  per the standing PATCH-105–107 ruling). `PATCH-108.md` §11 records
+  the full closure.
+  **Fresh harness census (post-PATCH-105/106/107/108):** the
+  manifest-driven test runner is landed and, critically, **already
+  composes PATCH-105's server lifecycle and PATCH-107's worktree
+  lifecycle internally** — `runManifestCommands` and `testRunnerCli.ts`
+  already accept `--use-worktree <id>` and already handle create/cwd
+  -set/cleanup for that worktree, plus optional server start/stop,
+  entirely within one call. Landed/pre-commit validation, manifest
+  lifecycle, and Windows process/worktree/branch state all remain
+  clean and mature across five patches now.
+  **Scope-narrowing finding, confirmed by directly reading the landed
+  `testRunner.ts`/`testRunnerCli.ts` rather than assuming:** the
+  user's preferred PATCH-109 concept ("Isolated Harness Run
+  Coordinator" — read a manifest, optionally create a PATCH-107
+  worktree, invoke PATCH-108's runner inside it, optionally use the
+  PATCH-105 server, collect the evidence bundle, guarantee cleanup,
+  emit one structured result) is **already fully implemented by
+  PATCH-108 as landed.** Building a second coordinator that itself
+  calls `createWorktree` and then separately invokes
+  `runManifestCommands` inside it would either duplicate
+  `runManifestCommands`'s own internal worktree handling or require
+  modifying `TestRunnerOptions` to accept a caller-supplied worktree
+  handle — an API change to a just-reviewed module, discouraged by the
+  user's own explicit brief ("modify PATCH-105–108 APIs unless a
+  proven additive seam is unavoidable") and not proven necessary.
+  PATCH-109 was narrowed accordingly to the one genuine,
+  non-duplicative gap: callers today must already know the exact
+  manifest file path and must invent their own worktree ID by hand.
+  **PATCH-109 drafted** ("Harness Run-Coordinator Resolution Layer" —
+  a thin, additive layer resolving a `patchId` to its manifest path
+  and generating safe, collision-resistant worktree IDs on request,
+  then calling PATCH-108's `runManifestCommands` exactly once,
+  unmodified, wrapping its result in a `CoordinatorResult` whose `ok`
+  is an exact, never-overridden passthrough of the evidence bundle's
+  own `ok`). 5 new files (`runCoordinator.ts`/`.test.ts`/
+  `runCoordinatorCli.ts`/`.integration.ts`/`PATCH-109.manifest.json` —
+  pilots itself again), 2 modified (`types.ts` additive-only,
+  `package.json` two new scripts), zero new dependencies, no
+  `.gitignore` change needed (reuses PATCH-107/108's existing ignored
+  paths). Validation matrix pre-split into Phase 1/Phase 2 from the
+  start (§6a/§6b). Full interfaces, safety fences, tests, and
+  hard-stops bound in `.fable5/patches/PATCH-109.md` §0 (the
+  scope-narrowing rationale is recorded there in full, not just in
+  this log entry). Implementer: Codex 5.6 Terra (pure composition, no
+  new Windows git/path complexity). Reviewer: DeepSeek V4 Pro primary,
+  Kepler/Gemini 3.1 Pro fallback — not Sonnet. Health ledger: unchanged
+  (option B, retired). PATCH-109 authorized only — not implemented.
+  **Do not authorize PATCH-110.**
+
 - **2026-07-24** — **PATCH-107 CLOSED (commit `fe339d93d9231ecfa745e23ba5471e82af04b533`,
   `feat(harness): add isolated git-worktree lifecycle foundation
   (PATCH-107)`) — CTO post-landing verification PASSED; PATCH-108

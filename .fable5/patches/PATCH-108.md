@@ -22,7 +22,10 @@ happened. Each deferred item remains its own separate, not-yet
 -authorized future patch, per the user's stated priority order
 (Explorer next, then retrieval, then orchestration).
 
-**Status:** AUTHORIZED, NOT STARTED.
+**Status:** **DONE.** Landed commit
+`8d4176f21fb9f1ee4fa41631de25fd1ad30cb922` (exact bound message,
+below). Independent review PASS. See closure section at the end of
+this document for the full record.
 
 **Implementer:** Codex 5.6 Terra — this patch orchestrates
 already-built, already-reviewed primitives (`child_process` spawn,
@@ -389,4 +392,49 @@ reviewed commit.
 
 Unchanged ruling (option B, retired) — not recalculated here.
 
-**Do not authorize PATCH-109.**
+## 11. Closure (bind — CTO post-landing verification)
+
+**Landed commit:** `8d4176f21fb9f1ee4fa41631de25fd1ad30cb922`, exact
+bound message
+`feat(harness): add manifest-driven test runner and evidence bundle (PATCH-108)`.
+Verified directly: branch `main`, HEAD == origin/main == the landed
+commit, clean working tree, zero staged/untracked files, empty stash,
+`package-lock.json` unchanged, `git diff HEAD^ HEAD --check` clean,
+and `git show --name-only --format="" HEAD` returns exactly the eight
+governed paths from §7 —
+`.fable5/patches/PATCH-108.manifest.json`, `.gitignore`,
+`package.json`, `scripts/harness/testRunner.integration.ts`,
+`scripts/harness/testRunner.test.ts`, `scripts/harness/testRunner.ts`,
+`scripts/harness/testRunnerCli.ts`, `scripts/harness/types.ts` — no
+more, no fewer. Confirmed `.fable5/evidence` and `.fable5/worktrees`
+both absent on disk, only the main worktree exists, and no
+`harness/worktree/*` branches exist — zero residual run artifacts.
+
+**Independent review:** PASS.
+
+**Post-commit landed validation (re-verified live this closure turn,
+read-only):**
+`npm run harness:validate-landed -- .fable5/patches/PATCH-108.manifest.json HEAD`
+→ exit 0,
+`{"ok":true,"violations":[],"checks":{"landedCommitExists":true,"parentMatchesBaseCommit":true,"landedFilesWithinAllowed":true,"prohibitedPathsAbsentFromLandedCommit":true,"landedCommitMessageMatches":true,"landedBlobsMatch":"not-checked","testTotalsMatch":"not-checked"}}`.
+Confirmed zero mutation and zero residual process/port state. This is
+the §8b Phase 2 gate this patch bound proactively from the start
+(rather than retrofitting it, as PATCH-107 had to) — it passed cleanly
+on the first post-commit run, with no lifecycle contradiction.
+
+**Post-commit pre-commit-scope validation:** as expected per the
+standing PATCH-105–107 ruling, `harness:validate-scope` against this
+same manifest post-commit reports `ok:false`
+(`headMatchesExpected`/`baseCommitMatches` false,
+`commitMessageMatches: true`) — the same expected, non-broken
+lifecycle shape, not a regression.
+
+**Remaining implementation blocker:** none. PATCH-108 is fully landed,
+reviewed, and functionally verified — the manifest-driven test runner
+and evidence-bundle primitive is in place, composing PATCH-105's
+server lifecycle and PATCH-107's worktree lifecycle without modifying
+either.
+
+**PATCH-109:** authorized separately (see `PATCH-109.md`) as the
+Isolated Harness Run Coordinator — not implemented as part of this
+closure.
