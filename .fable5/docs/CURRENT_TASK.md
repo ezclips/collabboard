@@ -14,9 +14,9 @@ validation, isolated worktrees, manifest-driven test execution,
 evidence bundles, patch-ID resolution, and evidence-bundle validation
 are all landed. No further infrastructure patch is authorized without
 a concrete need found during real product work. **Current focus:**
-PATCH-111, a drawing-canvas frame/slide-membership and post-card
--clipping characterization investigation (not an infrastructure
-patch) — see the Log below for full detail.
+PATCH-112, a targeted fix assigning post-card frame/slide membership
+on drag commit and narrowing the geometric fallback threshold — see
+the Log below for full detail.
 
 **Last patch:** `PATCH-001` — **DONE (2026-07-07, commit 9b8bed2).** Authenticated
 characterization harness + wall board lifecycle test. `npm run test:e2e` = 6 pass
@@ -370,6 +370,78 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 - Excalidraw fork has its own `node_modules` committed (major repo bloat); handle carefully in a later phase — it backs a `file:` dependency.
 
 ## Log
+
+- **2026-07-24** — **PATCH-111 CLOSED (commit `c41e19a6a011eaa73fdb9b96b666f5ec52ecbb3d`,
+  `test(presentation): characterize frame-membership and clipping
+  behavior for post cards (PATCH-111)`) — CTO post-landing
+  verification PASSED. PATCH-112 drafted and authorized as a targeted
+  product fix (not implemented).** Verified: branch `main`, HEAD ==
+  origin/main, clean tree, empty stash, `package-lock.json` unchanged,
+  `git diff HEAD^ HEAD --check` clean, exactly the three governed
+  paths landed with parent `e25754c` matching. No prohibited path
+  (implementation files, `FreeformPadletCards.tsx`, the vendored fork,
+  any harness file) was touched. Independent review PASS recorded.
+  Live-reran `npx vitest run lib/infra/drawing/presentationBridge.test.ts`
+  this closure turn: **42/42 passing.**
+  **§5 Findings reviewed and accepted:** explicit `frameId` confirmed
+  decisive when present; the any-overlap fallback confirmed accidental
+  /compatibility-shaped, not a documented requirement; the
+  embeddable-vs-native asymmetry confirmed real; persistence confirmed
+  to preserve whatever `frameId` is already stored. Whether manual
+  drag assigns `frameId` was left explicitly unproven (`action-not
+  -drivable` in Playwright, correctly not guessed at) — accepted as a
+  legitimate investigation boundary, carried forward as PATCH-112's
+  first required step. `PATCH-111.md` §10 records the full closure.
+  **PATCH-112 root cause resolved by direct source trace, this
+  authoring turn (supersedes PATCH-111's "unproven" classification):**
+  every post-card embeddable is created with `frameId: null`
+  hardcoded (`DrawingLayout.tsx:1742`); the vendored Excalidraw fork
+  *does* auto-reconcile frame membership on drag
+  (`updateFrameMembershipOfSelectedElements`,
+  `excalidraw_fork/.../App.tsx:10575`) but only inside Excalidraw's
+  own native pointer-driven selection/drag flow; post-card
+  repositioning in this product uses a **fully custom, self-contained
+  pointer-capture drag handle** on the card's own DOM strip
+  (`DrawingLayout.tsx:372-451`) that computes new x/y via the
+  hand-rolled `toSceneCoords` and calls `excAPI.updateScene()`
+  directly, **never touching Excalidraw's native drag system at all**
+  — so `frameId` is never assigned by any drag path in this product,
+  confirmed from source, not inferred. Consequence: the geometric
+  overlap fallback is not a rare legacy path, it is **the only
+  functioning membership mechanism for post cards today** — narrowing
+  or deleting it without also closing the assignment gap would break
+  existing slide membership across the product. **PATCH-112 does
+  both halves together**, exactly as PATCH-111's own §5 Findings
+  already anticipated. New shared, deterministic, pure utility
+  `lib/infra/drawing/frameMembership.ts` (`resolveFrameMembership`):
+  explicit `frameId` (even stale/non-matching) remains fully
+  authoritative; the fallback (only when `frameId` is absent) is
+  narrowed from "any overlap, even one pixel" to "the element's
+  center point lies strictly within the frame's bounds" — deterministic,
+  documented, exhaustively tested (9 unit cases). Production changes,
+  narrowly scoped to exactly two functions:
+  `resolveSlidePadlets.ts` consumes the shared utility instead of
+  inline logic; `DrawingLayout.tsx`'s drag handle's `handleUp` **only**
+  (never `handleMove`, which keeps today's exact live-drag visual
+  behavior) now assigns the resolved `frameId` at drag commit. Post
+  -card *creation* is explicitly left unchanged (a documented, narrow
+  scope boundary, not an oversight). Also newly noted: unlike
+  PATCH-111's native-Excalidraw-drag attempt, this drag handle *is*
+  Playwright-drivable (a plain DOM pointer-capture element, not
+  Excalidraw's internal hit-testing) — PATCH-112 adds two new live
+  drag scenarios proving the fix end-to-end, not just at the unit
+  level. 2 new files (`frameMembership.ts`/`.test.ts`), 4 modified
+  (`resolveSlidePadlets.ts`, `DrawingLayout.tsx`'s one `handleUp`
+  closure, `presentationBridge.test.ts` — one case intentionally
+  updated, one added, `drawing-slide-frame-membership.spec.ts` — two
+  new scenarios), zero new dependencies. Full ruling on all six
+  membership categories (A-G), exact production-change boundaries,
+  test matrix, and hard-stops bound in `.fable5/patches/PATCH-112.md`.
+  Implementer: **Codex 5.6 Terra** (the drag/persistence path crosses
+  materially complex layers — the same architecture PATCH-111 was
+  escalated to characterize, now being modified). Reviewer: DeepSeek
+  V4 Pro primary, Kepler/Gemini 3.1 Pro fallback — not Sonnet.
+  **Do not authorize PATCH-113.**
 
 - **2026-07-24** — **PATCH-110 CLOSED (commit `d7e5431a96a4d889ca4b582223867b3f3283c6f6`,
   `feat(harness): add evidence-bundle verification layer (PATCH-110)`)

@@ -20,7 +20,10 @@ touch the unrelated `FreeformPadletCards.tsx` canvas stack (confirmed
 by direct investigation to have no frame concept at all — a different
 system).
 
-**Status:** AUTHORIZED, NOT STARTED.
+**Status:** **DONE.** Landed commit
+`c41e19a6a011eaa73fdb9b96b666f5ec52ecbb3d` (exact bound message,
+below). Independent review PASS. See closure section at the end of
+this document for the full record.
 
 **Implementer:** **Codex 5.6 Terra** — not GPT-5.5's default for pure
 investigation, because direct inspection of this codebase found the
@@ -397,5 +400,48 @@ empty or is not written before requesting independent review.
 Not applicable to a product/investigation patch — no change to the
 harness health-ledger ruling.
 
-**Do not authorize PATCH-112 until PATCH-111's findings are reviewed
-by the CTO.**
+## 10. Closure (bind — CTO post-landing verification)
+
+**Landed commit:** `c41e19a6a011eaa73fdb9b96b666f5ec52ecbb3d`, parent
+`e25754cce2292690e34d43deb4a32a665c65bc9a`, exact bound message
+`test(presentation): characterize frame-membership and clipping behavior for post cards (PATCH-111)`.
+Verified directly: branch `main`, HEAD == origin/main == the landed
+commit, clean working tree, empty stash, `package-lock.json`
+unchanged, `git diff HEAD^ HEAD --check` clean, and `git show
+--name-only --format="" HEAD` returns exactly the three governed paths
+from §6 — `.fable5/patches/PATCH-111.md`,
+`e2e/characterization/drawing-slide-frame-membership.spec.ts`,
+`lib/infra/drawing/presentationBridge.test.ts` — no more, no fewer.
+No prohibited path (any actual implementation file, `FreeformPadletCards.tsx`,
+the vendored fork, or any `scripts/harness/**` file) was touched.
+Live-reran `npx vitest run lib/infra/drawing/presentationBridge.test.ts`
+this closure turn: **42/42 passing.**
+
+**Independent review:** PASS.
+
+**§5 Findings reviewed and accepted:** explicit `frameId` is confirmed
+decisive when present; the any-overlap fallback is confirmed accidental
+/compatibility-shaped, not a documented product requirement; the
+embeddable-vs-native asymmetry is confirmed real at the presentation
+-bridge boundary; persistence is confirmed to preserve whatever
+`frameId` value is already stored. **Critically, whether a manual
+drag of a post-card embeddable into a frame actually assigns
+`element.frameId` remains unproven** — the implementer correctly
+classified this as `action-not-drivable` from Playwright (no stable
+public DOM handle exists to drive a real Excalidraw drag
+deterministically) rather than guessing or asserting an unverified
+claim. This is accepted as a legitimate investigation boundary, not a
+gap requiring rework — PATCH-112 must resolve it by tracing the
+production source directly (§ of `PATCH-112.md`), not by another
+Playwright attempt.
+
+**Remaining implementation blocker:** none for PATCH-111 itself. The
+unresolved manual-drag question is carried forward as PATCH-112's
+first required investigation step, not a blocker on this patch's
+closure.
+
+**PATCH-112:** authorized separately (see `PATCH-112.md`) as a narrow
+product fix — not implemented as part of this closure. (The prior
+gating condition — "do not authorize PATCH-112 until PATCH-111's
+findings are reviewed by the CTO" — is satisfied by this closure
+section; PATCH-112 is now authorized.)
