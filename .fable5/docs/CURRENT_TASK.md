@@ -361,6 +361,61 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-24** — **PATCH-109 CLOSED (commit `984c2867147acf1c6f9a5de7d4c7a6ed85ac0a64`,
+  `feat(harness): add patch-id/worktree resolution layer for the test
+  runner (PATCH-109)`) — CTO post-landing verification PASSED;
+  PATCH-110 drafted and authorized (not implemented).** Verified:
+  branch `main`, HEAD == origin/main, clean tree, zero
+  staged/untracked files, empty stash, `package-lock.json` unchanged,
+  `git diff HEAD^ HEAD --check` clean, exactly the seven governed
+  paths landed. Confirmed `.fable5/evidence`/`.fable5/worktrees` both
+  absent, only the main worktree exists, no `harness/worktree/*`
+  branches. Independent review PASS recorded.
+  **Landed-validation re-verified live this closure turn:**
+  `npm run harness:validate-landed -- .fable5/patches/PATCH-109.manifest.json HEAD`
+  → exit 0, `ok:true`, all applicable checks true, zero mutation, zero
+  residual process/port state — the third consecutive patch (after
+  PATCH-107/108) to pass its own proactively-bound Phase 2 gate
+  cleanly on the first post-commit run. Companion
+  `harness:validate-scope` correctly still `ok:false` (expected
+  post-commit divergence, per the standing PATCH-105–108 ruling).
+  `PATCH-109.md` §9 records the full closure.
+  **Fresh harness census (post-PATCH-105–109):** confirmed via direct
+  grep that no evidence-bundle verifier exists anywhere — PATCH-108
+  produces `EvidenceBundle` JSON and PATCH-109 resolves inputs to it,
+  but nothing checks that a produced bundle is complete, correctly
+  ordered, internally consistent, or that its referenced log files
+  actually exist where it claims. This is a genuine, non-duplicative
+  gap distinct from every prior patch's scope. Landed/pre-commit
+  validation, manifest lifecycle, and Windows process/worktree/branch
+  state all remain clean and mature across six patches now.
+  **PATCH-110 drafted** ("Evidence-Bundle Verification Layer" — Option
+  A from the CTO's own preferred-areas list, selected over Option B
+  [an evidence renderer, which presupposes a validation capability
+  that doesn't yet exist] and over any further wrapper around
+  PATCH-108/109, which the census found nothing left to justify). Reads
+  one `EvidenceBundle` (schema-validated as untrusted external JSON)
+  against its manifest: required-commands representation, order,
+  exit-code/`ok` consistency, `stoppedEarly` shape validity, governed
+  test-totals honoring, an independently-recomputed overall-`ok`
+  check (never trusting the bundle's own `ok` at face value), and
+  log-file existence/containment within the governed evidence root.
+  Never executes a command, never edits Git state or the bundle
+  itself, never decides a failed command is acceptable. 6 new files
+  (`evidenceSchema.ts`/`evidenceValidator.ts`/`.test.ts`/
+  `evidenceValidatorCli.ts`/`.integration.ts`/
+  `PATCH-110.manifest.json` — pilots itself again), 2 modified
+  (`types.ts` additive-only, `package.json` two new scripts), zero new
+  dependencies. Validation matrix pre-split into Phase 1/Phase 2 from
+  the start (§7a/§7b). Full interfaces, bound semantics, safety
+  fences, tests, and hard-stops in `.fable5/patches/PATCH-110.md`.
+  Implementer: **GPT-5.5** (pure validation/composition layer, no new
+  process/filesystem or Windows git/path complexity — neither Codex
+  5.6 Terra nor Sol's added capability is required). Reviewer:
+  DeepSeek V4 Pro primary, Kepler/Gemini 3.1 Pro fallback — not
+  Sonnet. Health ledger: unchanged (option B, retired). PATCH-110
+  authorized only — not implemented. **Do not authorize PATCH-111.**
+
 - **2026-07-24** — **PATCH-108 CLOSED (commit `8d4176f21fb9f1ee4fa41631de25fd1ad30cb922`,
   `feat(harness): add manifest-driven test runner and evidence bundle
   (PATCH-108)`) — CTO post-landing verification PASSED; PATCH-109

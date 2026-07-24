@@ -53,7 +53,10 @@ no result, and never decides whether a failure is acceptable — it only
 resolves inputs and passes them through to PATCH-108's existing,
 unmodified entry point.
 
-**Status:** AUTHORIZED, NOT STARTED.
+**Status:** **DONE.** Landed commit
+`984c2867147acf1c6f9a5de7d4c7a6ed85ac0a64` (exact bound message,
+below). Independent review PASS. See closure section at the end of
+this document for the full record.
 
 **Implementer:** Codex 5.6 Terra — this patch is pure composition (path
 resolution, ID generation, one wrapped call to an existing, unmodified
@@ -355,4 +358,54 @@ actually landed the reviewed commit.
 
 Unchanged ruling (option B, retired) — not recalculated here.
 
-**Do not authorize PATCH-110.**
+## 9. Closure (bind — CTO post-landing verification)
+
+**Landed commit:** `984c2867147acf1c6f9a5de7d4c7a6ed85ac0a64`, exact
+bound message
+`feat(harness): add patch-id/worktree resolution layer for the test runner (PATCH-109)`.
+Verified directly: branch `main`, HEAD == origin/main == the landed
+commit, clean working tree, zero staged/untracked files, empty stash,
+`package-lock.json` unchanged, `git diff HEAD^ HEAD --check` clean,
+and `git show --name-only --format="" HEAD` returns exactly the seven
+governed paths from §5 —
+`.fable5/patches/PATCH-109.manifest.json`, `package.json`,
+`scripts/harness/runCoordinator.integration.ts`,
+`scripts/harness/runCoordinator.test.ts`,
+`scripts/harness/runCoordinator.ts`,
+`scripts/harness/runCoordinatorCli.ts`, `scripts/harness/types.ts` —
+no more, no fewer. Confirmed `.fable5/evidence` and
+`.fable5/worktrees` both absent on disk, only the main worktree
+exists, and no `harness/worktree/*` branches exist — zero residual run
+artifacts.
+
+**Independent review:** PASS.
+
+**Post-commit landed validation (re-verified live this closure turn,
+read-only):**
+`npm run harness:validate-landed -- .fable5/patches/PATCH-109.manifest.json HEAD`
+→ exit 0,
+`{"ok":true,"violations":[],"checks":{"landedCommitExists":true,"parentMatchesBaseCommit":true,"landedFilesWithinAllowed":true,"prohibitedPathsAbsentFromLandedCommit":true,"landedCommitMessageMatches":true,"landedBlobsMatch":"not-checked","testTotalsMatch":"not-checked"}}`.
+Confirmed zero mutation and zero residual process/port state. This is
+the third consecutive patch (after PATCH-107/108) to pass its own
+proactively-bound §6b Phase 2 gate cleanly on the first post-commit
+run.
+
+**Post-commit pre-commit-scope validation:** as expected per the
+standing PATCH-105–108 ruling, `harness:validate-scope` against this
+same manifest post-commit reports `ok:false`
+(`headMatchesExpected`/`baseCommitMatches` false,
+`commitMessageMatches: true`) — the same expected, non-broken
+lifecycle shape, not a regression.
+
+**Remaining implementation blocker:** none. PATCH-109 is fully landed,
+reviewed, and functionally verified — the thin patch-ID/worktree-ID
+resolution layer over PATCH-108's unmodified `runManifestCommands` is
+in place.
+
+**PATCH-110:** authorized separately (see `PATCH-110.md`) as the
+evidence-bundle verification layer — not implemented as part of this
+closure.
+
+**Do not authorize PATCH-110's implementation from this section alone
+— see the separate PATCH-110.md authorization for its own exact
+scope, model assignment, and hard-stops.**
