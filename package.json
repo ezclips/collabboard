@@ -27,6 +27,8 @@
     ,"harness:worktree:list": "vite-node scripts/harness/worktreeCli.ts list"
     ,"harness:worktree:prune": "vite-node scripts/harness/worktreeCli.ts prune"
     ,"test:harness:worktree:integration": "vite-node scripts/harness/worktreeLifecycle.integration.ts"
+    ,"harness:evidence:run": "vite-node scripts/harness/testRunnerCli.ts"
+    ,"test:harness:testrunner:integration": "vite-node scripts/harness/testRunner.integration.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

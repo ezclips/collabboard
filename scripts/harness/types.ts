@@ -113,3 +113,80 @@ export type WorktreeCliResult =
   | { readonly ok: true; readonly reason: 'listed'; readonly handles: readonly OwnedWorktreeHandle[] }
   | { readonly ok: true; readonly reason: 'pruned'; readonly prunedCount: number; readonly prunedIds: readonly string[] }
   | { readonly ok: false; readonly reason: 'invalid-arguments' | 'operation-failed'; readonly message: string };
+
+export interface CommandExecutionRecord {
+  readonly label: string;
+  readonly command: string;
+  readonly args: readonly string[];
+  readonly exitCode: number;
+  readonly expectedExitCode: number;
+  readonly ok: boolean;
+  readonly timedOut: boolean;
+  readonly durationMs: number;
+  readonly stdoutLogPath: string;
+  readonly stderrLogPath: string;
+  readonly parsedTestTotals: ParsedTestTotals | null;
+  readonly startedAt: string;
+  readonly finishedAt: string;
+}
+
+export interface ParsedTestTotals {
+  readonly tests: number;
+  readonly files: number;
+  readonly passed?: number;
+  readonly failed?: number;
+  readonly skipped?: number;
+  readonly durationMs?: number;
+  readonly parseError?: string;
+}
+
+export interface HarnessCleanupRecord {
+  readonly ok: boolean;
+  readonly worktreeRemoveResult: WorktreeRemoveResult | null;
+  readonly serverStopResult: ServerStopResult | null;
+  readonly errors: readonly string[];
+}
+
+export interface EvidenceBundle {
+  readonly ok: boolean;
+  readonly patchId: string;
+  readonly startedAt: string;
+  readonly finishedAt: string;
+  readonly totalDurationMs: number;
+  readonly commands: readonly CommandExecutionRecord[];
+  readonly stoppedEarly: boolean;
+  readonly parsedTestTotals: ParsedTestTotals | null;
+  readonly expectedTestTotalsMatch: boolean | 'not-checked';
+  readonly worktree: { readonly used: boolean; readonly worktreeId: string | null };
+  readonly serverManaged: { readonly used: boolean; readonly started: boolean };
+  readonly cleanup: HarnessCleanupRecord;
+  readonly evidenceBundlePath: string;
+}
+
+export interface TestRunnerOptions {
+  readonly repoRoot: string;
+  readonly logDir?: string;
+  readonly commandTimeoutMs?: number;
+  readonly useOwnedWorktree?: { readonly worktreeId: string };
+  readonly spawnRunner?: SpawnRunner;
+}
+
+export interface SpawnedCommandResult {
+  readonly exitCode: number;
+  readonly timedOut: boolean;
+}
+
+export type SpawnRunner = (
+  command: string,
+  args: readonly string[],
+  options: {
+    readonly cwd: string;
+    readonly timeoutMs: number;
+    readonly stdoutLogPath: string;
+    readonly stderrLogPath: string;
+  },
+) => Promise<SpawnedCommandResult>;
+
+export type TestRunnerCliResult =
+  | EvidenceBundle
+  | { readonly ok: false; readonly reason: 'invalid-arguments' | 'malformed-manifest' | 'operation-failed'; readonly message: string };

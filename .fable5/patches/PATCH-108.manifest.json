@@ -1,0 +1,106 @@
+{
+  "patchId": "PATCH-108",
+  "baseCommit": "32a589d27a2576961b9803581618007c7ff6c33d",
+  "allowedFiles": [
+    "scripts/harness/testRunner.ts",
+    "scripts/harness/testRunner.test.ts",
+    "scripts/harness/testRunnerCli.ts",
+    "scripts/harness/testRunner.integration.ts",
+    ".fable5/patches/PATCH-108.manifest.json",
+    "scripts/harness/types.ts",
+    "package.json",
+    ".gitignore"
+  ],
+  "prohibitedFiles": [
+    "app/**",
+    "components/**",
+    "lib/domain/**",
+    "lib/infra/**",
+    "e2e/**",
+    "playwright.config.ts",
+    "eslint.boundaries.config.mjs",
+    "package-lock.json",
+    ".fable5/patches/PATCH-0*.md",
+    ".fable5/patches/PATCH-105.manifest.json",
+    ".fable5/patches/PATCH-106.manifest.json",
+    ".fable5/patches/PATCH-107.manifest.json",
+    "scripts/harness/serverLifecycle.ts",
+    "scripts/harness/serverLifecycle.test.ts",
+    "scripts/harness/serverCli.ts",
+    "scripts/harness/manifestSchema.ts",
+    "scripts/harness/manifestSchema.test.ts",
+    "scripts/harness/scopeValidator.ts",
+    "scripts/harness/scopeValidator.test.ts",
+    "scripts/harness/validateScope.ts",
+    "scripts/harness/validateLandedCommit.ts",
+    "scripts/harness/serverLifecycle.integration.ts",
+    "scripts/harness/worktreeLifecycle.ts",
+    "scripts/harness/worktreeLifecycle.test.ts",
+    "scripts/harness/worktreeCli.ts",
+    "scripts/harness/worktreeLifecycle.integration.ts",
+    "scripts/harness/fixtures/tinyServer.mjs"
+  ],
+  "allowedUntrackedFiles": [
+    "scripts/harness/testRunner.ts",
+    "scripts/harness/testRunner.test.ts",
+    "scripts/harness/testRunnerCli.ts",
+    "scripts/harness/testRunner.integration.ts",
+    ".fable5/patches/PATCH-108.manifest.json"
+  ],
+  "generatedArtifactPaths": [
+    "test-results",
+    "playwright-report",
+    ".next/trace",
+    ".fable5/evidence"
+  ],
+  "stashPolicy": "must-be-empty",
+  "requiredCommands": [
+    {
+      "label": "harness-unit",
+      "command": "npx",
+      "args": ["vitest", "run", "scripts/harness"]
+    },
+    {
+      "label": "testrunner-integration",
+      "command": "npm",
+      "args": ["run", "test:harness:testrunner:integration"]
+    },
+    {
+      "label": "scope",
+      "command": "npm",
+      "args": ["run", "harness:validate-scope", "--", ".fable5/patches/PATCH-108.manifest.json"]
+    },
+    {
+      "label": "typecheck",
+      "command": "npx",
+      "args": ["tsc", "--noEmit"]
+    },
+    {
+      "label": "boundaries",
+      "command": "npm",
+      "args": ["run", "check:boundaries"]
+    },
+    {
+      "label": "unit",
+      "command": "npx",
+      "args": ["vitest", "run"]
+    },
+    {
+      "label": "verify",
+      "command": "npm",
+      "args": ["run", "verify"]
+    },
+    {
+      "label": "build",
+      "command": "npm",
+      "args": ["run", "build"]
+    }
+  ],
+  "expectedTestTotals": {
+    "unit": {
+      "tests": 505,
+      "files": 49
+    }
+  },
+  "exactCommitMessage": "feat(harness): add manifest-driven test runner and evidence bundle (PATCH-108)"
+}
