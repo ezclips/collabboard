@@ -256,6 +256,31 @@ ALTER TABLE canvas_lines ADD COLUMN IF NOT EXISTS coord_space text;
     CHECK (coord_space IS NULL OR coord_space = 'scene');
   ```
 
+  **AMENDED AGAIN 2026-07-26 (live gate, LOW 1 upgraded): the
+  `ADD CONSTRAINT` must carry an existence guard.** Required final text:
+
+  ```sql
+  ALTER TABLE canvas_lines ADD COLUMN IF NOT EXISTS coord_space text;
+
+  DO $$
+  BEGIN
+    ALTER TABLE canvas_lines
+      ADD CONSTRAINT canvas_lines_coord_space_check
+      CHECK (coord_space IS NULL OR coord_space = 'scene');
+  EXCEPTION
+    WHEN duplicate_object THEN NULL;
+  END $$;
+  ```
+
+  Rationale for the upgrade from LOW: `supabase/BASELINE.md` records that
+  migrations in this repository "were applied non-linearly and several
+  changes went to prod via the SQL editor". In an environment with a
+  documented history of out-of-band and replayed SQL, a bare
+  `ADD CONSTRAINT` is a live hazard rather than a cosmetic gap —
+  `ADD COLUMN` is already guarded by `IF NOT EXISTS`, and the two
+  statements must be equally replay-safe or the file is only half
+  idempotent.
+
   Rationale: §2a defines `coord_space` as a strictly two-valued domain
   (`null` = legacy, `'scene'` = normalized), and rendering branches on it.
   An unconstrained `text` column lets any future writer persist a third
@@ -574,3 +599,250 @@ matrix, then closure. The live matrix must include the deliberate ~1px
 drag that converts the real repro Arrow Post (§2e / §8 step 4), and its
 restoration afterward — without that conversion, PATCH-115 has no
 acceptance-testable subject.
+
+## 15. Live gate — CONDITIONAL AUTHORIZATION (CTO ruling, 2026-07-26)
+
+Correction gate 2 is **accepted**. Independent verdict *PASS — CORRECTION
+GATE COMPLETE* confirmed by CTO re-verification: T11-T18 execute
+(54 files / 576 tests), migration CHECK present, algebra intact, the §4c
+spec exists and is not skipped, no database mutation has occurred, and
+the candidate is uncommitted.
+
+**CTO additional verification — the new coverage is real, not theatre.**
+LOW 2 raised the possibility that tests cover functions production never
+calls. Verified false for everything that matters: every helper backing
+the restored tests has a genuine production caller —
+`drawingLineDragPersistenceIntent` → `SimpleLineRenderer.tsx:484`
+(T13/T14), `createCanvasLineGeometryFromLayerCoords` →
+`useCanvasLines.ts:90`, `normalizeCanvasLineForPersistence` →
+`useCanvasData.ts:368`, `canvasLinePersistencePayload` →
+`useCanvasData.ts:382`, `duplicateCanvasLineWithOffset` →
+`useCanvasData.ts:467` (T17), `mapGeoCanvasLinePersistencePayload` →
+`CanvasClient.tsx:3271` (T16). `convertCanvasLineGeometryToScene` is used
+internally at line 117 and is **not** dead.
+
+### 15a. Target environment (bind — no ambiguity permitted)
+
+**PRODUCTION.** Determined from source, not assumed:
+
+- `NEXT_PUBLIC_SUPABASE_URL` resolves to a remote hosted project
+  (`https://<20-char-ref>.supabase.co`). Classification was derived
+  programmatically without printing the value.
+- **No local Supabase stack exists** — there is no `supabase/config.toml`.
+- `supabase/BASELINE.md` refers to this database as "the live database"
+  and records that changes "went to **prod**".
+
+There is exactly one remote database, it holds the user's real canvases
+including the repro Arrow Post, and **no staging environment exists.**
+
+**Ruling on deploying to production for acceptance testing: ACCEPTABLE IN
+PRINCIPLE, CONDITIONAL ON EXPLICIT USER GO-AHEAD.** The change is two
+additive DDL statements — nullable column, no default, no backfill, no
+`UPDATE`, no destructive statement, valid for every existing row (all
+`NULL`), and independently droppable. Its blast radius is as small as a
+schema change can be. But it is production data, there is no staging to
+rehearse on, and authorizing it is the user's call, not the CTO's.
+**The operator must obtain a one-time explicit confirmation from the
+repository owner immediately before applying.**
+
+### 15b. HARD STOP — `supabase db push` is FORBIDDEN
+
+`supabase/BASELINE.md` states plainly that `supabase/migrations/` **does
+not rebuild the live database**, that migrations "were applied
+non-linearly", that several changes were applied out-of-band, and that
+the baseline reconciliation was **blocked on 2026-07-06 and never
+completed** (`legacy/` and the interim section are both still present).
+There are **64 migration files**.
+
+Against a desynchronized remote migration history, `npx supabase db push`
+applies everything the remote history table does not record as applied.
+That set is unknown and cannot be trusted here, and it may include
+`20260213_kanban_clean_reset.sql` (a reset script) and
+`20260213_step1_diagnostic.sql`. Running it against production risks
+catastrophic, unrelated schema change.
+
+This is exactly the narrower-method hard stop. `db push`,
+`db reset`, `migration up --include-all`, and any command that can apply
+more than the single authorized file are **prohibited**.
+
+### 15c. Authorized operator (bind)
+
+**The repository owner (the user), operating locally.** Sole operator for
+the migration step. Not the CTO — this governance role explicitly
+excludes deployment execution. Not the implementation model — production
+database credentials must not be handed to it.
+
+The implementation model (GPT-5.5 / Codex 5.6) **is** authorized to run
+the §4c Playwright matrix afterward, which needs only application-level
+credentials.
+
+### 15d. Pre-deployment checks (bind — all read-only, all must pass first)
+
+Run against production and record the output. **Any surprise is a hard
+stop.**
+
+```sql
+-- 1. table exists
+SELECT to_regclass('public.canvas_lines');                    -- expect non-null
+
+-- 2. column absent (or capture its exact existing definition)
+SELECT column_name, data_type, is_nullable, column_default
+FROM information_schema.columns
+WHERE table_name = 'canvas_lines' AND column_name = 'coord_space';   -- expect 0 rows
+
+-- 3. constraint absent
+SELECT conname FROM pg_constraint
+WHERE conname = 'canvas_lines_coord_space_check';              -- expect 0 rows
+
+-- 4. no existing value would violate the constraint
+--    (skip only if step 2 returned 0 rows)
+SELECT count(*) FROM canvas_lines
+WHERE coord_space IS NOT NULL AND coord_space <> 'scene';      -- expect 0
+
+-- 5. this migration version is not already recorded
+SELECT version FROM supabase_migrations.schema_migrations
+WHERE version LIKE '20260726%';                                -- expect 0 rows
+
+-- 6. baseline row count, for the post-check comparison
+SELECT count(*) AS total FROM canvas_lines;
+```
+
+Additionally, **capture a rollback record before applying**: a
+schema-only dump of the table
+(`pg_dump --schema-only --table=public.canvas_lines`) stored **outside
+the repository**. Rollback for this change is
+`ALTER TABLE canvas_lines DROP CONSTRAINT IF EXISTS canvas_lines_coord_space_check;`
+followed by `ALTER TABLE canvas_lines DROP COLUMN IF EXISTS coord_space;`.
+
+### 15e. Approved deployment method (bind — exact, narrow)
+
+Apply **only** `supabase/migrations/20260726_add_canvas_line_coord_space.sql`,
+as a single file, then record the version so future tooling skips it:
+
+```bash
+psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 \
+  -f supabase/migrations/20260726_add_canvas_line_coord_space.sql
+
+npx supabase migration repair --status applied 20260726
+```
+
+`SUPABASE_DB_URL` must be supplied from the local environment and must
+never be printed, echoed, logged, or pasted into a report. This satisfies
+`BASELINE.md`'s "CLI, not the dashboard SQL editor" rule while touching
+exactly one file. The `migration repair` step is **required** — without
+it the version stays unrecorded and a future `db push` would try to
+reapply it.
+
+**Not authorized:** any other migration, `db push`, `db reset`, schema
+recreation, bulk `UPDATE`, backfill, or any destructive statement.
+
+### 15f. Post-deployment verification (bind — leave no test rows)
+
+```sql
+-- column exists, nullable text
+SELECT data_type, is_nullable FROM information_schema.columns
+WHERE table_name='canvas_lines' AND column_name='coord_space';  -- text, YES
+
+-- constraint exists
+SELECT pg_get_constraintdef(oid) FROM pg_constraint
+WHERE conname='canvas_lines_coord_space_check';
+
+-- no row was backfilled; count unchanged vs 15d step 6
+SELECT count(*) AS total,
+       count(coord_space) AS non_null_coord_space
+FROM canvas_lines;                       -- non_null_coord_space expect 0
+```
+
+Accept/reject probes **must run inside a transaction that is rolled
+back**, so no test row can survive even on error:
+
+```sql
+BEGIN;
+  -- NULL accepted, 'scene' accepted, third value rejected
+  UPDATE canvas_lines SET coord_space = NULL    WHERE id = (SELECT id FROM canvas_lines LIMIT 1);
+  UPDATE canvas_lines SET coord_space = 'scene' WHERE id = (SELECT id FROM canvas_lines LIMIT 1);
+  -- expect this to raise check_violation:
+  UPDATE canvas_lines SET coord_space = 'bogus' WHERE id = (SELECT id FROM canvas_lines LIMIT 1);
+ROLLBACK;
+```
+
+Confirm the third statement raised `check_violation` and that `ROLLBACK`
+completed. Do not use `INSERT` for probes — rolled-back inserts still
+consume identity/sequence values.
+
+### 15g. Required live environment variables (bind)
+
+`PATCH114_LIVE_DRAWING_CANVAS_ID`, `PATCH114_LIVE_LEGACY_LINE_ID`,
+`PATCH114_LIVE_FREEFORM_CANVAS_ID`, `PATCH114_LIVE_MAP_CANVAS_ID`,
+`LIVE_ACCESS_EMAIL`, `LIVE_ACCESS_PASSWORD`,
+`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
+
+All resolve from local environment files only. **Never printed,
+committed, echoed, or copied into any report.** Reports state that a
+variable was set — never its value.
+
+### 15h. Authorized live command (bind)
+
+```bash
+node scripts/live-access-login.mjs "<scratch-path>/state.json"
+
+npx playwright test --project=characterization \
+  e2e/characterization/drawing-canvas-line-coordinates.spec.ts
+```
+
+Storage state goes to a scratch path outside the repository and is
+deleted afterward.
+
+### 15i. Real repro Arrow Post — restoration policy (bind)
+
+Record `id`, all geometry fields, `coord_space`, `layer_plane`, `z_index`
+and style **before** touching it. Move it only by the governed ~1px
+conversion drag.
+
+**Ruling: policy A — restore the original visual position, RETAIN
+`coord_space = 'scene'`.** PATCH-115 uses this object as its acceptance
+subject and requires normalized geometry to have a membership-testable
+subject at all; reverting to `coord_space = NULL` would immediately
+recreate the blocker PATCH-114 exists to remove. The conversion is
+value-preserving by §2e (visual position is held constant across
+conversion, which §7 of the live matrix independently asserts), so
+retaining it loses nothing the user can observe.
+
+Position must be restored to the original scene-equivalent coordinates
+within the §7 tolerance. Report the before/after geometry explicitly.
+
+### 15j. Cleanup (bind)
+
+Delete every temporary test line created by the matrix. Restore the
+repro Arrow Post per §15i. Delete scratch storage-state files. Close only
+processes the task started — **a pre-existing dev server must be left
+running**. No credential output anywhere. Git state unchanged; the
+candidate stays uncommitted.
+
+### 15k. Failure policy (bind)
+
+If any live scenario fails: do not commit the candidate, do not begin
+PATCH-115, and **leave the additive migration installed** unless rollback
+is specifically required — it is backward-compatible with the pre-patch
+code, which simply ignores the column. Report the exact failing scenario
+with observed values. Do not broaden implementation scope without a
+governance amendment.
+
+### 15l. Closure conditions (bind)
+
+Two residual corrections must land in the candidate **before** the live
+run, both trivial and inside the existing allowlist:
+
+1. the §3 idempotent `ADD CONSTRAINT` guard;
+2. deletion of `shouldConvertLegacyCanvasLineToScene` from
+   `lib/infra/drawing/canvasLineCoordinates.ts` — verified to have zero
+   internal, production **and** test references. Keep
+   `convertCanvasLineGeometryToScene` (used internally, line 117).
+
+The candidate **remains uncommitted until the live matrix passes.**
+
+**PATCH-114 may then close without a further amendment**, provided: the
+two corrections above landed, the full §4c matrix passed, §15f
+verification passed, §15i restoration is evidenced, and an independent
+reviewer confirms it. No third correction gate is required for a clean
+run.

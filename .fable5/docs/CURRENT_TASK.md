@@ -380,6 +380,59 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-26** — **PATCH-114 LIVE GATE: CONDITIONALLY AUTHORIZED;
+  `supabase db push` FORBIDDEN (candidate still uncommitted).**
+  Correction gate 2 accepted — T11-T18 execute (54 files / 576 tests),
+  CHECK present, §4c spec exists and is not skipped, no DB mutation yet.
+  CTO additionally verified the restored coverage is **real, not
+  theatre**: every helper behind it has a genuine production caller
+  (`drawingLineDragPersistenceIntent` → `SimpleLineRenderer.tsx:484`
+  for T13/T14, `duplicateCanvasLineWithOffset` → `useCanvasData.ts:467`
+  for T17, `mapGeoCanvasLinePersistencePayload` →
+  `CanvasClient.tsx:3271` for T16, plus creation and persistence paths).
+
+  **Target environment determined from source, not assumed: PRODUCTION.**
+  `NEXT_PUBLIC_SUPABASE_URL` resolves to a remote hosted
+  `<ref>.supabase.co` project (classified programmatically, value never
+  printed); there is **no** `supabase/config.toml`, so no local stack
+  exists; and `supabase/BASELINE.md` calls it "the live database" with
+  changes that "went to **prod**". One database, no staging, holding the
+  user's real canvases.
+
+  **Hard stop triggered on the deployment method.** BASELINE.md records
+  that `supabase/migrations/` does **not** rebuild the live database,
+  that migrations were applied **non-linearly** and partly out-of-band,
+  and that baseline reconciliation was blocked 2026-07-06 and never
+  finished. With 64 migration files and a desynchronized remote history,
+  `supabase db push` would apply an unknown pending set — possibly
+  including `20260213_kanban_clean_reset.sql` and
+  `20260213_step1_diagnostic.sql`. Forbidden, along with `db reset` and
+  `migration up --include-all`. Bound narrow method instead: single-file
+  `psql -v ON_ERROR_STOP=1 -f <the one migration>` followed by the
+  **required** `supabase migration repair --status applied 20260726`.
+
+  **LOW 1 upgraded** — in a repo with a documented history of replayed
+  out-of-band SQL, a bare `ADD CONSTRAINT` beside an
+  `IF NOT EXISTS` column is only half idempotent; §3 now requires a
+  `DO $$ ... EXCEPTION WHEN duplicate_object` guard. **LOW 2 confirmed
+  and ruled non-blocking but must be removed** —
+  `shouldConvertLegacyCanvasLineToScene` has zero internal, production
+  and test references; `convertCanvasLineGeometryToScene` is used
+  internally (line 117) and stays.
+
+  Production deployment ruled **acceptable in principle but conditional
+  on explicit user go-ahead**, with the repository owner as sole
+  operator (not the CTO — this role excludes deployment; not the
+  implementation model — no production DB credentials). Added §15
+  binding pre-checks, rollback record, exact command, rolled-back
+  accept/reject probes (no `INSERT`, no surviving test rows), env-var
+  policy, cleanup, and failure policy. **Restoration policy A** bound
+  for the repro Arrow Post: restore visual position, **retain**
+  `coord_space='scene'`, since reverting to `NULL` would recreate the
+  exact blocker PATCH-114 removes and leave PATCH-115 without an
+  acceptance subject. PATCH-114 may close after a clean live run without
+  a further amendment.
+
 - **2026-07-26** — **PATCH-114 ACCEPTANCE GATE 1: CORRECTION REQUIRED
   (not closed; candidate stays uncommitted).** Independent verdict was
   *PASS WITH BLOCKED LIVE GATE*; CTO re-verification independently
