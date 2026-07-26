@@ -1,6 +1,12 @@
 # PATCH-114 — Normalize Drawing CanvasLine Geometry to Excalidraw Scene Coordinates
 
-**Status:** **AUTHORIZED FOR IMPLEMENTATION.** Bound against governance
+**Status:** **DONE / CLOSED (2026-07-27).** Landed commit
+`44c0d5a6400edc00361e1f9141c17bd96680f91a`. See §18 for the closure
+record.
+
+*(Original authorization header retained below for the record.)*
+
+**Status at authorization:** **AUTHORIZED FOR IMPLEMENTATION.** Bound against governance
 baseline `e970d7dad4b44de5b1fb08abaa8c77ed6043c131` (see §0a for the
 base-commit resync rule). This patch is a **coordinate prerequisite
 only**. It renders nothing into any slide preview. PATCH-115 is blocked
@@ -1167,3 +1173,83 @@ running — the configured `webServer` will build and corrupt the shared
 `.fable5/docs/LESSONS_LEARNED.md:65`; it was violated in reaching this
 blocker and must be observed for every future live gate, PATCH-115
 included.
+
+## 18. Closure (bind — CTO post-landing verification, 2026-07-27)
+
+**PATCH-114 is CLOSED. Status: DONE.**
+
+- **Implementation commit:** `44c0d5a6400edc00361e1f9141c17bd96680f91a`
+- **Bound message used, exactly:**
+  `fix(drawing): normalize Drawing CanvasLine geometry to Excalidraw scene coordinates (PATCH-114)`
+- **Parent:** `2660947a0133bd91a04b52511b126f638c9a5bcf`
+- **Independent reviewer verdict:** *PASS — PATCH-114 READY TO CLOSE.*
+  No CRITICAL, HIGH, MEDIUM or LOW findings remained.
+
+### 18a. CTO re-verification (performed independently, not taken on report)
+
+- `git diff --check` clean; nothing was staged and no stash existed
+  before staging; HEAD == `origin/main` at the pre-commit baseline.
+- **All four bound corrections confirmed present in the candidate before
+  commit:** the §3 idempotent `DO $$ … EXCEPTION WHEN duplicate_object`
+  guard; deletion of `shouldConvertLegacyCanvasLineToScene` (zero
+  references remain in `lib/`, `components/`, `app/`); §17g
+  `const BASE_URL = requiredEnv('PW_BASE_URL')` with **no** hardcoded
+  default; §16f `optionalEnv` for the Freeform/Map ids with `requiredEnv`
+  retained for the two Drawing ids and `skipped-no-fixture` annotations
+  in place.
+- **`npx tsc --noEmit` re-run by the CTO: clean.**
+- **`npx vitest run` re-run by the CTO: 54 files / 580 tests, all
+  passing.** No Excalidraw-fork tests were pulled in by the scoped
+  include entry.
+- Exactly **12 files** staged, all within the amended §6 allowlist
+  (7 production + 1 migration + 1 config + 3 test). The five unrelated
+  pending paths — `.gitignore`, the three `app/api/ai/*` routes, and
+  `scripts/live-access-login.mjs` — remained unstaged and unmodified.
+
+### 18b. Live acceptance result
+
+- **5 passed, 1 intentionally skipped** (the deprecated monolithic test
+  superseded by the split scenarios).
+- **Maximum round-trip error: `0.00017837115774455015` scene units**
+  against a required tolerance of `≤ 0.01` — inside budget by roughly
+  two orders of magnitude.
+- All mandatory Drawing scenarios passed: creation at 50/100/200%,
+  creation after horizontal and vertical pan, stored scene-coordinate
+  stability, visual scene tracking, save/reload, front and back planes,
+  endpoint edit, whole-line drag, deliberate legacy conversion with no
+  visual jump, and subsequent pan/zoom tracking.
+- All temporary Drawing rows deleted.
+- **The real Arrow Post was visually restored and retains
+  `coord_space='scene'`** — policy A (§15i) satisfied, so PATCH-115 has a
+  normalized acceptance subject.
+
+### 18c. Recorded residual risk (carried forward, not dismissed)
+
+**Freeform and Map: NOT EXECUTABLE — NO ACCESSIBLE PRODUCTION FIXTURE.**
+Neither a pass nor a fail. The authenticated production account has no
+`freeform` or `map` board and is at its 3/3 plan limit, so no fixture
+could be obtained without creating production data, which was
+prohibited.
+
+Substitute evidence accepted per §16c: T15 and T16 green, full Vitest
+green, production call-site tracing, and diff-level proof that no
+Freeform- or Map-specific file changed. Per §16d this is **reasonable but
+not equivalent** to live execution — it proves the helpers are correct
+and wired, not that Freeform/Map behave identically end-to-end.
+
+**Per §16e this risk does not carry over silently: live Freeform and Map
+checks are REQUIRED before closing PATCH-115**, or PATCH-115 must carry
+its own explicit, separately-ruled unavailable-fixture record.
+
+### 18d. Standing rulings established by this patch
+
+1. A test file the configured runner does not execute never satisfies a
+   test contract (§14a).
+2. Never invoke Playwright without `PW_BASE_URL` while a dev server is
+   running — the configured `webServer` builds and corrupts the shared
+   `.next` (§17l, `LESSONS_LEARNED.md:65`).
+3. Live-gate health checks must probe a **dynamic** route such as
+   `/auth`, never only `/` — static pages survive `.next` corruption and
+   give a false green (§17e).
+
+**As of this closure, PATCH-115 may be authorized.**

@@ -380,6 +380,51 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-27** — **PATCH-114 CLOSED (commit
+  `44c0d5a6400edc00361e1f9141c17bd96680f91a`), PATCH-115 AUTHORIZED.**
+  Independent verdict *PASS — READY TO CLOSE*, no findings at any
+  severity. CTO re-verified rather than accepting the report: all four
+  bound corrections present before commit (idempotent `ADD CONSTRAINT`
+  guard, dead export removed, `requiredEnv('PW_BASE_URL')` with no
+  hardcoded default, `optionalEnv` for the Freeform/Map ids with
+  `skipped-no-fixture` annotations); `npx tsc --noEmit` clean and
+  `npx vitest run` **54 files / 580 tests** both re-run by the CTO; no
+  fork tests pulled in; exactly **12 files** staged, all inside the
+  amended §6 allowlist; the five unrelated pending paths untouched.
+
+  Live: **5 passed, 1 intentionally skipped** (deprecated monolith
+  superseded by split scenarios). **Max round-trip error
+  `0.00017837115774455015`** vs a `≤ 0.01` budget — inside by ~2 orders
+  of magnitude. Temporary rows deleted; the real Arrow Post visually
+  restored and **retaining `coord_space='scene'`** per policy A, so
+  PATCH-115 has a normalized acceptance subject.
+
+  **Residual risk carried forward, not dismissed:** Freeform and Map
+  remain *NOT EXECUTABLE — NO ACCESSIBLE PRODUCTION FIXTURE* (account has
+  no such board and is at its 3/3 plan limit). Substitute evidence
+  accepted for PATCH-114 only; per §16e those live checks are **required
+  before closing PATCH-115**, or PATCH-115 must carry its own explicit
+  unavailable-fixture ruling.
+
+  Three standing rulings established: a test file the runner does not
+  execute never satisfies a test contract; never invoke Playwright
+  without `PW_BASE_URL` while a dev server runs; live health checks must
+  probe a dynamic route (`/auth`), never only `/`.
+
+  **PATCH-115 authorized** — the actual user-visible fix: render Drawing
+  CanvasLines into the right-side thumbnail *and* fullscreen presentation,
+  plus reliable preview invalidation. Membership reuses PATCH-112's
+  `resolveFrameMembership` unmodified with `frameId: null` and the line's
+  unpadded normalized AABB (fail-closed, at most one slide per line,
+  scene-array-order tie-break); native `frameId`-only semantics and padlet
+  semantics unchanged. Only `coord_space='scene'` rows are eligible —
+  legacy rows render as today and are never mutated by preview generation.
+  A static presentation primitive is shared by both surfaces;
+  `SimpleLineRenderer` is forbidden in presentation mode. Closure requires
+  visual proof of the same Arrow Post in all three places. The toolbar
+  census is bound as a PATCH-115 deliverable; **PATCH-116 remains
+  reserved and uncreated** pending its outcome.
+
 - **2026-07-26** — **PATCH-114 §17: live execution bound to Option A
   (reuse dev server on :3000) with mandatory `.next` recovery first;
   Option B rejected as actively harmful.** The premise that :3000 was
