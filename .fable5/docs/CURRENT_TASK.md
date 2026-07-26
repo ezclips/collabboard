@@ -380,6 +380,47 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-26** — **PATCH-114 §17: live execution bound to Option A
+  (reuse dev server on :3000) with mandatory `.next` recovery first;
+  Option B rejected as actively harmful.** The premise that :3000 was
+  healthy is **false as of this ruling** — CTO verification found `/`
+  → 200 but **`/auth` → 500**, i.e. the exact route live login needs is
+  broken on *both* servers, not only :3100.
+
+  **Root cause is already documented in this repo**
+  (`.fable5/docs/LESSONS_LEARNED.md:61-65`): production builds run while
+  the dev server is live corrupt the shared `.next` — "static pages
+  survive, dynamic routes 500". The observed signature matches exactly.
+  Playwright's configured `webServer` built and started `next start` on
+  :3100 while the :3000 dev server was running; the reported
+  `Cannot find module './vendor-chunks/@supabase.js'` is a symptom of
+  that corruption, not an independent bundling defect.
+
+  **Option B is therefore rejected as counterproductive, not merely
+  inferior:** rebuilding means running `npm run build` again, which is
+  precisely the action that causes this corruption. The same lesson notes
+  the `PW_BASE_URL` override was added *specifically so e2e can target a
+  live dev server instead of building* — the escape hatch Option A needs
+  already exists for exactly this case.
+
+  Bound: owner-performed recovery (stop server → `rm -rf .next` →
+  restart → verify), **no Playwright config edit** since
+  `playwright.config.ts:9` and `:48` already make `PW_BASE_URL` set the
+  baseURL *and* disable `webServer` outright, `--no-deps` to skip the
+  unrelated `E2E_EMAIL` setup login, and a health check that tests
+  **`/auth`, not just `/`** — checking only `/` is what let this blocker
+  reach execution, since `/` returned 200 the whole time.
+
+  **Spec ruling:** the 3000 → 3100 default must be reverted, but *not* to
+  a hardcoded 3000 — the default is removed entirely in favour of
+  `requiredEnv('PW_BASE_URL')`, so the login URL, Playwright baseURL and
+  server under test are provably identical and fail loudly rather than
+  silently targeting the wrong server. Confined to the already-allowlisted
+  spec file; no allowlist expansion; `scripts/live-access-login.mjs`
+  unchanged (it already accepts a base-URL argument). No further
+  independent review required before execution; §16g closure review
+  extended to confirm §17g landed.
+
 - **2026-07-26** — **PATCH-114 §16: Freeform/Map live checks ruled NOT
   EXECUTABLE (no accessible production fixture); Drawing acceptance
   unchanged.** The authenticated production account has no `freeform` or

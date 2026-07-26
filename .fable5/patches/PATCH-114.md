@@ -1000,3 +1000,170 @@ PATCH-114 may close when **all** hold:
    unavailable-fixture status.
 
 The candidate remains uncommitted until the live matrix passes.
+
+## 17. Live execution model — OPTION A, with mandatory recovery (CTO
+ruling, 2026-07-26)
+
+### 17a. Correction to the premise (bind)
+
+Option A was recommended on the basis that `localhost:3000` is healthy.
+**It is not, as of this ruling.** CTO verification:
+
+- `http://localhost:3000/` → **200**
+- `http://localhost:3000/auth` → **500**
+- `http://localhost:3100/auth` → no response
+
+The `/auth` route — the exact route live-access login requires — is
+failing on **both** servers, not only on 3100.
+
+### 17b. Root cause — already documented in this repository
+
+`.fable5/docs/LESSONS_LEARNED.md:61-65` records this precise failure:
+
+> **Symptom:** dashboard/canvas routes returned Internal Server Error;
+> homepage still worked.
+> **Root cause:** production builds ran while the dev server was live;
+> both write `.next`, corrupting the dev cache (static pages survive,
+> dynamic routes 500).
+> **Fix:** stop server → delete `.next` → restart dev; guard added to
+> SKILL.md; `PW_BASE_URL` override added so e2e can target a live dev
+> server instead of building.
+> **Reusable rule:** never run `npm run build` or e2e-with-webServer
+> while the dev server is running; recovery is stop → rm `.next` →
+> restart.
+
+The observed signature matches exactly: static `/` survives, dynamic
+`/auth` returns 500. Playwright's configured `webServer` built and
+started `next start` on 3100 **while the 3000 dev server was running**,
+corrupting the shared `.next` and breaking both. The reported
+`Cannot find module './vendor-chunks/@supabase.js'` is a symptom of that
+corruption, not an independent bundling defect.
+
+### 17c. Decision — OPTION A (bind). Option B is rejected as harmful.
+
+**Option B would repeat the cause.** Rebuilding the production server
+means running `npm run build` again, which is precisely the action the
+documented rule forbids while a dev server is live. Choosing B would
+re-corrupt the dev cache and reproduce this blocker. It is rejected not
+merely as less preferable but as actively counterproductive.
+
+Further, the same lesson records that the `PW_BASE_URL` override was
+added **specifically so e2e can target a live dev server instead of
+building**. The escape hatch Option A needs already exists and was built
+for exactly this situation.
+
+### 17d. Mandatory recovery before execution (bind — operator: the
+repository owner, not the test)
+
+The dev server is the owner's pre-existing process. The **test must never
+start or stop any server**. The owner performs recovery once:
+
+1. Stop the dev server on port 3000.
+2. Delete only generated output: `rm -rf .next` (gitignored,
+   `.gitignore:14`; fully regenerable; not source).
+3. Restart with the project's normal dev command.
+4. **Verify before proceeding** — see §17e. If `/auth` does not return
+   200, **stop and report**; do not start an alternative server, do not
+   run `npm run build`, do not modify source or build config.
+
+No package, lockfile, or source change is authorized. This is generated
+-artifact recovery, not a PATCH-114 product implementation.
+
+### 17e. Server-health check (bind — must pass immediately before the run)
+
+```bash
+curl -s -o /dev/null -w "root:%{http_code}\n" http://localhost:3000
+curl -s -o /dev/null -w "auth:%{http_code}\n" http://localhost:3000/auth
+```
+
+**Both must return 200.** Checking only `/` is insufficient and is what
+allowed this blocker to reach execution — `/` returned 200 throughout
+while `/auth` was already broken. A 500 on `/auth` is a hard stop.
+
+### 17f. Supported mechanism — no Playwright config edit is necessary
+(bind)
+
+`playwright.config.ts` already provides the exact override required:
+
+- line 9: `const baseURL = process.env.PW_BASE_URL || 'http://localhost:3100';`
+- line 48: `webServer: process.env.PW_BASE_URL ? undefined : { ... }`
+
+Setting `PW_BASE_URL` therefore **both** points Playwright at the running
+server **and** disables the configured `webServer` entirely — no second
+server is started, and nothing is built. **Editing `playwright.config.ts`
+is NOT authorized**; the supported mechanism suffices.
+
+Recommended additionally: `--no-deps`, to skip the `setup` project, which
+would otherwise log in as the unrelated `E2E_EMAIL` account. Permitted
+only while `e2e/.auth/user.json` exists (verified present at this
+ruling), since the characterization project declares
+`storageState: AUTH_STATE_PATH`.
+
+### 17g. Spec correction ruling (bind)
+
+**The 3000 → 3100 default change must be reverted — but not back to a
+hardcoded 3000.** Remove the hardcoded default entirely and make the live
+gate environment-driven with **no fallback**:
+
+```ts
+const BASE_URL = requiredEnv('PW_BASE_URL');
+```
+
+reusing the existing `requiredEnv` helper. Rationale: any hardcoded
+default can silently diverge from `playwright.config.ts`'s `baseURL` and
+from the login script's URL. A single required variable makes the three
+provably identical and fails loudly instead of silently testing the wrong
+server — which is exactly the failure mode this ruling exists to prevent.
+
+The login script must be passed the **same** resolved value as its base
+-URL argument (it already accepts one as `argv[3]`); no change to
+`scripts/live-access-login.mjs` is authorized.
+
+**Exact allowed file for this correction:**
+`e2e/characterization/drawing-canvas-line-coordinates.spec.ts` — already
+allowlisted by §6. **No allowlist expansion. No other file may change.**
+
+### 17h. Authentication-only verification (bind — run before the matrix)
+
+```bash
+PW_BASE_URL=http://localhost:3000 \
+  node scripts/live-access-login.mjs "<scratch-path>/state.json" "http://localhost:3000"
+```
+
+Must print `{"ok":true,...}` and leave a state file. If it fails, stop —
+do not proceed to the matrix, do not start another server.
+
+### 17i. Authorized live execution command (bind)
+
+```bash
+PW_BASE_URL=http://localhost:3000 \
+  npx playwright test --project=characterization --no-deps \
+  e2e/characterization/drawing-canvas-line-coordinates.spec.ts
+```
+
+### 17j. Cleanup policy (bind — amends §15j)
+
+The pre-existing dev server on port 3000 **must be left running** by the
+test. Only the owner may stop it, and only for §17d recovery. The test
+deletes its own scratch storage state and temporary lines, restores the
+Arrow Post per §15i, and starts no server of its own. **Do not delete
+`.next` as part of test cleanup** — it is the owner's recovery step, not
+a per-run action.
+
+### 17k. Further independent review (bind)
+
+**Not required before execution.** This ruling changes no product
+behavior; the spec correction is a single-line change inside an
+already-allowlisted file, and the timeout corrections already applied are
+test-harness robustness. The §16g closure review remains mandatory and
+must additionally confirm §17g landed (no hardcoded base URL) and that
+the run used `PW_BASE_URL` with no `webServer` started.
+
+### 17l. Standing rule reinforced (bind)
+
+Never invoke Playwright without `PW_BASE_URL` while a dev server is
+running — the configured `webServer` will build and corrupt the shared
+`.next`. This is the documented rule from
+`.fable5/docs/LESSONS_LEARNED.md:65`; it was violated in reaching this
+blocker and must be observed for every future live gate, PATCH-115
+included.
