@@ -380,6 +380,50 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-26** — **PATCH-114 §16: Freeform/Map live checks ruled NOT
+  EXECUTABLE (no accessible production fixture); Drawing acceptance
+  unchanged.** The authenticated production account has no `freeform` or
+  `map` board. **Not accepted on the report alone** — the CTO
+  independently corroborated it from this session's own dashboard
+  capture for the same account: exactly three canvases (*drawing* /
+  Drawing, *My Canvas* / Wall, *Column Canvas2* / Columns), showing
+  "Canvases 3/3" and "Free plan limit reached." That matches the reported
+  accessible layouts exactly and means the account **cannot** create a
+  fourth canvas, so fixture creation is unavailable as well as
+  prohibited. Both mandatory Drawing fixture ids were likewise
+  corroborated first-hand: the canvas is the board used all session, and
+  line `5a5d77c2-…` appears in the renderer's own console diagnostics
+  captured during the earlier drag characterization.
+
+  Freeform/Map are bound as a **third state — neither PASS nor FAIL**;
+  recording them as passes is a hard stop. No invented ids, no layout
+  changes to production boards, no reuse of the Drawing canvas, and **no
+  weakening of any Drawing scenario**. Substitute evidence required at
+  closure: T15/T16 green, full Vitest green, production call-site tracing
+  (`mapGeoCanvasLinePersistencePayload` → `CanvasClient.tsx:3271`, and the
+  Freeform legacy branch via the §5 `drawingViewport` fence), and
+  diff-level proof no Freeform/Map file was touched.
+
+  **Residual risk recorded honestly (§16d):** unit tests plus call-site
+  tracing are reasonable but *not equivalent* to live execution — they
+  prove the helpers are correct and wired, not that Freeform/Map runtime
+  behavior is unchanged end-to-end. Accepted once here because the change
+  is fenced to Drawing and no Freeform/Map file changed; it must be
+  stated as a known limitation at closure rather than quietly dropped.
+  **CTO addition (§16e):** these live checks become *required* before
+  closing any future patch touching shared `CanvasLine` paths, PATCH-115
+  included — the risk compounds if deferred repeatedly.
+
+  Spec defect verified directly: lines 313-316 resolve all four fixture
+  ids via `requiredEnv` in one block, so an absent optional id throws and
+  aborts the whole monolithic test at line 310, taking the mandatory
+  Drawing scenarios with it. The Freeform (~413-417) and Map (~419-423)
+  blocks are contiguous and cleanly separable. Correction bound in §16f:
+  add `optionalEnv`, keep `requiredEnv` for the two Drawing ids, guard
+  each block, and record skips via a `skipped-no-fixture` annotation plus
+  console output — never a silent pass. Confined to the already-allowlisted
+  spec file; **no allowlist expansion**.
+
 - **2026-07-26** — **PATCH-114 LIVE GATE: CONDITIONALLY AUTHORIZED;
   `supabase db push` FORBIDDEN (candidate still uncommitted).**
   Correction gate 2 accepted — T11-T18 execute (54 files / 576 tests),

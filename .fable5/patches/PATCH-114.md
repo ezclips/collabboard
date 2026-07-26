@@ -846,3 +846,157 @@ two corrections above landed, the full §4c matrix passed, §15f
 verification passed, §15i restoration is evidenced, and an independent
 reviewer confirms it. No third correction gate is required for a clean
 run.
+
+## 16. Live gate fixture amendment — ACCEPTED (CTO ruling, 2026-07-26)
+
+The authenticated production account has **no accessible Freeform or Map
+canvas**. The recommended amendment is **accepted** with the additions in
+§16e and §16f.
+
+**CTO independent corroboration.** Not accepted on the report alone. The
+dashboard captured earlier in this session for the same authenticated
+account showed exactly three canvases — *drawing* (Drawing Layout),
+*My Canvas* (Wall Layout), *Column Canvas2* (Columns Layout) — displaying
+"Canvases 3/3" and "Free plan limit reached. Upgrade to create more than
+3 canvases." That matches the reported accessible layouts exactly
+(drawing, wall, columns) and confirms no `freeform` or `map` board
+exists. The plan limit further means the account **cannot** create a
+fourth canvas, so fixture creation is not merely prohibited — it is not
+available.
+
+### 16a. Drawing live acceptance remains MANDATORY (bind)
+
+Unchanged and not weakened. Required fixtures:
+
+- `PATCH114_LIVE_DRAWING_CANVAS_ID` = `0c65aa8e-99a0-4c82-9816-4c838526b838`
+- `PATCH114_LIVE_LEGACY_LINE_ID` = `5a5d77c2-2632-4727-8d39-22a2d6745185`
+
+Both independently corroborated by the CTO from this session's own
+evidence: the canvas is the Drawing board used throughout, and the line
+id appears in the renderer's own console diagnostics captured during the
+earlier drag characterization (`SimpleLineRenderer:event ... lineId:
+5a5d77c2-2632-4727-8d39-22a2d6745185`).
+
+Every scenario in §15h's list remains required: creation at 50/100/200%,
+creation after horizontal and vertical pan, stored scene-coordinate
+stability, visual scene tracking, save/reload, front and back planes,
+endpoint edit, whole-line drag, deliberate legacy conversion, no visual
+jump, subsequent pan/zoom tracking, and cleanup/restoration.
+
+### 16b. Freeform and Map live checks (bind)
+
+Status: **NOT EXECUTABLE — NO ACCESSIBLE PRODUCTION FIXTURE.**
+
+This is **neither a PASS nor a FAIL**. It must be reported as its own
+third state everywhere it appears — the implementation report, the
+Playwright output, and the closure review. Recording it as a pass is a
+hard stop.
+
+**Explicitly not authorized:** invented IDs; reusing the Drawing canvas
+under another layout; creating or converting production canvases for
+testing; altering any production board's `layout`; or weakening any
+Drawing scenario to compensate.
+
+### 16c. Substitute automated non-regression evidence (bind)
+
+In place of the unavailable live checks, closure requires:
+
+1. **T15** green — no Drawing conversion without `drawingViewport`;
+   Freeform stays on the legacy path, including conversion-on-drag (as
+   completed at §14c).
+2. **T16** green — Map/geo persistence stays on the legacy path.
+3. Full `npx vitest run` green.
+4. **Production call-site tracing** proving the helpers are genuinely
+   wired, not merely tested in isolation. Already verified once by the
+   CTO at §15 and must be re-evidenced at closure:
+   `mapGeoCanvasLinePersistencePayload` → `CanvasClient.tsx:3271` (Map),
+   and the Freeform path resolving through the legacy branch because
+   `drawingViewport` is absent per the §5 fence.
+5. **Diff-level evidence** that no Freeform-specific or Map-specific file
+   was modified — already confirmed across both prior gates and to be
+   restated at closure.
+
+### 16d. Residual risk — recorded honestly (bind)
+
+Unit tests plus call-site tracing are a **reasonable but not equivalent**
+substitute for live execution. They prove the helpers behave correctly
+and are wired; they do not prove Freeform and Map runtime behavior is
+unchanged end-to-end on a real board. The mitigating facts are that no
+Freeform or Map component file was touched, and that the §5 fence routes
+every new branch to the legacy path whenever `drawingViewport` is absent
+— which is by construction everywhere outside Drawing.
+
+This limitation is **accepted for PATCH-114** and must be stated as a
+known limitation in the closure record. It is not to be quietly dropped.
+
+### 16e. Future fixture policy (bind — extended)
+
+If an accessible Freeform or Map canvas later exists, those live checks
+may be run as **supplemental** validation. They are **not** required to
+close PATCH-114.
+
+**CTO addition:** they become **required** before closing any future
+patch that modifies shared `CanvasLine` code paths — PATCH-115 included.
+The residual risk in §16d is acceptable once, for a change fenced to
+Drawing; it compounds if repeatedly deferred. PATCH-115 must either
+obtain the fixtures or carry its own explicit, separately-ruled
+unavailable-fixture record.
+
+### 16f. E2E spec correction (bind — exact, inside the existing allowlist)
+
+The only file to change is
+`e2e/characterization/drawing-canvas-line-coordinates.spec.ts`, already
+allowlisted by §6. **No allowlist expansion is authorized.**
+
+Current defect (verified by the CTO): lines **313-316** resolve all four
+fixture ids through `requiredEnv` in one block, so an absent
+`PATCH114_LIVE_FREEFORM_CANVAS_ID` or `PATCH114_LIVE_MAP_CANVAS_ID`
+throws and aborts the **entire** monolithic test at line 310 — taking the
+mandatory Drawing scenarios down with it. The Freeform block
+(lines ~413-417) and Map block (lines ~419-423) are contiguous and
+cleanly separable near the end of the test, well after every Drawing
+scenario.
+
+Required changes, and nothing more:
+
+1. Add an `optionalEnv(key: string): string` helper mirroring
+   `requiredEnv` but returning `''` when unset instead of throwing.
+2. Lines 315-316 use `optionalEnv`. Lines 313-314 keep `requiredEnv` —
+   Drawing fixtures stay mandatory.
+3. Wrap the Freeform block and the Map block each in
+   `if (<id>) { ...existing assertions unchanged... } else { ...report skipped... }`.
+4. The skip branch must record the third state explicitly, both
+   machine-readable and human-readable:
+   ```ts
+   testInfo.annotations.push({
+     type: 'skipped-no-fixture',
+     description: 'PATCH114_LIVE_FREEFORM_CANVAS_ID not set — no accessible production Freeform canvas',
+   });
+   ```
+   plus an equivalent line in the run's console output. **Silently
+   passing, or omitting the scenario from the report, is a hard stop.**
+5. Update the test title at line 310 so it no longer asserts unconditional
+   Freeform/Map coverage — e.g. "…legacy conversion, save/reload,
+   optional Freeform/Map, and cleanup".
+
+Assertions inside the guarded blocks must not be altered, so the
+scenarios run unchanged if fixtures later appear.
+
+### 16g. Closure conditions (bind — supersedes §15l's list)
+
+PATCH-114 may close when **all** hold:
+
+1. The two §15l corrections landed (idempotent `ADD CONSTRAINT` guard;
+   `shouldConvertLegacyCanvasLineToScene` deleted).
+2. The §16f spec correction landed.
+3. **Every mandatory Drawing live scenario passed** (§16a).
+4. T15, T16 and the full Vitest suite green, with the §16c call-site
+   trace and diff-level evidence restated.
+5. Freeform and Map recorded as **NOT EXECUTABLE — NO ACCESSIBLE
+   PRODUCTION FIXTURE**, never as passes, with the §16d limitation noted.
+6. The real Arrow Post restored visually with `coord_space='scene'`
+   retained (policy A, §15i).
+7. Independent closure review confirms all of the above, including the
+   unavailable-fixture status.
+
+The candidate remains uncommitted until the live matrix passes.
