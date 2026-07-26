@@ -32,6 +32,7 @@ import { contrastIconColor } from '@/components/collabboard/shells/CardShell';
 import CustomMermaidModal from './CustomMermaidModal';
 import { sanitizeClonedPostMetadata } from '@/lib/infra/collabboard/clonedPostMetadata';
 import { resolveFrameMembership } from '@/lib/infra/drawing/frameMembership';
+import type { DrawingViewport } from '@/lib/infra/drawing/canvasLineCoordinates';
 
 const ExcalidrawWrapper = dynamic(
   () => import('@/components/collabboard/editors/ExcalidrawWrapper'),
@@ -649,6 +650,7 @@ interface DrawingLayoutProps {
   viewportContainerRef?: React.RefObject<HTMLDivElement | null>;
   drawingAppStateRef?: React.RefObject<any>;
   drawingExcalidrawAPIRef?: React.RefObject<any>;
+  onDrawingViewportChange?: (viewport: DrawingViewport) => void;
 }
 
 export default function DrawingLayout({
@@ -672,6 +674,7 @@ export default function DrawingLayout({
   viewportContainerRef,
   drawingAppStateRef,
   drawingExcalidrawAPIRef,
+  onDrawingViewportChange,
 }: DrawingLayoutProps) {
   const [masterPadlet, setMasterPadlet] = useState<Padlet | null>(null);
   const [isInitializing, setIsInitializing] = useState(true);
@@ -697,6 +700,7 @@ export default function DrawingLayout({
   const framesObjectsRef = useRef<Record<string, FrameSlide>>({});
   const initializedRef = useRef(false);
   const drawingRootRef = useRef<HTMLDivElement | null>(null);
+  const drawingViewportRafRef = useRef<number | null>(null);
   const topFloatingToolbarRef = useRef<HTMLDivElement | null>(null);
   const presentationSidebarRef = useRef<HTMLDivElement | null>(null);
   const paddletsRef = useRef<Padlet[]>(padlets);
@@ -1086,7 +1090,35 @@ export default function DrawingLayout({
     await saveDrawingSnapshot(snapshot);
   }, [saveDrawingSnapshot]);
 
+  const publishDrawingViewport = useCallback((appState: any) => {
+    if (!onDrawingViewportChange || drawingViewportRafRef.current !== null) return;
+
+    drawingViewportRafRef.current = requestAnimationFrame(() => {
+      drawingViewportRafRef.current = null;
+      const excalidrawCanvas = drawingRootRef.current?.querySelector<HTMLCanvasElement>('canvas.excalidraw__canvas');
+      const lineLayer = document.querySelector<SVGSVGElement>('[data-drawing-line-layer="front"]');
+      if (!excalidrawCanvas || !lineLayer) return;
+
+      const excalidrawCanvasRect = excalidrawCanvas.getBoundingClientRect();
+      const lineLayerRect = lineLayer.getBoundingClientRect();
+      onDrawingViewportChange({
+        zoom: appState.zoom?.value || 1,
+        scrollX: appState.scrollX || 0,
+        scrollY: appState.scrollY || 0,
+        originOffsetX: excalidrawCanvasRect.left - lineLayerRect.left,
+        originOffsetY: excalidrawCanvasRect.top - lineLayerRect.top,
+      });
+    });
+  }, [onDrawingViewportChange]);
+
+  useEffect(() => () => {
+    if (drawingViewportRafRef.current !== null) {
+      cancelAnimationFrame(drawingViewportRafRef.current);
+    }
+  }, []);
+
   const handleChange = useCallback((elements: readonly any[], newAppState: any, files: any) => {
+    publishDrawingViewport(newAppState);
     if (readOnly) return;
 
     const newZoomValue = newAppState.zoom?.value || 1;
@@ -1243,7 +1275,7 @@ export default function DrawingLayout({
       }, 2000);
     }
 
-  }, [onDeletePadlet, performSave, readOnly, schedulePadletPositionSave]);
+  }, [onDeletePadlet, performSave, publishDrawingViewport, readOnly, schedulePadletPositionSave]);
 
   // Clean up timer on unmount
   useEffect(() => {

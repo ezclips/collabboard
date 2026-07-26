@@ -282,6 +282,8 @@ export interface CanvasLine {
   control_y: number;
   end_x: number;
   end_y: number;
+  // Absent/null rows use the legacy viewport-layer coordinate system.
+  coord_space?: 'scene' | null;
   // NEW: Multi-point path (takes precedence if exists)
   points?: Array<{
     x: number;

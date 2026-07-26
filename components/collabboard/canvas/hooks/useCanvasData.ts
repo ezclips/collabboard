@@ -31,6 +31,12 @@ import {
 } from '@/lib/domain/canvas/posts';
 import { createCreateSectionsCommand } from '@/lib/domain/canvas/sections';
 import { createLinesRepository } from '@/lib/infra/canvas/linesRepository';
+import {
+  canvasLinePersistencePayload,
+  duplicateCanvasLineWithOffset,
+  normalizeCanvasLineForPersistence,
+  type DrawingViewport,
+} from '@/lib/infra/drawing/canvasLineCoordinates';
 import { createPostsRepository } from '@/lib/infra/canvas/postsRepository';
 import { createSectionsRepository } from '@/lib/infra/canvas/sectionsRepository';
 import {
@@ -350,11 +356,20 @@ export function useCanvasData({ canvasId, dispatch }: UseCanvasDataParams) {
   }, []);
 
   // Save line to database - called when drag ends
-  const saveLineToDb = useCallback(async (lineId: string) => {
+  const saveLineToDb = useCallback(async (
+    lineId: string,
+    options?: { convertLegacyToScene?: boolean; drawingViewport?: DrawingViewport },
+  ) => {
     if (lineId.startsWith('temp-')) return;
 
     const line = lines.find(l => l.id === lineId);
     if (!line) return;
+
+    const lineToPersist = normalizeCanvasLineForPersistence(line, options);
+
+    if (lineToPersist !== line) {
+      setLines(prev => prev.map((currentLine) => currentLine.id === lineId ? lineToPersist : currentLine));
+    }
 
     debugCanvasLogger('saveStart', { op: 'saveLineToDb', lineId });
     // PRESERVED LEGACY SWALLOW (P3-family, do not repair): both failure
@@ -364,29 +379,7 @@ export function useCanvasData({ canvasId, dispatch }: UseCanvasDataParams) {
     const result = await updateLineCmd(
       {
         lineId,
-        updates: {
-          start_x: line.start_x,
-          start_y: line.start_y,
-          control_x: line.control_x,
-          control_y: line.control_y,
-          end_x: line.end_x,
-          end_y: line.end_y,
-          points: line.points, // PERSIST POINTS
-          start_post_id: line.start_post_id,
-          end_post_id: line.end_post_id,
-          // Styling and Label
-          color: line.color,
-          stroke_width: line.stroke_width,
-          dashed: line.dashed,
-          start_arrow: line.start_arrow,
-          end_arrow: line.end_arrow,
-          label: line.label,
-          label_position: line.label_position,
-          z_index: line.z_index,
-          layer_plane: line.layer_plane ?? 'front',
-          label_text_color: line.label_text_color,
-          label_background_color: line.label_background_color,
-        },
+        updates: canvasLinePersistencePayload(line, options),
       },
       { userId: null },
     );
@@ -471,15 +464,8 @@ export function useCanvasData({ canvasId, dispatch }: UseCanvasDataParams) {
       const offset = 20; // Offset for duplicated line
 
       const newLine: CanvasLine = {
-        ...line,
+        ...duplicateCanvasLineWithOffset(line, offset),
         id: newLineId,
-        start_x: line.start_x + offset,
-        start_y: line.start_y + offset,
-        end_x: line.end_x + offset,
-        end_y: line.end_y + offset,
-        control_x: line.control_x + offset,
-        control_y: line.control_y + offset,
-        points: line.points?.map(p => ({ ...p, x: p.x + offset, y: p.y + offset })),
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       };

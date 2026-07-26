@@ -2,6 +2,12 @@
 
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import type { CanvasLine } from '@/types/collabboard';
+import {
+    drawingLineDragPersistenceIntent,
+    layerToScene,
+    sceneGroupTransform,
+    type DrawingViewport,
+} from '@/lib/infra/drawing/canvasLineCoordinates';
 
 const DEV_LINE_RENDER_DIAGNOSTICS = process.env.NODE_ENV !== 'production';
 
@@ -49,7 +55,7 @@ interface SimpleLineRendererProps {
     selectedLineId: string | null;
     onSelectLine: (lineId: string | null) => void;
     onUpdateLine: (lineId: string, updates: Partial<CanvasLine>) => void;
-    onSaveLine: (lineId: string) => void;
+    onSaveLine: (lineId: string, options?: { convertLegacyToScene?: boolean; drawingViewport?: DrawingViewport }) => void;
     isLineMode: boolean;
     onCreateLine: (startX: number, startY: number, endX: number, endY: number) => void;
     isEditMode: boolean;
@@ -60,7 +66,8 @@ interface SimpleLineRendererProps {
     onContextMenu?: (lineId: string, x: number, y: number) => void;
     canvasZoom?: number;
     forcePointerEvents?: boolean;
-    excalidrawAPIRef?: React.RefObject<any>;
+    excalidrawAPIRef?: React.RefObject<{ updateScene?: (scene: unknown) => void }>;
+    drawingViewport?: DrawingViewport;
 }
 
 // Catmull-Rom to Cubic Bezier conversion for smooth paths
@@ -86,11 +93,6 @@ function getCurvePath(points: Array<{ x: number; y: number; type: 'corner' | 'sm
         path += ` C ${cp1x} ${cp1y} ${cp2x} ${cp2y} ${p2.x} ${p2.y}`;
     }
     return path;
-}
-
-// Helper to get distance between points
-function getDist(p1: { x: number; y: number }, p2: { x: number; y: number }) {
-    return Math.sqrt(Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2));
 }
 
 // Calculate point on quadratic bezier curve at position t (0-1)
@@ -136,12 +138,6 @@ function getPointOnPath(line: CanvasLine, t: number) {
 
 // Project point onto line to find closest t (0-1)
 function getClosestT(line: CanvasLine, px: number, py: number): number {
-    const points = line.points || [
-        { x: line.start_x, y: line.start_y },
-        { x: line.control_x, y: line.control_y }, // Approx for legacy
-        { x: line.end_x, y: line.end_y }
-    ];
-
     let minDst = Infinity;
     let closestT = 0.5;
 
@@ -221,6 +217,7 @@ function SimpleLineRenderer({
     canvasZoom = 1,
     forcePointerEvents = false,
     excalidrawAPIRef,
+    drawingViewport,
 }: SimpleLineRendererProps) {
     const svgRef = useRef<SVGSVGElement>(null);
     const rendererLabel = layer === 'back' ? 'back' : 'front';
@@ -263,7 +260,19 @@ function SimpleLineRenderer({
         };
     }, [canvasZoom]);
 
-    const handlePointDragStart = (e: React.MouseEvent, lineId: string, index?: number, point?: any) => {
+    const getStoredMousePos = useCallback((line: CanvasLine, e: React.MouseEvent | MouseEvent) => {
+        const layerPoint = getMousePos(e);
+        return line.coord_space === 'scene' && drawingViewport
+            ? layerToScene(layerPoint, drawingViewport)
+            : layerPoint;
+    }, [drawingViewport, getMousePos]);
+
+    const handlePointDragStart = (
+        e: React.MouseEvent,
+        lineId: string,
+        index?: number,
+        point?: 'start' | 'control' | 'end' | 'label',
+    ) => {
         logLineEventDiagnostics('point-drag-start:before-stop', rendererLabel, lineId, e, {
             index: index ?? null,
             point: point ?? null,
@@ -320,7 +329,7 @@ function SimpleLineRenderer({
             const line = lines.find(l => l.id === lineId);
             if (!line) return;
 
-            const pos = getMousePos(e);
+            const pos = getStoredMousePos(line, e);
 
             // If line has no points array (legacy format), create one from legacy from legacy coordinates
             let workingPoints = line.points;
@@ -349,7 +358,6 @@ function SimpleLineRenderer({
             newPoints.splice(bestSegIdx + 1, 0, { x: pos.x, y: pos.y, type: 'smooth' });
 
             onUpdateLine(lineId, { points: newPoints });
-            onSaveLine(lineId);
 
             // Immediately start dragging the newly added point
             const newPointIndex = bestSegIdx + 1;
@@ -390,13 +398,16 @@ function SimpleLineRenderer({
             rafRef.current = requestAnimationFrame(() => {
                 rafRef.current = null;
 
-                const pos = getMousePos(e);
+                const layerPos = getMousePos(e);
                 const currentDraggingPoint = draggingPointRef.current;
                 const currentDraggingLine = draggingLineRef.current;
 
                 if (currentDraggingPoint) {
                     const line = linesRef.current.find(l => l.id === currentDraggingPoint.lineId);
                     if (!line) return;
+                    const pos = line.coord_space === 'scene' && drawingViewport
+                        ? layerToScene(layerPos, drawingViewport)
+                        : layerPos;
                     const updates: Partial<CanvasLine> = {};
 
                     if (currentDraggingPoint.index !== undefined && line.points) {
@@ -426,8 +437,15 @@ function SimpleLineRenderer({
                 } else if (currentDraggingLine) {
                     const line = linesRef.current.find(l => l.id === currentDraggingLine.lineId);
                     if (!line) return;
-                    const dx = pos.x - dragOffsetRef.current.x;
-                    const dy = pos.y - dragOffsetRef.current.y;
+                    const previousLayerPos = dragOffsetRef.current;
+                    const previousPos = line.coord_space === 'scene' && drawingViewport
+                        ? layerToScene(previousLayerPos, drawingViewport)
+                        : previousLayerPos;
+                    const pos = line.coord_space === 'scene' && drawingViewport
+                        ? layerToScene(layerPos, drawingViewport)
+                        : layerPos;
+                    const dx = pos.x - previousPos.x;
+                    const dy = pos.y - previousPos.y;
 
                     const updates: Partial<CanvasLine> = {
                         start_x: line.start_x + dx,
@@ -443,7 +461,7 @@ function SimpleLineRenderer({
                     }
 
                     // Update offset ref, not state
-                    dragOffsetRef.current = { x: pos.x, y: pos.y };
+                    dragOffsetRef.current = layerPos;
                     onUpdateLine(currentDraggingLine.lineId, updates);
                 }
             });
@@ -455,8 +473,17 @@ function SimpleLineRenderer({
                 cancelAnimationFrame(rafRef.current);
                 rafRef.current = null;
             }
-            const id = draggingPointRef.current?.lineId || draggingLineRef.current?.lineId;
-            if (id) onSaveLine(id);
+            const draggingPointAtCommit = draggingPointRef.current;
+            const id = draggingPointAtCommit?.lineId || draggingLineRef.current?.lineId;
+            const persistenceIntent = drawingLineDragPersistenceIntent({
+                phase: 'commit',
+                drawingViewport,
+                isLabelDrag: draggingPointAtCommit?.point === 'label',
+            });
+            if (id && persistenceIntent.shouldPersist) onSaveLine(id, {
+                convertLegacyToScene: persistenceIntent.convertLegacyToScene,
+                drawingViewport,
+            });
             setDraggingPoint(null);
             setDraggingLine(null);
         };
@@ -470,7 +497,7 @@ function SimpleLineRenderer({
                 cancelAnimationFrame(rafRef.current);
             }
         };
-    }, [isDragging, onUpdateLine, onSaveLine, getMousePos]);
+    }, [isDragging, onUpdateLine, onSaveLine, getMousePos, drawingViewport]);
 
     // Separate useEffect for drawing preview
     useEffect(() => {
@@ -499,7 +526,7 @@ function SimpleLineRenderer({
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
             const target = e.target as HTMLElement | null;
-            const isTyping = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || (target as any).isContentEditable);
+            const isTyping = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
             if (isTyping) return;
 
             if ((e.key === 'Delete' || e.key === 'Backspace') && selectedPoint && isEditMode) {
@@ -608,12 +635,18 @@ function SimpleLineRenderer({
 
     // Both visual strokes and hit areas use the same ordered set.
     const visualLines = orderedLines;
-    const interactionLines = orderedLines;
     const renderedVisibleLines = visualLines;
+    const legacyLines = orderedLines.filter((line) => line.coord_space !== 'scene' || !drawingViewport);
+    const sceneLines = drawingViewport ? orderedLines.filter((line) => line.coord_space === 'scene') : [];
+    const lineGroups = [
+        { key: 'legacy', lines: legacyLines, transform: undefined },
+        ...(drawingViewport ? [{ key: 'scene', lines: sceneLines, transform: sceneGroupTransform(drawingViewport) }] : []),
+    ];
 
     return (
         <svg
             ref={svgRef}
+            data-drawing-line-layer={excalidrawAPIRef ? layer : undefined}
             className="absolute inset-0 overflow-visible"
             style={{
                 width: '100%',
@@ -666,13 +699,19 @@ function SimpleLineRenderer({
             </defs>
 
             {/* Interactive hit areas - front layer renders ALL lines' hit areas */}
-            {interactionLines.map((line: CanvasLine) => {
+            {lineGroups.map(({ key, lines: groupedLines, transform }) => (
+                <g
+                    key={`hit-group-${key}`}
+                    data-line-coordinate-space={key}
+                    data-line-render-pass="hit"
+                    transform={transform}
+                >
+            {groupedLines.map((line: CanvasLine) => {
                 const pathData = (line.points && line.points.length > 0)
                     ? getCurvePath(line.points)
                     : `M ${line.start_x} ${line.start_y} Q ${line.control_x} ${line.control_y} ${line.end_x} ${line.end_y}`;
                 const isSelected = selectedLineId === line.id;
                 const bbox = getBoundingBox(line);
-
                 return (
                     <g key={`hit-${line.id}`}>
                         {/* Selection Box */}
@@ -695,6 +734,7 @@ function SimpleLineRenderer({
                             fill="none"
                             stroke="transparent"
                             strokeWidth={20}
+                            vectorEffect="non-scaling-stroke"
                             data-line-id={line.id}
                             data-line-renderer={rendererLabel}
                             data-line-role="hit-path"
@@ -723,14 +763,22 @@ function SimpleLineRenderer({
                     </g>
                 );
             })}
+                </g>
+            ))}
 
             {/* Visible lines - only lines belonging to this layer */}
-            {renderedVisibleLines.map((line: CanvasLine) => {
+            {lineGroups.map(({ key, lines: groupedLines, transform }) => (
+                <g
+                    key={`visible-group-${key}`}
+                    data-line-coordinate-space={key}
+                    data-line-render-pass="visible"
+                    transform={transform}
+                >
+            {groupedLines.map((line: CanvasLine) => {
                 const isSelected = selectedLineId === line.id;
                 const pathData = (line.points && line.points.length > 0)
                     ? getCurvePath(line.points)
                     : `M ${line.start_x} ${line.start_y} Q ${line.control_x} ${line.control_y} ${line.end_x} ${line.end_y}`;
-                const bbox = getBoundingBox(line);
 
                 return (
                     <g key={line.id}>
@@ -870,6 +918,8 @@ function SimpleLineRenderer({
                     </g>
                 );
             })}
+                </g>
+            ))}
 
             {/* Drawing preview */}
             {drawing && (

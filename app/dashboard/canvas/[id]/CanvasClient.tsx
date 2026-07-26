@@ -11,6 +11,10 @@ import TextStylePopup from '@/components/collabboard/editors/TextStylePopup';
 import ReactionDisplay from '@/components/collabboard/editors/ReactionDisplay';
 import InlineCaption from '@/components/collabboard/editors/InlineCaption';
 import SimpleLineRenderer from '@/components/collabboard/SimpleLineRenderer';
+import {
+  mapGeoCanvasLinePersistencePayload,
+  type DrawingViewport,
+} from '@/lib/infra/drawing/canvasLineCoordinates';
 import ColumnsLayout from '@/components/canvas/layouts/ColumnsLayout';
 import DrawingLayout from '@/components/collabboard/canvas/layouts/DrawingLayout';
 import ChronoTimelineCanvas from '@/components/canvas/ChronoTimelineCanvas';
@@ -712,6 +716,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   // === END SELECTION REGION ===
 
   // === BEGIN LINE REGION ===
+  const [drawingViewport, setDrawingViewport] = useState<DrawingViewport | undefined>();
   const {
     lineEditModeId,
     setLineEditModeId,
@@ -730,6 +735,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     canvasZoom,
     setLines,
     setSelectedLineId,
+    drawingViewport: canvas?.layout === 'drawing' ? drawingViewport : undefined,
   });
 
   // Helper to close all toolbars and popups when opening a new one
@@ -3249,7 +3255,10 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   const shouldEnableMapLinePointerEvents = isMapLayout && (selectedLineId !== null || lineEditModeId !== null);
 
   // When a geo-anchored line is saved after editing, recompute its lng/lat from current pixels
-  const saveLineToDbMapAware = useCallback(async (lineId: string) => {
+  const saveLineToDbMapAware = useCallback(async (
+    lineId: string,
+    options?: { convertLegacyToScene?: boolean; drawingViewport?: DrawingViewport },
+  ) => {
     const mapInst = mapInstanceRef.current;
     if (isMapLayout && mapInst) {
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
@@ -3259,16 +3268,11 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           const geo = mapInst.unproject([p.x, p.y]);
           return { ...p, lng: geo.lng, lat: geo.lat };
         });
-        await updateLine(lineId, {
-          start_x: line.start_x, start_y: line.start_y,
-          end_x: line.end_x, end_y: line.end_y,
-          control_x: line.control_x, control_y: line.control_y,
-          points: geoPoints,
-        });
+        await updateLine(lineId, mapGeoCanvasLinePersistencePayload(line, geoPoints));
         return;
       }
     }
-    await saveLineToDb(lineId);
+    await saveLineToDb(lineId, options);
   }, [isMapLayout, saveLineToDb, updateLine]);
 
   const handleLineContextMenu = useCallback((lineId: string, x: number, y: number) => {
@@ -6333,6 +6337,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
               onContextMenu={handleLineContextMenu}
               forcePointerEvents={true}
               excalidrawAPIRef={isDrawingLayout ? drawingExcalidrawAPIRef : undefined}
+              drawingViewport={isDrawingLayout ? drawingViewport : undefined}
             />
           </div>
 
@@ -6794,6 +6799,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                 onGhostDraftDropped={() => setDrawingGhostDraft(null)}
                 drawingAppStateRef={drawingAppStateRef}
                 drawingExcalidrawAPIRef={drawingExcalidrawAPIRef}
+                onDrawingViewportChange={setDrawingViewport}
                 currentUserId={user?.id}
                 currentUserName={user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'User'}
                 currentUserAvatar={user?.user_metadata?.avatar_url}
@@ -7161,6 +7167,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
               canvasZoom={canvasZoom}
               forcePointerEvents={shouldEnableMapLinePointerEvents}
               excalidrawAPIRef={isDrawingLayout ? drawingExcalidrawAPIRef : undefined}
+              drawingViewport={isDrawingLayout ? drawingViewport : undefined}
             />
           </div>
 

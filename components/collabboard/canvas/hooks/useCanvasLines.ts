@@ -5,12 +5,17 @@ import type { CanvasLine } from '@/types/collabboard';
 import { createCreateLineAndSelectCommand } from '@/lib/domain/canvas/lines';
 import { createLinesRepository } from '@/lib/infra/canvas/linesRepository';
 import { debugCanvasLogger } from '@/lib/collabboard/debugCanvasLogger';
+import {
+  createCanvasLineGeometryFromLayerCoords,
+  type DrawingViewport,
+} from '@/lib/infra/drawing/canvasLineCoordinates';
 
 interface UseCanvasLinesParams {
   canvasId?: string;
   canvasZoom: number;
   setLines: React.Dispatch<React.SetStateAction<CanvasLine[]>>;
   setSelectedLineId: (v: string | null) => void;
+  drawingViewport?: DrawingViewport;
 }
 
 export function useCanvasLines({
@@ -18,6 +23,7 @@ export function useCanvasLines({
   canvasZoom,
   setLines,
   setSelectedLineId,
+  drawingViewport,
 }: UseCanvasLinesParams) {
   const [lineEditModeId, setLineEditModeId] = useState<string | null>(null);
   const [isLineMode, setIsLineModeState] = useState(false);
@@ -81,26 +87,19 @@ export function useCanvasLines({
     rawStartX: number, rawStartY: number, rawEndX: number, rawEndY: number,
     geoPoints?: { startLng: number; startLat: number; endLng: number; endLat: number }
   ) => {
-    const startX = rawStartX / canvasZoom;
-    const startY = rawStartY / canvasZoom;
-    const endX = rawEndX / canvasZoom;
-    const endY = rawEndY / canvasZoom;
-
-    const controlX = (startX + endX) / 2;
-    const controlY = Math.min(startY, endY) - 50;
+    const geometry = createCanvasLineGeometryFromLayerCoords({
+      rawStartX,
+      rawStartY,
+      rawEndX,
+      rawEndY,
+      canvasZoom,
+      drawingViewport,
+      geoPoints,
+    });
 
     createLine({
       board_id: canvasId || '',
-      start_x: startX,
-      start_y: startY,
-      control_x: controlX,
-      control_y: controlY,
-      end_x: endX,
-      end_y: endY,
-      points: [
-        { x: startX, y: startY, type: 'smooth', ...(geoPoints ? { lng: geoPoints.startLng, lat: geoPoints.startLat } : {}) },
-        { x: endX, y: endY, type: 'smooth', ...(geoPoints ? { lng: geoPoints.endLng, lat: geoPoints.endLat } : {}) },
-      ],
+      ...geometry,
       color: '#374151',
       stroke_width: 2,
       start_arrow: false,
@@ -108,7 +107,7 @@ export function useCanvasLines({
       dashed: false,
       layer_plane: 'front',
     });
-  }, [canvasId, createLine, canvasZoom]);
+  }, [canvasId, createLine, canvasZoom, drawingViewport]);
 
   /** Reset all line-specific state (edit mode, dragging, context menu). */
   const clearLineState = useCallback(() => {
