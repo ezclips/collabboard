@@ -13,10 +13,19 @@ and executed by implementation models (SKILL.md).
 validation, isolated worktrees, manifest-driven test execution,
 evidence bundles, patch-ID resolution, and evidence-bundle validation
 are all landed. No further infrastructure patch is authorized without
-a concrete need found during real product work. **Current focus:**
-PATCH-112, a targeted fix assigning post-card frame/slide membership
-on drag commit and narrowing the geometric fallback threshold — see
-the Log below for full detail.
+a concrete need found during real product work.
+
+**Current focus: the Drawing-canvas slider sequence.** `PATCH-114`
+(**AUTHORIZED**) normalizes Drawing `CanvasLine` geometry to Excalidraw
+scene coordinates — the proven prerequisite for any slide-membership
+comparison. `PATCH-115` (**BLOCKED, design bound**) renders Drawing
+CanvasLines into both slider surfaces and fixes preview invalidation;
+it is gated on PATCH-114's closure plus an invalidation trace and a
+Drawing-toolbar census. `PATCH-116` is reserved but deliberately not
+created — the census decides whether it is needed. `PATCH-113`
+(stacked-card pointer events) remains an **open, unauthorized
+proposal**, unrelated and not superseded. Scope is Drawing-only:
+Freeform, Map, Kanban, Gantt and Scheduler are explicitly out.
 
 **Last patch:** `PATCH-001` — **DONE (2026-07-07, commit 9b8bed2).** Authenticated
 characterization harness + wall board lifecycle test. `npm run test:e2e` = 6 pass
@@ -370,6 +379,77 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 - Excalidraw fork has its own `node_modules` committed (major repo bloat); handle carefully in a later phase — it backs a `file:` dependency.
 
 ## Log
+
+- **2026-07-26** — **PATCH-114 AUTHORIZED, PATCH-115 BOUND-BUT-BLOCKED
+  (governance-only turn).** Drawing-canvas slider sequence opened after
+  live characterization on the real board.
+
+  **Root cause of the missing Arrow Post (source-proven + live-confirmed).**
+  The "Arrow Post" / "Line Post" is a `CanvasLine` row in `canvas_lines`
+  rendered by `SimpleLineRenderer`, **not** a native Excalidraw arrow.
+  Grep confirms no file under `components/presentation/**` references
+  `CanvasLine`, `canvas_lines`, or the `lines` state — the presentation
+  pipeline reads only native scene elements and padlet embeddables. This
+  is a categorical omission, not a membership defect. Live proof: the
+  arrow renders inside the Slide 4 frame on canvas while Slide 4's
+  fully-generated thumbnail shows only its Photo Card.
+
+  **Coordinate prerequisite (classification `E` — relationship unstable
+  under pan/zoom).** Chain: the line SVG has no viewBox/transform
+  (`SimpleLineRenderer.tsx:615-624`); path `d` consumes stored values as
+  raw user units (`:670-672`, `:730-732`); pointer input divides only by
+  `canvasZoom` (`:257-264`); and `canvasZoom` is permanently `1` on the
+  Drawing canvas — `useCanvasCamera.ts:6` starts at 1 and its only
+  mutators are wired to `ZoomControls`, rendered solely when
+  `!isDrawingLayout` (`CanvasClient.tsx:8411`). So stored coordinates are
+  viewport-fixed CSS pixels, while Excalidraw frames live in scene space
+  transformed by live zoom/scroll. Empirically decisive: the arrow held
+  identical screen pixels (~x 1220-1302, y 450-490) at `zoom 0.4 /
+  scroll(-1932, 840.5)` and again at `zoom 1.0` with different scroll,
+  while every frame moved. Its apparent containment in Slide 4 is a
+  one-viewport artifact; raw comparison against frame bounds is invalid.
+
+  **PATCH-114 (AUTHORIZED)** — narrow, Drawing-only coordinate
+  normalization: additive nullable `coord_space` column (no backfill, no
+  bulk `UPDATE`), a new pure `lib/infra/drawing/canvasLineCoordinates.ts`
+  with measured (never assumed-zero) origin offset, scene-space rendering
+  via one SVG group transform, `non-scaling-stroke` on hit paths only, and
+  an explicit legacy policy: **per-row marker + conversion on deliberate
+  edit**. Bulk conversion and marker-free heuristics were considered and
+  rejected — legacy and scene values occupy overlapping numeric ranges, so
+  no safe discriminator exists without a marker. Freeform and Map are
+  fenced off by construction: the `drawingViewport` prop follows the
+  existing `isDrawingLayout` condition already present at
+  `CanvasClient.tsx:7163`, and its absence routes every new branch to the
+  legacy path. 7 production files + 1 migration + 3 test files.
+  `linesRepository.ts` proven unnecessary (column-agnostic, lines 42-68).
+
+  **PATCH-115 (BLOCKED, design bound)** — membership, visual parity and
+  z-order are bound now; implementation is gated on PATCH-114's closure
+  plus two investigation deliverables: an invalidation trace (Problem 2's
+  mechanism is *not* yet proven — though it is already proven that
+  `getSlideRenderSignature.ts:108-116` filters on `frameId`, so a
+  CanvasLine edit cannot invalidate a cached thumbnail at all) and the
+  Drawing-toolbar census (Problem 3). Membership **reuses PATCH-112's
+  `resolveFrameMembership` unmodified** with `frameId: null` and the
+  line's unpadded normalized AABB, giving strict center-point
+  containment; fail-closed, at most one slide per line, scene-array-order
+  tie-break. Bound presentation order: background → native below-band →
+  back-plane lines → padlets → front-plane lines → native above-band.
+  Thumbnail and fullscreen must consume one static primitive;
+  `SimpleLineRenderer` is forbidden in presentation mode.
+
+  **No amendment to PATCH-111 or PATCH-112 is required** — `CanvasLine` is
+  a third, disjoint object family, and adding a caller to
+  `resolveFrameMembership` does not change existing callers' semantics.
+  This ruling is recorded explicitly in both new documents rather than
+  left silent. PATCH-113 remains an open, unauthorized, unrelated
+  proposal. PATCH-116 is reserved but not created; the census decides it.
+
+  Live access for characterization used `scripts/live-access-login.mjs`
+  with scratch-path storage state, deleted after use. No product file,
+  test, or real canvas datum was changed in this turn; the five unrelated
+  pending worktree paths were left untouched.
 
 - **2026-07-24** — **PATCH-112 CLOSED (commit `ed185240cd2c585723fa88be79bfda8e8b3e8157`,
   `fix(presentation): assign frame membership on post-card drag commit
