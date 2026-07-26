@@ -380,6 +380,50 @@ GPT-5.4 stays the preferred economical Pattern A implementer (AI_WORKFLOW).
 
 ## Log
 
+- **2026-07-26** — **PATCH-114 ACCEPTANCE GATE 1: CORRECTION REQUIRED
+  (not closed; candidate stays uncommitted).** Independent verdict was
+  *PASS WITH BLOCKED LIVE GATE*; CTO re-verification independently
+  confirmed every positive finding — allowlist compliance, five unrelated
+  paths untouched, no prohibited file changed, §2b algebra correct,
+  measured non-zero origin offsets, max round-trip error `≈9.9476e-14`
+  (six orders inside the 0.01 tolerance), legacy rows inert on load and
+  on move frames, conversion only on completed deliberate edit, atomic
+  `coord_space` persistence, Freeform/Map on legacy paths, and clean
+  `diff --check` / `tsc` / 564-test vitest / ESLint.
+
+  **Two findings were materially more severe than reported, and the
+  ruling is scoped to that reality.** (1) The §4c live spec was **never
+  written** — `git ls-files --others e2e/` is empty. The review framed
+  the live gate as blocked by the missing DB column, but authoring a
+  Playwright spec never required the column; only running it does. §4c
+  says verbatim that helper tests alone are insufficient, and the
+  candidate is exactly helper tests alone. (2) LOW 1 upgraded to
+  **HIGH**: `vitest.config.ts`'s include pattern
+  (`lib/domain`, `lib/infra`, `scripts/harness`) never reaches
+  `components/`, so all five renderer tests **never executed** — zero
+  coverage emitting a false green, and the 564 figure contains none of
+  them. New standing rule bound for all future patches: *a test file the
+  configured runner does not execute never satisfies a test contract.*
+
+  §4a verified genuinely complete — the three `it.each` blocks expand
+  across three viewports, covering T1-T10 in twelve executing tests,
+  exactly the 552 → 564 delta. §4b actual status: three written, one
+  partial (T15), four missing (T13, T14, T16, T17), **zero executing**.
+
+  **Ruling: decision path A.** Amended PATCH-114 §3 (CHECK constraint
+  now **required**, not permitted — `coord_space` is a two-valued domain
+  that rendering branches on, and an unconstrained `text` column lets a
+  third value silently fall through to the legacy branch), amended §6
+  (adds `vitest.config.ts` for a **precisely scoped**
+  `components/collabboard/*.test.tsx` entry only — a broad
+  `components/**` glob is a hard stop, it would sweep in ~100
+  Excalidraw-fork test files; `environment: 'node'` stays, sufficient
+  because the test uses `renderToStaticMarkup`), and added §14 recording
+  the gate, the corrected findings, and acceptance gate 2. **No migration
+  may be deployed yet**; deployment plus the full live matrix is gate 2,
+  and must include the deliberate ~1px conversion of the real repro Arrow
+  Post, since without it PATCH-115 has no acceptance-testable subject.
+
 - **2026-07-26** — **PATCH-114 AUTHORIZED, PATCH-115 BOUND-BUT-BLOCKED
   (governance-only turn).** Drawing-canvas slider sequence opened after
   live characterization on the real board.

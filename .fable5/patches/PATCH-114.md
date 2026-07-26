@@ -243,8 +243,28 @@ ALTER TABLE canvas_lines ADD COLUMN IF NOT EXISTS coord_space text;
 ```
 
 - Nullable, no default, no backfill, no `NOT NULL`, no constraint that
-  could reject existing rows. A `CHECK (coord_space IS NULL OR coord_space = 'scene')`
-  is permitted.
+  could reject existing rows.
+- **AMENDED 2026-07-26 (acceptance gate 1, MEDIUM 1 ruling): the CHECK
+  constraint is now REQUIRED, not merely permitted.** The migration must
+  read:
+
+  ```sql
+  ALTER TABLE canvas_lines ADD COLUMN IF NOT EXISTS coord_space text;
+
+  ALTER TABLE canvas_lines
+    ADD CONSTRAINT canvas_lines_coord_space_check
+    CHECK (coord_space IS NULL OR coord_space = 'scene');
+  ```
+
+  Rationale: §2a defines `coord_space` as a strictly two-valued domain
+  (`null` = legacy, `'scene'` = normalized), and rendering branches on it.
+  An unconstrained `text` column lets any future writer persist a third
+  value that would silently fall through to the legacy branch and
+  mis-place a line, with no error anywhere. The constraint is free at
+  this size, passes for every existing row (all `NULL`), and is
+  independently droppable. Enforcing a two-valued invariant only in
+  TypeScript when the database can enforce it is a gap, not a
+  preference.
 - **No data migration.** No `UPDATE` over existing rows.
 - Delivered as a new file under the repository's existing migration
   directory, following whatever convention that directory already uses.
@@ -341,6 +361,23 @@ introduce an unthrottled per-pointer-move React state write.
 - `components/collabboard/SimpleLineRenderer.test.tsx` — new or extended
 - one new spec under `e2e/characterization/` — new
 
+**AMENDED 2026-07-26 (acceptance gate 1):** one configuration file is
+added to the allowlist —
+
+- `vitest.config.ts` — **include-pattern extension only.**
+
+The existing pattern is
+`['lib/domain/**/*.test.ts', 'lib/infra/**/*.test.ts', 'scripts/harness/**/*.test.ts']`,
+which does not reach `components/`, so
+`components/collabboard/SimpleLineRenderer.test.tsx` never executed. Only
+a **precisely scoped** entry may be added — `'components/collabboard/*.test.tsx'`
+(single-level). A broader glob such as `components/**/*.test.tsx` is a
+**hard stop**: it would sweep in roughly 100 Excalidraw-fork test files
+that the narrow pattern deliberately excludes. No other key in this file
+may change; in particular `environment: 'node'` stays, and is sufficient
+because the renderer test uses `renderToStaticMarkup` from
+`react-dom/server` rather than a DOM.
+
 **Explicitly prohibited (non-exhaustive; the spirit binds):**
 
 - Anything under `components/collabboard/canvas/excalidraw_fork/**` — **no fork modification whatsoever.**
@@ -433,3 +470,107 @@ fix(drawing): normalize Drawing CanvasLine geometry to Excalidraw scene coordina
 
 **Do not authorize PATCH-115 implementation until this patch is closed
 by the CTO after independent review.**
+
+## 14. Acceptance gate 1 — CORRECTION REQUIRED (CTO ruling, 2026-07-26)
+
+**Verdict: NOT CLOSED. Focused correction required before any migration
+deployment or live testing. The candidate remains uncommitted.**
+(Decision path **A**.)
+
+The independent verdict of *PASS WITH BLOCKED LIVE GATE* is accepted for
+everything it verified, and CTO re-verification confirms it independently:
+the candidate is inside the allowlist; the five unrelated pending paths
+are untouched; no prohibited fork, presentation, Freeform, Map, or
+`frameMembership.ts` file changed; the coordinate algebra matches §2b;
+non-zero origin offsets are genuinely used; maximum round-trip error is
+`≈9.9476e-14` scene units, **six orders of magnitude inside the §7
+tolerance of 0.01**; legacy rows do not convert on load or on move
+frames; conversion occurs only on completed deliberate edit; geometry and
+`coord_space` persist atomically; Freeform and Map stay on legacy paths.
+`git diff --check`, `npx tsc --noEmit`, `npx vitest run` (53 files, 564
+tests) and ESLint are clean.
+
+**§4a is fully satisfied.** CTO re-verification: the three `it.each`
+blocks expand across three viewports, so T1-T3, T4-T6 and T7 are all
+genuinely covered, plus T8, T9, T10 — twelve executing tests, exactly
+matching the 552 → 564 delta.
+
+### 14a. Corrections to the independent characterization (bind)
+
+Two findings are materially more severe than reported. Recording both so
+the correction is scoped to reality:
+
+1. **The §4c live characterization spec was never written.** The review
+   framed the live gate as blocked by the absent database column. It is
+   not: `git ls-files --others --exclude-standard e2e/` returns nothing,
+   and no new file exists under `e2e/characterization/`. The §6 slot for
+   it is empty. **Authoring a Playwright spec has never required the
+   column to exist — only executing it does.** "Cannot run" and "was not
+   written" are different failures, and only the first is legitimately
+   blocked. §4c states verbatim that it is *required* and that *helper
+   tests alone are insufficient*; the present candidate is precisely
+   helper tests alone.
+
+2. **LOW 1 is upgraded to HIGH.** A test file outside the runner's
+   include pattern is not weak coverage — it is **zero** coverage
+   emitting a false green signal. All five renderer tests reported as
+   part of the passing suite never executed. The 564 figure contains
+   none of them.
+
+   **Standing governance rule, effective now and for all future
+   patches:** a test file that the configured runner does not execute
+   never satisfies a test contract. Any patch claiming test coverage must
+   demonstrate the tests appear in the runner's own output.
+
+### 14b. §4b coverage — actual status (bind)
+
+| Test | Required behavior | Status |
+|---|---|---|
+| T11 | legacy row render invariance | written, **not executing** |
+| T12 | scene row in transformed group | written, **not executing** |
+| T13 | drag commit converts all fields + marker | **missing** |
+| T14 | intermediate move frame does not convert | **missing** |
+| T15 | Freeform never converts on drag | **partial** — covers the render path only, not conversion-on-drag |
+| T16 | map geo branch never converts | **missing** |
+| T17 | duplication copies `coord_space` | **missing** |
+| T18 | front/back planes | written, **not executing** |
+
+Three fully written, one partial, four missing, **zero executing**.
+
+### 14c. Required corrections (bind — exhaustive)
+
+1. **Migration:** add the required CHECK constraint per the amended §3.
+2. **Runner:** extend `vitest.config.ts` by the single precisely scoped
+   include entry per the amended §6, so T11/T12/T15/T18 actually execute.
+3. **T13, T14, T16, T17:** add executing automated coverage, and complete
+   T15 to cover conversion-on-drag, not just rendering.
+   **Recommended route (satisfies §7 of PATCH-115's "no duplicated
+   formula" principle and needs no further allowlist entry):** expose the
+   conversion *decision* and the conversion *transform* as pure functions
+   in the already-allowlisted
+   `lib/infra/drawing/canvasLineCoordinates.ts`, have the hooks call
+   them, and unit-test them under `lib/infra/**` where the runner already
+   reaches. Binding requirement is the outcome, not the route: all four
+   must appear in `npx vitest run` output.
+4. **§4c live spec:** author the spec file under `e2e/characterization/`
+   now. It may be authored and committed to the candidate while still
+   **unrunnable** pending the migration; authoring is not gated.
+
+### 14d. Explicitly NOT authorized by this ruling
+
+- **No migration may be deployed to any database yet.** Deployment is
+  gated on acceptance gate 2.
+- No commit, no push — the candidate stays uncommitted.
+- No scope broadening beyond §14c. Behavior verified as correct must not
+  be refactored.
+- PATCH-115 remains blocked.
+
+### 14e. Acceptance gate 2 (defined now, not yet open)
+
+Once the §14c correction passes local re-validation, the CTO will
+authorize, as a separately governed step: migration deployment to the
+database backing the authenticated Drawing canvas, then the full §4c live
+matrix, then closure. The live matrix must include the deliberate ~1px
+drag that converts the real repro Arrow Post (§2e / §8 step 4), and its
+restoration afterward — without that conversion, PATCH-115 has no
+acceptance-testable subject.
