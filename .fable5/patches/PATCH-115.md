@@ -2227,3 +2227,217 @@ corrections intact. Live acceptance **FAILED/REOPENED**; closure review
 **CANCELLED**; commit **NOT AUTHORIZED**. **PATCH-116 CANCELLED and
 retired.** **PATCH-117 and PATCH-118 reserved, not authorized.** No
 implementation may begin.
+
+---
+
+## 23. §21 recovery cleared; PATCH-117 scope bound (2026-07-27, CTO)
+
+Issued at governance HEAD `290b78dcb57bf43b6252c743709c7b0927bfa219`.
+
+### 23a. §21a hard stop — FORMALLY CLEARED
+
+Verified by the CTO against the working tree, not accepted from the
+report:
+
+| check | measured |
+|---|---|
+| `git status --porcelain \| wc -l` | **16** |
+| tracked changes under `excalidraw_fork` | **0** |
+| staged (`git diff --cached --name-only`) | **0** |
+| `git stash list` | **empty** |
+| `package.json` / `package-lock.json` status | **0** (byte-unchanged) |
+| `dist/prod/index.js`, `dist/dev/index.js`, `dist/prod/index.css`, `dist/types/excalidraw/index.d.ts` | **all EXISTS** |
+| `npx tsc --noEmit` | **clean** — no TS2307 |
+| `npx vitest run` | **592 tests passed** |
+| §17 corrections | intact — `[elements, canvasLines]`, four-line comment, `CanvasClient.tsx` 1 insertion |
+| candidate | 12 modified + 4 untracked, **uncommitted, unstaged** |
+
+**The §21a hard stop is cleared.** Live and implementation work may resume
+under the standing gates.
+
+**One factual correction for the record.** The report describes
+`node_modules/@excalidraw/excalidraw` as a *junction*; `ls -la` reports
+mode `lrwxrwxrwx`, a **symlink**, and the same for `common`, `element`,
+and `math`. This does not affect the recovery — it matters only because
+§22f's standing rule names the mechanism, and a future reader debugging
+resolution should look for a symlink.
+
+**§22 is withdrawn as unnecessary.** It was drafted but never appended or
+committed; the owner restored `dist` from a matching backup instead of
+building it. Its Phase 1 findings are preserved as the standing rule
+below, which is the part with lasting value.
+
+**Standing rule (record in LESSONS_LEARNED):**
+
+> `@excalidraw/excalidraw` is a `file:` **symlink** into
+> `excalidraw_fork/packages/excalidraw`, and every manifest entrypoint —
+> `types`, `main`, `module`, all `exports` — resolves through a
+> **gitignored `dist/`** that `npm ci` never produces. It comes from
+> `yarn build:excalidraw` at the fork root, which additionally requires
+> `excalidraw_fork/.env.development` and `.env.production` to **exist**
+> (empty is sufficient) because `buildPackage.js` reads both with
+> `readFileSync` at module load. A TS2307 on `@excalidraw/excalidraw`
+> after a clean install means the fork was never built — it is **never** a
+> reason to edit `tsconfig.json`, the manifest, or product source. Note
+> also that `packages/{common,element,math}` keep their own `dist`, so
+> rebuilding all four when one is missing is over-broad.
+
+### 23b. Candidate durability — owner decision required
+
+**This is a risk I am raising, not a change I am making.**
+
+Twice in this session a working-tree operation destroyed state: 945
+tracked files (recoverable) and the fork `dist` (**not** recoverable from
+git — it took a backup). The PATCH-115 candidate includes **four
+untracked files** —
+`components/presentation/slide-renderer/renderCanvasLinePrimitive.tsx`,
+`lib/infra/drawing/canvasLineSlideMembership.ts`, its test, and
+`scripts/live-access-login.mjs`. A third such incident would destroy them
+with **no** recovery path.
+
+Holding that candidate uncommitted across two full patch cycles also
+creates a second problem: PATCH-117 must edit
+`DrawingLayout.tsx`, which is **already modified by the uncommitted
+candidate**. Two patches with concurrent uncommitted edits in one file
+makes review attribution genuinely hard.
+
+**Recommendation: commit the PATCH-115 candidate without closing it.**
+Committing is not closing. §21g's Option A exists so the *user* is never
+told the feature is fixed while it is visibly broken — and **closure**, not
+the commit, is that signal. Landing the candidate would make the work
+durable, give PATCH-117 a clean tree, and leave PATCH-115 open, blocked,
+and unclosed exactly as ruled.
+
+**I have not done this.** The candidate remains uncommitted and unstaged.
+If the owner accepts, it needs a governance ruling authorizing the commit
+with the bound message from §19's closure plan, and PATCH-115 stays
+**open**. Until then §21g stands unchanged and §23c's sequencing applies.
+
+### 23c. PATCH-117 — AUTHORIZED FOR AUTHORING, NOT YET FOR IMPLEMENTATION
+
+**PATCH-117 is not authorized for implementation, for a concrete reason:
+`.fable5/patches/PATCH-117.md` does not exist.** Implementation
+authorization requires a patch document with a bound base commit, exact
+file lists, hard stops, phase split, and a bound commit message.
+Authorizing implementation against a section of PATCH-115 would be exactly
+the "scope by prose" failure the governance model exists to prevent.
+
+**Authorized now:** the CTO may author `PATCH-117.md` against the scope
+below. **Implementation begins only** when that document exists, is marked
+AUTHORIZED, and §23b is resolved.
+
+**Sequencing constraint (bind).** If §23b is declined and the PATCH-115
+candidate stays uncommitted, PATCH-117's `DrawingLayout.tsx` edits must be
+in **line regions disjoint** from PATCH-115's. Measured, PATCH-115 touches
+approximately lines 3, 632–660, 758–773, 2136–2153, and 2210–2213; the
+zoom-control call site is 3085–3094 — **disjoint**. In that case PATCH-117
+must additionally bind a per-patch line-region census so a reviewer can
+attribute every hunk to exactly one patch.
+
+#### PATCH-117 allowlist (proposed, to be bound in the document)
+
+**Production — maximum 3 files:**
+
+1. `components/collabboard/SimpleLineRenderer.tsx` — the front/back layer
+   stacking rule at `:656` and the `overflow-visible` wrapper at `:650`.
+   **PATCH-115 prohibits this file; PATCH-117 explicitly authorizes it.**
+   The candidate does not touch it, so there is no conflict.
+2. `components/collabboard/canvas/layouts/DrawingLayout.tsx` — the
+   `ZoomControls` portal call site at `:3085-3094` **only**, reusing the
+   existing sidebar measurement at `:872`.
+3. `components/collabboard/canvas/ui/ZoomControls.tsx` — **only if**
+   source proves the default `className` must change. If the fix lives
+   entirely in the caller's `className`, this file is not touched and the
+   cap drops to 2.
+
+**Test — maximum 3 files.** At least one must be a runner-included unit
+test (`lib/**` or an existing included path) — per the standing PATCH-114
+ruling, a test file the runner does not execute satisfies no test
+contract. Verify inclusion against `vitest.config.ts` before writing.
+
+**Prohibited:** `frameMembership.ts`, `canvasLineSlideMembership.ts`,
+`planSlideComposition.ts`, `getSlideRenderSignature.ts`,
+`createSlideRenderer.tsx`, `renderCanvasLinePrimitive.tsx`,
+`RuntimeSlideRenderer.tsx`, `FullscreenPresentation.tsx`, `CanvasClient.tsx`,
+any `canvas_lines` persistence or coordinate module, any migration, and
+the five protected unrelated paths.
+
+**Prohibited fixes:** any global z-index escalation of the sidebar or
+modal; any blind reduction of the line layer's promoted z-index; any
+`pointer-events: none` blanket applied to the line layer that disables
+handle editing. The `z-1000` promotion exists so editing handles clear
+canvas chrome — the fix must preserve that while confining both paint and
+hit-testing to the canvas region.
+
+**Chrome band census (measured, for the document):** `DrawingLayout.tsx`
+uses `z-[130]` (zoom controls), `z-[500]` (presentation sidebar),
+`z-[9998]`, and `z-[10010]`; `SimpleLineRenderer.tsx` uses `0` / `10` /
+`1000`. PATCH-117 must define a coherent band rather than adjusting a
+single number, and must state where the line layer sits relative to all
+four Drawing chrome bands.
+
+#### PATCH-117 acceptance matrix (bind)
+
+Both a unit/integration layer and a live layer. Every row asserted in
+both panel-open and panel-closed states where applicable:
+
+| # | Case | Assertion |
+|---|---|---|
+| 1 | Normal (unselected) line | Paints within canvas; below all chrome |
+| 2 | **Selected** line | Handles remain above canvas chrome; **no paint over sidebar** |
+| 3 | Line mode active | As row 2 |
+| 4 | Edit mode active | As row 2 |
+| 5 | Front layer | Correct band; no chrome overlap |
+| 6 | Back layer | Stays behind canvas content; no chrome overlap |
+| 7 | Sidebar open | No line ink over the sidebar at any x |
+| 8 | Sidebar closed | Line renders normally to the true canvas edge |
+| 9 | Layout modal open | No line ink over the modal or its backdrop |
+| 10 | **Pointer interception** | Clicking Apply-layout, sidebar controls, slide cards, checkboxes and the ⋮ menu hits the intended element — **never** `data-line-role="hit-path"` |
+| 11 | Handle editing | Start/control/end handles remain draggable with sidebar open |
+| 12 | Keyboard editing | Unchanged with sidebar open |
+| 13 | Zoom controls, sidebar open | Fully visible and clickable, not occluded |
+| 14 | Zoom controls, sidebar closed | Position unchanged from today |
+| 15 | Sidebar open→close→open | Zoom controls re-solve correctly each time |
+| 16 | Window resize, sidebar open | Zoom controls re-solve; no drift |
+| 17 | No regression | CanvasLine still renders in thumbnail and runtime fullscreen; `coord_space` still `'scene'` |
+
+Row 10 is the **primary** acceptance criterion — this defect is
+interaction-blocking, not cosmetic, and a purely visual gate would pass
+while clicks are still swallowed. Live capture must use **full-page**
+screenshots, per §18a.
+
+**Live gate rules, unchanged:** `PW_BASE_URL` set; `--no-deps`; no build
+while the dev server is live; probe `/auth` as well as `/`; scratch state
+outside the repo; no credential printed; real board data restored;
+**report `git status --porcelain | wc -l` before and after** (the §21a
+blast-radius rule).
+
+**Freeform/Map:** the PATCH-115 exemption **does not carry forward**.
+PATCH-117 must obtain real fixtures or a fresh governance ruling. Since it
+touches `SimpleLineRenderer.tsx` — a **shared** editor renderer used by
+every layout — the structural non-participation argument that justified
+the PATCH-115 exemption is **not available** here.
+
+### 23d. PATCH-118 — RESERVED, NOT AUTHORIZED
+
+Unchanged from §21e. Scope stands: orphan/missing-`frameId` membership;
+moving and persisting padlets and CanvasLines with slide layouts;
+thumbnail scaling and completeness; save/reload and atomic persistence;
+plus the toolbar-object-type fixture coverage folded in at §21f. It must
+open with a **characterization phase**, because §21d recorded a harness
+result that contradicts source and that disagreement must be resolved
+before any fix is designed.
+
+Not authored, not authorized, not begun. It follows PATCH-117.
+
+### 23e. Status
+
+**§21a recovery: CLEARED.**
+**PATCH-117: authorized for AUTHORING only; scope and acceptance matrix
+bound above; implementation NOT authorized.**
+**PATCH-118: RESERVED, NOT AUTHORIZED.**
+**PATCH-116: CANCELLED and retired; number never reused.**
+**PATCH-115: AUTHORIZED, OPEN, BLOCKED, UNCOMMITTED, UNSTAGED** — live
+acceptance FAILED/REOPENED, closure review CANCELLED, commit NOT
+AUTHORIZED. §16's Freeform and Map **NOT EXECUTABLE** rulings and the §16d
+residual risk carry into closure verbatim.
