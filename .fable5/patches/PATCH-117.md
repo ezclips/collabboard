@@ -406,3 +406,157 @@ contradicted source, and that must be resolved before any fix is
 designed).
 
 **PATCH-116** is **CANCELLED and retired**; its number is never reused.
+
+---
+
+## 13. Endpoint-handle live failure — focused ruling (2026-07-27, CTO)
+
+Issued at governance HEAD `d192154dc617d86bcc51fec9b4fa3f77536adeb2`.
+Diagnosis is authorized; **no implementation change is authorized yet.**
+
+### 13a. Candidate scope check — PASS
+
+`git status --porcelain` returns **9** entries: the 5 protected paths of
+§0e plus 2 production and 2 test files. Production: 2 of a maximum 3 —
+`ZoomControls.tsx` was **not** touched, exactly as §3 predicted (the call
+site's `className` fully overrides the component default), so the
+production cap is **2**. Test: 2 of 3 —
+`components/collabboard/SimpleLineRenderer.test.tsx` (runner-included,
+confirmed) and `e2e/characterization/drawing-overlay-containment.spec.ts`,
+which lies inside the Playwright project `testDir: './e2e/characterization'`
+(`playwright.config.ts:43`) and is therefore runner-included for its own
+runner. **No allowlist violation.**
+
+The implementation follows §2: one boundary computed once in
+`DrawingLayout.tsx`, published as two CSS custom properties
+(`--drawing-visible-canvas-right-inset`, `--drawing-zoom-controls-right`)
+on the viewport element, consumed by both the zoom-control offset and the
+line layer's `clipPath: inset(0 Npx 0 0)`. `reservedSidebarLeft` now reads
+from the same derived value, so the pre-existing top-right cluster keeps
+one shared definition rather than a competing one. That is the required
+architecture.
+
+### 13b. Classification: **A**, with **G** as the contributing factor.
+**H is not excluded but is unlikely.** Production behavior is **not**
+believed to have regressed.
+
+The source fact that drives this, at `SimpleLineRenderer.tsx:875-877`:
+
+```
+{isEditMode && isSelected && (
+  <>
+    {line.points ? (
+      … data-line-role="point-handle" …      // :889
+      … data-line-role="midpoint-handle" …   // :915
+    ) : (
+      … start-handle / control-handle / end-handle …
+    )}
+```
+
+**`point-handle` renders only when `line.points` is truthy.** A line
+stored in the legacy three-parameter form — `start_x/y`, `control_x/y`,
+`end_x/y` with **no** `points` array — renders
+`start-handle` / `control-handle` / `end-handle` instead. It can never
+produce a `point-handle`, in any mode, with or without this patch.
+
+The spec waited 30 seconds for `[data-line-role="point-handle"]`. If the
+temporary fixture was created as an ordinary quadratic line — which is
+what the line tool produces, and what the user's real Arrow Post is — then
+**the spec asserted a selector its own fixture cannot emit.** The wait
+could only ever time out. That is a harness defect, not a product defect.
+
+**Two further source facts narrow the alternatives:**
+
+- **C is unlikely.** Double-clicking the hit path calls
+  `handlePathDoubleClick` (`:759` → `:609-615`), which calls
+  `onToggleEditMode(lineId)` directly. The transition exists and is wired.
+- **D and E are unlikely, and for a reason worth stating.** `clip-path`
+  removes nothing from the DOM, and Playwright's actionability/visibility
+  check evaluates bounding box and CSS visibility — **it does not evaluate
+  `clip-path`**. A handle that rendered but was clipped would therefore
+  most likely have **satisfied** a default `waitForSelector`, not timed
+  out. A 30-second timeout points at *absence from the DOM*, which is what
+  a wrong selector produces and what clipping does not.
+
+**This is a strong hypothesis, not a finding.** It is not bound as the
+answer. The diagnosis must confirm it, and the confirming check is a
+single step (§13c step 2).
+
+### 13d. Scope ruling — conditional, decided in advance
+
+So the outcome cannot be argued after the fact:
+
+- **If the fixture's `points` is null/absent and `start-handle` was
+  present in the DOM** → classification **A/G**, harness-only.
+  **Spec-only correction authorized. No production change.** The spec must
+  assert the role set the fixture actually emits — or create a
+  multi-point line if `point-handle` is genuinely the intended target —
+  and the **full 21-row matrix must rerun from the beginning**, not resume
+  from the failure point.
+- **If handles are absent from the DOM for a reason unrelated to the
+  selector** → classification C or H. **Stop and return to the CTO.** No
+  correction authorized without a fresh ruling.
+- **If handles are present in the DOM but the new containment hides or
+  blocks them** → classification E or F, a genuine candidate regression.
+  **The narrowest correction inside the existing two production files is
+  authorized**, subject to all four of: chrome containment preserved;
+  pointer safety preserved; handle editing preserved; and the
+  `elementFromPoint` chrome criterion (row 13) **not weakened** in any
+  way. A third production file remains a hard stop.
+
+**No governance amendment is required** for any of these paths — §3's
+allowlist already covers the production case and §4's cap already covers
+the spec case. An amendment becomes necessary only if a third production
+file, a fourth test file, or a change to `vitest.config.ts` or
+`playwright.config.ts` is proposed.
+
+### 13c. Required diagnosis (bind) — read-only
+
+Do **not** increase any timeout before the failed state transition is
+located. Do **not** mutate the user's real Arrow Post.
+
+1. Recreate the temporary line on the temporary Drawing fixture. Record
+   its exact `data-line-id`, and assert the hit-path selector count for
+   that id is exactly **1**.
+2. **Decisive step — run this first.** Read the fixture row's `points`
+   field (null/absent vs array) and, immediately after the double-click,
+   dump **every** `data-line-role` value present in the DOM for that
+   `data-line-id`. If `points` is null and `start-handle` /
+   `control-handle` / `end-handle` are present while `point-handle` is
+   absent, classification **A/G** is confirmed and steps 6–8 are
+   unnecessary.
+3. Record `selectedLineId` and `isEditMode` before any interaction.
+4. Single-click; record both again.
+5. Double-click; record click target, event count, `selectedLineId`,
+   `isEditMode`, and the count of **each** handle role.
+6. If no handle role appears at all: determine whether the handles are
+   absent from the DOM or present-but-clipped.
+7. If present-but-clipped: neutralize **only** the new containment by
+   read-only DOM styling (`clipPath: none` on the layer). Handles appear →
+   candidate regression (E/F). Handles still absent → harness or
+   pre-existing (A/C/G).
+8. Compare against `main` without the candidate **without disturbing it**
+   — a second checkout on a non-3000 port, or read-only source comparison.
+   **No worktree may be created** (§8); if one is judged necessary, stop
+   and request authorization. Teardown must never be issued with a path
+   that could resolve to the main checkout.
+9. Report `git status --porcelain` **count and full list** before and
+   after. Expect **9** entries throughout. Any delta is a run failure
+   regardless of findings.
+
+### 13e. Freeform / Map — unchanged
+
+Fixtures remain unavailable. **Neither is PASS.** The §7 Stage 2
+unavailable-fixture ruling is **not granted** and will not be considered
+until the Drawing 21-row matrix completes end to end.
+
+### 13f. Status
+
+**PATCH-117: OPEN · AUTHORIZED · UNCOMMITTED · UNSTAGED.** Not closed;
+candidate not committed. Phase 1 static validation is accepted as reported
+(tsc clean, 55 files / 605 tests, focused 20, zero candidate-introduced
+ESLint findings); Phase 2 is **incomplete** — rows 14–21 did not run.
+
+**PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
+**PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
+**PATCH-116: CANCELLED and retired.**
