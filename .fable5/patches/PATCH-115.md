@@ -480,7 +480,8 @@ fidelity (§2d) · signature and invalidation (§3) · no duplicate rendering
 and **the Freeform/Map fixture debt still requires a fresh CTO ruling
 before closure** (§4) — it is not waived by this amendment.
 
-**PATCH-115 remains AUTHORIZED FOR IMPLEMENTATION.**
+**PATCH-115 remains AUTHORIZED FOR IMPLEMENTATION.** *(See §15 for the
+current execution gate.)*
 
 ## 14. Amendment — fullscreen runtime path (CTO ruling, 2026-07-27)
 
@@ -655,6 +656,11 @@ mutate or convert lines · introduce a second cache or second fetch · pass
 `DrawingViewport` state into presentation · make any other presentation
 behavior change.
 
+### 14z. Superseded by §15
+
+§14j remains accurate; the Freeform/Map fixture question it defers is
+now ruled on in §15.
+
 ### 14j. Everything else preserved
 
 §13's `CanvasClient.tsx` restrictions, all §13d hard fences, and every
@@ -665,3 +671,177 @@ never mutated, and that **the Freeform/Map fixture debt still requires a
 fresh CTO ruling before closure (§4) and is not waived.**
 
 **PATCH-115 remains AUTHORIZED FOR IMPLEMENTATION.**
+
+## 15. Fixture ruling + execution gate (CTO ruling, 2026-07-27)
+
+**PATCH-115 remains AUTHORIZED. The candidate may NOT yet proceed to live
+testing** — two corrections are required first (§15c, §15d). The
+candidate stays uncommitted.
+
+### 15a. Freeform/Map exemption — CONDITIONALLY APPROVED
+
+The nine conditions were checked against the **actual diff**, not the
+report. Eight pass; one fails.
+
+| # | Condition | Verdict |
+|---|---|---|
+| 1 | No Map or Freeform component changed | **PASS** — absent from the diff entirely |
+| 2 | No CanvasLine persistence or editor-rendering module changed | **PASS** — `SimpleLineRenderer.tsx`, `canvasLineCoordinates.ts`, `useCanvasData.ts`, `useCanvasLines.ts` all untouched |
+| 3 | Eligibility explicitly excludes `coord_space=NULL` | **PASS** — `canvasLineSlideMembership.ts:65` gates on `!== "scene"`, with an observable diagnostic at `:69` |
+| 4 | Plumbing activated only for DrawingLayout | **PASS** — exactly one `canvasLines={lines}`, at the `<DrawingLayout>` call site, itself inside `{isDrawingLayout && …}` |
+| 5 | Unit tests prove legacy/null excluded without mutation | **PASS** — dedicated test, `canvasLineSlideMembership.test.ts:213` |
+| 6 | Call-site tracing proves Map/Freeform never supply CanvasLines | **PASS** — by construction: the sole supplier is `CanvasClient → DrawingLayout`, which mounts only in Drawing layout |
+| 7 | **No shared behavior outside Drawing presentation changed** | **FAIL** — see §15c |
+| 8 | Residual risk recorded | Satisfied by §15b |
+| 9 | Future patches need real fixtures or a fresh ruling | Bound in §15b |
+
+**The exemption is granted the moment §15c is satisfied**, and not
+before. The substance qualifies; the contamination does not.
+
+### 15b. Residual-risk record (exact wording — reproduce verbatim at closure)
+
+> **Freeform and Map: NOT EXECUTABLE — NO ACCESSIBLE PRODUCTION FIXTURE.**
+> Neither a pass nor a fail. The authenticated production account has no
+> `freeform` or `map` board and is at its 3/3 plan limit, so no fixture
+> could be obtained without creating production data, which is
+> prohibited. Substitute evidence accepted: no Map or Freeform component
+> was changed; no CanvasLine persistence or editor-rendering module was
+> changed; presentation eligibility explicitly excludes
+> `coord_space=NULL`; the presentation plumbing activates only under
+> `isDrawingLayout`; unit tests prove legacy/null rows are excluded
+> without mutation; and call-site tracing proves Map and Freeform never
+> supply CanvasLines into the PATCH-115 presentation path.
+>
+> **Residual risk:** this proves the Drawing presentation path is fenced
+> and that no shared module changed. It does **not** prove Freeform or
+> Map runtime behavior end-to-end on a real board. The risk is accepted
+> for PATCH-115 only, on the basis that the fence is structural rather
+> than conventional.
+>
+> **Any future patch that changes shared CanvasLine eligibility, shared
+> CanvasLine modules, or Map/Freeform presentation requires real fixtures
+> or another fresh CTO ruling. This exemption does not carry forward.**
+
+### 15c. Required correction 1 — revert out-of-scope `CanvasClient` edits
+
+§13b binds `CanvasClient.tsx` to **"may only"** pass the CanvasLine
+collection. The diff contains exactly **one** authorized line —
+`canvasLines={lines}` at the `<DrawingLayout>` call site. Five further
+edits are outside that binding and must be **reverted to their committed
+state**:
+
+1. removal of the `AIComponentEditor` import;
+2. three `forceContainerPrompt` rewrites from rest-destructuring to
+   `{ ...spread }` + `delete`;
+3. `onReport={(_post: Padlet) => …}` → `onReport={() => …}`;
+4. removal of `const containerError = insertResult.error.cause ?? insertResult.error;`
+   inside the `if (!insertResult.ok)` branch;
+5. any other edit in this file that is not `canvasLines={lines}`.
+
+These appear to be ESLint-driven cleanups of **pre-existing** findings.
+Three reasons they must go, in order of weight:
+
+- **"May only" must mean what it says.** If a bound restriction can be
+  exceeded for tidiness, every future restriction becomes advisory. This
+  is the governance model, not a style preference.
+- **Item 4 deletes an error-capturing binding in a failure branch.**
+  CLAUDE.md rule 10 (*no silent catch; report failures honestly*) and
+  rule 9 (*don't opportunistically "fix" known legacy patterns*) both
+  apply. Whether or not it was unused, deleting it inside an unrelated
+  patch is precisely the opportunistic repair the repo forbids.
+- **Item 2 replaces immutable destructuring with `delete` mutation**,
+  against `.claude/rules/common/coding-style.md`'s immutability rule — a
+  style regression, not an improvement, and it makes the patch
+  non-atomic (CLAUDE.md rule 8: a refactor with behavior diffs is two
+  PRs).
+
+**Amended ESLint gate (bind, resolving the conflict this creates):** the
+§9 validation requirement is now **"no candidate-introduced ESLint
+findings"**, not "clean on every touched file". Pre-existing findings in
+a touched file are **acceptable and must NOT be fixed inside this
+patch** — matching the standard already applied at PATCH-114 closure. If
+reverting reintroduces a pre-existing warning, that is the correct
+outcome; record it and move on.
+
+### 15d. Required correction 2 — test gaps before live execution
+
+The single test file is **genuinely strong** and directly exercises the
+new code paths — projection viewport-independence (`:48`), shared
+thumbnail/fullscreen payload (`:68`), six-band z-order and no duplicates
+(`:76`), signature behavior (`:116`), and the full membership table
+including unpadded bounds, strict centre containment, crossing
+exclusion, boundary-touch, overlapping-frame ordering, and null-row
+exclusion without mutation (`:172-213`). Six of the eight required areas
+are covered. This is not a case of inflated counts.
+
+Two gaps must be closed **before** live execution:
+
+1. **Style and label fidelity (§2d)** — no test asserts that the shared
+   payload preserves start/end arrowheads, stroke colour, stroke width,
+   dashed style, label text, `label_position`, `label_text_color` and
+   `label_background_color`. §2d requires all of them.
+2. **Signature completeness (§3)** — `:116` covers "semantic line edits"
+   generically. Required: a per-field assertion that **each** of
+   geometry, membership, `start_arrow`, `end_arrow`, `color`,
+   `stroke_width`, `dashed`, `label`, `label_position`,
+   `label_text_color`, `label_background_color`, `layer_plane`,
+   `z_index` and `coord_space` changes the signature, and that an
+   unrelated change does not.
+
+**Not required as a unit test:** runtime memo recomputation on
+`canvasLines` identity change. CTO inspection confirms
+`RuntimeSlideRenderer` deps are `[slide?.id, sceneElements, allPadlets, canvasLines]`
+and that both `DrawingLayout` memos use ref-backed getters with `[]` —
+§14e is implemented correctly in both directions. Live already-open
+fullscreen evidence (§15f) is sufficient proof of behavior, and the
+implementer must **quote both dependency arrays in the report** so the
+reviewer can confirm the live pass is not incidental.
+
+These additions belong in the existing test file or one further
+authorized file; the allowance of **5** is unchanged and 4 slots remain.
+
+### 15e. Drawing execution gate — owner recovery (bind)
+
+The dev server is down (`:3000` and `:3000/auth` both unreachable).
+Owner performs, in order:
+
+1. Ensure no process holds port 3000.
+2. Delete generated output: `rm -rf .next` (gitignored; regenerable).
+3. `npm run dev`.
+4. **Verify immediately before Playwright — both must return 200:**
+   ```bash
+   curl -s -o /dev/null -w "root:%{http_code}\n" http://localhost:3000
+   curl -s -o /dev/null -w "auth:%{http_code}\n" http://localhost:3000/auth
+   ```
+   A 500 on `/auth` with 200 on `/` is the documented `.next`-corruption
+   signature (`LESSONS_LEARNED.md:61-65`) — repeat step 2, do not proceed.
+5. `PW_BASE_URL=http://localhost:3000` (this also disables the configured
+   `webServer`).
+6. Run Playwright with `--no-deps`.
+7. **Never run `npm run build` while the dev server is active.**
+
+### 15f. Mandatory Drawing live matrix (bind — closure impossible without)
+
+Same Slide 4 Arrow Post visible in **all three**: the Drawing canvas, the
+right-side thumbnail, and **runtime fullscreen**. Plus: fullscreen
+demonstrably still on `RuntimeSlideRenderer` (not the PNG fallback) ·
+save/reload · editor pan/zoom independence · front and back planes ·
+endpoint edit refreshing thumbnail **and already-open fullscreen** ·
+whole-line drag refreshing both · style changes refreshing both · label
+changes refreshing both · deletion removing it from both ·
+recreation/restoration returning it · no duplicate rendering · **no
+stored-geometry mutation caused by preview generation** · `coord_space`
+still `'scene'` afterwards · the real Arrow Post restored visually · and
+the §8 toolbar census completed.
+
+### 15g. Order of operations (bind)
+
+1. Apply §15c (revert) and §15d (tests).
+2. Re-run static validation: `tsc`, full `vitest`, ESLint (new gate),
+   `git diff --check`.
+3. Owner performs §15e recovery and confirms both 200s.
+4. Run the §15f live matrix.
+5. Report; independent review; **then** closure is considered.
+
+The candidate remains **uncommitted** throughout. Do not begin
+PATCH-116.
