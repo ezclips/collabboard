@@ -1015,3 +1015,189 @@ verbatim.
 **PATCH-115 remains AUTHORIZED and the candidate remains UNCOMMITTED.**
 This section does not close the patch and does not authorize a commit of
 the candidate.
+
+---
+
+## 17. Closure-review findings ruling (2026-07-27, CTO)
+
+Issued at governance HEAD `e53bb47ebf30558bfcf0dd96a71ee1381dbe66c4`
+against an independent closure verdict of **PASS — READY TO CLOSE** with
+two MEDIUM findings referred for explicit ruling. Both findings were
+re-derived from the candidate diff before ruling; neither was accepted on
+the reviewer's characterization.
+
+### 17a. Decision: OPTION A, AMENDED
+
+**Option A is selected — with item 2 of its correction list rejected.**
+
+Finding 1 is upheld and must be corrected. **Finding 2 is rejected**: the
+dependency it asks to remove is load-bearing, and removing it would
+reintroduce the exact §3 defect this patch exists to fix. Neither pure
+Option A nor Option B is adopted, because Option A as written would ship a
+regression and Option B would absorb a genuine scope violation.
+
+This is not an override of the reviewer on taste. Finding 1 is accepted
+*as written*. Finding 2 rests on a factual premise about the code that is
+false, evidenced below.
+
+### 17b. Finding 1 — UPHELD. Correction required.
+
+Confirmed at `DrawingLayout.tsx:3197-3199` and `:3250-3252`. Both hunks
+replace immutable rest-destructuring with `{ ...spread }` followed by two
+`delete` statements:
+
+```
+-          const { parentId: _p2, childPadletIds: _c2, ...cleanMeta2 } = c.metadata || {};
++          const cleanMeta2 = { ...(c.metadata || {}) };
++          delete cleanMeta2.parentId;
++          delete cleanMeta2.childPadletIds;
+```
+
+This is the **same** ESLint-driven rewrite that §15c required reverting
+from `CanvasClient.tsx`, in the same candidate, by the same implementer.
+It must be ruled the same way, for three reasons:
+
+1. **Consistency is the whole value of the ruling.** A restriction that
+   applied to one file and not its neighbour in the same patch is not a
+   restriction.
+2. **It is out of scope.** DrawingLayout's authorization covers CanvasLine
+   plumbing — the prop, the ref, the two getters, the deps array. These
+   two sites touch library-item placement metadata and have no relation
+   to CanvasLine presentation.
+3. **It contradicts repository immutability guidance**, replacing a
+   non-mutating destructure with in-place `delete`.
+
+**Required:** revert both hunks to their committed rest-destructuring
+form, exactly. The ESLint gate remains **"no candidate-introduced
+findings"** (§15) — if reverting reintroduces a pre-existing
+`no-unused-vars` warning on `_p`/`_p2`/`_c`/`_c2`, that warning is
+**pre-existing and correct**, and must **not** be fixed here.
+
+### 17c. Finding 2 — REJECTED. The dependency must remain.
+
+The reviewer's stated premise is:
+
+> CanvasLines do not determine the Excalidraw frame list.
+
+**This premise is false**, and the memo at `DrawingLayout.tsx:2168-2213`
+is not a frame list. It is the **thumbnail invalidation engine**. Inside
+it, per frame element:
+
+```
+const sig = slideRenderer.getSlideRenderSignature(baseSlide);   // :2181
+if (frameSigsRef.current[el.id] !== sig) {
+  frameSigsRef.current[el.id] = sig;
+  frameVersionsRef.current[el.id] = (frameVersionsRef.current[el.id] ?? 0) + 1;
+}
+```
+
+The chain that makes `canvasLines` load-bearing:
+
+1. `slideRenderer` is memoized with **`[]` deps** (`:2135-2140`) and reads
+   lines through the ref-backed getter `getCanvasLines: () =>
+   runtimeCanvasLinesRef.current`. Its identity **never changes** — that
+   is the §14e requirement, deliberately.
+2. `getSlideRenderSignature` now folds CanvasLine state into the
+   signature via `canvasLineSignature`
+   (`getSlideRenderSignature.ts:145-152`).
+3. A stale-closure-free getter means **nothing else in React can observe
+   a CanvasLine change**. The deps array is the only trigger.
+
+So with deps `[elements]`, editing a CanvasLine's colour changes no
+Excalidraw element, the memo does not re-run, `sig` is never recomputed,
+`contentVersion` never bumps, `frames` keeps its identity, and
+`PresentationPanel` (`:3290 slides={frames}`) never re-renders the
+thumbnail. **That is precisely the §3 defect** — the thumbnail not
+refreshing on a CanvasLine change.
+
+The live matrix corroborates this empirically:
+`patch115ThumbnailSignatureChangedAfterStyle: true` was observed **with**
+`[elements, canvasLines]` in place. Applying Option A item 2 would
+falsify that observation.
+
+The "unnecessary recomputation" cost is also overstated: the memo is
+identity-stable by construction — `framesArrayRef.current` is returned
+unless `changed`, and each slide object is reused unless its signature or
+geometry differs (`:2188-2202`). A CanvasLine change that affects no
+slide re-runs the comparison and returns the **same array reference**.
+
+**Ruling:** `[elements, canvasLines]` is **correct, required, and
+governed**. It may not be reverted by this patch or by any future
+cleanup, refactor, or lint autofix without a fresh governance ruling.
+
+**Required (single line, authorized):** add an explanatory comment
+immediately above the deps array so the dependency is not silently
+removed later. Mechanism over memory — a rule recorded only in a patch
+document does not protect a deps array. Exact text:
+
+```
+    // PATCH-115: canvasLines is load-bearing. getSlideRenderSignature folds
+    // CanvasLine state in via a []-deps ref-backed getter, so this dep is the
+    // only trigger that recomputes renderSignature/contentVersion. Removing it
+    // silently stops thumbnails refreshing on CanvasLine edits. Do not remove.
+  }, [elements, canvasLines]);
+```
+
+**Reviewer note.** The finding was correctly *raised* — an added memo
+dependency deserves challenge, and marking it non-blocking was the right
+call rather than asserting a change. The characterization was wrong, not
+the vigilance. This is the fourth time the hard-stop review protocol has
+surfaced a claim that source inspection contradicted (two of them mine,
+in §14a).
+
+### 17d. Candidate may NOT be committed yet
+
+Not committed; not staged; no closure. Order of operations:
+
+1. Codex applies the §17e correction instruction.
+2. Full re-validation.
+3. Focused independent re-review of the three hunks only, by a **different
+   reviewer** than the closure reviewer, and not by Codex or the CTO.
+4. Then closure is reconsidered.
+
+`.gitignore`, the three `app/api/ai/**` routes, and
+`scripts/live-access-login.mjs` remain protected and unstageable
+throughout.
+
+### 17e. Exact correction instruction (bind)
+
+> Apply exactly three hunks to the uncommitted PATCH-115 candidate. Read
+> PATCH-115 §17 first; it is authoritative over this prompt. Do not
+> commit, push, stage, or start a new patch.
+>
+> **Hunk 1 — `DrawingLayout.tsx:3197-3199`.** Restore
+> `const { parentId: _p2, childPadletIds: _c2, ...cleanMeta2 } = c.metadata || {};`
+> and delete the three replacement lines.
+>
+> **Hunk 2 — `DrawingLayout.tsx:3250-3252`.** Restore
+> `const { parentId: _p, childPadletIds: _c, ...cleanMeta } = item.metadata || {};`
+> and delete the three replacement lines.
+>
+> **Hunk 3 — `DrawingLayout.tsx:2213`.** **Do NOT change the dependency
+> array.** It stays `[elements, canvasLines]`. Add only the four-line
+> `// PATCH-115: canvasLines is load-bearing…` comment from §17c
+> immediately above it.
+>
+> Make no other change. Do not fix any ESLint finding that reverting
+> reintroduces — the gate is "no candidate-introduced findings", and
+> `_p`/`_p2`/`_c`/`_c2` warnings are pre-existing.
+>
+> Re-run and report actual output: `git diff --check`, `npx tsc --noEmit`,
+> full `npx vitest run` (expect 55 files / 592 tests), the focused
+> PATCH-115 test file (expect 12 tests), and ESLint under the amended
+> gate. Confirm `CanvasClient.tsx` still shows exactly `1 +` and `0 -`,
+> and that no protected path moved.
+>
+> Leave the candidate **uncommitted**.
+
+### 17f. Unchanged by this ruling
+
+All §16 rulings stand: Freeform **NOT EXECUTABLE — NO ACCESSIBLE
+PRODUCTION FIXTURE**; Map **NOT EXECUTABLE — NO ACCESSIBLE PRODUCTION
+FIXTURE**; PATCH-116 **CANCELLED**; the §16d residual risk carries into
+closure verbatim. Drawing live acceptance remains **COMPLETE** — the §17e
+correction touches no code path the live matrix exercised, so it does not
+invalidate that evidence and no live re-run is required.
+
+**PATCH-115 remains AUTHORIZED and the candidate remains UNCOMMITTED.**
+This section does not close the patch.
