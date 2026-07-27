@@ -1638,3 +1638,299 @@ which awaits only the §19g verdict. §16's Freeform and Map **NOT
 EXECUTABLE** rulings and the §16d residual risk stand unchanged and carry
 into closure verbatim. **PATCH-116 remains CANCELLED.** No new patch may
 begin.
+
+---
+
+## 20. Second reopening — three user-visible defects (2026-07-27, CTO)
+
+Issued at governance HEAD `3455c55f71fcba75b0637aaca36b131401dab4c5`.
+Screenshots supplied by the user show three defects against the current
+candidate. Each was source-traced before ruling; two now have a
+source-provable mechanism.
+
+### 20a. Closure status (bind)
+
+- **PATCH-115 live acceptance: FAILED / REOPENED.**
+- **Focused closure re-review (§19g): CANCELLED.** Do not run it.
+- **Candidate commit: NOT AUTHORIZED.**
+- **PATCH-115 closure: BLOCKED.**
+- **Candidate remains uncommitted.**
+
+The §19e reinstatement of live acceptance is **withdrawn**. §19b (Defect A
+surface identification) and §19c (Defect B pre-existence) remain factually
+correct as far as they went, but §19's *closure* conclusion was premature:
+it accepted "not candidate-introduced" as sufficient to unblock, when the
+user-visible requirement was still violated. **That was my error, and the
+correction is stated as a rule below.**
+
+**Standing rule (record in LESSONS_LEARNED):** *identifying the responsible
+surface is not the same as clearing the defect.* A patch under acceptance
+may not close while the object it renders is still visibly broken in the
+surface it was added to, even when the responsible code is outside the
+patch's file scope. Routing decides **which patch fixes it**, never
+**whether it gets fixed before the user sees it work**.
+
+### 20b. Defect 1 — editor CanvasLine paints over the presentation sidebar
+
+**Classification: REAL UI LAYERING DEFECT. Mechanism source-proven.
+Pre-existing; predates PATCH-114.**
+
+`SimpleLineRenderer.tsx:656` sets the line layer's stacking as:
+
+```
+zIndex: layer === 'back' ? 0 : (isLineMode || selectedLineId || isEditMode) ? 1000 : 10
+```
+
+and `:650` wraps it in `className="absolute inset-0 overflow-visible"`.
+The presentation sidebar is `fixed … w-80 z-[500]`
+(`DrawingLayout.tsx:3288`). **1000 > 500.** So whenever a line is
+selected, or line-mode or edit-mode is active, the front line layer is
+promoted above the sidebar and paints over it. When none of those hold it
+sits at `z-10`, safely below. This explains why the defect is
+intermittent, and the user's screenshot shows the affected slide card
+selected — consistent with the `selectedLineId` branch.
+
+**Provenance.** `git log -L 656,656` and `-L 650,650` both resolve to
+`e9554e7` (2026-03-23) — the extraction commit that created the file.
+Both the z-1000 promotion and the `overflow-visible` wrapper **predate
+PATCH-114 and PATCH-115**. Neither `SimpleLineRenderer.tsx` nor the
+sidebar appears in the candidate diff; `SimpleLineRenderer.tsx` is in fact
+**prohibited** from modification under PATCH-115 §6.
+
+This meets the exact bar set for routing out: *source proves the defect
+predates PATCH-114 and is independent of the candidate.*
+
+**But one qualification, and it is not a technicality.** PATCH-114 changed
+*where* a line paints — from viewport-fixed to scene-space that tracks the
+canvas. The **layering rule** predates it; the **frequency of landing
+under the sidebar** may not. The diagnosis must establish whether a
+pre-PATCH-114 legacy line could reach the same region. Until that is
+answered, "pre-existing mechanism" is proven and "pre-existing exposure"
+is not.
+
+**Routing: TIGHTLY COUPLED FOLLOW-UP PATCH, and it blocks PATCH-115
+closure.** PATCH-115 cannot fix this — the fix lives in a file PATCH-115
+is forbidden to touch. But per §20a the defect may not simply be deferred:
+the follow-up patch must be authored, landed, and live-verified **before**
+PATCH-115 closes, or PATCH-115 closes simultaneously with it as a bound
+pair. That decision is deferred to the post-diagnosis ruling.
+
+**Prohibited fix (bind):** raising the sidebar's z-index globally to mask
+the symptom, without proving pointer-interaction, selection, hit-testing,
+and visual behavior all remain correct on the canvas beneath. The
+`z-1000` promotion exists to let handles sit above other canvas chrome;
+suppressing it blindly may break line editing.
+
+### 20c. Defect 2 — thumbnails do not reliably refresh or populate
+
+**Classification: NOT YET DETERMINED. Full-chain diagnosis required.
+Blocks closure.**
+
+The §19c ruling is **superseded**. Its evidence — objects present in the
+composition plan, plus reproduction at the pre-candidate commit —
+established that PATCH-115 did not *introduce* the shortfall. It did
+**not** establish that the displayed thumbnail updates, and I accept the
+objection: *"object exists in the payload"* is not proof the DOM image
+changed. The chain has seven links after the payload and none were
+instrumented.
+
+**Leading hypothesis, to be tested — not assumed.** §19c recorded a named
+residual that now looks central rather than peripheral: *some native
+embeddable rows are excluded under the governed native `frameId` rule
+while their padlet counterparts resolve normally.*
+`planSlideComposition`'s `isNativeFrameMember` requires
+`element.frameId === slideFrame.id` with **no geometric fallback for
+natives** (PATCH-112's deliberate narrowing). An embeddable whose native
+element never received a `frameId` therefore **never enters any slide**,
+however it looks on canvas — which would render as a **blank or
+near-blank thumbnail for a slide that visibly contains a container post**.
+That matches the screenshots: Slide 2 blank and Slide 4 near-empty, both
+containing "New Container" cards, while Slide 3 — whose contents do
+render — does not.
+
+If confirmed, this is the **same root cause as Defect 3** (§20d), and
+both are one pre-existing `frameId`-assignment defect rather than two.
+The diagnosis must test this explicitly by reading `frameId` on each
+embeddable element, not infer it.
+
+**Required classification, exactly one:** A signature not changing ·
+B signature changes but `contentVersion` does not · C render not scheduled ·
+D render runs but produces incomplete PNG · E new PNG produced but UI
+retains stale image · F race/cancellation · G mixed.
+
+Instrumentation points, named so the trace is reproducible: the
+`frames` memo at `DrawingLayout.tsx:2168-2213` (`renderSignature` and
+`contentVersion` are computed there); `useSlideThumbnails`; and the
+`SlideThumbnail` `pngDataUrl` prop.
+
+### 20d. Defect 3 — applying a slide layout strands objects outside frames
+
+**Classification: F — MIXED, with one component already certain.
+Pre-existing. Blocks closure.**
+
+Root cause is source-provable now, in `handleArrangeLayout`
+(`DrawingLayout.tsx:1674-1720`). For each frame it computes `dx, dy`, moves
+the frame, then moves children with:
+
+```
+updated.forEach((el: any, idx: number) => {
+  if (el.frameId === frame.id && !el.isDeleted) {
+    updated[idx] = { ...el, x: el.x + dx, y: el.y + dy, updated: Date.now() };
+  }
+});
+```
+
+Three defects follow directly:
+
+1. **CanvasLines are never moved — certain, no test needed to establish
+   it.** `canvas_lines` rows are not in `elements`. The function has no
+   access to them, applies no `dx/dy`, and writes nothing to the table.
+   After any layout apply, every CanvasLine stays at its old scene
+   coordinates while its frame moves out from under it. This alone fixes
+   the classification at **at least C, hence F (mixed)**.
+2. **Objects without `frameId` are stranded.** The child loop is gated
+   entirely on `el.frameId === frame.id`. An embeddable whose native
+   element lacks a `frameId` is left behind while its frame departs —
+   **exactly the stranded "New Container" in the user's screenshot.**
+   Same gate, same root cause as the §20c hypothesis.
+3. **Persistence is not obviously atomic.** The function calls only
+   `excalidrawAPI.updateScene({ elements: updated })`. It does not write
+   padlet `position_x`/`position_y` or any CanvasLine geometry. Whether
+   scene-sync writes back, and whether it does so atomically, must be
+   established by the trace, not assumed.
+
+**Interaction with PATCH-115 — stated precisely.** PATCH-115 renders
+CanvasLines faithfully at their stored scene coordinates. After a layout
+apply those coordinates are stale, so
+`resolveCanvasLineSlideMemberships` will legitimately reassign the line to
+a different frame or to none. **PATCH-115 behaves correctly and the
+composite result is still wrong.** PATCH-115 did not cause this and cannot
+fix it; `handleArrangeLayout` is untouched by the candidate (the entire
+`DrawingLayout.tsx` diff is 14 lines, none near `:1674`) and predates it.
+
+**Required classification, exactly one:** A frames move but members do not ·
+B natives move but padlets do not · C padlets move but CanvasLines do not ·
+D membership changes without geometry changes · E persistence/reload
+regression · F mixed. The trace must still produce the per-category table;
+the source reading above predicts **F** and the trace must confirm or
+refute it.
+
+### 20e. Candidate-introduced vs pre-existing — summary
+
+| Defect | Mechanism established | Candidate-introduced | Blocks PATCH-115 closure |
+|---|---|---|---|
+| 1 — line over sidebar | **Yes** (`SimpleLineRenderer.tsx:650,656`, `e9554e7`, 2026-03-23) | **No** — file prohibited and untouched | **Yes** (§20a rule) |
+| 2 — thumbnails blank/stale | No — full-chain trace required | **No** (§19c reproduction stands) | **Yes** |
+| 3 — layout strands objects | **Yes** (`DrawingLayout.tsx:1674-1720`) | **No** — region untouched, predates candidate | **Yes** |
+
+None of the three is candidate-introduced. **All three block closure
+anyway**, per §20a. PATCH-115's own claims — correct membership, correct
+rendering, correct invalidation — remain source-verified and
+test-verified; what is not established is that the **user-visible slider
+preview works**, which is the actual object of this patch.
+
+### 20f. Diagnosis allowlist (bind)
+
+**Zero product files. Zero test files. Diagnosis only.**
+
+Permitted:
+- Read any file in the repository.
+- One **disposable** Playwright spec, created outside the repo tree or
+  deleted before reporting, never committed.
+- Temporary `console`/DOM instrumentation **only** inside that disposable
+  spec — not inside product source.
+- One **read-only comparison worktree** at the pre-candidate commit
+  `3455c55f71fcba75b0637aaca36b131401dab4c5`, on a port that is not 3000,
+  removed afterwards.
+- Full-page screenshots to a scratch path outside the repo.
+
+Prohibited: any edit to any file under `components/`, `app/`, `lib/`,
+`supabase/`, or `.fable5/`; staging; committing; stashing; `--fix`;
+touching the five protected unrelated paths; altering `.env.local`;
+printing credentials; any product edit "while you're in there".
+
+**The §17 corrections must be preserved exactly.** Re-confirm before and
+after: `DrawingLayout.tsx` shows 14 changed lines, `CanvasClient.tsx`
+shows `1 +` / `0 -`, and the deps array remains `[elements, canvasLines]`.
+
+### 20g. Caps: sufficient for diagnosis, INSUFFICIENT for the likely fixes
+
+**Diagnosis: sufficient** — it consumes no allowlist slot.
+
+**Implementation: not sufficient, and this is now near-certain.**
+
+- The **production cap of 10 is already reached.** No file can be added
+  without an explicit amendment.
+- Defect 1's fix lives in `SimpleLineRenderer.tsx`, which PATCH-115 §6
+  **prohibits**. It cannot be fixed inside PATCH-115 under any cap.
+- Defect 3's fix lives in `handleArrangeLayout`, a region of an authorized
+  file that is **outside the authorized change**, and would additionally
+  need CanvasLine persistence — modules PATCH-115 is forbidden to touch.
+- Defect 2's fix, if the `frameId` hypothesis holds, lands in embeddable
+  `frameId` assignment — PATCH-112 territory, not PATCH-115's.
+
+**Therefore: a later implementation amendment to PATCH-115 is UNLIKELY;
+one or more fresh patches are LIKELY.** The probable shape is a single
+patch for the shared `frameId`-assignment root cause (Defects 2 and 3, if
+the hypothesis confirms), plus one layering patch (Defect 1, which may
+absorb the zoom-control issue from §18d since they share the
+sidebar-overlay root cause). **This is a forecast, not an authorization.**
+No patch number is assigned; **PATCH-116 remains CANCELLED and its number
+must not be reused.** Nothing may begin before the post-diagnosis ruling.
+
+### 20h. Next Codex task (bind)
+
+> **Diagnosis only. Propose no fix. Make no product edit.** Read
+> `.fable5/patches/PATCH-115.md` §17, §19 and §20 first — §20 is
+> authoritative over this prompt.
+>
+> **0.** Confirm the §17 corrections are intact: `DrawingLayout.tsx` diff
+> is 14 lines, `CanvasClient.tsx` is `1 +` / `0 -`, deps array is
+> `[elements, canvasLines]`. Re-confirm at the end. Owner dev server on
+> 3000; `PW_BASE_URL` set; `--no-deps`; no build while dev is live;
+> health-probe `/auth` as well as `/`.
+>
+> **1 — Defect 1.** Reproduce the line painting over the sidebar. Capture
+> **full-page** screenshots. Record `selectedLineId`, `isLineMode`,
+> `isEditMode`, and the computed `zIndex` of the front line layer at the
+> moment of overlap, and confirm against `SimpleLineRenderer.tsx:656`.
+> Then answer the open question: **could a pre-PATCH-114 legacy
+> viewport-fixed line reach the same screen region?** Test in the
+> comparison worktree. Report whether the *mechanism* and the *exposure*
+> are both pre-existing.
+>
+> **2 — Defect 2.** For each affected slide (at minimum the blank Slide 2
+> and near-empty Slide 4), record the full chain: prior signature → new
+> signature → `contentVersion` before/after → render request fired Y/N →
+> generated PNG non-empty Y/N → `pngDataUrl` changed Y/N → rendered DOM
+> image dimensions and visible content. Then: does opening/closing the
+> sidebar force the correct preview? Does switching slides? Does
+> save/reload? **Additionally — test the leading hypothesis directly:**
+> for every object visible inside each affected frame, read the native
+> element's `frameId` and report whether it is null/absent. Classify
+> A–G.
+>
+> **3 — Defect 3.** Apply a slide layout on a **disposable** canvas, never
+> the user's real board. Record before/after coordinates for: native
+> elements, padlet/container posts (with and without `frameId`),
+> CanvasLines (front and back), objects partly crossing a frame, and
+> multiple selected slides. Record whether each moved, whether `frameId`
+> was recalculated, and what was persisted — then reload and re-record.
+> Classify A–F.
+>
+> **4.** For all three, determine reproduction **without** the candidate
+> using the read-only comparison worktree at `3455c55` on a non-3000
+> port. Remove the worktree afterwards.
+>
+> **5.** Report source paths, line numbers, and state transitions.
+> Restore all real board data; confirm the real Arrow Post's
+> `coord_space` is still `'scene'`. Delete the disposable spec and all
+> scratch artifacts. Leave the candidate **uncommitted**.
+
+### 20i. Status
+
+**PATCH-115: AUTHORIZED, OPEN, UNCOMMITTED, BLOCKED FROM CLOSURE.** Live
+acceptance **FAILED/REOPENED**; focused re-review **CANCELLED**; commit
+**NOT AUTHORIZED**. §16's Freeform and Map **NOT EXECUTABLE** rulings and
+the §16d residual risk are unaffected. **PATCH-116 remains CANCELLED.** No
+zoom-control patch, no thumbnail patch, no new patch may begin.
