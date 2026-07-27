@@ -265,9 +265,15 @@ before running, never `npm run build` while the dev server is live.
 7. `app/dashboard/canvas/[id]/CanvasClient.tsx`
 8. `components/collabboard/canvas/layouts/DrawingLayout.tsx`
 
-**Maximum production files: 8.** A ninth requires another hard stop and
-a further amendment. The original "one unnamed supplying component" rule
-is **superseded** — see §13.
+**Fullscreen runtime path (added by the §14 amendment, 2026-07-27) —
+exactly two:**
+
+9. `components/presentation/FullscreenPresentation.tsx`
+10. `components/presentation/runtime-slide/RuntimeSlideRenderer.tsx`
+
+**Maximum production files: 10.** An eleventh requires another hard stop
+and a further amendment. The original "one unnamed supplying component"
+rule is **superseded** — see §13 and §14.
 
 **Allowed test files (max 4):** unit tests colocated with items 5 and 6
 above · an extension of an existing presentation test · one new spec
@@ -473,5 +479,189 @@ fidelity (§2d) · signature and invalidation (§3) · no duplicate rendering
 `coord_space=NULL` exclusion **with** an observable diagnostic (§2a) ·
 and **the Freeform/Map fixture debt still requires a fresh CTO ruling
 before closure** (§4) — it is not waived by this amendment.
+
+**PATCH-115 remains AUTHORIZED FOR IMPLEMENTATION.**
+
+## 14. Amendment — fullscreen runtime path (CTO ruling, 2026-07-27)
+
+### 14a. Correction of a false statement in §13a
+
+**§13a asserted that supplying lines to `createSlideRenderer` at
+`DrawingLayout.tsx:2131` serves thumbnail and fullscreen "by
+construction". That is FALSE on current `main`.** It was asserted without
+tracing the fullscreen path, and is withdrawn. Codex was **again correct
+to hard-stop**; §7.9 has now caught two governance errors, which is the
+control working as intended.
+
+The two surfaces use **different renderers**:
+
+**Thumbnail (correct as previously stated):**
+`DrawingLayout.tsx:2131` → `createSlideRenderer(…)` → `renderSlideToPNG`
+(`:2138-2139`) → `PresentationPanel` (`:3284`).
+
+**Fullscreen (previously missed):**
+`DrawingLayout.tsx:3306` → `FullscreenPresentation runtimeHelpers={runtimeSlideHelpers}`
+→ `usingRuntime = USE_RUNTIME_LIVE_SLIDESHOW && !!runtimeHelpers`
+(`FullscreenPresentation.tsx:75`; the flag is **`true`** at `:20`)
+→ `RuntimeSlideRenderer` → `planSlideComposition(slide, sceneElements, allPadlets)`
+(`RuntimeSlideRenderer.tsx:56`).
+
+**When `runtimeHelpers` is present, fullscreen never calls
+`renderSlideToPNG`.** `RuntimeSlideRenderer` has no CanvasLine input.
+
+`renderSlideToPNG` is also passed at `:3303`, but that is the PNG
+fallback/export route, not the live runtime path taken while the flag is
+true.
+
+### 14b. Ruling — extend the runtime path; do not disable it
+
+The runtime fullscreen path **stays enabled**. Disabling
+`USE_RUNTIME_LIVE_SLIDESHOW` or forcing the PNG fallback so that one
+renderer suffices is **prohibited** — it would change existing
+presentation behavior for every board and conceal the real integration
+gap rather than closing it. Any change to that flag requires a separate,
+explicit product decision by the owner.
+
+### 14c. Exact minimum additional files — both required (source-proven)
+
+**`FullscreenPresentation.tsx` MUST change.** Two independent reasons:
+
+1. It **owns the contract**: `export type RuntimeSlideHelpers` is
+   declared at `FullscreenPresentation.tsx:26` (currently
+   `getSceneElements` / `getPadlets` / `getFiles`). Adding
+   `getCanvasLines` cannot be done anywhere else.
+2. It **unpacks the getters rather than forwarding the object** — lines
+   `231-233` resolve `getSceneElements()`, `getPadlets()` and
+   `getFiles()` and pass the **resolved values** down.
+   `RuntimeSlideRenderer` receives arrays, not the helper object, so it
+   cannot reach a new getter on its own.
+
+The narrower "modify only `RuntimeSlideRenderer`" option is therefore
+**not available**. This was checked before binding rather than assumed.
+
+**`RuntimeSlideRenderer.tsx` MUST change** — it accepts the resolved
+arrays as props (`:12-14`) and calls `planSlideComposition` at `:56`. It
+must accept and forward the CanvasLine collection.
+
+**Final production cap: 10.** No speculative headroom; this is the exact
+set the source demonstrates.
+
+### 14d. Runtime input contract (bind — exact)
+
+Extend the existing type at `FullscreenPresentation.tsx:26`:
+
+```ts
+export type RuntimeSlideHelpers = {
+  getSceneElements: () => readonly any[];
+  getPadlets: () => Padlet[];
+  getFiles: () => any;
+  getCanvasLines: () => CanvasLine[];   // added
+};
+```
+
+`DrawingLayout` supplies it from the **same ref** used for the PNG path,
+so one ref feeds both surfaces — exactly one CanvasLine source of truth
+in the presentation layer.
+
+### 14e. The two memos have OPPOSITE requirements (bind — do not conflate)
+
+This is the single most likely way this implementation goes wrong.
+
+**(1) `DrawingLayout.tsx` — renderer/helper construction: deps MUST stay
+`[]`.** Both `createSlideRenderer` (`:2131`) and `runtimeSlideHelpers`
+(`:2144`) are `useMemo(…, [])` holding **ref-backed getters**, with the
+existing comment *"Keep the helper identity stable and read fresh scene
+data from refs at call time."* Add
+`getCanvasLines: () => runtimeCanvasLinesRef.current` and **leave both
+dependency arrays empty**. Adding the array to these deps rebuilds the
+renderer and helper identity on every line edit — thumbnail cache thrash
+and re-render churn. **Hard stop.**
+
+**(2) `RuntimeSlideRenderer.tsx` — composition memo: the resolved array
+MUST be added to deps.** Line `60` is deliberately identity-based —
+`[slide?.id, sceneElements, allPadlets]`, with the existing comment *"We
+intentionally depend on array identity — the parent recreates these when
+elements change."* The resolved `canvasLines` array **must be added to
+that dependency list**. Omitting it means an already-open fullscreen view
+never recomputes on a line change — the exact stale-preview defect this
+patch exists to fix. **Hard stop.**
+
+Stable getter identity at construction; live array identity at
+composition. Applying either rule in the other place breaks the patch.
+
+### 14f. Invalidation chain (bind — verify, do not assume)
+
+`CanvasClient` `lines` state changes (new array identity) → prop to
+`DrawingLayout` → `runtimeCanvasLinesRef.current` updated during render,
+following the existing pattern at `DrawingLayout.tsx:768-769` →
+`FullscreenPresentation` re-renders and calls `getCanvasLines()`,
+yielding the new identity → `RuntimeSlideRenderer`'s composition memo
+recomputes → the open fullscreen view updates.
+
+The implementer must **demonstrate this chain live with fullscreen
+already open**, not reason about it.
+
+The two surfaces invalidate by **different mechanisms** and both are
+required: the thumbnail via the §3 `getSlideRenderSignature` extension,
+the runtime view via the §14e(2) memo deps. Implementing only one leaves
+the other stale.
+
+### 14g. Shared implementation (bind — no divergence permitted)
+
+**One composition representation:** both surfaces already call
+`planSlideComposition`. Extend it **once** to resolve CanvasLine bands;
+both paths then inherit identical membership, ordering and band
+assignment automatically. `canvasLineSlideMembership` is used only there,
+never re-implemented in either renderer.
+
+**One geometry/style payload:** the two media genuinely differ (PNG path
+rasterizes to a canvas; runtime path renders live DOM), so a single
+literal drawing component may not be possible. Therefore
+`renderCanvasLinePrimitive` **must expose a pure render-payload builder**
+— resolved path data, arrowhead geometry, stroke/dash/color, label text,
+placement and colors — consumed by **both** paths, with only the final
+draw call medium-specific.
+
+**Duplicated curve, arrowhead, label-placement or membership maths across
+the two renderers is a hard stop.** A test must assert both paths derive
+the **identical payload** from the same input (§14h).
+
+### 14h. Test allowlist — raised to 5, narrowly
+
+Maximum **5** test files. The fifth is authorized **only** as an
+extension of the existing
+`e2e/characterization/drawing-presentation.spec.ts` (source-verified to
+exist and to cover presentation), **not** as a new file. A sixth, or a
+new fifth file, requires explicit binding.
+
+Acceptance must exercise all four of:
+
+1. the PNG thumbnail path;
+2. the **runtime fullscreen** path;
+3. **identical composition and render payload** across both;
+4. **already-open fullscreen invalidation** after create / edit / move /
+   style / label / delete / legacy→scene conversion.
+
+### 14i. `DrawingLayout.tsx` restrictions — §13c amended
+
+**May now also:** maintain `runtimeCanvasLinesRef.current` (following the
+existing `:768-769` pattern) and supply `getCanvasLines` through **both**
+the `createSlideRenderer` construction (`:2131`) **and** the existing
+`runtimeSlideHelpers` object (`:2144`).
+
+**Still may not:** disable `runtimeHelpers` or force the PNG fallback ·
+construct a second renderer · filter by editor pan/zoom/viewport origin ·
+mutate or convert lines · introduce a second cache or second fetch · pass
+`DrawingViewport` state into presentation · make any other presentation
+behavior change.
+
+### 14j. Everything else preserved
+
+§13's `CanvasClient.tsx` restrictions, all §13d hard fences, and every
+requirement in §1-§5 stand unchanged — including that no editor
+`DrawingViewport` state may reach either presentation path, that
+`coord_space=NULL` rows are excluded with an observable diagnostic and
+never mutated, and that **the Freeform/Map fixture debt still requires a
+fresh CTO ruling before closure (§4) and is not waived.**
 
 **PATCH-115 remains AUTHORIZED FOR IMPLEMENTATION.**
