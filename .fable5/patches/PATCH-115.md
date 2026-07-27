@@ -2548,3 +2548,21 @@ committed authorization.
 phase per §21d.
 
 **PATCH-116: CANCELLED and retired.** Number never reused.
+
+---
+
+## 25. PATCH-117 authored and authorized (2026-07-27, CTO)
+
+`.fable5/patches/PATCH-117.md` is created and marked **AUTHORIZED FOR
+IMPLEMENTATION**. It binds: a 3-file production cap (expected 2 — the
+ZoomControls file is authorized only if source proves it necessary, and a
+fourth file is a hard stop); a 3-file test cap with mandatory
+runner-included coverage; a 21-row acceptance matrix whose primary
+criteria are the pointer-interception rows 9-13; an explicit two-stage
+Freeform/Map ruling; and the repository blast-radius safety gates from
+PATCH-115 section 21a.
+
+**PATCH-115 is unchanged by this: OPEN, BLOCKED, LANDED (`215ea81`), NOT
+CLOSED.** PATCH-117 is one of its two closure prerequisites.
+**PATCH-118 remains RESERVED and UNAUTHORIZED. PATCH-116 remains
+CANCELLED and retired.**
