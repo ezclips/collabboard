@@ -1225,3 +1225,166 @@ candidate not to be committed. Production frozen at 2 files.
 **PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
 **PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
 **PATCH-116: CANCELLED and retired.**
+
+---
+
+## 18. Post-§17 correction ruling (2026-07-27, CTO)
+
+Issued at governance HEAD `5b1f5cc7cf2c1b99a291db10e07db6451e3152c7`.
+Candidate verified: **9** dirty paths, uncommitted, unstaged, production
+and unit-test hashes unchanged, nothing edited during diagnosis.
+
+### 18a. Classification H — ACCEPTED
+
+The handle is a `<circle>` carrying `data-line-role="point-handle"` and
+the exact `data-line-id`, `pointer-events: auto`, visible, opaque, and
+topmost at its centre and four further sampled points. The
+`elementsFromPoint` stack held the handle, the same line's hit path, and
+Excalidraw/layout containers — **no fixed chrome above the line-owned
+target**.
+
+A real drag moved the **targeted endpoint** `(1160, 300) → (1136, 312)`
+without translating the whole line, and persisted to the disposable row.
+The `clipPath: none` comparison produced the same result on every count.
+
+**Containment does not impair handle interaction. No production
+regression. No production correction authorized.**
+
+### 18b. Residual: the diagnosis did not reproduce the original failure
+
+**This must be recorded rather than glossed.** The matrix run reported
+`elementFromPoint` returning a node with `data-line-id: null`; the
+diagnosis found the handle **topmost at five sampled points**. Those two
+observations do not agree, and the discrepancy is unexplained.
+
+It does not block the correction — the §17c criterion is right on the
+merits, and part 2 (behavior) is substantive rather than a proxy. But it
+means a recurrence is possible from whatever the matrix did differently:
+a coordinate derived from a stale bounding rect, a different handle role,
+or a transient state between edit-mode entry and the probe.
+
+**Therefore the corrected spec must record, for rows 5 and 14, how the
+handle coordinate was derived** — the chosen handle's `data-line-role`,
+its bounding rect at the moment of sampling, the computed centre, and
+whether the rect was re-read immediately before the probe. Combined with
+the §16c diagnostic-failure dump, a recurrence will then be diagnosable in
+one run instead of costing another cycle. Three cycles have already been
+spent on opaque live failures; this is the mechanism that stops a fourth.
+
+### 18c. Spec-only correction — AUTHORIZED
+
+**Exactly one file may change:**
+
+```
+e2e/characterization/drawing-overlay-containment.spec.ts
+```
+
+**No production file and no unit-test file may change.**
+`SimpleLineRenderer.tsx`, `DrawingLayout.tsx` and
+`SimpleLineRenderer.test.tsx` remain **frozen byte-for-byte**; the 20
+focused tests must continue to pass untouched. Production stays at **2 of
+3** — `ZoomControls.tsx` still not needed.
+
+Rows 5 and 14 adopt the §17c three-part criterion, all parts required:
+
+**1. Ownership.** At the chosen handle coordinate, the
+`document.elementFromPoint` result **or its nearest `[data-line-id]`
+ancestor** must be the exact temporary line, and the resolved
+`data-line-role` must be the expected handle role. **The raw returned node
+is not required to carry `data-line-id`.**
+
+**2. Behavior.** A real, normal pointer drag — **no `force: true`** —
+must produce: the intended point/endpoint changes; the whole line does
+**not** translate; the persisted disposable row reflects the intended
+change; geometry restored afterward where cleanup requires it.
+
+**3. Non-interception.** `document.elementsFromPoint` at the handle
+coordinate must contain no fixed chrome above the line-owned target.
+
+Plus the §18b derivation record.
+
+### 18d. Fixed chrome — binding definition, plus checklist
+
+**The binding rule is property-based, not a selector list.** In the
+`elementsFromPoint` stack, treat as fixed chrome any entry that is **not**
+line-owned (no `data-line-id` on itself or an ancestor within the line
+layer) **and** satisfies either:
+
+- computed `position: fixed`; or
+- a computed `z-index` ≥ the front line layer's active value (`1000` when
+  selected / line mode / edit mode, else `10`).
+
+A property rule is bound rather than a class list because Tailwind class
+strings change under refactors and a stale selector list fails **open** —
+it silently stops detecting the very interception the row exists to catch.
+
+**Known Drawing chrome, as a cross-check (measured, current tree).** If
+any of these appears above a line-owned target the row fails; if the
+property rule ever matches something absent from this list, report it:
+
+| Element | Anchor |
+|---|---|
+| Presentation sidebar | `DrawingLayout.tsx:3305` — `fixed top-0 right-0 bottom-0 w-80 z-[500]`, `ref={presentationSidebarRef}` |
+| Modal | `:3065` — `fixed inset-0 z-[10010] … bg-black/50` |
+| Modal backdrop | `:3340` — `fixed inset-0 z-[9998]` |
+| Zoom controls | `:3112` — `absolute bottom-6 right-[var(--drawing-zoom-controls-right,1.5rem)] z-[130]` |
+| Top floating toolbar | `:2983` — `absolute top-4 z-[130] pointer-events-none` |
+| Slide controls | inside the sidebar subtree (`PresentationPanel`) — covered by the sidebar entry |
+
+Note the floating toolbar is `pointer-events-none` at its container, so it
+will not normally appear in an `elementsFromPoint` stack; it is listed
+because its **children** may re-enable pointer events.
+
+### 18e. Row 13 unchanged
+
+Row 13 remains the **strict negative** chrome-region sweep: no CanvasLine
+hit path anywhere in the fixed-chrome region. It **must not** adopt
+ancestor resolution, must not be narrowed, reordered, or made conditional.
+The §17c relaxation applies to the handle-interaction rows **only** —
+negative assertions are immune to bridge indirection, so nothing about
+this diagnosis justifies loosening them.
+
+### 18f. No further governance amendment
+
+None beyond the §17 rebinding of rows 5 and 14, which §17c already
+issued and this section restates. §3, §4, §7 and §8 are unchanged;
+production remains 2 of 3 and the test allowlist 2 of 3, with the
+correction editing a file that already exists.
+
+### 18g. Post-correction requirements
+
+**Static:**
+
+```
+git diff --check
+npx tsc --noEmit
+npx vitest run                                                    # 55 files / 605 tests
+npx vitest run components/collabboard/SimpleLineRenderer.test.tsx  # 20
+npx playwright test --list e2e/characterization/drawing-overlay-containment.spec.ts
+npx eslint <touched file>                                         # no candidate-introduced findings
+```
+
+Scope proof: `git diff --stat` shows the three frozen files
+**byte-identical**; `git status --porcelain | wc -l` remains **9**.
+
+**Live: the full 21-row Drawing matrix from row 1.** **No evidence carries
+forward** from any of the three incomplete runs. Standing rules unchanged:
+`PW_BASE_URL` set; `--no-deps`; no build while the dev server is live;
+probe **both** `/` and `/auth`; full-page screenshots; scratch outside the
+repo; credentials never printed; `.env.local` untouched; real board data
+restored; **no worktree or second checkout**; bounded waits per §16c with
+**no timeout increase**; status count **and full list** before and after,
+expecting **9** — any delta is a run failure regardless of findings.
+
+**Freeform/Map:** check fixture availability **only** after every Drawing
+row passes, then **stop**. Stage 2 remains **NOT granted**; neither layout
+is PASS; the decision is a fresh CTO ruling and is never inherited from
+PATCH-115.
+
+### 18h. Status
+
+**PATCH-117: OPEN · AUTHORIZED · UNCOMMITTED · UNSTAGED.** Not closed;
+candidate not to be committed.
+**PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
+**PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
+**PATCH-116: CANCELLED and retired.**
