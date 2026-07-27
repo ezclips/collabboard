@@ -713,3 +713,189 @@ Phase 2 incomplete until the full 21-row matrix passes.
 **PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
 **PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
 **PATCH-116: CANCELLED and retired.**
+
+---
+
+## 15. Row 3 selection-proof failure — focused ruling (2026-07-27, CTO)
+
+Issued at governance HEAD `bdfbd01e4d38fafc7b8fd79273d3d28620ce9a5e`.
+Candidate verified: **9** dirty paths, 2 production + 2 test files,
+uncommitted, unstaged, production hashes frozen and unchanged.
+
+### 15a. Classification: **B** — the line selected; the DOM proof was wrong
+
+Source settles this without needing the live probes. The observed log
+`line-drag-start:drag-branch` is emitted at
+`SimpleLineRenderer.tsx:373-376`. Seven lines later, with **no early
+return, no branch, and no await between them**:
+
+```
+:370  e.preventDefault();
+:371  e.stopPropagation();
+:373  logLineEventDiagnostics('line-drag-start:drag-branch', …);   ← observed
+:377  const pos = getMousePos(e);
+:378  dragOffsetRef.current = { x: pos.x, y: pos.y };
+:379  setDraggingLine({ lineId });
+:380  onSelectLine(lineId);                                        ← selection fires
+```
+
+**The diagnostic the run captured is itself proof that `onSelectLine` was
+called.** Reaching `:373` and not reaching `:380` is not a reachable
+state.
+
+**Exact event where selection becomes true: `mousedown`**, synchronously
+inside `handleLineDragStart`'s drag branch, propagated to the parent's
+`selectedLineId` and re-rendered on the next React commit. Not click, not
+drag-end, not mouseup.
+
+Note also `:370-371`: the handler calls `preventDefault()` **and**
+`stopPropagation()`. `preventDefault()` on mousedown suppresses the
+subsequent synthetic `click`, so a spec that waits for click-derived
+evidence after a real mousedown is waiting for something the product
+deliberately suppresses. Selection is a **mousedown-time** fact.
+
+**A, C, D, E and F are excluded:** A and D are refuted by `:380` being
+unconditionally reached from the observed log; C is refuted because the
+call is synchronous and the run waited far longer than one commit; E is
+refuted because the hit path demonstrably received the interaction; F is
+refuted below.
+
+### 15b. Root cause: there is no `data-*` attribute that represents
+selection
+
+This is the finding that matters, and it is a real gap in the DOM
+contract — not a spec author's oversight.
+
+Every selection-dependent DOM change in `SimpleLineRenderer.tsx`:
+
+| Signal | Location | Usable as a proof? |
+|---|---|---|
+| Dashed selection `<rect>` | `:731-746` | **No** — carries **no `data-line-id` and no `data-line-role`**; reachable only positionally inside `<g key={hit-…}>`, which §14c requirement 8 prohibits. Also renders only when `!isEditMode`. |
+| `filter: drop-shadow(…)` on the visible path | `:815` | **YES** — on an element carrying both `data-line-id` and `data-line-role="visible-path"` (`:804-806`) |
+| `cursor` on the hit path | `:755` | **No** — `(isEditMode && isSelected) ? 'cell' : (isEditMode ? 'default' : 'move')`. Outside edit mode the value is `move` **whether or not the line is selected**, so it carries no selection information in the state row 3 tests. |
+| Label border colour | `:851` | **No** — requires the line to have a label; not present on a bare fixture. |
+
+**Authoritative selection signal (bind):**
+
+```
+[data-line-id="<id>"][data-line-role="visible-path"]
+→ computed style `filter` contains "drop-shadow"   when selected
+→ computed style `filter` === "none"               when not selected
+```
+
+**One trap that must be handled.** That element carries
+`className="transition-all duration-200"` (`:813`). The filter **animates
+over 200 ms**, so a single computed-style read taken immediately after
+mousedown can catch an intermediate or still-`none` value. The spec must
+**poll** until the computed filter contains `drop-shadow`, with a short
+bounded wait — not assert once, and not extend the global timeout.
+
+### 15c. Containment does not participate in selection; no regression
+
+**Containment affects selection: NO. Production regressed: NO.**
+
+Already proven by evidence in hand, before any comparison run: the clip
+path governs paint and hit-testing only, and **the hit path demonstrably
+received the interaction** — the `line-drag-start:drag-branch` log cannot
+be emitted otherwise. The candidate's production diff touches only the
+SVG container's `clipPath` and a `data-line-containment` marker; nothing
+on the selection path, the mousedown handler, or the `visible-path`
+element.
+
+The §15d step-6 controlled comparison remains **required but
+confirmatory**. If — contrary to source — selection behaves differently
+with the clip path neutralized, that is classification **F**: stop
+immediately and return for a production correction ruling. Chrome
+containment and row 13 may not be weakened in any circumstance.
+
+### 15d. Required diagnosis (bind) — read-only, one disposable fixture
+
+Source has already answered the classification; these steps exist to
+**confirm on the live surface** and to hand the spec author a measured
+signal rather than an inferred one. Keep it short.
+
+Every probe uses a **short bounded wait (≤ 2 s)** and dumps state
+immediately on failure. **Do not wait four minutes. Do not raise any
+timeout.**
+
+1. Record before interaction: temporary line id; hit-path count (expect
+   1); `selectedLineId`; and the computed `filter` on that line's
+   `visible-path`.
+2. **pointerdown without movement** → record `selectedLineId`, the
+   `visible-path` computed `filter`, emitted diagnostics, role counts,
+   and whether drag state is active.
+3. **mouseup** → record the same set.
+4. **click** (full down/up) → record the same set.
+5. **Minimal 1–2 px drag** → record the same set, and whether stored
+   geometry changed (it must be restored afterwards).
+6. **Controlled comparison:** repeat step 2 with the line-layer clip path
+   neutralized by read-only DOM styling (`clipPath: none`). Unchanged ⇒
+   containment excluded, proceed. Selection works **only** with
+   containment disabled ⇒ **classification F, stop and report.**
+7. Report the **first** event at which `selectedLineId` changes, and the
+   settling time of the `drop-shadow` filter after that event.
+
+`force: true` clicking is permitted **as diagnosis only** and must never
+appear in the corrected spec — it masks targeting defects, which is the
+failure mode §14 already corrected once. **No worktree, no second
+checkout.** Do not mutate the real Arrow Post. Report
+`git status --porcelain` count **and full list** before and after; expect
+**9** throughout.
+
+### 15e. Ruling path — decided in advance
+
+- **Expected (B confirmed):** **spec-only correction authorized**, in
+  `e2e/characterization/drawing-overlay-containment.spec.ts` and nothing
+  else. The spec must wait on the **direct signal of §15b** — the
+  `visible-path` computed `filter`, polled — and **inferred visual
+  selectors are prohibited**: no anonymous `<rect>`, no positional or
+  nth-child lookup, no screenshot comparison, no cursor check.
+- **If selection proves to require mouseup or a small drag:** spec-only
+  **interaction** correction authorized, matching the real product
+  sequence. **Directly mutating application state to fake selection is
+  prohibited** — a spec that sets `selectedLineId` itself proves nothing
+  about the product.
+- **If containment changes selection (F):** stop. Production correction
+  ruling required from the CTO. Do not weaken containment or row 13.
+- **If the fixture itself is invalid:** narrowest fixture correction only;
+  no production change.
+
+**No governance amendment is required** on any path. Production stays at
+**2 of 3** files; the test allowlist stays at **2 of 3**, and the
+correction modifies a file that already exists. An amendment becomes
+necessary only for a third production file, a fourth test file, or a
+change to `vitest.config.ts` or `playwright.config.ts`.
+
+### 15f. Recommended follow-up — NOT authorized here
+
+The absence of any `data-*` selection attribute is a genuine testability
+gap: it forces every automated proof of CanvasLine selection onto a CSS
+filter, which is brittle and will break on any styling change. A
+`data-line-selected` attribute on the `visible-path` element would fix
+this permanently.
+
+**I am not authorizing it.** §14c froze the production candidate, the
+current defect is correctable in the spec alone, and adding a production
+change to a patch mid-live-run is exactly the scope drift this model
+exists to prevent. It is recorded as a candidate for a later patch — not
+PATCH-117, and not PATCH-118 unless that patch's own characterization
+independently needs it.
+
+### 15g. Certification status of the earlier rows
+
+**None of rows 1, 2, 4, 8–13, 17 or 18 may be certified** from the
+incomplete run, and this is now the second incomplete matrix. The full
+21-row matrix must run **from row 1** after the correction, per §14f. No
+row carries forward from any superseded artifact.
+
+### 15h. Status
+
+**PATCH-117: OPEN · AUTHORIZED · UNCOMMITTED · UNSTAGED.** Not closed.
+Production candidate frozen at 2 files and unchanged by this ruling.
+Phase 2 incomplete.
+
+**Freeform/Map: Stage 2 NOT granted**; neither is PASS; not considered
+until the Drawing matrix passes in full.
+**PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
+**PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
+**PATCH-116: CANCELLED and retired.**
