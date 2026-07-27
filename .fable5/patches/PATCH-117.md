@@ -560,3 +560,156 @@ ESLint findings); Phase 2 is **incomplete** — rows 14–21 did not run.
 **PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
 **PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
 **PATCH-116: CANCELLED and retired.**
+
+---
+
+## 14. §13 post-diagnosis correction ruling (2026-07-27, CTO)
+
+Issued at governance HEAD `3a41634db6c3fe4ebe61bfdd26bb9d67524c6e7a`.
+Candidate verified unchanged: **9** worktree entries, uncommitted,
+unstaged, no production file touched during diagnosis.
+
+### 14a. Classification G — ACCEPTED
+
+**G — live-spec interaction/targeting issue. No production regression.**
+
+The evidence is complete and settles it. On the temporary fixture the
+double-click **did** enter edit mode and the handles **did** render:
+`hit-path` 1, `visible-path` 1, `label-handle` 1, `point-handle` **2**,
+`midpoint-handle` 1 — with `display:inline`, `visibility:visible`,
+`opacity:1`, `pointer-events:auto`, and topmost at their centre points.
+The clip path was **active** throughout, and read-only
+`clipPath: none` neutralization changed nothing relevant.
+
+That last fact is the load-bearing one: it is a controlled substitution
+test, and it independently clears the candidate. **Containment is correct
+and handle editing is intact.**
+
+### 14b. Correction to §13b — my hypothesis was falsified on the fact
+
+§13b predicted the fixture's `points` would be **null**, making
+`point-handle` unrenderable and the selector unsatisfiable. **The fixture's
+`points` is an array, and two `point-handle` circles rendered.** The
+selector was correct; the failure was targeting, not selection.
+
+What did hold: `clip-path` was correctly excluded as the cause (D/E), on
+the stated reasoning that it removes nothing from the DOM and Playwright's
+visibility check does not evaluate it; and C was correctly excluded, since
+the double-click path does reach `onToggleEditMode`. The classification
+landed in the right family — harness, not product — but the mechanism I
+named was wrong, and §13b was explicit that it was a hypothesis requiring
+step 2 to confirm. Step 2 refuted it, which is what that step existed to
+do.
+
+The `line.points` branch at `SimpleLineRenderer.tsx:875-877` remains real
+and is still worth defending against — hence requirement 6 below survives
+into the correction even though this fixture takes the array branch.
+
+### 14c. Spec-only correction — AUTHORIZED
+
+**Exactly one file may change:**
+
+```
+e2e/characterization/drawing-overlay-containment.spec.ts
+```
+
+**No production file may change.** `SimpleLineRenderer.tsx` and
+`DrawingLayout.tsx` are **frozen** for this correction — their current
+candidate hunks are validated and must be preserved byte-for-byte.
+`SimpleLineRenderer.test.tsx` is likewise frozen; its 20 focused tests
+must continue to pass untouched.
+
+The corrected spec must:
+
+1. Target the temporary line by its exact `data-line-id`.
+2. Assert its hit-path count is exactly **1** before interacting.
+3. Single-click, then **verify selection** before proceeding.
+4. Double-click at a point **proven to be inside that exact hit path** —
+   the targeting failure is the root cause, so this step must verify the
+   click coordinate hits the intended element (e.g. via
+   `elementFromPoint` at the chosen coordinate) rather than assume it.
+5. Wait for **edit-mode evidence**, not for a handle. Edit mode is the
+   state transition; handles are its consequence. Waiting on the
+   consequence is what turned a targeting miss into an opaque 30-second
+   timeout.
+6. **Branch handle expectations by fixture shape**, read from the row, not
+   guessed: `points` array ⇒ expect `point-handle` **and**
+   `midpoint-handle`; `points` null/absent ⇒ expect `start-handle`,
+   `control-handle` **and** `end-handle`.
+7. **Never** wait generically for `point-handle` without first reading
+   `points`.
+8. Use no broad or positional selectors — every assertion scoped by
+   `data-line-id` and `data-line-role`.
+9. **Preserve every existing containment and `elementFromPoint`
+   assertion unchanged.** Row 13's chrome sweep is the patch's primary
+   criterion and may not be weakened, narrowed, or made conditional.
+10. Support rerunning the **complete 21-row matrix from row 1**, not
+    resuming at the failure point.
+
+**Do not increase any timeout** unless a specific remaining wait is proven
+necessary, and then only that wait, with the reason reported. The previous
+failure was a masked targeting bug; a longer timeout would have hidden it
+for longer, not fixed it.
+
+### 14d. No governance amendment required
+
+The correction stays inside §4's test allowlist (2 of 3 files used, and
+this changes one that already exists). Production remains at **2 of 3**
+files — `ZoomControls.tsx` still untouched. Nothing in §3, §4, §5, §7 or
+§8 needs amending. An amendment becomes necessary only if a third
+production file, a fourth test file, or a change to `vitest.config.ts` or
+`playwright.config.ts` is proposed.
+
+### 14e. Static validation (bind)
+
+```
+git diff --check
+npx tsc --noEmit
+npx vitest run                                                   # expect 55 files / 605 tests
+npx vitest run components/collabboard/SimpleLineRenderer.test.tsx # expect 20
+npx playwright test --list e2e/characterization/drawing-overlay-containment.spec.ts
+npx eslint <each touched file>                                   # no candidate-introduced findings
+```
+
+Plus a diff-scope proof: `git diff --stat` must show
+`SimpleLineRenderer.tsx` and `DrawingLayout.tsx` **byte-identical to their
+pre-correction candidate state**, and `git status --porcelain | wc -l`
+must remain **9**.
+
+### 14f. Live requirement — full 21-row matrix from row 1
+
+Rows 14–21 alone are **not** sufficient. The earlier run's passing rows
+were observed under a spec that has since changed; re-running only the
+tail would certify rows 1–13 on the strength of a superseded artifact.
+
+All primary rows re-asserted: Apply-layout click · slide-card click ·
+checkbox click · overflow-menu click · `elementFromPoint` chrome sweep ·
+endpoint handle editing · whole-line drag · keyboard editing · zoom
+controls with sidebar closed, open, and after resize · the PATCH-115
+thumbnail and runtime-fullscreen regression check · stored geometry and
+`coord_space` unchanged.
+
+Standing live rules unchanged: `PW_BASE_URL` set; `--no-deps`; no build
+while the dev server is live; probe **both** `/` and `/auth`; full-page
+screenshots; scratch state outside the repo; credentials never printed;
+`.env.local` untouched; real board data restored; **no worktree creation**;
+and `git status --porcelain` count **and full list** reported before and
+after — expect **9** throughout, any delta being a run failure regardless
+of findings.
+
+### 14g. Freeform / Map — Stage 2 still NOT granted
+
+Unchanged. Neither is PASS. If and when the Drawing matrix passes **in
+full**, report fixture availability for Freeform and Map and **stop** —
+the Stage 2 decision is a fresh CTO ruling and may not be assumed,
+inferred, or taken from PATCH-115.
+
+### 14h. Status
+
+**PATCH-117: OPEN · AUTHORIZED · UNCOMMITTED · UNSTAGED.** Not closed.
+Production candidate frozen at 2 files; spec-only correction authorized.
+Phase 2 incomplete until the full 21-row matrix passes.
+
+**PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
+**PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
+**PATCH-116: CANCELLED and retired.**
