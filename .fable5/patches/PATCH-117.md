@@ -1713,3 +1713,170 @@ only**.
 **PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
 **PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
 **PATCH-116: CANCELLED and retired.**
+
+---
+
+## 21. Edit-mode entry-path comparison (2026-07-27, CTO)
+
+Issued at governance HEAD `8bc1e2db90ef2421bd5d1c0b4a87a28745f1bd76`.
+Candidate verified: **9** dirty paths, uncommitted, unstaged, frozen
+hashes unchanged.
+
+### 21a. §20b is REFUTED — recorded plainly
+
+The measured working state shows `--drawing-visible-canvas-right-inset:
+320px`, resolved `clip-path: inset(0px 320px 0px 0px)` on a 1600×1000
+layer with the sidebar open at left 1280 — a **correct** boundary, with
+the point handle topmost, hit path second, canvas third. No full-width
+clip. No stale inset while closed.
+
+**The §20b hypothesis was wrong.** It was labelled a hypothesis and the
+§20c one-read step was designed to kill it cheaply, which it did. The
+§17/§18 clearance of containment stands after all; §20e's withdrawal of it
+is itself withdrawn, with one qualification retained: the §20e standing
+rule — *an isolated control that never enters the state under test proves
+nothing about that state* — remains correct and remains recorded. It is
+now satisfied, because containment has been observed **engaged** (320 px,
+sidebar open) and handles were still topmost.
+
+**Classification: J — still unresolved.** Row 5's original failure has no
+established mechanism, and I will not supply a third hypothesis to replace
+two that were falsified. What source can now contribute is a set of
+**proven non-equivalences** between the two entry paths, which is what the
+comparison must test.
+
+### 21b. Double-click IS an intended supported product path — bound
+
+Not a test-only affordance:
+
+```
+SimpleLineRenderer.tsx:759   onDoubleClick={(e) => handlePathDoubleClick(e, line.id)}
+SimpleLineRenderer.tsx:609   handlePathDoubleClick → onToggleEditMode(lineId)
+useCanvasLines.ts:125-127    handleToggleLineEditMode = (id) => setLineEditModeId(id)
+```
+
+It is product code writing product state. **If double-click fails, that is
+a product defect and may not be silently replaced by the toolbar
+interaction.** A spec substitution is authorized only if the comparison
+proves the *matrix's* event synthesis — not double-click itself — is the
+problem.
+
+### 21c. The two paths are NOT equivalent — three proven differences
+
+This is the requested binding of exact state variables. Both paths
+ultimately write the single state `lineEditModeId`, but they differ in
+three ways that are visible in source:
+
+**1. Path A is a setter; Path B is a toggle.** Despite its name,
+`handleToggleLineEditMode` (`useCanvasLines.ts:125-127`) is
+`setLineEditModeId(id)` — it **always enters** edit mode for that id and
+can never exit. Path B (`CanvasClient.tsx:7360`) is a genuine toggle:
+`setLineEditModeId(lineEditModeId === selectedLineId ? null : selectedLineId)`.
+So repeated double-clicks cannot toggle edit mode off, while repeated
+Edit-Points clicks can. **Any assumption in the matrix that double-click
+toggles is wrong.**
+
+**2. Path B keys off `selectedLineId`; Path A keys off the double-clicked
+line's own id.** If selection and the double-click target ever disagree,
+the two paths set different values. Path B cannot even run without a
+selection — the toolbar renders only when `selectedLineId` is set
+(`:7356`).
+
+**3. Path A necessarily runs the mousedown drag branch first; Path B never
+touches drag state.** A real double-click fires `mousedown` before
+`dblclick`, so `handleLineDragStart` executes: `e.preventDefault()`,
+`e.stopPropagation()` (`:370-371`), `setDraggingLine({ lineId })` and
+`onSelectLine(lineId)` (`:379-380`) — and `onDragChange` propagates to
+`setDraggingLineId`. **Path A therefore enters edit mode with drag state
+engaged; Path B does not.** If a `mouseup` is missing, swallowed, or
+delivered elsewhere, Path A can leave `draggingLine` latched while Path B
+never can. This is the most substantive difference and the comparison must
+measure it explicitly: **record `draggingLineId` at every step of both
+paths.**
+
+**4. Context worth carrying into the diff:** `isEditMode` is passed as a
+**global** boolean — `isEditMode={lineEditModeId !== null}`
+(`CanvasClient.tsx:6332`, and the same shape at the front-layer and Map
+call sites). Edit mode on *any* line puts every renderer instance in edit
+mode; handles are then gated per line by `isEditMode && isSelected`
+(`SimpleLineRenderer.tsx:874`). So "edit mode active" is not by itself
+evidence that the **intended** line is the one in edit mode.
+
+### 21d. Authorized: diagnosis only, comparing Path A and Path B
+
+No spec correction, no production correction. One disposable Drawing
+fixture. Both paths start from an identical recorded initial state:
+sidebar open, exact temporary line selected, line mode recorded,
+front/back layer recorded, no modal, same geometry.
+
+**Path A must reproduce the matrix exactly.** Read the current spec and
+replay its **actual** sequence and event method — no shortened
+approximation unless every preceding state and action is proven identical.
+Record click count, inter-click timing, both coordinates, raw event
+targets, the `dblclick` target, and every emitted diagnostic.
+
+**Both paths record, after every transition:** `selectedLineId`;
+`lineEditModeId`/edit mode; line mode; **`draggingLineId`**; front/back
+layer; sidebar and modal state; line-layer DOM identity and count;
+line-layer computed `z-index`, `pointer-events`, `clip-path` (resolved
+pixels) and the inset variable; SVG and canvas rects; handle counts by
+role; the selected-filter signal; and — where handles exist — the full
+`elementsFromPoint` stack and a real drag result.
+
+**Then produce the field-by-field diff** and answer explicitly whether
+Path A: never activates edit mode · activates then resets · activates on a
+different line · leaves line mode active · leaves **drag state latched** ·
+remounts a different line layer · produces handles under a different SVG
+layer · changes sidebar/boundary state · changes front/back layer ·
+loses selection · is intercepted · or depends on double-click timing.
+
+**Bounded timing variants**, only if the exact matrix double-click fails,
+and only these four: native `locator.dblclick` at the same verified
+coordinate; two normal clicks at the current matrix delay; two normal
+clicks with no delay; explicit mousedown/up pairs. **No `force: true`. Do
+not exceed the §16c 2000 ms bounds. Do not rerun the full matrix.**
+
+Read-only throughout; no substitution left active; real Arrow Post
+untouched; `git status --porcelain` count **and full list** before and
+after, expecting **9**.
+
+### 21e. Correction scope — decided in advance
+
+- **Toolbar works, double-click does not, and the failure survives all
+  four timing variants** ⇒ **product defect**. Determine pre-existing vs
+  candidate-introduced by testing the same double-click with the
+  candidate's `clipPath` neutralized **and** by reasoning against the
+  frozen production diff. Return for a production ruling. **Do not
+  substitute the toolbar path in the spec.**
+- **Double-click works under a different event method than the matrix
+  uses** ⇒ the matrix's synthesis is not equivalent to real user input.
+  **Spec-only correction authorized** to use the equivalent real
+  interaction. Direct state mutation remains prohibited; §17c may not be
+  weakened.
+- **Both paths work in isolation and only the matrix prefix fails** ⇒
+  sequence/state defect; bisect and correct the spec sequence only.
+- **Both fail** ⇒ broader edit-mode defect; stop and report.
+
+**No governance amendment is required** on any of these paths. Production
+stays at **2 of 3**; the test allowlist stays at **2 of 3**. An amendment
+becomes necessary only if a production correction needs a third file, or
+if a new acceptance row is added.
+
+### 21f. Certification and process note
+
+**No row is certified.** This is the fifth incomplete matrix and the
+third falsified mechanism (§13b `points`, §17b bridge-overlay, §20b
+full-width clip). Each was correctly labelled a hypothesis and each was
+killed by a cheap targeted step rather than by an expensive full run —
+that is the process working, not failing. It is nonetheless the reason
+this section supplies **proven non-equivalences** to measure rather than a
+fourth mechanism to believe.
+
+### 21g. Status
+
+**PATCH-117: OPEN · AUTHORIZED · UNCOMMITTED · UNSTAGED.** Not closed. No
+correction authorized by this section — **diagnosis only**.
+**Freeform/Map: Stage 2 NOT granted**; neither is PASS.
+**PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
+**PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
+**PATCH-116: CANCELLED and retired.**
