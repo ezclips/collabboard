@@ -1880,3 +1880,150 @@ correction authorized by this section — **diagnosis only**.
 **PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
 **PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
 **PATCH-116: CANCELLED and retired.**
+
+---
+
+## 22. Hit-path coordinate-selection correction (2026-07-28, CTO)
+
+Issued at governance HEAD `4884ca7d9948e287e60e022ff09793021e6fe1fa`.
+Candidate verified: **9** dirty paths, uncommitted, unstaged, frozen
+production and unit-test hashes unchanged.
+
+### 22a. Classification I — ACCEPTED
+
+`verifiedHitPathPoint` returned `(706, 280)` at nominal ratio **0.5**,
+where `document.elementFromPoint` resolves to
+`DIV[data-line-role="label-handle"]` rather than the hit path. Every
+double-click variant — `page.mouse.dblclick`, `locator.dblclick`, two
+clicks at the matrix delay, two with no delay, explicit down/up pairs —
+therefore delivered to the label, and `handlePathDoubleClick` never ran.
+Path B via the real Edit Points control worked from an identical initial
+state, with containment engaged (`inset(0px 320px 0px 0px)`, inset 320 px,
+z-index 1000) and the endpoint drag moving `(1160,300) → (1136,312)`
+without translating the line.
+
+**This is a harness coordinate-selection defect.** Not a PATCH-117
+regression, not clipping, not stacking, not a stale boundary, and not
+evidence that product double-click is unsupported.
+
+### 22b. Why ratio 0.5 was the one coordinate guaranteed to fail
+
+The label is centred on `line.label_position ?? 0.5`
+(`SimpleLineRenderer.tsx:823-824`), and its inner div sets
+`pointerEvents: 'auto'` with `data-line-role="label-handle"` (`:852`,
+`:861`). **A labelled line's midpoint is exactly where the label is, by
+construction.** Sampling at 0.5 does not merely risk the label — on a
+labelled line it selects it deterministically.
+
+**Correction to §17b, on the record.** I wrote there that the label
+`foreignObject` "is not the blocker" because it and its wrapper are
+`pointer-events: none`. Both statements remain true, and the conclusion
+drawn from them — that the label could not be returned by
+`elementFromPoint` — was **wrong**: the inner label div re-enables
+`pointer-events: auto` and is exactly what was returned. I named `:852` in
+that same section and did not follow it through. That is the fourth
+falsified inference in this patch, and the reason §21 stopped supplying
+mechanisms in favour of measurable non-equivalences.
+
+### 22c. Spec-only correction — AUTHORIZED
+
+**Exactly one file may change:**
+
+```
+e2e/characterization/drawing-overlay-containment.spec.ts
+```
+
+**No production or unit-test file may change.** `SimpleLineRenderer.tsx`,
+`DrawingLayout.tsx` and `SimpleLineRenderer.test.tsx` stay **frozen
+byte-for-byte**; production remains **2 of 3**.
+
+**"Same line-owned element" matching is PROHIBITED for
+`verifiedHitPathPoint`.** The helper must return only a coordinate where
+`document.elementFromPoint` resolves to an element satisfying **all
+three**: it is the hit path; `data-line-id` equals the temporary line id;
+and `data-line-role` equals exactly `hit-path`. Ancestor resolution must
+**not** be used here.
+
+This is deliberately stricter than §17c's ownership rule, and the
+distinction must be preserved in both directions:
+
+- **§17c ancestor resolution applies to rows 5/14 handle ownership**,
+  where the question is *"is this interaction reaching the right line?"*
+- **`verifiedHitPathPoint` requires exact-node identity**, because the
+  question is *"will a double-click here reach `handlePathDoubleClick`?"*
+  — and only the hit path carries that handler. An ancestor match answers
+  the wrong question, which is precisely how a label coordinate passed
+  validation.
+
+The helper must **reject** as a target: `label-handle`, `point-handle`,
+`midpoint-handle`, `visible-path`, any arrowhead or marker element, **any
+descendant or sibling sharing the same `data-line-id` under a different
+role**, the Excalidraw canvas, and any chrome element.
+
+Coordinate search must:
+
+1. sample multiple points along the exact hit-path geometry;
+2. verify **every** candidate with `elementFromPoint` before use;
+3. return only an exact `hit-path` match;
+4. on finding none, fail with a **diagnostic payload** — never a bare
+   assertion, per §19;
+5. report every sampled coordinate and the role returned at each;
+6. stay within §16c bounds — **no timeout increase**;
+7. use no `force: true`;
+8. leave **row 13 unchanged** — strict negative chrome sweep, no ancestor
+   resolution;
+9. preserve the §19 handle diagnostics in full;
+10. support running the complete 21-row matrix from row 1.
+
+**Recommended, not mandated:** bias sampling away from a band around
+`label_position` and away from the path extremities where arrowheads and
+endpoint handles sit. Verification is the requirement; sampling order is
+an efficiency choice.
+
+**No toolbar substitution for row 5.** Row 5 must exercise the intended
+double-click product path on a real hit-path coordinate. `Path B` was a
+diagnostic control, not an acceptance route.
+
+### 22d. No governance amendment required
+
+§17c and §18 already bind the acceptance criteria; this corrects the
+spec's target selection. Production stays **2 of 3**, the test allowlist
+**2 of 3**, and the correction edits an existing file. Nothing in §3, §4,
+§5, §7 or §8 changes.
+
+### 22e. Post-correction requirements
+
+**Static:**
+
+```
+git diff --check
+npx tsc --noEmit
+npx vitest run                                                    # 55 files / 605 tests
+npx vitest run components/collabboard/SimpleLineRenderer.test.tsx  # 20
+npx playwright test --list e2e/characterization/drawing-overlay-containment.spec.ts
+npx eslint e2e/characterization/drawing-overlay-containment.spec.ts
+```
+
+Scope proof: the three frozen files **byte-identical**;
+`git status --porcelain | wc -l` remains **9**.
+
+**Live: the complete 21-row Drawing matrix from row 1.** No evidence
+carries forward from any of the five incomplete runs. `PW_BASE_URL` set;
+`--no-deps`; no build while the dev server is live; probe **both** `/` and
+`/auth`; full-page screenshots; scratch outside the repo; credentials
+never printed; `.env.local` untouched; real board data restored; **no
+worktree or second checkout**; §16c bounds unchanged; status count **and
+full list** before and after, expecting **9** — any delta is a run failure
+regardless of findings.
+
+**If every Drawing row passes:** report Freeform and Map fixture
+availability and **stop**. Stage 2 remains **NOT granted**; neither layout
+is PASS; the decision is a fresh CTO ruling and is never inherited from
+PATCH-115. **Do not commit.**
+
+### 22f. Status
+
+**PATCH-117: OPEN · AUTHORIZED · UNCOMMITTED · UNSTAGED.** Not closed.
+**PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
+**PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
+**PATCH-116: CANCELLED and retired.**
