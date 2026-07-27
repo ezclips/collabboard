@@ -1388,3 +1388,163 @@ candidate not to be committed.
 **PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
 **PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
 **PATCH-116: CANCELLED and retired.**
+
+---
+
+## 19. Row 5 ownership failure and the missing diagnostic payload (2026-07-27, CTO)
+
+Issued at governance HEAD `4b5bc5a2ea2b2b47f56d7fdde732fb78acccb0d6`.
+Candidate verified: **9** dirty paths, uncommitted, unstaged, production
+and unit-test hashes unchanged.
+
+### 19a. Classification: **I — unresolved.** Deliberately.
+
+A–H cannot be distinguished, exactly as the report states, because the
+payload that would distinguish them was never emitted. **I will not guess
+among them.** §13b is the precedent: a confident source-derived mechanism
+was asserted there and falsified. The cost of a wrong classification here
+is another full cycle; the cost of `I` is one honest run.
+
+What source *does* narrow, without deciding: the probe coordinate is
+computed from `getBoundingClientRect()` **inside the same `evaluate`
+callback that performs `elementFromPoint`**
+(`drawing-overlay-containment.spec.ts:482-486`). So the coordinate cannot
+drift between measurement and probe within that call, which makes a naive
+reading of **C** unlikely. The genuine exposure is **between** the two
+separate `evaluate` round-trips (`:477` and `:481`) — the handle can
+re-render or detach in that gap, which is **B/F** territory. That is a
+narrowing, not a classification.
+
+### 19b. The spec defects — four, all source-proven
+
+**1. Bare assertion before any payload — `:476`.**
+
+```
+async function handleInteractionProof(page, handle, lineId) {
+  await expect(handle).toBeVisible();          // ← aborts with no payload
+```
+
+Directly violates §18's requirement that no bare `expect()` precede the
+diagnostic object for rows 5/14.
+
+**2. Second bare assertion — `:567.**
+`expect(proof.pointerEvents).not.toBe('none')` fires before `fullProof`
+is assembled at `:568-572`.
+
+**3. The payload is built but never attached — `:573-576`.** This is the
+actual failure site. `fullProof` *exists* and contains the stack,
+ancestors, chrome classification and z-index threshold — and then
+`expect(fullProof.resolvedLineId).toBe(lineId)` throws an error whose
+message carries only *expected* and *received*. **The evidence was
+collected and then discarded at the moment it was needed.** §18 required
+it to be included in the thrown error; assembling it into a local variable
+is not that.
+
+**4. `rereadBeforeProbe: true as const` (`:571`) is a fabricated field.**
+§18b required recording **whether** the rect was re-read immediately
+before the probe. This records a hardcoded literal that will report `true`
+in every run regardless of what happened. It is not a measurement, and it
+cannot ever fail.
+
+This is the "asserted, not measured" failure family already recorded
+repeatedly in `LESSONS_LEARNED` — the same shape as gates whose counts
+were composed from belief rather than executed. **Standing rule,
+reaffirmed:** *a field that records a fact must be derived from that
+fact.* A constant in an evidence payload is worse than an absent field,
+because it looks like confirmation.
+
+**Consequence:** `firstRect` is captured at `:477-480` and then **never
+compared** to the rect the probe actually used. Both values exist; the
+comparison that would detect rect instability — classifications **A** and
+**C** — was never performed.
+
+### 19c. Ruling: ONE merged spec-only correction, not two runs
+
+The prompt proposes diagnosis-only first, then a separate failure-path
+correction. **I am merging them, and the reason is substantive rather than
+procedural.**
+
+The diagnosis requires exactly the instrumentation the correction
+installs: collect every value, then assert. Running a read-only diagnosis
+first would mean writing that instrumentation, using it once, discarding
+it, and then writing it again as the correction — two live cycles for
+information one produces. The correction is required on every path
+anyway, since §18 mandated the payload and the spec does not deliver it.
+
+**Authorized now: a single spec-only correction, followed by one run of
+the full matrix.** If row 5 fails again, it fails *with* the payload, and
+the A–I classification is then decidable from that one run.
+
+### 19d. Authorized scope — spec-only
+
+**Exactly one file may change:**
+
+```
+e2e/characterization/drawing-overlay-containment.spec.ts
+```
+
+**No production change is authorized.** `SimpleLineRenderer.tsx`,
+`DrawingLayout.tsx` and `SimpleLineRenderer.test.tsx` remain **frozen
+byte-for-byte**; production stays at **2 of 3**. No governance amendment
+is required — §17c/§18 already bind the criterion, and this corrects the
+spec's failure to implement it.
+
+The correction must:
+
+1. **Remove every bare assertion from `handleInteractionProof` before the
+   payload exists** — including `:476` and `:567`. Visibility and
+   `pointer-events` become **recorded fields**, evaluated after collection.
+2. **Assemble the full §18 payload first, then assert.** Every throw must
+   carry it — via `expect(...,` message `)`, `test.info().attach()`, or an
+   explicit `throw new Error(JSON.stringify(payload, null, 2))`. A bare
+   `expect(a).toBe(b)` in this helper is prohibited.
+3. **Replace `rereadBeforeProbe: true as const` with a measurement:**
+   re-read the rect immediately before probing and record **both** rects
+   plus their delta. Assert nothing about the delta yet — record it.
+4. **Record locator stability across the edit-mode rerender:** locator
+   count, attachment status before and after rect sampling, tag,
+   `data-line-role`, `data-line-id`, and a stable `outerHTML` fingerprint
+   at both samples. If identity changes between samples, the payload must
+   say so.
+5. **Probe five points** at the re-read rect — centre, ±2 px horizontal,
+   ±2 px vertical — collecting the complete stack and ownership resolution
+   **for each**. Record which points resolve.
+6. **On ownership failure at all five points**, attempt a normal
+   pointerdown/drag on the locator (**no `force: true`**) and record
+   whether geometry changed, before failing.
+7. Preserve §16c bounded waits — **no timeout increase**.
+8. **Row 13 unchanged** — strict negative chrome sweep, no ancestor
+   resolution.
+9. Preserve every other containment assertion unchanged.
+
+### 19e. Interpretation, decided in advance
+
+From the payload the next run produces:
+
+- One sampled point resolves but the centre does not ⇒ **coordinate
+  instability / spec issue**; spec-only correction.
+- Handle detached or fingerprint changed between samples ⇒ **B/F**; spec
+  must re-locate after edit-mode settling; spec-only.
+- Drag succeeds despite ownership `null` ⇒ **D**; the ownership probe is
+  still wrong; spec-only.
+- Unrelated fixed chrome above the line-owned target ⇒ name the exact
+  blocker and **stop**.
+- Drag succeeds only with `clipPath: none` ⇒ **H(candidate regression)**;
+  **stop**, production ruling required; do not weaken containment or
+  row 13.
+- No drag and no line-owned stack entry ⇒ **unresolved/product**; stop.
+
+### 19f. Certification
+
+**No row certified.** This is the fourth incomplete matrix. Rows 1–4 and
+6–13 were exercised but are not certified — they ran under a helper now
+being corrected. Full 21 rows **from row 1**.
+
+### 19g. Status
+
+**PATCH-117: OPEN · AUTHORIZED · UNCOMMITTED · UNSTAGED.** Not closed.
+Production frozen at 2 files; no production change authorized.
+**Freeform/Map: Stage 2 NOT granted**; neither is PASS.
+**PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
+**PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
+**PATCH-116: CANCELLED and retired.**
