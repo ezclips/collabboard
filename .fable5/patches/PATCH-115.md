@@ -2441,3 +2441,110 @@ bound above; implementation NOT authorized.**
 acceptance FAILED/REOPENED, closure review CANCELLED, commit NOT
 AUTHORIZED. §16's Freeform and Map **NOT EXECUTABLE** rulings and the §16d
 residual risk carry into closure verbatim.
+
+---
+
+## 24. Durability commit — PATCH-115 landed but NOT closed (2026-07-27, CTO)
+
+Issued at governance HEAD `3769ff7d3ba239538f59114a880f9251be3004b9`.
+Approves the §23b recommendation.
+
+### 24a. What this commit is, and what it is not
+
+**Implementation commit: `215ea811869360f4f689745c84ece0abefe73110`**, pushed
+to `origin/main`.
+
+This is a **durability landing**, taken because the candidate had survived
+two destructive working-tree incidents and its four untracked files had
+**no git recovery path**. It is explicitly **not**:
+
+- closure of PATCH-115;
+- user-visible acceptance;
+- confirmation that the presentation defects are fixed;
+- authorization to skip PATCH-117 or PATCH-118;
+- authorization for release.
+
+**PATCH-115 remains OPEN and BLOCKED.** Closure requires PATCH-117 and
+PATCH-118 to land plus full workflow re-verification across all six
+acceptance dimensions (§21g): presence · containment · completeness ·
+interaction safety · layout stability · persistence after reload.
+
+The distinction that makes this safe: **committing is not the signal to
+the user; closure is.** The §20a rule — that a patch may not close while
+the object it renders is visibly broken — is preserved intact. Nothing in
+this commit tells anyone the feature works.
+
+### 24b. Staging verification (executed, not asserted)
+
+`git diff --cached --name-only` immediately before commit returned
+**exactly 11 paths** — the §6/§13/§14 allowlist, complete and with nothing
+extra:
+
+```
+app/dashboard/canvas/[id]/CanvasClient.tsx
+components/collabboard/canvas/layouts/DrawingLayout.tsx
+components/presentation/FullscreenPresentation.tsx
+components/presentation/runtime-slide/RuntimeSlideRenderer.tsx
+components/presentation/slide-renderer/createSlideRenderer.tsx
+components/presentation/slide-renderer/getSlideRenderSignature.ts
+components/presentation/slide-renderer/planSlideComposition.ts
+components/presentation/slide-renderer/renderCanvasLinePrimitive.tsx
+components/presentation/slide-renderer/types.ts
+lib/infra/drawing/canvasLineSlideMembership.test.ts
+lib/infra/drawing/canvasLineSlideMembership.ts
+```
+
+10 production (cap reached) + 1 test (4 slots unused).
+
+**Protected paths verified unstaged before commit and still dirty after**
+— `.gitignore`, the three `app/api/ai/**` routes, and the untracked
+`scripts/live-access-login.mjs`. Post-commit `git status --porcelain`
+returns exactly those 5 entries; `git diff --cached --name-only` is empty.
+
+Pre-commit validation, re-run by the CTO: `npx tsc --noEmit` clean ·
+`npx vitest run` **55 files / 592 tests passed** · `git diff --cached
+--check` pass.
+
+Commit message used verbatim as bound. The commit was **pushed** so the
+durability it exists to provide survives loss of the working machine, not
+only of the working tree.
+
+### 24c. What is now durable — and what it does not settle
+
+Landed: CanvasLine membership, projection, the shared render payload, the
+six-band z-order, the thumbnail signature extension, the runtime
+composition path, both §14e memo requirements, and the §17 corrections.
+Source-verified, test-verified (592 tests), and chain-verified through a
+regenerated PNG (§21c: 7550 → 51518 encoded length).
+
+Not settled, and unchanged by this commit: Defect 1 (editor line paints
+over and **intercepts clicks on** the sidebar and modal), Defect 2
+(thumbnails that read as blank), Defect 3 (layout apply strands
+CanvasLines and `frameId`-less objects). All three are pre-existing, none
+is candidate-introduced, all three still block closure.
+
+**Sequencing benefit realized:** `DrawingLayout.tsx` is now clean, so
+PATCH-117 starts from a clean tree and the §23c disjoint-line-region
+constraint and per-patch line census are **no longer required**. Every
+hunk PATCH-117 produces is unambiguously its own.
+
+### 24d. Status
+
+**PATCH-115: OPEN · BLOCKED · IMPLEMENTATION LANDED (`215ea81`) · NOT
+CLOSED.** No governance closure commit exists and none is authorized.
+Live acceptance remains FAILED/REOPENED; the focused closure re-review
+remains CANCELLED. §16's Freeform and Map **NOT EXECUTABLE** rulings and
+the §16d residual risk carry into closure verbatim when it eventually
+occurs.
+
+**PATCH-117: authoring authorized; implementation NOT authorized.**
+Implementation begins only when `.fable5/patches/PATCH-117.md` exists with
+a bound base commit, bound allowlist, bound test matrix, an explicit
+Freeform/Map ruling (the PATCH-115 exemption does **not** carry forward —
+`SimpleLineRenderer.tsx` is a shared renderer used by every layout), and a
+committed authorization.
+
+**PATCH-118: RESERVED, NOT AUTHORIZED.** Must open with a characterization
+phase per §21d.
+
+**PATCH-116: CANCELLED and retired.** Number never reused.
