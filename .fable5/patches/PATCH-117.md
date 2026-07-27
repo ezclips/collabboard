@@ -1548,3 +1548,168 @@ Production frozen at 2 files; no production change authorized.
 **PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
 **PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
 **PATCH-116: CANCELLED and retired.**
+
+---
+
+## 20. State-dependent row-5 handle hit-testing failure (2026-07-27, CTO)
+
+Issued at governance HEAD `c62f714464a904ac59cc3bb374d49c17c57043bd`.
+Candidate verified: **9** dirty paths, uncommitted, unstaged, frozen
+hashes unchanged. The §19 payload correction worked — this section exists
+because the evidence finally arrived.
+
+### 20a. What this section can and cannot return
+
+The isolated/full-prefix control results, the first offending transition,
+the shortest reproducing sequence, the passing-vs-failing DOM comparison,
+and the substitution outcomes are **outputs of a diagnosis that has not
+run**. They are not stated here. What is stated is a source-proven
+mechanism that predicts all of them, and a first diagnostic step that
+confirms or refutes it in a single read.
+
+### 20b. Leading classification: **E**, materializing as **H**.
+Hypothesis — one read decides it.
+
+The payload's decisive fact is not that the canvas was topmost. It is that
+`elementsFromPoint` contained **no line-owned SVG node at all** — not the
+handle, not the hit path, nothing — while the handle's own
+`getBoundingClientRect()` reported a normal `12×12` box at `(434, 294)`
+with `pointer-events: auto`, `opacity: 1`, and a stable fingerprint. The
+element is laid out and styled to be interactive, and is simply absent
+from hit-testing.
+
+**That is the signature of `clip-path`, and `clip-path` is
+candidate-introduced.** It removes hit-testing without altering layout
+geometry, without altering computed `pointer-events`, and — as recorded in
+§13b — **without affecting Playwright's visibility check**. Every anomaly
+in the payload is explained by one clip.
+
+**The mechanism, from source.** The candidate applies
+`clipPath: inset(0 var(--drawing-visible-canvas-right-inset, 0px) 0 0)`
+to the line-layer SVG. The variable is written on the viewport element in
+`updatePosition` (`DrawingLayout.tsx:856-892`):
+
+```
+const sidebarRect = presentationSidebarRef.current?.getBoundingClientRect() ?? null;
+const visibleCanvasRight = sidebarRect
+  ? Math.min(Math.max(sidebarRect.left, viewportRect?.left ?? 0), viewportRight)
+  : null;
+const nextVisibleCanvasRightInsetPx =
+  visibleCanvasRight === null ? null : Math.max(0, viewportRight - visibleCanvasRight);
+```
+
+Two independent defects follow, both reachable by the row 1→5 sequence:
+
+**Defect 1 — a degenerate sidebar rect produces a full-width clip.** If
+the sidebar element exists but its rect is zeroed — mid-mount, mid-unmount,
+or `display:none`-adjacent — then `sidebarRect.left` is `0`,
+`Math.max(0, viewportLeft)` is `0`, and the inset becomes
+`viewportRight − 0` = **the entire viewport width**. The clip collapses to
+zero and **the whole line layer stops hit-testing**. A handle at `x = 434`
+is then unreachable, which is precisely what the payload shows. Nothing in
+the expression rejects a zero-width or zero-position sidebar rect.
+
+**Defect 2 — the variable is persistent inline style and the updater has
+two early returns that skip clearing it.** `updatePosition` returns at
+`:859-862` if the Excalidraw stock toolbar or the cluster element is
+missing, and again at `:867-870` if either has zero width — **before**
+reaching the variable write. The property is an inline style on
+`viewportEl`, so it **retains its previous value** across those returns.
+The stock toolbar is exactly what re-renders when the active tool changes
+— which is **row 4, line mode on/off**. So a sidebar-open inset can
+survive into a sidebar-closed state, and there is no path that clears it
+except a complete, unguarded run.
+
+**Why §17's isolated diagnosis passed and gave a false all-clear.** In
+that run the sidebar was never opened, so the variable was absent, the
+clip resolved to `inset(0 0px 0 0)` — a no-op — and `clipPath: none`
+therefore "made no difference". **That comparison could not have detected
+this defect**, and §17c/§18's conclusion that "containment does not impair
+handle interaction" must be read as scoped to a state where the variable
+was never set. It is not a general clearance, and this section withdraws
+any reading of it as one.
+
+**If confirmed, this is H — a genuine PATCH-117 production regression** —
+arrived at through the **E** pathway (clip/CSS-variable state changing
+after earlier rows). It is not a matrix artifact: a real user who opens
+the presentation panel, switches tools, and closes the panel can land in
+the same state and lose all line interaction. **A, B, C, D, F, G and I are
+not excluded**, but none of them explains a layer that is laid out,
+pointer-enabled, and wholly absent from the hit-test stack.
+
+### 20c. First diagnostic step — one read decides it (bind)
+
+**Before any control sequence**, in the failing state, record:
+
+1. the computed value of `--drawing-visible-canvas-right-inset` on the
+   viewport element;
+2. the **resolved** computed `clip-path` on the line-layer SVG (the
+   substituted pixel value, not the `var()` text);
+3. the SVG's bounding rect and the viewport's bounding rect;
+4. `presentationSidebarRef`'s element presence and its rect;
+5. whether the sidebar is open at that moment.
+
+If the inset is large — approaching or exceeding the viewport width — or
+non-zero while the sidebar is closed, **§20b is confirmed and controls 1–3
+are unnecessary.** Report and stop.
+
+Only if the inset is `0px` or absent do the requested controls apply:
+Control 1 (isolated edit mode), Control 2 (full prefix with per-transition
+capture), Control 3 (one state at a time), sequence bisection, and the
+three read-only substitutions. In that case §20b is refuted and the
+classification returns to A/B/C/D/F/G/I on the evidence.
+
+Standing constraints: read-only DOM styling only; substitutions must not
+be left active; no source or spec edits; no `force: true`; **do not rerun
+the full 21-row matrix**; one disposable fixture; real Arrow Post
+untouched; `git status --porcelain` count **and full list** before and
+after, expecting **9**.
+
+### 20d. Correction scope — decided in advance
+
+- **§20b confirmed (E/H):** a **narrow production correction inside the
+  existing two files is authorized**, no third file, no new dependency.
+  The correction must (i) treat a degenerate sidebar rect — zero width, or
+  a `left` at or left of the viewport's left edge — as **no boundary**,
+  not as a full-width inset; (ii) guarantee the variable is **cleared**
+  whenever no valid boundary exists, on a path that the toolbar/cluster
+  early returns cannot skip; and (iii) preserve row 13, sidebar
+  interaction safety, front/back layers, and line/edit modes. **The clip
+  must fail open** — an unresolvable boundary must mean *no clipping*,
+  never *clip everything*. Containment is a safety feature and must not be
+  able to disable the editor.
+- **§20b refuted, product-side cause:** prove it against the isolated
+  baseline and source, then decide whether it blocks acceptance.
+  **Row 5 may not be silently exempted** under any classification.
+- **Invalid state created by the spec:** authorize a **sequence-only**
+  spec correction. The handle interaction criterion (§17c) **may not be
+  weakened**.
+
+**A governance amendment IS required only on the first path** — §5 rows
+would need a new sub-row asserting the boundary clears correctly after the
+sidebar closes, and §4's test allowlist has one free slot for a unit test
+covering degenerate-rect input. That amendment is **not issued now**; it
+follows the diagnosis. No allowlist or cap change is needed either way:
+production stays at **2 of 3**.
+
+### 20e. Certification
+
+**No row is certified.** Fifth incomplete matrix. Rows 1–4 and 6–13 were
+exercised under a helper and a criterion that have both since changed.
+
+**Standing rule (record in LESSONS_LEARNED):** *an isolated control that
+never enters the state under test proves nothing about that state.* §17's
+`clipPath: none` comparison returned "no difference" because the clip was
+already a no-op — a negative result from an inactive mechanism was read as
+evidence the mechanism was harmless. A containment control must be run in
+the state where containment is actually engaged.
+
+### 20f. Status
+
+**PATCH-117: OPEN · AUTHORIZED · UNCOMMITTED · UNSTAGED.** Not closed. No
+production or spec correction is authorized by this section — **diagnosis
+only**.
+**Freeform/Map: Stage 2 NOT granted**; neither is PASS.
+**PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
+**PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
+**PATCH-116: CANCELLED and retired.**
