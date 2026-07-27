@@ -2,6 +2,9 @@
 
 import type { FrameSlide } from "@/components/presentation/PresentationPanel";
 import type { Padlet } from "@/types/collabboard";
+import type { CanvasLine } from "@/types/collabboard";
+import { resolveCanvasLineSlideMemberships } from "@/lib/infra/drawing/canvasLineSlideMembership";
+import { buildCanvasLineRenderPayload } from "./renderCanvasLinePrimitive";
 import { resolveSlidePadlets } from "./resolveSlidePadlets";
 import type { SlideCompositionPlan } from "./types";
 
@@ -18,6 +21,7 @@ export function planSlideComposition(
   slideFrame: FrameSlide,
   sceneElements: readonly any[],
   availablePadlets: Padlet[],
+  canvasLines: readonly CanvasLine[] = [],
 ): SlideCompositionPlan {
   const activeElements = sceneElements.filter((element) => !element?.isDeleted);
   const frameElement = activeElements.find((element) => element.id === slideFrame.id) ?? null;
@@ -26,12 +30,46 @@ export function planSlideComposition(
   const activeIndexById = new Map(
     activeElements.map((element, activeIndex) => [element?.id, activeIndex]),
   );
+  const frames = activeElements
+    .filter((element: any) => element.type === "frame" && !element.isDeleted)
+    .map((element: any) => ({
+      id: String(element.id),
+      x: Number(element.x) || 0,
+      y: Number(element.y) || 0,
+      width: Number(element.width) || 0,
+      height: Number(element.height) || 0,
+    }));
+  const canvasLinePayloads = resolveCanvasLineSlideMemberships(
+    canvasLines.filter((line) => !(line as { isDeleted?: boolean }).isDeleted),
+    frames,
+    (diagnostic) => {
+      if (process.env.NODE_ENV !== "production") {
+        console.debug("[canvas-line-slide-membership]", diagnostic);
+      }
+    },
+  )
+    .filter((entry) => entry.frameId === slideFrame.id)
+    .map((entry) => {
+      const payload = buildCanvasLineRenderPayload(entry.line, slideFrame);
+      return payload ? { payload, sourceIndex: entry.sourceIndex } : null;
+    })
+    .filter((entry): entry is { payload: NonNullable<ReturnType<typeof buildCanvasLineRenderPayload>>; sourceIndex: number } => entry !== null)
+    .sort((a, b) => {
+      const zDiff = a.payload.zIndex - b.payload.zIndex;
+      if (zDiff !== 0) return zDiff;
+      return a.sourceIndex - b.sourceIndex;
+    })
+    .map((entry) => entry.payload);
+  const backCanvasLinePayloads = canvasLinePayloads.filter((payload) => payload.layerPlane === "back");
+  const frontCanvasLinePayloads = canvasLinePayloads.filter((payload) => payload.layerPlane === "front");
 
   if (resolvedPadlets.length === 0) {
     return {
       frameElement,
       nativeBelowElements: nativeFrameElements,
+      backCanvasLinePayloads,
       nativeAboveElements: [],
+      frontCanvasLinePayloads,
       resolvedPadlets,
     };
   }
@@ -51,7 +89,9 @@ export function planSlideComposition(
   return {
     frameElement,
     nativeBelowElements,
+    backCanvasLinePayloads,
     nativeAboveElements,
+    frontCanvasLinePayloads,
     resolvedPadlets,
   };
 }

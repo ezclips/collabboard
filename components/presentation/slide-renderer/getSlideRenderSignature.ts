@@ -1,10 +1,12 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import type { Padlet } from "@/types/collabboard";
+import type { CanvasLine } from "@/types/collabboard";
 import type { FrameSlide } from "@/components/presentation/PresentationPanel";
+import { resolveCanvasLineSlideMemberships } from "@/lib/infra/drawing/canvasLineSlideMembership";
 import { planSlideComposition } from "./planSlideComposition";
 
-const SLIDE_RENDERER_VERSION = "phase3-renderer-v1";
+const SLIDE_RENDERER_VERSION = "phase3-renderer-v2-canvas-lines";
 
 function summarizePadletMetadata(padlet: Padlet) {
   const metadata = padlet.metadata ?? {};
@@ -100,10 +102,20 @@ export function getSlideRenderSignature(
   slideFrame: FrameSlide,
   sceneElements: readonly any[],
   availablePadlets: Padlet[],
+  canvasLines: readonly CanvasLine[] = [],
 ) {
   const padletsById = new Map(availablePadlets.map((padlet) => [String(padlet.id), padlet] as const));
-  const compositionPlan = planSlideComposition(slideFrame, sceneElements, availablePadlets);
+  const compositionPlan = planSlideComposition(slideFrame, sceneElements, availablePadlets, canvasLines);
   const resolvedPadlets = compositionPlan.resolvedPadlets;
+  const frames = sceneElements
+    .filter((element: any) => element.type === "frame" && !element.isDeleted)
+    .map((element: any) => ({
+      id: String(element.id),
+      x: Number(element.x) || 0,
+      y: Number(element.y) || 0,
+      width: Number(element.width) || 0,
+      height: Number(element.height) || 0,
+    }));
 
   const nativeSceneSignature = sceneElements
     .filter((element: any) => !element.isDeleted && element.frameId === slideFrame.id)
@@ -130,6 +142,40 @@ export function getSlideRenderSignature(
     link: embeddable.link ?? null,
     padlet: buildPadletRenderState(padlet, padletsById, 2, new Set<string>()),
   }));
+  const canvasLineSignature = resolveCanvasLineSlideMemberships(canvasLines, frames)
+    .filter((entry) => entry.frameId === slideFrame.id)
+    .map(({ line, frameId, bounds }) => ({
+      id: line.id,
+      frameId,
+      bounds,
+      coord_space: line.coord_space ?? null,
+      points: Array.isArray(line.points)
+        ? line.points.map((point) => ({
+          x: point.x,
+          y: point.y,
+          type: point.type,
+        }))
+        : null,
+      legacy: {
+        start_x: line.start_x,
+        start_y: line.start_y,
+        control_x: line.control_x,
+        control_y: line.control_y,
+        end_x: line.end_x,
+        end_y: line.end_y,
+      },
+      start_arrow: Boolean(line.start_arrow),
+      end_arrow: Boolean(line.end_arrow),
+      color: line.color ?? null,
+      stroke_width: line.stroke_width ?? null,
+      dashed: Boolean(line.dashed),
+      label: line.label ?? "",
+      label_position: line.label_position ?? null,
+      label_text_color: line.label_text_color ?? null,
+      label_background_color: line.label_background_color ?? null,
+      layer_plane: line.layer_plane ?? null,
+      z_index: line.z_index ?? null,
+    }));
 
   return JSON.stringify({
     rendererVersion: SLIDE_RENDERER_VERSION,
@@ -143,8 +189,11 @@ export function getSlideRenderSignature(
     nativeSceneSignature,
     compositionBands: {
       nativeBelow: compositionPlan.nativeBelowElements.map((element) => element.id),
+      canvasLineBack: compositionPlan.backCanvasLinePayloads.map((payload) => payload.id),
+      canvasLineFront: compositionPlan.frontCanvasLinePayloads.map((payload) => payload.id),
       nativeAbove: compositionPlan.nativeAboveElements.map((element) => element.id),
     },
     embeddableOverlaySignature,
+    canvasLineSignature,
   });
 }

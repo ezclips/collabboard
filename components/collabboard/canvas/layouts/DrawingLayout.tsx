@@ -3,7 +3,7 @@
 
 import React, { useState, useEffect, useCallback, useRef, useMemo, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
-import type { Padlet } from '@/types/collabboard';
+import type { CanvasLine, Padlet } from '@/types/collabboard';
 import dynamic from 'next/dynamic';
 import { getExcalidrawLibrary } from '@/lib/collabboard/excalidrawLibrary';
 import {
@@ -632,6 +632,7 @@ function DrawingEmbeddableCard({
 interface DrawingLayoutProps {
   canvasId: string;
   padlets: Padlet[];
+  canvasLines: CanvasLine[];
   padletsLoaded?: boolean;
   onAddPadlet: (postData: Partial<Padlet>) => Promise<Padlet | null>;
   onUpdatePadlet: (id: string, updates: Partial<Padlet>) => Promise<void>;
@@ -656,6 +657,7 @@ interface DrawingLayoutProps {
 export default function DrawingLayout({
   canvasId,
   padlets,
+  canvasLines,
   padletsLoaded = false,
   onAddPadlet,
   onUpdatePadlet,
@@ -758,6 +760,7 @@ export default function DrawingLayout({
   const currentFilesRef = useRef<any>(null);
   const runtimeSceneElementsRef = useRef<readonly any[]>([]);
   const runtimePadletsRef = useRef<Padlet[]>(padlets);
+  const runtimeCanvasLinesRef = useRef<CanvasLine[]>(canvasLines);
   const runtimeInitialFilesRef = useRef<any>(null);
   const isApplyingImportedSceneRef = useRef(false);
   const importPlacementCountRef = useRef(0);
@@ -767,6 +770,7 @@ export default function DrawingLayout({
 
   runtimeSceneElementsRef.current = elements;
   runtimePadletsRef.current = padlets;
+  runtimeCanvasLinesRef.current = canvasLines;
   runtimeInitialFilesRef.current = initialFiles;
 
   useEffect(() => {
@@ -2132,6 +2136,7 @@ export default function DrawingLayout({
     getSceneElements: () => runtimeSceneElementsRef.current,
     getPadlets: () => runtimePadletsRef.current,
     getFiles: () => currentFilesRef.current ?? runtimeInitialFilesRef.current ?? null,
+    getCanvasLines: () => runtimeCanvasLinesRef.current,
   }), []);
 
   // Render a single Excalidraw frame to a PNG dataURL (used by PresentationPanel + export path)
@@ -2145,6 +2150,7 @@ export default function DrawingLayout({
     getSceneElements: () => runtimeSceneElementsRef.current,
     getPadlets: () => runtimePadletsRef.current,
     getFiles: () => currentFilesRef.current ?? runtimeInitialFilesRef.current ?? null,
+    getCanvasLines: () => runtimeCanvasLinesRef.current,
   }), []);
 
   const handleActivateSlide = useCallback((slideId: string) => {
@@ -2204,7 +2210,11 @@ export default function DrawingLayout({
       framesArrayRef.current = next;
     }
     return framesArrayRef.current;
-  }, [elements]);
+    // PATCH-115: canvasLines is load-bearing. getSlideRenderSignature folds
+    // CanvasLine state in via a []-deps ref-backed getter, so this dep is the
+    // only trigger that recomputes renderSignature/contentVersion. Removing it
+    // silently stops thumbnails refreshing on CanvasLine edits. Do not remove.
+  }, [elements, canvasLines]);
   const contentPadlets = padlets.filter(p => p.type !== 'drawing' && p.type !== 'comment' && p.id !== masterPadlet?.id);
 
   const hasSavedViewportOnInit = useMemo(() => {

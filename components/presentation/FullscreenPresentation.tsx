@@ -6,6 +6,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { createPortal } from "react-dom";
 import type { FrameSlide, RenderSlideToPNG } from "./PresentationPanel";
 import type { Padlet } from "@/types/collabboard";
+import type { CanvasLine } from "@/types/collabboard";
 import PostCardContent from "@/components/collabboard/PostCardContent";
 import { RuntimeSlideRenderer } from "./runtime-slide/RuntimeSlideRenderer";
 import { sortSlidesByPresentationOrder } from "@/lib/infra/presentation/slideOrder";
@@ -27,6 +28,7 @@ export type RuntimeSlideHelpers = {
   getSceneElements: () => readonly any[];
   getPadlets: () => Padlet[];
   getFiles: () => any;
+  getCanvasLines: () => CanvasLine[];
 };
 
 /**
@@ -231,6 +233,7 @@ export function FullscreenPresentation({
   const sceneElements = usingRuntime ? runtimeHelpers!.getSceneElements() : null;
   const allPadlets = usingRuntime ? runtimeHelpers!.getPadlets() : null;
   const files = usingRuntime ? runtimeHelpers!.getFiles() : null;
+  const canvasLines = usingRuntime ? runtimeHelpers!.getCanvasLines() : null;
 
   const content = (
     <div
@@ -252,6 +255,7 @@ export function FullscreenPresentation({
           slide={currentSlide}
           sceneElements={sceneElements!}
           allPadlets={allPadlets!}
+          canvasLines={canvasLines!}
           files={files}
           vpW={vpSize.w}
           vpH={vpSize.h}

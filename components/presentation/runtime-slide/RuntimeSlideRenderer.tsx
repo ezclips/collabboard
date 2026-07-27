@@ -4,8 +4,10 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { Padlet } from "@/types/collabboard";
+import type { CanvasLine } from "@/types/collabboard";
 import type { FrameSlide } from "@/components/presentation/PresentationPanel";
 import { planSlideComposition } from "@/components/presentation/slide-renderer/planSlideComposition";
+import { renderCanvasLinePayloadsSvg } from "@/components/presentation/slide-renderer/renderCanvasLinePrimitive";
 import { renderExcalidrawSlideBase } from "@/components/presentation/slide-renderer/renderExcalidrawSlideBase";
 import { RuntimePadletLayer } from "./RuntimePadletLayer";
 
@@ -13,6 +15,7 @@ type RuntimeSlideRendererProps = {
   slide: FrameSlide | undefined;
   sceneElements: readonly any[];
   allPadlets: Padlet[];
+  canvasLines: CanvasLine[];
   files: any;
   vpW: number;
   vpH: number;
@@ -35,6 +38,7 @@ export function RuntimeSlideRenderer({
   slide,
   sceneElements,
   allPadlets,
+  canvasLines,
   files,
   vpW,
   vpH,
@@ -53,11 +57,11 @@ export function RuntimeSlideRenderer({
   const compositionPlan = useMemo(
     () => {
       if (!slide) return null;
-      return planSlideComposition(slide, sceneElements, allPadlets);
+      return planSlideComposition(slide, sceneElements, allPadlets, canvasLines);
     },
     // We intentionally depend on array identity — the parent recreates these when elements change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [slide?.id, sceneElements, allPadlets],
+    [slide?.id, sceneElements, allPadlets, canvasLines],
   );
 
   // Viewport → slide scale (object-fit: contain)
@@ -151,6 +155,20 @@ export function RuntimeSlideRenderer({
   if (!slide || vpW === 0 || vpH === 0) return null;
 
   const resolvedPadlets = compositionPlan?.resolvedPadlets ?? [];
+  const backCanvasLineSvg = compositionPlan
+    ? renderCanvasLinePayloadsSvg({
+      payloads: compositionPlan.backCanvasLinePayloads,
+      width: slide.width,
+      height: slide.height,
+    })
+    : null;
+  const frontCanvasLineSvg = compositionPlan
+    ? renderCanvasLinePayloadsSvg({
+      payloads: compositionPlan.frontCanvasLinePayloads,
+      width: slide.width,
+      height: slide.height,
+    })
+    : null;
 
   return (
     <div
@@ -190,25 +208,39 @@ export function RuntimeSlideRenderer({
         />
       )}
 
+      {backCanvasLineSvg && (
+        <div style={{ position: "absolute", inset: 0, zIndex: 2, pointerEvents: "none" }}>
+          {backCanvasLineSvg}
+        </div>
+      )}
+
       {/*
         Layer 2: Live padlet DOM cards
         Positioned using slide-local coordinates, then CSS-scaled.
-        z-index managed by RuntimePadletLayer (isolation: isolate, zIndex: 2).
+        z-index managed by wrapper band; RuntimePadletLayer keeps its internal isolation.
       */}
       {hasVisibleBase && isPadletLayerReady && (
-        <RuntimePadletLayer
-          resolvedPadlets={resolvedPadlets}
-          scale={scale}
-          slideWidth={slide.width}
-          slideHeight={slide.height}
-          allPadlets={allPadlets}
-        />
+        <div style={{ position: "absolute", inset: 0, zIndex: 3 }}>
+          <RuntimePadletLayer
+            resolvedPadlets={resolvedPadlets}
+            scale={scale}
+            slideWidth={slide.width}
+            slideHeight={slide.height}
+            allPadlets={allPadlets}
+          />
+        </div>
+      )}
+
+      {frontCanvasLineSvg && (
+        <div style={{ position: "absolute", inset: 0, zIndex: 4, pointerEvents: "none" }}>
+          {frontCanvasLineSvg}
+        </div>
       )}
 
       {/*
         Layer 3: Excalidraw above-band PNG (transparent bg, pointer-events off)
         Renders async; nothing shows in this layer until ready.
-        z-index 3 so it sits on top of padlets (for Excalidraw shapes designed as foreground).
+        z-index 5 so it sits on top of padlets and front-plane CanvasLines.
       */}
       {abovePng && (
         // eslint-disable-next-line @next/next/no-img-element
@@ -224,7 +256,7 @@ export function RuntimeSlideRenderer({
             height: "100%",
             display: "block",
             pointerEvents: "none",
-            zIndex: 3,
+            zIndex: 5,
           }}
         />
       )}

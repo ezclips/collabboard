@@ -6789,6 +6789,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
               <DrawingLayout
                 canvasId={canvasId || ''}
                 padlets={padlets}
+                canvasLines={lines}
                 padletsLoaded={!loading}
                 onAddPadlet={handleDrawingLayoutAddPadletWithContainerCheck}
                 onUpdatePadlet={handleDrawingLayoutUpdatePadlet}

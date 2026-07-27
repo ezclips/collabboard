@@ -1,7 +1,9 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import type { Padlet } from "@/types/collabboard";
+import type { CanvasLine } from "@/types/collabboard";
 import type { FrameSlide, RenderSlideOptions } from "@/components/presentation/PresentationPanel";
+import type { CanvasLineRenderPayload } from "./renderCanvasLinePrimitive";
 
 export type ResolvedSlidePadlet = {
   padlet: Padlet;
@@ -17,6 +19,7 @@ export type CreateSlideRendererArgs = {
   getSceneElements: () => readonly any[];
   getPadlets: () => Padlet[];
   getFiles: () => any;
+  getCanvasLines: () => CanvasLine[];
 };
 
 export type SlideRenderHelpers = {
@@ -28,6 +31,8 @@ export type SlideRenderHelpers = {
 export type SlideCompositionPlan = {
   frameElement: any | null;
   nativeBelowElements: any[];
+  backCanvasLinePayloads: CanvasLineRenderPayload[];
   nativeAboveElements: any[];
+  frontCanvasLinePayloads: CanvasLineRenderPayload[];
   resolvedPadlets: ResolvedSlidePadlet[];
 };

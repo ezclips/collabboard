@@ -8,6 +8,7 @@ import { mergeSlideLayers } from "./mergeSlideLayers";
 import { planSlideComposition } from "./planSlideComposition";
 import PresentationContainerCard from "./PresentationContainerCard";
 import PresentationPadletCard from "./PresentationPadletCard";
+import { drawCanvasLinePayloadsToCanvas } from "./renderCanvasLinePrimitive";
 import { renderExcalidrawSlideBase } from "./renderExcalidrawSlideBase";
 import { resolveSlidePadlets } from "./resolveSlidePadlets";
 import type { CreateSlideRendererArgs, SlideRenderHelpers } from "./types";
@@ -55,6 +56,7 @@ export function createSlideRenderer({
   getSceneElements,
   getPadlets,
   getFiles,
+  getCanvasLines,
 }: CreateSlideRendererArgs): SlideRenderHelpers {
   const renderPadletOverlayToCanvas = async (
     slideFrame: FrameSlide,
@@ -266,7 +268,9 @@ export function createSlideRenderer({
       return legacyMergedCanvas.toDataURL("image/png");
     }
 
-    const compositionPlan = planSlideComposition(slide, activeElements, getPadlets());
+    const compositionPlan = planSlideComposition(slide, activeElements, getPadlets(), getCanvasLines());
+    const scale = opts.scale ?? 2;
+    const padding = Math.max(0, Math.round((opts.paddingPx ?? 0) * scale));
     const [nativeBelowCanvas, overlayCanvas, nativeAboveCanvas] = await Promise.all([
       renderExcalidrawSlideBase({
         elements: compositionPlan.nativeBelowElements,
@@ -291,8 +295,20 @@ export function createSlideRenderer({
       throw new Error("Failed to render z-band Excalidraw slide base");
     }
 
-    const scale = opts.scale ?? 2;
-    const padding = Math.max(0, Math.round((opts.paddingPx ?? 0) * scale));
+    const backCanvasLineCanvas = drawCanvasLinePayloadsToCanvas({
+      payloads: compositionPlan.backCanvasLinePayloads,
+      width: nativeBelowCanvas.width,
+      height: nativeBelowCanvas.height,
+      scale,
+      padding,
+    });
+    const frontCanvasLineCanvas = drawCanvasLinePayloadsToCanvas({
+      payloads: compositionPlan.frontCanvasLinePayloads,
+      width: nativeBelowCanvas.width,
+      height: nativeBelowCanvas.height,
+      scale,
+      padding,
+    });
     let paddedOverlayCanvas: HTMLCanvasElement | null = null;
 
     if (overlayCanvas) {
@@ -318,14 +334,20 @@ export function createSlideRenderer({
     const mergedCanvas = mergeSlideLayers({
       width: nativeBelowCanvas.width,
       height: nativeBelowCanvas.height,
-      layers: [nativeBelowCanvas, paddedOverlayCanvas, nativeAboveCanvas],
+      layers: [
+        nativeBelowCanvas,
+        backCanvasLineCanvas,
+        paddedOverlayCanvas,
+        frontCanvasLineCanvas,
+        nativeAboveCanvas,
+      ],
     });
 
     return (mergedCanvas ?? nativeBelowCanvas).toDataURL("image/png");
   };
 
   const getSlideRenderSignature = (slide: FrameSlide) => (
-    buildSlideRenderSignature(slide, getSceneElements(), getPadlets())
+    buildSlideRenderSignature(slide, getSceneElements(), getPadlets(), getCanvasLines())
   );
 
   return {
