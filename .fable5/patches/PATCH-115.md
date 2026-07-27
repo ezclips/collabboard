@@ -1440,3 +1440,201 @@ restoration of real canvas data afterwards.
 **REOPENED**. The candidate **must remain uncommitted**. §16's Freeform and
 Map **NOT EXECUTABLE** rulings and the §16d residual risk are unchanged.
 **PATCH-116 remains CANCELLED.** No new patch may begin.
+
+---
+
+## 19. §18 resolution and final focused re-review authorization (2026-07-27, CTO)
+
+Issued at governance HEAD `3455c55f71fcba75b0637aaca36b131401dab4c5`.
+Resolves the three §18 defects and authorizes the final gate before
+closure. All claims below were re-derived from the working tree; none
+were accepted on report.
+
+### 19a. §17 corrections — independently verified
+
+**VERIFIED.** `git diff` on `DrawingLayout.tsx` now shows **14 changed
+lines, all CanvasLine plumbing plus the comment**. Both out-of-scope
+hunks are gone from the diff — the file's only remaining changes are the
+type import, the prop, the ref, the two ref-backed getters, and the memo
+dependency with its four-line explanatory comment. `CanvasClient.tsx`
+remains exactly **`1 +` / `0 -`**. Candidate total: 12 modified + 4
+untracked, unchanged in shape.
+
+Re-run by the CTO, not quoted from the report:
+
+- `npx tsc --noEmit` → exit 0.
+- `npx vitest run` → **55 files / 592 tests passed**.
+- `git diff --check` → pass.
+- ESLint on both corrected files → **4 `no-unused-vars` errors** on
+  `_p2`/`_c2`/`_p`/`_c`.
+
+That last result is the expected one and is **explicitly acceptable**.
+Verified pre-existing by stashing the candidate and re-running ESLint at
+HEAD: the same 4 errors are present without the candidate. Under the §15
+gate — *no candidate-introduced findings* — the candidate contributes
+**zero**. §17b predicted exactly this and forbade fixing it; that
+prohibition stands through closure. **Do not `--fix` these.**
+
+### 19b. Defect A — NOT A PATCH-115 PRODUCT DEFECT
+
+**Bound.** No clipping correction is authorized, and none is needed. The
+observed ink was the **editor** surface, not preview content escaping its
+bounds.
+
+The diagnosis confirms hypothesis **H1** from §18b, and does so by
+elimination rather than assertion: fullscreen was not open and the
+runtime CanvasLine SVG was absent, so neither PATCH-115 render path was
+even mounted; the topmost sampled element was the editor's
+`data-line-role="hit-path"`; hiding the editor line layer removed the
+ink, while hiding thumbnail images did not. That is a controlled
+substitution test, and it is what makes the ruling safe to bind.
+
+It also independently corroborates §18b's source proof: the thumbnail
+image uses `overflow: clip`, the card `overflow: hidden`, and the content
+is raster — so it could not have painted outside its element regardless.
+The editor SVG, by contrast, spans the canvas with `overflow: visible`,
+and the line ended just left of the sidebar boundary. **The line never
+left the canvas; the sidebar arrived on top of it.**
+
+This is the same root cause as Defect C — a `fixed` sidebar overlaying a
+canvas that is not inset — and it is therefore **routed to the Defect C
+patch**, not to PATCH-115. **Defect A no longer blocks closure.**
+
+Recorded so this is not re-litigated: §18b withheld the recommended
+clipping correction, and the diagnosis shows that correction would have
+modified provably-correct code while leaving an unrelated layout issue in
+place. The hard-stop-before-fixing rule earned its keep here.
+
+### 19c. Defect B — PRE-EXISTING. Does not block closure.
+
+**Bound.** Not introduced by PATCH-115. Any improvement requires a fresh
+patch with its own diagnosis and scope.
+
+**The load-bearing evidence is the pre-candidate reproduction**, not the
+scale explanation: the same tiny/missing-looking thumbnail behavior
+reproduced in a temporary worktree at the governed pre-candidate commit
+on port 3001 (cleanly isolated from the owner's dev server on 3000, and
+cleaned up afterwards). That is the §18c binary question answered
+correctly, and it alone settles the routing. The "small thumbnail size and
+scale/layout" account is a **plausible explanation, not proof**, and is
+recorded as such — it must not be cited by a future patch as a completed
+root-cause analysis.
+
+For the objects actually inspected: present in the composition plan where
+membership resolved, present in the render payloads, and visible in
+regenerated PNGs. Neither stale nor excluded.
+
+**Named residual — do not let this dissolve into "scale".** The
+diagnosis reports that *some native embeddable rows remain excluded under
+the governed native `frameId` rule while their padlet counterparts
+resolve normally*. This is a **distinct, real, pre-existing finding**,
+not a rendering-scale artifact. It is consistent with
+`planSlideComposition`'s `isNativeFrameMember` requiring
+`element.frameId === slideFrame.id` with **no geometric fallback for
+natives** — the deliberate narrowing made by PATCH-112. An embeddable
+whose native element never received a `frameId` will therefore never
+enter a slide, however it looks on canvas.
+
+This residual is **carried forward explicitly** as the seed for the
+future thumbnail-completeness patch. It is **out of scope for
+PATCH-115**, which may not widen native membership. Do not begin it.
+
+### 19d. Defect C — fresh patch required. CONFIRMED.
+
+Unchanged from §18d and now reinforced, since Defect A shares its root
+cause. The future patch must reuse the existing presentation-sidebar
+measurement mechanism at `DrawingLayout.tsx:872` and its
+`ResizeObserver`/`MutationObserver` wiring — not invent a second one —
+and must handle panel open, close, absence, and resize.
+
+**PATCH-116 remains CANCELLED and its number must not be reused for this
+or for the Defect B follow-up.** Both future patches take fresh numbers.
+Neither may begin until PATCH-115 closes.
+
+### 19e. Drawing live acceptance — REINSTATED, scoped
+
+**Reinstated as COMPLETE for the behavior PATCH-115 owns**: CanvasLine
+present in the thumbnail; present in runtime fullscreen; both invalidation
+mechanisms working; style, label, geometry, plane, deletion, restoration
+and persistence all passing; no preview-driven stored-geometry mutation;
+`coord_space` remaining `'scene'`.
+
+This is a **reinstatement on new evidence, not a reversal of §18a**. §18a
+withdrew the earlier claim because the matrix asserted only presence. That
+criticism was correct and is not retracted. What has changed is that the
+§18 diagnosis now **supplies** the missing containment and completeness
+classifications — containment by showing no preview content escaped its
+element, completeness by showing the shortfall reproduces without the
+candidate. The gap was closed by evidence, not by relaxing the standard.
+
+### 19f. Standing rule (record in LESSONS_LEARNED)
+
+> A rendering live gate must separately assert **presence** (the right
+> thing appears), **containment** (nothing paints outside its element),
+> and **completeness** (nothing that should appear is missing). A gate
+> built only from presence assertions cannot certify a rendering patch —
+> it will pass while a user sees an obvious defect.
+
+Corollary, from Defect A: when visual ink appears in an unexpected place,
+**identify the emitting surface by controlled substitution** (hide one
+layer at a time) before attributing it to any renderer. A screenshot shows
+*where* ink is, never *who drew it*.
+
+### 19g. Focused re-review — AUTHORIZED, read-only
+
+**Reviewer eligibility (bind):** not Opus (authoring CTO), not Codex
+(implementer), not the original full closure reviewer. DeepSeek V4 Pro,
+Kepler, or Gemini 3.1 Pro, whichever did not perform the §16/§17 closure
+review.
+
+**Scope — strictly limited to these six items. Nothing else may be
+re-reviewed, re-litigated, or reopened:**
+
+1. The two restored immutable-destructuring hunks
+   (`DrawingLayout.tsx:3201`, `:3252`) match their committed forms
+   exactly.
+2. The four-line explanatory comment is present above the dependency
+   array and states why `canvasLines` is load-bearing.
+3. The dependency array remains **`[elements, canvasLines]`** —
+   unchanged. Per §17c this is **governed**; a recommendation to remove
+   it is out of scope and must not be raised again.
+4. Validation reproduces: 55 files / 592 tests; focused file 12 tests;
+   `tsc --noEmit` clean; **zero candidate-introduced** ESLint findings
+   (the 4 pre-existing `_p`/`_p2`/`_c`/`_c2` errors are expected and
+   **must not** be reported as findings or fixed).
+5. §18 introduced **no product changes** — the candidate file set is
+   unchanged from the §16 review.
+6. The candidate remains within the authorized allowlist: **10
+   production files** (cap reached, no additions) and **5 test files**
+   (1 used). The five protected unrelated paths are not absorbed.
+
+**Read-only.** The reviewer edits nothing, stages nothing, commits
+nothing, and runs no live browser session.
+
+**Verdict — exactly one of:**
+
+- `PASS — PATCH-115 CORRECTIONS VERIFIED`
+- `PASS WITH FINDINGS`
+- `FAIL`
+
+### 19h. No further live run required
+
+**Correct, on the condition that the verdict is PASS.** The §18g full
+visual live re-run requirement is **satisfied by the §18 diagnosis**, not
+waived — containment and completeness were both classified against real
+surfaces. The §17 correction and the comment touch no rendering behavior
+and no path the live matrix exercised, so they cannot invalidate it.
+
+On `PASS`: PATCH-115 proceeds directly to candidate commit and governance
+closure.
+On `PASS WITH FINDINGS` or `FAIL`: return to the CTO for a fresh ruling.
+The reviewer may **not** authorize a commit under either of those verdicts.
+
+### 19i. Status
+
+**PATCH-115: AUTHORIZED, OPEN, UNCOMMITTED, NOT CLOSED.** Defects A, B
+and C are all routed out of PATCH-115; **no defect now blocks closure**,
+which awaits only the §19g verdict. §16's Freeform and Map **NOT
+EXECUTABLE** rulings and the §16d residual risk stand unchanged and carry
+into closure verbatim. **PATCH-116 remains CANCELLED.** No new patch may
+begin.
