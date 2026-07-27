@@ -2027,3 +2027,172 @@ PATCH-115. **Do not commit.**
 **PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
 **PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
 **PATCH-116: CANCELLED and retired.**
+
+---
+
+## 23. Full-matrix timeout — structural over-budget and row misordering (2026-07-28, CTO)
+
+Issued at governance HEAD `5e9531f20e06eedfe936ad5f6bfc4f4c1a74a1a0`.
+Candidate verified: **9** dirty paths, uncommitted, unstaged, frozen
+production and unit-test hashes unchanged.
+
+### 23a. Classification: **H**, causing **A**. Cumulative, not a single hang.
+
+Both are provable from the spec as it stands. No diagnostic run is needed
+to establish them, and this section supplies the source order and budget
+census the prompt asked for.
+
+**Row 5 is misplaced in source — confirmed.** The single test at `:1064`
+executes in this order (offsets relative to `:1064`):
+
+| source offset | matrix row |
+|---|---|
+| +21…+26 | row 1 — sidebar closed |
+| +30…+31 | row 17 — zoom, sidebar closed |
+| +35…+41 | row 2 — sidebar open |
+| +44…+45 | row 18 — zoom, sidebar open |
+| +51 | row 13 — chrome sweep |
+| +55…+57 | row 4 — line mode |
+| +62…+68 | row 8 — modal open |
+| +71…+76 | row 9 — Apply layout |
+| +79…+82 | row 10 — slide card |
+| +85…+88 | row 11 — checkbox |
+| +91…+100 | row 12 — overflow menu |
+| **+104…+106** | **row 3 — selection** |
+| +109…+111 | rows 6/7 — back layer, **via `page.reload`** |
+| later | **row 5 — edit mode / handles**, and rows 14–21 |
+
+So rows 8–13 and a full page reload execute **before** row 3, and row 5
+runs after all of them. The acceptance matrix states row 5 follows row 4.
+**This is an accidental spec-order defect**, and it is why five
+consecutive runs have burned their entire budget without ever exercising
+the row under investigation.
+
+### 23b. Time-budget census — the spec cannot fit its own limit
+
+Measured across the file:
+
+| operation | count | bound each | worst case |
+|---|---|---|---|
+| `{ timeout: 60_000 }` waits | **11** | 60 s | **660 s** |
+| `{ timeout: 30_000 }` waits | **11** | 30 s | **330 s** |
+| `waitForFunction` (no explicit bound ⇒ config default) | **4** | 30 s | 120 s |
+| `page.reload` | 2 | — | — |
+| `page.screenshot({ fullPage: true })` | 10 | — | — |
+
+**Worst-case cumulative ≈ 1110 s of bounded waiting alone**, against
+`test.setTimeout(240_000)` at `:1065`. **The spec's own budget exceeds its
+limit by more than 4×.** Only ~22 % of the declared waiting can occur
+before the test dies.
+
+That settles the question the prompt asks: **this is cumulative runtime,
+not one wait using the global timeout.** No single operation needs to hang.
+A handful of the 60 s waits resolving slowly — or simply the ordinary cost
+of 10 full-page screenshots and 2 reloads — consumes the budget before row
+5 is reached. The observed evidence fits exactly: rows 1–4, 6, 7 (partial),
+8–13 completed; row 7's continuation, row 5, and rows 14–21 never ran.
+
+**Raising the timeout is not the fix and remains prohibited.** A limit
+raised to fit a 1110 s worst case would make every future failure a
+20-minute stall. The bounds themselves are wrong: a 60 s wait for an
+element on an already-loaded page is not a safety margin, it is a
+deferred, expensive failure.
+
+### 23c. Structural defect: one monolithic test, no phase attribution
+
+The entire 21-row matrix is a **single** `test()` spanning `:1064-1319`
+with **no `test.step` boundaries**. Three consequences, all of which this
+patch has already paid for:
+
+1. No per-row timing or attribution — every timeout reports only "the test
+   timed out", which is why an instrumentation run is being contemplated
+   at all.
+2. Fixture creation, the full matrix, and cleanup share one budget;
+   cleanup competes with assertions for the same 240 s.
+3. A failure anywhere discards every row after it, so no row is ever
+   certified. **Five incomplete matrices in a row are a predictable
+   consequence of this shape**, not five separate accidents.
+
+### 23d. Authorized: ONE spec-only correction. No separate instrumentation run.
+
+The prompt authorizes a diagnostic run and, if needed, one instrumentation
+edit. **I am collapsing that into the corrective edit**, on the same
+reasoning as §19c: the instrumentation and the correction are the same
+change — `test.step` boundaries provide exactly the per-phase timing the
+diagnostic run would have produced, and Playwright reports step durations
+natively. Running instrumentation first would mean writing the steps,
+reading them once, and then writing them again.
+
+**Exactly one file may change:**
+
+```
+e2e/characterization/drawing-overlay-containment.spec.ts
+```
+
+**No production change is authorized.** `SimpleLineRenderer.tsx`,
+`DrawingLayout.tsx` and `SimpleLineRenderer.test.tsx` remain **frozen
+byte-for-byte**; production stays at **2 of 3**.
+
+The correction must:
+
+1. **Reorder to the matrix sequence** — row 5 immediately after row 4, and
+   every other row in its stated position. **All 21 criteria are
+   preserved.** No assertion may be weakened, dropped, merged, or made
+   conditional to save time.
+2. **Wrap every row in a named `test.step`** — `"row NN — <name>"` — so
+   Playwright reports per-row duration natively. Move fixture setup and
+   cleanup into their own named steps.
+3. **Bring the waits inside budget.** Replace the 60 s and 30 s bounds
+   with bounds justified by measured behaviour — the §16/§20 diagnostics
+   measured selection settling at **1–7 ms** and handle rects as stable.
+   **Timeouts may be reduced; none may be increased** (§16c). Where a wait
+   genuinely needs a long bound (initial page load), state the reason in a
+   comment.
+4. **Keep the total worst case inside `test.setTimeout(240_000)`** and say
+   so: report the recomputed worst-case sum. If it cannot fit, split the
+   matrix into multiple `test()` blocks rather than raising the limit —
+   that is authorized here and requires no amendment, since it adds no
+   file.
+5. **Reduce screenshot cost** — retain full-page capture for the rows that
+   need it (containment and chrome rows, per §18a) and drop redundant
+   captures elsewhere. Row 13 evidence must remain full-page.
+6. **Preserve unchanged**: row 13's strict negative sweep; §22's exact
+   `hit-path` node matching in `verifiedHitPathPoint`; §19's diagnostic
+   payloads; §17c's three-part handle criterion; the row 5 double-click
+   product path with **no toolbar substitution**.
+7. **Carry no evidence between runs.** The reordered matrix runs from row
+   1 in one pass.
+
+### 23e. No governance amendment required
+
+§5's 21 rows are unchanged in content and count; only their execution
+order in the spec is corrected to match what §5 already states.
+Production stays **2 of 3**, tests **2 of 3**, and the correction edits an
+existing file. Splitting into multiple `test()` blocks within that file
+adds no file and needs no amendment.
+
+### 23f. Certification and standing rule
+
+**No row certified.** Sixth incomplete matrix.
+
+**Standing rule (record in LESSONS_LEARNED):**
+
+> A live acceptance matrix must be **budgeted before it is run**: sum the
+> declared worst-case waits and compare against the test timeout. If the
+> sum exceeds the limit, the matrix cannot pass and every run is wasted
+> regardless of product correctness. Bound each wait from measured
+> behaviour, not from a defensive round number — a 60 s wait on an
+> already-loaded page is a deferred failure, not a safety margin. Give
+> every row its own `test.step` so a timeout names the row that consumed
+> the budget, and keep setup and cleanup out of the assertion budget.
+
+This patch spent five live cycles on defects the arithmetic in §23b would
+have predicted before the first run.
+
+### 23g. Status
+
+**PATCH-117: OPEN · AUTHORIZED · UNCOMMITTED · UNSTAGED.** Not closed.
+**Freeform/Map: Stage 2 NOT granted**; neither is PASS.
+**PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
+**PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
+**PATCH-116: CANCELLED and retired.**
