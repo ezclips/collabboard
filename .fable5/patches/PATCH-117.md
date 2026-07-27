@@ -1038,3 +1038,190 @@ candidate is not to be committed. Production frozen at 2 files.
 **PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
 **PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
 **PATCH-116: CANCELLED and retired.**
+
+---
+
+## 17. Row 5/14 handle-topmost failure — focused ruling (2026-07-27, CTO)
+
+Issued at governance HEAD `2cc3c6d7d31ea979f6e67ca3983fa1a98ca651bb`.
+Candidate verified: **9** dirty paths, 2 production + 2 test files,
+uncommitted, unstaged, frozen hashes unchanged.
+
+### 17a. What this section can and cannot answer
+
+The requested return list includes the element at the handle centre, the
+full `elementsFromPoint` stack, the nearest line-owned ancestor, whether
+pointerdown reaches the handle, whether the drag succeeds, and the
+geometry before and after. **Those are outputs of the diagnosis, which is
+not yet run and which the CTO does not execute.** They will come from the
+§17d run. Stating them now would be fabrication.
+
+What this section decides definitively is the **topmost criterion**
+(§17e), which is the part that does not depend on the diagnosis outcome.
+
+### 17b. Leading classification: **H**, with **A** as the most likely
+mechanism. Provisional — the diagnosis decides.
+
+§13b is the reason this is labelled provisional rather than bound: a
+confident source-derived mechanism was falsified there. The classification
+is not bound until §17d confirms it.
+
+**Excluded by source, with evidence:**
+
+- **The label `<foreignObject>` is not the blocker.** It carries
+  `pointerEvents: 'none'` (`SimpleLineRenderer.tsx:828-829`), and its
+  wrapper `<div className="group relative">` sets no `pointer-events`, so
+  it inherits `none`. Only the inner label div re-enables
+  `pointerEvents: 'auto'` (`:852`). `document.elementFromPoint` skips
+  non-hit-testable elements, so neither the `foreignObject` nor its
+  wrapper can be returned. This rules out the most obvious form of **E**.
+- **F is unlikely.** The report states the handle was **visible**, so it
+  lies inside the clip region. `clip-path` cannot remove hit-testing from
+  geometry it is not clipping. §16a already closed F by measurement on the
+  selection path; §17d step 2 re-tests it on the handle path.
+- **G is unlikely.** Every handle sets `pointerEvents: 'auto'` explicitly
+  (`:890`, `:917`, `:930-932`).
+
+**Material finding — the Drawing surface routes line pointer events
+through a bridge.** `DrawingLayout.tsx:3033-3041` is the layout's **root
+container** — `className="flex-1 w-full h-full absolute inset-0
+bg-transparent"` — carrying `onPointerDownCapture`,
+`onMouseDownCapture`, `onClickCapture`, `onDoubleClickCapture` and
+`onContextMenuCapture`. It resolves an interactive line target and
+re-dispatches to it, with a documented role priority in
+`lib/infra/drawing/lineBridge.ts:4-12`:
+`point-handle → midpoint-handle → start-handle → control-handle →
+end-handle → label-handle → hit-path`.
+
+Two consequences that matter for the ruling:
+
+1. It is an **ancestor with capture-phase handlers**, not an element
+   stacked above the handles. So it should not itself be returned by
+   `elementFromPoint` while a hit-testable descendant exists — and a
+   returned node's `closest('[data-line-id]')` chain is therefore
+   meaningful rather than coincidental.
+2. **Handle interaction on Drawing does not require the handle to be the
+   `elementFromPoint` result.** The bridge exists precisely to resolve a
+   target that the raw hit test does not return directly
+   (`resolveBackLineContextMenuDispatchTarget`, `:2853-2867`, explicitly
+   redirects `point-handle`/`midpoint-handle` hits to the same line's
+   `hit-path`). A spec asserting raw-topmost identity is modelling a
+   dispatch path this product deliberately does not use.
+
+That is why **H** leads: the criterion encodes an assumption the
+architecture contradicts. **A** is the most likely concrete mechanism —
+`elementFromPoint` returning a node whose `closest('[data-line-id]')` is
+the correct handle — and the §17d point-stack dump settles it in one step.
+
+### 17c. Topmost criterion — RULING (binding, independent of §17d)
+
+The current criterion — *the exact `elementFromPoint` node must carry
+`data-line-id` equal to the temporary line* — is **rejected as an
+acceptance criterion for handle interaction.** It is a proxy for
+interactability, and on this surface the proxy is wrong: the line bridge
+makes raw-topmost identity neither necessary nor sufficient for a handle
+to work.
+
+**Replacement criterion (bind). All three parts required:**
+
+1. **Ownership** — the node returned by `document.elementFromPoint` at the
+   handle centre, **or its nearest ancestor carrying `data-line-id`**,
+   must be the exact temporary line, and the resolved
+   `data-line-role` must be the expected handle role.
+2. **Behavior** — a **real, normal pointer drag** (no `force: true`) on
+   that handle must change the **intended** geometry: the targeted
+   endpoint or point moves, and the line as a whole does not translate
+   instead. Geometry is recorded before and after and restored.
+3. **Non-interception guard** — the `elementsFromPoint` stack at the
+   handle centre must contain **no fixed application chrome** above the
+   line layer: no presentation sidebar, no modal, no backdrop, no zoom
+   controls. This is what preserves the protection the original criterion
+   was reaching for.
+
+Part 2 is the substantive test. Part 1 without part 2 proves only DOM
+shape; part 2 without part 3 could pass while chrome overlays the handle
+in some other state.
+
+**Row 13 is untouched and stays strict.** Its assertion is **negative** —
+that no CanvasLine hit path appears anywhere in the fixed-chrome region —
+and negative assertions are unaffected by bridge indirection: an ancestor
+that re-dispatches cannot make a line element absent from a region where
+it is present. Row 13 must **not** adopt ancestor resolution, must not be
+narrowed, reordered, or made conditional. **This ruling relaxes the
+handle-interaction criterion only.**
+
+### 17d. Required diagnosis (bind) — read-only, one disposable fixture
+
+No source edit, no spec edit. No `force: true`. No worktree or second
+checkout. Do not mutate the real Arrow Post. Bounded waits per §16c —
+**do not raise any timeout.**
+
+Enter edit mode using the §16 proven selection signal, then:
+
+1. **Handle census.** For every handle of the exact temporary line record:
+   `data-line-role`, tag name, `outerHTML` summary, bounding rect,
+   computed transform, `pointer-events`, `visibility`, `opacity`,
+   `clip-path`, and centre coordinate.
+2. **Point stacks.** At the centre and at several points inside the handle
+   radius record: `document.elementFromPoint`; the full
+   `document.elementsFromPoint` stack; tag name; `data-line-id`;
+   `data-line-role`; nearest ancestor with `data-line-id`; nearest
+   ancestor with `data-line-role`.
+3. **Real interaction.** Normal pointerdown then a minimal drag on the
+   exact handle. Record whether the handle's handler fires (its
+   diagnostics), geometry before and after, whether the **intended**
+   point moved, whether the **line** moved instead, and whether another
+   element received the event. Restore geometry exactly.
+4. **Controlled comparison.** Repeat steps 2 and 3 with **only** the
+   candidate line-layer `clipPath` neutralized by read-only DOM styling.
+
+**Interpretation, decided in advance:**
+
+- Same stack **and** drag succeeds ⇒ **H/A confirmed. Spec-only
+  correction authorized** to the §17c criterion.
+- Drag succeeds **only** with `clipPath: none` ⇒ **F, production
+  regression.** Stop and return for a narrow production ruling. Do not
+  weaken containment or row 13.
+- Drag never succeeds and a non-line element is above ⇒ identify the exact
+  blocker and stop.
+- Event reaches the handle but geometry does not change ⇒ handler/state
+  failure; identify it and stop.
+
+Report `git status --porcelain` count **and full list** before and after —
+expect **9** throughout; any delta is a run failure regardless of
+findings.
+
+### 17e. Correction scope and amendment
+
+**Expected path (H/A): spec-only**, in
+`e2e/characterization/drawing-overlay-containment.spec.ts` and nothing
+else. `SimpleLineRenderer.tsx`, `DrawingLayout.tsx` and
+`SimpleLineRenderer.test.tsx` remain **frozen byte-for-byte**. Production
+stays at **2 of 3**.
+
+**A governance amendment IS required** on this path — but only to §5, and
+only for the criterion text: **rows 5 and 14 must be rebound to the §17c
+three-part criterion.** That amendment is issued in this section: §17c is
+the bound text and supersedes any earlier reading of rows 5 and 14 that
+required raw-topmost identity. No allowlist, cap, or file-scope amendment
+is needed, and §3, §4, §7 and §8 are unchanged.
+
+If the diagnosis returns **F**, no correction is authorized and a fresh
+production ruling is required.
+
+### 17f. Certification status
+
+**No row may be certified from this run.** This is the third incomplete
+matrix. The rows reported passing before the hard stop were observed under
+a criterion that §17c now supersedes, so they must be re-observed under
+the corrected spec. The full 21-row matrix runs **from row 1** after the
+correction.
+
+### 17g. Status
+
+**PATCH-117: OPEN · AUTHORIZED · UNCOMMITTED · UNSTAGED.** Not closed;
+candidate not to be committed. Production frozen at 2 files.
+**Freeform/Map: Stage 2 NOT granted**; neither is PASS.
+**PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
+**PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
+**PATCH-116: CANCELLED and retired.**
