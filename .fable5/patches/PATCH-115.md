@@ -845,3 +845,173 @@ the §8 toolbar census completed.
 
 The candidate remains **uncommitted** throughout. Do not begin
 PATCH-116.
+
+---
+
+## 16. Final Freeform/Map unavailable-fixture ruling (2026-07-27, CTO)
+
+Supersedes §15's *conditional* exemption. Both §15 corrections have been
+verified applied by direct inspection of the candidate diff at governance
+HEAD `48b8924495d5ee089ea7b11f8bf8ff9c28578722`; the Drawing live matrix
+(§15f) has passed. This section issues the **final** ruling.
+
+### 16a. Correction verification (both PASS)
+
+**Correction 1 — out-of-scope `CanvasClient.tsx` edits reverted: PASS.**
+`git diff --stat` reports `app/dashboard/canvas/[id]/CanvasClient.tsx |
+1 +` — one insertion, **zero deletions**. The sole hunk adds
+`canvasLines={lines}` at `:6792`, inside the `{isDrawingLayout && (`
+guard opened at `:6788`. All five §15c edits are gone: the
+`AIComponentEditor` import, the three `forceContainerPrompt` rewrites
+(`:6466` is back to the committed form), the `onReport` signature change,
+and — most importantly — the deleted `containerError` binding in the
+`if (!insertResult.ok)` failure branch has been restored.
+
+**Correction 2 — the two §15d test gaps closed: PASS.**
+`lib/infra/drawing/canvasLineSlideMembership.test.ts` now carries 13
+cases across two describes. The gaps are covered by name and by content:
+`"preserves style and label fidelity in the shared render payload"`
+(`:69`), `"changes render signatures for each presentation-relevant
+CanvasLine field"` (`:137`), and the required negative case `"does not
+change render signatures for unrelated editor state"` (`:195`).
+
+**Static gates under the §15 standard.** `npx tsc --noEmit` exits 0.
+`npx vitest run` → **55 files / 592 tests passed**, matching the reported
+figure exactly. ESLint over all nine candidate files exits 0 — so the
+amended *"no candidate-introduced findings"* gate is satisfied without
+needing the allowance it grants.
+
+### 16b. Substitute evidence — all 12 items independently verified
+
+Verified by inspection of the working tree, not by accepting the report.
+
+1–4. **No Map, Freeform, or shared-persistence file changed.** The full
+   `git status --porcelain` is 12 modified + 4 untracked paths; filtering
+   for `map|freeform|geo|mapbox` returns **NONE**, and filtering for
+   `SimpleLineRenderer|canvasLineCoordinates|useCanvasLines|useCanvasData|frameMembership`
+   returns **NONE**. PATCH-114's normalization surface and PATCH-112's
+   `frameMembership.ts` are untouched; the latter is *reused* by import
+   at `canvasLineSlideMembership.ts:2`, which is the required direction.
+
+5. **`CanvasClient` supplies `canvasLines` only to `DrawingLayout`.** A
+   repo-wide grep for `canvasLines|getCanvasLines` returns exactly one
+   occurrence in `CanvasClient.tsx` — `:6792` — and it is layout-gated.
+
+6 & 10. **`DrawingLayout` is the sole path, by construction.** The whole
+   chain is single-entry: exactly one `<DrawingLayout>` call site in the
+   repo (`CanvasClient.tsx:6789`, under `isDrawingLayout`); exactly one
+   `createSlideRenderer(` caller (`DrawingLayout.tsx:2135`); exactly one
+   `<FullscreenPresentation>` call site (`DrawingLayout.tsx:3310`), which
+   is also the only site passing `runtimeHelpers`. `isDrawingLayout` is
+   `canvas?.layout === 'drawing'` (`:1044`), and `isFreeformLayout`
+   (`:1047`) and `isMapLayout` are mutually exclusive with it. Map and
+   Freeform therefore cannot mount any component in this path — this is a
+   structural impossibility, not an untested assumption.
+
+7 & 8. **Null-`coord_space` rows excluded, observably, without
+   mutation.** `canvasLineSlideMembership.ts:65` gates on
+   `line.coord_space !== "scene"`, emits the
+   `canvas-line-preview-legacy-coord-space-excluded` diagnostic at
+   `:66-70`, and returns `null` — dropped by the `.filter()` at `:88`.
+   The pipeline is `.map(…).filter(…)`; the input array and its rows are
+   never written to. Covered by the dedicated case at `:283`.
+
+9. **`RuntimeSlideRenderer` receives lines only through Drawing runtime
+   helpers.** `FullscreenPresentation.tsx:236` reads
+   `runtimeHelpers!.getCanvasLines()` and passes it at `:258`; the only
+   provider of `getCanvasLines` is `DrawingLayout.tsx:2139` and `:2153`,
+   both `() => runtimeCanvasLinesRef.current`.
+
+11. **Vitest green at 55 files / 592 tests** — confirmed above.
+
+12. **Dedicated coverage exists** for null-row exclusion without mutation
+    (`:283`) and viewport-independent payload behavior (`:48`).
+
+**Accepted.** This structural evidence is accepted as a substitute for
+Freeform and Map live execution **for this patch only**. It is accepted
+because it proves *non-participation by construction*, which is a
+stronger claim than a passing live check would have been — a live Freeform
+run could only show that nothing broke on one board, whereas the
+single-entry-point proof shows the code cannot be reached at all.
+
+### 16c. Final rulings
+
+**Freeform: NOT EXECUTABLE — NO ACCESSIBLE PRODUCTION FIXTURE.**
+**Map: NOT EXECUTABLE — NO ACCESSIBLE PRODUCTION FIXTURE.**
+
+Neither may be recorded as PASS anywhere. `.env.local` defines
+`PATCH114_LIVE_DRAWING_CANVAS_ID` and `PATCH114_LIVE_LEGACY_LINE_ID` and
+**no** Freeform or Map fixture key for either patch — confirmed by
+inspection. Consistent with the PATCH-114 §16 amendment: the authenticated
+production account owns no accessible Freeform or Map canvas, and creating,
+converting, or relabelling a production board to manufacture one remains
+**prohibited**.
+
+**This exemption is PATCH-115-specific and does not carry forward.** It
+does not establish precedent, and it may not be cited by a later patch as
+having already settled the question.
+
+### 16d. Bound residual risk (verbatim; carry into §18 closure)
+
+> Freeform and Map presentation behavior was not live-verified.
+> The current candidate is structurally Drawing-only.
+> No inference is made that future shared CanvasLine changes are safe.
+> Any future patch touching shared CanvasLine membership, rendering,
+> persistence, or presentation plumbing requires real fixtures or another
+> fresh governance ruling.
+
+### 16e. Drawing live acceptance: COMPLETE
+
+The §15f matrix is satisfied. Both routes returned 200 before and after;
+3 Playwright tests passed in 53.9s with `PW_BASE_URL` set and `--no-deps`;
+no `webServer` was started and no build command ran — the three standing
+rules from the PATCH-114 gate (never invoke Playwright without
+`PW_BASE_URL` while a dev server runs; never build while dev is live;
+probe a dynamic route) were all honored. `RuntimeSlideRenderer` stayed
+active with **PNG fallback count 0**, so the runtime path — the one my
+withdrawn §13a claim got wrong — is what was actually exercised.
+
+The three §14e invalidation observations are the decisive evidence:
+
+```
+patch115ThumbnailSignatureChangedAfterStyle: true
+patch115RuntimeCanvasLinesIdentityChangedAfterStyle: true
+patch115AlreadyOpenRuntimeDashObserved: true
+```
+
+These confirm the two opposite memo requirements empirically, not just by
+reading deps arrays: the thumbnail signature now responds to a CanvasLine
+field change (the §3 defect), and an **already-open** fullscreen updated
+(the §14e identity requirement). Cleanup is clean: zero temporary lines,
+no scratch directories, disposable spec removed, real Arrow Post restored
+with `coord_space='scene'`.
+
+**No additional live evidence is required.**
+
+### 16f. PATCH-116: CANCELLED
+
+The §8 toolbar census is accepted as sufficient. It found no further
+unsupported custom Drawing object type; `CanvasLine` was the single
+missing path, and it now renders in canvas, thumbnail, and runtime
+fullscreen. PATCH-116 is **cancelled**, not merely unreserved — its sole
+purpose was additional custom-toolbar object coverage, and the census
+establishes there is none.
+
+**Bind:** this cancellation rests on the census being complete. If a
+future custom Drawing toolbar object type is *added*, it needs a fresh
+patch and may not claim coverage from PATCH-115.
+
+### 16g. Independent closure review: AUTHORIZED
+
+The candidate **may now proceed to independent closure review**.
+
+Reviewer assignment per §11: DeepSeek V4 Pro (primary) or Kepler /
+Gemini 3.1 Pro. **The authoring CTO must not review it, and Codex — which
+implemented it — must not review its own work.** The reviewer must
+re-derive §16a and §16b from the diff rather than accepting this section,
+and must check the §16d residual-risk wording is carried into closure
+verbatim.
+
+**PATCH-115 remains AUTHORIZED and the candidate remains UNCOMMITTED.**
+This section does not close the patch and does not authorize a commit of
+the candidate.
