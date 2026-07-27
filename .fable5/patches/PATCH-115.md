@@ -260,11 +260,14 @@ before running, never `npm run build` while the dev server is live.
 5. **new** `components/presentation/slide-renderer/renderCanvasLinePrimitive.ts(x)` — the §2b static primitive
 6. **new** `lib/infra/drawing/canvasLineSlideMembership.ts` — CanvasLine→`ElementFrameState` adapter + AABB
 
-**Plus** whichever single component supplies `lines` to the presentation
-entry point. It is **not yet named** — the implementer must identify it
-by source trace and **report it before editing**. If more than one file
-is required to plumb `lines` through, **stop and report**; do not widen
-the boundary unilaterally.
+**Plumbing (added by the §13 amendment, 2026-07-27) — exactly two:**
+
+7. `app/dashboard/canvas/[id]/CanvasClient.tsx`
+8. `components/collabboard/canvas/layouts/DrawingLayout.tsx`
+
+**Maximum production files: 8.** A ninth requires another hard stop and
+a further amendment. The original "one unnamed supplying component" rule
+is **superseded** — see §13.
 
 **Allowed test files (max 4):** unit tests colocated with items 5 and 6
 above · an extension of an existing presentation test · one new spec
@@ -364,3 +367,111 @@ fix(presentation): render Drawing CanvasLines in slider previews and fix preview
 
 **Do not authorize PATCH-116 until the §8 census is complete and
 reviewed.**
+
+## 13. Amendment — two-component plumbing path APPROVED (CTO ruling,
+2026-07-27)
+
+**Approved.** The original §6 rule authorized only one unnamed supplying
+component. That was **insufficient**, and Codex was **correct to hard-stop
+without making changes** — exactly the behavior §7.9 demands.
+
+### 13a. Source trace — verified independently by the CTO
+
+- **`createSlideRenderer` is constructed at exactly one site in the
+  codebase:** `DrawingLayout.tsx:2131`, inside a `useMemo`.
+- Its `renderSlideToPNG` wrapper (`:2138-2139`) is handed to
+  `PresentationPanel` at **both** `:3284` and `:3303` — the thumbnail and
+  fullscreen surfaces already consume **one** renderer instance.
+  Supplying lines at `:2131` therefore serves both surfaces **by
+  construction**, not by convention. §2b's "same primitive for both
+  surfaces" requirement is satisfied structurally.
+- `DrawingLayout` has **no `lines` prop** and no `lines` in its props
+  interface — confirmed by grep.
+- `CanvasLine` state is owned by `CanvasClient.tsx` (`lines` /
+  `updateLineLocal` / `saveLineToDb` via `useCanvasData`).
+
+The minimum legitimate path is therefore exactly:
+`CanvasClient` → `DrawingLayout` → `createSlideRenderer` → the shared
+composition path. Two files. No third.
+
+### 13b. Restrictions on `CanvasClient.tsx` (bind — exhaustive)
+
+**May only:** pass the **existing** current Drawing `CanvasLine`
+collection into `DrawingLayout`, under the existing `isDrawingLayout`
+condition already present at the `<DrawingLayout …/>` call site.
+
+**Must not:** introduce new fetching, caching, filtering, conversion, or
+mutation of lines · change line ownership or lifecycle · derive or pass
+any editor viewport state for presentation purposes · alter Freeform or
+Map behavior · pass lines to any component other than `DrawingLayout`.
+
+The collection passed is the same `lines` state already held for the
+live canvas. **No second source of truth and no second fetch.**
+
+### 13c. Restrictions on `DrawingLayout.tsx` (bind — exhaustive)
+
+**May only:** accept the collection as one new prop, and feed it into the
+**existing** `createSlideRenderer({ … })` construction at `:2131`.
+
+**Must not:** create a separate rendering path or a second cache · filter
+by current editor pan, zoom, or viewport origin · modify `CanvasLine`
+state · construct a second renderer · pass lines anywhere other than into
+that single existing construction.
+
+**Required input convention (bind — source-proven house pattern).** The
+existing construction supplies every input as a **ref-backed getter with
+empty `useMemo` deps**:
+
+```ts
+const slideRenderer = useMemo(() => createSlideRenderer({
+  getSceneElements: () => runtimeSceneElementsRef.current,
+  getPadlets: () => runtimePadletsRef.current,
+  getFiles: () => currentFilesRef.current ?? runtimeInitialFilesRef.current ?? null,
+}), []);
+```
+
+The CanvasLine input **must follow this exact shape** — e.g.
+`getCanvasLines: () => runtimeCanvasLinesRef.current`, with the ref kept
+in sync by the same mechanism the sibling refs already use, and the
+`useMemo` dependency array **left as `[]`**.
+
+**Passing the array directly, or adding it to the deps array, is a hard
+stop.** Doing so would rebuild the renderer on every line edit — causing
+thumbnail cache thrash and re-render churn — and a raw array captured in
+a `[]`-deps memo would go stale instead. The getter pattern is the only
+form that is both current and stable, and it is already the established
+convention in this exact call.
+
+### 13d. Hard fences retained and restated (bind)
+
+Still prohibited: global state or context introduced solely for this
+patch · duplicate database fetches · presentation-specific CanvasLine
+fetching · a second CanvasLine cache · prop drilling **beyond these two
+components** · `frameMembership.ts` · `SimpleLineRenderer.tsx` ·
+`canvasLineCoordinates.ts` · Excalidraw-fork changes · schema or
+migration changes · `bridge.ts` · Map or Freeform component changes · the
+five §0b unrelated paths · `.fable5/**`.
+
+### 13e. Test allowlist — UNCHANGED
+
+**Maximum four test files**, as originally bound. Do not broaden
+pre-emptively. One additional **existing** integration test may be
+extended **only** if source proves it indispensable, and the proof must
+be stated in the implementation report before the edit. A fifth *new*
+test file requires a further amendment.
+
+### 13f. All prior requirements preserved
+
+This amendment widens the file boundary and nothing else. Unchanged and
+still binding in full: the same Arrow Post visible in the Drawing frame,
+the thumbnail **and** fullscreen (§5c) · **no editor `DrawingViewport`
+state anywhere in the presentation path** (§2c) · one shared
+geometry/render path for both surfaces (§2b) · membership and clipping
+(§1) · front/back plane and z-order (§2e) · complete style and label
+fidelity (§2d) · signature and invalidation (§3) · no duplicate rendering
+· no stored-geometry mutation during preview generation ·
+`coord_space=NULL` exclusion **with** an observable diagnostic (§2a) ·
+and **the Freeform/Map fixture debt still requires a fresh CTO ruling
+before closure** (§4) — it is not waived by this amendment.
+
+**PATCH-115 remains AUTHORIZED FOR IMPLEMENTATION.**
