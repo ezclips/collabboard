@@ -1201,3 +1201,242 @@ invalidate that evidence and no live re-run is required.
 
 **PATCH-115 remains AUTHORIZED and the candidate remains UNCOMMITTED.**
 This section does not close the patch.
+
+---
+
+## 18. Reopened closure gate — new user-visible evidence triage (2026-07-27, CTO)
+
+Issued at governance HEAD `c9ee39fd7980d40d6967b4a7acc3c04b2819be7c`. Three
+defects were reported from direct user inspection of the candidate. Each
+was source-traced before ruling. **Two of the three recommended rulings do
+not survive that trace and are not adopted as written.**
+
+### 18a. Live acceptance: REOPENED
+
+The §16e / §17f statement *"Drawing live acceptance remains COMPLETE — no
+live re-run required"* is **withdrawn**. It is superseded by this section.
+
+The withdrawal is warranted on its own terms, independent of how the three
+defects are classified. The §15f matrix asserted *presence* — "the Arrow
+Post is visible in the thumbnail" — and every such assertion passed. It
+contained **no assertion of containment** (that nothing paints outside the
+slide rect), and **no assertion of completeness** (that every object on
+the canvas appears in its thumbnail). A scripted matrix proves the
+propositions it encodes and nothing else; the user's eye covered a
+proposition the matrix never encoded.
+
+**Standing rule (record in LESSONS_LEARNED):** a live matrix built only
+from presence assertions cannot certify a rendering patch. Every future
+rendering patch must assert **presence, containment, and completeness** —
+"the right thing appears", "nothing appears where it must not", and
+"nothing that should appear is missing".
+
+**PATCH-115 remains open, uncommitted, and unclosed.**
+
+### 18b. Defect A — CanvasLine thumbnail overflow: CONDITIONAL BLOCKER, mechanism NOT established
+
+**Ruling: this is a PATCH-115 closure blocker. The recommended
+correction is NOT authorized, because the code it would correct is
+provably already correct.**
+
+The recommendation was: *"the patch explicitly requires clipping to the
+slide viewport; authorise the minimum correction."* Source says the
+thumbnail path already clips to the slide viewport, exactly:
+
+1. `renderExcalidrawSlideBase` calls `exportToCanvas` with
+   `exportPadding: opts.paddingPx ?? 0` and a `getDimensions` that
+   multiplies by `scale`. So
+   `nativeBelowCanvas.width = round((slideWidth + 2p) * scale)`, and scene
+   point `sx` lands at image `x = (sx - slide.x + p) * scale`.
+2. `drawCanvasLinePayloadsToCanvas` sets
+   `ctx.rect(padding, padding, width - padding*2, height - padding*2)`
+   followed by `ctx.clip()`, where `padding = round(p * scale)`. That
+   rect **is** the slide rectangle in image space — not an approximation
+   of it.
+3. It then applies `translate(padding, padding)` and `scale(scale, scale)`
+   before drawing slide-local payload coordinates, so CanvasLine geometry
+   is registered to native geometry **exactly**, with no off-by-padding
+   error.
+4. `mergeSlideLayers` filters null layers (`layers.filter(Boolean)`), so
+   the five-layer array introduced by the candidate cannot drop or
+   mis-stack a band.
+5. The sidebar thumbnail card carries `overflow-hidden`
+   (`PresentationPanel.tsx:355`) and `SlideThumbnail` renders a **PNG**
+   at fixed width/height. A raster image cannot paint outside its own
+   element box.
+
+Points 2 and 5 are independently sufficient: even if the clip were absent,
+the PNG could not escape the card. **Authorizing a clipping fix here would
+change correct code and leave the real defect in place.** That is the
+worse outcome, not the safer one.
+
+**Therefore the mechanism must be identified before any correction is
+authorized.** Two hypotheses, in order of source-supported likelihood —
+both must be tested, neither may be assumed:
+
+- **H1 (favoured): the overflow is not the thumbnail at all.** It is the
+  **live editor** `SimpleLineRenderer` overlay painting the real Arrow
+  Post on the Drawing canvas, appearing beside or beneath the
+  presentation sidebar. The sidebar is `fixed top-0 right-0 bottom-0 w-80
+  z-[500]` (`DrawingLayout.tsx:3288`) and **overlays** the canvas without
+  insetting it — the canvas keeps its full width underneath. Under
+  PATCH-114 a scene-space line now tracks its true canvas position, so a
+  line near the right edge sits in the region the panel covers. If H1
+  holds, Defect A is **the same root cause as Defect C** and is a layout
+  issue, not a PATCH-115 rendering issue.
+- **H2: the fullscreen SVG path.** `renderCanvasLinePayloadsSvg` relies on
+  the outer `<svg>` viewport clip, and its label `<foreignObject>`
+  carries an explicit `style={{ overflow: "visible" }}`. The outer SVG
+  should still clip, but this is the only place in the candidate where
+  clipping is implicit rather than explicit, and it is the only surface
+  that renders CanvasLines as live DOM.
+
+**Blocker status.** Defect A blocks closure until the mechanism is
+identified. If the trace shows H1, Defect A leaves PATCH-115 entirely and
+merges into the Defect C patch, and PATCH-115 closure is unblocked by it.
+If the trace shows H2 or any third mechanism inside an authorized file,
+PATCH-115 is amended narrowly at that point.
+
+**Acceptance criteria (bind, whichever patch ends up owning it):** the
+line is clipped entirely inside the slide rectangle; it cannot overlap
+thumbnail borders, slide labels, checkboxes, menus, neighbouring previews,
+or the outer sidebar; it remains correctly rendered in fullscreen;
+front/back z-order remains correct inside the slide; and **no global
+z-index escalation may be used to hide the issue** — raising or lowering a
+`z-[…]` to make the symptom invisible is explicitly prohibited as a fix.
+
+### 18c. Defect B — missing post content in thumbnails: DIAGNOSIS FIRST, no scope ruling yet
+
+**Ruling: scope deferred pending source trace. Blocks closure until
+classified.** It may not be treated as covered merely because the Arrow
+Post appears in one thumbnail — that inference is explicitly rejected.
+
+What the trace can already exclude: the candidate's only structural change
+to the thumbnail merge is the five-layer array, and `mergeSlideLayers`
+filters nulls, so a null CanvasLine band cannot suppress the padlet
+overlay or the native above-band. `resolveSlidePadlets` is **not** in the
+candidate diff. So a PATCH-115-introduced cause is unlikely but **not
+disproven** — `planSlideComposition` and `getSlideRenderSignature` are
+both in the candidate and both sit on the path.
+
+**Exact source-trace task (bind).** For each affected slide, produce a
+table with one row per object visible inside the frame on the Drawing
+canvas, and these columns:
+
+1. slide/frame id, and the object's id and kind (native element / padlet
+   embeddable / CanvasLine);
+2. does it satisfy the membership rule for its kind — `frameId ===
+   slideFrame.id` for natives (`planSlideComposition`), `resolveSlidePadlets`
+   for padlets, `resolveCanvasLineSlideMemberships` for lines;
+3. does it appear in `compositionPlan` (`nativeBelowElements`,
+   `nativeAboveElements`, `resolvedPadlets`, `back`/`frontCanvasLinePayloads`);
+4. does it appear in the rendered PNG;
+5. if absent, at **which** of those three stages it disappeared.
+
+Then answer two binary questions explicitly:
+
+- **Stale or excluded?** Force a thumbnail regeneration (change the
+  frame's geometry, or clear the signature cache) and re-observe. If the
+  object appears after regeneration, the defect is **invalidation**; if
+  not, it is **membership or composition**.
+- **Pre-existing or introduced?** Re-run the identical observation with
+  the candidate stashed, at commit `c9ee39f`. If the objects are missing
+  there too, PATCH-115 did not introduce it.
+
+**Routing, decided in advance so the result cannot be argued into
+PATCH-115:**
+
+- Missing objects reproduce **without** the candidate → **pre-existing
+  independent defect**. Bind a **fresh patch**. PATCH-115 is **not**
+  broadened, and this defect stops blocking PATCH-115 closure.
+- Missing objects reproduce **only with** the candidate → **PATCH-115
+  regression**. Amend PATCH-115 narrowly; closure stays blocked.
+
+Do **not** run this trace against a canvas whose state has been altered to
+make it reproduce.
+
+### 18d. Defect C — zoom control positioning: SEPARATE PATCH. Confirmed pre-existing.
+
+**Ruling: not in PATCH-115. Not caused by PATCH-115. A fresh patch is
+required, and it may not begin until PATCH-115 closes.**
+
+Source-confirmed, not assumed:
+
+- Drawing's zoom controls are portalled into `viewportContainerRef.current`
+  with `className="absolute bottom-6 right-6 z-[130] …"`
+  (`DrawingLayout.tsx:3085-3094`).
+- The presentation sidebar is `fixed top-0 right-0 bottom-0 w-80 z-[500]`
+  (`:3288`) and does not inset the canvas.
+- `130 < 500` and both are anchored to the same right edge, so the controls
+  are occluded whenever the panel is open. The reported symptom follows
+  directly.
+- `git diff` on `DrawingLayout.tsx` filtered for `zoom|Zoom|w-80|z-\[`
+  returns **nothing**. The candidate does not touch either element.
+
+**One correction to the report:** the controls are **not** "centred across
+the full browser width" — they are bottom-**right**-anchored, which is why
+they collide with a right-edge panel. A fix that centres them in the
+remaining canvas area is a design change, not a restoration; a smaller fix
+is to reserve the sidebar width on the right offset.
+
+**The correct pattern already exists in this file.** The top-right floating
+cluster measures
+`presentationSidebarRef.current?.getBoundingClientRect().left ?? (viewportRight - 320)`
+(`:872`) and re-solves its offset under both a `MutationObserver` and a
+`ResizeObserver` that observes the sidebar itself (`:896-897`). The future
+patch should **reuse this mechanism**, not invent a second one — that is
+what satisfies the "account for opening/closing and resizing the panel"
+requirement, including the panel's absence.
+
+**Do not implement this now.** No patch number is assigned; PATCH-116
+remains **cancelled** and its number is not to be reused for this.
+
+### 18e. Allowlist: UNCHANGED
+
+No amendment to the PATCH-115 file scope is authorized by this section.
+The allowlist stays exactly as bound in §6, §13 and §14: **10 production
+files (cap reached) and 5 test files (1 used, 4 free).** No new production
+file may be added for Defect A or Defect B until the corresponding trace
+completes and a narrow amendment is issued. Diagnosis in §18b and §18c is
+**read-only plus disposable live specs** — it authorizes no product edit.
+
+The five protected unrelated paths remain protected and unstageable.
+
+### 18f. Order of operations (revised)
+
+1. Apply the §17e corrections — still required, unchanged.
+2. Run the §18b Defect A surface identification and the §18c Defect B
+   source trace. **No product edit.**
+3. CTO issues a follow-up ruling routing A and B.
+4. Any authorized narrow amendment is implemented.
+5. **Full visual live re-run** (see §18g), not the §15f matrix.
+6. Focused independent re-review of the §17e hunks **plus** whatever
+   step 4 produced, by a reviewer who is neither the closure reviewer,
+   nor Codex, nor the CTO.
+7. Closure reconsidered.
+
+### 18g. A full visual live re-run IS required
+
+**Yes.** The §15f matrix may not be reused as-is; presence assertions
+alone are now known to be insufficient (§18a). The re-run must add:
+
+- **Containment:** for every slide, assert no CanvasLine ink falls outside
+  the slide rectangle in the thumbnail, and that the sidebar's controls,
+  labels, and neighbouring cards are unobstructed. Capture full-panel
+  screenshots, not element-scoped ones — an element-scoped screenshot
+  cannot show a defect that consists of painting *outside* that element.
+- **Completeness:** for every slide with visible frame content, assert the
+  thumbnail is non-blank and object counts match the §18c trace table.
+- **Panel-open and panel-closed** states for both.
+
+All standing live rules continue to apply: `PW_BASE_URL` set, `--no-deps`,
+no build while the dev server is live, health-probe `/auth` not only `/`,
+scratch state outside the repo, no credential ever printed, and full
+restoration of real canvas data afterwards.
+
+### 18h. Status
+
+**PATCH-115: AUTHORIZED, OPEN, UNCOMMITTED, NOT CLOSED.** Live acceptance
+**REOPENED**. The candidate **must remain uncommitted**. §16's Freeform and
+Map **NOT EXECUTABLE** rulings and the §16d residual risk are unchanged.
+**PATCH-116 remains CANCELLED.** No new patch may begin.
