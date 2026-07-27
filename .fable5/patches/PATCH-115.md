@@ -1934,3 +1934,296 @@ acceptance **FAILED/REOPENED**; focused re-review **CANCELLED**; commit
 **NOT AUTHORIZED**. §16's Freeform and Map **NOT EXECUTABLE** rulings and
 the §16d residual risk are unaffected. **PATCH-116 remains CANCELLED.** No
 zoom-control patch, no thumbnail patch, no new patch may begin.
+
+---
+
+## 21. Post-diagnosis routing ruling (2026-07-27, CTO)
+
+Issued at governance HEAD `d026067444a757722500b771932ec13917e3d8ec`.
+
+### 21a. HARD STOP — the diagnosis run deleted 945 tracked files
+
+**This was not in the report and must be resolved before anything else.**
+
+`git status --porcelain` returns **961 entries**, not the expected 16.
+**945 are unstaged deletions (` D`)** of tracked files under
+`components/collabboard/canvas/excalidraw_fork/packages/`:
+
+| subtree | files deleted |
+|---|---|
+| `excalidraw` | 813 |
+| `element` | 78 |
+| `common` | 28 |
+| `math` | 26 |
+
+`packages/common/` is now an **empty directory** on disk. The §20f
+allowlist authorized **zero product-file changes**; this is a 945-file
+working-tree mutation of a vendored fork.
+
+**Assessment — do not panic, but do not proceed:**
+
+- **No data is lost.** Every deleted path is intact at HEAD, verified by
+  `git cat-file -e HEAD:…/packages/common/src/colors.ts`. All 945 entries
+  are pure deletions — `git status` filtered for the fork returns **no**
+  modified-but-present files. Recovery is fully additive.
+- **The PATCH-115 candidate is untouched.** The 16 non-fork entries are
+  exactly the expected set: 12 modified + 4 untracked, with
+  `CanvasClient.tsx` still `1 +` / `0 -`. §17 corrections intact.
+- **`git worktree list` shows only the main worktree** and `git stash
+  list` is empty, so the comparison worktree was indeed removed — the
+  most likely cause is that its removal (or a `git clean`) ran against the
+  main worktree path.
+
+**Required recovery, by the owner, before any further work:**
+
+```
+git restore -- components/collabboard/canvas/excalidraw_fork
+git status --porcelain          # must return exactly 16 entries
+```
+
+Then the §20 server recovery: stop the port-3000 process, delete `.next`,
+`npm run dev`, confirm **both** `/` and `/auth` return 200. Do **not** run
+`npm run build` while the dev server is live.
+
+**Standing rule (record in LESSONS_LEARNED):** *a diagnosis task must
+verify its own blast radius.* Any run that creates a comparison worktree
+must report `git status --porcelain | wc -l` for the **main** worktree
+before and after, and any delta beyond the known candidate set is a
+failure of that run regardless of its findings. Worktree teardown must
+never be issued with a path that could resolve to the main checkout. §20h
+step 0 required confirming the candidate was intact — that check passed
+and still missed this, because it looked only at the candidate files, not
+at the whole tree.
+
+The findings below are accepted on their merits — the deletions are a
+process failure, not evidence of a wrong diagnosis — but **no further live
+work, no implementation, and no closure activity may proceed until the
+tree returns to 16 entries.**
+
+### 21b. Defect 1 — BOUND
+
+- **PRE-EXISTING MECHANISM** — `SimpleLineRenderer.tsx:650,656`, dating to
+  `e9554e7` (2026-03-23), confirmed identical in the comparison worktree.
+- **USER-VISIBLE AND INTERACTION-BLOCKING.** This is an escalation from
+  §20b and it changes the severity, not just the wording: the live run
+  proved a `data-line-renderer="front"` / `data-line-role="hit-path"`
+  element **intercepted the Apply-layout interaction**. A transparent hit
+  path at `z-1000` over a `z-500` sidebar does not merely look wrong; it
+  swallows clicks intended for application chrome. Treat as a
+  **functional** defect.
+- **NOT IMPLEMENTABLE INSIDE THE PATCH-115 ALLOWLIST** — the fix lives in
+  `SimpleLineRenderer.tsx`, which §6 **prohibits**, and the production cap
+  of 10 is already reached.
+- **MUST BE FIXED IN A TIGHTLY COUPLED FOLLOW-UP BEFORE PATCH-115
+  CLOSURE.**
+
+The follow-up must preserve line-editing handles above canvas chrome while
+ensuring neither line paint nor hit paths can visually or interactively
+overtake the presentation sidebar, the layout modal, or other fixed
+application chrome. **Prohibited:** blind global z-index reduction, and
+sidebar z-index escalation used to mask the symptom. Required test matrix:
+normal line · selected line · line mode · edit mode · front and back
+layers · sidebar open/closed · modal open · pointer interception ·
+keyboard and handle editing.
+
+**Zoom controls — same patch: YES.** Source confirms one mechanism, not
+two: the controls are `absolute bottom-6 right-6 z-[130]`
+(`DrawingLayout.tsx:3085-3094`) and the sidebar is `fixed right-0 w-80
+z-[500]` (`:3288`) — a right-edge chrome collision with an overlay that
+does not inset the canvas, which is exactly Defect 1's mechanism seen from
+the other side (there, chrome is occluded by canvas content; here, canvas
+chrome is occluded by the panel). Fixing them separately would produce two
+competing notions of "the visible canvas area". They share the patch, and
+that patch must reuse the existing sidebar measurement at
+`DrawingLayout.tsx:872` with its `ResizeObserver`/`MutationObserver`
+wiring rather than inventing a second mechanism.
+
+### 21c. Defect 2 — BOUND
+
+- **NOT A PATCH-115 CANVASLINE INVALIDATION REGRESSION.** The chain
+  evidence is accepted and is decisive: Slide 4's PNG went from encoded
+  length **7550 → 51518** at an unchanged 569×320 after supported
+  regeneration, with signatures changing for endpoint geometry, style,
+  label, and deletion/`coord_space` exclusion. That is the full chain
+  through to a new committed image — the proof §20c demanded and §19c
+  lacked.
+- **PRE-EXISTING THUMBNAIL COMPOSITION / SCALE / MEMBERSHIP ISSUE.**
+- **USER-VISIBLE AND REQUIRING A FRESH PATCH.**
+- **MUST BE VISUALLY VERIFIED BEFORE THE OVERALL WORKFLOW IS CALLED
+  COMPLETE.**
+
+The future patch must separately cover: (1) true exclusion from missing
+native `frameId`; (2) content present but rendered at unusably small
+scale; (3) slide bounds containing widely separated or orphaned objects;
+(4) padlet/native-embeddable duplication or divergence; (5) thumbnail fit
+strategy and a minimum useful visual scale; (6) consistency with runtime
+fullscreen.
+
+**Attribution correction, on the record.** The native membership rule is
+`isNativeFrameMember` → `element.frameId === slideFrame.id` at
+`planSlideComposition.ts:11-17`. `git log` on that file resolves its last
+substantive change to **PATCH-070**, not to PATCH-111 or PATCH-112.
+PATCH-111 *characterized* frame membership; PATCH-112 assigned `frameId`
+on post-card drag commit and narrowed the **padlet** geometric fallback.
+So neither the prompt's "PATCH-111's frameId-only rule" nor my own §20c
+attribution to PATCH-112 is precise. **Bind by file and function, not by
+patch number:** `planSlideComposition.ts:11-17` is the governed rule, and
+**PATCH-115 may not alter it.** The follow-up patch may only alter it
+under its own explicit authorization.
+
+### 21d. Defect 3 — BOUND
+
+- **PRE-EXISTING** — `handleArrangeLayout`, `DrawingLayout.tsx:1674-1720`,
+  untouched by the candidate.
+- **USER-VISIBLE.**
+- **OUTSIDE THE CURRENT PATCH-115 ALLOWLIST.**
+- **REQUIRES A FRESH SLIDE-LAYOUT / MEMBERSHIP / PERSISTENCE PATCH.**
+- **MUST LAND BEFORE PATCH-115 MAY CLOSE.**
+
+**Proven by source, not by harness:** the child loop is gated on
+`el.frameId === frame.id` over `elements`, so it cannot move CanvasLines
+(absent from `elements` entirely — no `dx/dy`, no `canvas_lines` write),
+cannot move objects lacking `frameId`, and performs no padlet coordinate
+persistence. Only `excalidrawAPI.updateScene` is called.
+
+**Harness caveat honored — and it is not a formality.** The disposable run
+reported no persisted movement for several categories *including frames*,
+yet source proves the handler intends to move frames. That disagreement
+means the harness result cannot be read as behavioral truth. The future
+patch must first distinguish: (a) the handler never fired in that attempt;
+(b) client-only scene movement that was never persisted; (c) real movement
+rolled back on reload. **Only the source-proven gap — CanvasLines,
+`frameId`-less objects, and absent coordinate persistence — is bound as
+established.** The mixed classification stands on that basis alone.
+
+The fresh patch must define atomic layout movement for slide frames,
+native `frameId` members, padlets/containers, Drawing CanvasLines (front
+and back), objects lacking `frameId` but intended as members,
+boundary-crossing objects, and multiple slides. It must decide explicitly
+whether membership is established before movement, inferred geometrically,
+persisted through `frameId`, or rejected as an orphan requiring explicit
+handling — and must prove save/reload persistence plus rollback and
+partial-failure behavior.
+
+### 21e. Follow-up structure — exactly two patches
+
+The recommended A/B split is adopted, with fresh identifiers.
+
+**PATCH-117 — Application chrome and editor overlay containment.**
+Covers Defect 1 (CanvasLine z-index and hit-path over sidebars and
+modals), the presentation-sidebar collision, and zoom-control placement
+relative to the open sidebar (§21b). One shared notion of "visible canvas
+area", one measurement mechanism.
+
+**PATCH-118 — Slide membership, layout movement, and thumbnail
+completeness.**
+Covers Defects 2 and 3: orphan/missing-`frameId` membership diagnosis;
+moving and persisting padlets and CanvasLines with slide layouts;
+thumbnail scaling and completeness after layout; save/reload and atomic
+persistence.
+
+**Thumbnail scale stays inside PATCH-118 for now.** It splits into a third
+patch **only if** PATCH-118's own source trace proves scale/fit and layout
+movement need independent architectures. That determination belongs to
+PATCH-118's characterization phase, not to this ruling.
+
+Both are **reserved, not authorized.** Neither document may be created
+until §21a recovery completes and the CTO authorizes PATCH-117.
+
+### 21f. PATCH-116 — remains CANCELLED (option 1)
+
+The newly identified defects concern **overlay layering, membership, and
+layout movement** — not a missing custom renderer type. The §8 toolbar
+census conclusion stands: `CanvasLine` was the single missing renderer
+path and it now renders in canvas, thumbnail, and runtime fullscreen.
+
+The §20 report's observation that not every toolbar-created object type
+had live *fixture* coverage is a **live-verification gap, not a missing
+renderer**. It is folded into **PATCH-118's** verification matrix, which
+must exercise every toolbar-created object type through layout apply,
+membership, and thumbnail. No census patch is created.
+
+**The number 116 is retired and must never be reused** — not for these
+patches, not for a census, not for anything. Fresh work takes 117 and 118.
+
+### 21g. PATCH-115 closure dependency — OPTION A
+
+**PATCH-115 remains BLOCKED until PATCH-117 and PATCH-118 land and the
+full workflow is re-verified.** Option B is rejected.
+
+The reasoning is the §20a rule applied to its own case. PATCH-115's
+internal renderer is source-verified, test-verified (55 files / 592 tests;
+focused 12), and now chain-verified through a regenerated PNG. Closing it
+would still be closing on a false signal: it would tell the user the
+slider preview is fixed while lines cover and **intercept** sidebar and
+modal controls, thumbnails can appear blank, and switching layout strands
+slide contents. The patch's stated purpose is a user-visible fix; it
+cannot close on internal correctness alone.
+
+Final user-visible acceptance must assert **presence · containment ·
+completeness · interaction safety · layout stability · persistence after
+reload** — the §19f triad extended by the two dimensions this round
+exposed.
+
+### 21h. Implementation order (bind)
+
+1. **§21a recovery** — restore the 945 fork files; `git status
+   --porcelain` returns exactly 16; then recover the dev server and
+   confirm `/` and `/auth` both 200.
+2. **CTO authors and authorizes PATCH-117.**
+3. Implement PATCH-117 → independent review → land.
+4. **CTO authors and authorizes PATCH-118** (characterization first, given
+   the harness/source disagreement in §21d).
+5. Implement PATCH-118 → independent review → land.
+6. **Full workflow re-verification** across all six acceptance dimensions.
+7. **PATCH-115 closure review and commit.**
+
+PATCH-115's candidate stays uncommitted through steps 1–6. If PATCH-117 or
+PATCH-118 requires a change to a PATCH-115 authorized file, that is a
+governance event requiring a fresh ruling — not a silent merge.
+
+### 21i. Next Codex prompt (bind) — recovery only
+
+> **Recovery only. No diagnosis, no implementation, no product edit, no
+> commit.**
+>
+> 1. In `C:\Users\rmeic\Projects\dev\starter`, restore the working tree:
+>    `git restore -- components/collabboard/canvas/excalidraw_fork`
+> 2. Verify: `git status --porcelain | wc -l` returns **exactly 16**, and
+>    `git status --porcelain | grep -v excalidraw_fork | wc -l` also
+>    returns 16. Confirm `git diff --stat` shows
+>    `app/dashboard/canvas/[id]/CanvasClient.tsx | 1 +` and
+>    `DrawingLayout.tsx | 14 ++`.
+> 3. Confirm the §17 corrections survive: the deps array is
+>    `[elements, canvasLines]`, the four-line load-bearing comment is
+>    present, and both metadata rest-destructuring lines are the committed
+>    forms.
+> 4. Recover the server: stop the port-3000 process, delete generated
+>    `.next`, `npm run dev`, confirm **both** `/` and `/auth` return 200.
+>    **Do not run `npm run build` while the dev server is live.**
+> 5. Re-run static validation only: `npx tsc --noEmit`, full
+>    `npx vitest run` (expect **55 files / 592 tests**), `git diff
+>    --check`.
+> 6. Report `git status --porcelain | wc -l`, the validation output, and
+>    both health-check results.
+>
+> Do not stage, commit, stash, reset, clean, or create a worktree. Leave
+> the candidate **uncommitted**. Report and stop.
+
+### 21j. Freeform / Map — retained unchanged
+
+**Freeform: NOT EXECUTABLE — NO ACCESSIBLE PRODUCTION FIXTURE.**
+**Map: NOT EXECUTABLE — NO ACCESSIBLE PRODUCTION FIXTURE.**
+Neither is recorded as PASS. The exemption stays PATCH-115-specific and
+**does not carry forward** to PATCH-117 or PATCH-118 — both must obtain
+real fixtures or a fresh governance ruling. The §16d residual risk carries
+into PATCH-115 closure verbatim.
+
+### 21k. Status
+
+**PATCH-115: AUTHORIZED, OPEN, UNCOMMITTED, UNSTAGED, CLOSURE BLOCKED.**
+Candidate untouched: 16 entries, `CanvasClient.tsx` `1 +` / `0 -`, §17
+corrections intact. Live acceptance **FAILED/REOPENED**; closure review
+**CANCELLED**; commit **NOT AUTHORIZED**. **PATCH-116 CANCELLED and
+retired.** **PATCH-117 and PATCH-118 reserved, not authorized.** No
+implementation may begin.
