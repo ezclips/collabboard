@@ -899,3 +899,142 @@ until the Drawing matrix passes in full.
 **PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
 **PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
 **PATCH-116: CANCELLED and retired.**
+
+---
+
+## 16. Final spec-only correction ruling (2026-07-27, CTO)
+
+Issued at governance HEAD `1bc148376df9699d4c97731048b995bfbd42cf0f`.
+Candidate verified unchanged: **9** dirty paths, uncommitted, unstaged,
+production and unit-test hashes unaltered, no file touched during
+diagnosis.
+
+### 16a. Classification B — ACCEPTED
+
+Selection becomes true on **mousedown** from the exact temporary line's
+hit path, exactly as §15a derived from source. The diagnosis confirms it
+on the live surface and adds the measurement the spec needs:
+
+| interaction | filter settling |
+|---|---|
+| pointerdown | 1 ms |
+| normal click | 7 ms |
+| minimal drag | 1 ms |
+| `clipPath: none` comparison | 1 ms |
+
+Hit-path count 1; `elementFromPoint` resolved the intended element; no
+`force: true` used; geometry restored exactly after the drag probe;
+`coord_space` remained `'scene'`; the real Arrow Post untouched.
+
+**Containment does not affect selection. No production regression
+exists.** The `clipPath: none` comparison returning an identical 1 ms
+settling time closes classification **F** by measurement, not inference —
+the §15c source argument and the live result agree.
+
+### 16b. Spec-only correction — AUTHORIZED
+
+**Exactly one file may change:**
+
+```
+e2e/characterization/drawing-overlay-containment.spec.ts
+```
+
+**No production file and no unit-test file may change.**
+`SimpleLineRenderer.tsx` and `DrawingLayout.tsx` remain frozen
+byte-for-byte at their validated candidate state, as does
+`SimpleLineRenderer.test.tsx` with its 20 passing focused tests. The
+production cap stands at **2 of 3** — `ZoomControls.tsx` still untouched.
+
+The corrected selection proof must:
+
+1. Target the temporary line by its exact `data-line-id`.
+2. Assert that line's hit-path count is exactly **1** before interacting.
+3. Prove the chosen coordinate resolves through `elementFromPoint` to that
+   exact hit path — **before** dispatching the interaction, not after.
+4. Use normal pointer interaction. **No `force: true`.**
+5. Poll the computed `filter` on
+   `[data-line-id="<id>"][data-line-role="visible-path"]`.
+6. Require that value to **contain `drop-shadow`**. Assert the
+   pre-interaction value is `none` first, so the proof is a transition and
+   not a pre-existing state.
+7. Use the §16c bounded wait.
+8. Use **none** of: anonymous selection rectangles · positional selectors
+   · `nth-child` · cursor style · screenshot comparison · direct
+   application-state mutation · `force: true`.
+9. Preserve row 13's `elementFromPoint` chrome sweep **unchanged** — not
+   weakened, narrowed, reordered, or made conditional.
+10. Preserve every existing containment assertion unchanged.
+
+### 16c. Bounded wait rule (bind)
+
+**Poll interval ≤ 50 ms. Overall bound 2000 ms. Do not raise either.**
+
+2000 ms is ~285× the measured worst case (7 ms) — ample for machine and CI
+variance, and still short enough that a genuine defect surfaces in
+seconds rather than after a four-minute stall. The element carries
+`transition-all duration-200` (`SimpleLineRenderer.tsx:813`), so 2000 ms
+also clears the full transition window ten times over.
+
+Raising this bound requires a fresh CTO ruling. A longer timeout has
+never once been the fix in this patch — it was the thing that hid the
+defect in §13 and again in §15.
+
+**Failure must be diagnostic (bind).** On timeout the spec must dump, at
+minimum: the observed computed `filter` value, the hit-path count for that
+`data-line-id`, the element returned by `elementFromPoint` at the chosen
+coordinate, and every `data-line-role` present for that line. Two full
+cycles have now been spent because a bare timeout reported nothing about
+the state it timed out in. A third is not acceptable, and this
+requirement is what prevents it.
+
+### 16d. No governance amendment required
+
+Production stays at 2 of 3 files; the test allowlist stays at 2 of 3, and
+this correction modifies a file that already exists. Nothing in §3, §4,
+§5, §7 or §8 needs amending. An amendment becomes necessary only for a
+third production file, a fourth test file, or a change to
+`vitest.config.ts` or `playwright.config.ts`.
+
+### 16e. Post-correction requirements
+
+**Static validation:**
+
+```
+git diff --check
+npx tsc --noEmit
+npx vitest run                                                    # 55 files / 605 tests
+npx vitest run components/collabboard/SimpleLineRenderer.test.tsx  # 20
+npx playwright test --list e2e/characterization/drawing-overlay-containment.spec.ts
+npx eslint <each touched file>                                    # no candidate-introduced findings
+```
+
+Plus a scope proof: `git diff --stat` must show `SimpleLineRenderer.tsx`,
+`DrawingLayout.tsx` and `SimpleLineRenderer.test.tsx` **byte-identical**
+to their pre-correction state, and `git status --porcelain | wc -l` must
+remain **9**.
+
+**Live: the full 21-row Drawing matrix, from row 1.** No row may be
+carried forward from either incomplete run — every earlier passing row was
+observed under a spec that has since changed twice. Standing live rules
+unchanged: `PW_BASE_URL` set; `--no-deps`; no build while the dev server
+is live; probe **both** `/` and `/auth`; full-page screenshots; scratch
+outside the repo; credentials never printed; `.env.local` untouched; real
+board data restored; **no worktree or second checkout**; `git status
+--porcelain` count **and full list** before and after, expecting **9**
+throughout — any delta is a run failure regardless of findings.
+
+### 16f. Freeform / Map — check only after Drawing completes
+
+**Stage 2 remains NOT granted.** Neither layout is PASS. Only if the
+Drawing matrix passes **in full** does the implementer report Freeform and
+Map fixture availability and **stop**. The Stage 2 decision is a fresh CTO
+ruling; it may not be assumed, inferred, or inherited from PATCH-115.
+
+### 16g. Status
+
+**PATCH-117: OPEN · AUTHORIZED · UNCOMMITTED · UNSTAGED.** Not closed; the
+candidate is not to be committed. Production frozen at 2 files.
+
+**PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
+**PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
+**PATCH-116: CANCELLED and retired.**
