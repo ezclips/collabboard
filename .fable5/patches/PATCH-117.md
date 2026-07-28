@@ -2391,3 +2391,186 @@ Production frozen at 2 files; no production change authorized.
 **PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
 **PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
 **PATCH-116: CANCELLED and retired.**
+
+---
+
+## 25. Post-§24 correction ruling (2026-07-28, CTO)
+
+Issued at governance HEAD `42bd019addfa0a4b95a27bc1a060798040a40231`.
+Candidate verified: **9** dirty paths, uncommitted, unstaged; all three
+frozen hashes unchanged (`8966233d…`, `86e84e65…`, `df759afb…`).
+
+### 25a. Diagnosis accepted, with the confound recorded
+
+The corrected full-prefix reproduction — rows 1–4 replayed via the exact
+locator logic from the current spec, then row 5 — did not reproduce the
+original timeout. All four candidate signals resolved well inside bound:
+selection filter 10 ms, Edit Points active-state 32 ms, cursor `cell`
+42 ms, exact-line handles 46 ms. Every event in the double-click sequence
+targeted the exact hit-path node; it neither detached nor remounted.
+**No production or targeting regression reproduced.**
+
+**The trace-overhead confound is correctly left unproven and is bound as
+such.** It is a plausible account of the non-reproduction, not a finding,
+and it must not be written into this document as a cause. If it recurs
+under `--trace on` in the next run, that will be evidence; it is not
+evidence now.
+
+### 25b. Cursor signal — DISQUALIFIED, confirmed
+
+§24b's disqualification of `cursor === 'cell'` as an acceptance signal is
+**confirmed, not merely restated**. The diagnosis measured it settling at
+42 ms alongside three independent signals in the same window — so the
+live evidence agrees with the source argument in §24a (the signal ANDs two
+independently-sourced states) without needing the signal to have failed
+again. A signal can be disqualified on structural grounds even when it
+happens to pass; §24a's reasoning stands regardless of this run's outcome.
+
+### 25c. Spec-only correction — AUTHORIZED
+
+**Exactly one file may change:**
+
+```
+e2e/characterization/drawing-overlay-containment.spec.ts
+```
+
+**No production or unit-test file may change.** `SimpleLineRenderer.tsx`,
+`DrawingLayout.tsx` and `SimpleLineRenderer.test.tsx` remain **frozen
+byte-for-byte**; production stays at **2 of 3**.
+
+Replace `waitForLineEditMode`'s acceptance condition with exact-line handle
+presence, branched on fixture shape:
+
+- **points-array fixture**: `point-handle` count ≥ 1 **and**
+  `midpoint-handle` count ≥ 1, both scoped to the exact temporary
+  `data-line-id`.
+- **legacy fixture**: `start-handle`, `control-handle` and `end-handle`
+  each present (count ≥ 1), scoped to the exact temporary `data-line-id`.
+
+The branch condition must be read from the fixture's actual `points`
+field — the same test already does this correctly in
+`editableHandleForCurrentLine` (`:1126-1143`); this correction should
+reuse that shape check rather than re-deriving it, so the two do not
+drift apart.
+
+Bound requirements, all required:
+
+1. Keep the exact raw hit-path double-click product path (§22 unaffected).
+2. No toolbar substitution.
+3. `cursor === 'cell'` may **not** be used as an acceptance condition
+   anywhere in this function.
+4. Cursor readings may remain in the **diagnostic payload only**.
+5. Poll interval ≤ 50 ms, total bound ≤ 2000 ms — unchanged from §16c.
+6. On failure, emit: exact line id; fixture `points` shape; **all**
+   exact-line role counts (`hit-path`, `visible-path`, `label-handle`,
+   `point-handle`, `midpoint-handle`, `start-handle`, `control-handle`,
+   `end-handle` — whichever are present); cursor on a **freshly located**
+   hit path; the selection-filter value; the raw double-click event
+   targets in order; and the hit-path fingerprint **before and after**
+   the double-click, so a remount is directly visible in the failure
+   payload rather than inferred.
+7. Preserve unchanged: §22's exact hit-path coordinate matching; §19's
+   diagnostic payload discipline (assemble before asserting — the §19
+   rule applies here too); §17c/§18's handle criteria; row 13's strict
+   sweep; the governed row order and `test.step` structure from §23.
+8. No timeout may be increased.
+
+### 25d. Wait-budget correction — AUTHORIZED
+
+`UI_READY_TIMEOUT_MS`: **5000 ms → 3000 ms**, exactly as proposed.
+
+Recomputed: `23 × 3000 = 69,000`, replacing `23 × 5000 = 115,000` in the
+§23 census — total declared worst case **150,250 ms**, down from
+196,250 ms, **29,750 ms under the 180,000 ms target**. This is a
+reduction only, consistent with §16c and §23's "no increase" constraint.
+**No other timeout may be changed** by this correction — `INTERACTION_
+TIMEOUT_MS` (2,000 ms), `INITIAL_LOAD_TIMEOUT_MS` (15,000 ms) and
+`FALLBACK_SETTLE_TIMEOUT_MS` (250 ms) are untouched.
+
+This bound is a reduction against the *declared worst case*, not a
+prediction of the next run's actual duration — the row 1–4 prefix observed
+in §24's diagnosis completed in well under a second per row, so 3,000 ms
+remains generous headroom, not a tight margin.
+
+### 25e. No governance amendment required
+
+§5's rows are unchanged in content, count and order. This replaces a
+harness signal with a stricter, exact-line-scoped one and reduces a
+declared-wait constant; neither touches an acceptance criterion.
+Production stays **2 of 3**; tests stay **2 of 3**; both edits land in
+the one already-authorized spec file.
+
+### 25f. Post-correction requirements
+
+**Static:**
+
+```
+git diff --check
+npx tsc --noEmit
+npx vitest run                                                    # 55 files / 605 tests
+npx vitest run components/collabboard/SimpleLineRenderer.test.tsx  # 20
+npx playwright test --list e2e/characterization/drawing-overlay-containment.spec.ts
+npx eslint e2e/characterization/drawing-overlay-containment.spec.ts
+```
+
+Scope proof: the three frozen files **byte-identical**;
+`git status --porcelain | wc -l` remains **9**. Report the recomputed
+worst-case total (expect **150,250 ms**) alongside the static results.
+
+**Live: one complete Playwright matrix from row 1, `--trace on`.** No
+evidence carries forward from any of the six prior incomplete runs.
+Standing rules unchanged: `PW_BASE_URL` set; `--no-deps`; no build while
+the dev server is live; probe **both** `/` and `/auth`; scratch state
+outside the repo, deleted after use; credentials never printed;
+`.env.local` untouched; real board data restored; **no worktree**; status
+count **and full list** before and after, expecting **9**.
+
+**If every Drawing row passes:** report Freeform and Map fixture
+availability and **stop**. Stage 2 remains **NOT granted**; a fresh CTO
+ruling, never inherited from PATCH-115. **Do not commit.**
+
+### 25g. Next Sonnet instruction (bind)
+
+> **Implementation engineer role only. Read PATCH-117 §25 first —
+> authoritative. Do not issue governance rulings, edit `.fable5`, or begin
+> PATCH-118.**
+>
+> Repository safety gate before and after: `git status --porcelain` (expect
+> **9**, same paths as before), `git diff --cached --name-status` (empty),
+> `git worktree list` (one), `git stash list` (empty). Record frozen
+> hashes before and after — any change to `SimpleLineRenderer.tsx`,
+> `DrawingLayout.tsx`, or `SimpleLineRenderer.test.tsx` is a hard stop.
+>
+> **Exactly one file may change:**
+> `e2e/characterization/drawing-overlay-containment.spec.ts`.
+>
+> Apply both corrections from §25c and §25d:
+>
+> 1. Replace `waitForLineEditMode`'s cursor-based condition with exact-line
+>    handle presence, branched on the fixture's `points` shape exactly as
+>    §25c specifies — reuse the shape check already present in
+>    `editableHandleForCurrentLine` rather than re-deriving it. Keep the
+>    double-click product path; no toolbar substitution; `cursor` becomes
+>    diagnostic-only; poll ≤50 ms / ≤2000 ms bound unchanged; on-failure
+>    payload includes every item listed in §25c.6.
+> 2. Change `UI_READY_TIMEOUT_MS` from `5000` to `3000`. No other timeout
+>    constant changes.
+>
+> Do not touch row order, `test.step` structure, row 13, or §22's
+> coordinate helper.
+>
+> Run static validation per §25f and report actual output, including the
+> recomputed worst-case wait total. Then run one complete Playwright
+> matrix from row 1 with `--trace on`, following all standing live rules.
+> Report every row's PASS/FAIL with duration, the full diagnostic payload
+> for any failure, and the final safety-gate results. If Drawing passes in
+> full, report Freeform/Map fixture availability and stop. Leave the
+> candidate uncommitted and unstaged.
+
+### 25h. Status
+
+**PATCH-117: OPEN · AUTHORIZED · UNCOMMITTED · UNSTAGED.** Not closed.
+**Freeform/Map: Stage 2 NOT granted**; neither is PASS.
+**PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
+**PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
+**PATCH-116: CANCELLED and retired.**
