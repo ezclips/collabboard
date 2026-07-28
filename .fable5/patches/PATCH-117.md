@@ -2990,3 +2990,248 @@ incomplete matrix. The §25 wait budget (declared worst case
 **PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
 **PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
 **PATCH-116: CANCELLED and retired.**
+
+---
+
+## 28. §27 diagnostic accepted; §26 continuation authorized on a corrected reset (2026-07-28, CTO)
+
+Issued at governance HEAD `4eeb546372fc49fb5414e2cb57cbdb3225126d46`.
+Candidate verified: **9** dirty paths, uncommitted, unstaged; frozen hashes
+unchanged (`8966233d…`, `86e84e65…`, `df759afb…`).
+Trace present:
+`test-results/drawing-overlay-containmen-c28fc-lection-survival-diagnostic-characterization/trace.zip`.
+
+### 28a. Findings accepted and bound
+
+The rows 1–4 diagnostic ran through the real Playwright runner and passed.
+The following are **bound as fact**:
+
+- **Row 3 proves selection onset only.** Filter `none` / z-index 10 before;
+  `drop-shadow` / z-index 1000 immediately after mousedown; the product
+  selection branch activated.
+- **Row 3 itself clears the selection it sets.** Before row 4: filter
+  `none`, z-index 10.
+- **Row 4 does not clear selection** — there was none left to clear. Line
+  mode on raises z-index to 1000 *only* through `isLineMode`, with the
+  filter still `none`, exactly as
+  `SimpleLineRenderer.tsx:656/668` predicts.
+- **`Escape` does not clear selection.** Filter `none` before and after.
+- **§26 must begin from an unselected line.** The `exact line selected`
+  reset precondition struck in §27c **remains struck**, now on measured
+  evidence rather than source reasoning alone.
+
+**§27's classification G is confirmed live.** Row 3's four historical
+PASSes remain re-scoped to onset-only evidence, not retracted.
+
+### 28b. One reported finding is NOT accepted as stated — and it matters
+
+The report states that at pointerup/mouseup the front-layer z-index **had
+already returned to 10**, which would place the selection loss *before* the
+click and would contradict §26b step 5, which this document bound as fact.
+
+**That inference is not supported by the measurement taken.** A checkpoint
+read after `page.mouse.up()` resolves is necessarily taken **after the
+browser has already synthesized and dispatched `click`** — `mouseup` and
+`click` dispatch in the same task. A post-hoc read therefore **cannot
+distinguish** "cleared at mouseup" from "cleared at the click." The
+observation is real; the ordering conclusion drawn from it is not
+established.
+
+**§26b step 5 is therefore neither confirmed nor contradicted by this run.
+It stands as previously bound, with its timing now explicitly marked
+unproven.** The report's own item 4 — wrapper deselection path executed —
+remains consistent with §26b; a wrapper handler that runs after the state
+is already null is indistinguishable from one that nulls it, by this
+instrumentation.
+
+**Required correction in §28d:** selection filter and front-layer z-index
+must be captured **synchronously inside real `mouseup` and `click`
+listeners**, in the handler body, not by a checkpoint read afterwards.
+Only that ordering is admissible for a claim about when selection is lost.
+
+### 28c. New source finding — mechanism A is materially elevated
+
+`SimpleLineRenderer.tsx:472-491` registers a **window-level `mouseup`
+listener** (`:494`) whose handler:
+
+1. cancels any pending RAF (`:474-477`);
+2. resolves the dragging line id (`:479`);
+3. calls **`onSaveLine(id, …)`** when `persistenceIntent.shouldPersist`
+   (`:485-488`);
+4. clears `draggingPoint` and `draggingLine` (`:489-490`).
+
+**This fires on a plain click with zero movement**, because
+`handleLineDragStart` (`:379-380`) sets `draggingLine` on mousedown and no
+movement is required to reach the commit path. A simple press-and-release
+on a line therefore issues a **persistence commit**, whose refresh can
+re-render or remount the line layer.
+
+That is a direct, source-backed candidate for **mechanism A** — the path
+moving or remounting between mousedown and mouseup — and it is the reason
+§26d's per-event rect capture is the decisive measurement. It is a
+**candidate mechanism, not a finding**; four prior mechanisms in this patch
+were asserted and falsified, and this one is not exempt.
+
+The window listener is **pre-existing** — it is outside both candidate
+diffs. Whether a zero-movement click *should* trigger a save is a
+legitimate product question and is **explicitly out of scope for
+PATCH-117**; it is recorded here for the successor patch and must not be
+touched.
+
+### 28d. §26 continuation — AUTHORIZED, diagnosis only
+
+**Corrected reset state, required before each sequence** (replaces §26d's
+struck precondition in full):
+
+- exact line **unselected**
+- selection filter `none`
+- front-layer z-index `10`
+- line mode off
+- edit mode off
+- dragging state clear
+- sidebar open
+- geometry unchanged
+- `coord_space` `scene`
+- exact verified hit-path coordinate valid
+- `document.elementFromPoint` at that coordinate is the **exact hit path**
+
+`selectedLineId` and `drop-shadow` are **not** required before a sequence
+and must not be asserted.
+
+**All six sequences stand, unchanged and run separately:**
+
+1. `page.mouse.dblclick`
+2. `locator.dblclick`
+3. direct DOM `dblclick` dispatch on the exact hit-path node
+4. two complete click sequences, zero movement
+5. explicit mousedown/mouseup pairs, positioned, zero movement
+6. `pointerdown`/`pointerup`
+
+**Record for every sequence:** complete event order and targets (tag,
+`data-line-id`, `data-line-role`); hit-path bounding rect **before and
+after every event**; hit-path attachment and fingerprint; both
+`elementFromPoint` **and the full `elementsFromPoint` stack** at the
+coordinate; selection filter; front-layer z-index; dragging state; edit
+mode; handle counts; pointer capture (`hasPointerCapture` and any
+`setPointerCapture` call); whether `handlePathDoubleClick` fires.
+
+**Plus, mandatory per §28b:** filter and z-index captured **synchronously
+inside real `mouseup` and `click` listeners**, in the handler body.
+
+**Plus, mandatory per §28c:** record whether an `onSaveLine`-driven
+update/refresh occurs between mousedown and mouseup, and whether the
+hit-path fingerprint changes across it. This is read-only observation of
+what the product already does — **do not suppress, stub or intercept the
+save.**
+
+**Mandatory controls, unchanged:**
+
+- sequence 1 repeated with **only** the line-layer `clipPath` neutralized
+  through read-only DOM styling
+- drag-state completion/cancellation through normal product flow where
+  possible, never by direct state mutation
+- **no `force: true`**; **no source or spec edit**; **no timeout
+  increase**; **no full matrix**; **real Arrow Post untouched**; one
+  disposable fixture; no worktree
+
+`git status --porcelain` count **and full list** before and after.
+
+### 28e. Classification: **J**, unchanged, and correctly so
+
+The §27 diagnostic answered the reset question. It did **not** address why
+pointerup/mouseup leave the hit path, and nothing in it licenses a new
+classification. **A, C, D and E remain live**; **F** and **G** remain
+excluded on prior evidence; **B** remains insufficient. **A is now the
+best-supported candidate** on §28c's source finding, and is separated from
+the rest by one measurement — the per-event rect.
+
+**Results for the six sequences, the first event at which targeting leaves
+the hit path, whether the rect changes, whether pointer capture occurs,
+whether dragging remains latched, the `clipPath: none` comparison, which
+methods reach `handlePathDoubleClick`, and which methods render handles are
+all outputs of the diagnosis authorized here. They do not exist yet and
+must not be recorded, predicted or inferred.**
+
+### 28f. Outcome table — preserved verbatim in force
+
+- **Another real pointer sequence (2, 4, 5, 6) works** ⇒ harness/input-method
+  issue (**D**); possible **spec-only** correction to sequence 1.
+- **Only direct dispatch works** ⇒ the real product double-click route is
+  unreachable by real input (**H**); **production scope ruling required**,
+  outside PATCH-117's allowlist. `dispatchEvent` is characterization only
+  and never proof of usability.
+- **`clipPath: none` changes behaviour** ⇒ **PATCH-117 candidate
+  regression**; stop immediately; production ruling required. Containment
+  and row 13 may not be weakened.
+- **All real sequences fail** ⇒ classify as a **product defect, not
+  harness-only.**
+
+### 28g. Scope, amendment and cleanup
+
+**Narrowest authorized correction: none to production, none to the spec's
+acceptance criteria.** This section authorizes **diagnosis only**. The
+three frozen files remain frozen byte-for-byte; production stays **2 of
+3**.
+
+**No governance amendment is required now.** §5's rows are unchanged in
+content, count and order. An amendment becomes required **only** on outcome
+**H** or a candidate regression.
+
+**Cleanup, still owed from §27f:** the temporary rows 1–4 diagnostic added
+to `e2e/characterization/drawing-overlay-containment.spec.ts` **must be
+removed before the next full matrix run** and may not ship. It may remain
+in place for this §26 continuation.
+
+### 28h. Next GPT-5.5 instruction (bind)
+
+> **Implementation/diagnosis engineer role only. Read PATCH-117 §28 first —
+> authoritative; it corrects one §26d precondition and adds two mandatory
+> captures. Do not issue governance rulings, edit `.fable5`, or begin
+> PATCH-118. Do not commit.**
+>
+> Safety gate before and after: `git status --porcelain` (full list),
+> `git diff --cached --name-status` (empty), `git worktree list` (one),
+> `git stash list` (empty). Record the three frozen hashes before and after
+> — any change is a hard stop. **No worktree. No `force: true`. No timeout
+> increase. No full matrix. Real Arrow Post untouched.**
+>
+> **No source edit. No spec edit.** Instrumentation is read-only page
+> evaluation only.
+>
+> One disposable Drawing fixture. Establish the §28d corrected reset state
+> and prove all eleven of its conditions **before each of the six
+> sequences**. Do not require or assert `selectedLineId` or `drop-shadow`
+> beforehand.
+>
+> Run the six §28d sequences **separately**, recording every listed field —
+> including the full `elementsFromPoint` stack, the per-event rect before
+> and after every event, and the filter/z-index captured **synchronously
+> inside real `mouseup` and `click` handlers** (§28b). Record whether an
+> `onSaveLine` refresh occurs between mousedown and mouseup and whether the
+> hit-path fingerprint changes across it (§28c) — observe only, never
+> suppress it.
+>
+> Then run both mandatory controls: sequence 1 with only the line-layer
+> `clipPath` neutralized via read-only DOM styling, and the drag-state
+> completion/cancellation control through normal product flow.
+>
+> **Stop immediately and return** if the `clipPath: none` control changes
+> the mouseup target — that is a candidate regression requiring a
+> production ruling.
+>
+> Report all six sequence results, both controls, and the final safety-gate
+> results. Leave the candidate uncommitted and unstaged.
+
+### 28i. Certification
+
+**No row certified.** The §27 diagnostic certifies no matrix row; it is
+characterization of rows 1–4 state only. Ninth incomplete matrix. The §25
+wait budget (declared worst case **150,250 ms**) is unchanged.
+
+### 28j. Status
+
+**PATCH-117: OPEN · AUTHORIZED · UNCOMMITTED · UNSTAGED.** Not closed.
+**Freeform/Map: Stage 2 NOT granted**; neither is PASS.
+**PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
+**PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
+**PATCH-116: CANCELLED and retired.**
