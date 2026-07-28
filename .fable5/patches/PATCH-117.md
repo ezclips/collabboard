@@ -2574,3 +2574,181 @@ ruling, never inherited from PATCH-115. **Do not commit.**
 **PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
 **PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
 **PATCH-116: CANCELLED and retired.**
+
+---
+
+## 26. Row-5 double-click event-chain failure (2026-07-28, CTO)
+
+Issued at governance HEAD `b4534cfbbdc953bda7a4e4e0a31b28e99446814b`.
+Candidate verified: **9** dirty paths, uncommitted, unstaged, frozen
+hashes unchanged.
+
+### 26a. The §25 correction worked and must not be reverted
+
+The handle-presence signal reported the truth: `point-handle: 0`,
+`midpoint-handle: 0`, edit mode never entered. Under the old cursor
+signal this same run would have reported `cursor: move` and been equally
+ambiguous between "no edit mode" and "selection lost" — here it is
+unambiguous, and the run additionally produced the event chain that makes
+this section possible. **§25 is validated by this failure**, not
+questioned by it. Rows 1–4 passing and row 5 failing with a complete
+payload is the instrumentation doing its job.
+
+### 26b. The downstream chain is PROVEN — not a hypothesis
+
+From the run's event log plus source, the following is established and is
+bound as fact:
+
+1. `mousedown` lands on the exact hit path → `handleLineDragStart` runs →
+   `setDraggingLine({ lineId })` and `onSelectLine(lineId)`
+   (`SimpleLineRenderer.tsx:379-380`). **Selection is set.**
+2. `mouseup` lands on the `<svg>`, **not** the path. Down-target and
+   up-target now differ.
+3. Per DOM UI Events, `click` is dispatched on the **nearest common
+   ancestor** of the down and up targets — the canvas wrapper `DIV`,
+   exactly as the run recorded. **`handlePathClick` never runs.**
+4. Because `handlePathClick` never runs, its `e.stopPropagation()`
+   (`:577`, commented *"Always stop propagation to prevent canvas
+   deselect"*) never runs.
+5. The click therefore reaches the canvas wrapper's `onClick`
+   (`CanvasClient.tsx:6123-6147`), which calls `setSelectedLineId(null)`
+   and `setLineEditModeId(null)`. **Selection is lost; the front layer
+   z-index falls back to 10** — precisely what the run measured.
+6. `dblclick` is dispatched on the same common ancestor, so
+   `handlePathDoubleClick` never receives it. **Edit mode is never
+   entered.**
+
+**A product assumption is provably violated.** The wrapper comment at
+`:6130-6131` states: *"Interactions on the line/path/handles call
+stopPropagation, so they won't reach here."* That guarantee holds only
+when the click's target **is** the line. When mouseup leaves the path, the
+click retargets to an ancestor and the guard silently fails open — the
+canvas deselect fires on what the user experienced as a click on the line.
+
+### 26c. Classification: **J — unresolved**, on the one link that matters
+
+Steps 2 through 6 are proven. **Step 2's cause — why `mouseup` targets the
+`<svg>` rather than the path — is not**, and I will not guess it. Four
+mechanisms have been asserted and falsified in this patch (§13b `points`,
+§17b bridge overlay, §20b full-width clip, and the §22 correction to my
+own §17b reasoning). A fifth guess would cost another cycle.
+
+**A, C, D and E all remain live** and are separated by one instrumented
+run. What source contributes:
+
+- **Not F.** The run shows selection *set* on mousedown and lost only at
+  the click. z-index drops as a *consequence* of step 5, not a cause of
+  step 2.
+- **Not G, on current evidence.** The Drawing bridge
+  (`DrawingLayout.tsx:3033-3041`) is an ancestor with capture-phase
+  handlers, and its target resolution is back-plane scoped
+  (`data-line-renderer="back"`, `:2853-2867`). The fixture line is
+  front-plane. Not excluded, but unsupported.
+- **B is partially implicated but insufficient.** `handleLineDragStart`
+  does call `preventDefault()` and `stopPropagation()` (`:370-371`), but
+  neither retargets `mouseup`; `preventDefault` on mousedown does not
+  suppress or retarget click. It cannot by itself explain step 2.
+
+**One candidate-specific possibility must be tested explicitly:**
+`clip-path` is candidate-introduced, and it affects hit-testing. §21
+observed handles topmost with containment engaged, but that was in a
+*different* state (post-edit-mode, not mid-mousedown, and not during a
+drag-state re-render). **The `clipPath: none` comparison is mandatory
+here** and is the single highest-value control in §26d.
+
+### 26d. Required diagnosis (bind) — read-only
+
+One disposable Drawing fixture, rows 1–4 prefix replayed as in §24. **No
+`force: true`. No worktree. No timeout increase. Real Arrow Post
+untouched.** Do not mutate application state directly.
+
+**Test each input sequence separately from an identical, field-proven
+reset state**, at the exact verified hit-path coordinate:
+
+1. `page.mouse.dblclick` (current spec method)
+2. `locator.dblclick` on the exact hit path
+3. `dispatchEvent('dblclick')` on the exact hit-path node
+4. two complete click sequences, zero movement
+5. mousedown/mouseup pairs, positioned, no movement
+6. pointerdown/pointerup, if the product listens to pointer events
+
+**For every sequence record:** each of `pointerdown`, `mousedown`,
+`pointerup`, `mouseup`, `click` (both), `dblclick` — with target tag,
+`data-line-id`, `data-line-role`; whether pointer capture exists
+(`hasPointerCapture` / any `setPointerCapture` call); whether the
+hit-path node stays attached; its bounding rect **before and after each
+event**; the selection filter after each event; the front-layer z-index
+after each event; dragging state after each event; whether
+`handlePathDoubleClick` fires; and whether exact-line handles appear.
+
+**The rect-per-event capture is the decisive measurement** — if the path's
+rect shifts between mousedown and mouseup, mechanism A is confirmed
+directly; if it is unchanged, A is excluded and C/D/E remain.
+
+**Mandatory control — containment:** repeat sequence 1 with **only** the
+line-layer `clipPath` neutralized by read-only DOM styling. If the mouseup
+target becomes the path, this is a **candidate-introduced production
+regression** — stop immediately and return for a production ruling. If
+unchanged, the candidate is excluded and the defect is pre-existing.
+
+**Drag-state control:** before the second click, record whether
+`draggingLine` remains active. If it can be completed or cancelled through
+normal product flow, do so, then issue the second click and record whether
+`dblclick` reaches the hit path. **Do not mutate state directly.**
+
+Report `git status --porcelain` count **and full list** before and after —
+expect **9**.
+
+### 26e. Supported-path ruling
+
+Decided in advance, so the outcome cannot be argued afterward:
+
+- **Any real pointer sequence (2, 4, 5, 6) reaches
+  `handlePathDoubleClick`** ⇒ the current `page.mouse.dblclick` is not
+  equivalent to real user input on a draggable path (**D**). **Spec-only
+  correction** to that sequence. Harness defect.
+- **All real pointer sequences fail, `dispatchEvent` succeeds** ⇒ classify
+  as **H — the product's double-click route is functionally unreachable
+  through real input.** `dispatchEvent` may then be used **only** as
+  explicitly-ruled characterization of the intended route, must faithfully
+  exercise the registered `onDoubleClick` handler, and must **never**
+  mutate application state. It is **not** proof of usability, and the
+  document must record that the user-facing path is broken. That would be
+  a **product defect requiring its own patch** — PATCH-117 would then need
+  a fresh scope ruling, because its allowlist does not authorize fixing
+  the click-target/deselect interaction.
+- **`clipPath: none` changes the outcome** ⇒ candidate-introduced
+  regression. Stop; production ruling required. Containment and row 13 may
+  not be weakened.
+
+**Regardless of outcome, the §26b finding stands on its own:** a click
+whose down-target is a line but whose up-target is not will deselect the
+line via `CanvasClient.tsx:6123-6147`. Whether that is reachable by a real
+user is exactly what §26d must establish. **It must not be recorded as
+harness-only without that evidence.**
+
+### 26f. Correction scope and amendment
+
+**No production change is authorized by this section.** No spec change is
+authorized either — this is **diagnosis only**. `SimpleLineRenderer.tsx`,
+`DrawingLayout.tsx` and `SimpleLineRenderer.test.tsx` remain frozen;
+production stays **2 of 3**.
+
+**A governance amendment will be required only** if the outcome is **H**
+or a candidate regression — both put the fix outside PATCH-117's current
+allowlist. A spec-only sequence correction needs no amendment.
+
+### 26g. Certification and wait budget
+
+**No row certified.** Seventh incomplete matrix. The §25 wait-budget
+reduction to a declared worst case of **150,250 ms** stands and is
+unaffected; the run failed on an assertion, not a budget exhaustion —
+row 5 failed at 2,382 ms, well inside its bound.
+
+### 26h. Status
+
+**PATCH-117: OPEN · AUTHORIZED · UNCOMMITTED · UNSTAGED.** Not closed.
+**Freeform/Map: Stage 2 NOT granted**; neither is PASS.
+**PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
+**PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
+**PATCH-116: CANCELLED and retired.**
