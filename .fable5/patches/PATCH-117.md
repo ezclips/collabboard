@@ -3934,3 +3934,188 @@ a tenth. **No production change authorized; production remains 2 of 3.**
 **PATCH-119: designated, NOT authored, NOT authorized, UNTOUCHED.**
 **PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
 **PATCH-116: CANCELLED and retired.**
+
+---
+
+## 32. Row-15 whole-line-drag failure — narrow ruling (2026-07-28, CTO)
+
+Issued at governance HEAD `df894b6cd3d0aa28c4b441ec2b1c0c310d539303`.
+Candidate verified: **9** dirty paths, uncommitted, unstaged; the three
+frozen production/unit hashes unchanged (`8966233d…`, `86e84e65…`,
+`df759afb…`).
+
+### 32a. The containment result is the headline and it is CERTIFIED
+
+**Rows 1–13 PASSED** with the identity alignment from §31 in place — the
+first time the matrix has reached row 13. Sidebar containment, front/back
+layer containment, modal containment, Apply-layout, slide-card, checkbox
+and overflow interactions, and **row 13's strict chrome-region
+`elementFromPoint` sweep** all passed, with the production candidate and
+all frozen hashes unchanged.
+
+**Rows 1–13 are CERTIFIED.** They may not be rerun unless the production
+candidate changes. §31's identity alignment is confirmed working and is
+discharged. Row 14 remains DEFERRED under §29e.
+
+### 32b. **A is EXCLUDED on source — row 15 is not candidate-caused**
+
+The candidate's entire behavioural surface is a `clip-path` inset on the
+line layer plus CSS custom properties for zoom-control placement. Three
+steps, each source-backed:
+
+1. **The mousedown reached the hit path.** Row 15 takes its coordinate from
+   `verifiedHitPathPoint` (`:1677`), which requires `elementFromPoint` at
+   that coordinate to return the exact hit path. `clip-path` suppresses
+   hit-testing, so a clipped coordinate **cannot** pass that verification.
+   The drag therefore began at a provably unclipped point.
+2. **Movement is not clip-sensitive.** The drag is driven by a
+   **window-level `mousemove` listener** (`SimpleLineRenderer.tsx:493`),
+   not by hit-testing the path. `clip-path` cannot suppress it, and the
+   drag direction is `(-18, -12)` — away from the sidebar inset, not into
+   it.
+3. **Persistence is not clip-sensitive.** `onSaveLine` is invoked from the
+   window `mouseup` handler (`:485-488`); no part of that path consults
+   layout, hit-testing or clipping.
+
+**There is no source path by which the containment candidate can prevent
+geometry persistence. A is excluded.**
+
+### 32c. **E is EXCLUDED on source — the row-15 expectation is valid**
+
+`expectExpectedGeometryChange` (`:1403-1410`) branches on
+`Array.isArray(before.points)` and, for the points-array fixture, requires
+`pointsChanged` (`:1390-1392`). The whole-line drag branch updates
+`start/control/end` **and** maps every point by the same delta
+(`SimpleLineRenderer.tsx:452-463`). The expectation matches what the
+product does for this fixture shape. **E is excluded.**
+
+**D is excluded.** The PATCH-119 defect is that targeting leaves the path
+at `pointerup`; `mousedown` targeting is intact, and `mousedown` is all a
+drag needs to start. Row 15 does not depend on the double-click route.
+
+### 32d. Classification: **C leading, B live** — and one read separates them
+
+Two non-candidate mechanisms remain, both source-backed:
+
+- **C — harness.** Row 15 calls `fetchLine` **immediately** after
+  `dragFromPoint` returns (`:1678-1679`), with **no wait for persistence to
+  land**. `onSaveLine` is an asynchronous network write. If the read
+  outruns the write, the DB legitimately still holds the created values —
+  exactly the reported symptom.
+- **B — pre-existing product race.** The window `mousemove` listener is
+  attached inside a `useEffect` gated on `isDragging`
+  (`SimpleLineRenderer.tsx:393-394`), and `isDragging` only becomes true
+  after React re-renders from `setDraggingLine` (`:379`). Playwright's
+  `mouse.move(..., { steps: 8 })` (`:1180`) dispatches all eight moves
+  back-to-back. If the listener is not attached before they are dispatched,
+  **every move is missed**, `dragOffsetRef.current` never advances, and the
+  `mouseup` commit persists unchanged geometry — the same symptom.
+
+`drawingLineDragPersistenceIntent` is excluded as a cause: it returns
+`shouldPersist: true` unconditionally for `phase: 'commit'`
+(`lib/infra/drawing/canvasLineCoordinates.ts:65-74`), so the save is always
+attempted.
+
+**Per the anti-spiral rule, no new run is authorized to separate them.**
+The distinction is answerable from the **already-captured row-15 trace**:
+whether a persistence network request was issued after `mouseup`, and
+whether its payload carried changed geometry. That is one focused read of
+existing data, not a diagnosis sequence.
+
+### 32e. Disposition — the fork is decided in advance
+
+**Row 15 is not certified**, and PATCH-117 authorizes **no production
+change** for it. Which of the two paths applies is decided by the trace
+read, and both outcomes are ruled now so no further ruling is needed:
+
+- **A persistence request was issued carrying changed geometry** ⇒ **C**.
+  The harness read too early. This is a **spec-only** defect in the one
+  file PATCH-117 already authorizes, so **row 15 stays in PATCH-117** and
+  is **not deferred**. Authorized correction, narrowest form: row 15 waits
+  for the persisted geometry to change, bounded by the existing
+  `INTERACTION_TIMEOUT_MS` with a poll interval ≤50 ms — **no new timeout
+  constant, no increase, no arbitrary sleep**, and the same bounded-wait
+  discipline already used elsewhere in the spec.
+- **No persistence request, or one carrying unchanged geometry** ⇒ **B**.
+  A pre-existing whole-line-drag defect in the same interaction layer
+  PATCH-119 already owns. **Row 15 is DEFERRED and assigned to PATCH-119**,
+  whose designated scope widens from "double-click reachability" to
+  "SimpleLineRenderer real-pointer interaction defects". PATCH-119 remains
+  **NOT authored, NOT authorized**.
+
+**Under no outcome is a PATCH-117 production change authorized.** The three
+frozen files stay byte-for-byte; production remains **2 of 3**. Nothing in
+`CanvasClient.tsx` or the wider drag architecture is authorized under
+either branch.
+
+### 32f. Continuation run — rows 16–21, with a binding state constraint
+
+**Rows 1–13 must not be rerun.** The candidate is unchanged, and they are
+certified.
+
+The continuation run covers **rows 16–21**, plus **row 15** if and only if
+the C branch applies and its spec correction is made.
+
+**Binding constraint, because it will otherwise be got wrong:** rows 15–21
+are not independent. They assume the fixture exists and the presentation
+sidebar is open — state established by setup and row 2. A continuation run
+**must replay the state-establishing prefix** (setup, `openDrawing`,
+`openPresentationSidebar`) **without re-asserting or re-certifying rows
+1–13**. Prefix replay is not certification; the prefix rows must be
+reported as `replayed-not-recertified`, never as PASS.
+
+`--trace on`; all §25f live rules and §31's identity assertion unchanged;
+Freeform/Map Stage 2 remains **NOT granted**.
+
+### 32g. Next GPT-5.5 instruction (bind)
+
+> **Implementation engineer role only. Read PATCH-117 §32 first —
+> authoritative. Do not issue governance rulings, edit `.fable5`, or begin
+> PATCH-118 or PATCH-119. Do not commit.**
+>
+> Safety gate before and after: `git status --porcelain` (full list, expect
+> **9**), `git diff --cached --name-status` (empty), `git worktree list`
+> (one), `git stash list` (empty), and the three frozen production/unit
+> hashes — any change to those is a hard stop. **No production edit. No
+> worktree. No `force: true`. No timeout increase. Real Arrow Post
+> untouched. `.env.local` untouched.**
+>
+> **Step 1 — one focused read of the existing row-15 trace. Do not run
+> anything.** Determine only: (a) whether a persistence network request was
+> issued after the row-15 `mouseup`, and (b) whether its payload carried
+> changed geometry. Report both, with the request path and status. **Do not
+> start a multi-variant investigation.**
+>
+> **Step 2 — apply the branch §32e already decided.**
+> If a request was issued with changed geometry: this is **C**. Make the
+> single authorized spec-only correction — row 15 waits for the persisted
+> geometry to change, bounded by the existing `INTERACTION_TIMEOUT_MS`,
+> poll ≤50 ms, no new or increased timeout constant, no sleep. Row 15 stays
+> in PATCH-117.
+> Otherwise this is **B**. Mark row 15 **deferred to PATCH-119** using the
+> existing `deferredRow` mechanism with a stated reason, exactly as rows 5
+> and 14 are handled. Change nothing else.
+>
+> **Step 3 — one continuation run:** rows 16–21, plus row 15 only under
+> branch C. Replay the state-establishing prefix (setup, `openDrawing`,
+> `openPresentationSidebar`) and report those as
+> `replayed-not-recertified`, **never as PASS**. **Do not rerun or
+> re-certify rows 1–13.** `--trace on`; §31 identity assertion in force;
+> user ids only, never a credential or token.
+>
+> Report each executed row's PASS/FAIL/DEFERRED with duration, the full
+> diagnostic payload for any failure, whether each configured Freeform and
+> Map fixture id is readable by the aligned identity, and the final
+> safety-gate results. Leave the candidate uncommitted and unstaged.
+
+### 32h. Status
+
+**PATCH-117: OPEN · AUTHORIZED · UNCOMMITTED · UNSTAGED.** Not closed.
+**Rows 1–13 CERTIFIED.** Rows 5 and 14 DEFERRED to PATCH-119. Row 15
+undecided between one spec-only correction and deferral, per §32e.
+**No production change authorized; production remains 2 of 3.**
+**Freeform/Map: Stage 2 NOT granted**; neither is PASS.
+**PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
+**PATCH-119: designated, NOT authored, NOT authorized.**
+**PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
+**PATCH-116: CANCELLED and retired.**
