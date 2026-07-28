@@ -3469,3 +3469,220 @@ NOT authorized.**
 **PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
 **PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
 **PATCH-116: CANCELLED and retired.**
+
+---
+
+## 30. Matrix setup failure before row 1 — diagnosis authorized (2026-07-28, CTO)
+
+Issued at governance HEAD `cbe71ab4c28d1a6812650eca48f1f0cc26acbe8d`.
+Candidate verified: **9** dirty paths, uncommitted, unstaged; frozen hashes
+unchanged (`8966233d…`, `86e84e65…`, `df759afb…`).
+
+### 30a. §29 spec handling accepted; the run is not evidence against containment
+
+Static validation passed in full, the three frozen hashes are unchanged,
+and the §29h spec-only handling is present and correct: row 5 deferred to
+PATCH-119, row 14 deferred **with a stated source reason** (it calls
+`enterEditModeViaExactHitPath()`), row 16 correctly left executable, and no
+§27/§28 diagnostic scaffolding remaining. **§29h items 1–3 are discharged.**
+
+**The run produced no evidence about PATCH-117 containment, for or
+against.** It failed in `openDrawing` before row 1; no Drawing row
+executed. **It does not count as an incomplete matrix** in the sense the
+prior nine did — the candidate was never exercised. The count of incomplete
+matrices stays at nine.
+
+### 30b. One reported datum is misleading and must not drive classification
+
+"Cleanup found zero matching disposable PATCH-117 boards" is **expected and
+benign**, and is **not** evidence that the fixture never existed.
+
+`cleanupFixture` (`:240-244`) runs inside the test's `finally` block
+(`:1596-1602`) and deletes the board unconditionally when `fixture` is
+non-null. Any sweep performed *after* the run therefore finds zero by
+construction. Further, `cleanupFixture` issues deletes and **never reads a
+count**, so it cannot report "zero matched" at all.
+
+**Classifications A and D are therefore unsupported by this datum**, and
+positive evidence for either must come from the authorized diagnosis, not
+from the post-run sweep. Additionally, `createFixture` throws on every
+error path it has (`:187`, `:209`, `:235`), and no such error was reported —
+so the boards, padlets and canvas_lines inserts all returned successfully.
+**A is further disfavoured**, though not excluded, since the insert
+responses were not captured.
+
+### 30c. Leading candidate — **G**, with a specific and testable mechanism
+
+**Classification is J — unresolved — pending measurement.** Five mechanisms
+have been asserted and falsified across §§13, 17, 20, 22 and 28c in this
+patch; this one gets no exemption and is recorded as a **hypothesis, not a
+finding**. But it is specific, artifact-backed, and separable in one cheap
+step.
+
+The two identities are constructed by **completely different paths**:
+
+- **Node/fixture identity:** `createClientForLiveUser` (`:155-167`) signs in
+  fresh with `signInWithPassword` on every run. It is always valid. This is
+  why fixture creation succeeded.
+- **Browser identity:** the `characterization` project uses
+  `storageState: AUTH_STATE_PATH` = `e2e/.auth/user.json`
+  (`playwright.config.ts`, `e2e/helpers/env.ts:25`), produced by the
+  `setup` project via `dependencies: ['setup']`.
+
+**The standing live rule mandates `--no-deps`, which skips the `setup`
+project.** The browser therefore reuses whatever `e2e/.auth/user.json`
+already holds and never regenerates it.
+
+Observed artifact state: `e2e/.auth/user.json` was last written
+**2026-07-26 22:58**, roughly **42 hours** before this run. The §27/§28
+diagnostics on 2026-07-28 ~15:00 used the *same* unchanged file and
+succeeded. Playwright only writes storage state in the `setup` project, so
+any in-browser token refresh during those runs was **not** persisted back
+to the file. Under refresh-token rotation, a refresh consumed during the
+15:00 run invalidates the token still stored on disk — which would make the
+browser unauthenticated from that point on, while the Node client continues
+to work.
+
+**This account fits every observation**: creation succeeded; the canvas
+route rendered rather than redirecting; the application reported "Canvas
+not found" (an RLS-empty read, not a 404 route error); and `/` and `/auth`
+returned 200. It also explains why the identical setup path passed 90
+minutes earlier and fails now.
+
+**It is not established.** Classifications B, C, E, F, H and I remain live
+and are separated by the same single measurement.
+
+### 30d. Bounded diagnosis — AUTHORIZED, read-only
+
+Through the real Playwright runner. **No production edit. No full matrix.
+No timeout increase. No `force: true`. No worktree. Real Arrow Post
+untouched.** One disposable fixture; **stop after `openDrawing`**, pass or
+fail.
+
+Record all twelve items from the request, and specifically:
+
+1. the fixture creation requests and **response bodies** (boards, padlets,
+   canvas_lines), not merely the absence of a thrown error
+2. the exact created board id, and the padlet and canvas_line ids
+3. an authoritative read-back of the board **immediately before**
+   `page.goto`
+4. the exact URL passed to `page.goto`
+5. **the browser's auth identity at the moment of failure** — read from the
+   page's own session, and compare it to the Node client's `getUser()` id.
+   **This is the decisive measurement.**
+6. every network request the canvas page makes, with status and response
+   body for the request that resolves the canvas — flagging any 401, 403,
+   404, empty result set or `PGRST116`
+7. the URL and DOM state when "Canvas not found" renders
+8. an authoritative read-back of the board **at that exact moment**, from
+   the Node client
+9. whether cleanup had run at that point (it must not have)
+
+**Credentials are never printed.** Report the auth identity as a user id
+only — never the email, never a token, never any part of one.
+
+**Controlled variants, in this order, and only these:**
+
+1. current setup path, unchanged — establish the baseline failure
+2. **regenerate the storage state by running the `setup` project** (drop
+   `--no-deps` for that project only), then repeat variant 1. This tests
+   30c directly and is the highest-value control.
+3. bounded authoritative read-back before navigation — **only if** the
+   read-back at item 3 shows the record absent or delayed
+4. navigate using the exact returned identifier rather than any derived id
+   — **only if** item 4 shows a mismatch
+
+**No arbitrary retries. No arbitrary sleeps.** If variant 2 passes and
+variant 1 fails, 30c is confirmed and variants 3 and 4 are not run.
+
+Report `git status --porcelain` count **and full list** before and after.
+
+### 30e. Correction scope
+
+**No production change is authorized.** The three frozen files stay
+byte-for-byte; production remains **2 of 3**. This is an environment,
+harness or auth question until proven otherwise, and none of those live in
+product code.
+
+**A spec-only setup correction is authorized in advance for one thing
+only**, because it is a pure diagnostic improvement with no acceptance
+impact: `openDrawing` (`:266-271`) must **fail fast with a stated reason**
+when the page renders "Canvas not found", instead of spending
+`INITIAL_LOAD_TIMEOUT_MS` waiting for a title that will never appear and
+reporting a bare `TimeoutError`. The failure message must include the
+navigated URL and the observed page state. **No timeout may be increased**,
+and no other behaviour of `openDrawing` may change.
+
+**Any other correction requires a further ruling.** In particular:
+
+- If 30c is confirmed, the fix is a **run-procedure change** — regenerate
+  the storage state before a live matrix — not a file change. It consumes
+  **no allowlist slot**. The standing `--no-deps` rule is amended by §30f.
+- `auth.setup.ts`, `e2e/helpers/env.ts` and `playwright.config.ts` are
+  **not authorized** to change.
+- If the resolving request **succeeds** and the UI still says "Canvas not
+  found", that is an application loading defect requiring a production
+  ruling and a successor patch — **not** a PATCH-117 change.
+
+### 30f. Amendment to the standing live rule
+
+The standing live-run rule "`--no-deps`" is **amended**: it remains in force
+for avoiding unrelated project dependencies, but it **must not be used to
+skip the `setup` project when the browser session is stale or of unknown
+age.** Before any live matrix run, the age and validity of
+`e2e/.auth/user.json` must be established, and the `setup` project run if
+it is stale.
+
+This amendment is procedural. It touches no allowlist, no acceptance
+criterion and no row.
+
+### 30g. Whether another matrix may be run
+
+**Yes — exactly one**, and only after the diagnosis identifies the cause
+and the fix is applied. The §25f live requirements and the §29h reporting
+requirements carry forward unchanged, including deferred-row reporting.
+**Do not re-run the matrix speculatively before the diagnosis completes.**
+
+### 30h. Next GPT-5.5 instruction (bind)
+
+> **Diagnosis engineer role only. Read PATCH-117 §30 first — authoritative.
+> Do not issue governance rulings, edit `.fable5`, or begin PATCH-118 or
+> PATCH-119. Do not commit.**
+>
+> Safety gate before and after: `git status --porcelain` (full list, expect
+> **9**), `git diff --cached --name-status` (empty), `git worktree list`
+> (one), `git stash list` (empty), and the three frozen hashes — any change
+> to a frozen file is a hard stop. **No worktree. No `force: true`. No
+> timeout increase. No full matrix. Real Arrow Post untouched.**
+>
+> **No production edit.** `auth.setup.ts`, `e2e/helpers/env.ts` and
+> `playwright.config.ts` may not change. The only file you may edit is
+> `e2e/characterization/drawing-overlay-containment.spec.ts`, and only to
+> add the §30e fail-fast in `openDrawing` plus read-only diagnostic
+> capture.
+>
+> Run through the real Playwright runner with one disposable fixture and
+> **stop after `openDrawing`**. Record all nine items in §30d, with the
+> browser-versus-Node auth identity comparison as the decisive one.
+> **Report identities as user ids only — never an email, never a token.**
+>
+> Run controlled variant 1 (baseline), then variant 2 (regenerate storage
+> state via the `setup` project, then repeat). If variant 2 passes and
+> variant 1 fails, stop — §30c is confirmed; do not run variants 3 or 4.
+> Otherwise run variant 3 or 4 only if §30d's stated precondition for it
+> holds. **No arbitrary retries, no arbitrary sleeps.**
+>
+> Report the classification you can support from the measurements, all
+> recorded items, and the final safety-gate results. Then stop and return
+> for the §30 follow-up ruling. Leave the candidate uncommitted and
+> unstaged.
+
+### 30i. Status
+
+**PATCH-117: OPEN · AUTHORIZED · UNCOMMITTED · UNSTAGED.** Not closed.
+Nine incomplete matrices; this attempt is **not** a tenth.
+**PATCH-119: designated, NOT authored, NOT authorized.**
+**Freeform/Map: Stage 2 NOT granted**; neither is PASS.
+**PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
+**PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
+**PATCH-116: CANCELLED and retired.**
