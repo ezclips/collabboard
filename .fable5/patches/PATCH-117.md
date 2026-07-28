@@ -3686,3 +3686,251 @@ Nine incomplete matrices; this attempt is **not** a tenth.
 **PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
 **PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
 **PATCH-116: CANCELLED and retired.**
+
+---
+
+## 31. Identity alignment — strategy A, one credential source of truth (2026-07-28, CTO)
+
+Issued at governance HEAD `03ddaa07eb9c4d67e5e7afcb234ce84886708790`.
+Candidate verified: **9** dirty paths, uncommitted, unstaged; the three
+frozen production/unit hashes unchanged (`8966233d…`, `86e84e65…`,
+`df759afb…`).
+
+### 31a. Finding accepted — and the root cause is source-proven
+
+The diagnosis is accepted in full. Two distinct identities, RLS behaving
+correctly, fixture present throughout, route identifier correct, HTTP 200
+with empty RLS-backed reads, no cleanup collision, application healthy.
+**Harness/auth defect. Not a product defect. Not a containment defect.**
+
+**§30c is FALSIFIED and is recorded as such.** Stale storage age was my
+leading candidate; variant 2 with freshly regenerated storage failed
+identically. That is the sixth mechanism asserted and killed in this patch,
+and the §30d variant-2 control is exactly what killed it — the control did
+its job.
+
+**The cause is not merely "two identities"; it is two different credential
+pairs, and it is provable from source:**
+
+- `e2e/auth.setup.ts` authenticates the **browser** through the real `/auth`
+  UI using `E2E_EMAIL` / `E2E_PASSWORD`, imported from
+  `e2e/helpers/env.ts` (`:20-21`), then writes `AUTH_STATE_PATH`.
+- `createClientForLiveUser`
+  (`e2e/characterization/drawing-overlay-containment.spec.ts:155-167`)
+  authenticates the **Node fixture client** with
+  `requiredEnv('LIVE_ACCESS_EMAIL')` / `requiredEnv('LIVE_ACCESS_PASSWORD')`
+  (`:162-163`), read by the spec's own private `readEnvLocal`/`requiredEnv`
+  (`:60-78`) — a **duplicate** of the reader in `e2e/helpers/env.ts`.
+
+Two credential pairs, two accounts, two user ids. The spec never consumed
+the setup project's source of truth, so the identities were never required
+to match and nothing ever checked. **The two reported user ids are the
+expected consequence of that source split, not an environment accident.**
+
+This also explains why no earlier run caught it: nothing in the harness
+compared the identities, and any run that happened to succeed did so for a
+reason that has not been established and must not be assumed.
+
+### 31b. Chosen strategy: **A**, in one direction only
+
+**A is chosen. B, C, D and E are rejected.**
+
+- **B rejected** — creating fixtures through the browser session would
+  rewrite `createFixture`, `fetchLine`, `cleanupFixture` and every
+  `supabase`-based row assertion (rows 20, 21 and the geometry trace all
+  read through the Node client). Large surface, no benefit over A.
+- **C rejected** — generating browser storage state from the Node identity
+  means minting a session outside the real `/auth` flow. That is token
+  injection in substance, and it is prohibited.
+- **D rejected** — creating ownership/access grant records changes what the
+  fixture *is* and would exercise a sharing path the matrix does not
+  characterize. It also risks masking genuine RLS behaviour.
+- **E** — nothing better is supported by the source.
+
+**Direction is binding: the Node fixture client adopts the browser's
+credentials, not the reverse.** `e2e/auth.setup.ts` is shared by the whole
+characterization project; changing which credentials it uses would alter
+the identity of every other authenticated spec in the suite. That blast
+radius is unacceptable for a PATCH-117 harness fix.
+
+Therefore `createClientForLiveUser` must consume **`E2E_EMAIL` /
+`E2E_PASSWORD` imported from `e2e/helpers/env.ts`** — the same values, from
+the same module, that the setup project already uses. `LIVE_ACCESS_EMAIL` /
+`LIVE_ACCESS_PASSWORD` are no longer read by this spec.
+
+**No new shared auth helper is required, and none is authorized.**
+`e2e/helpers/env.ts` already **is** the single source of truth for live-test
+credentials; adding a second helper would recreate the split this section
+exists to remove. The spec's private `readEnvLocal`/`requiredEnv` may
+remain **only** for the non-credential keys it also reads
+(`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, the optional
+fixture ids).
+
+### 31c. Authorized and prohibited files
+
+**Authorized to change — exactly one:**
+
+```
+e2e/characterization/drawing-overlay-containment.spec.ts
+```
+
+**Prohibited — must remain byte-for-byte unchanged:**
+
+```
+e2e/helpers/env.ts
+e2e/auth.setup.ts
+playwright.config.ts
+components/collabboard/SimpleLineRenderer.tsx
+components/collabboard/canvas/layouts/DrawingLayout.tsx
+components/collabboard/SimpleLineRenderer.test.tsx
+app/dashboard/canvas/[id]/CanvasClient.tsx
+.env.local
+```
+
+`e2e/helpers/env.ts` already exports everything needed; importing from it
+is not a change to it. **No production file is authorized.** Production
+remains **2 of 3**.
+
+**Also prohibited, restating the request as binding:** hard-coded user ids,
+copied tokens, token injection, minted sessions, RLS bypass, service-role
+keys, and any production policy change.
+
+### 31d. Identity equality assertion — required, before any fixture write
+
+The order is binding: **the check must precede the first insert**, so a
+mismatch can never create an orphaned board.
+
+1. Obtain the Node fixture-client user id from `supabase.auth.getUser()`.
+2. Obtain the **browser's** user id from the browser's own authenticated
+   session at runtime — via an authenticated in-page read, not by parsing
+   `e2e/.auth/user.json`, and never by decoding a token.
+3. Compare the two.
+4. On mismatch, **throw immediately**, before `createFixture` performs any
+   insert.
+5. The message may contain **the two user ids and nothing else.**
+
+**Never expose, log, print, commit or include in any report or annotation:**
+email, password, access token, refresh token, cookies, or any part of one.
+This extends the standing PATCH-115/117 credential rule to `E2E_EMAIL` /
+`E2E_PASSWORD`, which are now in scope for this spec.
+
+The identity pair may be recorded in the test annotation as user ids only.
+
+### 31e. Forward risk that must be recorded, not assumed away
+
+Switching the Node client's identity changes **who owns everything this
+spec reads**. The disposable fixture is created fresh each run and is
+unaffected. But:
+
+- `PATCH117_LIVE_FREEFORM_CANVAS_ID` / `PATCH114_LIVE_FREEFORM_CANVAS_ID`
+  and the Map equivalents (`:1245-1246`) are **pre-existing boards**, and
+  their owner is unknown. Under the new identity they may become
+  unreadable.
+- The real Arrow Post board is **untouched and must stay untouched**, but
+  if any future step reads it, the same risk applies.
+
+**Required:** the implementer must report whether each configured Freeform
+and Map fixture id is readable by the aligned identity. This does **not**
+gate the Drawing matrix, and Stage 2 remains **NOT granted** regardless.
+It must be known before any Stage 2 ruling rather than discovered inside
+one.
+
+### 31f. §30 fail-fast diagnostics — RETAINED
+
+They **remain part of PATCH-117**. They are spec-only, redacted, fail fast
+on "Canvas not found", and they are what turned a bare 15-second
+`TimeoutError` into an actionable failure. Removing them would discard the
+instrumentation that made this section possible.
+
+The spec is the one file PATCH-117 authorizes to change, so its hash is
+**expected** to move; it carries no frozen status. The new baseline is
+bound:
+
+```
+e2e/characterization/drawing-overlay-containment.spec.ts
+  was: 55fda3fa84480ca717c412cd564940333bb98f6b
+  now: ff58aa76b1357074d268d2020c35ef03cd858448   (§30 baseline)
+```
+
+The identity-alignment work in this section will move it again; that is
+expected and authorized. **The three frozen production/unit hashes must not
+move, and remain the only hard-stop hashes.**
+
+### 31g. Acceptance control — mandatory, and it gates the matrix
+
+The seven-step control is adopted verbatim and is binding:
+
+1. regenerate storage state through the normal `setup` project
+2. verify the browser user id **equals** the Node fixture-client user id
+3. create one disposable Drawing fixture
+4. confirm the **browser** can read that exact fixture
+5. open Drawing successfully
+6. **stop before row 1**
+7. clean up fully
+
+**The next full matrix is NOT authorized immediately.** It is authorized
+**only after this control passes**, and then **exactly one** run, under
+§25f's live requirements and §29h's deferred-row reporting, with rows 5 and
+14 deferred to PATCH-119.
+
+If the control fails at step 2 or step 4, **stop and return** — do not
+proceed, do not retry with a different identity, do not run the matrix.
+
+### 31h. Next GPT-5.5 instruction (bind)
+
+> **Implementation engineer role only. Read PATCH-117 §31 first —
+> authoritative. Do not issue governance rulings, edit `.fable5`, or begin
+> PATCH-118 or PATCH-119. Do not commit.**
+>
+> Safety gate before and after: `git status --porcelain` (full list, expect
+> **9**), `git diff --cached --name-status` (empty), `git worktree list`
+> (one), `git stash list` (empty), and the three frozen production/unit
+> hashes — any change to those is a hard stop. **No worktree. No
+> `force: true`. No timeout increase. Real Arrow Post untouched.
+> `.env.local` untouched.**
+>
+> **Exactly one file may change:**
+> `e2e/characterization/drawing-overlay-containment.spec.ts`.
+> `e2e/helpers/env.ts`, `e2e/auth.setup.ts` and `playwright.config.ts` must
+> stay byte-for-byte identical — verify their hashes before and after.
+>
+> Do exactly two things:
+>
+> 1. Change `createClientForLiveUser` to authenticate with `E2E_EMAIL` /
+>    `E2E_PASSWORD` **imported from `e2e/helpers/env.ts`**. Do not read
+>    those two keys through the spec's private env reader; leave that
+>    reader in place for the non-credential keys only. `LIVE_ACCESS_EMAIL`
+>    and `LIVE_ACCESS_PASSWORD` are no longer read by this spec.
+> 2. Add the §31d identity-equality assertion **before any fixture insert**:
+>    Node id from `getUser()`, browser id from the browser's own
+>    authenticated in-page session (never by parsing the storage-state file,
+>    never by decoding a token), compared, throwing immediately on
+>    mismatch with **user ids and nothing else** in the message.
+>
+> Keep the §30 fail-fast `openDrawing` diagnostics. Change nothing else —
+> no row order, no acceptance criteria, no timeout constant, no row 13, no
+> §22 coordinate helper, no deferred-row handling.
+>
+> **Never print, log, annotate or commit** an email, password, access
+> token, refresh token or cookie. User ids only.
+>
+> Run static validation per §25f and report actual output. Then run the
+> §31g seven-step control and **stop before row 1**. Report both user ids,
+> whether they matched, whether the browser read the exact fixture, and
+> whether cleanup completed. Also report whether each configured Freeform
+> and Map fixture id is readable by the aligned identity (§31e) — reporting
+> only, this gates nothing.
+>
+> **Do not run the full matrix in this run.** Return for the §31 follow-up
+> ruling first. Leave the candidate uncommitted and unstaged.
+
+### 31i. Status
+
+**PATCH-117: OPEN · AUTHORIZED · UNCOMMITTED · UNSTAGED.** Not closed.
+Nine incomplete matrices; neither the §29 attempt nor the §30 diagnosis is
+a tenth. **No production change authorized; production remains 2 of 3.**
+**Freeform/Map: Stage 2 NOT granted**; neither is PASS.
+**PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
+**PATCH-119: designated, NOT authored, NOT authorized, UNTOUCHED.**
+**PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
+**PATCH-116: CANCELLED and retired.**
