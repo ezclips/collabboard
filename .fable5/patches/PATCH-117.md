@@ -2196,3 +2196,198 @@ have predicted before the first run.
 **PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
 **PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
 **PATCH-116: CANCELLED and retired.**
+
+---
+
+## 24. Row 5 edit-mode signal ruling (2026-07-28, CTO)
+
+Issued at governance HEAD `18cd4b4a317778fc453711b18968a5f69d7a061e`.
+Candidate verified: **9** dirty paths, uncommitted, unstaged; all three
+frozen hashes unchanged
+(`8966233d…`, `86e84e65…`, `df759afb…`).
+
+The §23 structural correction was already present in the spec when the
+implementer inspected it — row order 1–21 with row 5 immediately after row
+4, named `test.step` attribution, reduced timeout constants, `try/finally`
+cleanup, §22 exact hit-path matching, §19 diagnostics, §17c/§18 criterion,
+row 13 unchanged. **§23 is satisfied and closed.** The implementer made no
+source or spec edits, issued no governance ruling, touched no `.fable5`
+file, and stopped at the bound hard stop. **Role boundary correctly
+observed; the report is accepted.**
+
+### 24a. Classification: **J — unresolved**, and the signal is the reason
+
+I will not choose among A/F/G/H, because **the signal that failed cannot
+distinguish between them.** That is not a limitation of the evidence; it
+is a property of the signal, and it is the finding.
+
+`SimpleLineRenderer.tsx:755`:
+
+```
+cursor: (isEditMode && isSelected) ? 'cell' : (isEditMode ? 'default' : 'move'),
+```
+
+`isEditMode` is the **global** `lineEditModeId !== null`
+(`CanvasClient.tsx:6332`). `isSelected` is `selectedLineId === line.id`
+(`:726`). So `cursor === 'cell'` is a **conjunction of two independent
+states**. Its absence is consistent with *all* of:
+
+- edit mode never activated (**F/G**);
+- edit mode activated but selection was lost (**A**);
+- edit mode activated on a different line (**E**);
+- either state cleared after activation (**H**).
+
+`handlePathDoubleClick` (`:609-615`) sets **only** edit mode —
+`onToggleEditMode(lineId)`. Selection arrives separately, from the
+preceding `mousedown` via `handleLineDragStart:380`. **The two states have
+different sources, and the signal ANDs them.** A failure therefore erases
+the information needed to classify it.
+
+**A candidate mechanism worth testing, not asserting.**
+`handleCanvasMouseDown` (`:553-568`) clears **both** states when a
+mousedown reaches the SVG root with `!isLineMode`:
+
+```
+if (!isLineMode) {
+    onSelectLine(null);
+    onToggleEditMode(null);
+    setSelectedPoint(null);
+    return;
+}
+```
+
+`handleLineDragStart` calls `stopPropagation()` (`:371`), so a mousedown
+that lands **on** the hit path is protected. One that misses by a pixel —
+across the six events `page.mouse.dblclick` synthesises — is not, and
+would clear everything silently. Row 4 also ends with `Escape` at spec
+`:1179`. This is a hypothesis for the diagnosis, consistent with §21's
+finding that `handleToggleLineEditMode` is a plain setter and so cannot
+have toggled edit mode *off*.
+
+**Source does not guarantee `cursor: 'cell'` on edit-mode entry.** It
+guarantees it only when edit mode **and** selection of that exact line
+both hold. That answers the §24 source-trace question directly: the signal
+is **not** guaranteed by entering edit mode.
+
+### 24b. Authoritative signal ruling — BINDING, independent of the diagnosis
+
+**`cursor === 'cell'` is DISQUALIFIED as row 5's edit-mode signal**, and
+this holds regardless of what the diagnosis finds. A signal that ANDs two
+states cannot prove either, and it destroys diagnostic information on
+failure — which this patch has now paid for twice.
+
+**Row 5 must use, in this order of preference:**
+
+1. **Exact-line handle presence matching fixture shape** — the fixture's
+   `points` is an array, so `point-handle ≥ 1` **and** `midpoint-handle ≥ 1`
+   for that exact `data-line-id`; for a legacy row, `start-handle`,
+   `control-handle` and `end-handle` each exactly 1. This is preferred
+   over `lineEditModeId` because handles are rendered by
+   `isEditMode && isSelected` at `:874` — the same conjunction — but as
+   **presence**, which is directly observable, exact-line scoped, and is
+   what row 5 must prove anyway. The spec already implements this branch
+   in `editableHandleForCurrentLine` (`:1126-1143`); the correction is to
+   **wait on it** rather than on cursor.
+2. `lineEditModeId` equal to the exact line id, if safely observable
+   without instrumenting production code.
+3. Another direct, source-backed, exact-line DOM signal.
+4. `cursor` — **only** if source and live evidence prove it guaranteed.
+   §24a shows source does not, so this option is closed.
+
+**A generic global edit-mode boolean alone is not acceptable**, per the
+prompt and per §21's finding that `isEditMode` is global: it cannot show
+that the *intended* line entered edit mode.
+
+### 24c. Required diagnosis (bind) — read-only, one disposable fixture
+
+Reproduce rows 1–5 only, using the current exact-hit-path helper. **No
+`force: true`. The toolbar path is diagnostic only and is never acceptance
+evidence.** No worktree. Real Arrow Post untouched. §16c bounds — **no
+timeout increase.**
+
+**Before the double-click**, record: exact line id; hit-path node
+fingerprint; hit-path computed `cursor`; visible-path selection filter;
+line-mode state; selected state; handle counts by role; line-layer DOM
+identity.
+
+**During and immediately after**, record: raw `mousedown`, `mouseup`,
+`click` and `dblclick` targets and their order; whether the
+`hit-path-doubleclick` diagnostic fires; whether `onToggleEditMode` fires;
+whether the hit-path node is detached or replaced, with the new
+fingerprint; `cursor` on **both** the original node and a freshly located
+exact hit path; handle counts by role; and — decisively — **`selectedLineId`
+and edit-mode state separately**, never inferred from cursor.
+
+**Poll all four candidate signals independently**, each bounded at 2000 ms,
+and record each settling time: (1) cursor contains `cell`; (2) exact-line
+handles matching fixture shape; (3) exact-line edit-mode state; (4) any
+other direct source-backed signal.
+
+**Controlled comparison** from an identical reset state: enter edit mode
+via the real Edit Points control and record the same signals. Determine
+specifically **whether the toolbar path also fails `cursor === 'cell'`
+while handles are present** — if it does, the cursor signal is invalid
+independently of the double-click path, which converts §24b from a
+source-based ruling into a measured one.
+
+Report `git status --porcelain` count **and full list** before and after —
+expect **9**.
+
+### 24d. Correction scope
+
+- **Handles or exact-line edit state appear while cursor never becomes
+  `cell`** ⇒ **spec-only correction**, replacing `waitForLineEditMode`'s
+  condition with the §24b signal. **No production change.**
+- **Original node stale but a freshly located node carries the correct
+  signal** ⇒ **spec-only re-location correction.**
+- **`handlePathDoubleClick` never fires despite exact raw targeting** ⇒
+  identify the interception or synthesis defect and **stop**; no
+  correction authorized without a fresh ruling.
+- **Handler fires but state does not change** ⇒ product state defect;
+  determine candidate-introduced vs pre-existing and **stop**.
+- **Cursor changes only after >2000 ms** ⇒ **do not raise the timeout**;
+  identify why the state is delayed and whether a faster direct signal
+  exists. §24b applies regardless.
+
+**No production change is authorized by this section.**
+
+### 24e. Wait-budget ruling
+
+**196,250 ms is acceptable for the next run and must be reduced below
+180,000 ms before closure.**
+
+It is within the 240,000 ms hard limit, and the observed evidence retires
+the risk the target was guarding against: the reordered matrix reached row
+5 in **12.6 s wall-clock**, so the declared worst case is nowhere near
+being approached. Forcing a reduction before the next run would spend a
+cycle for no information.
+
+The lever, for when it is done: `UI_READY_TIMEOUT_MS` × 23 = 115,000 ms
+dominates the sum. Rows 1–4 completed in ~10 s total, so 5,000 ms per
+UI-ready wait is already generous; reducing it to 3,000 ms yields 69,000 ms
+and a total of **150,250 ms**. **Reductions only — no timeout may be
+increased.** This may be bundled into the same spec-only correction.
+
+### 24f. No governance amendment required
+
+§5's rows are unchanged in content, count and order. This ruling replaces
+a **harness signal**, not an acceptance criterion: row 5 still requires
+edit mode entered via the exact hit-path double-click, and §24b's handle
+presence is a stricter, exact-line-scoped observation than the cursor it
+replaces. Production stays **2 of 3**; tests stay **2 of 3**; the
+correction edits an existing file.
+
+### 24g. Certification
+
+**No row certified.** Rows 1–4 passed under the corrected spec but are not
+certified, because the run did not complete and §14f/§18g require the
+matrix to run from row 1 in one pass.
+
+### 24h. Status
+
+**PATCH-117: OPEN · AUTHORIZED · UNCOMMITTED · UNSTAGED.** Not closed.
+Production frozen at 2 files; no production change authorized.
+**Freeform/Map: Stage 2 NOT granted**; neither is PASS.
+**PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
+**PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
+**PATCH-116: CANCELLED and retired.**
