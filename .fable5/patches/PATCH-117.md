@@ -2752,3 +2752,241 @@ row 5 failed at 2,382 ms, well inside its bound.
 **PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
 **PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
 **PATCH-116: CANCELLED and retired.**
+
+---
+
+## 27. §26 reset-proof failure — the row-3 PASS signal is invalid (2026-07-28, CTO)
+
+Issued at governance HEAD `eb93ee515f9fafbc48ac2f2ab85d5fb61270718e`.
+Candidate verified: **9** dirty paths, uncommitted, unstaged, frozen
+hashes unchanged.
+
+### 27a. The hard stop was correct
+
+The §26 diagnosis stopped before sequences 1–6 because §26d's mandatory
+"identical, field-proven reset state" was not established. That was the
+right call: entering the event-chain experiment from an unproven state
+would have produced a seventh unfalsifiable result. **Classification J
+stands for §26 — the governed experiment was never entered**, and no
+statement about `page.mouse.dblclick`, `locator.dblclick`,
+`dispatchEvent`, click pairs, down/up pairs, pointer sequences, or the
+`clipPath: none` control may be recorded.
+
+### 27b. Classification G — the spec's row-3 PASS signal is itself wrong
+
+Provable from source; no run was required to reach this.
+
+`selectExactLineByVisibleFilter`
+(`e2e/characterization/drawing-overlay-containment.spec.ts:540-567`) is
+the entire row-3 interaction. Its sequence is:
+
+1. `:547` resolve the verified hit-path coordinate.
+2. `:548` `page.mouse.move(point.x, point.y)`.
+3. `:551` `page.mouse.down()`.
+4. `:553-557` poll `visiblePathFilter` for `drop-shadow`, **while the
+   mouse button is still held down**.
+5. `:558` `page.mouse.up()`.
+6. `:560-566` compute `elapsedMs`, assert on the filter value **captured
+   at step 4**, and return.
+
+**The function never re-reads the selection filter after
+`page.mouse.up()`.** Row 3 itself (`:1350-1354`) then asserts only
+`exactHitPath()` count `=== 1` and screenshots. So row 3 asserts that
+selection *becomes* true during mousedown. It does **not** assert, and
+has never asserted, that selection *survives* the interaction that set
+it.
+
+This is not a reproduction defect. **A byte-perfect replay of row 3 also
+ends unselected**, because the clearing happens inside row 3's own
+`mouse.up()`/`click` — after the only measurement row 3 takes. Therefore
+**A is excluded as the explanation**: no fidelity improvement to the
+replay could have produced a selected reset state.
+
+The mechanism is §26b, already bound as fact, applied one row earlier:
+mousedown on the hit path sets selection
+(`SimpleLineRenderer.tsx:379-380`); if mouseup leaves the path the
+`click` retargets to the nearest common ancestor, `handlePathClick`'s
+`stopPropagation` (`:577`) never runs, and the wrapper `onClick`
+(`CanvasClient.tsx:6123-6147`) calls `setSelectedLineId(null)`.
+
+**The measured reset state is internally consistent and is trusted.**
+Front-layer z-index derives from
+`isLineMode || selectedLineId || isEditMode ? 1000 : 10`
+(`SimpleLineRenderer.tsx:656/668`). The reported z-index of **10**
+independently corroborates that all three are false — the reset
+measurement is not a stale or mis-scoped read.
+
+**What remains open is only the destination, not the finding.** Whether
+selection is lost at row 3's own `click` (§26b chain) or at row 4's
+`selectLineTool` sidebar click / `Escape` (`:1356-1362`) is unmeasured.
+Both leave row 3's assertion equally unable to prove survival. The
+authorized diagnostic exists to separate them, not to re-establish 27b.
+
+### 27c. The §26d reset requirement is INVALID as written
+
+Row 5's real entry state is **unselected**, and correctly so:
+
+- Row 3 does not leave selection standing (27b).
+- Row 4 activates the line tool, toggles it off, and presses `Escape`
+  (`:1356-1362`) — a sequence that is not required to preserve any prior
+  line selection.
+- Row 5's own recorded failure payload showed selection filter `none` and
+  z-index 10, consistent with an unselected entry.
+- Row 5's product path is a double-click on the hit path **from an
+  unselected state**; its own mousedown is what sets selection.
+
+**§26d's reset precondition demanding `exact line selected: true` is
+struck.** It demanded a state the governed matrix never reaches, so it
+would have made the diagnosis reproduce a scenario row 5 does not have.
+**Every other §26d requirement stands unchanged** — the six sequences,
+per-event rect capture, the mandatory `clipPath: none` control, the
+drag-state control, no `force: true`, no worktree, no timeout increase,
+read-only DOM inspection only.
+
+**Row 4 is not required to preserve selection.** No row in §5 asserts
+cross-row selection persistence, and none may be added by this section.
+
+### 27d. Authorized correction — diagnostic only, exactly one file
+
+**Exactly one file may change:**
+
+```
+e2e/characterization/drawing-overlay-containment.spec.ts
+```
+
+**No production file may change.** `SimpleLineRenderer.tsx`,
+`DrawingLayout.tsx` and `SimpleLineRenderer.test.tsx` remain **frozen
+byte-for-byte**; production stays **2 of 3**.
+
+**Two changes only:**
+
+1. **A bounded, temporary diagnostic** — one `test.step`, or one
+   `test.describe`-scoped test, that runs **rows 1–4 only** and stops.
+   It must **not** run rows 5–21 and must **not** rerun the full matrix.
+2. **No change to row order, row content, acceptance criteria, timeouts,
+   `test.step` structure, row 13, or §22's coordinate helper.** The
+   existing 21-row test is untouched.
+
+The row-3 and row-4 interactions inside the diagnostic must **call the
+existing helpers directly** — `selectExactLineByVisibleFilter`,
+`selectLineTool`, `toggleLineToolOff`, `verifiedHitPathPoint` — never a
+reimplementation or approximation of them. Method, selector, coordinate
+and wait logic must be the shipped ones.
+
+**Seven checkpoints, in order:**
+
+1. before the row-3 interaction
+2. immediately after `page.mouse.down()` inside row 3
+3. immediately after `page.mouse.up()` inside row 3 — **the decisive
+   checkpoint**
+4. immediately before row 4
+5. immediately after the line tool turns on
+6. immediately after `Escape` with the line tool off
+7. immediately before the §26 reset proof
+
+Checkpoints 2 and 3 require a temporary instrumented copy of the row-3
+sequence **inside the diagnostic only**; `selectExactLineByVisibleFilter`
+itself must not be modified.
+
+**At every checkpoint record:** the `visible-path` computed filter;
+`selectedLineId` if inspectable without mutation; front-layer computed
+z-index; exact-line `hit-path` count; `document.elementFromPoint` at the
+row-3 coordinate (tag, `data-line-id`, `data-line-role`); line-mode
+state; edit-mode state; dragging state; sidebar state; and the full
+`selectionDiagnosticDump` payload. Assemble the whole record **before**
+asserting — the §19 payload rule applies.
+
+**Also record, for row 3 specifically:** the target of every
+`pointerdown`/`mousedown`/`pointerup`/`mouseup`/`click` in the row-3
+interaction, with tag, `data-line-id` and `data-line-role`. This is what
+distinguishes 27b's two live destinations.
+
+**It must run through the real Playwright runner** — not a standalone
+Chromium script. The §26 non-equivalence question (H, input synthesis)
+is not settled and cannot be settled by a raw script.
+
+One disposable fixture. Real Arrow Post untouched. No mutation of
+application state. `git status --porcelain` count **and full list**
+before and after.
+
+### 27e. Supported-path ruling
+
+Decided in advance:
+
+- **Selection is present at checkpoint 2 and absent at checkpoint 3** ⇒
+  27b confirmed live at row 3's own click. Row 3's assertion is
+  corrected to record the post-`mouse.up()` filter as an explicit
+  characterization observation, and §26b is upgraded from proven-by-
+  reasoning to proven-by-measurement at two independent call sites.
+- **Selection survives checkpoint 3 and is absent at 5 or 6** ⇒ **B/D/E**
+  — a sequence/state finding at row 4. Record the exact clearing event.
+  Row 5 still correctly begins unselected; no reselect is added.
+- **Selection survives all seven checkpoints** ⇒ the standalone §26
+  replay was not equivalent to the runner (**H on input synthesis**).
+  Return directly to the §26d event-chain diagnosis using the runner
+  path, with the struck selection precondition replaced by the observed
+  state.
+- **Selection flickers true then false within one checkpoint window** ⇒
+  **I**; record the exact event and timing before classifying.
+
+**In every outcome, 27b stands**: row 3's PASS signal proves onset, not
+survival, and must never again be cited as evidence that a line is
+selected at any later row.
+
+### 27f. Scope and amendment
+
+**No production change is authorized.** **No acceptance-criterion change
+is authorized.** No row may be added, removed or reordered. The
+diagnostic is temporary and must be removed before the next full matrix
+run; it may not remain in the shipped spec.
+
+**No governance amendment is required for this section.** §5's rows are
+unchanged in content, count and order; §26d's struck precondition was a
+diagnosis precondition, never an acceptance criterion.
+
+### 27g. Next GPT-5.5 instruction (bind)
+
+> **Implementation/diagnosis engineer role only. Read PATCH-117 §27
+> first — authoritative, and it strikes one §26d precondition. Do not
+> issue governance rulings, edit `.fable5`, or begin PATCH-118. Do not
+> commit.**
+>
+> Safety gate before and after: `git status --porcelain` (full list),
+> `git diff --cached --name-status` (empty), `git worktree list` (one),
+> `git stash list` (empty). Record the three frozen hashes before and
+> after — any change is a hard stop. **No worktree. No `force: true`.
+> No timeout increase.**
+>
+> **Exactly one file may change:**
+> `e2e/characterization/drawing-overlay-containment.spec.ts`, and only
+> by adding the temporary bounded diagnostic described in §27d. The
+> existing 21-row test, its row order, its acceptance criteria and its
+> timeout constants are untouched.
+>
+> Run **rows 1–4 only**, through the real Playwright runner, on one
+> disposable fixture. Record the seven checkpoints of §27d with every
+> listed field, plus the row-3 per-event target list. Stop after
+> checkpoint 7. **Do not run rows 5–21. Do not run the full matrix.**
+>
+> Report: the value of each field at each of the seven checkpoints; the
+> first event at which selection becomes true; the first event at which
+> it becomes false; the row-3 mouseup and click targets; and the final
+> safety-gate results. Then stop and return for the §27e ruling. Leave
+> the candidate uncommitted and unstaged.
+
+### 27h. Certification
+
+**No row certified.** Row 3's four prior PASSes are **not retracted** —
+they correctly recorded that selection onset occurs — but they are
+**re-scoped**: they are evidence of onset only, and carry no weight as
+evidence of persistence. Rows 1, 2 and 4 are unaffected. Eighth
+incomplete matrix. The §25 wait budget (declared worst case
+**150,250 ms**) is unchanged.
+
+### 27i. Status
+
+**PATCH-117: OPEN · AUTHORIZED · UNCOMMITTED · UNSTAGED.** Not closed.
+**Freeform/Map: Stage 2 NOT granted**; neither is PASS.
+**PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
+**PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
+**PATCH-116: CANCELLED and retired.**
