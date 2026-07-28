@@ -4294,3 +4294,136 @@ closure. Rows 5 and 14 DEFERRED to PATCH-119. Rows 18–21 pending.
 **PATCH-119: designated, NOT authored, NOT authorized, UNTOUCHED.**
 **PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
 **PATCH-116: CANCELLED and retired.**
+
+---
+
+## 34. CLOSURE (2026-07-28, CTO)
+
+Issued at governance HEAD `1411e1b4ec176526a703ae74ffe45df0e8f94203`.
+
+### 34a. Independent review
+
+**PASS.** Performed by an independent reviewer; the authoring CTO neither
+implemented nor reviewed this candidate, per the standing role separation.
+
+### 34b. Acceptance
+
+**Certified PASS — 19 rows:** rows 1–4, rows 6–13, rows 15–21.
+
+**Governed DEFERRED — 2 rows:** row 5 (edit mode through exact hit-path
+double-click) and row 14 (point/endpoint-handle drag, which depends on the
+same edit-mode entry route).
+
+Both deferrals are governed by §29 and are **assigned to PATCH-119**. Both
+were **proven not caused by PATCH-117**: §29a records the controls —
+`clipPath: none` did not change the failure, hit-path rect delta was 0 px,
+no pointer capture, no save request, no geometry change, no detach, remount
+or fingerprint change. The defect is **pre-existing** and lies in the
+real-pointer interaction layer, not in containment.
+
+**Row 17 note, carried forward:** §33c re-scoped row 17 to "zoom controls
+present", its sidebar-closed premise having been unverified in the run that
+first certified it. It was re-executed under the §33d correction and is
+included in the certified set above on that re-execution, not on the
+earlier scope-limited pass.
+
+**Freeform/Map Stage 2: NOT granted.** The fixtures are unconfigured, so
+neither surface is PASS and neither is FAIL. Stage 2 was never inherited
+from PATCH-115 and is not granted here; it requires a fresh ruling in a
+future patch once fixtures exist.
+
+### 34c. Final static validation
+
+```
+git diff --check                                    clean
+npx tsc --noEmit                                    clean
+npx vitest run                                      55 files / 605 tests
+npx vitest run …/SimpleLineRenderer.test.tsx        20 tests
+npx eslint …/drawing-overlay-containment.spec.ts    clean
+npx playwright test --list …                        listing passed
+```
+
+### 34d. Final candidate file list — verified by CTO inspection
+
+**Production — 2 of a maximum 3 (§3):**
+
+```
+components/collabboard/SimpleLineRenderer.tsx                 +13 / -0
+components/collabboard/canvas/layouts/DrawingLayout.tsx       +21 / -2
+```
+
+`SimpleLineRenderer.tsx` adds the optional `visibleCanvasRightInsetPx`
+prop, derives `boundaryClipPath`, and applies `clipPath` plus the
+`data-line-containment` marker to the layer `<svg>`. `DrawingLayout.tsx`
+measures the visible canvas right edge, publishes
+`--drawing-visible-canvas-right-inset` and `--drawing-zoom-controls-right`,
+removes both on cleanup, and anchors the zoom cluster to the published
+variable. **`ZoomControls.tsx` was not needed**; the third production slot
+is unused.
+
+**Tests — 2 of a maximum 3 (§4):**
+
+```
+components/collabboard/SimpleLineRenderer.test.tsx            +110 / -6
+e2e/characterization/drawing-overlay-containment.spec.ts      (new file)
+```
+
+### 34e. Protected paths — EXCLUDED, verified
+
+The following five unrelated pending paths were **not staged and not
+committed**, and remain dirty in the working tree exactly as they were
+before PATCH-117 began:
+
+```
+.gitignore
+app/api/ai/classify-intent/route.ts
+app/api/ai/convert-component/route.ts
+app/api/ai/generate-component/route.ts
+scripts/live-access-login.mjs
+```
+
+`.env.local` was never modified. No worktree was created. No stash was
+used. The real Arrow Post board was never modified.
+
+### 34f. Commit
+
+Committed with the §10 bound message **verbatim**, unaltered:
+
+```
+fix(canvas): contain the Drawing editor line overlay and zoom controls within the visible canvas area (PATCH-117)
+```
+
+Exactly five paths staged: this document plus the four candidate files.
+
+### 34g. Status of adjacent patches
+
+- **PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.** Unaffected
+  by this closure.
+- **PATCH-116: CANCELLED and retired.**
+- **PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.** Not begun.
+- **PATCH-119: DESIGNATED, UNAUTHORED, UNAUTHORIZED, UNTOUCHED.** Owns
+  rows 5 and 14 and the real-pointer interaction defects recorded in §§29
+  and 32e. Its proposed scope is bound in §29d and confers no authority
+  until that patch is authored and authorized.
+
+### 34h. Outstanding work recorded for successors
+
+1. **PATCH-119** — double-click reachability (§29) and, if §32e branch B is
+   ever revisited, whole-line drag initiation. Requires the up-target
+   identity proof from §29b(1) before mechanism F is implemented.
+2. **Freeform/Map Stage 2** — requires configured fixtures and a fresh CTO
+   ruling; never inherited.
+3. **Precondition-assertion sweep** — §33c bound the rule that a row whose
+   name states a precondition must assert it. Three occurrences were found
+   (rows 3, 15, 17). The remaining rows were not swept and should be at the
+   next matrix authoring.
+4. **Freeform/Map fixture readability** under the §31 aligned identity is
+   reported but unverified against real fixtures.
+
+### 34i. PATCH-117 — **CLOSED**
+
+All acceptance criteria met or governed-deferred. Independent review PASS.
+Static gates green. Scope verified at 2 production and 2 test files, within
+the §3/§4 maxima. No protected path included.
+
+**PATCH-117 is CLOSED.**

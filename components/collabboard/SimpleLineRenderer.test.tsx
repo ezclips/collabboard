@@ -28,21 +28,31 @@ function line(id: string, overrides: Partial<CanvasLine> = {}): CanvasLine {
   };
 }
 
-function render(lines: CanvasLine[], drawingViewport = viewport) {
+type RendererProps = React.ComponentProps<typeof SimpleLineRenderer>;
+
+const baseProps: Omit<RendererProps, 'lines'> = {
+  selectedLineId: null,
+  onSelectLine: () => {},
+  onUpdateLine: () => {},
+  onSaveLine: () => {},
+  onCreateLine: () => {},
+  isLineMode: false,
+  isEditMode: false,
+  onToggleEditMode: () => {},
+  drawingViewport: viewport,
+};
+
+function renderWithProps(props: Partial<RendererProps> & { lines: CanvasLine[] }) {
   return renderToStaticMarkup(
     <SimpleLineRenderer
-      lines={lines}
-      selectedLineId={null}
-      onSelectLine={() => {}}
-      onUpdateLine={() => {}}
-      onSaveLine={() => {}}
-      onCreateLine={() => {}}
-      isLineMode={false}
-      isEditMode={false}
-      onToggleEditMode={() => {}}
-      drawingViewport={drawingViewport}
+      {...baseProps}
+      {...props}
     />,
   );
+}
+
+function render(lines: CanvasLine[], drawingViewport = viewport) {
+  return renderWithProps({ lines, drawingViewport });
 }
 
 describe('SimpleLineRenderer Drawing coordinate gating', () => {
@@ -130,5 +140,89 @@ describe('SimpleLineRenderer Drawing coordinate gating', () => {
     );
 
     expect(markup).not.toContain('data-drawing-line-layer');
+  });
+});
+
+describe('SimpleLineRenderer visible canvas containment', () => {
+  it.each([
+    ['front idle', { layer: 'front' as const }],
+    ['front selected', { layer: 'front' as const, selectedLineId: 'same' }],
+    ['front line mode', { layer: 'front' as const, isLineMode: true }],
+    ['front edit mode', { layer: 'front' as const, selectedLineId: 'same', isEditMode: true }],
+    ['back idle', { layer: 'back' as const }],
+    ['back selected', { layer: 'back' as const, selectedLineId: 'same' }],
+  ])('keeps no-boundary %s output free of containment markup', (_label, props) => {
+    const markup = renderWithProps({ lines: [line('same', { coord_space: null })], ...props });
+
+    expect(markup).not.toContain('data-line-containment');
+    expect(markup).not.toContain('clip-path');
+    expect(markup).toContain('class="absolute inset-0 overflow-visible"');
+  });
+
+  it.each([
+    ['selected', { selectedLineId: 'bounded' }],
+    ['line mode', { isLineMode: true }],
+    ['edit mode', { selectedLineId: 'bounded', isEditMode: true }],
+  ])('clips front-layer visual and hit output when a boundary is supplied in %s state', (_label, props) => {
+    const markup = renderWithProps({
+      lines: [line('bounded', { coord_space: null, end_x: 900, end_y: 60, label: 'Bounded label' })],
+      layer: 'front',
+      visibleCanvasRightInsetPx: 320,
+      ...props,
+    });
+
+    expect(markup).toContain('data-line-containment="visible-canvas"');
+    expect(markup).toContain('clip-path:inset(0 320px 0 0)');
+    expect(markup).toContain('data-line-role="hit-path"');
+    expect(markup).toContain('data-line-role="visible-path"');
+    expect(markup).toContain('Bounded label');
+    expect(markup).toContain('z-index:1000');
+  });
+
+  it('leaves rendered geometry unchanged inside the visible canvas when clipping is supplied', () => {
+    const unbounded = renderWithProps({ lines: [line('same', { coord_space: null })] });
+    const bounded = renderWithProps({
+      lines: [line('same', { coord_space: null })],
+      visibleCanvasRightInsetPx: 320,
+    });
+
+    expect(unbounded).toContain('d="M 10 20 Q 30 40 50 60"');
+    expect(bounded).toContain('d="M 10 20 Q 30 40 50 60"');
+  });
+
+  it('keeps back-layer stacking unchanged while allowing boundary containment', () => {
+    const unbounded = renderWithProps({ lines: [line('back', { coord_space: null })], layer: 'back' });
+    const bounded = renderWithProps({
+      lines: [line('back', { coord_space: null })],
+      layer: 'back',
+      visibleCanvasRightInsetPx: 320,
+    });
+
+    expect(unbounded).toContain('z-index:0');
+    expect(bounded).toContain('z-index:0');
+    expect(bounded).toContain('clip-path:inset(0 320px 0 0)');
+  });
+
+  it('keeps selected edit handles interactive inside the boundary', () => {
+    const markup = renderWithProps({
+      lines: [line('editable', { coord_space: null })],
+      selectedLineId: 'editable',
+      isEditMode: true,
+      visibleCanvasRightInsetPx: 320,
+    });
+
+    expect(markup).toContain('data-line-role="start-handle"');
+    expect(markup).toContain('data-line-role="control-handle"');
+    expect(markup).toContain('data-line-role="end-handle"');
+    expect(markup).toContain('pointer-events:auto');
+  });
+
+  it('does not mutate stored line geometry while rendering containment', () => {
+    const source = line('immutable', { coord_space: null, end_x: 900, label: 'Immutable' });
+    const before = JSON.stringify(source);
+
+    renderWithProps({ lines: [source], visibleCanvasRightInsetPx: 320 });
+
+    expect(JSON.stringify(source)).toBe(before);
   });
 });

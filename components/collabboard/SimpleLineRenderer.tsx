@@ -68,6 +68,7 @@ interface SimpleLineRendererProps {
     forcePointerEvents?: boolean;
     excalidrawAPIRef?: React.RefObject<{ updateScene?: (scene: unknown) => void }>;
     drawingViewport?: DrawingViewport;
+    visibleCanvasRightInsetPx?: number;
 }
 
 // Catmull-Rom to Cubic Bezier conversion for smooth paths
@@ -218,6 +219,7 @@ function SimpleLineRenderer({
     forcePointerEvents = false,
     excalidrawAPIRef,
     drawingViewport,
+    visibleCanvasRightInsetPx,
 }: SimpleLineRendererProps) {
     const svgRef = useRef<SVGSVGElement>(null);
     const rendererLabel = layer === 'back' ? 'back' : 'front';
@@ -643,10 +645,20 @@ function SimpleLineRenderer({
         ...(drawingViewport ? [{ key: 'scene', lines: sceneLines, transform: sceneGroupTransform(drawingViewport) }] : []),
     ];
 
+    const explicitRightInsetPx = typeof visibleCanvasRightInsetPx === 'number'
+        ? Math.max(0, visibleCanvasRightInsetPx)
+        : null;
+    const boundaryClipPath = explicitRightInsetPx !== null
+        ? `inset(0 ${explicitRightInsetPx}px 0 0)`
+        : excalidrawAPIRef
+            ? 'inset(0 var(--drawing-visible-canvas-right-inset, 0px) 0 0)'
+            : undefined;
+
     return (
         <svg
             ref={svgRef}
             data-drawing-line-layer={excalidrawAPIRef ? layer : undefined}
+            data-line-containment={boundaryClipPath ? 'visible-canvas' : undefined}
             className="absolute inset-0 overflow-visible"
             style={{
                 width: '100%',
@@ -654,6 +666,7 @@ function SimpleLineRenderer({
                 pointerEvents: (isLineMode || forcePointerEvents) ? 'auto' : 'none',
                 cursor: isLineMode ? 'crosshair' : 'default',
                 zIndex: layer === 'back' ? 0 : (isLineMode || selectedLineId || isEditMode) ? 1000 : 10,
+                ...(boundaryClipPath ? { clipPath: boundaryClipPath } : {}),
             }}
             onMouseDown={handleCanvasMouseDown}
             onContextMenu={(e) => {

@@ -834,6 +834,7 @@ export default function DrawingLayout({
     let observer: MutationObserver | null = null;
     let resizeObserver: ResizeObserver | null = null;
     let lastResolvedLeftPx: number | null = null;
+    const cleanupViewportEl = viewportContainerRef?.current ?? null;
 
     const scheduleRetry = (delayMs = 0) => {
       if (frameId) {
@@ -868,8 +869,22 @@ export default function DrawingLayout({
         scheduleRetry(120);
         return;
       }
-      const viewportRight = viewportContainerRef?.current?.getBoundingClientRect().right ?? window.innerWidth;
-      const reservedSidebarLeft = presentationSidebarRef.current?.getBoundingClientRect().left ?? (viewportRight - 320);
+      const viewportEl = viewportContainerRef?.current;
+      const viewportRect = viewportEl?.getBoundingClientRect();
+      const viewportRight = viewportRect?.right ?? window.innerWidth;
+      const sidebarRect = presentationSidebarRef.current?.getBoundingClientRect() ?? null;
+      const visibleCanvasRight = sidebarRect ? Math.min(Math.max(sidebarRect.left, viewportRect?.left ?? 0), viewportRight) : null;
+      const nextVisibleCanvasRightInsetPx = visibleCanvasRight === null ? null : Math.max(0, viewportRight - visibleCanvasRight);
+      if (viewportEl) {
+        if (nextVisibleCanvasRightInsetPx === null) {
+          viewportEl.style.removeProperty('--drawing-visible-canvas-right-inset');
+          viewportEl.style.removeProperty('--drawing-zoom-controls-right');
+        } else {
+          viewportEl.style.setProperty('--drawing-visible-canvas-right-inset', `${nextVisibleCanvasRightInsetPx}px`);
+          viewportEl.style.setProperty('--drawing-zoom-controls-right', `${nextVisibleCanvasRightInsetPx + 24}px`);
+        }
+      }
+      const reservedSidebarLeft = visibleCanvasRight ?? (viewportRight - 320);
       const equalGap = Math.max(16, (reservedSidebarLeft - stockToolbarRect.right - clusterRect.width) / 2);
       const nextLeftPx = stockToolbarRect.right + equalGap - anchorRect.left;
 
@@ -912,6 +927,8 @@ export default function DrawingLayout({
       if (lastResolvedLeftPx === null) {
         setRightClusterLeftPx(null);
       }
+      cleanupViewportEl?.style.removeProperty('--drawing-visible-canvas-right-inset');
+      cleanupViewportEl?.style.removeProperty('--drawing-zoom-controls-right');
       window.removeEventListener('resize', requestUpdate);
     };
   }, [rightClusterAnchorEl, viewportContainerRef, activeTool, key]);
@@ -3092,7 +3109,7 @@ export default function DrawingLayout({
           handleZoomOut={() => applyZoom('out')}
           handleZoomReset={() => applyZoom('reset')}
           handleZoomIn={() => applyZoom('in')}
-          className="absolute bottom-6 right-6 z-[130] flex items-center bg-white rounded-lg shadow-md border border-gray-200 pointer-events-auto"
+          className="absolute bottom-6 right-[var(--drawing-zoom-controls-right,1.5rem)] z-[130] flex items-center bg-white rounded-lg shadow-md border border-gray-200 pointer-events-auto"
         />,
         viewportContainerRef.current
       ) : null}
