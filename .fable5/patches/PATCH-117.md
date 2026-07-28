@@ -4119,3 +4119,178 @@ undecided between one spec-only correction and deferral, per §32e.
 **PATCH-119: designated, NOT authored, NOT authorized.**
 **PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
 **PATCH-116: CANCELLED and retired.**
+
+---
+
+## 33. Row-18 sidebar-open failure — stale close locator (2026-07-28, CTO)
+
+Issued at governance HEAD `e61cf06b0f61752b32cb4127c89085f0f7fa5c2b`.
+Candidate verified: **9** dirty paths, uncommitted, unstaged; the three
+frozen production/unit hashes unchanged (`8966233d…`, `86e84e65…`,
+`df759afb…`).
+
+### 33a. §32 discharged — branch C was correct
+
+Row 15 passed after the governed persistence wait, and the failure payload
+proves it: `afterSidebarWholeDrag` shows `140,260 → 122,248` and
+`1160,300 → 1142,288` — exactly the `(-18, -12)` delta. **§32e branch C is
+confirmed**; row 15 stays in PATCH-117 and is **not** deferred. Rows 16 and
+17 passed. **Rows 1–16 remain certified and must not be rerun.**
+
+### 33b. Classification: **D — stale locator**, proven from trace and source
+
+Four artefacts, together conclusive:
+
+1. **No element with `title="Close"` exists anywhere in the trace.** A
+   count over every DOM snapshot in `0-trace.trace` returns **zero**. Row
+   17's `page.getByTitle('Close').click(…)` (`:1720`) therefore matched
+   nothing, timed out at `INTERACTION_TIMEOUT_MS`, and was **silently
+   swallowed by `.catch(() => undefined)`**. The presentation sidebar was
+   never closed.
+2. **"Present Frames" is a toggle, not an opener.**
+   `DrawingLayout.tsx:3010-3017`:
+   `onClick={() => setActiveTool(activeTool === 'present' ? 'select' : 'present')}`.
+3. **The sidebar is rendered only while `activeTool === 'present'`**
+   (`DrawingLayout.tsx:3304-3305`). It is conditional rendering, not
+   visibility.
+4. **The real close affordance is not titled "Close".** The panel receives
+   `onClose={() => setActiveTool('select')}` (`:3309`), so a close control
+   exists inside `PresentationPanel` — but whatever its accessible name is,
+   the trace proves it is **not** `title="Close"`.
+
+**The chain is therefore proven:** row 17's close silently failed → the
+sidebar was still open entering row 18 → `openPresentationSidebar`
+(`:273-279`) clicked the toggle → **the sidebar closed** → the helper then
+waited `UI_READY_TIMEOUT_MS` for a sidebar it had just dismissed. The
+observed 3,185 ms is the click plus the full 3,000 ms wait, and the failure
+snapshot shows "Present Frames" focused with **no** sidebar in the DOM.
+
+**Other options excluded:** **A** — the click fired (the button holds
+focus). **B** — state *did* change; it toggled closed. **C** — nothing
+appeared late; it was dismissed. **E** — nothing intercepted the click;
+this is the wrong entry state, and its cause is the stale locator, so **D**
+is the correct classification even though the symptom surfaced as bad
+state. **F** — excluded: `activeTool` is a pure product toggle that no
+candidate line touches, and the governed CSS variables
+(`--drawing-visible-canvas-right-inset`, `--drawing-zoom-controls-right`)
+do not gate whether the sidebar renders.
+
+**No production regression. No production change is authorized.**
+Production remains **2 of 3**.
+
+### 33c. Row 17 is RE-SCOPED — its stated premise was never tested
+
+Row 17 is titled *"zoom controls unchanged with sidebar closed"*, but it
+asserts only that `canvasSidebar(page)` — the **left** canvas toolbar,
+`:1114-1118` — has count 1, and that the zoom-out button has a bounding
+box. Both hold whether or not the presentation sidebar is open. **Row 17
+passed with its premise false.**
+
+This is the same defect class as row 3 in §27: a row certifying something
+narrower than its name claims. Row 17 is **not retracted** — the zoom
+controls were genuinely present — but it is **re-scoped to
+"zoom controls present", with the sidebar-closed premise unverified**, and
+it is **flagged for re-execution in the final full matrix before PATCH-117
+closure**. It may not be cited as evidence about sidebar-closed behaviour
+until then.
+
+**Rule, now bound for this patch:** a row whose name states a precondition
+must assert that precondition. This is the third occurrence (rows 3, 15,
+17); it must be checked for across the remaining rows during the closure
+review, not fixed row-by-row as each one fails.
+
+### 33d. Authorized correction — spec-only, anti-spiral outcome 2
+
+**Exactly one file may change:**
+`e2e/characterization/drawing-overlay-containment.spec.ts`.
+**No production file.** No new timeout constant; no timeout increase; no
+arbitrary sleep.
+
+Three changes, and nothing else:
+
+1. **A source-backed close helper.** Derive the presentation panel's actual
+   close affordance from `PresentationPanel`'s source — do **not** guess an
+   accessible name, and do not reuse `getByTitle('Close')`. The helper must
+   **assert the sidebar is gone** afterwards, bounded by the existing
+   `INTERACTION_TIMEOUT_MS`. **Remove the swallowing `.catch(() =>
+   undefined)`** — a close that cannot close must fail loudly.
+2. **Make `openPresentationSidebar` idempotent.** Because "Present Frames"
+   is a toggle, the helper must check whether the sidebar is already
+   present and click **only** when it is not, then verify. This removes the
+   entire class of failure, not just this instance.
+3. **Apply the close helper at both call sites** — row 17 (`:1720`) and
+   **row 19 (`:1739`)**, which carries the identical stale locator and
+   swallowed catch and would otherwise fail the same way. Row 19's
+   open-close-open sequence genuinely requires a working close.
+
+Row 17 additionally gains the assertion its name already claims: the
+presentation sidebar is **absent**.
+
+No change to row order, acceptance criteria, row 13, §22's coordinate
+helper, deferred-row handling, or any timeout constant.
+
+### 33e. Continuation run — rows 18–21
+
+**Rows 1–16 are bound and must not be rerun or re-certified.** Row 17 is
+re-scoped per §33c and is **not** re-certified in this run; it is re-run at
+the final full matrix.
+
+Exactly **one** continuation run: **rows 18, 19, 20, 21.** The
+state-establishing prefix (setup, `openDrawing`, and — because rows 18–21
+require a deterministic entry state — an explicit **verified close** so
+row 18 begins with the sidebar closed) must be reported as
+`replayed-not-recertified`, **never as PASS**.
+
+`--trace on`; §25f live rules and §31's identity assertion in force; user
+ids only, never a credential or token; real Arrow Post untouched;
+`.env.local` untouched. Freeform/Map Stage 2 remains **NOT granted**.
+
+### 33f. Next GPT-5.5 instruction (bind)
+
+> **Implementation engineer role only. Read PATCH-117 §33 first —
+> authoritative. Do not issue governance rulings, edit `.fable5`, or begin
+> PATCH-118 or PATCH-119. Do not commit.**
+>
+> Safety gate before and after: `git status --porcelain` (full list, expect
+> **9**), `git diff --cached --name-status` (empty), `git worktree list`
+> (one), `git stash list` (empty), and the three frozen production/unit
+> hashes — any change to those is a hard stop. **No production edit. No
+> worktree. No `force: true`. No timeout increase.**
+>
+> **Exactly one file may change:**
+> `e2e/characterization/drawing-overlay-containment.spec.ts`. Apply the
+> three §33d changes and nothing else:
+>
+> 1. Add a close helper whose selector is **read from `PresentationPanel`'s
+>    source**, not guessed and not `getByTitle('Close')`. It must assert the
+>    sidebar is absent afterwards, bounded by the existing
+>    `INTERACTION_TIMEOUT_MS`. **Delete the swallowing `.catch(() =>
+>    undefined)`.** State in your report which selector you used and the
+>    source line you took it from.
+> 2. Make `openPresentationSidebar` idempotent — click the "Present Frames"
+>    toggle only when the sidebar is not already present, then verify.
+> 3. Use the close helper at both row 17 (`:1720`) and row 19 (`:1739`), and
+>    add to row 17 the assertion that the presentation sidebar is absent.
+>
+> Run static validation per §25f and report actual output. Then run **one**
+> continuation covering **rows 18–21 only**. Replay the prefix — setup,
+> `openDrawing`, and a verified close so row 18 starts with the sidebar
+> closed — and report the prefix as `replayed-not-recertified`, never as
+> PASS. **Do not rerun or re-certify rows 1–17.**
+>
+> Report each executed row's PASS/FAIL with duration, the full diagnostic
+> payload for any failure, whether each configured Freeform and Map fixture
+> id is readable by the aligned identity, and the final safety-gate
+> results. Leave the candidate uncommitted and unstaged.
+
+### 33g. Status
+
+**PATCH-117: OPEN · AUTHORIZED · UNCOMMITTED · UNSTAGED.** Not closed.
+**Rows 1–16 CERTIFIED.** Row 17 **re-scoped**, re-execution required before
+closure. Rows 5 and 14 DEFERRED to PATCH-119. Rows 18–21 pending.
+**No production change authorized; production remains 2 of 3.**
+**Freeform/Map: Stage 2 NOT granted**; neither is PASS.
+**PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
+**PATCH-119: designated, NOT authored, NOT authorized, UNTOUCHED.**
+**PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
+**PATCH-116: CANCELLED and retired.**
