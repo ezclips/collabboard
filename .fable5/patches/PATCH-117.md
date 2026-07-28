@@ -3235,3 +3235,237 @@ wait budget (declared worst case **150,250 ms**) is unchanged.
 **PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
 **PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
 **PATCH-116: CANCELLED and retired.**
+
+---
+
+## 29. Classification H accepted; the fix is routed to a successor patch (2026-07-28, CTO)
+
+Issued at governance HEAD `a15a0fb5cabda3c299b2c23f313a7fcfcc999fba`.
+Candidate verified: **9** dirty paths, uncommitted, unstaged; frozen hashes
+unchanged (`8966233d…`, `86e84e65…`, `df759afb…`).
+Trace present:
+`test-results/drawing-overlay-containmen-073ef-ain-continuation-diagnostic-characterization/trace.zip`.
+
+### 29a. Classification H — ACCEPTED and bound
+
+All four real mouse routes (sequences 1, 4, 5 and the real-input portion of
+2) fail to reach `handlePathDoubleClick`. Only direct DOM dispatch reaches
+the registered handler, and per §26e that is characterization only and is
+**not** proof of usability.
+
+**The intended double-click-to-edit route is unreachable through normal
+real mouse input. This is a real product defect, not a harness defect.**
+
+**The PATCH-117 candidate is EXCLUDED as the cause**, on the controls:
+`clipPath: none` does not change the failure; hit-path rect delta is 0 px;
+no pointer capture; no save request; no geometry change; no detach, remount
+or fingerprint change. Combined with §28c's `onSaveLine` candidate being
+falsified by "no save request occurs", **the defect is pre-existing** and
+is unrelated to containment, to the §25 handle signal, and to the wait
+budget.
+
+**The §25 handle-presence signal is vindicated a second time.** It reported
+"no edit mode" truthfully in a case where edit mode genuinely never
+activated.
+
+### 29b. Two source contradictions in the reported findings — flagged, not accepted
+
+**(1) The up-target identity is NOT established.** The report names the
+pointerup/mouseup target as "SVG". `SimpleLineRenderer.tsx:666` sets the
+layer `<svg>` to `pointerEvents: (isLineMode || forcePointerEvents) ? 'auto'
+: 'none'`. `forcePointerEvents` defaults to `false` (`:219`), and the
+governed reset state has **line mode off**. An element with
+`pointer-events: none` **cannot be a hit-test target**. Therefore the
+reported "SVG" is either a different `<svg>` element (the back line layer,
+the Excalidraw surface, or another ancestor), or the identification is
+imprecise. **The retarget destination is unproven and must not be recorded
+as the front line layer.**
+
+**(2) Sequence 6 proves nothing about real pointer hit-testing.** It is
+described as a DOM-dispatched `pointerdown`/`pointerup` sequence. Events
+dispatched directly on a node necessarily "remain on the hit path" —
+that is a property of `dispatchEvent`, not of hit-testing. It may **not**
+be read as evidence that real pointer events stay on the path. Sequence 1
+shows the opposite for real input: **targeting first leaves the hit path at
+`pointerup`.**
+
+Consequence for mechanism selection: **under real input, every event from
+`pointerup` onward leaves the path. `mousedown`/`pointerdown` is the only
+event proven to land on the line.** Any correction that depends on a
+later event remaining on the path is unsupported.
+
+**The DOM-level cause of the retarget remains unproven.** Every mechanical
+control returned negative — nothing moves, nothing remounts, nothing
+captures. That is a legitimate open question, but it does **not** block a
+correction, because the failure condition is stated without reference to
+cause: *the down-target is a line and the up-target is not.* A correction
+conditioned on that observable is robust to whichever mechanism is
+eventually identified. **It must not be described as a root-cause fix.**
+
+### 29c. Mechanism ruling
+
+- **C alone is INSUFFICIENT.** Suppressing wrapper deselection preserves
+  selection but does not make `dblclick` reach the path, so edit mode still
+  never activates. It satisfies one required behaviour and fails the
+  central one.
+- **A and B are REJECTED as the primary mechanism.** A drag threshold
+  changes when persistence and movement begin — real behavioural surface
+  affecting rows 14, 15 and 21 — while leaving the retarget untouched. The
+  diagnosis proved zero movement and zero geometry change already, so a
+  threshold addresses a problem this defect does not have.
+- **D is REJECTED as stated**, on §29b(2): no post-`pointerdown` real
+  pointer event is proven reachable on the path.
+- **E is REJECTED.** Preserving hit-testing across the double-click window
+  is a timing-shaped workaround of the forbidden kind.
+- **F is CHOSEN**, in one specific form: **derive the line's
+  double-activation from the two `mousedown`/`pointerdown` events that
+  provably land on the hit path, and suppress the wrapper deselection route
+  only for the interaction whose originating down-target was that line.**
+  Both halves key off the one proven-reachable signal. C is retained as the
+  subordinate half of F, not as the mechanism.
+
+**Preference stands: the correction must be local to
+`SimpleLineRenderer.tsx`.** Global canvas click semantics may not be
+changed. `CanvasClient.tsx` is **not authorized**; if the implementer can
+show from source that no local correction satisfies every required
+behaviour, they must **return for a further amendment**, not widen scope.
+
+**No drag-threshold behaviour is introduced.**
+
+**Single-click selection survives wrapper deselection** by the F-suppression
+half: the wrapper deselect is neutralized only when the originating
+down-target was that line. **Click-away deselection is preserved** because
+a click whose down-target is not a line is untouched — that is the entire
+existing click-away path and it is unmodified.
+
+### 29d. Patch identity — this requires a SUCCESSOR PATCH
+
+PATCH-117's declared subject is containment of the Drawing line overlay and
+zoom controls; its bound commit message (§10) says exactly that. This
+defect is **pre-existing, unrelated to containment, in a different
+interaction layer, and proven not to be candidate-introduced**. Folding it
+into PATCH-117 would break the patch's identity, invalidate its bound
+commit message, and mix an unrelated behavioural change into a containment
+acceptance matrix.
+
+**Ruling: the double-click reachability fix is routed to a successor
+patch — designated PATCH-119**, so as not to disturb PATCH-118's reserved
+purpose. **PATCH-119 is NOT authored and NOT authorized by this section**;
+this section records only that the work belongs there.
+
+**No production file is authorized to change under PATCH-117.**
+`SimpleLineRenderer.tsx`, `DrawingLayout.tsx` and
+`SimpleLineRenderer.test.tsx` remain **frozen byte-for-byte**; production
+stays **2 of 3**. The file and test lists below are the *proposed scope for
+PATCH-119*, binding on that patch when it is authored, and confer no
+authority now:
+
+- production: `components/collabboard/SimpleLineRenderer.tsx` — **only**
+- tests: `components/collabboard/SimpleLineRenderer.test.tsx`,
+  `e2e/characterization/drawing-overlay-containment.spec.ts`
+- `DrawingLayout.tsx` frozen unless source proof shows it indispensable
+- `CanvasClient.tsx` not authorized
+
+The nine characterization requirements listed in the request are adopted
+verbatim as PATCH-119's required pre-implementation characterization, with
+one addition: **prove the up-target identity first** (§29b(1)) — full
+ancestry and computed `pointer-events` of the real pointerup target — since
+mechanism F's suppression predicate must be written against the actual
+element, not against "SVG".
+
+### 29e. Consequence for PATCH-117 — row 5 is deferred, not failed
+
+This is the operative outcome for the patch in hand.
+
+Row 5 exercises a **pre-existing product defect that PATCH-117 did not
+cause, is not authorized to fix, and cannot fix within its scope.** It is
+therefore **not a PATCH-117 failure**.
+
+**Row 5 is DEFERRED to PATCH-119** and recorded as *blocked — pre-existing
+defect, candidate excluded by control*. **Rows 14 and 16 are deferred with
+it** if and only if they depend on edit-mode entry through the same route;
+the implementer must state which do, from the spec, and defer no others.
+
+**PATCH-117 is therefore no longer blocked on this defect.** The remaining
+rows may be certified. This is the ninth incomplete matrix; the next run is
+a **complete matrix from row 1** under §25f, with the deferred rows recorded
+as deferred rather than skipped silently, and every other row required to
+pass.
+
+**Cleanup, owed from §27f and still outstanding:** the temporary rows 1–4
+diagnostic and any §28 diagnostic scaffolding must be removed from
+`e2e/characterization/drawing-overlay-containment.spec.ts` before that
+matrix run.
+
+### 29f. Acceptance criteria (binding on PATCH-119, not on PATCH-117)
+
+A real mouse double-click on the line hit area must invoke the existing
+edit-mode transition and render the correct exact-line handles, with **no**
+reliance on direct state mutation, `dispatchEvent` acceptance, `force:
+true`, test-only production branches, arbitrary delays, timeout increases,
+or globally disabling canvas deselection.
+
+All of the following must be preserved and proven: whole-line drag;
+zero-movement single-click selection surviving mouseup; click-away
+deselection; front/back line modes; sidebar and modal containment;
+keyboard editing; line geometry and `coord_space`; label interaction;
+handle interaction; and no geometry persistence for a zero-movement click
+beyond what the product already does today.
+
+### 29g. Amendment status
+
+**A governance amendment IS required — and it is an amendment to a
+successor patch, not to PATCH-117.** PATCH-117's §3 production allowlist,
+§5 acceptance matrix and §10 bound commit message are **unchanged**, except
+that §5's row 5 acquires the deferred status ruled in §29e. No production
+allowlist slot is consumed.
+
+### 29h. Next GPT-5.5 instruction (bind)
+
+> **Implementation engineer role only. Read PATCH-117 §29 first —
+> authoritative. Do not issue governance rulings, edit `.fable5`, begin
+> PATCH-118, or begin PATCH-119. Do not commit.**
+>
+> **No production file may change.** The three frozen files stay
+> byte-for-byte identical; production remains 2 of 3. The double-click
+> defect is **not** yours to fix in this patch.
+>
+> Safety gate before and after: `git status --porcelain` (full list, expect
+> **9**), `git diff --cached --name-status` (empty), `git worktree list`
+> (one), `git stash list` (empty), and the three frozen hashes. Any change
+> to a frozen file is a hard stop. **No worktree. No `force: true`. No
+> timeout increase.**
+>
+> **Exactly one file may change:**
+> `e2e/characterization/drawing-overlay-containment.spec.ts`. Do three
+> things and nothing else:
+>
+> 1. Remove the temporary rows 1–4 diagnostic and all §28 diagnostic
+>    scaffolding. None of it may ship.
+> 2. Mark row 5 **deferred to PATCH-119** — it must report as deferred with
+>    a reason, not silently skip and not fail. State from the spec which of
+>    rows 14 and 16 depend on edit-mode entry through the same route and
+>    defer exactly those; defer no others, and say which you deferred and
+>    why.
+> 3. Change nothing else — no row order, no acceptance criteria, no timeout
+>    constant, no row 13, no §22 coordinate helper.
+>
+> Run static validation per §25f and report actual output. Then run **one
+> complete Playwright matrix from row 1 with `--trace on`**, all standing
+> live rules unchanged. Every non-deferred row must pass. Report each row's
+> PASS/FAIL/DEFERRED with duration, the full diagnostic payload for any
+> failure, and the final safety-gate results. If the Drawing matrix
+> completes, report Freeform and Map fixture availability and **stop** —
+> Stage 2 remains NOT granted. Leave the candidate uncommitted and
+> unstaged.
+
+### 29i. Status
+
+**PATCH-117: OPEN · AUTHORIZED · UNCOMMITTED · UNSTAGED.** Not closed, and
+**no longer blocked** on the double-click defect.
+**PATCH-119: designated for the double-click reachability fix; NOT authored,
+NOT authorized.**
+**Freeform/Map: Stage 2 NOT granted**; neither is PASS.
+**PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
+**PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
+**PATCH-116: CANCELLED and retired.**
