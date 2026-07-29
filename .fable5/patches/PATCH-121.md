@@ -1,6 +1,6 @@
 # PATCH-121 — Widen the Clipart draft comment badge-colour palette
 
-**Status:** AUTHORIZED · IMPLEMENTED · UNCOMMITTED · AWAITING INDEPENDENT REVIEW
+**Status:** CLOSED — independent review PASS (see §10)
 **Authored:** 2026-07-29
 **Base commit:** `c23f665e7c2f4e4e7956822ff0216b5cd3516d64` (PATCH-120 closure)
 
@@ -157,8 +157,8 @@ Used verbatim, **only after independent review passes**.
 
 ## 9. Status
 
-**PATCH-121: IMPLEMENTED · UNCOMMITTED · UNSTAGED · AWAITING INDEPENDENT
-REVIEW. NOT APPROVED, NOT CLOSED.**
+**PATCH-121: CLOSED** — superseded by §10; this section records the
+pre-review state.
 **PATCH-120: CLOSED. PATCH-117: CLOSED. PATCH-116: CANCELLED.**
 **PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
 **PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
