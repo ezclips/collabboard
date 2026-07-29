@@ -500,3 +500,242 @@ rule is retired by §13c, which does not reopen that patch.
 **PATCH-116: CANCELLED. PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT
 CLOSED.**
 **PATCH-118: RESERVED. PATCH-119: DESIGNATED, UNAUTHORED, UNAUTHORIZED.**
+
+---
+
+## 14. CLOSURE (2026-07-29, CTO)
+
+### 14a. Independent review
+
+**PASS.** Full independent review PASS; focused independent re-review of the
+one-click panel-switching correction PASS. The prior blocker — Caption →
+Reaction required two clicks — is resolved. The authoring CTO neither
+implemented nor reviewed this candidate. The reader phase (§11 Phase 1) was
+separately confirmed by the CTO before the writer phase began, with four
+non-blocking notes; N3 (spread the base style) and N4 (guard the second
+`ContainerCardPreview` false positive) were both addressed in the final
+candidate.
+
+### 14b. Caption reader
+
+- `CardPreview` reads **`metadata.captionStyle`** (`CardPreview.tsx:34`) via
+  `resolveCaptionStyle`.
+- **Caption text source remains `padlet.title`.** Unchanged.
+- Legacy behaviour is **byte-identical** for `captionStyle` absent, `null`,
+  `{}` and malformed — proven by full-markup `toBe(legacy)` comparison, not a
+  field spot-check.
+- Colour precedence: **`captionStyle.color` → `metadata.textColor` →
+  `#1F2937`**. `metadata.textColor` is deliberately **not** validated, so
+  existing cards render exactly as before.
+- Accepted colour forms: **`#RRGGBB`, `#RRGGBBAA`, `transparent`**. Invalid
+  values fall back rather than emitting bad CSS.
+- **No opacity field introduced** — not `opacity`, not `textOpacity`, not
+  `captionOpacity`. The picker emits a single colour string, so an opacity
+  field could not have been sourced (§16 of PATCH-122).
+- The **seven Image-post presets are copied value-for-value** from
+  `FreeformPadletCards.tsx:1512-1587`, including the explicit
+  `fontFamily: undefined` resets.
+- Only the eight governed fields are read: `heading`, `fontSize`,
+  `fontWeight`, `fontStyle`, `fontFamily`, `lineHeight`, `color`,
+  `backgroundColor`.
+
+**Recorded debt:** the preset table is now **duplicated** between
+`lib/domain/canvas/captionStyle.ts` and `FreeformPadletCards.tsx:1512-1587`.
+`FreeformPadletCards.tsx` is prohibited by this patch, so the duplication is
+correct here and de-duplication is future work.
+
+**Consumer-visible change, recorded deliberately.** The reaction display was
+added to `CardPreview`'s **clipart branch**, which previously had none. The
+canvas clipart site already passed `reactions={padlet.metadata?.reactions ||
+[]}` and `onAddReaction` (`FreeformPadletCards.tsx:1754`) and those props were
+being **silently dropped**. Saved clipart cards holding reactions will now
+display them. This is a restoration of intended behaviour, not a new
+capability, and `FreeformPadletCards.tsx` was not edited to achieve it.
+
+### 14c. Caption writer and style panel
+
+- Caption opens **`InlineCaption` and `TextStylePopup`** together.
+- **`TextStylePopup` is reused unchanged** and remains prohibited from edit.
+- **Opening Caption alone writes no metadata.** Only an explicit style
+  selection writes.
+- Styles write **only to `metadata.captionStyle`**.
+- The draft persists through **`updateMetadata`/`onChange`**;
+  **`updatePadletMetadata` is never called** from the modal. Parity is visual
+  and behavioural, never a persistence-route copy (§13d).
+- **No `metadata.caption`. No `metadata.captionText`. No
+  `captionStyle.opacity`.**
+- Preset application merges **`{ ...baseStyle, ...selectedPreset }`** — the
+  N3 correction. An existing caption colour **survives** preset changes, and
+  an existing background **survives ordinary presets**.
+- **Callout defaults to `#fef3c7` only when no background is present**,
+  mirroring the writer's `baseStyle.backgroundColor || '#fef3c7'`.
+- Saved and reopened styles render through `CardPreview` — the
+  **reader-before-writer** requirement is satisfied, which is precisely the
+  defect PATCH-122 §16's hard stop caught.
+
+### 14d. Reaction parity
+
+- The Clipart draft now uses **`EmojiPicker` from `emoji-picker-react`**, the
+  product's real picker — correcting **PATCH-120 §5**, which bound
+  `EmojiReactionPicker` and recorded its zero call sites as merely "unproven"
+  rather than reading that zero as the signal it was.
+- Wrapper and configuration match the Image post: **`width={300}`,
+  `height={400}`, `lazyLoadEmojis={true}`**, absolute close X, and the picker
+  **closes on selection**.
+- The **bespoke Clipart chips row is removed**; `CardPreview` receives
+  `reactions` and `onAddReaction` and the **existing `ReactionDisplay` is
+  reused** with no modification.
+- **Repeated reactions are appended, not de-duplicated** — repeated emoji
+  reach a count of 2 or more. **PATCH-120 §6's dedup rule, its acceptance
+  criterion and its test are retired by §13c**; the count is *derived from
+  repetition* (`ReactionDisplay.tsx:18-21`), so dedup pinned every count at 1
+  and defeated the display's purpose.
+- Clicking a reaction removes **exactly one matching instance**
+  (`indexOf` + slice around it), not all.
+- **No new dependency** — `emoji-picker-react` was already present.
+  `EmojiReactionPicker` is now unused by this modal and **deliberately not
+  deleted**; removal is out of scope.
+
+### 14e. Panel switching
+
+- Caption → Reaction → Comments → Colour transitions occur in **one click**.
+- Root cause: `InlineCaption`'s blur **consumed the first toolbar click**.
+- Fix: a **toolbar-local `onMouseDownCapture` guard** that calls
+  **`preventDefault()`, not `stopPropagation()`** — so the click still
+  reaches the button and only the premature blur is suppressed. Scoped to
+  `e.target.closest('button')` and active only while the caption is editing.
+- **Keyboard behaviour and `TextStylePopup` interaction are unaffected.**
+- The Caption action uses **explicit open semantics** (`openCaptionPanel`)
+  rather than a toggle, matching the other four panels.
+- The **two-click Playwright workaround is removed** — the test now asserts
+  the real one-click behaviour.
+
+### 14f. Layout and regression
+
+- **Exactly one optional side panel at a time**, through the shared `open*`
+  handlers.
+- Composition remains **`m-auto` centred** with overflow reachable — not
+  `items-center` (the PATCH-122 §14c trap).
+- Panel tops align within **1px**; short viewport remains **top-reachable**.
+- **No DOM measurement and no screenshot-derived offset.**
+- PATCH-122's comment panel, corner and toolbar badges, and badge-colour
+  palette behaviour are **preserved**.
+
+### 14g. Final validation
+
+```
+git diff --check              PASS  (CRLF warnings only)
+npx tsc --noEmit              PASS
+CardPreview focused Vitest    24 PASS
+Clipart modal focused Vitest  45 PASS
+full Vitest                   57 files / 674 tests PASS
+ESLint                        PASS  (pre-existing next/no-img-element only)
+focused Playwright            2 PASS
+reader induced-failure           PASS
+reaction-duplicate induced-fail  PASS
+one-click panel-switch induced   PASS
+independent review            PASS
+focused independent re-review PASS
+production build              FAILED — see §14h
+```
+
+### 14h. Build note — recorded accurately, NOT resolved
+
+A normal production build **was attempted and FAILED**. `npm run build`
+failed **before `.next` generation** with:
+
+```
+uncaughtException [TypeError: Cannot read properties of undefined (reading 'length')]
+```
+
+Recorded honestly:
+
+- **The failure was independently reproduced by the CTO at closure**, exit
+  code 1, with the identical message.
+- Focused Playwright **was run successfully against a development server**,
+  so the behavioural evidence is real but does not come from a production
+  build.
+- **The available review evidence does not prove the failure was caused by
+  PATCH-123.** `tsc --noEmit` passes, ESLint reports no errors, and the crash
+  occurs during "Creating an optimized production build" — **before any
+  module compilation output**, which is a lead suggesting a Next/config-level
+  fault rather than a PATCH-123 source fault. **That is a lead, not a
+  finding**, and it is not offered as proof.
+- **The build failure remains unresolved and unclassified technical
+  evidence.**
+- **This closure does NOT state that the production build passed. It did not
+  pass.** Any later reader must treat production-build health as an open
+  question, not as certified by this patch.
+
+Closing PATCH-123 with a failing build is an explicit, recorded judgement:
+the failure is pre-existing to the degree the evidence allows and blocks no
+PATCH-123 acceptance criterion. It is **not** thereby dismissed.
+
+### 14i. Scope — six implementation and test files
+
+**Production — 3 of 3 authorized:**
+
+```
+components/collabboard/CardPreview.tsx                     reader + clipart reactions
+components/collabboard/editors/ClipartCardDraftModal.tsx    writer, panel, picker
+lib/domain/canvas/captionStyle.ts                          presets + normalizer (new)
+```
+
+**Tests — 3:**
+
+```
+components/collabboard/CardPreview.test.tsx                        (new)
+components/collabboard/ClipartCardDraftModal.test.tsx
+e2e/characterization/clipart-draft-reactions-comments.spec.ts
+```
+
+`.fable5/patches/PATCH-123.md` already exists in governance commit `9ef4562`;
+this commit carries only its closure amendment.
+
+### 14j. Excluded
+
+**Protected paths — not staged, not committed, still dirty:**
+
+```
+.gitignore
+app/api/ai/classify-intent/route.ts
+app/api/ai/convert-component/route.ts
+app/api/ai/generate-component/route.ts
+scripts/live-access-login.mjs
+```
+
+**Untouched, verified against HEAD:** `CardActionsToolbar.tsx`,
+`TextStylePopup.tsx`, `InlineCaption.tsx`, `FreeformPadletCards.tsx`,
+`ReactionDisplay.tsx`, `EmojiReactionPicker.tsx`, `CanvasClient.tsx`,
+`vitest.config.ts`, `types/collabboard.ts`, `package.json`.
+
+`types/collabboard.ts` needed **no** edit: `metadata.captionStyle` and
+`metadata.caption` were both already declared, so no field was introduced by
+this patch. `.env.local` untouched. No worktree. No stash.
+
+**PATCH-118 and PATCH-119 untouched** — neither has a file in the repository.
+
+### 14k. PATCH-123 — **CLOSED**
+
+All §§1–8 and §13 acceptance criteria met. Reader-before-writer phasing (§11)
+observed, with the reader confirmed before the writer began. Independent
+review and focused re-review both PASS. Scope verified at **3 production and
+3 test files**, within the authorized maxima. No prohibited file touched. No
+protected path included. Production build failure recorded as unresolved and
+explicitly **not** certified.
+
+**PATCH-123 is CLOSED.**
+
+**PATCH-122 / 121 / 120 / 117: CLOSED** — PATCH-120's dedup rule and §5
+picker choice are corrected by §§13c and 14d, which does not reopen that
+patch. **PATCH-116: CANCELLED and retired.**
+**PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
+**PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
+**PATCH-119: DESIGNATED, UNAUTHORED, UNAUTHORIZED, UNTOUCHED** — it owns
+PATCH-117 rows 5 and 14.
+
+**Carried forward as recorded debt:** preset-table duplication (§14b);
+`CardActionsToolbar` silently dropping `onDelete`; placeholder comment
+identity; the three-way comment-count inconsistency; the dead
+`ImageActionsToolbar` call site at `FreeformPadletCards.tsx:779`; and the
+unresolved production build failure (§14h).

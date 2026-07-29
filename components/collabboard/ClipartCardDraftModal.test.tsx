@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Padlet } from '@/types/collabboard';
 import ClipartCardDraftModal from './editors/ClipartCardDraftModal';
 import CardActionsToolbar from './editors/CardActionsToolbar';
+import { CAPTION_STYLE_PRESETS } from '@/lib/domain/canvas/captionStyle';
 
 const state = vi.hoisted(() => ({
   values: [] as unknown[],
@@ -191,6 +192,30 @@ function inlineCaptionNode(element: ReactNode): ReactNode {
   return node!;
 }
 
+function textStylePopupProps(element: ReactNode) {
+  return findByComponentName(element, 'TextStylePopup').props as {
+    isOpen: boolean;
+    onOpenChange: (open: boolean) => void;
+    onSelectHeading: (level: 'h1' | 'h2' | 'normal' | 'small' | 'code' | 'callout' | 'quote') => void;
+    onSelectColor: (color: string) => void;
+    onSelectHighlight: (color: string) => void;
+    currentHeading?: string;
+    currentColor?: string;
+    currentHighlight?: string;
+  };
+}
+
+function emojiPickerNode(element: ReactNode): ReactNode {
+  const node = findElement(element, (candidate) =>
+    candidate.props?.width === 300 &&
+    candidate.props?.height === 400 &&
+    candidate.props?.lazyLoadEmojis === true &&
+    typeof candidate.props?.onEmojiClick === 'function',
+  );
+  expect(node, 'emoji-picker-react picker should render').toBeTruthy();
+  return node!;
+}
+
 function collectText(node: unknown): string {
   if (typeof node === 'string' || typeof node === 'number') return String(node);
   return childrenOf(node).map(collectText).join('');
@@ -219,16 +244,16 @@ describe('ClipartCardDraftModal reaction and comment metadata', () => {
     expect(state.calls).toContainEqual({ index: 2, value: false });
   });
 
-  it('selecting an emoji preserves reactions and prevents duplicates', () => {
+  it('selecting an emoji appends duplicate reactions and closes the emoji picker', () => {
     const onChange = vi.fn();
     const { element } = renderModal({
       metadata: { reactions: ['existing', 'new-emoji'], comments: [{ id: 'legacy' }], other: 'preserved' },
       stateValues: [false, false, true, false, false],
       onChange,
     });
-    const picker = findByComponentName(element, 'EmojiReactionPicker');
+    const picker = emojiPickerNode(element);
 
-    (picker.props.onSelectEmoji as (emoji: string) => void)('added');
+    (picker.props.onEmojiClick as (emojiData: { emoji: string }) => void)({ emoji: 'added' });
     expect(onChange).toHaveBeenLastCalledWith(
       expect.objectContaining({
         metadata: expect.objectContaining({
@@ -238,10 +263,19 @@ describe('ClipartCardDraftModal reaction and comment metadata', () => {
         }),
       }),
     );
+    expect(state.calls).toContainEqual({ index: 2, value: false });
 
     onChange.mockClear();
-    (picker.props.onSelectEmoji as (emoji: string) => void)('new-emoji');
-    expect(onChange).not.toHaveBeenCalled();
+    (picker.props.onEmojiClick as (emojiData: { emoji: string }) => void)({ emoji: 'new-emoji' });
+    expect(onChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          reactions: ['existing', 'new-emoji', 'new-emoji'],
+          comments: [{ id: 'legacy' }],
+          other: 'preserved',
+        }),
+      }),
+    );
   });
 
   it('submitting a comment preserves detachedComments and never writes metadata.comments', () => {
@@ -401,6 +435,186 @@ describe('ClipartCardDraftModal reaction and comment metadata', () => {
     expect(state.calls).toContainEqual({ index: 5, value: true });
   });
 
+  it('keeps toolbar panel-switch clicks from being consumed by InlineCaption blur', () => {
+    const { element: captionOpen } = renderModal({ stateValues: [false, false, false, false, false, true] });
+    const toolbarWrapper = testIdNode(captionOpen, 'clipart-toolbar-wrapper');
+    const preventDefault = vi.fn();
+    expect(typeof toolbarWrapper!.props.onMouseDownCapture).toBe('function');
+
+    (toolbarWrapper!.props.onMouseDownCapture as (event: { target: HTMLElement; preventDefault: () => void }) => void)({
+      target: { closest: (selector: string) => selector === 'button' ? {} : null } as HTMLElement,
+      preventDefault,
+    });
+    expect(preventDefault).toHaveBeenCalledTimes(1);
+
+    const { element: captionClosed } = renderModal({ stateValues: [false, false, false, false, false, false] });
+    const closedToolbarWrapper = testIdNode(captionClosed, 'clipart-toolbar-wrapper');
+    const closedPreventDefault = vi.fn();
+    (closedToolbarWrapper!.props.onMouseDownCapture as (event: { target: HTMLElement; preventDefault: () => void }) => void)({
+      target: { closest: () => ({}) } as unknown as HTMLElement,
+      preventDefault: closedPreventDefault,
+    });
+    expect(closedPreventDefault).not.toHaveBeenCalled();
+  });
+
+  it('opens Caption TextStylePopup on the right without writing metadata', () => {
+    const onChange = vi.fn();
+    const { element } = renderModal({
+      metadata: { captionStyle: { color: '#dc2626', backgroundColor: '#fef3c7', heading: 'quote' } },
+      stateValues: [false, false, false, false, false, true],
+      onChange,
+    });
+    const panel = testIdNode(element, 'clipart-caption-style-panel');
+    const popup = textStylePopupProps(element);
+
+    expect(panel).toBeTruthy();
+    expect(String(panel!.props.className)).toContain('bg-white rounded-lg shadow-xl border border-gray-200 p-3 min-w-[240px]');
+    expect(popup.isOpen).toBe(true);
+    expect(popup.currentHeading).toBe('quote');
+    expect(popup.currentColor).toBe('#dc2626');
+    expect(popup.currentHighlight).toBe('#fef3c7');
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('writes caption presets by merging over the existing base style', () => {
+    const onChange = vi.fn();
+    const { element } = renderModal({
+      metadata: {
+        captionStyle: {
+          color: '#2563eb',
+          backgroundColor: '#ccfbf1',
+          fontFamily: 'Inter',
+          lineHeight: '1.9',
+        },
+        other: 'preserved',
+      },
+      stateValues: [false, false, false, false, false, true],
+      onChange,
+    });
+    const popup = textStylePopupProps(element);
+
+    popup.onSelectHeading('h1');
+    expect(onChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          other: 'preserved',
+          captionStyle: {
+            color: '#2563eb',
+            backgroundColor: '#ccfbf1',
+            fontFamily: undefined,
+            heading: 'h1',
+            fontSize: '18px',
+            fontWeight: '700',
+            fontStyle: 'normal',
+            lineHeight: '1.3',
+          },
+        }),
+      }),
+    );
+
+    onChange.mockClear();
+    popup.onSelectHeading('normal');
+    expect(onChange.mock.calls[0][0].metadata.captionStyle.color).toBe('#2563eb');
+    expect(onChange.mock.calls[0][0].metadata.captionStyle.backgroundColor).toBe('#ccfbf1');
+    expect(onChange.mock.calls[0][0].metadata.captionStyle).toMatchObject(CAPTION_STYLE_PRESETS.normal);
+  });
+
+  it('writes all governed preset values and callout default background only when none exists', () => {
+    const labels = ['Large heading', 'Normal heading', 'Normal text', 'Small text', 'Code block', 'Callout', '"Quote block"'];
+    const popupMarkup = renderToStaticMarkup(
+      <ClipartCardDraftModal
+        isOpen={true}
+        padlet={fixturePadlet()}
+        onClose={vi.fn()}
+        onDiscard={vi.fn()}
+        onChange={vi.fn()}
+        onReplaceIcon={vi.fn()}
+      />,
+    );
+    const source = sourceFor('components/collabboard/editors/TextStylePopup.tsx');
+    for (const label of labels) expect(source).toContain(label);
+    expect(popupMarkup).not.toContain('Large heading');
+
+    for (const heading of Object.keys(CAPTION_STYLE_PRESETS) as Array<keyof typeof CAPTION_STYLE_PRESETS>) {
+      const onChange = vi.fn();
+      const { element } = renderModal({ stateValues: [false, false, false, false, false, true], onChange });
+      textStylePopupProps(element).onSelectHeading(heading);
+      expect(onChange.mock.calls[0][0].metadata.captionStyle).toEqual(CAPTION_STYLE_PRESETS[heading]);
+    }
+
+    const onChange = vi.fn();
+    const { element } = renderModal({
+      metadata: { captionStyle: { color: '#111827' } },
+      stateValues: [false, false, false, false, false, true],
+      onChange,
+    });
+    textStylePopupProps(element).onSelectHeading('callout');
+    expect(onChange.mock.calls[0][0].metadata.captionStyle).toEqual({
+      color: '#111827',
+      ...CAPTION_STYLE_PRESETS.callout,
+    });
+  });
+
+  it('writes caption text color and highlight without creating caption or opacity fields', () => {
+    const onChange = vi.fn();
+    const { element } = renderModal({
+      metadata: { captionStyle: { fontSize: '18px' } },
+      stateValues: [false, false, false, false, false, true],
+      onChange,
+    });
+    const popup = textStylePopupProps(element);
+
+    for (const color of ['#dc2626', '#dc262680', 'transparent']) {
+      popup.onSelectColor(color);
+      expect(onChange).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          metadata: expect.objectContaining({
+            captionStyle: expect.objectContaining({ fontSize: '18px', color }),
+          }),
+        }),
+      );
+      expect(onChange.mock.calls.at(-1)![0].metadata).not.toHaveProperty('caption');
+      expect(onChange.mock.calls.at(-1)![0].metadata.captionStyle).not.toHaveProperty('opacity');
+    }
+
+    popup.onSelectHighlight('#fef3c7');
+    expect(onChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          captionStyle: expect.objectContaining({ fontSize: '18px', backgroundColor: '#fef3c7' }),
+        }),
+      }),
+    );
+  });
+
+  it('passes saved caption style to InlineCaption and CardPreview', () => {
+    const { element, markup } = renderModal({
+      metadata: {
+        captionStyle: {
+          color: '#111827cc',
+          backgroundColor: '#fef3c7',
+          fontSize: '18px',
+          fontWeight: '700',
+          fontStyle: 'italic',
+          fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+          lineHeight: '1.45',
+        },
+      },
+    });
+    const inlineCaption = findByComponentName(inlineCaptionNode(element), 'InlineCaption');
+
+    expect(inlineCaption.props.color).toBe('#111827cc');
+    expect(inlineCaption.props.backgroundColor).toBe('#fef3c7');
+    expect(inlineCaption.props.textStyle).toMatchObject({
+      fontSize: '18px',
+      fontWeight: '700',
+      fontStyle: 'italic',
+      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+      lineHeight: '1.45',
+    });
+    expect(markup).toContain('color:#111827cc;font-size:18px;font-weight:700;font-style:italic;font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;line-height:1.45;background-color:#fef3c7');
+  });
+
   it('renders InlineCaption inside the compact card and edits previewPadlet.title only', () => {
     const onChange = vi.fn();
     const { element: emptyElement, markup: emptyMarkup } = renderModal({ title: '', onChange });
@@ -511,7 +725,7 @@ describe('ClipartCardDraftModal reaction and comment metadata', () => {
   });
 
   it('centres the whole composition row with m-auto and no governed pt-6 offsets', () => {
-    const { element } = renderModal({ stateValues: [true, false, true, true, false] });
+    const { element } = renderModal({ stateValues: [true, false, true, true, false, true] });
     const source = sourceFor('components/collabboard/editors/ClipartCardDraftModal.tsx');
     const row = compositionRowNode(element);
     const toolbarWrapper = testIdNode(element, 'clipart-toolbar-wrapper');
@@ -519,6 +733,7 @@ describe('ClipartCardDraftModal reaction and comment metadata', () => {
     const commentsPanel = testIdNode(element, 'clipart-comments-panel');
     const colorPanel = testIdNode(element, 'clipart-color-panel-wrapper');
     const reactionPanel = testIdNode(element, 'clipart-reaction-panel-wrapper');
+    const captionPanel = testIdNode(element, 'clipart-caption-style-panel');
 
     expect(String(row.props.className)).toContain('m-auto');
     expect(String(row.props.className)).toContain('items-start');
@@ -533,6 +748,7 @@ describe('ClipartCardDraftModal reaction and comment metadata', () => {
       ['comments', commentsPanel],
       ['color panel', colorPanel],
       ['reaction panel', reactionPanel],
+      ['caption panel', captionPanel],
     ] as const) {
       expect(node, `${label} wrapper should render in this state`).toBeTruthy();
       expect(String(node!.props.className || ''), `${label} wrapper should not use pt-6`).not.toContain('pt-6');
@@ -644,8 +860,9 @@ describe('ClipartCardDraftModal reaction and comment metadata', () => {
   it('closing panels leaves the draft modal open', () => {
     const onClose = vi.fn();
     const reactionTree = renderModal({ stateValues: [false, false, true, false, false], onClose });
-    const picker = findByComponentName(reactionTree.element, 'EmojiReactionPicker');
-    (picker.props.onOpenChange as (open: boolean) => void)(false);
+    const pickerClose = findElement(reactionTree.element, (node) => node.props?.title === 'Close');
+    expect(pickerClose).toBeTruthy();
+    (pickerClose!.props.onClick as () => void)();
     expect(onClose).not.toHaveBeenCalled();
     expect(findByComponentName(reactionTree.element, 'CardActionsToolbar')).toBeTruthy();
 
@@ -720,6 +937,148 @@ describe('ClipartCardDraftModal reaction and comment metadata', () => {
     expect(source).toContain('onComment={openCommentPanel}');
     expect(source).toContain('updateMetadata({ detachedComments: [...detachedComments, newComment] });');
     expect(source).toContain('data-testid="clipart-comments-panel"');
+  });
+
+  it('passes reactions through CardPreview and removes one matching instance per click', () => {
+    const onChange = vi.fn();
+    const { element } = renderModal({ metadata: { reactions: ['👍', '👍', '🚀'] }, onChange });
+    const cardPreview = findByComponentName(element, 'CardPreview');
+
+    expect(cardPreview.props.reactions).toEqual(['👍', '👍', '🚀']);
+    expect(typeof cardPreview.props.onAddReaction).toBe('function');
+    expect(typeof cardPreview.props.onReactionClick).toBe('function');
+    expect(testIdNode(element, 'clipart-reaction-panel-wrapper')).toBeNull();
+    expect(findElement(element, (node) => node.props?.['aria-label'] === 'Draft reactions')).toBeNull();
+
+    (cardPreview.props.onReactionClick as (emoji: string) => void)('👍');
+    expect(onChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({ reactions: ['👍', '🚀'] }),
+      }),
+    );
+
+    const oneLeft = renderModal({ metadata: { reactions: onChange.mock.calls[0][0].metadata.reactions }, onChange });
+    const oneLeftCardPreview = findByComponentName(oneLeft.element, 'CardPreview');
+    (oneLeftCardPreview.props.onReactionClick as (emoji: string) => void)('👍');
+    expect(onChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({ reactions: ['🚀'] }),
+      }),
+    );
+
+    const rocketLeft = renderModal({ metadata: { reactions: ['🚀', '✨'] }, onChange });
+    const rocketCardPreview = findByComponentName(rocketLeft.element, 'CardPreview');
+    (rocketCardPreview.props.onReactionClick as (emoji: string) => void)('🚀');
+    expect(onChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({ reactions: ['✨'] }),
+      }),
+    );
+  });
+
+  it('uses emoji-picker-react parity markup and never imports the in-repo picker', () => {
+    const source = sourceFor('components/collabboard/editors/ClipartCardDraftModal.tsx');
+    const { element } = renderModal({ stateValues: [false, false, true, false, false] });
+    const panel = testIdNode(element, 'clipart-reaction-panel-wrapper');
+    const picker = emojiPickerNode(element);
+    const close = findElement(panel, (node) => node.props?.title === 'Close');
+
+    expect(source).toContain("import EmojiPicker from 'emoji-picker-react'");
+    expect(source).not.toContain('EmojiReactionPicker');
+    expect(String(panel!.props.className)).toContain('animate-in fade-in zoom-in duration-200');
+    expect(String(childrenOf(panel)[0] && (childrenOf(panel)[0] as ReactNode).props.className)).toContain('relative shadow-2xl rounded-xl overflow-hidden border border-gray-200 bg-white');
+    expect(String(close!.props.className)).toContain('absolute top-2 right-2 translate-x-1 z-10 w-4 h-4 rounded hover:bg-gray-100 flex items-center justify-center');
+    expect(picker.props.width).toBe(300);
+    expect(picker.props.height).toBe(400);
+    expect(picker.props.lazyLoadEmojis).toBe(true);
+    expect(source).not.toContain('updatePadletMetadata');
+  });
+
+  it('CardPreview ReactionDisplay shows duplicate count two for duplicate draft reactions', () => {
+    const { markup } = renderModal({ metadata: { reactions: ['👍', '👍'] } });
+
+    expect(markup).toContain('👍');
+    expect(markup).toContain('>2</span>');
+  });
+
+  it('closes sibling panels when opening caption, reaction, comments, and color panels', () => {
+    const { element } = renderModal();
+    const toolbar = toolbarProps(element);
+
+    toolbar.onCaption?.();
+    expect(state.calls).toContainEqual({ index: 5, value: true });
+    expect(state.calls).toContainEqual({ index: 0, value: false });
+    expect(state.calls).toContainEqual({ index: 2, value: false });
+    expect(state.calls).toContainEqual({ index: 3, value: false });
+    expect(state.calls).toContainEqual({ index: 4, value: false });
+
+    resetState();
+    toolbar.onAddReaction({ stopPropagation: vi.fn() });
+    expect(state.calls).toContainEqual({ index: 2, value: true });
+    expect(state.calls).toContainEqual({ index: 3, value: false });
+    expect(state.calls).toContainEqual({ index: 0, value: false });
+    expect(state.calls).toContainEqual({ index: 4, value: false });
+    expect(state.calls).toContainEqual({ index: 5, value: false });
+
+    resetState();
+    toolbar.onComment();
+    expect(state.calls).toContainEqual({ index: 3, value: true });
+    expect(state.calls).toContainEqual({ index: 2, value: false });
+    expect(state.calls).toContainEqual({ index: 0, value: false });
+    expect(state.calls).toContainEqual({ index: 4, value: false });
+    expect(state.calls).toContainEqual({ index: 5, value: false });
+
+    resetState();
+    toolbar.onColorClick({ stopPropagation: vi.fn() }, 'background');
+    expect(state.calls).toContainEqual({ index: 0, value: true });
+    expect(state.calls).toContainEqual({ index: 2, value: false });
+    expect(state.calls).toContainEqual({ index: 3, value: false });
+    expect(state.calls).toContainEqual({ index: 4, value: false });
+    expect(state.calls).toContainEqual({ index: 5, value: false });
+  });
+
+  it('switches directly from open sibling panels to the requested toolbar panel in one handler call', () => {
+    const captionOpen = renderModal({ stateValues: [false, false, false, false, false, true] });
+    toolbarProps(captionOpen.element).onAddReaction({ stopPropagation: vi.fn() });
+    expect(state.calls).toContainEqual({ index: 2, value: true });
+    expect(state.calls).toContainEqual({ index: 5, value: false });
+
+    resetState();
+    toolbarProps(captionOpen.element).onComment();
+    expect(state.calls).toContainEqual({ index: 3, value: true });
+    expect(state.calls).toContainEqual({ index: 5, value: false });
+
+    resetState();
+    toolbarProps(captionOpen.element).onColorClick({ stopPropagation: vi.fn() }, 'background');
+    expect(state.calls).toContainEqual({ index: 0, value: true });
+    expect(state.calls).toContainEqual({ index: 5, value: false });
+
+    const reactionOpen = renderModal({ stateValues: [false, false, true, false, false, false] });
+    toolbarProps(reactionOpen.element).onCaption?.();
+    expect(state.calls).toContainEqual({ index: 5, value: true });
+    expect(state.calls).toContainEqual({ index: 2, value: false });
+
+    resetState();
+    const commentsOpen = renderModal({ stateValues: [false, false, false, true, false, false] });
+    toolbarProps(commentsOpen.element).onAddReaction({ stopPropagation: vi.fn() });
+    expect(state.calls).toContainEqual({ index: 2, value: true });
+    expect(state.calls).toContainEqual({ index: 3, value: false });
+
+    resetState();
+    toolbarProps(commentsOpen.element).onCaption?.();
+    expect(state.calls).toContainEqual({ index: 5, value: true });
+    expect(state.calls).toContainEqual({ index: 3, value: false });
+
+    resetState();
+    const colorOpen = renderModal({ stateValues: [true, false, false, false, false, false] });
+    toolbarProps(colorOpen.element).onAddReaction({ stopPropagation: vi.fn() });
+    expect(state.calls).toContainEqual({ index: 2, value: true });
+    expect(state.calls).toContainEqual({ index: 0, value: false });
+
+    resetState();
+    toolbarProps(colorOpen.element).onCaption?.();
+    expect(state.calls).toContainEqual({ index: 5, value: true });
+    expect(state.calls).toContainEqual({ index: 0, value: false });
   });
 });
 

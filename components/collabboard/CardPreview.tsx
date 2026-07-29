@@ -1,5 +1,6 @@
 import React from 'react';
 import { Padlet } from '@/types/collabboard';
+import { resolveCaptionStyle } from '@/lib/domain/canvas/captionStyle';
 import { Edit2 } from 'lucide-react';
 import ReactionDisplay from './editors/ReactionDisplay';
 
@@ -30,7 +31,7 @@ export default function CardPreview({
     const svgUrl = metadata?.svgUrl;
     const counterType = metadata?.counterType || 'words';
     const topStripColor = metadata?.topStripColor || '#4f46e5'; // Top strip (Tab 3: "Icon Strip")
-    const textColor = metadata?.textColor || '#1F2937'; // Title text color
+    const titleStyle = resolveCaptionStyle(metadata?.captionStyle, metadata?.textColor);
     const showTopStrip = !!topStripColor && topStripColor !== 'transparent';
     const isClipartCard = !!svgUrl;
     const stripBg = showTopStrip ? topStripColor : 'rgba(0,0,0,0.04)';
@@ -88,12 +89,22 @@ export default function CardPreview({
                         <img src={svgUrl} alt="" className="h-28 w-28 object-contain" />
                     </div>
                     {title ? (
-                        <div className="text-center text-xs font-semibold" style={{ color: textColor }}>
+                        <div className="text-center text-xs font-semibold" style={titleStyle}>
                             {title}
                         </div>
                     ) : null}
                     <div className="text-[10px] text-gray-600">{calculateCounter()}</div>
                 </div>
+
+                {reactions.length > 0 && (
+                    <div className="absolute bottom-2 left-2 flex flex-wrap gap-1 z-10">
+                        <ReactionDisplay
+                            reactions={reactions}
+                            onAddClick={onAddReaction}
+                            onReactionClick={onReactionClick}
+                        />
+                    </div>
+                )}
             </div>
         );
     }
@@ -134,7 +145,7 @@ export default function CardPreview({
                 </div>
 
                 {title ? (
-                    <div className="text-center text-xs font-semibold" style={{ color: textColor }}>
+                    <div className="text-center text-xs font-semibold" style={titleStyle}>
                         {title}
                     </div>
                 ) : null}

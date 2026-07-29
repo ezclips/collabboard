@@ -6,9 +6,12 @@ import CardPreview from '@/components/collabboard/CardPreview';
 import CardEditor from '@/components/collabboard/CardEditor';
 import CardActionsToolbar from '@/components/collabboard/editors/CardActionsToolbar';
 import { CardColorPanel } from '@/components/collabboard/editors/CardColorPanel';
-import EmojiReactionPicker from '@/components/collabboard/editors/EmojiReactionPicker';
 import CommentPopup from '@/components/collabboard/editors/CommentPopup';
 import InlineCaption from '@/components/collabboard/editors/InlineCaption';
+import TextStylePopup from '@/components/collabboard/editors/TextStylePopup';
+import { CAPTION_STYLE_PRESETS, type CaptionHeading } from '@/lib/domain/canvas/captionStyle';
+import EmojiPicker from 'emoji-picker-react';
+import { X } from 'lucide-react';
 
 const BADGE_COLORS = [
   '#fef9c3', '#fef08a', '#fde047', '#facc15', '#eab308', '#ca8a04',
@@ -122,15 +125,40 @@ export default function ClipartCardDraftModal({
     setIsCommentPanelOpen(true);
     setIsReactionPickerOpen(false);
     setIsColorPanelOpen(false);
+    setIsBadgeColorPaletteOpen(false);
     setIsCaptionEditing(false);
   };
 
-  const toggleCaptionEditing = () => {
-    setIsCaptionEditing((editing) => !editing);
+  const openCaptionPanel = () => {
+    setIsCaptionEditing(true);
     setIsColorPanelOpen(false);
     setIsReactionPickerOpen(false);
     setIsCommentPanelOpen(false);
     setIsBadgeColorPaletteOpen(false);
+  };
+
+  const keepToolbarClickFromBlurringCaption = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!isCaptionEditing) return;
+    const target = e.target as { closest?: (selector: string) => Element | null };
+    if (typeof target.closest === 'function' && target.closest('button')) {
+      e.preventDefault();
+    }
+  };
+
+  const writeCaptionStyle = (captionStyle: Record<string, unknown>) => {
+    updateMetadata({ captionStyle });
+  };
+
+  const applyCaptionPreset = (level: CaptionHeading) => {
+    const baseStyle = previewPadlet.metadata?.captionStyle || {};
+    const selectedPreset = level === 'callout' && baseStyle.backgroundColor
+      ? { ...CAPTION_STYLE_PRESETS.callout, backgroundColor: baseStyle.backgroundColor }
+      : CAPTION_STYLE_PRESETS[level];
+
+    writeCaptionStyle({
+      ...baseStyle,
+      ...selectedPreset,
+    });
   };
 
   return (
@@ -146,7 +174,7 @@ export default function ClipartCardDraftModal({
         data-testid="clipart-composition-row"
         className="relative m-auto flex max-w-[calc(100vw-80px)] items-start gap-6"
       >
-        <div data-testid="clipart-toolbar-wrapper">
+        <div data-testid="clipart-toolbar-wrapper" onMouseDownCapture={keepToolbarClickFromBlurringCaption}>
           <CardActionsToolbar
             padlet={previewPadlet}
             isColorPickerOpen={isColorPanelOpen}
@@ -162,7 +190,7 @@ export default function ClipartCardDraftModal({
               setIsCaptionEditing(false);
             }}
             onReplaceIcon={onReplaceIcon}
-            onCaption={toggleCaptionEditing}
+            onCaption={openCaptionPanel}
             isCaptionActive={isCaptionEditing}
             onToggleCardView={() => {
               setIsCardViewOpen(true);
@@ -195,13 +223,37 @@ export default function ClipartCardDraftModal({
                   : '#ffffff',
               }}
             >
-              <CardPreview padlet={previewPadlet} isSelected={false} />
+              <CardPreview
+                padlet={previewPadlet}
+                isSelected={false}
+                reactions={reactions}
+                onAddReaction={openReactionPicker}
+                onReactionClick={(emoji) => {
+                  const indexToRemove = reactions.indexOf(emoji);
+                  if (indexToRemove === -1) return;
+                  updateMetadata({
+                    reactions: [
+                      ...reactions.slice(0, indexToRemove),
+                      ...reactions.slice(indexToRemove + 1),
+                    ],
+                  });
+                }}
+              />
               <div data-testid="clipart-inline-caption">
                 <InlineCaption
                   value={previewPadlet.title || ''}
                   isEditing={isCaptionEditing}
                   onChange={(nextTitle) => onChange({ ...previewPadlet, title: nextTitle })}
                   onCommit={() => setIsCaptionEditing(false)}
+                  color={previewPadlet.metadata?.captionStyle?.color}
+                  backgroundColor={previewPadlet.metadata?.captionStyle?.backgroundColor}
+                  textStyle={{
+                    fontSize: previewPadlet.metadata?.captionStyle?.fontSize,
+                    fontWeight: previewPadlet.metadata?.captionStyle?.fontWeight,
+                    fontStyle: previewPadlet.metadata?.captionStyle?.fontStyle,
+                    fontFamily: previewPadlet.metadata?.captionStyle?.fontFamily,
+                    lineHeight: previewPadlet.metadata?.captionStyle?.lineHeight,
+                  }}
                 />
               </div>
             </div>
@@ -222,23 +274,37 @@ export default function ClipartCardDraftModal({
             ) : null}
           </div>
 
-          {reactions.length > 0 ? (
-            <div
-              aria-label="Draft reactions"
-              className="mt-3 flex flex-wrap justify-center gap-1.5"
-            >
-              {reactions.map((reaction) => (
-                <span
-                  key={reaction}
-                  className="rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-sm"
-                >
-                  {reaction}
-                </span>
-              ))}
-            </div>
-          ) : null}
-
         </div>
+
+        {isCaptionEditing ? (
+          <div
+            data-testid="clipart-caption-style-panel"
+            className="bg-white rounded-lg shadow-xl border border-gray-200 p-3 min-w-[240px]"
+            onClick={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <TextStylePopup
+              isOpen={isCaptionEditing}
+              onOpenChange={(open) => setIsCaptionEditing(open)}
+              onSelectHeading={applyCaptionPreset}
+              onSelectColor={(color) => {
+                writeCaptionStyle({
+                  ...(previewPadlet.metadata?.captionStyle || {}),
+                  color,
+                });
+              }}
+              onSelectHighlight={(color) => {
+                writeCaptionStyle({
+                  ...(previewPadlet.metadata?.captionStyle || {}),
+                  backgroundColor: color,
+                });
+              }}
+              currentHeading={previewPadlet.metadata?.captionStyle?.heading || 'normal'}
+              currentColor={previewPadlet.metadata?.captionStyle?.color}
+              currentHighlight={previewPadlet.metadata?.captionStyle?.backgroundColor}
+            />
+          </div>
+        ) : null}
 
         {isColorPanelOpen ? (
           <div data-testid="clipart-color-panel-wrapper" onClick={(e) => e.stopPropagation()}>
@@ -258,18 +324,28 @@ export default function ClipartCardDraftModal({
         {isReactionPickerOpen ? (
           <div
             data-testid="clipart-reaction-panel-wrapper"
+            className="animate-in fade-in zoom-in duration-200"
             onClick={(e) => e.stopPropagation()}
             onMouseDown={(e) => e.stopPropagation()}
           >
-            <EmojiReactionPicker
-              isOpen={isReactionPickerOpen}
-              onOpenChange={setIsReactionPickerOpen}
-              onSelectEmoji={(emoji) => {
-                if (reactions.includes(emoji)) return;
-                updateMetadata({ reactions: [...reactions, emoji] });
-              }}
-              inline
-            />
+            <div className="relative shadow-2xl rounded-xl overflow-hidden border border-gray-200 bg-white">
+              <button
+                className="absolute top-2 right-2 translate-x-1 z-10 w-4 h-4 rounded hover:bg-gray-100 flex items-center justify-center"
+                onClick={() => setIsReactionPickerOpen(false)}
+                title="Close"
+              >
+                <X className="w-3 h-3 text-gray-400" />
+              </button>
+              <EmojiPicker
+                onEmojiClick={(emojiData) => {
+                  updateMetadata({ reactions: [...reactions, emojiData.emoji] });
+                  setIsReactionPickerOpen(false);
+                }}
+                width={300}
+                height={400}
+                lazyLoadEmojis={true}
+              />
+            </div>
           </div>
         ) : null}
 

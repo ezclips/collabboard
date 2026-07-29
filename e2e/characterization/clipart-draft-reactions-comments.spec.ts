@@ -203,15 +203,19 @@ test.describe('PATCH-120 clipart draft reactions and comments', () => {
       const commentsPanel = page.locator('[data-testid="clipart-comments-panel"]');
       const mainPanelBadge = page.locator('[data-testid="clipart-main-comment-badge"]');
       const reactionPanel = page.locator('[data-testid="clipart-reaction-panel-wrapper"]');
+      const captionStylePanel = page.locator('[data-testid="clipart-caption-style-panel"]');
       const inlineCaption = page.locator('[data-testid="clipart-inline-caption"]');
       const inlineCaptionInput = inlineCaption.locator('textarea');
+      const toolbarCaptionButton = toolbarWrapper.getByTitle('Caption');
+      const toolbarReactionButton = toolbarWrapper.getByTitle('Reaction');
+      const toolbarCommentButton = toolbarWrapper.getByTitle('Comment');
       await expect(mainPanel).toBeVisible();
       await expect(compositionRow).toBeVisible();
       await expect(toolbarWrapper).toBeVisible();
       await expect(cardPreviewAnchor).toBeVisible();
       await expect(cardPreviewWrapper).toBeVisible();
       await expect(page.getByPlaceholder('Optional caption')).toHaveCount(0);
-      await expect(page.getByTitle('Caption')).toBeVisible();
+      await expect(toolbarCaptionButton).toBeVisible();
       await expect(page.getByText('Caption', { exact: true })).toBeVisible();
       await expect(mainPanelBadge).toHaveCount(0);
       const centeringDeltas: Record<string, { x: number; y: number }> = {};
@@ -234,34 +238,51 @@ test.describe('PATCH-120 clipart draft reactions and comments', () => {
       expect(await cardPreviewWrapper.evaluate((el) => window.getComputedStyle(el).overflow)).toBe('hidden');
       await page.screenshot({ path: testInfo.outputPath('patch-122-compact-editor-centered.png'), fullPage: false });
 
-      await page.getByTitle('Caption').click();
+      await toolbarCaptionButton.click();
       await expect(inlineCaptionInput).toBeFocused();
+      await expect(captionStylePanel).toBeVisible();
+      await expect(page.getByText('Large heading', { exact: true })).toBeVisible();
+      await expect(page.getByText('Normal heading', { exact: true })).toBeVisible();
+      const captionStyleRowBox = await requiredBox(compositionRow, 'composition row with Caption style open');
+      centeringDeltas.captionStyle = expectCentered(captionStyleRowBox, defaultViewport, 'Caption style composition');
+      const captionStyleBox = await requiredBox(captionStylePanel, 'Caption style panel');
+      topDeltas.captionStyleCompact = expectAlignedTops(captionStyleBox, await requiredBox(mainPanel, 'main Clipart panel with Caption style open'), 'Caption style panel and compact card top edges should align');
+      expectInsideViewport(captionStyleRowBox, defaultViewport, 'Caption style composition');
+      expectInsideViewport(captionStyleBox, defaultViewport, 'Caption style panel');
       await inlineCaptionInput.fill('');
       await expect(inlineCaptionInput).toHaveValue('');
       await expect(inlineCaptionInput).toHaveAttribute('placeholder', 'Write a caption...');
       await page.screenshot({ path: testInfo.outputPath('patch-122-empty-inline-caption.png'), fullPage: false });
       await inlineCaptionInput.fill('PATCH-122 inline caption');
       await expect(inlineCaptionInput).toHaveValue('PATCH-122 inline caption');
+      await page.getByText('Large heading', { exact: true }).click();
+      await expect(captionStylePanel).toBeVisible();
       const captionEditingRowBox = await requiredBox(compositionRow, 'composition row during caption editing');
-      expect(Math.abs(captionEditingRowBox.width - initialRowBox.width), 'caption editing should not change composition width').toBeLessThanOrEqual(1);
+      expect(captionEditingRowBox.width, 'caption style panel should expand the centered composition row').toBeGreaterThan(initialRowBox.width);
       await page.screenshot({ path: testInfo.outputPath('patch-122-active-caption-editing.png'), fullPage: false });
 
-      await page.getByTitle('Reaction').click();
-      await expect(page.getByText('Add Reaction', { exact: true })).toBeVisible();
+      await toolbarReactionButton.click();
+      await expect(captionStylePanel).toHaveCount(0);
       await expect(reactionPanel).toBeVisible();
+      await expect(reactionPanel.locator('.EmojiPickerReact')).toBeVisible();
       const reactionRowBox = await requiredBox(compositionRow, 'composition row with Reaction open');
       centeringDeltas.reaction = expectCentered(reactionRowBox, defaultViewport, 'Reaction composition');
       const reactionBox = await requiredBox(reactionPanel, 'Reaction panel');
       topDeltas.reactionCompact = expectAlignedTops(reactionBox, await requiredBox(mainPanel, 'main Clipart panel with Reaction open'), 'Reaction panel and compact card top edges should align');
-      const firstEmoji = page.locator('.grid.grid-cols-8.gap-1 button').first();
-      const emoji = (await firstEmoji.textContent())?.trim();
-      if (!emoji) throw new Error('PATCH-120 emoji picker did not expose an emoji button');
+      const emoji = '😀';
+      const firstEmoji = reactionPanel.locator('li').getByRole('button', { name: 'grinning' }).first();
       await firstEmoji.click();
-      await expect(page.getByLabel('Draft reactions').getByText(emoji, { exact: true })).toBeVisible();
+      await expect(reactionPanel).toHaveCount(0);
+      await toolbarReactionButton.click();
+      await expect(reactionPanel).toBeVisible();
+      const secondSameEmoji = reactionPanel.locator('li').getByRole('button', { name: 'grinning' }).first();
+      await secondSameEmoji.click();
+      await expect(reactionPanel).toHaveCount(0);
+      await expect(cardPreviewWrapper.locator('button').filter({ hasText: emoji }).filter({ hasText: '2' })).toBeVisible();
       const afterReactionRowBox = await requiredBox(compositionRow, 'composition row after selecting Reaction');
       centeringDeltas.reactionSelected = expectCentered(afterReactionRowBox, defaultViewport, 'Reaction composition after selection');
 
-      await page.getByTitle('Comment').click();
+      await toolbarCommentButton.click();
       await expect(page.getByText('Comments', { exact: true })).toBeVisible();
       await expect(commentsPanel).toBeVisible();
       const commentIconRowBox = await requiredBox(compositionRow, 'composition row with Comments opened from icon');
@@ -279,7 +300,7 @@ test.describe('PATCH-120 clipart draft reactions and comments', () => {
       await page.getByPlaceholder('Add a comment...').fill('PATCH-120 draft comment');
       await page.keyboard.press('Enter');
       await expect(page.getByText('PATCH-120 draft comment', { exact: true })).toBeVisible();
-      const toolbarBadge = page.getByTitle('Comment').locator('span').filter({ hasText: '1' });
+      const toolbarBadge = toolbarCommentButton.locator('span').filter({ hasText: '1' });
       await expect(toolbarBadge).toBeVisible();
       await expect(mainPanelBadge).toHaveText('1');
       await expect(mainPanelBadge).toBeVisible();
@@ -328,7 +349,7 @@ test.describe('PATCH-120 clipart draft reactions and comments', () => {
       await expect(page.getByText('Comments', { exact: true })).toHaveCount(0);
       const beforeToolbarBadgeMetadata = await draftMetadataFingerprint(supabase, fixture);
       const toolbarBadgeBox = await requiredBox(toolbarBadge, 'toolbar comment badge');
-      const toolbarCommentButtonBox = await requiredBox(page.getByTitle('Comment'), 'toolbar Comment button');
+      const toolbarCommentButtonBox = await requiredBox(toolbarCommentButton, 'toolbar Comment button');
       const toolbarBadgeOverhangPoint = {
         x: toolbarBadgeBox.x + toolbarBadgeBox.width - 2,
         y: toolbarBadgeBox.y + toolbarBadgeBox.height / 2,
@@ -346,7 +367,7 @@ test.describe('PATCH-120 clipart draft reactions and comments', () => {
       topDeltas.toolbarBadgeComments = expectAlignedTops(await requiredBox(mainPanel, 'main panel from toolbar badge'), await requiredBox(commentsPanel, 'Comments from toolbar badge'), 'toolbar badge opens the same aligned Comments panel');
       await page.screenshot({ path: testInfo.outputPath('patch-122-comments-from-toolbar-badge-overhang.png'), fullPage: false });
 
-      await page.getByTitle('Comment').click();
+      await toolbarCommentButton.click();
       await expect(page.getByText('Comments', { exact: true })).toBeVisible();
       await expect(mainPanelBadge).toHaveText('1');
 
@@ -420,7 +441,7 @@ test.describe('PATCH-120 clipart draft reactions and comments', () => {
       await expect(page.getByText('Comments', { exact: true })).toBeVisible();
       await expect(mainPanel).toBeVisible();
       await expect(mainPanelBadge).toHaveText('1');
-      const commentBadge = page.getByTitle('Comment').locator('span').filter({ hasText: '1' });
+      const commentBadge = toolbarCommentButton.locator('span').filter({ hasText: '1' });
       const badgeStyle = await commentBadge.getAttribute('style', { timeout: 5_000 });
       expect(badgeStyle).toContain('251, 146, 60');
       expect(await backgroundColor(mainPanelBadge)).toBe(await backgroundColor(commentBadge));
@@ -448,7 +469,7 @@ test.describe('PATCH-120 clipart draft reactions and comments', () => {
       centeringDeltas.closedAfterPalette = expectCentered(closedAfterPaletteRowBox, defaultViewport, 'closed composition after palette');
       topDeltas.closedToolbarCompact = expectAlignedTops(await requiredBox(toolbarWrapper, 'toolbar after closing Comments following palette'), closedMainBox, 'toolbar and compact card top edges should remain aligned after closing Comments');
 
-      await page.getByTitle('Comment').click();
+      await toolbarCommentButton.click();
       await expect(page.getByText('Comments', { exact: true })).toBeVisible();
       const reopenedMainBox = await requiredBox(mainPanel, 'main Clipart panel after reopening Comments');
       const reopenedCommentsBox = await requiredBox(commentsPanel, 'Comments panel after reopening');
@@ -490,8 +511,15 @@ test.describe('PATCH-120 clipart draft reactions and comments', () => {
         .toMatchObject({
           title: 'PATCH-122 inline caption',
           metadata: {
-            reactions: [emoji],
+            reactions: [emoji, emoji],
             badgeColor: '#fb923c',
+            captionStyle: expect.objectContaining({
+              heading: 'h1',
+              fontSize: '18px',
+              fontWeight: '700',
+              fontStyle: 'normal',
+              lineHeight: '1.3',
+            }),
             detachedComments: [expect.objectContaining({ text: 'PATCH-120 draft comment' })],
           },
         });
@@ -504,7 +532,14 @@ test.describe('PATCH-120 clipart draft reactions and comments', () => {
       if (savedCardError) throw savedCardError;
       expect(savedCard?.title).toBe('PATCH-122 inline caption');
       expect(savedCard?.metadata).not.toHaveProperty('caption');
-      expect(savedCard?.metadata).not.toHaveProperty('captionStyle');
+      expect(savedCard?.metadata?.captionStyle).toMatchObject({
+        heading: 'h1',
+        fontSize: '18px',
+        fontWeight: '700',
+        fontStyle: 'normal',
+        lineHeight: '1.3',
+      });
+      expect(savedCard?.metadata?.captionStyle).not.toHaveProperty('opacity');
     } finally {
       await cleanupFixture(supabase, fixture);
     }
