@@ -4,6 +4,7 @@ import React from 'react';
 import {
     Palette,
     Image as ImageIcon,
+    TextCursor,
     LayoutGrid,
     Smile,
     MessageSquare,
@@ -17,9 +18,11 @@ interface CardActionsToolbarProps {
     onToggleCardView: () => void;
     onAddReaction: (e: React.MouseEvent) => void;
     onComment: () => void;
+    onCaption?: () => void;
     onDelete?: () => void;
     isColorPickerOpen?: boolean;
     isCardView?: boolean;
+    isCaptionActive?: boolean;
     commentCount?: number;
     commentBadgeColor?: string;
 }
@@ -40,8 +43,10 @@ export default function CardActionsToolbar({
     onToggleCardView,
     onAddReaction,
     onComment,
+    onCaption,
     isColorPickerOpen = false,
     isCardView = false,
+    isCaptionActive = false,
     commentCount = 0,
     commentBadgeColor = '#facc15',
 }: CardActionsToolbarProps) {
@@ -63,6 +68,12 @@ export default function CardActionsToolbar({
             onClick: () => onReplaceIcon(),
             active: false,
         },
+        ...(onCaption ? [{
+            icon: TextCursor,
+            label: 'Caption',
+            onClick: () => onCaption(),
+            active: isCaptionActive,
+        }] : []),
         {
             icon: LayoutGrid,
             label: 'Card view',

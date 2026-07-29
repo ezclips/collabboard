@@ -8,6 +8,7 @@ import CardActionsToolbar from '@/components/collabboard/editors/CardActionsTool
 import { CardColorPanel } from '@/components/collabboard/editors/CardColorPanel';
 import EmojiReactionPicker from '@/components/collabboard/editors/EmojiReactionPicker';
 import CommentPopup from '@/components/collabboard/editors/CommentPopup';
+import InlineCaption from '@/components/collabboard/editors/InlineCaption';
 
 const BADGE_COLORS = [
   '#fef9c3', '#fef08a', '#fde047', '#facc15', '#eab308', '#ca8a04',
@@ -57,6 +58,7 @@ export default function ClipartCardDraftModal({
   const [isReactionPickerOpen, setIsReactionPickerOpen] = useState(false);
   const [isCommentPanelOpen, setIsCommentPanelOpen] = useState(false);
   const [isBadgeColorPaletteOpen, setIsBadgeColorPaletteOpen] = useState(false);
+  const [isCaptionEditing, setIsCaptionEditing] = useState(false);
 
   const previewPadlet = useMemo(() => {
     if (!padlet) return null;
@@ -113,16 +115,26 @@ export default function ClipartCardDraftModal({
     setIsCommentPanelOpen(false);
     setIsColorPanelOpen(false);
     setIsBadgeColorPaletteOpen(false);
+    setIsCaptionEditing(false);
   };
 
   const openCommentPanel = () => {
     setIsCommentPanelOpen(true);
     setIsReactionPickerOpen(false);
     setIsColorPanelOpen(false);
+    setIsCaptionEditing(false);
+  };
+
+  const toggleCaptionEditing = () => {
+    setIsCaptionEditing((editing) => !editing);
+    setIsColorPanelOpen(false);
+    setIsReactionPickerOpen(false);
+    setIsCommentPanelOpen(false);
+    setIsBadgeColorPaletteOpen(false);
   };
 
   return (
-    <div className="fixed inset-0 z-[160] flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-[160] flex items-start justify-center overflow-auto p-4">
       <button
         type="button"
         className="absolute inset-0 bg-black/40 backdrop-blur-sm"
@@ -130,8 +142,11 @@ export default function ClipartCardDraftModal({
         aria-label="Save clipart card"
       />
 
-      <div className="relative flex max-w-5xl items-start gap-4">
-        <div className="pt-6">
+      <div
+        data-testid="clipart-composition-row"
+        className="relative m-auto flex max-w-[calc(100vw-80px)] items-start gap-6"
+      >
+        <div data-testid="clipart-toolbar-wrapper">
           <CardActionsToolbar
             padlet={previewPadlet}
             isColorPickerOpen={isColorPanelOpen}
@@ -144,8 +159,11 @@ export default function ClipartCardDraftModal({
               setIsReactionPickerOpen(false);
               setIsCommentPanelOpen(false);
               setIsBadgeColorPaletteOpen(false);
+              setIsCaptionEditing(false);
             }}
             onReplaceIcon={onReplaceIcon}
+            onCaption={toggleCaptionEditing}
+            isCaptionActive={isCaptionEditing}
             onToggleCardView={() => {
               setIsCardViewOpen(true);
             }}
@@ -158,50 +176,72 @@ export default function ClipartCardDraftModal({
           />
         </div>
 
-        <div className="relative w-[320px] rounded-[28px] bg-white p-5 shadow-2xl">
-          <div>
-            <div className="text-sm font-semibold text-gray-900">Clipart Card</div>
-            <div className="mt-1 text-xs text-gray-500">
-              Adjust the icon styling here, then place it on the canvas.
-            </div>
-          </div>
-
-          <div className="mt-5">
-            <div className="mx-auto w-[160px]">
-              <CardPreview padlet={previewPadlet} isSelected={true} />
-            </div>
-            {reactions.length > 0 ? (
-              <div
-                aria-label="Draft reactions"
-                className="mt-3 flex flex-wrap justify-center gap-1.5"
-              >
-                {reactions.map((reaction) => (
-                  <span
-                    key={reaction}
-                    className="rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-sm"
-                  >
-                    {reaction}
-                  </span>
-                ))}
+        <div
+          data-testid="clipart-main-panel"
+          className="flex w-[220px] flex-col items-stretch"
+        >
+          <div
+            data-testid="clipart-card-preview-anchor"
+            className="relative w-[220px] overflow-visible"
+          >
+            <div
+              data-testid="clipart-card-preview-wrapper"
+              className="flex flex-col overflow-hidden border border-gray-200 shadow-2xl"
+              style={{
+                width: '220px',
+                minHeight: '200px',
+                backgroundColor: typeof previewPadlet.metadata?.backgroundColor === 'string'
+                  ? previewPadlet.metadata.backgroundColor
+                  : '#ffffff',
+              }}
+            >
+              <CardPreview padlet={previewPadlet} isSelected={false} />
+              <div data-testid="clipart-inline-caption">
+                <InlineCaption
+                  value={previewPadlet.title || ''}
+                  isEditing={isCaptionEditing}
+                  onChange={(nextTitle) => onChange({ ...previewPadlet, title: nextTitle })}
+                  onCommit={() => setIsCaptionEditing(false)}
+                />
               </div>
+            </div>
+            {commentCount > 0 ? (
+              <button
+                type="button"
+                data-testid="clipart-main-comment-badge"
+                className="absolute -right-2 -top-2 z-[1200] flex h-6 w-6 items-center justify-center rounded-full border-2 border-white text-xs font-bold text-gray-800 shadow-md"
+                style={{ backgroundColor: commentBadgeColor }}
+                aria-label={`Open comments, ${commentCount} comments`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  openCommentPanel();
+                }}
+              >
+                {commentCount}
+              </button>
             ) : null}
           </div>
 
-          <div className="mt-5">
-            <label className="mb-2 block text-xs font-medium uppercase tracking-[0.14em] text-gray-500">
-              Caption
-            </label>
-            <input
-              value={previewPadlet.title || ''}
-              onChange={(e) => onChange({ ...previewPadlet, title: e.target.value })}
-              className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 outline-none transition-colors focus:border-blue-500"
-              placeholder="Optional caption"
-            />
-          </div>
+          {reactions.length > 0 ? (
+            <div
+              aria-label="Draft reactions"
+              className="mt-3 flex flex-wrap justify-center gap-1.5"
+            >
+              {reactions.map((reaction) => (
+                <span
+                  key={reaction}
+                  className="rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-sm"
+                >
+                  {reaction}
+                </span>
+              ))}
+            </div>
+          ) : null}
+
         </div>
 
         {isColorPanelOpen ? (
-          <div className="pt-6" onClick={(e) => e.stopPropagation()}>
+          <div data-testid="clipart-color-panel-wrapper" onClick={(e) => e.stopPropagation()}>
             <CardColorPanel
               iconColor={previewPadlet.metadata?.iconBgColor}
               bgColor={previewPadlet.metadata?.backgroundColor}
@@ -217,7 +257,7 @@ export default function ClipartCardDraftModal({
 
         {isReactionPickerOpen ? (
           <div
-            className="pt-6"
+            data-testid="clipart-reaction-panel-wrapper"
             onClick={(e) => e.stopPropagation()}
             onMouseDown={(e) => e.stopPropagation()}
           >
@@ -235,7 +275,9 @@ export default function ClipartCardDraftModal({
 
         {isCommentPanelOpen ? (
           <div
-            className="relative pt-6 min-w-[320px]"
+            data-testid="clipart-comments-panel"
+            className="relative"
+            style={{ minWidth: '320px' }}
             onClick={(e) => e.stopPropagation()}
             onMouseDown={(e) => e.stopPropagation()}
           >
