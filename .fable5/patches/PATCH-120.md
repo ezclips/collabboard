@@ -845,3 +845,165 @@ dependency.
 **PATCH-119: DESIGNATED, UNAUTHORED, UNAUTHORIZED, UNTOUCHED.**
 **PATCH-117: CLOSED. PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT
 CLOSED.**
+
+---
+
+## 18. CLOSURE (2026-07-29, CTO)
+
+Issued at governance HEAD `e597308d326d1f6c36535a037c1ad43b3c0289ec`.
+
+### 18a. Independent review
+
+**PASS.** Performed by an independent reviewer. The authoring CTO neither
+implemented nor reviewed this candidate.
+
+### 18b. Root cause and resolution
+
+**Root cause:** `ClipartCardDraftModal` rendered the Reaction and Comment
+actions of the shared `CardActionsToolbar` with silent no-op callbacks
+(`onAddReaction={() => {}}`, `onComment={() => {}}`). The buttons rendered
+and accepted clicks and did nothing. Classification **A**, as amended by §2.
+
+**Resolved:**
+
+- **Reaction** opens `EmojiReactionPicker` and persists to
+  `metadata.reactions`, appending without duplicates
+  (`ClipartCardDraftModal.tsx:213-214`).
+- **Comment** opens `CommentPopup` and writes **only**
+  `metadata.detachedComments` (`:288`).
+- **`metadata.comments` remains untouched.** It is read for the count
+  fallback (`:89`) and never written.
+
+### 18c. Metadata contract — verified by CTO inspection, not on the review verdict alone
+
+- **Comment count** uses `(detachedComments || comments || []).length`,
+  implemented at `:86-90` as precedence, not summation.
+  **`detachedComments` takes precedence and the two fields are never
+  summed** — this satisfies the §17c ruling and the "no double count"
+  acceptance criterion.
+- **Badge colour** uses `metadata.badgeColor` with the established
+  `'#facc15'` default (`:92-93`).
+- **The draft colour palette writes only `metadata.badgeColor`, through the
+  existing `updateMetadata`/`onChange` helper** (`:255`).
+- **No direct repository persistence was added.** `updatePadletMetadata`
+  appears nowhere in the modal; draft state flows through the existing
+  save-card path exactly as §8.11 required.
+- **No new colour metadata field was invented.**
+
+### 18d. `CardActionsToolbar` — additive, with one recorded deviation
+
+Additive optional props were added as authorized by §17d:
+
+- `commentCount?: number` — defaults to `0`
+- `commentBadgeColor?: string` — defaults to `'#facc15'`
+
+**The badge renders only when the count exceeds zero**
+(`CardActionsToolbar.tsx:93`), and the `relative` positioning class is
+applied only in that case, so omitting both props reproduces today's
+rendering exactly. All existing call sites are unaffected.
+
+**Recorded deviation, accepted:** the change also tightened the `padlet`
+prop from `any` to the imported `Padlet` type, renaming the unused binding
+to `_padlet`. §17d said "change nothing else", so this is outside the letter
+of that authorization. It is **accepted rather than reverted** because it is
+a type-only narrowing, `npx tsc --noEmit` passes across the whole project
+(proving no call site was broken), and reverting would be a gratuitous
+second edit to a shared file. It is recorded here so the deviation is not
+silently absorbed.
+
+### 18e. Deliberately left untouched
+
+- **Dead `onDelete` behaviour.** `CardActionsToolbar` still declares
+  `onDelete?` without destructuring or rendering it, and
+  `ClipartCardDraftModal.tsx:142` still passes `onDelete={onDiscard}` into
+  nothing. Recorded in §17h.1 and **left untouched by design** — it changes
+  destructive behaviour and belongs in its own patch.
+- **Real user identity.** The comment author identity remains the
+  pre-existing placeholder used across this component family (§7). It is a
+  **pre-existing successor concern**, explicitly out of scope here.
+- The dead `ImageActionsToolbar` call site and the three-way comment-count
+  inconsistency (§17h.2, §17h.3).
+
+### 18f. Final validation
+
+```
+git diff --check                     PASS
+npx tsc --noEmit                     PASS
+focused Vitest                       11 PASS
+npx vitest run                       56 files / 616 tests PASS
+ESLint                               PASS
+Playwright characterization          PASS
+fixture cleanup                      zero disposable fixtures remaining
+independent review                   PASS
+```
+
+The full Vitest run reports **56 files**, up from 55 — confirming the
+relocated suite is discovered by the ordinary command with **no temporary
+config**, which was the §16f acceptance condition. `vitest.config.ts` is
+unchanged and no test dependency was added.
+
+### 18g. Committed file list
+
+**Production — 2 of a maximum 2 (§17d):**
+
+```
+components/collabboard/editors/CardActionsToolbar.tsx        +36 / -6
+components/collabboard/editors/ClipartCardDraftModal.tsx     +173 / -1
+```
+
+**Tests — 2:**
+
+```
+components/collabboard/ClipartCardDraftModal.test.tsx        (new, included by the existing Vitest glob)
+e2e/characterization/clipart-draft-reactions-comments.spec.ts (new)
+```
+
+The previously excluded
+`components/collabboard/editors/ClipartCardDraftModal.test.tsx` was
+**deleted**, so exactly one authoritative focused suite exists per harness,
+as §16d required.
+
+### 18h. Protected paths — EXCLUDED, verified
+
+Not staged, not committed, still dirty and unmodified:
+
+```
+.gitignore
+app/api/ai/classify-intent/route.ts
+app/api/ai/convert-component/route.ts
+app/api/ai/generate-component/route.ts
+scripts/live-access-login.mjs
+```
+
+`.env.local` untouched. No worktree. No stash. `vitest.config.ts`
+unchanged. No test dependency added.
+
+### 18i. Commit
+
+Committed with the §12 bound message **verbatim**, unaltered:
+
+```
+fix(canvas): wire clipart draft reactions and comments (PATCH-120)
+```
+
+### 18j. PATCH-120 — **CLOSED**
+
+All acceptance criteria in §9, §16 and §17f met. Independent review PASS.
+Static and live gates green. Scope verified at 2 production and 2 test
+files, within the amended maxima. No protected path included.
+
+**PATCH-120 is CLOSED.**
+
+**PATCH-117: CLOSED. PATCH-116: CANCELLED and retired.**
+**PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
+**PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
+**PATCH-119: DESIGNATED, UNAUTHORED, UNAUTHORIZED, UNTOUCHED.**
+
+### 18k. Carried forward to successors
+
+1. `CardActionsToolbar` silently drops `onDelete`; the Clipart modal passes
+   it into nothing.
+2. Real authenticated identity for card comments, replacing the placeholder.
+3. The three-way comment-count inconsistency in `FreeformPadletCards`.
+4. The dead `ImageActionsToolbar` call site at
+   `FreeformPadletCards.tsx:779`.
