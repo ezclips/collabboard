@@ -123,7 +123,7 @@ test.describe('PATCH-120 clipart draft reactions and comments', () => {
   test.skip(!hasE2ECredentials, 'E2E_EMAIL / E2E_PASSWORD not set');
   test.setTimeout(60_000);
 
-  test('draft clipart cards keep reactions, comment badge state, and persisted metadata', async ({ page }) => {
+  test('draft clipart cards keep reactions, comment badge state, and persisted metadata', async ({ page }, testInfo) => {
     const supabase = await createLiveClient();
     let fixture: Fixture | null = null;
 
@@ -147,8 +147,69 @@ test.describe('PATCH-120 clipart draft reactions and comments', () => {
       await expect(page.getByTitle('Comment').locator('span').filter({ hasText: '1' })).toBeVisible();
 
       await page.getByTitle('Badge Color').click();
-      await page.getByTitle('#fb923c').click({ position: { x: 4, y: 10 }, timeout: 5_000 });
+
+      // PATCH-121 — the palette must lay out as six full columns, not compress
+      // against the 28px swatch button that is its containing block.
+      const palette = page.locator('[data-testid="clipart-badge-color-palette"]');
+      const grid = page.locator('[data-testid="clipart-badge-color-grid"]');
+      await expect(palette).toBeVisible();
+
+      const gridTemplateColumns = await grid.evaluate((el) => window.getComputedStyle(el).gridTemplateColumns);
+      expect(gridTemplateColumns.trim().split(/\s+/)).toHaveLength(6);
+      for (const track of gridTemplateColumns.trim().split(/\s+/)) {
+        expect(Math.round(parseFloat(track))).toBe(20);
+      }
+
+      const paletteBox = await palette.boundingBox();
+      expect(paletteBox).not.toBeNull();
+      expect(paletteBox!.width).toBeGreaterThanOrEqual(166);
+
+      const swatches = page.locator('[data-badge-color-swatch]');
+      await expect(swatches).toHaveCount(48);
+      const swatchBoxes: Array<{ x: number; y: number; width: number; height: number }> = [];
+      for (let index = 0; index < 48; index += 1) {
+        const box = await swatches.nth(index).boundingBox();
+        expect(box, `swatch ${index} should be laid out`).not.toBeNull();
+        swatchBoxes.push(box!);
+      }
+
+      for (const [index, box] of swatchBoxes.entries()) {
+        expect(Math.round(box.width), `swatch ${index} width`).toBe(20);
+        expect(Math.round(box.height), `swatch ${index} height`).toBe(20);
+        // No horizontal clipping: every swatch sits inside the palette box.
+        expect(box.x).toBeGreaterThanOrEqual(paletteBox!.x - 0.5);
+        expect(box.x + box.width).toBeLessThanOrEqual(paletteBox!.x + paletteBox!.width + 0.5);
+        expect(box.y).toBeGreaterThanOrEqual(paletteBox!.y - 0.5);
+        expect(box.y + box.height).toBeLessThanOrEqual(paletteBox!.y + paletteBox!.height + 0.5);
+      }
+
+      // No overlap between any two swatches.
+      for (let a = 0; a < swatchBoxes.length; a += 1) {
+        for (let b = a + 1; b < swatchBoxes.length; b += 1) {
+          const first = swatchBoxes[a];
+          const second = swatchBoxes[b];
+          const overlaps = first.x < second.x + second.width - 0.5
+            && second.x < first.x + first.width - 0.5
+            && first.y < second.y + second.height - 0.5
+            && second.y < first.y + first.height - 0.5;
+          expect(overlaps, `swatches ${a} and ${b} must not overlap`).toBe(false);
+        }
+      }
+
+      // Exactly six distinct columns, evenly gapped.
+      const columnXs = [...new Set(swatchBoxes.map((box) => Math.round(box.x)))].sort((a, b) => a - b);
+      expect(columnXs).toHaveLength(6);
+      for (let index = 1; index < columnXs.length; index += 1) {
+        expect(columnXs[index] - columnXs[index - 1]).toBe(26);
+      }
+
+      await palette.screenshot({ path: testInfo.outputPath('patch-121-badge-color-palette.png') });
+
+      // A plain centre click must hit the swatch; PATCH-120 needed a corner
+      // offset because the compressed palette overlapped its neighbours.
+      await page.getByTitle('#fb923c').click({ timeout: 5_000 });
       await expect(page.getByText('Comments', { exact: true })).toBeVisible();
+      await expect(page.getByText('Clipart Card', { exact: true })).toBeVisible();
       const commentBadge = page.getByTitle('Comment').locator('span').filter({ hasText: '1' });
       const badgeStyle = await commentBadge.getAttribute('style', { timeout: 5_000 });
       expect(badgeStyle).toContain('251, 146, 60');

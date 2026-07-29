@@ -350,3 +350,128 @@ describe('ClipartCardDraftModal reaction and comment metadata', () => {
     expect(source).not.toMatch(/onComment=\{\s*function\s*\([^)]*\)\s*\{\s*\}\s*\}/);
   });
 });
+
+// PATCH-121 — badge-colour palette geometry.
+describe('ClipartCardDraftModal badge colour palette geometry', () => {
+  const OPEN_COMMENT_PANEL_WITH_PALETTE = [false, false, false, true, true];
+  const COLUMNS = 6;
+  const SWATCH_PX = 20;
+  const GAP_PX = 6;
+  const PADDING_PX = 8;
+  const EXPECTED_WIDTH_PX = COLUMNS * SWATCH_PX + (COLUMNS - 1) * GAP_PX + PADDING_PX * 2;
+
+  beforeEach(() => {
+    resetState();
+  });
+
+  function paletteTree() {
+    return renderModal({ metadata: { badgeColor: '#facc15' }, stateValues: OPEN_COMMENT_PANEL_WITH_PALETTE }).element;
+  }
+
+  function paletteNode(element: ReactNode) {
+    const node = findElement(element, (candidate) => candidate.props?.['data-testid'] === 'clipart-badge-color-palette');
+    expect(node, 'badge colour palette should render when open').toBeTruthy();
+    return node!;
+  }
+
+  function gridNode(element: ReactNode) {
+    const node = findElement(element, (candidate) => candidate.props?.['data-testid'] === 'clipart-badge-color-grid');
+    expect(node, 'badge colour grid should render when open').toBeTruthy();
+    return node!;
+  }
+
+  function swatchNodes(element: ReactNode): ReactNode[] {
+    const found: ReactNode[] = [];
+    const walk = (node: unknown) => {
+      if (!node || typeof node !== 'object') return;
+      const candidate = node as ReactNode;
+      if (candidate.props?.['data-badge-color-swatch']) found.push(candidate);
+      childrenOf(candidate).forEach(walk);
+    };
+    walk(element);
+    return found;
+  }
+
+  it('states an explicit palette width instead of shrinking to its 28px containing block', () => {
+    const style = paletteNode(paletteTree()).props.style as { width?: string };
+    expect(style?.width).toBe(`${EXPECTED_WIDTH_PX}px`);
+  });
+
+  it('uses six fixed-width grid columns so swatches cannot be compressed', () => {
+    const grid = gridNode(paletteTree());
+    const style = grid.props.style as { gridTemplateColumns?: string };
+
+    expect(style?.gridTemplateColumns).toBe(`repeat(${COLUMNS}, ${SWATCH_PX}px)`);
+    expect(String(grid.props.className)).toContain('gap-1.5');
+    // minmax(0,1fr) tracks were the defect: they permit tracks narrower than
+    // the swatch, which made swatches overlap and clip.
+    expect(style?.gridTemplateColumns).not.toContain('1fr');
+    expect(String(grid.props.className)).not.toContain('grid-cols-6');
+  });
+
+  it('renders every colour as an equal, non-shrinking swatch with no conflicting minimum', () => {
+    const swatches = swatchNodes(paletteTree());
+    expect(swatches).toHaveLength(48);
+    expect(swatches.length % COLUMNS).toBe(0);
+
+    for (const swatch of swatches) {
+      const style = swatch.props.style as Record<string, unknown>;
+      expect(style.width).toBe(`${SWATCH_PX}px`);
+      expect(style.height).toBe(`${SWATCH_PX}px`);
+      // A minWidth larger than width overflowed the track and caused overlap.
+      expect(style.minWidth).toBeUndefined();
+      expect(style.minHeight).toBeUndefined();
+      expect(String(swatch.props.className)).toContain('shrink-0');
+    }
+  });
+
+  it('fits all six columns within the stated palette width', () => {
+    const contentWidth = COLUMNS * SWATCH_PX + (COLUMNS - 1) * GAP_PX;
+    expect(contentWidth + PADDING_PX * 2).toBe(EXPECTED_WIDTH_PX);
+    expect(EXPECTED_WIDTH_PX).toBeGreaterThanOrEqual(166);
+  });
+
+  it('preserves the repository colour set and ordering', () => {
+    const source = sourceFor('components/collabboard/editors/ClipartCardDraftModal.tsx');
+    const declared = source.match(/const BADGE_COLORS = \[([\s\S]*?)\];/);
+    expect(declared).toBeTruthy();
+    const colors = declared![1].match(/#[0-9a-f]{6}/gi) ?? [];
+
+    expect(colors).toHaveLength(48);
+    expect(colors[0]).toBe('#fef9c3');
+    expect(colors[3]).toBe('#facc15');
+    expect(colors[colors.length - 1]).toBe('#0d9488');
+    expect(swatchNodes(paletteTree()).map((node) => node.props['data-badge-color-swatch'])).toEqual(colors);
+  });
+
+  it('keeps propagation guards so the comments panel and draft stay open', () => {
+    const palette = paletteNode(paletteTree());
+    expect(typeof palette.props.onClick).toBe('function');
+    expect(typeof palette.props.onMouseDown).toBe('function');
+
+    const stopPropagation = vi.fn();
+    (palette.props.onClick as (event: { stopPropagation: () => void }) => void)({ stopPropagation });
+    (palette.props.onMouseDown as (event: { stopPropagation: () => void }) => void)({ stopPropagation });
+    expect(stopPropagation).toHaveBeenCalledTimes(2);
+  });
+
+  it('still writes only metadata.badgeColor when a widened swatch is clicked', () => {
+    const onChange = vi.fn();
+    const { element } = renderModal({
+      metadata: { badgeColor: '#facc15', comments: [{ id: 'legacy' }] },
+      stateValues: OPEN_COMMENT_PANEL_WITH_PALETTE,
+      onChange,
+    });
+    const swatch = swatchNodes(element).find((node) => node.props['data-badge-color-swatch'] === '#3b82f6');
+    expect(swatch).toBeTruthy();
+    (swatch!.props.onClick as (event: { stopPropagation: () => void }) => void)({ stopPropagation: vi.fn() });
+
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({ badgeColor: '#3b82f6', comments: [{ id: 'legacy' }] }),
+      }),
+    );
+    const [[updated]] = onChange.mock.calls as [[{ metadata: Record<string, unknown> }]];
+    expect(updated.metadata.detachedComments).toBeUndefined();
+  });
+});

@@ -20,6 +20,21 @@ const BADGE_COLORS = [
   '#ccfbf1', '#99f6e4', '#5eead4', '#2dd4bf', '#14b8a6', '#0d9488',
 ];
 
+// Badge-colour palette geometry (PATCH-121). The palette is absolutely
+// positioned inside the 28px swatch button wrapper, so it must state its own
+// width: shrink-to-fit would otherwise resolve against that 28px containing
+// block and compress the six columns. Fixed tracks keep swatches from
+// shrinking. Mirrors the working Note/Table/Image palette (20px swatches,
+// 6px gap, p-2).
+const BADGE_PALETTE_COLUMNS = 6;
+const BADGE_SWATCH_SIZE_PX = 20;
+const BADGE_SWATCH_GAP_PX = 6;
+const BADGE_PALETTE_PADDING_PX = 8;
+const BADGE_PALETTE_WIDTH_PX =
+  BADGE_PALETTE_COLUMNS * BADGE_SWATCH_SIZE_PX
+  + (BADGE_PALETTE_COLUMNS - 1) * BADGE_SWATCH_GAP_PX
+  + BADGE_PALETTE_PADDING_PX * 2;
+
 interface ClipartCardDraftModalProps {
   isOpen: boolean;
   padlet: Padlet | null;
@@ -241,11 +256,17 @@ export default function ClipartCardDraftModal({
               </button>
               {isBadgeColorPaletteOpen ? (
                 <div
+                  data-testid="clipart-badge-color-palette"
                   className="absolute right-0 top-9 z-20 bg-white rounded-lg shadow-lg border border-gray-200 p-2"
                   onClick={(e) => e.stopPropagation()}
                   onMouseDown={(e) => e.stopPropagation()}
+                  style={{ width: `${BADGE_PALETTE_WIDTH_PX}px` }}
                 >
-                  <div className="grid grid-cols-6 gap-3">
+                  <div
+                    data-testid="clipart-badge-color-grid"
+                    className="grid gap-1.5"
+                    style={{ gridTemplateColumns: `repeat(${BADGE_PALETTE_COLUMNS}, ${BADGE_SWATCH_SIZE_PX}px)` }}
+                  >
                     {BADGE_COLORS.map((color) => (
                       <button
                         key={color}
@@ -255,12 +276,11 @@ export default function ClipartCardDraftModal({
                           updateMetadata({ badgeColor: color });
                           setIsBadgeColorPaletteOpen(false);
                         }}
-                        className={`rounded transition-colors ${commentBadgeColor === color ? 'ring-2 ring-blue-500' : ''}`}
+                        data-badge-color-swatch={color}
+                        className={`shrink-0 rounded transition-colors ${commentBadgeColor === color ? 'ring-2 ring-blue-500' : ''}`}
                         style={{
-                          width: '20px',
-                          height: '20px',
-                          minWidth: '22px',
-                          minHeight: '22px',
+                          width: `${BADGE_SWATCH_SIZE_PX}px`,
+                          height: `${BADGE_SWATCH_SIZE_PX}px`,
                           backgroundColor: color,
                           border: ['#f3f4f6', '#e5e7eb', '#fef9c3', '#fef08a'].includes(color) ? '1px solid #d1d5db' : 'none',
                         }}
