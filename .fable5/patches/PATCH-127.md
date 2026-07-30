@@ -802,3 +802,260 @@ marker, now documented so no future patch re-derives it the hard way; the
 `unload` warning; the tsconfig-excluded `excalidraw_fork`; and the ledgers
 carried from PATCH-123 §14k, PATCH-124 §14l and PATCH-125 §13l, plus the
 unresolved production-build failure.
+
+---
+
+## 16. Amendment — RUNTIME CRASH CONFIRMED; B3 WITHDRAWN (2026-07-30, CTO)
+
+### 16a. Severity reclassification
+
+New user-visible evidence: the internal hyperlink path also produces a
+**user-triggerable runtime crash**.
+
+```
+Runtime TypeError: Cannot read properties of null (reading 'clientX')
+  components/App.tsx:6286  handleElementLinkClick
+  this.lastPointerDownEvent!.clientX
+```
+
+Observed while interacting with / right-clicking an app-owned embeddable
+carrying `padlet://<padlet-id>`. **The canvas is replaced by the Next.js
+runtime error overlay.**
+
+**PATCH-127 is no longer cosmetic-only.** It now covers two symptoms reached
+through the same third-party hyperlink path:
+
+1. the browser hover/status label leaking the internal `padlet://` identifier;
+2. hyperlink interaction crashing the canvas via a null dereference.
+
+**§15g's B3 — ACCEPT AND RECORD — is WITHDRAWN.** My §15g reasoning
+("cosmetic browser-chrome defect… no data, correctness, security or functional
+impact") was **correct on the evidence then available and is now wrong**.
+Accepting a status label is defensible; accepting a reproducible canvas crash
+that destroys the user's working surface is not.
+
+### 16b. Root-cause trace — source evidence
+
+Read from the reference source mirroring the installed 0.18.0
+(`excalidraw_fork/packages/excalidraw/components/App.tsx`; the fork is
+**reference only** and is not adopted — §5, §15f):
+
+```
+:648   lastPointerDownEvent: React.PointerEvent<HTMLElement> | null = null;
+
+:6281  private handleElementLinkClick = (event) => {
+:6284    const draggedDistance = pointDistance(
+:6286      pointFrom(this.lastPointerDownEvent!.clientX,
+:6287               this.lastPointerDownEvent!.clientY),
+:6290      pointFrom(this.lastPointerUpEvent!.clientX,
+:6291               this.lastPointerUpEvent!.clientY));
+:6293    if (!this.hitLinkElement || draggedDistance > DRAGGING_THRESHOLD) return;
+:6298    viewportCoordsToSceneCoords(this.lastPointerDownEvent!, …)
+```
+
+**The field is declared nullable and dereferenced with a non-null assertion,
+three times, in the handler's very first statement — before any guard.**
+
+The decisive contrast is in the same class:
+
+```
+:1249  if (!this.lastPointerDownEvent || !this.lastPointerUpEvent || …) 
+:936   this.lastPointerMoveEvent ?? this.lastPointerDownEvent?.nativeEvent;
+:1058  this.lastPointerMoveEvent ?? this.lastPointerDownEvent?.nativeEvent;
+```
+
+**Excalidraw guards this field everywhere else and only in
+`handleElementLinkClick` asserts it non-null.** This is an **upstream
+null-dereference bug**, not a consequence of anything the application does.
+
+There is exactly **one** assignment site in the shipped bundle
+(`lastPointerDownEvent = event`) and no reset-to-null. The field is therefore
+null when the handler runs **without any prior canvas pointerdown having been
+recorded**.
+
+**Hypothesis, explicitly NOT a finding:** the hyperlink anchor lives in the
+popup **overlay**, a DOM element outside the canvas, so activating it may
+invoke the link path without the canvas ever recording a pointerdown.
+Right-click, context-menu dismissal and remount are equally plausible
+contributors.
+
+**§16c requires this be established by observation. It must not be inferred
+from the stack — or from this paragraph.**
+
+### 16c. The crash is NOT `padlet://`-specific — product consequence
+
+`handleElementLinkClick` has **no scheme check** before the dereference. Any
+element carrying **any** link reaches the same unguarded code — **including
+external `https://` links on ordinary Excalidraw elements.**
+
+**Consequence: suppressing only the `padlet://` anchor would remove the label
+and leave the crash reachable elsewhere in the product.** This materially
+changes the strategy calculus and is why §16d rules as it does.
+
+### 16d. A/B ruling — both are likely required, and here is why
+
+The owner asked not to choose between A and B without tracing. Trace performed;
+the two symptoms have a **common trigger path but different root causes**:
+
+- **the label** is caused by *anchor rendering* → addressed by **A**;
+- **the crash** is caused by an *unguarded dereference* → addressed by **B**.
+
+**A alone is insufficient** — §16c shows the crash remains reachable via
+external links. **B alone is insufficient** — a guarded handler still leaves the
+`padlet://` identifier in the status bar.
+
+**Ruled: the final patch is expected to require BOTH A and B.** This is a
+directional ruling, not authorization. It must be confirmed by the §16e runtime
+trace before implementation, and if the trace contradicts it, this section is
+amended rather than worked around.
+
+**B is the higher-priority half.** It fixes a crash, it is version-agnostic in
+spirit (a null guard cannot regress correct behaviour), it matches Excalidraw's
+own convention at `:1249`, and it protects external links too. If only one half
+can be delivered, **deliver B.**
+
+### 16e. Required runtime trace — before any implementation
+
+Establish **by observation**, in a real browser, which interaction leaves
+`lastPointerDownEvent` null: right-click; context-menu close; click after
+context-menu close; click on the hyperlink overlay; keyboard activation;
+synthetic/programmatic event; or another reproducible sequence.
+
+Report the **exact sequence**, the observed field state, and whether the same
+sequence crashes on an **external-link** element. Do not report a sequence that
+was not run.
+
+### 16f. B2C spike — gate expanded to 10, all mandatory
+
+The placeholder-link spike must now prove **all** of: (1) the app-owned
+embeddable still renders; (2) no `a[href^="padlet://"]` is created; (3) **no
+replacement browser destination label** is introduced; (4) normal left-click
+does not crash; (5) right-click / context-menu does not crash; (6) clicking
+after closing the context menu does not crash; (7) selection and drag still
+work; (8) the embedded post still renders and resolves; (9) external Excalidraw
+links still work; (10) identity remains resolvable.
+
+**Rejected** if the placeholder renders a different status-bar URL, creates an
+anchor with another `href`, breaks rendering or selection, **or merely avoids
+one interaction while another still crashes.**
+
+Given §16c, **B2C cannot fix the crash on external links under any placeholder
+value** — a placeholder changes app-owned data only. B2C is therefore at best a
+partial answer and, on current evidence, **is not expected to pass criterion
+5 or 6 in the general case**. It remains authorized as a spike because
+disproving it cheaply is worth more than assuming it.
+
+### 16g. B2B — accounting required, mechanism scoped
+
+Prepare the exact narrow patch design. Candidate scope:
+
+- **A —** `Hyperlink` component: do not render the anchor for app-owned
+  `padlet://` links, **retaining `element.link` internally** so embeddable
+  validation still passes (the §15b precondition that defeated B1).
+- **B —** `handleElementLinkClick`: **guard `lastPointerDownEvent` and
+  `lastPointerUpEvent` before reading `clientX`/`clientY`**; return safely, or
+  use the current event, when absent; preserve normal external-link behaviour.
+
+Required accounting, to be supplied **before** code is written:
+
+1. **Maintenance burden** — the patch targets specific components in a specific
+   version; every upgrade needs re-verification.
+2. **Package implications** — the repository uses **npm** (`package-lock.json`
+   present), so `patch-package` plus a `postinstall` script is the fitting
+   mechanism. **This requires editing `package.json`**, currently prohibited.
+3. **Build/deployment implications** — the patch must apply in CI and every
+   deployment environment.
+4. **External-link compatibility** — proven, not assumed.
+5. **Proof that only app-owned `padlet://` elements lose the anchor.**
+6. **Proof that external hyperlinks remain fully functional**, including
+   `target`/`rel` and keyboard behaviour.
+
+**Authorized minimum package changes, if and only if B2B is selected:**
+`package.json` (one `postinstall` script and one devDependency), the lockfile
+**only** as generated by that addition, and **one deterministic patch file** for
+the exact installed version.
+
+**Hard requirements:** installation/build must **fail loudly** if the patch no
+longer applies; **no silent fallback** to vulnerable upstream code; the exact
+package version must be **pinned and verified**; future upgrades must surface
+the conflict. **The full unused fork is not adopted** (§5, §15f).
+
+### 16h. External-link contract — bind
+
+`http://`, `https://`, `mailto:` and other supported links remain **unchanged**:
+the hover anchor stays available; clicks open through existing behaviour; the
+context menu does not crash; keyboard behaviour is unchanged.
+
+**Only app-owned `padlet://` elements may suppress hyperlink UI.** The crash
+guard (B), by contrast, **must apply to all links** — a guard that protects only
+`padlet://` would leave §16c's external-link crash live.
+
+### 16i. Crash characterization tests — bind
+
+Focused browser characterization must: create/open an app-owned embedded post;
+hover it; right-click it; open **and close** its context menu; left-click it
+afterward; **repeat the sequence several times**; and prove **no Next.js runtime
+overlay appears**, **no `pageerror` is emitted**, and **no console `TypeError`
+mentioning `lastPointerDownEvent`/`clientX` occurs**. The canvas must remain
+interactive; the object selectable and draggable; **context-menu Edit Post and
+Duplicate must still work**; and an external-link element must still behave
+normally.
+
+**Capture `pageerror` events, console error events, runtime-overlay presence,
+and the exact interaction sequence.** Listeners must be attached **before**
+navigation, or the first error is missed.
+
+### 16j. Unit/source tests — bind
+
+App-owned `padlet://` links are recognized **narrowly**; external links are not
+suppressed; **a null `lastPointerDownEvent` cannot be dereferenced**; no broad
+hyperlink disablement; the runtime patch applies to the **exact installed
+version**; and the patch artifact contains **only** the governed minimal
+changes — asserted against the artifact itself, so scope creep inside the patch
+file is caught.
+
+### 16k. Console warning
+
+The `unload` permissions-policy warning **remains separate** unless the §16e
+trace proves it is part of the same runtime path. **It must not be conflated
+with the `clientX` crash** — they share no evidence.
+
+### 16l. Next instruction (bind)
+
+> **Do not implement. Do not re-attempt B1.**
+>
+> Deliver two things, in order: (1) the **§16e runtime trace** establishing by
+> observation which interaction leaves `lastPointerDownEvent` null, and whether
+> the same sequence crashes an **external-link** element; (2) the **§16f B2C
+> spike** under its expanded 10-criterion gate.
+>
+> Then **stop and report**. Do not proceed to B2B — it requires the §16g
+> accounting and explicit owner sign-off, including a narrow `package.json`
+> exception that does not yet exist.
+>
+> Change no product code. Leave no candidate behind. Report the exact sequences
+> run and their observed results, including sequences that did **not** reproduce.
+
+### 16m. Status
+
+**PATCH-127: OPEN · B1 REJECTED · B2A CLOSED · B2C SPIKE EXPANDED · B2B
+ACCOUNTING REQUIRED · RUNTIME CRASH CONFIRMED · IMPLEMENTATION BLOCKED PENDING
+STRATEGY RULING.**
+**B3: WITHDRAWN (§16a).** Severity reclassified from cosmetic to
+crash-inducing. Directional ruling: **A and B both expected; B is the priority
+half** (§16d). Raw-reader cap remains **10** (§15h).
+
+**PATCH-126: DESIGNATED, UNAUTHORED, UNAUTHORIZED.**
+**PATCH-125 / 124 / 123 / 122 / 121 / 120 / 117: CLOSED.**
+**PATCH-116: CANCELLED.**
+**PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
+**PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
+**PATCH-119: DESIGNATED, UNAUTHORED, UNAUTHORIZED, UNTOUCHED.**
+
+**Recorded debt:** an **upstream Excalidraw 0.18.0 null-dereference in
+`handleElementLinkClick`** affecting **all** linked elements, not only
+app-owned ones — worth reporting upstream regardless of which strategy this
+patch takes; the §2c census defect (`presentationBridge.ts`); `element.link` as
+a render precondition (§15b); the `unload` warning; the tsconfig-excluded fork;
+and the PATCH-123 §14k / PATCH-124 §14l / PATCH-125 §13l ledgers plus the
+unresolved production-build failure.
