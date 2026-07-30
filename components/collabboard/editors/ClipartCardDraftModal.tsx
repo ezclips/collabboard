@@ -10,8 +10,7 @@ import CommentPopup from '@/components/collabboard/editors/CommentPopup';
 import InlineCaption from '@/components/collabboard/editors/InlineCaption';
 import TextStylePopup from '@/components/collabboard/editors/TextStylePopup';
 import { CAPTION_STYLE_PRESETS, type CaptionHeading } from '@/lib/domain/canvas/captionStyle';
-import EmojiPicker from 'emoji-picker-react';
-import { X } from 'lucide-react';
+import EmojiReactionPicker from '@/components/collabboard/editors/EmojiReactionPicker';
 
 const BADGE_COLORS = [
   '#fef9c3', '#fef08a', '#fde047', '#facc15', '#eab308', '#ca8a04',
@@ -328,22 +327,15 @@ export default function ClipartCardDraftModal({
             onClick={(e) => e.stopPropagation()}
             onMouseDown={(e) => e.stopPropagation()}
           >
-            <div className="relative shadow-2xl rounded-xl overflow-hidden border border-gray-200 bg-white">
-              <button
-                className="absolute top-2 right-2 translate-x-1 z-10 w-4 h-4 rounded hover:bg-gray-100 flex items-center justify-center"
-                onClick={() => setIsReactionPickerOpen(false)}
-                title="Close"
-              >
-                <X className="w-3 h-3 text-gray-400" />
-              </button>
-              <EmojiPicker
-                onEmojiClick={(emojiData) => {
-                  updateMetadata({ reactions: [...reactions, emojiData.emoji] });
+            <div>
+              <EmojiReactionPicker
+                isOpen={isReactionPickerOpen}
+                onOpenChange={setIsReactionPickerOpen}
+                onSelectEmoji={(emoji) => {
+                  updateMetadata({ reactions: [...reactions, emoji] });
                   setIsReactionPickerOpen(false);
                 }}
-                width={300}
-                height={400}
-                lazyLoadEmojis={true}
+                inline
               />
             </div>
           </div>

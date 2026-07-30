@@ -364,3 +364,261 @@ is superseded by §6 without reopening it.
 divergence (§3d → PATCH-126); five duplicated reaction blocks inside
 `FreeformPadletCards` sharing one state; the unresolved production-build
 failure; and the PATCH-123 §14k / PATCH-124 §14l ledgers.
+
+---
+
+## 13. CLOSURE (2026-07-30, CTO)
+
+### 13a. Independent review
+
+**PASS.** The authoring CTO neither implemented nor reviewed this candidate.
+Every claim below was **re-verified from source at closure**, not accepted on
+report.
+
+### 13b. Two-picker census — final
+
+- **13 `EmojiPicker` render sites** were found before implementation.
+- **10 were post-reaction consumers.** All 10 now use `EmojiReactionPicker`.
+- **3 were legitimate non-reaction consumers.** All 3 remain on
+  `emoji-picker-react`, **unchanged vs HEAD**:
+
+```
+components/collabboard/canvas/IconSelector.tsx     "Select Icon" dialog
+app/dashboard/page.tsx                             folder icon picker
+components/collabboard/editors/CommentEditor.tsx   emoji insertion into comment text
+```
+
+- **`emoji-picker-react` remains installed.** `package.json` and
+  `package-lock.json` are **unchanged** — §3e's census disproved the premise for
+  removal, and removal was never authorized.
+
+Verified at closure: exactly **three** `emoji-picker-react` import statements
+remain in `components/` and `app/`, and they are precisely those three files.
+
+### 13c. Migrated reaction sites — all 10
+
+```
+1.  FreeformPadletCards.tsx:955    Image (inline card)
+2.  FreeformPadletCards.tsx:1902   Image (selected, no toolbar)
+3.  FreeformPadletCards.tsx:4982   Image (right-positioned)
+4.  FreeformPadletCards.tsx:5631   Image toolbar
+5.  FreeformPadletCards.tsx:6078   Card Post Modal
+6.  ClipartCardDraftModal.tsx:331  Clipart draft
+7.  CanvasClient.tsx:8151          CanvasClient image toolbar
+8.  NoteEditor.tsx:758             Note
+9.  TodoEditor.tsx:538             Todo
+10. LinkEditor.tsx:520             Link
+```
+
+Verified at closure: **10 `<EmojiReactionPicker` production render sites**
+(12 repository-wide, of which 2 are inside `EmojiReactionPicker.test.tsx`),
+and **6 files import it**.
+
+### 13d. Shared picker
+
+- **Every post Reaction path uses the in-repo `EmojiReactionPicker`.**
+- **No post Reaction path renders `.EmojiPickerReact`.**
+- **No private second compact picker was added** — one component, one source of
+  truth. This was a live risk: re-implementing a "similar" compact picker per
+  editor would have satisfied the screenshots and defeated the patch.
+- Same compact structure and dimensions across post types.
+- Panel placement and **one-click sibling-panel transitions preserved**,
+  including the PATCH-124-era caption/reaction switching.
+- **Closing without selecting does not mutate reactions.**
+
+### 13e. Search fix (§3a) — delivered
+
+- Glyph-only matching is **replaced with keyword-indexed search**. The prior
+  `emoji.includes(searchQuery)` compared a glyph against typed text and could
+  never match a word.
+- Search text is composed from **emoji + category label + curated keywords**,
+  lowercased.
+- **Case-insensitive**; **whitespace trimmed**; **empty query returns the full
+  compact set**; **emoji glyph queries still work**; **nonsense queries are
+  safe** (empty result, no crash).
+- Textual terms including `smile`, `happy`, `laugh`, `heart`, `fire` and
+  `thumbs up` now work.
+- **No new dependency and no external API** was introduced.
+- The compact set remains **intentionally limited**.
+
+**Recorded non-blocking debt:** the keyword catalog is **hand-curated and not
+exhaustive** — 42 curated entries against ~163 emoji. Terms outside the catalog
+fall back to category-label and glyph matching. This is an improvement over a
+search that could never match anything, not a complete emoji index.
+
+### 13f. Reaction semantics — PICKER UI ONLY
+
+**PATCH-125 changed the picker, not the semantics. Semantics remain divergent
+by editor, deliberately.** Verified at closure:
+
+```
+Image / Card Post Modal / Clipart / CanvasClient   append   (duplicates allowed, count 2+)
+Note        (NoteEditor.tsx:762)                   dedup-append
+Todo        (TodoEditor.tsx:246-252)               toggle
+Link        (LinkEditor.tsx:287-290)               toggle
+```
+
+**Nothing here implies semantics were standardized.** They were not. A reader
+must not infer from "standardize post reactions" that reaction *behaviour* was
+unified — only the *picker component* was.
+
+**PATCH-126 owns any future semantics unification and remains DESIGNATED,
+UNAUTHORED and UNAUTHORIZED.**
+
+The retired PATCH-120 dedup rule did **not** return to append-semantics
+editors. Note's dedup is **pre-existing, independent, and untouched** — it is
+not the PATCH-120 rule reinstated.
+
+### 13g. Persistence routes — all unchanged
+
+```
+updatePostFieldsPreservingFailureChannels   FreeformPadletCards :955, :5631
+updatePadletMetadata                        FreeformPadletCards :1902, :4982, :6078; CanvasClient :8151
+updateMetadata / onChange                   Clipart draft (:335)
+local setReactions                          Note, Todo, Link
+```
+
+Verified at closure: **20** `updatePostFieldsPreservingFailureChannels` and
+**75** `updatePadletMetadata` occurrences remain in `FreeformPadletCards`, and
+the Clipart draft still writes through `updateMetadata({ reactions: … })`.
+
+**No update-route crossover.** **No persistence logic moved into
+`EmojiReactionPicker`** — the shared component still only reports a selection
+through `onSelectEmoji`, and each call site owns its own write. That separation
+is what made a 10-site migration safe.
+
+### 13h. Boundaries — verified unchanged at closure
+
+```
+ReactionDisplay.tsx        CardPreview.tsx         CardActionsToolbar.tsx
+TextStylePopup.tsx         InlineCaption.tsx       IconSelector.tsx
+app/dashboard/page.tsx     CommentEditor.tsx       package.json
+package-lock.json
+```
+
+Repositories, schema and RLS untouched. Protected paths untouched (§13k).
+
+- **PATCH-123's picker-choice ruling is SUPERSEDED — that ruling only.**
+  **PATCH-123 remains CLOSED.** Its caption reader, `metadata.captionStyle`,
+  the `{...base, ...preset}` merge, the `ReactionDisplay` reuse, the draft
+  persistence route, and §13c's retirement of the PATCH-120 dedup rule all
+  stand.
+- **PATCH-126: DESIGNATED, UNAUTHORED, UNAUTHORIZED.**
+- **PATCH-118 and PATCH-119: UNTOUCHED.**
+
+### 13i. Tests
+
+- **All 10 reaction call sites are census-bound** — a static guard counts them,
+  so a future call site that reaches for `emoji-picker-react` fails the suite.
+- **All 3 non-reaction consumers are census-bound**, so they cannot be migrated
+  by accident.
+- **The existing Clipart assertions were INVERTED, not deleted**
+  (`ClipartCardDraftModal.test.tsx:981`, and the Playwright
+  `.EmojiPickerReact` assertion). They previously *enforced the defect*; they
+  now enforce the fix. Deleting them would have left a green suite that checked
+  nothing.
+- Image and Clipart use the **same** picker in real browser tests.
+- **`.EmojiPickerReact` is absent from Reaction paths.**
+- Text search works.
+- Append duplicate count reaches **2**.
+- Clipart persistence survives **save and reopen**.
+- **Note, Todo and Link retain their distinct semantics** — the guard that
+  proves the picker swap did not silently change three post types.
+- **All three induced-failure proofs succeeded:** call-site, search, and
+  append-semantics.
+
+### 13j. Final validation
+
+```
+git diff --check            PASS  (CRLF warnings only)
+npx tsc --noEmit            PASS
+focused Vitest              55 PASS
+full Vitest                 59 files / 703 tests PASS
+PATCH-125 Playwright        3 PASS
+existing Clipart Playwright 2 PASS
+scoped ESLint               PASS  (exit 0, no findings)
+call-site induced-failure   PASS
+search induced-failure      PASS
+append-semantics induced-failure PASS
+independent review          PASS
+```
+
+**No production-build claim is made.** The `npm run build` failure recorded in
+PATCH-123 §14h remains unresolved and unclassified; PATCH-125 does not inherit
+it and does not assert the production build passes.
+
+### 13k. Committed file list
+
+**Production — 7 of 7 authorized:**
+
+```
+app/dashboard/canvas/[id]/CanvasClient.tsx
+components/collabboard/canvas/ui/FreeformPadletCards.tsx
+components/collabboard/editors/ClipartCardDraftModal.tsx
+components/collabboard/editors/EmojiReactionPicker.tsx      (§3a search fix only)
+components/collabboard/editors/NoteEditor.tsx
+components/collabboard/editors/TodoEditor.tsx
+components/collabboard/editors/LinkEditor.tsx
+```
+
+**Tests — 4:**
+
+```
+components/collabboard/EmojiReactionPicker.test.tsx                (new)
+components/collabboard/ClipartCardDraftModal.test.tsx              (inverted)
+e2e/characterization/clipart-draft-reactions-comments.spec.ts      (inverted)
+e2e/characterization/patch-125-shared-reaction-picker.spec.ts      (new)
+```
+
+**Governance — 1:** `.fable5/patches/PATCH-125.md`
+
+**Protected paths — not staged, not committed, still dirty, unmodified:**
+
+```
+.gitignore
+app/api/ai/classify-intent/route.ts
+app/api/ai/convert-component/route.ts
+app/api/ai/generate-component/route.ts
+scripts/live-access-login.mjs
+```
+
+Neither cleaned, reset, restored nor modified. `.env.local` untouched. No
+worktree. No stash.
+
+### 13l. Non-blocking notes
+
+**These do not block closure.**
+
+1. The compact picker remains limited to **~163 emoji** (§3b). Users who react
+   with an emoji outside that set can no longer do so — an accepted,
+   deliberate consequence of the owner's choice of the compact picker.
+2. The **keyword catalog is hand-curated and not exhaustive** (§13e).
+3. The five protected dirty paths are **unrelated and excluded**.
+4. **Legacy lint debt in large files remains unrelated** to this patch; scoped
+   ESLint on the changed files reports nothing.
+
+### 13m. PATCH-125 — **CLOSED**
+
+All §4 contract items hold. All 10 reaction sites migrated; all 3 non-reaction
+consumers preserved; every persistence route intact; every editor's semantics
+preserved; `ReactionDisplay` untouched. The §3a search defect — which would
+have shipped a dead control to every post type — was fixed rather than
+inherited. All three induced-failure proofs pass. Independent review PASS.
+Scope verified at **7 production and 4 test files**, within the authorized
+maxima. No prohibited file touched. No protected path staged.
+
+**PATCH-125 is CLOSED.**
+
+**PATCH-124 / 123 / 122 / 121 / 120 / 117: CLOSED.**
+**PATCH-116: CANCELLED and retired.**
+**PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
+**PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
+**PATCH-119: DESIGNATED, UNAUTHORED, UNAUTHORIZED, UNTOUCHED.**
+**PATCH-126: DESIGNATED, UNAUTHORED, UNAUTHORIZED** — owns §3d semantics
+unification.
+
+**Recorded debt carried forward:** the ~163-emoji ceiling; the hand-curated
+keyword catalog; three-way reaction-semantics divergence (→ PATCH-126); five
+duplicated reaction blocks inside `FreeformPadletCards` sharing one
+`isImageEmojiOpen` state; the unresolved production-build failure; and the
+PATCH-123 §14k / PATCH-124 §14l ledgers.

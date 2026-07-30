@@ -5,7 +5,7 @@ import { Palette, Type, Calendar, User, Smile, MessageSquare, Trash2, ChevronLef
 import ShareModal from './ShareModal';
 import { ColorPickerContent } from '../ColorPicker';
 import TextStylePopup from './TextStylePopup';
-import EmojiPicker from 'emoji-picker-react';
+import EmojiReactionPicker from './EmojiReactionPicker';
 
 interface Task {
     id: string;
@@ -534,22 +534,14 @@ export default function TodoEditor({
                                 onClick={(e) => e.stopPropagation()}
                                 onMouseDown={(e) => e.stopPropagation()}
                             >
-                                <div className="relative shadow-2xl rounded-xl overflow-hidden border border-gray-200 bg-white">
-                                    <button
-                                        className="absolute top-2 right-2 translate-x-1 z-10 w-4 h-4 rounded hover:bg-gray-100 flex items-center justify-center"
-                                        onClick={() => setShowReactionPicker(false)}
-                                        title="Close"
-                                    >
-                                        <X className="w-3 h-3 text-gray-400" />
-                                    </button>
-                                    <EmojiPicker
-                                        onEmojiClick={(emojiData) => {
-                                            toggleReaction(emojiData.emoji);
+                                <div>
+                                    <EmojiReactionPicker
+                                        isOpen={showReactionPicker}
+                                        onOpenChange={setShowReactionPicker}
+                                        onSelectEmoji={(emoji) => {
+                                            toggleReaction(emoji);
                                         }}
-                                        width={300}
-                                        height={400}
-                                        searchPlaceHolder="Search emojis..."
-                                        previewConfig={{ showPreview: false }}
+                                        inline
                                     />
                                 </div>
                             </div>

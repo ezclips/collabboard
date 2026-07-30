@@ -13,7 +13,7 @@ import { FontSize } from './extensions/FontSize';
 import { Comment } from './extensions/Comment';
 import NoteEditorToolbar, { ToolbarMode } from './NoteEditorToolbar';
 import TextStylePopup from './TextStylePopup';
-import EmojiPicker from 'emoji-picker-react';
+import EmojiReactionPicker from './EmojiReactionPicker';
 import LinkPopup from './LinkPopup';
 import CommentPopup from './CommentPopup';
 import { Palette, PenTool, X, Strikethrough, Trash2 } from 'lucide-react';
@@ -754,26 +754,18 @@ export default function NoteEditor({
               className="absolute left-full top-0 ml-2 z-[60]"
               onMouseDown={(e) => e.preventDefault()}
             >
-              <div className="relative">
-                <button
-                  className="absolute top-2 right-2 translate-x-1 z-10 w-4 h-4 rounded hover:bg-gray-100 flex items-center justify-center"
-                  onClick={() => setEmojiPickerOpen(false)}
-                  title="Close"
-                >
-                  <X className="w-3 h-3 text-gray-400" />
-                </button>
-                <EmojiPicker
-                  onEmojiClick={(emojiData) => {
-                    if (!reactions.includes(emojiData.emoji)) {
-                      setReactions([...reactions, emojiData.emoji]);
+              <div>
+                <EmojiReactionPicker
+                  isOpen={emojiPickerOpen}
+                  onOpenChange={setEmojiPickerOpen}
+                  onSelectEmoji={(emoji) => {
+                    if (!reactions.includes(emoji)) {
+                      setReactions([...reactions, emoji]);
                     }
                     setEmojiPickerOpen(false);
                   }}
-                  width={320}
-                  height={400}
-                  searchPlaceHolder="Search emojis..."
-                  previewConfig={{ showPreview: false }}
                   className="note-emoji-picker"
+                  inline
                 />
               </div>
             </div>

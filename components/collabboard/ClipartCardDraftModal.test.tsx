@@ -205,14 +205,10 @@ function textStylePopupProps(element: ReactNode) {
   };
 }
 
-function emojiPickerNode(element: ReactNode): ReactNode {
-  const node = findElement(element, (candidate) =>
-    candidate.props?.width === 300 &&
-    candidate.props?.height === 400 &&
-    candidate.props?.lazyLoadEmojis === true &&
-    typeof candidate.props?.onEmojiClick === 'function',
-  );
-  expect(node, 'emoji-picker-react picker should render').toBeTruthy();
+function emojiReactionPickerNode(element: ReactNode): ReactNode {
+  const node = findByComponentName(element, 'EmojiReactionPicker');
+  expect(node.props?.inline, 'shared EmojiReactionPicker should render inline').toBe(true);
+  expect(typeof node.props?.onSelectEmoji).toBe('function');
   return node!;
 }
 
@@ -251,9 +247,9 @@ describe('ClipartCardDraftModal reaction and comment metadata', () => {
       stateValues: [false, false, true, false, false],
       onChange,
     });
-    const picker = emojiPickerNode(element);
+    const picker = emojiReactionPickerNode(element);
 
-    (picker.props.onEmojiClick as (emojiData: { emoji: string }) => void)({ emoji: 'added' });
+    (picker.props.onSelectEmoji as (emoji: string) => void)('added');
     expect(onChange).toHaveBeenLastCalledWith(
       expect.objectContaining({
         metadata: expect.objectContaining({
@@ -266,7 +262,7 @@ describe('ClipartCardDraftModal reaction and comment metadata', () => {
     expect(state.calls).toContainEqual({ index: 2, value: false });
 
     onChange.mockClear();
-    (picker.props.onEmojiClick as (emojiData: { emoji: string }) => void)({ emoji: 'new-emoji' });
+    (picker.props.onSelectEmoji as (emoji: string) => void)('new-emoji');
     expect(onChange).toHaveBeenLastCalledWith(
       expect.objectContaining({
         metadata: expect.objectContaining({
@@ -860,9 +856,8 @@ describe('ClipartCardDraftModal reaction and comment metadata', () => {
   it('closing panels leaves the draft modal open', () => {
     const onClose = vi.fn();
     const reactionTree = renderModal({ stateValues: [false, false, true, false, false], onClose });
-    const pickerClose = findElement(reactionTree.element, (node) => node.props?.title === 'Close');
-    expect(pickerClose).toBeTruthy();
-    (pickerClose!.props.onClick as () => void)();
+    const picker = emojiReactionPickerNode(reactionTree.element);
+    (picker.props.onOpenChange as (open: boolean) => void)(false);
     expect(onClose).not.toHaveBeenCalled();
     expect(findByComponentName(reactionTree.element, 'CardActionsToolbar')).toBeTruthy();
 
@@ -976,21 +971,18 @@ describe('ClipartCardDraftModal reaction and comment metadata', () => {
     );
   });
 
-  it('uses emoji-picker-react parity markup and never imports the in-repo picker', () => {
+  it('uses the shared in-repo reaction picker and never imports emoji-picker-react', () => {
     const source = sourceFor('components/collabboard/editors/ClipartCardDraftModal.tsx');
     const { element } = renderModal({ stateValues: [false, false, true, false, false] });
     const panel = testIdNode(element, 'clipart-reaction-panel-wrapper');
-    const picker = emojiPickerNode(element);
-    const close = findElement(panel, (node) => node.props?.title === 'Close');
+    const picker = emojiReactionPickerNode(element);
 
-    expect(source).toContain("import EmojiPicker from 'emoji-picker-react'");
-    expect(source).not.toContain('EmojiReactionPicker');
+    expect(source).toContain("import EmojiReactionPicker from '@/components/collabboard/editors/EmojiReactionPicker'");
+    expect(source).not.toContain("import EmojiPicker from 'emoji-picker-react'");
     expect(String(panel!.props.className)).toContain('animate-in fade-in zoom-in duration-200');
-    expect(String(childrenOf(panel)[0] && (childrenOf(panel)[0] as ReactNode).props.className)).toContain('relative shadow-2xl rounded-xl overflow-hidden border border-gray-200 bg-white');
-    expect(String(close!.props.className)).toContain('absolute top-2 right-2 translate-x-1 z-10 w-4 h-4 rounded hover:bg-gray-100 flex items-center justify-center');
-    expect(picker.props.width).toBe(300);
-    expect(picker.props.height).toBe(400);
-    expect(picker.props.lazyLoadEmojis).toBe(true);
+    expect(picker.props.isOpen).toBe(true);
+    expect(picker.props.onOpenChange).toBeDefined();
+    expect(picker.props.inline).toBe(true);
     expect(source).not.toContain('updatePadletMetadata');
   });
 

@@ -82,7 +82,7 @@ import {
   Image as ImageIcon, Upload, PenTool, Trash2, Bell, Table, X, Columns3,
   Map as MapIcon, BookOpen, Plus, CloudDownload, Sparkles, Palette, Strikethrough, UserPlus, Settings
 } from 'lucide-react';
-import EmojiPicker from 'emoji-picker-react';
+import EmojiReactionPicker from '@/components/collabboard/editors/EmojiReactionPicker';
 import AIComponentEditor from '@/components/collabboard/editors/AIComponentEditor';
 import LibraryPanel from '@/components/collabboard/LibraryPanel';
 import ImportsDialog from '@/components/collabboard/imports/ImportsDialog';
@@ -8147,28 +8147,21 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                   onClick={(e) => e.stopPropagation()}
                   onMouseDown={(e) => e.stopPropagation()}
                 >
-                  <div className="relative shadow-2xl rounded-xl overflow-hidden border border-gray-200 bg-white">
-                    <button
-                      className="absolute top-2 right-2 translate-x-1 z-10 w-4 h-4 rounded hover:bg-gray-100 flex items-center justify-center"
-                      onClick={() => setIsImageEmojiOpen(false)}
-                      title="Close"
-                    >
-                      <X className="w-3 h-3 text-gray-400" />
-                    </button>
-                    <EmojiPicker
-                      onEmojiClick={async (emojiData) => {
+                  <div>
+                    <EmojiReactionPicker
+                      isOpen={isImageEmojiOpen}
+                      onOpenChange={setIsImageEmojiOpen}
+                      onSelectEmoji={async (emoji) => {
                         try {
                           const currentReactions = activeImageToolbarPadlet.metadata?.reactions || [];
-                          const newReactions = [...currentReactions, emojiData.emoji];
+                          const newReactions = [...currentReactions, emoji];
                           await updatePadletMetadata(activeImageToolbarPadlet.id, { reactions: newReactions });
                           setIsImageEmojiOpen(false);
                         } catch (err) {
                           console.error('Failed to add reaction:', err);
                         }
                       }}
-                      width={300}
-                      height={400}
-                      lazyLoadEmojis={true}
+                      inline
                     />
                   </div>
                 </div>

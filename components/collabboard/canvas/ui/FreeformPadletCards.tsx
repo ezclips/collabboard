@@ -17,7 +17,7 @@ import CommentPost from '@/components/collabboard/CommentPost';
 import TextStylePopup from '@/components/collabboard/editors/TextStylePopup';
 import { CardColorPanel } from '@/components/collabboard/editors/CardColorPanel';
 import ReactionDisplay from '@/components/collabboard/editors/ReactionDisplay';
-import EmojiPicker from 'emoji-picker-react';
+import EmojiReactionPicker from '@/components/collabboard/editors/EmojiReactionPicker';
 import InlineCaption from '@/components/collabboard/editors/InlineCaption';
 import { ColorPickerContent } from '@/components/collabboard/ColorPicker';
 import AIContentRenderer from '@/components/ai/AIContentRenderer';
@@ -951,19 +951,14 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                 onClick={(e) => e.stopPropagation()}
                 onMouseDown={(e) => e.stopPropagation()}
               >
-                <div className="relative shadow-2xl rounded-xl overflow-hidden border border-gray-200 bg-white">
-                  <button
-                    className="absolute top-2 right-2 translate-x-1 z-10 w-4 h-4 rounded hover:bg-gray-100 flex items-center justify-center"
-                    onClick={() => setIsImageEmojiOpen(false)}
-                    title="Close"
-                  >
-                    <X className="w-3 h-3 text-gray-400" />
-                  </button>
-                  <EmojiPicker
-                    onEmojiClick={async (emojiData) => {
+                <div>
+                  <EmojiReactionPicker
+                    isOpen={isImageEmojiOpen}
+                    onOpenChange={setIsImageEmojiOpen}
+                    onSelectEmoji={async (emoji) => {
                       try {
                         const currentReactions = padlet.metadata?.reactions || [];
-                        const newReactions = [...currentReactions, emojiData.emoji];
+                        const newReactions = [...currentReactions, emoji];
                         await updatePostFieldsPreservingFailureChannels(padlet.id, {
                           metadata: { ...padlet.metadata, reactions: newReactions },
                           updated_at: new Date().toISOString(),
@@ -974,9 +969,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                         console.error('Failed to add reaction:', err);
                       }
                     }}
-                    width={300}
-                    height={400}
-                    lazyLoadEmojis={true}
+                    inline
                   />
                 </div>
               </div>
@@ -1905,18 +1898,21 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
             )}
             {isPadletSelected(padlet.id) && isImageEmojiOpen && !cardToolbarPadletId && (
               <div className="absolute left-full top-0 ml-3 z-[70] animate-in fade-in zoom-in duration-200">
-                <div className="shadow-2xl rounded-xl overflow-hidden border border-gray-200 bg-white">
-                  <EmojiPicker
-                    onEmojiClick={async (emojiData) => {
+                <div>
+                  <EmojiReactionPicker
+                    isOpen={isImageEmojiOpen}
+                    onOpenChange={setIsImageEmojiOpen}
+                    onSelectEmoji={async (emoji) => {
                       try {
                         const currentReactions = padlet.metadata?.reactions || [];
-                        const newReactions = [...currentReactions, emojiData.emoji];
+                        const newReactions = [...currentReactions, emoji];
                         await updatePadletMetadata(padlet.id, { reactions: newReactions });
                         setIsImageEmojiOpen(false);
                       } catch (err) {
                         console.error('Failed to add reaction:', err);
                       }
                     }}
+                    inline
                   />
                 </div>
               </div>
@@ -4982,18 +4978,21 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
               {/* Emoji Picker - Positioned to the right */}
               {isPadletSelected(padlet.id) && isImageEmojiOpen && (
                 <div className="absolute left-full top-0 ml-3 z-[9999] animate-in fade-in zoom-in duration-200">
-                  <div className="shadow-2xl rounded-xl overflow-hidden border border-gray-200 bg-white">
-                    <EmojiPicker
-                      onEmojiClick={async (emojiData) => {
+                  <div>
+                    <EmojiReactionPicker
+                      isOpen={isImageEmojiOpen}
+                      onOpenChange={setIsImageEmojiOpen}
+                      onSelectEmoji={async (emoji) => {
                         try {
                           const currentReactions = padlet.metadata?.reactions || [];
-                          const newReactions = [...currentReactions, emojiData.emoji];
+                          const newReactions = [...currentReactions, emoji];
                           await updatePadletMetadata(padlet.id, { reactions: newReactions });
                           setIsImageEmojiOpen(false);
                         } catch (err) {
                           console.error('Failed to add reaction:', err);
                         }
                       }}
+                      inline
                     />
                   </div>
                 </div>
@@ -5628,19 +5627,14 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                 onClick={(e) => e.stopPropagation()}
                 onMouseDown={(e) => e.stopPropagation()}
               >
-                <div className="relative shadow-2xl rounded-xl overflow-hidden border border-gray-200 bg-white">
-                  <button
-                    className="absolute top-2 right-2 translate-x-1 z-10 w-4 h-4 rounded hover:bg-gray-100 flex items-center justify-center"
-                    onClick={() => setIsImageEmojiOpen(false)}
-                    title="Close"
-                  >
-                    <X className="w-3 h-3 text-gray-400" />
-                  </button>
-                  <EmojiPicker
-                    onEmojiClick={async (emojiData) => {
+                <div>
+                  <EmojiReactionPicker
+                    isOpen={isImageEmojiOpen}
+                    onOpenChange={setIsImageEmojiOpen}
+                    onSelectEmoji={async (emoji) => {
                       try {
                         const currentReactions = activeImageToolbarPadlet.metadata?.reactions || [];
-                        const newReactions = [...currentReactions, emojiData.emoji];
+                        const newReactions = [...currentReactions, emoji];
                         await updatePostFieldsPreservingFailureChannels(activeImageToolbarPadlet.id, {
                           metadata: { ...activeImageToolbarPadlet.metadata, reactions: newReactions },
                           updated_at: new Date().toISOString(),
@@ -5651,9 +5645,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                         console.error('Failed to add reaction:', err);
                       }
                     }}
-                    width={300}
-                    height={400}
-                    lazyLoadEmojis={true}
+                    inline
                   />
                 </div>
               </div>
@@ -6082,28 +6074,21 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                 onClick={(e) => e.stopPropagation()}
                 onMouseDown={(e) => e.stopPropagation()}
               >
-                <div className="relative shadow-2xl rounded-xl overflow-hidden border border-gray-200 bg-white">
-                  <button
-                    className="absolute top-2 right-2 translate-x-1 z-10 w-4 h-4 rounded hover:bg-gray-100 flex items-center justify-center"
-                    onClick={() => setIsImageEmojiOpen(false)}
-                    title="Close"
-                  >
-                    <X className="w-3 h-3 text-gray-400" />
-                  </button>
-                  <EmojiPicker
-                    onEmojiClick={async (emojiData) => {
+                <div>
+                  <EmojiReactionPicker
+                    isOpen={isImageEmojiOpen}
+                    onOpenChange={setIsImageEmojiOpen}
+                    onSelectEmoji={async (emoji) => {
                       try {
                         const currentReactions = activeCardToolbarPadlet.metadata?.reactions || [];
-                        const newReactions = [...currentReactions, emojiData.emoji];
+                        const newReactions = [...currentReactions, emoji];
                         await updatePadletMetadata(activeCardToolbarPadlet.id, { reactions: newReactions });
                         setIsImageEmojiOpen(false);
                       } catch (err) {
                         console.error('Failed to add reaction:', err);
                       }
                     }}
-                    width={300}
-                    height={400}
-                    lazyLoadEmojis={true}
+                    inline
                   />
                 </div>
               </div>

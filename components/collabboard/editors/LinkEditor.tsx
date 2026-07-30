@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { X, Palette, Image as ImageIcon, Link2, Type, Smile, MessageSquare, ExternalLink, PenTool } from 'lucide-react';
 import { ColorPickerContent } from '../ColorPicker';
-import EmojiPicker from 'emoji-picker-react';
+import EmojiReactionPicker from './EmojiReactionPicker';
 import TextStylePopup from './TextStylePopup';
 import LinkMediaEmbed, { getLinkEmbedKind } from '../LinkMediaEmbed';
 
@@ -517,14 +517,13 @@ export default function LinkEditor({
                             className="absolute left-full top-0 ml-2 z-[60]"
                             onMouseDown={(e) => e.preventDefault()}
                         >
-                            <EmojiPicker
-                                onEmojiClick={(emojiData) => {
-                                    toggleReaction(emojiData.emoji);
+                            <EmojiReactionPicker
+                                isOpen={showReactionPicker}
+                                onOpenChange={setShowReactionPicker}
+                                onSelectEmoji={(emoji) => {
+                                    toggleReaction(emoji);
                                 }}
-                                width={320}
-                                height={400}
-                                searchPlaceHolder="Search emojis..."
-                                previewConfig={{ showPreview: false }}
+                                inline
                             />
                         </div>
                     )}

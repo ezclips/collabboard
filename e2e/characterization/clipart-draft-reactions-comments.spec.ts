@@ -264,21 +264,29 @@ test.describe('PATCH-120 clipart draft reactions and comments', () => {
       await toolbarReactionButton.click();
       await expect(captionStylePanel).toHaveCount(0);
       await expect(reactionPanel).toBeVisible();
-      await expect(reactionPanel.locator('.EmojiPickerReact')).toBeVisible();
+      await expect(reactionPanel.locator('.EmojiPickerReact')).toHaveCount(0);
+      await expect(reactionPanel.getByText('Add Reaction', { exact: true })).toBeVisible();
+      await expect(reactionPanel.getByPlaceholder('Search emojis...')).toBeVisible();
       const reactionRowBox = await requiredBox(compositionRow, 'composition row with Reaction open');
       centeringDeltas.reaction = expectCentered(reactionRowBox, defaultViewport, 'Reaction composition');
       const reactionBox = await requiredBox(reactionPanel, 'Reaction panel');
       topDeltas.reactionCompact = expectAlignedTops(reactionBox, await requiredBox(mainPanel, 'main Clipart panel with Reaction open'), 'Reaction panel and compact card top edges should align');
-      const emoji = '😀';
-      const firstEmoji = reactionPanel.locator('li').getByRole('button', { name: 'grinning' }).first();
+      await reactionPanel.getByPlaceholder('Search emojis...').fill('smile');
+      const firstEmoji = reactionPanel.locator('.grid button').first();
+      await expect(firstEmoji).toBeVisible();
+      const selectedEmoji = ((await firstEmoji.textContent()) ?? '').trim();
+      expect(selectedEmoji.length).toBeGreaterThan(0);
       await firstEmoji.click();
       await expect(reactionPanel).toHaveCount(0);
       await toolbarReactionButton.click();
       await expect(reactionPanel).toBeVisible();
-      const secondSameEmoji = reactionPanel.locator('li').getByRole('button', { name: 'grinning' }).first();
+      await expect(reactionPanel.locator('.EmojiPickerReact')).toHaveCount(0);
+      await reactionPanel.getByPlaceholder('Search emojis...').fill('smile');
+      const secondSameEmoji = reactionPanel.locator('.grid button').filter({ hasText: selectedEmoji }).first();
+      await expect(secondSameEmoji).toBeVisible();
       await secondSameEmoji.click();
       await expect(reactionPanel).toHaveCount(0);
-      await expect(cardPreviewWrapper.locator('button').filter({ hasText: emoji }).filter({ hasText: '2' })).toBeVisible();
+      await expect(cardPreviewWrapper.locator('button').filter({ hasText: selectedEmoji }).filter({ hasText: '2' })).toBeVisible();
       const afterReactionRowBox = await requiredBox(compositionRow, 'composition row after selecting Reaction');
       centeringDeltas.reactionSelected = expectCentered(afterReactionRowBox, defaultViewport, 'Reaction composition after selection');
 
@@ -511,7 +519,7 @@ test.describe('PATCH-120 clipart draft reactions and comments', () => {
         .toMatchObject({
           title: 'PATCH-122 inline caption',
           metadata: {
-            reactions: [emoji, emoji],
+            reactions: [selectedEmoji, selectedEmoji],
             badgeColor: '#fb923c',
             captionStyle: expect.objectContaining({
               heading: 'h1',

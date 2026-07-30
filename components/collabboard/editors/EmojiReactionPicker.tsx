@@ -43,6 +43,67 @@ const emojiData: Record<string, string[]> = {
     flags: ['🏁', '🚩', '🎌', '🏴', '🏳️', '🇺🇸', '🇬🇧', '🇨🇦', '🇦🇺', '🇩🇪', '🇫🇷', '🇮🇹', '🇪🇸', '🇯🇵', '🇨🇳', '🇰🇷'],
 };
 
+const emojiKeywords: Record<string, string[]> = {};
+
+function addEmojiKeywords(categoryId: string, index: number, terms: string[]) {
+    const emoji = emojiData[categoryId]?.[index];
+    if (emoji) emojiKeywords[emoji] = terms;
+}
+
+[
+    ['frequent', 0, ['thumbs up', 'like', 'approve', 'yes']],
+    ['frequent', 1, ['thumbs down', 'dislike', 'no']],
+    ['frequent', 2, ['smile', 'happy', 'blush']],
+    ['frequent', 3, ['heart', 'love']],
+    ['frequent', 4, ['party', 'celebrate']],
+    ['frequent', 5, ['clap', 'applause']],
+    ['frequent', 6, ['fire', 'flame', 'hot']],
+    ['frequent', 7, ['hundred', '100', 'perfect']],
+    ['frequent', 8, ['check', 'done', 'yes']],
+    ['frequent', 9, ['star', 'favorite']],
+    ['smileys', 0, ['smile', 'happy', 'grin']],
+    ['smileys', 1, ['smile', 'happy', 'grin']],
+    ['smileys', 2, ['smile', 'happy', 'laugh']],
+    ['smileys', 3, ['smile', 'happy', 'grin']],
+    ['smileys', 4, ['smile', 'happy', 'laugh']],
+    ['smileys', 5, ['smile', 'happy', 'laugh', 'sweat']],
+    ['smileys', 6, ['laugh', 'laughing', 'rolling']],
+    ['smileys', 7, ['laugh', 'laughing', 'tears', 'happy']],
+    ['smileys', 8, ['smile', 'happy']],
+    ['smileys', 9, ['smile', 'upside down']],
+    ['smileys', 10, ['wink', 'smile']],
+    ['smileys', 11, ['smile', 'happy', 'blush']],
+    ['smileys', 12, ['smile', 'angel']],
+    ['smileys', 13, ['smile', 'happy', 'love']],
+    ['smileys', 14, ['heart eyes', 'love', 'happy']],
+    ['smileys', 15, ['star eyes', 'excited', 'happy']],
+    ['symbols', 0, ['heart', 'love']],
+    ['symbols', 1, ['heart', 'orange', 'love']],
+    ['symbols', 2, ['heart', 'yellow', 'love']],
+    ['symbols', 3, ['heart', 'green', 'love']],
+    ['symbols', 4, ['heart', 'blue', 'love']],
+    ['symbols', 5, ['heart', 'purple', 'love']],
+    ['symbols', 6, ['heart', 'black', 'love']],
+    ['symbols', 7, ['heart', 'white', 'love']],
+    ['symbols', 8, ['heart', 'brown', 'love']],
+    ['symbols', 9, ['heart', 'broken']],
+    ['symbols', 10, ['heart', 'exclamation']],
+    ['symbols', 11, ['heart', 'love']],
+    ['symbols', 12, ['heart', 'love']],
+    ['symbols', 13, ['heart', 'love']],
+    ['symbols', 14, ['heart', 'love']],
+    ['symbols', 15, ['heart', 'love']],
+].forEach(([categoryId, index, terms]) => addEmojiKeywords(categoryId as string, index as number, terms as string[]));
+
+const getCategoryLabel = (categoryId: string) =>
+    emojiCategories.find((category) => category.id === categoryId)?.label ?? categoryId;
+
+const getSearchText = (emoji: string, categoryId: string) => [
+    emoji,
+    getCategoryLabel(categoryId),
+    ...(emojiKeywords[emoji] ?? []),
+].join(' ').toLowerCase();
+
 export default function EmojiReactionPicker({
     isOpen,
     onOpenChange,
@@ -53,10 +114,12 @@ export default function EmojiReactionPicker({
     const [selectedCategory, setSelectedCategory] = useState('frequent');
     const [searchQuery, setSearchQuery] = useState('');
 
-    const filteredEmojis = searchQuery
-        ? Object.values(emojiData).flat().filter(emoji =>
-            emoji.includes(searchQuery)
-        )
+    const normalizedSearchQuery = searchQuery.trim().toLowerCase();
+    const filteredEmojis = normalizedSearchQuery
+        ? Object.entries(emojiData)
+            .flatMap(([categoryId, emojis]) => emojis.map((emoji) => ({ emoji, categoryId })))
+            .filter(({ emoji, categoryId }) => getSearchText(emoji, categoryId).includes(normalizedSearchQuery))
+            .map(({ emoji }) => emoji)
         : emojiData[selectedCategory] || [];
 
     const preventFocusLoss = (e: React.MouseEvent) => {
