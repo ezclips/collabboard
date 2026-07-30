@@ -563,3 +563,242 @@ unification, not this patch.
 `renderSignature`, which §14b and §14i protect.
 **PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
 **PATCH-119: DESIGNATED, UNAUTHORED, UNAUTHORIZED, UNTOUCHED.**
+
+---
+
+## 15. Amendment — B1 REJECTED BY RUNTIME EVIDENCE (2026-07-30, CTO)
+
+### 15a. Result
+
+**B1 was attempted and fully restored. No implementation candidate remains.**
+The worktree contains only the five protected dirty paths — verified at
+amendment time: `git status --porcelain` returns exactly those five, nothing
+staged, one worktree, empty stash.
+
+**Do not authorize another B1 attempt.**
+
+### 15b. The runtime blocker — recorded as fact
+
+The attempted candidate proved, at runtime:
+
+- **`customData.padletId`-only app embeddables do not render.**
+- **`link: null` also does not render.**
+- **Legacy `link: "padlet://<id>"` embeddables continue to render.**
+- **The installed Excalidraw validates and filters embeddables through
+  `element.link` *before* the app's `renderEmbeddable` callback can resolve
+  `customData.padletId`.**
+
+Therefore `element.link` is not merely an identity marker — **it is a
+precondition of the embeddable rendering at all.** §2a described it as "an
+identity marker binding an embeddable to a padlet row, not a user-facing
+navigation target." That description was **correct about intent and incomplete
+about mechanism**, and the gap is exactly what B1 fell into.
+
+**B1, as authorized in §14, is not implementable** without changing the
+Excalidraw runtime or retaining a qualifying `link` value. §14 is superseded by
+this section; its writer contract must not be implemented as written.
+
+**Why the design review did not catch this.** §14b reasoned from the *shape*
+of `customData` — that `renderSignature` already lived there, so `padletId`
+would be additive and low-risk. That reasoning was sound about the field and
+silent about the **render precondition**, which no amount of source-shape
+inspection would have surfaced. The lesson is recorded plainly: **a third-party
+render pipeline's preconditions must be proven by running it, not inferred from
+the data it stores.** The attempt was cheap, reversible and correctly restored;
+it bought the fact that four sections of reasoning could not.
+
+### 15c. Secondary scope finding — the cap was already wrong
+
+`lib/infra/drawing/presentationBridge.ts:262-263` contains an **additional raw
+`padlet://` reader** outside the §7 eight-file allowlist:
+
+```ts
+element.link?.startsWith("padlet://") &&
+!padlets.some((padlet) => `padlet://${padlet.id}` === element.link)
+```
+
+**A complete raw-reader consolidation would have exceeded the eight-file cap
+even if the runtime blocker did not exist.** The §2c census missed this file;
+it is recorded as a census defect, not as a scope overrun by the implementer.
+
+### 15d. B2A — INVESTIGATED AND CLOSED: no supported API exists
+
+Time-boxed investigation performed by the CTO against the **installed
+`@excalidraw/excalidraw` 0.18.0**, reading the shipped type surface and bundle.
+
+**Complete link-related public API in 0.18.0** (`dist/types/excalidraw/types.d.ts`):
+
+```
+:477  generateLinkForSelection?: (id, type) => string
+:478  onLinkOpen?: (element, event) => void
+:486  validateEmbeddable?: boolean | string[] | RegExp | RegExp[] | ((link) => boolean | undefined)
+:487  renderEmbeddable?: (element, appState) => JSX.Element | null
+```
+
+Assessed one by one:
+
+- **`onLinkOpen`** intercepts **click** only. The status label is produced by
+  **hover** over an `<a href>`. It cannot help.
+- **`validateEmbeddable`** decides *whether* an embeddable is valid — it is the
+  very gate that made B1 fail. It does not affect hyperlink UI.
+- **`renderEmbeddable`** controls the embeddable's **body**, not the hyperlink
+  popup, which is rendered separately by the Hyperlink component (§2d).
+- **`generateLinkForSelection`** concerns share-links for selections, unrelated.
+
+The hyperlink popup is gated on **`appState.showHyperlinkPopup`**
+(`types.d.ts:344`, `false | "info" | "editor"`) — **`AppState`, not a prop.**
+It is set internally on hover and selection. Forcing it false through
+`updateScene` would be **hover-time mutation**, which §14a and the owner's
+constraints prohibit, and would race the component that sets it.
+
+**Ruling: B2A is CLOSED. No supported mechanism exists in 0.18.0 to suppress
+the hyperlink anchor while retaining `element.link`.** No further time-box is
+authorized — the API surface is small, fully enumerated above, and exhausted.
+
+### 15e. B2C — authorized as a CHARACTERIZATION SPIKE ONLY
+
+**Do not assume a placeholder works. I have source-level reason to doubt it.**
+
+The anchor renders `href={normalizeLink(element.link)}` for **any** non-empty
+link. Chrome paints a destination label for **any** resolvable `href`, not only
+for exotic schemes. A placeholder therefore tends to **replace** the
+`padlet://…` label with a different label rather than remove it — and a
+placeholder chosen to defeat that (bare `#`, empty value) lands squarely on the
+prohibited list.
+
+**Authorized: a browser characterization spike, no product change.** Its
+purpose is to answer one question with evidence: *does any link value exist
+that satisfies embeddable validation and produces no browser destination
+label?*
+
+It is **accepted only if characterization proves all of**: the embeddable
+renders; no anchor with a navigable internal `href` appears; **no status-bar
+label appears by cause — i.e. no meaningful `href`**; no `javascript:`, empty
+`href`, hover-time mutation or CSS suppression; identity remains available
+through `customData.padletId`; external links unaffected.
+
+**If any one fails, B2C is rejected and the spike is discarded.** A spike that
+"mostly works" is a rejection.
+
+### 15f. B2B — the only proven-viable path, NOT yet authorized
+
+If B2C fails, B2B is what remains. **It is not authorized by this amendment.**
+Authorizing a runtime patch demands the accounting the owner required, and the
+implementer must supply it **before** any code is written:
+
+1. **Exact maintenance burden** — the patch targets a specific `Hyperlink`
+   component in a specific version. Every Excalidraw upgrade requires
+   re-verification, and a silently failed patch reintroduces the defect.
+2. **Package/update implications** — `patch-package` requires a `postinstall`
+   hook, so **`package.json` must change.** It is currently prohibited; this
+   would be an explicit, narrow exception requiring owner sign-off.
+3. **Build and deployment implications** — the patch must apply in CI and in
+   every deployment environment, and must **fail the build loudly** if it does
+   not apply. A patch that silently no-ops is worse than no patch.
+4. **External-link compatibility** — proven, not assumed.
+5. **Proof that only app-owned `padlet://` links lose the anchor.**
+6. **Proof that normal Excalidraw external hyperlinks remain fully
+   functional**, including `target`/`rel`.
+
+**Fork adoption is rejected as the B2B variant.** §5 already rejected it as
+disproportionate, and nothing since has changed that: the in-repo fork is
+tsconfig-excluded, unbuilt and divergent. A targeted patch to one component is
+far smaller than adopting an entire fork.
+
+### 15g. B3 — remains available and is not a failure
+
+If B2C fails and the owner judges B2B's maintenance burden disproportionate to
+a hover label, **close PATCH-127 as blocked/accepted debt and retain
+`padlet://` identity links.**
+
+Stated plainly so the choice is honest: this is a **cosmetic browser-chrome
+defect**. It leaks an internal identifier into a status bar. It does not affect
+data, correctness, security or function. Weighed against a permanent
+`node_modules` patch on every install, in every environment, forever — **B3 is
+a legitimate and defensible outcome, not a capitulation.**
+
+### 15h. Raw-reader cap — raised to 10, with the census corrected
+
+The eight-file cap is **replaced by ten**, explicitly accounting for every raw
+reader found:
+
+```
+1. components/collabboard/canvas/layouts/DrawingLayout.tsx
+2. components/collabboard/canvas/hooks/useCanvasActions.ts
+3. components/collabboard/editors/ExcalidrawWrapper.tsx
+4. app/dashboard/canvas/[id]/CanvasClient.tsx
+5. components/presentation/slide-renderer/resolveSlidePadlets.ts
+6. components/presentation/slide-renderer/planSlideComposition.ts
+7. lib/infra/drawing/presentationBridge.ts          ← MISSED BY §2c
+8. lib/infra/drawing/importScene.ts                 (the parser itself)
+9. lib/infra/drawing/bridge.ts                      (uses the helper; no raw literal)
+10.                                                  headroom, one file
+```
+
+**The cap must never force incomplete identity handling.** If a future strategy
+needs dual-read consolidation and ten is still insufficient, **stop and report
+the exact remaining sites** — do not ship a partially-consolidated reader set,
+and do not leave one undocumented.
+
+`resolveSlidePadlets.ts`, `planSlideComposition.ts` and `presentationBridge.ts`
+are presentation files. **PATCH-115 owns `getSlideRenderSignature.ts` only**, so
+these three are not blocked by it — but they sit adjacent to an open patch and
+must not be widened into.
+
+### 15i. Test requirement — browser proof is mandatory
+
+**Any newly authorized strategy must include a real browser test proving
+both:**
+
+1. **the app-owned embeddable still renders**, and
+2. **no browser hyperlink anchor is created for its internal identity.**
+
+**A unit-only solution is insufficient.** This is the rule B1 would have been
+caught by: the blocker was a render-pipeline precondition that no unit test
+could have observed. Both assertions are required together — proving the anchor
+is gone while the embeddable silently stops rendering is exactly the failure
+mode already seen.
+
+### 15j. Console warning
+
+Unchanged: the `unload` permissions-policy warning stays **outside PATCH-127**
+as unrelated, unclassified debt (§10, §14k).
+
+### 15k. Next instruction (bind)
+
+> **Do not implement. Do not re-attempt B1.**
+>
+> Run the **B2C characterization spike** only: determine by real browser
+> evidence whether any link value satisfies Excalidraw embeddable validation
+> while producing no browser destination label. Report the exact values tried
+> and the observed result for each. Change no product code and leave no
+> candidate behind.
+>
+> If B2C fails, **stop and report** — do not proceed to B2B. B2B requires the
+> §15f accounting and explicit owner authorization, including a narrow
+> `package.json` exception that does not currently exist.
+
+### 15l. Status
+
+**PATCH-127: OPEN · B1 REJECTED BY RUNTIME EVIDENCE · STRATEGY
+RECONSIDERATION REQUIRED.**
+**B2A: CLOSED — no supported API (§15d).**
+**B2C: CHARACTERIZATION SPIKE AUTHORIZED — implementation NOT authorized.**
+**B2B: NOT AUTHORIZED — requires §15f accounting and owner sign-off.**
+**B3: AVAILABLE.**
+§14's B1 writer contract is **superseded** and must not be implemented.
+Raw-reader cap **raised from 8 to 10** (§15h).
+
+**PATCH-126: DESIGNATED, UNAUTHORED, UNAUTHORIZED.**
+**PATCH-125 / 124 / 123 / 122 / 121 / 120 / 117: CLOSED.**
+**PATCH-116: CANCELLED.**
+**PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
+**PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
+**PATCH-119: DESIGNATED, UNAUTHORED, UNAUTHORIZED, UNTOUCHED.**
+
+**Recorded debt:** the §2c census defect that missed `presentationBridge.ts`;
+`element.link` being a **render precondition** and not merely an identity
+marker, now documented so no future patch re-derives it the hard way; the
+`unload` warning; the tsconfig-excluded `excalidraw_fork`; and the ledgers
+carried from PATCH-123 §14k, PATCH-124 §14l and PATCH-125 §13l, plus the
+unresolved production-build failure.
