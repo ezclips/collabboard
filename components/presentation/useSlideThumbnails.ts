@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FrameSlide, RenderSlideToPNG } from "./PresentationPanel";
+import {
+  getSlideThumbnailCacheKey,
+  selectQueuedSlidesForActiveThumbnailPass,
+  selectSlidesForThumbnailRefresh,
+  shouldAcceptSlideThumbnailRender,
+  SLIDE_THUMBNAIL_REFRESH_DEBOUNCE_MS,
+} from "@/lib/infra/presentation/slideThumbnailRefresh";
 
 export function useSlideThumbnails({
   slides,
@@ -17,73 +24,159 @@ export function useSlideThumbnails({
   const [thumbs, setThumbs] = useState<Record<string, string>>({});
   const [isGeneratingAny, setIsGeneratingAny] = useState(false);
 
-  // Track which slides have been rendered: id -> cache key including contentVersion
   const renderedRef = useRef<Record<string, string>>({});
-  const inFlight = useRef<Set<string>>(new Set());
+  const inFlightRef = useRef<Set<string>>(new Set());
+  const latestRequestIdRef = useRef<Record<string, number>>({});
+  const requestIdRef = useRef(0);
+  const pendingSlideIdsRef = useRef<Set<string>>(new Set());
+  const pendingChangedSlideIdsRef = useRef<Set<string>>(new Set());
+  const pendingForceAllRef = useRef(false);
+  const refreshTimerRef = useRef<number | null>(null);
+  const runningRefreshRef = useRef(false);
   const cancelledRef = useRef(false);
-  // Guards against capturing transient canvas state immediately on mount
   const isMountSettledRef = useRef(false);
-  const getSlideCacheKey = useCallback(
-    (slide: FrameSlide) => slide.renderSignature ?? `${slide.x},${slide.y},${slide.width},${slide.height},${slide.contentVersion ?? 0}`,
-    [],
-  );
   const warmThumbsRef = useRef<() => Promise<void>>(async () => {});
+  const scheduleRefreshRef = useRef<(ids?: readonly string[] | null, immediate?: boolean) => void>(() => {});
 
-  // Keep latest slides in a ref so warmThumbs doesn't need them in its deps
   const slidesRef = useRef(slides);
   useEffect(() => { slidesRef.current = slides; }, [slides]);
 
-  // warmThumbs is stable -only recreates when render config changes, not on every canvas update
-  const warmThumbs = useCallback(async () => {
+  const warmThumbs = useCallback(async (forcedIds?: ReadonlySet<string> | null) => {
+    if (runningRefreshRef.current) {
+      const queued = selectQueuedSlidesForActiveThumbnailPass({
+        slides: slidesRef.current,
+        renderedKeys: renderedRef.current,
+        inFlightIds: inFlightRef.current,
+        forcedIds,
+      });
+
+      if (queued.forceAll) {
+        pendingForceAllRef.current = true;
+        pendingSlideIdsRef.current.clear();
+        pendingChangedSlideIdsRef.current.clear();
+      } else {
+        for (const id of queued.forcedSlideIds) pendingSlideIdsRef.current.add(id);
+        for (const id of queued.changedSlideIds) pendingChangedSlideIdsRef.current.add(id);
+      }
+      return;
+    }
+
+    runningRefreshRef.current = true;
     const current = slidesRef.current;
-    if (current.length === 0) return;
+    if (current.length === 0) {
+      runningRefreshRef.current = false;
+      setIsGeneratingAny(false);
+      return;
+    }
 
-    // Only render slides whose geometry or content has changed, or that have never been rendered
-    const toRender = current.filter((s) => {
-      const key = getSlideCacheKey(s);
-      return renderedRef.current[s.id] !== key && !inFlight.current.has(s.id);
+    const { requests, deferredIds } = selectSlidesForThumbnailRefresh({
+      slides: current,
+      renderedKeys: renderedRef.current,
+      inFlightIds: inFlightRef.current,
+      forcedIds,
     });
+    for (const id of deferredIds) pendingSlideIdsRef.current.add(id);
 
-    if (toRender.length === 0) return;
+    if (requests.length === 0) {
+      runningRefreshRef.current = false;
+      setIsGeneratingAny(inFlightRef.current.size > 0);
+      return;
+    }
 
     cancelledRef.current = false;
     setIsGeneratingAny(true);
     try {
-      for (const s of toRender) {
+      for (const request of requests) {
         if (cancelledRef.current) break;
-        if (inFlight.current.has(s.id)) continue;
+        const slide = slidesRef.current.find((entry) => entry.id === request.id);
+        if (!slide || inFlightRef.current.has(slide.id)) continue;
 
-        inFlight.current.add(s.id);
-        const versionKey = getSlideCacheKey(s);
+        inFlightRef.current.add(slide.id);
+        const cacheKey = getSlideThumbnailCacheKey(slide);
+        const requestId = ++requestIdRef.current;
+        latestRequestIdRef.current[slide.id] = requestId;
+
         try {
-          const scale = s.height > 0 ? height / s.height : 1;
-          const png = await renderSlideToPNG(s, {
+          const scale = slide.height > 0 ? height / slide.height : 1;
+          const png = await renderSlideToPNG(slide, {
             scale: scale * (dpr ?? 2),
             background,
             paddingPx: 20,
           });
-          if (!cancelledRef.current) {
-            renderedRef.current[s.id] = versionKey;
+          const latestSlide = slidesRef.current.find((entry) => entry.id === slide.id);
+          const latestCacheKey = latestSlide ? getSlideThumbnailCacheKey(latestSlide) : undefined;
+          const shouldAccept = !cancelledRef.current && shouldAcceptSlideThumbnailRender({
+            requestId,
+            latestRequestId: latestRequestIdRef.current[slide.id],
+            requestedCacheKey: cacheKey,
+            latestCacheKey,
+          });
+
+          if (shouldAccept) {
+            renderedRef.current[slide.id] = cacheKey;
             setThumbs((prev) => {
-              if (prev[s.id] === png) return prev;
-              return { ...prev, [s.id]: png };
+              if (prev[slide.id] === png) return prev;
+              return { ...prev, [slide.id]: png };
             });
+          } else if (latestSlide) {
+            pendingSlideIdsRef.current.add(slide.id);
           }
         } finally {
-          inFlight.current.delete(s.id);
+          inFlightRef.current.delete(slide.id);
         }
       }
     } finally {
-      setIsGeneratingAny(false);
+      runningRefreshRef.current = false;
+      setIsGeneratingAny(inFlightRef.current.size > 0);
+      if (
+        !cancelledRef.current
+        && (pendingForceAllRef.current || pendingSlideIdsRef.current.size > 0 || pendingChangedSlideIdsRef.current.size > 0)
+      ) {
+        scheduleRefreshRef.current(undefined, true);
+      }
     }
-  }, [renderSlideToPNG, height, background, dpr, getSlideCacheKey]); // slides intentionally excluded -use slidesRef
+  }, [renderSlideToPNG, height, background, dpr]);
 
-  useEffect(() => {
-    warmThumbsRef.current = warmThumbs;
+  const scheduleRefresh = useCallback((ids?: readonly string[] | null, immediate = false) => {
+    if (ids === null) {
+      pendingForceAllRef.current = true;
+      pendingSlideIdsRef.current.clear();
+      pendingChangedSlideIdsRef.current.clear();
+    } else if (ids) {
+      for (const id of ids) pendingSlideIdsRef.current.add(id);
+    }
+
+    if (refreshTimerRef.current !== null) {
+      window.clearTimeout(refreshTimerRef.current);
+      refreshTimerRef.current = null;
+    }
+
+    const run = () => {
+      refreshTimerRef.current = null;
+      const forcedIds = pendingForceAllRef.current
+        ? null
+        : pendingSlideIdsRef.current.size > 0
+          ? new Set(pendingSlideIdsRef.current)
+          : undefined;
+      pendingForceAllRef.current = false;
+      pendingSlideIdsRef.current.clear();
+      pendingChangedSlideIdsRef.current.clear();
+      void warmThumbs(forcedIds);
+    };
+
+    if (immediate) {
+      run();
+      return;
+    }
+
+    refreshTimerRef.current = window.setTimeout(run, SLIDE_THUMBNAIL_REFRESH_DEBOUNCE_MS);
   }, [warmThumbs]);
 
-  // On mount, wait for canvas to settle (double-RAF) before the first thumbnail pass.
-  // This prevents capturing transient "just opened" state.
+  useEffect(() => {
+    warmThumbsRef.current = () => warmThumbs();
+    scheduleRefreshRef.current = scheduleRefresh;
+  }, [warmThumbs, scheduleRefresh]);
+
   useEffect(() => {
     let raf2: number;
     const raf1 = window.requestAnimationFrame(() => {
@@ -95,24 +188,30 @@ export function useSlideThumbnails({
     return () => {
       window.cancelAnimationFrame(raf1);
       window.cancelAnimationFrame(raf2);
+      if (refreshTimerRef.current !== null) {
+        window.clearTimeout(refreshTimerRef.current);
+        refreshTimerRef.current = null;
+      }
       isMountSettledRef.current = false;
+      cancelledRef.current = true;
     };
-  }, []); // intentionally runs once on mount only
+  }, []);
 
-  // Signature changes when slide geometry OR content version changes
   const slideSignature = useMemo(
-    () => slides.map((s) => `${s.id}:${getSlideCacheKey(s)}`).join("|"),
-    [slides, getSlideCacheKey]
+    () => slides.map((slide) => `${slide.id}:${getSlideThumbnailCacheKey(slide)}`).join("|"),
+    [slides],
   );
 
-  // Re-run warmThumbs when geometry or content changes — but only after initial mount has settled
   useEffect(() => {
     if (!isMountSettledRef.current) return;
-    warmThumbs();
-  }, [warmThumbs, slideSignature]);
+    scheduleRefresh();
+  }, [scheduleRefresh, slideSignature]);
 
-  // Return cleaned map with only current slide ids
-  const slideIds = useMemo(() => slides.map((s) => s.id), [slides]);
+  const refreshAllThumbnails = useCallback(() => {
+    scheduleRefresh(null, true);
+  }, [scheduleRefresh]);
+
+  const slideIds = useMemo(() => slides.map((slide) => slide.id), [slides]);
   const cleaned = useMemo(() => {
     const idSet = new Set(slideIds);
     const next: Record<string, string> = {};
@@ -122,5 +221,9 @@ export function useSlideThumbnails({
     return next;
   }, [thumbs, slideIds]);
 
-  return { thumbs: cleaned, warmThumbs, isGeneratingAny };
+  return {
+    thumbs: cleaned,
+    refreshAllThumbnails,
+    isGeneratingAny,
+  };
 }

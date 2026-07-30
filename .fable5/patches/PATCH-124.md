@@ -415,3 +415,219 @@ invalidation layer this patch is forbidden to touch.
 `PresentationPreviewModal.tsx:42`, `presentationBridge.ts:160`);
 de-duplication is blocked by §2. Plus the unresolved production-build failure
 (§7) and the debt ledger carried in PATCH-123 §14k.
+
+---
+
+## 14. CLOSURE (2026-07-30, CTO)
+
+### 14a. Independent review
+
+**PASS.** The authoring CTO neither implemented nor reviewed this candidate.
+
+All three blocking §6 findings are **resolved**, verified from source at
+closure rather than taken on report:
+
+- **§6.1** — the dead `refreshSlideThumbnail` API is **removed**. The only
+  remaining occurrence in the repository is a static guard test asserting its
+  absence (`slideThumbnailRefresh.test.ts:228`). The zero-call-site signal was
+  acted on this time rather than rationalised, unlike PATCH-120 §5.
+- **§6.2** — the mid-pass drop is **fixed**. The `forcedIds === undefined`
+  path no longer falls through an early return that queued nothing; queueing
+  is now decided by `selectQueuedSlidesForActiveThumbnailPass`, which handles
+  the automatic case explicitly.
+- **§6.4** — the out-of-contract blank-line deletion in `PresentationPanel.tsx`
+  is **reverted**. The panel diff is now confined to the refresh control.
+
+### 14b. Root cause
+
+- Thumbnail generation **already** used live canvas state and slide-frame
+  bounds. Neither was the fault.
+- A **changed slide could be skipped** while an older asynchronous render pass
+  was still active.
+- **Automatic, signature-driven work was not guaranteed a follow-up pass**
+  once skipped.
+- An older render could therefore complete last and **leave the thumbnail
+  stale**.
+
+The defect was **scheduling and race resolution**, not rendering and not
+invalidation. §14g records why that distinction is load-bearing.
+
+### 14c. Automatic refresh
+
+- Changed slides are selected **by cache key**; unchanged slides are skipped.
+- Scheduling is **debounced by 250 ms**, a bounded constant pinned by test.
+- Automatic changes observed **during an active pass are queued**.
+- Forced refresh-all requests observed **during an active pass are queued**.
+- **Queued slide IDs are de-duplicated.**
+- **Automatic follow-up work retains normal cache checks** — queueing does not
+  smuggle in a forced render.
+- **Forced refresh-all bypasses unchanged-cache skips**, by design.
+- **Every queued request receives a follow-up pass.**
+- **No polling loop was introduced**, and **no infinite rescheduling occurs**
+  once signatures stabilise.
+
+### 14d. Stale-render protection
+
+- Request IDs are **scoped per slide**.
+- Acceptance requires **both** the latest request ID **and** the latest cache
+  key to match. Either alone is insufficient — the §4.3 rule.
+- **Older renders cannot overwrite newer previews.**
+- **Rejected stale renders are re-queued** where required, so rejection never
+  strands a thumbnail.
+- **Removed slides cannot receive late thumbnail updates.**
+
+### 14e. Manual refresh
+
+- The Slides panel exposes **Refresh slide previews**, with that exact
+  accessible name.
+- It calls **`refreshAllThumbnails`**, refreshing all current slides from live
+  canvas state and **bypassing ordinary unchanged-cache skips**.
+- It **does not mutate slide content**, and is **safe with zero slides**.
+- The dead `refreshSlideThumbnail` API is **removed** (§14a).
+
+### 14f. Browser characterization
+
+`e2e/characterization/patch-124-slide-thumbnail-refresh.spec.ts` — the §5
+blocking gate, satisfied.
+
+- Uses a **real disposable board and the real Excalidraw harness**.
+- **Avoids the unrelated embeddable-link fixture dependency**, so a failure
+  here means a thumbnail failure and not a fixture failure — the trap that
+  cost PATCH-117 six falsified mechanisms.
+- Inspects **actual Slide preview PNG data URLs**; asserts `data:image/png`
+  and non-trivial natural dimensions.
+- Asserts **decoded pixel evidence** (colour-hit counts) **and**
+  source/content-hash change — **the test cannot pass merely because a
+  callback fired**, which is precisely what the nine original helper-only unit
+  tests could not establish.
+- A **non-selected slide updates without being selected**.
+- **Drawing/connector content is represented.**
+- **Rapid changes settle on the newest preview.**
+- **Manual refresh regenerates current thumbnails** — the only assertion that
+  can prove the button does anything, since by construction its input is
+  unchanged.
+- Transient controls and menus are excluded from sampling.
+
+**Credential safety verified at closure:** the spec gates on
+`hasE2ECredentials` and reads credentials only through the shared env helper.
+No credential, token or cookie appears in the spec or in this record.
+
+### 14g. Scope
+
+- **Exactly three production files and two test files.**
+- Slide-frame **bounds and ownership semantics unchanged**.
+- **Renderer pipeline unchanged.**
+- **No thumbnail data stored in metadata.**
+- **No dependency, schema or metadata-field change.**
+- **The PATCH-115 invalidation boundary is preserved** — verified at closure:
+  `getSlideRenderSignature.ts`, `createSlideRenderer.tsx`, `DrawingLayout.tsx`,
+  `FullscreenPresentation.tsx`, `PresentationPreviewModal.tsx` and
+  `presentationBridge.ts` are all **unchanged**. PATCH-115 remains OPEN and
+  owns that layer.
+- **PATCH-118 and PATCH-119 untouched.**
+
+### 14h. Final validation
+
+```
+git diff --check              PASS  (CRLF warnings only)
+npx tsc --noEmit              PASS
+focused Vitest                19 PASS
+full Vitest                   58 files / 693 tests PASS
+ESLint                        PASS
+focused Playwright            2 PASS
+scheduler induced-failure     PASS
+browser induced-failure       PASS
+independent review            PASS
+```
+
+**No production-build claim is made.** Per §7, the `npm run build` failure
+recorded in PATCH-123 §14h remains unresolved and unclassified, PATCH-124 does
+not inherit it, and this closure does **not** assert that the production build
+passes.
+
+### 14i. Commit-message deviation from §10 — recorded
+
+§10 bound `fix(presentation): order and coalesce slide thumbnail refreshes`,
+worded deliberately under §6.3 to avoid implying that invalidation was fixed.
+
+**The owner bound a different message at closure:**
+`fix(presentation): refresh stale slide thumbnails (PATCH-124)`, and it is used
+verbatim.
+
+Recorded rather than silently substituted. The owner's wording is **supported
+by §14b**: the root cause proved to be the async-race and follow-up-pass gap,
+which this patch does fix, so "refresh stale slide thumbnails" describes the
+symptom actually resolved. It remains true that **thumbnail *invalidation* is
+not fixed here** and stays with PATCH-115; a future reader must not infer from
+the commit subject that the signature layer was repaired.
+
+### 14j. Committed file list
+
+**Production — 3 of 3 authorized:**
+
+```
+components/presentation/PresentationPanel.tsx          refresh control
+components/presentation/useSlideThumbnails.ts          scheduling, queueing, race resolution
+lib/infra/presentation/slideThumbnailRefresh.ts        pure selection/accept helpers
+```
+
+**Tests — 2:**
+
+```
+lib/infra/presentation/slideThumbnailRefresh.test.ts                (19 tests)
+e2e/characterization/patch-124-slide-thumbnail-refresh.spec.ts      (new)
+```
+
+**Governance — 1:** `.fable5/patches/PATCH-124.md` (authored at `dd4d484`,
+closure appended here).
+
+### 14k. Excluded
+
+**Protected paths — not staged, not committed, still dirty, unmodified:**
+
+```
+.gitignore
+app/api/ai/classify-intent/route.ts
+app/api/ai/convert-component/route.ts
+app/api/ai/generate-component/route.ts
+scripts/live-access-login.mjs
+```
+
+They were neither cleaned, reset, restored nor modified. `.env.local`
+untouched. No worktree. No stash.
+
+### 14l. Non-blocking notes
+
+**These do not block closure.**
+
+1. **Browser deletion-cycle coverage remains future test debt** — the spec
+   does not exercise slide deletion mid-render, though §14d's guarantee for
+   removed slides is asserted at the unit level.
+2. **The refresh button has no pending/disabled feedback** (§6.5).
+   `isGeneratingAny` is available but unused by the control. Behaviour is safe
+   because passes coalesce.
+3. **Protected dirty paths remain unrelated and excluded** — they predate this
+   patch and belong to no open Fable 5 work.
+
+### 14m. PATCH-124 — **CLOSED**
+
+All §4 contract items hold. The §5 browser characterization exists, runs
+against a real canvas, and asserts decoded pixels. Both induced-failure proofs
+pass. All three blocking §6 findings resolved. Independent review PASS. Scope
+verified at **3 production and 2 test files**, within the authorized maxima. No
+prohibited file touched. No protected path staged.
+
+**PATCH-124 is CLOSED.**
+
+**PATCH-123 / 122 / 121 / 120 / 117: CLOSED.**
+**PATCH-116: CANCELLED and retired.**
+**PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED** — it still owns
+the invalidation layer, and PATCH-124 deliberately did not encroach on it.
+**PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
+**PATCH-119: DESIGNATED, UNAUTHORED, UNAUTHORIZED, UNTOUCHED.**
+
+**Recorded debt carried forward:** the cache-key formula remains duplicated in
+four places (`slideThumbnailRefresh.ts`, `FullscreenPresentation.tsx:101`,
+`PresentationPreviewModal.tsx:42`, `presentationBridge.ts:160`), with
+de-duplication still blocked by §2; the unresolved production-build failure;
+§14l's two test/UX notes; and the ledger carried in PATCH-123 §14k.

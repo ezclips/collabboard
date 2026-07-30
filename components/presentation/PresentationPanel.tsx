@@ -8,6 +8,7 @@ import { useSlideThumbnails } from "./useSlideThumbnails";
 import { exportSlidesToPDF } from "./exporters/exportToPDF";
 import { exportSlidesToPPTX } from "./exporters/exportToPPTX";
 import { SharePresentationModal } from "./SharePresentationModal";
+import { RefreshCw } from "lucide-react";
 
 export type FrameSlide = {
   id: string;
@@ -184,7 +185,7 @@ export function PresentationPanel({
   const [shareModalOpen, setShareModalOpen] = useState(false);
 
   // Thumbnails
-  const { thumbs, isGeneratingAny } = useSlideThumbnails({
+  const { thumbs, refreshAllThumbnails, isGeneratingAny } = useSlideThumbnails({
     slides: sortedSlides,
     renderSlideToPNG,
     height: thumbnail.height,
@@ -207,6 +208,16 @@ export function PresentationPanel({
           <span className={`text-base font-semibold ${accentClassName}`}>Presentation</span>
 
           <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={refreshAllThumbnails}
+              title="Refresh slide previews"
+              aria-label="Refresh slide previews"
+              className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-600 transition-colors"
+            >
+              <RefreshCw size={18} strokeWidth={1.8} />
+            </button>
+
             {/* ⊞ Layout */}
             <button
               type="button"
