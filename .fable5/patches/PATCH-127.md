@@ -353,3 +353,213 @@ tsconfig-excluded `excalidraw_fork` tree carrying a divergent copy of a
 third-party component; `padlet://` string handling spread across ~20 call sites
 despite PATCH-064's single-parser rule; plus the PATCH-123 §14k, PATCH-124 §14l
 and PATCH-125 §13l ledgers and the unresolved production-build failure.
+
+---
+
+## 14. Amendment — Strategy B1 AUTHORIZED (2026-07-30, owner decision)
+
+### 14a. Decision
+
+**The owner selected B1.** `customData.padletId` becomes the canonical identity
+for app-owned Excalidraw embeddable elements, with **dual-read** backward
+compatibility for legacy `padlet://` links.
+
+§6's hard stop is **resolved and lifted**. Implementation is authorized.
+
+Reaffirmed as prohibited: patching `node_modules`, adopting `excalidraw_fork`,
+CSS hiding, `pointer-events`, empty `href`, `javascript:` URLs, and hover-time
+link mutation.
+
+### 14b. B1 fits the existing convention — confirmed from source
+
+The primary writer **already builds a `customData` object**
+(`DrawingLayout.tsx:1805`) carrying `renderSignature`, and the re-link path
+already spreads to preserve unrelated fields
+(`:1957-1958`, `...(el.customData ?? {})`). **`customData.padletId` is an
+additive field on a structure that already exists** — not a new element shape.
+
+**Binding caution:** `customData.renderSignature` is load-bearing for
+presentation invalidation and is owned by **PATCH-115, which remains OPEN**.
+Adding `padletId` must **not** perturb how `renderSignature` is computed,
+stored or compared. If adding the field changes any slide render signature,
+that is a **hard stop** — see §14i.
+
+### 14c. Writer contract — bind
+
+For every app-owned embeddable **creation, clone, orphan re-bind and re-link**
+path (§2b: `DrawingLayout.tsx:1803`, `:1814`, `:1267`, `:1625`, and the
+`:1841-42` lookup construction):
+
+1. **Write `customData.padletId = <padlet id>`.**
+2. **Do not write `element.link = "padlet://<id>"`.**
+3. **Preserve unrelated existing `customData` fields** — always spread, never
+   replace. `renderSignature` in particular must survive untouched.
+4. **Do not clear legitimate external links** on non-padlet elements. An
+   embeddable whose `link` is `https://…` keeps it.
+5. **Only app-owned padlet embeddables are affected.**
+
+### 14d. Reader contract — bind
+
+**Resolution order, exactly:**
+
+1. `element.customData?.padletId`
+2. legacy `element.link` matching `padlet://<id>`
+3. `null`
+
+**The `customData` value must be validated before it is returned.** Accept only
+a non-empty trimmed `string`. Reject non-strings, empty and whitespace-only
+values, and fall through to step 2 — a malformed `customData.padletId` must not
+mask a working legacy link, and must never surface as an identity.
+
+**API shape — ruled, to avoid unnecessary churn.** The current authoritative
+parser takes a **link string**, not an element:
+
+```ts
+extractPadletIdFromEmbeddableLink(link: unknown)   // importScene.ts:63
+```
+
+Dual-reading requires the **element**. Ruled:
+
+- **Keep `extractPadletIdFromEmbeddableLink` unchanged** as the legacy
+  string-level parser. Its existing tests
+  (`importScene.test.ts:181-185`) stay valid.
+- **Add one element-level authoritative resolver** in the same module — e.g.
+  `resolvePadletIdFromEmbeddable(element)` — implementing §14d's three-step
+  order and delegating step 2 to the existing function.
+- **This is the ONLY dual-read implementation.** PATCH-064 §266's
+  single-parser rule extends to it: no second dual-read anywhere.
+
+`bridge.ts:92`'s `getLinkedPadletId` becomes a call to the new resolver.
+
+### 14e. Backward compatibility — bind
+
+- Boards storing `link: "padlet://<id>"` **must continue to resolve**.
+- **No database migration. No scene migration. No destructive rewrite on
+  load.** Loading a legacy board must not modify it.
+- A legacy embeddable **may be upgraded naturally** to `customData.padletId`
+  with no `padlet://` link **only** when an authorized app path already
+  rewrites it (clone, re-bind, re-link). Opportunistic upgrade outside those
+  paths is **prohibited** — it would be a silent migration.
+
+### 14f. Raw readers — consolidate, do not widen
+
+The §2c census lists ~20 raw `padlet://` sites. **Prefer routing each through
+the new resolver over duplicating dual-read logic.**
+
+**If all raw readers cannot be safely consolidated within the §7 eight-file
+maximum: STOP and report the exact remaining sites.** Do not widen scope, and
+do not leave a partially-consolidated reader set undocumented.
+
+**Do not broaden** to unrelated presentation, clone, import or ownership
+behaviour. Membership, dedup, deep-clone and slide resolution must keep their
+current semantics — only their *identity source* changes.
+
+### 14g. Expected user-visible result
+
+For newly created or rewritten app-owned padlet embeddables:
+
+- `element.link` is **absent**;
+- Excalidraw renders **no Hyperlink anchor**;
+- hovering shows **no black `padlet://` status label**;
+- identity, selection, rendering, cloning and slide resolution **still work**.
+
+Legacy boards may retain `link: padlet://` in stored scene data — and once
+loaded **must remain fully functional**. **The label may therefore persist on
+untouched legacy elements until they are rewritten.** That is an accepted,
+explicit consequence of "no migration", and it must be stated in the closure
+rather than presented as a complete eradication of the label.
+
+### 14h. Playwright — 10 bound proofs
+
+Against a real app-owned embeddable: (1) new embeddable has
+`customData.padletId`; (2) it has no `padlet://` link; (3) **no
+`a[href^="padlet://"]` exists for it**; (4) the embedded post still renders;
+(5) selection and interaction still work; (6) clone preserves identity through
+`customData`; (7) slide/presentation resolution still finds the post; (8) a
+legacy fixture with only `link: padlet://<id>` still resolves; (9) rewriting
+that legacy element upgrades it without breaking identity; (10) external links
+on unrelated Excalidraw elements are unchanged.
+
+Credential and storage-state rules from §9 apply unchanged.
+
+### 14i. Tests — extend §8
+
+Extend `importScene.test.ts` and focused characterization to prove:
+customData-first resolution; legacy-link fallback; **malformed-customData
+fallback**; no `padlet://` writer remains in authorized app-owned write paths;
+no rendered `padlet://` anchor for new elements; legacy scene compatibility;
+clone/re-bind/deep-clone identity preservation; membership and dedup lookup
+correctness; presentation resolver correctness; **no metadata or schema
+migration**; external links unaffected.
+
+**Additional, required by §14b:** adding `customData.padletId` must **not**
+change any slide `renderSignature`. Assert it directly — PATCH-115 owns that
+layer and remains open.
+
+### 14j. Induced-failure proof — bind
+
+1. Temporarily remove the `customData` reader → **new-element identity tests
+   must fail**.
+2. Temporarily restore one primary `padlet://` writer → **the no-anchor test
+   must fail**.
+3. **Restore the candidate exactly and re-run: all PASS.**
+
+Report the restored file hashes so the proof is verifiable rather than
+asserted.
+
+### 14k. Console warning
+
+The `unload` permissions-policy warning stays **outside PATCH-127** unless
+implementation evidence establishes that the same change removes it. Recorded
+as **unrelated, unclassified debt** (§10). Do not investigate further under
+this patch.
+
+### 14l. Hard stops — added to §5/§6
+
+1. Adding `customData.padletId` changes any slide `renderSignature`.
+2. Raw readers cannot be consolidated within the eight-file maximum.
+3. A second dual-read implementation appears necessary.
+4. Any change to schema, repositories, RLS or stored padlet metadata appears
+   necessary.
+5. Legacy boards cannot be made to resolve without a migration.
+6. Suppressing the anchor requires touching `node_modules` or
+   `excalidraw_fork`.
+
+### 14m. Next GPT-5.5 instruction (bind)
+
+> **Implement B1.** Write `customData.padletId` at the five §2b producers and
+> stop writing `element.link` for app-owned padlet embeddables. Add exactly one
+> element-level resolver next to `extractPadletIdFromEmbeddableLink`, keep that
+> function unchanged for legacy string parsing, and route every raw reader
+> through the new resolver.
+>
+> Validate `customData.padletId` as a non-empty trimmed string; fall through to
+> the legacy link on anything else. Preserve `renderSignature` and every other
+> `customData` field by spreading. Do not upgrade legacy elements except on
+> paths that already rewrite them. No migration of any kind.
+>
+> Do not touch `node_modules`, `excalidraw_fork`, schema, repositories, RLS or
+> package files. Keep external `https://` links intact.
+>
+> If the raw readers exceed the eight-file maximum, stop and report the exact
+> remaining sites instead of widening scope.
+>
+> Deliver both §14j induced-failure proofs. Leave the candidate uncommitted and
+> unstaged for independent review.
+
+### 14n. Status
+
+**PATCH-127: OPEN · B1 IMPLEMENTATION AUTHORIZED · NOT STARTED.**
+Conditional production allowlist **8 max** (§7); tests: `importScene.test.ts`
+extension, `patch-127-internal-link-no-anchor.spec.ts`, plus inversions of
+existing `padlet://` assertions on app-owned elements — inverted, never
+deleted.
+
+**PATCH-126: DESIGNATED, UNAUTHORED, UNAUTHORIZED** — reaction-semantics
+unification, not this patch.
+**PATCH-125 / 124 / 123 / 122 / 121 / 120 / 117: CLOSED.**
+**PATCH-116: CANCELLED.**
+**PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED** — it owns
+`renderSignature`, which §14b and §14i protect.
+**PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
+**PATCH-119: DESIGNATED, UNAUTHORED, UNAUTHORIZED, UNTOUCHED.**
