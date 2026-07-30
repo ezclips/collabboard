@@ -1059,3 +1059,261 @@ patch takes; the §2c census defect (`presentationBridge.ts`); `element.link` as
 a render precondition (§15b); the `unload` warning; the tsconfig-excluded fork;
 and the PATCH-123 §14k / PATCH-124 §14l / PATCH-125 §13l ledgers plus the
 unresolved production-build failure.
+
+---
+
+## 17. Amendment — B2C IMPLEMENTATION AUTHORIZED (2026-07-31, owner decision)
+
+### 17a. Decision
+
+The §16l runtime trace and the §16f B2C spike **completed successfully**, and
+all temporary changes were restored with **no implementation candidate
+remaining** — verified at amendment time: the worktree holds only the five
+protected dirty paths, nothing staged, one worktree, empty stash.
+
+**B2C is AUTHORIZED using the placeholder scheme:**
+
+```
+urn:padlet-internal:<padlet-id>
+```
+
+**B2B and `patch-package` are NOT authorized at this stage.** B2B remains a
+documented fallback only (§15f, §16g).
+
+### 17b. Diagnostic result — recorded
+
+The spike confirmed, in a real browser: app-owned embeddables rendered; **no
+`a[href^="padlet://"]` existed**; **no hyperlink popup anchor existed for
+app-owned embeddables**; left click, right click, context-menu close, double
+click and drag **did not crash**; external Excalidraw links stayed on their
+existing path; **the `clientX` null crash was not reproduced**; and **both**
+candidate schemes rendered — `urn:padlet-internal:<id>` and
+`padlet-internal:<id>`.
+
+`urn:` is selected. It is an IANA-registered, non-navigable URN scheme, which
+makes the value self-describing as an identifier rather than a location, and
+makes it far less likely that a browser or a future Excalidraw version treats
+it as a navigation target.
+
+**§16f expectation corrected.** I predicted B2C would fail criteria 5–6
+because §16c showed the crash is not `padlet://`-specific. The spike proved the
+crash is **not reproducible on app-owned embeddables** under either
+placeholder. My inference over-generalized from "the handler has no scheme
+check" to "the crash will therefore still fire here"; observation beat it.
+
+**But the §16c finding itself still stands and is NOT closed by this
+amendment:** `handleElementLinkClick` still dereferences a nullable field with
+`!`, and the upstream bug remains reachable in principle by **external-link**
+elements. B2C does not fix that; it removes the app-owned trigger. §17i records
+the residual.
+
+### 17c. Identity contract — bind
+
+**Canonical identity remains `customData.padletId`.**
+
+**The placeholder link is ONLY an Excalidraw embeddable-validity token. It must
+never be treated as the authoritative identity source.** Any code that derives
+identity from the `urn:` string other than through the compatibility step below
+is a contract violation.
+
+**Reader order, exactly:**
+
+1. valid `customData.padletId`
+2. legacy `padlet://<id>` link
+3. `urn:padlet-internal:<id>` — **compatibility only**, where an element
+   somehow lacks `customData.padletId`
+4. `null`
+
+Step 3 exists so a placeholder-bearing element with lost `customData` still
+resolves. It is a **safety net, not a path**: correctly written elements always
+resolve at step 1.
+
+Validate before returning: accept only a **non-empty trimmed string**; anything
+else falls through to the next step.
+
+### 17d. Writer contract — bind
+
+For new or rewritten app-owned padlet embeddables:
+
+- write `customData.padletId = padletId`;
+- write ``link = `urn:padlet-internal:${padletId}` ``;
+- **preserve all existing `customData` fields**, always by spread;
+- **preserve `customData.renderSignature` exactly**;
+- **never write `padlet://`** for new or rewritten elements;
+- **do not alter external `http`/`https`/`mailto` links**;
+- **do not rewrite untouched legacy scenes on load.**
+
+### 17e. TWO BLOCKERS that would reproduce the B1 failure — bind
+
+These are the highest-risk items in this patch. Both were found in source at
+`97d5096`, and either one left unhandled makes new embeddables **fail to render**
+— the exact way B1 died.
+
+**Blocker 1 — `validateEmbeddable` predicates hardcode `padlet://`.**
+
+```
+components/collabboard/editors/ExcalidrawWrapper.tsx:110
+    if (typeof link === "string" && link.startsWith("padlet://")) return true;
+
+components/collabboard/canvas/layouts/DrawingLayout.tsx:3060
+    validateEmbeddable={(link: string) => link.startsWith('padlet://')}
+```
+
+**Both must accept the `urn:padlet-internal:` form as well as legacy
+`padlet://`.** If they are not updated, every new embeddable fails validation
+and does not render. **This is the single most likely way this patch fails.**
+
+**Blocker 2 — five exact-equality comparisons silently stop matching.**
+
+```
+components/collabboard/canvas/hooks/useCanvasActions.ts:141   el.link === `padlet://${padlet.id}`
+components/collabboard/canvas/layouts/DrawingLayout.tsx:389   el.link === `padlet://${padlet.id}`
+components/collabboard/canvas/layouts/DrawingLayout.tsx:531   el.link === `padlet://${padlet.id}`
+components/collabboard/canvas/layouts/DrawingLayout.tsx:537   el.link === `padlet://${padlet.id}`
+app/dashboard/canvas/[id]/CanvasClient.tsx:5176               e.link === `padlet://${containerId}`
+```
+
+plus `lib/infra/drawing/presentationBridge.ts:262-263`, which combines
+`startsWith("padlet://")` with an equality check.
+
+**These are string-equality identity lookups. Against a `urn:`-linked element
+they simply return no match — silently.** No crash, no error, no console
+warning: membership, dedup, orphan detection and container lookup would quietly
+misbehave. **Every one must be converted to resolver-based identity
+comparison** (`resolvePadletIdFromEmbeddable(el) === padlet.id`), never string
+equality against a link.
+
+**A silent identity miss is worse than the crash this patch is fixing**, because
+nothing surfaces it. §17h test 12 is the guard.
+
+### 17f. Legacy compatibility — bind
+
+Existing `link: padlet://<id>` **must continue to resolve**. **No destructive
+migration. No load-time rewrite.**
+
+When a legacy element **is already being** cloned, re-bound or rewritten by an
+authorized path: preserve identity in `customData.padletId`, **replace its
+internal `padlet://` link with the `urn:` placeholder**, preserve
+`renderSignature`, and change no unrelated field.
+
+**Untouched legacy elements keep `padlet://` and therefore keep the hover
+label** until they are rewritten. This is the accepted, explicit consequence of
+"no migration" (§14g), and the closure must state it rather than claim the
+label is fully eradicated.
+
+### 17g. Browser, external-link, raw-reader and signature contracts
+
+**App-owned embeddables:** no `a[href^="padlet://"]`; no hyperlink popup
+anchor; **no black `padlet://` destination label**; the embedded post still
+renders; selection, dragging and context menu still work; **no `pageerror` and
+no runtime overlay.**
+
+**External links unchanged** — `https://`, `http://`, `mailto:` are neither
+suppressed nor rewritten.
+
+**Raw readers:** route identity reads through **one element-level resolver**.
+Do **not** duplicate parsing for `customData.padletId`, legacy `padlet://` or
+`urn:padlet-internal:`. Keep `extractPadletIdFromEmbeddableLink` as the legacy
+string parser (§14d); the element-level resolver remains the only dual/triple-read
+implementation. Raw-reader cap stays **10** (§15h), which must now also cover
+the §17e Blocker-1 predicates.
+
+**Render signature:** adding `padletId` and changing the internal placeholder
+link **must not alter `customData.renderSignature`**. Do not edit
+signature-generation or presentation-invalidation behaviour — **PATCH-115 owns
+that layer and remains OPEN.** Any signature change is a hard stop.
+
+### 17h. Tests — 22 bound
+
+1. New embeddable stores `customData.padletId`. 2. New embeddable stores
+`urn:padlet-internal:<id>`. 3. **No writer emits `padlet://`.** 4. Legacy
+`padlet://` resolves. 5. **`customData` wins over a conflicting link.**
+6. Malformed `customData` falls back safely. 7. The `urn:` placeholder resolves
+**only as internal compatibility data**. 8. **`renderSignature` preserved.**
+9. Clone preserves identity. 10. Orphan re-bind preserves identity. 11. Deep
+clone preserves identity. 12. **Presentation and membership lookup remain
+correct** — the §17e Blocker-2 guard. 13. No `a[href^="padlet://"]`. 14. No
+app-owned hyperlink popup anchor. 15. App-owned embeddable **renders** — the
+§17e Blocker-1 guard. 16. Left click does not crash. 17. Right click /
+context menu does not crash. 18. Click after context-menu close does not crash.
+19. Drag and selection work. 20. External linked shapes retain normal anchors
+and behaviour. 21. **No package or `node_modules` patch exists.** 22. **No
+load-time migration exists.**
+
+### 17i. Playwright — bind
+
+Against a real app-owned embeddable: `customData.padletId` present; link uses
+`urn:padlet-internal:`; no `padlet://` anchor; no hyperlink popup anchor;
+embedded post visible; context menu opens; **Edit Post still works**;
+**Duplicate still works**; selection and drag work; **no `pageerror`**; **no
+Next runtime overlay**; and an external `https`-linked shape remains
+functional.
+
+Attach `pageerror` and console listeners **before** navigation, or the first
+error is missed. Credential and storage-state rules from §9 apply unchanged.
+
+### 17j. Induced-failure proofs — bind
+
+**A.** Restore a primary `padlet://` writer → the no-`padlet://`-link test must
+**fail**.
+**B.** Remove `customData`-first resolution → identity tests must **fail**.
+**C.** Drop `renderSignature` preservation → the signature guard must **fail**.
+
+Restore all mutations exactly and re-run to PASS. **Report restored file hashes**
+so the proof is verifiable rather than asserted.
+
+### 17k. Package boundary — bind
+
+**Do not modify `node_modules`, `package.json`, `package-lock.json` or
+`excalidraw_fork`.** B2B remains documented fallback only.
+
+### 17l. Console warning
+
+Unchanged: the `unload` permissions-policy warning stays outside PATCH-127 as
+unrelated, unclassified debt (§10, §14k, §16k).
+
+### 17m. Next GPT-5.5 instruction (bind)
+
+> **Implement B2C.** Write `customData.padletId` plus
+> ``link = `urn:padlet-internal:${padletId}` `` at the app-owned producers.
+> Never write `padlet://` for new or rewritten elements.
+>
+> **Start with §17e.** Update both `validateEmbeddable` predicates
+> (`ExcalidrawWrapper.tsx:110`, `DrawingLayout.tsx:3060`) to accept the `urn:`
+> form, and convert all five equality comparisons plus
+> `presentationBridge.ts:262-263` to resolver-based identity comparison. These
+> two blockers are how this patch fails silently or fails to render.
+>
+> Add exactly one element-level resolver implementing the §17c four-step order;
+> keep `extractPadletIdFromEmbeddableLink` for legacy string parsing; add no
+> second parser. Preserve `renderSignature` and every other `customData` field
+> by spreading. No migration, no load-time rewrite. Do not touch
+> `node_modules`, `package.json`, `package-lock.json` or `excalidraw_fork`.
+>
+> Deliver all three §17j induced-failure proofs with restored hashes. Leave the
+> candidate uncommitted and unstaged for independent review.
+
+### 17n. Status
+
+**PATCH-127: OPEN · B2C IMPLEMENTATION AUTHORIZED · B1 REJECTED · B2A CLOSED ·
+B2B DEFERRED · NOT STARTED.**
+Raw-reader cap **10** (§15h), now covering the §17e predicates. Tests **22**
+(§17h) plus Playwright (§17i) and three induced-failure proofs (§17j).
+§14's B1 writer contract remains **superseded**; §17d replaces it.
+
+**PATCH-126: DESIGNATED, UNAUTHORED, UNAUTHORIZED.**
+**PATCH-125 / 124 / 123 / 122 / 121 / 120 / 117: CLOSED.**
+**PATCH-116: CANCELLED.**
+**PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED** — owns
+`renderSignature`, protected by §17g.
+**PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
+**PATCH-119: DESIGNATED, UNAUTHORED, UNAUTHORIZED, UNTOUCHED.**
+
+**Recorded debt, updated:** the **upstream Excalidraw 0.18.0 null-dereference
+in `handleElementLinkClick`** — **not fixed by B2C**, still reachable in
+principle by external-link elements, and worth reporting upstream regardless;
+untouched legacy elements retaining `padlet://` and its label until rewritten
+(§17f); the §2c census defect (`presentationBridge.ts`); `element.link` as a
+render precondition (§15b); the `unload` warning; the tsconfig-excluded fork;
+and the PATCH-123 §14k / PATCH-124 §14l / PATCH-125 §13l ledgers plus the
+unresolved production-build failure.
