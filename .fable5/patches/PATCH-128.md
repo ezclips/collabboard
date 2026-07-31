@@ -1338,3 +1338,213 @@ blind to metadata-only changes (§17e); plus the upstream Excalidraw
 null-dereference, the `unload` warning, the tsconfig-excluded fork, and the
 PATCH-123 §14k / PATCH-124 §14l / PATCH-125 §13l ledgers with the unresolved
 production-build failure.
+
+---
+
+## 21. Amendment — OPTION A GEOMETRY SPIKE AUTHORIZED (2026-07-31, owner decision)
+
+The §20 field census was executed and **fully restored**. It **confirms §20b and
+§20c from measurement.**
+
+### 21a. Census — the app-owned move writer is the sole outlier
+
+| mutation | x/y or size | version | versionNonce | updated | getSceneVersion |
+|---|---|---|---|---|---|
+| **app-owned move** | 360,120 → 1120,265 | **2 → 2** | **unchanged** | **unchanged** | **12 → 12** |
+| app-owned resize | w 320 → 410 | 2 → 18 | changed | changed | 12 → 28 |
+| native move | 80,150 → 340,240 | 1 → 19 | changed | changed | 28 → 46 |
+| native resize | 120×70 → 240×150 | 19 → 37 | changed | changed | 46 → 64 |
+
+Across multiple pointermove samples of the app-owned move: x/y changed each
+frame, **a new element object each frame**, `version` pinned at 2,
+`versionNonce` pinned at `629480932`, `updated` pinned at `1785510546089`,
+`getSceneVersion` pinned at 12 — over **91 `onChange`** and **33 `updateScene`**
+calls.
+
+**Object identity and array identity both changed on every frame and are
+therefore unusable as revisions** — confirming the standing hard stop against
+treating identity as a revision.
+
+**`getSceneVersion` is not defective.** It folds element `version`; the writer
+never changes it. Predicted in §20b from source, now measured.
+
+**Three rows increment; one does not.** App-owned **resize** already increments
+(2 → 18) because it goes through Excalidraw's own handles — **so the defect is
+confined to the custom move writer**, and the repair surface is exactly one code
+site.
+
+**The other three rows also establish that per-frame revision increments are
+normal Excalidraw behaviour** — native move jumped 1 → 19 and resize 19 → 37
+across a single interaction. §20d's per-frame-inflation risk is therefore
+**cleared by evidence**: the app is already living with per-frame increments
+everywhere except this one writer.
+
+### 21b. Consumer findings — recorded
+
+`getSceneVersion` sums element `version`. `getSlideRenderSignature` includes
+`version` and `versionNonce`. Excalidraw **reconcile** uses `version`/
+`versionNonce` for conflict ordering. Excalidraw **history excludes**
+`version`/`versionNonce` from applied deltas. Native movement already increments
+during interaction. **No repository evidence forbids per-pointermove revision
+increments.**
+
+### 21c. Option A — AUTHORIZED as a temporary spike
+
+**Authorized: one narrow geometry trigger implementation spike, Option A only.**
+
+The spike may temporarily modify the **existing** `DrawingEmbeddableCard` drag
+writer (`DrawingLayout.tsx:408`) so each geometry mutation also updates
+`version`, `versionNonce` and `updated`, using **the convention already present
+in this repository**:
+
+```
+version: (el.version ?? 1) + 1,
+versionNonce: Math.floor(Math.random() * 1e9),
+updated: Date.now(),
+```
+
+— matching `DrawingLayout.tsx:1954-1956`, `:2025-2027` and
+`useCanvasActions.ts:75-77`.
+
+**This invents nothing.** It repairs one inconsistent writer to follow the
+existing repository and Excalidraw mutation conventions. It is **not a second
+writer** (§20c, and the owner's boundary clause).
+
+**Do not change** x/y calculation, drag ownership, persistence, lock durations,
+DB synchronization, membership, thumbnail scheduling or signature logic.
+
+The spike **may** also use the already-authorized settled revision-based React
+propagation **beside** the existing count/frame-name gate (§19f clauses 1–4, 6–12
+stand; clause 5's revision comparison is now viable because §21c makes the
+revision real).
+
+### 21d. The complete chain the spike must prove
+
+```
+app-owned drag
+ → x/y AND revision fields change
+   → getSceneVersion changes
+     → settled React elements update
+       → frames memo receives current geometry
+         → presentation membership/composition updates
+           → PATCH-124 receives changed cache keys
+             → affected thumbnails refresh automatically
+```
+
+**Every arrow must be evidenced.** A break at any one of them is a failure, not
+a partial pass — this is the fifth diagnostic on this defect, and each previous
+one died at a different arrow.
+
+### 21e. Scenarios
+
+**A — app-owned cross-slide move:** live and React geometry agree after settle;
+presentation removes from A and adds to B; **both** thumbnails refresh; **slide
+B not selected**; **no manual refresh**.
+**B — app-owned within-slide move:** a **large** move; cache key changes;
+renderer coordinates change; **decoded thumbnail pixel bounds move**;
+presentation coordinates update.
+**C — native move** between slides: settled propagation remains **generic**; no
+regression.
+**D — app-owned resize** through Excalidraw handles: **no double revision** and
+no regression; presentation and thumbnail update.
+
+Scenario D is the one to watch. App-owned resize **already** increments via
+Excalidraw's handles (§21a); if the repaired move writer also fires on a resize
+path, revisions could be bumped twice. Double-increment is not obviously harmful
+— `getSceneVersion` only needs to *change* — but it must be **measured, not
+assumed**, and any interaction between the two paths reported.
+
+### 21f. History and persistence contract — bind
+
+Existing drag behaviour must remain: pointermove updates keep
+`commitToHistory`/capture semantics that **do not create one undo entry per
+frame**; only the existing **final drag commit** enters history; position
+persistence stays on drag completion; **no second `updateScene` writer**; **no
+change to lock duration, DB synchronization or drag ownership.**
+
+Excalidraw excludes `version`/`versionNonce` from applied history deltas
+(§21b), which is why this repair is expected to be history-neutral — **expected,
+and therefore measured, not assumed.**
+
+### 21g. Performance and history bar
+
+Record: `onChange` count; `updateScene` count; scene-version changes; immediate
+structural `setElements` calls; settled `setElements` calls; thumbnail renders
+**per slide**; **undo-stack effect**; and **collaboration/reconcile warnings or
+anomalies**.
+
+**Pass only if:** `setElements` and thumbnail rendering do **not** occur per
+pointer frame; **one normal undo restores the drag**; **no extra history
+entries**; **no collaboration/reconcile loop**; visible drag stays smooth; latest
+geometry wins; presentation and thumbnails stay synchronized.
+
+### 21h. Hard stops — stop and restore
+
+Revision changes create a collaboration/reconcile loop; undo history gains one
+entry per pointer frame; app-owned resize regresses; native geometry regresses;
+thumbnails render continuously during drag; `getSlideRenderSignature` or
+PATCH-124 must change; the PATCH-115 boundary must be crossed; or metadata work
+is required to pass a geometry scenario.
+
+### 21i. Metadata remains blocked
+
+**This spike addresses geometry only.** Metadata-only changes — title/caption,
+image/icon, card colour, visible reactions/comments — still require a separate
+trigger and **must not be included or claimed as solved.** Passing all four
+scenarios does **not** unblock full implementation (§19j hard stop 6, §20e).
+
+### 21j. Spike boundary
+
+**Temporary implementation spike, not the final patch.** **§10's production
+allowlist stays LOCKED**; provisional cap 5 remains a forecast, not
+authorization. After the spike, **restore every temporary product change** and
+report whether the Option A trigger passes.
+
+### 21k. Next GPT-5.5 instruction (bind)
+
+> **Run the Option A geometry spike. Temporary only.**
+>
+> Repair the existing writer at `DrawingLayout.tsx:408` to add
+> `version`/`versionNonce`/`updated` using the convention at `:1954`, `:2025` and
+> `useCanvasActions.ts:75`. Add nothing else — no second writer, no change to
+> x/y maths, drag ownership, persistence, locks, membership, scheduling or
+> signatures.
+>
+> Prove **every arrow** of §21d for scenarios A–D with real drags, decoded pixel
+> bounds and real presentation composition. Record all §21g counters, including
+> **undo-stack effect and reconcile anomalies** — those are the two that decide
+> whether Option A is safe, not just effective.
+>
+> Watch scenario D for double revision bumps.
+>
+> Do not touch metadata, `getSlideRenderSignature`, PATCH-124, `node_modules` or
+> `excalidraw_fork`. Restore everything; leave no candidate behind.
+
+### 21l. Status
+
+**PATCH-128: OPEN · OPTION A GEOMETRY TRIGGER SPIKE AUTHORIZED · METADATA PATH
+UNRESOLVED · FULL IMPLEMENTATION BLOCKED.**
+Census confirms the app-owned move writer as the **sole** non-conforming
+geometry path (§21a). Option A **repairs**, and does not invent (§21c).
+Per-frame increment risk **cleared by evidence** (§21a). Allowlist **LOCKED**.
+
+**Option ranking:** A authorized · B fallback · C weak fallback · D rejected.
+
+**PATCH-127: OPEN · B2C AUTHORIZED · NOT STARTED · candidate removed.**
+**PATCH-126: DESIGNATED, UNAUTHORED, UNAUTHORIZED.**
+**PATCH-125 / 124 / 123 / 122 / 121 / 120 / 117: CLOSED.**
+**PATCH-116: CANCELLED.**
+**PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
+**PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
+**PATCH-119: DESIGNATED, UNAUTHORED, UNAUTHORIZED, UNTOUCHED.**
+
+**Recorded debt, updated:** `DrawingLayout.tsx:408` violates Excalidraw's
+element-revision contract — **now measured, not merely inferred** — so any
+consumer relying on `version`, `versionNonce` or `getSceneVersion` is blind to
+app-owned drags, including Excalidraw's own **reconcile conflict ordering**,
+which is a correctness concern beyond slides and beyond this patch; propagation
+into React is nondeterministic (§19c); the split-brain `frames` memo (§17c);
+`getSceneVersion` blind to metadata-only changes (§17e); plus the upstream
+Excalidraw null-dereference, the `unload` warning, the tsconfig-excluded fork,
+and the PATCH-123 §14k / PATCH-124 §14l / PATCH-125 §13l ledgers with the
+unresolved production-build failure.
