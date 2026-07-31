@@ -1548,3 +1548,225 @@ into React is nondeterministic (§19c); the split-brain `frames` memo (§17c);
 Excalidraw null-dereference, the `unload` warning, the tsconfig-excluded fork,
 and the PATCH-123 §14k / PATCH-124 §14l / PATCH-125 §13l ledgers with the
 unresolved production-build failure.
+
+---
+
+## 22. Amendment — OPTION A PROVEN; THUMBNAIL OUTPUT PATH UNRESOLVED (2026-07-31, CTO)
+
+The authorized Option A spike was executed and **fully restored**. It **repaired
+the revision and propagation chain** but **failed at thumbnail output**.
+**Permanent implementation remains blocked.**
+
+### 22a. Corrected Option A status — PROVEN, NOT AUTHORIZED
+
+The temporary repair added the repository-standard fields to the existing
+immutable move writer (`version + 1`, new `versionNonce`, `updated`).
+
+```
+x/y                       360,120 → 1500,180
+version                        2 → 33
+versionNonce              changed
+getSceneVersion               12 → 43
+onChange calls                91
+app-owned updateScene calls   31
+settled setElements calls      1      ← one, not 91
+onUpdatePadlet calls           1
+```
+
+**Proven effective for:** app-owned move revision generation; `getSceneVersion`
+triggering; settled React propagation; presentation membership/composition; and
+undo/redo. **History contract intact** — pointermove stayed non-history, the
+final drag commit was the history commit, one undo restored the original
+position, redo restored the final. **No per-frame `setElements`, no per-frame
+history entries.**
+
+Six §21d arrows now pass. **The seventh and eighth do not.**
+
+**Ruling: Option A is PROVEN but NOT permanently authorized.** It is a
+prerequisite, not a solution. The §21g bar required the *complete* chain, and a
+partial chain is not a pass — as §21d stated in advance.
+
+### 22b. The failure, and where diagnosis now begins
+
+Scenario A failed **at thumbnail pixels**: slide B membership changed, slide B
+presentation/signature changed, React state was current — **and the decoded
+slide B thumbnail output did not change.**
+
+**Diagnosis begins after presentation/signature generation. Do not return to the
+revision trigger unless new evidence contradicts this.** Four diagnostics were
+spent upstream; that ground is now settled.
+
+### 22c. Thumbnail diagnostic contract — bind
+
+Trace **one** app-owned cross-slide move through all thirteen layers, recording
+**exact before/after values for BOTH the old and new slide**:
+
+```
+1  updated React frames            8  renderer input slide
+2  resolved slide membership       9  renderer input elements/padlets
+3  slide render signature         10  generated PNG / data URL
+4  thumbnail cache-key construction 11  cache acceptance
+5  PATCH-124 changed-slide compare 12  sidebar img source
+6  pending changed-slide queue    13  decoded output pixels
+7  createSlideRenderer invocation
+```
+
+**Discriminator — report exactly one:**
+
+- **A** signature changed, cache key changed, render scheduled, renderer input
+  current, **but PNG unchanged**;
+- **B** signature and cache key changed, **but render not scheduled**;
+- **C** render completed with a changed PNG, **but the result was rejected or not
+  installed**;
+- **D** renderer receives **stale membership/elements** despite current
+  presentation input;
+- **E** output changes but the **pixel assertion targets the wrong image or a
+  stale DOM node**.
+
+**Do not assume the renderer is wrong until each layer is measured.**
+
+**Source narrowing, offered as a prior and not a finding:** `createSlideRenderer`
+is constructed with a **`getSceneElements` getter** (`createSlideRenderer.tsx:56`)
+and `renderSlideToPNG(slide, opts)` receives the **slide object** (`:220`). The
+renderer therefore reads the scene **at render time**, which makes **D less
+likely for scene elements** — though a stale captured *getter*, or a stale
+`slide` object, would still produce D. **C and A are the stronger priors; E must
+be excluded before either is believed.** Measure all five regardless.
+
+### 22d. Old and new slide — both required
+
+For an object moving A → B, prove **separately**:
+
+- **slide A is invalidated and removes the post**;
+- **slide B is invalidated and adds the post**;
+- **both** render requests use current scene data;
+- **both** accepted results reach the **correct sidebar thumbnail elements**.
+
+**Record render tokens and cache keys per slide.** A diagnostic that only
+inspects slide B cannot distinguish C from E, because the two slides' results can
+be installed against the wrong nodes.
+
+### 22e. PATCH-124 — still presumed correct
+
+**PATCH-124 may still be correct and must not be rewritten speculatively.**
+Modify it only once evidence identifies exactly one of: changed-slide selection
+failure; queue loss; stale request-token rejection error; or accepted-result
+installation failure.
+
+Note for the diagnostic: PATCH-124's acceptance requires **both**
+`requestId === latestRequestId` **and** `requestedCacheKey === latestCacheKey`.
+During a settled propagation the cache key can legitimately change between
+request and completion, producing a **correct rejection and re-queue**. If the
+re-queue is not observed to complete, that is discriminator **C** — and it is the
+single most likely mechanism given everything upstream now works.
+
+### 22f. Renderer input divergence — compare three consumers
+
+Presentation success **does not** prove the thumbnail renderer received the same
+slide object or the same scene snapshot. Compare the actual slide data used by
+**`PresentationPanel`**, **`useSlideThumbnails`** and **`createSlideRenderer`**,
+recording: frame ID, object IDs, local x/y, width/height, padlet IDs, render
+signature, and scene/files snapshot identity or revision.
+
+**Identify the first point where thumbnail input diverges from presentation
+input.** That single answer resolves D outright.
+
+### 22g. Scenario C — INCONCLUSIVE, not failed
+
+The native **keyboard** move reached `x=1500,y=240` but `frameId`/membership
+remained landscape. **Do not classify native propagation as failed.**
+
+Determine which holds: keyboard movement does not update `frameId`
+automatically; membership is **geometric** and the test asserted the wrong field;
+the element never crossed the authoritative boundary; or the interaction is
+unsupported for frame reassignment.
+
+**A later native test must use a real pointer drag and verify membership through
+the authoritative `resolveFrameMembership` result — not `frameId` alone.** §4
+made that helper authoritative precisely so that membership is never asserted by
+reading a raw field.
+
+### 22h. Scenario D — INCONCLUSIVE, not failed
+
+The app-owned resize did not mutate width/height because the test **never
+targeted the real resize handle**. **Do not classify resize as passed or
+failed** — neither claim is supported.
+
+A later test must first prove the correct Excalidraw resize handle received
+pointerdown, width/height changed in the live scene, and the interaction
+completed. **Only then** may propagation and thumbnail output be evaluated. An
+interaction that did not occur cannot characterize the code it was meant to
+exercise.
+
+### 22i. Authorized next action — thumbnail diagnostic only
+
+**Authorized: one thumbnail pipeline diagnostic. Nothing else.**
+
+**Do not rerun the full Option A spike.** The temporary Option A revision repair
+and settled propagation **may be reintroduced solely as prerequisites** to create
+the known-good current React and presentation state — they are scaffolding here,
+not the subject.
+
+**The diagnostic must STOP after identifying the first thumbnail layer that
+remains stale or rejects the result.** Do not continue into a fix.
+
+**No permanent production change is authorized.** §10's allowlist stays
+**LOCKED**.
+
+### 22j. Metadata
+
+**Metadata invalidation remains separate and unresolved. Do not investigate or
+solve it in the thumbnail diagnostic.**
+
+### 22k. Hard stops — updated
+
+Stop and restore if: the diagnostic cannot isolate a single discriminator;
+diagnosing requires modifying `getSlideRenderSignature` or crossing PATCH-115;
+diagnosing requires rewriting PATCH-124's scheduler; a fix appears to require a
+second thumbnail scheduler; the answer is **E** and the underlying pipeline is
+found already correct — in which case **report that plainly rather than
+manufacturing a defect**; metadata work is required to complete the geometry
+chain; or `node_modules`/`excalidraw_fork` must change.
+
+### 22l. Next GPT-5.5 instruction (bind)
+
+> **Run the thumbnail diagnostic only. Do not fix anything.**
+>
+> Reintroduce Option A's repair and settled propagation **as scaffolding** to
+> reach known-good React and presentation state. Then trace all thirteen §22c
+> layers for **both** the old and new slide, recording render tokens and cache
+> keys per slide, and report **exactly one** discriminator A–E.
+>
+> Compare §22f's three consumers and name the first divergence point.
+>
+> **Stop at the first stale or rejecting layer.** Do not rerun the full Option A
+> spike, do not touch metadata, `getSlideRenderSignature`, PATCH-124's
+> scheduler, `node_modules` or `excalidraw_fork`. Restore everything; leave no
+> candidate behind.
+
+### 22m. Status
+
+**PATCH-128: OPEN · OPTION A REVISION/PROPAGATION PROVEN · THUMBNAIL OUTPUT PATH
+UNRESOLVED · NATIVE MOVE AND RESIZE TESTS INCONCLUSIVE · METADATA PATH
+UNRESOLVED · FULL IMPLEMENTATION BLOCKED.**
+Option A is **proven, not authorized** (§22a). Diagnosis moves **downstream of
+signature generation** (§22b). Scenarios C and D are **inconclusive, not
+failures** (§22g, §22h). Allowlist **LOCKED**.
+
+**PATCH-127: OPEN · B2C AUTHORIZED · NOT STARTED · candidate removed.**
+**PATCH-126: DESIGNATED, UNAUTHORED, UNAUTHORIZED.**
+**PATCH-125 / 124 / 123 / 122 / 121 / 120 / 117: CLOSED.**
+**PATCH-116: CANCELLED.**
+**PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
+**PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
+**PATCH-119: DESIGNATED, UNAUTHORED, UNAUTHORIZED, UNTOUCHED.**
+
+**Recorded debt, updated:** the `DrawingLayout.tsx:408` revision-contract
+violation is **measured and its repair proven effective** — it should land
+regardless of how the thumbnail question resolves, since Excalidraw's reconcile
+conflict ordering depends on those fields; propagation into React is
+nondeterministic (§19c); the split-brain `frames` memo (§17c); `getSceneVersion`
+blind to metadata-only changes (§17e); plus the upstream Excalidraw
+null-dereference, the `unload` warning, the tsconfig-excluded fork, and the
+PATCH-123 §14k / PATCH-124 §14l / PATCH-125 §13l ledgers with the unresolved
+production-build failure.
