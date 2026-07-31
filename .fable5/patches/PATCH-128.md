@@ -3235,3 +3235,260 @@ update path (§24c); thumbnail assertions must re-query by stable slide identity
 Excalidraw null-dereference, the `unload` warning, the tsconfig-excluded fork, and
 the PATCH-123 §14k / PATCH-124 §14l / PATCH-125 §13l ledgers with the unresolved
 production-build failure.
+
+---
+
+## 29. Amendment — IMPLEMENTATION AUTHORIZED; B/D/F/G BOUND AS PRE-CLOSURE GATES (2026-08-01, CTO)
+
+### 29a. Governance decision — §28n **Option 2**
+
+**The combined PATCH-128 implementation is AUTHORIZED now.**
+
+**The remaining acceptance debt is NOT waived.** The following remain **mandatory
+before PATCH-128 may close**:
+
+- **B** — real container/child metadata case
+- **D** — live identity-churn control
+- **F** — real app-owned resize
+- **G** — representative performance run
+
+**These are closure gates, not implementation prerequisites.** Implementation may
+proceed in parallel; closure may not.
+
+### 29b. Rationale
+
+The architecture is **sufficiently characterized for implementation**. Every
+mechanism being authorized has been measured in a real browser and fully restored;
+nothing below is authorized on the strength of unit evidence alone.
+
+### 29c. Geometry evidence — proven
+
+1. The custom `DrawingEmbeddableCard` move writer is **the only measured geometry
+   writer that changes x/y without updating Excalidraw revision fields.**
+2. Repairing it with the repository's established convention — `version + 1`, new
+   `versionNonce`, `updated` timestamp — **causes `getSceneVersion` to reflect
+   app-owned movement.**
+3. The **two-ref settled propagation design passes for both** native Excalidraw drag
+   and app-owned `DrawingEmbeddableCard` drag (§28d, §28e).
+4. **~16–17 revision changes collapse into one settled `setElements` propagation.**
+5. **~149–152 unchanged-revision `onChange` calls after pointerup are harmless** —
+   they do not schedule, clear, or reset the timer (§28f).
+6. **Live and React geometry matched exactly after settlement.**
+7. **One-ref observed/settled bookkeeping is REJECTED** (§27c, §28b).
+8. **Pointerup flushing and maximum-wait are not justified** by current evidence
+   (§28j).
+
+### 29d. Metadata evidence — proven
+
+1. Metadata updates **reach** local padlet state and `paddletsRef` (§24a).
+2. The existing frames memo **does not recompute** from metadata changes because its
+   trigger is element/canvas-line driven (§24a, §24b).
+3. **`getSlideRenderSignature` already consumes canonical `buildPadletRenderState`
+   and does not require semantic modification** (§24b).
+4. A deterministic M2 revision derived from canonical `buildPadletRenderState` is
+   stable across fresh object **and** array identities; stable across ordering
+   changes; changes for title, card-colour, todo-state and child-field changes; uses
+   the existing bounded child recursion; **does not duplicate the render-field
+   list** (§25c).
+5. **Real UI evidence passed** for title metadata (§25d), non-text todo metadata
+   (§26b), and an outside-slide edit reaching local state while leaving slide output
+   unchanged (§26d).
+
+### 29e. Downstream evidence — proven, and unchanged
+
+`resolveFrameMembership` remains authoritative; `getSlideRenderSignature` remains
+correct when invoked; **PATCH-124 correctly schedules and de-races changed
+thumbnails**; `createSlideRenderer` reads current scene and post state; generated
+PNGs are accepted, installed and displayed correctly; the earlier thumbnail failure
+was **classification E** — a stale/ambiguous test assertion (§23a).
+
+**No PATCH-124 or renderer change is authorized.**
+
+### 29f. Authorized implementation — GEOMETRY
+
+**A. Repair the existing `DrawingEmbeddableCard` move writer.**
+
+For each existing immutable x/y mutation, also update `version: (current version ?? 1)
++ 1`, `versionNonce` using the repository's existing convention, and
+`updated: Date.now()`.
+
+**Requirements:** derive from the **current live element** for each mutation; **do
+not** use the pointerdown-time snapshot for revision fields; preserve existing x/y
+calculations; preserve existing pointermove history semantics; preserve the existing
+final history commit; preserve **one** persistence write at drag completion; **do
+not** add a second `updateScene` writer; **do not** alter locks or database
+synchronization.
+
+**B. Add shared two-ref settled scene propagation beside the existing immediate
+count/frame-name gate.**
+
+**Required state:** `latestElementsSnapshotRef`, `lastObservedSceneVersionRef`,
+`lastSettledSceneVersionRef`, **one** timer ref.
+
+**Required behaviour:**
+
+1. lazily initialize observed and settled revisions to the **same** current revision;
+2. store the latest elements snapshot on each `onChange`;
+3. if current scene revision **differs** from last observed — update last observed,
+   clear any pending timer, schedule **one** 150 ms settle callback;
+4. if revision is **unchanged** — do not schedule, do not clear, do not reset;
+5. in the callback — compare last observed with last settled, propagate the latest
+   snapshot when different, advance last settled **only after** propagation, clear
+   the timer ref;
+6. preserve the immediate count/frame-name path;
+7. clean up the timer on unmount;
+8. **latest snapshot wins**;
+9. **do not** add pointerup flushing;
+10. **do not** add maximum-wait;
+11. **do not** create separate native and app-owned mechanisms.
+
+### 29g. Authorized implementation — METADATA
+
+**C. Add a pure deterministic post-render revision helper.**
+
+Stable top-level ordering by post ID; **reuse canonical `buildPadletRenderState`**;
+preserve existing bounded recursion; deterministic serialization of canonical render
+state; lightweight stable digest. **No** raw padlets/object identity; **no**
+duplicate field list; **no** unbounded traversal; **no** Excalidraw revision mutation
+for metadata.
+
+**D. Add the deterministic metadata revision as an *additive* frames-memo
+dependency.**
+
+**Leave unchanged:** `getSlideRenderSignature` semantics; `resolveFrameMembership`;
+PATCH-124 scheduling; renderer behaviour; presentation composition rules.
+
+### 29h. Production allowlist — **UNLOCKED, bounded**
+
+1. **`components/collabboard/canvas/layouts/DrawingLayout.tsx`**
+2. **`lib/infra/drawing/postRenderRevision.ts`** — new pure helper for the
+   deterministic canonical metadata revision.
+3. **The existing module containing `buildPadletRenderState`** — **export visibility
+   only if required. No semantic change** to `buildPadletRenderState` or
+   `getSlideRenderSignature`.
+4. **`lib/infra/drawing/settledScenePropagation.ts`** — **optional**, only if
+   extraction materially improves deterministic unit testing. **If the logic remains
+   clearer and smaller inline in `DrawingLayout.tsx`, do not create this file merely
+   to fill the allowlist.**
+
+**No other production files are authorized without a governance amendment.**
+
+### 29i. Test allowlist
+
+Authorized: unit tests for the deterministic post-render revision; unit tests for
+settled observed-versus-settled revision scheduling **if extracted**; browser
+characterization for integrated geometry and metadata synchronization; source/boundary
+test **only** where it protects the exact prohibited regressions.
+
+### 29j. Implementation test requirements — minimum
+
+**GEOMETRY:** app-owned cross-slide drag; app-owned within-slide drag; native
+real-pointer cross-slide drag using **`resolveFrameMembership`**; **one**
+`setElements` settlement per completed drag; unchanged-revision `onChange` traffic
+ignored; undo/redo remains correct; **one** persistence write at drag completion.
+
+**METADATA:** real title edit; real non-text todo edit; real outside-slide edit;
+deterministic identity/order unit tests; **no thumbnail render for unchanged
+per-slide signatures**.
+
+**OUTPUT:** presentation and thumbnails update **automatically**; **no manual refresh
+required**; thumbnails identified by **stable slide ID and re-queried at assertion
+time** (§23a); no continuous rendering loop; **no PATCH-124 changes**.
+
+### 29k. Mandatory pre-closure gates
+
+**B — CONTAINER/CHILD.** Before closure, **either** execute a real render-relevant
+container-child UI edit and pass the full chain, **or** return to Opus with source
+evidence that no such user interaction exists in `DrawingLayout` mode and request a
+**narrowly documented waiver**. **No automatic waiver is granted.**
+
+**D — IDENTITY CHURN.** Before closure, produce a **real local-state** identity churn
+where raw array/object identities change, canonical render state does not, the
+deterministic revision remains stable, and no slide signature or thumbnail render
+changes. **Unit evidence alone is not enough** unless Opus later grants a documented
+waiver.
+
+**F — APP-OWNED RESIZE.** Before closure, prove: real resize-handle `pointerdown`;
+live width/height mutation; revision/`getSceneVersion` change; settled React
+propagation; presentation and thumbnail update.
+
+**G — PERFORMANCE.** Before closure, run a representative board and report padlet
+count; slide count; metadata revision cost; `onChange` count; settled `setElements`
+count; frames memo count; thumbnail render count; interaction responsiveness;
+loops/errors/reconcile anomalies. **No arbitrary threshold is required, but the
+evidence must show bounded, non-frame-by-frame expensive work and no material
+regression.**
+
+### 29l. Hard stops during implementation
+
+Stop and report if: more production files are required; `getSlideRenderSignature`
+semantics must change; PATCH-124 must change; metadata requires Excalidraw revision
+fields; raw `padlets` identity is required; **observed and settled revision are
+collapsed into one ref**; pointerup or maximum-wait becomes necessary; separate
+native/app-owned mechanisms are introduced; thumbnails render per pointermove; undo
+gains per-frame entries; protected paths change; PATCH-115 must be crossed.
+
+### 29m. Commit contract — bind
+
+```
+fix(slides): synchronize canvas and post changes with previews
+```
+
+**Do not commit governance and implementation together.**
+
+### 29n. Next GPT-5.5 instruction (bind)
+
+> **Implement PATCH-128 §29f–§29g. This is the permanent implementation, not a spike.**
+>
+> Touch only the §29h allowlist. Build **A** (writer repair, live element per
+> mutation), **B** (two-ref settled propagation, eleven clauses), **C** (pure
+> deterministic revision helper reusing `buildPadletRenderState`), and **D** (additive
+> frames-memo dependency).
+>
+> Satisfy every §29j test requirement. **Do not** collapse observed and settled into
+> one ref, add pointerup flushing or maximum-wait, duplicate the render-field list,
+> use raw `padlets` identity, mutate Excalidraw revision fields for metadata, create
+> separate native/app-owned mechanisms, or change `getSlideRenderSignature`,
+> PATCH-124, PATCH-115, `node_modules` or `excalidraw_fork`.
+>
+> Create `settledScenePropagation.ts` **only if** extraction genuinely improves unit
+> testing — an allowlist entry is permission, not an instruction.
+>
+> Commit exactly once, with the §29m message. **Do not close the patch** — B/D/F/G
+> remain outstanding.
+
+### 29o. Status
+
+**PATCH-128: OPEN · IMPLEMENTATION AUTHORIZED · PRODUCTION ALLOWLIST UNLOCKED AS
+BOUNDED ABOVE · OPTION A WRITER REPAIR BOUND · TWO-REF SETTLED PROPAGATION BOUND ·
+M2 METADATA REVISION BOUND · B/D/F/G MANDATORY PRE-CLOSURE GATES · NOT CLOSED.**
+
+Twenty-nine sections to authorize roughly four mechanisms — but every one of them is
+now backed by a measurement rather than an argument, and the two most expensive
+wrong turns (§22's implied renderer defect, §26's implied native-only defect) were
+caught by evidence rather than shipped.
+
+**PATCH-124 unchanged and correct. `getSlideRenderSignature` unchanged. PATCH-115
+untouched.**
+**PATCH-127: OPEN · B2C AUTHORIZED · NOT STARTED · candidate removed.**
+**PATCH-126: DESIGNATED, UNAUTHORED, UNAUTHORIZED.**
+**PATCH-125 / 124 / 123 / 122 / 121 / 120 / 117: CLOSED.**
+**PATCH-116: CANCELLED.**
+**PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
+**PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
+**PATCH-119: DESIGNATED, UNAUTHORED, UNAUTHORIZED, UNTOUCHED.**
+
+**Recorded debt — carried into implementation.** The four closure gates B/D/F/G are
+now the patch's primary outstanding obligation and must not be quietly dropped at
+closure time. Retained: Excalidraw `onChange` fires continuously at rest (~15–20 ms)
+with no scene or appState change — harmless to a revision-conditioned debounce, still
+load-bearing for any future consumer; one ref must never carry both "observed" and
+"settled" meanings; a stable output with a flat input-arrival counter proves absence
+of input, not correct filtering; a mechanism proven for one path must not be
+described as proven generally; `updated_at` is not a reliable client-side
+invalidation trigger under the optimistic update path; thumbnail assertions must
+re-query by stable slide identity; nondeterministic React propagation (§19c); the
+split-brain `frames` memo (§17c); `getSceneVersion` blind to metadata-only changes
+(§17e); plus the upstream Excalidraw null-dereference, the `unload` warning, the
+tsconfig-excluded fork, and the PATCH-123 §14k / PATCH-124 §14l / PATCH-125 §13l
+ledgers with the unresolved production-build failure.
