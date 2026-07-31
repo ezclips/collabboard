@@ -1957,3 +1957,239 @@ metadata-only changes (§17e); plus the upstream Excalidraw null-dereference, th
 `unload` warning, the tsconfig-excluded fork, and the PATCH-123 §14k /
 PATCH-124 §14l / PATCH-125 §13l ledgers with the unresolved production-build
 failure.
+
+---
+
+## 24. Amendment — METADATA CLASSIFIED **C**; M2 SPIKE AUTHORIZED (2026-07-31, CTO)
+
+The authorized metadata diagnostic was executed and **fully restored**.
+
+### 24a. Classification **C** — stale at frames-memo invalidation
+
+Post metadata **reaches** current application state and `paddletsRef`, but **the
+frames memo does not recompute**, because its dependencies remain
+element/canvas-line driven. The slide therefore keeps an old `renderSignature`
+and cache key even though the renderer can read the latest post data at render
+time.
+
+**Measured, real `CardEditor` title edit** ("Metadata Before Title" → "Metadata
+After Title"), geometry-neutral: `x=760`, `y=120`, `320×220`, `angle=0`,
+`version=1`, `versionNonce=1`, `updated=1785521172923` — **all unchanged.**
+
+| | before | after |
+|---|---|---|
+| padlet object identity | 7 | **13** |
+| padlets array identity | 6 | **12** |
+| React scene version | 3 | **3 (stale)** |
+| slide signature digest | `5e04fbf` | **`5e04fbf` (stale)** |
+
+**The Excalidraw element is not the appropriate metadata revision source.** The
+live `getSceneVersion` moving to 5 during surrounding activity is **not** evidence
+that metadata is encoded in revision fields — the target element's geometry and
+revision fields were unchanged and the React scene revision stayed stale.
+Recorded so no later reader misreads that number.
+
+### 24b. The renderer split — the defect is purely upstream
+
+After the edit, the thumbnail **cache-key input** still serialized
+`title: "Metadata Before Title"` at digest `5e04fbf`, while
+`createSlideRenderer` read `paddletsRef` and resolved
+`title: "Metadata After Title"`.
+
+**The renderer is fully capable of drawing current metadata. The stale layer is
+slide derivation/signature invalidation, and nothing downstream of it.**
+
+This also explains the reported product behaviour for metadata exactly as §2 did
+for geometry: **an unrelated later refresh renders the current metadata**, because
+the renderer was never the problem. Two invalidation classes, one shared
+symptom — and one shared cause shape: **a memo that cannot see what changed.**
+
+**`getSlideRenderSignature` remains unchanged** — it already consumes
+`buildPadletRenderState` and includes the relevant post state *when invoked*; it
+is simply never re-invoked. **PATCH-124 remains unchanged** — it correctly reacts
+to changed signatures; the signature was never recalculated upstream. That is the
+**sixth** diagnostic confirming PATCH-124.
+
+### 24c. Persistence finding — `updated_at` is not a client trigger
+
+The database `updated_at` advanced (`18:06:13.13179Z → 18:06:19.316Z`), but **the
+local optimistic post object retained the old value.** Under the current
+optimistic update path, **`updated_at` alone is not a reliable immediate
+client-side invalidation trigger** — the visible content changes before the field
+does. This is precisely why **M1 is insufficient**.
+
+### 24d. Post-type census — one canonical helper, no per-type work
+
+`buildPadletRenderState` already provides the canonical deterministic render
+state for **all** supported app-owned post forms — Card, Note, Image, Clipart,
+Todo, Link, Container, AI/import variants — covering title, content, media URLs
+and dimensions, `updated_at`, card colour, caption data, link data, todo/task
+state, child/container state, import/AI state, and recursively visible children
+to the existing **bounded** depth.
+
+**No separate metadata listener or signature per post type**, consistent with §5.
+
+### 24e. Option ranking — names preserved
+
+- **M1 — existing `updated_at`/version/revision: NOT SUFFICIENT ALONE** (§24c).
+- **M2 — deterministic post-render revision derived from
+  `buildPadletRenderState`: LEADING.** Uses the same canonical inputs
+  `getSlideRenderSignature` already consumes, **without changing that function**.
+- **M3 — existing centralized post-store revision/event: SECONDARY.** No suitable
+  proven stable centralized revision has been identified; viable only if source
+  finds one that changes for **every** render-relevant edit without becoming a
+  second authority.
+- **M4 — raw padlets array/object identity: REJECTED** as the permanent trigger.
+  Identity changed on this edit (6→12, 7→13) but changes broadly and on unrelated
+  parent renders; it encodes **object allocation, not visible content**, and
+  would make the frames memo noisy.
+
+**Also explicitly rejected: incrementing Excalidraw `version`/`versionNonce`/
+`updated` for metadata-only edits.** Those fields belong to Excalidraw element
+mutation, collaboration and reconciliation semantics. Borrowing them for post
+metadata would corrupt reconcile ordering — the very contract PATCH-128's
+geometry half exists to *restore*.
+
+### 24f. M2 spike — AUTHORIZED, temporary
+
+Derive **one** deterministic post-render revision from canonical
+`buildPadletRenderState` output and use it as an upstream dependency/invalidation
+input for the frames memo.
+
+**Must not:** add raw `padlets` as a memo dependency; mutate Excalidraw revision
+fields; modify `getSlideRenderSignature`; duplicate the full slide signature; add
+per-post listeners; add polling; add another thumbnail scheduler; alter
+PATCH-124.
+
+**Preferred temporary design:** derive a stable revision over render-relevant
+post state only; **reuse `buildPadletRenderState`** or an existing canonical
+helper rather than maintaining a parallel field list; deterministic ordering by
+stable post ID; **no raw JSON serialization of the unbounded application graph**;
+respect the existing **bounded** child/container depth; include only fields that
+can affect presentation or thumbnails; use the revision to make the frames memo
+recompute on visible content change; let `getSlideRenderSignature` run
+**unchanged** to produce new per-slide signatures; and let **PATCH-124** compare
+them and render only affected slides.
+
+The last two clauses are the point of M2: **it adds a trigger, not a second
+signature.** Duplicating field semantics is a hard stop precisely because two
+field lists will drift.
+
+### 24g. Performance
+
+A naïve global revision may recompute the frames memo when a post **outside all
+slides** changes. **Acceptable for the temporary spike only if PATCH-124 proves
+unchanged slide keys do not render.** The permanent design should evaluate
+whether the revision can be **scoped or cheaply computed** without creating
+duplicate membership logic — noting that scoping by membership risks exactly the
+second membership algorithm §4 forbids, so cheapness is likely the safer axis.
+
+**Record:** `DrawingLayout` render count; metadata revision computation count;
+frames memo recomputation count; number of slide signatures that change;
+thumbnail renders **per slide**; effect of unrelated parent rerenders; effect of
+editing a post outside every slide.
+
+### 24h. Scenarios
+
+**A — inside-slide title edit** via real UI: no geometry mutation; revision
+changes; memo recomputes; signature/cache key changes; presentation shows the new
+title; **thumbnail automatically shows it**; no manual refresh.
+**B — inside-slide non-text edit** (card colour, image/icon, or todo completion):
+same chain.
+**C — outside-slide edit:** the memo may recompute, but **no slide
+`renderSignature` changes** and **PATCH-124 schedules no render**.
+**D — unrelated parent rerender** (selection or other UI): revision **stable**;
+no signature change; no thumbnail render.
+**E — container/child case** where practical: edit a visible child/container
+field already covered by the bounded recursion; prove the containing slide
+invalidates.
+
+### 24i. Assertion quality — bind
+
+**Use stable slide IDs and re-query thumbnail DOM nodes at assertion time.** The
+§23a false failure cost a full cycle; captured or ambiguous nodes are not
+acceptable.
+
+Prove: old and new signature/cache-key digests; renderer input metadata;
+generated PNG/data-URL change; **actual displayed thumbnail change**; and
+presentation DOM/composition change. **Do not pass merely because the frames memo
+or a callback ran** — the recurring trap of this patch, in its third costume.
+
+### 24j. Geometry integration — two distinct triggers, one pipeline
+
+**The metadata spike must not re-diagnose geometry.** The final design is
+expected to carry **two distinct upstream triggers** feeding the **existing**
+frame/signature/PATCH-124 pipeline:
+
+1. **geometry** — repair the custom app-owned move writer's revision fields, plus
+   settled `getSceneVersion`-based React propagation;
+2. **metadata** — a deterministic post-render revision from canonical post render
+   state.
+
+**Do not merge the trigger concepts, and do not use Excalidraw revision fields for
+post metadata** (§24e).
+
+### 24k. Allowlist and hard stops
+
+**The permanent production allowlist stays LOCKED.** The spike may temporarily
+touch only the narrow files needed to derive and observe the candidate revision.
+**No permanent implementation is authorized.**
+
+**Stop and restore if:** the revision changes on every unrelated parent render;
+raw array/object identity enters the revision; the revision requires modifying
+`getSlideRenderSignature`; the implementation duplicates `buildPadletRenderState`
+field semantics; frames recompute recursively or continuously; thumbnails render
+for unchanged slides; container recursion becomes unbounded; PATCH-124 or
+PATCH-115 must change; protected paths change; or **anything becomes staged**.
+
+### 24l. Next GPT-5.5 instruction (bind)
+
+> **Run the M2 metadata spike only. Temporary. Do not implement the patch.**
+>
+> Derive one deterministic post-render revision from canonical
+> `buildPadletRenderState` output, ordered by stable post ID, bounded at the
+> existing child depth, and use it as an upstream input to the frames memo.
+> **Reuse the canonical helper — do not restate its field list.**
+>
+> Prove scenarios A–E with stable slide IDs and **DOM re-queried at assertion
+> time**. Record every §24g counter, especially the outside-slide and
+> unrelated-rerender cases — those decide whether M2 is *safe*, not just
+> effective.
+>
+> Do not re-diagnose geometry, mutate Excalidraw revision fields, add raw
+> `padlets` as a dependency, or touch `getSlideRenderSignature`, PATCH-124,
+> `node_modules` or `excalidraw_fork`. Restore everything; leave no candidate
+> behind and nothing staged.
+
+### 24m. Status
+
+**PATCH-128: OPEN · GEOMETRY PIPELINE PROVEN · OPTION A GEOMETRY DESIGN
+JUSTIFIED · METADATA FAILURE CLASSIFIED AT FRAMES-MEMO INVALIDATION · M2
+METADATA SPIKE AUTHORIZED · FULL IMPLEMENTATION BLOCKED.**
+
+Both invalidation classes are now **localized to the same layer**: the frames
+memo cannot see either geometry revisions (pre-Option A) or post-render state.
+**M2 leading · M1 insufficient · M3 secondary · M4 rejected.** Allowlist
+**LOCKED**.
+
+**PATCH-124 unchanged and correct (sixth confirmation). `getSlideRenderSignature`
+unchanged. PATCH-115 untouched.**
+**PATCH-127: OPEN · B2C AUTHORIZED · NOT STARTED · candidate removed.**
+**PATCH-126: DESIGNATED, UNAUTHORED, UNAUTHORIZED.**
+**PATCH-125 / 124 / 123 / 122 / 121 / 120 / 117: CLOSED.**
+**PATCH-116: CANCELLED.**
+**PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
+**PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
+**PATCH-119: DESIGNATED, UNAUTHORED, UNAUTHORIZED, UNTOUCHED.**
+
+**Recorded debt, updated.** Added: **`updated_at` is not a reliable client-side
+invalidation trigger under the optimistic update path** (§24c) — visible content
+changes before the field does, which will mislead any future cache keyed on it.
+Retained: thumbnail assertions must re-query by stable slide identity (§23a); the
+`DrawingLayout.tsx:408` revision-contract violation, measured and its repair
+proven, valuable independently because reconcile ordering depends on those
+fields; nondeterministic React propagation (§19c); the split-brain `frames` memo
+(§17c); `getSceneVersion` blind to metadata-only changes (§17e); plus the
+upstream Excalidraw null-dereference, the `unload` warning, the
+tsconfig-excluded fork, and the PATCH-123 §14k / PATCH-124 §14l / PATCH-125 §13l
+ledgers with the unresolved production-build failure.
