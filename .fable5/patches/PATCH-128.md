@@ -644,3 +644,244 @@ scene revision (§3); `getSceneVersion` insufficient alone for metadata-only
 changes (§17e); plus the upstream Excalidraw null-dereference, the `unload`
 warning, the tsconfig-excluded fork, and the PATCH-123 §14k / PATCH-124 §14l /
 PATCH-125 §13l ledgers with the unresolved production-build failure.
+
+---
+
+## 18. Amendment — SECOND DIAGNOSTIC COMPLETE; THREE INVALIDATION PATHS (2026-07-31, CTO)
+
+### 18a. Result
+
+The §17 discriminator and layer trace were **executed against the real browser
+application and fully restored**. No implementation remains. **Full
+implementation stays blocked; §10's allowlist stays locked.**
+
+Three independent missing signals are now established:
+
+- **R1 — geometry propagation.** A verified `updateScene` mutation moved the
+  live element (`x=120/v=1 → x=200/v=3`) while React elements stayed
+  `x=120/v=1`. **First stale layer: React elements state / frames memo.** The
+  count/frame-name gate is confirmed as a **correctness boundary, not a weak
+  assertion** — this closes §17c in favour of **A2**, and retires A5.
+- **R2 — the real app-owned drag never mutated the element at all**
+  (`x=120,y=100,v=1,nonce=222` before and after). PATCH-124 correctly did
+  nothing: its cache key never changed.
+- **R3 — post metadata without element mutation** produced no scene-version,
+  element-version, signature or cache-key change.
+
+§17c's ranking was wrong: I led with **A5** (hash/quantization weakness) on the
+move-vs-resize contrast. **The real-drag trace shows the element never moved at
+all**, so there was nothing for the renderer to draw differently. The contrast I
+reasoned from had a simpler cause than the one I inferred. Recorded plainly.
+
+**PATCH-124 remains downstream and not at fault**, now for the third time and
+for a third distinct reason.
+
+### 18b. R2 SOLVED FROM SOURCE — app-owned drag ownership
+
+**The visible app-owned post drag is owned by the HTML overlay, not by
+Excalidraw.** Chain, verbatim from source:
+
+```
+DrawingLayout.tsx:2065  renderEmbeddable = (element) => {
+:2066-2067                if (!link.startsWith("padlet://")) return null;
+:2072                     return <DrawingEmbeddableCard … 
+:2092                       onDragEnd={(id, x, y) => {
+:2093                         recentlyDraggedRef.current.set(id, { x, y, expiresAt: Date.now() + 5000 });
+:2094                         savePadletPositionWithLock(id, x, y);
+:2095                       }}
+```
+
+```
+:1015  savePadletPositionWithLock = (padletId, x, y, lockMs = 1500) => {
+:1018    pendingPosTimersRef.current.set(padletId, setTimeout(…, lockMs));
+:1021    onUpdatePadlet(padletId, { position_x: x, position_y: y });   ← DB write
+:1022  }
+```
+
+**There is no `updateScene` call on this path.** The drag persists to the
+**padlet row**. The Excalidraw element is expected to follow later, through the
+padlet→element sync effect — which is **deliberately suppressed**:
+
+```
+:1947  x: positionLocked || !positionChangedInPadletData ? el.x : nextX,
+:1948  y: positionLocked || !positionChangedInPadletData ? el.y : nextY,
+```
+
+While `positionLocked` (timer-based via `pendingPosTimersRef`, or
+coordinate-based via `recentlyDraggedRef`'s 5s window), the element **keeps
+`el.x`/`el.y` — it stays stationary by design.**
+
+**Answers to the §A questions:**
+
+- **Which DOM node receives pointerdown?** The `DrawingEmbeddableCard` overlay
+  rendered inside Excalidraw's embeddable container via `renderEmbeddable`.
+- **Which code moves the visible post?** `DrawingEmbeddableCard`'s own drag,
+  reporting through `onDragEnd`.
+- **Does Excalidraw receive the drag?** **No.**
+- **Is the backing element expected to move?** **Yes — but only later**, via the
+  padlet→element sync effect, and only once the lock clears and
+  `positionChangedInPadletData` is true.
+- **Where is `updateScene` lost?** It is not lost — **it was never called on
+  this path.** The design routes geometry through the database and back.
+- **Is the movement only an overlay transform?** During the lock window,
+  **yes** with respect to the Excalidraw element.
+
+**The critical open question — and I will not answer it from source.** The
+diagnostic sampled at **one moment**. Source cannot tell us whether the element
+**never** moves or moves **after the 1.5s/5s lock expires**. That distinction
+changes the fix completely:
+
+- **moves after expiry** → R2 is a **latency/ordering** defect; the fix is to
+  invalidate slides when the sync lands, not to add a new writer;
+- **never moves** → R2 is a genuine **bypass**; the sync path itself is broken.
+
+**Bound: the third spike must re-sample element coordinates AFTER lock expiry
+(> 5s) before anything is designed.** Designing a writer for a path that is
+merely late would introduce a second geometry authority and fight the existing
+lock — the lock exists to stop exactly that.
+
+### 18c. D — object-type impact
+
+`renderEmbeddable` returns `null` for anything not `padlet://` (`:2066`), so
+**every app-owned post type — Image, Clipart, Card, Note, Todo, Link, Container
+— renders through the same `DrawingEmbeddableCard` and shares the same drag
+ownership.** The R2 bypass is **uniform across post types**, not layout-specific.
+
+**Native Excalidraw elements** are dragged by Excalidraw itself and **do**
+mutate — which is precisely R1's scenario.
+
+**Consequence, and the trap to avoid: fixing R1 alone fixes native shapes and
+leaves every app-owned post stale.** The final design must cover both. Whether
+dragging by Excalidraw *selection bounds/handles* (rather than the HTML content)
+produces a true Excalidraw drag is **unknown and must be measured** in
+Scenario 2.
+
+### 18d. B — geometry propagation proposal (R1), not yet authorized
+
+Narrowest mechanism satisfying the constraints: **replace the count/frame-name
+predicate at `:1209` with a deterministic revision comparison**
+(`getSceneVersion`/`hashElementsVersion`), **debounced and settled**, calling
+the existing `setElements` — feeding the existing `frames` memo, adding no
+second scene store, touching neither PATCH-115 signature logic nor PATCH-124
+scheduling.
+
+**Not authorized yet**, per §B: not until the real drag path is understood,
+because if R2 is latency (§18b) the correct trigger point may be the sync
+landing rather than raw `onChange`.
+
+Also carried forward: the **split-brain `frames` memo** (§17c/A2) — stale
+`elements` plus a live ref-backed signature getter. Any propagation fix should
+reduce that split, not entrench it.
+
+### 18e. C — metadata invalidation path (R3)
+
+Trace one real metadata edit through: post state/store → `buildPadletRenderState`
+→ `customData.renderSignature` → `frames` memo → `getSlideRenderSignature` →
+slide cache key → presentation composition → thumbnail scheduler. **Report the
+first layer that fails to observe the revision.**
+
+Source already establishes the shape: `getSlideRenderSignature` **does** fold
+padlet state via `buildPadletRenderState`, so the signature *function* can see
+metadata. But it is only invoked from the `frames` memo, whose deps are
+`[elements, canvasLines]` — **neither of which changes on a metadata-only
+edit.** The likely first failing layer is therefore **the memo's dependency
+set**, not the signature.
+
+**Do not assume the fix belongs in `getSceneVersion`** — §17e already proved
+scene version cannot see metadata-only changes, and R3 confirms it. **Do not
+modify `getSlideRenderSignature`** (PATCH-115).
+
+### 18f. Third spike — authorized, three scenarios, characterized separately
+
+**Scenario 1 — native geometry.** Real drag of a native shape; prove live scene
+changes; prove the current gate suppresses propagation; apply temporary settled
+propagation; prove presentation **and** thumbnail refresh automatically.
+
+**Scenario 2 — app-owned geometry.** Identify the correct real drag surface
+(HTML content vs Excalidraw selection bounds/handles); prove whether the backing
+element changes; **re-sample after lock expiry (§18b)**; if it should change and
+does not, temporarily repair **only** that synchronization; prove the latest
+geometry reaches React frames, presentation and thumbnail.
+
+**Scenario 3 — post metadata.** Edit visible post content without moving the
+element; prove the render-state revision changes; temporarily propagate it
+through the existing slide invalidation; prove presentation and thumbnail update.
+
+**Each scenario characterized independently, before and after. Do not combine
+them into an implementation candidate.** Evidence remains decoded pixel bounding
+boxes plus real presentation composition — never a fired callback, never a
+whole-image hash alone. Restore everything; leave no candidate.
+
+### 18g. Is the three-file cap still credible? **No.**
+
+R1 alone fits `DrawingLayout.tsx` plus a pure module. **R2 and R3 do not.** R2
+may reach `DrawingEmbeddableCard` and the padlet→element sync; R3 may reach the
+memo's dependency wiring and post-state plumbing.
+
+**Provisional revised cap: 5 production files**, to be confirmed by the third
+spike. **§10's allowlist remains LOCKED** — this is a forecast, not an
+authorization. If five proves insufficient, **stop and report** rather than
+widen silently.
+
+### 18h. New hard stops
+
+1. R2 turns out to require a **second geometry authority** fighting the existing
+   position lock.
+2. A fix would **shorten, bypass or disable the drag position lock** — it exists
+   to prevent DB round-trips clobbering in-flight drags.
+3. Correct behaviour requires editing `getSlideRenderSignature` (PATCH-115).
+4. Correct behaviour requires altering PATCH-124 scheduling.
+5. More than 5 production files prove necessary.
+6. Fixing R1 would ship while R2 leaves all app-owned posts stale — **native-only
+   fixes must not be presented as resolving this patch.**
+7. Any scenario cannot be characterized independently.
+
+### 18i. Boundaries — unchanged
+
+Do not modify `getSlideRenderSignature` without explicit evidence and amendment.
+Do not cross PATCH-115. Do not alter PATCH-124 scheduling. Do not resume
+PATCH-127. Do not touch `node_modules`, `excalidraw_fork`, `package.json`,
+`package-lock.json`, schema, repositories, RLS, reaction or caption behaviour.
+**Protected paths untouched:** `.gitignore`, the three `app/api/ai/*` routes,
+`scripts/live-access-login.mjs`.
+
+### 18j. Next GPT-5.5 instruction (bind)
+
+> **Do not implement. Complete the source trace, then run the three-scenario
+> spike separately.**
+>
+> **Answer §18b's open question first: does the app-owned backing element move
+> after the position lock expires (> 5s)?** Everything about R2's fix depends on
+> late-vs-never, and the answer costs one measurement.
+>
+> Then trace §18e's metadata path and report the first layer that misses the
+> revision — expected to be the `frames` memo dependency set, not the signature.
+>
+> Do not touch `getSlideRenderSignature`, PATCH-124's scheduler, or the position
+> lock. Restore everything exactly; leave no candidate behind.
+
+### 18k. Status
+
+**PATCH-128: OPEN · SECOND DIAGNOSTIC COMPLETE · THREE INVALIDATION PATHS
+IDENTIFIED · SOURCE TRACE REQUIRED · FULL IMPLEMENTATION BLOCKED.**
+R1 confirmed (**A2**, A5 retired). **R2 mechanism identified from source**
+(§18b) with late-vs-never open. R3 confirmed; likely first failure is the memo
+dependency set (§18e). Three-file cap **no longer credible**; provisional **5**,
+allowlist **LOCKED**.
+
+**PATCH-127: OPEN · B2C AUTHORIZED · NOT STARTED · candidate removed.**
+**PATCH-126: DESIGNATED, UNAUTHORED, UNAUTHORIZED.**
+**PATCH-125 / 124 / 123 / 122 / 121 / 120 / 117: CLOSED.**
+**PATCH-116: CANCELLED.**
+**PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
+**PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
+**PATCH-119: DESIGNATED, UNAUTHORED, UNAUTHORIZED, UNTOUCHED.**
+
+**Recorded debt, updated:** app-owned post geometry round-trips through the
+**database** rather than the scene, with a 1.5s/5s lock suppressing the return
+path (§18b) — an architectural coupling worth revisiting independently of this
+patch; the split-brain `frames` memo (§17c); no deterministic scene revision
+(§3); `getSceneVersion` blind to metadata-only changes (§17e, R3); plus the
+upstream Excalidraw null-dereference, the `unload` warning, the
+tsconfig-excluded fork, and the PATCH-123 §14k / PATCH-124 §14l / PATCH-125
+§13l ledgers with the unresolved production-build failure.
