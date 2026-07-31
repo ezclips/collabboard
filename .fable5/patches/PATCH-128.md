@@ -2990,3 +2990,248 @@ for the writer itself; nondeterministic React propagation (§19c); the split-bra
 the upstream Excalidraw null-dereference, the `unload` warning, the tsconfig-excluded
 fork, and the PATCH-123 §14k / PATCH-124 §14l / PATCH-125 §13l ledgers with the
 unresolved production-build failure.
+
+---
+
+## 28. Amendment — TWO-REF SETTLED PROPAGATION PROVEN; CONFLICT RECONCILED (2026-08-01, CTO)
+
+The §27i two-ref debounce spike was executed and **fully restored**. No
+implementation remains.
+
+### 28a. Result — **PASS** for both required scenarios
+
+**Native Excalidraw drag: PASS. App-owned `DrawingEmbeddableCard` drag: PASS.**
+
+The corrected two-ref bookkeeping **resolves the generic settled-propagation
+failure** recorded in §26a and §27a.
+
+### 28b. Core finding
+
+The settled mechanism works when two meanings are kept **separate**:
+
+1. `lastObservedSceneVersion`
+2. `lastSettledSceneVersion`
+
+**The previous one-ref implementation was defective because it collapsed observed
+and settled state into one value** (§27c). With separate refs: real revision changes
+schedule/reset the debounce; unchanged-revision `onChange` traffic is ignored; one
+callback enters after settlement; one `setElements` propagates the latest snapshot;
+React geometry matches the live scene; **and no pointerup flush or maximum-wait is
+required by current evidence.**
+
+### 28c. Initialization
+
+Refs were **lazily initialized on the first `onChange` observation**, both set to
+the same value:
+
+- `lastObservedSceneVersionRef` = initial scene version
+- `lastSettledSceneVersionRef` = **same** initial scene version
+- observed initial version in the fixture: **5**
+
+This produced **no startup `setElements` call** and **no false initial
+invalidation** — the §27 initialization requirement, met and measured.
+
+### 28d. Native drag — **PASS**
+
+| | |
+|---|---|
+| scene revision changes | 16 |
+| unchanged-revision `onChange` after pointerup | **152** |
+| timer schedules after pointerup | **1** |
+| timer clears after pointerup | **1** (source: reschedule on a **real** revision change) |
+| callback entries | **1** |
+| settled `setElements` calls | **1** |
+| propagated final scene revision | 21 |
+
+| geometry | live | React |
+|---|---|---|
+| x | 1500 | **1500** |
+| y | 200 | **200** |
+| frameId | `slide-e2` | **`slide-e2`** |
+| element version | 17 | **17** |
+
+**Live and React state matched exactly.**
+
+### 28e. App-owned drag — **PASS**
+
+| | |
+|---|---|
+| scene revision changes | 17 |
+| unchanged-revision `onChange` after pointerup | **149** |
+| timer schedules after pointerup | **2** |
+| timer clears after pointerup | **2** (both caused by **real** revision changes) |
+| callback entries | **1** |
+| settled `setElements` calls | **1** |
+| propagated final scene revision | 39 |
+
+| geometry | live | React |
+|---|---|---|
+| x | 980 | **980** |
+| y | 190 | **190** |
+| element version | 18 | **18** |
+
+**Live and React state matched exactly.**
+
+### 28f. Continuous `onChange` traffic — §27g resolved
+
+The at-rest cadence recorded in §27g **remains real**: ~**149–152** unchanged-revision
+`onChange` calls after pointerup.
+
+With the corrected design those calls caused **zero timer schedules, zero timer
+resets, zero timer clears, and no delay to callback entry.**
+
+**Continuous no-op `onChange` traffic does not defeat the debounce when scheduling is
+conditioned on actual scene revision changes. §27g's open question is resolved.**
+
+The at-rest cadence itself stays in the debt ledger — it is a real property of
+Excalidraw that any future `onChange` consumer must assume.
+
+### 28g. Conflict reconciliation — §27b closed
+
+§22a measured **one** settled app-owned propagation. §26/§27 later reproduced
+**failure** with the one-ref candidate. The two-ref spike now establishes that:
+
+- **app-owned settlement is achievable and generic;**
+- **the one-ref bookkeeping was the defective variant;**
+- **§22a was consistent with a mechanism that kept observed and settled state
+  distinct, whether explicitly or effectively.**
+
+**The conflict is no longer marked unresolved. Do not retain the inference that the
+settled concept itself was unreliable. Retain the historical record that one
+implementation variant was defective.**
+
+This is the correct closure: §27b refused to discard §22a in favour of the newer
+measurement, and holding both until a third measurement adjudicated them is what made
+this resolution available rather than a coin-flip.
+
+### 28h. Technically justified geometry design
+
+**A — APP-OWNED WRITER REPAIR.** The custom `DrawingEmbeddableCard` move writer must
+follow the repository's existing Excalidraw revision convention: `version + 1`, new
+`versionNonce`, `updated` timestamp.
+
+**B — TWO-REF SETTLED PROPAGATION.** The existing `onChange` integration must
+maintain `latestElementsSnapshotRef`, `lastObservedSceneVersionRef`,
+`lastSettledSceneVersionRef` and **one** debounce timer ref, with this behaviour:
+
+1. store the latest elements snapshot on `onChange`;
+2. compute current `getSceneVersion`;
+3. when current revision **differs** from last observed — update last observed, clear
+   the existing timer if any, schedule **one** new settle timer;
+4. when revision is **unchanged** — **do not** clear or reschedule;
+5. on callback entry — compare last observed with last settled, propagate the latest
+   snapshot if different, and **only after propagation** advance last settled;
+6. **latest snapshot wins**;
+7. clear the timer on unmount;
+8. keep the immediate count/frame-name path **unchanged**.
+
+**Do not use one ref for both observed and settled revision.**
+
+### 28i. Performance
+
+For both drag types: **16–17 scene changes collapsed into one settled `setElements`
+call**; `setElements` did **not** run per pointermove; no effect loop; no
+console/page errors; bounded timer scheduling; no timer thrashing from
+unchanged-revision traffic.
+
+**The spike did not perform a full high-load benchmark. §26j scenario G remains
+UNPROVEN.**
+
+### 28j. Pointerup, maximum-wait, appState gating — not justified
+
+Current evidence does **not** justify adding pointerup-driven flush, maximum-wait
+debounce, or appState gating. The corrected two-ref debounce completed reliably
+without them.
+
+**Do not add those mechanisms unless a later stress test demonstrates a new
+failure.** §27h listed them as contingent candidates; the contingency did not fire.
+
+### 28k. Separate mechanisms — still REJECTED
+
+The **same shared** two-ref mechanism passed **both** paths. Separate native and
+app-owned propagation systems remain rejected (§4, §24j, §26h, §27e).
+
+### 28l. Geometry status correction
+
+**Withdraw:** *CURRENT SETTLED DEBOUNCE GENERICALLY DEFECTIVE.*
+
+**Replace with:** **ONE-REF DEBOUNCE REJECTED · TWO-REF SETTLED PROPAGATION PROVEN
+FOR NATIVE AND APP-OWNED DRAGS.**
+
+The geometry architecture is **once again technically justified**, subject to the
+remaining acceptance gaps: **app-owned resize real interaction; representative
+performance run; final integrated implementation verification.**
+
+### 28m. Metadata status
+
+**M2 remains justified, acceptance incomplete.** Unresolved: real container/child
+edit (§26c); live identity-churn control (§26e); representative performance run
+(§26j).
+
+**Do not rerun already-passed metadata scenarios A and C** unless required by final
+integrated acceptance.
+
+### 28n. Next governance decision — Opus to decide
+
+**Do not unlock the full production allowlist solely from this spike.**
+
+Remaining acceptance debt: **B** (container/child real UI path), **D** (live
+identity-churn control), **F** (app-owned resize), **G** (representative performance
+run).
+
+Opus must decide whether to:
+
+1. **require** those remaining cases before implementation authorization; or
+2. **authorize the combined implementation** with those cases bound as **final
+   acceptance gates before closure**.
+
+**No waiver is implied by this amendment.**
+
+### 28o. Boundaries — bind
+
+- Do not add pointerup flushing. Do not add maximum-wait without new evidence.
+- Do not use one ref for observed and settled revision.
+- Do not create separate native/app-owned mechanisms.
+- Do not alter PATCH-124. Do not alter `getSlideRenderSignature` semantics.
+- Do not use raw `padlets` identity. Do not use Excalidraw revision fields as the
+  metadata trigger.
+- Do not resume PATCH-127. Do not touch protected paths.
+- Do not modify `node_modules` or `excalidraw_fork`.
+
+### 28p. Status
+
+**PATCH-128: OPEN · OPTION A APP-OWNED WRITER REPAIR PROVEN · TWO-REF SETTLED
+GEOMETRY PROPAGATION PROVEN · M2 METADATA DESIGN JUSTIFIED BUT ACCEPTANCE INCOMPLETE
+· REMAINING ACCEPTANCE DEBT B/D/F/G · PRODUCTION ALLOWLIST LOCKED · FULL
+IMPLEMENTATION BLOCKED.**
+
+Both halves of PATCH-128 now have a **technically justified, measured** upstream
+trigger feeding the **existing, unmodified** frames/signature/PATCH-124 pipeline.
+What remains is **acceptance coverage and a governance decision**, not design.
+
+**PATCH-124 unchanged and correct (ninth confirmation stands; this spike touched
+nothing downstream). `getSlideRenderSignature` unchanged. PATCH-115 untouched.**
+**PATCH-127: OPEN · B2C AUTHORIZED · NOT STARTED · candidate removed.**
+**PATCH-126: DESIGNATED, UNAUTHORED, UNAUTHORIZED.**
+**PATCH-125 / 124 / 123 / 122 / 121 / 120 / 117: CLOSED.**
+**PATCH-116: CANCELLED.**
+**PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
+**PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
+**PATCH-119: DESIGNATED, UNAUTHORED, UNAUTHORIZED, UNTOUCHED.**
+
+**Recorded debt, updated.** **Resolved and removed:** the §27b unreconciled
+app-owned conflict (§28g). **Retained, reclassified:** one ref must never carry both
+"observed" and "settled" meanings — now a *proven* design rule rather than a
+suspected one (§28b, §28h). **Retained:** Excalidraw `onChange` fires continuously at
+rest (~15–20 ms) with no scene or appState change (§27g) — harmless to a
+revision-conditioned debounce, but still load-bearing for any future consumer; a
+stable output with a flat input-arrival counter proves absence of input, not correct
+filtering (§25e, §26e); a mechanism proven for one path must not be described as
+proven generally (§26g) — the rule that produced §27 and therefore this resolution;
+`updated_at` is not a reliable client-side invalidation trigger under the optimistic
+update path (§24c); thumbnail assertions must re-query by stable slide identity
+(§23a); nondeterministic React propagation (§19c); the split-brain `frames` memo
+(§17c); `getSceneVersion` blind to metadata-only changes (§17e); plus the upstream
+Excalidraw null-dereference, the `unload` warning, the tsconfig-excluded fork, and
+the PATCH-123 §14k / PATCH-124 §14l / PATCH-125 §13l ledgers with the unresolved
+production-build failure.
