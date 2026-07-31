@@ -2193,3 +2193,284 @@ fields; nondeterministic React propagation (§19c); the split-brain `frames` mem
 upstream Excalidraw null-dereference, the `unload` warning, the
 tsconfig-excluded fork, and the PATCH-123 §14k / PATCH-124 §14l / PATCH-125 §13l
 ledgers with the unresolved production-build failure.
+
+---
+
+## 25. Amendment — M2 METADATA DESIGN JUSTIFIED; FINAL ACCEPTANCE MATRIX REQUIRED (2026-07-31, CTO)
+
+The authorized M2 metadata spike was executed and **fully restored**.
+
+**M2 is technically validated as the canonical metadata invalidation design. The
+complete acceptance matrix was not executed. Permanent implementation remains
+blocked and the production allowlist remains LOCKED.**
+
+### 25a. What M2 proved
+
+A deterministic revision derived from canonical `buildPadletRenderState` drove the
+entire chain:
+
+```
+metadata edit → metadata revision change → frames memo recomputation
+  → unchanged getSlideRenderSignature producing a NEW signature
+    → new thumbnail cache key → PATCH-124 render
+      → updated installed and displayed thumbnail
+```
+
+**`getSlideRenderSignature` was not modified and did not need to be.** It produced
+a new signature purely because it was finally re-invoked — exactly the §24b
+prediction. **PATCH-124 was not modified and scheduled correctly.** That is the
+**seventh** consecutive diagnostic confirming PATCH-124.
+
+### 25b. The temporary design that was tested
+
+1. sort top-level padlets by **stable ID**;
+2. map each through the **existing** `buildPadletRenderState`;
+3. retain the **existing bounded recursion depth**;
+4. serialize only the canonical render state;
+5. hash the deterministic result with a lightweight djb2 digest.
+
+**No render-field list was duplicated.** A temporary `export` of
+`buildPadletRenderState` — visibility only, zero semantic change — was added
+solely to reuse the canonical implementation, and was fully restored.
+
+The revision was added as a **third** dependency to the frames memo, beside
+`elements` and `canvasLines`. **Additive only; nothing was replaced.**
+
+### 25c. Determinism gate — nine properties PASSED
+
+- identical render state → same revision;
+- fresh **array** identity, identical state → same revision;
+- fresh **object** identity, identical state → same revision;
+- ordering differences → same revision;
+- title change → different revision;
+- card-colour change → different revision;
+- todo-completion change → different revision;
+- array rewrapping alone → same revision;
+- a visible **child** field change → detected through bounded recursion.
+
+**This confirms the revision encodes visible render state rather than object
+allocation** — the precise property §24e rejected M4 for lacking.
+
+### 25d. Scenario A — real inside-slide title edit — **PASS**
+
+Real `CardEditor` title edit through the real UI, save-on-close, **no geometry
+mutation, no manual refresh**.
+
+| | before | after |
+|---|---|---|
+| thumbnail digest | `708667857` | **`3099288761`** |
+| non-white pixels | 535 | **934** |
+| revision computation count | 4 | **6** |
+| frames memo recomputation count | 4 | **6** |
+
+The sidebar thumbnail was **re-queried by stable slide title at assertion time**,
+per §24i. **This is real evidence that M2 repairs the metadata invalidation path
+for a text edit.**
+
+### 25e. Scenarios C and D — LIMITED EVIDENCE, not passes
+
+The slide thumbnail remained stable after an attempted outside-slide edit and
+after an unrelated click/escape. **But the metadata revision and frames-memo
+counters also remained unchanged** — so stability was not demonstrably *caused* by
+the mechanism under test.
+
+**Scenario C:** the outside post was edited by **direct Supabase write** while
+placed off-canvas. The diagnostic did **not** prove the updated value reached the
+client's local `padlets` state. It therefore does not prove that local state
+changed, that the global revision changed, or that PATCH-124 filtered unchanged
+slides.
+
+**Scenario D:** the operation produced **no `padlets` identity change**, so
+revision stability during a genuine identity-churning, content-equivalent rerender
+remains undemonstrated live.
+
+The §25c unit properties support both expected behaviours. **Live acceptance
+remains required.** A stable output with a flat counter is an *absence of
+evidence*, not evidence of correct filtering — the §23a lesson in a new costume.
+
+### 25f. Scenarios B and E — NOT EXECUTED
+
+Unproven: geometry-neutral **non-text** metadata edit; visible **container/child**
+metadata edit.
+
+**Do not infer acceptance from the unit tests alone.** §25c proves the revision
+*detects* colour, todo and child changes; it does not prove the real UI edit
+reaches local client state and drives the displayed output.
+
+### 25g. M2 status
+
+**M2 is the leading permanent design.** It is deterministic; independent of array
+and object identity; generic across post types; aligned with canonical
+`buildPadletRenderState` semantics; bounded by the existing recursion depth;
+suitable for a pure helper; and capable of driving the existing
+frames/signature/PATCH-124 pipeline.
+
+**M2 is not yet fully accepted**, because required real-browser coverage remains
+incomplete.
+
+**M1 insufficient (§24c) · M3 secondary · M4 rejected (§24e).** Unchanged.
+
+### 25h. Performance status
+
+At diagnostic scale the global computation was **cheap enough and produced no
+loop**. **Production-scale cost was not load-tested.**
+
+The permanent design **may use a global deterministic revision** rather than
+creating a second slide-membership algorithm. **Optimise for cheap canonical
+computation before attempting membership scoping** — scoping by membership risks
+exactly the second membership algorithm §4 forbids, as §24g anticipated.
+
+**Do not add raw `padlets` identity as a dependency.**
+
+### 25i. Final design candidate — two triggers, one pipeline
+
+**GEOMETRY**
+
+1. **Repair** the custom `DrawingEmbeddableCard` move writer to follow the
+   repository's established Excalidraw revision convention: `version + 1`, new
+   `versionNonce`, `updated` timestamp.
+2. **Add settled `getSceneVersion`-based React propagation** beside the immediate
+   count/frame-name gate: retain the latest scene snapshot; debounce rapid
+   changes; propagate the latest revision **once** after settlement; **no
+   `setElements` per pointer frame**.
+
+**METADATA**
+
+3. **Add a deterministic post-render revision**: derived from canonical
+   `buildPadletRenderState`; stable-ID ordering; existing bounded child recursion;
+   independent of object identity; used as an **upstream frames-memo dependency**.
+
+**DOWNSTREAM — leave unchanged**
+
+4. `resolveFrameMembership`; `getSlideRenderSignature`; the PATCH-124 scheduler;
+   the renderer; presentation composition rules.
+
+**Two distinct triggers feeding one existing pipeline. Do not merge the trigger
+concepts** (§24j).
+
+### 25j. Required final acceptance matrix — A–G
+
+**Authorize one final temporary acceptance run before unlocking production
+implementation.**
+
+**A — NON-TEXT METADATA.** A real UI edit that visibly changes rendering, does
+**not** change geometry, and reaches local client state. Preferred: card colour;
+todo completion; image/icon. Prove: revision changes; frames memo recomputes;
+signature/cache key changes; presentation **and actual thumbnail** update.
+
+**B — CONTAINER/CHILD.** A real UI child edit inside a slide-visible container.
+Prove: the child update reaches local client state; the bounded canonical revision
+changes; the containing slide signature changes; presentation and thumbnail
+update; **unrelated slides do not render**.
+
+**C — OUTSIDE-SLIDE EDIT.** Use the **real application UI** on a post outside
+every slide. **First** prove local `padlets` state receives the edit and the
+revision changes. **Then** prove no slide signature changes and PATCH-124
+schedules **no** thumbnail render. The first half is mandatory — §25e failed
+precisely by omitting it.
+
+**D — IDENTITY-CHURN CONTROL.** Produce a **genuine fresh** `padlets`
+array/object allocation with equivalent canonical render content. Prove: raw
+identities change; the deterministic revision remains **stable**; the frames memo
+does **not** recompute because of the metadata dependency; no slide render occurs.
+
+**E — NATIVE CROSS-SLIDE GEOMETRY.** A **real pointer drag**. Determine membership
+with authoritative **`resolveFrameMembership`**, not `frameId` alone (§22g). Prove
+old/new presentation membership and **both** thumbnails update.
+
+**F — APP-OWNED RESIZE.** **First** prove the real resize handle receives
+pointerdown and width/height change live (§22h). **Then** prove React geometry,
+presentation, signature and thumbnail update.
+
+**G — PERFORMANCE.** A representative larger board. Record: padlet count;
+revision computation duration; `DrawingLayout` render count; frames memo count;
+thumbnail render count; interaction responsiveness. **Derive a bounded acceptance
+threshold from current project performance conventions rather than inventing an
+arbitrary limit.**
+
+### 25k. Production allowlist — LOCKED
+
+**Keep locked until A–G pass, or until Opus explicitly accepts a documented
+limitation.**
+
+The **provisional** final allowlist may include:
+
+**Production**
+- `components/collabboard/canvas/layouts/DrawingLayout.tsx`
+- `lib/infra/drawing/postRenderRevision.ts` or an equivalently named pure helper
+- the existing module containing `buildPadletRenderState`, **only** for an export
+  with **no semantic change**
+- a pure settled-scene propagation helper **only if** extraction is justified
+
+**Tests**
+- unit tests for the deterministic post-render revision
+- browser characterization for geometry and metadata synchronization
+
+**Do not authorize exact paths until the final acceptance run confirms no
+additional production dependency is required.**
+
+### 25l. Boundaries — bind
+
+- No raw `padlets` dependency.
+- No metadata writes to Excalidraw revision fields.
+- No duplicate render-field list.
+- No second membership algorithm.
+- No PATCH-115 change. No PATCH-124 change. No PATCH-127 work.
+- No protected-path changes. No `node_modules` or `excalidraw_fork` changes.
+
+### 25m. Next GPT-5.5 instruction (bind)
+
+> **Run the final acceptance matrix A–G only. Temporary. Do not implement the
+> patch.**
+>
+> Reintroduce the §25b M2 revision and the §25i geometry repair **as scaffolding**
+> to reach known-good state. Then prove **A–G** with stable slide IDs and **DOM
+> re-queried at assertion time**.
+>
+> For **C**, prove the edit reaches local client state *before* asserting that
+> nothing rendered. For **D**, produce a genuine fresh allocation *before*
+> asserting stability. **A stable output with a flat counter is not a pass** — it
+> is the §25e failure repeated.
+>
+> If a scenario has no reliable real UI path, **report it unproven. Do not
+> simulate a pass.**
+>
+> Do not add raw `padlets` as a dependency, mutate Excalidraw revision fields for
+> metadata, duplicate `buildPadletRenderState` field semantics, or touch
+> `getSlideRenderSignature`, PATCH-124, PATCH-115, `node_modules` or
+> `excalidraw_fork`. Restore everything; leave no candidate behind and nothing
+> staged.
+
+### 25n. Status
+
+**PATCH-128: OPEN · GEOMETRY DESIGN JUSTIFIED · M2 METADATA DESIGN JUSTIFIED ·
+FINAL ACCEPTANCE MATRIX REQUIRED · PRODUCTION ALLOWLIST LOCKED · FULL
+IMPLEMENTATION BLOCKED.**
+
+Both invalidation classes now have a **technically justified** upstream trigger,
+and both feed the **existing, unmodified** frames/signature/PATCH-124 pipeline.
+What remains is **acceptance coverage, not design**.
+
+**PATCH-124 unchanged and correct (seventh confirmation). `getSlideRenderSignature`
+unchanged. PATCH-115 untouched.**
+**PATCH-127: OPEN · B2C AUTHORIZED · NOT STARTED · candidate removed.**
+**PATCH-126: DESIGNATED, UNAUTHORED, UNAUTHORIZED.**
+**PATCH-125 / 124 / 123 / 122 / 121 / 120 / 117: CLOSED.**
+**PATCH-116: CANCELLED.**
+**PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
+**PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
+**PATCH-119: DESIGNATED, UNAUTHORED, UNAUTHORIZED, UNTOUCHED.**
+
+**Recorded debt, updated.** Added: **a passing assertion with an unchanged
+instrumentation counter proves absence of input, not correct filtering** (§25e) —
+the third distinct form of the false-green trap in this patch, after §22's implied
+defect and §23a's false failure. Retained: `updated_at` is not a reliable
+client-side invalidation trigger under the optimistic update path (§24c);
+thumbnail assertions must re-query by stable slide identity (§23a); the
+`DrawingLayout.tsx:408` revision-contract violation, measured and its repair
+proven, valuable independently because reconcile ordering depends on those fields;
+nondeterministic React propagation (§19c); the split-brain `frames` memo (§17c);
+`getSceneVersion` blind to metadata-only changes (§17e); plus the upstream
+Excalidraw null-dereference, the `unload` warning, the tsconfig-excluded fork, and
+the PATCH-123 §14k / PATCH-124 §14l / PATCH-125 §13l ledgers with the unresolved
+production-build failure.
