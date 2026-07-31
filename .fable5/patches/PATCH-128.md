@@ -1770,3 +1770,190 @@ blind to metadata-only changes (§17e); plus the upstream Excalidraw
 null-dereference, the `unload` warning, the tsconfig-excluded fork, and the
 PATCH-123 §14k / PATCH-124 §14l / PATCH-125 §13l ledgers with the unresolved
 production-build failure.
+
+---
+
+## 23. Amendment — CLASSIFICATION E; GEOMETRY PIPELINE PROVEN (2026-07-31, CTO)
+
+The authorized thumbnail diagnostic was executed and **fully restored**.
+
+### 23a. Classification **E** — the §22 failure was a TEST false failure
+
+**No product defect exists in PATCH-124 or the geometry thumbnail rendering
+path.** In the controlled one-post cross-slide test: correct signatures and cache
+keys were produced; PATCH-124 scheduled **exactly one** render per affected
+slide; current renderer inputs were used; correct PNGs were generated; both
+results passed request-token and cache-key acceptance; both were installed; and
+**the re-queried sidebar `img` elements displayed the updated images.**
+
+| | slide A (old) | slide B (new) |
+|---|---|---|
+| members after | **none** | `patch128-post-el` @ local 100,180 |
+| digest | `2be0bd19 → cb252e3d` | `bbc7a383 → 7d97e454` |
+| request | `id=3`, `latest=3`, keys equal | `id=4`, `latest=4`, keys equal |
+| PNG | `3933543301`, 569×320, **0 px, bounds null** | `3953236842`, 180×320, **4148 px, bounds 28,48..104,101** |
+| installed | yes — updated to empty slide | yes — blank → rendered post |
+
+No rejection, no follow-up render required, one render per affected slide, no
+render loop.
+
+**This is the outcome §22k deliberately kept available.** After five diagnostics
+there was real pressure to find a defect; the honest answer was that the last one
+did not exist. **The fixture sampled a stale, ambiguous or non-discriminating
+thumbnail state**; the controlled diagnostic re-queried sidebar images **by
+stable slide identity** and proved the results correct.
+
+**§22's implied product failure is withdrawn.** The lesson, recorded: **a
+thumbnail assertion must re-query the DOM by stable slide identity at assertion
+time** — a captured node or an ambiguous selector will report a false failure and
+send diagnosis downstream of a pipeline that already works.
+
+**PATCH-124 is correct — the fifth consecutive diagnostic to confirm it. Do not
+modify or rewrite it.**
+
+### 23b. Geometry chain — PROVEN end to end
+
+```
+app-owned drag → x/y change → version/versionNonce/updated change
+  → getSceneVersion change → one settled setElements
+    → React geometry matches live scene → frames/presentation membership updates
+      → slide signatures/cache keys change → PATCH-124 renders both affected slides
+        → correct PNGs accepted and installed → actual sidebar thumbnails update
+```
+
+**All eight §21d arrows now pass.** Option A plus settled revision-based
+propagation is **technically justified for the geometry portion**.
+
+**This does not authorize the full PATCH-128 implementation.** Metadata remains
+unresolved (§19j hard stop 6, §20e, §21i).
+
+### 23c. Option A — permanent design candidate (not yet authorized)
+
+The permanent geometry design may now be **prepared** around:
+
+**1. Repair the existing `DrawingEmbeddableCard` move writer** (`DrawingLayout.tsx:408`)
+to follow the established convention — `version: previous + 1`, new
+`versionNonce`, `updated: Date.now()` — matching `:1954`, `:2025` and
+`useCanvasActions.ts:75`. **One writer repaired, none added.**
+
+**2. One settled `getSceneVersion`-based propagation path beside the existing
+immediate count/frame-name gate:** retain immediate structural updates; retain
+the latest elements snapshot; debounce rapid changes; propagate only the latest
+settled revision; **no `setElements` per pointer frame**; timer cleanup; **no
+second scheduler; no second scene store.**
+
+**The allowlist stays LOCKED until the metadata path is characterized**, so the
+two halves can be designed and reviewed as one patch rather than shipped in
+sequence.
+
+### 23d. Native and resize coverage — still required, no longer blocking
+
+Native cross-slide move and app-owned resize remain **unproven**, because the
+earlier interactions never established the intended mutations (§22g, §22h). They
+**remain required before final acceptance** but **no longer block the geometry
+architecture selection**.
+
+Later acceptance must use a **real pointer drag**; assert membership via the
+authoritative **`resolveFrameMembership`**, not `frameId` alone; confirm the
+**resize handle received pointerdown**; and confirm **live width/height mutation**
+before evaluating anything downstream.
+
+### 23e. Metadata — the only unresolved invalidation class
+
+A metadata-only post edit produces no element mutation, no element-version
+change, no `getSceneVersion` change, no frames-memo recomputation, no
+signature/cache-key recalculation and no thumbnail render.
+
+**Authorized next action: a metadata invalidation source trace and minimal
+diagnostic.** Use one real visible edit that does not alter geometry — title or
+caption, image/icon, card colour, or another clearly visible field — and trace:
+
+```
+post mutation → local post/store state → DrawingLayout render
+  → padlet collection/reference identity → frames memo dependencies
+    → buildPadletRenderState → slide render signature → thumbnail cache key
+      → presentation composition → PATCH-124 scheduling → displayed thumbnail
+```
+
+**Report the first stale layer.**
+
+**Primary questions:** (1) does `DrawingLayout` receive updated post data?
+(2) does the post collection or a deterministic post revision change? (3) does
+the frames memo rerun? (4) if it reruns, does `buildPadletRenderState` change?
+(5) does the slide signature change? (6) do presentation and thumbnail receive
+the same updated post state? (7) can one existing post-data revision be added
+upstream **without** changing `getSlideRenderSignature` or PATCH-115-owned
+semantics?
+
+**Source prior — offered as a prior, not a finding.** `padlets` is a **prop**
+(`DrawingLayout.tsx:634`), mirrored into `paddletsRef` (`:708`, `:737`). The
+frames memo's deps are **`[elements, canvasLines]`** (`:2234`) — **`padlets` is
+deliberately absent**, while the signature getter reads `paddletsRef.current`
+**live**. So a metadata edit is expected to update the prop and the ref, and the
+memo is expected **not** to rerun — making the **memo dependency set** the
+predicted first stale layer, exactly as §18e and §19h forecast.
+
+**Critical caveat for Q7:** `padlets` must **not** be added raw as a dependency.
+It is a prop array with a new identity on every parent render, so adding it would
+recompute the memo constantly — almost certainly why it was excluded in the first
+place. **A derived, deterministic post-render revision is required, not the
+array.** Measure before designing.
+
+**Do not solve metadata through `getSceneVersion`** (§17e, and Path 3 proved it
+blind). **Do not add per-post listeners.** **Do not implement the full patch in
+the metadata diagnostic.**
+
+### 23f. Hard stops — updated
+
+Stop if: the metadata trigger requires changing `getSlideRenderSignature` or
+crossing PATCH-115; it requires altering PATCH-124; it requires per-post
+listeners or polling; adding the dependency causes the frames memo to recompute
+on every parent render or produces a render loop; or geometry work is needed to
+complete the metadata trace.
+
+### 23g. Next GPT-5.5 instruction (bind)
+
+> **Run the metadata source trace and minimal diagnostic only. Do not implement.**
+>
+> Use one real visible non-geometry edit. Trace every layer in §23e and report
+> the **first stale layer**, answering all seven primary questions.
+>
+> Test the §23e prior explicitly: does the frames memo rerun on a metadata-only
+> edit? If it does not, identify which **deterministic** post-render revision
+> could serve as an upstream dependency — and confirm it does not recompute on
+> every parent render.
+>
+> Do not use `getSceneVersion`, do not add per-post listeners, do not touch
+> `getSlideRenderSignature`, PATCH-124, `node_modules` or `excalidraw_fork`.
+> Restore everything; leave no candidate behind.
+
+### 23h. Status
+
+**PATCH-128: OPEN · GEOMETRY PIPELINE PROVEN · OPTION A GEOMETRY DESIGN
+JUSTIFIED · PREVIOUS THUMBNAIL FAILURE CLASSIFIED AS TEST FALSE FAILURE ·
+METADATA PATH UNRESOLVED · FULL IMPLEMENTATION BLOCKED.**
+Classification **E** (§23a). Geometry chain proven end to end (§23b). Native and
+resize coverage required but non-blocking (§23d). Metadata is now the **only**
+unresolved invalidation class. Allowlist **LOCKED**.
+
+**PATCH-124 unchanged and correct. `getSlideRenderSignature` unchanged.
+PATCH-115 untouched.**
+**PATCH-127: OPEN · B2C AUTHORIZED · NOT STARTED · candidate removed.**
+**PATCH-126: DESIGNATED, UNAUTHORED, UNAUTHORIZED.**
+**PATCH-125 / 124 / 123 / 122 / 121 / 120 / 117: CLOSED.**
+**PATCH-116: CANCELLED.**
+**PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
+**PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
+**PATCH-119: DESIGNATED, UNAUTHORED, UNAUTHORIZED, UNTOUCHED.**
+
+**Recorded debt, updated.** Added: **thumbnail assertions must re-query sidebar
+images by stable slide identity at assertion time** — the §22 false failure cost
+a full diagnostic cycle. Retained: the `DrawingLayout.tsx:408` revision-contract
+violation, now measured **and** its repair proven through the full pipeline —
+valuable independently of PATCH-128 because Excalidraw's reconcile conflict
+ordering depends on those fields; propagation into React is nondeterministic
+(§19c); the split-brain `frames` memo (§17c); `getSceneVersion` blind to
+metadata-only changes (§17e); plus the upstream Excalidraw null-dereference, the
+`unload` warning, the tsconfig-excluded fork, and the PATCH-123 §14k /
+PATCH-124 §14l / PATCH-125 §13l ledgers with the unresolved production-build
+failure.
