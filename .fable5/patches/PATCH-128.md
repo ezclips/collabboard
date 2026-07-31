@@ -2753,3 +2753,240 @@ for the app-owned path; nondeterministic React propagation (§19c); the split-br
 the upstream Excalidraw null-dereference, the `unload` warning, the tsconfig-excluded
 fork, and the PATCH-123 §14k / PATCH-124 §14l / PATCH-125 §13l ledgers with the
 unresolved production-build failure.
+
+---
+
+## 27. Amendment — DEBOUNCE GENERICALLY DEFECTIVE; TWO-REF SPIKE AUTHORIZED (2026-08-01, CTO)
+
+The §26h focused diagnostic was executed and **fully restored**. No implementation
+remains.
+
+### 27a. Primary result — the defect is **not** native-specific
+
+The temporary settled-propagation mechanism **fails identically for both** a native
+Excalidraw drag and an app-owned `DrawingEmbeddableCard` drag. In both controls:
+scene changes are observed; timer scheduling occurs repeatedly; **timer callback
+entry count remains zero**; settlement never completes; the same endless reschedule
+pattern occurs.
+
+| after `pointerup`, 4.5 s traced | native | app-owned |
+|---|---|---|
+| `onChange` calls | 266 | 272 |
+| of those, real scene-version changes | **1** | **2** |
+| of those, any appState field changed | 1 (`cursorButton`, t=9 ms) | **0** |
+| timer scheduled / cleared | 266 / 266 | 272 / 272 |
+| **timer callback entered** | **0** | **0** |
+| settled `setElements` calls | **0** | **0** |
+| effect cleanups | 0 | 0 |
+
+Last recorded event at **t=4525 ms**: `onChange (sceneVersionChanged:false,
+changedAppKeys:[]) → timerCleared → timerScheduled`. Still rescheduling, 4.5 seconds
+after the interaction ended.
+
+### 27b. Correction to §26g and §23b — **conflict recorded, evidence not erased**
+
+§26g characterized this as a **native** acceptance problem while retaining the
+earlier app-owned settled-propagation result. **The new diagnostic contradicts that
+framing.** Amend the record to state:
+
+- **the current candidate debounce implementation is generically defective;**
+- **native and app-owned drags are affected equally;**
+- **the earlier app-owned "one settled `setElements` call" result (§22a) is not
+  reconciled with the mechanism reintroduced in §25/§26;**
+- **either the earlier spike used materially different temporary code, or its
+  measurement requires re-examination;**
+- **until reconciled, do not cite the earlier app-owned settled-call result as proof
+  that this debounce mechanism works.**
+
+**Do not erase the earlier evidence. It is marked CONFLICTING and UNRESOLVED.**
+
+This is the correct handling: §22a's `settled setElements calls: 1` was recorded as
+measured fact and remains in the record. What is withdrawn is the *inference* that
+the mechanism works. Two measurements disagree; the patch says so plainly rather
+than quietly preferring the newer one.
+
+### 27c. Root cause — one ref carrying two meanings
+
+The temporary implementation uses **one revision ref for two separate meanings**:
+
+1. last scene revision **observed** by `onChange`;
+2. last scene revision successfully **propagated** after settlement.
+
+During `onChange` the ref is updated immediately to the newly observed revision, the
+timer is scheduled, and later `onChange` calls compare against that same
+already-updated ref — so the scheduling/guard logic continually resets or invalidates
+settlement and **the callback never becomes the event that advances a distinct
+settled revision.**
+
+**The implementation loses the distinction between observed, pending and settled.**
+
+**This is a candidate-mechanism bug. It is not an Excalidraw bug and not a PATCH-124
+issue.** PATCH-124 remains unchanged — the **ninth** consecutive confirmation.
+
+### 27d. Timer failure classification — **T1**
+
+Per the §26h T1–T7 scheme the execution report returned **T1 — timer continuously
+reset by post-release `onChange` traffic**, with the §27c bookkeeping error as the
+mechanism behind it.
+
+**Ruled out by direct evidence, not by assumption:**
+
+- **T2 / T5** (effect cleanup clearing the timer; ref replaced across renders) —
+  `effectCleanupCountAfterUp: 0` with stable render counts.
+- **T3 / T4** (callback runs but exits a guard; callback throws or is cancelled) —
+  `callbackEnteredCountAfterUp: 0`. **The callback body never executes, so it cannot
+  be exiting on a guard.** §26h required callback entry to be instrumented
+  *separately* from `setElements` precisely so this could be distinguished; it was,
+  and it was.
+- **T6** (event-loop starvation) — the ~15–20 ms `onChange` cadence is steady and
+  consistent with a normal render loop, not a blocked thread.
+
+### 27e. Genericity finding — separate mechanisms **REJECTED**
+
+Both paths fail under the same temporary debounce. **Separate native and app-owned
+propagation systems are rejected. One shared corrected mechanism should be
+evaluated.**
+
+**Do not introduce:** one native listener; one app-owned listener; per-object-type
+commit paths; a second scene store. (§4, §24j and §26h all forbid this; the evidence
+now removes the only argument that could have justified it.)
+
+### 27f. Candidate correction — narrow two-ref model
+
+Evidence-supported contract:
+
+1. `onChange` stores the **latest elements snapshot**;
+2. `onChange` records the **latest observed** scene version;
+3. scheduling compares **latest observed** against **last settled**;
+4. the timer callback propagates the latest snapshot;
+5. **only after successful propagation** does it advance **last settled**;
+6. later no-op `onChange` traffic **must not erase the pending difference**;
+7. **latest snapshot wins.**
+
+**Evidence-supported, not authorized as production implementation. Do not combine
+observed and settled state in one ref.**
+
+### 27g. Continuous `onChange` traffic — an independent finding
+
+The diagnostic confirms **post-interaction/no-op `onChange` traffic continues
+indefinitely** — ~266–272 calls in 4.5 idle seconds, of which only 1–2 carried a real
+scene-version change and essentially none carried an appState change.
+
+**Therefore a pure trailing debounce may remain vulnerable even after the two-ref
+fix.** Evaluate in the next spike: whether the two-ref fix **alone** allows
+settlement; whether continuous `onChange` calls with unchanged scene revision still
+reset the timer; whether timer reset should occur **only when scene revision
+changes**; whether a bounded maximum-wait is required as a safety net.
+
+**Do not authorize maximum-wait yet. Measure first.**
+
+This finding is valuable independently of PATCH-128: any future work that debounces
+on Excalidraw `onChange` will hit it.
+
+### 27h. Candidate signal assessment
+
+- **Pointerup / interaction-end signal** — **supported** as a real singular
+  interaction boundary; **not selected** as the primary architecture; may be
+  considered as a fallback or flush signal.
+- **Bounded maximum-wait debounce** — **supported** as a possible safety net,
+  because continuous no-op traffic is now proven; **not authorized.**
+- **AppState interaction-flag gating** — **weakened.** Post-release `changedAppKeys`
+  exposed no reliable generic flag beyond early cursor-button state.
+- **Separate native/app-owned signals** — **REJECTED** (§27e).
+
+### 27i. Next authorized action — one narrow two-ref debounce spike
+
+The spike **must**:
+
+1. use the same real **native and app-owned** drag fixtures;
+2. change **only the revision bookkeeping** — separate last observed revision,
+   separate last settled revision;
+3. preserve **one** latest elements snapshot;
+4. preserve **one** timer;
+5. reset the timer **only when the observed scene revision actually changes**;
+6. record **callback entry independently from `setElements`**;
+7. prove whether **one** settled propagation completes after each drag;
+8. prove whether continuous unchanged-revision `onChange` traffic prevents
+   completion;
+9. **stop before adding pointerup flushing or maximum-wait logic.**
+
+**Required evidence for both drag types:** `onChange` count; scene-revision-change
+count; timer schedules; timer resets; **callback entries**; settled `setElements`
+calls; last observed revision; last settled revision; React geometry after
+settlement; frames memo recomputation.
+
+**The first spike question is only:** *does separating observed and settled revision
+state make the existing debounce complete for both paths?* If **yes**, then decide
+whether no-op traffic still requires maximum-wait or pointerup flushing. If **no**,
+identify the next exact blocker.
+
+**Do not rerun:** M2 metadata acceptance; PATCH-124 traces; thumbnail pixel tests;
+the A–G matrix; resize or container scenarios.
+
+### 27j. Boundaries — bind
+
+- Do not alter PATCH-124. Do not alter `getSlideRenderSignature`. Do not modify M2 in
+  this diagnostic.
+- Do not implement pointerup flushing yet. Do not implement maximum-wait yet.
+- Do not create separate native/app-owned mechanisms.
+- Do not resume PATCH-127. Do not touch protected paths.
+- Do not modify `node_modules` or `excalidraw_fork`.
+
+### 27k. Next GPT-5.5 instruction (bind)
+
+> **Run the two-ref debounce spike only. Temporary. Do not implement the patch.**
+>
+> Change **only** the revision bookkeeping (§27f): separate `lastObservedSceneVersion`
+> from `lastSettledSceneVersion`, one snapshot, one timer, reset **only** when the
+> observed revision actually changes, and advance the settled revision **only after**
+> propagation succeeds.
+>
+> Run the **same** real native **and** app-owned drag fixtures. Instrument **callback
+> entry separately from `setElements`** — §27d turned on exactly that distinction.
+>
+> Answer one question: **does the two-ref separation make the debounce complete for
+> both paths?** Then stop. **Do not add pointerup flushing or maximum-wait in this
+> pass** — §27g lists them as *later* decisions contingent on what this spike
+> measures.
+>
+> Do not rerun M2 acceptance, PATCH-124 traces, thumbnail pixel tests, the A–G matrix,
+> or resize/container scenarios. Do not create separate native/app-owned mechanisms,
+> alter `getSlideRenderSignature`, cross PATCH-115, or touch `node_modules` or
+> `excalidraw_fork`. Restore everything; leave nothing staged.
+
+### 27l. Status
+
+**PATCH-128: OPEN · OPTION A WRITER REPAIR PROVEN · CURRENT SETTLED DEBOUNCE
+GENERICALLY DEFECTIVE · EARLIER APP-OWNED SETTLED-CALL EVIDENCE UNRECONCILED ·
+TWO-REF DEBOUNCE SPIKE AUTHORIZED · M2 METADATA DESIGN JUSTIFIED BUT ACCEPTANCE
+INCOMPLETE · PRODUCTION ALLOWLIST LOCKED · FULL IMPLEMENTATION BLOCKED.**
+
+The failure is now **localized to a single bookkeeping error in the patch's own
+candidate** — the cheapest possible place for a defect to live, and the first one
+this patch has found in its own proposal rather than in the existing product.
+
+**PATCH-124 unchanged and correct (ninth confirmation). `getSlideRenderSignature`
+unchanged. PATCH-115 untouched.**
+**PATCH-127: OPEN · B2C AUTHORIZED · NOT STARTED · candidate removed.**
+**PATCH-126: DESIGNATED, UNAUTHORED, UNAUTHORIZED.**
+**PATCH-125 / 124 / 123 / 122 / 121 / 120 / 117: CLOSED.**
+**PATCH-116: CANCELLED.**
+**PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
+**PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
+**PATCH-119: DESIGNATED, UNAUTHORED, UNAUTHORIZED, UNTOUCHED.**
+
+**Recorded debt, updated.** Added: **Excalidraw `onChange` fires continuously at rest
+(~15–20 ms) with no scene or appState change** (§27g) — any future debounce on that
+callback must assume this; **one ref must never carry both "observed" and "settled"
+meanings** (§27c); and **§22a's app-owned settled-call result conflicts with §27a and
+is unreconciled** (§27b). Retained: a stable output with a flat input-arrival counter
+proves absence of input, not correct filtering (§25e, §26e); a mechanism proven for
+one path must not be described as proven generally (§26g); `updated_at` is not a
+reliable client-side invalidation trigger under the optimistic update path (§24c);
+thumbnail assertions must re-query by stable slide identity (§23a); the
+`DrawingLayout.tsx:408` revision-contract violation, measured and its repair proven
+for the writer itself; nondeterministic React propagation (§19c); the split-brain
+`frames` memo (§17c); `getSceneVersion` blind to metadata-only changes (§17e); plus
+the upstream Excalidraw null-dereference, the `unload` warning, the tsconfig-excluded
+fork, and the PATCH-123 §14k / PATCH-124 §14l / PATCH-125 §13l ledgers with the
+unresolved production-build failure.
