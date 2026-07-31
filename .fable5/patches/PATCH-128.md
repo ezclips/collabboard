@@ -1118,3 +1118,223 @@ drag (21 calls/drag, §19a); plus the upstream Excalidraw null-dereference, the
 `unload` warning, the tsconfig-excluded fork, and the PATCH-123 §14k /
 PATCH-124 §14l / PATCH-125 §13l ledgers with the unresolved production-build
 failure.
+
+---
+
+## 20. Amendment — GEOMETRY SPIKE FAILED; getSceneVersion TRIGGER REJECTED (2026-07-31, CTO)
+
+The authorized geometry spike was executed and **fully restored**. No
+implementation remains. It **failed at Scenario A**.
+
+### 20a. Result
+
+Real app-owned drag: live geometry `x=360,y=120 → x=1520,y=240`; live membership
+`frame-landscape → frame-portrait`. React elements **remained `x=360,y=120`,
+frame-landscape**.
+
+```
+onChange calls                    1242
+sceneVersionChanges                  0      ← getSceneVersion never moved
+immediate structural setElements     0
+settled revision setElements         0
+frames memo recomputations           0
+thumbnail renders                 none
+```
+
+Cache keys stale (`landscape 2201291394`, `portrait 1204495343`). Landscape
+thumbnail still contained the post (2381 meaningful px, bounds
+`35,36→162,98`); **portrait remained blank (0 meaningful px, bounds null)**.
+**No unrelated render path rescued it** — §19c's nondeterminism confirmed in the
+negative.
+
+**The temporary scheduler was revision-driven and therefore correctly did
+nothing.** The spike did not malfunction; **its trigger was unsuitable.**
+
+**Ruled: `getSceneVersion` is WITHDRAWN as the authorized sole geometry
+trigger.** §19f clause 5 is superseded by §20d.
+
+### 20b. WHY — answered from source. `getSceneVersion` is not defective.
+
+The owner was right to warn against assuming the primitive was at fault. **It is
+not. The app-owned writer violates Excalidraw's mutation contract.**
+
+```
+DrawingLayout.tsx:408   const updatedSceneEl = { ...sceneEl, x: newX, y: newY };
+:410                    excAPI.updateScene({ … elements: […map…], commitToHistory: false })
+```
+
+A spread clone that changes `x`/`y` and **copies `version`, `versionNonce` and
+`updated` verbatim**. `getSceneVersion` folds element **`version`**; if no
+element's `version` changes, the scene version cannot change. **Zero
+`sceneVersionChanges` across 1242 `onChange` calls is the exact, predicted
+consequence.**
+
+Answers to the §diagnosis questions, from source:
+
+1. **Mutated in place?** No — a spread clone.
+2. **x/y changed without incrementing version?** **Yes. This is the defect.**
+3. **`versionNonce` unchanged?** Yes.
+4. **Same object identity?** No — new identity each frame. Identity is therefore
+   useless as a revision signal, and is a hard stop anyway.
+7. **What `getSceneVersion` folds:** element `version`, which this writer never
+   increments.
+8. **Native vs app-owned:** native drag goes through Excalidraw's own element
+   mutation and **does** increment `version`. **Expected to differ — confirm by
+   census (§20c).**
+
+### 20c. The repository already has the correct precedent — three sites
+
+This is the decisive finding, and it means **no Excalidraw semantics need to be
+invented**:
+
+```
+DrawingLayout.tsx:1954-1956      version: (el.version ?? 1) + 1,
+                                 versionNonce: Math.floor(Math.random() * 1e9),
+                                 updated: Date.now(),
+DrawingLayout.tsx:2025-2027      (identical three-field bump)
+useCanvasActions.ts:75-77        (identical three-field bump)
+```
+
+**Three existing app-owned writers already bump `version`, `versionNonce` and
+`updated` on an immutable spread. The drag writer at `:408` is the outlier —
+it is the only one that does not.**
+
+So Option A is not "inventing version fields"; it is **making one writer match
+the convention the repository already applies everywhere else**. Per §"BOUNDARY
+WITH DRAG WRITER", that is **repairing the existing mutation, not adding a
+second writer.**
+
+**Still required before authorization — the field-level census** (`x, y, width,
+height, angle, version, versionNonce, updated, object identity, array identity,
+getSceneVersion`, before/after) for **app-owned move, app-owned resize, native
+move, native resize**. Source predicts app-owned move/resize fail to increment
+while native increments. **Measure it; do not ship on my prediction.**
+
+### 20d. Trigger options — ranked on evidence
+
+**OPTION A — repair the app-owned mutation. LEADING.**
+Add the established three-field bump at `:408`. Then `getSceneVersion` becomes a
+valid trigger for **both** native and app-owned geometry, uniformly, with no new
+concept and no per-type logic. Narrowest and most generic.
+
+**Two risks that must be cleared before authorization:**
+1. **Per-frame version inflation** — `version` would increment on every
+   pointermove (1242 `onChange` calls observed). Native Excalidraw does exactly
+   this, so it is contract-consistent, but confirm nothing in the app or any
+   sync/reconciliation path treats `version` as monotonic-per-commit.
+2. **`commitToHistory: false` must stay**, so per-frame bumps do not pollute
+   undo.
+
+**OPTION B — deterministic geometry signature. VIABLE FALLBACK.** Only if A
+proves unsafe. Must cover `id, type, frameId, x, y, width, height, angle,
+version/versionNonce where available, deletion state, group ids, bound-element
+relationships`; must not rely on object identity, must not deep-serialize per
+pointer frame, must be cheap at settlement, must not duplicate
+`getSlideRenderSignature`, and **must exclude post metadata** — metadata stays a
+separate trigger.
+
+**OPTION C — unconditional settled propagation. NOT PREFERRED.** Without a
+revision or signature comparison it risks a settle→render→settle loop and
+over-rendering. It also **still needs a bounded equality check**, at which point
+it has become Option B with weaker guarantees.
+
+**OPTION D — explicit drag-commit signal. REJECTED.** It creates one path for
+app-owned and another for native, and would miss resize, style and delete
+operations — precisely the per-type divergence §5 and §18c forbid. A generic
+settled `onChange` solution is preferable and, given §20c, is achievable.
+
+### 20e. Metadata — unchanged and still unresolved
+
+**No geometry trigger solves metadata.** Title/caption edits, image/icon changes,
+card colour, visible reactions/comments, and other post-data changes without
+Excalidraw geometry mutation remain invisible to every option above.
+
+**The final PATCH-128 design requires BOTH: (1) a reliable geometry/scene
+trigger, and (2) a reliable post-render-state trigger.** Shipping (1) alone must
+not be described as resolving PATCH-128 (§19j hard stop 6).
+
+### 20f. PATCH-115 and PATCH-124 — unchanged
+
+**Do not change `getSlideRenderSignature`** — it already folds geometry *and*
+post render state when invoked; it is simply never re-invoked. **Do not alter
+PATCH-124 scheduling** — its inputs are stale because upstream React slide state
+is stale. Neither is at fault; this is now the fourth diagnostic to confirm it.
+
+### 20g. NEXT AUTHORIZED ACTION — diagnosis only
+
+**Authorized: the §20c field-level census and one trigger-comparison
+diagnostic. Nothing else.**
+
+It must answer: why app-owned geometry does not alter `getSceneVersion`
+(source-answered in §20b — **confirm by measurement**); whether native geometry
+does; whether immutable/versioned mutation is already supported (§20c says
+**yes**, at three sites — confirm); whether a deterministic geometry signature is
+necessary; whether unconditional settled propagation would loop or over-render;
+and which trigger is narrowest and generic across native and app-owned elements.
+
+**No further geometry implementation spike is authorized until a trigger
+strategy is selected on this evidence.** **The §10 production allowlist stays
+LOCKED**; the provisional five-file forecast is **not** authorization.
+
+### 20h. Hard stops — carried and extended
+
+Stop if the solution requires: modifying `node_modules` or `excalidraw_fork`;
+**manually inventing Excalidraw `versionNonce` behaviour without precedent** —
+note §20c supplies precedent, so Option A does *not* trip this; modifying
+PATCH-115 signature logic; modifying PATCH-124 scheduling; per-post-type
+listeners; polling; rendering thumbnails on every pointermove; **treating object
+identity as a geometry revision**; or combining metadata work into the geometry
+diagnostic.
+
+**Added:** stop if repairing the `:408` writer changes undo/history behaviour,
+or if any sync/reconciliation path depends on `version` not incrementing
+per-frame.
+
+### 20i. Next GPT-5.5 instruction (bind)
+
+> **Diagnosis only. No implementation spike.**
+>
+> Produce the §20c field-level census — `x, y, width, height, angle, version,
+> versionNonce, updated, object identity, array identity, getSceneVersion`,
+> before and after, for app-owned move, app-owned resize, native move, native
+> resize.
+>
+> Confirm or refute from measurement: the app-owned writer at
+> `DrawingLayout.tsx:408` does not increment `version`, while native drag does,
+> and the three-field bump at `:1954`, `:2025` and `useCanvasActions.ts:75` is
+> the established in-repo convention.
+>
+> Report whether anything depends on `version` not incrementing per frame, and
+> whether `commitToHistory: false` is preserved on that path.
+>
+> Do not repair the writer yet. Do not touch metadata,
+> `getSlideRenderSignature`, PATCH-124, `node_modules` or `excalidraw_fork`.
+> Restore everything; leave no candidate.
+
+### 20j. Status
+
+**PATCH-128: OPEN · GEOMETRY ROOT CAUSE CONFIRMED · getSceneVersion TRIGGER
+REJECTED · TRIGGER SOURCE DIAGNOSIS REQUIRED · METADATA PATH UNRESOLVED · FULL
+IMPLEMENTATION BLOCKED.**
+Cause of the failure **identified from source** (§20b): the app-owned drag
+writer clones without bumping `version`. **Option A leads**, with in-repo
+precedent at three sites (§20c), pending the confirming census. Allowlist
+**LOCKED**.
+
+**PATCH-127: OPEN · B2C AUTHORIZED · NOT STARTED · candidate removed.**
+**PATCH-126: DESIGNATED, UNAUTHORED, UNAUTHORIZED.**
+**PATCH-125 / 124 / 123 / 122 / 121 / 120 / 117: CLOSED.**
+**PATCH-116: CANCELLED.**
+**PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
+**PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
+**PATCH-119: DESIGNATED, UNAUTHORED, UNAUTHORIZED, UNTOUCHED.**
+
+**Recorded debt, updated:** the app-owned drag writer at `DrawingLayout.tsx:408`
+**silently violates Excalidraw's element-revision contract** — a defect with
+consequences beyond this patch, since any consumer relying on `version` or
+`getSceneVersion` is equally blind to app-owned drags; propagation into React is
+nondeterministic (§19c); the split-brain `frames` memo (§17c); `getSceneVersion`
+blind to metadata-only changes (§17e); plus the upstream Excalidraw
+null-dereference, the `unload` warning, the tsconfig-excluded fork, and the
+PATCH-123 §14k / PATCH-124 §14l / PATCH-125 §13l ledgers with the unresolved
+production-build failure.
