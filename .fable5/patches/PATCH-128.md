@@ -2474,3 +2474,282 @@ nondeterministic React propagation (§19c); the split-brain `frames` memo (§17c
 Excalidraw null-dereference, the `unload` warning, the tsconfig-excluded fork, and
 the PATCH-123 §14k / PATCH-124 §14l / PATCH-125 §13l ledgers with the unresolved
 production-build failure.
+
+---
+
+## 26. Amendment — FINAL ACCEPTANCE MATRIX FAILED; NATIVE SETTLED-PROPAGATION FAILURE (2026-07-31, CTO)
+
+The §25j A–G matrix was executed and **fully restored**. No implementation remains.
+
+### 26a. Result — **FAIL**
+
+The §25 pass standard required **all** of A–G. Observed:
+
+| | scenario | result |
+|---|---|---|
+| A | non-text metadata edit | **PASS** |
+| B | container/child | **UNPROVEN** |
+| C | outside-slide edit | **PASS** |
+| D | identity-churn control | **UNPROVEN** |
+| E | native cross-slide move | **PARTIAL** |
+| F | app-owned resize | **UNPROVEN** |
+| G | performance | **UNPROVEN** |
+
+**Production allowlist remains LOCKED. Full implementation remains BLOCKED.
+PATCH-128 must not be authorized for production implementation. The geometry design
+must no longer be described as fully accepted** (§26g).
+
+### 26b. Scenario A — **PASS**
+
+A real `TodoEditor` completion-state change through the application UI. Local state
+arrival, revision change and memo recomputation were proven **before** any
+downstream assertion, per §25j's ordering requirement.
+
+| | before | after |
+|---|---|---|
+| thumbnail digest | `3712725325` | **`1816075446`** |
+| revision computation count | 4 | **6** |
+| frames memo recomputation count | 4 | **6** |
+| x/y/width/height | 360,120,320,220 | **unchanged** |
+
+Thumbnail re-queried by stable slide identity. No manual refresh.
+
+**Side finding — do not conflate.** The app-owned element `version` moved 1 → 2
+during the metadata edit. Traced to the **existing embeddable-content
+synchronization effect keyed on `getPadletRenderSignature`** — *not* to the
+temporary M2 mechanism. **This is not evidence that Excalidraw revision fields are
+or should be the metadata trigger** (§24e stands).
+
+### 26c. Scenario B — **UNPROVEN**
+
+Source and UI inspection found **no reliable real render-relevant child-edit path in
+`DrawingLayout` canvas mode.** Children rendered through
+`RowColumnContainerCard`/`PostCardContent` do not receive the editable drawing
+callback available in `FreeformPadletCards`. The only reliable child affordance
+found writes `metadata.detachedComments`, which is **not** part of
+`buildPadletRenderState`'s canonical visible-state fields and therefore cannot
+exercise bounded render-state recursion.
+
+**A real UI path was not executed. Do not infer acceptance from the §25c unit test
+proving child-field determinism** — that proves the revision *would* detect the
+change, not that the product delivers it.
+
+### 26d. Scenario C — **PASS**
+
+A real `TodoEditor` edit on a post outside all slide frames. Arrival proven first:
+revision computation **6 → 8**, frames memo recomputation **6 → 8**. The tested
+slide's thumbnail digest **remained `1816075446`**; no affected slide output
+changed.
+
+**This is the §25e gap closed.** It proves a **global** metadata revision may
+recompute slide derivation while unchanged per-slide signatures still let PATCH-124
+avoid unnecessary thumbnail output — the exact §24g performance concession the
+permanent design depends on.
+
+### 26e. Scenario D — **UNPROVEN**
+
+A direct Supabase write to `position_x` was used to attempt identity churn without
+changing canonical render state. Dedicated instrumentation recorded
+`padletsIdentityChangeCount` **4 → 4 over 12 seconds**: the realtime update was
+never proven to reach the browser's local padlet state.
+
+**The stable thumbnail is therefore not acceptance evidence.**
+
+**Rule, recorded:** *a stable output accompanied by a flat input-arrival counter
+proves absence of input, not correct filtering.* §25e stated this; this run built
+instrumentation specifically to detect it and **the instrumentation worked** —
+catching what would otherwise have been the fourth false green of this patch.
+Identity-only determinism remains supported by unit evidence and lacks live
+acceptance.
+
+### 26f. Scenario E — **PARTIAL, with a new real failure**
+
+A real pointer drag moved a native Excalidraw rectangle from slide E1 to slide E2.
+
+**Proven:** `x` 150 → 1500; element `version` 1 → 17; `getSceneVersion` 3 → 22;
+authoritative `resolveFrameMembership` reported `slide-e2`. **Native geometry and
+membership mutation succeeded** — closing the §22g/§23d gap that made the earlier
+native attempt *inconclusive*.
+
+**Not proven:** settled React propagation; frames memo recomputation; presentation
+update; thumbnail update.
+
+**NEW FAILURE — the settled propagation timer was scheduled repeatedly and never
+fired.** Schedule counters reached **~288–303**; `settledSetElementsCount` remained
+**absent/zero**; idle wait **4 seconds**; **zero** page errors; frames memo
+recomputation **flat**; thumbnails **unchanged**.
+
+**This is not a missing interaction.** §22g and §22h were classified inconclusive
+precisely because the interaction never occurred. Here the drag and the membership
+transition are *proven*. **The failure is in the temporary settled-propagation
+mechanism itself, for native Excalidraw activity.**
+
+### 26g. Geometry governance correction
+
+**Proven:** repairing the app-owned drag writer's revision fields is effective;
+`getSceneVersion` then reflects app-owned moves; settled propagation worked in the
+earlier **app-owned** controlled case (§22a, §23b); history behaviour passed in that
+same controlled case.
+
+**Not proven:** that the same settled mechanism reliably completes after a **native**
+Excalidraw drag.
+
+**Revised geometry status:**
+
+> **OPTION A WRITER REPAIR PROVEN · SETTLED PROPAGATION MECHANISM NOT GENERICALLY
+> ACCEPTED.**
+
+**Do not authorize the permanent settled-timer design until the native failure is
+diagnosed.** §23b's "all eight arrows pass" was true **for the app-owned path only**;
+generalizing it to native activity was unwarranted, and this amendment withdraws
+that generalization.
+
+### 26h. Required next diagnosis for E
+
+Trace **why the timer is continually scheduled but never completes.** Inspect:
+
+1. whether `onChange` continues firing after pointer release;
+2. whether app-state-only changes keep resetting the timer;
+3. whether selection, hover, collaborators, cursor state, scroll or viewport changes
+   trigger the same `onChange` path;
+4. whether the timer callback closes over stale revision/state;
+5. whether effect cleanup repeatedly clears the timer;
+6. whether `DrawingLayout` rerenders recreate or replace timer refs;
+7. whether the callback runs but exits its revision comparison;
+8. whether native and app-owned paths differ in post-release `onChange` traffic.
+
+**Record timestamped:** last `pointerup`; every `onChange` after `pointerup`; timer
+schedule/reset; timer clear source; timer callback entry; callback guard result;
+final scene revision; last propagated revision; component render/effect cleanup
+count.
+
+**Do not redesign the mechanism before identifying which event prevents settlement.**
+
+Then evaluate whether the correct **generic** signal is instead: `pointerup`/
+interaction completion combined with the latest scene snapshot; Excalidraw
+`appState` interaction flags; a **bounded maximum-wait** debounce; or another
+supported committed-scene indication.
+
+**Do not create separate native and app-owned synchronization systems unless source
+evidence proves it unavoidable** — that would be §4's second-algorithm prohibition
+in a new form.
+
+### 26i. Scenario F — **UNPROVEN**
+
+The diagnostic could not reliably target the real Excalidraw resize handle; live
+width/height did not change. Per the §25j bound fallback this **cannot characterize
+propagation or thumbnail behaviour. Do not mark pass or fail.**
+
+A later test must first prove: the correct handle receives `pointerdown`; live
+width/height change; `version`/`getSceneVersion` change. **Only then** may
+downstream acceptance be evaluated. (§22h, unchanged and still owed.)
+
+### 26j. Scenario G — **UNPROVEN**
+
+A disposable board with **4 slides and 32 padlets** was created, but the test timed
+out during setup/interaction before producing usable measurements.
+
+**No conclusions may be drawn** about production-scale M2 cost, frames-memo
+frequency, drag responsiveness, thumbnail render filtering, or timer behaviour under
+larger load.
+
+### 26k. History, reconcile, PATCH-124
+
+**History/reconcile was not independently rerun in this matrix.** The earlier Option
+A evidence stands — pointermove non-history updates, one undo restores, redo
+restores, no per-frame undo entries — but **must not be treated as covering the newly
+observed native settled-timer failure** (§26f).
+
+**No PATCH-124 defect was found.** A and C were consistent with changed per-slide
+signatures causing output refresh and unchanged signatures avoiding it. **The E
+failure occurred upstream of frames/signature/cache-key invalidation.** PATCH-124
+remains unchanged — the **eighth** consecutive confirmation.
+
+### 26l. M2 status
+
+**M2 remains the justified metadata architecture.** Real evidence now covers **text
+metadata** (§25d), **non-text todo metadata** (§26b) and **outside-slide filtering**
+(§26d).
+
+Still unproven live: container/child recursion; identity-only allocation churn;
+representative-board performance.
+
+**Do not revoke M2 on those gaps — and do not mark complete acceptance either.**
+
+### 26m. Next action — bind
+
+**Authorize only a focused native settled-propagation diagnostic (§26h).**
+
+**Do not repeat A, C, or the thumbnail renderer trace. Do not begin production
+implementation.**
+
+After E resolves, remaining acceptance debt is **B** (container/child real UI path),
+**D** (live identity-churn control), **F** (real app-owned resize), **G**
+(representative performance run).
+
+Opus may later decide whether B, D, F or G can be accepted as **documented
+limitations**. **No such waiver is authorized in this amendment.**
+
+### 26n. Boundaries — bind
+
+- Do not alter PATCH-124. Do not alter `getSlideRenderSignature`.
+- Do not use raw `padlets` identity. Do not use Excalidraw revisions as the metadata
+  trigger.
+- Do not create per-post listeners. Do not introduce polling.
+- Do not create separate native and app-owned scene stores.
+- Do not resume PATCH-127. Do not touch protected paths.
+- Do not modify `node_modules` or `excalidraw_fork`.
+
+### 26o. Next GPT-5.5 instruction (bind)
+
+> **Run the native settled-propagation diagnostic only. Do not fix, redesign, or
+> implement.**
+>
+> Reproduce §26f: a real pointer drag of a **native** Excalidraw element across
+> slides. The drag and membership transition are already proven — **do not
+> re-litigate them.** Answer the eight §26h questions and produce the timestamped
+> record §26h requires.
+>
+> **Report which event prevents settlement.** Stop there. Do not propose or build a
+> replacement signal in the same pass — §26h lists candidates for a *later*
+> decision, not for this diagnostic.
+>
+> Do not repeat scenarios A or C, retrace the thumbnail renderer, alter PATCH-124 or
+> `getSlideRenderSignature`, cross PATCH-115, or touch `node_modules` or
+> `excalidraw_fork`. Restore everything; leave nothing staged.
+
+### 26p. Status
+
+**PATCH-128: OPEN · OPTION A APP-OWNED WRITER REPAIR PROVEN · SETTLED GEOMETRY
+PROPAGATION FAILS NATIVE ACCEPTANCE · M2 METADATA DESIGN JUSTIFIED BUT ACCEPTANCE
+INCOMPLETE · FINAL MATRIX FAILED · PRODUCTION ALLOWLIST LOCKED · FULL IMPLEMENTATION
+BLOCKED.**
+
+The metadata half advanced (A, C pass). The geometry half **regressed in confidence**:
+a mechanism previously believed proven is now known to fail for native activity.
+**That is the correct outcome of an acceptance matrix — it found something.**
+
+**PATCH-124 unchanged and correct (eighth confirmation). `getSlideRenderSignature`
+unchanged. PATCH-115 untouched.**
+**PATCH-127: OPEN · B2C AUTHORIZED · NOT STARTED · candidate removed.**
+**PATCH-126: DESIGNATED, UNAUTHORED, UNAUTHORIZED.**
+**PATCH-125 / 124 / 123 / 122 / 121 / 120 / 117: CLOSED.**
+**PATCH-116: CANCELLED.**
+**PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
+**PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
+**PATCH-119: DESIGNATED, UNAUTHORED, UNAUTHORIZED, UNTOUCHED.**
+
+**Recorded debt, updated.** Added: **the settled-propagation timer is scheduled but
+never fires after a native Excalidraw drag** (§26f) — the first *mechanism* defect
+this patch has found in its own candidate rather than in the existing product; and
+**a proven-for-one-path mechanism must not be described as proven generally**
+(§26g). Retained: a stable output with a flat input-arrival counter proves absence of
+input, not correct filtering (§25e, re-confirmed by §26e); `updated_at` is not a
+reliable client-side invalidation trigger under the optimistic update path (§24c);
+thumbnail assertions must re-query by stable slide identity (§23a); the
+`DrawingLayout.tsx:408` revision-contract violation, measured and its repair proven
+for the app-owned path; nondeterministic React propagation (§19c); the split-brain
+`frames` memo (§17c); `getSceneVersion` blind to metadata-only changes (§17e); plus
+the upstream Excalidraw null-dereference, the `unload` warning, the tsconfig-excluded
+fork, and the PATCH-123 §14k / PATCH-124 §14l / PATCH-125 §13l ledgers with the
+unresolved production-build failure.
