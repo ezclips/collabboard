@@ -397,3 +397,250 @@ substitutes an element count (§3) — the root enabler of this class of defect;
 the upstream Excalidraw null-dereference (PATCH-127 §16b); the `unload` warning;
 the tsconfig-excluded fork; and the PATCH-123 §14k / PATCH-124 §14l /
 PATCH-125 §13l ledgers plus the unresolved production-build failure.
+
+---
+
+## 17. Amendment — FIRST SPIKE FAILED; SECOND DIAGNOSIS REQUIRED (2026-07-31, CTO)
+
+### 17a. Result
+
+The §9 minimal spike was **executed and fully restored**. **Full implementation
+is NOT authorized.** The three-file allowlist in §10 stays locked.
+
+**Confirmed by the spike:** `onChange` fires frequently; the count/frame-name
+gate suppresses most scene-version changes; temporary settled propagation does
+update React frame composition; cross-slide movement updates the destination
+thumbnail and presentation; resize updates the destination thumbnail; expensive
+synchronization did **not** run on every `onChange`.
+
+**Failed gates — two, both mandatory:**
+
+1. **Moving the post *within* the same slide did not change the thumbnail
+   hash.**
+2. **The disabled-propagation control did not cleanly reproduce the defect**,
+   because existing embeddable-sync / natural-height behaviour caused React
+   frame updates even without the temporary settled path.
+
+**Instrumentation:**
+
+```
+after move into slide B     2057405507
+after move within slide B   2057405507      ← unchanged
+after resize in slide B      900724366      ← changed
+
+onChangeCalls                      248
+sceneVersionChanges                 17
+countGateSuppressedVersionChanges   16      ← 16 of 17 suppressed
+settledSetElementsCalls              4
+thumbnailRenders                    10
+```
+
+**The `16 / 17` figure independently confirms §2's root cause**: the gate
+suppresses ~94% of real scene-version changes. That part of the diagnosis
+survives the failed spike and is strengthened by it.
+
+### 17b. A1 is EXCLUDED — derived from source, not assumed
+
+§B asked not to assume the signature is wrong without deriving its inputs.
+Derived. `getSlideRenderSignature.ts:130-145`, `embeddableOverlaySignature`:
+
+```ts
+embeddableId, embeddableVersion, embeddableVersionNonce, frameId,
+x, y, width, height, localX, localY, zIndex, link, padlet
+```
+
+**`x`, `y`, `localX`, `localY`, `version` and `versionNonce` are all present.**
+A within-slide move changes every one of them.
+
+**Ruling: A1 (signature/cache-key omission) is EXCLUDED for app-owned
+embeddables.** The signature is not the missing piece. Any second spike that
+starts by "fixing the signature" is working on the wrong layer — and would
+collide with PATCH-115 for no reason.
+
+### 17c. Remaining candidates, ranked with the discriminator
+
+**A5 — pixel/hash assertion weakness. LEADING.** The whole-image hash is the
+only evidence, and thumbnails are rendered at
+`scale = height / slide.height` (`useSlideThumbnails.ts:100`), typically a heavy
+downscale. **A small within-slide move can quantize to identical output pixels;
+a resize changes the object's footprint and cannot.** The move-unchanged /
+resize-changed contrast in §17a is exactly the fingerprint of a *magnitude*
+effect rather than a plumbing failure. This must be tested, not assumed.
+
+**A2 — stale renderer input. LIVE, with a concrete named mechanism.** The
+`frames` memo mixes two sources: `baseSlide` geometry from the **stale
+`elements` state**, while `slideRenderer.getSlideRenderSignature(baseSlide)` is
+a **`[]`-deps ref-backed getter reading live runtime state** (PATCH-115's own
+comment, `DrawingLayout.tsx:2230-2233`). **That is a split-brain input: one half
+stale, one half live.** It is a plausible A2 mechanism and independently worth
+recording regardless of this defect.
+
+**A4 — harness mutation not reaching real scene state. LIVE**, and the reason
+§17f mandates a real user drag.
+
+**A3 — composition normalization. UNLIKELY** given §17b, but not excluded.
+
+**The discriminator is cheap and must be run first: compare the thumbnail cache
+key across the within-slide move.**
+
+- cache key **changed** and a render occurred, but pixels matched → **A5**
+  (assertion weakness; the pipeline is working).
+- cache key **unchanged** → **A2 or A4** (the new coordinates were lost
+  upstream).
+
+**Do not proceed past this discriminator without running it.** It separates "the
+product is broken" from "the test is weak", and those demand opposite responses.
+
+### 17d. B — control-path contamination census
+
+**There are exactly TWO `setElements` call sites in `DrawingLayout.tsx`:**
+
+```
+:1215   the count/frame-name gate (§2)
+:1427   snapshot restore (import/undo path)
+```
+
+So the contamination did **not** enter through a third `setElements`. The
+mechanism is different, and it matters:
+
+**The `frames` memo re-runs whenever `canvasLines` changes** (deps
+`[elements, canvasLines]`, `:2234`) — and when it re-runs, **the ref-backed
+signature getter reads LIVE scene state** even though `elements` is stale
+(§17c/A2). Embeddable sync (`:1987-2004`, `:2031-2047`) and natural-height
+synchronization call `updateScene`, which drives further `onChange` and further
+re-renders.
+
+**Consequence: disabling the settled path does not isolate anything, because
+these paths recompute a live signature by a side door.** The control was not
+wrong; the architecture has no single choke point to disable.
+
+**Bound for the second spike:** the control must isolate `canvasLines`-driven
+memo re-runs and embeddable/natural-height sync, **and must record explicitly
+which product behaviour was suppressed and why.** Do **not** disable product
+behaviour merely to manufacture a failure without that record — a control that
+silently changes the product proves nothing about the product.
+
+### 17e. C — scene-version coverage census, required
+
+Establish which mutations increment the Excalidraw scene version and which
+require a separate post-data revision: **move, resize, rotate, style change,
+text change, connector change, and app-owned post metadata change without any
+Excalidraw element mutation.**
+
+Known from source: `version`/`versionNonce` are per-element and bump on element
+mutation, so the first six are expected to increment. **Post metadata changes
+with no element mutation cannot increment the Excalidraw scene version** —
+they reach the signature only through `buildPadletRenderState` inside
+`getSlideRenderSignature`. **Therefore `getSceneVersion` alone is insufficient
+as the revision comparator**, and any design treating it as the sole trigger
+will miss the metadata-change case that §13 already requires a test for.
+
+Report the census as a table of *mutation → scene version changed? → signature
+changed?* Both columns are required.
+
+### 17f. D — layer-by-layer coordinate trace, required
+
+For the **within-slide move**, capture and compare, in order:
+
+1. current Excalidraw element coordinates;
+2. React `frames` composition coordinates;
+3. presentation composition coordinates;
+4. slide render signature;
+5. thumbnail cache key;
+6. renderer input element coordinates;
+7. final PNG **pixel bounding box**.
+
+**Report the first layer at which the new coordinates disappear.** If they
+survive all seven and only the hash is unchanged, the answer is **A5** and the
+product is not broken at this point.
+
+### 17g. Second spike — authorized; full implementation still blocked
+
+Only a **second diagnostic spike** is authorized. It must:
+
+1. use a **real user drag** where possible, not only synthetic mutation;
+2. record old/new coordinates at **every** §17f layer;
+3. prove whether the thumbnail **signature** changes;
+4. prove whether the **renderer receives** the new coordinates;
+5. use **decoded pixel bounding boxes**, not only a whole-image hash;
+6. **isolate the control** from natural-height and embeddable-sync side effects,
+   recording what was suppressed;
+7. **reproduce the stale behaviour before** applying any temporary fix;
+8. prove **one narrow temporary change** fixes that exact scenario.
+
+**Full implementation stays blocked until all of:** within-slide movement
+updates the actual thumbnail; control behaviour is reproducible; presentation
+and thumbnail remain synchronized; and no per-drag-frame expensive refresh
+occurs.
+
+Restore every temporary change exactly and leave no candidate behind.
+
+### 17h. What survives from §2, and what does not
+
+**Survives — strengthened:** the count/frame-name gate suppresses committed
+scene changes (16 of 17 measured), PATCH-124 is not at fault (§2a),
+`resolveFrameMembership` remains authoritative (§4), post types are one generic
+embeddable path (§5), presentation and thumbnails share the frozen memo (§11),
+and the fix sits upstream of PATCH-115 (§8).
+
+**Does not survive as stated:** §2's implication that restoring propagation is
+*sufficient*. The spike propagated settled changes and the within-slide case
+**still** did not update. **Propagation is necessary but not proven
+sufficient**, and §16's status is amended accordingly.
+
+**And the §9 pass bar did its job.** It required decoded pixel evidence and
+forbade passing on "a callback fired" — which is why this returned a failure
+instead of a false green. The bar was still too weak in one respect: a
+whole-image hash is not decoded pixel evidence, and §17g/5 closes that gap.
+
+### 17i. Boundaries — unchanged
+
+**Do not modify PATCH-115-owned signature logic without an explicit later
+amendment** — and §17b removes the main reason anyone would want to. **Do not
+resume PATCH-127.** Do not touch `frameMembership.ts`, PATCH-124's scheduler,
+`node_modules`, `package.json`, `package-lock.json`, `excalidraw_fork`, schema,
+repositories, RLS, reaction or caption behaviour. **Protected paths untouched:**
+`.gitignore`, the three `app/api/ai/*` routes, `scripts/live-access-login.mjs`.
+
+### 17j. Next GPT-5.5 instruction (bind)
+
+> **Do not implement. Run the source trace, then the second spike.**
+>
+> **Start with the §17c discriminator:** compare the thumbnail cache key across
+> a within-slide move. If it changed and pixels did not, the finding is A5 —
+> report that and stop. If it did not change, trace §17f layer by layer and
+> report the first layer where the coordinates vanish.
+>
+> Do not "fix the signature" — §17b excludes A1 from source, and that code is
+> PATCH-115-owned.
+>
+> Deliver the §17e mutation census as a table with both columns. Use a real user
+> drag and decoded pixel bounding boxes. Record exactly which product behaviour
+> the control suppressed.
+>
+> Restore everything exactly. Leave no candidate behind.
+
+### 17k. Status
+
+**PATCH-128: OPEN · FIRST SPIKE FAILED · SECOND DIAGNOSIS REQUIRED · FULL
+IMPLEMENTATION BLOCKED.**
+§2 root cause **retained and strengthened** (16/17 suppressed) but **no longer
+claimed sufficient** (§17h). **A1 EXCLUDED** (§17b). Leading candidate **A5**,
+with **A2/A4 live** (§17c). §10's three-file allowlist remains **locked** —
+only diagnostic spikes are authorized.
+
+**PATCH-127: OPEN · B2C AUTHORIZED · NOT STARTED · candidate removed.**
+**PATCH-126: DESIGNATED, UNAUTHORED, UNAUTHORIZED.**
+**PATCH-125 / 124 / 123 / 122 / 121 / 120 / 117: CLOSED.**
+**PATCH-116: CANCELLED.**
+**PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
+**PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
+**PATCH-119: DESIGNATED, UNAUTHORED, UNAUTHORIZED, UNTOUCHED.**
+
+**Recorded debt, updated:** the **split-brain `frames` memo** — stale `elements`
+state combined with a live ref-backed signature getter (§17c/A2) — which has no
+single choke point and is why the control could not isolate; no deterministic
+scene revision (§3); `getSceneVersion` insufficient alone for metadata-only
+changes (§17e); plus the upstream Excalidraw null-dereference, the `unload`
+warning, the tsconfig-excluded fork, and the PATCH-123 §14k / PATCH-124 §14l /
+PATCH-125 §13l ledgers with the unresolved production-build failure.
