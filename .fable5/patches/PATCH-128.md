@@ -885,3 +885,236 @@ patch; the split-brain `frames` memo (§17c); no deterministic scene revision
 upstream Excalidraw null-dereference, the `unload` warning, the
 tsconfig-excluded fork, and the PATCH-123 §14k / PATCH-124 §14l / PATCH-125
 §13l ledgers with the unresolved production-build failure.
+
+---
+
+## 19. Amendment — §18 CORRECTED; GEOMETRY ROOT CAUSE CONFIRMED (2026-07-31, CTO)
+
+The third diagnostic was executed against current committed behaviour and
+**fully restored**. No implementation remains.
+
+### 19a. CORRECTION — §18b was WRONG
+
+**§18b concluded that the app-owned post drag never touches Excalidraw. That is
+incorrect at current HEAD, and the conclusion is withdrawn.**
+
+Real `DrawingEmbeddableCard` drag produced **committed `updateScene` calls** —
+**21** during the within-slide drag, **42** cumulative after the cross-slide
+drag. **The backing element moved immediately during the drag.**
+
+The mechanism is in the card's own body, not in the props I read:
+
+```
+DrawingLayout.tsx:383   onPointerDown={(e) => {
+:388                      const sceneEl = excAPI.getSceneElements().find(…)
+:395                      const grabOffsetX = startPointerScene.x - sceneEl.x;
+:401                      const handleMove = (me: PointerEvent) => {
+:405                        const newX = pointerScene.x - grabOffsetX;
+:408                        const updatedSceneEl = { ...sceneEl, x: newX, y: newY };
+:409                        excAPI.updateScene({ … })          ← per pointermove frame
+```
+
+**How I got it wrong.** I traced the `onDragEnd` **prop wiring** at `:2092-2095`,
+saw it call `savePadletPositionWithLock` → `onUpdatePadlet` with no `updateScene`,
+and concluded the DB was the geometry authority. **I never opened
+`DrawingEmbeddableCard`'s own body at `:251-400`, where the real drag lives.**
+Reading a component's props tells you what it *reports*, not what it *does*. The
+reusable rule: **when tracing who mutates state, read the component, not its
+callback wiring.**
+
+**Consequences, bound:**
+
+- **The database write and the position lock are NOT the geometry authority for
+  the visible drag, and are NOT the cause of stale slide state.**
+- **The lock-expiry theory (§18b) is RETIRED.** `savePadletPositionWithLock` ran
+  with `lockMs=1500`, both `onUpdatePadlet` writes completed, **the element had
+  already moved before persistence completed**, and **no synchronization pass
+  occurred after the 5s coordinate window** — none was required or expected.
+- **R2 as a separate app-owned drag bypass is REJECTED.**
+- §18c's object-type finding **survives with its conclusion inverted**: all
+  app-owned types share the overlay path — and that path **already mutates** the
+  backing element. **Native and app-owned geometry can therefore share one
+  settled propagation mechanism.**
+
+### 19b. Confirmed geometry failure — R1 is the principal defect
+
+**Within-slide drag:** live Excalidraw moved `x=360/y=120 → x=540/y=200`;
+element version `1 → 2`; scene version `7 → 12`; padlet persistence later
+reached `540/200`; the landscape thumbnail eventually refreshed.
+
+**Cross-slide drag:** live Excalidraw moved to `x=1520/y=240`; **live membership
+changed frame-landscape → frame-portrait**; **React elements remained at
+`540/200`**; React frames/presentation input remained frame-landscape; slide
+signatures stale; cache keys stale; **no new thumbnail render**; presentation and
+thumbnail **stale together**.
+
+**First failed downstream layer: React elements state / frames memo.** The
+count/frame-name gate is the confirmed blocker.
+
+```
+Excalidraw updateScene  →  live scene + membership CORRECT
+  → onChange fires
+    → count/frame-name gate SUPPRESSES setElements        ← the defect
+      → React elements + frames stale
+        → presentation + thumbnail inputs stale
+          → PATCH-124 receives no changed cache key
+```
+
+**The live Excalidraw mutation is correct.** The updated scene is not reliably
+propagated into React state when element count and frame names are unchanged.
+
+### 19c. The nuance that matters most
+
+The within-slide run showed React composition and thumbnails **eventually
+catching up through another render path**. **This does not weaken the diagnosis
+— it sharpens it.**
+
+**Propagation today is nondeterministic and side-effect dependent.** Within-slide
+geometry happened to be rescued by an unrelated re-render; **cross-slide
+membership was not.** There is no authoritative propagation after a committed
+scene change.
+
+**Bound: the final solution must not depend on `canvasLines`, persistence,
+natural-height, selection or any other incidental re-render.** A fix that merely
+makes the rescue more likely is a **rejection**, not a pass — and any spike that
+passes only because something else re-rendered has proven nothing. This is the
+same trap as "a callback fired" (§9) in a new costume.
+
+### 19d. Boundaries added by this diagnostic
+
+**Do not add another `updateScene` writer.** **Do not alter drag ownership.**
+**Do not modify lock durations.** **Do not redesign database position
+synchronization.** All four were candidate fixes under §18's wrong model; all
+four are now prohibited.
+
+**PATCH-124 remains correct and unchanged** — it schedules and de-races renders
+when its cache-key inputs change. **PATCH-128's job is to deliver current React
+slide inputs after settled scene mutations. No second thumbnail scheduler.**
+
+### 19e. Metadata remains unresolved — implementation stays blocked
+
+Metadata-only updates still produce no scene-version change, no element-version
+change, no frames-memo rerun, no signature/cache-key change and no thumbnail
+render.
+
+**A settled scene-propagation mechanism fixes geometry and cannot by itself
+satisfy the PATCH-128 product contract.** Full implementation stays blocked until
+the metadata trigger is characterized (§19h).
+
+### 19f. AUTHORIZED — one narrow geometry implementation spike
+
+Temporary, upstream of the `frames` memo. Contract, bound:
+
+1. the existing `onChange` remains the source of live scene snapshots;
+2. **preserve the immediate count/frame-name update path**;
+3. track the latest scene revision and latest elements snapshot;
+4. debounce/settle rapid geometry changes;
+5. after interaction settles, call `setElements` **once** with the latest
+   elements when the revision differs from the last React-propagated revision;
+6. **not** on every `onChange` frame;
+7. no polling; 8. no second scene store; 9. no membership change;
+10. no `getSlideRenderSignature` change; 11. no PATCH-124 scheduling change;
+12. **no change to `DrawingEmbeddableCard` drag/`updateScene` behaviour.**
+
+**Must prove with real user interactions:**
+
+**A — app-owned cross-slide move:** drag A→B; live membership changes; settled
+React elements update; presentation removes it from A and adds it to B; **both**
+thumbnails refresh; **slide B not selected**; **no manual refresh**.
+**B — app-owned within-slide move:** a **large** move; cache key changes;
+thumbnail **visible-pixel bounds move**; presentation coordinates update.
+**C — native element move** between slides: the **same** settled propagation
+updates presentation and thumbnails.
+**D — resize** of an app-owned post: settled propagation updates presentation
+and thumbnail.
+
+### 19g. Performance bar
+
+Record `onChange` count, scene-version-change count, settled `setElements`
+count, and thumbnail renders **per slide**.
+
+**Pass only if:** settled `setElements` calls are **substantially fewer** than
+`onChange` calls; **no expensive thumbnail render on any drag frame**; the
+latest settled scene wins; **no infinite React loop**; only affected slides
+regenerate where PATCH-124 supports it; **visible drag remains smooth.**
+
+Given §19a's measurement — 21 `updateScene` calls in one within-slide drag —
+the per-frame pressure is real and this bar is the reason clause 5 exists.
+
+### 19h. Metadata source trace — bound for a later diagnostic
+
+Trace one real metadata-only edit: post mutation/store update → padlet state
+identity/revision → `DrawingLayout` render → **frames memo dependencies** →
+`buildPadletRenderState` → slide signature → cache key → presentation and
+thumbnail.
+
+**Determine which existing post-state revision can be added as an upstream memo
+or invalidation dependency without modifying PATCH-115-owned signature
+semantics.** §18e's expectation stands: the first failing layer is expected to be
+the **memo dependency set**, not the signature — `getSlideRenderSignature`
+already folds padlet state via `buildPadletRenderState`; it is simply never
+re-invoked.
+
+### 19i. Spike boundary
+
+**This is a temporary geometry spike, not the final implementation.** Do not
+solve metadata invalidation in it. **Do not widen the production allowlist
+permanently** — §10 stays **LOCKED**, provisional cap **5** (§18g). After the
+spike, **restore all temporary product changes** and report whether the geometry
+mechanism passes.
+
+### 19j. New hard stops
+
+1. The settled mechanism cannot be made deterministic without depending on an
+   incidental re-render (§19c).
+2. Clause 5 cannot be satisfied without calling `setElements` per frame.
+3. A fix requires a second `updateScene` writer, changed drag ownership, changed
+   lock durations, or redesigned DB position sync (§19d).
+4. `getSlideRenderSignature` or PATCH-115 must change.
+5. PATCH-124 scheduling must change.
+6. Geometry passes but shipping it would leave metadata stale — **geometry-only
+   must not be presented as resolving PATCH-128** (§19e).
+7. More than 5 production files prove necessary.
+
+### 19k. Next GPT-5.5 instruction (bind)
+
+> **Run the §19f geometry spike only. Do not build the final implementation. Do
+> not touch metadata.**
+>
+> Preserve the immediate count/frame-name path; add settled revision-based
+> propagation alongside it. Prove scenarios A–D with **real user drags**, decoded
+> pixel bounds and real presentation composition. Record the §19g counters.
+>
+> **A pass requires the cross-slide case to work deterministically** — not
+> because `canvasLines`, persistence, natural-height or selection happened to
+> re-render (§19c).
+>
+> Do not add an `updateScene` writer, change drag ownership, change lock
+> durations, touch `getSlideRenderSignature`, or alter PATCH-124. Restore every
+> temporary change and leave no candidate behind.
+
+### 19l. Status
+
+**PATCH-128: OPEN · GEOMETRY ROOT CAUSE CONFIRMED · GEOMETRY SPIKE AUTHORIZED ·
+METADATA PATH UNRESOLVED · FULL IMPLEMENTATION BLOCKED.**
+**§18b withdrawn; R2 rejected** (§19a). **R1 confirmed as the principal geometry
+defect** (§19b). §10 allowlist **LOCKED**, provisional cap **5**.
+
+**PATCH-127: OPEN · B2C AUTHORIZED · NOT STARTED · candidate removed.**
+**PATCH-126: DESIGNATED, UNAUTHORED, UNAUTHORIZED.**
+**PATCH-125 / 124 / 123 / 122 / 121 / 120 / 117: CLOSED.**
+**PATCH-116: CANCELLED.**
+**PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
+**PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
+**PATCH-119: DESIGNATED, UNAUTHORED, UNAUTHORIZED, UNTOUCHED.**
+
+**Recorded debt, updated.** Removed: the §18 claim that app-owned geometry
+round-trips through the database — **false**, withdrawn. Retained and added:
+propagation into React is **nondeterministic and side-effect dependent** (§19c),
+the single most important architectural finding of this patch; the split-brain
+`frames` memo (§17c); no deterministic scene revision (§3); `getSceneVersion`
+blind to metadata-only changes (§17e); the per-frame `updateScene` volume during
+drag (21 calls/drag, §19a); plus the upstream Excalidraw null-dereference, the
+`unload` warning, the tsconfig-excluded fork, and the PATCH-123 §14k /
+PATCH-124 §14l / PATCH-125 §13l ledgers with the unresolved production-build
+failure.
