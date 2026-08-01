@@ -98,6 +98,8 @@ const POSITION_SYNC_EPSILON = 1.25;
 const DEV_DRAWING_BRIDGE_DIAGNOSTICS = process.env.NODE_ENV !== 'production';
 const DRAWING_BRIDGE_LOG_PREFIX = '[DrawingLayout:back-line-bridge]';
 const INITIAL_VIEWPORT_SETTLE_MAX_FRAMES = 12;
+const PRESENTATION_FRAME_NAVIGATION_PADDING_PX = 48;
+const PRESENTATION_FRAME_NAVIGATION_MAX_ZOOM = 1;
 const BACK_LINE_INTERACTIVE_ROLE_PRIORITY = [
   'point-handle',
   'midpoint-handle',
@@ -1545,6 +1547,93 @@ export default function DrawingLayout({
     locked: false,
   }), []);
 
+  const getPresentationNavigationUsableRect = useCallback((appState: any) => {
+    const viewportRect =
+      viewportContainerRef?.current?.getBoundingClientRect()
+      ?? drawingRootRef.current?.getBoundingClientRect()
+      ?? null;
+    if (!viewportRect || viewportRect.width <= 0 || viewportRect.height <= 0) return null;
+
+    const sidebarRect = presentationSidebarRef.current?.getBoundingClientRect() ?? null;
+    const visibleRight = sidebarRect
+      ? Math.min(Math.max(sidebarRect.left, viewportRect.left), viewportRect.right)
+      : viewportRect.right;
+    const measuredLeftInset = Number.isFinite(appState?.offsetLeft)
+      ? Math.max(0, Number(appState.offsetLeft) - viewportRect.left)
+      : 0;
+    const measuredTopInset = Number.isFinite(appState?.offsetTop)
+      ? Math.max(0, Number(appState.offsetTop) - viewportRect.top)
+      : 0;
+    const left = Math.min(viewportRect.right, viewportRect.left + measuredLeftInset);
+    const top = Math.min(viewportRect.bottom, viewportRect.top + measuredTopInset);
+    const right = Math.max(left, visibleRight);
+    const bottom = Math.max(top, viewportRect.bottom);
+
+    return {
+      left,
+      top,
+      right,
+      bottom,
+      width: right - left,
+      height: bottom - top,
+      centerX: left + (right - left) / 2,
+      centerY: top + (bottom - top) / 2,
+    };
+  }, [viewportContainerRef]);
+
+  const navigateToPresentationFrame = useCallback((slideId: string): boolean => {
+    const api = excalidrawAPIRef.current ?? excalidrawAPI;
+    if (!api || typeof api.getSceneElements !== 'function' || typeof api.updateScene !== 'function') {
+      return false;
+    }
+
+    const liveFrame = api.getSceneElements().find((el: any) =>
+      el?.id === slideId && el.type === 'frame' && !el.isDeleted
+    );
+    if (!liveFrame || liveFrame.width <= 0 || liveFrame.height <= 0) return false;
+
+    const appState = api.getAppState?.() ?? appStateRef.current ?? {};
+    const usableRect = getPresentationNavigationUsableRect(appState);
+    if (!usableRect || usableRect.width <= 0 || usableRect.height <= 0) return false;
+
+    const currentZoom = Number(appState?.zoom?.value ?? 1);
+    const fitZoom = Math.min(
+      usableRect.width / (liveFrame.width + 2 * PRESENTATION_FRAME_NAVIGATION_PADDING_PX),
+      usableRect.height / (liveFrame.height + 2 * PRESENTATION_FRAME_NAVIGATION_PADDING_PX),
+      PRESENTATION_FRAME_NAVIGATION_MAX_ZOOM,
+    );
+    const finiteFitZoom = Number.isFinite(fitZoom) && fitZoom > 0 ? fitZoom : PRESENTATION_FRAME_NAVIGATION_MAX_ZOOM;
+    const finiteCurrentZoom = Number.isFinite(currentZoom) && currentZoom > 0 ? currentZoom : PRESENTATION_FRAME_NAVIGATION_MAX_ZOOM;
+    const targetZoom = Math.min(finiteCurrentZoom, finiteFitZoom, PRESENTATION_FRAME_NAVIGATION_MAX_ZOOM);
+    const offsetLeft = Number.isFinite(appState?.offsetLeft) ? Number(appState.offsetLeft) : 0;
+    const offsetTop = Number.isFinite(appState?.offsetTop) ? Number(appState.offsetTop) : 0;
+    const frameCenterX = liveFrame.x + liveFrame.width / 2;
+    const frameCenterY = liveFrame.y + liveFrame.height / 2;
+
+    api.updateScene({
+      appState: {
+        zoom: { ...(appState?.zoom ?? {}), value: targetZoom },
+        scrollX: (usableRect.centerX - offsetLeft) / targetZoom - frameCenterX,
+        scrollY: (usableRect.centerY - offsetTop) / targetZoom - frameCenterY,
+        selectedElementIds: { [liveFrame.id]: true },
+        selectedGroupIds: {},
+        selectedLinearElement: null,
+        activeEmbeddable: null,
+      },
+      commitToHistory: false,
+    });
+    return true;
+  }, [excalidrawAPI, getPresentationNavigationUsableRect]);
+
+  const navigateToPresentationFrameSoon = useCallback((slideId: string) => {
+    window.requestAnimationFrame(() => {
+      if (navigateToPresentationFrame(slideId)) return;
+      window.requestAnimationFrame(() => {
+        navigateToPresentationFrame(slideId);
+      });
+    });
+  }, [navigateToPresentationFrame]);
+
   const handleAddSlide = useCallback(() => {
     if (!excalidrawAPI) return;
     const currentElements = excalidrawAPI.getSceneElements();
@@ -1560,8 +1649,9 @@ export default function DrawingLayout({
     const indexedElements = syncSceneElementIndices([...currentElements, newFrame]);
     const indexedFrame = indexedElements.find((el: any) => el.id === newFrame.id) ?? newFrame;
     excalidrawAPI.updateScene({ elements: indexedElements });
-    setTimeout(() => excalidrawAPI.scrollToContent([indexedFrame], { fitToContent: true, animate: true, duration: 400 }), 50);
-  }, [excalidrawAPI, makeFrameElement]);
+    setActiveSlideId(indexedFrame.id);
+    navigateToPresentationFrameSoon(indexedFrame.id);
+  }, [excalidrawAPI, makeFrameElement, navigateToPresentationFrameSoon]);
 
   const handleAddSlideBelow = useCallback((id: string) => {
     if (!excalidrawAPI) return;
@@ -1577,8 +1667,9 @@ export default function DrawingLayout({
     const indexedElements = syncSceneElementIndices([...currentElements, newFrame]);
     const indexedFrame = indexedElements.find((el: any) => el.id === newFrame.id) ?? newFrame;
     excalidrawAPI.updateScene({ elements: indexedElements });
-    setTimeout(() => excalidrawAPI.scrollToContent([indexedFrame], { fitToContent: true, animate: true, duration: 400 }), 50);
-  }, [excalidrawAPI, makeFrameElement]);
+    setActiveSlideId(indexedFrame.id);
+    navigateToPresentationFrameSoon(indexedFrame.id);
+  }, [excalidrawAPI, makeFrameElement, navigateToPresentationFrameSoon]);
 
   const cloneLinkedRowsForDuplicateSlide = useCallback(async (children: any[], dx: number) => {
     const createdIds: string[] = [];
@@ -2215,15 +2306,9 @@ export default function DrawingLayout({
 
   const handleActivateSlide = useCallback((slideId: string) => {
     setActiveSlideId(slideId);
-    const frameElement = elements.find((el: any) => el.id === slideId);
-    if (excalidrawAPI && frameElement) {
-      excalidrawAPI.scrollToContent([frameElement], {
-        fitToContent: true,
-        animate: true,
-        duration: 500,
-      });
-    }
-  }, [elements, excalidrawAPI]);
+    if (navigateToPresentationFrame(slideId)) return;
+    navigateToPresentationFrameSoon(slideId);
+  }, [navigateToPresentationFrame, navigateToPresentationFrameSoon]);
 
   // PATCH-128: deterministic revision over canonical padlet render state, used
   // below purely as an additional frames-memo dependency so metadata-only edits
