@@ -4092,3 +4092,226 @@ propagation (§19c); the split-brain `frames` memo (§17c); `getSceneVersion` bl
 metadata-only changes (§17e); plus the upstream Excalidraw null-dereference, the
 `unload` warning, the tsconfig-excluded fork, and the PATCH-123 §14k / PATCH-124 §14l
 / PATCH-125 §13l ledgers with the unresolved production-build failure.
+
+---
+
+## 33. Amendment — PRE-CLOSURE GATE D ACCEPTED (2026-08-01, CTO)
+
+Independent acceptance review of gate-D test commit **`39e5578`** against the §32m
+ordering.
+
+**Result: ACCEPT GATE D WITH NON-BLOCKING FINDINGS. Do not close PATCH-128.**
+
+### 33a. Scope verified — and the single deletion inspected
+
+`39e5578` changes **only** `e2e/characterization/patch-128-slide-sync.spec.ts`:
+**370 insertions, 1 deletion.**
+
+**No production change. No governance change. No package change. No `node_modules` or
+`excalidraw_fork` change. No protected-path change.**
+
+This is the **first gate commit that is not purely additive**, so the deletion was
+inspected rather than assumed benign. It is the existing import line
+
+```
+import { getSlideRenderSignature } from '@/components/presentation/slide-renderer/getSlideRenderSignature';
+```
+
+widened in place to `import { buildPadletRenderState, getSlideRenderSignature }`.
+
+**No assertion was removed, weakened or relaxed.** The §30n prohibition is satisfied
+on inspection, not on the commit's shape. Recording the check explicitly: from here
+on, "additive only" stops being a free proxy for "no assertion weakened", and future
+gate reviews must read the deletion rather than counting it.
+
+### 33b. Live production state path — **PASS**
+
+Gate D exercises the **real production `fetchData` path**:
+
+```
+CanvasClient → useCanvasData → DrawingLayout fetchData prop
+→ DrawingEmbeddableCard fetchData prop → real Supabase refetch
+→ new React state → DrawingLayout re-render
+→ new padlet-array and padlet-object identities
+```
+
+The test **invokes the live component's `fetchData` prop.** It does **not** build a
+test-local copied array, mutate React internals, call `computePostRenderRevision` as
+a substitute for live state arrival, or synthetically suppress thumbnail rendering.
+
+This is what §29's gate D asked for and what the unit tests could not supply. The
+determinism tests prove the *function* is identity-insensitive; only this proves the
+**running application** actually receives replaced identities and stays inert. The
+distinction has mattered before in this patch — §22a's evidence was correct about a
+function and wrong about the system.
+
+### 33c. Live identity proof — **PASS**
+
+A test-scoped in-page identity tracker using **`WeakMap<object, number>`**, monotonic
+identity tokens, and **live React component `memoizedProps`** — reading the actual
+`padlet` and `allPadlets` values consumed by `DrawingLayout`/card rendering.
+
+Each iteration proves:
+
+- the **top-level `allPadlets` array identity changed**;
+- the **target padlet object identity changed**;
+- the **stable target post ID remained unchanged**.
+
+The test **polls until both identity tokens differ**, and **a successful database
+request alone is not treated as sufficient evidence.**
+
+That last point is the gate. A completed refetch proves a network round trip; it does
+not prove React re-rendered with new object identities, which is the churn the
+mechanism must absorb. Asserting on the tokens rather than the request is the same
+discipline as §31b's `resizingElementId` and §32c's `enteredAppOwnedStripPath`: prove
+the condition under test actually occurred before claiming the system tolerated it.
+
+### 33d. Target — **PASS**, a populated slide
+
+The target post sits **inside a populated slide** containing a real frame, two
+embeddables, a native rectangle, and **non-blank existing thumbnail content**,
+verified non-blank **before the first refetch**.
+
+**This is not merely an outside-slide inertness case.** An empty or blank-thumbnail
+target would have made inertness trivially true and proved nothing — the §23a
+blank-frame lesson in a new guise. The harder target was chosen.
+
+### 33e. Canonical stability — **PASS**
+
+For each of **three real refetch cycles**: `buildPadletRenderState` output remained
+**deeply equal**; `computePostRenderRevision` remained **exactly equal**; **every**
+slide signature/cache key remained equal; no render-relevant content changed.
+
+### 33f. Thumbnail inertness — **PASS**
+
+For each cycle: **thumbnail render requests remained zero**; displayed thumbnail
+changes remained empty; sampled displayed thumbnail state remained unchanged;
+**thumbnails were re-queried rather than held through stale DOM references** (§23a
+holding); no manual refresh occurred; **no delayed rendering loop followed the
+identity replacement.**
+
+The zero-request result is the strong form. Identity churn producing *equal* output
+after doing the work would still be a performance defect at scale; producing **no
+work at all** is the property mechanism D was designed for.
+
+### 33g. Repeatability — **PASS**
+
+**Three independent identity-refetch iterations**, each proving array **and** object
+identity replacement, each preserving canonical revision and slide signatures, each
+producing no thumbnail work. The implementer reports the focused test passed **once
+and under `--repeat-each=3`**; the full PATCH-128 suite passed.
+
+### 33h. Independent-runtime limitation — recorded explicitly
+
+**The independent reviewer did not rerun the Playwright scenario**, because the
+review environment lacked the required dev server and Supabase credentials — the same
+constraint as §32j.
+
+The reviewer independently verified **source structure, the production state path,
+assertions, scope, TypeScript, Vitest, diff checks, and the absence of production
+instrumentation.**
+
+**Runtime repetition therefore rests on the implementer's recorded runs.** As at
+§32j: a weaker evidentiary form than gate F, and materially stronger than §30k's
+rejected form, because the assertions are committed and re-runnable on demand. Two of
+the four gates now stand on reviewed-but-not-re-run runtime evidence. That is
+acceptable and is recorded so it is visible as a pattern rather than discovered later
+as a surprise.
+
+### 33i. Non-blocking findings
+
+1. **React fiber internals.** Live component props are obtained through
+   `__reactFiber$` DOM keys. Acceptable for the current React 19 browser test; **may
+   require adaptation after a React upgrade.**
+2. **JSON-cloned canonical comparisons.** Serialized clones are passed to
+   `buildPadletRenderState` and `getSlideRenderSignature`. Acceptable because those
+   functions are value-oriented, the deterministic revision assertions pass, and — the
+   decisive reason — **the thumbnail-request and displayed-thumbnail assertions prove
+   the real rendering pipeline stayed inert independently of the cloned comparison.**
+   The clone is corroborating evidence, not the load-bearing evidence.
+3. **`stateArrivalCount` is cumulative across iterations**, so its per-iteration
+   `>= 1` assertion is **not independently meaningful after the first cycle.** The
+   actual per-iteration proof is the polling and direct comparison of fresh
+   array/object identity tokens.
+
+**No correction is required for PATCH-128 closure.** Finding 3 is a genuinely weak
+assertion sitting beside a strong one; it is harmless only because the identity-token
+comparison carries the cycle. Worth knowing before anyone cites the counter as proof.
+
+### 33j. Gate record updated
+
+| Gate | Subject | Status |
+|---|---|---|
+| **D** | live identity-churn control | **PASS with non-blocking findings** (§33, `39e5578`) |
+| **F** | app-owned resize | **PASS** (§31b, `56592ab`) |
+| **G** | representative performance run | **PASS with non-blocking findings** (§32, `ea7775b`) |
+| **B** | container/child edit | **UNPROVEN — the sole outstanding obligation** |
+
+**Commit `39e5578` is accepted and may be retained. Do not alter it.**
+
+### 33k. Next action — Gate B only
+
+**Proceed only to gate B**, resolving through **one** of the two already-authorized
+routes:
+
+1. a **committed real render-relevant container/child UI characterization**; or
+2. **source evidence demonstrating no such real UI path exists in `DrawingLayout`
+   mode**, followed by an **explicit narrow governance waiver**.
+
+Route 2 requires the evidence first and the waiver second, granted by Opus in an
+amendment — it is not self-serve, and an implementer may not assume it.
+
+**Do not modify production unless gate B exposes a genuine product defect. Do not
+alter `400f056`, `56592ab`, `ea7775b` or `39e5578`. Do not push. Do not close
+PATCH-128.**
+
+### 33l. Status
+
+**PATCH-128: OPEN · IMPLEMENTATION ACCEPTED (`400f056`) · D/F/G PASS · B UNRESOLVED ·
+NOT CLOSED.**
+
+Three of four pre-closure gates are discharged in the committed suite. **Gate B is the
+only remaining obligation between this patch and closure.**
+
+**PATCH-124 unchanged and correct. `getSlideRenderSignature` semantics unchanged.
+PATCH-115 untouched.**
+**PATCH-127: OPEN · B2C AUTHORIZED · NOT STARTED · candidate removed.**
+**PATCH-126: DESIGNATED, UNAUTHORED, UNAUTHORIZED.**
+**PATCH-125 / 124 / 123 / 122 / 121 / 120 / 117: CLOSED.**
+**PATCH-116: CANCELLED.**
+**PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
+**PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
+**PATCH-119: DESIGNATED, UNAUTHORED, UNAUTHORIZED, UNTOUCHED.**
+
+**Recorded debt, updated.** Added: **once a gate commit contains any deletion, read
+it** — "additive only" stops being a free proxy for "no assertion weakened" (§33a);
+**an inertness gate must target populated, non-blank content**, or inertness is
+trivially true (§33d); **prove the condition under test occurred before claiming the
+system tolerated it** — a completed refetch is not proof of identity replacement, as
+`resizingElementId` and `enteredAppOwnedStripPath` were not proof of a dimension
+change (§33c); **`__reactFiber$` prop access will need revisiting on React upgrade**
+(§33i.1); **a cumulative counter cannot carry a per-iteration assertion** (§33i.3);
+and **two of four gates rest on reviewed-but-not-re-run runtime evidence** (§32j,
+§33h). Resolved: **gates D, F and G**. Retained: acceptance evidence must live in the
+committed suite — a deleted temporary diagnostic is not acceptance; a real-interaction
+gate must assert the interaction reached the intended mechanism; repeat-run evidence
+is required for gates in this patch; exact numeric evidence belongs in annotations
+while assertions verify semantic transitions; a performance fixture needs a
+completeness check alongside its measurements; do not introduce a latency threshold at
+acceptance time; a fixture-floor assertion looser than the fixture it guards can
+silently stop being representative; derived counters are acceptable if documented
+beside the code; `settledScenePropagation.ts` timer casts and the 32-bit djb2 digest
+as accepted non-blocking notes; Excalidraw `onChange` fires continuously at rest
+(~15–20 ms) with no scene or appState change; one ref must never carry both "observed"
+and "settled" meanings; a stable output with a flat input-arrival counter proves
+absence of input, not correct filtering; a mechanism proven for one path must not be
+described as proven generally; `updated_at` is not a reliable client-side invalidation
+trigger under the optimistic update path; thumbnail assertions must re-query by stable
+slide identity; Excalidraw fixture elements need sequential fractional indices matching
+array order or they are silently dropped; a destination frame with no prior elements
+can take unusually long to receive its first thumbnail render (pre-existing, reproduced
+on baseline); nondeterministic React propagation (§19c); the split-brain `frames` memo
+(§17c); `getSceneVersion` blind to metadata-only changes (§17e); plus the upstream
+Excalidraw null-dereference, the `unload` warning, the tsconfig-excluded fork, and the
+PATCH-123 §14k / PATCH-124 §14l / PATCH-125 §13l ledgers with the unresolved
+production-build failure.
