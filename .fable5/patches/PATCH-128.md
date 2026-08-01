@@ -4315,3 +4315,260 @@ on baseline); nondeterministic React propagation (§19c); the split-brain `frame
 Excalidraw null-dereference, the `unload` warning, the tsconfig-excluded fork, and the
 PATCH-123 §14k / PATCH-124 §14l / PATCH-125 §13l ledgers with the unresolved
 production-build failure.
+
+---
+
+## 34. Amendment — GATE B ACCEPTED; PATCH-128 CLOSED (2026-08-01, CTO)
+
+Independent acceptance review of gate-B test commit **`0f8762f`** against the §33k
+ordering, followed by closure.
+
+**Result: ACCEPT GATE B WITH NON-BLOCKING FINDINGS. All pre-closure obligations
+satisfied. CLOSE PATCH-128.**
+
+### 34a. Gate B scope — verified, purely additive
+
+`0f8762f` changes **only** `e2e/characterization/patch-128-slide-sync.spec.ts`:
+**448 insertions, zero deletions** — confirmed independently.
+
+**No existing assertion removed, weakened, relaxed or bypassed. No production change.
+No governance change. No protected-path change. No package, `node_modules` or
+`excalidraw_fork` change.**
+
+### 34b. Real `DrawingLayout` child path — **PASS**, via route 1
+
+Gate B resolves through **route 1 — a committed real render-relevant container/child
+UI characterization.** **No waiver was used, and none is granted.** Both authorized
+routes stayed open from §30k through §33k; the stronger one was taken.
+
+The committed test exercises the real production path:
+
+```
+DrawingLayout → AutoHeightContainer → RowColumnContainerCard
+→ child PostCardContent → visible todo checkbox
+→ createToggleTaskCommand → onScan → onScanChild → fetchData
+→ useCanvasData refetch → fresh live DrawingLayout padlet state
+```
+
+The test **clicks the visible child checkbox through the UI.** It does **not** call
+`createToggleTaskCommand` directly, mutate the database as a substitute for the UI,
+synthesize child metadata, use `updateScene`, or manually refresh.
+
+This settles the question §29 could not: whether a **real** render-relevant child edit
+propagates. The bounded child recursion in `computePostRenderRevision` was designed
+against unit fixtures at §30d; it is now exercised by a user-reachable control.
+
+### 34c. Targeting proof — **PASS**
+
+The test proves the intended container ID, child post ID and task ID; the child task
+moving **incomplete → complete**; persisted task metadata changing; the live
+`DrawingLayout` refetch arriving; container and child identities changing; and stable
+parent and child IDs unchanged.
+
+The state-arrival poll requires **simultaneously** completed child task state, a
+changed container identity token, **and** a changed child identity token. **A click or
+database write alone is not treated as sufficient evidence.**
+
+This is the fourth consecutive gate to assert that the mechanism under test was
+actually entered before claiming the system handled it — after `resizingElementId`
+(F), `enteredAppOwnedStripPath` (G) and the identity tokens (D). The pattern is now
+the patch's settled standard for what a real-interaction gate must show.
+
+### 34d. Canonical child render state — **PASS**
+
+The real child todo completion **changes `buildPadletRenderState` for the parent
+container**, **exercises the existing bounded child recursion**, **changes
+`computePostRenderRevision`**, **changes only the affected slide signature**, and
+**leaves the unrelated slide signature unchanged.**
+
+Both halves matter equally: the change proves propagation, and the unrelated slide's
+stability proves the global digest is not over-invalidating — the same discrimination
+§32f established for the outside-slide case, now shown for a nested child.
+
+### 34e. Presentation and thumbnail result — **PASS**
+
+The affected slide's presentation payload changes and its **displayed thumbnail
+changes automatically**; the unrelated slide's payload and thumbnail remain
+unchanged; **thumbnail render work occurs only for the expected slide**; thumbnail
+work **stops during idle**; **no continuous loop occurs**; thumbnail nodes are
+**re-queried by stable slide identity** (§23a holding through the final gate).
+
+### 34f. Repeatability — **PASS**
+
+Focused gate B passed **once and under `--repeat-each=3`**; the **full PATCH-128
+characterization suite passed with `--workers=1`**; **no manual refresh was
+required.**
+
+### 34g. Independent-runtime limitation — recorded explicitly
+
+**The independent reviewer did not personally rerun the gate-B Playwright scenario**,
+the review environment again lacking a dev server and Supabase credentials.
+
+The reviewer independently verified **committed source, the production UI path,
+live-state assertions, scope, TypeScript, Vitest, diff checks, and the absence of
+production instrumentation.**
+
+**Runtime repeatability rests on the implementer's committed, re-runnable test and
+recorded runs.**
+
+Three of the four gates therefore close on **reviewed-but-not-re-run** runtime
+evidence (B, D, G), with F alone reviewed and re-run. **This patch closes with that
+stated, not glossed.** It is the honest ceiling of a credentialed E2E suite reviewed
+from an uncredentialed environment, and it is materially stronger than the §30k form
+this patch already rejected: every claim above is a committed assertion that fails
+loudly on regression for anyone who can run it.
+
+### 34h. Non-blocking findings
+
+1. **Single-worker execution.** The full PATCH-128 characterization suite currently
+   requires `--workers=1`, because the gate D/G real-board scenarios are sensitive to
+   concurrent multi-board load. **A test-environment limitation, not a product
+   defect.** It will matter to whoever next wires this suite into CI.
+2. **`canvasContext` verification.** The gate-B test does not directly assert
+   `canvasContext === "drawing"` at runtime. The source path proves the value is
+   inherited through the `DrawingLayout` container chain, and the **visible
+   interactive checkbox is itself runtime evidence** that the child todo control is
+   available in this mode.
+
+**No correction is required for closure.**
+
+### 34i. Final gate record
+
+| Gate | Subject | Status |
+|---|---|---|
+| **B** | container/child edit | **PASS** (§34, `0f8762f`) |
+| **D** | live identity-churn control | **PASS** (§33, `39e5578`) |
+| **F** | app-owned resize | **PASS** (§31, `56592ab`) |
+| **G** | representative performance run | **PASS** (§32, `ea7775b`) |
+
+**All PATCH-128 pre-closure gates are satisfied. No gate was waived.**
+
+### 34j. Final implementation acceptance
+
+**Commit `400f056` remains accepted.** The implementation consists of:
+
+1. **app-owned drag writer revision repair**;
+2. **two-ref settled scene propagation**;
+3. **deterministic canonical post-render revision**;
+4. **additive frames-memo invalidation**.
+
+**Verified preserved boundaries:** `getSlideRenderSignature` semantics unchanged;
+`buildPadletRenderState` semantic body unchanged; `resolveFrameMembership` unchanged;
+PATCH-124 scheduler unchanged; **no raw padlet identity used as invalidation**; no
+pointerup flush; no maximum-wait; no separate native/app-owned mechanism; no
+production instrumentation residue; protected unrelated paths untouched by every
+PATCH-128 commit.
+
+Independently confirmed across the full patch span `368a3d1..0f8762f`: **exactly eight
+files changed** — the seven authorized files plus this governance document — and a
+**zero diff on all five protected paths.** The §29 allowlist held from authorization
+through closure without a single excursion.
+
+### 34k. Final validation record
+
+- `npx tsc --noEmit`: **PASS**
+- Full Vitest suite at implementation: **719/719 PASS**
+- PATCH-128 focused Vitest files: **16/16 PASS**
+- PATCH-128 browser characterization: core synchronization **PASS**; app-owned resize
+  **PASS**; representative performance **PASS**; live identity churn **PASS**; real
+  container-child edit **PASS**
+- Diff checks: **PASS**
+- **No continuous loops. No per-pointermove thumbnail rendering. No manual refresh
+  required.**
+
+The known production-build error — `TypeError: Cannot read properties of undefined
+(reading 'length')` — **remains recorded as pre-existing and unrelated to
+PATCH-128**, reproduced on the pre-implementation baseline and left in the debt ledger
+unattributed to this patch.
+
+### 34l. Retrospective — what this patch cost and why
+
+Recorded because the shape of the work is the reusable lesson, not just its result.
+
+The original defect was one sentence long: committed scene changes did not
+automatically update slide membership, rendering and thumbnails. Reaching a correct
+fix took **§17 through §34**, and the time went almost entirely into **distinguishing
+real evidence from evidence-shaped observations**:
+
+- **§22a vs §26** — a measurement that was right about a function and wrong about the
+  system, reconciled at §28 by taking a third measurement rather than preferring the
+  newer one.
+- **§26g** — a stable output beside a flat input counter, which proves absence of
+  input and not correct filtering. Caught by instrumentation built specifically to
+  catch it.
+- **§27c** — the root cause: one ref carrying both "observed" and "settled" meanings,
+  so the comparison value could only be advanced by the callback it gated. A
+  bookkeeping bug, invisible at every level above it.
+- **§30k** — a *reported* PASS corrected to UNPROVEN by an independent reviewer,
+  because its evidence lived in a deleted diagnostic. The review layer earning its
+  place.
+
+Twice, an apparent regression was proven pre-existing by A/B against a stashed
+baseline (the empty-frame thumbnail, the production build) rather than absorbed into
+this patch's account. Both times that was the difference between an honest ledger and
+a convenient one.
+
+**The generalizable rule this patch contributes: a gate is a claim about what the
+repository can demonstrate on demand.** Everything else in §30k–§34 follows from it.
+
+### 34m. Closure
+
+**PATCH-128: CLOSED · IMPLEMENTATION ACCEPTED (`400f056`) · B/D/F/G PASS · ALL
+PRE-CLOSURE OBLIGATIONS SATISFIED.**
+
+Accepted and retained, not to be squashed, amended or altered:
+
+| Commit | Role |
+|---|---|
+| `400f056` | implementation |
+| `56592ab` | gate F — app-owned resize |
+| `ea7775b` | gate G — representative performance |
+| `39e5578` | gate D — live identity churn |
+| `0f8762f` | gate B — real container/child edit |
+
+**Not pushed.** The five protected unrelated dirty paths remain untouched.
+
+**PATCH-124 unchanged and correct. `getSlideRenderSignature` semantics unchanged.
+PATCH-115 untouched.**
+**PATCH-127: OPEN · B2C AUTHORIZED · NOT STARTED · candidate removed.**
+**PATCH-126: DESIGNATED, UNAUTHORED, UNAUTHORIZED.**
+**PATCH-128 / 125 / 124 / 123 / 122 / 121 / 120 / 117: CLOSED.**
+**PATCH-116: CANCELLED.**
+**PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
+**PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
+**PATCH-119: DESIGNATED, UNAUTHORED, UNAUTHORIZED, UNTOUCHED.**
+
+**Recorded debt carried forward from PATCH-128.** Test-environment: **the PATCH-128
+characterization suite requires `--workers=1`** (§34h.1) and **`__reactFiber$` prop
+access will need revisiting on React upgrade** (§33i.1); **`onChangeEmitter`
+instrumentation depends on the current vendored fork API** (§32k.2); **the
+`appOwnedPosts >= 40` floor is looser than the 65-post fixture it guards** (§32k.3);
+**`stateArrivalCount` is cumulative and cannot carry a per-iteration assertion**
+(§33i.3); **three of four gates rest on reviewed-but-not-re-run runtime evidence**
+(§34g). Implementation notes, accepted: **`settledScenePropagation.ts` timer casts**
+and the **32-bit djb2 digest** (§30j). Method rules, generalizable beyond this patch:
+**a gate is a claim about what the repository can demonstrate on demand — acceptance
+evidence must live in the committed suite**; **prove the mechanism under test was
+entered before claiming the system handled it**; **once a gate commit contains any
+deletion, read it**; **an inertness gate must target populated, non-blank content**;
+**a performance fixture needs a completeness check alongside its measurements**; **do
+not introduce a latency threshold at acceptance time**; **repeat-run evidence is
+required**; **exact numerics belong in annotations while assertions verify semantic
+transitions**; **derived counters are acceptable if documented beside the code**; **a
+stable output with a flat input-arrival counter proves absence of input, not correct
+filtering**; **a mechanism proven for one path must not be described as proven
+generally**. Product/platform facts retained: Excalidraw `onChange` fires continuously
+at rest (~15–20 ms) with no scene or appState change; **one ref must never carry both
+"observed" and "settled" meanings**; `updated_at` is not a reliable client-side
+invalidation trigger under the optimistic update path; thumbnail assertions must
+re-query by stable slide identity; Excalidraw fixture elements need sequential
+fractional indices matching array order or they are silently dropped; a destination
+frame with no prior elements can take unusually long to receive its first thumbnail
+render (pre-existing, reproduced on baseline); nondeterministic React propagation
+(§19c); the split-brain `frames` memo (§17c); `getSceneVersion` blind to
+metadata-only changes (§17e); plus the upstream Excalidraw null-dereference, the
+`unload` warning, the tsconfig-excluded fork, and the PATCH-123 §14k / PATCH-124 §14l
+/ PATCH-125 §13l ledgers with **the unresolved production-build failure, which
+outlives this patch and remains unowned.**
+
+**END OF PATCH-128.**
