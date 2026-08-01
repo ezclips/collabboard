@@ -5,7 +5,7 @@ import {
   registerDrawingCleanup,
   openDrawingBoard,
 } from './drawingBridgeHarness';
-import { getSlideRenderSignature } from '@/components/presentation/slide-renderer/getSlideRenderSignature';
+import { buildPadletRenderState, getSlideRenderSignature } from '@/components/presentation/slide-renderer/getSlideRenderSignature';
 import { planSlideComposition } from '@/components/presentation/slide-renderer/planSlideComposition';
 import { computePostRenderRevision } from '@/lib/infra/drawing/postRenderRevision';
 
@@ -45,6 +45,17 @@ type GateGMeasurement = {
   consoleErrors: string[];
   pageErrors: string[];
   reactRenderReconcileAnomalies: string[];
+};
+type GateDLiveSnapshot = {
+  targetId: string;
+  stableTargetId: string;
+  arrayToken: number;
+  objectToken: number;
+  allPadlets: any[];
+  targetPadlet: any;
+  totalPadlets: number;
+  refetchInvocationCount: number;
+  stateArrivalCount: number;
 };
 
 async function openPresentationSidebar(page: Page, expectedSlideCount: number): Promise<Locator> {
@@ -233,6 +244,18 @@ function frameEl(id: string, name: string, x: number, y: number, w = 1280, h = 7
 }
 function embEl(id: string, padletId: string, x: number, y: number, w: number, h: number, frameId: string | null) {
   return { id, type: 'embeddable', x, y, width: w, height: h, angle: 0, strokeColor: 'transparent', backgroundColor: 'transparent', fillStyle: 'solid', strokeWidth: 1, strokeStyle: 'solid', roundness: null, roughness: 0, opacity: 100, seed: 1, version: 1, versionNonce: 1, index: nextFractionalIndex(), isDeleted: false, groupIds: [], frameId, boundElements: null, updated: nowMs, link: `padlet://${padletId}`, locked: false, customData: {} };
+}
+function drawingLayoutPadletRenderSignature(padlet: any): string {
+  return JSON.stringify({
+    id: padlet.id,
+    type: padlet.type,
+    title: padlet.title ?? '',
+    content: padlet.content ?? '',
+    file_url: padlet.file_url ?? null,
+    width: padlet.width ?? 320,
+    height: padlet.height ?? 280,
+    metadata: padlet.metadata ?? null,
+  });
 }
 function rectEl(id: string, x: number, y: number, frameId: string | null) {
   return { id, type: 'rectangle', x, y, width: 120, height: 80, angle: 0, strokeColor: '#dc2626', backgroundColor: '#dc2626', fillStyle: 'solid', strokeWidth: 2, strokeStyle: 'solid', roundness: null, roughness: 0, opacity: 100, seed: 5, groupIds: [], frameId, isDeleted: false, version: 1, versionNonce: 1, updated: nowMs, index: nextFractionalIndex(), boundElements: null, link: null, locked: false };
@@ -498,6 +521,182 @@ async function stopGateGOperation(page: Page): Promise<void> {
 
 async function readGateGOperationCounters(page: Page, operation: GateGOperationName): Promise<any> {
   return page.evaluate((name) => (window as any).__patch128GateG.get(name), operation);
+}
+
+function gateDRenderState(snapshot: GateDLiveSnapshot): Record<string, unknown> {
+  const padletsById = new Map(snapshot.allPadlets.map((padlet) => [String(padlet.id), padlet] as const));
+  return buildPadletRenderState(snapshot.targetPadlet, padletsById, 2, new Set<string>());
+}
+
+function gateDSlideSignatures(slideIds: string[], sceneElements: any[], padlets: any[]): Record<string, string> {
+  const signatures: Record<string, string> = {};
+  for (const slideId of slideIds) {
+    const frame = sceneElements.find((el) => el.id === slideId);
+    if (!frame) throw new Error(`Missing Gate D slide frame ${slideId}`);
+    signatures[slideId] = getSlideRenderSignature({
+      id: frame.id,
+      name: frame.name ?? null,
+      x: frame.x,
+      y: frame.y,
+      width: frame.width,
+      height: frame.height,
+      order: null,
+    }, sceneElements, padlets);
+  }
+  return signatures;
+}
+
+async function installGateDInstrumentation(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const target = window as any;
+    const counters = {
+      activeOperation: null as string | null,
+      byOperation: {} as Record<string, any>,
+      arrayTokens: new WeakMap<object, number>(),
+      objectTokens: new WeakMap<object, number>(),
+      lastTokensByTarget: new Map<string, { arrayToken: number; objectToken: number }>(),
+      nextToken: 1,
+      refetchInvocationCount: 0,
+      stateArrivalCount: 0,
+      originalToDataURL: HTMLCanvasElement.prototype.toDataURL,
+      originalImageSrc: Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'src'),
+    };
+    const ensure = (operation: string) => {
+      counters.byOperation[operation] ??= {
+        thumbnailRenderRequests: 0,
+        displayedThumbnailChanges: [] as string[],
+      };
+      return counters.byOperation[operation];
+    };
+    const tokenFor = (map: WeakMap<object, number>, value: object) => {
+      const existing = map.get(value);
+      if (existing) return existing;
+      const next = counters.nextToken++;
+      map.set(value, next);
+      return next;
+    };
+    const reactFiberFor = (el: Element) => {
+      const key = Object.keys(el).find((name) => name.startsWith('__reactFiber$') || name.startsWith('__reactInternalInstance$'));
+      return key ? (el as any)[key] : null;
+    };
+    const clonePadlets = (padlets: any[]) => JSON.parse(JSON.stringify(padlets));
+    const findLiveProps = (targetId: string) => {
+      const selector = `[data-padlet-id="${CSS.escape(targetId)}"]`;
+      const host = document.querySelector(selector);
+      if (!host) throw new Error(`Gate D could not find rendered padlet host ${targetId}`);
+      let fiber = reactFiberFor(host);
+      while (fiber) {
+        const props = fiber.memoizedProps;
+        const padlet = props?.padlet;
+        const allPadlets = props?.allPadlets;
+        if (
+          padlet &&
+          String(padlet.id) === targetId &&
+          Array.isArray(allPadlets) &&
+          allPadlets.some((entry) => String(entry?.id) === targetId)
+        ) {
+          return props;
+        }
+        fiber = fiber.return;
+      }
+      throw new Error(`Gate D could not reach DrawingEmbeddableCard props for ${targetId}`);
+    };
+
+    HTMLCanvasElement.prototype.toDataURL = function (...args: any[]) {
+      const op = counters.activeOperation;
+      if (op && this.width > 0 && this.height > 0) ensure(op).thumbnailRenderRequests++;
+      return counters.originalToDataURL.apply(this, args as any);
+    };
+    if (counters.originalImageSrc?.get && counters.originalImageSrc?.set) {
+      Object.defineProperty(HTMLImageElement.prototype, 'src', {
+        configurable: true,
+        get() {
+          return counters.originalImageSrc!.get!.call(this);
+        },
+        set(value: string) {
+          const alt = this.getAttribute('alt');
+          const previous = counters.originalImageSrc!.get!.call(this);
+          const op = counters.activeOperation;
+          if (op && alt === 'Slide preview' && value && value !== previous) {
+            const row = this.closest('.group');
+            const label = row?.textContent?.match(/Gate D Slide \d+/)?.[0] ?? alt;
+            ensure(op).displayedThumbnailChanges.push(label);
+          }
+          return counters.originalImageSrc!.set!.call(this, value);
+        },
+      });
+    }
+
+    target.__patch128GateD = {
+      snapshot(targetId: string) {
+        const props = findLiveProps(targetId);
+        const allPadlets = props.allPadlets as any[];
+        const padlet = props.padlet as any;
+        const arrayToken = tokenFor(counters.arrayTokens, allPadlets);
+        const objectToken = tokenFor(counters.objectTokens, padlet);
+        const previous = counters.lastTokensByTarget.get(targetId);
+        if (previous && (previous.arrayToken !== arrayToken || previous.objectToken !== objectToken)) {
+          counters.stateArrivalCount++;
+        }
+        counters.lastTokensByTarget.set(targetId, { arrayToken, objectToken });
+        return {
+          targetId,
+          stableTargetId: String(padlet.id),
+          arrayToken,
+          objectToken,
+          allPadlets: clonePadlets(allPadlets),
+          targetPadlet: JSON.parse(JSON.stringify(padlet)),
+          totalPadlets: allPadlets.length,
+          refetchInvocationCount: counters.refetchInvocationCount,
+          stateArrivalCount: counters.stateArrivalCount,
+        };
+      },
+      async invokeFetchData(targetId: string) {
+        const props = findLiveProps(targetId);
+        if (typeof props.fetchData !== 'function') throw new Error(`Gate D missing production fetchData prop for ${targetId}`);
+        counters.refetchInvocationCount++;
+        const result = props.fetchData();
+        if (result && typeof result.then === 'function') await result;
+        return { targetId, refetchInvocationCount: counters.refetchInvocationCount };
+      },
+      start(operation: string) {
+        counters.activeOperation = operation;
+        ensure(operation);
+      },
+      stop() {
+        counters.activeOperation = null;
+      },
+      get(operation: string) {
+        const values = ensure(operation);
+        return {
+          ...values,
+          displayedThumbnailChanges: [...new Set(values.displayedThumbnailChanges)],
+          refetchInvocationCount: counters.refetchInvocationCount,
+          stateArrivalCount: counters.stateArrivalCount,
+        };
+      },
+      dispose() {
+        HTMLCanvasElement.prototype.toDataURL = counters.originalToDataURL;
+        if (counters.originalImageSrc) Object.defineProperty(HTMLImageElement.prototype, 'src', counters.originalImageSrc);
+      },
+    };
+  });
+}
+
+async function gateDSnapshot(page: Page, targetId: string): Promise<GateDLiveSnapshot> {
+  return page.evaluate((id) => (window as any).__patch128GateD.snapshot(id), targetId);
+}
+
+async function startGateDOperation(page: Page, operation: string): Promise<void> {
+  await page.evaluate((name) => (window as any).__patch128GateD.start(name), operation);
+}
+
+async function stopGateDOperation(page: Page): Promise<void> {
+  await page.evaluate(() => (window as any).__patch128GateD.stop());
+}
+
+async function readGateDOperationCounters(page: Page, operation: string): Promise<any> {
+  return page.evaluate((name) => (window as any).__patch128GateD.get(name), operation);
 }
 
 test('PATCH-128 geometry: app-owned and native drags synchronize slides and thumbnails', async ({ page }) => {
@@ -788,6 +987,176 @@ test('PATCH-128 gate F: real app-owned resize handle synchronizes presentation a
   });
 
   expect(pageErrors).toEqual([]);
+});
+
+test('PATCH-128 gate D: live padlet identity churn does not churn slide previews', async ({ page }) => {
+  test.setTimeout(120_000);
+  const pageErrors: string[] = [];
+  const consoleErrors: string[] = [];
+  page.on('pageerror', (err) => pageErrors.push(err.message));
+  page.on('console', (msg) => { if (msg.type() === 'error') consoleErrors.push(msg.text()); });
+
+  const { supabase, fixture } = await createDisposableDrawingBoard('p128-gate-d');
+  const slideId = 'gate-d-slide-1';
+  const targetId = crypto.randomUUID();
+  const containerId = crypto.randomUUID();
+  const childId = crypto.randomUUID();
+  const slideIds = [slideId];
+  const slideNames = ['Gate D Slide 1'];
+
+  const gateDPadletRows = [
+    {
+      id: targetId,
+      board_id: fixture.boardId,
+      title: 'Gate D Stable Target',
+      content: 'Equivalent refetch should not alter render state',
+      type: 'card',
+      position_x: 120,
+      position_y: 120,
+      width: 260,
+      height: 170,
+      metadata: { cardColor: '#dcfce7', topStrip: '#166534', textColor: '#111827' },
+    },
+    {
+      id: containerId,
+      board_id: fixture.boardId,
+      title: 'Gate D Populated Container',
+      content: '',
+      type: 'container',
+      position_x: 450,
+      position_y: 110,
+      width: 290,
+      height: 240,
+      metadata: { isContainer: true, childPadletIds: [childId], cardColor: '#fef9c3', topStrip: '#854d0e' },
+    },
+    {
+      id: childId,
+      board_id: fixture.boardId,
+      title: 'Gate D Child',
+      content: 'Child render input remains stable too',
+      type: 'note',
+      position_x: 0,
+      position_y: 0,
+      width: 180,
+      height: 110,
+      metadata: { parentId: containerId, cardColor: '#e0f2fe' },
+    },
+  ];
+  const { error: padletsErr } = await supabase.from('padlets').insert(gateDPadletRows);
+  if (padletsErr) throw padletsErr;
+
+  const targetEmbeddable = embEl('gate-d-emb-target', targetId, 120, 120, 260, 170, slideId);
+  targetEmbeddable.customData = { renderSignature: drawingLayoutPadletRenderSignature(gateDPadletRows[0]) };
+  const containerEmbeddable = embEl('gate-d-emb-container', containerId, 450, 110, 290, 240, slideId);
+  containerEmbeddable.customData = { renderSignature: drawingLayoutPadletRenderSignature(gateDPadletRows[1]) };
+  const scene = [
+    frameEl(slideId, slideNames[0], 0, 0),
+    targetEmbeddable,
+    containerEmbeddable,
+    rectEl('gate-d-native-rect', 850, 160, slideId),
+  ];
+  const { data: masterData, error: masterErr } = await supabase.from('padlets').insert({
+    board_id: fixture.boardId,
+    title: `${fixture.prefix} master`,
+    content: JSON.stringify(scene),
+    type: 'drawing',
+    position_x: 0,
+    position_y: 0,
+    width: 0,
+    height: 0,
+    metadata: { drawingAppState: JSON.stringify({ scrollX: 0, scrollY: 0, zoom: { value: 1 } }), drawingFiles: JSON.stringify({}) },
+  }).select('id').single();
+  if (masterErr) throw masterErr;
+  fixture.masterPadletId = masterData.id;
+
+  await openDrawingBoard(page, fixture.boardId);
+  await waitForHarness(page);
+  await waitForFramesLoaded(page, 1);
+  await expect(page.locator(`[data-padlet-id="${targetId}"]`).first()).toBeVisible({ timeout: 30_000 });
+  await page.waitForTimeout(3000);
+
+  await installGateDInstrumentation(page);
+  await gateDSnapshot(page, targetId);
+  await page.evaluate((id) => (window as any).__patch128GateD.invokeFetchData(id), targetId);
+  await page.waitForTimeout(3000);
+  const sidebar = await openPresentationSidebar(page, 1);
+  await expect(slideRow(sidebar, slideNames[0])).toBeVisible({ timeout: 30_000 });
+  const initialThumbs = await sampleAllThumbnails(sidebar, slideNames);
+  expect(initialThumbs[slideNames[0]].nonWhitePixels).toBeGreaterThan(0);
+
+  const measurements: any[] = [];
+  for (let iteration = 1; iteration <= 3; iteration++) {
+    const operation = `identity-refetch-${iteration}`;
+    const beforeSnapshot = await gateDSnapshot(page, targetId);
+    const beforeScene = await getLiveElements(page);
+    const beforeRenderState = gateDRenderState(beforeSnapshot);
+    const beforeRevision = computePostRenderRevision(beforeSnapshot.allPadlets);
+    const beforeSignatures = gateDSlideSignatures(slideIds, beforeScene, beforeSnapshot.allPadlets);
+    const beforeThumbs = await sampleAllThumbnails(sidebar, slideNames);
+
+    await startGateDOperation(page, operation);
+    const refetchResult = await page.evaluate((id) => (window as any).__patch128GateD.invokeFetchData(id), targetId);
+    await expect.poll(async () => {
+      const next = await gateDSnapshot(page, targetId);
+      return `${next.arrayToken !== beforeSnapshot.arrayToken}:${next.objectToken !== beforeSnapshot.objectToken}`;
+    }, { timeout: 15_000, intervals: [100, 250, 500, 1000] }).toBe('true:true');
+    await page.waitForTimeout(2000);
+    await stopGateDOperation(page);
+
+    const afterSnapshot = await gateDSnapshot(page, targetId);
+    const afterScene = await getLiveElements(page);
+    const afterRenderState = gateDRenderState(afterSnapshot);
+    const afterRevision = computePostRenderRevision(afterSnapshot.allPadlets);
+    const afterSignatures = gateDSlideSignatures(slideIds, afterScene, afterSnapshot.allPadlets);
+    const afterThumbs = await sampleAllThumbnails(sidebar, slideNames);
+    const counters = await readGateDOperationCounters(page, operation);
+
+    expect(afterSnapshot.stableTargetId).toBe(beforeSnapshot.stableTargetId);
+    expect(afterSnapshot.arrayToken).not.toBe(beforeSnapshot.arrayToken);
+    expect(afterSnapshot.objectToken).not.toBe(beforeSnapshot.objectToken);
+    expect(afterRenderState).toEqual(beforeRenderState);
+    expect(afterRevision).toBe(beforeRevision);
+    expect(afterSignatures).toEqual(beforeSignatures);
+    expect(afterThumbs).toEqual(beforeThumbs);
+    expect(counters.thumbnailRenderRequests).toBe(0);
+    expect(counters.displayedThumbnailChanges).toEqual([]);
+
+    measurements.push({
+      operation,
+      targetId,
+      refetchResult,
+      beforeIdentity: { arrayToken: beforeSnapshot.arrayToken, objectToken: beforeSnapshot.objectToken },
+      afterIdentity: { arrayToken: afterSnapshot.arrayToken, objectToken: afterSnapshot.objectToken },
+      totalPadlets: afterSnapshot.totalPadlets,
+      stableTargetId: afterSnapshot.stableTargetId,
+      renderStateStable: JSON.stringify(afterRenderState) === JSON.stringify(beforeRenderState),
+      revisionStable: afterRevision === beforeRevision,
+      signaturesStable: JSON.stringify(afterSignatures) === JSON.stringify(beforeSignatures),
+      thumbnailRequests: counters.thumbnailRenderRequests,
+      displayedThumbnailChanges: counters.displayedThumbnailChanges,
+      beforeThumbs,
+      afterThumbs,
+      stateArrivalCount: counters.stateArrivalCount,
+    });
+  }
+
+  test.info().annotations.push({
+    type: 'patch128-gate-d-live-identity-evidence',
+    description: JSON.stringify({
+      method: 'test-scoped React fiber prop inspection of live DrawingEmbeddableCard padlet/allPadlets plus invocation of its production fetchData prop',
+      repetitions: measurements.length,
+      measurements,
+      pageErrors,
+      consoleErrors,
+    }),
+  });
+
+  expect(measurements).toHaveLength(3);
+  expect(measurements.every((entry) => entry.refetchResult.refetchInvocationCount >= 1)).toBe(true);
+  expect(measurements.every((entry) => entry.stateArrivalCount >= 1)).toBe(true);
+  expect(pageErrors).toEqual([]);
+  expect(consoleErrors).toEqual([]);
+  await page.evaluate(() => (window as any).__patch128GateD.dispose());
 });
 
 test('PATCH-128 gate G: representative slide-sync performance remains bounded', async ({ page }) => {
