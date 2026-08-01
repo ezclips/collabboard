@@ -3492,3 +3492,222 @@ split-brain `frames` memo (§17c); `getSceneVersion` blind to metadata-only chan
 (§17e); plus the upstream Excalidraw null-dereference, the `unload` warning, the
 tsconfig-excluded fork, and the PATCH-123 §14k / PATCH-124 §14l / PATCH-125 §13l
 ledgers with the unresolved production-build failure.
+
+---
+
+## 30. Amendment — IMPLEMENTATION ACCEPTED; F CORRECTED TO UNPROVEN (2026-08-01, CTO)
+
+Independent acceptance review of implementation commit **`400f056`** against §29.
+
+**Result: ACCEPT IMPLEMENTATION COMMIT WITH NON-BLOCKING FINDINGS. Do not close
+PATCH-128.**
+
+### 30a. Scope verified — exactly seven authorized files
+
+**Production:** `DrawingLayout.tsx`; `getSlideRenderSignature.ts`;
+`lib/infra/drawing/postRenderRevision.ts`;
+`lib/infra/drawing/settledScenePropagation.ts`.
+**Tests:** `postRenderRevision.test.ts`; `settledScenePropagation.test.ts`;
+`e2e/characterization/patch-128-slide-sync.spec.ts`.
+
+**No unauthorized production path changed.**
+
+### 30b. Mechanism A — app-owned writer repair — **PASS**
+
+Both handlers retrieve the current **live** element; do not derive revision fields
+from the pointerdown-time snapshot; update x/y immutably; increment version;
+generate a new `versionNonce`; set `updated: Date.now()`; preserve pointermove
+non-history behaviour, the final history commit, `updateBoundElements`, and **one**
+`onDragEnd` persistence operation; add **no** second `updateScene` writer; and do
+not alter locking or database synchronization.
+
+**The final pointerup mutation derives from the latest live element and therefore
+does not overwrite a newer pointermove revision or position.** That was the precise
+§29f requirement, and the reviewer confirmed it independently.
+
+### 30c. Mechanism B — two-ref settled propagation — **PASS**
+
+Separate `lastObservedSceneVersion` and `lastSettledSceneVersion` confirmed. Lazy
+initialization produces no startup propagation; latest snapshot retained; only
+actual revision changes schedule/reset; unchanged-revision traffic ignored; latest
+snapshot wins; settled revision advances **only after** `onSettle`; cleanup cancels
+pending work; no pointerup flush; no maximum-wait; no appState gating; no separate
+native/app-owned system; the immediate count/frame-name gate intact.
+
+**The §27c one-ref defect is not present.**
+
+### 30d. Mechanism C — deterministic post-render revision — **PASS**
+
+Sorts by stable post ID; reuses `buildPadletRenderState`; duplicates no
+render-field list; preserves existing bounded recursion; stable across array/object
+identity and top-level ordering; changes for visible metadata; excludes raw
+identity; no unbounded traversal; **djb2 digest acceptable for cache invalidation**.
+
+### 30e. `buildPadletRenderState` export — **PASS**
+
+Visibility-only: `export` keyword added, function body unchanged,
+`getSlideRenderSignature` semantics unchanged, field list unchanged, recursion
+unchanged, **no PATCH-115 semantic boundary crossed.**
+
+### 30f. Frames-memo wiring — **PASS**
+
+Deterministic revision computed from `padlets`; **raw `padlets` identity not added**
+to the memo; revision added as an **additive** dependency; `elements` and
+`canvasLines` retained; no second membership algorithm; no second thumbnail
+scheduler; `resolveFrameMembership` and PATCH-124 unchanged.
+
+### 30g. Test quality — **PASS for the committed core contract**
+
+16 unit tests pass (9 revision, 7 settled propagation). Three browser cases cover
+geometry synchronization (within-slide, cross-slide, native real-pointer,
+React/live agreement, thumbnail updates), history (undo/redo restore, one
+persistence write) and metadata (title, non-text todo, outside-slide filtering).
+
+**Thumbnail locators are re-queried by stable slide identity and do not rely on
+stale captured DOM nodes** — the §23a lesson held in the committed suite.
+
+### 30h. Boundaries — **PASS**
+
+Confirmed untouched: `.fable5`; the PATCH-124 scheduler; `resolveFrameMembership`;
+`getSlideRenderSignature` semantics; protected paths; `node_modules`;
+`excalidraw_fork`; package files; PATCH-115 behaviour; PATCH-126/127/118/119.
+
+### 30i. Validation — **PASS**, subject to the pre-existing build failure
+
+`npx tsc --noEmit` passed; `npx vitest run` passed; `git diff --check
+368a3d1..400f056` passed; changed-file scope passed.
+
+The production-build failure — `TypeError: Cannot read properties of undefined
+(reading 'length')` — is **plausibly unrelated**: the implementation adds no
+matching unsafe length access or array destructuring, and the implementer
+reproduced the identical failure on the pre-implementation baseline. It stays in
+the debt ledger, unresolved and unattributed to this patch.
+
+### 30j. Non-blocking findings
+
+1. **`settledScenePropagation.ts` uses timer casts** around `setTimeout`/
+   `clearTimeout`. Functional and tested; typing slightly fragile. **No correction
+   required unless it causes a real type or runtime issue.**
+2. **`postRenderRevision` uses a 32-bit djb2 digest.** Acceptable for governed cache
+   invalidation. **Not blocking.**
+
+Neither finding is a defect. Recorded so a future reader does not rediscover them as
+if they were unnoticed.
+
+### 30k. Gate record corrected — **F is UNPROVEN**
+
+**B — CONTAINER/CHILD: UNPROVEN.** No committed test provides a real
+render-relevant child edit in `DrawingLayout` mode.
+
+**D — LIVE IDENTITY-CHURN: UNPROVEN.** Unit determinism exists; a real local-client
+identity-churn scenario has not been proven.
+
+**F — APP-OWNED RESIZE: UNPROVEN IN THE COMMITTED ACCEPTANCE SUITE.**
+
+> **This corrects the implementer report, which stated F PASS.** The independent
+> reviewer found **no real resize-handle interaction and no resize assertion in the
+> committed browser test file.** The implementer's F evidence came from a
+> **temporary diagnostic spec that was deleted before the commit** — real evidence
+> at the time it was taken, but **not retained in the acceptance suite**, and
+> therefore not acceptance.
+
+**Do not silently preserve the implementation report's F PASS classification.**
+
+To accept F, require **one** of:
+
+1. **add and pass a committed real resize-handle characterization test**; or
+2. **present the retained diagnostic evidence to Opus and obtain an explicit
+   documented waiver** from requiring it in the committed suite.
+
+**No waiver is granted by this amendment.**
+
+This is the correct correction. A gate is a claim about what the repository can
+demonstrate on demand — evidence that exists only in a deleted file and a chat
+transcript does not meet that bar, however genuine the observation was. The lesson
+generalizes and is recorded in the ledger: **acceptance evidence must live in the
+committed suite, or it is not acceptance.**
+
+**G — PERFORMANCE: UNPROVEN.** No representative larger-board performance result
+exists.
+
+### 30l. Implementation status
+
+**PATCH-128 IMPLEMENTATION COMMIT `400f056`: ACCEPTED AND MAY BE RETAINED.**
+
+**Do not alter commit `400f056`.**
+
+### 30m. Next action — gates only
+
+**Do not request another broad implementation review.** The next work must focus
+**only** on resolving closure gates, in this order:
+
+1. **F** — add a reliable real resize-handle browser characterization;
+2. **G** — representative-board performance run;
+3. **D** — local identity-churn control;
+4. **B** — execute a real child edit, or request the already-defined narrow
+   source-based waiver if no render-relevant UI path exists.
+
+**Do not modify production implementation unless one of those gate tests exposes a
+real defect.**
+
+**Do not push and do not close until Opus records the gate-resolution plan.**
+
+### 30n. Next GPT-5.5 instruction (bind)
+
+> **Resolve closure gate F only. Do not touch production implementation.**
+>
+> Add a **committed** browser characterization that proves a real Excalidraw
+> resize-handle interaction: the correct handle receives `pointerdown`; live
+> width/height change; `version`/`getSceneVersion` change; settled React dimensions
+> match live; the slide signature/cache key changes; and the displayed thumbnail
+> changes — re-queried by stable slide identity at assertion time.
+>
+> The only file you may add to or modify is
+> `e2e/characterization/patch-128-slide-sync.spec.ts`. **A temporary diagnostic that
+> is deleted before commit does not satisfy this gate** (§30k).
+>
+> If the handle cannot be reliably targeted in a committed test, **stop and report
+> UNPROVEN with the exact obstacle** — do not weaken the assertion to obtain a pass.
+>
+> Do not alter commit `400f056`'s production files, PATCH-124,
+> `getSlideRenderSignature`, PATCH-115, `node_modules` or `excalidraw_fork`. Do not
+> push. Do not close PATCH-128.
+
+### 30o. Status
+
+**PATCH-128: OPEN · IMPLEMENTATION ACCEPTED (`400f056`) · B/D/F/G PRE-CLOSURE GATES
+UNRESOLVED · NOT CLOSED.**
+
+The mechanisms are landed and independently verified against every clause §29 bound.
+What remains is entirely acceptance evidence.
+
+**PATCH-124 unchanged and correct. `getSlideRenderSignature` semantics unchanged.
+PATCH-115 untouched.**
+**PATCH-127: OPEN · B2C AUTHORIZED · NOT STARTED · candidate removed.**
+**PATCH-126: DESIGNATED, UNAUTHORED, UNAUTHORIZED.**
+**PATCH-125 / 124 / 123 / 122 / 121 / 120 / 117: CLOSED.**
+**PATCH-116: CANCELLED.**
+**PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
+**PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
+**PATCH-119: DESIGNATED, UNAUTHORED, UNAUTHORIZED, UNTOUCHED.**
+
+**Recorded debt, updated.** Added: **acceptance evidence must live in the committed
+suite — a deleted temporary diagnostic is not acceptance** (§30k), the first time
+this patch has had a *reported* pass corrected by an independent reviewer rather
+than by its own measurement; **`settledScenePropagation.ts` timer casts** and the
+**32-bit djb2 digest** as accepted, non-blocking implementation notes (§30j); and
+**the four closure gates B/D/F/G remain the patch's sole outstanding obligation.**
+Retained: Excalidraw `onChange` fires continuously at rest (~15–20 ms) with no scene
+or appState change; one ref must never carry both "observed" and "settled" meanings;
+a stable output with a flat input-arrival counter proves absence of input, not
+correct filtering; a mechanism proven for one path must not be described as proven
+generally; `updated_at` is not a reliable client-side invalidation trigger under the
+optimistic update path; thumbnail assertions must re-query by stable slide identity;
+Excalidraw fixture elements need sequential fractional indices matching array order
+or they are silently dropped; a destination frame with no prior elements can take
+unusually long to receive its first thumbnail render (pre-existing, reproduced on
+baseline); nondeterministic React propagation (§19c); the split-brain `frames` memo
+(§17c); `getSceneVersion` blind to metadata-only changes (§17e); plus the upstream
+Excalidraw null-dereference, the `unload` warning, the tsconfig-excluded fork, and
+the PATCH-123 §14k / PATCH-124 §14l / PATCH-125 §13l ledgers with the unresolved
+production-build failure.
