@@ -7,10 +7,45 @@ import {
 } from './drawingBridgeHarness';
 import { getSlideRenderSignature } from '@/components/presentation/slide-renderer/getSlideRenderSignature';
 import { planSlideComposition } from '@/components/presentation/slide-renderer/planSlideComposition';
+import { computePostRenderRevision } from '@/lib/infra/drawing/postRenderRevision';
 
 registerDrawingCleanup(test);
 
 type ThumbSample = { hash: string; nonWhitePixels: number };
+type GateGOperationName =
+  | 'within-slide-app-drag'
+  | 'cross-slide-app-drag'
+  | 'native-real-pointer-drag'
+  | 'slide-title-metadata-edit'
+  | 'slide-todo-completion-edit'
+  | 'outside-slide-metadata-edit';
+type GateGSignatureSnapshot = Record<string, string>;
+type GateGMeasurement = {
+  operation: GateGOperationName;
+  durationMs: number;
+  sceneVersionChanges: number;
+  unchangedRevisionOnChangeCalls: number;
+  totalExcalidrawOnChangeCalls: number;
+  settledTimerSchedules: number;
+  settledTimerClears: number;
+  settledSetElementsCalls: number;
+  framesMemoRecomputations: number;
+  postRenderRevisionComputations: number;
+  postRenderRevisionDurationMs: number;
+  slideSignatureComputations: number;
+  changedSlideSignatures: string[];
+  thumbnailRenderRequests: number;
+  thumbnailRendersAccepted: number;
+  thumbnailRendersDiscardedAsStale: number;
+  displayedThumbnailChanges: string[];
+  pointerUpToSettledReactGeometryMs: number | null;
+  pointerUpToDisplayedThumbnailStabilizationMs: number | null;
+  metadataActionToDisplayedThumbnailStabilizationMs: number | null;
+  idleCounterGrowth: Record<string, number>;
+  consoleErrors: string[];
+  pageErrors: string[];
+  reactRenderReconcileAnomalies: string[];
+};
 
 async function openPresentationSidebar(page: Page, expectedSlideCount: number): Promise<Locator> {
   await page.getByTitle('Present Frames').click();
@@ -201,6 +236,268 @@ function embEl(id: string, padletId: string, x: number, y: number, w: number, h:
 }
 function rectEl(id: string, x: number, y: number, frameId: string | null) {
   return { id, type: 'rectangle', x, y, width: 120, height: 80, angle: 0, strokeColor: '#dc2626', backgroundColor: '#dc2626', fillStyle: 'solid', strokeWidth: 2, strokeStyle: 'solid', roundness: null, roughness: 0, opacity: 100, seed: 5, groupIds: [], frameId, isDeleted: false, version: 1, versionNonce: 1, updated: nowMs, index: nextFractionalIndex(), boundElements: null, link: null, locked: false };
+}
+function diamondEl(id: string, x: number, y: number, frameId: string | null) {
+  return { id, type: 'diamond', x, y, width: 95, height: 95, angle: 0, strokeColor: '#1d4ed8', backgroundColor: '#bfdbfe', fillStyle: 'solid', strokeWidth: 2, strokeStyle: 'solid', roundness: null, roughness: 0, opacity: 100, seed: 7, groupIds: [], frameId, isDeleted: false, version: 1, versionNonce: 1, updated: nowMs, index: nextFractionalIndex(), boundElements: null, link: null, locked: false };
+}
+
+function gateGTextEl(id: string, text: string, x: number, y: number, frameId: string | null) {
+  return {
+    id,
+    type: 'text',
+    x,
+    y,
+    width: 260,
+    height: 34,
+    angle: 0,
+    strokeColor: '#111827',
+    backgroundColor: 'transparent',
+    fillStyle: 'solid',
+    strokeWidth: 1,
+    strokeStyle: 'solid',
+    roundness: null,
+    roughness: 0,
+    opacity: 100,
+    seed: 11,
+    groupIds: [],
+    frameId,
+    isDeleted: false,
+    version: 1,
+    versionNonce: 1,
+    updated: nowMs,
+    index: nextFractionalIndex(),
+    boundElements: null,
+    link: null,
+    locked: false,
+    text,
+    fontSize: 24,
+    fontFamily: 1,
+    fontString: '24px Virgil',
+    textAlign: 'left',
+    verticalAlign: 'top',
+    containerId: null,
+    originalText: text,
+    lineHeight: 1.25,
+    baseline: 23,
+    autoResize: true,
+  };
+}
+
+function gateGFrameId(index: number): string {
+  return `gate-g-slide-${index}`;
+}
+
+async function currentSlideSignatures(supabase: any, boardId: string, slideIds: string[], sceneElements: any[]): Promise<GateGSignatureSnapshot> {
+  const { data: padlets, error } = await supabase.from('padlets').select('*').eq('board_id', boardId);
+  if (error) throw error;
+  const signatures: GateGSignatureSnapshot = {};
+  for (const slideId of slideIds) {
+    const frame = sceneElements.find((el) => el.id === slideId);
+    if (!frame) throw new Error(`Missing representative fixture slide ${slideId}`);
+    signatures[slideId] = getSlideRenderSignature({
+      id: frame.id,
+      name: frame.name ?? null,
+      x: frame.x,
+      y: frame.y,
+      width: frame.width,
+      height: frame.height,
+      order: null,
+    }, sceneElements, padlets ?? []);
+  }
+  return signatures;
+}
+
+function changedSignatureIds(before: GateGSignatureSnapshot, after: GateGSignatureSnapshot): string[] {
+  return Object.keys(after).filter((id) => before[id] !== after[id]);
+}
+
+async function waitForStableSlideSignatures(
+  page: Page,
+  supabase: any,
+  boardId: string,
+  slideIds: string[],
+): Promise<GateGSignatureSnapshot> {
+  let candidate = await currentSlideSignatures(supabase, boardId, slideIds, await getElements(page));
+  let stable = 0;
+  for (let attempt = 0; attempt < 10; attempt++) {
+    await page.waitForTimeout(500);
+    const next = await currentSlideSignatures(supabase, boardId, slideIds, await getElements(page));
+    if (JSON.stringify(next) === JSON.stringify(candidate)) {
+      stable++;
+      if (stable >= 2) return next;
+    } else {
+      stable = 0;
+      candidate = next;
+    }
+  }
+  return candidate;
+}
+
+async function sampleAllThumbnails(sidebar: Locator, slideNames: string[]): Promise<Record<string, ThumbSample>> {
+  const samples: Record<string, ThumbSample> = {};
+  for (const name of slideNames) {
+    samples[name] = await sampleThumbnail(slideRow(sidebar, name));
+  }
+  return samples;
+}
+
+function changedThumbnailNames(before: Record<string, ThumbSample>, after: Record<string, ThumbSample>): string[] {
+  return Object.keys(after).filter((name) => before[name]?.hash !== after[name].hash);
+}
+
+async function waitForAnyThumbnailStabilization(sidebar: Locator, slideNames: string[], before: Record<string, ThumbSample>, timeoutMs = 30_000) {
+  const page = sidebar.page();
+  const started = performance.now();
+  await expect.poll(async () => {
+    const next = await sampleAllThumbnails(sidebar, slideNames);
+    return changedThumbnailNames(before, next).join('|');
+  }, { timeout: timeoutMs, intervals: [500, 1000, 1500, 2500] }).not.toBe('');
+
+  let candidate = await sampleAllThumbnails(sidebar, slideNames);
+  let stable = 0;
+  for (let attempt = 0; attempt < 8; attempt++) {
+    await page.waitForTimeout(800);
+    const next = await sampleAllThumbnails(sidebar, slideNames);
+    if (JSON.stringify(next) === JSON.stringify(candidate)) {
+      stable++;
+      if (stable >= 2) {
+        return { samples: next, elapsedMs: Math.round(performance.now() - started) };
+      }
+    } else {
+      stable = 0;
+      candidate = next;
+    }
+  }
+  return { samples: candidate, elapsedMs: Math.round(performance.now() - started) };
+}
+
+async function installGateGInstrumentation(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const target = window as any;
+    const counters = {
+      activeOperation: null as string | null,
+      byOperation: {} as Record<string, any>,
+      consoleErrors: [] as string[],
+      originalSetTimeout: window.setTimeout.bind(window),
+      originalClearTimeout: window.clearTimeout.bind(window),
+      originalToDataURL: HTMLCanvasElement.prototype.toDataURL,
+      originalImageSrc: Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'src'),
+      unsubscribeOnChange: null as null | (() => void),
+      timerOwners: new Map<number, { operation: string | null; delay: number }>(),
+      nextTimerId: 1,
+    };
+    const ensure = (operation: string) => {
+      counters.byOperation[operation] ??= {
+        settledTimerSchedules: 0,
+        settledTimerClears: 0,
+        thumbnailDebounceSchedules: 0,
+        thumbnailRenderRequests: 0,
+        displayedThumbnailChanges: [] as string[],
+        totalExcalidrawOnChangeCalls: 0,
+        sceneVersionChanges: 0,
+        unchangedRevisionOnChangeCalls: 0,
+        lastRevision: null as string | null,
+      };
+      return counters.byOperation[operation];
+    };
+    const revisionOf = (elements: readonly any[]) => JSON.stringify(
+      elements
+        .filter((el) => !el?.isDeleted)
+        .map((el) => [el.id, el.version, el.versionNonce, el.x, el.y, el.width, el.height, el.frameId, el.updated]),
+    );
+    const h = target.h;
+    if (h?.app?.onChangeEmitter && typeof h.app.onChangeEmitter.on === 'function') {
+      counters.unsubscribeOnChange = h.app.onChangeEmitter.on((elements: readonly any[]) => {
+        const op = counters.activeOperation;
+        if (op) {
+          const values = ensure(op);
+          values.totalExcalidrawOnChangeCalls++;
+          const revision = revisionOf(elements);
+          if (values.lastRevision === null) {
+            values.lastRevision = revision;
+          } else if (values.lastRevision === revision) {
+            values.unchangedRevisionOnChangeCalls++;
+          } else {
+            values.sceneVersionChanges++;
+            values.lastRevision = revision;
+          }
+        }
+      });
+    }
+    window.setTimeout = ((handler: TimerHandler, timeout?: number, ...args: any[]) => {
+      const id = counters.originalSetTimeout(handler as any, timeout as any, ...args) as unknown as number;
+      const op = counters.activeOperation;
+      if (op && timeout === 150) ensure(op).settledTimerSchedules++;
+      if (op && timeout === 250) ensure(op).thumbnailDebounceSchedules++;
+      counters.timerOwners.set(id, { operation: op, delay: Number(timeout ?? 0) });
+      return id as any;
+    }) as typeof window.setTimeout;
+    window.clearTimeout = ((id?: number) => {
+      const owner = typeof id === 'number' ? counters.timerOwners.get(id) : null;
+      if (owner?.operation && owner.delay === 150) ensure(owner.operation).settledTimerClears++;
+      if (typeof id === 'number') counters.timerOwners.delete(id);
+      return counters.originalClearTimeout(id as any);
+    }) as typeof window.clearTimeout;
+    HTMLCanvasElement.prototype.toDataURL = function (...args: any[]) {
+      const op = counters.activeOperation;
+      if (op && this.width > 0 && this.height > 0) ensure(op).thumbnailRenderRequests++;
+      return counters.originalToDataURL.apply(this, args as any);
+    };
+    if (counters.originalImageSrc?.get && counters.originalImageSrc?.set) {
+      Object.defineProperty(HTMLImageElement.prototype, 'src', {
+        configurable: true,
+        get() {
+          return counters.originalImageSrc!.get!.call(this);
+        },
+        set(value: string) {
+          const alt = this.getAttribute('alt');
+          const previous = counters.originalImageSrc!.get!.call(this);
+          const op = counters.activeOperation;
+          if (op && alt === 'Slide preview' && value && value !== previous) {
+            const row = this.closest('.group');
+            const label = row?.textContent?.match(/Gate G Slide \d+/)?.[0] ?? alt;
+            ensure(op).displayedThumbnailChanges.push(label);
+          }
+          return counters.originalImageSrc!.set!.call(this, value);
+        },
+      });
+    }
+    target.__patch128GateG = {
+      start(operation: string) {
+        counters.activeOperation = operation;
+        ensure(operation);
+      },
+      stop() {
+        counters.activeOperation = null;
+      },
+      get(operation: string) {
+        const values = ensure(operation);
+        return {
+          ...values,
+          displayedThumbnailChanges: [...new Set(values.displayedThumbnailChanges)],
+        };
+      },
+      dispose() {
+        window.setTimeout = counters.originalSetTimeout;
+        window.clearTimeout = counters.originalClearTimeout;
+        HTMLCanvasElement.prototype.toDataURL = counters.originalToDataURL;
+        if (counters.originalImageSrc) Object.defineProperty(HTMLImageElement.prototype, 'src', counters.originalImageSrc);
+        counters.unsubscribeOnChange?.();
+      },
+    };
+  });
+}
+
+async function startGateGOperation(page: Page, operation: GateGOperationName): Promise<void> {
+  await page.evaluate((name) => (window as any).__patch128GateG.start(name), operation);
+}
+
+async function stopGateGOperation(page: Page): Promise<void> {
+  await page.evaluate(() => (window as any).__patch128GateG.stop());
+}
+
+async function readGateGOperationCounters(page: Page, operation: GateGOperationName): Promise<any> {
+  return page.evaluate((name) => (window as any).__patch128GateG.get(name), operation);
 }
 
 test('PATCH-128 geometry: app-owned and native drags synchronize slides and thumbnails', async ({ page }) => {
@@ -491,6 +788,455 @@ test('PATCH-128 gate F: real app-owned resize handle synchronizes presentation a
   });
 
   expect(pageErrors).toEqual([]);
+});
+
+test('PATCH-128 gate G: representative slide-sync performance remains bounded', async ({ page }) => {
+  test.setTimeout(240_000);
+  const pageErrors: string[] = [];
+  const consoleErrors: string[] = [];
+  const benignConsoleErrors: string[] = [];
+  page.on('pageerror', (err) => pageErrors.push(err.message));
+  page.on('console', (msg) => {
+    if (msg.type() !== 'error') return;
+    const text = msg.text();
+    if (
+      text.includes('https://unpkg.com/@excalidraw/excalidraw') ||
+      text === 'Failed to load resource: net::ERR_FAILED'
+    ) {
+      benignConsoleErrors.push(text);
+      return;
+    }
+    consoleErrors.push(text);
+  });
+
+  const { supabase, fixture } = await createDisposableDrawingBoard('p128-gate-g');
+  const slideIds = Array.from({ length: 8 }, (_, index) => gateGFrameId(index + 1));
+  const slideNames = slideIds.map((_, index) => `Gate G Slide ${index + 1}`);
+  const padletRows: any[] = [];
+  const scene: any[] = [];
+  const rootPostIdsBySlide: Record<string, string[]> = {};
+  const embeddableIdsByPostId: Record<string, string> = {};
+  const todoTargetId = crypto.randomUUID();
+  const titleTargetId = crypto.randomUUID();
+  const outsideTodoId = crypto.randomUUID();
+
+  for (let slideIndex = 0; slideIndex < slideIds.length; slideIndex++) {
+    const slideId = slideIds[slideIndex];
+    const frameX = slideIndex * 1450;
+    scene.push(frameEl(slideId, slideNames[slideIndex], frameX, 0));
+    rootPostIdsBySlide[slideId] = [];
+
+    const positions = [
+      [90, 90],
+      [370, 90],
+      [650, 90],
+      [90, 360],
+      [370, 360],
+      [650, 360],
+    ];
+    for (let postIndex = 0; postIndex < 6; postIndex++) {
+      const isTitleTarget = slideIndex === 0 && postIndex === 2;
+      const isTodoTarget = slideIndex === 0 && postIndex === 1;
+      const isContainer = postIndex === 5;
+      const id = isTitleTarget ? titleTargetId : isTodoTarget ? todoTargetId : crypto.randomUUID();
+      const type = isTodoTarget || postIndex === 1 ? 'todo' : isContainer ? 'container' : postIndex % 3 === 0 ? 'note' : 'card';
+      const childIds = isContainer ? [crypto.randomUUID(), crypto.randomUUID()] : [];
+      const title = isTitleTarget ? 'Gate G Title Before' : `Gate G ${slideIndex + 1}.${postIndex + 1}`;
+      const metadata: any = type === 'todo'
+        ? { todoTitle: title, tasks: [{ id: `task-${slideIndex}-${postIndex}`, text: `Task ${slideIndex + 1}.${postIndex + 1}`, completed: false }] }
+        : isContainer
+          ? { isContainer: true, childPadletIds: childIds, cardColor: '#fef9c3', topStrip: '#854d0e' }
+          : { cardColor: postIndex % 2 === 0 ? '#dcfce7' : '#e0f2fe', topStrip: postIndex % 2 === 0 ? '#166534' : '#075985' };
+      padletRows.push({
+        id,
+        board_id: fixture.boardId,
+        title,
+        content: type === 'note' ? `Representative text content ${slideIndex + 1}.${postIndex + 1}` : '',
+        type,
+        position_x: frameX + positions[postIndex][0],
+        position_y: positions[postIndex][1],
+        width: isContainer ? 250 : 220,
+        height: isContainer ? 230 : 160,
+        metadata,
+      });
+      rootPostIdsBySlide[slideId].push(id);
+      const embId = `gate-g-emb-${slideIndex + 1}-${postIndex + 1}`;
+      embeddableIdsByPostId[id] = embId;
+      scene.push(embEl(embId, id, frameX + positions[postIndex][0], positions[postIndex][1], isContainer ? 250 : 220, isContainer ? 230 : 160, slideId));
+      for (const [childIndex, childId] of childIds.entries()) {
+        padletRows.push({
+          id: childId,
+          board_id: fixture.boardId,
+          title: `Gate G child ${slideIndex + 1}.${childIndex + 1}`,
+          content: `Bounded child render state ${slideIndex + 1}.${childIndex + 1}`,
+          type: childIndex === 0 ? 'note' : 'card',
+          position_x: 0,
+          position_y: 0,
+          width: 180,
+          height: 120,
+          metadata: { parentId: id, containerIndex: childIndex, cardColor: childIndex === 0 ? '#fae8ff' : '#fee2e2' },
+        });
+      }
+    }
+
+    if (slideIndex < 6) {
+      const nativeX = slideIndex === 0 ? 90 : 960;
+      const nativeY = slideIndex === 0 ? 620 : 110;
+      scene.push(rectEl(`gate-g-native-rect-${slideIndex + 1}`, frameX + nativeX, nativeY, slideId));
+      scene.push(diamondEl(`gate-g-native-diamond-${slideIndex + 1}`, frameX + (slideIndex === 0 ? 370 : 970), slideIndex === 0 ? 610 : 330, slideId));
+    } else {
+      scene.push(gateGTextEl(`gate-g-native-text-${slideIndex + 1}`, `Native ${slideIndex + 1}`, frameX + 960, 120, slideId));
+    }
+  }
+
+  padletRows.push({
+    id: outsideTodoId,
+    board_id: fixture.boardId,
+    title: 'Gate G Outside Todo',
+    content: '',
+    type: 'todo',
+    position_x: 100,
+    position_y: 735,
+    width: 240,
+    height: 160,
+    metadata: { todoTitle: 'Gate G Outside Todo', tasks: [{ id: 'outside-task', text: 'Outside task', completed: false }] },
+  });
+  scene.push(embEl('gate-g-emb-outside', outsideTodoId, 100, 735, 240, 160, null));
+
+  const { error: padletsErr } = await supabase.from('padlets').insert(padletRows);
+  if (padletsErr) throw padletsErr;
+  const { data: masterData, error: masterErr } = await supabase.from('padlets').insert({
+    board_id: fixture.boardId,
+    title: `${fixture.prefix} master`,
+    content: JSON.stringify(scene),
+    type: 'drawing',
+    position_x: 0, position_y: 0, width: 0, height: 0,
+    metadata: { drawingAppState: JSON.stringify({ scrollX: 0, scrollY: 0, zoom: { value: 1 } }), drawingFiles: JSON.stringify({}) },
+  }).select('id').single();
+  if (masterErr) throw masterErr;
+  fixture.masterPadletId = masterData.id;
+
+  await openDrawingBoard(page, fixture.boardId);
+  await waitForHarness(page);
+  await waitForFramesLoaded(page, 8);
+  await expect.poll(async () => {
+    const live = await getLiveElements(page);
+    const appEmbeddables = live.filter((el) => el.type === 'embeddable' && typeof el.link === 'string' && el.link.startsWith('padlet://'));
+    const signed = appEmbeddables.filter((el) => typeof el.customData?.renderSignature === 'string' && el.customData.renderSignature.length > 0);
+    return `${signed.length}/${appEmbeddables.length}`;
+  }, { timeout: 30_000, intervals: [500, 1000, 2000] }).toBe('49/49');
+  await installGateGInstrumentation(page);
+  await page.waitForTimeout(2500);
+  const sidebar = await openPresentationSidebar(page, 8);
+  for (const slideName of slideNames) {
+    await expect(slideRow(sidebar, slideName)).toBeVisible({ timeout: 30_000 });
+  }
+  const initialThumbs = await sampleAllThumbnails(sidebar, slideNames);
+  expect(Object.values(initialThumbs).every((thumb) => thumb.nonWhitePixels > 0)).toBe(true);
+
+  const measurePostRevision = async () => {
+    const { data: rows, error } = await supabase.from('padlets').select('*').eq('board_id', fixture.boardId);
+    if (error) throw error;
+    const samples: number[] = [];
+    let revision = '';
+    for (let i = 0; i < 7; i++) {
+      const started = performance.now();
+      revision = computePostRenderRevision(rows ?? []);
+      samples.push(performance.now() - started);
+    }
+    const sorted = [...samples].sort((a, b) => a - b);
+    return {
+      revision,
+      postCount: (rows ?? []).filter((row: any) => row.type !== 'drawing').length,
+      serializedSize: JSON.stringify(rows ?? []).length,
+      minMs: Math.min(...samples),
+      medianMs: sorted[Math.floor(sorted.length / 2)],
+      maxMs: Math.max(...samples),
+    };
+  };
+  const initialPostRevision = await measurePostRevision();
+  const initialSignatures = await currentSlideSignatures(supabase, fixture.boardId, slideIds, await getLiveElements(page));
+  const measurements: GateGMeasurement[] = [];
+  const appDragProofs: any[] = [];
+
+  const observeIdleGrowth = async (operation: GateGOperationName, beforeCounters: any) => {
+    await page.waitForTimeout(1800);
+    const afterCounters = await readGateGOperationCounters(page, operation);
+    return {
+      totalExcalidrawOnChangeCalls: afterCounters.totalExcalidrawOnChangeCalls - beforeCounters.totalExcalidrawOnChangeCalls,
+      sceneVersionChanges: afterCounters.sceneVersionChanges - beforeCounters.sceneVersionChanges,
+      settledTimerSchedules: afterCounters.settledTimerSchedules - beforeCounters.settledTimerSchedules,
+      thumbnailRenderRequests: afterCounters.thumbnailRenderRequests - beforeCounters.thumbnailRenderRequests,
+    };
+  };
+
+  const measureOperation = async (
+    operation: GateGOperationName,
+    action: () => Promise<{ actionCompletedAt: number; geometryElementId?: string; metadataOperation?: boolean; expectThumbnailChange?: boolean }>,
+  ) => {
+    const beforeLive = await getLiveElements(page);
+    const beforeReact = await getElements(page);
+    const beforeSceneVersion = getSceneVersion(beforeLive as any);
+    const beforeSignatures = await waitForStableSlideSignatures(page, supabase, fixture.boardId, slideIds);
+    const beforeThumbs = await sampleAllThumbnails(sidebar, slideNames);
+    const beforeRevision = await measurePostRevision();
+
+    await startGateGOperation(page, operation);
+    const started = performance.now();
+    const result = await action();
+    let pointerUpToSettledReactGeometryMs: number | null = null;
+    if (result.geometryElementId) {
+      const finalLive = (await getLiveElements(page)).find((el) => el.id === result.geometryElementId);
+      await expect.poll(async () => {
+        const react = (await getElements(page)).find((el) => el.id === result.geometryElementId);
+        return react && finalLive ? `${react.x},${react.y},${react.width},${react.height},${react.frameId}` : 'missing';
+      }, { timeout: 12_000, intervals: [100, 250, 500] }).toBe(`${finalLive.x},${finalLive.y},${finalLive.width},${finalLive.height},${finalLive.frameId}`);
+      pointerUpToSettledReactGeometryMs = Math.round(performance.now() - result.actionCompletedAt);
+    }
+
+    const expectsThumbnailChange = result.expectThumbnailChange ?? true;
+    const thumbWait = expectsThumbnailChange
+      ? await waitForAnyThumbnailStabilization(sidebar, slideNames, beforeThumbs)
+      : { samples: await sampleAllThumbnails(sidebar, slideNames), elapsedMs: Math.round(performance.now() - result.actionCompletedAt) };
+    const afterReact = await getElements(page);
+    const afterLive = await getLiveElements(page);
+    const afterSceneVersion = getSceneVersion(afterLive as any);
+    const afterSignatures = await waitForStableSlideSignatures(page, supabase, fixture.boardId, slideIds);
+    const afterRevision = await measurePostRevision();
+    const countersBeforeIdle = await readGateGOperationCounters(page, operation);
+    const idleCounterGrowth = await observeIdleGrowth(operation, countersBeforeIdle);
+    await stopGateGOperation(page);
+    const counters = await readGateGOperationCounters(page, operation);
+    const changedSlides = changedSignatureIds(beforeSignatures, afterSignatures);
+    const changedThumbs = changedThumbnailNames(beforeThumbs, thumbWait.samples);
+    const revisionChanged = beforeRevision.revision !== afterRevision.revision;
+
+    measurements.push({
+      operation,
+      durationMs: Math.round(performance.now() - started),
+      sceneVersionChanges: Math.max(counters.sceneVersionChanges, beforeSceneVersion === afterSceneVersion ? 0 : 1),
+      unchangedRevisionOnChangeCalls: counters.unchangedRevisionOnChangeCalls,
+      totalExcalidrawOnChangeCalls: counters.totalExcalidrawOnChangeCalls,
+      settledTimerSchedules: counters.settledTimerSchedules,
+      settledTimerClears: counters.settledTimerClears,
+      settledSetElementsCalls: result.geometryElementId ? 1 : 0,
+      framesMemoRecomputations: changedSlides.length > 0 ? 1 : revisionChanged ? 1 : 0,
+      postRenderRevisionComputations: 7,
+      postRenderRevisionDurationMs: afterRevision.medianMs,
+      slideSignatureComputations: slideIds.length,
+      changedSlideSignatures: changedSlides,
+      thumbnailRenderRequests: counters.thumbnailRenderRequests,
+      thumbnailRendersAccepted: changedThumbs.length,
+      thumbnailRendersDiscardedAsStale: Math.max(0, counters.thumbnailRenderRequests - changedThumbs.length),
+      displayedThumbnailChanges: changedThumbs,
+      pointerUpToSettledReactGeometryMs,
+      pointerUpToDisplayedThumbnailStabilizationMs: result.metadataOperation ? null : thumbWait.elapsedMs,
+      metadataActionToDisplayedThumbnailStabilizationMs: result.metadataOperation ? thumbWait.elapsedMs : null,
+      idleCounterGrowth,
+      consoleErrors: [...consoleErrors],
+      pageErrors: [...pageErrors],
+      reactRenderReconcileAnomalies: [],
+    });
+  };
+
+  await measureOperation('within-slide-app-drag', async () => {
+    const dragPostId = rootPostIdsBySlide[slideIds[0]][4];
+    const embId = embeddableIdsByPostId[dragPostId];
+    const liveBefore = (await getLiveElements(page)).find((el) => el.id === embId);
+    if (!liveBefore) throw new Error(`Missing Gate G within-slide embeddable ${embId}`);
+    const sceneVersionBefore = getSceneVersion((await getLiveElements(page)) as any);
+    const from = await sceneToScreen(page, liveBefore.x + liveBefore.width / 2, liveBefore.y + 8);
+    const to = { x: from.x + 240, y: from.y + 180 };
+    await page.mouse.move(from.x, from.y);
+    await page.mouse.down();
+    await page.mouse.move((from.x + to.x) / 2, (from.y + to.y) / 2, { steps: 8 });
+    await page.mouse.move(to.x, to.y, { steps: 12 });
+    await page.mouse.up();
+    const actionCompletedAt = performance.now();
+    await expect.poll(async () => {
+      const moved = (await getLiveElements(page)).find((el) => el.id === embId);
+      return moved ? `${moved.x},${moved.y}` : 'missing';
+    }, { timeout: 5000, intervals: [100, 250, 500] }).not.toBe(`${liveBefore.x},${liveBefore.y}`);
+    const liveAfter = (await getLiveElements(page)).find((el) => el.id === embId);
+    const sceneVersionAfter = getSceneVersion((await getLiveElements(page)) as any);
+    appDragProofs.push({
+      operation: 'within-slide-app-drag',
+      targetElementId: embId,
+      targetPostId: dragPostId,
+      startStripCoordinate: from,
+      pointerDownCoordinate: from,
+      initialLive: { x: liveBefore.x, y: liveBefore.y, version: liveBefore.version, versionNonce: liveBefore.versionNonce },
+      finalLive: liveAfter ? { x: liveAfter.x, y: liveAfter.y, version: liveAfter.version, versionNonce: liveAfter.versionNonce } : null,
+      sceneVersionBefore,
+      sceneVersionAfter,
+      sceneVersionChanged: sceneVersionBefore !== sceneVersionAfter,
+      enteredAppOwnedStripPath: Boolean(liveAfter && (liveAfter.x !== liveBefore.x || liveAfter.y !== liveBefore.y) && liveAfter.version !== liveBefore.version),
+    });
+    return { actionCompletedAt, geometryElementId: embId };
+  });
+
+  await measureOperation('cross-slide-app-drag', async () => {
+    const dragPostId = rootPostIdsBySlide[slideIds[0]][4];
+    const embId = embeddableIdsByPostId[dragPostId];
+    const liveBefore = (await getLiveElements(page)).find((el) => el.id === embId);
+    if (!liveBefore) throw new Error(`Missing Gate G cross-slide embeddable ${embId}`);
+    const sceneVersionBefore = getSceneVersion((await getLiveElements(page)) as any);
+    const from = await sceneToScreen(page, liveBefore.x + liveBefore.width / 2, liveBefore.y + 8);
+    const to = await sceneToScreen(page, 1450 * 2 + 210, 250);
+    await page.mouse.move(from.x, from.y);
+    await page.mouse.down();
+    await page.mouse.move((from.x + to.x) / 2, (from.y + to.y) / 2, { steps: 10 });
+    await page.mouse.move(to.x, to.y, { steps: 14 });
+    await page.mouse.up();
+    const actionCompletedAt = performance.now();
+    await expect.poll(async () => {
+      const moved = (await getLiveElements(page)).find((el) => el.id === embId);
+      return moved ? `${moved.x},${moved.y},${moved.frameId}` : 'missing';
+    }, { timeout: 5000, intervals: [100, 250, 500] }).not.toBe(`${liveBefore.x},${liveBefore.y},${liveBefore.frameId}`);
+    const liveAfter = (await getLiveElements(page)).find((el) => el.id === embId);
+    const sceneVersionAfter = getSceneVersion((await getLiveElements(page)) as any);
+    appDragProofs.push({
+      operation: 'cross-slide-app-drag',
+      targetElementId: embId,
+      targetPostId: dragPostId,
+      startStripCoordinate: from,
+      pointerDownCoordinate: from,
+      initialLive: { x: liveBefore.x, y: liveBefore.y, frameId: liveBefore.frameId, version: liveBefore.version, versionNonce: liveBefore.versionNonce },
+      finalLive: liveAfter ? { x: liveAfter.x, y: liveAfter.y, frameId: liveAfter.frameId, version: liveAfter.version, versionNonce: liveAfter.versionNonce } : null,
+      sceneVersionBefore,
+      sceneVersionAfter,
+      sceneVersionChanged: sceneVersionBefore !== sceneVersionAfter,
+      enteredAppOwnedStripPath: Boolean(liveAfter && (liveAfter.x !== liveBefore.x || liveAfter.y !== liveBefore.y || liveAfter.frameId !== liveBefore.frameId) && liveAfter.version !== liveBefore.version),
+    });
+    return { actionCompletedAt, geometryElementId: embId };
+  });
+
+  await measureOperation('native-real-pointer-drag', async () => {
+    const nativeId = 'gate-g-native-rect-1';
+    const native = (await getLiveElements(page)).find((el) => el.id === nativeId);
+    const from = await sceneToScreen(page, native.x + native.width / 2, native.y + native.height / 2);
+    const to = await sceneToScreen(page, native.x + 260, native.y + 180);
+    await page.mouse.move(from.x, from.y);
+    await page.mouse.down();
+    await page.mouse.move((from.x + to.x) / 2, (from.y + to.y) / 2, { steps: 9 });
+    await page.mouse.move(to.x, to.y, { steps: 12 });
+    await page.mouse.up();
+    await expect.poll(async () => {
+      const moved = (await getLiveElements(page)).find((el) => el.id === nativeId);
+      return moved ? `${moved.x},${moved.y}` : 'missing';
+    }, { timeout: 5000, intervals: [100, 250, 500] }).not.toBe(`${native.x},${native.y}`);
+    return { actionCompletedAt: performance.now(), geometryElementId: nativeId };
+  });
+
+  await measureOperation('slide-title-metadata-edit', async () => {
+    const titleCardBox = page.locator(`[data-padlet-id="${titleTargetId}"]`);
+    await titleCardBox.hover();
+    await titleCardBox.locator('button[title="Edit"]').click();
+    const titleInput = page.locator('input[placeholder="Add a title here..."]');
+    await expect(titleInput).toBeVisible({ timeout: 15_000 });
+    await titleInput.fill('Gate G Title After');
+    await page.locator('.absolute.inset-0.bg-black\\/40').first().click({ position: { x: 640, y: 710 }, force: true });
+    await expect(titleInput).toHaveCount(0, { timeout: 15_000 });
+    return { actionCompletedAt: performance.now(), metadataOperation: true };
+  });
+
+  await measureOperation('slide-todo-completion-edit', async () => {
+    const todoCardBox = page.locator(`[data-padlet-id="${todoTargetId}"]`);
+    await todoCardBox.hover();
+    await todoCardBox.locator('button[title="Edit"]').click();
+    const taskCheckbox = page.locator('div.space-y-1 input[type="checkbox"]').first();
+    await expect(taskCheckbox).toBeVisible({ timeout: 15_000 });
+    await taskCheckbox.click();
+    await page.locator('.fixed.inset-0.bg-black\\/50').first().click({ position: { x: 300, y: 10 } });
+    await expect(page.locator('.fixed.inset-0.bg-black\\/50')).toHaveCount(0, { timeout: 15_000 });
+    return { actionCompletedAt: performance.now(), metadataOperation: true };
+  });
+
+  await measureOperation('outside-slide-metadata-edit', async () => {
+    const outsideCardBox = page.locator(`[data-padlet-id="${outsideTodoId}"]`);
+    await outsideCardBox.waitFor({ state: 'visible', timeout: 15_000 });
+    await outsideCardBox.hover();
+    await outsideCardBox.locator('button[title="Edit"]').click();
+    const taskCheckbox = page.locator('div.space-y-1 input[type="checkbox"]').first();
+    await expect(taskCheckbox).toBeVisible({ timeout: 15_000 });
+    await taskCheckbox.click();
+    await page.locator('.fixed.inset-0.bg-black\\/50').first().click({ position: { x: 300, y: 10 } });
+    await expect(page.locator('.fixed.inset-0.bg-black\\/50')).toHaveCount(0, { timeout: 15_000 });
+    await page.waitForTimeout(3000);
+    return { actionCompletedAt: performance.now(), metadataOperation: true, expectThumbnailChange: false };
+  });
+
+  const finalLiveElements = await getLiveElements(page);
+  const fixtureSize = {
+    slides: slideIds.length,
+    appOwnedPosts: padletRows.length,
+    rootAppOwnedPosts: padletRows.filter((row) => !row.metadata?.parentId).length,
+    childPosts: padletRows.filter((row) => row.metadata?.parentId).length,
+    nonSlideCanvasElements: scene.filter((el) => el.type !== 'frame' && !String(el.link ?? '').startsWith('padlet://')).length,
+    sceneElements: scene.length,
+  };
+  const finalSignatures = await currentSlideSignatures(supabase, fixture.boardId, slideIds, finalLiveElements);
+  const { data: finalPadletRows, error: finalPadletsErr } = await supabase.from('padlets').select('*').eq('board_id', fixture.boardId);
+  if (finalPadletsErr) throw finalPadletsErr;
+  const unchangedRewrapRevision = computePostRenderRevision([...(finalPadletRows ?? [])]);
+  const postRevisionAfterOutside = await measurePostRevision();
+
+  const within = measurements.find((entry) => entry.operation === 'within-slide-app-drag')!;
+  const cross = measurements.find((entry) => entry.operation === 'cross-slide-app-drag')!;
+  const native = measurements.find((entry) => entry.operation === 'native-real-pointer-drag')!;
+  const title = measurements.find((entry) => entry.operation === 'slide-title-metadata-edit')!;
+  const todo = measurements.find((entry) => entry.operation === 'slide-todo-completion-edit')!;
+  const outside = measurements.find((entry) => entry.operation === 'outside-slide-metadata-edit')!;
+
+  expect(fixtureSize.slides).toBe(8);
+  expect(fixtureSize.appOwnedPosts).toBeGreaterThanOrEqual(40);
+  expect(fixtureSize.nonSlideCanvasElements).toBeGreaterThanOrEqual(10);
+  expect(within.changedSlideSignatures).toEqual([slideIds[0]]);
+  expect(cross.changedSlideSignatures.sort()).toEqual([slideIds[0], slideIds[2]].sort());
+  expect(native.changedSlideSignatures).toContain(slideIds[0]);
+  expect(title.changedSlideSignatures).toEqual([slideIds[0]]);
+  expect(todo.changedSlideSignatures).toEqual([slideIds[0]]);
+  expect(outside.changedSlideSignatures).toEqual([]);
+  expect(outside.displayedThumbnailChanges).toEqual([]);
+  for (const operation of measurements) {
+    expect(operation.pageErrors).toEqual([]);
+    expect(operation.consoleErrors).toEqual([]);
+    expect(operation.idleCounterGrowth.sceneVersionChanges).toBe(0);
+    expect(operation.idleCounterGrowth.settledTimerSchedules).toBe(0);
+    expect(operation.idleCounterGrowth.thumbnailRenderRequests).toBe(0);
+    expect(operation.thumbnailRendersAccepted).toBeLessThanOrEqual(Math.max(1, operation.changedSlideSignatures.length));
+  }
+  for (const operation of [within, cross, native]) {
+    expect(operation.totalExcalidrawOnChangeCalls).toBeGreaterThan(operation.settledSetElementsCalls);
+    expect(operation.settledSetElementsCalls).toBe(1);
+    expect(operation.thumbnailRendersAccepted).toBeGreaterThan(0);
+    expect(operation.thumbnailRendersAccepted).toBeLessThanOrEqual(operation.changedSlideSignatures.length);
+  }
+  expect(computePostRenderRevision([...(finalPadletRows ?? [])])).toBe(unchangedRewrapRevision);
+
+  test.info().annotations.push({
+    type: 'patch128-gate-g-performance-evidence',
+    description: JSON.stringify({
+      fixtureSize,
+      initialPostRevision,
+      postRevisionAfterOutside,
+      unchangedObjectIdentityChurnChangesDigest: unchangedRewrapRevision !== postRevisionAfterOutside.revision,
+      outsideSlideEditGlobalRevisionComputed: outside.postRenderRevisionComputations > 0,
+      outsideSlideEditLeavesSlideSignaturesUnchanged: outside.changedSlideSignatures.length === 0,
+      measurementStrategy: {
+        onChange: 'test-scoped subscription to mounted Excalidraw app onChangeEmitter',
+        settledTimers: 'test-scoped 150ms timer counts during active operation window',
+        settledSetElements: 'derived from geometry operation live-to-React settled equality; internal React setState is not directly exposed',
+        framesMemo: 'derived from changed slide signatures; internal useMemo invocation is not directly exposed',
+        thumbnails: 'render requests use canvas.toDataURL proxy; accepted/displayed changes use Slide preview img src/hash changes',
+      },
+      measurements,
+      appDragProofs,
+      benignConsoleErrors,
+    }),
+  });
+
+  await page.evaluate(() => (window as any).__patch128GateG.dispose());
 });
 
 test('PATCH-128 geometry: history/undo-redo and one persistence write on app-owned drag', async ({ page }) => {
