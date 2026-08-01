@@ -1,9 +1,12 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import { getSceneVersion } from '@excalidraw/element';
 import {
   createDisposableDrawingBoard,
   registerDrawingCleanup,
   openDrawingBoard,
 } from './drawingBridgeHarness';
+import { getSlideRenderSignature } from '@/components/presentation/slide-renderer/getSlideRenderSignature';
+import { planSlideComposition } from '@/components/presentation/slide-renderer/planSlideComposition';
 
 registerDrawingCleanup(test);
 
@@ -97,6 +100,14 @@ async function getElements(page: Page): Promise<any[]> {
   return page.evaluate(() => (window as any).h.elements as any[]);
 }
 
+async function getLiveElements(page: Page): Promise<any[]> {
+  return page.evaluate(() => {
+    const h = (window as any).h;
+    if (typeof h?.app?.getSceneElements === 'function') return h.app.getSceneElements();
+    return h.elements as any[];
+  });
+}
+
 async function sceneToScreen(page: Page, sceneX: number, sceneY: number) {
   const appState = await getAppState(page);
   const zoom = appState?.zoom?.value ?? 1;
@@ -107,6 +118,69 @@ async function sceneToScreen(page: Page, sceneX: number, sceneY: number) {
   return {
     x: (sceneX + scrollX) * zoom + offsetLeft,
     y: (sceneY + scrollY) * zoom + offsetTop,
+  };
+}
+
+async function selectElementThroughCanvas(page: Page, elementId: string): Promise<{ x: number; y: number; selectedIds: string[] }> {
+  const element = (await getLiveElements(page)).find((el) => el.id === elementId);
+  if (!element) throw new Error(`Cannot select missing element ${elementId}`);
+  const point = await sceneToScreen(page, element.x + element.width / 2, element.y + element.height / 2);
+  await page.mouse.click(point.x, point.y);
+  await expect.poll(async () => {
+    const state = await getAppState(page);
+    return Boolean(state?.selectedElementIds?.[elementId]);
+  }, { timeout: 10_000, intervals: [100, 250, 500] }).toBe(true);
+  const state = await getAppState(page);
+  return { x: point.x, y: point.y, selectedIds: Object.keys(state?.selectedElementIds ?? {}) };
+}
+
+async function southeastResizeHandle(page: Page, elementId: string): Promise<{ locator: string; x: number; y: number; zoom: number }> {
+  const element = (await getLiveElements(page)).find((el) => el.id === elementId);
+  if (!element) throw new Error(`Cannot compute resize handle for missing element ${elementId}`);
+  const handle = await sceneToScreen(page, element.x + element.width, element.y + element.height);
+  const appState = await getAppState(page);
+  return {
+    locator: 'computed-se-transform-handle-from-live-selected-element-bounds',
+    x: handle.x,
+    y: handle.y,
+    zoom: appState?.zoom?.value ?? 1,
+  };
+}
+
+async function slideRenderEvidence(supabase: any, boardId: string, slideId: string, sceneElements: any[]) {
+  const { data: padlets, error } = await supabase
+    .from('padlets')
+    .select('*')
+    .eq('board_id', boardId);
+  if (error) throw error;
+  const slideFrame = sceneElements.find((el) => el.id === slideId);
+  if (!slideFrame) throw new Error(`Missing slide frame ${slideId}`);
+  const slide = {
+    id: slideFrame.id,
+    name: slideFrame.name ?? null,
+    x: slideFrame.x,
+    y: slideFrame.y,
+    width: slideFrame.width,
+    height: slideFrame.height,
+    order: null,
+  };
+  const renderSignature = getSlideRenderSignature(slide, sceneElements, padlets ?? []);
+  const composition = planSlideComposition(slide, sceneElements, padlets ?? []);
+  return {
+    cacheKey: renderSignature,
+    composition: {
+      resolvedPadlets: composition.resolvedPadlets.map((entry) => ({
+        padletId: entry.padlet.id,
+        embeddableId: entry.embeddable.id,
+        localX: entry.localX,
+        localY: entry.localY,
+        width: entry.width,
+        height: entry.height,
+        zIndex: entry.zIndex,
+      })),
+      nativeBelowIds: composition.nativeBelowElements.map((element) => element.id),
+      nativeAboveIds: composition.nativeAboveElements.map((element) => element.id),
+    },
   };
 }
 
@@ -258,6 +332,160 @@ test('PATCH-128 geometry: app-owned and native drags synchronize slides and thum
       withinEmbAfter: { x: withinEmbAfter.x, y: withinEmbAfter.y, version: withinEmbAfter.version },
       crossEmbAfter: { frameId: crossEmbAfter.frameId, x: crossEmbAfter.x, y: crossEmbAfter.y },
       nativeRectAfter: { frameId: nativeRectAfter.frameId, x: nativeRectAfter.x, y: nativeRectAfter.y, version: nativeRectAfter.version },
+      pageErrors,
+    }),
+  });
+
+  expect(pageErrors).toEqual([]);
+});
+
+test('PATCH-128 gate F: real app-owned resize handle synchronizes presentation and thumbnail', async ({ page }) => {
+  test.setTimeout(90_000);
+  const pageErrors: string[] = [];
+  page.on('pageerror', (err) => pageErrors.push(err.message));
+  page.on('console', (msg) => { if (msg.type() === 'error') pageErrors.push(`console: ${msg.text()}`); });
+
+  const { supabase, fixture } = await createDisposableDrawingBoard('p128-resize');
+
+  const slideR = 'slide-resize';
+  const cardId = crypto.randomUUID();
+  const embeddableId = 'emb-resize';
+
+  const { error: padletsErr } = await supabase.from('padlets').insert({
+    id: cardId,
+    board_id: fixture.boardId,
+    title: 'Resize Card',
+    content: 'PATCH-128 gate F resize target',
+    type: 'card',
+    position_x: 160,
+    position_y: 140,
+    width: 260,
+    height: 190,
+    metadata: { cardColor: '#fef3c7', topStripColor: '#78350f' },
+  });
+  if (padletsErr) throw padletsErr;
+
+  const scene = [
+    frameEl(slideR, 'Resize Slide', 0, 0),
+    embEl(embeddableId, cardId, 160, 140, 260, 190, slideR),
+  ];
+  const { data: masterData, error: masterErr } = await supabase.from('padlets').insert({
+    board_id: fixture.boardId,
+    title: `${fixture.prefix} master`,
+    content: JSON.stringify(scene),
+    type: 'drawing',
+    position_x: 0, position_y: 0, width: 0, height: 0,
+    metadata: { drawingAppState: JSON.stringify({ scrollX: 0, scrollY: 0, zoom: { value: 1 } }), drawingFiles: JSON.stringify({}) },
+  }).select('id').single();
+  if (masterErr) throw masterErr;
+  fixture.masterPadletId = masterData.id;
+
+  await openDrawingBoard(page, fixture.boardId);
+  await waitForHarness(page);
+  await waitForFramesLoaded(page, 1);
+  await page.waitForTimeout(2000);
+
+  const sidebar = await openPresentationSidebar(page, 1);
+  const rowR = slideRow(sidebar, 'Resize Slide');
+  const beforeThumb = await sampleThumbnail(rowR);
+  const initialLiveElements = await getLiveElements(page);
+  const initialReactElements = await getElements(page);
+  const initialLive = initialLiveElements.find((el) => el.id === embeddableId);
+  const initialReact = initialReactElements.find((el) => el.id === embeddableId);
+  const initialSceneVersion = getSceneVersion(initialLiveElements as any);
+  const initialRenderEvidence = await slideRenderEvidence(supabase, fixture.boardId, slideR, initialReactElements);
+
+  const selectionProof = await selectElementThroughCanvas(page, embeddableId);
+  const handle = await southeastResizeHandle(page, embeddableId);
+
+  await page.mouse.move(handle.x, handle.y);
+  await page.evaluate(({ x, y, id }) => {
+    const h = (window as any).h;
+    const stateBefore = h.state ?? {};
+    const beforeSelected = Boolean(stateBefore?.selectedElementIds?.[id]);
+    (window as any).__patch128PointerDownProof = new Promise<any>((resolve) => {
+      const canvas = document.elementFromPoint(x, y);
+      const eventTarget = canvas?.tagName?.toLowerCase() ?? null;
+      window.addEventListener('pointerdown', () => {
+        requestAnimationFrame(() => {
+          const stateAfter = h.state ?? {};
+          resolve({
+            beforeSelected,
+            eventTarget,
+            resizingElementId: stateAfter?.resizingElement?.id ?? null,
+            selectedAfterDown: Boolean(stateAfter?.selectedElementIds?.[id]),
+          });
+        });
+      }, { once: true, capture: true });
+    });
+  }, { x: handle.x, y: handle.y, id: embeddableId });
+  await page.mouse.down();
+  const pointerDownProof = await page.evaluate(() => (window as any).__patch128PointerDownProof);
+  expect(pointerDownProof).toMatchObject({
+    beforeSelected: true,
+    resizingElementId: embeddableId,
+    selectedAfterDown: true,
+  });
+
+  await page.mouse.move(handle.x + 90, handle.y + 70, { steps: 8 });
+  await page.mouse.move(handle.x + 150, handle.y + 110, { steps: 10 });
+  await page.mouse.up();
+
+  await expect.poll(async () => {
+    const live = (await getLiveElements(page)).find((el) => el.id === embeddableId);
+    return live ? `${Math.round(live.width)}x${Math.round(live.height)}:${live.version}:${live.versionNonce}` : 'missing';
+  }, { timeout: 10_000, intervals: [100, 250, 500] }).not.toBe(`${Math.round(initialLive.width)}x${Math.round(initialLive.height)}:${initialLive.version}:${initialLive.versionNonce}`);
+
+  const finalLiveElements = await getLiveElements(page);
+  const finalLive = finalLiveElements.find((el) => el.id === embeddableId);
+  const finalSceneVersion = getSceneVersion(finalLiveElements as any);
+
+  expect(finalLive.width).not.toBe(initialLive.width);
+  expect(finalLive.height).not.toBe(initialLive.height);
+  expect(finalLive.version).not.toBe(initialLive.version);
+  expect(finalLive.versionNonce).not.toBe(initialLive.versionNonce);
+  expect(finalSceneVersion).not.toBe(initialSceneVersion);
+
+  await expect.poll(async () => {
+    const react = (await getElements(page)).find((el) => el.id === embeddableId);
+    return react ? `${react.width},${react.height},${react.version},${react.versionNonce}` : 'missing';
+  }, { timeout: 10_000, intervals: [250, 500, 1000] }).toBe(`${finalLive.width},${finalLive.height},${finalLive.version},${finalLive.versionNonce}`);
+
+  const finalReactElements = await getElements(page);
+  const finalReact = finalReactElements.find((el) => el.id === embeddableId);
+  const finalRenderEvidence = await slideRenderEvidence(supabase, fixture.boardId, slideR, finalReactElements);
+  expect(finalReact.width).toBe(finalLive.width);
+  expect(finalReact.height).toBe(finalLive.height);
+  expect(finalRenderEvidence.cacheKey).not.toBe(initialRenderEvidence.cacheKey);
+  const initialCompositionEntry = initialRenderEvidence.composition.resolvedPadlets.find((entry) => entry.embeddableId === embeddableId);
+  const finalCompositionEntry = finalRenderEvidence.composition.resolvedPadlets.find((entry) => entry.embeddableId === embeddableId);
+  expect(finalCompositionEntry?.width).toBe(finalLive.width);
+  expect(finalCompositionEntry?.height).toBe(finalLive.height);
+  expect(finalCompositionEntry?.width).not.toBe(initialCompositionEntry?.width);
+  expect(finalCompositionEntry?.height).not.toBe(initialCompositionEntry?.height);
+
+  const changedRow = slideRow(sidebar, 'Resize Slide');
+  const afterThumb = await waitForStableThumbnailChange(changedRow, beforeThumb);
+  expect(afterThumb.nonWhitePixels).toBeGreaterThan(0);
+
+  test.info().annotations.push({
+    type: 'patch128-gate-f-resize-evidence',
+    description: JSON.stringify({
+      handle,
+      selectionProof,
+      pointerDownProof,
+      initialLive: { width: initialLive.width, height: initialLive.height, version: initialLive.version, versionNonce: initialLive.versionNonce },
+      finalLive: { width: finalLive.width, height: finalLive.height, version: finalLive.version, versionNonce: finalLive.versionNonce },
+      initialSceneVersion,
+      finalSceneVersion,
+      initialReact: { width: initialReact.width, height: initialReact.height, version: initialReact.version, versionNonce: initialReact.versionNonce },
+      finalReact: { width: finalReact.width, height: finalReact.height, version: finalReact.version, versionNonce: finalReact.versionNonce },
+      initialCacheKey: initialRenderEvidence.cacheKey,
+      finalCacheKey: finalRenderEvidence.cacheKey,
+      initialCompositionEntry,
+      finalCompositionEntry,
+      beforeThumb,
+      afterThumb,
       pageErrors,
     }),
   });
