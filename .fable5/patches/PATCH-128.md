@@ -3711,3 +3711,146 @@ baseline); nondeterministic React propagation (§19c); the split-brain `frames` 
 Excalidraw null-dereference, the `unload` warning, the tsconfig-excluded fork, and
 the PATCH-123 §14k / PATCH-124 §14l / PATCH-125 §13l ledgers with the unresolved
 production-build failure.
+
+---
+
+## 31. Amendment — PRE-CLOSURE GATE F ACCEPTED (2026-08-01, CTO)
+
+Independent acceptance review of gate-F test commit **`56592ab`** against the §30n
+binding instruction.
+
+**Result: ACCEPT GATE F WITH NON-BLOCKING FINDINGS. Do not close PATCH-128.**
+
+### 31a. Scope verified — one file, additive only
+
+`56592ab` changes **only** `e2e/characterization/patch-128-slide-sync.spec.ts`, the
+single file §30n permitted. **228 insertions, no deletions** — confirmed
+independently. The gate therefore **cannot have been obtained by weakening an
+existing assertion**, which was the specific failure mode §30n warned against.
+
+**No production file changed. Commit `400f056` is untouched.**
+
+### 31b. Gate F — app-owned resize — **PASS**
+
+The committed test proves a **real app-owned resize through Excalidraw's supported
+resize UI**, not a synthetic mutation:
+
+1. selects the backing embeddable **through the real canvas**;
+2. computes the **southeast transform handle from live bounds and the current
+   zoom/scroll/offset** — not from a DOM bounding box, per the §26 geometry
+   correction;
+3. drives it with **real Playwright `pointerdown`/`pointermove`/`pointerup`**;
+4. proves `resizingElementId` **matches the target embeddable** — the interaction
+   reached Excalidraw's own resize path, not merely a nearby element;
+5. proves **live width/height changed**;
+6. proves **`version`, `versionNonce` and `getSceneVersion` changed**;
+7. proves **settled React geometry matches live geometry** — mechanism B propagated;
+8. proves **presentation dimensions and the slide render signature/cache key
+   changed** — mechanism D invalidated downstream;
+9. proves the **displayed sidebar thumbnail changed automatically**.
+
+**No manual refresh and no synthetic `updateScene` resize was used.**
+
+Point 4 is what makes this acceptance rather than inference. A width/height delta
+alone would be consistent with a stray drag; asserting `resizingElementId` proves the
+pointer sequence entered the real resize path on the intended element. This is the
+same standard §26g's false-green rule demands — evidence of the *mechanism*, not only
+of the *outcome*.
+
+### 31c. Reliability and validation — **PASS**
+
+Focused test passed **once and under `--repeat-each=3`**; the **full PATCH-128
+characterization suite passed**; TypeScript and diff checks passed.
+
+The repeat run matters: the two hardest-won lessons in this patch — transient
+blank-frame thumbnail samples (§23a) and nondeterministic React propagation (§19c) —
+both produce tests that pass once and flake later. A single green run would not have
+been sufficient evidence here, and was not relied upon.
+
+### 31d. Non-blocking finding
+
+**Exact numeric evidence is stored in test annotations, while the assertions verify
+semantic transitions rather than hard-coded exact values.** This is **acceptable and
+is the preferred form.**
+
+Hard-coding exact post-resize pixel values would bind the suite to Excalidraw's
+internal rounding and to the fixture's zoom state, producing a brittle test that
+fails on unrelated upstream change. Asserting the transition — changed, propagated,
+matched — while **retaining the exact numbers as annotations for a future reader** is
+the correct trade. **No correction required.**
+
+Note the contrast with §30k: annotations here **supplement** committed assertions
+that stand on their own. They are not themselves the acceptance evidence. A future
+reader must not cite this clause to justify evidence that lives *only* in
+annotations.
+
+### 31e. Gate record updated
+
+| Gate | Subject | Status |
+|---|---|---|
+| **F** | app-owned resize | **PASS** (§31b, commit `56592ab`) |
+| **B** | container/child edit | **UNPROVEN** |
+| **D** | live identity-churn control | **UNPROVEN** |
+| **G** | representative performance run | **UNPROVEN** |
+
+**F is now proven in the committed acceptance suite**, discharging the §30k
+correction by route 1 (a committed characterization test). **No waiver was used, and
+none was needed.**
+
+**Commit `56592ab` is accepted and may be retained. Do not alter it.**
+
+### 31f. Next action — remaining gates only
+
+The §30m ordering stands, less F:
+
+1. **G** — representative-board performance run;
+2. **D** — local identity-churn control;
+3. **B** — execute a real child edit, or request the already-defined narrow
+   source-based waiver if no render-relevant UI path exists.
+
+**Do not request another broad implementation review. Do not modify production
+implementation unless one of those gate tests exposes a real defect. Do not alter
+`400f056` or `56592ab`.**
+
+**Do not push and do not close until Opus records the next gate-resolution
+instruction.**
+
+### 31g. Status
+
+**PATCH-128: OPEN · IMPLEMENTATION ACCEPTED (`400f056`) · GATE F PASS (`56592ab`) ·
+B/D/G PRE-CLOSURE GATES UNRESOLVED · NOT CLOSED.**
+
+**PATCH-124 unchanged and correct. `getSlideRenderSignature` semantics unchanged.
+PATCH-115 untouched.**
+**PATCH-127: OPEN · B2C AUTHORIZED · NOT STARTED · candidate removed.**
+**PATCH-126: DESIGNATED, UNAUTHORED, UNAUTHORIZED.**
+**PATCH-125 / 124 / 123 / 122 / 121 / 120 / 117: CLOSED.**
+**PATCH-116: CANCELLED.**
+**PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
+**PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
+**PATCH-119: DESIGNATED, UNAUTHORED, UNAUTHORIZED, UNTOUCHED.**
+
+**Recorded debt, updated.** Added: **a real-interaction browser gate must assert the
+interaction reached the intended mechanism** (here `resizingElementId`), not only
+that the observable outcome changed (§31b); **repeat-run evidence is required for
+gates in this patch**, because its two known flake sources — transient blank-frame
+thumbnails and nondeterministic React propagation — both pass once before failing
+(§31c); and **exact numeric evidence belongs in annotations while assertions verify
+semantic transitions**, provided the assertions stand alone (§31d). Resolved:
+**gate F**, which discharges the §30k correction in the committed suite. Retained:
+acceptance evidence must live in the committed suite — a deleted temporary diagnostic
+is not acceptance; `settledScenePropagation.ts` timer casts and the 32-bit djb2
+digest as accepted non-blocking notes; Excalidraw `onChange` fires continuously at
+rest (~15–20 ms) with no scene or appState change; one ref must never carry both
+"observed" and "settled" meanings; a stable output with a flat input-arrival counter
+proves absence of input, not correct filtering; a mechanism proven for one path must
+not be described as proven generally; `updated_at` is not a reliable client-side
+invalidation trigger under the optimistic update path; thumbnail assertions must
+re-query by stable slide identity; Excalidraw fixture elements need sequential
+fractional indices matching array order or they are silently dropped; a destination
+frame with no prior elements can take unusually long to receive its first thumbnail
+render (pre-existing, reproduced on baseline); nondeterministic React propagation
+(§19c); the split-brain `frames` memo (§17c); `getSceneVersion` blind to
+metadata-only changes (§17e); plus the upstream Excalidraw null-dereference, the
+`unload` warning, the tsconfig-excluded fork, and the PATCH-123 §14k / PATCH-124 §14l
+/ PATCH-125 §13l ledgers with the unresolved production-build failure.
