@@ -3854,3 +3854,241 @@ render (pre-existing, reproduced on baseline); nondeterministic React propagatio
 metadata-only changes (§17e); plus the upstream Excalidraw null-dereference, the
 `unload` warning, the tsconfig-excluded fork, and the PATCH-123 §14k / PATCH-124 §14l
 / PATCH-125 §13l ledgers with the unresolved production-build failure.
+
+---
+
+## 32. Amendment — PRE-CLOSURE GATE G ACCEPTED (2026-08-01, CTO)
+
+Independent acceptance review of gate-G test commit **`ea7775b`** against the §31f
+ordering.
+
+**Result: ACCEPT GATE G WITH NON-BLOCKING FINDINGS. Do not close PATCH-128.**
+
+### 32a. Scope verified — one file, additive only
+
+`ea7775b` changes **only** `e2e/characterization/patch-128-slide-sync.spec.ts`:
+**746 insertions, zero deletions** — confirmed independently.
+
+**No production change. No governance change. No protected-path change. No package
+change. No `node_modules` or `excalidraw_fork` change.**
+
+**No production instrumentation remains.** This was the specific residue risk of a
+performance gate — counters are easiest to obtain by temporarily wiring them into
+production code, and the temptation is to leave them. Nothing was left.
+
+### 32b. Representative fixture — **PASS**
+
+8 slides; 65 app-owned posts (49 root embeddables, 16 child posts); 1 outside-slide
+todo; 14 native non-slide canvas elements; ~71 scene elements. **Every measured slide
+seeded with content.** Sequential fractional indices used, per the §25 ledger entry.
+
+The **49-of-49 render-signature readiness check** supports that no fixture element
+was silently dropped. That check is load-bearing: a fixture that quietly loses
+elements would produce *better* performance numbers, so a performance gate without a
+completeness check measures the wrong board. It was not omitted.
+
+### 32c. Real interactions — **PASS**
+
+Both app-owned drags re-query the **current live embeddable**; target the top strip
+at `live.x + live.width / 2`, `live.y + 8`; convert through **current scene-to-screen
+state**; use **real Playwright mouse input**; use **no `updateScene` and no synthetic
+x/y mutation**; and prove live coordinates and element revisions changed.
+
+The committed test records **`enteredAppOwnedStripPath = true`**, plus within-slide
+and cross-slide movement with revision change. As at §31b, the assertion that the
+interaction **reached the intended path** is what distinguishes this from an outcome
+that merely looks right. The native drag likewise uses real pointer interaction.
+
+### 32d. Counter quality — **PASS**, with a recorded derivation
+
+**Directly measured:** total Excalidraw `onChange` calls; scene-version changes;
+unchanged-revision `onChange` calls; 150 ms timer schedules; timer clears; thumbnail
+render requests; displayed thumbnail changes; idle counter growth; console and page
+errors; post-render revision timing.
+
+**Derived rather than directly instrumented:** `settledSetElementsCalls` and
+`framesMemoRecomputations`.
+
+**Accepted as adequate for representative characterization**, and **preserved as a
+non-blocking measurement limitation** (§32j.1). The derivation is documented in the
+committed test itself, which is the right home for it — a future reader tightening
+these counters will find the caveat next to the code, not only in governance.
+
+### 32e. Geometry performance — **PASS**
+
+Repeated representative runs demonstrate: ~20–25 real pointer-driven scene changes
+per drag; **one settled React propagation per completed drag**; hundreds of
+unchanged-revision `onChange` calls ignored; **no settled `setElements` per
+pointermove**; **no thumbnail rendering per pointermove**; **no scene-version,
+timer-schedule or thumbnail-request growth during idle**; **no continuous loop.**
+
+Changed slides were limited correctly:
+
+| Interaction | Slides changed |
+|---|---|
+| within-slide app drag | source slide only |
+| cross-slide app drag | source and destination only |
+| native drag | expected source slide only |
+
+This is the §29 design behaving as specified at representative scale, and it is the
+first measurement in this patch where the mechanism's *cost* — not only its
+correctness — has been observed on a board of realistic size.
+
+### 32f. Metadata performance — **PASS**
+
+Title edit changed only the expected slide; todo edit changed only the expected
+slide; the outside-slide metadata edit **changed the global post-render revision but
+changed no slide signatures and requested no thumbnail render**;
+**identity-equivalent post-array rewrapping left the digest unchanged**; no repeated
+rendering loop followed metadata updates.
+
+The outside-slide result is the exact discrimination §29 required of mechanism D: the
+revision is global by construction, so the proof that it is not over-invalidating is
+that **signatures and thumbnail requests stayed flat while the revision moved**. A
+global digest that triggered downstream work for an irrelevant edit would have been a
+real defect at scale; it does not.
+
+### 32g. Post-render revision cost — **PASS**
+
+Representative measurements: **65 posts**; serialized canonical state ~84,057–84,187
+bytes; **minimum ~0.746–0.965 ms; median ~0.845–1.184 ms; maximum ~8.162–11.056 ms.**
+
+The work is **bounded**, and the maximum samples **do not indicate a loop or material
+regression**. Sub-millisecond median on a 65-post board, with the tail an order of
+magnitude below a frame budget's practical concern for a non-per-frame computation.
+
+### 32h. Responsiveness — **PASS**, observational
+
+| Observation | Range |
+|---|---|
+| within-slide pointerup → settled React geometry | 130–147 ms |
+| cross-slide pointerup → settled React geometry | 94–160 ms |
+| native pointerup → settled React geometry | 30–61 ms |
+| geometry thumbnail stabilization | ~4.8–7.9 s |
+| metadata thumbnail stabilization | ~3.9–5.8 s |
+| outside-slide observation | 217–479 ms, no thumbnail render |
+
+**No new arbitrary latency threshold is introduced.** That restraint is correct: a
+threshold invented at acceptance time becomes a flake source and an unearned
+guarantee. These are recorded as observations, and a future regression will be
+argued against them as evidence, not asserted against them as a limit.
+
+The thumbnail stabilization delays are **bounded** and produce **no repeated work, no
+manual-refresh requirement, and no continuous loop.** They are the pre-existing
+thumbnail scheduler's cadence, not a cost this patch introduced.
+
+### 32i. Repeatability and validation — **PASS**
+
+Focused gate G passed **once and under `--repeat-each=3`**; the full PATCH-128
+characterization suite passed in the implementation run; **no manual refresh or retry
+was required**; thumbnails stabilized consistently; idle windows retained benign
+no-op `onChange` traffic **while meaningful revision, timer and thumbnail counters
+stopped growing.**
+
+That last clause is the §26g false-green rule satisfied in its hardest form: the
+input counter kept moving, so the flat output counters prove **filtering**, not
+absence of input.
+
+Independently verified: `npx tsc --noEmit` **PASS**; PATCH-128 Vitest files **16
+tests PASS**; `git diff --check` **PASS**; changed-file scope **PASS**; **no
+production instrumentation residue PASS**.
+
+### 32j. Independent-runtime limitation — recorded explicitly
+
+**The independent reviewer did not rerun the focused gate-G Playwright scenario**,
+because the review environment lacked the required dev server and Supabase
+credentials.
+
+Therefore:
+
+- **runtime repeatability is supported by the implementer's recorded successful
+  runs**;
+- the reviewer verified the **committed source, assertions, instrumentation and
+  validation structure**;
+- **the reviewer did not personally reproduce the E2E runtime.**
+
+**This is a non-blocking limitation, not an independently reproduced runtime PASS.**
+
+Recorded plainly because it is the honest shape of this acceptance. It is a weaker
+form of evidence than gate F's, where review and runtime coincided. It is
+nevertheless materially stronger than §30k's rejected form: the measurements live in
+**committed, re-runnable assertions**, so anyone with credentials can reproduce them
+on demand. That is the standard the ledger actually sets.
+
+### 32k. Non-blocking findings
+
+1. **`settledSetElementsCalls` and `framesMemoRecomputations` are derived**, not
+   directly instrumented (§32d).
+2. **`onChangeEmitter` instrumentation depends on the current vendored Excalidraw
+   fork API** — it will need revisiting if the fork moves.
+3. **The fixture assertion permits `appOwnedPosts >= 40`, although the actual fixture
+   contains 65.** The floor is looser than the measurement it guards.
+
+**No correction is required for PATCH-128 closure unless the fixture is later reduced
+or the fork API changes.** Finding 3 is the one to watch: if a future edit shrinks the
+fixture, the assertion would still pass while the board stopped being representative,
+and the performance numbers above would silently cease to mean what §32b says they
+mean.
+
+### 32l. Gate record updated
+
+| Gate | Subject | Status |
+|---|---|---|
+| **F** | app-owned resize | **PASS** (§31b, `56592ab`) |
+| **G** | representative performance run | **PASS with non-blocking findings** (§32, `ea7775b`) |
+| **B** | container/child edit | **UNPROVEN** |
+| **D** | live identity-churn control | **UNPROVEN** |
+
+**Commit `ea7775b` is accepted and may be retained. Do not alter it.**
+
+### 32m. Next action — Gate D only
+
+**Proceed only to gate D** — the live identity-churn control.
+
+**Do not modify production implementation unless the gate-D characterization exposes
+a real defect. Do not request another broad implementation review. Do not alter
+`400f056`, `56592ab` or `ea7775b`. Do not push. Do not close PATCH-128.**
+
+### 32n. Status
+
+**PATCH-128: OPEN · IMPLEMENTATION ACCEPTED (`400f056`) · F PASS (`56592ab`) ·
+G PASS WITH NON-BLOCKING FINDINGS (`ea7775b`) · B/D UNRESOLVED · NOT CLOSED.**
+
+**PATCH-124 unchanged and correct. `getSlideRenderSignature` semantics unchanged.
+PATCH-115 untouched.**
+**PATCH-127: OPEN · B2C AUTHORIZED · NOT STARTED · candidate removed.**
+**PATCH-126: DESIGNATED, UNAUTHORED, UNAUTHORIZED.**
+**PATCH-125 / 124 / 123 / 122 / 121 / 120 / 117: CLOSED.**
+**PATCH-116: CANCELLED.**
+**PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
+**PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
+**PATCH-119: DESIGNATED, UNAUTHORED, UNAUTHORIZED, UNTOUCHED.**
+
+**Recorded debt, updated.** Added: **a performance fixture needs a completeness check
+alongside its measurements**, because silently dropped elements make the numbers
+better and the board wrong (§32b); **an acceptance may be reviewed without being
+independently re-run** — record which, and never let the two read alike (§32j);
+**derived counters are acceptable for representative characterization if the
+derivation is documented beside the code** (§32d); **do not introduce a latency
+threshold at acceptance time** — record observations, which become evidence against a
+future regression rather than an unearned guarantee (§32h); and **a fixture-floor
+assertion looser than the fixture it guards can silently stop being representative**
+(§32k.3). Resolved: **gates F and G**. Retained: acceptance evidence must live in the
+committed suite — a deleted temporary diagnostic is not acceptance; a real-interaction
+gate must assert the interaction reached the intended mechanism; repeat-run evidence
+is required for gates in this patch; exact numeric evidence belongs in annotations
+while assertions verify semantic transitions; `settledScenePropagation.ts` timer casts
+and the 32-bit djb2 digest as accepted non-blocking notes; Excalidraw `onChange` fires
+continuously at rest (~15–20 ms) with no scene or appState change; one ref must never
+carry both "observed" and "settled" meanings; a stable output with a flat
+input-arrival counter proves absence of input, not correct filtering; a mechanism
+proven for one path must not be described as proven generally; `updated_at` is not a
+reliable client-side invalidation trigger under the optimistic update path; thumbnail
+assertions must re-query by stable slide identity; Excalidraw fixture elements need
+sequential fractional indices matching array order or they are silently dropped; a
+destination frame with no prior elements can take unusually long to receive its first
+thumbnail render (pre-existing, reproduced on baseline); nondeterministic React
+propagation (§19c); the split-brain `frames` memo (§17c); `getSceneVersion` blind to
+metadata-only changes (§17e); plus the upstream Excalidraw null-dereference, the
+`unload` warning, the tsconfig-excluded fork, and the PATCH-123 §14k / PATCH-124 §14l
+/ PATCH-125 §13l ledgers with the unresolved production-build failure.
