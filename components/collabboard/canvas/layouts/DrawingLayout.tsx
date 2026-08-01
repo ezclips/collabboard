@@ -15,7 +15,9 @@ import {
 } from '@/lib/infra/drawing/importScene';
 import { getDrawingContainerEditTargetLabel } from '@/lib/infra/drawing/containerEditTargetLabel';
 import { sortSlidesByPresentationOrder } from '@/lib/infra/presentation/slideOrder';
-import { syncInvalidIndicesImmutable, validateFractionalIndices } from '@excalidraw/element';
+import { syncInvalidIndicesImmutable, validateFractionalIndices, getSceneVersion } from '@excalidraw/element';
+import { createSettledScenePropagation } from '@/lib/infra/drawing/settledScenePropagation';
+import { computePostRenderRevision } from '@/lib/infra/drawing/postRenderRevision';
 import LibraryPanel from '@/components/collabboard/LibraryPanel';
 import PostCardContent from '@/components/collabboard/PostCardContent';
 import EmbeddedCommentList from '@/components/collabboard/EmbeddedCommentList';
@@ -404,7 +406,19 @@ function DrawingEmbeddableCard({
             const newX = pointerScene.x - grabOffsetX;
             const newY = pointerScene.y - grabOffsetY;
 
-            const updatedSceneEl = { ...sceneEl, x: newX, y: newY };
+            // Bump the standard Excalidraw revision fields off the live element (not
+            // the pointerdown-time snapshot) so version strictly increases per frame,
+            // matching the convention used elsewhere in this file. Without this,
+            // getSceneVersion never reflects this app-owned move.
+            const liveSceneEl = excAPI.getSceneElements().find((el2: any) => el2.id === sceneEl.id) ?? sceneEl;
+            const updatedSceneEl = {
+              ...liveSceneEl,
+              x: newX,
+              y: newY,
+              version: (liveSceneEl.version ?? 1) + 1,
+              versionNonce: Math.floor(Math.random() * 1e9),
+              updated: Date.now(),
+            };
 
             excAPI.updateScene({
               ...buildDrawingSceneUpdate({
@@ -433,7 +447,18 @@ function DrawingEmbeddableCard({
               { ...sceneEl, x: newX, y: newY, frameId: null },
               excAPI.getSceneElements().filter((el: any) => el.type === 'frame' && !el.isDeleted),
             );
-            const updatedSceneEl = { ...sceneEl, x: newX, y: newY, frameId: membership.frameId };
+            // Same live-element revision bump as handleMove, applied to the final
+            // history commit.
+            const liveSceneElFinal = excAPI.getSceneElements().find((el2: any) => el2.id === sceneEl.id) ?? sceneEl;
+            const updatedSceneEl = {
+              ...liveSceneElFinal,
+              x: newX,
+              y: newY,
+              frameId: membership.frameId,
+              version: (liveSceneElFinal.version ?? 1) + 1,
+              versionNonce: Math.floor(Math.random() * 1e9),
+              updated: Date.now(),
+            };
 
             excAPI.updateScene({
               ...buildDrawingSceneUpdate({
@@ -744,6 +769,19 @@ export default function DrawingLayout({
   const prevZoomValueRef = useRef(1);
   const [zoomPercent, setZoomPercent] = useState(100);
   const [elements, setElements] = useState<readonly any[]>([]);
+  // PATCH-128: debounces geometry-affecting onChange traffic (app-owned and native)
+  // into one settled setElements call per real scene-revision change, beside the
+  // existing immediate active-count/frame-name gate below. See settledScenePropagation.ts.
+  const settledScenePropagationRef = useRef<ReturnType<typeof createSettledScenePropagation> | null>(null);
+  if (settledScenePropagationRef.current === null) {
+    settledScenePropagationRef.current = createSettledScenePropagation({
+      getSceneVersion: (els) => getSceneVersion(els as any),
+      onSettle: (snapshot) => setElements(snapshot),
+    });
+  }
+  useEffect(() => {
+    return () => settledScenePropagationRef.current?.cleanup();
+  }, []);
   const [activeTool, setActiveTool] = useState<'select' | 'comment' | 'library' | 'present' | 'group'>('select');
   const [excalidrawAPI, setExcalidrawAPI] = useState<any>(null);
   const [isInitialViewportSettled, setIsInitialViewportSettled] = useState(true);
@@ -1214,6 +1252,11 @@ export default function DrawingLayout({
       frameNameSigRef.current = frameNameSig;
       setElements(elements);
     }
+
+    // PATCH-128: additive settled propagation for geometry changes the immediate
+    // gate above does not cover (e.g. an in-place move/resize that changes neither
+    // active count nor frame names). No-op onChange traffic is ignored internally.
+    settledScenePropagationRef.current?.onChange(activeElements);
 
     if (deletedEmbeddables) {
       deletedEmbeddables.forEach((el: any) => {
@@ -2182,6 +2225,12 @@ export default function DrawingLayout({
     }
   }, [elements, excalidrawAPI]);
 
+  // PATCH-128: deterministic revision over canonical padlet render state, used
+  // below purely as an additional frames-memo dependency so metadata-only edits
+  // (which never change `elements` or `canvasLines`) still invalidate slide
+  // signatures. Does not replace or duplicate getSlideRenderSignature's logic.
+  const postRenderRevision = useMemo(() => computePostRenderRevision(padlets), [padlets]);
+
   const frames: FrameSlide[] = useMemo(() => {
     const frameEls = (elements as any[]).filter((el: any) => el.type === 'frame' && !el.isDeleted);
     let changed = frameEls.length !== framesArrayRef.current.length;
@@ -2231,7 +2280,9 @@ export default function DrawingLayout({
     // CanvasLine state in via a []-deps ref-backed getter, so this dep is the
     // only trigger that recomputes renderSignature/contentVersion. Removing it
     // silently stops thumbnails refreshing on CanvasLine edits. Do not remove.
-  }, [elements, canvasLines]);
+    // PATCH-128: postRenderRevision is additive -- it does not replace elements or
+    // canvasLines as triggers, it adds metadata-only edits as a third one.
+  }, [elements, canvasLines, postRenderRevision]);
   const contentPadlets = padlets.filter(p => p.type !== 'drawing' && p.type !== 'comment' && p.id !== masterPadlet?.id);
 
   const hasSavedViewportOnInit = useMemo(() => {

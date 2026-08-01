@@ -56,7 +56,9 @@ function summarizePadletMetadata(padlet: Padlet) {
   };
 }
 
-function buildPadletRenderState(
+// Exported (visibility only, no semantic change) so lib/infra/drawing/postRenderRevision.ts
+// can reuse this exact canonical field list rather than duplicating it (PATCH-128).
+export function buildPadletRenderState(
   padlet: Padlet,
   padletsById: Map<string, Padlet>,
   maxDepth: number,
