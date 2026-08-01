@@ -402,3 +402,262 @@ Freeform fallback at `CanvasClient.tsx:6354` (§6a).
 properties of undefined (reading 'length')`, carried from PATCH-128 §34m; and the
 shared-`.next` hazard between `next dev` and `next build`, now compounded by the
 orphaned-process/port-reassignment failure recorded in §13.
+
+---
+
+## 15. Amendment — IMPLEMENTATION ACCEPTED; PATCH-130 CLOSED (2026-08-02, CTO)
+
+Independent acceptance review of implementation commit **`0262405`** against the §5–§11
+authorization.
+
+**Result: ACCEPT WITH NON-BLOCKING FINDINGS. CLOSE PATCH-130.**
+
+### 15a. Scope verified — exactly two files, deletions inspected
+
+`0262405` changes exactly:
+
+1. `components/collabboard/canvas/layouts/DrawingLayout.tsx` (+98 / −13)
+2. `e2e/characterization/patch-130-slide-navigation.spec.ts` (new, +348)
+
+**Confirmed unchanged:** `CanvasClient.tsx`; PATCH-128 and PATCH-129 files, tests and
+governance; `PresentationPanel.tsx`; `RuntimeSlideRenderer.tsx`;
+`FullscreenPresentation.tsx`; `getSlideRenderSignature.ts`; PATCH-124 scheduling;
+presentation order logic; thumbnail generation; the five protected paths; package
+files; `node_modules`; `excalidraw_fork`.
+
+Per the §33a rule established in PATCH-128, the **13 deletions were read, not
+assumed**. All thirteen are the three old `scrollToContent` navigation calls and their
+dependency arrays — the exact code §9 required replacing. **No assertion, guard or
+unrelated line was removed.**
+
+**§6a held: `CanvasClient.tsx:6354` was not touched.** The deeper cause remains
+deliberately deferred, and the implementer respected a boundary that would have been
+the easier fix.
+
+### 15b. Shared navigation helper — **PASS**
+
+One helper, `navigateToPresentationFrame` (`DrawingLayout.tsx:1584-1626`), used by
+existing-slide activation, new-slide creation and add-slide-below. **No divergent
+centring algorithms remain**, resolving §4c.
+
+It re-queries the target frame from the **live Excalidraw scene** (L1590-1592) rather
+than React `elements` — the §9.2 requirement, and the precise inconsistency §4c
+identified. It moves and resizes nothing, alters no presentation order, applies only
+`appState` and selection, and uses `commitToHistory: false` (L1623) so navigation
+never pollutes undo history.
+
+### 15c. Usable-canvas geometry — **PASS**
+
+`getPresentationNavigationUsableRect` (L1550-1582) derives the rectangle from
+`viewportContainerRef` DOM bounds with a `drawingRootRef` fallback, subtracts the
+sidebar via `presentationSidebarRef.getBoundingClientRect()` (L1557-1560), and applies
+`offsetLeft` / `offsetTop` as **measured** insets (L1561-1566).
+
+**No fixed 320 px or 56 px assumption appears anywhere** — §8's explicit prohibition,
+and the §5 requirement that every deduction be measured rather than assumed.
+
+Decisively: **the calculation does not read `appState.width` or `appState.height`.**
+Those remain bound to the oversized 2000 × 1500 virtual stage (§4a), and the repair
+simply stops asking Excalidraw what it thinks its canvas is. That is exactly the
+strategy §6a mandated when it excluded `CanvasClient.tsx` — the wrong self-belief is
+routed around rather than corrected, keeping the blast radius at one file.
+
+### 15d. Zoom policy — **PASS**
+
+```js
+const PRESENTATION_FRAME_NAVIGATION_PADDING_PX = 48;   // L101
+const PRESENTATION_FRAME_NAVIGATION_MAX_ZOOM = 1;      // L102
+
+const fitZoom = Math.min(
+  usableRect.width  / (liveFrame.width  + 2 * PADDING),
+  usableRect.height / (liveFrame.height + 2 * PADDING),
+  MAX_ZOOM,
+);
+const targetZoom = Math.min(finiteCurrentZoom, finiteFitZoom, MAX_ZOOM);
+```
+
+Both axes are consulted, the padding and cap are **named constants** per §5, and every
+term is guarded for finiteness and positivity (L1605-1607). Zoom never exceeds 1, so
+small frames are not enlarged; large frames scale down; aspect ratio is preserved
+because a single scalar drives both axes; frame scene dimensions are untouched.
+
+`Math.min(finiteCurrentZoom, …)` **retains an already-smaller zoom**, satisfying §5's
+"zoom changes only when needed" and avoiding a jarring zoom-in on a user who has
+deliberately zoomed out.
+
+### 15e. Scroll policy — **PASS**
+
+```js
+scrollX: (usableRect.centerX - offsetLeft) / targetZoom - frameCenterX,   // L1616
+scrollY: (usableRect.centerY - offsetTop)  / targetZoom - frameCenterY,   // L1617
+```
+
+This maps the frame centre onto the **usable-canvas** centre, accounts for Excalidraw's
+offsets, excludes the sidebar, and — the property that defines this patch — **produces
+a viewport-dependent result.** Frame scene coordinates are not altered, satisfying §8's
+first prohibition.
+
+### 15f. Frame selection — **PASS**
+
+`selectedElementIds` is set to the intended live frame **only**, with `selectedGroupIds`
+emptied, `selectedLinearElement` and `activeEmbeddable` nulled (L1618-1621). Frame
+contents and unrelated elements are not selected, and both paths behave identically.
+
+This resolves §4d, where selection was never applied to Excalidraw at all. §9.7 required
+the change be deliberate and stated rather than incidental; it is.
+
+### 15g. Existing-slide and new-slide paths — **PASS**
+
+`handleActivateSlide` (L2309-2311) sets the active slide ID, attempts navigation
+immediately from the live scene, and falls back to the bounded RAF path only if the
+frame is not yet present. The old `scrollToContent` call is gone and nothing overwrites
+the result afterward.
+
+New-slide creation inserts the frame first, then calls the same helper through
+`navigateToPresentationFrameSoon` (L1628-1635) — **at most two `requestAnimationFrame`
+callbacks, no polling** (§8), re-querying the live scene each time. No second click is
+required, and nothing is computed from a pre-creation scene.
+
+### 15h. Manual navigation stability — **PASS**
+
+Navigation runs only on explicit actions — slide activation, creation, add-below. It is
+not an effect, does not run per render, does not recentre during sidebar churn, and
+creates no continuous loop.
+
+**The committed test verifies manual wheel pan survives an 800 ms observation window.**
+This is the §8 "must not recentre after the user begins navigating" clause proven rather
+than asserted, and it is the requirement most likely to regress silently in a future
+refactor.
+
+### 15i. Committed test coverage — **PASS**
+
+`e2e/characterization/patch-130-slide-navigation.spec.ts` drives the real UI for both
+paths and proves: panel open; intended slide active; intended live frame present;
+frame-only selection; all four edges inside the usable canvas; no sidebar overlap;
+**centre within 4 px of the usable centre**; finite positive zoom ≤ 1; no drift on
+repeated selection; stability across distant-slide round trips; automatic centring of a
+newly created frame; updated geometry after resize plus reselection; and manual pan
+preserved.
+
+**Viewport matrix: 1920×1080, 1440×900, 1366×768, 1180×760** — the three §10-required
+sizes plus one narrower.
+
+### 15j. Viewport-dependence regression — **PASS, and this is the gate that matters**
+
+The committed test explicitly proves final scroll or zoom **differs between materially
+different viewport sizes**.
+
+§3a's signature was a frame landing at screen L360 → R1640 at zoom 1.0, **byte-identical
+across 1920, 1440 and 1366**. §10 required a test capable of detecting exactly that, on
+the reasoning that a suite blind to the defect's signature does not cover the patch. The
+committed test would fail under the old behaviour. **The original defect is now a
+committed regression test, not a fixed anecdote.**
+
+### 15k. False-green protection — **PASS**
+
+Live frames resolved by stable identity; geometry from live DOM and `appState`; usable
+canvas excludes the sidebar; no screenshots as acceptance evidence; **the test does not
+call the helper directly** and injects no synthetic `appState`; frame scene elements
+unchanged; assertions wait for the new frame to exist; **manual pan/zoom is not used to
+prepare passing geometry**; page and console errors classified and asserted.
+
+The two strongest items are that the helper is exercised only through real UI, and that
+no manual viewport manipulation stages the assertion — either shortcut would have
+produced a green suite over an unrepaired product.
+
+### 15l. Validation
+
+`npx tsc --noEmit` **PASS**; relevant Vitest suites **69 tests PASS**; targeted
+PATCH-130 Playwright **PASS**, and **`--repeat-each=3` PASS**; `git diff --check`
+**PASS**; no production debug instrumentation remains; protected file hashes unchanged.
+
+**The independent reviewer did not personally rerun the credentialed E2E scenario**,
+having verified the committed implementation, source paths, assertions, scope,
+TypeScript, Vitest and diff checks. Same posture as PATCH-129 §15j and PATCH-128
+§32j/§34g: reviewed-but-not-re-run, recorded plainly, acceptable because the evidence is
+committed and re-runnable.
+
+**Dev-server cleanup evidence recorded:** test server on port 3003, PID 15116, stopped;
+final port state `TIME_WAIT` only, no listener remaining. This is a direct response to
+the §13 orphaned-process hazard, and the first time in this sequence that server
+teardown was evidenced rather than assumed. **The §13 note did its job.**
+
+### 15m. Non-blocking findings
+
+1. **Frame scene coordinates are recorded but not asserted field-by-field.** The test
+   captures live frame `x/y/width/height` without an explicit before-versus-after
+   equality assertion per field. Non-blocking: the implementation modifies only
+   `appState`, performs no scene-element update, all geometric assertions pass, and
+   frame identity is stable. **The source establishes the invariant that the test
+   merely observes** — acceptable, though a direct assertion would be strictly
+   stronger.
+
+2. **The second RAF callback ignores the helper's return value** (L1632). If the frame
+   were still absent after two RAF cycles, navigation would **fail silently** — the
+   precise failure mode §9.5 prohibited ("silent no-op is not acceptable"). Non-blocking
+   because frame insertion is a synchronous `updateScene`, existing-slide navigation
+   normally succeeds on the first attempt, the new-slide path is proven by committed
+   E2E, and no observed scenario needed more than the bounded fallback.
+
+   Recorded precisely because it is a **latent** instance of a pattern this patch
+   family has already been burned by: the original `handleActivateSlide` also did
+   nothing when its frame lookup failed (§4c), and that silence is why the
+   creation/selection divergence went unnoticed. The bound is correct; only the
+   unchecked final attempt is worth revisiting if a future report describes navigation
+   that occasionally does nothing.
+
+**No correction is required for closure.**
+
+### 15n. Final status
+
+**PATCH-130: CLOSED · IMPLEMENTATION ACCEPTED (`0262405`) · EXISTING AND NEW SLIDES
+CENTERED IN VISIBLE CANVAS · SIDEBAR-AWARE VIEWPORT FIT PROVEN · REPEATABLE E2E
+EVIDENCE COMMITTED.**
+
+Accepted and retained, not to be squashed or amended:
+
+| Commit | Role |
+|---|---|
+| `864e9ff` | governance authorization |
+| `0262405` | implementation + committed navigation characterization |
+
+**Not pushed.** The five protected unrelated dirty paths remain untouched.
+
+**PATCH-128 and PATCH-129: CLOSED** — neither modified nor reopened.
+**PATCH-127: OPEN · B2C AUTHORIZED · NOT STARTED · candidate removed.**
+**PATCH-126: DESIGNATED, UNAUTHORED, UNAUTHORIZED.**
+**PATCH-130 / 129 / 128 / 125 / 124 / 123 / 122 / 121 / 120 / 117: CLOSED.**
+**PATCH-116: CANCELLED.**
+**PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
+**PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
+**PATCH-119: DESIGNATED, UNAUTHORED, UNAUTHORIZED, UNTOUCHED.**
+
+**Deferred, now with two patches' worth of evidence behind it:** Drawing Layout inherits
+Freeform's 2000 × 1500 stage at `CanvasClient.tsx:6354` (§4a, §6a). PATCH-130 routes
+around it rather than correcting it. **Any future work on canvas viewport geometry
+should start there**, and should expect the blast radius §6a describes.
+
+**Recorded debt from PATCH-130.** Added: **route around a wrong invariant rather than
+correcting it when the correction's blast radius exceeds the patch** — computing the
+target transform directly made `appState.width/height` irrelevant and kept the change
+to one file (§15c); **a bounded retry whose final attempt ignores its result is a
+silent-failure risk**, even when currently unreachable (§15m.2); **evidence the dev
+server was actually torn down** belongs in the implementation report, following the
+orphaned-process incident (§13, §15l); **"constant where it should vary" is now a
+primary diagnostic** — it located the failing layer in PATCH-129 (686.3 px) and
+PATCH-130 (L360→R1640) before any source was read, in two consecutive patches; **a
+smooth, stable, never-overwritten animation can still be centring against the wrong
+rectangle**; **check for an existing measurement before adding one** —
+`--drawing-visible-canvas-right-inset` already existed and was consumed only for
+zoom-control placement (§4b). Retained and still in force: acceptance evidence must live
+in the committed suite; prove the mechanism under test was entered before claiming the
+system handled it; a test must be able to detect the defect's own signature; repeat-run
+evidence is required; once a commit contains any deletion, read it; bound allowlists by
+file and responsibility, not line range; a review finding must be checked against the
+source on the same terms as an implementer's claim.
+
+**Inherited and still unowned:** the production-build failure `TypeError: Cannot read
+properties of undefined (reading 'length')`, carried from PATCH-128 §34m through
+PATCH-129; and the shared-`.next` hazard between `next dev` and `next build`.
+
+**END OF PATCH-130.**
