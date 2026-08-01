@@ -329,6 +329,34 @@ display artifact is the next review's real byte.
 **Fix:** PATCH-102 reuses the existing marker directly — zero changes to `AIComponentRenderer.tsx`/`useAIComponent.ts` needed, exactly the same reuse-not-rebuild shape as PATCH-101's Mermaid fix.
 **Reusable rule:** before declaring "no readiness/state marker exists" for any async React content, grep the FULL body of every effect/helper function that touches the DOM (`querySelectorAll`, `.dataset`, `setAttribute`) inside the relevant component tree — not just the hook's returned state — since production code frequently writes richer DOM-observable state than it exposes through its own return type.
 
+## Responsive layout & canvas navigation (PATCH-129–130)
+
+### Scrollable overflow content must not be unconditionally centred (2026-08-01, PATCH-129)
+**Symptom:** the presentation preview slide overflowed the viewer; the user reported roughly the bottom third cut off and unreachable.
+**Wrong path:** reading it as a missing scrollbar. A scrollbar was already present and active (`scrollHeight > clientHeight`), so "make it scroll" would have changed nothing.
+**Root cause:** two defects composed. The slide box derived its height from width alone (`aspect-[16/10] w-full` inside `max-w-[1100px]`), so the height-constrained scale was never computed and could never win. Separately, `flex items-center` on an `overflow-auto` container pushed the content's top **above the scroll origin** — measured at 130.6px above at 1920×600 — where no amount of scrolling can reach it. A hard-coded 16:10 box against a 1.767 slide letterboxed inside an already-oversized box, worsening the fit.
+**Diagnostic clue:** content fits at tall viewports; content height stays fixed as available height falls; the scroll container itself shrinks correctly; the content's top goes negative relative to the reachable viewport.
+**Fix:** `2228641` — measured two-axis contain (`min(availW/slideW, availH/slideH, MAX_WIDTH/slideW)`) driving one shared scale, real slide dimensions replacing the hard-coded ratio, and conditional alignment (`items-center` when it fits, `items-start` when overflow is possible).
+**Reusable rule:** never combine `overflow-auto` with unconditional cross-axis centring — centre only when content fits and switch to start alignment otherwise. Size to a true two-axis contain using the smaller of the width- and height-constrained scales, preserving the real aspect ratio. A visible scrollbar is not evidence that content is reachable, and "add a scrollbar" is not a repair.
+
+### Authorize by file and responsibility, not by brittle line ranges (2026-08-01, PATCH-129 §15b)
+**Symptom:** the accepted implementation landed four of five hunks outside the authorized line range, which looks like scope drift on a diff stat.
+**Root cause:** the governance document bound the change to "lines 241–264 only" while separately authorizing a `ResizeObserver`-based repair. A measurement repair needs a type, a constant, two refs, a state hook, an effect and a derived memo at component top level — none of which can live inside a JSX fragment. **The two clauses contradicted each other; no implementation could have satisfied both.** The file-level bound — one production file — held exactly.
+**Fix:** recorded as a defect in the authorization, not a violation by the implementer.
+**Reusable rule:** allowlist by file plus a precise responsibility contract; use a line range only when the complete authorized implementation can demonstrably fit inside it. When a line range and the implementation contract conflict, record the governance defect — do not misclassify a compliant implementation as scope drift.
+
+### A constant result where viewport-dependent variation is expected is a primary diagnostic (2026-08-02, PATCH-129 §3b / PATCH-130 §3a)
+**Symptom:** two consecutive responsive defects, each located before any source was read.
+**Root cause (PATCH-129):** available height fell 480px across a viewport sweep while the rendered slide height stayed at **686.3px in every row** — proof that height never entered the sizing calculation. **(PATCH-130):** across 1920/1440/1366 the selected frame landed at **L360 → R1640 with zoom 1.0, byte-identical**, and a correct centre/fit is necessarily viewport-dependent — proof that navigation was centring against a fixed 2000×1500 virtual stage rather than the usable canvas.
+**Diagnostic practice:** sweep one viewport dimension while holding the other stable, and record rendered bounds, zoom, scroll, available bounds and centre offsets at each step. Ask first: **which value should vary here but does not?** The invariant points at the wrong coordinate system, a stale measurement, a fixed constraint, or a missing responsive input.
+**Reusable rule:** when reproducing a responsive defect, hunt the constant before reading the source. A value that refuses to move while its inputs change identifies the failing layer faster than any code inspection, and a smooth, stable, never-overwritten animation can still be centring against the wrong rectangle.
+
+### Bounded fallback callbacks must not fail silently (2026-08-02, PATCH-130 §15m)
+**Symptom:** navigation to a presentation frame uses an immediate attempt plus a bounded two-`requestAnimationFrame` fallback; the final callback ignores the helper's return value, so a still-missing frame produces no navigation and no signal.
+**Root cause:** the same silence had already cost this patch family once — the original `handleActivateSlide` did nothing when its React-state frame lookup failed, and that quiet no-op is why the create-path/select-path divergence went unnoticed until a live diagnostic measured it.
+**Fix:** accepted as non-blocking in `0262405` — frame insertion is a synchronous `updateScene`, existing-slide navigation succeeds on the first attempt, and the committed E2E proves the create path. Retained as a hardening lesson, not a defect.
+**Reusable rule:** a bounded retry is correct; an unchecked final attempt is not. Perform the immediate attempt, then only the bounded fallback the interaction authorizes, then **inspect the final result and make failure surfaced, recorded, or test-observable** — never indefinite polling. Tests must prove the intended mechanism was actually entered rather than inferring success from a sidebar highlight or other indirect state.
+
 ## Architecture strategy (the standing plan)
 
 ### Domain-layer migration: net → freeze → seam → extract
