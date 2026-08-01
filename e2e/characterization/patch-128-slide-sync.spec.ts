@@ -57,6 +57,21 @@ type GateDLiveSnapshot = {
   refetchInvocationCount: number;
   stateArrivalCount: number;
 };
+type GateBLiveSnapshot = {
+  containerId: string;
+  childId: string;
+  stableContainerId: string;
+  stableChildId: string;
+  arrayToken: number;
+  containerToken: number;
+  childToken: number;
+  allPadlets: any[];
+  containerPadlet: any;
+  childPadlet: any;
+  childTaskCompleted: boolean | null;
+  totalPadlets: number;
+  stateArrivalCount: number;
+};
 
 async function openPresentationSidebar(page: Page, expectedSlideCount: number): Promise<Locator> {
   await page.getByTitle('Present Frames').click();
@@ -699,6 +714,207 @@ async function readGateDOperationCounters(page: Page, operation: string): Promis
   return page.evaluate((name) => (window as any).__patch128GateD.get(name), operation);
 }
 
+function gateBContainerRenderState(snapshot: GateBLiveSnapshot): Record<string, unknown> {
+  const padletsById = new Map(snapshot.allPadlets.map((padlet) => [String(padlet.id), padlet] as const));
+  return buildPadletRenderState(snapshot.containerPadlet, padletsById, 2, new Set<string>());
+}
+
+function gateBPresentationPayload(slideIds: string[], sceneElements: any[], padlets: any[]): Record<string, any> {
+  const padletsById = new Map(padlets.map((padlet) => [String(padlet.id), padlet] as const));
+  const payload: Record<string, any> = {};
+  for (const slideId of slideIds) {
+    const frame = sceneElements.find((el) => el.id === slideId);
+    if (!frame) throw new Error(`Missing Gate B slide frame ${slideId}`);
+    const slide = {
+      id: frame.id,
+      name: frame.name ?? null,
+      x: frame.x,
+      y: frame.y,
+      width: frame.width,
+      height: frame.height,
+      order: null,
+    };
+    const composition = planSlideComposition(slide, sceneElements, padlets);
+    payload[slideId] = {
+      resolvedPadlets: composition.resolvedPadlets.map((entry) => ({
+        padletId: entry.padlet.id,
+        embeddableId: entry.embeddable.id,
+        localX: entry.localX,
+        localY: entry.localY,
+        width: entry.width,
+        height: entry.height,
+        zIndex: entry.zIndex,
+        renderState: buildPadletRenderState(entry.padlet, padletsById, 2, new Set<string>()),
+      })),
+      nativeBelowIds: composition.nativeBelowElements.map((element) => element.id),
+      nativeAboveIds: composition.nativeAboveElements.map((element) => element.id),
+    };
+  }
+  return payload;
+}
+
+async function installGateBInstrumentation(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const target = window as any;
+    const counters = {
+      activeOperation: null as string | null,
+      byOperation: {} as Record<string, any>,
+      arrayTokens: new WeakMap<object, number>(),
+      objectTokens: new WeakMap<object, number>(),
+      lastTokensByContainer: new Map<string, { arrayToken: number; containerToken: number; childToken: number }>(),
+      nextToken: 1,
+      stateArrivalCount: 0,
+      originalToDataURL: HTMLCanvasElement.prototype.toDataURL,
+      originalImageSrc: Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'src'),
+    };
+    const ensure = (operation: string) => {
+      counters.byOperation[operation] ??= {
+        thumbnailRenderRequests: 0,
+        displayedThumbnailChanges: [] as string[],
+      };
+      return counters.byOperation[operation];
+    };
+    const tokenFor = (map: WeakMap<object, number>, value: object) => {
+      const existing = map.get(value);
+      if (existing) return existing;
+      const next = counters.nextToken++;
+      map.set(value, next);
+      return next;
+    };
+    const reactFiberFor = (el: Element) => {
+      const key = Object.keys(el).find((name) => name.startsWith('__reactFiber$') || name.startsWith('__reactInternalInstance$'));
+      return key ? (el as any)[key] : null;
+    };
+    const clonePadlets = (padlets: any[]) => JSON.parse(JSON.stringify(padlets));
+    const findLiveContainerProps = (containerId: string) => {
+      const selector = `[data-padlet-id="${CSS.escape(containerId)}"]`;
+      const host = document.querySelector(selector);
+      if (!host) throw new Error(`Gate B could not find rendered container host ${containerId}`);
+      let fiber = reactFiberFor(host);
+      while (fiber) {
+        const props = fiber.memoizedProps;
+        const padlet = props?.padlet;
+        const allPadlets = props?.allPadlets;
+        if (
+          padlet &&
+          String(padlet.id) === containerId &&
+          Array.isArray(allPadlets) &&
+          allPadlets.some((entry) => String(entry?.id) === containerId)
+        ) {
+          return props;
+        }
+        fiber = fiber.return;
+      }
+      throw new Error(`Gate B could not reach DrawingEmbeddableCard props for ${containerId}`);
+    };
+
+    HTMLCanvasElement.prototype.toDataURL = function (...args: any[]) {
+      const op = counters.activeOperation;
+      if (op && this.width > 0 && this.height > 0) ensure(op).thumbnailRenderRequests++;
+      return counters.originalToDataURL.apply(this, args as any);
+    };
+    if (counters.originalImageSrc?.get && counters.originalImageSrc?.set) {
+      Object.defineProperty(HTMLImageElement.prototype, 'src', {
+        configurable: true,
+        get() {
+          return counters.originalImageSrc!.get!.call(this);
+        },
+        set(value: string) {
+          const alt = this.getAttribute('alt');
+          const previous = counters.originalImageSrc!.get!.call(this);
+          const op = counters.activeOperation;
+          if (op && alt === 'Slide preview' && value && value !== previous) {
+            const row = this.closest('.group');
+            const label = row?.textContent?.match(/Gate B Slide \d+/)?.[0] ?? alt;
+            ensure(op).displayedThumbnailChanges.push(label);
+          }
+          return counters.originalImageSrc!.set!.call(this, value);
+        },
+      });
+    }
+
+    target.__patch128GateB = {
+      snapshot(containerId: string, childId: string) {
+        const props = findLiveContainerProps(containerId);
+        const allPadlets = props.allPadlets as any[];
+        const container = props.padlet as any;
+        const child = allPadlets.find((entry) => String(entry?.id) === childId);
+        if (!child) throw new Error(`Gate B could not find child ${childId} in live DrawingLayout allPadlets`);
+        const arrayToken = tokenFor(counters.arrayTokens, allPadlets);
+        const containerToken = tokenFor(counters.objectTokens, container);
+        const childToken = tokenFor(counters.objectTokens, child);
+        const previous = counters.lastTokensByContainer.get(containerId);
+        if (previous && (
+          previous.arrayToken !== arrayToken ||
+          previous.containerToken !== containerToken ||
+          previous.childToken !== childToken
+        )) {
+          counters.stateArrivalCount++;
+        }
+        counters.lastTokensByContainer.set(containerId, { arrayToken, containerToken, childToken });
+        const firstTask = Array.isArray(child.metadata?.tasks) ? child.metadata.tasks[0] : null;
+        return {
+          containerId,
+          childId,
+          stableContainerId: String(container.id),
+          stableChildId: String(child.id),
+          arrayToken,
+          containerToken,
+          childToken,
+          allPadlets: clonePadlets(allPadlets),
+          containerPadlet: JSON.parse(JSON.stringify(container)),
+          childPadlet: JSON.parse(JSON.stringify(child)),
+          childTaskCompleted: firstTask ? Boolean(firstTask.completed) : null,
+          totalPadlets: allPadlets.length,
+          stateArrivalCount: counters.stateArrivalCount,
+        };
+      },
+      async invokeFetchData(containerId: string) {
+        const props = findLiveContainerProps(containerId);
+        if (typeof props.fetchData !== 'function') throw new Error(`Gate B missing production fetchData prop for ${containerId}`);
+        const result = props.fetchData();
+        if (result && typeof result.then === 'function') await result;
+        return { containerId };
+      },
+      start(operation: string) {
+        counters.activeOperation = operation;
+        ensure(operation);
+      },
+      stop() {
+        counters.activeOperation = null;
+      },
+      get(operation: string) {
+        const values = ensure(operation);
+        return {
+          ...values,
+          displayedThumbnailChanges: [...new Set(values.displayedThumbnailChanges)],
+          stateArrivalCount: counters.stateArrivalCount,
+        };
+      },
+      dispose() {
+        HTMLCanvasElement.prototype.toDataURL = counters.originalToDataURL;
+        if (counters.originalImageSrc) Object.defineProperty(HTMLImageElement.prototype, 'src', counters.originalImageSrc);
+      },
+    };
+  });
+}
+
+async function gateBSnapshot(page: Page, containerId: string, childId: string): Promise<GateBLiveSnapshot> {
+  return page.evaluate(({ containerId: c, childId: ch }) => (window as any).__patch128GateB.snapshot(c, ch), { containerId, childId });
+}
+
+async function startGateBOperation(page: Page, operation: string): Promise<void> {
+  await page.evaluate((name) => (window as any).__patch128GateB.start(name), operation);
+}
+
+async function stopGateBOperation(page: Page): Promise<void> {
+  await page.evaluate(() => (window as any).__patch128GateB.stop());
+}
+
+async function readGateBOperationCounters(page: Page, operation: string): Promise<any> {
+  return page.evaluate((name) => (window as any).__patch128GateB.get(name), operation);
+}
+
 test('PATCH-128 geometry: app-owned and native drags synchronize slides and thumbnails', async ({ page }) => {
   test.setTimeout(120_000);
   const pageErrors: string[] = [];
@@ -987,6 +1203,238 @@ test('PATCH-128 gate F: real app-owned resize handle synchronizes presentation a
   });
 
   expect(pageErrors).toEqual([]);
+});
+
+test('PATCH-128 gate B: real container child todo edit synchronizes slide preview', async ({ page }) => {
+  test.setTimeout(120_000);
+  const pageErrors: string[] = [];
+  const consoleErrors: string[] = [];
+  page.on('pageerror', (err) => pageErrors.push(err.message));
+  page.on('console', (msg) => { if (msg.type() === 'error') consoleErrors.push(msg.text()); });
+
+  const { supabase, fixture } = await createDisposableDrawingBoard('p128-gate-b');
+  const slideIds = ['gate-b-slide-1', 'gate-b-slide-2'];
+  const slideNames = ['Gate B Slide 1', 'Gate B Slide 2'];
+  const containerId = crypto.randomUUID();
+  const childTodoId = crypto.randomUUID();
+  const unrelatedId = crypto.randomUUID();
+  const childTaskId = 'gate-b-task-1';
+
+  const gateBPadletRows = [
+    {
+      id: containerId,
+      board_id: fixture.boardId,
+      title: 'Gate B Container',
+      content: '',
+      type: 'container',
+      position_x: 90,
+      position_y: 90,
+      width: 360,
+      height: 270,
+      metadata: { isContainer: true, childPadletIds: [childTodoId], cardColor: '#fef9c3', topStrip: '#854d0e' },
+    },
+    {
+      id: childTodoId,
+      board_id: fixture.boardId,
+      title: 'Gate B Child Todo',
+      content: '',
+      type: 'todo',
+      position_x: 0,
+      position_y: 0,
+      width: 260,
+      height: 150,
+      metadata: {
+        parentId: containerId,
+        todoTitle: 'Gate B Child Todo',
+        tasks: [{ id: childTaskId, text: 'Visible child task before toggle', completed: false }],
+        cardColor: '#e0f2fe',
+        topStrip: '#075985',
+      },
+    },
+    {
+      id: unrelatedId,
+      board_id: fixture.boardId,
+      title: 'Gate B Unrelated Slide Card',
+      content: 'This slide must not re-render for the child edit.',
+      type: 'card',
+      position_x: 1540,
+      position_y: 120,
+      width: 260,
+      height: 180,
+      metadata: { cardColor: '#dcfce7', topStrip: '#166534' },
+    },
+  ];
+  const { error: padletsErr } = await supabase.from('padlets').insert(gateBPadletRows);
+  if (padletsErr) throw padletsErr;
+
+  const containerEmbeddable = embEl('gate-b-emb-container', containerId, 90, 90, 360, 270, slideIds[0]);
+  containerEmbeddable.customData = { renderSignature: drawingLayoutPadletRenderSignature(gateBPadletRows[0]) };
+  const unrelatedEmbeddable = embEl('gate-b-emb-unrelated', unrelatedId, 1540, 120, 260, 180, slideIds[1]);
+  unrelatedEmbeddable.customData = { renderSignature: drawingLayoutPadletRenderSignature(gateBPadletRows[2]) };
+  const scene = [
+    frameEl(slideIds[0], slideNames[0], 0, 0),
+    containerEmbeddable,
+    rectEl('gate-b-native-rect-1', 700, 180, slideIds[0]),
+    frameEl(slideIds[1], slideNames[1], 1450, 0),
+    unrelatedEmbeddable,
+    diamondEl('gate-b-native-diamond-2', 1880, 180, slideIds[1]),
+  ];
+  const { data: masterData, error: masterErr } = await supabase.from('padlets').insert({
+    board_id: fixture.boardId,
+    title: `${fixture.prefix} master`,
+    content: JSON.stringify(scene),
+    type: 'drawing',
+    position_x: 0,
+    position_y: 0,
+    width: 0,
+    height: 0,
+    metadata: { drawingAppState: JSON.stringify({ scrollX: 0, scrollY: 0, zoom: { value: 1 } }), drawingFiles: JSON.stringify({}) },
+  }).select('id').single();
+  if (masterErr) throw masterErr;
+  fixture.masterPadletId = masterData.id;
+
+  await openDrawingBoard(page, fixture.boardId);
+  await waitForHarness(page);
+  await waitForFramesLoaded(page, 2);
+  const containerHost = page.locator(`[data-padlet-id="${containerId}"]`).first();
+  await expect(containerHost).toBeVisible({ timeout: 30_000 });
+  const childCheckbox = containerHost.locator('input[type="checkbox"]').first();
+  await expect(childCheckbox).toBeVisible({ timeout: 30_000 });
+  await expect(childCheckbox).not.toBeChecked();
+  await page.waitForTimeout(3000);
+
+  await installGateBInstrumentation(page);
+  await gateBSnapshot(page, containerId, childTodoId);
+  await page.evaluate((id) => (window as any).__patch128GateB.invokeFetchData(id), containerId);
+  await page.waitForTimeout(3000);
+  const sidebar = await openPresentationSidebar(page, 2);
+  for (const slideName of slideNames) {
+    await expect(slideRow(sidebar, slideName)).toBeVisible({ timeout: 30_000 });
+  }
+  const initialThumbs = await sampleAllThumbnails(sidebar, slideNames);
+  expect(Object.values(initialThumbs).every((thumb) => thumb.nonWhitePixels > 0)).toBe(true);
+
+  const operation = 'container-child-todo-toggle';
+  const beforeSnapshot = await gateBSnapshot(page, containerId, childTodoId);
+  const beforeScene = await getLiveElements(page);
+  const beforeRenderState = gateBContainerRenderState(beforeSnapshot);
+  const beforeRevision = computePostRenderRevision(beforeSnapshot.allPadlets);
+  const beforeSignatures = gateDSlideSignatures(slideIds, beforeScene, beforeSnapshot.allPadlets);
+  const beforePayload = gateBPresentationPayload(slideIds, beforeScene, beforeSnapshot.allPadlets);
+  const beforeThumbs = await sampleAllThumbnails(sidebar, slideNames);
+
+  expect(beforeSnapshot.stableContainerId).toBe(containerId);
+  expect(beforeSnapshot.stableChildId).toBe(childTodoId);
+  expect(beforeSnapshot.childTaskCompleted).toBe(false);
+
+  await startGateBOperation(page, operation);
+  await childCheckbox.click();
+  await expect.poll(async () => {
+    const next = await gateBSnapshot(page, containerId, childTodoId);
+    return `${next.childTaskCompleted}:${next.containerToken !== beforeSnapshot.containerToken}:${next.childToken !== beforeSnapshot.childToken}`;
+  }, { timeout: 20_000, intervals: [250, 500, 1000] }).toBe('true:true:true');
+
+  const thumbWait = await waitForAnyThumbnailStabilization(sidebar, slideNames, beforeThumbs);
+  const afterSnapshot = await gateBSnapshot(page, containerId, childTodoId);
+  const afterScene = await getLiveElements(page);
+  const afterRenderState = gateBContainerRenderState(afterSnapshot);
+  const afterRevision = computePostRenderRevision(afterSnapshot.allPadlets);
+  const afterSignatures = gateDSlideSignatures(slideIds, afterScene, afterSnapshot.allPadlets);
+  const afterPayload = gateBPresentationPayload(slideIds, afterScene, afterSnapshot.allPadlets);
+  const countersBeforeIdle = await readGateBOperationCounters(page, operation);
+  await page.waitForTimeout(1800);
+  const countersAfterIdle = await readGateBOperationCounters(page, operation);
+  await stopGateBOperation(page);
+  const counters = await readGateBOperationCounters(page, operation);
+
+  const changedSlides = changedSignatureIds(beforeSignatures, afterSignatures);
+  const changedThumbs = changedThumbnailNames(beforeThumbs, thumbWait.samples);
+  const changedPayloadSlides = Object.keys(afterPayload).filter((id) => JSON.stringify(afterPayload[id]) !== JSON.stringify(beforePayload[id]));
+  const afterTask = afterSnapshot.childPadlet.metadata.tasks.find((task: any) => task.id === childTaskId);
+  const { data: persistedChild, error: persistedErr } = await supabase.from('padlets').select('*').eq('id', childTodoId).single();
+  if (persistedErr) throw persistedErr;
+
+  expect(afterSnapshot.stableContainerId).toBe(containerId);
+  expect(afterSnapshot.stableChildId).toBe(childTodoId);
+  expect(afterSnapshot.arrayToken).not.toBe(beforeSnapshot.arrayToken);
+  expect(afterSnapshot.containerToken).not.toBe(beforeSnapshot.containerToken);
+  expect(afterSnapshot.childToken).not.toBe(beforeSnapshot.childToken);
+  expect(afterTask.completed).toBe(true);
+  expect((persistedChild.metadata as any).tasks.find((task: any) => task.id === childTaskId).completed).toBe(true);
+  expect(afterRenderState).not.toEqual(beforeRenderState);
+  expect(afterRevision).not.toBe(beforeRevision);
+  expect(changedSlides).toEqual([slideIds[0]]);
+  expect(changedPayloadSlides).toEqual([slideIds[0]]);
+  expect(changedThumbs).toEqual([slideNames[0]]);
+  expect(counters.thumbnailRenderRequests).toBeGreaterThan(0);
+  expect(counters.displayedThumbnailChanges).not.toContain(slideNames[1]);
+  expect(countersAfterIdle.thumbnailRenderRequests - countersBeforeIdle.thumbnailRenderRequests).toBe(0);
+  expect(countersAfterIdle.displayedThumbnailChanges.length - countersBeforeIdle.displayedThumbnailChanges.length).toBe(0);
+
+  test.info().annotations.push({
+    type: 'patch128-gate-b-container-child-ui-evidence',
+    description: JSON.stringify({
+      sourceFeasibility: {
+        route: 'real DrawingLayout container child todo checkbox',
+        rendering: [
+          'DrawingLayout.tsx:72-88 passes container children into RowColumnContainerCard in canvasContext="drawing"',
+          'RowColumnContainerCard.tsx:134-146 resolves childPadletIds and metadata.parentId children',
+          'RowColumnContainerCard.tsx:407-417 renders child PostCardContent with onScanChild and onUpdateChildComments',
+          'PostCardContent.tsx:360-394 renders todo task checkbox and calls createToggleTaskCommand then onScan',
+          'DrawingLayout.tsx:540-548 wires container onScanChild to fetchData',
+          'useCanvasData.ts:87-254 refetches posts and replaces padlets state',
+        ],
+        canonicalFields: [
+          'getSlideRenderSignature.ts:61-100 buildPadletRenderState includes child recursion and metadata.tasks completed state',
+          'postRenderRevision.ts computes a deterministic revision from buildPadletRenderState values',
+        ],
+      },
+      uiProof: {
+        containerId,
+        childTodoId,
+        childTaskId,
+        checkboxLocator: `[data-padlet-id="${containerId}"] input[type="checkbox"]`,
+        beforeTaskCompleted: beforeSnapshot.childTaskCompleted,
+        afterTaskCompleted: afterSnapshot.childTaskCompleted,
+        persistedTaskCompleted: (persistedChild.metadata as any).tasks.find((task: any) => task.id === childTaskId).completed,
+      },
+      liveIdentity: {
+        before: { arrayToken: beforeSnapshot.arrayToken, containerToken: beforeSnapshot.containerToken, childToken: beforeSnapshot.childToken },
+        after: { arrayToken: afterSnapshot.arrayToken, containerToken: afterSnapshot.containerToken, childToken: afterSnapshot.childToken },
+        stableContainerId: afterSnapshot.stableContainerId,
+        stableChildId: afterSnapshot.stableChildId,
+        stateArrivalCount: afterSnapshot.stateArrivalCount,
+      },
+      canonical: {
+        renderStateChanged: JSON.stringify(afterRenderState) !== JSON.stringify(beforeRenderState),
+        revisionChanged: afterRevision !== beforeRevision,
+      },
+      presentation: {
+        changedSlides,
+        changedPayloadSlides,
+        beforeSignatures,
+        afterSignatures,
+        beforePayload,
+        afterPayload,
+      },
+      thumbnails: {
+        changedThumbs,
+        beforeThumbs,
+        afterThumbs: thumbWait.samples,
+        counters,
+        idleGrowth: {
+          thumbnailRenderRequests: countersAfterIdle.thumbnailRenderRequests - countersBeforeIdle.thumbnailRenderRequests,
+          displayedThumbnailChanges: countersAfterIdle.displayedThumbnailChanges.length - countersBeforeIdle.displayedThumbnailChanges.length,
+        },
+      },
+      pageErrors,
+      consoleErrors,
+    }),
+  });
+
+  expect(pageErrors).toEqual([]);
+  expect(consoleErrors).toEqual([]);
+  await page.evaluate(() => (window as any).__patch128GateB.dispose());
 });
 
 test('PATCH-128 gate D: live padlet identity churn does not churn slide previews', async ({ page }) => {
