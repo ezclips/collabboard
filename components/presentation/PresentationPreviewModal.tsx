@@ -4,6 +4,13 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { FrameSlide, RenderSlideToPNG } from "./PresentationPanel";
 import { SlideThumbnail } from "./SlideThumbnail";
 
+type PreviewBounds = {
+  width: number;
+  height: number;
+};
+
+const PREVIEW_MAX_WIDTH = 1100;
+
 export function PresentationPreviewModal({
   open,
   onClose,
@@ -18,6 +25,9 @@ export function PresentationPreviewModal({
   renderSlideToPNG: RenderSlideToPNG;
 }) {
   const [currentId, setCurrentId] = useState<string | null>(activeSlideId);
+  const previewViewportRef = useRef<HTMLDivElement>(null);
+  const previewFooterRef = useRef<HTMLDivElement>(null);
+  const [previewBounds, setPreviewBounds] = useState<PreviewBounds>({ width: 0, height: 0 });
 
   useEffect(() => {
     if (!open) return;
@@ -31,6 +41,64 @@ export function PresentationPreviewModal({
   }, [currentId, slides]);
 
   const currentSlide = slides[currentIndex];
+
+  useEffect(() => {
+    if (!open) return;
+    const viewport = previewViewportRef.current;
+    if (!viewport) return;
+
+    const measure = () => {
+      const styles = window.getComputedStyle(viewport);
+      const horizontalPadding = parseFloat(styles.paddingLeft) + parseFloat(styles.paddingRight);
+      const verticalPadding = parseFloat(styles.paddingTop) + parseFloat(styles.paddingBottom);
+      const footer = previewFooterRef.current;
+      const footerStyles = footer ? window.getComputedStyle(footer) : null;
+      const footerHeight = footer
+        ? footer.getBoundingClientRect().height +
+        (footerStyles ? parseFloat(footerStyles.marginTop) + parseFloat(footerStyles.marginBottom) : 0)
+        : 0;
+
+      const nextBounds = {
+        width: Math.max(0, viewport.clientWidth - horizontalPadding),
+        height: Math.max(0, viewport.clientHeight - verticalPadding - footerHeight),
+      };
+      setPreviewBounds((prev) =>
+        prev.width === nextBounds.width && prev.height === nextBounds.height ? prev : nextBounds,
+      );
+    };
+
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(viewport);
+    if (previewFooterRef.current) observer.observe(previewFooterRef.current);
+    window.addEventListener("resize", measure);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [open, currentSlide?.id, currentSlide?.width, currentSlide?.height]);
+
+  const previewSlideSize = useMemo(() => {
+    const slideWidth = currentSlide?.width ?? 0;
+    const slideHeight = currentSlide?.height ?? 0;
+    if (slideWidth <= 0 || slideHeight <= 0 || previewBounds.width <= 0 || previewBounds.height <= 0) {
+      return { width: 0, height: 0, scale: 0 };
+    }
+
+    const scale = Math.min(
+      previewBounds.width / slideWidth,
+      previewBounds.height / slideHeight,
+      PREVIEW_MAX_WIDTH / slideWidth,
+    );
+
+    return {
+      width: slideWidth * scale,
+      height: slideHeight * scale,
+    };
+  }, [currentSlide?.width, currentSlide?.height, previewBounds.width, previewBounds.height]);
+
+  const previewFitsVertically =
+    previewSlideSize.height > 0 && previewSlideSize.height <= previewBounds.height + 0.5;
 
   const [bigPng, setBigPng] = useState<string | null>(null);
   const [thumbs, setThumbs] = useState<Record<string, string>>({});
@@ -238,10 +306,33 @@ export function PresentationPreviewModal({
             </div>
           </div>
 
-          <div className="flex-1 bg-gray-100 p-4 md:p-8 overflow-auto flex items-center justify-center">
-            <div className="w-full max-w-[1100px]">
+          <div
+            ref={previewViewportRef}
+            data-preview-viewport="true"
+            className={`flex-1 bg-gray-100 p-4 md:p-8 overflow-auto flex justify-center ${
+              previewFitsVertically ? "items-center" : "items-start"
+            }`}
+          >
+            <div
+              data-preview-content="true"
+              style={{
+                width: previewSlideSize.width > 0 ? previewSlideSize.width : "100%",
+                maxWidth: "100%",
+              }}
+            >
               <div className="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
-                <div className="aspect-[16/10] w-full relative bg-white">
+                <div
+                  data-preview-slide="true"
+                  className="relative bg-white"
+                  style={{
+                    width: previewSlideSize.width > 0 ? previewSlideSize.width : "100%",
+                    height: previewSlideSize.height > 0 ? previewSlideSize.height : undefined,
+                    aspectRatio:
+                      currentSlide && currentSlide.width > 0 && currentSlide.height > 0
+                        ? `${currentSlide.width} / ${currentSlide.height}`
+                        : undefined,
+                  }}
+                >
                   {bigPng ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
@@ -258,7 +349,7 @@ export function PresentationPreviewModal({
                 </div>
               </div>
 
-              <div className="mt-4 text-xs text-gray-500 text-center">
+              <div ref={previewFooterRef} className="mt-4 text-xs text-gray-500 text-center">
                 ← → Space PageUp/PageDown to navigate · Esc to close
               </div>
             </div>
