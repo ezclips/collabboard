@@ -379,3 +379,232 @@ Implementation and tests commit separately from governance.
 **Inherited debt still unowned:** the production-build failure
 `TypeError: Cannot read properties of undefined (reading 'length')`, carried out of
 PATCH-128 §34m without an owner.
+
+---
+
+## 15. Amendment — IMPLEMENTATION ACCEPTED; PATCH-129 CLOSED (2026-08-01, CTO)
+
+Independent acceptance review of implementation commit **`2228641`** against the §6–§10
+authorization.
+
+**Result: ACCEPT WITH NON-BLOCKING FINDINGS. CLOSE PATCH-129.**
+
+### 15a. Scope verified — exactly two files
+
+`2228641` changes exactly:
+
+1. `components/presentation/PresentationPreviewModal.tsx` (+95 / −4)
+2. `e2e/characterization/patch-129-preview-fit.spec.ts` (new, +273)
+
+**Confirmed unchanged:** `RuntimeSlideRenderer.tsx`; `FullscreenPresentation.tsx`;
+`PresentationPanel.tsx`; `SlideThumbnail.tsx`; `getSlideRenderSignature.ts`;
+`lib/infra/drawing/`; PATCH-128 governance and all five accepted PATCH-128 commits;
+the five protected paths; package files; `node_modules`; `excalidraw_fork`.
+
+### 15b. Governance correction — §6's line range was wrong, not the implementation
+
+§6 bound the production change to **"lines 241–264 only."** The commit lands five
+hunks, at source lines **4, 18, 32, 238 and 258** — four of them outside that range.
+
+**This is a defect in the authorization, not a violation by the implementer.**
+
+§9 explicitly offered **shape 2 — "a `ResizeObserver` on the scroll area computing
+`scale = min(availW / slideW, availH / slideH)`"** — as an authorized repair. A
+`ResizeObserver` cannot be expressed inside a JSX fragment: it requires a type, a
+constant, two refs, a state hook, a measurement effect and a derived memo, all of
+which must sit at component top level. **§6 and §9 were therefore internally
+inconsistent, and no implementation could have satisfied both.** The implementer
+followed the authorized shape; the line range was unsatisfiable.
+
+The binding that actually mattered — **one production file, and that file only** —
+held exactly. Recorded so the failure is attributed correctly, and generalized in
+§15j: *bound an allowlist by file and by responsibility, not by line range, unless the
+authorized shape provably fits inside those lines.*
+
+### 15c. Two-axis contain repair — **PASS**
+
+`PresentationPreviewModal.tsx:88-92`:
+
+```js
+const scale = Math.min(
+  previewBounds.width / slideWidth,
+  previewBounds.height / slideHeight,
+  PREVIEW_MAX_WIDTH / slideWidth,
+);
+```
+
+This is the §9 contract exactly, mirroring `RuntimeSlideRenderer.tsx:67-74` as §4e
+directed. The height-constrained scale is now computed and can win, which is the
+precise capability §4a found missing. The third term preserves the §5 requirement that
+the slide not grow beyond its natural intended maximum on large displays.
+
+**The fixed ~686 px height no longer persists as viewport height decreases** — the §3b
+defect signature is eliminated at its cause, not compensated downstream.
+
+### 15d. Real aspect ratio — **PASS**
+
+The hard-coded `aspect-[16/10]` wrapper is gone. Width and height derive from
+`currentSlide.width` / `currentSlide.height` through **one shared scale**
+(L94-97), so the two axes cannot disagree. CSS `aspectRatio` uses the same real
+dimensions as a fallback (L330-333). `object-contain` is retained, so content is
+neither stretched nor cropped. Slide switching recomputes from the new slide's
+dimensions, and both portrait and landscape are covered by the committed test.
+
+§4c is resolved: the box no longer reserves height the slide does not use.
+
+### 15e. Resize observation — **PASS**
+
+`previewViewportRef` measures the real preview scroll area and `previewFooterRef` the
+footer, both observed — correct, since the footer consumes vertical space the slide
+cannot have. `ResizeObserver` plus a `window` resize listener; measurement retriggers
+on slide change (L79); `observer.disconnect()` and `removeEventListener` on cleanup
+(L75-78).
+
+**Unchanged dimensions return the previous state object** (L65-67), so no redundant
+render is produced. That guard is what prevents a measure → render → measure feedback
+loop, and it is the same discipline PATCH-128 §30c required of settled propagation. No
+loop was found.
+
+### 15f. Vertical reachability — **PASS**
+
+`PresentationPreviewModal.tsx:312-314`:
+
+```jsx
+className={`flex-1 … overflow-auto flex justify-center ${
+  previewFitsVertically ? "items-center" : "items-start"
+}`}
+```
+
+Content that fits stays centred; content that would overflow switches to top
+alignment. **No slide region can be shifted above the scroll origin**, which
+eliminates the §4b unreachable-top condition at its cause.
+
+This is the part of the repair most easily faked, and it was not faked: it is neither
+a scrollbar nor a padding workaround, and it is retained even though §15c alone
+removes overflow at ordinary sizes — exactly as §9 required.
+
+### 15g. Preserved behaviour — **PASS**
+
+Thumbnail strip unchanged and functional; Prev, Next and Close remain visible;
+switching slides still updates the main preview; slide rendering and PNG generation
+semantics unchanged (the L55/L114 render scales were correctly left alone per §8);
+**PATCH-128 synchronization behaviour untouched.**
+
+### 15h. Committed test coverage — **PASS**
+
+`e2e/characterization/patch-129-preview-fit.spec.ts` enters the real UI path — Drawing
+Layout → Present Frames → per-slide kebab → Preview slide → the modal — and proves the
+modal genuinely opened by requiring a visible viewer, the expected title, and a loaded
+image with meaningful natural dimensions and source content.
+
+**Viewports:** 1920×1080, 1600×700, 1920×600, 1440×900, 1366×768, 1024×768 — covering
+both §10's required sizes and the short-viewport requirement. **Live resize**
+1600×900 → 1600×700 → 1600×900 **without reload or modal reopen**, which is the only
+form that actually exercises the `ResizeObserver` path.
+
+**Geometric assertions:** all four slide edges inside the preview viewport; top edge
+reachable; bottom edge visible; no preview-local overflow; no page-level overflow; real
+aspect ratio preserved; non-blank content; controls visible; strip visible; slide
+shrinks as height decreases and expands when it returns; portrait slide uses its own
+dimensions.
+
+**The 1920×600 regime — the worst measured case in §3b, at 23.8 % hidden — is
+explicitly covered**, proving materially smaller slide height than at 1920×1080, full
+containment, reachable top, visible bottom, **no viewer scrollbar required**, no page
+overflow, and controls and strip present. The original failure is now a committed
+regression test.
+
+### 15i. False-green protection — **PASS**
+
+Live bounding boxes rather than screenshots, per §10. The main preview viewport is
+measured **separately from the thumbnail sidebar** — necessary, since measuring the
+modal shell would have concealed exactly the defect under repair. All four edges
+asserted. Preview-local **and** document overflow both checked. Bounding boxes re-read
+after viewport changes. `expect.poll` rather than fixed sleeps as sole synchronization.
+**A missing, blank or unopened preview cannot pass.** No manual scroll, refresh or
+reopen.
+
+This satisfies the PATCH-128 §31b standard carried into §10: the test proves the
+mechanism was entered before asserting geometry.
+
+### 15j. Validation
+
+`npx tsc --noEmit` **PASS**; targeted PATCH-129 Playwright **PASS**; the same under
+**`--repeat-each=3` PASS**; `git diff --check` **PASS**; no production debug
+instrumentation remains; protected file hashes unchanged.
+
+**The independent reviewer did not personally rerun the credentialed E2E scenario**,
+having verified the committed implementation, assertions, scope, TypeScript and diff
+checks. As at PATCH-128 §32j and §34g: reviewed-but-not-re-run, recorded plainly, and
+acceptable because the evidence is committed and re-runnable on demand.
+
+### 15k. Non-blocking finding — corrected on inspection
+
+The reviewer reported **~18 px of unaccounted vertical space**: ~2 px of slide-card
+border plus ~16 px from the footer's `mt-4` gap.
+
+**The `mt-4` half is not correct.** `previewFooterRef` is attached to the `mt-4`
+element itself (L352), and `measure()` adds `marginTop + marginBottom` to the footer
+height before subtracting it (L56-59). **The footer gap is already deducted.**
+
+**The border half is correct.** The card at L323 carries `border border-gray-200`
+(1 px top and bottom); those 2 px are not subtracted from `previewBounds.height`.
+
+**Corrected finding: approximately 2 px unaccounted, not approximately 18 px.**
+
+The reviewer's conclusion stands — non-blocking, no overflow at any committed test
+viewport including 1920×600, revisit only if an extreme-height viewport demonstrates a
+real clipped or scrolling state. Only its magnitude is corrected. Recorded because a
+future reader hunting an 18 px discrepancy would be looking for 16 px that is already
+handled, and because the §30k precedent cuts both ways: a review finding gets checked
+against the source on the same terms as an implementer's claim.
+
+A second cosmetic note: `previewSlideSize` returns `{ width, height, scale }` on the
+degenerate branch (L85) but `{ width, height }` on the success branch (L94-97). `scale`
+is unused by callers. Harmless; **no correction required.**
+
+### 15l. Final status
+
+**PATCH-129: CLOSED · IMPLEMENTATION ACCEPTED (`2228641`) · VIEWPORT CONTAINMENT
+REPAIRED · REPEATABLE GEOMETRIC EVIDENCE COMMITTED.**
+
+Accepted and retained, not to be squashed or amended:
+
+| Commit | Role |
+|---|---|
+| `83c7a0a` | governance authorization |
+| `2228641` | implementation + committed geometric characterization |
+
+**Not pushed.** The five protected unrelated dirty paths remain untouched.
+
+**PATCH-128: CLOSED — not reopened or modified by this patch.**
+**PATCH-127: OPEN · B2C AUTHORIZED · NOT STARTED · candidate removed.**
+**PATCH-126: DESIGNATED, UNAUTHORED, UNAUTHORIZED.**
+**PATCH-129 / 128 / 125 / 124 / 123 / 122 / 121 / 120 / 117: CLOSED.**
+**PATCH-116: CANCELLED.**
+**PATCH-115: OPEN, BLOCKED, LANDED (`215ea81`), NOT CLOSED.**
+**PATCH-118: RESERVED, UNAUTHORIZED, UNTOUCHED.**
+**PATCH-119: DESIGNATED, UNAUTHORED, UNAUTHORIZED, UNTOUCHED.**
+
+**Recorded debt from PATCH-129.** Added: **bound an allowlist by file and
+responsibility, not by line range**, unless the authorized shape provably fits inside
+those lines — §6 and §9 contradicted each other and no implementation could have
+satisfied both (§15b); **a review finding must be checked against the source on the
+same terms as an implementer's claim** — half of the only finding here was already
+handled in code (§15k); **~2 px of card border is not deducted from
+`previewBounds.height`**, non-blocking, revisit only on a demonstrated extreme-height
+clip; **`items-center` on an `overflow-auto` container makes part of the overflow
+permanently unreachable, and a visible scrollbar is not evidence that content is
+reachable** (§4b, generalizable beyond this component); **a constant output under a
+varying input is the strongest available evidence of an ignored input** (§13); **the
+user's magnitude estimate did not match measurement** (23.8 % vs "a third"), explained
+by display scaling rather than explained away. Retained from PATCH-128 and still in
+force: acceptance evidence must live in the committed suite; prove the mechanism under
+test was entered before claiming the system handled it; repeat-run evidence is
+required; measure the specific container under test, never an ancestor that conceals
+the defect. **Inherited and still unowned:** the production-build failure
+`TypeError: Cannot read properties of undefined (reading 'length')`, carried out of
+PATCH-128 §34m; and the shared-`.next` hazard between `next dev` and `next build`
+(§13).
+
+**END OF PATCH-129.**
