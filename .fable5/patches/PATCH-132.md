@@ -955,3 +955,165 @@ protected-path rules are unchanged.
   auto-scroll proposal is confirmed, and the "avoid work while moving" proposal is
   already implemented and working (§19b). **Recorded so the unbuilt proposals are visibly
   declined with a reason, not quietly dropped.**
+
+---
+
+## 20. Amendment — CLOSED; INDEPENDENT ACCEPTANCE REVIEW PASSED (2026-08-02, CTO)
+
+Independent acceptance review of the PATCH-132 implementation returned **PASS**.
+**PATCH-132 is CLOSED.**
+
+### 20a. Implementation commits
+
+| Commit | Scope |
+|---|---|
+| `a08a576` | `fix(presentation): keep active thumbnail visible` — production repair + initial characterization spec |
+| `d79d587` | `test(presentation): prove active thumbnail auto-scroll` — false-green correction to the spec only |
+
+Governance authorization: `f8defed` (§19).
+
+**Commit-message deviation, recorded rather than waived silently.** §19j specified
+`fix(presentation): scroll active slide thumbnail into view` and
+`test(presentation): characterize active thumbnail auto-scroll`. The messages actually used
+differ in wording. The **scope contract was honoured exactly**; only the wording drifted,
+and the implementation turn's own instructions specified the wording used. No action
+required — recorded so a future reader matching §19j against `git log` is not misled into
+thinking a different change landed.
+
+### 20b. Governance compliance — verified
+
+- production change limited to `components/presentation/PresentationPanel.tsx`;
+- test change limited to `e2e/characterization/patch-132-thumbnail-visibility.spec.ts`;
+- **both commits together touch exactly those two files** — verified by `git show --stat` on
+  each;
+- no thumbnail scheduling, virtualization, queue, image-loading, debounce, signature or
+  embedded-media change — the §19g prohibitions all held;
+- the five protected paths appear in neither commit and remain unstaged;
+- the closed PATCH-128, PATCH-129 and PATCH-130 specs are unmodified.
+
+### 20c. Production implementation — accepted
+
+Confirmed against §19h point by point: sidebar scroll-container ref; slide-row refs keyed by
+**stable slide ID**; `useLayoutEffect` depending only on `activeSlideId`; no render or scroll
+loop; manual scrolling not retriggered while `activeSlideId` is unchanged; stale row refs
+pruned; identity preserved across reorder; nearest-edge arithmetic; **fully visible card
+produces no movement**; above/below overflow produces minimum practical movement; **only the
+sidebar's `scrollTop` is mutated** — document and canvas scrolling are never invoked; browser
+clamping handles the boundaries safely.
+
+The scrolling calculation as landed:
+
+```
+topOverflow    = containerRect.top - rowRect.top
+bottomOverflow = rowRect.bottom - containerRect.bottom
+topOverflow    > 0  → container.scrollTop -= topOverflow
+bottomOverflow > 0  → container.scrollTop += bottomOverflow
+otherwise           → no write
+```
+
+**The absence of a page scroll is structural, not behavioural.** `window.scrollTo` and
+document scrolling are not referenced anywhere in the change, so §19h.6 cannot be violated by
+any input.
+
+### 20d. FALSE-GREEN CORRECTED — the most important finding of this review
+
+The spec as committed in `a08a576` activated the offscreen slide with Playwright
+`locator.click()`. **That was false-green.** Playwright's actionability checks scroll overflow
+ancestors *before* dispatching the click, so the sidebar was already scrolled by the test
+framework, and the assertion "the target became fully visible" would have passed **with the
+production effect removed**.
+
+`d79d587` replaced that activation with a dispatched DOM event:
+
+```
+locator.evaluate(button => button.dispatchEvent(
+  new MouseEvent('click', { bubbles: true, cancelable: true, view: window })))
+```
+
+which bypasses actionability, performs no automatic scroll, and still reaches the real React
+`onClick` → `handleActivateSlide` → `activeSlideId` → production `useLayoutEffect`. The
+corrected spec asserts a three-point timeline: **T0** target attached, fully offscreen,
+`scrollTop === 0`, not active; **T1** immediately before dispatch, `scrollTop` and document
+scroll unchanged and the row still fully offscreen; **T2** after dispatch, `activeSlideId`
+changed to the target's stable ID, `scrollTop` changed, row fully visible, document scroll
+unchanged.
+
+**Negative control.** The production `useLayoutEffect` was temporarily disabled during
+validation. `activeSlideId` still changed, the row stayed offscreen, and the fully-visible
+assertion **failed**. The temporary edit was fully restored and never committed —
+independently verified at closure: the working tree is clean against `HEAD` for the production
+file and the effect is present at `a08a576`. This is the evidence that the production effect,
+not the harness, is the agent responsible for the scroll.
+
+`d79d587` also corrected the fixture's Excalidraw fractional indices from `p132-000001`-style
+strings to valid order keys. Not mentioned in the review summary; recorded here because it is
+a second real defect fixed in that commit, and because invalid fractional indices are a
+standing cause of silently dropped scene elements in this repo.
+
+### 20e. Other assertions — preserved through the correction
+
+Already-visible activation causes no unnecessary scroll; reselection causes no drift; manual
+sidebar scrolling persists while `activeSlideId` is unchanged; sidebar scrolling causes **no**
+thumbnail image-`src` updates; page scroll unchanged; slide order unchanged; stable slide IDs
+used throughout; disposable fixture remains isolated; no idle scroll loop; canvas state
+unchanged by sidebar scrolling. §19i items 1–13 are covered.
+
+### 20f. Validation
+
+Completed successfully during implementation and correction: `npx tsc --noEmit`; the PATCH-132
+focused spec; **`--repeat-each=3`** per the carried standard; the closed PATCH-130 regression
+spec (run, not modified); `git diff --check`.
+
+**During the independent review, typecheck and diff checks remained clean, but both the
+PATCH-132 spec and the closed PATCH-130 spec stopped at the same shared `waitForHarness`
+infrastructure timeout, before any patch-specific assertion ran.**
+
+**Classification: SHARED TEST-HARNESS ENVIRONMENT FAILURE — NOT a PATCH-132 implementation or
+test-logic failure.** A closed, previously accepted spec failing at the identical shared setup
+step is the discriminator: a PATCH-132 defect cannot reach into PATCH-130's harness. **Do not
+reopen PATCH-130 and do not reject PATCH-132 on this basis.**
+
+**Recorded limitation, stated plainly rather than absorbed into the PASS.** The acceptance
+evidence for this closure is the green implementation/correction runs plus the negative
+control, **not** a green re-run observed during independent review. That is weaker than
+closing on a review-time green, and it is accepted here because the corrected spec is
+committed, repeatable and independently re-runnable once the harness environment is healthy.
+**If the shared harness timeout persists, it is its own defect and needs its own patch** — it
+is not PATCH-132's to carry, and closing this patch must not be read as evidence that the
+harness is well.
+
+### 20g. Out of scope at closure — unchanged
+
+The **YouTube / embedded-media failure layer remains OUT OF SCOPE and unresolved** (§19e,
+§5b). It was unclassifiable on the imported diagnostic board because no embeddable scene
+element survived the export/import round trip. **Closing PATCH-132 does not answer the
+blank-embedded-slide report**; that needs the original board or an equivalent retaining a live
+embeddable element. Queue priority, visibility gating and virtualization remain declined on
+measurement (§19c, §19f), not deferred.
+
+### 20h. Status
+
+**PATCH-132: CLOSED · ACTIVE-SLIDE THUMBNAIL AUTO-SCROLL IMPLEMENTED · FALSE-GREEN TEST
+CORRECTED · INDEPENDENT REVIEW PASSED · NO QUEUE OR VIRTUALIZATION CHANGES · YOUTUBE FAILURE
+LAYER REMAINS OUT OF SCOPE · NOT PUSHED.**
+
+**PATCH-131: OPEN · BLOCKED · not modified. PATCH-130 / 129 / 128: CLOSED — not modified or
+reopened**, and specifically **not** reopened by §20f's harness-timeout note.
+
+### 20i. Recorded diagnostic notes
+
+- **Playwright actionability is a false-green generator for any scroll-into-view test.**
+  `locator.click()` scrolls overflow ancestors before dispatching, so a test that asserts "the
+  element became visible after clicking it" measures the test framework, not the product.
+  **Scroll-visibility behaviour must be activated by a dispatched DOM event, and the
+  pre-dispatch scroll state must be asserted immediately before the dispatch** — a T0 check
+  alone is insufficient, because the framework scrolls between T0 and the click.
+- **The negative control is what upgraded this from "the test passes" to "the production code
+  is responsible."** The false-green survived a full implementation turn including a
+  `--repeat-each=3` green. Only disabling the production effect and watching the assertion
+  fail distinguished the two. **For any test whose subject is a side effect on shared UI
+  state, an induced-failure run is not optional diligence — it is the assertion.**
+- **A closed patch's spec failing at the same step is the cheapest way to classify an
+  environment failure** (§20f). Without the PATCH-130 re-run there would have been no
+  principled way to separate "our new test is wrong" from "the harness is down," and the
+  default would have been to suspect the new work.
