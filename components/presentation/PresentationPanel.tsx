@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { PresentationPreviewModal } from "./PresentationPreviewModal";
 import { SlideThumbnail } from "./SlideThumbnail";
 import { SlideLayoutModal } from "./SlideLayoutModal";
@@ -195,6 +195,59 @@ export function PresentationPanel({
 
   // Thumbnails are self-triggered inside useSlideThumbnails via slideSignature
 
+  // PATCH-132: keep the active slide's thumbnail visible in the sidebar without
+  // scrolling the document or fighting manual scroll. Only activeSlideId triggers
+  // this -- never scroll position, thumbnail updates, or unrelated re-renders.
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const slideRowRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const slideRowRefCallbacks = useRef<Map<string, (el: HTMLDivElement | null) => void>>(new Map());
+
+  const getSlideRowRef = useCallback((slideId: string) => {
+    let callback = slideRowRefCallbacks.current.get(slideId);
+    if (!callback) {
+      callback = (el) => {
+        if (el) slideRowRefs.current.set(slideId, el);
+        else slideRowRefs.current.delete(slideId);
+      };
+      slideRowRefCallbacks.current.set(slideId, callback);
+    }
+    return callback;
+  }, []);
+
+  // Prune refs for slides that no longer exist so detached DOM nodes aren't retained.
+  useEffect(() => {
+    const liveIds = new Set(sortedSlides.map((slide) => slide.id));
+    for (const id of slideRowRefCallbacks.current.keys()) {
+      if (!liveIds.has(id)) {
+        slideRowRefCallbacks.current.delete(id);
+        slideRowRefs.current.delete(id);
+      }
+    }
+  }, [sortedSlides]);
+
+  // Scroll the sidebar (never the document) so the active slide's row is fully
+  // visible, using the minimum movement needed to reveal it. Runs only when
+  // activeSlideId changes, so manual sidebar scrolling is never fought and
+  // reselecting the same slide never drifts.
+  useLayoutEffect(() => {
+    if (!activeSlideId) return;
+    const container = scrollContainerRef.current;
+    const row = slideRowRefs.current.get(activeSlideId);
+    if (!container || !row) return;
+
+    const containerRect = container.getBoundingClientRect();
+    const rowRect = row.getBoundingClientRect();
+
+    const topOverflow = containerRect.top - rowRect.top;
+    const bottomOverflow = rowRect.bottom - containerRect.bottom;
+
+    if (topOverflow > 0) {
+      container.scrollTop -= topOverflow;
+    } else if (bottomOverflow > 0) {
+      container.scrollTop += bottomOverflow;
+    }
+  }, [activeSlideId]);
+
   const slideCountLabel =
     selectedCount === 0 || selectedCount === sortedSlides.length
       ? `Slides (${sortedSlides.length})`
@@ -331,7 +384,11 @@ export function PresentationPanel({
       </div>
 
       {/* ── Slide list ── */}
-      <div className="flex-1 overflow-auto px-3 py-3">
+      <div
+        ref={scrollContainerRef}
+        data-presentation-scroll-container="true"
+        className="flex-1 overflow-auto px-3 py-3"
+      >
         {sortedSlides.length === 0 ? (
           <div className="text-sm text-gray-400 text-center py-12 px-4">
             No slides yet. Draw a Frame in Excalidraw to create a slide.
@@ -349,7 +406,12 @@ export function PresentationPanel({
               const menuIsOpen = openMenuId === slide.id;
 
               return (
-                <div key={slide.id} className="group flex items-start gap-2">
+                <div
+                  key={slide.id}
+                  ref={getSlideRowRef(slide.id)}
+                  data-slide-id={slide.id}
+                  className="group flex items-start gap-2"
+                >
                   {/* Checkbox */}
                   <div className="pt-2.5 flex-shrink-0">
                     <input
