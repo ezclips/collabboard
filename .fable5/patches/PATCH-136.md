@@ -943,3 +943,222 @@ links/backlinks.
   touches all five specs at once, which is exactly the moment to introduce the shared helper
   — and exactly the moment it could quietly grow feature assertions. **Its charter is written
   down as three responsibilities precisely because it will be tempting to add a fourth.**
+
+---
+
+## 18. Amendment — MUTATION CENSUS CORRECTED; PATCH-124 SPLIT OUT (2026-08-03, CTO)
+
+Implementation stopped at the governed mutation hard stop **before touching anything** — no
+files modified, no builds or tests run, no commits, nothing pushed. **That was the correct
+call, and the stop caught a false statement in my own governance.**
+
+### 18a. The contradiction — §17a was wrong
+
+§17a stated: *"No spec mutates through the harness. The entire imperative surface in the
+suite is one subscription."* **That is false.**
+
+**PATCH-124 performs direct scene mutation through the private debug harness.**
+
+`e2e/characterization/patch-124-slide-thumbnail-refresh.spec.ts`:
+
+| Line | Evidence |
+|---|---|
+| `:170` | `addRectToFrame(page, frameId, id, color, x, y)` helper defined |
+| `:174` | types `app` as `{ updateScene: (scene: { elements: unknown[]; appState?; commitToHistory? }) => void }` |
+| `:180` | `if (!app?.updateScene) throw new Error('Excalidraw updateScene harness unavailable')` |
+| `:181-207` | constructs a full `SceneElement` — `frameId: targetFrameId`, explicit `backgroundColor`, `fillStyle: 'solid'`, 120×80, fractional `index` |
+| `:209-213` | **`app.updateScene({ elements: [...elements.filter(…), nextElement], appState: { selectedElementIds: {} }, commitToHistory: true })`** — whole-scene replacement |
+| `:263, :268, :272, :284, :285` | five call sites driving the thumbnail-refresh assertions |
+
+**How §17a got it wrong:** the census was built from `grep -o "h\.app\.[a-zA-Z]*"`, which
+matches `h.app.getSceneElements` but **not** `const app = target.h?.app;` followed by
+`app.updateScene(...)` two statements later. **A pattern that assumes a single-expression
+call site cannot see a mutation performed through a local alias.** §17a even carried a
+correction of §16g for the same class of error — and repeated it one indirection deeper.
+
+### 18b. Corrected five-spec census — from full source
+
+Re-audited by scanning each spec for `updateScene`, `replaceAllElements`, `setState`,
+`.scene`, `.history`, `.store`, assignment to `h.elements`/`h.state`, and any `app.*(` call —
+**not by pattern-guessing the shape of the access**.
+
+| Spec | 1 readiness | 2 scene obs. | 3 viewport obs. | 4 subscription | 5 **imperative mutation** | 6 direct command | 7 other private API |
+|---|---|---|---|---|---|---|---|
+| **PATCH-124** | ✅ `:163-168` | ✅ `h.elements` | — | — | **✅ `app.updateScene` `:209`** | — | — |
+| PATCH-128 | ✅ `:148` | ✅ `h.elements` ×3, `getSceneElements` | ✅ `getAppState`, `h.state` | ✅ `onChangeEmitter.on` `:447` | **none** | — | emitter (→ public `onChange`, §17d) |
+| PATCH-129 | ✅ `:54-55` | ✅ `h.elements` `:61` | — | — | **none** | — | — |
+| PATCH-130 | ✅ `:45-46` | ✅ `getSceneElements` | ✅ `getAppState` | — | **none** | — | — |
+| PATCH-132 | ✅ `:153-154` | ✅ `getSceneElements` | ✅ `getAppState` | — | **none** | — | — |
+
+Two clarifications from the scan:
+
+- **PATCH-128's `:2046` `setState` match is an annotation string**, not code — it explicitly
+  says internal React `setState` is *not* exposed. Not a mutation.
+- **PATCH-132's `:204` `dispatchEvent(new MouseEvent('click'))` targets a production
+  button** — that is the PATCH-132 §20d false-green correction, a real DOM event on real UI.
+  **Not harness mutation.**
+
+**Conclusion: exactly one spec mutates. The Group 1 / Group 2 split the brief predicted is
+confirmed by source.**
+
+### 18c. Governance consequence
+
+**The single migration contract in §17i cannot stand.** PATCH-124 cannot reach an
+observation-only bridge through a transport-only edit, and **§17i's row describing it as
+transport-only is withdrawn.**
+
+**The observation-only bridge is NOT weakened.** §17c–§17g stand unchanged: no setters, no
+scene replacement, no raw app/API, no persistence mutation, no arbitrary commands.
+**Mutation is not added to the bridge merely because PATCH-124 currently uses it.**
+
+### 18d. PATCH-124 semantic contract — what the rectangles actually prove
+
+| Question | Answer |
+|---|---|
+| Which frame? | `frame-landscape` (slide A) ×4, `frame-portrait` (slide B) ×1 — set by explicit `frameId`, **and** by x/y inside the frame |
+| Exact geometry needed? | **No** — but the element must be **inside the target frame** and large enough to survive downscaling |
+| Frame membership required? | **Yes — it is the whole point.** A rect in A must change A's thumbnail and leave B's hash **identical** (`:265-266`) |
+| What does the thumbnail assertion depend on? | **element creation** → per-slide isolation → **manual refresh** re-render (`:275-277`) → absence of transient chrome → **debounce coalescing** |
+| The measurement instrument | **Pixel colour sampling.** Each rect carries a distinct Tailwind hex (`#dc2626`, `#16a34a`, `#7c3aed`, `#f97316`, `#14b8a6`) with `fillStyle: 'solid'`, and assertions count pixels: `colorHits.orange > 12`, `colorHits.teal > 12` (`:287-288`) |
+| Hardest assertion | **`:284-288` — two rects in rapid succession, and the settled thumbnail must contain BOTH colours.** This is the coalescing proof: neither add may be dropped |
+
+**Equivalence contract for any migration.** The same frame receives the new element; the
+same per-slide isolation holds (other slide's hash unchanged); the manual-refresh and
+no-transient-chrome assertions are unchanged; **the rapid-succession both-colours-present
+assertion is preserved**; no database or internal-command bypass; no fixed sleeps replace
+readiness.
+
+### 18e. Option A vs Option B — A preferred, **feasibility NOT yet established**
+
+**Option A (real UI drawing) is preferred** and is evaluated first, as directed. Evidence
+for it: `drawing-canvas-line-coordinates.spec.ts` proves the suite **already has a real-UI
+drawing pattern** — `[data-testid="toolbar-line"]`, real pointer events, and an
+`ensureDrawingReady` helper that waits on **production DOM only** (`.excalidraw`,
+`canvas.excalidraw__canvas.interactive`, the toolbar testid) with no `window.h`. A
+`readDrawingViewport` helper for scene↔screen conversion also already exists.
+
+**But four specific blockers stand between that pattern and PATCH-124's assertions:**
+
+1. **Colour is the measurement instrument, and the real UI cannot produce these colours.**
+   Excalidraw's rectangle tool draws with the *current* stroke/background settings;
+   `#dc2626`/`#16a34a`/`#7c3aed`/`#f97316`/`#14b8a6` are Tailwind hexes, not Excalidraw
+   palette entries. Reaching them through the UI means opening the shape properties panel and
+   entering a custom hex per shape — **five times, mid-test**. Changing the colours to palette
+   values would change the sampling thresholds, i.e. **change the assertion**.
+2. **`fillStyle: 'solid'` is not the default** — a transparent rectangle produces almost no
+   colour hits, so the `> 12` thresholds would fail.
+3. **The rapid-succession assertion is timing-critical by design** (`:284-288`). Two pointer
+   drags plus two colour-panel interactions are far slower than two `evaluate` calls, and may
+   no longer coalesce inside the 250 ms debounce — **which would silently convert a coalescing
+   test into a sequential one**.
+4. **Scene→screen conversion must be exact** under live scroll/zoom for the shape to land
+   inside the intended frame; `readDrawingViewport` exists but has not been proven against
+   frame-relative targeting.
+
+**Option B (a bounded `addTestRectangleToFrame` fixture command) is NOT authorized**, and
+must not be reached for on grounds of convenience. It would place a mutation surface inside
+the production-test artifact and weaken the observation-only boundary that is the entire
+point of §17.
+
+**Decision: neither option is authorized yet.** A bounded feasibility spike must run first
+(§18f). **Recorded plainly: I cannot honestly authorize Option A from reading, because three
+of the four blockers concern whether the assertion survives, not whether the interaction is
+possible.**
+
+### 18f. Sequencing — **Option B (split)**, and the document sequence shifts again
+
+The brief says prefer splitting if the real-UI migration needs substantial pointer geometry,
+fixture redesign or separate acceptance evidence. **It needs all three** (§18e).
+
+| Number | Subject | Status |
+|---|---|---|
+| **PATCH-136** | Observation bridge + **four** transport migrations (128, 129, 130, 132) | **BOUNDED · AUTHORIZED** |
+| **PATCH-137** | **PATCH-124 private-mutation removal** — feasibility spike, then Option A or a re-argued Option B | **NEW · BLOCKED pending spike** |
+| PATCH-138 | Document card, free-standing open affordance, deferred Card view removal, dead-constant cleanup | |
+| PATCH-139 | Editor / read-only modal split | |
+| PATCH-140 | Document persistence / lifecycle | |
+| PATCH-141 | Links, backlinks, archive, reusable appearances | |
+
+**PATCH-136 no longer blocks on PATCH-124.** Four specs regain production-mode execution
+immediately; PATCH-124 keeps running in dev mode until PATCH-137 lands. **That is a strictly
+better position than today and does not pretend the fifth spec is solved.**
+
+**PATCH-137's required first output — the feasibility spike:** attempt one real-UI rectangle,
+with a custom colour, inside `frame-landscape`, and report whether all five §18d equivalence
+terms survive — especially the rapid-succession coalescing. **No spec edit until that report
+exists.**
+
+### 18g. Allowlists — PATCH-136 only
+
+**Production — unchanged, exactly 3:** `lib/e2e/productionBridge.ts` (new, ≤150 lines) ·
+`components/collabboard/canvas/layouts/DrawingLayout.tsx` (registration effect only) ·
+`types/e2e-bridge.d.ts` (new). Vendored `App.tsx` and all of `excalidraw_fork/` remain
+excluded, as do `next.config.ts`, `serverLifecycle.ts`, `CanvasClient.tsx`, persistence,
+Supabase, and all feature code.
+
+**Test — 6 (reduced from 7):**
+
+```
+e2e/characterization/patch-136-production-readiness.spec.ts   (new)
+e2e/characterization/e2eBridge.ts                             (new shared helper)
+e2e/characterization/patch-128-slide-sync.spec.ts
+e2e/characterization/patch-129-preview-fit.spec.ts
+e2e/characterization/patch-130-slide-navigation.spec.ts
+e2e/characterization/patch-132-thumbnail-visibility.spec.ts
+```
+
+**`patch-124-slide-thumbnail-refresh.spec.ts` is REMOVED from the PATCH-136 test allowlist**
+and belongs to PATCH-137. No PATCH-134 or PATCH-135 test edit.
+
+### 18h. Hard stops — updated
+
+| Hard stop | Verdict |
+|---|---|
+| Another affected spec also requires mutation | **RESOLVED — none do** (§18b) |
+| Mutation and observation cannot be separated within the allowlists | **NOT triggered** — separated by patch (§18f) |
+| Real UI drawing cannot target the intended frame deterministically | **UNRESOLVED — PATCH-137 spike** |
+| Test requires exact internal geometry/colour unavailable from governed observation | **LIKELY TRIGGERED for colour** (§18e.1–2) — the strongest argument against Option A |
+| Only workable solution is raw `updateScene` | **UNRESOLVED** — if the spike says yes, **stop again**; raw `updateScene` stays prohibited |
+| Pointer actions make the test materially flaky | **UNRESOLVED** (§18e.3) |
+| PATCH-124's feature assertion cannot be preserved | **UNRESOLVED — the decisive question** |
+| A test fixture API would become generic command infrastructure | **Live risk if Option B returns** |
+
+**Four unresolved, all confined to PATCH-137. None affects PATCH-136.**
+
+### 18i. Status
+
+**PATCH-136: OPEN · BUILD TRACK RESOLVED · OBSERVATION BRIDGE AUTHORIZED · FOUR TRANSPORT
+MIGRATIONS AUTHORIZED (128, 129, 130, 132) · PATCH-124 MUTATION DEPENDENCY CONFIRMED AND
+SPLIT INTO PATCH-137 · NO MUTATION ADDED TO THE BRIDGE · NOT PUSHED.**
+
+**PATCH-137: OPEN · PATCH-124 PRIVATE-MUTATION REMOVAL · FEASIBILITY SPIKE REQUIRED ·
+IMPLEMENTATION BLOCKED.**
+
+**Track A: RESOLVED PROCEDURALLY.** **PATCH-135 / 134 / 132 / 130 / 129 / 128 / 124: CLOSED —
+not modified or reopened; 128/129/130/132 authorized for transport-only migration here, 124
+for its own contract under PATCH-137. PATCH-133: OPEN. PATCH-131: OPEN · BLOCKED.**
+Snapshot and tag remain at `c0fa799`.
+
+### 18j. Recorded diagnostic notes
+
+- **A census built from a grep pattern found what the pattern could express, and nothing
+  else.** `h.app.getSceneElements` matched; `const app = target.h?.app` … `app.updateScene(…)`
+  did not. **One local alias hid a whole-scene replacement from two consecutive censuses**,
+  and §17a stated the false negative as a positive finding — "no spec mutates" — which is the
+  strongest form a census claim can take. **A census that enumerates absence must read the
+  files; pattern matching can only enumerate presence.**
+- **The hard stop fired against the governance that authorized it, before any code was
+  written.** §17n listed "tests require mutation after all" as NOT triggered, on my own bad
+  census; implementation hit it immediately and stopped with zero files touched. **The stop
+  list is worth most when it can contradict the patch that wrote it — this is the second time
+  in this sequence (PATCH-134 §0b was the first).**
+- **The measurement instrument is part of the assertion.** PATCH-124's rectangles are not
+  arbitrary shapes; their Tailwind hexes and solid fill are how the test *sees* the thumbnail.
+  Option A reads as "draw a rectangle through the UI instead" and is really "reproduce five
+  exact RGB values through a palette UI without changing the sampling thresholds."
+  **Before calling a test migration transport-only or UI-equivalent, identify what the test
+  measures with — the setup may be the instrument.**
+- **Splitting cost one patch number and unblocked four specs immediately.** Keeping PATCH-124
+  in would have held the bridge hostage to an unresolved pointer-geometry question. **When
+  one member of a batch turns out to be a different problem, the batch is the thing to
+  change.**
