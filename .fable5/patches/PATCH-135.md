@@ -437,3 +437,182 @@ modal split → **138** persistence → **139** links/backlinks/archive.
   genuinely does not fit. **A single-viewport diagnosis would have produced a confident,
   correct, and wholly insufficient fix** — which is precisely what §17d authorized before the
   matrix ran.
+
+---
+
+## 16. Amendment — CLOSED; INDEPENDENT ACCEPTANCE REVIEW PASSED (2026-08-02, CTO)
+
+Independent acceptance review returned **PASS WITH NON-BLOCKING OBSERVATIONS**.
+**PATCH-135 is CLOSED.**
+
+### 16a. Implementation commits
+
+| Commit | Scope |
+|---|---|
+| `af7e6ff` | `fix(canvas): add toolbar overflow menu` — `CanvasSidebar.tsx` only, +226/−71 |
+| `cc6c1e6` | `test(canvas): characterize toolbar overflow reachability` — the new spec only, +415 |
+
+Governance authority: PATCH-135 §1–§15; PATCH-134 §18.
+
+### 16b. Governance compliance — independently verified
+
+`git diff --name-only af7e6ff~1 cc6c1e6` returns **exactly two paths**:
+`components/collabboard/canvas/ui/CanvasSidebar.tsx` and
+`e2e/characterization/patch-135-toolbar-overflow.spec.ts`.
+
+Confirmed by that same diff: **`canvasToolbarRegistry.tsx` unchanged** (the §10 "prefer zero
+changes" preference was met, not merely permitted); **`components/ui/dropdown-menu.tsx`
+unchanged** — the 23-consumer shared primitive was consumed, not modified; **PATCH-125
+unchanged**; no `CanvasClient`, persistence, placement, modal or command-ownership change; no
+`.fable5` change inside the implementation commits; no protected path committed.
+
+**Generated artifacts:** `test-results/.last-run.json` is absent from both commits, absent
+from `git ls-files`, and absent from disk. The earlier UI change summary was not a committed
+artifact.
+
+**Component ceiling:** `CanvasSidebar.tsx` is **337 lines** — under the 400-line component
+ceiling. §10's contingency (a separate `CanvasSidebarOverflow.tsx` requiring an allowlist
+amendment) was therefore correctly **not** invoked.
+
+### 16c. Implementation — accepted
+
+Silent group disappearance (`return null`, §2a.1) is replaced by one accessible **More** menu
+built on the existing Radix wrapper. Confirmed: rail and overflow sets are disjoint; stable
+group and tool IDs preserved; group and tool order preserved; permission-hidden tools appear in
+neither surface; overflow items dispatch the **same** production path — `onBeforeToolClick` →
+`handleToolClick(tool.type)` (`CanvasSidebar.tsx:102`); opening More invokes no command; no
+hidden clickable duplicates.
+
+**§9's command-ownership boundary held exactly.** The overflow owns no persistence, placement,
+modal state, Supabase access or reconciliation.
+
+**§2d's layering requirement was met as specified:** `DropdownMenuContent` carries
+`className="z-[3001]"` (`:289`) — above the `z-[3000]` toolbar, below the `z-[9999]` modal
+layer. The risk flagged as "not triggered, not dismissed" was resolved by the one-class remedy
+§2d predicted, and verified rather than assumed.
+
+### 16d. Height model and loop safety — accepted
+
+Natural group heights are measured from the real rendered DOM, cached by a stable
+group/tool-count signature, taken with **all** groups rendered (so a collapsed group is never
+recorded as zero-height), and include container height, fixed controls, gaps, padding and the
+More-trigger height — with the trigger's height **reserved before** the visible set is chosen.
+Resize reuses the cache; permission, layout, graph-mode and tool-count changes invalidate it
+through signature change.
+
+Loop safety: deterministic calculation, cache independent of the collapsed DOM, no polling, no
+timer chain, no repeated `requestAnimationFrame`, state updates skipped when the overflow ID
+set is unchanged, `ResizeObserver` disconnected on cleanup, no idle oscillation. **§4d's
+mandatory guard is satisfied in all four of its parts.**
+
+### 16e. Terminal case and matrix — accepted
+
+The missing else-branch identified in §15 now exists: core `canvas` + `create` + More fit at
+the supported minimum, More is always fully visible, every displaced group is inside it, no
+capability disappears, and **no clipping remains anywhere in the governed matrix.**
+
+| Configuration | Outcome |
+|---|---|
+| Graph-on Freeform 1920×1080 | no More |
+| Graph-on Freeform 1440×900 | Share, Settings in More |
+| Graph-on Freeform 1366×768 · 1280×720 | Media, Draw, Share, Settings in More |
+| Graph-on Freeform 1024×600 · 768×600 | Blocks, Media, Draw, Share, Settings in More |
+| Graph-off Freeform 1920×1080 · 1440×900 | no More |
+| Graph-off Freeform 1366×768 → 768×600 | Media, Draw, Share, Settings in More |
+| Drawing 1280×720 · 1024×600 | Media, Draw, Share, Settings in More |
+
+**§8's PATCH-125 decision is vindicated by measurement.** Library remains **directly on the
+rail at 1280×720** in every configuration — the 78 px of headroom §8 relied on was real. The
+capability assertion at `patch-125-shared-reaction-picker.spec.ts:124-126` is not weakened, no
+hidden duplicate satisfies its locator, and the file was not edited. At 1024×600 Blocks
+legitimately moves into More, where the new spec proves reachability.
+
+**PATCH-134 compatibility confirmed unchanged:** Document's stable ID and Create placement; the
+`AI · Note · Document · To-do · Comment · Table` order; Freeform and Drawing creation paths;
+180×220 draft dimensions; the empty-new-card guard; "Card view" access; Clipart modal behavior.
+
+### 16f. Accessibility — accepted within the declared scope
+
+Semantic More `<button>`; Radix-managed `aria-expanded`; Enter and Space open; Escape closes
+and restores focus to the trigger; outside-click closes; pointer/touch activation; `menuitem`
+semantics; meaningful labels; permission-hidden items absent.
+
+**§2e/§5's declared boundary held and was not overstated.** The pre-existing non-focusable rail
+`div`-with-`onClick` controls, with hover-only tooltips, remain out of scope and are **not**
+claimed fixed. The overflow is more accessible than the rail it draws from — recorded in §15 as
+a trap to avoid, and the review did not fall into it.
+
+### 16g. Non-blocking observations — recorded
+
+1. **Review-time E2E execution was blocked by the inherited production-build failure at
+   PATCH-128 §34m.** **Classification: inherited environment failure — NOT a PATCH-135
+   implementation or test-logic failure.** Same standing as PATCH-132 §20f, and the same
+   limitation applies plainly: **this closure rests on the implementation-time matrix plus
+   static verification, not on a green E2E run observed during review.** That is weaker than
+   closing on a review-time green. Accepted because the spec is committed and re-runnable, and
+   because the matrix outcomes are geometric measurements rather than judgements. **If the
+   build failure persists it is its own defect needing its own patch** — closing PATCH-135 is
+   not evidence the build is well.
+2. **Arrow-key navigation plus Enter activation of an overflow item is not separately
+   asserted.** Radix owns that behavior, and the same `onSelect` command path is exercised
+   through real pointer activation. **Non-blocking.** Recorded as a candidate assertion if the
+   overflow is ever reimplemented without Radix — at which point it stops being a vendor
+   guarantee.
+3. **PATCH-135 also repaired a terminal-case capability loss that likely predates PATCH-134 at
+   1024×600** (PATCH-134 §18b.3). This does **not** alter the finding that PATCH-134 introduced
+   the separate 1280×720 Library regression. Two distinct defects, one repair.
+4. **Added by this review: `GROUP_H` and `OVERHEAD_H` are now dead constants.** Each appears
+   exactly once in `CanvasSidebar.tsx` — its own declaration (`:47`, `:48`) — with zero
+   references. §4d required them "byte-identical unless the implementation deletes them
+   entirely as unused"; they are byte-identical, so the letter is satisfied and **this is not a
+   violation**. But a stale height model sitting beside the new real-geometry one is precisely
+   the trap this codebase keeps setting for itself — `DraggableToolbar`, `metadata.showCardView`
+   and `CardPreview.onEditContent` were all found live-looking and dead during PATCH-133.
+   **Non-blocking; recommended for deletion in PATCH-136** as a one-line cleanup, or sooner if
+   any patch touches this file.
+
+### 16h. Validation
+
+`npx tsc --noEmit` clean · `ClipartCardDraftModal` **45 passing** · `CardPreview` **24
+passing** · both implementation commits pass `git diff --check` · the PATCH-135 spec is
+parseable and structurally valid · no temporary files or listeners remain · the worktree
+contains only the five protected paths.
+
+### 16i. Status
+
+**PATCH-135: CLOSED · RESPONSIVE TOOLBAR OVERFLOW IMPLEMENTED · SILENT GROUP REMOVAL REPLACED
+BY ACCESSIBLE MORE MENU · LIBRARY CAPABILITY PRESERVED · DOCUMENT CAPABILITY PRESERVED ·
+SUPPORTED VIEWPORTS UNCLIPPED · INDEPENDENT REVIEW PASSED WITH NON-BLOCKING OBSERVATIONS ·
+NOT PUSHED.**
+
+**PATCH-134: its blocking prerequisite is now satisfied.** PATCH-134 §18e recorded it as
+`IMPLEMENTATION BLOCKED` pending this patch. That block is **lifted**; PATCH-134 remains
+**OPEN and not closed**, and requires its own acceptance review — the Library regression it
+introduced is repaired *by this patch*, which is not the same as PATCH-134 having been
+accepted. **Closing PATCH-134 is a separate turn and is not authorized here.**
+
+**PATCH-133: OPEN. PATCH-132 / 130 / 129 / 128: CLOSED — not modified or reopened.
+PATCH-131: OPEN · BLOCKED — not modified.** Snapshot branch
+`snapshot/pre-document-architecture-2026-08-02` and tag
+`pre-document-architecture-2026-08-02` remain at `c0fa799` — **not modified.**
+
+Sequence unchanged: **136** document card + the deferred "Card view" removal → **137** modal
+split → **138** persistence → **139** links/backlinks/archive.
+
+### 16j. Recorded diagnostic notes
+
+- **The fix was the missing else-branch, exactly as §15 predicted.** Three earlier proposals —
+  another `alwaysVisible`, corrected `GROUP_H` constants, a compact mode — all adjusted inputs
+  to a greedy loop whose defect was having no defined behavior on failure. **When a greedy
+  algorithm can run out of candidates, look for the undefined terminal case before tuning its
+  numbers.**
+- **Refusing a ten-pixel assertion two turns ago is what produced this patch.** PATCH-134 §17d
+  declined to assert a derived 654-vs-664 fit and demanded a matrix. The matrix confirmed
+  1280×720 *and* found 1024×600 broken. **The value was not in doubting the estimate — the
+  estimate was fine, off by 12 px in the safe direction — it was in measuring viewports the
+  proposed fix was not aimed at.**
+- **A replaced algorithm leaves its old constants behind unless someone looks.** `GROUP_H` and
+  `OVERHEAD_H` survive as unreferenced declarations beside the real-geometry code that replaced
+  them. The governance clause that protected them from being tuned is the same clause that let
+  them linger. **A "do not change X" rule should say what happens to X when it becomes
+  unused — otherwise the rule quietly manufactures dead code.**
