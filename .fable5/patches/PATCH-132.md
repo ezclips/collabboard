@@ -1,14 +1,20 @@
 # PATCH-132 — Scalable presentation-thumbnail rendering and active-slide visibility
 
-**Status: OPEN · SOURCE FINDINGS C/E CONFIRMED · SERIAL FIFO HEAD-OF-LINE RISK
-CONFIRMED · UNCHANGED-SLIDE SUPPRESSION INTACT · MANY-SLIDE RUNTIME UNMEASURED ·
-YOUTUBE FAILURE LAYER UNCLASSIFIED · EXACT `LIVE_ACCESS` USER STILL LACKS BOARD ACCESS ·
-IMPLEMENTATION BLOCKED**
+**Status: OPEN · CORRECT IMPORTED BOARD ACCESS MANUALLY VERIFIED · 14-SLIDE DRAWING
+BOARD AVAILABLE · SOURCE FINDINGS C/E CONFIRMED · SERIAL FIFO HEAD-OF-LINE RISK
+CONFIRMED · MANY-SLIDE RUNTIME DIAGNOSIS AUTHORIZED · IMPLEMENTATION BLOCKED**
 
-> See **§16** (2026-08-02) for the formal blocked-reproduction record, the four
-> competing implementation cases (§16c), and the unblock routes (§16f); and **§17** for
-> the second failed access retry, the authenticated diagnostic user id, and the manual
-> verification now gating any further automated attempt (§17c).
+> **Diagnostic board: `0c65aa8e-99a0-4c82-9816-4c838526b838`** — the imported copy of the
+> reported board, manually verified (**§18**). The original board
+> `a3c92898-…` in §2/§16/§17 remains inaccessible and **must not be retried**.
+> **⚠ §18b: that diagnostic ID is reused from PATCH-129/130/131, where it is described
+> as "the 4-slide board"; it now holds 14 slides.** Those descriptions are stale; the
+> patches are not reopened.
+>
+> See **§16** for the blocked-reproduction record and the four competing implementation
+> cases (§16c); **§17** for the second failed access retry and the authenticated
+> diagnostic user id; **§18** for the superseding board and the authorized measurement
+> order.
 
 Authored 2026-08-02 by CTO (governance and diagnosis only). Starting HEAD verified at
 **`83f9a11`** (`610c141` plus all PATCH-130 closure and documentation commits, plus the
@@ -586,3 +592,138 @@ or reopened.**
   Each is blocked on a different missing external input — a user reproduction, board
   access, and now effective board access. **The engineering work is not the constraint;
   the evidence supply is.**
+
+---
+
+## 18. Amendment — ACCESS BLOCKER SUPERSEDED; DIAGNOSTIC BOARD AVAILABLE (2026-08-02, CTO)
+
+**§17's access blocker is superseded. The many-slide runtime diagnosis is authorized.
+Implementation remains BLOCKED.**
+
+### 18a. What changed
+
+§17 remains **historically correct for the original board**
+`a3c92898-ca21-488d-9b28-4107415e1ee6`, which stays inaccessible to the diagnostic
+account. It is not retracted.
+
+The user **exported that board and imported it into the Codex/`LIVE_ACCESS` account**.
+The imported copy has canvas ID **`0c65aa8e-99a0-4c82-9816-4c838526b838`**.
+
+Correct diagnostic URL:
+`http://localhost:3000/dashboard/canvas/0c65aa8e-99a0-4c82-9816-4c838526b838`
+
+**Manually verified by the user while logged into the Codex/`LIVE_ACCESS` account**,
+satisfying all four §17c checks: the Drawing canvas loads; the Presentation panel loads;
+**14 slides** are present; thumbnail cards are mounted; **several cards are offscreen**.
+
+Governance consequences:
+
+- **do not retry the original board ID**;
+- **do not treat the imported board as a substitute fixture** — it is the **authorized
+  diagnostic copy of the reported board**, carrying the reported board's real content;
+- **"board access required" is withdrawn as the current blocker**;
+- **implementation stays blocked** until the runtime measurements are complete.
+
+### 18b. ⚠ ID collision — the diagnostic board ID is reused, and its content has changed
+
+**`0c65aa8e-99a0-4c82-9816-4c838526b838` is not a new ID.** It is the same canvas ID
+already referenced by:
+
+| Patch | Recorded as |
+|---|---|
+| `PATCH-114.md:877` | `PATCH114_LIVE_DRAWING_CANVAS_ID` |
+| `PATCH-129.md:34` | the board PATCH-129's geometry was measured on |
+| `PATCH-130.md:31` | "canvas …, **4 slides**" |
+| `PATCH-131.md:53` | "Drawing Layout, **4 slides**" |
+
+Earlier in this same session I measured **`Slides (4)`** on that exact board. The user's
+verification now reports **14 slides**. **The board's content has changed under a stable
+ID.**
+
+This is recorded prominently because it will silently mislead someone:
+
+1. **PATCH-129, PATCH-130 and PATCH-131 describe this ID as "the 4-slide board."** Those
+   descriptions are now **stale**. The measurements themselves remain correct *as taken*
+   — they were accurate against the board's state at the time, and PATCH-130's committed
+   characterization asserts against live geometry rather than hard-coded slide counts.
+   **None of those patches is invalidated, and none is reopened.**
+2. **§16a's reasoning is now moot, not wrong.** It argued the 4-slide board was an
+   invalid substitute because every card was visible and no offscreen set existed. That
+   was true of the board's *content*, not its identity — and the content has since been
+   replaced with the reported board's.
+3. **Any future re-run of the PATCH-129/130 characterization specs against this board
+   will meet 14 slides, not 4.** If either spec depends on slide count, ordering, or
+   index-based selection, it may behave differently. Those specs are **closed and must
+   not be modified** — but a re-run producing an unexpected result should be checked
+   against this note **before** being treated as a regression in the accepted
+   implementations.
+
+**Reusable rule, recorded in §21: a board ID is a stable identifier for a *container*,
+not for its *contents*. Any measurement pinned to a live board ID must record what was on
+the board at the time, because a later import can replace it without the ID changing.**
+
+### 18c. Diagnostic suitability — good, with one caveat to confirm first
+
+14 slides with several cards offscreen satisfies the §11 requirement for a many-slide
+board and clears the §16a objections. It is short of the **≥ 15 slides** the §10 test
+plan reserves for the *acceptance suite*; that is a target for the committed test, not a
+precondition for diagnosis, and 14 is ample to measure offscreen contention, queue
+ordering and auto-scroll.
+
+**Confirm as the first measurement, before anything else:** that the imported copy
+actually contains the **YouTube/embedded slide**. An export/import round trip is exactly
+the operation most likely to drop or alter an embedded element, and that slide is the
+subject of §5b — the unclassified failing layer and one of the two findings that would
+most change the repair. **If the embedded slide did not survive the import, §5b remains
+unclassifiable on this board and must be reported as such, not silently skipped.**
+
+### 18d. Next authorized action — §11 measurement, unchanged
+
+The §11 measurement plan stands as written, against the imported board. In order:
+
+1. **verify the embedded/YouTube slide survived the import** (§18c);
+2. **confirm the live slide count and record it** — do not rely on 14 from a screenshot;
+3. **answer §5a first** — how many slide signatures change for a move within one slide, a
+   move between two slides, and a metadata edit. **This still decides the repair shape**
+   (§16c cases A vs B);
+4. classify visible / near / offscreen by `IntersectionObserver`, **never by index**;
+5. record thumbnail requests and accepted/stale renders **by slide ID**, with start/end
+   times, visibility at render start, and render order — proving or disproving §4c's
+   head-of-line blocking on real data;
+6. classify the YouTube slide into exactly one of A–I (§5b);
+7. measure whether work starts before settlement (§5c) — **if it does not, no new delay
+   is authorized**;
+8. measure sidebar re-render cost (§5d);
+9. **report which cells were not measured.**
+
+**No production allowlist is granted** (§10). **No implementation is authorized.** The
+§12 hard stops and regression boundaries are unchanged, as are the standing prohibitions
+on modifying PATCH-128/129/130/131 and the five protected paths.
+
+**Dev-server rule (PATCH-130 §13, four occurrences):** identify the listening PID and
+port before measuring; confirm the base URL points at the healthy server — note the
+correct URL above assumes **port 3000**, which has repeatedly been held by orphans, so
+**take the port from the dev log, not from this document**; stop the real child afterward
+and verify no listener remains.
+
+### 18e. Status
+
+**PATCH-132: OPEN · CORRECT IMPORTED BOARD ACCESS MANUALLY VERIFIED · 14-SLIDE DRAWING
+BOARD AVAILABLE · SOURCE FINDINGS C/E CONFIRMED · SERIAL FIFO HEAD-OF-LINE RISK
+CONFIRMED · MANY-SLIDE RUNTIME DIAGNOSIS AUTHORIZED · IMPLEMENTATION BLOCKED.**
+
+**PATCH-131: OPEN · BLOCKED · not modified. PATCH-130 / 129 / 128: CLOSED — not modified
+or reopened**, and specifically **not** reopened by §18b's staleness note.
+
+### 18f. Recorded diagnostic note
+
+- **A board ID identifies a container, not its contents** (§18b). Three patches describe
+  this ID as "the 4-slide board"; it now holds 14. Measurements pinned to a live board
+  must record the board's state at the time, or a later import silently invalidates the
+  description while leaving the identifier valid.
+- **An export/import round trip is a lossy operation for embedded content** (§18c). The
+  one element this patch most needs is the one most likely not to have survived, so it is
+  the first thing to check rather than something to discover three measurements in.
+- **The blocker was resolved by the user changing the world, not by another retry.** §17c
+  gated further automated attempts on manual verification precisely so the next action
+  would be a real change rather than a third identical failure. That gate worked.
