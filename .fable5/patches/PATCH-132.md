@@ -2,10 +2,13 @@
 
 **Status: OPEN · SOURCE FINDINGS C/E CONFIRMED · SERIAL FIFO HEAD-OF-LINE RISK
 CONFIRMED · UNCHANGED-SLIDE SUPPRESSION INTACT · MANY-SLIDE RUNTIME UNMEASURED ·
-YOUTUBE FAILURE LAYER UNCLASSIFIED · BOARD ACCESS REQUIRED · IMPLEMENTATION BLOCKED**
+YOUTUBE FAILURE LAYER UNCLASSIFIED · EXACT `LIVE_ACCESS` USER STILL LACKS BOARD ACCESS ·
+IMPLEMENTATION BLOCKED**
 
 > See **§16** (2026-08-02) for the formal blocked-reproduction record, the four
-> competing implementation cases (§16c), and the unblock routes (§16f).
+> competing implementation cases (§16c), and the unblock routes (§16f); and **§17** for
+> the second failed access retry, the authenticated diagnostic user id, and the manual
+> verification now gating any further automated attempt (§17c).
 
 Authored 2026-08-02 by CTO (governance and diagnosis only). Starting HEAD verified at
 **`83f9a11`** (`610c141` plus all PATCH-130 closure and documentation commits, plus the
@@ -486,3 +489,100 @@ PATCH-130 / 129 / 128: CLOSED — not modified or reopened.**
   `LIVE_ACCESS` account sees three boards; user-reported defects will routinely live on
   boards it cannot reach. Consider whether defect reports should carry a shared-board
   step, so the blocker is resolved before a diagnostic turn is spent discovering it.
+
+---
+
+## 17. Amendment — SECOND ACCESS RETRY FAILED (2026-08-02, CTO)
+
+Record of the second reproduction retry, attempted after the user reported sharing the
+board.
+
+**Result: BLOCKED — the target board is still inaccessible to the configured
+`LIVE_ACCESS` account. Implementation remains BLOCKED.**
+
+### 17a. Retry result
+
+| Item | Value |
+|---|---|
+| Authenticated diagnostic **user id** | **`3f41bc24-435a-4e42-8177-278ececb1107`** |
+| Target board | **`a3c92898-ca21-488d-9b28-4107415e1ee6`** |
+| Page result | **"Canvas not found"** |
+| `canvasCount` | **0** |
+| Presentation sidebar | **absent** |
+| Thumbnail cards | **absent** |
+| Many-slide content | **absent** |
+
+**The diagnostic stopped at the required first-check boundary.** No substitute board was
+used; no runtime measurements were taken; no production or test files were changed; no
+implementation was authorized.
+
+The user id is recorded because it is the one durable identifier that makes the next
+verification unambiguous — it is a **user id only**, never an email, token or cookie, per
+the standing constraint. Any share must be checked against *this* id.
+
+### 17b. The share has not become effective for this account
+
+**Record: the board-sharing change reported by the user has not taken effect for the
+exact account `LIVE_ACCESS` authenticates as.**
+
+Stated precisely, because the distinction matters: this is not evidence that no share was
+made. It is evidence that **the account the diagnostic actually authenticates as still
+cannot read the board.** Possible causes:
+
+- the board was shared with a different email/account;
+- the invitation was not accepted;
+- the share applies to a different workspace or tenant;
+- "Full access" was set on a different board;
+- the diagnostic account's membership has not propagated;
+- board lookup does not include the granted share.
+
+The last is the only one that would be a product defect rather than a configuration
+mismatch. **It is not diagnosed here** and must not be assumed — but if manual
+verification (§17c) shows the board *does* appear for this account while the URL still
+returns "Canvas not found", that would itself be a real bug and a separate patch.
+
+### 17c. Unblock requirement — manual verification first
+
+Before another diagnostic retry, **manual verification while logged in as the configured
+`LIVE_ACCESS` account** must confirm all four:
+
+1. the target board **appears in that account's board list**;
+2. opening the exact URL **does not** show "Canvas not found";
+3. the **Drawing canvas and Presentation panel load**;
+4. **slide thumbnail cards are visible**.
+
+**Do not spend another automated diagnostic turn merely testing the same inaccessible
+URL.** Two turns have now produced the same three-word result; a third would cost a full
+session's setup — dev server, authentication, navigation — to re-derive a fact already
+established twice. The next automated turn must be gated on a human confirming the
+account can see the board.
+
+### 17d. Status
+
+**PATCH-132: OPEN · SOURCE FINDINGS C/E CONFIRMED · SERIAL FIFO HEAD-OF-LINE RISK
+CONFIRMED · UNCHANGED-SLIDE SUPPRESSION INTACT · MANY-SLIDE RUNTIME UNMEASURED · YOUTUBE
+FAILURE LAYER UNCLASSIFIED · EXACT `LIVE_ACCESS` USER STILL LACKS BOARD ACCESS ·
+IMPLEMENTATION BLOCKED.**
+
+Nothing in §4's source-proven findings changes. **No production allowlist granted**
+(§10). Route 3 of §16f — a seeded fixture — remains available if granting access proves
+impractical, with the §16f caveat that it cannot reproduce the YouTube slide's failing
+layer.
+
+**PATCH-131: OPEN · BLOCKED · not modified. PATCH-130 / 129 / 128: CLOSED — not modified
+or reopened.**
+
+### 17e. Recorded diagnostic note
+
+- **Verify the precondition before spending the turn.** Both retries paid the full cost
+  of a diagnostic session — server startup, authentication, navigation, load waits — to
+  discover an access failure that a single authenticated board-list check would have
+  surfaced in seconds. **A cheap precondition check belongs at the top of any diagnostic
+  that depends on external state**, and §17c now makes it a gate rather than a discovery.
+- **"Shared" is a claim about intent; readability by a specific user id is the fact.**
+  Recording the authenticated user id turns an untestable report ("I shared it") into a
+  checkable one ("does `3f41bc24-…` see it").
+- This is the **third** consecutive blocked diagnosis across PATCH-131 and PATCH-132.
+  Each is blocked on a different missing external input — a user reproduction, board
+  access, and now effective board access. **The engineering work is not the constraint;
+  the evidence supply is.**
