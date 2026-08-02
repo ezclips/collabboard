@@ -1,6 +1,13 @@
 # PATCH-131 — Keep newly created posts and containers inside the visible canvas
 
-**Status: OPEN · DIAGNOSIS INCOMPLETE · IMPLEMENTATION BLOCKED**
+**Status: OPEN · PARTIALLY REPRODUCED · FREEFORM NEUTRAL CREATION PROVEN VISIBLE ·
+DRAWING REAL UI PATH PARTIALLY PROVEN · HOSTILE PAN/ZOOM UNPROVEN · DRAWING
+ANTI-STACKING CONFOUNDS PLACEMENT · RECONCILIATION UNCLASSIFIED · IMPLEMENTATION
+BLOCKED**
+
+> Superseded in part by **§16** (bounded reproduction, 2026-08-02). §3's "complete"
+> source map and §5e's virtual-stage hypothesis are corrected there; §1–§15 are
+> retained unedited as the record of what was believed before measurement.
 
 Authored 2026-08-02 by CTO (governance and diagnosis only). Starting HEAD verified at
 **`5e03f44`** (`610c141` plus the documentation-only lessons commit). Worktree clean
@@ -65,7 +72,13 @@ substitution to satisfy my own deadline.
 
 ---
 
-## 3. Source map — complete
+## 3. Source map — claimed complete; **CORRECTED BY §16a**
+
+> **This heading was wrong.** §16a records three further production paths found by
+> measurement — `usePadletSave`, `checkPlacementRequired`, and
+> `handleDrawingNewContainer`'s anti-stacking loop — the last of which moves the final
+> coordinate by ≈ +380 px per collision. This is a complete map of the two
+> *centre-computation* sites, not of the placement pipeline. Read §16a with it.
 
 Every app-owned creation path for Freeform and Drawing resolves into **two placement
 computations, both in `CanvasClient.tsx`**.
@@ -421,3 +434,245 @@ granted** (§6). Next action is §11's bounded reproduction.
 properties of undefined (reading 'length')` (PATCH-128 §34m); the shared-`.next` hazard
 between `next dev` and `next build`; and Drawing Layout's inherited 2000 × 1500 Freeform
 stage at `CanvasClient.tsx:6354` (PATCH-130 §6a), now relevant to a second patch.
+
+---
+
+## 16. Amendment — BOUNDED REPRODUCTION, PARTIAL (2026-08-02, CTO)
+
+Result of the §11 bounded reproduction turn.
+
+**Result: PARTIALLY REPRODUCED. Implementation remains BLOCKED.**
+
+### 16a. §3's "complete" source map was not complete — corrected
+
+§3 asserted a **complete** source map resolving all app-owned creation into two
+placement computations. The reproduction found three further production paths that
+materially affect the final coordinate and appear nowhere in that table:
+
+| Path | Role |
+|---|---|
+| `usePadletSave` (`saveNote` et al.) | the actual caller of `getNewPostPosition`, per object type |
+| `checkPlacementRequired` | gates `onDrawingPlacementStart` for new Drawing posts without `parentId` |
+| `handleDrawingNewContainer` | applies an **anti-stacking displacement loop** after placement |
+
+The last of these is decisive (§16f) and was missed entirely. **The §3 heading was
+wrong and is corrected here: it was a complete map of the two *centre-computation*
+sites, not of the placement pipeline.** A map that stops at the arithmetic and omits
+what runs after it is not a map of where the coordinate comes from.
+
+This is the second time in three patches that reading handlers produced a confident
+and incomplete picture — the §1 and §14 caution against exactly this was correct, and
+still understated.
+
+### 16b. Freeform real UI paths — **PROVEN**
+
+```
+CanvasSidebar (non-semantic clickable div) → Note
+  → handleToolClick("note") → NoteEditor → outside-click save
+  → usePadletSave.saveNote → getNewPostPosition(280, 280)
+
+CanvasSidebar (non-semantic clickable div) → Column
+  → handleToolClick("container") → handleCreateEmptyFreeformContainer
+```
+
+**The toolbar creation controls are clickable `div` elements, not semantic buttons.**
+That is precisely why §2a's button census returned 14 buttons and no creation action.
+The §2a inference was right, and the standing repo lesson — *discover selectors live;
+sidebar tools are `<div onClick>` with tooltip-span labels* — applied exactly as
+written. **Recording that the blocker was a known, documented trap, not a novel one.**
+
+### 16c. Freeform viewport classification — **DECIDED**
+
+§11.3 named one measurement as the highest-value item in the reproduction, because it
+would decide whether PATCH-131 is a placement-arithmetic patch or a second stage patch.
+It was taken. At 1440×900:
+
+| Property | Value |
+|---|---|
+| `containerRef` client area | ≈ **1440 × 900** |
+| `scrollWidth` / `scrollHeight` | ≈ 10056 / 10024 |
+| `overflow` | auto / auto |
+| Inner stage | 2000 × 1500 |
+| Inner-stage rect origin | ≈ left 56, top 24 |
+
+**`containerRef` resolves to the real visible scrolling viewport.** The Freeform
+placement formula is **not** reading the 2000 × 1500 stage.
+
+**The §5e hypothesis is withdrawn: Freeform creation is not a recurrence of PATCH-130's
+virtual-stage defect.** §5e predicted this as a negative and asked for the measurement
+that would settle it; the prediction held. That is the one part of §5 that can now be
+closed, and it closes as *not the cause* — which is worth as much as a positive finding,
+because it stops the next turn chasing the PATCH-130 analogy.
+
+Note also `scrollWidth ≈ 10056`, far larger than the 2000 px stage — the Freeform scroll
+extent is its own thing, and the stage is not the boundary of the pannable area.
+
+### 16d. Freeform neutral placement — **VISIBLE, not defective**
+
+Created through the real UI at neutral scroll and zoom:
+
+| Object | Persisted x, y | Size | Screen L, T → R, B |
+|---|---|---|---|
+| Note | 580, 310 | 280 × 280 | ≈ 636, 334 → 816, 414 |
+| Container | 545, 300 | 350 × 300 | ≈ 601, 324 → 961, 474 |
+
+Both match `x = viewportWidth/2 − objectWidth/2`, `y = viewportHeight/2 − objectHeight/2`.
+**Both remained fully visible.**
+
+**Neutral Freeform creation is not classified as defective**, and the user's reported
+symptom was **not** reproduced in this case. §5b (object not offset by its own size)
+is therefore **confirmed absent in Freeform** — the helper does subtract half the object
+size, and the measurement proves it end-to-end rather than by reading.
+
+### 16e. Freeform remaining risk — genuinely open
+
+Freeform still appears to choose its centre without subtracting the ≈ 56 px occupied
+left toolbar (consistent with the inner-stage origin at left 56 in §16c). But the
+neutral objects stayed visible, hostile pan/zoom was not completed, and sidebar-open
+and narrower viewports are unproven.
+
+**Freeform is neither PASS nor a confirmed defect.** It must not be described as either
+in the next turn.
+
+### 16f. Drawing — real path partially proven, and confounded
+
+```
+CanvasSidebar Note → NoteEditor outside-click save
+  → onDrawingPlacementStart → PlacementPrompt → New Container
+  → handleDrawingNewContainer
+```
+
+Created: container at **x 4952, y 60**, 360 × 300, `childPadletIds` including the child;
+child note at 0, 0, 300 × 200, `metadata.parentId` pointing at the new container. Live
+container bounds after creation ≈ **877, 601 → 1235, 749.5**.
+
+**The confound:** `handleDrawingNewContainer` applies an existing **anti-stacking loop**
+displacing x by ≈ **+380 per conflict**. The persisted x is therefore the composition of
+
+1. the initial placement input,
+2. anti-stacking adjustment, and
+3. later `scrollToContent` / navigation.
+
+**x = 4952 cannot be attributed to the §5a/§5b arithmetic**, and no Drawing repair may
+be authorized from this measurement. §5b remains a strong hypothesis for Drawing — the
+formula still passes a scene-space centre straight into `position_x/position_y` without
+subtracting half the object size — but it is **not established as the first failing
+layer**, because two later stages can move the result.
+
+This is the §16a miss doing real damage: had the anti-stacking loop been in §3, the
+reproduction would have been designed to isolate it. §17.2 now requires choosing a
+collision-free target area for exactly that reason.
+
+### 16g. Consumer census — §11.7 satisfied
+
+`getNewPostPosition` is consumed through **`usePadletSave`** for: note 280×280;
+link 300×350; todo 300×350; table 400×300; container 350×300; comment 300×280;
+card 180×220; image 300×200; drawing 400×300; AI component 500×400.
+
+The shared prop bag passes from `CanvasClient` into `usePadletSave`. The **inline
+duplicate formula is used only by `handleCreateEmptyFreeformContainer`**, and
+`onDrawingPlacementStart` is invoked by `checkPlacementRequired` for new Drawing posts
+without a `parentId`.
+
+**This materially improves the allowlist picture** (§6): the blast radius of
+`getNewPostPosition` is ten object types funnelled through **one** hook, not an
+open-ended set of layouts. A single correction there reaches every type uniformly, and
+the inline duplicate has exactly one caller. **The allowlist is still not granted** —
+it should be written once §17 resolves whether Freeform needs changing at all.
+
+### 16h. Reconciliation — **UNCLASSIFIED**, and now the top risk
+
+After reload the new Drawing container remained persisted, but its live location was
+not recovered in the current viewport without further navigation or panning. The run
+did **not** determine whether reconciliation preserved x/y, whether the object was
+merely outside the view, or whether the backing element and persisted post coordinates
+diverged.
+
+**§5f G remains unclassified.** §12 already names this as the condition that would
+re-scope the patch: if a refetch rewrites position, a placement-only repair is
+worthless. It is now the single most consequential unknown, and §17.6 must resolve it
+before any implementation is considered.
+
+### 16i. Status
+
+**PATCH-131: OPEN · PARTIALLY REPRODUCED · FREEFORM NEUTRAL CREATION PROVEN VISIBLE ·
+DRAWING REAL UI PATH PARTIALLY PROVEN · HOSTILE PAN/ZOOM UNPROVEN · DRAWING
+ANTI-STACKING CONFOUNDS PLACEMENT · RECONCILIATION UNCLASSIFIED · IMPLEMENTATION
+BLOCKED.**
+
+Hypothesis ledger after this turn:
+
+| Ref | Hypothesis | Status |
+|---|---|---|
+| 5a | Drawing screen→scene parenthesisation error | **unproven** — not isolated from §16f |
+| 5b | Object not offset by its own size | **absent in Freeform** (§16d); **strong, unproven in Drawing** |
+| 5c | Sidebar/toolbar geometry ignored | **plausible in Freeform** (§16e); unproven in Drawing |
+| 5d | Inconsistent paths | **confirmed** by inspection and now by measured divergence |
+| 5e | 2000 × 1500 virtual stage | **WITHDRAWN** (§16c) |
+| 5f B | Stale pointer position | not investigated |
+| 5f G | Reconciliation overwrites x/y | **unclassified — top risk** (§16h) |
+| 5f H | Per-type divergent paths | partially addressed by §16g; ten types, one hook |
+| — | **Anti-stacking displacement** | **NEW** (§16f) — not in the original diagnosis |
+
+---
+
+## 17. NEXT AUTHORIZED ACTION — one further bounded diagnostic turn
+
+**Diagnosis only. No production file may be modified. No test file may be committed.
+No implementation is authorized.**
+
+1. **Drawing "Add to Existing"** path.
+2. **Drawing free/new-container placement with a target area chosen to avoid
+   anti-stacking collisions** — isolate the initial arithmetic from the ≈ +380
+   displacement, and report the collision count observed.
+3. **Hostile pan and zoom in both layouts** — the §11.5 matrix that was not completed.
+4. **Drawing Presentation panel open versus closed.**
+5. **Freeform left-toolbar and sidebar-open comparison** — resolve §16e.
+6. **Initial live position vs persisted position vs post-refetch position** — resolve
+   §16h / gate G.
+7. **Exact scene coordinates before and after anti-stacking.**
+8. **Whether the object is ever visibly offscreen before navigation moves the canvas** —
+   a user-observable bad state is itself a defect even if the final position is correct.
+9. **Whether normal creation can be reproduced offscreen in either layout** — the user's
+   actual reported symptom, still not reproduced anywhere.
+10. **Whether a shared repair remains safe, or the patch must split** into Freeform and
+    Drawing patches.
+
+**Report which matrix cells were not measured.** Partial coverage is acceptable and
+expected; silently implying full coverage is not. §16 exists because the previous turn
+reported honestly.
+
+**Dev-server rule (PATCH-130 §13, now confirmed three times):** identify the listening
+PID and port before measuring; confirm the base URL points at the healthy server; stop
+the real child process afterward and verify no listener remains. `TaskStop` on
+`npm run dev` orphans the Next child. Never delete `.next` while a server is alive.
+
+**Standing prohibitions unchanged** (§12): do not modify or reopen PATCH-128, PATCH-129
+or PATCH-130 or their accepted commits; do not call slide-frame navigation for new
+posts; do not recentre the canvas to place a normal-sized post; do not move existing
+objects; do not touch `CanvasClient.tsx:6354`; preserve the five protected paths
+untouched and unstaged; credentials only via the named environment variables; identities
+as **user ids only**.
+
+---
+
+## 18. Recorded diagnostic notes — this turn
+
+- **A "complete" source map that stops at the arithmetic is not complete** (§16a). The
+  anti-stacking loop runs *after* placement and moved x by thousands of pixels; omitting
+  it made the original diagnosis structurally unable to reach a conclusion. **Map the
+  whole pipeline from input to persisted value, not the formula.**
+- **A confounded measurement is not weak evidence — it is no evidence for the confounded
+  claim.** x = 4952 is a real number that says nothing about §5a/§5b, and treating it as
+  support would have been the most natural error available this turn.
+- **A withdrawn hypothesis is a result.** §5e cost one measurement and removed an entire
+  wrong direction (§16c); naming it in advance as *probably not the cause*, with the
+  measurement that would settle it, is what made it cheap.
+- **The blocker in §2a was a documented trap, not a novel one** (§16b). The lesson
+  existed and still cost a turn — evidence that a rule nobody re-reads at the moment of
+  use does not function. Consider whether creation-affordance selectors belong in a
+  reusable harness rather than a lesson.
+- **The user's reported symptom has still not been reproduced anywhere.** Neutral
+  Freeform creation is visible; Drawing is confounded. Until §17.9 reproduces an
+  offscreen creation, this patch has a defect report and a set of suspicious formulas,
+  **but no demonstrated failure.** That gap must stay visible in the status line.
