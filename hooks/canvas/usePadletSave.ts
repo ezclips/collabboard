@@ -976,6 +976,28 @@ export function usePadletSave(params: UsePadletSaveParams) {
     try {
       let createdPadlet: any = null;
       if (padletToEdit.id === 'new') {
+        const metadataWithoutEmptyDescription = Object.fromEntries(
+          Object.entries(data.metadata || {}).filter(([key, value]) => !(key === 'description' && value === '')),
+        );
+        const hasMeaningfulMetadata = Object.entries(metadataWithoutEmptyDescription).some(([key, value]) =>
+          key !== 'parentId' &&
+          value !== undefined &&
+          value !== null &&
+          !(typeof value === 'string' && value.trim() === '') &&
+          !(Array.isArray(value) && value.length === 0)
+        );
+        if (
+          data.title.trim() === '' &&
+          data.content.replace(/<[^>]*>/g, '').trim() === '' &&
+          typeof data.metadata?.description === 'string' &&
+          data.metadata.description.trim() === '' &&
+          !hasMeaningfulMetadata
+        ) {
+          setIsCardEditorOpen(false);
+          setPadletToEdit(null);
+          return;
+        }
+
         // For freeform layout: place directly on canvas
         // For map layout with parentId: place in pin container directly
         // For other layouts: check if placement prompt is needed

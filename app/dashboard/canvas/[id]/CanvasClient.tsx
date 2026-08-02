@@ -171,7 +171,6 @@ function getFreeformDotGridStorageKey(boardId?: string) {
   return boardId ? `freeform-board-dot-grid:${boardId}` : null;
 }
 
-
 // === END TYPES + CONSTANTS REGION ===
 
 export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: string; openPadletId?: string }) {
@@ -905,8 +904,6 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     }
   };
 
-
-
   // Memoized background style object - recomputed only when background fields change
   useEffect(() => {
     const dotGridStorageKey = getFreeformDotGridStorageKey(canvas?.id);
@@ -1337,8 +1334,6 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     if (!selectedPadletId || selectedPadletIds.length === 0) return;
     setSelectedPadletIds([]);
   }, [selectedPadletId, selectedPadletIds.length, setSelectedPadletIds]);
-
-
 
   // Order padlets for wall layout
   const wallOrderedPadlets = useMemo(() => {
@@ -2062,7 +2057,6 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     toast.success('Empty column created');
   }, [canvasId, isFreeformLayout, canvasZoom, insertPostPreservingFailureChannels, fetchData]);
 
-
   // Handle "Add to Existing" from Column Placement Prompt
   const handleStartDragToExisting = () => {
     if (pendingPostDraft) {
@@ -2100,7 +2094,6 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     });
     toast.info('Click a container to place your post');
   };
-
 
   // Handle "Add to Existing" from Wall Placement Prompt
   const handleWallStartPickExisting = () => {
@@ -2461,7 +2454,6 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         throw containerResult.error.cause ?? containerResult.error;
       }
 
-
       // 7. Update local state - replace optimistic container with final version
       setPadlets(prev => prev.map(p =>
         p.id === containerId ? finalContainerPayload as any : p
@@ -2486,7 +2478,6 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       fetchData(); // Also refresh on error
     }
   };
-
 
   useEffect(() => {
     if (isFreeformGraphMode) return;
@@ -2706,7 +2697,6 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
 
         if (!childResult.ok) console.error('Failed to delete children:', childResult.error.cause ?? childResult.error);
       }
-
 
       // Clear selection if needed
       if (selectedPadletId === padletId) {
@@ -3095,7 +3085,6 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     mapInstanceRef.current = map;
     setMapReadyVersion(v => v + 1);
   }, []);
-
 
   // Map-aware line creation: unprojects pixel coords → lng/lat so lines move with the map
   const createLineForMap = useCallback((
@@ -4157,7 +4146,6 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       fetchData();
     }
   }, [padlets, supabase, fetchData]);
-
 
   const handleDeleteChildFromContainer = useCallback(async (childId: string, containerId: string) => {
     const container = padlets.find(p => p.id === containerId);
@@ -5408,6 +5396,25 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         });
         setIsNoteEditorOpen(true);
         break;
+      case 'document':
+        closeDrawingSelectedShapePanel();
+        closeAllToolbarLaunchedUi();
+        setPadletToEdit({
+          id: 'new',
+          board_id: canvasId,
+          title: '',
+          content: '',
+          type: 'card',
+          position_x: 0,
+          position_y: 0,
+          width: 180,
+          height: 220,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          metadata: { ...createMetadata },
+        });
+        setIsCardEditorOpen(true);
+        break;
       case 'table':
         // Open Table/Spreadsheet Editor
         closeDrawingSelectedShapePanel();
@@ -6338,7 +6345,6 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                 }
               }
 
-
               // 2. Check for library item drop first
               // 2. Check for library item drop first
               const libraryData = e.dataTransfer.getData('application/collabboard-library');
@@ -6420,7 +6426,6 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                         ? { ...p, position_x: newX, position_y: newY }
                         : p
                     ));
-
 
                     // Background sync to Supabase
                     const updatePostPosition = createUpdatePostPositionCommand(createPostsRepository());

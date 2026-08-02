@@ -6,6 +6,7 @@ import {
   CheckSquare,
   CloudDownload,
   Columns3,
+  FileText,
   Image as ImageIcon,
   Link,
   Map as MapIcon,
@@ -93,6 +94,7 @@ export function buildCanvasToolbarGroups({
       tools: [
         { icon: Sparkles, label: "AI", color: "text-purple-600", bg: "hover:bg-purple-50", type: "ai-component" },
         { icon: StickyNote, label: "Note", color: "text-yellow-600", bg: "hover:bg-yellow-50", type: "note" },
+        { icon: FileText, label: "Document", color: "text-sky-700", bg: "hover:bg-sky-50", type: "document" },
         { icon: CheckSquare, label: "To-do", color: "text-green-600", bg: "hover:bg-green-50", type: "todo" },
         { icon: MessageCircle, label: "Comment", color: "text-orange-600", bg: "hover:bg-orange-50", type: "comment" },
         { icon: Table, label: "Table", color: "text-purple-600", bg: "hover:bg-purple-50", type: "table" },
