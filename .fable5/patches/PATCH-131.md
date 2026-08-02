@@ -1,13 +1,17 @@
 # PATCH-131 — Keep newly created posts and containers inside the visible canvas
 
-**Status: OPEN · PARTIALLY REPRODUCED · FREEFORM NEUTRAL CREATION PROVEN VISIBLE ·
-DRAWING REAL UI PATH PARTIALLY PROVEN · HOSTILE PAN/ZOOM UNPROVEN · DRAWING
-ANTI-STACKING CONFOUNDS PLACEMENT · RECONCILIATION UNCLASSIFIED · IMPLEMENTATION
-BLOCKED**
+**Status: OPEN · NO USER-VISIBLE OFFSCREEN CREATION REPRODUCED IN MEASURED CASES ·
+FREEFORM HOSTILE PAN/ZOOM PROVEN VISIBLE · DRAWING CENTRE-AS-TOP-LEFT ARITHMETIC PROVEN
+BUT NOT USER-VISIBLE FAILURE · DRAWING ANTI-STACKING AND NAVIGATION PIPELINE
+CHARACTERIZED · DATABASE PLACEMENT PRESERVED · TRANSIENT PRE-NAVIGATION VISIBILITY
+UNPROVEN · USER-SPECIFIC REPRODUCTION REQUIRED · IMPLEMENTATION BLOCKED**
 
-> Superseded in part by **§16** (bounded reproduction, 2026-08-02). §3's "complete"
-> source map and §5e's virtual-stage hypothesis are corrected there; §1–§15 are
-> retained unedited as the record of what was believed before measurement.
+> Superseded in part by **§16** (bounded reproduction) and **§19** (follow-up
+> diagnostic), both 2026-08-02. §3's "complete" source map and §5e's virtual-stage
+> hypothesis are corrected in §16a/§16c; §5b is **proven but not a user-visible
+> failure** (§19c); Freeform is **not defective on current evidence** (§19b). §1–§15 are
+> retained unedited as the record of what was believed before measurement. **§20 stops
+> autonomous diagnosis and requests a user reproduction.**
 
 Authored 2026-08-02 by CTO (governance and diagnosis only). Starting HEAD verified at
 **`5e03f44`** (`610c141` plus the documentation-only lessons commit). Worktree clean
@@ -676,3 +680,236 @@ as **user ids only**.
   Freeform creation is visible; Drawing is confounded. Until §17.9 reproduces an
   offscreen creation, this patch has a defect report and a set of suspicious formulas,
   **but no demonstrated failure.** That gap must stay visible in the status line.
+
+---
+
+## 19. Amendment — §17 FOLLOW-UP DIAGNOSTIC (2026-08-02, CTO)
+
+Result of the §17 bounded diagnostic turn.
+
+**Result: STILL PARTIALLY REPRODUCED. A user-visible offscreen creation was not
+reproduced through any measured real UI path. Implementation remains BLOCKED.**
+
+### 19a. The headline, stated plainly
+
+Three diagnostic turns have now measured both layouts across neutral and hostile
+scroll/zoom, panel open and closed, and after reload. **Every measured final
+user-visible result stayed inside the usable canvas.**
+
+The repository currently demonstrates:
+
+- **no confirmed Freeform defect**;
+- **no confirmed final Drawing visibility defect**;
+- a **possible unmeasured transient** Drawing state before `scrollToContent`;
+- **incomplete** stable-ID backing-element restoration evidence after reload.
+
+This is a negative result, and it is recorded as one. §9's expected behaviour is
+currently *met* in every case measured.
+
+### 19b. Freeform — hostile pan/zoom proven visible, **no defect reproduced**
+
+Real paths: `CanvasSidebar Note → NoteEditor → outside-click save →
+getNewPostPosition(280, 280)`, and `CanvasSidebar Column →
+handleCreateEmptyFreeformContainer`.
+
+| Viewport | Scroll | Zoom | Persisted x, y | Screen bounds | Visible |
+|---|---|---|---|---|---|
+| 1920×1080 | 0 / 0 | 1.0 | 820, 400 | ≈ 876, 424 → 1056, 504 | **yes** |
+| 1440×900 | 2500 / 1800 | 1.0 | 3045, 2100 | ≈ 601, 324 → 961, 474 | **yes** |
+| 1366×768 | 4200 / 4200 | 1.2 | 3929, 3680 | ≈ 570.8, 240 → 786.8, 336 | **yes** |
+| 1024×768 | 5000 / 2200 | 0.8 | 6715, 3080 | ≈ 428, 288 → 716, 408 | **yes** |
+
+**All measured Freeform objects remained fully visible**, including under substantial
+pan in both axes and at zoom 0.8 and 1.2.
+
+**FREEFORM REPAIR NOT JUSTIFIED BY CURRENT EVIDENCE. Freeform must not appear in a
+future implementation allowlist unless a real failing case is produced.**
+
+This also resolves §16e: the ≈ 56 px left-toolbar inset that Freeform does not subtract
+is real, but it does not produce a visibility failure at any measured state. **A
+theoretical inset error that never puts an object offscreen is not a defect** — it is a
+note.
+
+### 19c. Drawing — the arithmetic is **PROVEN**, the defect is not
+
+The §17.2 collision-free case isolated the initial arithmetic exactly as required:
+
+| Input | Value |
+|---|---|
+| `scrollX` / `scrollY` | 0 / 0 |
+| `zoom` | 1 |
+| `offsetLeft` / `offsetTop` | 0 / 0 |
+| Computed centre | **720, 450** |
+| Anti-stacking attempts | **0** |
+| Persisted container | **x 720, y 450**, 360 × 300 |
+| Final visible bounds | ≈ 877, 601 → 1235, 749.5 |
+| Usable canvas | ≈ 56, 0 → 1440, 900 |
+
+**Persisted x/y equals the computed centre exactly. §5b is PROVEN: Drawing stores the
+computed centre as the object's top-left, without subtracting half the object size.**
+
+**And the object remained fully visible.**
+
+Both halves matter. The arithmetic hypothesis I have carried since §5b is now
+confirmed as arithmetic — and simultaneously shown *not* to produce the reported
+symptom at the measured viewport. **"Centre stored as top-left" must not be promoted
+from suspicious arithmetic to confirmed defect without an actual visibility failure.**
+
+That distinction is the whole content of this turn. A wrong-looking formula whose
+output is correct in every measured case is a latent risk, not a reproduced bug, and
+repairing it would be repairing a hypothesis rather than a defect.
+
+Note the clean case also had `offsetLeft = 0`, which means **§5a — the
+`(W − offsetLeft) / 2` parenthesisation error — was not exercised**. At
+`offsetLeft = 0` the wrong and right formulas coincide. §5a therefore remains
+**unproven and untested**, not disproven.
+
+### 19d. Drawing — anti-stacking and navigation characterized
+
+- anti-stacking shifts x by ≈ **380 px per collision**;
+- observed cases used between **1 and ≈ 8–12 iterations**;
+- the final `scrollToContent` navigation **kept the created container visible**;
+- persisted x is the composition of initial placement → anti-stacking → navigation.
+
+**The anti-stacking pipeline must be preserved in any future diagnosis**, and any
+future repair must account for it rather than assume placement is the last writer.
+This is the §16a finding now fully characterized.
+
+### 19e. Drawing — Presentation panel open vs closed
+
+| State | Panel width | Usable right | Final bounds | Result |
+|---|---|---|---|---|
+| Closed | — | ≈ 1440 | ≈ 877, 601 → 1235, 749.5 | visible |
+| Open | ≈ 320 | ≈ 1120 | ≈ 261, 601 → 619, 749.5 | **visible, no overlap** |
+
+The initial placement arithmetic ignores the panel — §5c confirmed as written — **but
+the measured final navigation kept the object visible and clear of the panel.** No
+panel-related disappearance was reproduced.
+
+The mechanism is worth noting: PATCH-130's navigation repair centres on the *usable*
+canvas, so it is currently **compensating for** placement's panel-blindness. That is
+fortunate rather than designed, and it means a future change to either could expose
+the other.
+
+### 19f. Add to Existing
+
+Child note receives the selected container's `parentId`; child has independently
+persisted x/y from the ghost drop; the parent container does not move; no root backing
+element is expected for a parented child. **No disappearance reproduced.**
+
+### 19g. Reconciliation — **gate G partially resolved**
+
+- persisted database coordinates **matched the initial saved coordinates**;
+- reload **preserved `position_x` and `position_y`**;
+- **no database overwrite of placement was observed.**
+
+Still unproven: stable-ID navigation back to the created object after reload, and the
+exact restored backing-element geometry after reload.
+
+**Classification: DATABASE PLACEMENT PRESERVED · BACKING-ELEMENT RESTORATION PARTIALLY
+UNPROVEN.**
+
+§16h named this the top risk on the grounds that a placement-only repair would be
+worthless if refetch rewrote position. **It does not.** The top risk is retired, and
+§5f G moves from unclassified to partially resolved.
+
+### 19h. Temporal visibility — the one live possibility
+
+The run did not sample the interval between scene insertion and `scrollToContent`
+tightly enough to establish whether the user briefly sees an offscreen object.
+
+**This is the only plausible visibility failure not ruled out by the measured final
+states**, and it is a genuinely good fit for the user's report: an object that is
+briefly wrong and then moves would read as "it wasn't created" or "I had to hunt for
+it", while leaving every final-state measurement clean.
+
+**Do not infer a transient defect without timing evidence.** §8's own prohibition on
+user-observable temporary offscreen positions applies here, but it cannot be enforced
+against an unmeasured interval.
+
+### 19i. Root-cause ledger — current state
+
+| Claim | Status |
+|---|---|
+| Freeform virtual-stage hypothesis (§5e) | **REJECTED** |
+| Freeform hostile placement failure | **NOT REPRODUCED** |
+| Drawing centre-as-top-left arithmetic (§5b) | **PROVEN** |
+| Drawing user-visible offscreen result | **NOT REPRODUCED** |
+| Drawing anti-stacking displacement | **PROVEN** |
+| Drawing final navigation visibility | **PROVEN in measured cases** |
+| Persistence overwrite (§5f G) | **NOT OBSERVED** |
+| Drawing screen→scene parenthesisation (§5a) | **UNPROVEN — untested at `offsetLeft = 0`** |
+| Transient pre-navigation visibility | **UNPROVEN — the only open candidate** |
+
+### 19j. Shared repair decision — **NOT AUTHORIZED**
+
+**A shared Freeform/Drawing repair is not authorized.** The layouts differ materially
+in coordinate system, placement pipeline, anti-stacking behaviour, navigation behaviour
+and persistence semantics. §7's provisional "one arithmetic helper, two input sources"
+shape is **withdrawn as premature**: it was designed to unify two paths on the
+assumption both were defective, and only one has proven arithmetic — which produces no
+failure.
+
+**If a future repair is justified, the likely scope is Drawing-only, and it must be
+based on a reproduced failing case.**
+
+### 19k. Status
+
+**PATCH-131: OPEN · NO USER-VISIBLE OFFSCREEN CREATION REPRODUCED IN MEASURED CASES ·
+FREEFORM HOSTILE PAN/ZOOM PROVEN VISIBLE · DRAWING CENTRE-AS-TOP-LEFT ARITHMETIC PROVEN
+BUT NOT USER-VISIBLE FAILURE · DRAWING ANTI-STACKING AND NAVIGATION PIPELINE
+CHARACTERIZED · DATABASE PLACEMENT PRESERVED · TRANSIENT PRE-NAVIGATION VISIBILITY
+UNPROVEN · USER-SPECIFIC REPRODUCTION REQUIRED · IMPLEMENTATION BLOCKED.**
+
+---
+
+## 20. NEXT ACTION — stop autonomous diagnostics; request user reproduction
+
+**Broad autonomous diagnosis is stopped.** Three turns have measured the plausible
+matrix and found no failing case. Further unguided sweeps would spend effort at a
+falling rate of return, and the remaining candidate (§19h) is a millisecond-scale
+transient that only the reporter can point at.
+
+**Required from the user before any further work:**
+
+1. layout — **Freeform or Drawing**;
+2. exact **object type**;
+3. exact **creation action** taken;
+4. whether a **panel/sidebar was open**;
+5. current **zoom**;
+6. approximate **pan position**;
+7. whether the object **never appears**, or **appears briefly and then moves**;
+8. a **screenshot or short screen recording** showing the full canvas before and after;
+9. whether the object **appears after manually panning**;
+10. whether it happens **every time or intermittently**.
+
+Item 7 is the highest-value single answer: it discriminates directly between a
+placement defect and the §19h transient, which is the only branch still open.
+
+**After that evidence arrives, authorize only a narrow reproduction matching those
+exact conditions.** Do not authorize implementation from the currently suspicious
+formulas alone.
+
+---
+
+## 21. Recorded diagnostic notes — this turn
+
+- **A proven wrong formula is not a proven defect.** §5b is now confirmed arithmetic —
+  Drawing does store the centre as the top-left — and it produced a fully visible object
+  in every measured case. Repairing it today would be repairing a hypothesis. **The
+  standard is a reproduced failing case, and it does not relax because the code looks
+  wrong.**
+- **A clean isolating case can silently fail to exercise the thing it was meant to
+  test.** The §17.2 collision-free run had `offsetLeft = 0`, where §5a's wrong and right
+  formulas are numerically identical. The case proved §5b and said nothing about §5a —
+  and would have read as exonerating it. **Check that the isolating conditions still
+  exercise the hypothesis.**
+- **One subsystem can be compensating for another's defect** (§19e). Placement ignores
+  the panel; PATCH-130's navigation centres on the usable canvas and rescues it. Neither
+  is safe to change in isolation without re-measuring the other.
+- **Retiring the top risk is a result worth stating.** §16h called reconciliation the
+  most consequential unknown; it is now measured and clean (§19g). Naming the top risk
+  in advance is what made it the first thing checked.
+- **Three diagnostic turns with no reproduction is itself information.** It shifts the
+  probability toward a transient, an environment-specific condition, or a path not yet
+  mapped — and it is the point at which asking the reporter beats sweeping further.
