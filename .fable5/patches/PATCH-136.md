@@ -1451,3 +1451,402 @@ at `c0fa799`.
   made before the sixth member existed. **A limit that forces unreadable code in the one
   module whose readability *is* the control has stopped doing its job** — the honest move is
   to move the number and say why.
+
+## 20. Amendment — BUILD-TIME BRIDGE SELECTION AUTHORIZED (2026-08-03, CTO)
+
+**Trigger:** the third implementation hard stop, and the first one caused by a *governance
+design defect* rather than a census error. §17g asserted that a `NEXT_PUBLIC_*` guard makes
+the bridge **absent** from ordinary bundles. Runtime disablement passed. **Bundle exclusion
+failed.** The assertion was wrong, and it was mine.
+
+### 20a. Revert confirmed
+
+`23e39d1` is HEAD. No bridge module exists (`lib/e2e/` absent). No test changed. PATCH-124
+byte-identical. No vendored change. `next.config.ts` unchanged at 52 lines.
+`serverLifecycle.ts` unchanged. No commits, nothing pushed. Worktree holds only the five
+protected pre-existing paths.
+
+### 20b. What the attempted implementation proved
+
+The attempt was **correct work against a wrong specification**. It used only
+`getSceneElements()`, `getAppState()`, `onChange()` — no private API. 134 lines, under the
+180 limit. `DrawingLayout.tsx` 3514 → 3530. `npx tsc --noEmit` passed. A clean ordinary
+`npx next build` passed.
+
+And the ordinary client chunks still contained `__COLLABBOARD_E2E__`,
+`COLLABBOARD_E2E_BRIDGE_DIAGNOSTIC`, `productionBridge`, `getInteractionState`.
+
+**RUNTIME DISABLEMENT PASSED · BUNDLE EXCLUSION FAILED.** The §17k exclusion test — the one
+this patch itself demanded — is what caught it. The stop is the process working.
+
+### 20c. The mechanism — resolution and dead-code elimination are different phases
+
+The guard was:
+
+```ts
+process.env.NEXT_PUBLIC_E2E_BRIDGE === '1'   // guarding a dynamic import()
+```
+
+Next inlines the literal, so the branch is statically false and the **call site** is removed.
+But an `import()` is a *dependency*, and webpack resolves and emits dependencies while
+**building the module graph** — before the optimizer ever evaluates the guard. Value-level
+DCE deletes the code that would have *called* the chunk; it does not un-create the chunk. The
+module had already been resolved, compiled, assigned to a chunk and written to `static/`.
+
+Record as a general rule, because it will recur:
+
+> **A build-time environment condition governs runtime reachability, not graph membership.
+> Only module *resolution* governs graph membership.** If a module must not be in an
+> artifact, the compiler must never resolve it — no conditional expression can achieve that
+> after the fact.
+
+Corollary: **runtime absence and bundle absence are separate requirements with separate
+proofs.** §17g conflated them. §17g's gate mechanism is **superseded** by this section; its
+security *requirements* stand unchanged.
+
+**Further restructuring of the same conditional import is not authorized.** The exclusion
+requirement is not weakened.
+
+### 20d. Options evaluated
+
+| | Option | Verdict |
+|---|---|---|
+| **A** | Build-time **resolve alias** on an invariant import path | **SELECTED** — proven in §20f |
+| **B** | `NormalModuleReplacementPlugin` replacing real → no-op in **ordinary** builds | **REJECTED** — see below |
+| **C** | Separate static entry modules selected by alias | Same mechanism as A with more files; A is C with the minimum file count |
+| **D** | Source generation / file swapping before build | **REJECTED** — dirties the worktree, creates stale artifacts, makes builds non-reproducible; the brief already flags it high risk and it is |
+| **E** | Conditional exports / internal package | **REJECTED** — requires a workspace package for one module; `exports` conditions are resolved by the packager and would interact with Next's own resolution in ways this repo has no precedent for. Cost is not smallness, it is unfamiliarity in the resolver |
+
+**Why B is rejected, and this is the load-bearing decision.** A and B differ in *which build
+carries the rule*, and therefore in **what happens when the rule fails**.
+
+- **B**: the real module is the default; the *ordinary* build must actively replace it. A
+  typo in the regex, a plugin ordering change, a Next upgrade that alters the hook — and the
+  ordinary artifact **ships the real bridge**. The failure mode is silent and is the exact
+  security failure this patch exists to prevent.
+- **A as specified below**: the **no-op is the default** and the *E2E* build applies the rule.
+  If the rule fails, the E2E build gets a no-op and **every E2E spec fails loudly on the
+  first `waitForE2EBridge`**. The ordinary artifact cannot be affected by a rule it does not
+  execute — `E2E_BRIDGE_BUILD` is unset, the `if` is false, `resolve.alias` is untouched.
+
+**The ordinary build carries no bridge rule at all.** That is the property being bought. A
+security boundary should fail toward exclusion, and only one of these two does.
+
+### 20e. Selected architecture
+
+```
+lib/e2e/bridgeContract.ts          type-only contract, shared by both implementations
+lib/e2e/bridgeRegistration.ts      DEFAULT resolution target — no-op. Ordinary builds get this
+                                   with no configuration whatsoever.
+lib/e2e/bridgeRegistration.e2e.ts  Real implementation. Reachable ONLY through the E2E alias.
+```
+
+`DrawingLayout.tsx` imports **`./…/lib/e2e/bridgeRegistration`** — one invariant specifier, no
+conditional, no `import()`, no environment read in client source. The host cannot tell which
+implementation it received, which is why the host contains no bridge logic.
+
+**Exact alias rule** — the E2E branch only:
+
+```ts
+config.resolve.alias = {
+  ...config.resolve.alias,
+  [`${path.resolve(process.cwd(), "lib/e2e/bridgeRegistration.ts")}$`]:
+    path.resolve(process.cwd(), "lib/e2e/bridgeRegistration.e2e.ts"),
+};
+```
+
+**The key is an absolute file path with a `$` terminator, not a request string.** This is not
+stylistic. §20f proved that the natural-looking key `"@/lib/e2e/bridgeRegistration$"`
+**silently does nothing** in Next 15.5.20: Next installs the tsconfig `paths` mapping as a
+resolver plugin that rewrites `@/…` to an absolute path *before* the alias plugin is
+consulted, so the alias never sees the request it was written for. The build succeeds and the
+bridge is simply absent. An implementer would have shipped that and believed it worked.
+
+The absolute-path key is also **specifier-independent**: `DrawingLayout.tsx` uses relative
+imports throughout (zero `@/` imports in the file), and the rule works regardless.
+
+**Mandatory companion — cache keying:**
+
+```ts
+if (config.cache && typeof config.cache === "object" && "version" in config.cache) {
+  config.cache.version = `${config.cache.version ?? ""}|e2eBridge=${E2E_BRIDGE_BUILD ? "1" : "0"}`;
+}
+```
+
+This is **not** defence in depth. §20f proved that without it, flipping the flag over an
+existing `.next` produces a **fully cached, silently wrong artifact**. It applies in both
+branches, which is why it sits outside the `if`.
+
+### 20f. Scratch proof — results
+
+Performed in an isolated Next **15.5.20** application outside the repository
+(`scratchpad/bridge-proof`, React 19.2.0, same `@/*` tsconfig mapping, the repo's `node:`
+`NormalModuleReplacementPlugin` and `resolve.fallback` block copied verbatim). No repository
+file was created, modified, staged or built.
+
+**Scope limit, stated plainly:** this proves *webpack/Next resolution and emission behaviour*,
+which is the entire question at issue. It does **not** prove the rule against this
+repository's real module graph. That proof is an implementation deliverable (§20j), and the
+implementation is not authorized to skip it because a scratch build passed.
+
+Marker strings: `__COLLABBOARD_E2E__`, `COLLABBOARD_E2E_BRIDGE_DIAGNOSTIC`,
+`getInteractionState`, `subscribeToSceneChange`, `getSceneRevision`.
+
+| # | Test | Result |
+|---|---|---|
+| 1 | Clean ordinary build succeeds | **PASS** exit 0 |
+| 2 | Ordinary `.next/static` + `.next/server`: all five markers | **0 occurrences** |
+| 3 | Ordinary: real module path in any manifest | **0** |
+| 4 | Ordinary: emitted async bridge chunk | **none** — the design has no `import()` |
+| 5 | Ordinary: no-op inlined | emitted client code is literally `()=>{}` |
+| 6 | Clean E2E build succeeds | **PASS** exit 0 |
+| 7 | E2E: real module present **exactly once** | 1 chunk, `static/chunks/app/page-*.js` |
+| 8 | E2E: full governed API emitted | `version`, `instanceId`, `getSceneElements`, `getViewport`, `getInteractionState`, `getSceneRevision`, `subscribeToSceneChange` all present |
+| 9 | Request-string key `"@/lib/e2e/bridgeRegistration$"` | **FAILS SILENTLY** — E2E build succeeded with the **no-op** bundled |
+| 10 | Absolute-path key, `$`-terminated | **WORKS** in both directions |
+| 11 | Exactness — prefix-superset module `lib/e2e/bridgeRegistrationExtra.ts` | **INTACT** in both builds |
+| 12 | Exactness — unrelated module `lib/unrelatedBridgeRegistrationHelper.ts` | **INTACT** in both builds |
+| 13 | `node:` plugin coexistence — client `import "node:path"` alongside the alias | **PASS**, build exit 0, stub emitted, behaviour unchanged |
+| 14 | Ordinary build source maps in `static/` / `server/` | **0 `.map` files** (`productionBrowserSourceMaps` unset → default `false`, matching the repo) |
+| 15 | **Dirty ordinary rebuild over an E2E `.next`, no cache key** | **FAIL — CRITICAL** |
+| 16 | Dirty ordinary rebuild over an E2E `.next`, **with** cache key | **PASS** — 0 marker hits, stale chunk pruned, manifest correct |
+| 17 | Dirty E2E rebuild over an ordinary `.next`, with cache key | **PASS** — bridge present |
+
+**Test 15 in full, because it is the most dangerous finding in this section.** After a clean
+E2E build emitting `page-4f09f789b06c320c.js`, an ordinary `next build` over the same `.next`
+exited 0, emitted **no new page chunk**, left the E2E chunk on disk, and
+`app-build-manifest.json` **still pointed at it**. The webpack filesystem cache scored the
+build a complete hit — the alias is invisible to the cache key, so nothing appeared to have
+changed. **An ordinary production build served the real bridge, with a successful build log
+and no warning.** This is §16a's stale-cache defect recurring with a security consequence
+instead of a crash. Test 16 closes it.
+
+### 20g. Build flag — `E2E_BRIDGE_BUILD=1`, non-public
+
+**`NEXT_PUBLIC_E2E_BRIDGE` is retired.** Selection now happens in `next.config.ts`, so no
+client module reads the flag, so nothing needs `NEXT_PUBLIC_` inlining. Keeping the public
+prefix would ship the value into the ordinary bundle for a decision the ordinary bundle no
+longer participates in.
+
+| Requirement | How met |
+|---|---|
+| Explicit | A named variable must be set on the **build** command |
+| Build/config resolution only | Read once at `next.config.ts` module scope; never in client source |
+| Cannot become a runtime toggle | Absent from every emitted chunk. No query parameter, no `localStorage`, no global. **There is nothing to toggle: the module is not there** |
+| Distinguishes artifacts | Marker file `.next/E2E_BRIDGE_BUILD` (§17h.6), plus `.next/BUILD_ID` recorded by the run |
+| Documented | `.fable5/docs/TESTING.md`, in the implementation commit |
+| Not a secret | Literal `1`; a switch |
+
+Build command: `E2E_BRIDGE_BUILD=1 npx next build`, run directly, never piped (§16e.5).
+
+### 20h. Module contracts
+
+**No-op — `lib/e2e/bridgeRegistration.ts`, ≤20 lines.** Identical signature to the real
+module; returns a no-op cleanup. **No global name. No API method names. No diagnostic marker.
+No Excalidraw import. No environment check.** `import type` only, from `bridgeContract.ts`.
+Tree-shakable but **must not depend on tree shaking for correctness** — it is inert as
+written. It carries a comment stating it is the ordinary-build target and is replaced by the
+E2E alias.
+
+**The no-op is not a security control.** Exclusion of the real module is. The no-op exists so
+`DrawingLayout.tsx` contains no conditional.
+
+**Real — `lib/e2e/bridgeRegistration.e2e.ts`, ≤180 lines.** The §19f API unchanged:
+`version` · `instanceId` · `getSceneElements()` · `getViewport()` · `getInteractionState()` ·
+`getSceneRevision()` · `subscribeToSceneChange()`. Frozen projections, defensive snapshots,
+no setters, no mutation, no raw API exposure, no Supabase, no persistence, no network. §17f,
+§17j, §19f apply verbatim.
+
+**Contract — `lib/e2e/bridgeContract.ts`, ≤40 lines.** Type-only. Both implementations satisfy
+one shared registration type; **the full global bridge API type is not duplicated**. Both
+import it with `import type`, so it is erased — test 5 confirms the ordinary no-op emits as
+`()=>{}` with no contract residue. **The no-op must not import the real module for any
+runtime value.**
+
+**`types/e2e-bridge.d.ts`** — `Window` augmentation, ambient, erased. Application-owned, never
+the fork's.
+
+**`lib/e2e/productionBridge.ts` is retired and must not be created.** The name asserts the
+module is production; the entire architecture asserts it is not.
+
+### 20i. `next.config.ts` — bounded change
+
+**52 lines → ≤ 80 lines.** Authorized additions, and nothing else:
+
+1. `import path from "node:path";`
+2. `const E2E_BRIDGE_BUILD = process.env.E2E_BRIDGE_BUILD === "1";` at module scope
+3. The cache-version keying block (unconditional)
+4. The `if (E2E_BRIDGE_BUILD)` alias block
+
+**Preservation requirements — the existing `node:` handling is not to be touched.** The
+`NormalModuleReplacementPlugin(/^node:/)` and the `resolve.fallback` block stay inside
+`if (!isServer)`, byte-identical, in the same order, with the same comments. The new blocks
+go **after** them. Test 13 proves coexistence. Prohibited: any Next version change,
+`transpilePackages` change, broad `optimization` change, general E2E webpack infrastructure,
+and **any broad regex** — the alias key is a single absolute file path.
+
+The alias is applied to **both** compilations. Ordinary builds are unaffected either way (no
+rule runs); for E2E builds this keeps the server graph consistent with the client graph.
+
+### 20j. Bundle-proof method — required implementation evidence
+
+Both artifacts built from a **removed** `.next`, both verified before either is trusted.
+
+**Scoping rule.** Assertions run over `.next/static` and `.next/server`. `.next/cache` and
+`.next/trace` are excluded **with justification**: neither is served by `next start` nor
+included in a deployment output, and the scratch ordinary build's only hits there were the
+*filename* `bridgeRegistration.e2e` recorded in the resolver's directory cache — never
+implementation content. The implementation must **verify that characterization**, not assume
+it: any `.next/cache` or `.next/trace` occurrence must be shown to be a path string only.
+
+**Ordinary artifact must show:** build exit 0 · zero occurrences of the global name, the
+diagnostic constant, the bridge-only method-name cluster and the real module path across
+`static/` + `server/` and every manifest · no emitted bridge chunk · no unused async chunk ·
+runtime global absent after mount · **the no-op present and inert**.
+
+**E2E artifact must show:** build exit 0 · real module present **exactly once** · runtime
+bridge present after mount with `version === 1` · every governed method functional · marker
+file present.
+
+**Not accepted as proof:** runtime global absence alone · minified renaming instead of
+exclusion · the module emitted but unused · presence in ordinary source maps or manifests ·
+text obfuscation · a passing grep whose pattern cannot match minified output. Chunk and module
+manifests are compared, not only text. If the ordinary build ever emits source maps, they are
+inside the exclusion scope.
+
+### 20k. Security model
+
+- **The ordinary compiler never resolves the real module.** It is not in the graph, not in a
+  chunk, not in a manifest, not in a source map.
+- **No runtime state can activate it** — no query parameter, no `localStorage`, no global, no
+  cookie, no header. There is no code to activate.
+- **The ordinary artifact executes no bridge-selection rule**, so no misconfiguration of that
+  rule can affect it.
+- **The E2E artifact is separately marked and disposable**, and is deleted after the run
+  (§17h.14). It must never be presented as evidence for an ordinary production build.
+- §17k's threat model for the E2E artifact itself is unchanged and still governs.
+- **Obscurity remains explicitly rejected.** The global name is not a control.
+
+### 20l. Allowlists
+
+**Production — exactly 6 files** (was 3; the increase is the cost of moving selection out of
+client source, and each file has one owner):
+
+| File | Change | Limit |
+|---|---|---|
+| `lib/e2e/bridgeContract.ts` | **NEW** — type-only shared contract | ≤40 lines |
+| `lib/e2e/bridgeRegistration.ts` | **NEW** — no-op, default resolution target | ≤20 lines |
+| `lib/e2e/bridgeRegistration.e2e.ts` | **NEW** — real implementation | ≤180 lines |
+| `types/e2e-bridge.d.ts` | **NEW** — `Window` augmentation | ≤30 lines |
+| `components/collabboard/canvas/layouts/DrawingLayout.tsx` | **Registration only** — one import, one effect that registers on API availability and unregisters on cleanup. Report before/after line count | **≤ +20 lines** from 3514 |
+| `next.config.ts` | The four §20i additions only | 52 → **≤80 lines** |
+
+**Do not force unrelated concerns into one file to preserve the old count**, and do not split
+the real bridge to stay under 180 — §19g's reasoning stands.
+
+**Tooling — exactly 2 entries:**
+
+| File | Change | Limit |
+|---|---|---|
+| `scripts/e2e/assertBridgeExclusion.mjs` | **NEW** — artifact census used by both the manual procedure and the readiness spec | ≤80 lines |
+| `package.json` | **≤2 added script lines** (`build:e2e`, `verify:bridge-exclusion`). No dependency change | — |
+
+**Explicitly excluded, unchanged:** vendored `App.tsx` and everything under
+`excalidraw_fork/` · `serverLifecycle.ts` · `CanvasClient.tsx` · persistence and Supabase
+modules · document-feature code · toolbar code · `canvasToolbarRegistry.tsx` ·
+`CanvasSidebar.tsx` · shared UI · **`patch-124-slide-thumbnail-refresh.spec.ts`**.
+
+**Test — exactly 6 files** (unchanged from §19k):
+
+```
+e2e/characterization/patch-136-production-readiness.spec.ts   (new)
+e2e/characterization/e2eBridge.ts                             (new shared helper)
+e2e/characterization/patch-128-slide-sync.spec.ts
+e2e/characterization/patch-129-preview-fit.spec.ts
+e2e/characterization/patch-130-slide-navigation.spec.ts
+e2e/characterization/patch-132-thumbnail-visibility.spec.ts
+```
+
+**Docs:** `.fable5/docs/TESTING.md` update, in the implementation commit.
+
+### 20m. Module-selection test requirements
+
+The ten brief items, allocated by cost. Items 1–4, 9, 10 are cheap and **automated** in
+`patch-136-production-readiness.spec.ts` via `assertBridgeExclusion.mjs` against the artifact
+on disk. Items 5–8 each require a full build and are a **scripted, recorded procedure** in
+`TESTING.md`, executed once during implementation with output pasted into the closure
+evidence — not a per-run gate.
+
+| # | Requirement | Where |
+|---|---|---|
+| 1 | Ordinary config resolves the stable import to the no-op | automated |
+| 2 | E2E config resolves it to the real module | automated |
+| 3 | Ordinary module graph contains no real bridge | automated |
+| 4 | E2E module graph contains it exactly once | automated |
+| 5 | A stale E2E `.next` cannot be mistaken for ordinary | procedure — marker file + `BUILD_ID` |
+| 6 | Rebuilding ordinary after E2E removes the bridge entirely | procedure — **§20f test 15/16; must be re-proven in-repo** |
+| 7 | Rebuilding E2E after ordinary restores it | procedure |
+| 8 | Flag changes require a clean build | procedure — asserted **with** the cache key in place |
+| 9 | The rule matches no unrelated module | automated — prefix-superset and unrelated-name fixtures, as §20f tests 11–12 |
+| 10 | `node:` replacement behaviour unchanged | automated — the existing `pptxgenjs`/`jspdf` export paths still build and still run |
+
+**Additional required negative control:** delete `bridgeRegistration.e2e.ts` and confirm the
+E2E build **fails loudly** rather than silently falling back to the no-op. A silent fallback
+would make every future E2E green meaningless, and §20f test 9 shows a silent no-op fallback
+is a real failure mode of this mechanism.
+
+### 20n. Commit plan — four commits
+
+1. `build(e2e): select observation bridge by artifact` — `next.config.ts`, `bridgeContract.ts`,
+   `bridgeRegistration.ts`, `bridgeRegistration.e2e.ts`, `types/e2e-bridge.d.ts`,
+   `scripts/e2e/assertBridgeExclusion.mjs`, `package.json`
+2. `feat(e2e): add production observation bridge` — `DrawingLayout.tsx` registration
+3. `test(e2e): migrate canvas specs to observation bridge` — the four migrations
+4. `test(e2e): characterize observation bridge lifecycle` — the readiness spec + `TESTING.md`
+
+Commit 1 must be verifiable on its own: with no registration call yet, both builds must
+succeed and the ordinary artifact must already be clean.
+
+### 20o. PATCH-124 and PATCH-137
+
+PATCH-124 remains **excluded** and byte-identical. PATCH-137 remains the separate
+private-mutation-removal patch, still blocked on its feasibility spike.
+
+### 20p. Hard stops — evaluated
+
+| Stop | Result |
+|---|---|
+| Next/webpack cannot exclude the real module through a narrow exact rule | **NOT TRIGGERED** — §20f tests 2, 7, 10 |
+| Config selection affects unrelated imports | **NOT TRIGGERED** — tests 11, 12; the key is one absolute path with `$` |
+| Module replacement conflicts with existing `node:` handling | **NOT TRIGGERED** — test 13; different mechanism, different stage, no overlap |
+| Ordinary source maps or manifests still include the real module | **NOT TRIGGERED** — tests 3, 14; ordinary emits no maps |
+| E2E and ordinary artifacts cannot be distinguished safely | **NOT TRIGGERED** — marker file + `BUILD_ID` + exclusion census |
+| Architecture requires source-file mutation before each build | **NOT TRIGGERED** — option D rejected; no file is written at build time |
+| **Stale artifact switching remains possible** | **TRIGGERED AND CLOSED** — test 15 proved it *is* possible; the §20e cache key closes it (test 16), and the clean-build requirement plus the marker file remain mandatory regardless. Residual: serving a previously built `.next` wholesale is an artifact-handling risk, addressed by §17h.14 deletion |
+| More than the bounded files are required without a clear owner | **NOT TRIGGERED** — 6 production + 2 tooling + 6 test, each with a named owner and limit |
+
+### 20q. Status
+
+**OPEN · BUILD TRACK RESOLVED · OBSERVATION BRIDGE AUTHORIZED · BUILD-TIME MODULE SELECTION
+AUTHORIZED · FOUR MIGRATIONS AUTHORIZED (128, 129, 130, 132) · PATCH-124 SPLIT INTO PATCH-137
+· NOT PUSHED.**
+
+Implementation is unblocked. §17g's gate mechanism is superseded by §20e/§20g; every other
+§17, §18 and §19 constraint stands.
+
+### 20r. Recorded diagnostic notes
+
+- **Runtime gating is not graph exclusion.** An inlined `process.env` guard removes a call
+  site; it cannot remove a resolved dependency. Only resolution decides membership.
+- **Make the security boundary the default, not the override.** The rule belongs on the build
+  that *adds* the risky module, so that rule failure excludes rather than includes.
+- **A webpack `resolve.alias` key must be an absolute path when tsconfig `paths` are in play.**
+  Next's paths plugin rewrites `@/…` before the alias runs; a request-string key fails
+  **silently**, producing a build that succeeds and does the wrong thing.
+- **Any build input not in the webpack cache key can produce a fully cached wrong artifact.**
+  The alias flip was invisible to the cache and an ordinary rebuild re-served the E2E chunk
+  with exit 0. Second time a stale `.next` has caused a false result in this patch (§16a);
+  first time it could have shipped a security defect.
+- **The test that catches the governance error is worth more than the governance.** §17k's
+  bundle-grep requirement is the only reason this was caught before merge. Write the
+  falsifier into the spec, not only the intent.
