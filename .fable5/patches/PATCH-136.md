@@ -625,3 +625,321 @@ links/backlinks/archive.
   them use only `h.elements`, and the entire imperative surface is one `onChangeEmitter`
   subscription in PATCH-128. **Census before designing the replacement — the contract you must
   support is usually smaller than the API you are replacing.**
+
+---
+
+## 17. Amendment — TRACK B BOUNDED; PRODUCTION E2E BRIDGE AUTHORIZED (2026-08-02, CTO)
+
+Track A is settled (§16) and is not revisited. Track B is now bounded.
+
+**The decisive finding: no vendored modification is required.** The application-owned
+Drawing host already holds Excalidraw's **public** `ExcalidrawImperativeAPI`, and that API
+supplies every observation the five specs need — including the change subscription PATCH-128
+currently takes from the internal emitter.
+
+### 17a. Exact five-spec census — corrected and completed
+
+§16g under-counted: it matched `h.app.X` forms only, and missed `getAppState` in PATCH-130
+and PATCH-132. Corrected:
+
+| Spec | Readiness | Scene elements | App state | Subscription |
+|---|---|---|---|---|
+| PATCH-124 | `h?.app && Array.isArray(h.elements)` (`:165-166`) | `h.elements` | — | — |
+| PATCH-129 | `:54-55` | `h.elements` (`:61`) | — | — |
+| PATCH-130 | `:45-46` | `getSceneElements() ?? h.elements` (`:52-53, :87-88, :102`) | `getAppState() ?? h.state` (`:103, :231-232`) | — |
+| PATCH-132 | `:153-154` | `getSceneElements() ?? h.elements` (`:160-161`) | `getAppState() ?? h.state` (`:243-244, :255-256`) | — |
+| **PATCH-128** | `:148` | `h.elements` ×3, `getSceneElements()` (`:161, :167-168, :992`) | `getAppState()` via local helper (`:152-155`), `h.state` (`:1116`) | **`h.app.onChangeEmitter.on(...)`** (`:447-448`) |
+
+**Classification:** readiness ×5 · scene observation ×5 · app-state observation ×3 ·
+**imperative event subscription ×1 (PATCH-128 only)** · **direct internal mutation ×0**.
+
+**No spec mutates through the harness.** The entire imperative surface in the suite is one
+subscription.
+
+### 17b. App-state projection — six fields, all geometry
+
+Every `getAppState()` consumer across all three specs reads only:
+
+| Field | Used by | Assertion enabled |
+|---|---|---|
+| `scrollX` | 128, 130, 132 | canvas pan position |
+| `scrollY` | 128, 130, 132 | canvas pan position |
+| `zoom.value` | 128, 130, 132 | zoom level |
+| `offsetLeft` | 128 (`:175`) | viewport→scene coordinate mapping |
+| `offsetTop` | 128 (`:176`) | viewport→scene coordinate mapping |
+| `selectedElementIds` | 132 (`:257`) | which frame is active |
+
+**`getAppState()` must NOT be exposed.** Excalidraw's `AppState` carries dozens of fields
+including collaborator identities, clipboard-adjacent state and UI internals. **The bridge
+exposes exactly these six, as a flat frozen projection.** This directly answers the brief's
+question — PATCH-128 does not need full app state; it needs five numbers, and PATCH-132
+needs one id map.
+
+### 17c. API minimization — property by property
+
+| Property | Needed by | Enables | Replaceable by DOM/UI? | Irreducible because |
+|---|---|---|---|---|
+| `version: 1` | all | fail fast on contract drift | no | migration safety |
+| `ready` (implicit: bridge presence) | all 5 | replaces `waitForHarness` | **no** — canvas mount is a `<canvas>`; nothing in DOM states the scene is loaded | Excalidraw renders to canvas; there is no stable DOM readiness signal |
+| `getSceneElements()` | all 5 | frame identity/order/geometry | **no** | frames are canvas pixels; ids and fractional indices exist nowhere in the DOM |
+| `getViewport()` — the §17b six fields | 128, 130, 132 | pan/zoom/selection assertions | **partially** — PATCH-132's `selectedElementIds` is *mirrored* by the sidebar's `border-violet-400` class, already asserted there | pan/zoom are canvas-internal with no DOM equivalent; selection is kept because 132 asserts the **scene-level** selection, not the sidebar's rendering of it |
+| `subscribeToSceneChange(cb)` | **128 only** | proves change events arrive | **no** — the assertion is that a change *fired*, which is invisible in the DOM | see §17d |
+
+**Rejected from the contract:** `getAppState()` (too broad, §17b) · any `app` reference ·
+any emitter object · any setter · anything not in the table above.
+
+**Renamed deliberately:** `getViewport()` rather than `getAppState()`, so the name cannot
+invite future field creep. **If a future spec needs a seventh field, that is an amendment,
+not an implementation detail.**
+
+### 17d. Change subscription — narrow wrapper over the PUBLIC API
+
+PATCH-128 uses `h.app.onChangeEmitter.on(...)` — an **internal** emitter. **The bridge must
+not expose it.** Excalidraw's public `ExcalidrawImperativeAPI.onChange(callback)`
+(`excalidraw_fork/packages/excalidraw/types.ts:870`) provides the same signal and is already
+part of the supported surface the host consumes.
+
+Contract:
+
+```
+subscribeToSceneChange(listener: (revision: number) => void): () => void
+```
+
+| Aspect | Decision |
+|---|---|
+| Payload | **A monotonically increasing revision number only.** Not elements, not state |
+| Why | PATCH-128's assertion is that changes *arrived* and how many; it re-reads elements via `getSceneElements()` when it needs them. Passing elements would hand test code live references (§17f) |
+| Initial emission | **None.** Subscription does not fire on subscribe; the revision at subscribe time is readable via `getSceneRevision()` if needed |
+| Timing | Registered against the currently mounted instance; fires only for that instance |
+| Cleanup | Returns an unsubscribe function; **all listeners are dropped on unmount/navigation** |
+| Duplicate listeners | Same function reference registered twice registers twice and requires two unsubscribes — **no silent dedupe**; documented, and asserted |
+| Remount | Listeners are **not** carried across; a stale unsubscribe is a no-op |
+| Stale listeners | **Must not fire for a new board** — test item 16 |
+
+### 17e. Source ownership — **application-owned, no vendored change**
+
+`components/collabboard/canvas/layouts/DrawingLayout.tsx` already holds the mounted API:
+`excalidrawAPIRef` (`:236, :259, :390, :555, :791, :1065`), `excalidrawAPI` state (`:788`),
+and already calls `excalidrawAPI.getSceneElements()` (`:1310`).
+
+The public API type provides exactly what is needed:
+`getSceneElements` (`types.ts:849`) · `getAppState` (`:850`) · `onChange` (`:870`).
+
+**Hard stop *"no application-owned integration point can expose observations without
+vendored modification"* — NOT TRIGGERED.** The vendored `App.tsx` is **not** on the
+allowlist, and `window.h` is neither enabled nor extended.
+
+`DrawingLayout.tsx` is **2,794 lines** — far over the 800-line ceiling and it must not grow.
+**Registration logic therefore lives in a new dedicated module**, called from the host with
+the API and lifecycle; the host's own change is a few lines.
+
+### 17f. Type and snapshot contract
+
+- `version: 1`, frozen.
+- Global augmentation on an **application-owned** declaration file — never the fork's.
+- `getSceneElements()` returns a **defensive snapshot**: a new array of **frozen shallow
+  clones** of the plain element fields the specs read. **Not live references.**
+- `getViewport()` returns a **new frozen flat object** of the six §17b fields.
+- **`Object.freeze` at runtime, not `readonly` alone** — the brief is explicit, and TypeScript
+  `readonly` is erased at runtime while Playwright's `page.evaluate` runs untyped JS.
+- **No setters. No accessor properties. No function that accepts scene data.**
+
+### 17g. Runtime gate — option B, build-time public flag
+
+**Chosen: `NEXT_PUBLIC_E2E_BRIDGE=1` read at build time.**
+
+Next inlines `NEXT_PUBLIC_*` at build time, so `if (process.env.NEXT_PUBLIC_E2E_BRIDGE !== '1') return;`
+is **statically eliminated** from ordinary production bundles — the registration code is not
+merely inert, it is **absent**.
+
+| Requirement | How met |
+|---|---|
+| Ordinary production cannot expose it accidentally | The var is unset in normal builds → branch eliminated → **no bridge code in the bundle** |
+| Enablement is explicit | A named env var must be set on the **build** command |
+| Tests fail clearly if absent | The shared helper (§17i) fails with "E2E bridge absent — build with NEXT_PUBLIC_E2E_BRIDGE=1", not a bare timeout |
+| No secret embedded | The value is the literal `1` — it is a switch, not a credential |
+| Users cannot toggle at runtime | Build-time only. **A query parameter or runtime flag is explicitly rejected** (false-green list) |
+| Stale enabled builds cannot be reused unknowingly | §17h |
+
+Rejected: **A** (server-only var — cannot reach client code); **C** (test-only route/session —
+introduces an authorization surface, the exact thing the bridge must not touch); **D**
+(injected HTML marker — a runtime signal a proxy or user could forge).
+
+**An E2E-enabled production build IS a separate artifact.** It must never be presented as
+evidence for an ordinary production build.
+
+### 17h. Governed production-build test flow
+
+1. Stop prior servers via `npm run harness:server:stop`.
+2. Verify no listener on 3000–3003 / 3100.
+3. Remove or rename `.next` (§16e).
+4. `NEXT_PUBLIC_E2E_BRIDGE=1 npx next build` — **run directly, never piped** (§16e.5).
+5. Verify exit code, then `BUILD_ID`, `static/`, `routes-manifest.json`.
+6. **Mark the artifact:** write `.next/E2E_BRIDGE_BUILD` as a marker file.
+7. Start via `npm run harness:server:start`.
+8. Create the disposable authenticated fixture.
+9. Navigate to the board.
+10. Await bridge presence **and** `version === 1`.
+11. Execute the existing assertions.
+12. Clean the fixture.
+13. Stop the full process tree via the lifecycle script; verify ports free.
+14. **Delete the E2E-enabled `.next` afterwards.** The marker in step 6 exists so a later
+    ordinary-production verification cannot silently inherit it.
+
+### 17i. Migration table and shared helper
+
+| Spec | Old usage | Replacement | Delete local `waitForHarness`? |
+|---|---|---|---|
+| PATCH-124 | readiness, `h.elements` | `waitForE2EBridge`, `getSceneElements()` | **Yes** |
+| PATCH-129 | readiness, `h.elements` | same | **Yes** |
+| PATCH-130 | readiness, elements, `getAppState` | + `getViewport()` | **Yes** |
+| PATCH-132 | readiness, elements, `getAppState` | + `getViewport()` | **Yes** |
+| PATCH-128 | all of the above + `onChangeEmitter.on` | + `subscribeToSceneChange()` | **Yes** |
+
+**Shared helper: AUTHORIZED** — `e2e/characterization/e2eBridge.ts`. The brief's concern is
+exact: five copy-pasted waiters became five copy-pasted bridge waiters. It owns **only**
+bridge presence/version wait, typed access, and timeout diagnostics. **It must contain no
+feature assertion.**
+
+**Closed-test integrity:** same UI actions, same scene assertions, same negative controls,
+same fixture isolation, same viewports. **Only the readiness/observation transport changes.**
+No skips, no timeout-only fixes, no database injection replacing UI, no assertion replaced by
+source inspection. PATCH-132's `selectedElementIds` read is retained as-is — **simplifying it
+to the sidebar class would be a semantic change and requires its own decision.**
+
+### 17j. Lifecycle contract
+
+Bridge absent before init · present after mount · bound to the current board instance ·
+replaced on reload · replaced on board navigation · **deleted on unmount** · old subscribers
+detached · stale callbacks never receive new-board events · **Strict Mode double-mount must
+not leak** (register in an effect whose cleanup deletes; the second mount overwrites the same
+global) · **multiple canvases: last mount wins, and the bridge records `instanceId` so a test
+can detect replacement.** If two Drawing canvases ever mount simultaneously the bridge is
+**ambiguous by design** — the spec must assert single-instance, and ambiguity is a failure,
+not a silent overwrite.
+
+### 17k. Security review
+
+**Threat model:** a browser-side global in an E2E-only artifact.
+
+- **Scene elements** expose board content the user is **already viewing in their own
+  browser** — no new disclosure.
+- **Viewport projection** is six geometry values — no user or account data.
+- **No cross-board access:** the bridge reflects only the mounted instance; reading another
+  board requires navigating to it, which RLS already governs.
+- **Authorization unchanged:** the bridge performs no fetch, holds no Supabase client, and
+  cannot write. **It cannot bypass RLS because it never talks to the network.**
+- **Global naming is not a security control** — obscurity is explicitly rejected. Exclusion
+  rests on build-time elimination (§17g).
+- **CSP:** unaffected — no inline script, no external resource.
+- **Ordinary-production exclusion proof:** the required test is a **bundle-content
+  assertion** — grep the built client chunks of an ordinary build for the bridge global and
+  assert **zero** occurrences (test item 1). Absence from `window` at runtime is necessary
+  but not sufficient; absence from the bundle is the proof.
+
+### 17l. Allowlists
+
+**Production — exactly 3 files:**
+
+| File | Change |
+|---|---|
+| `lib/e2e/productionBridge.ts` | **NEW** — bridge type, `Object.freeze` projections, register/unregister, revision counter, subscription wrapper, the `NEXT_PUBLIC_E2E_BRIDGE` gate. **Bounded at 150 lines.** No command ownership, no Supabase, no persistence |
+| `components/collabboard/canvas/layouts/DrawingLayout.tsx` | **Registration call only** — one effect that registers on API availability and unregisters on cleanup. **Must not grow materially**; report before/after line count |
+| `types/e2e-bridge.d.ts` | **NEW** — `Window` augmentation |
+
+**Explicitly excluded:** vendored `App.tsx` and anything under `excalidraw_fork/` ·
+`next.config.ts` · `serverLifecycle.ts` · `CanvasClient.tsx` · persistence and Supabase
+modules · document-feature code · toolbar code · `canvasToolbarRegistry.tsx` ·
+`CanvasSidebar.tsx` · shared UI.
+
+**Test — exactly 7 files:**
+
+```
+e2e/characterization/patch-136-production-readiness.spec.ts   (new)
+e2e/characterization/e2eBridge.ts                             (new shared helper)
+e2e/characterization/patch-124-slide-thumbnail-refresh.spec.ts
+e2e/characterization/patch-128-slide-sync.spec.ts
+e2e/characterization/patch-129-preview-fit.spec.ts
+e2e/characterization/patch-130-slide-navigation.spec.ts
+e2e/characterization/patch-132-thumbnail-visibility.spec.ts
+```
+
+The five are authorized **only** for replacing local `window.h` access and deleting the local
+`waitForHarness`. **No PATCH-134 or PATCH-135 test edit.**
+
+**Docs:** a `.fable5/docs/TESTING.md` update (stale `.next` recovery, direct exit-code
+verification, the E2E-enabled artifact distinction, lifecycle-script requirement, cleanup) is
+**authorized as part of the implementation patch's commit** — not written in this governance
+turn.
+
+### 17m. Test plan
+
+`e2e/characterization/patch-136-production-readiness.spec.ts` must prove all twenty brief
+items, with these sharpenings: **item 1** by bundle-content grep (§17k); **items 6, 8, 9** by
+attempting mutation and asserting no effect on the live scene; **item 10** by asserting no
+property of the bridge exposes a function named `updateScene`/`replaceAllElements` or an
+object with a `scene` property; **item 20** by running all five migrated specs unchanged in
+behavior. Shared-helper tests: timeout diagnostics, version mismatch, absent gate, stale
+instance, reload, cleanup. Carried standard **`--repeat-each=3`**.
+
+**False-green rejection** as the brief lists it, in full.
+
+### 17n. Hard stops — evaluated
+
+| Hard stop | Verdict |
+|---|---|
+| No application-owned integration point without vendored modification | **NOT triggered** — `DrawingLayout` holds the public API (§17e) |
+| Bridge cannot be excluded from ordinary production | **NOT triggered** — build-time elimination, proven by bundle grep (§17g, §17k) |
+| Tests require mutation after all | **NOT triggered** — zero mutation across five specs (§17a) |
+| Projected app state broad or unstable | **NOT triggered** — six geometry fields (§17b) |
+| Scene snapshots expose live mutable references | **NOT triggered** — frozen defensive clones (§17f) |
+| Subscription cleanup cannot be guaranteed | **NOT triggered** — unsubscribe + unmount teardown, asserted (§17d, §17j) |
+| Multi-instance ownership ambiguous | **NOT triggered** — last-mount-wins with `instanceId`; ambiguity is asserted as failure (§17j) |
+| Five migrations require semantic weakening | **NOT triggered** — transport-only (§17i) |
+| E2E artifact indistinguishable from ordinary production | **NOT triggered** — marker file + mandatory deletion (§17h) |
+| Allowlist cannot be bounded | **NOT triggered** — 3 production, 7 test (§17l) |
+
+**Zero of ten triggered.**
+
+### 17o. Status
+
+**PATCH-136: OPEN · BUILD TRACK RESOLVED · PRODUCTION E2E BRIDGE ARCHITECTURE BOUNDED ·
+NARROW IMPLEMENTATION AUTHORIZED · NO VENDORED FORK CHANGE · OBSERVATION-ONLY BY
+CONSTRUCTION · BUILD-TIME GATE · NOT PUSHED.**
+
+**Track A: RESOLVED PROCEDURALLY** — settled, not revisited.
+**Track B: BOUNDED · IMPLEMENTATION AUTHORIZED.**
+
+**PATCH-135 / 134 / 132 / 130 / 129 / 128 / 124: CLOSED — not modified or reopened; the five
+specs are authorized for transport-only migration under this patch. PATCH-133: OPEN.
+PATCH-131: OPEN · BLOCKED — not modified.** Snapshot and tag remain at `c0fa799`.
+
+Commit contract — implementation, when run: `feat(e2e): add production observation bridge`,
+then `test(e2e): migrate characterization specs to the bridge`, then
+`docs(testing): record production e2e build procedure`. **Do not push.**
+
+Sequence: **136** → **137** document card, free-standing open affordance, deferred Card view
+removal, dead-constant cleanup → **138** modal split → **139** persistence → **140**
+links/backlinks.
+
+### 17p. Recorded diagnostic notes
+
+- **The replacement API was already a supported public interface.** The suite reached for
+  `window.h` — an internal debug global with setters — while the host component sitting one
+  file away held `ExcalidrawImperativeAPI` with `getSceneElements`, `getAppState` and
+  `onChange`. **When test code depends on a vendor's private surface, check whether the
+  application already holds the public one; the integration point is usually the code that
+  mounts the vendor, not the vendor.**
+- **The scary number was six.** "Replace `getAppState()`" sounds like modelling Excalidraw's
+  entire `AppState`; the census shows three specs read `scrollX`, `scrollY`, `zoom.value`,
+  `offsetLeft`, `offsetTop` and `selectedElementIds`. **Naming the projection `getViewport()`
+  rather than `getAppState()` is deliberate — an API named after what callers need resists
+  field creep that an API named after its source invites.**
+- **Runtime absence is not exclusion; bundle absence is.** A bridge that returns `undefined`
+  in production still ships its code and can be re-enabled by anything that flips a runtime
+  check. Build-time `NEXT_PUBLIC_*` elimination removes the code, and the test asserts it by
+  grepping the built chunks. **Prove a security boundary at the layer that enforces it.**
+- **Five copy-pasted waiters nearly became five copy-pasted bridge waiters.** The migration
+  touches all five specs at once, which is exactly the moment to introduce the shared helper
+  — and exactly the moment it could quietly grow feature assertions. **Its charter is written
+  down as three responsibilities precisely because it will be tempting to add a fourth.**
