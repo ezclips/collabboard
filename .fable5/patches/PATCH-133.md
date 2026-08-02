@@ -797,3 +797,415 @@ Commit contract for this turn: `docs(patch-133): map document post architecture`
   original decomposition did not anticipate. **This is the PATCH-132 §19k pattern repeating:
   measurement reshapes the plan, and the reshaping is only possible before implementation
   starts.**
+
+---
+
+## 19. Amendment — ARCHIVE REVIEW COMPLETE; THE ARCHIVE IS A DIFFERENT FEATURE (2026-08-02, CTO)
+
+The §2 blocker is resolved. The archive was supplied, extracted and read in full.
+
+**Headline result: the archive does not describe the Document post feature. It describes
+PDF integration.** It is a coherent, technically strong, 16-patch plan for uploading PDFs,
+rendering them in a modal viewer, extracting highlights, dragging highlights onto the
+canvas, and linking them back to Note posts. **It contains no toolbar plan, no document
+post type, no document card, no document editor/viewer split, and no reference to any of
+the fifteen source-proven PATCH-133 findings.**
+
+**Nothing in §1–§18 is retracted, and nothing in the archive contradicts it.**
+
+### 19a. Archive path and extraction
+
+| | |
+|---|---|
+| Path | `C:\Users\rmeic\Projects\dev\PFD_Plan.zip` (447,857 bytes) |
+| Extracted to | `…\scratchpad\pfd_extract\` — **outside the repository** |
+| Tool | `7z x` |
+| Result | **Clean, complete, 30 files** |
+| Repository impact | **None.** No file copied in, staged or committed. `git status` unchanged apart from this document |
+
+**§2's tooling analysis is confirmed, and its naming guess was right.** "PFD" is a
+transposition of **PDF**. The blocker really was availability, not format — the ZIP
+extracted first try with the tooling that was already installed.
+
+### 19b. File inventory (30 files, 6,552 lines of Markdown)
+
+**Planning documents (5)**
+
+| File | Lines | What it is |
+|---|---|---|
+| `task.md` | 21 | A 4-phase checklist. **Every box unticked.** |
+| `implementation_plan.md` | 77 | The earliest plan — note-post extension + PDF modal + drag routing + AI synthesis |
+| `implementation_plan_PDF_Document_Integration.md` | 434 | The main architecture document; competitor feature table, schema, phases |
+| `implementation_plan_LLM.md` | 188 | A **rival** architecture — Markdown-in-Storage + `pgvector`, explicitly replacing the relational model |
+| `review_and_improvements.md` | 125 | Technical review: 7 critical bugs, 4 architectural gaps, 5 competitor feature gaps |
+
+**Patch drafts (16):** `patch_090.md` … `patch_105.md`, 122–694 lines each, **all marked
+`Status: draft`**.
+
+| # | Title |
+|---|---|
+| 090 | PDF Post Type + Domain Skeleton |
+| 091 | PDF Database Schema + RLS Policies |
+| 092 | Supabase Storage Buckets + RLS |
+| 093 | Server-Side PDF Processor |
+| 094 | PDF Upload API Route |
+| 095 | PDF Viewer Modal |
+| 096 | Highlight Creation (Text + Area) |
+| 097 | Highlight Overlay Rendering (Coordinate Math) |
+| 098 | Highlight Card Renderer + PDF Document Card |
+| 099 | Drag-and-Drop Routing |
+| 100 | Note Post Integration + Bidirectional Links |
+| 101 | PDF Search |
+| 102 | Realtime Collaboration |
+| 103 | Sticky Notes, Tagging, Export |
+| 104 | OCR + Readwise/Zotero Importers |
+| 105 | Multi-PDF Compare, Polish, E2E Tests |
+
+**Machine-generated (9):** `.system_generated/logs/transcript*.jsonl`,
+`.system_generated/messages/*.json`, two `*.metadata.json`. Session transcripts and cursor
+state. **Classification 8 — historical noise.** Not reviewed for content; they are tool
+exhaust, not planning material.
+
+### 19c. ⚠ CRITICAL — the archived patch numbers collide with real, closed Fable 5 patches
+
+**§2.3 predicted this and was right, but understated it.** §2 reasoned that because the
+repo's sequence skips 098, an archived "PATCH-098" would not be a Fable 5 patch. The truth
+is worse: **all sixteen numbers are occupied, and every single one is a different piece of
+work.**
+
+| # | Archive claims | The repository's actual PATCH-### |
+|---|---|---|
+| 090 | PDF Post Type + Domain Skeleton | Atomic Container Child Create-and-Append |
+| 091 | PDF Database Schema + RLS | Drawing-Layout Comment Persistence Diagnosis |
+| 092 | Storage Buckets + RLS | Strict Drawing-Layout Comment Persistence |
+| 093 | Server-Side PDF Processor | Comment EDIT UI Diagnosis (Drawing Layout) |
+| 094 | PDF Upload API Route | Comment EDIT Save-Persistence Diagnosis |
+| 095 | PDF Viewer Modal | Atomic Cross-Container Move: Design Contract |
+| 096 | Highlight Creation | Bounded PATCH-088 Setup-Close Runner Hardening |
+| 097 | Highlight Overlay Coordinate Math | Render Application-Owned AI Containers in the Slider/Player |
+| **098** | Highlight Card + PDF Document Card | **DOES NOT EXIST — the repo sequence skips 098** |
+| 099 | Drag-and-Drop Routing | Render Current Structured AI Content in the Runtime Slider/Player |
+| 100 | Note Post Integration + Bidirectional Links | Render Synchronous Structured AI Containers in Snapshot Surfaces |
+| 101 | PDF Search | Bounded Mermaid Diagram Readiness Wait |
+| 102 | Realtime Collaboration | Bounded Legacy-HTML Image Readiness Wait |
+| 103 | Sticky Notes, Tagging, Export | Fix Excalidraw Fractional-Index Fixtures |
+| 104 | OCR + Readwise/Zotero Importers | Extract the Column-Layout Container-Creation Command Family |
+| 105 | Multi-PDF Compare, Polish, E2E | Fable Harness Reliability Foundation |
+
+**Governing rule, binding on every future turn: the archived numbers 090–105 are VOID as
+identifiers.** They must never be cited, resurrected, or reused. Any future PDF work takes
+**new, unoccupied numbers**. The task's standing instruction — *do not import old patch
+numbers or implementation contracts directly* — is not a stylistic preference here; obeying
+it is the only thing preventing sixteen collisions with closed, accepted work.
+
+This also means the archive's drafts were **never** Fable 5 patches, despite each one
+carrying a "**Fable 5 alignment:**" header line. They were authored *against* Fable 5
+conventions by a model that read the docs, but they were never numbered by this governance
+process and never entered `.fable5/patches/`.
+
+### 19d. PATCH-090–105 relevance map
+
+Files-still-exist column verified against the working tree at `c7b5a57`.
+
+| # | Original purpose | Expected files | Still exist? | Impl. status | Conflict with current architecture | Reusable decision | Obsolete assumption | Prerequisite now required | Destination |
+|---|---|---|---|---|---|---|---|---|---|
+| 090 | `'pdf'` post type + `lib/domain/pdf/` skeleton, branded IDs, `pdfjs-dist` local worker | `types/collabboard.ts` ✅; `lib/domain/pdf/*` ❌; `next.config.ts` ✅ | **Type file yes, all new dirs no** | **5 — not started** | Low. Adds a union member exactly as §5d says is possible without migration | **Branded IDs; local worker over CDN; one type-surface patch before all dependents** | `pdfjs-dist` "will be installed" — **it is not a dependency** | Add the dep; renumber | Pattern → PATCH-137; feature → new PDF patch |
+| 091 | `pdf_documents`, `pdf_pages`, `pdf_highlights`, `note_post_links` + RLS | 4 new tables | **None exist** | **5 — not started** | **HIGH — see §19f.** `pdf_documents` RLS is owner-only | Timestamped migrations; RLS in the same migration; GIN indexes | That owner-only RLS suits a collaborative board | Board-scoped RLS rewrite | New PDF patch only |
+| 092 | Storage buckets `pdfs`, `pdf-thumbnails` + RLS | 2 buckets | **Unverified — not checked live** | **5 — not started** | Low | Buckets before the upload route | — | Bucket audit | New PDF patch |
+| 093 | Server-side processor, thumbnails, TOC/scan detection | `lib/infra/pdf/processor.ts` ❌ | No | **5 — not started** | Medium — needs the `canvas` npm package (native build) | `Result<T, DomainError>`; thin domain command wrapping infra | Original used a **fictional** `pdfjsLib.createCanvas()` (BUG-5) | `canvas` dep + native toolchain | New PDF patch |
+| 094 | `app/api/pdf/upload/route.ts` | ❌ | No | **5 — not started** | Low | **zod on every input; domain commands instead of direct Supabase in routes; explicit `runtime='nodejs'`** | — | 090–093 | Pattern → PATCH-137 |
+| 095 | Modal PDF viewer + subcomponents | `components/pdf/*` ❌ | No | **5 — not started** | **HIGH — mandates TanStack Query hooks; `@tanstack/react-query` is NOT a dependency** (only `react-table`) | **Modal over split-pane; no `fetch()` in components; split to respect the 400-line ceiling** | That a query library is present | Add the dep or pick another pattern | Modal shell pattern → PATCH-136 |
+| 096 | Text + area highlight creation | ❌ | No | **5 — not started** | Low | `getClientRects()` per line, not one merged rect | — | 095 | New PDF patch |
+| 097 | Overlay coordinate math | documentation-only | n/a | **5 — not started** | None | **PDF→CSS Y-flip and stored per-page dimensions; a doc-only patch for subtle math** | Hardcoded A4 `792×1122` — wrong twice over (A4 is 595×842) | — | Method → keep |
+| **098** | Highlight card + **PDF document card** | `components/pdf/PdfDocumentCard.tsx` ❌; `CardShell` ✅ (`components/collabboard/shells/CardShell.tsx`) | Shell yes, cards no | **5 — not started** | Medium — **this is the archive's closest touch to PATCH-135** | **Card = thumbnail + filename + page count + click-to-open; backlink count on the card face; `post.*` naming in new code with an adapter comment at the legacy `CardShell.padletId` boundary** | Assumes a `'pdf'` type exists | Renumber; 090 | **Card grammar → PATCH-135** |
+| 099 | Drag-and-drop routing, freeform vs structured | `useCanvasInteractions.ts` ✅, `PlacementPrompt.tsx` ✅, `usePadletSave.ts` ✅ | **All three exist** | **5 — not started** | Low — the surfaces it names are real | **Freeform drops directly; structured layouts interrupt with the placement prompt; strangler — add a `case`, don't rename the hook** | Calls `createPost()` "or the correct name — verify before implementing" | Verify the real function | Placement grammar → PATCH-137 |
+| 100 | Note-post embedding + bidirectional links (`note_post_links`) | `NoteEditor.tsx` ✅; table ❌ | Editor yes, links no | **5 — not started** | Medium | **Backlinks as a first-class table, not a metadata array; a "Sources" panel separate from embedded content** | Original used `VueNodeViewRenderer` **in a React app** (BUG-6) | Renumber; entity/placement decision | **Link model → PATCH-138** |
+| 101 | Full-text PDF search | ❌ | No | **5 — not started** | Low | Repository class over `.from()` in routes; GIN over `ilike` | — | 091 | Search → PATCH-138 |
+| 102 | Realtime highlight sync | ❌ | No | **5 — not started** | Low | **CRITICAL security fix recorded: never `getSupabaseAdmin()` in a client hook; anon key + RLS** | — | 091 | **Rule → keep repo-wide** |
+| 103 | Sticky notes, tagging, **export** | ❌ | No | **5 — not started** | Medium — **a third export implementation** (§8 already has two) | Convert coordinates before the component; zod on export inputs | Export is Markdown-only, highlights-only, **auth-checked but not permission-checked** | Designate the surviving exporter | Export patch (still unnumbered) |
+| 104 | OCR + Readwise/Zotero importers | ❌ | No | **5 — not started** | Low | **Dependency inversion: domain owns the interface, infra implements** | — | 091 | Pattern → keep |
+| 105 | Multi-PDF compare, polish, E2E | `ActionRegistry.ts` ✅ | Registry yes | **5 — not started** | Low | **Keyboard shortcuts via `ActionRegistry`, never raw `addEventListener`; E2E in `e2e/characterization/`** | — | everything above | **Shortcut rule → PATCH-134** |
+
+**Implementation status, summarized: 16 of 16 are classification 5 — never started.** Zero
+of the proposed new directories (`lib/domain/pdf/`, `hooks/pdf/`, `components/pdf/`) exist.
+Zero of the four proposed tables exist. Zero of `pdfjs-dist`, `react-pdf`, `canvas`,
+`@tanstack/react-query`, or any OCR package is in `package.json`.
+
+**The archive is a plan that was written, reviewed, revised — and never executed.**
+
+### 19e. Reconciliation against the fifteen source-proven findings — **the archive is silent on all fifteen**
+
+The task required each PATCH-133 finding be reconciled against the archive. A full-text
+search of all 21 Markdown files for every term returned **zero matches on every one**:
+
+`Card view` · `showCardView` · `CardActionsToolbar` · `CardEditor` · `CardPreview` ·
+`ClipartCardDraftModal` · `DraggableToolbar` · `toolbarGroups` · `CanvasClient` ·
+`wordCount` · `word count` · `document post` · `'document'` · `canEditWorkspace` ·
+`canUseFreeformEditButton` — **all 0 files.**
+
+| # | PATCH-133 finding | Archive position |
+|---|---|---|
+| 1 | "Card view" is a mislabeled `CardEditor` opener | **Silent** |
+| 2 | `metadata.showCardView` read, never written | **Silent** |
+| 3 | Freeform and Clipart call sites differ in ownership | **Silent** |
+| 4 | The `CardPreview` viewer path is unreachable | **Silent** |
+| 5 | No document table | **Silent** — proposes PDF tables, not a document table |
+| 6 | No document post type | **Partially adjacent** — proposes `'pdf'`, never `'document'` |
+| 7 | `type='card'` overloaded for clipart/document | **Silent** |
+| 8 | `padlets.type` accepts a new value without migration | **Implicitly agrees** — 090 adds `'pdf'` with no migration |
+| 9 | `padlets.board_id` blocks multi-board reuse | **Implicitly agrees** — `pdf_documents.board_id` is likewise single (§19g) |
+| 10 | Word-count implementations disagree | **Silent** |
+| 11 | Board permissions don't reach canvas surfaces | **Silent, and assumes otherwise** (§19f) |
+| 12 | Read-only mode still mounts mutation behavior | **Silent, and would repeat the mistake** (§19f) |
+| 13 | Export exists for AI-component posts only | **Silent** — proposes a third exporter unaware of the first two |
+| 14 | `CanvasClient.tsx` must not grow un-decided | **Silent** — never names the file |
+| 15 | `DraggableToolbar.tsx` is dead code | **Silent** |
+
+**Classification: no conflict, and no corroboration.** The task's instruction — *do not
+overwrite current source findings merely because an older plan differs* — never had to be
+exercised. **The archive cannot overwrite findings it never addresses.** All fifteen stand
+exactly as recorded, on source evidence alone.
+
+This is the single most useful outcome of the review, and it is a negative result: **the
+historical plans do not contain a document-post design.** Anyone hoping the archive would
+shorten PATCH-134 should stop hoping.
+
+### 19f. Permissions — the archive is **unsafe on three of four** questions, and internally inconsistent
+
+The task named four specific assumptions to look for.
+
+| Assumption | Archive position | Verdict |
+|---|---|---|
+| Board-level reader/editor roles already reach the canvas | **Never considered.** No archive file mentions any canvas permission symbol | **Unsafe by omission** |
+| Viewer mode may reuse the editable component | Not addressed — **no viewer/editor split is proposed anywhere** | **Unsafe by omission** |
+| Hiding controls is sufficient authorization | **Yes, explicitly.** `implementation_plan_PDF_Document_Integration.md:271` — "**No edit pencil for read-only users**" is the *entire* read-only design | **UNSAFE — CONFIRMED** |
+| Export follows edit permission automatically | **Worse.** The export route (`patch_103.md:157`) checks only that a user is *authenticated*, then relies on owner-only RLS. No permission tier is consulted | **UNSAFE — CONFIRMED** |
+
+**"No edit pencil for read-only users" is precisely the failure mode PATCH-133 §6b rejected
+on source evidence.** The current `CardEditor` hides its toolbar and footer in read-only
+mode and still mounts `onSave`, still binds it to the backdrop click. The archive proposes
+the same shape for a new surface. **Current source evidence takes precedence, as the task
+directs: §6b's structure B — mutation props absent from the viewer's type — stands, and the
+archive strengthens rather than weakens the case for it, by showing the mistake being made
+independently a second time.**
+
+**A genuine internal inconsistency in the archive, recorded precisely rather than
+flattened:** its RLS is not uniformly owner-only.
+
+- `pdf_documents` / `pdf_pages` / `pdf_highlights` (`patch_091.md:196-231`) —
+  `auth.uid() = user_id`. **Owner-only.** A PDF uploaded by one board editor would be
+  invisible to every collaborator on that board.
+- `note_post_links` (`patch_091.md:283-313`) — joins `boards` and `board_members`.
+  **Board-scoped, and correct in shape.**
+
+So the archive knew how to write board-scoped RLS and did it for one table out of four.
+**On a collaborative board product, owner-only RLS for shared content is a design defect,
+not a conservative default** — it silently converts a shared artifact into a private one.
+Any future PDF patch must rewrite the first three policies to the board-scoped form the
+fourth already demonstrates.
+
+**Reusable and worth keeping:** `patch_102.md`'s CRITICAL fix — `getSupabaseAdmin()` (the
+service-role key) must never appear inside a React hook, because it lands in the browser
+bundle. That is a correct, general, repo-wide security rule and the strongest single
+contribution in the archive.
+
+### 19g. Document entity model — what the archive actually proposed
+
+| Asked | Archive proposal | Against the current single-`board_id` model |
+|---|---|---|
+| A separate documents table | **No document table.** Four *PDF* tables (`pdf_documents`, `pdf_pages`, `pdf_highlights`, `note_post_links`) | Compatible in shape; irrelevant to documents |
+| A new padlet type | **`'pdf'`**, appended to the same union PATCH-133 §5d examined — never `'document'` | **Compatible** — confirms §5d from an independent direction |
+| Content stored in metadata | Partially — `extracted_highlights`, `source_pdf_id`, `pdf_highlight_id` in post metadata | Compatible; the metadata-absorbs-features pattern DATABASE.md already flags |
+| Rich-text JSON | **Yes, indirectly** — TipTap node embedding in Note posts (`patch_100.md`) | Compatible; TipTap is already a dependency |
+| HTML | Not proposed | Leaves §5a's HTML-vs-plain-text question **unanswered** |
+| Markdown | **Yes, twice** — as export output (`patch_103`) and, in the rival LLM plan, as the *primary storage format* in Supabase Storage | The LLM variant conflicts with everything else |
+| Independent entities + board placements | **No.** `pdf_documents.board_id` is a plain single FK (`patch_091.md:75`) | **Agrees with §5c** |
+| Multi-board reuse | **Never proposed anywhere in the archive** | — |
+
+**Two findings follow.**
+
+1. **The archive independently arrives at single-board ownership.** It had a clean
+   opportunity to propose a placements table for `pdf_documents` and did not. §5c's
+   conclusion — multi-board reuse is not supported and must not be attempted now — is
+   therefore **reinforced from two directions**. The task's rule, *do not authorize
+   multi-board reuse from historical plans alone*, is satisfied trivially: **the historical
+   plans do not propose it.**
+2. **The archive contains two mutually incompatible data models for the same feature.**
+   `implementation_plan_PDF_Document_Integration.md` + patches 090–105 specify relational
+   tables. `implementation_plan_LLM.md` explicitly proposes to "**replace complex relational
+   tables (`pdf_pages`, `pdf_highlights`)**" with Markdown files in Storage plus a
+   `pgvector` index. **Both are present, neither is marked superseded, and the patch drafts
+   silently implement only the first.** Anyone reading the archive front-to-back could
+   implement either and believe it was the plan. Classification **8 — historical noise —
+   applies to the LLM variant until its author says otherwise**, but its existence means
+   *no* archive proposal may be cited as "the plan" without naming the file it came from.
+
+### 19h. Scrintal — the four categories kept strictly separate
+
+**§12's deliberately empty "verified Scrintal behavior" column stays empty.** The archive
+mentions Scrintal 19 times, and the task explicitly warned against treating that as
+verification. It is not.
+
+| Category | Content |
+|---|---|
+| **Historical archive proposals** | Bidirectional highlight↔note links (P0); backlink count on the card face; a "Sources"/backlinks panel on Note posts; page-thumbnail strip; note embedding as live reference rather than copy; "Combine Blocks into Docs" (P3); PDF embedded inside a Note post (P2) |
+| **Current user requirements** (from the PATCH-133 brief) | Links, backlinks, reusable documents, archive/search, multiple board appearances — all explicitly deferred |
+| **Current repository support** | **None of it.** No links table, no backlink index, no search index, no archive |
+| **Future architecture** | PATCH-138, still not authorizable |
+| **Verified external Scrintal behavior** | **EMPTY.** No Scrintal product was inspected by this diagnosis or, on the available evidence, by the archive's author |
+
+`review_and_improvements.md:4` says "**Reviewed against:** Heptabase, Scrintal PDF/Document
+feature sets", and `implementation_plan_PDF_Document_Integration.md:40` says features "were
+discovered through research of Scrintal, Heptabase, Logseq, Obsidian, LiquidText,
+MarginNote, Readwise, Zotero". **Those are claims of research, not citations of it** — no
+URL, version, date, or screenshot appears anywhere in the archive. A second model asserting
+a competitor's behavior is not verification; **it is the same unverified claim with one more
+hop of provenance.** Recorded because promoting it would be the easiest and most invisible
+way to manufacture evidence in this entire review.
+
+### 19i. Strongest conflicts with current repository truth
+
+1. **Sixteen patch-number collisions** with closed, accepted work (§19c). The most damaging
+   error available in this material, and the easiest to make.
+2. **Owner-only RLS on shared board content** (§19f) — three of four tables.
+3. **"No edit pencil for read-only users"** as a complete authorization design (§19f) —
+   independently repeating the defect §6b rejected.
+4. **Export with no permission tier** (§19f), proposing a **third** export implementation
+   into a repo that already has two (§8) — a direct P6 breach.
+5. **Two rival data models in one archive** (§19g).
+6. **Four missing dependencies presented as present** — `pdfjs-dist`, `react-pdf`, `canvas`,
+   `@tanstack/react-query`. `task.md` even records "*npm install failed due to excalidraw
+   versioning, but code assumes it's present*" — **an acknowledged unmet prerequisite
+   carried forward as an assumption.** The vendored Excalidraw fork that blocked that
+   install is still vendored.
+
+### 19j. Reusable architecture — what genuinely survives
+
+Retained as **method**, never as authorization, and never under its old number:
+
+- **One type-surface patch before all dependents** (090) — every later patch compiles
+  against a single agreed surface. Directly applicable to PATCH-134→137.
+- **`Result<T, DomainError>` + thin domain commands wrapping infra** (093, 094, 104).
+- **zod on every route input; no direct `.from()` in routes; repositories own queries**
+  (094, 101).
+- **Never `getSupabaseAdmin()` in a client hook** (102) — the archive's best contribution.
+- **Dependency inversion: domain declares the interface, infra implements** (104).
+- **Strangler discipline stated concretely** (098, 099) — new code uses `post.*`; legacy
+  props like `CardShell.padletId` are *not* renamed; new behavior arrives as a `case` in the
+  existing hook. This matches repo rule 9 and is directly reusable by PATCH-135.
+- **Keyboard shortcuts through `ActionRegistry`, never raw `addEventListener`** (105) —
+  `lib/collabboard/ActionRegistry.ts` exists. **Promoted into PATCH-134:** §11a recorded
+  that no tool has a shortcut today; if one is ever added, this is the mechanism.
+- **A documentation-only patch for subtle math** (097) — a legitimate governance shape.
+- **The card grammar** (098): thumbnail/icon + name + count + click-to-open, with a
+  live-fetched badge on the card face. **The nearest thing in the archive to a document card
+  spec, and it corroborates §11b's independently derived contract.**
+- **Modal over split-pane** — the archive reversed its own source article's side-by-side
+  design in favor of a modal, matching the user's request and §11c.
+
+### 19k. Superseded, unsafe, and noise
+
+- **Superseded (4):** the whole of `implementation_plan.md` by
+  `implementation_plan_PDF_Document_Integration.md`; the original pre-review patch bodies by
+  the `review_and_improvements.md` rewrites; the CDN worker by the local worker (GAP-2); the
+  side-by-side viewer by the modal.
+- **Unsafe without prerequisites (6):** every patch depending on the four absent
+  dependencies; 091's owner-only RLS; 093's native `canvas` build; 095's TanStack Query
+  assumption; 103's ungated export; 102's realtime, which depends on 091's schema.
+- **Historical noise (8):** the nine `.system_generated/*` files; the `implementation_plan_LLM.md`
+  rival model until explicitly revived; `implementation_plan.md`'s open questions, which its
+  own successor already answered.
+
+### 19l. Revised patch sequence
+
+**The §13 sequence is confirmed and unchanged in shape.** The archive supplies no evidence
+to move a boundary, because it addresses a different feature. Three refinements, each
+justified by archive evidence rather than by preference:
+
+| Patch | Change | Justification |
+|---|---|---|
+| **PATCH-134** | Unchanged scope. **Add:** if any keyboard shortcut is introduced, it registers through `ActionRegistry` | Archive 105; `ActionRegistry.ts` verified present |
+| **PATCH-135** | Unchanged scope. **Add:** adopt the 098 card grammar and its strangler naming rule — new code uses `post.*`, the legacy `CardShell.padletId` boundary gets an adapter comment and is **not** renamed | Archive 098; corroborates §11b; matches repo rule 9 |
+| **PATCH-136** | Unchanged, and its blocking prerequisite is **reinforced**. Two independent designs have now proposed hiding controls as the whole of read-only authorization | §19f |
+| **PATCH-137** | Unchanged. **Add** to its required first measurements: the §5a HTML-vs-plain-text question is **not** answered by the archive | §19g |
+| **PATCH-138** | Unchanged — still **not authorizable**. The archive's `note_post_links` shape is recorded as a **candidate** link model (a real table with board-scoped RLS, plus a panel listing links independently of embedded content), not as authorization | Archive 100, 101 |
+
+**PDF integration is NOT part of this sequence.** It is a separate feature with its own
+dependencies, its own storage, its own security review, and its own numbers — **new,
+unoccupied ones**. Folding it into the document sequence would repeat exactly the mistake
+§13 avoided when it removed export.
+
+### 19m. Remaining hard stops
+
+| Hard stop | Movement |
+|---|---|
+| Historical plans conflict with current schema | **RESOLVED → they do not, because they never address documents** (§19e). The PDF-specific conflicts in §19i belong to a future PDF patch, not to PATCH-134–137 |
+| Document body format unclear (§5a) | **UNCHANGED — still open.** The archive does not answer it |
+| Existing button has multiple responsibilities (§4) | **UNCHANGED** — archive silent |
+| Permission enforcement only in presentation code (§7) | **UNCHANGED, evidence strengthened** (§19f) |
+| Viewer/editor indistinguishable at board level (§7) | **UNCHANGED** |
+| One-file allowlist cannot satisfy PATCH-134 (§13) | **UNCHANGED** — the `CanvasClient.tsx` ceiling decision is still owed |
+| Import/export loses Drawing placement (§9a) | **UNCHANGED** |
+
+**One of nine hard stops resolved; six unchanged; two were never triggered.** The resolved
+one was the only one the archive could have touched.
+
+### 19n. Can PATCH-134 be authored?
+
+**Not yet — and the reason has narrowed to two decisions, neither of which needs more
+research.**
+
+Both are owner/architecture calls, not diagnostics:
+
+1. **The `CanvasClient.tsx` ceiling decision** (§13, §15). The file is 8,526 lines; repo
+   rule 3 forbids growing it; the tool registry lives inside it. Either a recorded ceiling
+   waiver for a minimal registry addition, **or** extract the create-tool registry first as
+   its own patch. **Until this is decided, PATCH-134's production allowlist cannot be
+   granted** — PATCH-129 §15b is the standing lesson against granting an allowlist the
+   authorized shape cannot satisfy.
+2. **The `ClipartCardDraftModal.test.tsx` label-assertion change** (§4f) must be explicitly
+   named in PATCH-134's test allowlist, because it is closed-patch evidence.
+
+Everything else PATCH-134 needs is now on record. **The §16 next-action list shortens from
+four items to two: items 1 (supply the archive) and 2 (the content-format question) are
+resolved and deferred respectively** — item 2 belongs to PATCH-137, not PATCH-134, and does
+not block toolbar work.
+
+**When 1 and 2 above are decided, PATCH-134 is authorable in the same turn.**
+
+### 19o. Status
+
+**PATCH-133: OPEN · ARCHIVE REVIEW COMPLETE · SOURCE CENSUS COMPLETE · ARCHITECTURE
+DECISIONS REQUIRED · IMPLEMENTATION BLOCKED · ARCHIVE IS A PDF-INTEGRATION PLAN, NOT A
+DOCUMENT-POST PLAN · ARCHIVED PATCH NUMBERS 090–105 VOID AS IDENTIFIERS · ZERO ARCHIVE
+PROPOSALS IMPLEMENTED · NO CONFLICT WITH THE FIFTEEN SOURCE-PROVEN FINDINGS · NOT PUSHED.**
+
+**PATCH-132 / 130 / 129 / 128: CLOSED — not modified or reopened. PATCH-131: OPEN · BLOCKED
+— not modified.** Snapshot branch `snapshot/pre-document-architecture-2026-08-02` and tag
+`pre-document-architecture-2026-08-02` both remain at `c0fa799` — **not modified.**
+
+### 19p. Recorded diagnostic notes
+
+- **A supplied archive's most valuable finding can be that it is about something else.**
+  The review was scoped to reconcile historical document plans against current source; the
+  reconciliation table came back silent on all fifteen points because "PFD" was "PDF" and
+  the material describes a different feature. **A negative result, stated plainly, is worth
+  more than a strained mapping** — the alternative was to force PDF-highlight architecture
+  onto a document-post patch and call it continuity.
+- **Numbered artifacts from outside the governance process are a collision hazard, and the
+  collision is silent.** Sixteen drafts each carried a "Fable 5 alignment" header and each
+  claimed a number belonging to closed, accepted work. Nothing in the files themselves
+  reveals the conflict; only checking the numbers against the real patch directory does.
+  **Verify identifiers against the registry before reading content — provenance first,
+  substance second.**
+- **The same authorization mistake was made twice, independently.** `CardEditor`'s read-only
+  mode hides controls and keeps the mutation path; the archive proposes "no edit pencil for
+  read-only users" for a new surface. Two designs, two authors, one failure mode.
+  **That is evidence the mistake is attractive, not that it is acceptable** — and it is the
+  strongest argument yet for §6b's type-level split, where the unsafe version does not
+  compile.
+- **An archive can disagree with itself.** Two rival data models sit side by side with
+  neither marked superseded, and one acknowledged unmet prerequisite ("npm install failed …
+  but code assumes it's present") is carried forward as an assumption. **Cite the file, never
+  "the archive"** — and treat a failed prerequisite recorded in a checklist as a blocker that
+  survived into the plan, not as a footnote.
