@@ -26,8 +26,13 @@ registerDrawingCleanup(test);
 
 let fixtureIndexCounter = 0;
 function nextFixtureFractionalIndex(): string {
+  const digits = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
+  const next = fixtureIndexCounter;
   fixtureIndexCounter += 1;
-  return `p132-${String(fixtureIndexCounter).padStart(6, '0')}`;
+  if (next >= digits.length) {
+    throw new Error('PATCH-132 fixture needs more valid Excalidraw order keys');
+  }
+  return `a${digits[next]}`;
 }
 
 function frameElement(id: string, name: string, x: number, y: number): Record<string, unknown> {
@@ -194,6 +199,17 @@ async function clickSlide(sidebar: Locator, title: string): Promise<void> {
   await row.locator('button').first().click();
 }
 
+async function dispatchSlideActivationWithoutActionability(row: Locator): Promise<void> {
+  const dispatched = await row.locator('button').first().evaluate((button) => (
+    button.dispatchEvent(new MouseEvent('click', {
+      bubbles: true,
+      cancelable: true,
+      view: window,
+    }))
+  ));
+  expect(dispatched).toBe(true);
+}
+
 // Waits for the warm-up thumbnail pass to fully settle (the "Generating previews…"
 // UI state, driven by PATCH-124's useSlideThumbnails isGeneratingAny), so later
 // "scrolling causes no new render" assertions aren't confounded by in-flight
@@ -295,17 +311,40 @@ test.describe('PATCH-132 active slide thumbnail auto-scroll', () => {
     const scrollTopBefore = await scroller.evaluate((el) => el.scrollTop);
     expect(scrollTopBefore).toBe(0);
 
+    // False-green guard, T0: the target row is attached but fully offscreen.
+    // The first activation must not use locator.click(), because Playwright's
+    // actionability checks scroll overflow ancestors before dispatching the
+    // click, which would make the production effect a no-op.
+    const targetRow = slideRowByTitle(sidebar, OFFSCREEN_SLIDE_TITLE);
+    await expect(targetRow).toBeAttached({ timeout: 30_000 });
+    expect(fullyOutside(targetRowBefore, containerBoxBefore)).toBe(true);
+    const activeIdsBeforeDispatch = await getSelectedElementIds(page);
+    expect(activeIdsBeforeDispatch).not.toEqual([offscreenFrameId]);
+
+    // False-green guard, T1: immediately before dispatching the DOM click,
+    // Playwright has not scrolled the sidebar and the row is still fully
+    // offscreen. The event below is a real DOM click event on the thumbnail
+    // button, but it bypasses Playwright actionability scrolling.
+    const scrollTopImmediatelyBeforeDispatch = await scroller.evaluate((el) => el.scrollTop);
+    const documentScrollImmediatelyBeforeDispatch = await page.evaluate(() => ({ x: window.scrollX, y: window.scrollY }));
+    const containerBoxImmediatelyBeforeDispatch = await box(scroller);
+    const targetRowImmediatelyBeforeDispatch = await box(targetRow);
+    expect(scrollTopImmediatelyBeforeDispatch).toBe(scrollTopBefore);
+    expect(documentScrollImmediatelyBeforeDispatch).toEqual(documentScrollBefore);
+    expect(fullyOutside(targetRowImmediatelyBeforeDispatch, containerBoxImmediatelyBeforeDispatch)).toBe(true);
+
     // Assertion 3 & 11: selecting the offscreen slide through the app's real
     // activation path changes the active slide, identified by stable frame ID
-    // (not array index) -- the only path in this codebase that sets
-    // activeSlideId from a user action besides slide creation (DrawingLayout.tsx
-    // handleActivateSlide, invoked here via the sidebar thumbnail's onClick).
-    await clickSlide(sidebar, OFFSCREEN_SLIDE_TITLE);
+    // (not array index). This invokes DrawingLayout.tsx handleActivateSlide via
+    // the thumbnail button's onClick without letting Playwright pre-scroll the
+    // sidebar.
+    await dispatchSlideActivationWithoutActionability(targetRow);
     await expect(slideCard(slideRowByTitle(sidebar, OFFSCREEN_SLIDE_TITLE))).toHaveClass(/border-violet-400/, { timeout: 15_000 });
     await expect.poll(() => getSelectedElementIds(page), { timeout: 15_000 }).toEqual([offscreenFrameId]);
 
-    // Assertion 4 & 5: the sidebar scroll container moved, and the active
-    // thumbnail is now fully visible (not merely partially).
+    // False-green guard, T2 / assertions 4 & 5: the sidebar scroll container
+    // moved only after activeSlideId changed, and the active thumbnail is now
+    // fully visible (not merely partially).
     await expect.poll(async () => {
       const containerBox = await box(scroller);
       const rowBox = await box(slideRowByTitle(sidebar, OFFSCREEN_SLIDE_TITLE));
