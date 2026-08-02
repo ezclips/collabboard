@@ -802,3 +802,111 @@ Snapshot branch `snapshot/pre-document-architecture-2026-08-02` and tag
   than a formality. **When a decision depends on an approximation, record the approximation's
   error and where the true value must be measured — never let the model's number and the real
   number be quoted interchangeably.**
+
+---
+
+## 18. Amendment — FIT GATE FAILED; OVERFLOW PREREQUISITE REQUIRED (2026-08-02, CTO)
+
+The §17d fit gate was executed. **It failed.** The one-line correction was measured and then
+**fully reverted** — no implementation remains, no commit was created, no production or test
+file is changed, nothing was pushed. Verified at `7dd5aab`: `canvasToolbarRegistry.tsx` has no
+`alwaysVisible` on the `structure` group, and the working tree contains only the five
+protected paths.
+
+**Classification: RESPONSIVE CORRECTION INSUFFICIENT · BROADER OVERFLOW PATCH REQUIRED.**
+
+### 18a. Measured real-DOM matrix (graph-enabled worst case, with the correction applied)
+
+| Viewport | `clientHeight` | `scrollHeight` | Toolbar bottom | Clipping | Library | Document |
+|---|---|---|---|---|---|---|
+| 1920×1080 | 1080 | 1080 | 884 | 0 | ✅ | ✅ |
+| 1440×900 | 900 | 900 | 642 | 0 | ✅ | ✅ |
+| 1366×768 | 768 | 768 | 642 | 0 | ✅ | ✅ |
+| **1280×720** | 720 | 720 | 642 | **0** | ✅ | ✅ |
+| **1024×600** | 600 | **672** | 641 | **41 px** | ✅ | ✅ — but **always-visible Settings is clipped** |
+
+**PATCH-125 passed unchanged** during the attempted correction.
+
+### 18b. What the measurement settles
+
+1. **§17d's prediction was right in both directions.** The graph-enabled configuration was
+   correctly identified as the worst case, and the correction *does* fit at 1280×720 — the
+   measured toolbar bottom is **642**, against my derived estimate of ≈ 654. Ten pixels of
+   margin was the right thing to refuse to assert. **Had the gate been waved through on the
+   estimate, 1280×720 would have passed and 1024×600 would have shipped broken.**
+2. **The correction is insufficient, not wrong.** It fixes the regression it targeted and
+   fails a viewport it never addressed.
+3. **⚠ The 1024×600 failure is almost certainly PRE-EXISTING, not caused by PATCH-134.**
+   Removing the `structure` group's ~49 real pixels from the measured 672 leaves ≈ 623,
+   still over the 544 available (600 − the 56 px title header). Under the model at HEAD:
+   `needed = 993`, `avail = 544`, all three collapsible groups collapse, and the surviving
+   always-visible set is still ≈ 669 model-pixels. **So the toolbar clips at 1024×600 today,
+   with or without PATCH-134's Document tool.** This is **derived, not measured** — it must be
+   confirmed at HEAD as PATCH-135's first measurement (§4a there). If confirmed, PATCH-134
+   introduced exactly one regression (Library at 1280×720), and PATCH-135 additionally repairs
+   a defect that predates it.
+
+### 18c. What is NOT authorized
+
+Per the review, and adopted verbatim: no further `alwaysVisible` flag; no hiding Settings; no
+deleting tools; no reducing hit-target sizes without accessibility review; no relying on
+browser clipping; no increasing test viewport height; no making the whole page scroll; no
+arbitrary responsive thresholds; no compressing labels until unreadable.
+
+**`structure.alwaysVisible = true` is withdrawn as an authorized correction.** §17d is
+superseded on that point; its diagnosis (§17b, §17c) stands unchanged.
+
+### 18d. Commits retained
+
+`923e644` (`refactor(canvas): extract toolbar registry`) and `e5bf95e`
+(`feat(canvas): add document creation tool`) **remain in place and are not reverted.**
+`e5bf95e` also carries the **empty-draft guard** in `hooks/canvas/usePadletSave.ts` (+22
+lines) — the §9a conditional allowlist exception, exercised because §4d's dismissal risk was
+confirmed real.
+
+The Document tool is therefore live and the Library regression is live with it. **That is a
+deliberate, recorded state**: reverting would also revert the extraction that PATCH-135 needs
+as its insertion point, and the owner has directed that the commits stand. **PATCH-134 cannot
+close, and no further document work may proceed, until PATCH-135 lands.**
+
+### 18e. Status
+
+**PATCH-134: OPEN · DOCUMENT TOOL IMPLEMENTED · REGISTRY EXTRACTION IMPLEMENTED ·
+EMPTY-DRAFT GUARD IMPLEMENTED · RESPONSIVE TOOLBAR REGRESSION CONFIRMED · ONE-LINE VISIBILITY
+CORRECTION PROVEN INSUFFICIENT · BROADER TOOLBAR OVERFLOW PREREQUISITE REQUIRED ·
+IMPLEMENTATION BLOCKED · NOT CLOSED.**
+
+Blocking prerequisite: **PATCH-135 — Responsive Canvas Toolbar Overflow.** Scope C (the "Card
+view" removal) remains blocked and re-sequenced — now into **PATCH-136** (§18f).
+
+Snapshot branch and tag remain at `c0fa799` — not modified.
+
+### 18f. Sequence renumbering
+
+A new prerequisite takes the number 135; the document sequence shifts by one. Historical
+planning numbers are non-authoritative (PATCH-133 §19c); this follows current evidence.
+
+| Number | Subject |
+|---|---|
+| **PATCH-135** | **Responsive canvas toolbar overflow** (new prerequisite) |
+| PATCH-136 | Document canvas-card presentation — **inherits Scope C**, the "Card view" removal, gated on the free-standing-card open affordance (§8, §16) |
+| PATCH-137 | Editor / read-only modal split + permission enforcement |
+| PATCH-138 | Document persistence, lifecycle, reconciliation, import/export |
+| PATCH-139 | Links, backlinks, archive, reusable multi-board appearances — still not authorizable |
+
+### 18g. Recorded diagnostic notes
+
+- **The gate earned its keep on its first use.** §17d refused to assert a ten-pixel margin and
+  demanded measurement. The margin turned out to be real at 1280×720 — the estimate was off by
+  12 px and in the safe direction — **and the matrix caught a different viewport failing
+  entirely.** The value was not in doubting the estimate; it was in measuring *more viewports
+  than the one the correction was aimed at.*
+- **A fix that passes its target case can still be the wrong fix.** `alwaysVisible` resolved
+  1280×720 exactly as designed. It was rejected because it moves a group from "collapsible" to
+  "unconditionally consuming height" in a budget that is already over-subscribed at the
+  smallest supported viewport. **Adding to the always-visible set is not a correction
+  strategy; it is deferred debt with a smaller viewport's name on it.**
+- **The investigation surfaced a defect older than the patch under review.** The 1024×600
+  clipping appears to predate PATCH-134 entirely. **Recorded as derived-not-measured and
+  handed to PATCH-135 as its first measurement**, rather than quietly folded into this patch's
+  blame or quietly fixed without being named.
