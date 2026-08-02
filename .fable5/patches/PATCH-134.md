@@ -910,3 +910,182 @@ planning numbers are non-authoritative (PATCH-133 §19c); this follows current e
   clipping appears to predate PATCH-134 entirely. **Recorded as derived-not-measured and
   handed to PATCH-135 as its first measurement**, rather than quietly folded into this patch's
   blame or quietly fixed without being named.
+
+---
+
+## 19. Amendment — CLOSED; FINAL INDEPENDENT ACCEPTANCE REVIEW PASSED (2026-08-02, CTO)
+
+Final independent acceptance review returned **PASS WITH NON-BLOCKING OBSERVATIONS**.
+**PATCH-134 is CLOSED.**
+
+### 19a. Commits
+
+| Commit | Role |
+|---|---|
+| `923e644` | `refactor(canvas): extract toolbar registry` — Scope A |
+| `e5bf95e` | `feat(canvas): add document creation tool` — Scope B + the empty-draft guard |
+| `af7e6ff` · `cc6c1e6` | PATCH-135 prerequisite implementation |
+| `7183ae0` | **PATCH-135 closure** — the blocking prerequisite, now satisfied |
+
+Governance: PATCH-134 §1–§18; PATCH-135 §16.
+
+### 19b. The blocking failure is resolved
+
+PATCH-134 §18e recorded a single blocking acceptance failure: the responsive Library
+regression, with the one-line correction proven insufficient. **PATCH-135 resolved it.**
+
+**At 1280×720:** Document directly visible · Library directly visible **on the rail** ·
+PATCH-125's original real-rail locator still valid · no hidden duplicate · Library uses the
+real production click path · no clipping.
+
+**At 1024×600:** Document reachable · Library reachable · Settings reachable through More ·
+no capability disappears · More remains visible · no rail/menu duplication · no clipping.
+
+**§8's PATCH-125 decision — keep Library directly on the rail rather than invent a
+compatibility path — held under measurement.** The alternative would have required a hidden
+duplicate, which §7 of PATCH-135 forbade outright.
+
+### 19c. Scope A — extraction, accepted
+
+Independently verified: **`923e644` changed exactly two files** — `CanvasClient.tsx`
+(−128/+13) and the new `canvasToolbarRegistry.tsx` (+154).
+
+**The commit contains zero occurrences of "Document" or "FileText."** The refactor is
+genuinely behavior-preserving and contains none of the feature it was making room for.
+**Repo rule 8 — "a refactor PR with behavior diffs is two PRs" — was honored literally**, and
+that is what makes the extraction reviewable in isolation.
+
+Preserved: existing IDs, labels, icons, groups, order and visibility rules. Callbacks and
+command ownership stayed outside the registry; no persistence, placement, modal state or
+Supabase ownership moved. `buildCanvasToolbarGroups(flags)` is pure — **§3b's central claim,
+that the registry was already 100 % declarative, is confirmed by the resulting diff.**
+
+**Line-count gate met: `CanvasClient.tsx` 8,436 → 8,339 = 97 lines removed**, against the
+§3f requirement of ≥ 90. **Refusing the growth waiver produced a smaller god-component, not
+merely a differently-shaped one.**
+
+### 19d. Scope B — Document tool, accepted
+
+Stable ID/type `document` · label **Document** · icon `FileText` · order
+`AI · Note · Document · To-do · Comment · Table` · appears exactly once · reuses the existing
+workspace edit gate with no new predicate · **no `ActionRegistry` shortcut** (§6) · **no new
+database document type** — the persisted post type remains `card`.
+
+**Freeform path:** toolbar click → `type:'card'` draft → `CardEditor` → `saveCard` →
+`getNewPostPosition(180, 220)` → persisted 180×220 card, visible on canvas. **No direct
+handler call and no database injection was introduced** — the §10a false-green protection held.
+
+**Drawing path:** toolbar click → `CardEditor` → `saveCard` → `checkPlacementRequired` →
+`onDrawingPlacementStart` → placement prompt → New Container → `type:'card'` child with
+existing parent-child behavior.
+
+**Both paths run through the existing pipeline exactly as §4a selected.** No new creation
+command was written, and the §4b deviation to 180×220 — deliberately unlike the sibling arms'
+280×250, to match `saveCard`'s own insert — is present and correct.
+
+### 19e. Empty-draft guard — accepted as correctly narrow
+
+§4d flagged the dismissal risk as *measure, do not assume*. It was measured, confirmed real,
+and fixed under the §9a conditional allowlist exception (+22 lines in `usePadletSave.ts`).
+
+It fires only when `id === 'new'` **and** title, body and description are all empty **and**
+there is no meaningful metadata, clipart, SVG or attachment content. It does **not** block
+clearing an existing card, suppress meaningful metadata-only cards, affect other post types,
+swallow save failures, or leave modal state inconsistent.
+
+**This is the P3 outcome §4d was protecting:** the user cannot create content they did not
+intend, and cannot lose content they did.
+
+### 19f. Scope C — NOT delivered, and closing does not deliver it
+
+**PATCH-134 closes with Scope C unfulfilled.** The misleading "Card view" entry is still
+present — verified at `CardActionsToolbar.tsx:79`.
+
+That is the correct outcome, not an oversight. §0b/§7 proved the entry is the **only** editor
+opener for a free-standing Freeform card; §16 narrowed that to *free-standing* (container
+children have an indirect path via the Container Editor); §8 re-sequenced the removal into the
+document-card patch, gated on a real open affordance.
+
+Confirmed preserved: a free-standing Freeform card still exposes Card view, and it opens the
+editable `CardEditor`; `ClipartCardDraftModal` still exposes Card view and its edits still flow
+through `onChange`; `CardActionsToolbar` and `CardPreview` are unchanged.
+
+**Scope C is inherited by PATCH-136** and must be gated there on the free-standing-card open
+affordance — proven on a free-standing card, never on a container child (§16).
+
+### 19g. PATCH-135 interaction — no disturbance
+
+Independently verified: **zero commits after `af7e6ff` touched `CanvasClient.tsx`,
+`canvasToolbarRegistry.tsx` or `usePadletSave.ts`.** PATCH-135 changed only
+`CanvasSidebar.tsx` and its own spec, leaving Document creation commands, toolbar order,
+placement behavior, the PATCH-134 test and the PATCH-125 test untouched.
+
+### 19h. Test and validation
+
+The PATCH-134 spec is accepted as real-UI coverage for: tool identity and order; Freeform
+creation; Drawing placement; parent-child creation; permission-hidden toolbar; free-standing
+Card view access; Clipart Card view preservation; backdrop **and** explicit-close empty-draft
+suppression; no shortcut; no new document database type; isolated repeat-safe fixtures. **No
+false-green mechanism was identified.**
+
+`npx tsc --noEmit` clean · `ClipartCardDraftModal` **45 passing** · `CardPreview` **24
+passing** · `git diff --check` clean · implementation-time PATCH-134 tests previously passed.
+
+**Review-time E2E execution remained blocked by the inherited PATCH-128 §34m production-build
+failure. Classification: SHARED PRE-EXISTING ENVIRONMENT FAILURE — NOT a PATCH-134
+implementation or test-logic failure.**
+
+**Stated plainly, as in PATCH-132 §20f and PATCH-135 §16g:** this closure rests on prior green
+implementation runs, the accepted PATCH-135 responsive review, source and test inspection, and
+unit/typecheck/diff verification — **not on a review-time green.** That is weaker than usual
+and is accepted on the strength of the other four legs. **This is now the third consecutive
+patch closed without a review-time E2E run. The inherited build failure is its own defect and
+needs its own patch; three closures leaning on it is a trend, not a footnote.**
+
+### 19i. Non-blocking observations
+
+1. **`CanvasSidebar.tsx` retains unused `OVERHEAD_H` and `GROUP_H`** (PATCH-135 §16g.4).
+   Dead-code cleanup for PATCH-136 or a maintenance patch. **Not removed during this
+   closure** — that file is not on PATCH-134's allowlist, and closing a patch is not a licence
+   to edit.
+2. **Review-time E2E unavailability** — §19h.
+
+### 19j. Status
+
+**PATCH-134: CLOSED · TOOLBAR REGISTRY EXTRACTED · DOCUMENT CREATION TOOL IMPLEMENTED ·
+FREEFORM AND DRAWING FLOWS VERIFIED · EMPTY-DRAFT PERSISTENCE PREVENTED · CARD VIEW PRESERVED ·
+RESPONSIVE PREREQUISITE RESOLVED BY PATCH-135 · INDEPENDENT REVIEW PASSED WITH NON-BLOCKING
+OBSERVATIONS · NOT PUSHED.**
+
+Implementation commits: **`923e644`**, **`e5bf95e`**. Prerequisite: **PATCH-135 closed at
+`7183ae0`**.
+
+**PATCH-135: CLOSED. PATCH-133: OPEN** — the document architecture census, still the governing
+source for the sequence. **PATCH-132 / 130 / 129 / 128: CLOSED — not modified or reopened.
+PATCH-131: OPEN · BLOCKED — not modified.**
+
+Snapshot branch `snapshot/pre-document-architecture-2026-08-02` and tag
+`pre-document-architecture-2026-08-02` remain at `c0fa799` — **not modified.**
+
+**Next: PATCH-136 — document canvas-card presentation**, carrying (a) the deferred Scope C
+removal gated on a free-standing-card open affordance, and (b) the `GROUP_H`/`OVERHEAD_H`
+cleanup. Then **137** modal split → **138** persistence → **139** links/backlinks/archive.
+
+### 19k. Recorded diagnostic notes
+
+- **The two-commit split was worth insisting on.** `923e644` contains zero occurrences of the
+  feature it enabled, so "did the extraction change behavior?" was answerable by reading one
+  diff. Had the tool been added in the same commit, the responsive regression that surfaced
+  days later would have been indistinguishable from an extraction defect. **Separating
+  mechanical from behavioral change is not tidiness; it is what makes a later regression
+  attributable.**
+- **A patch can close with a scope undelivered, provided the deferral is loud.** Scope C was
+  authorized, then blocked by its own hard stop, then re-sequenced twice, and PATCH-134 closes
+  without it. **The failure mode to avoid is a closure summary that reads as if the original
+  scope shipped** — §19f exists so the next reader finds "Card view" still on screen and knows
+  why, rather than concluding the patch silently failed.
+- **Three consecutive closures now rest on an inherited build failure.** Individually each
+  classification is correct; collectively they mean the characterization suite has not been
+  independently exercised in three patches. **Recorded as an escalation, not absorbed as
+  routine** — the point of naming an environment failure is to keep it visible, and visibility
+  decays if the note is identical every time.
