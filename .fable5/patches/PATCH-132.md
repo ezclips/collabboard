@@ -1,6 +1,11 @@
 # PATCH-132 — Scalable presentation-thumbnail rendering and active-slide visibility
 
-**Status: OPEN · DIAGNOSIS INCOMPLETE · IMPLEMENTATION BLOCKED**
+**Status: OPEN · SOURCE FINDINGS C/E CONFIRMED · SERIAL FIFO HEAD-OF-LINE RISK
+CONFIRMED · UNCHANGED-SLIDE SUPPRESSION INTACT · MANY-SLIDE RUNTIME UNMEASURED ·
+YOUTUBE FAILURE LAYER UNCLASSIFIED · BOARD ACCESS REQUIRED · IMPLEMENTATION BLOCKED**
+
+> See **§16** (2026-08-02) for the formal blocked-reproduction record, the four
+> competing implementation cases (§16c), and the unblock routes (§16f).
 
 Authored 2026-08-02 by CTO (governance and diagnosis only). Starting HEAD verified at
 **`83f9a11`** (`610c141` plus all PATCH-130 closure and documentation commits, plus the
@@ -350,3 +355,134 @@ Next action is §11.
 properties of undefined (reading 'length')` (PATCH-128 §34m); the shared-`.next` hazard;
 and Drawing Layout's inherited 2000 × 1500 Freeform stage at `CanvasClient.tsx:6354`
 (PATCH-130 §6a).
+
+---
+
+## 16. Amendment — BLOCKED ON BOARD ACCESS (2026-08-02, CTO)
+
+Formal record of the blocked reproduction attempt and of what is nevertheless settled.
+
+**Result: BLOCKED ON BOARD ACCESS. Implementation remains BLOCKED.**
+
+### 16a. Access failure
+
+Board **`a3c92898-ca21-488d-9b28-4107415e1ee6`** is **not accessible to the
+`LIVE_ACCESS` diagnostic account.** The authenticated diagnostic session receives
+**"Canvas not found"** — confirmed at 15 s, 25 s and 30 s, with zero canvases mounted
+and no Excalidraw instance.
+
+The diagnostic account has access only to one Freeform board, one Wall board, and the
+**four-slide Drawing board** used during PATCH-129/130.
+
+**The four-slide board is not a valid substitute**, because on it: every slide card is
+visible; there is no meaningful offscreen thumbnail set; no many-slide queue contention
+exists; it does not contain the reported slow YouTube/embedded slide; active-slide
+auto-scroll through a long list cannot be exercised; and visible / overscan / hidden
+scheduling cannot be distinguished.
+
+**No substitute measurements were used.** Numbers from a board that cannot exhibit the
+defect would have looked like evidence and been worth nothing — the §10 false-green
+standard applied to diagnosis rather than to a test.
+
+### 16b. Source-backed findings — certain, and independent of the board
+
+1. **No visibility awareness.** The thumbnail-list pipeline contains no
+   `IntersectionObserver`, `overscan`, virtualization, active-card visibility,
+   `requestIdleCallback` or `scrollIntoView`. The single `loading="lazy"` occurrence
+   concerns images **inside rendered slide content**, not sidebar-card scheduling.
+2. **No active-slide priority input.** `useSlideThumbnails` receives no `activeSlideId`,
+   no visible or near-visible slide IDs, and no sidebar scroll state. **Prioritization
+   is impossible with the current interface** — this is a signature-level fact, not a
+   policy choice.
+3. **Serial FIFO rendering.** A `for` loop with `await` per slide; concurrency is
+   effectively **one**. **The excessive-concurrency hypothesis is rejected.** The
+   structural risk runs the other way: serial FIFO → no visibility priority → offscreen
+   changed slides can run before the active or visible slide → one complex slide causes
+   **head-of-line blocking**.
+4. **PATCH-128 remains intact.** Changed-signature suppression, the trailing settled
+   delay, and stale-result rejection are all present and correct; unchanged slides do no
+   work. **PATCH-128 must not be classified as broken.**
+5. **Hidden-slide work.** Unchanged hidden slides do not render; **changed** hidden
+   slides can, and are not visibility-prioritized. **How many signatures the user's
+   actual operation changes remains unmeasured.**
+
+### 16c. Why implementation stays blocked — four live cases
+
+The implementation *shape* depends on the missing measurement, and the four candidates
+call for materially different repairs:
+
+| Case | Condition | Implied repair |
+|---|---|---|
+| **A** | one interaction changes **one** signature | lag dominated by one expensive slide; **queue prioritization may suffice** |
+| **B** | one interaction changes **several** signatures | **visibility gating / deferred hidden work** may be necessary |
+| **C** | YouTube slide renders **before embedded content is ready** | **prioritization alone will not fix the blank result** |
+| **D** | render completes but **image update/decode is delayed** | **scheduling changes would target the wrong layer entirely** |
+
+**Do not choose among these without runtime evidence from a representative board.**
+Case D is the sharpest warning: it is the one where the intuitively correct repair —
+reordering the queue — would be work spent on a layer that is not failing.
+
+### 16d. Root-cause ledger
+
+| Claim | Status |
+|---|---|
+| **C** — no active/visible priority | **SOURCE-PROVEN** |
+| **E** — no active-slide auto-scroll | **SOURCE-PROVEN** |
+| **I** — too many concurrent renders | **REJECTED** |
+| Serial head-of-line blocking | **SOURCE-PROVEN RISK** |
+| Hidden **changed**-slide rendering | **SOURCE-PROVEN** |
+| Actual many-slide lag mechanism | **UNPROVEN** |
+| YouTube blank-slide failing layer | **UNPROVEN** |
+
+Two findings are certain, and they are the two the user described most concretely. The
+*lag itself* — the actual complaint — is unattributed.
+
+### 16e. Virtualization — still not authorized
+
+**Full list virtualization is not authorized.** The smallest likely design remains:
+active-slide `scrollIntoView`; `IntersectionObserver`-based visibility classification;
+visible-and-active render priority; small near-visible overscan; deferred hidden changed
+slides.
+
+**Provisional** until runtime measurement determines whether **card mounting** or
+**thumbnail generation** is the dominant cost. Those point at different solutions —
+mounting cost argues for windowing, generation cost argues for queue policy — and
+nothing measured so far separates them.
+
+### 16f. Unblock requirement
+
+PATCH-132 may continue when **one** of the following is provided:
+
+1. **grant the `LIVE_ACCESS` diagnostic account access to board
+   `a3c92898-ca21-488d-9b28-4107415e1ee6`** — **preferred**, because it contains the
+   actual slow embedded slide and the observed lag;
+2. duplicate or share an equivalent many-slide board into the diagnostic account;
+3. provide a seeded fixture with **≥ 15 slides**, several complex slides, enough slides
+   to create offscreen cards, **one embedded or video-like slide**, and stable content
+   suitable for repeated timing measurements.
+
+Route 1 is materially better than route 3: a seeded fixture would be built from my
+assumptions about what makes a slide expensive, and the YouTube slide's failing layer
+(§16c cases C and D) is exactly the thing those assumptions would most likely get wrong.
+
+### 16g. Status
+
+**PATCH-132: OPEN · SOURCE FINDINGS C/E CONFIRMED · SERIAL FIFO HEAD-OF-LINE RISK
+CONFIRMED · UNCHANGED-SLIDE SUPPRESSION INTACT · MANY-SLIDE RUNTIME UNMEASURED · YOUTUBE
+FAILURE LAYER UNCLASSIFIED · BOARD ACCESS REQUIRED · IMPLEMENTATION BLOCKED.**
+
+**No production allowlist granted** (§10). **PATCH-131: OPEN · BLOCKED · not modified.
+PATCH-130 / 129 / 128: CLOSED — not modified or reopened.**
+
+### 16h. Recorded diagnostic note
+
+- **An inaccessible reproduction target is a hard blocker, not a reason to approximate.**
+  Two patches in a row have now stopped at the point where further autonomous work would
+  have meant inventing the evidence — PATCH-131 §20 for want of a user reproduction, and
+  PATCH-132 for want of board access. In both, the source analysis was strong enough that
+  producing a confident-sounding authorization would have been easy. **The standard is
+  the same either way: a repair needs a measured failing case.**
+- **Diagnostic-account scope is a standing constraint worth planning around.** The
+  `LIVE_ACCESS` account sees three boards; user-reported defects will routinely live on
+  boards it cannot reach. Consider whether defect reports should carry a shared-board
+  step, so the blocker is resolved before a diagnostic turn is spent discovering it.
