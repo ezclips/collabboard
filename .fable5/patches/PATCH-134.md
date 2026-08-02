@@ -564,3 +564,241 @@ Consequences:
   gives the successor patch a sharper test** — here, that the affordance must be proven on a
   free-standing card. An unnamed exception would have surfaced later as a reviewer's doubt
   about the whole blocking argument.
+
+---
+
+## 17. Amendment — RESPONSIVE LIBRARY REGRESSION CONFIRMED; NARROW CORRECTION AUTHORIZED (2026-08-02, CTO)
+
+Independent review of the PATCH-134 implementation returned **FAIL — RESPONSIVE TOOLBAR
+REGRESSION**. **The finding is confirmed.** PATCH-134 is **not closed**.
+
+Implementation commits under review: `923e644` (`refactor(canvas): extract toolbar registry`)
+and `e5bf95e` (`feat(canvas): add document creation tool`). HEAD at amendment: `e5bf95e`.
+
+### 17a. Implementation state — the authorized scopes landed correctly
+
+| Contract | Result |
+|---|---|
+| Registry extracted to `canvasToolbarRegistry.tsx` | ✅ present, 5,934 bytes |
+| `CanvasClient.tsx` net reduction ≥ 90 lines (§3f) | ✅ **8,436 → 8,339 = 97 lines** |
+| Create order `AI · Note · Document · To-do · Comment · Table` | ✅ registry `:95-100` |
+| Document tool shape (`FileText`, `text-sky-700`, `type: "document"`) | ✅ registry `:97` |
+| Two-commit split (refactor, then feature) | ✅ |
+
+**The regression is not a defect in either authorized scope.** The extraction is
+behavior-preserving; the tool definition matches §4c exactly. The regression is a
+**second-order consequence** of the sixth Create tool interacting with a collapse threshold
+neither scope touched — which is precisely why §4c's mobile/overflow row required the fit to
+be verified at a small viewport, and why that verification was insufficiently pursued.
+
+### 17b. The regression, independently reproduced from source
+
+`CanvasSidebar.tsx:37-38, 62-86`:
+
+```
+OVERHEAD_H = 105
+GROUP_H(n) = 20 + n * 44
+needed = OVERHEAD_H + Σ GROUP_H(group)
+collapse candidates = groups where !alwaysVisible && priority > 1, highest priority number first
+```
+
+Freeform board, editor role, share-manager, no graph mode:
+
+| Group | Tools | `GROUP_H` | Priority | `alwaysVisible` |
+|---|---|---|---|---|
+| canvas | 2 | 108 | 1 | ✅ |
+| create | **5 → 6** | **240 → 284** | 2 | ✅ |
+| structure (**Library**) | 1 | 64 | 4 | ❌ |
+| media | 4 | 196 | 5 | ❌ |
+| draw | 1 | 64 | 6 | ❌ |
+| share | 1 | 64 | 7 | ✅ |
+| settings | 1 | 64 | 8 | ✅ |
+
+`needed`: **905 before → 949 after.** Collapse order by descending priority:
+**draw (64) → media (196) → structure (64).**
+
+With `avail ≈ 664` (720 viewport − the 56 px `CANVAS_TITLE_HEADER_HEIGHT`):
+
+- **Before:** `canSave = 905 − 664 = 241`. draw → 177; media → **−19**, loop breaks.
+  **Library survives.**
+- **After:** `canSave = 949 − 664 = 285`. draw → 221; media → 25; **25 > 0 → structure
+  collapses.** **Library is gone.**
+
+**The review's 240 → 284 figures and its collapse-order conclusion are exactly reproduced.**
+The single 44 px increment crosses the threshold with 25 model-pixels to spare — the
+narrowest possible margin.
+
+`CanvasSidebar.tsx:120`: `if (collapsedIds.has(group.id)) return null;` — **confirmed. A
+collapsed group is removed from the DOM.** There is no overflow menu, no More button, no
+keyboard path, no touch path, no secondary access. **Library becomes completely
+inaccessible.**
+
+### 17c. Findings recorded as required
+
+| Finding | Verdict |
+|---|---|
+| Document remains visible because Create is `alwaysVisible` | **CONFIRMED** — registry `:103` |
+| Library was visible before PATCH-134 at 720 px | **CONFIRMED** — §17b |
+| Library is absent from the DOM after PATCH-134 at 720 px | **CONFIRMED** — `return null`, not `display:none` |
+| PATCH-125's failure correctly identifies lost Library access | **CONFIRMED** — `patch-125-shared-reaction-picker.spec.ts:124-126` asserts the Library tool is visible **and clicks it**; the config uses `devices['Desktop Chrome']` = **1280×720** with no override. This is a genuine product assertion at exactly the affected viewport, **not** a stale characterization detail |
+| Extraction did not independently alter spacing or collapse behavior | **CONFIRMED** — `CanvasSidebar.tsx` untouched by `923e644`; `GROUP_H`/`OVERHEAD_H` unchanged |
+| The additive sixth Create tool crossed the existing threshold | **CONFIRMED** |
+| Media and Draw were already collapsed at this viewport | **CONFIRMED** |
+| No collapsed-group affordance exists | **CONFIRMED** |
+
+**Classification: product regression. `Library` is a core structural tool with no alternative
+path, and P3/repo-rule-10 territory — a user at the default supported viewport silently
+loses a capability.**
+
+### 17d. Correction — AUTHORIZED, with a fit condition that must be measured first
+
+**Authorized:** mark the `structure` group `alwaysVisible: true` in
+`components/collabboard/canvas/ui/canvasToolbarRegistry.tsx`. **One property, one file.**
+
+The rationale is accepted in full: an overflow system needs new interaction design,
+accessibility, mobile behavior, focus handling, tests and files; PATCH-134 is a Document
+integration patch, not a toolbar redesign; Library was accessible at 720 px and must remain
+so.
+
+**But rationale item 5 — "the measured always-visible set remains within the supported 720 px
+height" — is NOT yet established, and my own arithmetic says it is close enough to fail.**
+
+Under the sidebar's **own** model, after the correction at `avail ≈ 664`:
+
+```
+always-visible = 105 + 108 + 284 + 64 + 64 + 64 = 689
+collapsible savings = draw 64 + media 196 = 260  →  949 − 260 = 689
+689 > 664  →  the model overflows by ~25 px, and no further group is eligible
+```
+
+The algorithm cannot collapse an `alwaysVisible` group, so it collapses everything it may and
+**stops while still over budget**. The sidebar is `overflow-visible` (`:97`) — **it does not
+scroll.** An over-budget sidebar therefore clips or overlaps rather than scrolling.
+
+**However, the model is not the DOM.** Derived from the rendered Tailwind classes
+(`:122-129` — `gap-1`, `text-[9px] leading-none` label, `w-9 h-9` = 36 px tools, outer
+`gap-3`, `py-6`), the real always-visible height is approximately:
+
+```
+48 (py-6) + 17 (back) + 89 (canvas) + 249 (create) + 49 (structure) + 49 (share)
++ 49 (settings) + 32 (collapse btn) + 7 × 12 (gap-3)  ≈  654
+```
+
+**≈ 654 ≤ ≈ 664 — it fits, by roughly ten pixels.**
+
+The two numbers disagree because **`GROUP_H(n) = 20 + 44n` overestimates the real
+≈ `13 + 40n`** — about 4 px per tool plus 7 px per group. On the six-tool Create group alone
+the model is ~35 px pessimistic.
+
+**This has a sharp consequence worth stating plainly: the regression is partly an artifact of
+an inaccurate height model, not purely a real shortage of space.** The sixth tool added
+44 model-pixels but only ~40 real pixels, and it crossed a threshold the model had already
+biased low. **Correcting `GROUP_H` is NOT authorized here** — it would change unrelated
+responsive thresholds across every layout, breaching correction-contract item 13. It is
+recorded for a future toolbar patch.
+
+**Binding condition on the correction.** My ≈ 654 figure is **derived from class names, not
+measured in a browser.** It is within ~10 px of the limit, and any of these makes it fail: a
+global app header above the canvas area, a taller title header, a third canvas-specific tool
+(graph mode adds "Graph Line" → +40 px real), or a layout with a larger canvas group.
+
+**Therefore: the §17e viewport matrix must be measured on the real UI BEFORE the correction
+is accepted.** If the always-visible set does not fit at any supported viewport, **STOP and
+request a broader toolbar-overflow patch** — do not force clipping. This is the review's own
+escalation rule, and it is live, not theoretical.
+
+**Specifically flagged for measurement: Freeform with graph mode enabled** (`isFreeformGraphMode`
+→ a third canvas tool). That configuration is ~40 real pixels worse than the one computed
+above and is the most likely to fail.
+
+### 17e. Viewport matrix — required evidence
+
+Measured on the real UI, with a Freeform board (and, where noted, Drawing), recording per row:
+**visible groups · collapsed groups · Library present · Document present · clipping/overlap ·
+sidebar `scrollHeight` vs `clientHeight`.**
+
+| Viewport | Required outcome |
+|---|---|
+| 1920×1080 | existing layout preserved; nothing newly collapsed |
+| 1440×900 | existing layout preserved |
+| 1366×768 | Library present |
+| **1280×720** | **Library present and clickable; Document present; no clipping** — the regression viewport |
+| 1024×600 (or the narrowest supported practical viewport) | Library present, or an explicit STOP |
+| **1280×720, Freeform graph mode ON** | added by this amendment — the worst case (§17d) |
+
+`scrollHeight > clientHeight` on a container that cannot scroll **is** the clipping signal.
+Report the raw numbers, not a judgement.
+
+### 17f. Allowlists
+
+**Production — exactly 1 file:** `components/collabboard/canvas/ui/canvasToolbarRegistry.tsx`
+(add `alwaysVisible: true` to the `structure` group; nothing else).
+
+**Must NOT be edited:** `CanvasSidebar.tsx` (including `GROUP_H`/`OVERHEAD_H`) ·
+`CanvasClient.tsx` · `usePadletSave.ts` · `CardActionsToolbar.tsx` · any editor or modal file.
+
+**Tests:**
+
+- `e2e/characterization/patch-134-document-toolbar.spec.ts` — update **only** to add the
+  §17g assertions.
+- `e2e/characterization/patch-125-shared-reaction-picker.spec.ts` — **run FIRST, unchanged.**
+  **Expected to pass without edits** once Library is visible again. **It is allowlisted only
+  so that a still-failing run is investigated under an authorized path — not so it may be
+  edited.** Its `:124-126` Library assertion is correct and must survive verbatim. **Editing
+  it to accept Library disappearing is an automatic rejection.** Any edit requires stopping
+  and reporting first.
+
+### 17g. Correction contract — required assertions
+
+At **1280×720**, against the real sidebar: (1) Library present in the DOM, visible and
+**clickable**; (2) Document present; (3) Create order `AI · Note · Document · To-do ·
+Comment · Table`; (4) Media and Draw may still collapse per existing policy; (5) no
+always-visible group disappears; (6) no duplicate group; (7) no clipping — report
+`scrollHeight`/`clientHeight`; (8) the sidebar remains scroll-free, which is the existing
+contract (`overflow-visible`); (9) Library reachable by mouse, keyboard and touch through its
+normal button; (10) wider viewports unchanged; (11) narrower practical viewports do not hide
+Library; (12) no overflow menu or new interaction model; (13) no unrelated responsive
+threshold changed — `GROUP_H` and `OVERHEAD_H` byte-identical.
+
+Carried standard: **`--repeat-each=3`**.
+
+**False-green rejection:** Library in source but not in the rendered DOM · Library present but
+clipped below the viewport · the test raises viewport height to dodge the regression · the
+existing Library assertion removed · Library rendered with `display:none` · a mocked registry
+instead of the real sidebar · Document removed to restore fit · an optional group deleted ·
+collapse logic bypassed globally.
+
+### 17h. Status
+
+**PATCH-134: OPEN · DOCUMENT TOOL IMPLEMENTED · REGISTRY EXTRACTION IMPLEMENTED · RESPONSIVE
+LIBRARY REGRESSION CONFIRMED · NARROW RESPONSIVE CORRECTION AUTHORIZED · FIT AT 1280×720 MUST
+BE MEASURED BEFORE ACCEPTANCE · SCOPE C STILL BLOCKED AND RE-SEQUENCED TO PATCH-135 · NOT
+CLOSED · NOT PUSHED.**
+
+Snapshot branch `snapshot/pre-document-architecture-2026-08-02` and tag
+`pre-document-architecture-2026-08-02` remain at `c0fa799` — **not modified.**
+
+### 17i. Recorded diagnostic notes
+
+- **An additive change with no shared state still had a second-order consequence, through a
+  height budget.** Nothing in either commit touched `CanvasSidebar`, spacing, or collapse
+  logic; the sixth tool simply pushed a sum past a threshold and silently deleted a different
+  group from the DOM. **"Purely additive" describes the diff, not the behavior — anything
+  entering a fixed budget must be checked against the budget's consumers, not just its own
+  correctness.**
+- **§4c named this risk and the verification was not carried out.** The mobile/overflow row
+  said the group is `alwaysVisible` so never collapsed, "**but the overall fit must be
+  verified at a small viewport**." That sentence was right and was not executed. **A risk
+  recorded in a contract is not a risk mitigated; it needs an assertion attached, or it is
+  just a well-informed omission.** The §17e matrix is that assertion.
+- **The failing test was a product assertion wearing a characterization test's clothes.**
+  PATCH-125's spec clicks Library to open the external library — its failure reported a real
+  capability loss, not a stale expectation. **Before "updating" a characterization assertion
+  to match new behavior, check whether it asserts a capability; if it does, the new behavior
+  is the defect.**
+- **The model that decides collapse is ~4 px per tool more pessimistic than the DOM it
+  models.** The regression sits inside that error bar: 949 model-pixels vs ~654 real. So the
+  fix probably works, and probably-works is exactly why §17d makes measurement a gate rather
+  than a formality. **When a decision depends on an approximation, record the approximation's
+  error and where the true value must be measured — never let the model's number and the real
+  number be quoted interchangeably.**
