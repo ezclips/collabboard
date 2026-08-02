@@ -1162,3 +1162,292 @@ Snapshot and tag remain at `c0fa799`.
   in would have held the bridge hostage to an unresolved pointer-geometry question. **When
   one member of a batch turns out to be a different problem, the batch is the thing to
   change.**
+
+---
+
+## 19. Amendment — RESIZE-STATE OBSERVATION CONTRACT; BRIDGE SURFACE CLOSED (2026-08-03, CTO)
+
+Implementation stopped a second time, correctly, and reverted completely. Verified:
+PATCH-124 byte-identical to `5953533`; no vendored, `next.config.ts` or
+`serverLifecycle.ts` change; no commits; nothing pushed; worktree holds only the five
+protected paths.
+
+**The stop was right, and it caught a second gap in my own bridge census.**
+
+### 19a. The contradiction
+
+§17c authorized `getViewport()` limited to `scrollX`, `scrollY`, `zoom.value`,
+`offsetLeft`, `offsetTop`, `selectedElementIds`. **PATCH-128 reads a seventh field:**
+
+```
+patch-128-slide-sync.spec.ts:1127
+  resizingElementId: stateAfter?.resizingElement?.id ?? null,
+patch-128-slide-sync.spec.ts:1138
+  resizingElementId: embeddableId,          // the assertion
+```
+
+The authorized bridge cannot preserve that closed assertion. The implementation
+**refused to expose full `AppState`, refused a private surface, refused to weaken or
+delete the assertion, and refused to misfile `resizingElement` as viewport state.** All
+four refusals were correct.
+
+### 19b. What the PATCH-128 assertion actually proves
+
+Full context, `:1112-1140`:
+
+| Line | Step |
+|---|---|
+| `:1111` | `southeastResizeHandle(page, embeddableId)` computes the SE handle position |
+| `:1113` | `page.mouse.move(handle.x, handle.y)` — hover only |
+| `:1116-1117` | **before** the gesture: `stateBefore.selectedElementIds[id]` → `beforeSelected` |
+| `:1119-1121` | records `document.elementFromPoint(x, y)` as `eventTarget` |
+| `:1121-1131` | one-shot capture-phase `pointerdown` listener; inside `requestAnimationFrame`, samples `stateAfter` |
+| `:1127` | **`resizingElementId: stateAfter?.resizingElement?.id ?? null`** |
+| `:1128` | `selectedAfterDown` |
+| `:1134` | `page.mouse.down()` |
+| `:1136-1140` | `expect(pointerDownProof).toMatchObject({ beforeSelected: true, resizingElementId: embeddableId, selectedAfterDown: true })` |
+| `:1142-1144` | two `mouse.move` steps, then `mouse.up()` |
+| `:1146-1150` | poll: live element `width×height:version:versionNonce` **changed** |
+
+**Classification: B and C together, over A.** It proves **(B)** the pointer actually
+acquired the resize handle — not the canvas, not empty space, not a new element — and
+**(C)** that the resize lifecycle began **at pointerdown, before any movement**; and it
+binds both to **(A)** the *correct* element by asserting the id equals `embeddableId`.
+
+**This is a negative control for the gesture itself.** Without it, the later "dimensions
+changed" poll (`:1146`) could pass for a reason unrelated to a resize — a drag that moved
+and re-laid-out the element, a stray tool, a coincidental sync. **The assertion exists
+precisely so the completion evidence cannot be satisfied by the wrong mechanism.** It is
+in no sense an incidental internal read, and moving it to after `mouse.up()` — which would
+make it trivially accessible — **would destroy the property it proves.**
+
+### 19c. Full-source app-state census — all four specs
+
+Method, stated because two prior censuses failed: candidate sites located by searching
+`h.state`, `h?.state`, `getAppState`, `appState`, **bare `\bstate\b`** (catching aliases such
+as `stateBefore`/`stateAfter`/`const state =` regardless of the variable's name), then **every
+hit read in source**. Mutation absence established by **method-name** search
+(`updateScene`, `replaceAllElements`, `setState`, `.history`, `.store`, `.scene`), which is
+**alias-independent** and therefore sound for proving absence of those methods.
+
+**Every `h.<member>` touched by the four specs: `h.app`, `h.elements`, `h.state` — and
+nothing else.** The fork's debug object also carries `scene`, `setState`, `watchState`,
+`history` and `store` (`App.tsx:12407-12415`); **none of the five is used.**
+(`h.sceneVersionChanges`, `h.settledTimerSchedules`, `h.thumbnailRenderRequests` in
+PATCH-128 are that spec's own instrumentation counters — not members of the fork's `h`
+type. `h.abs`/`h.min`/`h.max`/`h.floor`/`h.round`/`h.imul` are `Math.*` matches.)
+
+| Spec | Field path | Reads | Assertion served | Category | DOM-replaceable? | Verdict |
+|---|---|---|---|---|---|---|
+| **128** | `zoom.value` | 2 (`:174`, `:207`) | scene↔screen conversion for canvas clicks | viewport geometry | no | `getViewport()` |
+| 128 | `offsetLeft` | 1 (`:175`) | same | viewport geometry | no | `getViewport()` |
+| 128 | `offsetTop` | 1 (`:176`) | same | viewport geometry | no | `getViewport()` |
+| 128 | `scrollX` | 1 (`:177`) | same | viewport geometry | no | `getViewport()` |
+| 128 | `scrollY` | 1 (`:178`) | same | viewport geometry | no | `getViewport()` |
+| 128 | `selectedElementIds` | 4 (`:192`, `:195`, `:1117`, `:1128`) | selection before/after pointerdown | selection | **partially** — the sidebar mirrors *slide* selection, not *scene element* selection | `getViewport()` |
+| **128** | **`resizingElement.id`** | **1 (`:1127`)** | **§19b gesture-acquisition proof** | **interaction lifecycle** | **no** — §19e | **`getInteractionState()`** |
+| **129** | — | **0** | — | — | — | **no app-state projection needed** |
+| **130** | `zoom.value`, `scrollX`, `scrollY`, `offsetLeft`, `offsetTop` | `:110-114`, `:233`, `:240`, `:245`, `:251` | frame→screen mapping; pan-stability | viewport geometry | no | `getViewport()` |
+| 130 | `selectedElementIds` | 1 (`:154`) | which frame is active | selection | no | `getViewport()` |
+| **132** | `scrollX`, `scrollY`, `zoom.value` | `:246-248` | canvas unchanged by sidebar scroll | viewport geometry | no | `getViewport()` |
+| 132 | `selectedElementIds` | 1 (`:257`) | active slide's frame | selection | no | `getViewport()` |
+
+**Union across all four = the six `getViewport()` fields + `resizingElement.id`. Exactly one
+field is ungoverned, and it is the one the implementation stopped on.**
+
+No collaborator data, no auth data, no UI state, no pointer coordinates, no raw elements are
+read from state anywhere in the four specs.
+
+**Residual limit, stated honestly:** method-name search proves absence of the *named*
+methods; it cannot prove absence of a method nobody thought to name. The `h.<member>`
+enumeration above closes that gap for this surface — the four specs touch three of the
+debug object's eight members, and all three are now fully accounted for. **I consider the
+bridge surface closed, and I have been wrong twice, so the readiness spec's §19h assertions
+are what will actually establish it.**
+
+### 19d. `resizingElement` is publicly typed — hard stop NOT triggered
+
+```
+excalidraw_fork/packages/excalidraw/types.ts:293
+  resizingElement: NonDeletedExcalidrawElement | null;
+```
+
+It is a member of the public `AppState` interface, and
+`ExcalidrawImperativeAPI.getAppState()` (`types.ts:850`) returns
+`InstanceType<typeof App>["state"]` — i.e. that `AppState`. **The projection reads a
+supported, typed, public field. No cast into private internals is required.**
+
+### 19e. Irreducibility — UI evidence is not equivalent
+
+Alternatives inspected and rejected:
+
+| Alternative | Why not equivalent |
+|---|---|
+| Element bounds change after movement | Already asserted at `:1146`. It proves a resize *happened*, **not** that the correct element entered resize state at pointerdown — the exact gap `:1127` closes |
+| Resize-handle DOM | Excalidraw renders handles **to canvas**, not DOM. There is nothing to query |
+| Cursor state | `cursor` is a CSS property of the canvas element; it does not identify *which* element is being resized |
+| Pointer capture | Captured by the canvas, not per element — no element identity |
+| Selection state | Already captured (`beforeSelected`, `selectedAfterDown`); selection ≠ active resize |
+| Production callback behavior | The app's own change handlers fire after mutation, i.e. too late for a pointerdown-time proof |
+
+**Conclusion: irreducible.** The preferred outcome applies — **retain the accepted assertion
+through a narrow interaction projection.**
+
+### 19f. Final bridge API
+
+```
+window.__COLLABBOARD_E2E__ = {
+  version: 1,
+  instanceId,
+  getSceneElements(),
+  getViewport(),
+  getInteractionState(),
+  getSceneRevision(),
+  subscribeToSceneChange(callback),
+}
+```
+
+`getViewport()` returns **exactly**
+`{ scrollX, scrollY, zoom: { value }, offsetLeft, offsetTop, selectedElementIds }`.
+
+`getInteractionState()` returns **exactly** `{ resizingElementId: string | null }`.
+
+**The two objects must not be merged.** Viewport geometry and interaction lifecycle are
+separate contracts with different stability and different reasons to change; merging them
+is how `getViewport()` would acquire a seventh field, then an eighth.
+
+Semantics for `getInteractionState()`: frozen defensive object · reads
+`api.getAppState().resizingElement?.id ?? null` · **never returns the element**, only the id ·
+no geometry, handles, pointers, group state, collaborators or UI state · `null` when idle ·
+the current id during an active resize gesture · no setters · no mutation · no raw `AppState`
+· no raw API.
+
+**Explicitly prohibited, now and in future amendments:** `getAppState()`,
+`getInternalState()`, `getStateField(path)`, `inspectApp()`, or any accessor parameterised by
+a field name. **The projection stays explicit and closed** — a path-parameterised getter would
+re-create the very surface these two hard stops removed.
+
+### 19g. Line limit — raised to 180, deliberately
+
+§17l bounded `lib/e2e/productionBridge.ts` at 150 lines for five members. A sixth member adds
+the projection, its frozen return, its type, and its declaration — roughly 15–25 lines.
+
+**Authorized limit: 180 lines.** The brief is explicit that unreadable code must not be
+forced to preserve an old number, and compressing a security-boundary module is exactly the
+wrong economy. **No helper file is authorized** — splitting a 180-line module would scatter
+the boundary across two files and make "what does the bridge expose?" a two-file question.
+If the implementation exceeds 180, **stop and report** rather than compress.
+
+### 19h. Readiness-spec additions
+
+Beyond §17m's twenty items, `patch-136-production-readiness.spec.ts` must prove, **against a
+real resize gesture on a real element — never a mocked `AppState`**:
+
+1. `getInteractionState` exists **only** in the E2E-enabled build;
+2. its return has **exactly one key**, `resizingElementId` (assert `Object.keys().length === 1`);
+3. the returned object is **frozen**;
+4. idle value is `null`;
+5. **pointerdown on a real SE resize handle** yields the expected element id;
+6. after pointerup/resize completion it returns to `null`;
+7. no full `resizingElement` object is reachable;
+8. no full `AppState` is reachable;
+9. the returned object cannot be mutated (assignment throws or has no effect);
+10. ordinary production chunks still exclude the bridge (**bundle-content grep**, §17k).
+
+### 19i. PATCH-128 migration mapping
+
+| Old | New |
+|---|---|
+| `h.state.selectedElementIds[id]` (`:1117`, `:1128`) | `bridge.getViewport().selectedElementIds[id]` |
+| `h.state.resizingElement?.id` (`:1127`) | `bridge.getInteractionState().resizingElementId` |
+| `getAppState()` helper (`:152-157`) → `zoom/offset/scroll` | `bridge.getViewport()` |
+| `h.elements` / `getSceneElements()` | `bridge.getSceneElements()` |
+| `h.app.onChangeEmitter.on(...)` (`:447`) | `bridge.subscribeToSceneChange(...)` (§17d) |
+| local `waitForHarness` (`:146-150`) | shared `waitForE2EBridge` |
+
+**Preserved exactly:** the hover-then-`pointerdown` sequence; the capture-phase one-shot
+listener inside `requestAnimationFrame`; the assertion's position **before** `mouse.down()`
+resolves and **before** any movement; the same expected element id; the same two `mouse.move`
+steps and `mouse.up()`; the same `beforeSelected`/`selectedAfterDown` negative controls; the
+same completion poll. **The check must not be moved after resize completion to simplify
+access** (§19b).
+
+**PATCH-130 and PATCH-132: fully covered by `getViewport()`** — confirmed field-by-field in
+§19c. **No interaction field is added for them.** **PATCH-129 uses no app-state projection at
+all** — readiness plus `getSceneElements()` only.
+
+### 19j. Security
+
+The addition exposes **one string or `null`**: the id of an element **already present in the
+scene the user is viewing in their own browser**, during a gesture **that user is
+performing**. No content beyond that id, no collaborator data, no raw element, no geometry,
+no pointer coordinates, no command interface, no persistence access, no authorization change.
+The bridge still performs no network I/O and holds no Supabase client, so **it cannot bypass
+RLS because it never speaks to the network**. Build-time `NEXT_PUBLIC_E2E_BRIDGE` gating and
+the bundle-grep exclusion proof are unchanged.
+
+### 19k. Allowlists — unchanged
+
+**Production, exactly 3:** `lib/e2e/productionBridge.ts` (new, **≤180 lines**) ·
+`components/collabboard/canvas/layouts/DrawingLayout.tsx` (registration effect only) ·
+`types/e2e-bridge.d.ts` (new). **No additional production file is required** — the projection
+reads the public API the host already holds. Vendored fork, `next.config.ts`,
+`serverLifecycle.ts`, `CanvasClient.tsx`, persistence, Supabase and all feature code remain
+excluded.
+
+**Test, exactly 6:** `patch-136-production-readiness.spec.ts` (new) · `e2eBridge.ts` (new
+shared helper) · PATCH-128 · PATCH-129 · PATCH-130 · PATCH-132.
+**PATCH-124 remains excluded — PATCH-137.** No PATCH-134/135 edit.
+
+### 19l. Hard stops
+
+| Hard stop | Verdict |
+|---|---|
+| `resizingElement` unavailable through the supported public `AppState` | **NOT triggered** — `types.ts:293` (§19d) |
+| Another ungoverned state field found | **NOT triggered** — union is six + one (§19c) |
+| A migrated spec requires mutation | **NOT triggered** — §18b; the only mutator is PATCH-124, split out |
+| Assertion requires raw element or raw API | **NOT triggered** — an id string suffices (§19f) |
+| UI equivalence impossible and the projection unsafe | **NOT triggered** — irreducible **and** safe (§19e, §19j) |
+| Bridge line/file limits no longer viable | **NOT triggered** — 150 → 180, no helper file (§19g) |
+| Ordinary bundle exclusion weakened | **NOT triggered** — gate unchanged (§19j) |
+
+**Zero of seven triggered.**
+
+### 19m. Status
+
+**PATCH-136: OPEN · BUILD TRACK RESOLVED · OBSERVATION BRIDGE AUTHORIZED · INTERACTION-STATE
+PROJECTION AUTHORIZED · FOUR MIGRATIONS AUTHORIZED (128, 129, 130, 132) · PATCH-124 SPLIT INTO
+PATCH-137 · NOT PUSHED.**
+
+**PATCH-137: OPEN · PATCH-124 PRIVATE-MUTATION REMOVAL · FEASIBILITY SPIKE REQUIRED ·
+BLOCKED.** Sequence: 136 → 137 → **138** document card → **139** modal split → **140**
+persistence → **141** links/backlinks.
+
+**Track A: RESOLVED PROCEDURALLY. PATCH-135 / 134 / 132 / 130 / 129 / 128 / 124: CLOSED — not
+modified or reopened. PATCH-133: OPEN. PATCH-131: OPEN · BLOCKED.** Snapshot and tag remain
+at `c0fa799`.
+
+### 19n. Recorded diagnostic notes
+
+- **Two stops, two censuses, two different blind spots — and both censuses were mine.**
+  §17a missed an aliased `app.updateScene`; §18b's app-state work missed
+  `state.resizingElement` because it enumerated the fields I expected a viewport projection to
+  need. **The second failure was not a repeat of the first: the first was a pattern that
+  couldn't see through an alias, the second was a census that answered "which viewport fields
+  are read?" instead of "which state fields are read?"** A census answers the question it
+  asks; the question has to be the general one.
+- **The assertion that blocked the bridge is the one that makes the test honest.**
+  `resizingElement.id` at pointerdown is a negative control: it proves the gesture grabbed the
+  right handle, so the later "dimensions changed" evidence cannot be satisfied by a drag, a
+  stray tool, or a coincidental sync. **The cheapest resolution — move the check after
+  `mouse.up()` where the state is easy to read — would have preserved the line and destroyed
+  the proof.** Access convenience and assertion meaning are unrelated properties.
+- **A one-field projection is the whole design decision.** The alternatives were exposing
+  `AppState` (hundreds of fields, collaborators included) or adding a seventh key to
+  `getViewport()` (which would have made the object a grab-bag and the next field an easy
+  precedent). **Keeping interaction state in its own two-key-free object is what makes the
+  eighth field an amendment rather than a detail.**
+- **I raised my own line limit rather than compress a security boundary.** 150 was a guess
+  made before the sixth member existed. **A limit that forces unreadable code in the one
+  module whose readability *is* the control has stopped doing its job** — the honest move is
+  to move the number and say why.
