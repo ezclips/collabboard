@@ -1,8 +1,17 @@
 # PATCH-132 — Scalable presentation-thumbnail rendering and active-slide visibility
 
-**Status: OPEN · CORRECT IMPORTED BOARD ACCESS MANUALLY VERIFIED · 14-SLIDE DRAWING
-BOARD AVAILABLE · SOURCE FINDINGS C/E CONFIRMED · SERIAL FIFO HEAD-OF-LINE RISK
-CONFIRMED · MANY-SLIDE RUNTIME DIAGNOSIS AUTHORIZED · IMPLEMENTATION BLOCKED**
+**Status: OPEN · ACTIVE-SLIDE AUTO-SCROLL DEFECT REPRODUCED · ONE-SLIDE
+CHANGED-SIGNATURE SUPPRESSION PROVEN · CROSS-SLIDE UPDATE BOUNDED TO SOURCE AND
+DESTINATION · QUEUE PERFORMANCE DEFECT NOT REPRODUCED · VIRTUALIZATION NOT JUSTIFIED ·
+YOUTUBE FAILURE LAYER UNCLASSIFIABLE ON IMPORTED BOARD · NARROW IMPLEMENTATION
+AUTHORIZED**
+
+> **§19 supersedes the performance framing of §4–§10.** Runtime measurement resolved
+> §5a as Case A (one interaction → one signature → one render) and measured thumbnail
+> work at 0.8–2.0 ms per slide, so **§4c's head-of-line-blocking risk did not
+> materialize** and priority scheduling, visibility gating and virtualization are all
+> **declined**. The **only** authorized repair is active-slide thumbnail auto-scroll in
+> `PresentationPanel.tsx` (§19g).
 
 > **Diagnostic board: `0c65aa8e-99a0-4c82-9816-4c838526b838`** — the imported copy of the
 > reported board, manually verified (**§18**). The original board
@@ -727,3 +736,222 @@ or reopened**, and specifically **not** reopened by §18b's staleness note.
 - **The blocker was resolved by the user changing the world, not by another retry.** §17c
   gated further automated attempts on manual verification precisely so the next action
   would be a real change rather than a third identical failure. That gate worked.
+
+---
+
+## 19. Amendment — RUNTIME DIAGNOSIS COMPLETE; NARROW REPAIR AUTHORIZED (2026-08-02, CTO)
+
+Result of the §18d runtime diagnosis on the imported board
+`0c65aa8e-99a0-4c82-9816-4c838526b838`.
+
+**Result: STILL PARTIALLY DIAGNOSED. One bounded defect reproduced and authorized for
+repair. Broad thumbnail-performance work is NOT authorized.**
+
+### 19a. Runtime inventory
+
+| Property | Value |
+|---|---|
+| Slides | **14** |
+| Mounted thumbnail cards | **14** — all mounted |
+| Fully visible | **3** |
+| Partly visible | 1 |
+| Near-visible (250 px overscan) | 1 |
+| Fully offscreen | **9** |
+| Sidebar `clientHeight` | ≈ 834 px |
+| Sidebar `scrollHeight` | ≈ 3041 px |
+| Card height | ≈ 204.3 px |
+| Card images | `loading="auto"` |
+
+**Three fully visible cards** confirms §4e's source-derived estimate of 3.2–3.7 and the
+user's "approximately three". The §9 responsive target is therefore grounded in
+measurement, not arithmetic.
+
+### 19b. Changed-signature behaviour — §5a answered; **Case A**
+
+| Operation | Signatures changed | Thumbnails rendered | Image src updates |
+|---|---|---|---|
+| Move within Slide 1 | **exactly Slide 1** | **1** | 1 |
+| Move within Slide 2 | **exactly Slide 2** | **1** | 1 |
+| Cross-slide move | **exactly source + destination** | **2** | source then destination |
+
+**PATCH-128 settlement and changed-signature suppression are working.**
+
+This resolves §5a decisively as **§16c Case A**: one interaction changes one signature.
+**Do not add another debounce. Do not change signature computation. Do not broaden
+thumbnail regeneration.**
+
+The consequence is large. §16c predicted that Case A versus Case B would demand opposite
+repairs, and Case A removes the entire justification for visibility gating: there is no
+crowd of changed hidden slides to gate.
+
+### 19c. Queue findings — the structural risk did **not** materialize
+
+**Confirmed as source predicted:** concurrency is one; full refresh is sequential in
+slide-array order; no active-slide priority; no visible-slide priority; forced refresh
+includes offscreen slides.
+
+**Not reproduced:** material head-of-line blocking; meaningful queue waiting; expensive
+hidden-slide contention; thumbnail generation as the dominant lag source.
+
+Measured `toDataURL` work: **≈ 0.8–2.0 ms per slide** on this board.
+
+**This corrects the emphasis of §4c and §16d.** I recorded serial FIFO head-of-line
+blocking as a **SOURCE-PROVEN RISK** and called it "the strongest structural candidate"
+for the user's complaints. The *structure* is exactly as described — that part stands —
+but at 0.8–2.0 ms per render the serial queue is harmless at this scale, and the risk I
+weighted most heavily is not the defect. **A correctly identified structural weakness is
+not evidence of the reported symptom**, and I gave it more evidential weight than a
+source reading can carry.
+
+**Therefore NOT authorized:** priority scheduling; visibility-gated rendering; idle
+hidden-slide scheduling; queue restructuring; concurrency changes.
+
+### 19d. Active-slide auto-scroll — **CONFIRMED DEFECT**
+
+Selecting the distant slide **"09 · Ratchet"** while its thumbnail was fully offscreen:
+
+| Measurement | Value |
+|---|---|
+| Sidebar `scrollTop` before | **0** |
+| Sidebar `scrollTop` after | **0** |
+| Page scroll | unchanged |
+| Active thumbnail | **remained outside the visible sidebar region** |
+
+Source contains no active-thumbnail `scrollIntoView`. **§4a's classification E is now a
+reproduced, bounded UX defect** — the only one of the two source-certain findings that
+turned out to matter. (Classification **C**, no priority, is real and harmless per §19c.)
+
+### 19e. YouTube / embedded — **UNCLASSIFIABLE ON THIS BOARD**
+
+The imported board contains a YouTube URL as a **link padlet**
+(`3bd27989-e472-47f7-890d-2d3d5baaaf0b`), but **no Excalidraw embeddable/video/iframe
+scene element survived the import**, and no scene element maps to that link padlet's
+parent.
+
+**Classification: YOUTUBE FAILURE LAYER UNCLASSIFIABLE ON THIS IMPORTED BOARD.**
+
+§18c required this be checked first and reported as unclassifiable rather than silently
+skipped, precisely because an export/import round trip is the operation most likely to
+drop embedded content. It did. §5b remains open and **cannot be closed from this board**.
+
+**Not authorized:** embedded readiness handling; retries; arbitrary waits;
+video-specific thumbnail changes. Any future work on the blank-embedded-slide report
+needs the original board or an equivalent that retains a live embeddable element.
+
+### 19f. Virtualization — **NOT JUSTIFIED**
+
+All 14 cards mount, but no material mounting, layout or re-render cost was demonstrated,
+and sidebar scrolling triggered **zero thumbnail renders and zero additional idle
+renders**.
+
+§5d is answered: mounting is not the dominant cost. **§8's provisional design is
+withdrawn except for its `scrollIntoView` element.** No list windowing and no
+virtualization dependency is authorized.
+
+### 19g. AUTHORIZED REPAIR — active-slide thumbnail auto-scroll only
+
+**Production allowlist — one file:**
+
+| File | Scope |
+|---|---|
+| `components/presentation/PresentationPanel.tsx` | active-thumbnail auto-scroll only |
+
+**Verified sufficient before granting:** the sidebar scroll container (`L334`), the slide
+card map (`L341`), the card button (`L375`) and the `SlideThumbnail` mount (`L378`) are
+all **inline in `PresentationPanel.tsx`**, and `useRef` is already imported (`L3`). The
+repair therefore needs no other file. This check was done deliberately — PATCH-129 §15b
+is the standing lesson against an allowlist the authorized shape cannot satisfy.
+
+**If implementation nonetheless finds the active card or scroll container defined in a
+directly extracted child component, STOP and request an allowlist amendment before
+editing it.**
+
+**Explicitly NOT authorized:** `useSlideThumbnails.ts`; `slideThumbnailRefresh.ts`;
+`SlideThumbnail.tsx`; signature logic; render queues; image loading; virtualization;
+embedded-media behaviour.
+
+**Test allowlist — one new file:**
+`e2e/characterization/patch-132-thumbnail-visibility.spec.ts`. **Do not modify the
+PATCH-128, PATCH-129 or PATCH-130 specs.**
+
+### 19h. Expected behaviour (governed)
+
+When `activeSlideId` changes:
+
+1. identify the thumbnail card **by stable slide ID**;
+2. inspect its bounds relative to the sidebar scroll container;
+3. if fully visible, **do nothing**;
+4. if partly or fully outside, scroll **only the sidebar container**;
+5. use nearest-edge alignment or equivalent **minimal movement**;
+6. **do not scroll the document**;
+7. do not scroll repeatedly when `activeSlideId` has not changed;
+8. do not fight manual scrolling unless `activeSlideId` changes;
+9. reselecting an already visible slide must cause **no drift**;
+10. **preserve PATCH-130 canvas navigation behaviour.**
+
+### 19i. Acceptance tests — mandatory
+
+Use a representative Drawing board with enough slides that the target active thumbnail
+**begins fully offscreen**. Assert:
+
+1. selecting an offscreen slide from the canvas changes `activeSlideId`;
+2. the sidebar scroll container moves;
+3. the active thumbnail becomes **fully** visible;
+4. document/page scroll position does not change;
+5. selecting an already visible slide causes no scroll movement;
+6. reselecting the same active slide causes no drift;
+7. selecting a distant slide scrolls by the minimum practical amount;
+8. manual sidebar scroll is not reversed while `activeSlideId` is unchanged;
+9. behaviour uses **stable slide ID, not array index**;
+10. slide order and selection unchanged;
+11. PATCH-130 canvas navigation remains functional;
+12. sidebar scrolling alone causes **no** thumbnail regeneration;
+13. no continuous scroll loop at idle.
+
+**False-green rejection:** the test calls an internal scrolling function directly; fixed
+sleeps as sole synchronization; the page scrolls instead of the sidebar; the target card
+is already visible before selection; slides identified only by index; the active card is
+merely *partly* visible; scrolling recurs without `activeSlideId` changing; thumbnail
+updates disabled; any PATCH-128/129/130 test modified.
+
+Carried standards: acceptance evidence must live in the committed suite; the test must
+prove the mechanism was entered before asserting the outcome; **`--repeat-each=3`**.
+
+### 19j. Status
+
+**PATCH-132: OPEN · ACTIVE-SLIDE AUTO-SCROLL DEFECT REPRODUCED · ONE-SLIDE
+CHANGED-SIGNATURE SUPPRESSION PROVEN · CROSS-SLIDE UPDATE BOUNDED TO SOURCE AND
+DESTINATION · QUEUE PERFORMANCE DEFECT NOT REPRODUCED · VIRTUALIZATION NOT JUSTIFIED ·
+YOUTUBE FAILURE LAYER UNCLASSIFIABLE ON IMPORTED BOARD · NARROW IMPLEMENTATION
+AUTHORIZED.**
+
+**PATCH-131: OPEN · BLOCKED · not modified. PATCH-130 / 129 / 128: CLOSED — not modified
+or reopened.**
+
+**Commit contract.** Implementation: `fix(presentation): scroll active slide thumbnail
+into view`. Tests: `test(presentation): characterize active thumbnail auto-scroll`.
+**Do not push. Do not close PATCH-132.** The §12 hard stops, regression boundaries and
+protected-path rules are unchanged.
+
+### 19k. Recorded diagnostic notes
+
+- **A source-proven structural weakness is not evidence of the reported symptom** (§19c).
+  Serial FIFO with no priority is exactly as described in the code, and at 0.8–2.0 ms per
+  render it causes nothing. I ranked it the strongest candidate on structure alone; the
+  measurement demoted it. **Structural certainty and causal attribution are different
+  claims, and only the second justifies a repair.**
+- **The measurement shrank the patch rather than growing it.** Diagnosis began with a
+  performance brief spanning queues, virtualization, priority policy and embedded media,
+  and ends authorizing one auto-scroll behaviour in one file. **Refusing to authorize on
+  three earlier turns is what made that possible** — an implementation started from the
+  original hypothesis set would have built a priority scheduler and a virtualized list
+  that the evidence now says are unnecessary.
+- **The export/import caveat paid off** (§19e). §18c predicted the embedded element was
+  the thing least likely to survive and required it be checked first; it did not survive,
+  and the YouTube report remains open rather than being answered from a board that cannot
+  answer it.
+- **Two of the user's five proposals are not supported by evidence** — render-only-visible
+  thumbnails, and defer-hidden-previews. Both target a cost that measured 0.8–2.0 ms. The
+  auto-scroll proposal is confirmed, and the "avoid work while moving" proposal is
+  already implemented and working (§19b). **Recorded so the unbuilt proposals are visibly
+  declined with a reason, not quietly dropped.**
