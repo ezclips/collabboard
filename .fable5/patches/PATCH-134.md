@@ -521,3 +521,46 @@ CLOSED — not modified or reopened. PATCH-131: OPEN · BLOCKED — not modified
   reserved. Neither is wired. **Before honoring a convention "because the mechanism exists",
   verify the mechanism executes**; this codebase has now produced three decorative
   affordances (toolbar no-ops, formatting buttons, and this) by skipping that check.
+
+---
+
+## 16. Amendment — §7 refined: one indirect opener exists, for container children only (2026-08-02, CTO)
+
+A completed consumer census re-confirmed §7's file lists and line numbers exactly, and
+surfaced one call site §7 did not name:
+
+```
+components/collabboard/canvas/ui/CanvasModals.tsx:265-271
+  onOpenChildPadlet={(childId) => { … setIsContainerEditorOpen(false);
+                                    openPadletInTypeEditor(child); }}
+```
+
+This is the **Container Editor's child list**. It reaches `openPadletInTypeEditor`, and for
+`type: 'card'` that reaches `setIsCardEditorOpen(true)`.
+
+**Refinement, not refutation.** It is a second opener **only** for a card that is already a
+**container child**, and only via first opening that container's editor. It is unreachable
+for a free-standing Freeform card.
+
+Consequences:
+
+1. **§7's conclusion stands and Scope C remains BLOCKED.** `handleToolClick`'s Document arm
+   (§4b) creates a **free-standing** post unless a container context supplies `parentId`, so
+   the default product of this patch is exactly the case with no alternative opener — as are
+   all existing free-standing Freeform cards.
+2. **§7's wording is corrected** from "the only path to the edit-mode `CardEditor` for a card
+   post" to: **the only path for a free-standing Freeform card post; container children have
+   an additional indirect path through the Container Editor.**
+3. **PATCH-135 inherits a sharper acceptance bar.** When it removes the "Card view" entry
+   (§8), its new open affordance must be proven on a **free-standing** Freeform card, not on
+   a container child — a container child would pass while the real gap remained open.
+
+### 16a. Recorded diagnostic note
+
+- **A refuted claim and a narrowed claim need different handling, and the difference is worth
+  the ten minutes.** The extra call site was real and §7 had not named it; the reflex is
+  either to ignore it (the conclusion is unchanged) or to reopen the finding (something was
+  missed). Neither is right. **Naming the exception makes the remaining claim precise and
+  gives the successor patch a sharper test** — here, that the affordance must be proven on a
+  free-standing card. An unnamed exception would have surfaced later as a reviewer's doubt
+  about the whole blocking argument.
