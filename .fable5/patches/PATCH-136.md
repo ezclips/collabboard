@@ -1850,3 +1850,263 @@ Implementation is unblocked. §17g's gate mechanism is superseded by §20e/§20g
 - **The test that catches the governance error is worth more than the governance.** §17k's
   bundle-grep requirement is the only reason this was caught before merge. Write the
   falsifier into the spec, not only the intent.
+
+## 21. CLOSURE — PRODUCTION OBSERVATION BRIDGE (2026-08-03, CTO)
+
+Independent acceptance review: **PASS WITH NON-BLOCKING OBSERVATIONS.** Every claim below
+that is marked *verified here* was re-checked against source or re-executed by the CTO, not
+taken from the review summary.
+
+### 21a. Implementation commits
+
+| Commit | Subject |
+|---|---|
+| `ec17047` | `build(e2e): select observation bridge by artifact` |
+| `a1d6617` | `feat(e2e): add production observation bridge` |
+| `3bc69aa` | `test(e2e): migrate canvas specs to observation bridge` |
+| `b421e04` | `test(e2e): characterize observation bridge lifecycle` |
+
+`git diff --stat b37bc46 b421e04` = **14 files, +454 / −73** — *verified here*. Exactly the
+§20l allowlist: 6 production, 2 tooling, 6 test. **No file outside it was touched.**
+
+### 21b. Build track — closed
+
+The original production-build failure was **procedural, not a code defect**. A stale `.next`
+webpack filesystem-cache state produced the WasmHash failure (§16a). Current source builds
+successfully. **No application change and no dependency change was required** — the
+`next.config.ts` `node:` handling was a candidate that the owner's five-configuration A/B
+eliminated (§8, corrected). The clean-build procedure (§16e) and the process-lifecycle
+handling (§16i) remain **standing governance requirements**, not one-time fixes.
+
+### 21c. Build-time module selection — accepted
+
+Ordinary default `lib/e2e/bridgeRegistration.ts` is **4 lines** — *verified here*:
+`import type` only, one arrow returning a no-op cleanup. No global, no API strings, no
+diagnostic, no real-module import, no dynamic import, no client environment check.
+
+E2E target `lib/e2e/bridgeRegistration.e2e.ts` is selected **only** under
+`E2E_BRIDGE_BUILD=1`, through the exact absolute `$`-terminated alias key specified in §20e —
+*verified here, byte-for-byte*. No `@/…` request-string alias. No regex. **Ordinary builds
+install no bridge alias at all**, and no client module reads the flag.
+
+The readiness spec permanently encodes the §20f test-9 trap: it asserts `next.config.ts`
+**does not contain** `'@/lib/e2e/bridgeRegistration$'`. That is the right shape for a finding
+of this kind — the silent-failure mode is now a test, not a memory.
+
+Missing-real-module negative control: the E2E build **fails loudly** rather than falling back
+to the no-op.
+
+### 21d. Cache safety — accepted
+
+The existing cache version is preserved and appended with a deterministic
+`|collabboard-e2e-bridge:on|off` — *verified here*, and applied **unconditionally**, outside
+the `if`, which is what makes both directions safe. Both were exercised: E2E → ordinary stale
+bridge reuse, and ordinary → E2E stale no-op reuse.
+
+**Clean builds remain the required operational procedure** even though the cache key closes
+the §20f test-15 vulnerability. Two independent controls, because the demonstrated failure
+mode was an exit-0 build serving the wrong artifact with no warning.
+
+### 21e. Existing `next.config.ts` behaviour — unchanged
+
+*Verified here by diff.* `NormalModuleReplacementPlugin(/^node:/)`, the `resolve.fallback`
+block, the `if (!isServer)` scope and the ordering are untouched; all new blocks are appended
+after. `pptxgenjs` / `jspdf` `node:` handling is unaffected. **No conflict with bridge
+aliasing** — different mechanism, different resolution stage.
+
+52 → **76 lines**, within the ≤80 limit — *verified here*.
+
+### 21f. Ordinary artifact exclusion — accepted
+
+**Re-executed by the CTO, not accepted from the report:**
+
+```
+node scripts/e2e/assertBridgeExclusion.mjs
+Bridge exclusion proven across 891 emitted files.   EXIT=0
+```
+
+Zero bridge markers · no E2E artifact marker · no emitted real bridge chunk · no real bridge
+source or module reference · no API marker cluster · nothing in client or server surfaces.
+
+The script checks `BUILD_ID`, static chunks, server chunks, eight manifests, source maps
+where present (it reads every file under the scanned scopes), and **seven independent
+forbidden markers**, failing with exact per-file diagnostics. Its scope excludes `.next/cache`
+and `.next/trace` per §20j — correct, and justified there.
+
+### 21g. E2E artifact — accepted
+
+Build succeeds · marker file contains exactly `1` · real bridge markers in **exactly one**
+emitted canvas chunk · the exclusion script correctly **fails** against the E2E artifact ·
+missing-module negative control fails the build · the repository's final `.next` is
+**ordinary with no marker** — *verified here: `.next/E2E_BRIDGE_BUILD` absent*.
+
+### 21h. Bridge API — accepted, exactly seven members
+
+```
+window.__COLLABBOARD_E2E__ = { version, instanceId, getSceneElements, getViewport,
+                               getInteractionState, getSceneRevision, subscribeToSceneChange }
+```
+
+The readiness spec asserts the **exact sorted key list**, so an eighth member is a test
+failure rather than a review question. *Verified here by reading the implementation:* no
+`updateScene`, no `setState`, no raw Excalidraw API, no raw application object, no raw
+`AppState`, no generic state getter, no persistence, no network, no writable scene setter, no
+command invocation. `hasMutationSurface` is asserted `false`.
+
+Built on the supported `ExcalidrawImperativeAPI` only — `getSceneElements()`,
+`getAppState()`, `onChange()` returning unsubscribe. **No `onChangeEmitter`, no `window.h`,
+no private `App` instance, no vendored test hook, no undocumented cast** — *verified here:
+zero `window.h` references remain anywhere under `e2e/` outside PATCH-124.*
+
+**Scene snapshots:** `structuredClone` then recursive `Object.freeze` over the outer array,
+each element and nested reachable structures. Live references do not escape; snapshot
+mutation cannot reach the mounted scene.
+
+**Viewport:** exactly `scrollX`, `scrollY`, `zoom.value`, `offsetLeft`, `offsetTop`,
+`selectedElementIds`. Outer object, `zoom` and the cloned `selectedElementIds` all frozen. No
+seventh field, no collaborators, no raw `AppState`.
+
+**Interaction:** exactly `{ resizingElementId }`, sourced from the **public**
+`AppState.resizingElement` (§19d), id only, frozen, `null` when idle. No raw element, no
+pointer or UI internals.
+
+**Revision and subscription:** deterministic initial value · monotonic increments from public
+`onChange` · reads do not increment · callbacks receive a number only · listener exceptions
+isolated in a `try/catch` so a test observer cannot alter application behaviour · unsubscribe
+idempotent · Excalidraw subscription released on cleanup · listeners cleared on teardown ·
+stale listeners do not survive instance replacement.
+
+**Instance ownership:** `crypto.randomUUID()`, carrying no user or board information. Cleanup
+deletes the global **only when it still owns it**, so a late cleanup cannot remove a newer
+bridge. Reload and board navigation produce new IDs, both asserted. Simultaneous ownership
+**throws an E2E-only diagnostic** — §17j required ambiguity to be a failure, and it is; the
+incumbent bridge survives and no silent overwrite occurs.
+
+### 21i. `DrawingLayout.tsx` — accepted
+
+One invariant import, one registration effect keyed on `excalidrawAPI`, returning the
+cleanup. No environment branch, no feature behaviour change. **3514 → 3519 (+5)** — *verified
+here* — well inside the ≤ +20 limit.
+
+### 21j. The four migrations — accepted
+
+**PATCH-128.** Scene reads, viewport reads, interaction state and change observation all move
+to the bridge. The resize-handle assertion survives **in position**: after southeast-handle
+hover, inside the pointerdown capture / `requestAnimationFrame` sequence, after `mouse.down()`,
+**before movement and before pointerup**, against the same embeddable ID. §19b's negative-
+control property — that the later dimension poll cannot pass via a drag, a stray tool or a
+coincidental sync — is intact. This was the single most likely thing to be quietly lost, and
+it was not.
+
+**PATCH-129** — readiness and scene observation only; transport-only.
+**PATCH-130** — scene observations plus all six viewport fields; assertion semantics preserved.
+**PATCH-132** — scene observations, governed viewport fields, `selectedElementIds` retained as
+a scene-level assertion. **No DOM/CSS substitution** — §17i explicitly refused that
+simplification and the refusal held.
+
+Across all four: fixtures, viewports, real UI actions, expectations, negative controls and
+meaningful timing unchanged · no direct commands · no skips · no dev-server fallback · no
+`window.h`.
+
+### 21k. PATCH-124
+
+**Byte-identical** — *verified here*: `git diff b37bc46 b421e04 --` on the spec returns **0
+lines**. Excluded because it still performs private scene mutation via `app.updateScene`,
+governed separately by **PATCH-137**, which remains blocked on its feasibility spike.
+
+### 21l. Validation
+
+| Check | Result |
+|---|---|
+| `npx tsc --noEmit` | **exit 0** — *re-executed by the CTO* |
+| Bridge exclusion, 891 files | **exit 0, zero hits** — *re-executed by the CTO* |
+| Ordinary production build | passed |
+| E2E production build | passed |
+| E2E exclusion negative control | failed as expected |
+| PATCH-136 readiness spec | 4 passed |
+| Four migrated specs, one worker | 11 passed |
+| PATCH-136 + PATCH-128 focused repeat | 11 passed |
+| PATCH-128 Gate D alone | passed |
+| `git diff --check` | passed |
+| PATCH-124 byte identity | passed — *verified here* |
+| Playwright artifacts / ports 3000–3003, 3100 | clean |
+| Final `.next` | ordinary, no E2E marker — *verified here* |
+
+### 21m. Non-blocking observations
+
+**1 — Contention (from review).** PATCH-128 Gate D timed out once in a two-worker combined
+run, at the test level. Gate D uses neither the bridge subscription nor the interaction
+projection; it passed alone, in the full serial run and in focused repeat, and the React-fiber
+instrumentation is unchanged. **ORDINARY RESOURCE/TEST CONTENTION · NOT A PATCH-136 BRIDGE
+REGRESSION.** **Do not claim unrestricted parallel stability** — it has not been demonstrated
+and this closure does not assert it.
+
+**2 — Gate G instrumentation narrowed (CTO finding, not in the review).** Gate G previously
+derived a *content* revision (`JSON.stringify` of id/version/versionNonce/x/y/w/h/frameId/
+updated) and compared consecutive values to detect redundant `onChange` emissions carrying
+identical content. It now consumes the bridge's **monotonic counter**, which by construction
+never repeats. Therefore `unchangedRevisionOnChangeCalls` is now **structurally unreachable**
+and `sceneVersionChanges` is now just `totalExcalidrawOnChangeCalls − 1`.
+
+**Not a false green:** both counters are recorded but **never asserted** — the only Gate G
+onChange assertion is `totalExcalidrawOnChangeCalls > settledSetElementsCalls`, which the
+counter satisfies identically. *Verified here by grep across the full spec.* The risk is
+prospective: the two counters are now misleading dead instrumentation, and a future assertion
+written against `unchangedRevisionOnChangeCalls` would be **vacuously satisfied**. Follow-up
+for PATCH-137's spec pass: delete both counters, or restore content-revision derivation from
+`getSceneElements()` — do not leave them as decoration.
+
+**3 — `build:e2e` is Windows-`cmd` only (CTO finding).** The script is
+`set E2E_BRIDGE_BUILD=1&& next build`. On POSIX or CI this does **not** set the variable, so
+it produces an **ordinary** build under an E2E-looking name. It fails **safe**: the artifact
+gets the no-op, the marker file is absent, and every spec fails loudly at `waitForE2EBridge`.
+That is §20d's fail-toward-exclusion property behaving exactly as designed on the first
+unplanned occasion — worth recording as evidence the architecture choice was right. Before any
+CI use, replace with `cross-env` or a small node runner.
+
+**4 — A fifth `next.config.ts` block (CTO finding).** §20i enumerated four authorized
+additions; the implementation added a webpack `done`-hook plugin that writes
+`.next/E2E_BRIDGE_BUILD` on E2E builds and **removes it on ordinary builds**. **Accepted.** It
+implements the pre-existing §17h.6 marker requirement, writes only inside `.next` (never
+source — §20d's option-D rejection is not engaged), and the removal branch closes a stale-
+marker gap the manual procedure had. Style note: it uses `apply(compiler: any)`.
+
+**5 — Exclusion script reads every scanned file as UTF-8**, including binary assets under
+`static/media`. Harmless and wasteful only.
+
+**6 — Governance wording correction.** §20e stated `DrawingLayout.tsx` had zero pre-existing
+`@/` imports. **That was wrong** — the file uses `@/` imports throughout, and the new import
+correctly follows that convention. Root cause: the CTO's check was `grep 'from "@/'` with
+**double quotes** while the file uses single quotes. This is the same failure class as §17a
+and §18b — a pattern that cannot see the form the code actually takes, reported as absence.
+
+The security conclusion is **unaffected**: the alias key is an absolute resolved path
+precisely *because* request-string keys are unreliable here (§20f test 9), so the specifier
+style at the import site is irrelevant to the rule. **Governance wording correction, not an
+implementation defect.**
+
+### 21n. Status
+
+**PATCH-136: CLOSED · STALE BUILD CACHE ROOT CAUSE IDENTIFIED · ORDINARY PRODUCTION ARTIFACT
+EXCLUDES E2E BRIDGE · E2E ARTIFACT SELECTS OBSERVATION BRIDGE BY EXACT BUILD-TIME ALIAS ·
+CACHE MODE ISOLATION IMPLEMENTED · OBSERVATION-ONLY API IMPLEMENTED · FOUR CLOSED SPECS
+MIGRATED · PATCH-124 DEFERRED TO PATCH-137 · INDEPENDENT REVIEW PASSED WITH NON-BLOCKING
+OBSERVATIONS · NOT PUSHED.**
+
+### 21o. Recorded diagnostic notes
+
+- **Three hard stops, three governance defects, zero bad code merged.** Every stop was an
+  implementer refusing to proceed against a specification the CTO had got wrong: a census
+  blind to aliasing (§18), a census that asked the narrow question (§19), and an exclusion
+  mechanism that confused runtime gating with graph membership (§20). The stops are the
+  control that worked.
+- **Write the falsifier into the test, not the intent.** §17k's bundle-grep requirement caught
+  §17g's wrong premise; the readiness spec now asserts the *absence* of the failing alias
+  form, so §20f test 9 cannot be re-learned the hard way.
+- **Grep-shaped questions keep producing false absences here** — quote style this time, alias
+  binding and question scope before. Fourth occurrence. Absence claims in this repository
+  must come from reading the affected file or from a form-independent method; a pattern that
+  finds nothing has proven nothing.
+- **Fail-safe direction is worth more than rule elegance**, and it paid out immediately: a
+  platform-specific npm script silently produced an ordinary build, and because exclusion is
+  the default the result was a loud test failure rather than a shipped bridge.
