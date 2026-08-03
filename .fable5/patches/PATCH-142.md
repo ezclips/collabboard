@@ -375,3 +375,280 @@ SETTLE) · PATCH-137 §20f HYPOTHESIS REFUTED · NARROW IMPLEMENTATION AUTHORIZE
 - **"Settled" needs a completeness predicate, not a quiet interval.** The landscape thumbnail on
   this fixture never reached complete content without an unrelated edit — a real user-visible
   defect that no test asserted and no timeout would have caught.
+
+## 21. Amendment — RENDER-HOST READINESS BOUNDED (2026-08-03, CTO)
+
+**Trigger:** implementation hard stop — *overlay readiness source not bounded*. The slide-local
+ordinal repair was shown implementable inside the existing allowlist (typecheck clean, 24
+focused unit tests passing), then fully reverted. No commits, nothing pushed, PATCH-124 and the
+PATCH-136 bridge untouched, worktree holds only the five protected paths.
+
+The stop was correct: **the four authorized files cannot observe raster readiness.** Image URLs,
+resolved padlet ids, signature membership and scene elements are all *logical* data; none of
+them proves overlay DOM creation, final geometry, image decode or paint. Using them as readiness
+would be a false green.
+
+**Retained unchanged:** RC-1 (global scene ordinal contaminates slide-local signatures) · RC-2
+(overlay version/geometry changes are real visual inputs) · RC-3 (incomplete thumbnails are
+accepted because host readiness is unrepresented) · and the §3 refutation — `renderedRef` is not
+the root cause, the scheduler and acceptance logic were observed working, all instrumented
+renders were accepted, retry behaviour is valid.
+
+### 21a. The hard stop's premise about ownership is wrong — corrected
+
+The brief located the readiness owner "around `DrawingLayout.tsx`, the offscreen thumbnail
+renderer host, overlay/card/image render components". Source says otherwise.
+
+**`components/presentation/slide-renderer/createSlideRenderer.tsx` (360 lines) is the offscreen
+renderer host, and it is self-contained.** Inside `renderPadletOverlayToCanvas` it:
+
+| Line | Behaviour |
+|---|---|
+| `:70-79` | **creates its own detached host `<div>`** at `left:-100000px`, sized to the frame |
+| `:125-185` | **mounts its own React root** into that host and renders every overlay wrapper itself, `key={padlet.id}` |
+| `:188` | waits two `requestAnimationFrame`s |
+| `:190-192` | forces `loading="lazy"` images to `eager` |
+| `:193-196` | **an existing readiness wait** — polls `SNAPSHOT_READINESS_SELECTOR` |
+| `:206-213` | `html2canvas(host, …)` |
+| `:214-217` | `root.unmount(); host.remove()` in `finally` |
+
+`DrawingLayout.tsx:2291-2301` only constructs the renderer with four data getters
+(`getSceneElements`, `getPadlets`, `getFiles`, `getCanvasLines`). **It owns no thumbnail DOM.**
+
+**Consequence: `DrawingLayout.tsx` is NOT required and is NOT authorized.** The host already
+owns the entire rasterized DOM, creates it, and destroys it. Readiness can be observed without
+touching the editor, without a registry, without a global, and without modifying any card
+component.
+
+### 21b. Expected membership — no circular dependency exists here
+
+The brief asks how a host can declare readiness without knowing what it waits for. In this
+architecture the question does not arise.
+
+`compositionPlan.resolvedPadlets` is computed at `createSlideRenderer.tsx:271` and passed into
+`renderPadletOverlayToCanvas(slide, compositionPlan.resolvedPadlets, opts)` at `:283` —
+**before the host `<div>` exists and before React mounts anything.**
+
+**Authoritative expected set: the `slidePadlets` argument**, i.e. `resolveSlidePadlets` output.
+Against the brief's six required properties: stable ids (padlet id, already the React `key` at
+`:136`) · slide-local by construction (`resolveSlidePadlets.ts:27-30` filters to this frame) ·
+covers every raster-visible overlay, because the host renders exactly this list and nothing else
+· excludes other slides · changes generation when membership changes, since membership is part
+of the render key · **knowable before the DOM exists**.
+
+**No two-phase protocol is needed.** Native Excalidraw elements need no participant registration
+— they are rasterised from scene data by `renderExcalidrawSlideBase`, never through the DOM.
+
+### 21c. The actual raster-readiness gap, from source
+
+The existing wait is real but insufficient in three specific ways:
+
+1. **`SNAPSHOT_READINESS_SELECTOR` is `'[data-ai-render-state="loading"], [data-ai-image-state="loading"]'`.** A repo-wide search finds `data-ai-render-state` published by exactly **one** component — `components/ai/renderers/CodeDiagramRenderer.tsx:80`. **`data-ai-image-state` is published by nothing at all; that half of the selector is dead.**
+2. **Ordinary images are not covered.** `PresentationPadletCard.tsx:172, 221, 232` render bare `<img src=…>` with no loading state. **The moodboard image in the PATCH-137 evidence is one of these.** Nothing awaits its load or decode.
+3. **The wait is skipped entirely when it is most needed.** `:193-196` computes `pendingAtStart` two rAFs after `root.render` and only waits **if it is already greater than zero**. A card that has not yet mounted its loading attribute yields `pendingAtStart === 0` and the host rasters immediately.
+
+So the raster proceeds after two animation frames with no image guarantee. That is the
+mechanism behind the missing cards and missing moodboard image in PATCH-137 §20c.
+
+### 21d. Chosen architecture — **OPTION E (hybrid), host-scoped**
+
+Rejected: **A** (a callback still needs the host to know when layout and decode are done — it moves the problem, and there is no child to call back since the host renders the wrappers itself) · **B** (a registry is infrastructure this architecture does not need, and introduces participant leaks and membership circularity that §21b shows are absent) · **C** alone (a DOM quiet period is exactly the arbitrary-stability-interval the brief forbids) · **D** (would require changing card and image components to expose promises — broader, and unnecessary because the host can observe its own nodes).
+
+**Option E, entirely inside the host's own container:**
+
+1. **Expected set** = `slidePadlets` (§21b).
+2. **Node existence + geometry.** The host tags each wrapper it already renders at `:137` with `data-slide-overlay-id={padlet.id}`, then requires, for every expected id: the node exists in `host`, and `getBoundingClientRect()` reports non-zero width and height matching the geometry the host itself assigned.
+3. **Images.** Enumerate `host.querySelectorAll('img')` — the host's own subtree only. Each must satisfy `complete && naturalWidth > 0`, otherwise `await img.decode()`.
+4. **Existing loading-state protocol retained and corrected.** Keep the `data-ai-render-state="loading"` poll for AI diagram renderers, **but remove the `pendingAtStart > 0` shortcut** so it is evaluated after participants mount rather than before.
+5. **Fonts:** one `await document.fonts.ready`.
+6. **One `requestAnimationFrame` pair after all participants report ready**, then raster.
+
+Step 6 is a *confirmation of paint after explicit readiness*, which the brief permits, not a
+guess at async completion. **No step is a timing heuristic.**
+
+**Nothing outside the host's own detached `<div>` is observed.** No general application DOM, no
+global registry, no `Window` global, no `__COLLABBOARD_E2E__` change, no component-state
+inspection.
+
+### 21e. Participant readiness definitions
+
+**Embedded card:** node present under `[data-slide-overlay-id="<padletId>"]` · measured
+`width > 0 && height > 0` matching the host-assigned geometry · no descendant carrying a
+`…-state="loading"` attribute · all descendant images resolved per below.
+
+**Image:** `complete === true` **and** `naturalWidth > 0`; otherwise `decode()` resolved.
+Terminal failure = `decode()` rejection, or `complete === true && naturalWidth === 0`. Terminal
+failure **counts as ready** (§21g).
+
+**Native Excalidraw element:** no participation. Rasterised from scene data by
+`renderExcalidrawSlideBase`, never via DOM — verified at `createSlideRenderer.tsx:274-292`.
+
+**Fonts:** `await document.fonts.ready`. It is document-scoped, which is a deliberate,
+recorded compromise: it is the only bounded source, it resolves regardless of individual font
+failure so it cannot deadlock, and the host renders text through the same document. **Waiting
+on a specific font set is not authorized** — there is no per-font manifest for card content.
+
+### 21f. Generation protocol
+
+The host does not need a registry: **each `renderSlideToPNG` call owns a host `<div>` it creates
+and destroys** (`:70, :214-217`), so cross-generation contamination through the DOM is
+structurally impossible. What is required is cancellation.
+
+- `useSlideThumbnails` threads an `AbortSignal` per request into `RenderSlideOptions`; the request already has a unique `requestId` (`useSlideThumbnails.ts:96`) and a `cacheKey` (`:95`) — **the generation token is that pair**, never the slide id alone.
+- The host checks the signal before each await and immediately before `html2canvas`; on abort it unmounts, removes the host and rejects.
+- Membership or key change → the pass supersedes → the prior signal is aborted.
+- Unmount aborts all in-flight signals (`useSlideThumbnails.ts:188-198` already owns the cleanup).
+- Stale results remain rejected at the acceptance layer by `shouldAcceptSlideThumbnailRender` — **observed working in §3, not to be modified.**
+- A completion belonging to an old generation can never unblock a new one: the old generation's DOM is already removed.
+
+### 21g. Provisional-versus-final and failed assets
+
+**Decision: B — no provisional thumbnails.** The host blocks inside one `renderSlideToPNG` call
+and publishes only a complete raster, so there is no provisional state to mark or track. This is
+not a UX regression: publication is **per slide**, not global — each thumbnail still appears as
+soon as its own render completes, and today's cold load already shows nothing until ~2.8 s.
+Expected added latency is bounded by real image load time and must be measured against §10.
+
+**Failed-asset policy — no timeout is the detector:**
+
+| State | Classification | Effect |
+|---|---|---|
+| `complete && naturalWidth > 0` | ready | proceed |
+| `decode()` resolves | ready | proceed |
+| `decode()` rejects | **terminal failure** | **counts as ready**; raster with whatever the element shows |
+| `complete && naturalWidth === 0` | **terminal failure** | counts as ready |
+| not complete, no error yet | **transient** | keep waiting |
+
+**A terminal failure completes the generation** with the intended fallback rendering, so a
+broken image can never deadlock a thumbnail. Fonts follow the same principle via
+`document.fonts.ready`, which resolves on failure.
+
+**The existing 3 000 ms `resolveSnapshotTimeoutMs` (`:20-29`) is an arbitrary timeout already in
+production** (PATCH-101). It may remain as the terminal bound for the AI-diagram poll alone. It
+**must not** be extended to images, geometry or fonts, must not be increased, and must not be
+presented as the readiness contract.
+
+### 21h. RC-3 has two layers — only one is in scope
+
+**Layer (ii), raster readiness**, is what §21d–21g repair.
+
+**Layer (i), scene-level late membership**, is not: PATCH-137 §20 observed the landscape
+signature holding **two** embeddables at cold settle and **three** later, the third with
+`frameId: null`. Those embeddable *elements* are created by the interactive canvas, not by the
+host. A late arrival changes `slideSignature`, which should schedule a pass and self-heal.
+
+**The implementation must verify this.** If test 18 (initial thumbnail completes with no user
+edit) still fails after the layer-(ii) repair, layer (i) is a separate defect — **stop and
+report**; do not widen this patch. A candidate worth checking first is
+`useSlideThumbnails.ts:205-207`, where a signature change arriving before
+`isMountSettledRef.current` is silently dropped.
+
+### 21i. Amended production allowlist — 6 files
+
+| # | File | Reason / owned responsibility | Limit | Prohibited |
+|---|---|---|---|---|
+| 1 | `slide-renderer/resolveSlidePadlets.ts` | slide-local ordinal (RC-1) | current 44 → **≤70** | no membership-rule change |
+| 2 | `slide-renderer/planSlideComposition.ts` | band split onto the same slide-local basis | current 97 → **≤130** | no change to what is included in a slide |
+| 3 | `slide-renderer/getSlideRenderSignature.ts` | consume the slide-local ordinal | current 201 → **≤230** | **no content input may be removed** |
+| 4 | `components/presentation/useSlideThumbnails.ts` | thread the `AbortSignal`; no other change | current 229 → **≤265** | no debounce change, no acceptance-rule change, no `renderedRef` semantics change |
+| 5 | **`slide-renderer/createSlideRenderer.tsx`** | **NEW to the allowlist** — the readiness owner (§21a). Tag wrappers with `data-slide-overlay-id`; call the readiness helper; honour the abort signal | current 360 → **≤400** | no change to composition, layering, `html2canvas` options, colour sanitisation, or the legacy path |
+| 6 | **`slide-renderer/waitForOverlayReadiness.ts`** | **NEW FILE** — the §21d predicate: expected-set presence, geometry, image decode, loading-state poll, fonts, rAF confirmation | **≤100 lines** | no data fetching, no React, no global state, no DOM access outside the passed host element, **no `setTimeout`-based readiness** |
+
+**`DrawingLayout.tsx` is NOT authorized** (§21a) — the earlier conditional candidate is
+withdrawn on evidence. **No card or overlay component is authorized**: `PresentationPadletCard`,
+`PresentationContainerCard`, `PostCardContent` and `CodeDiagramRenderer` stay untouched, because
+the host can observe their rendered nodes without their cooperation. If implementation finds a
+card whose readiness is genuinely unobservable from outside, **stop and report** rather than
+adding it.
+
+Still excluded, unchanged: PATCH-124's spec · all PATCH-136 bridge files · `CanvasClient.tsx` ·
+persistence and Supabase · generic image-loading infrastructure · document-feature files · **the
+250 ms debounce constant** · the 3 000 ms snapshot timeout's value.
+
+### 21j. Amended test allowlist — ≤5 files
+
+Retained: `lib/infra/presentation/slideThumbnailRefresh.test.ts` · one slide-signature unit test
+· one `e2e/characterization/patch-142-*.spec.ts`.
+Added conditionally: **one readiness unit test** for `waitForOverlayReadiness.ts` (cases 1–9,
+13–15 of §21k) · **one existing renderer-host test** only if one already exists for
+`createSlideRenderer`.
+
+**PATCH-124 is not authorized.** The PATCH-136 bridge must not be broadened — readiness is
+production rendering behaviour, and test evidence uses existing bridge observation plus public
+thumbnail output.
+
+### 21k. Testable contract
+
+All fifteen brief items are adopted. Items 1–9 and 13–15 are unit-testable against
+`waitForOverlayReadiness` with a synthetic host element — no browser fixture needed:
+expected set known for the generation · never ready before every participant is ready · **mount
+without final layout is insufficient** · **an image element before decode is insufficient** · a
+missing participant keeps the generation pending · a removed participant does not deadlock a
+superseding generation · stale reports ignored · membership change replaces the barrier ·
+complete readiness triggers **exactly one** raster · **no arbitrary timeout is used** · cleanup
+leaks no observers, promises or listeners · no loop, no starvation.
+
+Items 10–12 stay in the characterization spec: initial thumbnail completes **with no user
+edit** · a portrait-only edit does not re-render a complete landscape · **a legitimate landscape
+overlay mutation still does re-render landscape** (the guard against over-narrowing).
+
+### 21l. Sequencing and intermediate commits
+
+**Intermediate commits are permitted while PATCH-142 remains open.** The alternative — one
+commit spanning an ordinal repair and a readiness protocol — is harder to review and harder to
+bisect, and the ordinal work is already proven implementable.
+
+1. `fix(presentation): scope slide overlay ordering to the slide` — files 1–3, plus unit tests. **Does not close PATCH-142.**
+2. `fix(presentation): await overlay readiness before thumbnail raster` — files 4–6, plus the readiness unit test.
+3. `test(e2e): characterize thumbnail invalidation isolation` — the characterization spec and the §10 performance re-measurement.
+
+**PATCH-142 does not close until all three land and RC-3 is proven repaired.** A partial merge
+closing only RC-1 is explicitly **not** a release of PATCH-137, which depends on both. Nothing
+is pushed until closure.
+
+### 21m. False-green protection — additions
+
+Beyond §16, reject if: readiness is inferred from an image URL, a signature id, elapsed
+milliseconds, or a DOM quiet period alone · the host rasters before `decode()` · a placeholder
+counts as final without the §21g terminal contract · a missing expected overlay is silently
+skipped · anything outside the host's own container is observed · a global mutable readiness
+registry appears · `data-ai-image-state` is "revived" as a readiness source **without a
+component that actually publishes it** · the 3 000 ms timeout is widened to cover images ·
+another user edit is still required to finish initial thumbnails.
+
+### 21n. Hard stops — re-evaluated
+
+| Stop | Result |
+|---|---|
+| Expected overlay membership not knowable | **NOT TRIGGERED** — `slidePadlets` is a parameter, known before the DOM exists (§21b) |
+| Card readiness indistinguishable from a mounted placeholder | **NOT TRIGGERED** — geometry + descendant image decode + loading-state attributes distinguish them. **Caveat:** a card that renders a skeleton with final geometry and no loading attribute would defeat this; the implementation must check each card type and **stop and report** if one is opaque |
+| Image completion/error unobservable | **NOT TRIGGERED** — `complete`, `naturalWidth`, `decode()` |
+| Final layout cannot be bounded without arbitrary waiting | **NOT TRIGGERED** — measured geometry against host-assigned values, plus one rAF pair *after* explicit readiness |
+| Readiness requires broad changes across card/image systems | **NOT TRIGGERED** — zero card components authorized |
+| DrawingLayout changes would affect ordinary editor behaviour | **NOT TRIGGERED** — DrawingLayout is not authorized at all (§21a) |
+| A generic global readiness framework is required | **NOT TRIGGERED** — one ≤100-line pure predicate over a passed host element |
+| More than the amended file limits are needed | **NOT TRIGGERED** — 6 production files, all bounded |
+| Completion still depends on unrelated scene activity | **OPEN — layer (i), §21h.** Resolved for raster readiness; must be **verified** by test 18. If it fails, stop and report |
+
+### 21o. Status
+
+**OPEN · SLIDE-LOCAL ORDINAL REPAIR AUTHORIZED · THUMBNAIL RENDER-HOST READINESS CONTRACT
+AUTHORIZED · NARROW IMPLEMENTATION AUTHORIZED · INTERMEDIATE COMMITS PERMITTED · NOT PUSHED.**
+
+PATCH-137 remains **OPEN · REAL-UI DRAWING PATH PROVEN · C5 CLASSIFIED · MIGRATION BLOCKED BY
+PATCH-142.**
+
+### 21p. Recorded diagnostic notes
+
+- **Locate the owner in source before naming it in governance.** The stop reported the readiness
+  owner as "around `DrawingLayout.tsx`". It is `createSlideRenderer.tsx`, which builds and
+  destroys the entire rasterized DOM. Getting that wrong would have authorized an 3 500-line
+  editor file for a change that belongs in a 360-line factory.
+- **A selector is not a protocol.** `SNAPSHOT_READINESS_SELECTOR` looks like a readiness
+  contract; half of it (`data-ai-image-state`) is published by nothing, and the other half by a
+  single AI-diagram component. Grep the *publishers*, not the consumer.
+- **A guard that only runs when the problem is already visible is not a guard.**
+  `pendingAtStart > 0` skips the wait in exactly the case where nothing has mounted yet.
+- **When the host owns the DOM it renders, readiness needs no registry.** The infrastructure
+  options were all sized for a problem this architecture does not have — the expected set is an
+  argument and the container is disposable.
