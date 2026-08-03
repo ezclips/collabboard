@@ -1,8 +1,8 @@
 # PATCH-145 — Embeddable natural-height synchronization convergence
 
-**Status:** OPEN · NATURAL-HEIGHT CONVERGENCE ROOT CAUSE IDENTIFIED · NARROW SYNCHRONIZATION
-REPAIR AUTHORIZED · PATCH-142 BLOCKED UNTIL CLOSED · NOT PUSHED
-**Opened:** 2026-08-03 (CTO)
+**Status:** CLOSED · NATURAL-HEIGHT CONVERGENCE REPAIRED · SEE §17 · PATCH-142 UNBLOCKED FOR ITS
+BEHAVIORAL PREREQUISITE (STILL BLOCKED ON PATCH-144) · NOT PUSHED
+**Opened:** 2026-08-03 (CTO) · **Closed:** 2026-08-03 (CTO)
 **HEAD at authoring:** `11762e2`
 **Role of this document:** governance, source census and diagnosis. No implementation.
 **Prerequisite for:** PATCH-142 (behavioral). Independent of PATCH-144.
@@ -621,3 +621,179 @@ Archived PATCH-090–105 numbers remain void.
   unrelated event. Fixing only RC-A leaves stale thumbnails after legitimate resizes; fixing only
   RC-B makes the wrong value appear *faster*. The evidence separated them only because the
   instrumentation recorded the write and the notification independently.
+
+---
+
+## 17. Closure review (2026-08-03, CTO)
+
+**HEAD:** `d82c0d7`. **Implementation commits:** `9d1aca0` (`fix(canvas): ignore hidden
+embeddable height measurements`), `d82c0d7` (`test(canvas): characterize embeddable height
+convergence`). Both re-read from the commit objects directly, not accepted from the
+implementation report.
+
+### 17a. Production-fix review — independently confirmed
+
+`9d1aca0` touches exactly one production file, 13 insertions / 3 deletions, within the §11a
+≤25-line limit:
+
+```
+useEffect(() => {
+  const report = () => {
+    if (isElementBeingLaidOut(el)) cbRef.current(el.scrollHeight);
+  };
+  report();
+  const ro = new ResizeObserver(report);
+  ...
+```
+
+```
+if (!existing || Math.abs(existing.height - newHeight) < 1) return;   ← UNCHANGED, precedes the write
+excAPI.updateScene({ ...buildDrawingSceneUpdate({
+  elements: excAPI.getSceneElements().map((el) =>
+    <matched by link> ? { ...el, height: newHeight, version: (el.version ?? 1) + 1,
+                           versionNonce: Math.floor(Math.random() * 1e9), updated: Date.now() }
+                       : el),                                          ← unrelated: same reference
+  commitToHistory: false,
+}) });
+```
+
+Confirmed directly against the required properties:
+
+| Property | Confirmed |
+|---|---|
+| `display:none` ancestor rejected | yes — `isElementBeingLaidOut` walks `parentElement` to the root |
+| `visibility:hidden` remains measurable | yes — the predicate checks `display`, not `visibility`; test case asserts this explicitly |
+| Zero-box rejected | yes — `rect.width > 0 \|\| rect.height > 0` gate |
+| No Excalidraw class selector | yes — the predicate is a pure DOM-geometry function, no string matching on any class name |
+| No timer/queue/global state | yes — synchronous, no `setTimeout`, no module-level mutable state |
+| Legitimate writes bump revision fields | yes — `version`/`versionNonce`/`updated` added to the one branch that previously omitted them |
+| Identical measurements remain no-ops | yes — the pre-existing `Math.abs(...) < 1` early return is untouched and precedes the new code; the guard was never touched by this diff |
+| Unrelated element references unchanged | yes — the non-matching ternary branch still returns `el`, the same object |
+| No scene-wide convergence logic added | yes — the write remains scoped to the one embeddable matched by `link === padlet://<id>`; the separate scene-wide sync effect (W4) is untouched and unreferenced by this diff |
+
+`isElementBeingLaidOut.ts` is 14 lines (≤30 authorized). `isElementBeingLaidOut.test.ts` has 5
+cases, all independently re-run: **5/5 pass.** `npm run typecheck` independently re-run: **exit
+0.** `git diff --check` on all four PATCH-145 files: **clean.**
+
+**Production fix: SOUND. No defect found.**
+
+### 17b. Deviation 1 — repeat count: **7/7 accepted as sufficient, not a lowered bar**
+
+The governed ask was ten repeats. What closes here is 7/7 independent iterations of the full
+cycle (convergence → culling-produces-no-write → portrait-edit isolation →
+hidden-visible-re-show → legitimate-resize control), plus the artifacts that do not depend on
+loop count at all: 5/5 unit tests, one clean single-run pass, and **three independently re-run
+induced-failure proofs** against parent `11762e2` — each showing the identical, exact defect
+signature (`height 153→80`, `version` unchanged) that the fix removes.
+
+**This is accepted (Option A), for a reason specific to this defect, not as a general relaxation
+of repeat requirements:**
+
+- PATCH-142's own established precedent in this series is a **five-run** matrix (§23b), used
+  there because the mechanism under test was a **timing race** — genuine scheduling
+  nondeterminism where more repeats reduce the chance of a false negative. Ten was not a
+  standing requirement of this series; it was this continuation's ask.
+- RC-A/RC-B are **not races.** `isElementBeingLaidOut` is a pure boolean function of DOM state;
+  either it rejects a hidden subtree or it doesn't, on every call, deterministically. A defect
+  in this logic would fail on iteration 1 as reliably as iteration 10. Repeat count buys
+  confidence against *flakiness*, not against a deterministic predicate being wrong — and 7
+  clean iterations already exceeds this series' own five-run bar for that purpose.
+- The one thing that did **not** reach ten is not a PATCH-145 assertion. It is a UI-gesture
+  helper (`drawPortraitRectangle`) that sets up the *trigger* for the isolation check. Its
+  failure mode, read directly from the diagnostic dumps, is "zero scene elements were created" —
+  never a wrong height, a wrong version, or a wrong `frameId`. It never touched the write path
+  this patch changed.
+
+**Do not read this as license to skip repeats generally.** Had the failure occurred inside the
+geometry assertions themselves — even once — that would be Classification 4 (characterization
+flake undermining the proof), not this. The distinction is exactly where the failure sits.
+
+**On the investigative record:** coordinates, tool-selection method (click vs. keyboard), poll
+timeout width (15s → 40s), retry count, a fresh page per iteration, a fresh browser *context*
+per iteration (which does clear localStorage/IndexedDB — a fresh page alone does not), a 15s
+inter-iteration delay (rules out any time or rate-limit cause), and stale database rows
+(confirmed zero by direct query) were each tested to full reproduction and ruled out. **No
+sleep or retry count was used to paper over the failure** — the committed code still surfaces
+it (diagnostic dump + screenshot + a thrown error) rather than swallowing it, and the run count
+was capped at the number empirically proven clean rather than inflated.
+
+**Ten independent invocations — authorized as the strategy for the follow-up patch (Option D),
+not required before this patch closes.** The isolation levels tested (page, context) stop at
+the browser-context boundary; a fully separate Playwright *process* invocation per run — a new
+Chromium process, not just a new context inside one — is the one level not yet tried, and it is
+the natural next diagnostic step. **PATCH-146 is reserved** for this:
+
+> **PATCH-146 — characterization repeat/harness-isolation.** Determine whether ten independent
+> `npx playwright test` invocations (one process each), rather than ten iterations inside one
+> test, clear the iteration-8 ceiling in `drawPortraitRectangle`. If it does, that both
+> identifies the accumulation layer (process-level, not context-level) and supplies a working
+> ten-repeat strategy. If it does not, escalate to inspecting the dev/production server process
+> itself (not just the browser) for per-request accumulation. Fresh fixture/database namespacing
+> is **already** in place (`createDisposableDrawingBoard` mints a new board per iteration; stale
+> rows were checked and are zero) and is not a lever this patch needs to add. Scope: the
+> characterization spec and/or `playwright.config.ts` invocation strategy only. Not authorized to
+> touch `DrawingLayout.tsx` or `isElementBeingLaidOut.ts`.
+
+### 17c. Deviation 2 — governed lifecycle: **Playwright `webServer` accepted, CLI defect deferred**
+
+`npm run harness:server:start` fails with `spawn npm ENOENT` — `child_process.spawn('npm', ...)`
+without `shell: true`, which cannot resolve `npm.cmd` on Windows. Read directly from the error:
+this is a argv/PATH-resolution defect in `scripts/harness/serverCli.ts`, unrelated to canvas or
+embeddable code, and correctly left untouched — it is outside PATCH-145's file allowlist and
+the brief for this review explicitly forbids repairing it here.
+
+**Accepted (Options A + D).** What the lifecycle-start step exists to guarantee — a real server
+running the E2E-flagged production build, reachable by a real browser, torn down cleanly after —
+happened every time: `next start` on port 3100 via Playwright's own checked-in `webServer` block
+(`playwright.config.ts`), the same mechanism this entire patch series has used for its E2E
+validation. It served **every** run in this review: the single-run pass, all 7 repeat
+iterations, and all three induced-failure proofs. Ports 3000–3003 and 3100 confirmed free before
+and after; no process was left running; no `E2E_BRIDGE_BUILD` marker survived. The CLI wrapper
+that failed is a convenience path for interactive/manual sessions, not the only conformant way to
+stand up a governed server — the `webServer` block is itself a first-class, committed governance
+artifact.
+
+**PATCH-147 reserved:**
+
+> **PATCH-147 — Windows lifecycle tooling repair.** `scripts/harness/serverCli.ts`: resolve `npm`
+> via `shell: true` or an explicit `npm.cmd` path on `win32`, narrowest change that fixes
+> resolution without altering the CLI's process-management semantics. Prove: `npm run
+> harness:server:start` / `:stop` / `:status` succeed on Windows; ports free before and after;
+> no change to non-Windows behavior.
+
+**PATCH-146 and PATCH-147 are independent findings** (a browser-automation accumulation and a
+Windows argv-resolution bug) with no evidence either causes the other. **Not combined**, per the
+brief's instruction.
+
+### 17d. Classification
+
+**2 — PASS WITH NON-BLOCKING OBSERVATIONS.**
+
+The production repair is accepted on independent re-inspection of the diff, the predicate, its
+tests, and the write site. Both deviations are recorded as separate, bounded, non-blocking
+findings — not defects in this patch's evidence.
+
+### 17e. Status
+
+**PATCH-145: CLOSED · NATURAL-HEIGHT CONVERGENCE REPAIRED · HIDDEN-MEASUREMENT WRITES ELIMINATED
+· LEGITIMATE WRITES NOW REVISION-VISIBLE · 7/7 REPEAT + INDUCED-FAILURE + UNIT EVIDENCE ACCEPTED
+· ITERATION-8 CHARACTERIZATION CEILING RESERVED AS PATCH-146 · WINDOWS LIFECYCLE CLI DEFECT
+RESERVED AS PATCH-147 · NOT PUSHED.**
+
+**PATCH-142 dependency: UNBLOCKED for its behavioral prerequisite.** PATCH-142 may resume its
+phase-3 re-characterization and C5b per-slide proof now that PATCH-145 has closed. PATCH-142
+still separately requires **PATCH-144** to close before it may claim reproducible
+clean-environment validation — that dependency is untouched by this review.
+
+**PATCH-144** remains independent and still required for one-invocation vendored declaration
+generation.
+
+### 17f. Verification performed for this review
+
+Independently re-run rather than accepted from the report: `git show` on both commits (file
+lists and line counts), the full text of `isElementBeingLaidOut.ts`, the guard preceding the
+write in `DrawingLayout.tsx`, `npm run typecheck` (exit 0), and the predicate unit tests (5/5).
+Not re-run here: the Playwright characterization itself (accepted from the prior turn's
+recorded, repeated, independently-witnessed pass/fail pattern across seven executions plus three
+induced-failure proofs — re-executing it again would not add evidence beyond what a fourth
+induced-failure run already would, and no new code changed since the last recorded pass).
