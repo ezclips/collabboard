@@ -21,6 +21,7 @@ export default function CardPreview({
     isSelected,
     onClick,
     onOpenToolbar,
+    onEditContent,
     reactions = [],
     onAddReaction,
     onReactionClick
@@ -61,7 +62,19 @@ export default function CardPreview({
                     style={{ gridTemplateColumns: 'auto 1fr auto', minHeight: '22px', backgroundColor: stripBg }}
                 >
                     <div className="flex items-center pl-1.5">
-                        <div className="w-5 h-5 shrink-0" aria-hidden="true" />
+                        {onEditContent ? (
+                            <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); onEditContent(); }}
+                                className="shrink-0 w-5 h-5 rounded flex items-center justify-center hover:bg-black/10 transition-opacity opacity-0 group-hover:opacity-100"
+                                style={{ color: stripIconColor }}
+                                aria-label="Edit card"
+                            >
+                                <Edit2 className="w-3 h-3" />
+                            </button>
+                        ) : (
+                            <div className="w-5 h-5 shrink-0" aria-hidden="true" />
+                        )}
                     </div>
                     <div className="flex items-center justify-center px-1 min-w-0" />
                     <div className="flex items-center pr-1.5">
@@ -124,6 +137,16 @@ export default function CardPreview({
                         onOpenToolbar(e);
                     }}
                     className={`absolute top-1 right-1 p-1.5 text-gray-500 bg-white/90 hover:bg-white hover:text-gray-800 rounded-full shadow-sm border border-gray-200/70 z-30 transition-all opacity-0 group-hover:opacity-100 ${isSelected ? 'opacity-100' : ''}`}
+                >
+                    <Edit2 className="w-4 h-4" />
+                </button>
+            )}
+            {onEditContent && (
+                <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); onEditContent(); }}
+                    className={`absolute top-1 left-1 p-1.5 text-gray-500 bg-white/90 hover:bg-white hover:text-gray-800 rounded-full shadow-sm border border-gray-200/70 z-30 transition-all opacity-0 group-hover:opacity-100 ${isSelected ? 'opacity-100' : ''}`}
+                    aria-label="Edit card"
                 >
                     <Edit2 className="w-4 h-4" />
                 </button>

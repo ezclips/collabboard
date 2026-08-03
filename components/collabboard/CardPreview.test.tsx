@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { type ReactElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { Padlet } from '@/types/collabboard';
 import {
   CAPTION_STYLE_PRESETS,
@@ -295,5 +295,51 @@ describe('CardPreview consumer characterization and static guards', () => {
     expect(toolbar).toContain('TextCursor');
     expect(textStylePopup).toContain('ColorPickerContent');
     expect(reactionDisplay).toContain('reactions.reduce');
+  });
+});
+function findEditCardButton(node: unknown): ReactElement<any> | undefined {
+  if (node == null || node === false || node === true) return undefined;
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const found = findEditCardButton(child);
+      if (found) return found;
+    }
+    return undefined;
+  }
+  if (typeof node !== 'object') return undefined;
+  const element = node as ReactElement<any>;
+  if (element.type === 'button' && element.props['aria-label'] === 'Edit card') return element;
+  return findEditCardButton(element.props?.children);
+}
+describe('CardPreview edit-content affordance (PATCH-138)', () => {
+  it.each<[string, Partial<Padlet>]>([
+    ['clipart branch', {}],
+    ['default branch', { metadata: { svgUrl: undefined } }],
+  ])('%s: renders an accessible "Edit card" button and invokes onEditContent exactly once', (_label, overrides) => {
+    const onEditContent = vi.fn();
+    const tree = CardPreview({ padlet: padlet(overrides), isSelected: false, onEditContent }) as ReactElement;
+    const button = findEditCardButton(tree)!;
+    expect([button.type, button.props.type]).toEqual(['button', 'button']);
+    button.props.onClick({ stopPropagation: () => {} });
+    expect(onEditContent).toHaveBeenCalledTimes(1);
+  });
+  it('renders no Edit card control when onEditContent is absent', () => {
+    expect(findEditCardButton(CardPreview({ padlet: padlet(), isSelected: false }))).toBeUndefined();
+  });
+  it('stops propagation before invoking onEditContent so the parent click handler is not reached', () => {
+    const onEditContent = vi.fn();
+    const tree = CardPreview({ padlet: padlet(), isSelected: false, onEditContent }) as ReactElement;
+    const stopPropagation = vi.fn();
+    findEditCardButton(tree)!.props.onClick({ stopPropagation });
+    expect(stopPropagation).toHaveBeenCalledTimes(1);
+    expect(onEditContent).toHaveBeenCalledTimes(1);
+  });
+  it('keeps existing title rendering and onOpenToolbar unchanged alongside the new control', () => {
+    const rendered = renderToStaticMarkup(
+      <CardPreview padlet={padlet()} isSelected={false} onOpenToolbar={() => {}} onEditContent={() => {}} />,
+    );
+    expect(rendered).toContain('Clipart caption');
+    expect(rendered).toContain('aria-label="Edit card"');
+    expect((rendered.match(/<button/g) || []).length).toBe(2);
   });
 });
