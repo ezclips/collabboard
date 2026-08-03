@@ -874,3 +874,216 @@ evidence; **PATCH-144 closes**; and clean-environment validation is repeatable. 
   the two, and it is the thing the test never observed.
 - **A serial number is a position, not a count.** Comparing `.at(-1).serial` across a window
   answers "how many things happened in total", never "how many of mine happened".
+
+## 23. Amendment — CAUSAL SHARED DEPENDENCY IDENTIFIED; §22 CORRECTED (2026-08-03, CTO)
+
+**Trigger:** the corrected per-slide characterization — exact canvas dimensions, per-slide
+counters, completeness **and** ≥2 s quiescence — still recorded a genuine post-baseline landscape
+raster (baseline count 2 → 3, hash `3282636608` → `885978125`, event `569×320` at t≈7606 ms,
+green pixels 0).
+
+**§22 was wrong.** It classified the residual render as *late self-invalidation, portrait
+coincidental*. With a stricter baseline that classification does not survive. **The portrait edit
+is causal**, and the causal chain is now identified.
+
+### 23a. Clean revert — verified
+
+Preserved outside the repository in `…/scratchpad/p142-evidence2/`: the full characterization
+spec, the unit-test diff (31 lines), Playwright artefacts, the causality diagnostic spec, the
+five-run idle/edit matrix, and the per-pass signature keys.
+
+`e2e/characterization/patch-142-thumbnail-isolation.spec.ts` removed ·
+`lib/infra/presentation/slideThumbnailRefresh.test.ts` restored (`git diff --exit-code HEAD` clean)
+· temporary diagnostic removed · transient instrumentation of `useSlideThumbnails.ts` reverted ·
+E2E `.next` removed · ordinary build rebuilt · bridge exclusion proven across 891 files · no
+`E2E_BRIDGE_BUILD` marker · worktree holds only the five protected paths.
+
+### 23b. Causality matrix — idle versus edit, 5 runs each
+
+The decisive experiment §22 never ran: after the *same* quiescence baseline, do nothing for 20 s,
+then edit.
+
+| run | baseline count / hash | **20 s idle, NO edit** | after portrait edit | green in landscape |
+|---|---|---|---|---|
+| 1 | 2 / `3550949808` | **2 / unchanged** | **3** / `3125674599` | 0 |
+| 2 | 2 / `828581647` | **2 / unchanged** | **3** / `3464156813` | 0 |
+| 3 | 2 / `2823216976` | **2 / unchanged** | **3** / `835350008` | 0 |
+| 4 | 2 / `2273218381` | **2 / unchanged** | **3** / `1413661655` | 0 |
+| 5 | 2 / `2136767611` | **2 / unchanged** | **3** / `1949794025` | 0 |
+
+**Landscape changed during idle: 0/5. Landscape changed after the portrait edit: 5/5.**
+
+Self-settlement is excluded. Baselines were reached at `completeMs` 59–97 ms with `quiesceMs`
+2309–2341 ms, then held for a further 20 s. **The portrait edit is causal, deterministically.**
+
+C5a still holds — green pixels 0 in every run.
+
+### 23c. First changed field — and it is landscape-owned
+
+Per-pass full-key instrumentation, landscape key only:
+
+```
+pass0 t= 1937 forced=none              requests=[landscape, portrait]  dirty=[landscape, portrait]
+pass1 t= 3821 forced=[landscape]       requests=[landscape]            dirty=[landscape]
+      nativeSceneSignature        version 1 → 2, versionNonce 1 → 983300846 (×3)
+      embeddableOverlaySignature  width 360 → 320 · height 210 → 260 · width 260 → 320 · height 169 → 153
+                                   ← initial settle, inside the baseline window
+--- baseline established, 20 s idle, no change ---
+--- portrait rectangle drawn ---
+pass2 t=27260 forced=none              requests=[landscape, portrait]  dirty=[landscape, portrait]
+      embeddableOverlaySignature  height 153 → 80   (×2 overlays)      ← THE CAUSAL CHANGE
+pass3 t=29136 forced=[portrait]        requests=[portrait]             dirty=[portrait]
+```
+
+**First changed field: `embeddableOverlaySignature` — `height` of two landscape-owned embeddable
+overlays, 153 → 80.** No portrait element, id, ordinal or geometry ever appears in the landscape
+key. `nativeSceneSignature` is unchanged at pass 2. Membership is **identical** before and after
+(same overlay ids, same count) — no new member appears, so the caveated scene-level layer-(i)
+"pre-mount signature dropped" hard stop is **not** engaged.
+
+**The landscape's own visual input genuinely changed. The thumbnail layer was right to
+re-render.**
+
+### 23d. Why a portrait edit changes landscape overlay heights
+
+`DrawingLayout.tsx` measures container cards and writes the measurement back into the Excalidraw
+scene:
+
+```
+:45-47   "Measures the natural height of a container card and reports it upward so the
+          Excalidraw embeddable element can be resized to fit the content exactly."
+:253     onNaturalResize?: (padletId: string, height: number) => void
+:572     onNaturalResize?.(padlet.id, newHeight)
+:745     isSyncingEmbeddablesRef — "true while the embeddable-sync useEffect is calling updateScene"
+:2235    onNaturalResize={(id, h) => …}
+```
+
+The embeddable-sync effect is **scene-wide, not slide-scoped**, and it **converges in stages** —
+the landscape overlays move `169 → 153` during load and `153 → 80` later. The second stage does
+not fire on a timer; it fires on the **next scene mutation**, which in this test is the portrait
+rectangle.
+
+So the chain is: portrait draw → scene change → scene-wide embeddable-sync re-measures → writes
+new natural heights onto **landscape** embeddables → landscape signature changes → landscape
+re-renders. Every link is doing what it was written to do.
+
+**This is the brief's quiescence-audit classification F — portrait interaction triggers a
+genuinely shared landscape dependency** — and the dependency is now named: the natural-height
+embeddable sync in `DrawingLayout.tsx`. Not A (no fixed window would help — idle proved 20 s
+changes nothing), not B/C/D/E.
+
+### 23e. Readiness predicate — correct, and not the boundary that failed
+
+The §21 host contract governs one raster: expected wrappers present, geometry matching the
+**plan given to it**, no loading descendants, images decoded, fonts ready, double-rAF. At
+pass 2's raster every one of those held — the raster was complete and correct **for the plan it
+was given**.
+
+The missing contract is one level up and must be stated precisely:
+
+> **Overlay geometry stability.** The host can prove a raster matches the current plan. Nothing
+> can prove the *plan itself* has stopped changing, because the source that changes it — the
+> natural-height sync — publishes no completion signal.
+
+**Do not extend the host helper into a generic quiet-period observer** (§21 rule, and §23b shows
+a quiet period would not have caught this anyway: the landscape was quiet for 20 s and still
+changed on the next unrelated edit).
+
+### 23f. Unit-test gap
+
+The added self-invalidation case passed and could not have caught this. It asserts the
+**selection function**, feeding it `renderedKeys: { a: "a-overlay-2" }` — a hand-written settled
+state. It encodes the assumption under test: that slide A eventually stops changing. The real
+failure is that A's key changes again on an event belonging to B, and no scheduler-level test can
+model that, because **it is not a scheduler property**.
+
+`selectSlidesForThumbnailRefresh` was never wrong. Testing it harder proves nothing. **Do not
+retain the case as written** — it asserts a weaker property than the one that failed. The
+scenario that would have caught this belongs at the embeddable-sync layer: *an edit confined to
+frame B must not change frame A's embeddable geometry.*
+
+### 23g. Repair — **OPTION F, SEPARATE UPSTREAM OVERLAY-STABILITY PATCH**
+
+The thumbnail layer correctly responds to a real overlay geometry change. The overlay system has
+no bounded completion contract and mutates unrelated slides' geometry on any scene change.
+**PATCH-142 remains blocked; the repair is not in its allowlist** — `DrawingLayout.tsx` was
+explicitly withdrawn at §21i on the evidence that thumbnail readiness did not need it. It is
+needed now, for a different defect.
+
+> **PATCH-145 — embeddable natural-height sync convergence.**
+> Establish that the natural-height sync (a) converges to a final height without requiring an
+> unrelated scene mutation to advance a stage, and (b) does not rewrite geometry for embeddables
+> whose measured content has not changed. Deliverables: census of every write path into
+> embeddable width/height; determine why the sync converges in two stages; a bounded completion
+> or idempotence contract; a test proving an edit confined to frame B leaves frame A's embeddable
+> geometry byte-identical. Owner: `DrawingLayout.tsx` and the natural-height measurement path.
+> **Not authorized to change any thumbnail file or any characterization assertion.**
+
+Option A is refuted by §23b. Option B would be a workaround at the wrong layer. Option C is not
+engaged — membership is stable. Option D is the right *diagnosis* but the dependency is not one
+the thumbnail layer may fix. **Option E is explicitly rejected: there is no existing deterministic
+completion signal to await — that is precisely what is missing** — and elapsed-time quiescence is
+forbidden and, per §23b, would not work.
+
+### 23h. Cold-load render target
+
+PATCH-142 §10 targeted one render per slide on cold load; the measured value is 2. §22h recorded
+that as an acceptable deviation. **That is now withdrawn.** The second render is the first stage
+of the same unbounded sync, and the third arrives on an unrelated edit. They are one defect
+observed at three moments.
+
+**Decision: PATCH-142 may not close with multiple cold renders unless PATCH-145 supplies a
+bounded, observable final-stability signal.** "Wait longer" is not a signal, and §23b proves it
+would not even be a working heuristic.
+
+### 23i. Allowlists
+
+**PATCH-142 production: unchanged and frozen.** `1fe6221` and `23a91bb` stand; no further
+production change is authorized in this patch. `DrawingLayout.tsx` remains **excluded from
+PATCH-142** — it moves to PATCH-145.
+
+**PATCH-142 test: none authorized until PATCH-145 closes.** Re-landing the characterization now
+would either encode a known-failing assertion or paper over it. Both uncommitted files stay
+reverted.
+
+**PATCH-145 (reserved, not authorized here):** `components/collabboard/canvas/layouts/DrawingLayout.tsx`
+· at most one narrow measurement/sync helper · one unit or characterization test. No thumbnail
+file. No PATCH-124 change. No fork change.
+
+### 23j. Hard stops
+
+| Stop | Result |
+|---|---|
+| Changed key field cannot be identified | **NOT TRIGGERED** — `embeddableOverlaySignature.height`, 153 → 80 |
+| Landscape visual inputs genuinely change from portrait interaction | **TRIGGERED — and this is the finding.** They do, through the scene-wide natural-height sync. It is a real shared dependency, not a measurement artefact |
+| Repair requires broad `DrawingLayout` changes | **DEFERRED TO PATCH-145** — scope to be bounded there, not assumed here |
+| Repair requires PATCH-124 changes | **NOT TRIGGERED** |
+| Membership unstable / pre-mount signature dropped | **NOT TRIGGERED** — membership identical before and after |
+| More files than can be narrowly bounded | **NOT TRIGGERED for PATCH-142** — zero further files |
+
+### 23k. Status
+
+**OPEN · PHASES 1–2 IMPLEMENTED · COLD CONTENT COMPLETENESS PROVEN · SLIDE-LOCAL ORDINAL REPAIR
+CONFIRMED · C5a HOLDS (GREEN 0/5) · C5b FAILS THROUGH A GENUINE SHARED DEPENDENCY · CAUSE
+IDENTIFIED: SCENE-WIDE EMBEDDABLE NATURAL-HEIGHT SYNC WITH NO CONVERGENCE CONTRACT · §22
+SELF-INVALIDATION CLASSIFICATION WITHDRAWN · OPTION F · PATCH-145 RESERVED · IMPLEMENTATION
+BLOCKED · PATCH-144 STILL REQUIRED · NOT PUSHED.**
+
+PATCH-142 may not close until PATCH-145 closes, C5b is proven with per-slide evidence, PATCH-144
+closes, and clean-environment validation is repeatable. PATCH-137 remains **OPEN · MIGRATION
+BLOCKED BY PATCH-142**.
+
+### 23l. Recorded diagnostic notes
+
+- **I classified this wrong once, and only a control condition caught it.** §22 called the
+  residual render coincidental self-settlement. Twenty seconds of idle after the same baseline —
+  0/5 changes — versus a portrait edit — 5/5 changes — is what separated the two. **Correlation
+  in a timeline is not causation; the experiment that withholds the trigger is.**
+- **"Its own input changed, so the re-render is correct" is a valid finding and an incomplete
+  one.** Both §22 and §23 found the landscape's own overlay geometry changing. The question that
+  mattered was *what made it change*, and that needed one more hop.
+- **A unit test that hard-codes the settled state cannot discover that nothing settles.** The
+  scheduler test fed in `a-overlay-2` as final; the defect is that there is no final.
+- **When readiness is proven for a plan, ask who owns the plan.** §21 correctly bounded "this
+  raster matches the current composition". Nothing bounded "the composition has stopped moving",
+  and the owner of that turned out to be an editor-layer measurement loop three files away.
