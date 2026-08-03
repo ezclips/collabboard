@@ -1,8 +1,8 @@
 # PATCH-144 — Reproducible vendored Excalidraw declaration generation
 
-**Status:** OPEN · CLEAN-ENVIRONMENT DECLARATION CONTRACT IDENTIFIED · ONE-RUN TYPECHECK
-REGENERATION AUTHORIZED · PATCH-142 VALIDATION BLOCKED UNTIL CLOSED · NOT PUSHED
-**Opened:** 2026-08-03 (CTO)
+**Status:** CLOSED · ONE-RUN CLEAN-ENVIRONMENT DECLARATION REGENERATION PROVEN · SEE §18 ·
+PATCH-142 RELEASED FOR ITS OWN FINAL CHARACTERIZATION · NOT PUSHED
+**Opened:** 2026-08-03 (CTO) · **Closed:** 2026-08-03 (CTO)
 **HEAD at authoring:** `748d141`
 **Role of this document:** governance, command-graph census and architecture selection. No
 implementation.
@@ -553,3 +553,124 @@ BLOCKED UNTIL CLOSED · NOT PUSHED.**
   destroys a working declaration set whenever the generator is unavailable. The deletion had to
   be confined to the path where the tree is already known broken — a constraint that only
   becomes visible once you ask what the script does on its *unhappy* path.
+
+---
+
+## 18. Closure review (2026-08-03, CTO)
+
+**HEAD:** `0186016`. **Implementation commit:** `0186016`
+(`build(types): make Excalidraw declaration setup reproducible`) — re-read from the commit
+object directly, not accepted from the implementation report.
+
+### 18a. Independent source review
+
+`git show 0186016 --stat`: **one file**, `scripts/preflight-excalidraw-types.mjs`,
+47 insertions / 10 deletions, **73 lines total** (≤80 limit). `package.json`: confirmed
+byte-identical to `f34e1ee` — the predicted zero-change outcome held.
+
+**Exclusion list** (`git diff --exit-code f34e1ee HEAD --` over the fork's `components`
+directory, `DrawingEditor.tsx`, `renderExcalidrawSlideBase.ts`, `tsconfig.json`,
+`next.config.ts`, root and fork `.gitignore`, `PATCH-142/145/146/147` files,
+`DrawingLayout.tsx`, `isElementBeingLaidOut.ts`, the PATCH-145 spec, `scripts/harness/`):
+**confirmed unchanged, zero diff.**
+
+| Review point | Finding |
+|---|---|
+| **Cleaning scope** — deletion path is exactly `<pkg>/dist/types` | Confirmed: `distTypes = path.join(pkg, "dist/types")`. Guard at line 39 checks `startsWith(pkg + sep)` plus both basenames (`types`/`dist`) before any `rmSync`. |
+| Deletion runs only when entry is absent | Confirmed: the guard and `rmSync` are unreachable except after the `existsSync(expected)` early-return at line 31–34. |
+| A working tree is never deleted merely because generation is unavailable | Confirmed by construction — deletion happens *before* the generator is invoked, only on the branch where the entry was already missing, so there is no "working tree" on that branch to protect. |
+| **Freshness** — tree removed before generation | Confirmed, line 45 precedes line 49. |
+| Entry checked; mtime checked against `genStart` with a clock tolerance | Confirmed, lines 59 and 65–67. `FRESHNESS_TOLERANCE_MS = 5_000` is not an exact value PATCH-144 pinned, but is small, same-process/same-machine (no cross-host clock skew is possible), and is *secondary* to the real guarantee — delete-then-generate — so it introduces neither a false-failure risk (nothing to skew) nor a false-green risk (nothing stale can be present to satisfy it). **Reasonable, not a defect.** |
+| Stale sentinels cannot survive | Re-verified directly (§18b, CASE 4) with newly planted sentinel files distinct from the implementer's originals. |
+| **Structure** — count floor ≥ 300, minimum not exact-lock | Confirmed, line 8 and the `<` comparison at line 62. |
+| Output not accepted from entry-existence alone | Confirmed: `existsSync(expected)` **and** the count floor **and** the mtime check are all required; none alone suffices. |
+| **Generator exit policy** — exit 0 still requires valid fresh output | Confirmed by control flow: the TS5055/existence/count/freshness checks (lines 58–67) run unconditionally, *before* the `result.status !== 0` branch at line 69 — there is no code path that trusts a zero exit without running every check. This is stronger than the brief's minimum ask. |
+| Non-zero tolerated only after all checks pass; generator never called successful | Confirmed — reaching line 69 means every `fail()` gate already passed; the log text explicitly attributes success to "the repository typecheck that runs next," never to the generator. |
+| Diagnostics remain visible | Confirmed — `result.stdout`/`result.stderr` are written to the process streams (lines 54–55) before any pass/fail decision. |
+| **TS5055** — checked across stdout and stderr, always fatal, no brittle matching | Confirmed, line 56 concatenates both streams; line 58 is a plain substring check on the diagnostic *code*, not a line number or filename. |
+| **Command ownership** — no recursion | Confirmed: the script never invokes `npm run typecheck` or `preflight:excalidraw-types`; `package.json`'s `typecheck` script is unchanged (`preflight:excalidraw-types && tsc --noEmit`). |
+| **Fail-closed** — every required condition | Nine `fail()` call sites enumerated directly from source: fork missing (29), fork package missing (30), unsafe path (40), deletion-not-removed (46), spawn error (53), TS5055 (58), post-generation absence (59), count floor (63), freshness (66). Downstream repository type errors are correctly **not** duplicated here — they are owned by the `&&  tsc --noEmit` that already follows in `package.json`, per the command-ownership rule this patch itself set. |
+
+### 18b. Test matrix — independently re-run, not accepted from the report
+
+Every case below was executed fresh in this review, with the healthy tree backed up
+externally first and restored to a verified-healthy (`npm run typecheck` exit 0) state
+immediately after each destructive test.
+
+| Case | Result |
+|---|---|
+| 1 — present | `EXIT=0`; entry `mtimeMs` identical before/after; no regeneration. |
+| 2 — clean missing | `dist/types` removed; **one** `npm run typecheck` → `TYPECHECK_EXIT=0`; 410 `.d.ts` files; entry present. |
+| 3 — generator unavailable | PATH stripped of the directory containing both `node` and `corepack` for the *child* process only (no committed-source edit); script exits **1**; declaration correctly absent afterward; message is `"Generation completed but declaration is still absent"` rather than a spawn-error message — see §18c observation 2. |
+| 4 — stale sentinel | Two newly planted sentinel files (`REVIEW_SENTINEL.d.ts`, nested variant) **removed** by clean-before-generate; fresh 410-file tree generated; no false green. |
+| 5 — unusable declaration | `index.d.ts` replaced with `export {};`; full `npm run typecheck` → **`TYPECHECK_EXIT=2`, 8 `TS2339` errors** across all 6 consuming files; restored, re-verified healthy. |
+| 6 — non-zero with fresh usable output | Subsumed by, and identical to, case 2's evidence — the clean-missing path *is* this case in this repo's current state (the generator always exits 1 on a clean run due to the known SearchMenu diagnostics). |
+| 7 — second invocation | Immediately re-run after case 2; `EXIT=0`; entry `mtimeMs` unchanged; no regeneration. |
+| 8 — git hygiene | `git status --short` shows only the five protected paths; `git check-ignore -v` confirms `dist/types/excalidraw/index.d.ts` is ignored via the **fork's own** `.gitignore:16`; `git add -n` on the `dist` directory is refused. |
+
+**No case required widening, retrying past a real failure, or accepting a result the
+implementer's own report did not already claim.**
+
+### 18c. Non-blocking observations
+
+1. **`FRESHNESS_TOLERANCE_MS = 5_000` is an implementer choice, not a value PATCH-144 pinned
+   numerically.** Reviewed and accepted: the check is secondary to delete-then-generate (the
+   actual freshness guarantee), so the specific tolerance value cannot introduce a false
+   green, and same-process/same-machine timing cannot produce a false failure at this
+   magnitude. No change required.
+2. **On Windows, the `result.error` branch (line 53) is not the path that catches "generator
+   unavailable."** With `shell: true`, `cmd.exe` absorbs the missing-command condition into
+   its own non-zero exit rather than causing Node's `spawnSync` to report a spawn-level
+   error object — confirmed directly in §18b case 3, where the failure was instead caught by
+   the subsequent `!existsSync(expected)` check with a less specific (but still accurate and
+   still fail-closed) message. The branch retains real value on POSIX, where `shell` is
+   `false` and a missing `corepack` *does* set `result.error.code === "ENOENT"` directly. This
+   is a diagnostic-message-precision nuance, not a false-green risk — the outcome (exit
+   non-zero, no misleading typecheck follows) is identical either way. No change required.
+3. **The path-safety guard (line 39) is lexical, not realpath-resolved** — it does not defend
+   against `distTypes` being redirected by a symlink or junction. Checked directly:
+   `fs.lstatSync` on the current `dist/types` confirms it is a plain directory, not a
+   symlink, and nothing in this repository's build process creates one at this location. For
+   this fixed, hardcoded, non-user-influenced path, the lexical check is sufficient; adding
+   `fs.realpathSync`-based verification would be hardening against a threat with no evidence
+   behind it, which the review brief instructs against. No change required.
+
+None of these three rises to a defect. They are recorded so a future reader does not
+re-derive them from scratch.
+
+### 18d. Clean-generation and build proof (this review's own run, not carried over)
+
+`.next` and `dist/types` removed **together** before any of the following:
+
+1. `npm run typecheck` → **exit 0** in one invocation; 410 fresh `.d.ts` files confirmed present afterward.
+2. `npx next build` (ordinary) → **exit 0**.
+3. `node scripts/e2e/assertBridgeExclusion.mjs` → **bridge exclusion proven across 891 emitted files**; no `E2E_BRIDGE_BUILD` marker.
+4. `.next` removed; `E2E_BRIDGE_BUILD=1 next build` → **exit 0**; `.next/E2E_BRIDGE_BUILD` contains **`1`**.
+5. `.next` removed; ordinary `next build` restored → **exit 0**; exclusion re-proven across 891 files; no marker.
+6. `git diff --check` → **exit 0**, clean.
+
+No step in this chain depended on a declaration tree copied from another machine or an
+earlier session — every `dist/types` used here was generated fresh within this review.
+
+### 18e. Classification
+
+**1 — PASS, READY FOR CLOSURE.**
+
+Independent source review found no gap between the governed contract and the shipped code.
+Every governed test case was re-run from a genuinely clean state and matched the required
+result, including two induced failures (cases 3 and 5) that must fail and did. The three
+observations recorded above are read-and-understood nuances, not acceptance defects, and the
+review brief explicitly instructs against widening the patch to pre-empt them.
+
+### 18f. Status
+
+**PATCH-144: CLOSED · ONE-RUN CLEAN-ENVIRONMENT DECLARATION REGENERATION PROVEN ·
+INDEPENDENTLY RE-VERIFIED · NOT PUSHED.**
+
+**PATCH-142 release decision:** PATCH-142 is **released** for its own independent final
+characterization and closure review. **PATCH-144 does not itself close PATCH-142** — PATCH-142
+must still re-run its phase-3 characterization and prove C5b per-slide, in its own governance
+turn, before it may be declared closed. **PATCH-137 remains blocked until PATCH-142 closes.**
+
+**PATCH-146 / PATCH-147:** unaffected by this review, remain reserved and non-blocking. No
+direct dependency between either and PATCH-144 was discovered.
