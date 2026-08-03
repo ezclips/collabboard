@@ -1,4 +1,8 @@
 import type { NextConfig } from "next";
+import { existsSync, rmSync, writeFileSync } from "node:fs";
+import path from "node:path";
+
+const E2E_BRIDGE_BUILD = process.env.E2E_BRIDGE_BUILD === "1";
 
 const nextConfig: NextConfig = {
   eslint: {
@@ -45,6 +49,26 @@ const nextConfig: NextConfig = {
         util: false,
       };
     }
+    if (config.cache && typeof config.cache === "object") {
+      const current = "version" in config.cache ? config.cache.version : "";
+      config.cache.version = `${current ?? ""}|collabboard-e2e-bridge:${E2E_BRIDGE_BUILD ? "on" : "off"}`;
+    }
+    if (E2E_BRIDGE_BUILD) {
+      config.resolve.alias = {
+        ...config.resolve.alias,
+        [`${path.resolve(process.cwd(), "lib/e2e/bridgeRegistration.ts")}$`]:
+          path.resolve(process.cwd(), "lib/e2e/bridgeRegistration.e2e.ts"),
+      };
+    }
+    config.plugins.push({
+      apply(compiler: any) {
+        compiler.hooks.done.tap("CollabboardE2EBridgeArtifactMarker", () => {
+          const marker = path.join(process.cwd(), ".next", "E2E_BRIDGE_BUILD");
+          if (E2E_BRIDGE_BUILD) writeFileSync(marker, "1\n");
+          else if (existsSync(marker)) rmSync(marker);
+        });
+      },
+    });
     return config;
   },
 };
