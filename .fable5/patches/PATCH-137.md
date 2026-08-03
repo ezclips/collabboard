@@ -1,8 +1,11 @@
 # PATCH-137 — PATCH-124 PRIVATE MUTATION REMOVAL: FEASIBILITY AND GOVERNANCE
 
-**Status:** OPEN · UNBLOCKED · CENSUS COMPLETE AND MEASURED · **OPTION A (TEST-ONLY MIGRATION)
-AUTHORIZED** · ZERO PRODUCTION FILES · ONE TEST FILE ≤ 360 LINES · SEE §21 · NOT PUSHED
+**Status:** **CLOSED** · OPTION A (TEST-ONLY MIGRATION) IMPLEMENTED AND INDEPENDENTLY VERIFIED
+AT `dad2784` · **CLASSIFICATION 2 — PASS WITH NON-BLOCKING OBSERVATIONS** · ZERO PRODUCTION
+FILES · ONE TEST FILE, 285/360 LINES · 21/21 CLEAN RUNS · NEGATIVE CONTROL CONFIRMED ·
+**PATCH-138 RELEASED** · SEE §21 (authorization) AND §22 (closure review) · NOT PUSHED
 **Authored:** 2026-08-03 (CTO). **Base:** `c852d95`. **Re-authorized:** 2026-08-03 at `f8671aa`.
+**Closed:** 2026-08-04 (independent governance review at `dad2784`, see §22).
 **Predecessors:** PATCH-124 (closed) · PATCH-136 (closed, §18f split this patch out) ·
 PATCH-142 / PATCH-144 / PATCH-145 (closed prerequisites; PATCH-142 released this patch at §24k).
 
@@ -1052,3 +1055,414 @@ scope; its ten-invocation strategy is precisely the approach PATCH-146 hypothesi
   hook ships in the production bundle and is held back only by a runtime environment check. Had
   the census stopped at "the guard excludes production", the permanent assertion would have looked
   redundant. It is the opposite: a runtime-only guard is exactly the kind that regresses silently.
+
+## 22. Closure review — INDEPENDENT (2026-08-04, CTO / independent governance reviewer)
+
+Performed at `HEAD = dad2784`, re-deriving every acceptance claim from the commit object,
+the source tree and fresh execution. No implementation was read from the implementation
+report and accepted on trust; each item below was re-measured. Nothing was implemented,
+no production or test file was modified, `dad2784` was not amended, nothing was pushed.
+
+### 22a. Implementation commit review
+
+`git show --name-status dad2784` returns exactly one path:
+
+| Check | Result |
+|---|---|
+| Files changed | **1** — `e2e/characterization/patch-124-slide-thumbnail-refresh.spec.ts` |
+| Insertions / deletions | 180 / 188 |
+| Final line count | **285** (governed maximum 360) |
+| Production files changed | **none** |
+| PATCH-136 bridge (`lib/e2e/*`) | unchanged — `git show dad2784 -- lib/e2e/` empty |
+| PATCH-142 characterization | unchanged — empty diff |
+| PATCH-145 characterization | unchanged — empty diff (and passes, §22j) |
+| `package.json` | unchanged — empty diff |
+| Vendored Excalidraw fork | unchanged — empty diff |
+| Persistence / schema (`lib/infra/drawing/`) | unchanged — empty diff |
+
+File scope is exactly as governed at §21h. **PASS.**
+
+### 22b. Private-surface census after migration
+
+Token census inside the migrated spec:
+
+| Token | Occurrences | Disposition |
+|---|---|---|
+| `waitForHarness` | 0 | removed |
+| `addRectToFrame` | 0 | removed |
+| `window.h.app` | 0 | removed |
+| `window.h.elements` | 0 | removed |
+| `window.h.scene` | 0 | removed |
+| `installThumbnailStamp` | 0 | removed (superseded by exact-dimension raster counting) |
+| `updateScene` | 1 | **comment only**, line 161 (`no window.h, no updateScene, no raw API`) |
+
+Repository-wide `window.h` census (excluding `node_modules`, `.next`, `dist`) returns
+**23 hits, all accounted for**:
+
+- **21 hits** inside `components/collabboard/canvas/excalidraw_fork/**` — the fork's own
+  `createTestHook` (`App.tsx:12422,12424`, `:2981`) plus 8 of the fork's own test files
+  and its `tests/helpers`. Upstream tooling, correctly untouched per §21b M1 and §21e
+  Option C ("NOT APPLICABLE").
+- **2 hits** are explanatory comments (`patch-124-...:12,161`; `patch-142-...:145`).
+- The permanent assertion at `:204` uses `(window as unknown as { h?: unknown }).h` and is
+  therefore not a `window.h` *call site* at all — it is a `typeof` probe.
+
+**No Fable 5 caller remains, and no scene-mutation path is reachable from the spec.**
+Every `page.evaluate` in the file was inspected individually (lines 75, 82, 85, 106, 204):
+four are pure reads, one (`:106`) builds a *local* scratch canvas to sample pixels. **PASS.**
+
+### 22c. Governed bridge
+
+Bridge members referenced by the spec, extracted mechanically:
+
+- `__COLLABBOARD_E2E__.getSceneElements`
+- `__COLLABBOARD_E2E__.getViewport`
+
+Nothing else. `lib/e2e/bridgeRegistration.e2e.ts` re-read in full: the returned object is
+`Object.freeze`d, exposes 7 members, every element is `cloneFrozen` (deep clone → deep
+freeze) before it leaves, and there is **no write method of any kind**. The surface was not
+widened, no writable object escapes, `updateScene` does not appear, and no database
+mutation is used as a substitute for UI. **PASS.**
+
+### 22d. Real-UI control path review
+
+Every edit in the spec is a genuine user interaction. Each selector was traced to its
+defining source line:
+
+| Control | Selector | Defined at | Verdict |
+|---|---|---|---|
+| Rectangle tool | `[data-testid="toolbar-rectangle"]` | `Actions.tsx:1150`, `ToolPopover.tsx:111`, `MobileToolBar.tsx:276` | app-owned test ID — **accepted** |
+| Stroke / background trigger | `[data-openpopup="elementStroke"\|"elementBackground"]` | `ColorPicker.tsx:260` | app-owned data attribute — **accepted** |
+| Hex entry | `input.color-picker-input` | `ColorInput.tsx:77` (+ `ColorPicker.scss:392`) | CSS class — **accepted, see O4** |
+| Popover gate | `.color-picker-content` | ColorPicker markup | visibility gate only — **accepted** |
+| Solid fill | `[data-testid="fill-solid"]` | `actionProperties.tsx:515` | app-owned test ID — **accepted** |
+| Drawing | `page.mouse.move/down/move/up` | — | real pointer input — **accepted** |
+| Duplicate | `ControlOrMeta+d` | — | real keyboard shortcut — **accepted** |
+| Slide navigation | thumbnail `img[alt="Slide preview"]` click | app markup | user-facing — **accepted** |
+
+None of these reach into internal Excalidraw *state*; they are all the controls a user
+operates. **PASS.**
+
+### 22e. Frame membership
+
+`resolvesToFrame` (`:56-62`) was diffed against production
+`lib/infra/drawing/frameMembership.ts::resolveFrameMembership` line by line:
+
+| Production | Spec mirror | Match |
+|---|---|---|
+| `element.frameId !== null && !== undefined` → return it | identical guard, `:58` | ✔ |
+| else centre = `x + width/2`, `y + height/2` | identical, `:59-60` | ✔ |
+| strict `>` / `<` containment on all four edges | identical, `:61` | ✔ |
+
+The proof is not coordinate-based: `drawStyledRectangle` (`:179-184`) polls the **live scene**
+until an element exists that is (a) new, (b) `type === 'rectangle'`, (c) not deleted, and
+(d) `resolvesToFrame(el, frameId)`. The created element itself is observed and its own
+`frameId` carries the verdict; coordinates only position the pointer. Correct target frame
+is proven positively, and non-membership of the unrelated frame is proven by §22g's
+per-slide raster and hash isolation. **PASS.** (See O5 for a bounded divergence note.)
+
+### 22f. Thumbnail attribution
+
+| Requirement | Evidence | Verdict |
+|---|---|---|
+| Exact dimensions | `LANDSCAPE_DIMS = 569×320`, `PORTRAIT_DIMS = 180×320` (`:39-40`) | ✔ |
+| No aspect-ratio classifier | `rasterCount` filters `e.width === w && e.height === h` (`:77`) | ✔ — PATCH-142 §22b defect not reintroduced |
+| Per-slide counts | separate counters per dimension pair | ✔ |
+| Non-zero baselines | `portraitRastersBeforeA` captured after cold load (`:224`); `landscapeBeforeManual` / `portraitBeforeManual` (`:245-246`); `landscapeRastersBeforeDup` (`:265`). Measured baseline in probe: **9** | ✔ |
+| Target thumbnail visibly changes | `waitForThumbnailChange` requires hash change **and** `colorHits[colour] > 12` (`:132-138`) | ✔ |
+| Unrelated thumbnail unchanged | hash equality (`:230`, `:237`) **and** raster-count equality (`:231`) | ✔ |
+| `src` string alone not relied on | `src` is only used for the PNG prefix check at `:223`; every behavioural assertion uses decoded pixels | ✔ |
+
+The sampler decodes the image into a scratch canvas and reads `getImageData`; it never calls
+`toDataURL`, so **it does not pollute the raster counter** — confirmed by reading `:106-128`.
+**PASS.**
+
+### 22g. Mirror direction
+
+| Direction | Mechanism | Assertion | Verdict |
+|---|---|---|---|
+| Landscape edit → landscape updates | real UI red draw, `:227` | `colorHits.red > 12`, `:228` | ✔ |
+| … portrait unchanged | — | hash `:230` **and** raster count `:231` | ✔ |
+| Portrait edit → portrait updates | real UI green draw, `:234` | `colorHits.green > 12`, `:235` | ✔ |
+| … landscape unchanged | — | hash `:237` | ✔ |
+
+Both directions use identical real-UI machinery; neither retains mutation or weaker
+evidence. The A→B direction is in fact *stronger* than the B→A direction (it adds the
+raster-count check), and PATCH-142 §24 independently owns the B→A raster case. **PASS.**
+
+### 22h. C10a — coalescing
+
+Sequence inspected at `:262-270`:
+
+1. real orange draw, then `waitForThumbnailChange` — the baseline is taken **after** the
+   draw has settled, not mid-flight (`:262-263`);
+2. `beforeDup` scene length and `landscapeRastersBeforeDup` captured (`:264-265`);
+3. two real `ControlOrMeta+d` presses (`:266-267`);
+4. scene confirms **exactly two** new elements (`:268`);
+5. raster count polled to increase, then asserted `=== baseline + 1` (`:269-270`).
+
+The production 250 ms debounce is **not modified** — no timer patching, no fake clock, no
+`page.clock` usage anywhere in the file. The 40–55 ms figure is a *measured property* of
+back-to-back `keyboard.press` calls recorded at §7d; the spec contains **no** `waitForTimeout`
+between the two presses, so it is not an arbitrary wait masking a race.
+
+**Independently measured** with a temporary probe (copy of the spec, deleted afterwards)
+sampling the landscape raster count at the assertion point and at +500/+1500/+3000 ms:
+
+```
+C10A_PROBE baseline=9 atAssertion=10 at500=10 at1500=10 at3000=10
+```
+
+The count is `baseline + 1` at the assertion point **and remains there for a full 3 s**.
+Coalescing genuinely holds and the assertion reports the settled value. **PASS**, with
+observation O1 recorded on the assertion's *future* discriminating power.
+
+### 22i. C10b — two-colour polling
+
+At `:274-280`: orange already present, a second real UI draw adds teal, then
+
+```ts
+await expect.poll(async () => {
+  const sample = await sampleThumbnail(slideA, colors);
+  return sample.colorHits.orange > 12 && sample.colorHits.teal > 12;
+}, ...).toBe(true);
+```
+
+The predicate is a **conjunction**, so an intermediate one-colour thumbnail cannot satisfy
+it — the original PATCH-124 race (accepting the first `hash`-changed sample as settled) is
+structurally impossible, not merely unlikely. A final hash-inequality check (`:280`) confirms
+the sample is not the pre-teal frame. No `src` identity shortcut is used. **PASS.**
+
+### 22j. C1–C13 equivalence — independent table
+
+Built by reading the assertions, not the claim-map comment, then cross-checked against it.
+
+| Claim | Original contract | Where it now lives | Verdict |
+|---|---|---|---|
+| C1 | Both slides render a PNG thumbnail, natural dims > 100 px | `:221-223` PNG prefix (slide A); both slides sampled successfully; **exact** 569×320 / 180×320 rasters required by the polls at `:248-249` | **Retained, strengthened** — exact dimensions are strictly stronger than “> 100 px”. See **O2** |
+| C2 | Shape in A appears in A's thumbnail (> 12 px) | `:227-228` real red draw + `colorHits.red > 12` | **Retained via real UI** |
+| C3 | Change to A does not alter B | `:230` hash **+** `:231` raster count | **Retained, strengthened** |
+| C4 | Shape in B refreshes B | `:234-235` real green draw | **Retained via real UI** |
+| C5 | Change to B does not alter A | `:237` hash equality (original used `src`) | **Retained, strengthened**; PATCH-142 §24 owns the general case |
+| C5c | `src` identity as a cross-frame contract | — | **Obsolete**, explicitly superseded by PATCH-142 §24; recorded at `:31` |
+| C6 | Further change to A refreshes A again | `:240-241` real purple draw | **Retained via real UI** |
+| C7 | Manual refresh → genuinely new render, content unchanged | `:244-254`: raster count increases for **both** slides, hash unchanged, both colours still present | **Retained, strengthened** — replaces the pixel-stamp hack with true render counting |
+| C8 | Refresh cycle terminates | `:250` `waitForRefreshButtonIdle` | **Retained** |
+| C9 | No transient chrome | `:257-258` both slides | **Retained** |
+| C10 | Two rapid changes → both colours | **Split** per §10a: C10a `:262-270`, C10b `:274-280` | **Split, both proven** |
+| C11 | No React state-update/unmounted/act() console errors | `:194-195` capture, `:283` assertion | **Retained** |
+| C12 | ±20/channel, alpha > 160, > 12 px | `:124` predicate; thresholds at `:137`, `:252-253`, `:278` | **Retained** |
+| C13 | Frame targeting by `frameId` | `resolvesToFrame` + creation poll `:181`, on **every** draw | **Retained, strengthened** |
+| — | Persistence / reload | not required — no C1–C13 claim reloads or reads back | **Correctly absent** (§21f) |
+
+**No claim was silently dropped.** The one textual reduction (C1's explicit `> 100 px`
+assertion) is superseded by a stronger requirement; it is recorded as O2 rather than waved
+through. The in-file claim map at `:12-32` matches this independently-derived table.
+**PASS.**
+
+### 22k. `window.h` absence
+
+The spec asserts, at `:204`, immediately after `waitForE2EBridge` and **before any drawing**:
+
+```ts
+expect(await page.evaluate(() => typeof (window as unknown as { h?: unknown }).h)).toBe('undefined');
+```
+
+Run independently against the freshly built governed E2E artifact: **passes in all 21
+executions** (§22m/§22n). The ordinary production bundle does not execute the vendored hook —
+`assertBridgeExclusion.mjs` proves bridge exclusion across **891 emitted files** and the
+`E2E_BRIDGE_BUILD` marker is absent (§22o steps 7 and 12–13); the hook itself remains held
+back at runtime by `isTestEnv() || isDevEnv()`, exactly as censused at §21c. Deletion of the
+vendored hook is **not** required under PATCH-137 and was not performed. **PASS.**
+
+### 22l. Induced-failure review — all three points reproduced
+
+**1. Parent-state PATCH-124 against the governed E2E artifact.** The pre-migration spec was
+materialised from `f5520ad` into a temporary sibling file and executed:
+
+```
+Test timeout of 120000ms exceeded.
+Error: page.waitForFunction: Test timeout of 120000ms exceeded.
+  164 |   await page.waitForFunction(() => {
+  165 |     const target = window as ... { h?: { app?: unknown; elements?: unknown[] } };
+  166 |     return Boolean(target.h?.app && Array.isArray(target.h.elements));
+  167 |   }, { timeout: 90_000 });
+  at waitForHarness (__parent-state-probe.spec.ts:164:14)
+```
+
+Fails waiting for the private harness, as governed. This independently confirms §21c's
+central finding: **PATCH-124 had already lost all coverage against the governed artifact
+before this patch** — the migration restores coverage rather than merely relocating it.
+
+**2. Current migrated test.** Passes through real UI (§22m).
+
+**3. Temporary negative control.** A copy of the spec with the first draw relocated to
+`(650,800)-(750,860)` — centre `(700, 830)`, below the landscape frame (height 720) and
+outside the portrait frame's x range, therefore belonging to **no** frame:
+
+```
+Expected: true
+Received: false
+  at drawStyledRectangle (__negctl-probe.spec.ts:184:50)
+  at __negctl-probe.spec.ts:229:5
+```
+
+Fails precisely at the frame-membership poll. The membership assertion is genuinely
+sensitive to real ownership and is not vacuously true.
+
+**Cleanup verified.** Both probes and the parent-state file were deleted, `test-results`
+removed, and the committed spec confirmed **byte-identical** to `dad2784`
+(`git diff --exit-code dad2784 -- <spec>` → clean). `git diff --check` exits 0. Neither
+probe was committed. **PASS.**
+
+### 22m. Focused run
+
+One focused invocation against the governed artifact:
+
+```
+ok 2 [characterization] patch-124-slide-thumbnail-refresh.spec.ts:191:7 (30.4s)
+2 passed (35.0s)
+```
+
+**PASS.**
+
+### 22n. Ten independent process invocations — plus ten more
+
+Ten **separate** `npx playwright test` CLI invocations (separate Node processes, not an
+in-test loop — PATCH-146 scope deliberately not consumed), fresh board and browser state per
+run, `retries: 0` locally, no `--repeat-each`:
+
+| Run | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Result | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| Duration | 32.3s | 32.4s | 31.7s | 33.2s | 36.5s | 34.4s | 30.0s | 30.3s | 31.4s | 34.3s |
+
+**10/10, no setup failures, no retries.** Because an anomaly had been observed on a modified
+copy (O3), a **second, unrequired batch of ten** was run to widen the denominator:
+
+| Run | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Result | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| Duration | 35.7s | 34.6s | 36.7s | 35.4s | 35.1s | 34.3s | 32.4s | 30.2s | 34.1s | 34.5s |
+
+**Observed flake rate on the governed spec: 0/21** (20 independent + 1 focused). Duration
+spread 30.0–36.7 s is tight, with no drift across the batch. **PASS.**
+
+### 22o. Clean-environment validation — all 13 steps
+
+| # | Step | Result |
+|---|---|---|
+| 1 | remove vendored `dist/types` (excalidraw + common) | removed, absence confirmed |
+| 2 | remove `.next` | removed, absence confirmed |
+| 3 | **one** `npm run typecheck` | completed |
+| 4 | fresh declarations generated | **410** `.d.ts` files (generator exits 1 on two pre-existing `SearchMenu.tsx` errors and emits 410 with no TS5055 — exactly PATCH-144's closed contract) |
+| 5 | typecheck exits 0 | **exit 0**; re-confirmed authoritatively with a bare `npx tsc --noEmit` → **exit 0**, no output |
+| 6 | ordinary `npx next build` | **exit 0** |
+| 7 | `node scripts/e2e/assertBridgeExclusion.mjs` | **exit 0** — "Bridge exclusion proven across 891 emitted files"; `E2E_BRIDGE_BUILD` absent |
+| 8 | remove `.next` | ordinary artifact set aside |
+| 9 | clean E2E build (`npm run build:e2e`) | **exit 0** |
+| 10 | marker contains `1` | `.next/E2E_BRIDGE_BUILD` → **`1`** |
+| 11 | restore ordinary `.next` | restored |
+| 12 | rerun exclusion | **exit 0** — 891 files |
+| 13 | confirm no marker | `.next/E2E_BRIDGE_BUILD` **absent** |
+
+**PASS.** Ordinary artifacts exclude the bridge; the E2E artifact carries it exactly once.
+
+### 22p. Focused regression validation
+
+| Suite | Result |
+|---|---|
+| Presentation unit tests (`lib/infra/presentation`) | **36/36 pass** — `slideOrder` 7, `slideThumbnailRefresh` 19, `waitForOverlayReadiness` 5, `slideRenderSignature` 5 |
+| PATCH-136 bridge characterization | **3/3 pass** (selection, exclusion/containment, runtime bounded-frozen-cloned-revisioned) |
+| PATCH-142 characterization | **1/1 pass** (20.8s) |
+| PATCH-145 characterization | **1/1 pass** (15.7s) |
+| Migrated PATCH-124 characterization | **21/21 pass** (§22m, §22n) |
+| `git diff --check` | **exit 0** |
+
+None of these files was modified — verified by empty diffs in §22a. **PASS.**
+
+### 22q. Observations — classified
+
+| # | Observation | Classification |
+|---|---|---|
+| **O1** | **C10a's `=== baseline + 1` is read immediately after the poll first sees *any* increase, with no settle window.** Measured directly (§22h): the count stays at `+1` through +3000 ms, so the claim is true and the assertion reports the settled value today. But as written, a future coalescing regression that emitted its second raster ~250 ms later could slip past, because the assertion samples before that window elapses. The scene-count `+2` precondition and the stable post-draw baseline keep the test from being vacuous. | **Non-blocking test-sensitivity observation.** Recommend a bounded settle window (e.g. re-assert after 500 ms) whenever this file is next opened. Not a defect in the proven property, and not grounds to withhold closure. |
+| **O2** | **C1's explicit "natural dimensions > 100 px" assertion was dropped**; PNG-prefix is asserted for slide A only (`:223`), not B. | **Accepted implementation detail.** Superseded by a strictly stronger requirement — the polls at `:248-249` cannot pass unless rasters at exactly 569×320 **and** 180×320 occur — and `sampleThumbnail` throws on a zero-size canvas. Recorded so the reduction is not mistaken for an oversight. |
+| **O3** | **One anomalous failure on a *modified copy* of the spec** (`colorHits.red = 0` vs `> 12`, ~11 s in). The copy's only edit was three `waitForTimeout` calls placed **after** the failure point, so the edit cannot have caused it through its own code path. It **did not reproduce**: the same probe passed on immediate re-run, and the governed spec then passed 21/21 consecutively. The run occurred immediately after the 2-minute parent-state timeout failure. | **Non-blocking, unreproduced anomaly — reported, not hidden.** Not a setup failure (auth setup passed). Not PATCH-146's many-cycle issue (single-cycle test). Residue from an aborted preceding run is a **plausible but unproven** mechanism and is explicitly *not* asserted as the cause. Bounded by a 0/21 observed flake rate on the governed file. If it recurs, open a patch against thumbnail-settling timing rather than re-litigating this closure. |
+| **O4** | Hex entry uses `input.color-picker-input` (CSS class) although `ColorInput.tsx:77` also carries an `aria-label`. | **Accepted implementation detail.** The `aria-label` is i18n-derived and therefore locale-fragile; the class is load-bearing in `ColorPicker.scss:392` and used by the fork's own tests. The class is the more stable choice here, so §21f's "prefer accessible controls" preference is correctly overridden. |
+| **O5** | `resolvesToFrame` tests containment against **one named frame**, whereas production resolves the **first match in array order** across a frame list. | **Accepted implementation detail.** Equivalent for this fixture: landscape `(0,0,1280,720)` and portrait `(1400,0,720,1280)` are disjoint, so no tie-break can arise. The divergence would only matter for overlapping frames, which this fixture does not create. |
+| **O6** | Drawing requires coordinates in a region clear of the floating properties panel (`.Island`, measured x:72–272), and requires clicking the target slide's thumbnail first to pan/zoom the canvas to that frame. | **Non-blocking test fragility — explicitly permitted.** Coordinates are derived from the **live** `getViewport()` and validated through **observed frame membership**, which §"DRAW RELIABILITY" declares acceptable. Critically it **fails safe**: if the panel widened, the pointer would miss the canvas and the membership poll would time out loudly (exactly the negative control's signature) rather than pass on weaker evidence. |
+| **O7** | The pixel sampler builds a scratch canvas at the thumbnail's natural size — the same 569×320 the raster counter filters on. | **Accepted, and worth recording.** It calls `getImageData`, **never** `toDataURL`, so it cannot inflate the raster counter. Verified by reading `:106-128`. Any future edit that switches the sampler to `toDataURL` would silently corrupt every count in the file. |
+
+Governance directed that coordinate use must not be rejected merely for existing. It is not:
+O6 is accepted on the stated grounds. No observation is classified as blocking reliance on
+layout coordinates.
+
+### 22r. Acceptance contract
+
+| # | Criterion | Result |
+|---|---|---|
+| 1 | Old PATCH-124 private mutation dependency removed | **PASS** §22b |
+| 2 | No replacement writable bridge or mutation hook introduced | **PASS** §22c |
+| 3 | `window.h` absent in the governed E2E artifact | **PASS** §22k |
+| 4 | Real UI creates the intended element | **PASS** §22d |
+| 5 | Element membership proven from scene state | **PASS** §22e |
+| 6 | Target thumbnail changes | **PASS** §22f |
+| 7 | Unrelated thumbnail remains unchanged | **PASS** §22f |
+| 8 | Both slide directions covered | **PASS** §22g |
+| 9 | C10a coalescing passes | **PASS** §22h (+O1) |
+| 10 | C10b two-colour polling passes | **PASS** §22i |
+| 11 | Manual refresh / chrome / console claims remain covered | **PASS** §22j (C7, C8, C9, C11) |
+| 12 | C1–C13 equivalence preserved or explicitly superseded | **PASS** §22j (+O2) |
+| 13 | Ten independent process runs pass | **PASS** §22n — 20/20, plus focused |
+| 14 | Negative control fails | **PASS** §22l |
+| 15 | Ordinary artifacts exclude the bridge | **PASS** §22o |
+| 16 | No production changes were required | **PASS** §22a |
+
+All sixteen hold.
+
+### 22s. Classification
+
+**2 — PASS WITH NON-BLOCKING OBSERVATIONS.**
+
+The migration achieves what §21e Option A set out to do, and does so on stronger evidence
+than the original: PATCH-124's claims are now proven through the same controls a user
+operates, observed only through a frozen read-only surface, against the artifact that
+actually ships. The two findings that matter (O1's C10a settle window, O3's unreproduced
+anomaly) were both **measured rather than argued** — O1's underlying property was verified
+stable to 3 s, and O3 was bounded by doubling the required run count. Neither undermines a
+claim the patch asserts.
+
+Not classification 1, because O1 identifies a real, if latent, reduction in future
+regression-detection power that a subsequent editor must know about, and O3 is an observed
+failure that must remain visible rather than be smoothed into a clean record.
+
+### 22t. Status and patch dependencies
+
+- **PATCH-137: CLOSED** — Option A (test-only migration) implemented and independently
+  verified at `dad2784`. Zero production files. One test file, 285/360 lines.
+- **PATCH-138: RELEASED** — becomes the next active patch.
+- **PATCH-139–141:** remain in their governed sequence, **not** closed by this review.
+- **PATCH-146** (many-cycles-in-one-test ceiling): remains **RESERVED, non-blocking**. The
+  evidence for it weakens further — 20 additional clean single-cycle process invocations
+  with zero setup failures. O3 is explicitly **not** attributed to it.
+- **PATCH-147** (Windows lifecycle `spawn npm ENOENT`): remains **RESERVED, non-blocking**.
+
+### 22u. Reviewer's notes
+
+- **"Absent from the artifact" was worth re-proving by execution.** The parent-state run did
+  not merely fail — it failed at `waitForHarness` after 90 s, which is the signature of a
+  capability that was never there, not of a flaky wait. Reading §21c would have told me the
+  same thing; running it made the difference between a cited finding and a verified one.
+- **A probe that fails once is data, not noise.** The cheapest response to O3 would have been
+  to re-run until green and report the green. Doubling the run batch cost six minutes and
+  converted an anecdote into a bounded rate (0/21), which is what a future reader actually
+  needs in order to judge a recurrence.
+- **Measure the settle window before calling a timing assertion sound.** O1 looked like a
+  false-green when read statically. Sampling the raster count at +0/+500/+1500/+3000 ms
+  showed the property genuinely holds — so the correct verdict was "weak future
+  sensitivity", not "defective assertion". Static reading alone would have produced the
+  wrong classification in both directions.
+- **Check what the instrument touches.** The sampler allocates a canvas at exactly the
+  dimensions the raster counter filters on. It happens to be safe only because it uses
+  `getImageData`. That is one edit away from silently invalidating every count in the file,
+  which is why it is recorded as O7 rather than left as an unstated coincidence.
