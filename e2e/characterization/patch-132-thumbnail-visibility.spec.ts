@@ -8,6 +8,7 @@ import {
   seedDrawingContainers,
   type DrawingFixture,
 } from './drawingBridgeHarness';
+import { waitForE2EBridge } from './e2eBridge';
 
 // PATCH-132: characterizes active-slide thumbnail auto-scroll in the Presentation
 // sidebar. Diagnosis (PATCH-132 §19) proved the thumbnail scheduler itself is not
@@ -149,16 +150,12 @@ async function seedManySlides(
 }
 
 async function waitForHarness(page: Page): Promise<void> {
-  await page.waitForFunction(() => {
-    const target = window as Window & typeof globalThis & { h?: { app?: unknown; elements?: unknown[] } };
-    return Boolean(target.h?.app && Array.isArray(target.h.elements));
-  }, { timeout: 90_000 });
+  await waitForE2EBridge(page);
 }
 
 async function waitForFramesLoaded(page: Page, expectedFrameCount: number): Promise<void> {
   await page.waitForFunction((count) => {
-    const h = (window as Window & typeof globalThis & { h?: { app?: { getSceneElements?: () => unknown[] }; elements?: unknown[] } }).h;
-    const elements = h?.app?.getSceneElements?.() ?? h?.elements;
+    const elements = window.__COLLABBOARD_E2E__?.getSceneElements();
     return Array.isArray(elements)
       && elements.filter((element) => {
         const item = element as { type?: string; isDeleted?: boolean };
@@ -240,8 +237,7 @@ function fullyInside(row: RowBox, container: RowBox, tolerance: number): boolean
 
 async function getCanvasAppState(page: Page): Promise<{ scrollX: number; scrollY: number; zoom: number }> {
   return page.evaluate(() => {
-    const h = (window as Window & typeof globalThis & { h?: { app?: { getAppState?: () => any }; state?: any } }).h;
-    const state = h?.app?.getAppState?.() ?? h?.state ?? {};
+    const state = (window.__COLLABBOARD_E2E__?.getViewport() ?? {}) as any;
     return {
       scrollX: Number(state?.scrollX ?? 0),
       scrollY: Number(state?.scrollY ?? 0),
@@ -252,8 +248,7 @@ async function getCanvasAppState(page: Page): Promise<{ scrollX: number; scrollY
 
 async function getSelectedElementIds(page: Page): Promise<string[]> {
   return page.evaluate(() => {
-    const h = (window as Window & typeof globalThis & { h?: { app?: { getAppState?: () => any }; state?: any } }).h;
-    const state = h?.app?.getAppState?.() ?? h?.state ?? {};
+    const state = (window.__COLLABBOARD_E2E__?.getViewport() ?? {}) as any;
     return Object.keys(state?.selectedElementIds ?? {}).filter((id) => state.selectedElementIds[id]);
   });
 }

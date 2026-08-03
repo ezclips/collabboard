@@ -5,6 +5,7 @@ import {
   registerDrawingCleanup,
   openDrawingBoard,
 } from './drawingBridgeHarness';
+import { waitForE2EBridge } from './e2eBridge';
 import { buildPadletRenderState, getSlideRenderSignature } from '@/components/presentation/slide-renderer/getSlideRenderSignature';
 import { planSlideComposition } from '@/components/presentation/slide-renderer/planSlideComposition';
 import { computePostRenderRevision } from '@/lib/infra/drawing/postRenderRevision';
@@ -83,7 +84,7 @@ async function openPresentationSidebar(page: Page, expectedSlideCount: number): 
 
 async function waitForFramesLoaded(page: Page, expectedFrameCount: number): Promise<void> {
   await page.waitForFunction((count) => {
-    const els = (window as any).h?.elements as any[] | undefined;
+    const els = window.__COLLABBOARD_E2E__?.getSceneElements() as any[] | undefined;
     if (!els) return false;
     return els.filter((el) => el.type === 'frame' && !el.isDeleted).length >= count;
   }, expectedFrameCount, { timeout: 30_000 });
@@ -143,30 +144,19 @@ async function waitForStableThumbnailChange(row: Locator, previous: ThumbSample,
 }
 
 async function waitForHarness(page: Page): Promise<void> {
-  await page.waitForFunction(() => {
-    const target = window as any;
-    return Boolean(target.h?.app && Array.isArray(target.h.elements));
-  }, { timeout: 90_000 });
+  await waitForE2EBridge(page);
 }
 
 async function getAppState(page: Page): Promise<any> {
-  return page.evaluate(() => {
-    const h = (window as any).h;
-    if (typeof h?.app?.getAppState === 'function') return h.app.getAppState();
-    return h?.state ?? {};
-  });
+  return page.evaluate(() => window.__COLLABBOARD_E2E__?.getViewport() ?? {});
 }
 
 async function getElements(page: Page): Promise<any[]> {
-  return page.evaluate(() => (window as any).h.elements as any[]);
+  return page.evaluate(() => window.__COLLABBOARD_E2E__?.getSceneElements() as any[] ?? []);
 }
 
 async function getLiveElements(page: Page): Promise<any[]> {
-  return page.evaluate(() => {
-    const h = (window as any).h;
-    if (typeof h?.app?.getSceneElements === 'function') return h.app.getSceneElements();
-    return h.elements as any[];
-  });
+  return getElements(page);
 }
 
 async function sceneToScreen(page: Page, sceneX: number, sceneY: number) {
@@ -438,26 +428,20 @@ async function installGateGInstrumentation(page: Page): Promise<void> {
       };
       return counters.byOperation[operation];
     };
-    const revisionOf = (elements: readonly any[]) => JSON.stringify(
-      elements
-        .filter((el) => !el?.isDeleted)
-        .map((el) => [el.id, el.version, el.versionNonce, el.x, el.y, el.width, el.height, el.frameId, el.updated]),
-    );
-    const h = target.h;
-    if (h?.app?.onChangeEmitter && typeof h.app.onChangeEmitter.on === 'function') {
-      counters.unsubscribeOnChange = h.app.onChangeEmitter.on((elements: readonly any[]) => {
+    const bridge = target.__COLLABBOARD_E2E__;
+    if (bridge && typeof bridge.subscribeToSceneChange === 'function') {
+      counters.unsubscribeOnChange = bridge.subscribeToSceneChange((revision: number) => {
         const op = counters.activeOperation;
         if (op) {
           const values = ensure(op);
           values.totalExcalidrawOnChangeCalls++;
-          const revision = revisionOf(elements);
           if (values.lastRevision === null) {
-            values.lastRevision = revision;
-          } else if (values.lastRevision === revision) {
+            values.lastRevision = String(revision);
+          } else if (values.lastRevision === String(revision)) {
             values.unchangedRevisionOnChangeCalls++;
           } else {
             values.sceneVersionChanges++;
-            values.lastRevision = revision;
+            values.lastRevision = String(revision);
           }
         }
       });
@@ -989,7 +973,7 @@ test('PATCH-128 geometry: app-owned and native drags synchronize slides and thum
 
   const elementsAfterWithin = await getElements(page);
   const withinEmbAfter = elementsAfterWithin.find((el) => el.id === 'emb-within');
-  const reactElementsAfterWithin = await page.evaluate(() => (window as any).h.elements as any[]);
+  const reactElementsAfterWithin = await getElements(page);
   const withinEmbAfterReact = reactElementsAfterWithin.find((el: any) => el.id === 'emb-within');
 
   expect(withinEmbAfter.x).not.toBe(withinEmbBefore.x);
@@ -1112,19 +1096,20 @@ test('PATCH-128 gate F: real app-owned resize handle synchronizes presentation a
 
   await page.mouse.move(handle.x, handle.y);
   await page.evaluate(({ x, y, id }) => {
-    const h = (window as any).h;
-    const stateBefore = h.state ?? {};
+    const bridge = window.__COLLABBOARD_E2E__;
+    const stateBefore = (bridge?.getViewport() ?? {}) as any;
     const beforeSelected = Boolean(stateBefore?.selectedElementIds?.[id]);
     (window as any).__patch128PointerDownProof = new Promise<any>((resolve) => {
       const canvas = document.elementFromPoint(x, y);
       const eventTarget = canvas?.tagName?.toLowerCase() ?? null;
       window.addEventListener('pointerdown', () => {
         requestAnimationFrame(() => {
-          const stateAfter = h.state ?? {};
+          const stateAfter = (bridge?.getViewport() ?? {}) as any;
+          const interactionAfter = (bridge?.getInteractionState() ?? {}) as any;
           resolve({
             beforeSelected,
             eventTarget,
-            resizingElementId: stateAfter?.resizingElement?.id ?? null,
+            resizingElementId: interactionAfter?.resizingElementId ?? null,
             selectedAfterDown: Boolean(stateAfter?.selectedElementIds?.[id]),
           });
         });
@@ -1777,11 +1762,13 @@ test('PATCH-128 gate G: representative slide-sync performance remains bounded', 
   const appDragProofs: any[] = [];
 
   const observeIdleGrowth = async (operation: GateGOperationName, beforeCounters: any) => {
+    const beforeIdleSceneVersion = getSceneVersion((await getLiveElements(page)) as any);
     await page.waitForTimeout(1800);
     const afterCounters = await readGateGOperationCounters(page, operation);
+    const afterIdleSceneVersion = getSceneVersion((await getLiveElements(page)) as any);
     return {
       totalExcalidrawOnChangeCalls: afterCounters.totalExcalidrawOnChangeCalls - beforeCounters.totalExcalidrawOnChangeCalls,
-      sceneVersionChanges: afterCounters.sceneVersionChanges - beforeCounters.sceneVersionChanges,
+      sceneVersionChanges: beforeIdleSceneVersion === afterIdleSceneVersion ? 0 : 1,
       settledTimerSchedules: afterCounters.settledTimerSchedules - beforeCounters.settledTimerSchedules,
       thumbnailRenderRequests: afterCounters.thumbnailRenderRequests - beforeCounters.thumbnailRenderRequests,
     };
@@ -2041,7 +2028,7 @@ test('PATCH-128 gate G: representative slide-sync performance remains bounded', 
       outsideSlideEditGlobalRevisionComputed: outside.postRenderRevisionComputations > 0,
       outsideSlideEditLeavesSlideSignaturesUnchanged: outside.changedSlideSignatures.length === 0,
       measurementStrategy: {
-        onChange: 'test-scoped subscription to mounted Excalidraw app onChangeEmitter',
+        onChange: 'test-scoped subscription to mounted E2E observation bridge scene revisions',
         settledTimers: 'test-scoped 150ms timer counts during active operation window',
         settledSetElements: 'derived from geometry operation live-to-React settled equality; internal React setState is not directly exposed',
         framesMemo: 'derived from changed slide signatures; internal useMemo invocation is not directly exposed',

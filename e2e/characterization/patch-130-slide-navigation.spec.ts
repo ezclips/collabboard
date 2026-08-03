@@ -7,6 +7,7 @@ import {
   seedDrawingContainers,
   seedPresentationScene,
 } from './drawingBridgeHarness';
+import { waitForE2EBridge } from './e2eBridge';
 
 const LANDSCAPE_TITLE = 'PATCH-064 Landscape';
 const PORTRAIT_TITLE = 'PATCH-064 Portrait';
@@ -41,16 +42,12 @@ type NavigationMeasurement = {
 registerDrawingCleanup(test);
 
 async function waitForHarness(page: Page): Promise<void> {
-  await page.waitForFunction(() => {
-    const target = window as Window & typeof globalThis & { h?: { app?: unknown; elements?: unknown[] } };
-    return Boolean(target.h?.app && Array.isArray(target.h.elements));
-  }, { timeout: 90_000 });
+  await waitForE2EBridge(page);
 }
 
 async function waitForFramesLoaded(page: Page, expectedFrameCount: number): Promise<void> {
   await page.waitForFunction((count) => {
-    const h = (window as Window & typeof globalThis & { h?: { app?: { getSceneElements?: () => unknown[] }; elements?: unknown[] } }).h;
-    const elements = h?.app?.getSceneElements?.() ?? h?.elements;
+    const elements = window.__COLLABBOARD_E2E__?.getSceneElements();
     return Array.isArray(elements)
       && elements.filter((element) => {
         const item = element as { type?: string; isDeleted?: boolean };
@@ -84,8 +81,7 @@ async function clickSlide(sidebar: Locator, title: string): Promise<void> {
 
 async function frameIdByTitle(page: Page, title: string): Promise<string> {
   return page.evaluate((targetTitle) => {
-    const h = (window as Window & typeof globalThis & { h?: { app?: { getSceneElements?: () => any[] }; elements?: any[] } }).h;
-    const elements = h?.app?.getSceneElements?.() ?? h?.elements ?? [];
+    const elements = (window.__COLLABBOARD_E2E__?.getSceneElements() ?? []) as any[];
     const frame = elements.find((element: any) =>
       element?.type === 'frame' && !element.isDeleted && element.name === targetTitle
     );
@@ -96,11 +92,9 @@ async function frameIdByTitle(page: Page, title: string): Promise<string> {
 
 async function measureNavigation(page: Page, frameId: string): Promise<NavigationMeasurement> {
   return page.evaluate((targetFrameId) => {
-    const h = (window as Window & typeof globalThis & {
-      h?: { app?: { getSceneElements?: () => any[]; getAppState?: () => any }; elements?: any[]; state?: any };
-    }).h;
-    const elements = h?.app?.getSceneElements?.() ?? h?.elements ?? [];
-    const appState = h?.app?.getAppState?.() ?? h?.state;
+    const bridge = window.__COLLABBOARD_E2E__;
+    const elements = (bridge?.getSceneElements() ?? []) as any[];
+    const appState = bridge?.getViewport() as any;
     if (!appState) throw new Error('PATCH-130 Excalidraw appState unavailable');
     const frame = elements.find((element: any) =>
       element?.id === targetFrameId && element.type === 'frame' && !element.isDeleted
@@ -215,8 +209,7 @@ function assertStable(before: NavigationMeasurement, after: NavigationMeasuremen
 
 async function collectFrameIds(page: Page): Promise<string[]> {
   return page.evaluate(() => {
-    const h = (window as Window & typeof globalThis & { h?: { app?: { getSceneElements?: () => any[] }; elements?: any[] } }).h;
-    const elements = h?.app?.getSceneElements?.() ?? h?.elements ?? [];
+    const elements = (window.__COLLABBOARD_E2E__?.getSceneElements() ?? []) as any[];
     return elements
       .filter((element: any) => element?.type === 'frame' && !element.isDeleted)
       .map((element: any) => element.id);
@@ -228,26 +221,22 @@ async function assertManualPanIsNotOverwritten(page: Page): Promise<void> {
   const box = await canvas.boundingBox();
   if (!box) throw new Error('PATCH-130 interactive canvas missing for manual pan assertion');
   const before = await page.evaluate(() => {
-    const h = (window as Window & typeof globalThis & { h?: { app?: { getAppState?: () => any }; state?: any } }).h;
-    const state = h?.app?.getAppState?.() ?? h?.state;
+    const state = window.__COLLABBOARD_E2E__?.getViewport();
     return { scrollX: Number(state?.scrollX ?? 0), scrollY: Number(state?.scrollY ?? 0) };
   });
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.mouse.wheel(180, 120);
   await expect.poll(async () => page.evaluate(() => {
-    const h = (window as Window & typeof globalThis & { h?: { app?: { getAppState?: () => any }; state?: any } }).h;
-    const state = h?.app?.getAppState?.() ?? h?.state;
+    const state = window.__COLLABBOARD_E2E__?.getViewport();
     return { scrollX: Number(state?.scrollX ?? 0), scrollY: Number(state?.scrollY ?? 0) };
   }), { timeout: 5_000, intervals: [100, 250] }).not.toEqual(before);
   const afterPan = await page.evaluate(() => {
-    const h = (window as Window & typeof globalThis & { h?: { app?: { getAppState?: () => any }; state?: any } }).h;
-    const state = h?.app?.getAppState?.() ?? h?.state;
+    const state = window.__COLLABBOARD_E2E__?.getViewport();
     return { scrollX: Number(state?.scrollX ?? 0), scrollY: Number(state?.scrollY ?? 0) };
   });
   await page.waitForTimeout(800);
   const afterWait = await page.evaluate(() => {
-    const h = (window as Window & typeof globalThis & { h?: { app?: { getAppState?: () => any }; state?: any } }).h;
-    const state = h?.app?.getAppState?.() ?? h?.state;
+    const state = window.__COLLABBOARD_E2E__?.getViewport();
     return { scrollX: Number(state?.scrollX ?? 0), scrollY: Number(state?.scrollY ?? 0) };
   });
   expect(Math.abs(afterWait.scrollX - afterPan.scrollX)).toBeLessThanOrEqual(DRIFT_TOLERANCE_PX);

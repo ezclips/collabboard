@@ -7,6 +7,7 @@ import {
   seedDrawingContainers,
   seedPresentationScene,
 } from './drawingBridgeHarness';
+import { waitForE2EBridge } from './e2eBridge';
 
 const LANDSCAPE_TITLE = 'PATCH-064 Landscape';
 const PORTRAIT_TITLE = 'PATCH-064 Portrait';
@@ -50,15 +51,12 @@ const VIEWPORTS: ViewportCase[] = [
 registerDrawingCleanup(test);
 
 async function waitForHarness(page: Page): Promise<void> {
-  await page.waitForFunction(() => {
-    const target = window as Window & typeof globalThis & { h?: { app?: unknown; elements?: unknown[] } };
-    return Boolean(target.h?.app && Array.isArray(target.h.elements));
-  }, { timeout: 90_000 });
+  await waitForE2EBridge(page);
 }
 
 async function waitForFramesLoaded(page: Page, expectedFrameCount: number): Promise<void> {
   await page.waitForFunction((count) => {
-    const elements = (window as Window & typeof globalThis & { h?: { elements?: unknown[] } }).h?.elements;
+    const elements = window.__COLLABBOARD_E2E__?.getSceneElements();
     return Array.isArray(elements)
       && elements.filter((element) => {
         const item = element as { type?: string; isDeleted?: boolean };
