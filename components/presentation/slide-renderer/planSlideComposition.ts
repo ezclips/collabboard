@@ -27,9 +27,14 @@ export function planSlideComposition(
   const frameElement = activeElements.find((element) => element.id === slideFrame.id) ?? null;
   const resolvedPadlets = resolveSlidePadlets(slideFrame, activeElements, availablePadlets);
   const nativeFrameElements = activeElements.filter((element) => isNativeFrameMember(element, slideFrame));
-  const activeIndexById = new Map(
-    activeElements.map((element, activeIndex) => [element?.id, activeIndex]),
-  );
+  const slideLocalOrder = activeElements
+    .map((element, sceneIndex) => ({ element, sceneIndex }))
+    .filter(({ element }) => (
+      isNativeFrameMember(element, slideFrame)
+      || resolvedPadlets.some((entry) => entry.embeddable.id === element?.id)
+    ))
+    .sort((a, b) => a.sceneIndex - b.sceneIndex);
+  const localIndexById = new Map(slideLocalOrder.map(({ element }, localIndex) => [element?.id, localIndex]));
   const frames = activeElements
     .filter((element: any) => element.type === "frame" && !element.isDeleted)
     .map((element: any) => ({
@@ -77,13 +82,13 @@ export function planSlideComposition(
   const firstPadletActiveIndex = Math.min(...resolvedPadlets.map((entry) => entry.zIndex));
 
   const nativeBelowElements = nativeFrameElements.filter((element) => {
-    const activeIndex = activeIndexById.get(element.id);
-    return typeof activeIndex === "number" && activeIndex < firstPadletActiveIndex;
+    const localIndex = localIndexById.get(element.id);
+    return typeof localIndex === "number" && localIndex < firstPadletActiveIndex;
   });
 
   const nativeAboveElements = nativeFrameElements.filter((element) => {
-    const activeIndex = activeIndexById.get(element.id);
-    return typeof activeIndex === "number" && activeIndex >= firstPadletActiveIndex;
+    const localIndex = localIndexById.get(element.id);
+    return typeof localIndex === "number" && localIndex >= firstPadletActiveIndex;
   });
 
   return {

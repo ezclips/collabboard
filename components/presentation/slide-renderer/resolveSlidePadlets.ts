@@ -11,15 +11,26 @@ export function resolveSlidePadlets(
   const padletsById = new Map(availablePadlets.map((padlet) => [String(padlet.id), padlet] as const));
   const frames = sceneElements.filter((element: any) => element.type === "frame" && !element.isDeleted);
 
-  return sceneElements
-    .map((element: any, zIndex: number) => ({ element, zIndex }))
+  const slideMembers = sceneElements
+    .map((element: any, sceneIndex: number) => ({ element, sceneIndex }))
+    .filter(({ element }) => {
+      if (!element || element.isDeleted || element.id === slideFrame.id) return false;
+      if (element.type === "embeddable" && typeof element.link === "string" && element.link.startsWith("padlet://")) {
+        return resolveFrameMembership(element, frames).frameId === slideFrame.id;
+      }
+      return element.frameId === slideFrame.id;
+    })
+    .sort((a, b) => a.sceneIndex - b.sceneIndex);
+  const localOrdinalById = new Map(slideMembers.map(({ element }, zIndex) => [element.id, zIndex]));
+
+  return slideMembers
     .filter(({ element }) =>
       element.type === "embeddable"
       && !element.isDeleted
       && typeof element.link === "string"
       && element.link.startsWith("padlet://")
     )
-    .map(({ element, zIndex }) => {
+    .map(({ element }) => {
       const padletId = element.link.replace("padlet://", "");
       const padlet = padletsById.get(padletId);
       if (!padlet || padlet.type === "drawing") return null;
@@ -36,7 +47,7 @@ export function resolveSlidePadlets(
         localY: element.y - slideFrame.y,
         width: element.width,
         height: element.height,
-        zIndex,
+        zIndex: localOrdinalById.get(element.id) ?? 0,
       } satisfies ResolvedSlidePadlet;
     })
     .filter((entry): entry is ResolvedSlidePadlet => entry !== null)
