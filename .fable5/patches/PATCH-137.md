@@ -462,3 +462,294 @@ stronger than the original. No production change. No bridge change. No new mutat
   actions" would have produced it.
 - **Report the failing run.** 9/10 with a named, attributable cause is evidence; 10/10 after
   quietly re-running is not.
+
+## 20. Amendment — C5 CLASSIFIED; CROSS-FRAME THUMBNAIL DEFECT ISOLATED (2026-08-03, CTO)
+
+**Trigger:** the real-UI migration was implemented, ran, and **correctly hard-stopped at C5**
+rather than weakening the assertion. No commit, nothing pushed, no production, bridge or
+governance file changed.
+
+### 20a. What the attempted implementation established
+
+It replaced `window.h` readiness, `h.app.updateScene`, whole-scene replacement and private
+emitter access with the PATCH-136 bridge, real rectangle-tool selection, exact stroke and
+background hex entry, solid-fill selection, real pointer drawing and real `Ctrl+D`
+duplication. It removed the permissive `expect.any(Number)` colour gate, split C10 per §10a,
+passed typecheck and `git diff --check`, and left **no private mutation pattern**.
+
+**§7's feasibility findings are confirmed by an independent implementation.** The blocker is
+not the drawing path.
+
+### 20b. Clean revert — verified
+
+`git diff --exit-code 8031aa1 -- e2e/characterization/patch-124-slide-thumbnail-refresh.spec.ts`
+→ **clean**. `test-results/` removed. Both generated build directories
+`.next.partial-20260803090257` and `.next.stale-20260803085826` removed (`rm -rf`; the
+suggested `cmd /c rmdir` opened an interactive shell under this harness and did nothing).
+Ports 3000–3003 and 3100 free. Worktree holds only the five protected paths.
+
+**Evidence preserved outside the repository** in
+`…/scratchpad/p137-evidence/`: the attempted diff (443 insertions, 76 deletions), the full
+attempted spec (660 lines), the Playwright error context, both failing thumbnails decoded to
+PNG, the C5 diagnostic spec, and the 20-run, 3-run and 2-run logs.
+
+### 20c. The exact failure, decoded
+
+The failing assertion is C5 at attempted-line 605:
+`expect(await sampleThumbnail(slideA, colors)).toMatchObject({ src: afterA.src })`.
+
+Both values were extracted from the preserved artifact and **decoded to raw RGBA**, not
+compared as strings:
+
+| | expected (`afterA`) | received (after the portrait edit) |
+|---|---|---|
+| data-URL length | 13 626 | 65 190 |
+| dimensions | **569 × 320** | **569 × 320** |
+| decoded bytes | 728 320 | 728 320 |
+| pixel hash | `2250605e530af152` | `b71441712824c77c` |
+| non-white pixels | **4 378** | **21 737** |
+| red hits | **1 858** | **813** |
+| green hits | **0** | **0** |
+
+Rendered side by side, the difference is unambiguous. The **expected** image contains only
+the native text, the blue seeded rectangle and the red rectangle. The **received** image
+contains those *plus* the two embeddable padlet cards and the uploaded moodboard image — and
+one of those cards overlaps the red rectangle, which is why the red count more than halved.
+
+**The baseline was an incomplete render.** The later image is the more complete one. This is
+not a case of the landscape thumbnail being corrupted by a portrait edit.
+
+### 20d. Diagnostic — 20 focused repetitions
+
+A temporary diagnostic (observation-only, bridge for all scene reads, real UI for all
+actions, single worker, `Desktop Chrome`, clean `E2E_BRIDGE_BUILD=1` artifact, disposable
+fixture per run) measured two phases: **settling with zero edits**, then a **portrait-only
+edit** with the landscape thumbnail watched for 10 s. Decoded pixel hashes throughout — no
+`src`-string evidence.
+
+| Measurement | Result |
+|---|---|
+| Landscape thumbnail changed **with no edit at all**, after the repo's own settled waiter returned | **5 / 20** (first change 568–971 ms later) |
+| Landscape thumbnail changed **after a portrait-only edit** | **20 / 20** (2.0–2.8 s after the commit) |
+| Green rectangle actually created in `frame-portrait` | 20 / 20 |
+| **Green pixels ever present in the landscape thumbnail** | **0 / 20** |
+| Final landscape hash equal to the pre-edit hash | **0 / 20** |
+
+Non-white levels for a landscape thumbnail with identical scene content clustered at
+**≈2 381**, **≈18 927** and **≈20 620**, and after the portrait edit at **≈19 180 / ≈19 480**
+— PNG payload 63 KB before, 53–55 KB after. **The same slide renders materially different
+content at different moments.**
+
+### 20e. The landscape slide's own inputs do not change
+
+Captured through the bridge immediately before the portrait edit, immediately after, and
+after settling (3 runs, full detail):
+
+```
+emb-slide-a         v2 / vn unchanged
+emb-uploaded-image  v2 / vn unchanged
+shape-landscape     v1 / vn1  unchanged
+text-landscape      v1 / vn1  unchanged
+members: 4 → 4 → 4
+```
+
+Every element with `frameId === 'frame-landscape'` is **byte-identical in id, type, version,
+versionNonce and frameId** across the edit. `nativeSceneSignature` therefore cannot have
+changed.
+
+The other signature input is `embeddableOverlaySignature`, which folds in
+`buildPadletRenderState` — including each padlet's `updated_at`. All **eight** padlet rows on
+the board were queried before and after the portrait edit (2 runs): **every `updated_at`
+unchanged**, including the drawing master padlet.
+
+**Every input to `getSlideRenderSignature` for the landscape slide is unchanged, and the
+landscape thumbnail is re-rendered anyway, with different pixels, in 20 of 20 runs.**
+
+### 20f. Mechanism — the leading explanation, and what would confirm it
+
+`selectSlidesForThumbnailRefresh` (`slideThumbnailRefresh.ts:44`) skips a slide when
+`renderedKeys[slide.id] === cacheKey`. `renderedRef.current[slide.id]` is written **only when
+`shouldAccept` is true** (`useSlideThumbnails.ts:115`), and `shouldAcceptSlideThumbnailRender`
+rejects a completed render whose cache key no longer matches the current one
+(`slideThumbnailRefresh.ts:98-110`).
+
+So: a landscape render that starts while padlet data is still arriving completes against a
+**changed** key, is rejected, the PNG is discarded — **and `renderedRef` is never updated**.
+From that moment the landscape slide is permanently "dirty": `renderedKeys['frame-landscape']`
+can never equal its current key, and **every subsequent refresh pass re-renders it, whichever
+slide actually changed.**
+
+This accounts for all four observations at once: the 20/20 cross-frame re-render; identical
+scene and padlet inputs; different pixels each time (each re-render captures whatever overlay
+content happens to be loaded); and the fact that the landscape stays quiet during the 12-second
+no-edit watch (nothing schedules a pass, because `scheduleRefresh` fires only on
+`slideSignature` change, `useSlideThumbnails.ts:205-208`).
+
+**This is the leading mechanism, not a confirmed one.** It is consistent with every
+measurement and no measurement contradicts it, but `renderedRef` and the `shouldAccept`
+outcome were not directly observed. **Instrumenting those two values is the first task of the
+production patch**, and this patch does not assert the mechanism as settled fact.
+
+### 20g. Classification
+
+### **F — ANOTHER IDENTIFIED CONDITION** (compound)
+
+Not A: the landscape content is not incorrect and no portrait content leaks — green is 0 in
+20/20. Not B: pixels differ materially, so the re-render is not redundant-but-identical. Not
+C: identity is not the issue; decoded pixels differ. Not G: the evidence is sufficient.
+
+**D and E are both present, and neither alone is sufficient:**
+
+1. **Invalidation over-reach (D-flavoured).** A portrait-only edit re-renders the landscape slide, 20/20, with all of that slide's inputs unchanged.
+2. **Render non-determinism (the part D does not cover).** Successive renders of an *unchanged* slide produce materially different images, because asynchronous embeddable/padlet overlay content may or may not have loaded when the raster is taken. This is what makes (1) *visible*; without it, over-invalidation would be mere wasted work.
+3. **Insufficient settled contract (E-flavoured).** `waitForStableThumbnail` — unchanged across one 750 ms gap, five attempts — returned an incomplete render in **5/20** runs with no edits at all. A quiet interval is not evidence that the render pipeline is idle.
+
+### 20h. What C5 was intended to prove
+
+PATCH-124's governance and the test itself describe cross-frame isolation, not render
+accounting. The production design supports that reading: `selectSlidesForThumbnailRefresh`
+exists precisely so unchanged slides are skipped, and `getSlideRenderSignature` is built
+strictly per-slide.
+
+- **C5a — visual isolation:** *intended.* A frame-B edit must not alter what frame A's thumbnail shows.
+- **C5b — invalidation isolation:** *intended by the architecture*, and currently violated. It was never asserted, because `src` identity happened to imply it.
+- **C5c — `src` identity:** **not a product contract.** Nothing in the production code promises a stable data-URL string, and the manual-refresh assertion (C7) depends on `src` deliberately *changing* for identical content.
+
+**`src` was a proxy** — a convenient single comparison that, under private mutation,
+simultaneously implied "not re-rendered" and "content unchanged". It is not a supported
+contract, and it is the **only** assertion in the spec that conflates the two.
+
+**But it must not be replaced merely because it now fails.** It fails because it is detecting
+something real.
+
+### 20i. Production-defect decision
+
+Both findings are production behaviour, not test artefacts:
+
+| Finding | Category |
+|---|---|
+| Unrelated-slide re-render on any scene change | **3 — performance defect.** The cache/invalidation contract is explicit in the code and is not being honoured |
+| A render can capture partially-loaded overlay content, so an unchanged slide yields different images | **4-adjacent — rendering-completeness defect.** The output is not wrong-content-for-the-wrong-slide, but it is not a function of the slide state either, and an incomplete thumbnail can be cached and shown to a user |
+
+**PATCH-137 must not disguise either by changing the test.** Reserving:
+
+> **PATCH-142 — slide thumbnail invalidation scope and render completeness.**
+> Deliverables: instrument `renderedRef` / `shouldAccept` to confirm §20f; ensure a rejected
+> render cannot leave a slide permanently uncached; define and enforce a render-readiness
+> precondition so a raster is not taken while overlay content is still resolving; add unit
+> coverage to `slideThumbnailRefresh.test.ts` for the rejected-render path. **Production
+> patch. Not authorized to change any characterization assertion.**
+
+The document sequence shifts: PATCH-138–141 unchanged; **PATCH-142** is new and is a
+prerequisite for closing PATCH-137.
+
+### 20j. C5 option decision
+
+**Option A (keep strict `src`)** — rejected: `src` is not a product contract, and C7 requires
+`src` to change for identical content.
+
+**Option B (assert pixel identity)** — **not available.** Pixel identity fails 20/20 for
+reasons unrelated to the portrait edit. Selecting B would convert a product defect into a
+flaky test.
+
+**Option D (fix production first)** — correct for the invalidation half, and reserved as
+PATCH-142.
+
+**Selected: Option C — SPLIT C5, gated behind PATCH-142.**
+
+- **C5a — semantic isolation (assertable today).** After a frame-B edit, the frame-A thumbnail contains **zero** frame-B colour pixels and **retains** its own expected content above threshold. Both hold 20/20 today.
+- **C5b — invalidation isolation (measured, not yet asserted).** Record whether the unrelated slide was re-rendered. **After PATCH-142 this becomes an assertion; until then it is recorded as a known deviation with a linked patch.**
+
+**C5b must not be quietly dropped.** A measurement with no owner is how a defect becomes
+folklore. It is assertable only when the product actually satisfies it.
+
+### 20k. Settling contract — corrected definition
+
+"Settled" for a slide thumbnail requires **all** of:
+
+1. the expected colour threshold for that slide's own content is reached;
+2. the decoded pixel hash is stable across at least two polls spanning **≥ 1.5 s** (the observed late change was 568–971 ms after the current waiter returned);
+3. no thumbnail render is in flight (`Generating previews…` absent);
+4. no debounce timer is pending;
+5. the image has been `decode()`d;
+6. the non-white pixel count is at or above the level expected once overlay content is present — the discriminator between the ≈2 381 / ≈18 927 / ≈20 620 states.
+
+**A fixed delay alone is insufficient, and so is the current waiter.** Condition 6 is the one
+that actually separates a complete render from an incomplete one, and no existing helper
+checks it.
+
+### 20l. Real-UI versus `updateScene` — why this surfaced now
+
+| | private `updateScene` | real UI |
+|---|---|---|
+| Scene commits per rectangle | 1 | pointerdown transient → geometry updates → pointerup finalisation → frame-membership assignment → selection change |
+| `onChange` notifications | one shape | many |
+| Tool/selection state | untouched | changes |
+| Elapsed time per rectangle | ~ms | 874–2 142 ms (§7d) |
+
+The old test never exercised the production event sequence, and — more importantly — it moved
+through the whole flow so fast that its baselines were captured inside a narrow window where
+the incomplete-render state happened to persist on both sides of each comparison. **The defect
+predates the migration; the migration only slowed the test down enough to see it.**
+
+This is worth stating plainly: PATCH-124 has been passing while a cross-frame re-render
+occurred on every edit.
+
+### 20m. C10 status
+
+Recorded as demonstrated by the attempted implementation but **not independently authorized**:
+exact colour entry, solid fill, real pointer drawing, correct frame membership, strengthened
+two-colour polling, and the real duplication path.
+
+**C10a still requires:** measured proof that the two duplicate commits occur < 250 ms apart
+(§7d measured 40–55 ms in the spike, not yet in the migrated spec) **and** render
+instrumentation proving the governed coalescing result. **C5 must be resolved before the
+overall migration can commit** — no partial authorization.
+
+### 20n. Allowlists — revised
+
+**PATCH-137 production: none.** Unchanged. The invalidation and completeness fixes belong to
+**PATCH-142** and must not be pulled forward into this patch.
+
+**PATCH-137 test — at most 3 files**, unchanged from §12, with the C5 wording replaced by
+§20j.
+
+**PATCH-142 (reserved, not authorized here):** `components/presentation/useSlideThumbnails.ts`
+· `lib/infra/presentation/slideThumbnailRefresh.ts` · `lib/infra/presentation/slideThumbnailRefresh.test.ts`.
+**No characterization assertion may change in PATCH-142.**
+
+### 20o. Hard stops — updated
+
+| Stop | Result |
+|---|---|
+| Exact colours / solid fill / frame targeting / coordinates | **NOT TRIGGERED** — reconfirmed by an independent implementation |
+| Rapid two-colour changes inside 250 ms | **TRIGGERED** (§16) — resolved by the §10a split |
+| **Unrelated-frame thumbnail re-render on any edit** | **TRIGGERED — NEW.** 20/20. Blocks C5 until PATCH-142 |
+| **Thumbnail render is not a function of slide state** | **TRIGGERED — NEW.** ≈2 381 / ≈18 927 / ≈20 620 for identical content. Blocks any pixel-identity assertion |
+| Thumbnail pixel thresholds unstable | **NOT TRIGGERED** for a slide's *own* content — red 1 843–1 901 against a threshold of 12 (§7c) |
+| The only stable path is raw `updateScene` | **NOT TRIGGERED** |
+| Migration requires broad production changes | **NOT TRIGGERED** for PATCH-137; PATCH-142 is a separate narrow patch |
+
+### 20p. Status
+
+**OPEN · REAL-UI DRAWING PATH PROVEN · C5 CLASSIFIED (F, COMPOUND) · CROSS-FRAME RE-RENDER
+CONFIRMED 20/20 WITH UNCHANGED INPUTS · RENDER NON-DETERMINISM CONFIRMED · PATCH-124 MIGRATION
+BLOCKED BY THUMBNAIL INVALIDATION DEFECT · PATCH-142 RESERVED · NOT PUSHED.**
+
+### 20q. Recorded diagnostic notes
+
+- **Decode before concluding.** The `src` diff looked like a 13 KB → 65 KB explosion, which
+  reads as corruption. Decoded, it was an incomplete render versus a complete one — the
+  opposite story. String evidence about images is not evidence.
+- **A test that passes can still be observing a defect.** PATCH-124 was green for its whole
+  life while an unrelated slide re-rendered on every edit. The assertion had the right target
+  and the wrong instrument, and the fast path hid the gap.
+- **When a proxy assertion starts failing, find out what it is detecting before replacing it.**
+  `src` identity conflated "not re-rendered" with "content unchanged"; both mattered, and only
+  one was true.
+- **"Stable for 750 ms" is not "idle".** Five of twenty settled waits returned an incomplete
+  render. Any settled contract over asynchronous content needs a completeness discriminator,
+  not just a quiet interval.
+- **Prove the negative directly.** The single most valuable number here is *green = 0 in
+  20/20*: it separates "the wrong content appeared" from "the right content was re-rendered
+  differently", and it is what makes the classification defensible.
