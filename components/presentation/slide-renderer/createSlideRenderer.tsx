@@ -12,10 +12,18 @@ import { drawCanvasLinePayloadsToCanvas } from "./renderCanvasLinePrimitive";
 import { renderExcalidrawSlideBase } from "./renderExcalidrawSlideBase";
 import { resolveSlidePadlets } from "./resolveSlidePadlets";
 import type { CreateSlideRendererArgs, SlideRenderHelpers } from "./types";
+import { waitForOverlayReadiness, type ExpectedSlideOverlay } from "./waitForOverlayReadiness";
 
 const USE_LEGACY_POSTCARD_OVERLAY = false;
 const USE_Z_BAND_COMPOSITION = true;
 const SNAPSHOT_READINESS_SELECTOR = '[data-ai-render-state="loading"], [data-ai-image-state="loading"]';
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (!signal?.aborted) return;
+  const error = new Error("Slide render aborted");
+  error.name = "AbortError";
+  throw error;
+}
 
 function resolveSnapshotTimeoutMs(): number {
   if (
@@ -65,8 +73,18 @@ export function createSlideRenderer({
   ): Promise<HTMLCanvasElement | null> => {
     const padlets = getPadlets();
     if (slidePadlets.length === 0) return null;
+    const signal = (opts as RenderSlideOptions & { signal?: AbortSignal }).signal;
+    throwIfAborted(signal);
+    const expectedOverlays: ExpectedSlideOverlay[] = slidePadlets.map(({ padlet, localX, localY, width, height }) => ({
+      id: padlet.id,
+      localX,
+      localY,
+      width,
+      height,
+    }));
 
     const { default: html2canvas } = await import("html2canvas");
+    throwIfAborted(signal);
     const host = document.createElement("div");
     host.style.position = "fixed";
     host.style.left = "-100000px";
@@ -136,6 +154,7 @@ export function createSlideRenderer({
         {slidePadlets.map(({ padlet, localX, localY, width, height, zIndex }) => (
           <div
             key={padlet.id}
+            data-slide-overlay-id={padlet.id}
             style={{
               position: "absolute",
               overflow: "hidden",
@@ -186,14 +205,14 @@ export function createSlideRenderer({
 
     try {
       await new Promise((resolve) => window.requestAnimationFrame(() => window.requestAnimationFrame(resolve)));
+      throwIfAborted(signal);
       sanitizeExportOverlayColors(host);
       host.querySelectorAll<HTMLImageElement>('img[loading="lazy"]').forEach((img) => {
         img.loading = 'eager';
       });
-      const pendingAtStart = host.querySelectorAll(SNAPSHOT_READINESS_SELECTOR).length;
-      const waitResult = pendingAtStart > 0
-        ? await waitForSnapshotDiagramReadiness(host, resolveSnapshotTimeoutMs())
-        : { waitedMs: 0, timedOut: false, pendingCount: 0 };
+      await waitForOverlayReadiness(host, expectedOverlays, signal);
+      const waitResult = await waitForSnapshotDiagramReadiness(host, resolveSnapshotTimeoutMs());
+      throwIfAborted(signal);
       if (process.env.NODE_ENV !== "production") {
         window.dispatchEvent(new CustomEvent("collabboard-ai-snapshot-capture-wait", {
           detail: {

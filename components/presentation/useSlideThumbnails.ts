@@ -28,6 +28,7 @@ export function useSlideThumbnails({
   const inFlightRef = useRef<Set<string>>(new Set());
   const latestRequestIdRef = useRef<Record<string, number>>({});
   const requestIdRef = useRef(0);
+  const abortControllersRef = useRef<Record<string, AbortController>>({});
   const pendingSlideIdsRef = useRef<Set<string>>(new Set());
   const pendingChangedSlideIdsRef = useRef<Set<string>>(new Set());
   const pendingForceAllRef = useRef(false);
@@ -51,12 +52,19 @@ export function useSlideThumbnails({
       });
 
       if (queued.forceAll) {
+        Object.values(abortControllersRef.current).forEach((controller) => controller.abort());
         pendingForceAllRef.current = true;
         pendingSlideIdsRef.current.clear();
         pendingChangedSlideIdsRef.current.clear();
       } else {
-        for (const id of queued.forcedSlideIds) pendingSlideIdsRef.current.add(id);
-        for (const id of queued.changedSlideIds) pendingChangedSlideIdsRef.current.add(id);
+        for (const id of queued.forcedSlideIds) {
+          abortControllersRef.current[id]?.abort();
+          pendingSlideIdsRef.current.add(id);
+        }
+        for (const id of queued.changedSlideIds) {
+          abortControllersRef.current[id]?.abort();
+          pendingChangedSlideIdsRef.current.add(id);
+        }
       }
       return;
     }
@@ -94,6 +102,9 @@ export function useSlideThumbnails({
         inFlightRef.current.add(slide.id);
         const cacheKey = getSlideThumbnailCacheKey(slide);
         const requestId = ++requestIdRef.current;
+        abortControllersRef.current[slide.id]?.abort();
+        const abortController = new AbortController();
+        abortControllersRef.current[slide.id] = abortController;
         latestRequestIdRef.current[slide.id] = requestId;
 
         try {
@@ -102,7 +113,8 @@ export function useSlideThumbnails({
             scale: scale * (dpr ?? 2),
             background,
             paddingPx: 20,
-          });
+            signal: abortController.signal,
+          } as Parameters<RenderSlideToPNG>[1] & { signal: AbortSignal });
           const latestSlide = slidesRef.current.find((entry) => entry.id === slide.id);
           const latestCacheKey = latestSlide ? getSlideThumbnailCacheKey(latestSlide) : undefined;
           const shouldAccept = !cancelledRef.current && shouldAcceptSlideThumbnailRender({
@@ -121,7 +133,16 @@ export function useSlideThumbnails({
           } else if (latestSlide) {
             pendingSlideIdsRef.current.add(slide.id);
           }
+        } catch (error) {
+          if (abortController.signal.aborted && !cancelledRef.current) {
+            pendingSlideIdsRef.current.add(slide.id);
+          } else {
+            throw error;
+          }
         } finally {
+          if (abortControllersRef.current[slide.id] === abortController) {
+            delete abortControllersRef.current[slide.id];
+          }
           inFlightRef.current.delete(slide.id);
         }
       }
@@ -194,6 +215,8 @@ export function useSlideThumbnails({
       }
       isMountSettledRef.current = false;
       cancelledRef.current = true;
+      Object.values(abortControllersRef.current).forEach((controller) => controller.abort());
+      abortControllersRef.current = {};
     };
   }, []);
 
