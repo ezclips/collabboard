@@ -226,3 +226,172 @@ PREFLIGHT GUARD AUTHORIZED · PATCH-142 VALIDATION BLOCKED UNTIL CLOSED · NOT P
 - **"Reproduces at every revision with no diff between them" is a proof of environment, not of source.** The revision matrix offered as confirmation was the strongest evidence against the conclusion it was offered for.
 - **A partial build is worse than a failed one.** `rimraf dist && bundle && gen:types` degrades an entire repository's type safety if it stops two thirds of the way through, and says nothing. Any build that publishes an interface in two steps needs a completeness check on the artefact.
 - **Second stale-artefact misdiagnosis in this series** (PATCH-136 §16a was the first). The recurring tell is a failure that survives `git checkout` of every candidate revision.
+
+## 13. CLOSURE — PREFLIGHT GUARD ACCEPTED, REGENERATION DEFERRED (2026-08-03, CTO)
+
+**Classification: A — CLOSE AS PREFLIGHT/DIAGNOSTIC GUARD.**
+
+**Implementation:** `13a94ce` — `build(types): guard vendored Excalidraw declarations`.
+Two files, +38/−1: `package.json` (3 lines) and `scripts/preflight-excalidraw-types.mjs` (36
+lines). No application file, no Excalidraw source, no TypeScript or Next config, no PATCH-142
+file. Within the §7 tooling allowlist (≤40 lines and ≤2 changed `package.json` lines) — verified
+by diff, not by report.
+
+### 13a. What PATCH-143's contract actually was
+
+§6 authorized two things:
+
+1. **Regenerate the declarations as part of dependency setup**, so `dist/types` is produced whenever the JS bundles are.
+2. **Add a guard** so a partial build fails loudly instead of degrading every type in the repository.
+
+**Item 2 is delivered in full. Item 1 is not delivered in either form.** The implementation
+folded a *generation attempt* into the guard, which is more than item 2 asked for and less than
+item 1 requires — and that attempt is exactly where the open issue lives.
+
+The patch's stated purpose (§1) was to stop a missing artefact from surfacing as four misleading
+application type errors. **That purpose is met.** A missing declaration now fails immediately,
+names the file, names the fix command, and states that `dist` must not be committed — instead of
+sending the next engineer to `DrawingEditor.tsx:122`.
+
+Closure is therefore scoped to the guard, and item 1 is recorded as **deferred, not delivered**.
+I am not describing this patch as having solved regeneration.
+
+### 13b. Reproduction — confirmed independently
+
+The fresh-environment path was re-run here, not accepted from the report. `dist/types` removed,
+then **one** `npm run typecheck`:
+
+```
+[excalidraw-types] missing declaration: …/dist/types/excalidraw/index.d.ts
+$ rimraf types && tsc
+components/SearchMenu.tsx(396,37): error TS18047: 'focusIndex' is possibly 'null'.
+components/SearchMenu.tsx(398,18): error TS18047: 'focusIndex' is possibly 'null'.
+error Command failed with exit code 1.
+[excalidraw-types] Generation command failed with exit code 1.
+TYPECHECK_EXIT=1
+declaration present after run?  PRESENT
+```
+
+**The generator emits the correct artefact and then exits 1.** The guard fails closed, as
+governed. A second invocation passes. So a clean checkout needs **two** invocations, and fresh
+CI is blocked on the first.
+
+### 13c. SearchMenu diagnostics — analysis
+
+```tsx
+100:  const [focusIndex, setFocusIndex] = useAtom(searchItemInFocusAtom);
+ 56:  export const searchItemInFocusAtom = atom<number | null>(null);
+396:  {focusIndex !== null && focusIndex > -1 ? (      // col 37 → focusIndex > -1
+398:    {focusIndex + 1} / {matchCount}                 // col 18 → focusIndex + 1
+```
+
+**The null guard is present and correct.** `focusIndex !== null` is the immediate left operand
+of the `&&` whose right operand errors. There is no runtime defect here, and no control path on
+which `focusIndex` reaches `+ 1` while null.
+
+**Why narrowing fails.** `useAtom` is re-exported from `jotai-scope`'s `createIsolation()`,
+typed `useAtom: typeof useAtomOrig` (`createIsolation.d.ts:64`) — jotai's own hook, whose
+writable overload returns `[Awaited<Value>, SetAtom<…>]`. `Awaited<T>` is a conditional type,
+and **control-flow analysis does not narrow a value whose declared type is an unresolved
+conditional.** This is a compiler/typing interaction, not a defect in the vendored source.
+
+I record one corrected step: I first suspected `jotai-scope` shipped no declarations (its
+`dist/` listing shows only `.js`/`.mjs`). It does — they are under `dist/src/`. That theory was
+wrong and the `Awaited` explanation replaced it.
+
+**Consequences for any repair:**
+
+- **These diagnostics are invisible to the application build.** `tsconfig.json:30` excludes `components/collabboard/canvas/excalidraw_fork` from the repository typecheck. They affect only the fork's own `gen:types` exit code.
+- **The emitted declarations are unaffected.** `TS18047` is a checking diagnostic; declaration shape does not depend on it. Proven: after the failing run, the repo's `npx tsc --noEmit` passes at exit 0.
+- **A source edit would be a workaround for a compiler limitation, not a bug fix** — e.g. binding to a local so control-flow analysis applies to a plain `number | null`. Legitimate and assertion-free, but it is a local modification to an MIT vendored fork, carrying merge debt on every upstream sync, for a file we never typecheck.
+- **It is open-ended.** Exactly two diagnostics appear today, but the same `Awaited` pattern can resurface anywhere in the fork on a TypeScript upgrade. Fixing sites one at a time has no terminal state; fixing the generator contract does.
+
+### 13d. Fresh-environment contract — decision
+
+**Not required for PATCH-143's closure. Required before any clean-environment or CI claim.**
+
+The six-step contract (absent → one `npm run typecheck` → generator succeeds → declaration
+exists → application typecheck succeeds → exit 0 in the same invocation) is a restatement of §6
+item 1, which was never delivered. Holding the guard hostage to it would leave the repository
+with **no** protection against the exact defect PATCH-143 diagnosed, in exchange for nothing —
+the guard is strictly better than the prior state either way.
+
+**What is explicitly NOT claimed:** that a clean checkout typechecks in one invocation; that
+fresh CI works; that regeneration is self-healing.
+
+### 13e. PATCH-144 reserved — and its scope is not the brief's first suggestion
+
+> **PATCH-144 — one-invocation vendored declaration generation.**
+
+The prerequisite suggested an allowlist of "exact SearchMenu.tsx path". **The evidence points
+elsewhere, and PATCH-144 must evaluate in this order:**
+
+1. **Generator contract (preferred).** Make declaration generation succeed on *artefact production*: emit declarations, then gate on the artefact existing and on the repository's own `tsc --noEmit` — which runs immediately afterwards and is the real proof the declarations are usable. This is closed-ended, touches no vendored source, and needs no upstream-merge maintenance.
+2. **Vendored source edit (fallback).** A local binding in `SearchMenu.tsx`, no assertions, no `as number`, no `@ts-ignore`/`@ts-expect-error`, no compiler relaxation — only if (1) is rejected.
+
+**Surfaced conflict, not silently overridden:** option (1) sits against this patch series'
+standing instruction *"do not authorize skipping generator exit status."* That instruction was
+written before the evidence in §13c. My recommendation is to revisit it, because here the exit
+code is a **weaker** signal than the artefact plus the application typecheck — the generator
+"fails" while producing a correct artefact, and the repository compiler validates the result one
+step later. **The owner decides.** If the instruction stands as written, PATCH-144 takes path (2)
+and accepts the merge debt.
+
+**PATCH-144 must prove:** delete generated declarations · one `npm run typecheck` · exit 0 ·
+declaration regenerated · clean `next build` passes · induced-failure control still fails closed
+when the artefact cannot be produced. Allowlist: `scripts/preflight-excalidraw-types.mjs` ·
+`package.json` · the fork's `packages/excalidraw/package.json` **or** `SearchMenu.tsx`,
+whichever path is chosen — **not both**. No application call-site change. No config change
+unless proven necessary.
+
+### 13f. PATCH-142 dependency
+
+**PATCH-142 may resume locally.** The declarations are present, and `npx tsc --noEmit`, `npm run
+typecheck`, a clean ordinary `next build` and bridge exclusion across 891 files all pass.
+Phase 3 (characterization and the §10 performance re-measurement) is a local, interactive
+activity and is not blocked.
+
+**PATCH-142 must not claim reproducible clean-environment validation, and must not close, until
+PATCH-144 closes.** A validation record that depends on a gitignored artefact already existing
+on one machine is not reproducible — which is the same category of error this whole patch pair
+exists to eliminate. That constraint is recorded in PATCH-142's status, not just here.
+
+### 13g. Verification performed
+
+Independently re-run rather than accepted: the missing-declaration path (§13b, including the
+resulting artefact state) · `npx tsc --noEmit` → exit 0 with declarations present · the
+implementation diff confirmed to touch only `package.json` and the new script · the allowlist
+bounds checked against the actual line counts · `tsconfig.json:30` fork exclusion confirmed ·
+the `jotai-scope` / `Awaited` typing chain read from source.
+
+Not re-run here, accepted from the implementation report: `npm run typecheck` end-to-end, the
+clean ordinary `next build`, the generator-unavailable negative control, bridge exclusion across
+891 files, `git diff --check`.
+
+**Artefact state:** `dist/types` is present, having been regenerated by the §13b test. The
+working tree is unchanged; `dist` is gitignored and remains untracked.
+
+### 13h. Status
+
+**PATCH-143: CLOSED · MISSING VENDORED DECLARATIONS FAIL EARLY WITH ACTIONABLE DIAGNOSTIC ·
+AUTOMATIC REGENERATION ATTEMPTED · §6 ITEM 1 (ONE-INVOCATION REGENERATION) DEFERRED TO PATCH-144
+· GENERATOR SOURCE DIAGNOSTICS ANALYSED AND FOUND NOT TO BE A VENDORED SOURCE DEFECT ·
+PATCH-142 VALIDATION CONDITIONALLY BLOCKED FOR CLEAN ENVIRONMENTS · NOT PUSHED.**
+
+PATCH-142 remains **OPEN · PHASES 1–2 IMPLEMENTED · PHASE 3 MAY PROCEED LOCALLY · CLEAN-
+ENVIRONMENT VALIDATION BLOCKED BY PATCH-144.** PATCH-137 remains **OPEN · MIGRATION BLOCKED BY
+PATCH-142.**
+
+### 13i. Recorded diagnostic notes
+
+- **A failing exit code and a failed job are not the same thing.** `gen:types` produced a
+  correct artefact and returned 1. Gating on the exit code turned a successful generation into a
+  blocked pipeline; gating on the artefact plus the downstream compiler would not have.
+- **Check what the compiler actually compiles before repairing what it complains about.** The
+  two diagnostics are in a directory `tsconfig.json` excludes. They can never affect an
+  application build, which changes their priority from blocking to cosmetic.
+- **A guard that fires correctly on its first real trial is doing its job, even when the news is
+  unwelcome.** The preflight refused to proceed and printed the fix command; the alternative was
+  four misleading errors pointing at innocent code.
+- **Prefer the closed-ended repair.** Fixing narrowing sites one by one has no end state under a
+  compiler-behaviour cause; fixing the generation contract does.
