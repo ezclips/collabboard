@@ -652,3 +652,225 @@ PATCH-142.**
 - **When the host owns the DOM it renders, readiness needs no registry.** The infrastructure
   options were all sized for a problem this architecture does not have — the expected set is an
   argument and the container is disposable.
+
+## 22. Amendment — RESIDUAL RERENDER CLASSIFIED; C5b HOLDS IN PRODUCTION (2026-08-03, CTO)
+
+**Trigger:** phase-3 characterization failed — after a real portrait-frame rectangle draw, the
+landscape "render serial" moved from 2 to 6. No characterization commit was created, nothing was
+pushed.
+
+**Result of diagnosis: C5b is not disproven. The production invalidation logic is correct. The
+characterization measured the wrong thing, in two independent ways.**
+
+### 22a. Cleanup — verified
+
+Evidence preserved outside the repository in `…/scratchpad/p142-evidence/`: the failing
+characterization spec (176 lines), its Playwright artefacts, the corrected diagnostic spec, the
+five-run raster census, and the two signature-key instrumentation runs.
+
+Untracked spec removed · temporary diagnostic removed · transient instrumentation of
+`useSlideThumbnails.ts` reverted (`git diff --exit-code HEAD -- components/ lib/ e2e/` clean) ·
+E2E `.next` removed · ordinary build rebuilt · **bridge exclusion proven across 891 emitted
+files** · no `E2E_BRIDGE_BUILD` marker · worktree holds only the five protected paths.
+
+### 22b. Serial ownership audit — two independent instrumentation defects
+
+From the preserved spec:
+
+```ts
+let serial = 0;                                     // module-scope, ONE counter for the page
+HTMLCanvasElement.prototype.toDataURL = function (...args) {
+  serial += 1;
+  log.push({ serial, width: this.width, height: this.height,
+             kind: this.width > this.height ? 'landscape' : 'portrait' });
+};
+…
+const landscapeSerial = beforeLog.filter((e) => e.kind === 'landscape').at(-1)?.serial ?? 0;
+expect(landscapeAfter).toBe(landscapeSerial);
+```
+
+**Defect 1 — the counter is global (classification F).** `serial` increments on **every**
+`toDataURL` call anywhere in the page. The assertion compares two *positions in a shared
+sequence*, not two landscape render counts. Portrait rasters between the two samples shift the
+value even when the landscape never renders.
+
+**Defect 2 — the classifier is an aspect-ratio heuristic (classification E in principle).**
+`width > height ? 'landscape' : 'portrait'` labels *any* wide canvas a landscape slide render.
+A `300×150` scratch canvas appears in every cold load and is labelled "landscape".
+
+**However — and this is where my first reading was wrong — neither defect produced this
+failure.** I initially concluded from source alone that 2 → 6 was a false positive. A corrected
+five-run census disproves that:
+
+| run | rasters after the portrait edit | 569×320 (landscape slide) | 180×320 (portrait slide) | other sizes | wide canvases misclassified |
+|---|---|---|---|---|---|
+| 1 | `4:569x320 5:180x320 6:569x320 7:180x320 8:180x320` | **2** | 3 | none | **0** |
+| 2 | `4:569x320 5:180x320 6:180x320` | **1** | 2 | none | **0** |
+| 3 | `3:180x320 4:569x320 5:180x320 6:180x320` | **1** | 3 | none | **0** |
+| 4 | `3:180x320 4:569x320 5:180x320 6:569x320 7:180x320 8:180x320` | **2** | 4 | none | **0** |
+| 5 | `5:569x320 6:180x320 7:180x320` | **1** | 2 | none | **0** |
+
+**Genuine 569×320 landscape rasters do occur after the portrait edit, 5/5.** `html2canvas`
+reached. The landscape decoded hash changed 5/5. So the rasters are real and the thumbnail was
+accepted — classifications **A, B and C all apply to the events**, and my instrumentation-only
+explanation was wrong. Recorded because the correction is the finding: *the counter is broken
+and the symptom was still real.*
+
+### 22c. Signature diff — the landscape is invalidated by its own overlays, not by the portrait
+
+`useSlideThumbnails.ts` was instrumented transiently (as in §3) to log, for every scheduler pass,
+the forced set, the request list, the dirty set and each slide's **full** cache key. Five runs.
+
+**The pass caused by the portrait edit never requests the landscape, in 5 of 5 runs:**
+
+```
+run 1  pass0 t=1340 forced=none               requests=[landscape, portrait]  dirty=[landscape, portrait]   baseline
+       pass1 t=2720 forced=[portrait]         requests=[landscape, portrait]  dirty=[landscape, portrait]   LANDSCAPE KEY CHANGED
+       pass2 t=4729 forced=none               requests=[landscape, portrait]  dirty=[landscape, portrait]   LANDSCAPE KEY CHANGED
+       pass3 t=6521 forced=[portrait]         requests=[portrait]             dirty=[portrait]              landscape key STABLE
+```
+
+Runs 2, 3 and 5 are identical in shape; run 4's final pass requested **nothing at all**
+(`requests=[]`, `dirty=[]`).
+
+**The first changed field, every time, is the landscape's own content:**
+
+```
+nativeSceneSignature        version 2 → 3, versionNonce changed  (×3 elements)
+embeddableOverlaySignature  embeddableVersion 2 → 3
+                            width  340 → 320      height 169 → 153
+                            width  260 → 320      height 210 → 260
+                            (next pass)           height 153 → 80
+```
+
+These are the landscape's **own embeddable overlays resizing after mount** — RC-2, which §4
+recorded as *legitimate visual inputs that must continue to invalidate*. Width and height change
+what the thumbnail shows; suppressing them would be the false-green §16 forbids.
+
+**No portrait-derived field appears in the landscape key at any point.** The slide-local ordinal
+repair (`1fe6221`) holds under the real event sequence.
+
+### 22d. Classification — **H, ANOTHER IDENTIFIED EVENT**
+
+> **Late self-invalidation.** The landscape slide keeps invalidating itself for ~3–5 s after load
+> while its own embeddable geometry settles. The characterization captured its "complete"
+> baseline before that churn finished, so landscape renders belonging to its **own** settling
+> landed after the portrait edit in wall-clock time and were attributed to it.
+
+Not A/B/C as a *cause* (the rasters are real, but their trigger is the landscape's own key) · not
+D (nothing was rejected) · not E or F as the operative cause, though both defects exist in the
+instrumentation and must still be fixed · not G.
+
+**Transient membership: excluded.** The rectangle is drawn at scene (1600, 650); `frame-portrait`
+spans x 1400–2120 and `frame-landscape` spans x 0–1280. No transient bounding box can resolve
+into the landscape, and no portrait element id ever appears in the landscape signature.
+
+**Readiness generation: exonerated.** No `requestId`, generation token, abort state or readiness
+counter appears in any landscape key. Font and image readiness never entered a signature. The
+§21 readiness work introduced no shared invalidation input.
+
+### 22e. Remaining global-index census
+
+`resolveSlidePadlets.ts` (`1fe6221`) filters membership **before** assigning ordinals and derives
+`localOrdinalById` from position within `slideMembers`; `planSlideComposition.ts` consumes the
+same order. `sceneIndex` survives only as a **sort key inside the already-filtered slide member
+list**, which is order-preserving and slide-local — it cannot import cross-slide state.
+
+No scene-array position, global element order or secondary global index remains in the
+landscape signature. Confirmed by the diff: across every pass, the only changed fields are
+element `version`/`versionNonce` and overlay geometry.
+
+### 22f. Unit-test gap
+
+The 29 unit tests passed while phase 3 failed because **all of them model a settled scene**. They
+never model:
+
+- a slide that invalidates itself repeatedly after its first accepted render;
+- overlay geometry changing between passes (340×169 → 320×153 → 320×80);
+- one user gesture producing several scene revisions and several scheduler passes;
+- the distinction between "a raster happened" and "a raster happened *because of this edit*";
+- wall-clock overlap between one slide's settling and another slide's edit.
+
+**Required addition to the test contract:** a case in which slide A's key changes twice *after*
+its first accepted render, with no edit to slide B, asserting that B is never requested — and its
+mirror. Coverage must reproduce the causal sequence, not add mocked breadth.
+
+### 22g. Chosen repair — **OPTION A, TEST INSTRUMENTATION CORRECTION**
+
+**No production invalidation change is authorized.** The three corrections required of the
+characterization:
+
+1. **Identify slide rasters by exact expected canvas dimensions** (569×320 / 180×320), never by aspect ratio.
+2. **Count rasters per slide** over the window under test; never compare positions in a global serial.
+3. **Establish quiescence before the baseline.** The precondition is not "the thumbnail looks complete" but "the landscape produced no raster and its decoded hash did not change across N consecutive polls spanning ≥ 2 s" — the observed churn ends at ~4.9 s and the passes are ~1.5 s apart. §21 made each individual raster complete; it did not make the *scene* stop changing, and the settled contract must account for that.
+
+C5b's assertion then becomes exactly what §14 states: after quiescence, a portrait-only edit
+produces **zero** landscape rasters reaching `html2canvas` and no accepted landscape update. On
+the present evidence that assertion passes — but it must be **proven by the corrected spec**, not
+inherited from this diagnosis.
+
+### 22h. A production observation that is not C5b
+
+**The landscape slide renders 2–3 times on cold load**, driven by its own embeddable geometry
+settling. §10 set the post-fix target at **one render per slide on cold load**. That target is
+**not met**, and the cause is upstream of the thumbnail system: the canvas resizes embeddable
+elements after mount, and the thumbnail layer is correctly reacting to real visual change.
+
+**Not in PATCH-142's allowlist and not to be fixed by suppressing RC-2 inputs.** Recorded as an
+open performance question against the embeddable/overlay layer, to be raised as its own patch if
+the owner wants it pursued. PATCH-142 should close against the corrected C5b/C5a contract and the
+completeness proof, with this recorded as a known deviation from the §10 target.
+
+### 22i. Allowlists — revised
+
+**Production: unchanged, and now confirmed complete.** The four §21i files already committed
+(`1fe6221`, `23a91bb`) stand. **No further production change is authorized**, including none to
+`resolveSlidePadlets.ts`, `planSlideComposition.ts`, `getSlideRenderSignature.ts`,
+`useSlideThumbnails.ts`, `createSlideRenderer.tsx` or `waitForOverlayReadiness.ts`.
+
+**Test — 2 files:**
+
+| File | Change |
+|---|---|
+| `e2e/characterization/patch-142-thumbnail-isolation.spec.ts` | **NEW** — the three §22g corrections; C5a, C5b and cold completeness. ≤200 lines |
+| one existing PATCH-142 unit test file | the §22f self-invalidation case |
+
+Unchanged exclusions: PATCH-124's spec · PATCH-136 bridge files · `DrawingLayout.tsx` ·
+`CanvasClient.tsx` · persistence and schema · the 250 ms constant.
+
+### 22j. Hard stops
+
+| Stop | Result |
+|---|---|
+| Counter cannot be made slide-specific without broad production instrumentation | **NOT TRIGGERED** — exact canvas dimensions distinguish the slides with no production hook |
+| Real transient membership belongs to a broader canvas defect | **NOT TRIGGERED** — no transient cross-frame membership occurs (§22d) |
+| Landscape visual inputs genuinely change from portrait interaction | **NOT TRIGGERED** — they change from the landscape's own overlays; the portrait pass leaves the landscape key stable 5/5 |
+| Repair requires PATCH-124 changes | **NOT TRIGGERED** |
+| Repair requires broad `DrawingLayout` or fork changes | **NOT TRIGGERED** — no production change at all |
+| More files than can be narrowly bounded | **NOT TRIGGERED** — two test files |
+
+### 22k. Status
+
+**OPEN · PHASES 1–2 IMPLEMENTED AND VALIDATED · COLD THUMBNAIL COMPLETENESS PROVEN · SLIDE-LOCAL
+ORDINAL REPAIR CONFIRMED UNDER REAL EVENTS · C5b NOT DISPROVEN — CHARACTERIZATION MISMEASURED ·
+RESIDUAL RERENDER CLASSIFIED AS LATE SELF-INVALIDATION (H) · OPTION A AUTHORIZED · COLD-LOAD
+RENDER-COUNT TARGET NOT MET, RECORDED SEPARATELY · PATCH-144 STILL REQUIRED · NOT PUSHED.**
+
+PATCH-142 may not close until: the corrected characterization proves C5b with slide-specific
+evidence; **PATCH-144 closes**; and clean-environment validation is repeatable. PATCH-137 remains
+**OPEN · MIGRATION BLOCKED BY PATCH-142**.
+
+### 22l. Recorded diagnostic notes
+
+- **I was wrong first, and the correction is the finding.** Reading the probe showed a global
+  counter and an aspect-ratio classifier, and I concluded false positive. Measuring showed real
+  569×320 rasters. A broken instrument and a real symptom can coexist; finding the flaw in the
+  instrument does not discharge the symptom.
+- **"Complete" is not "quiescent".** §21 guaranteed each raster captures everything it owns. It
+  never guaranteed the scene stops changing. A baseline taken at first completeness sits inside a
+  window where the slide will invalidate itself twice more.
+- **Attribution needs a causal signal, not a timeline.** Everything after the edit looked caused
+  by the edit. Only the scheduler's dirty set — which slide's key actually changed — separates
+  the two, and it is the thing the test never observed.
+- **A serial number is a position, not a count.** Comparing `.at(-1).serial` across a window
+  answers "how many things happened in total", never "how many of mine happened".
