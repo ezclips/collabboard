@@ -1,8 +1,9 @@
 # PATCH-142 — SLIDE THUMBNAIL INVALIDATION SCOPE AND RENDER COMPLETENESS
 
-**Status:** governance, diagnosis and architecture. **No implementation.**
-**Authored:** 2026-08-03 (CTO). **Base:** `cc74e8e`.
-**Blocks:** PATCH-137 (PATCH-124 real-UI migration).
+**Status:** CLOSED · PHASES 1–3 IMPLEMENTED AND INDEPENDENTLY VALIDATED · C5a AND C5b PROVEN
+PER-SLIDE (10/10) · SEE §24 · PATCH-137 RELEASED TO RESUME · NOT PUSHED
+**Authored:** 2026-08-03 (CTO). **Base:** `cc74e8e`. **Closed:** 2026-08-03 at `3c53bc6`.
+**Blocked:** PATCH-137 (PATCH-124 real-UI migration) — **released at closure, §24k**.
 
 ## 1. Why this patch exists
 
@@ -1087,3 +1088,233 @@ BLOCKED BY PATCH-142**.
 - **When readiness is proven for a plan, ask who owns the plan.** §21 correctly bounded "this
   raster matches the current composition". Nothing bounded "the composition has stopped moving",
   and the owner of that turned out to be an editor-layer measurement loop three files away.
+
+## 24. Closure review — INDEPENDENT (2026-08-03, CTO / lead PM)
+
+**HEAD reviewed:** `3c53bc6`. **Role:** independent governance reviewer. Nothing below is
+accepted from the implementation report; every artifact was re-read from the commit objects and
+every validation re-executed in this review session.
+
+### 24a. Prerequisite closure status
+
+| Patch | Closure commit | Status re-confirmed here |
+|---|---|---|
+| PATCH-145 | `748d141` (governance), `9d1aca0` + `d82c0d7` (implementation) | CLOSED · files byte-identical to `d82c0d7` |
+| PATCH-144 | `021a0b6` (governance), `0186016` (implementation) | CLOSED · script byte-identical to `0186016`; contract re-proven live (§24f) |
+
+### 24b. Production review — `1fe6221`, `23a91bb`
+
+**Slide-local ordering (`1fe6221`) — CONFIRMED.**
+
+`resolveSlidePadlets.ts:14-24` filters to slide members **before** assigning ordinals;
+`localOrdinalById` is built by position within `slideMembers`, never within `sceneElements`.
+`sceneIndex` survives only as the sort key of the already-filtered set (`:23`) — order-preserving
+and incapable of importing cross-slide state. `planSlideComposition.ts:30-37` replaces the former
+whole-scene `activeIndexById` with `localIndexById` over the same slide-local basis, so the
+band split moved together with the ordinal, as §9 required. Membership is unchanged and still
+delegates to `resolveFrameMembership` (`:19`, `:38`), consistent with `frameMembership.ts`.
+
+**`getSlideRenderSignature.ts` is correctly absent from the diff.** §21i authorized it to
+"consume the slide-local ordinal"; it already reads `zIndex` from `resolvedPadlets`
+(`:132-143`), so it inherits the repair with no edit. Verified by reading it in full: no scene-array
+position, no global ordinal, no active-slide state anywhere in the key. `nativeSceneSignature`
+(`:122-130`) and `canvasLineSignature` (`:147-148`) are both filtered to `slideFrame.id`. Every
+content input §9.2 demanded is retained — `version`, `versionNonce`, geometry, `localX`/`localY`,
+child-card state via `buildPadletRenderState`. **A portrait-only element cannot reach the
+landscape key by any path.**
+
+**Host readiness (`23a91bb`) — CONFIRMED.**
+
+`createSlideRenderer.tsx` owns readiness. The expected set is derived at `:77-84` from
+`slidePadlets` — i.e. `compositionPlan.resolvedPadlets`, known before the host div exists,
+exactly as §21b specified. Each wrapper it renders is tagged `data-slide-overlay-id={padlet.id}`
+(`:157`). In `waitForOverlayReadiness.ts`: `matches.length !== 1` rejects **both** missing and
+duplicate wrappers (`:47`); geometry is checked against the host-assigned plan with a 1.5 px
+tolerance including a `> 0` size floor (`:50-57`); loading descendants block readiness
+(`:58`); images require `complete && naturalWidth > 0` else `decode()`, with terminal failure
+counted as ready so a broken asset cannot deadlock (`:23-41`); `document.fonts.ready` is awaited
+(`:89`); the final double-rAF is retained (`:90-91`). Readiness is host-local — every query is
+rooted at the passed `host` element; there is **no** global registry, no `setTimeout`-based
+readiness, and no DOM quiet-period observer.
+
+**The §21c defect #3 is repaired:** the `pendingAtStart > 0` shortcut is deleted, so
+`waitForSnapshotDiagramReadiness` now runs unconditionally *after* participants mount rather
+than being skipped in precisely the case it was needed.
+
+**Request/acceptance safety — CONFIRMED.** `useSlideThumbnails.ts` owns one `AbortController` per
+slide (`:105-107`), aborts any predecessor before replacing it, and deletes the entry in `finally`
+only when it is still the current one (`:143-145`) — no cross-generation clobber. Supersession and
+unmount abort in-flight work (`:55`, `:60-66`, `:218-219`). An aborted render is re-queued rather
+than swallowed (`:136-141`); a genuine error still propagates. `shouldAcceptSlideThumbnailRender`
+is **unmodified**, so the acceptance rule observed working in §3 is untouched, and a stale render
+still cannot overwrite a newer thumbnail. No private scene mutation was introduced anywhere.
+Ordinary builds resolve `lib/e2e/bridgeRegistration.ts`, which is a no-op returning a no-op
+teardown; the E2E module is swapped in only under `E2E_BRIDGE_BUILD=1` (`next.config.ts:56-60`).
+
+### 24c. PATCH-145 interaction — no suppression, no special-casing
+
+The prior C5b failure was upstream: a `display:none` subtree measured as zero, floored to 80, and
+written without a revision bump. **PATCH-142 contains no compensating logic for it.** The
+signature still reports embeddable `width`/`height`/`version`/`versionNonce` verbatim
+(`getSlideRenderSignature.ts:132-146`), so a *legitimate* geometry change still invalidates —
+which is what §16 requires and what the false-green rules forbid weakening. The repair lives
+entirely in PATCH-145's liveness predicate and revision bump. **The two patches compose without
+either knowing about the other**, which is the correct outcome: PATCH-142's layer was never wrong,
+and §23g's decision to push the repair upstream is vindicated.
+
+### 24d. Characterization review — `3c53bc6`
+
+Exactly **one** new file, **220 lines**, 220 insertions / 0 deletions, **zero production files**
+(verified by `--name-only`, not by the report). Confirmed against every governed requirement:
+
+| Requirement | Result |
+|---|---|
+| Exact raster dimensions 569×320 / 180×320 | yes — `LANDSCAPE_DIMS` / `PORTRAIT_DIMS`, matched by exact width and height equality |
+| No aspect-ratio classification | yes — no width/height comparison exists anywhere in the file |
+| Independent per-slide raster counters | yes — `rasterCount(page, dims)` filters the log per slide; never a position in a shared serial |
+| Real UI rectangle draw | yes — toolbar `data-testid`, accessible-name colour swatch, `page.mouse` drag |
+| No `updateScene` / `window.h` / raw API / DB mutation | yes — grep confirms only `getSceneElements()` and `getViewport()` are called |
+| Read-only bridge only | yes — two frozen members, no broadening |
+| Membership mirrors the production rule | yes — `resolvesToFrame` reproduces `resolveFrameMembership`: explicit `frameId` first, else strict centre-point containment |
+
+### 24e. Instrument liveness — the check that separates a pass from a false green
+
+A zero-delta raster assertion is only meaningful if the counter observes anything at all. A
+temporary review diagnostic (created, run, deleted; worktree re-verified clean) tallied every
+`toDataURL` call over a full cold load of the same fixture:
+
+```
+PROBE_TALLY {"300x150":1, "569x320":2, "180x320":1}
+```
+
+Three findings, all load-bearing:
+
+1. **The landscape baseline is 2, not 0.** C5b's raster-count equality is a real measurement
+   against a live, non-zero counter — not an instrument that captured nothing.
+2. **A 300×150 scratch canvas is present in every cold load** — the exact artefact §22b said an
+   aspect-ratio classifier would mislabel as "landscape" (300 > 150). The exact-dimension
+   classifier excludes it. **The §22g correction is validated against live data, not just by
+   reading the code.**
+3. The portrait slide rasters at 180×320 as specified.
+
+Combined with §23b's record that this same measurement technique **failed 5/5** before PATCH-145
+landed, the test is demonstrated to be capable of failing. This is a genuine before/after signal.
+
+### 24f. Validation re-executed in this review session
+
+| Step | Result |
+|---|---|
+| `dist/types` + `.next` removed, **one** `npm run typecheck` | exit **0**; 410 fresh declarations; entry mtime 12 s old — generated in this session, not inherited |
+| Clean `npx next build` | exit **0** |
+| `assertBridgeExclusion.mjs` | **891 files**, no bridge |
+| `.next` removed, clean `npm run build:e2e` | exit **0**; marker contains `1` |
+| Ordinary `.next` restored, exclusion re-run | **891 files**; **no** `E2E_BRIDGE_BUILD` marker |
+| Focused unit suite | **36/36** — `slideThumbnailRefresh` 19 · `slideOrder` 7 · `slideRenderSignature` 5 · `waitForOverlayReadiness` 5 |
+| One focused characterization | PASS |
+| **Ten independent Playwright process invocations** | **10/10 PASS** — separate process, fresh browser state and a freshly minted disposable board each; no loop-in-one-test, no retries, no setup failures |
+| `git diff --check` | clean |
+
+`npm run typecheck` exits 0 while the vendored generator itself exits 1 on two pre-existing
+`SearchMenu.tsx` `TS18047` diagnostics — PATCH-144's governed exit policy, behaving exactly as
+`021a0b6` closed it.
+
+### 24g. Acceptance contract
+
+| # | Criterion | Result |
+|---|---|---|
+| 1 | Cold thumbnails complete without user edits | **PASS** — both cards + moodboard resolved, native text + seeded rectangle present, blue hits > 12, non-white > 2000, all before any edit |
+| 2 | Overlay order and signatures slide-local | **PASS** (§24b) |
+| 3 | Raster waits for host-local readiness | **PASS** (§24b) |
+| 4 | C5a semantic isolation | **PASS** — green stroke chosen via accessible control, rectangle confirmed created in the portrait frame, **0** green pixels in landscape, all landscape content retained, 10/10 |
+| 5 | C5b invalidation isolation | **PASS** — landscape raster count unchanged from a **non-zero** baseline, hash unchanged, geometry byte-identical incl. `width`/`height`/`version`/`versionNonce`/`frameId`, portrait hash changes normally, 10/10 |
+| 6 | Ten independent runs | **PASS** — 10/10 in this review, independent of the implementer's 10/10 |
+| 7 | PATCH-144 clean-environment validation | **PASS** (§24f) |
+| 8 | PATCH-145 behaviour stable | **PASS** — the spec asserts geometry byte-identical across a full cull → re-show cycle *and* the edit; no height of 80 ever observed |
+| 9 | Ordinary artifacts exclude the bridge | **PASS** — 891 files, twice |
+| 10 | No unresolved production or test defect | **PASS** — see observations below; none blocking |
+
+**Baseline contract accepted.** `waitForQuiescentLandscape` requires geometry **and** decoded
+raster hash unchanged across at least 2 s of real polling, entered only after explicit completeness
+and non-80 height checks. It is not an elapsed-time wait: elapsed time alone can never satisfy it,
+and §23b already proved a 20 s quiet period would not have caught the defect this replaces.
+
+### 24h. Non-blocking observations
+
+1. **Cold-load landscape raster count is 2** (measured, §24e). Per this review's governed
+   criterion this is an observation, not a failure: it is bounded, stable, and — proven 10/10 —
+   does not change after an unrelated edit. §10's original target of 1 is **not** met and is
+   formally retired here; §23h's stricter reading is discharged, because the second raster is
+   legitimate bounded setup work, not the unbounded sync PATCH-145 removed.
+2. **`PORTRAIT_DIMS` is declared but never read.** The per-slide counter is parameterised and the
+   portrait side is proven via thumbnail hash change instead, so the C5b contract is fully met;
+   the constant is dead code. Cosmetic only — not worth a commit against a frozen characterization.
+3. **Two slide-local index spaces exist and can diverge in one narrow case.**
+   `resolveSlidePadlets`'s `localOrdinalById` includes padlet-embeddables whose padlet record is
+   missing or of type `drawing`; `planSlideComposition`'s `localIndexById` (built from
+   `isNativeFrameMember` or `resolvedPadlets`) excludes them. `firstPadletActiveIndex` is taken from
+   the first space and compared against the second (`planSlideComposition.ts:82-92`), so an
+   unresolvable embeddable ordered before the first resolvable one would shift the native
+   below/above band split by one. **Not a PATCH-142 acceptance defect:** both spaces are strictly
+   slide-local, so no cross-slide input is reintroduced and neither C5a, C5b, completeness nor
+   invalidation scope is affected — the only reachable symptom is native-element layering within a
+   single slide. Recorded for a future patch; **no change authorized here**, per this review's
+   instruction not to widen a patch for a defect outside its acceptance contract.
+
+### 24i. Unit-test decision — accepted
+
+No additional unit test. §23f already established from evidence that the previously proposed
+scheduler case encoded a hand-written settled state and "could not have caught" the real defect,
+which lived in an editor-layer measurement loop three files away. `selectSlidesForThumbnailRefresh`
+was never wrong; testing it harder proves nothing. The 36 focused tests cover the scheduler
+contract — selection, deferral, forcing, queuing, dedup, acceptance/rejection, ordinal locality and
+the readiness predicate. **Modelling PATCH-145's upstream geometry defect inside the pure thumbnail
+scheduler is explicitly not required and would be a category error.** Decision accepted as
+reported, on independent re-reading of the suites.
+
+### 24j. Classification
+
+**1 — PASS, READY FOR CLOSURE.**
+
+Every acceptance criterion holds on independently re-executed evidence. The three observations are
+bounded, non-blocking, and none touches the C5a/C5b/completeness contract.
+
+### 24k. Status
+
+**PATCH-142: CLOSED · SLIDE-LOCAL ORDINAL REPAIR CONFIRMED · HOST-LOCAL OVERLAY READINESS
+CONFIRMED · COLD COMPLETENESS PROVEN WITHOUT USER EDIT · C5a PROVEN (GREEN 0, 10/10) · C5b PROVEN
+PER-SLIDE AGAINST A LIVE NON-ZERO RASTER BASELINE (10/10) · CLEAN-ENVIRONMENT VALIDATION
+REPRODUCED · COLD-LOAD RENDER-COUNT TARGET FORMALLY RETIRED AS AN OBSERVATION · NOT PUSHED.**
+
+**PATCH-137: RELEASED to resume.** Its blocker is discharged — PATCH-142 has proven complete
+initial thumbnails, per-slide invalidation isolation and a deterministic accepted-render state,
+which were the three conditions §18 set. **This closure does not itself close PATCH-137**, which
+must run and pass its own migration work and review; it may now amend PATCH-124 to the governed
+C5a/C5b split, per §14.
+
+**PATCH-138–141:** unchanged, remain in their existing deferred sequence behind PATCH-137.
+
+**PATCH-146 / PATCH-147:** unchanged — reserved, non-blocking tooling debt. Neither gates any
+patch. Note that PATCH-146's premise now has weaker supporting evidence than when reserved: twenty
+independent process invocations of a comparable drawing characterization (ten by the implementer,
+ten here) produced no setup failure at all, which is itself a data point that the iteration-8
+ceiling is specific to many cycles **inside one test**, exactly as PATCH-146 hypothesised.
+
+### 24l. Recorded diagnostic notes
+
+- **A zero-delta assertion is only as good as the counter behind it.** The single most valuable
+  check in this review was not re-reading the diff — it was tallying what the raster instrument
+  actually observes. Landscape 2, portrait 1, and a 300×150 scratch canvas that a naive classifier
+  would have called "landscape". Had the counter observed nothing, all ten runs would still have
+  passed and proven nothing. **Before accepting "X did not change", prove the instrument can see X.**
+- **A fixture can carry the exact artefact a past defect was made of.** §22b deduced the
+  aspect-ratio hazard from source; the probe found the offending canvas sitting in every cold load.
+  Deduced hazards are worth measuring — the measurement is usually cheap and occasionally
+  reclassifies the finding.
+- **Not appearing in a diff can be the correct outcome for an authorized file.**
+  `getSlideRenderSignature.ts` was allowlisted to consume the slide-local ordinal and was never
+  touched, because it already read `zIndex` from the repaired producer. Reviewing only changed
+  files would have flagged that as incomplete work; reading it settled it in one pass.
+- **Two patches that compose without knowing about each other is the signal the layering was
+  right.** PATCH-142 contains no special case for PATCH-145's defect and PATCH-145 contains no
+  thumbnail logic. §23g's decision to refuse the workaround at the thumbnail layer and open an
+  upstream patch is what made that possible.
