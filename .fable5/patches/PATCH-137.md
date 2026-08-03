@@ -1,8 +1,10 @@
 # PATCH-137 — PATCH-124 PRIVATE MUTATION REMOVAL: FEASIBILITY AND GOVERNANCE
 
-**Status:** governance, source census and feasibility spike. **No final migration implemented.**
-**Authored:** 2026-08-03 (CTO). **Base:** `c852d95`.
-**Predecessors:** PATCH-124 (closed) · PATCH-136 (closed, §18f split this patch out).
+**Status:** OPEN · UNBLOCKED · CENSUS COMPLETE AND MEASURED · **OPTION A (TEST-ONLY MIGRATION)
+AUTHORIZED** · ZERO PRODUCTION FILES · ONE TEST FILE ≤ 360 LINES · SEE §21 · NOT PUSHED
+**Authored:** 2026-08-03 (CTO). **Base:** `c852d95`. **Re-authorized:** 2026-08-03 at `f8671aa`.
+**Predecessors:** PATCH-124 (closed) · PATCH-136 (closed, §18f split this patch out) ·
+PATCH-142 / PATCH-144 / PATCH-145 (closed prerequisites; PATCH-142 released this patch at §24k).
 
 ## 1. Why this patch exists
 
@@ -753,3 +755,300 @@ BLOCKED BY THUMBNAIL INVALIDATION DEFECT · PATCH-142 RESERVED · NOT PUSHED.**
 - **Prove the negative directly.** The single most valuable number here is *green = 0 in
   20/20*: it separates "the wrong content appeared" from "the right content was re-rendered
   differently", and it is what makes the classification defensible.
+
+## 21. Amendment — PATCH-142 RELEASED; REAL-UI MIGRATION AUTHORIZED (2026-08-03, CTO)
+
+**HEAD at authoring:** `f8671aa`. **Role:** lead PM, governance architect, patch author. No
+implementation. Every census claim below was verified against source or measured live at this
+HEAD; none is carried forward from §7's spike on trust.
+
+### 21a. Blocker released
+
+PATCH-142 closed at `f8671aa` (§24, classification 1). Its three §18 release conditions are
+discharged and independently re-verified there: complete initial thumbnails with no user edit,
+per-slide invalidation isolation (C5b, 10/10 against a live non-zero raster baseline), and a
+deterministic accepted-render state. PATCH-144 (`021a0b6`) and PATCH-145 (`748d141`) are closed
+prerequisites. **PATCH-137 resumes.**
+
+**§20's obsolete assumptions are formally retired.** §20g classified the cross-frame re-render as
+a compound production defect (F). PATCH-142 §22–§23 and PATCH-145 traced it to two causes in
+sequence — first broken measurement instrumentation (a global serial and an aspect-ratio
+classifier), then a genuine upstream hidden-embeddable height defect. **Neither was a failure of
+the real-UI editing concept.** §20p's "PATCH-124 MIGRATION BLOCKED" is superseded. §7's spike
+findings on selectors, colour entry, coordinates and frame membership stand and are corroborated
+by PATCH-142's committed spec, which draws a real rectangle through the same controls and passed
+20/20 across two independent sessions.
+
+### 21b. Private-surface census — complete, measured
+
+Searched repo-wide for `window.h`, exposed `updateScene`, scene-mutation bridges, test-only
+globals, raw Excalidraw API access, and database scene mutation used to simulate drawing.
+
+| # | Symbol | File | Owner | Callers | Ordinary build | E2E build | Still required | Disposition |
+|---|---|---|---|---|---|---|---|---|
+| M1 | `window.h` (`.app`, `.elements` get **and set**, `.scene`) | `excalidraw_fork/packages/excalidraw/components/App.tsx:12420-12446` (`createTestHook`) | **Vendored fork (upstream Excalidraw)** | `patch-124-…spec.ts:164-167, 174-214` — **the only Fable 5 caller** | **ABSENT** (measured) | **ABSENT** (measured) | **Yes — by the fork's own suite (8 test files)** | **Do not touch.** Migrate the caller |
+| M2 | `__COLLABBOARD_E2E__` | `lib/e2e/bridgeRegistration.e2e.ts` | PATCH-136 | 8 characterization specs | absent (no-op module) | present | Yes | **Retain unchanged** — already read-only |
+| M3 | `registerE2EBridge` no-op | `lib/e2e/bridgeRegistration.ts` | PATCH-136 | build-time alias target | present, no-op | replaced | Yes | Retain |
+| M4 | `__patch128GateB/D/G` (`.invokeFetchData`, `.dispose`, `.snapshot`) | installed **by the spec** at `patch-128-slide-sync.spec.ts:820` et al. | PATCH-128 test | own spec | n/a | n/a | PATCH-128 property | **Out of scope** — test-installed, not production |
+| M5 | `__patch070Stage0Probe`, `__patch114AppState`, `__patch065PointerRecords` | test specs only | test | own specs | n/a | n/a | own patches | **Out of scope** — optional-chained reads of test-installed probes |
+| M6 | `__patch101TimeoutOverrideMs` | **read** at `createSlideRenderer.tsx:28-37` | PATCH-101 | test override | **gated out** (`NODE_ENV !== "production"`) | gated out | Yes | **Out of scope** — a config *read*, not a scene-mutation surface |
+| M7 | `LayoutDebugger` | `lib/collabboard/layouts/LayoutDebug.ts:285` | Fable 5 | **none — module has zero importers** | only inside `interactive()` | same | No | **Out of scope**, recorded (§21j.2) |
+| M8 | `EXCALIDRAW_ASSET_PATH` | `ExcalidrawWrapper.tsx:56` | Fable 5 | Excalidraw runtime | present | present | Yes | Legitimate library config, not a test surface |
+
+**Legitimate internal production `updateScene` use — explicitly not test exposure.**
+`DrawingLayout.tsx` (24 call sites), `CanvasClient.tsx:5040`, `CustomMermaidModal.tsx`,
+`SimpleLineRenderer.tsx`, `useCanvasActions.ts`. All are ordinary editor behaviour on a private
+API handle held in component scope, reachable from no global. **None is in scope.**
+
+### 21c. The decisive measurement — M1 is already absent from every production build
+
+`createTestHook()` is gated `isTestEnv() || isDevEnv()`, and `getEnvMode()` falls through to
+`process.env.NODE_ENV` (`common/src/utils.ts:754-771`). Both builds are `NODE_ENV=production`.
+
+Measured live at `f8671aa` against a clean `E2E_BRIDGE_BUILD=1` artifact:
+
+```
+windowH_typeof        "undefined"        windowH_hasApp   false
+bridge_typeof         "object"           bridgeWriteMethods  []
+bridgeKeys  [getInteractionState, getSceneElements, getSceneRevision,
+             getViewport, instanceId, subscribeToSceneChange, version]
+mutationAttemptResult "1400"   ← assigning x=999999 to a bridge-returned element was rejected
+```
+
+And, run against the same governed artifact, **PATCH-124's committed spec fails**: it times out
+after 90 s at `waitForHarness` (`:164`) and the test aborts at 120 s.
+
+> **Finding: PATCH-124 has no coverage in the governed artifact today.** It is runnable only
+> against a dev server, where the fork installs `window.h`. §2a predicted this from source;
+> it is now measured. **PATCH-137 is therefore not hygiene — it is restoration of lost
+> coverage**, and its priority rises accordingly.
+
+**The hook is shipped but inert, and that distinction matters.** `isTestEnv() || isDevEnv()` is a
+**runtime** call, so bundlers cannot eliminate the branch: the literal `window.h=window.h`
+assignment is present in the ordinary production bundle
+(`.next/static/chunks/1927.*.js`, verified) and simply never executes. **`window.h`'s absence is
+therefore a runtime environment property, not a build-time guarantee.** A change to `NODE_ENV`
+handling, to Next.js env inlining, or to the fork's `getEnvMode()` would silently restore a
+scene-mutation surface — with a working `elements` **setter** — to production, and no build-time
+check would notice. This is precisely why §21i.2's permanent runtime assertion has regression
+value rather than being a tautology.
+
+**Consequences for the options.** M1 is not installed by Fable 5 production code, is absent from
+production artifacts, and is load-bearing for the fork's own suite — so there is no production
+global to delete. The bridge exposes no writes and deep-freezes its returns — so there is nothing
+to remove there either. **The entire remaining surface is one test file.**
+
+### 21d. PATCH-124 contract census — C1–C13 against §3
+
+| # | Claim | Class | Basis |
+|---|---|---|---|
+| C1 | Both slides render a PNG thumbnail, natural dims > 100 px | **A** | PATCH-142 proves cold completeness for landscape and a live portrait raster (180×320) |
+| C2 | A shape drawn in frame A appears in A's thumbnail (> 12 px) | **C** | PATCH-142 only ever asserts the *unrelated* slide is unchanged. **Never proven for the target slide** |
+| C3 | A change to frame A does not alter B's thumbnail | **C** | PATCH-142 proved the **B→A** direction only; A→B is untested |
+| C4 | A shape added to frame B refreshes B | **A** | PATCH-142 asserts the portrait thumbnail hash changes after a real portrait draw |
+| C5 | A change to frame B does not alter A's thumbnail | **A** | PATCH-142 C5a + C5b, 10/10, strictly stronger than the original `src` proxy |
+| C6 | A further change to A refreshes A again | **C** | not covered |
+| C7 | Manual refresh yields a genuinely new render for both slides with unchanged content | **C** | PATCH-142 never touches the refresh button; needs the `toDataURL` serial stamp |
+| C8 | The refresh cycle terminates ("Generating previews…" clears) | **C** | not covered |
+| C9 | Thumbnails contain no transient chrome | **C** | not covered |
+| C10 | Two rapid changes → settled thumbnail holds both colours | **C**, split per §10a into **C10a** (coalescing) / **C10b** (two colours) | not covered |
+| C11 | No React state-update/unmounted/act() console errors | **C** | not covered |
+| C12 | Exact colour content: ±20/channel, alpha > 160, > 12 px | **C** | rides on C2/C10 |
+| C13 | Frame targeting is by `frameId` | **A (partial)** / **C** | PATCH-142 asserts membership of the drawn element; the *target-slide-renders-it* half is C |
+
+**Class D (obsolete):** C5c — `src` identity as a contract. Retired by §20h and superseded by
+PATCH-142's raster-count + hash evidence. **Class E (not reachable through real UI):** none —
+C10's conflation is a *test-semantic* problem solved by the §10a split, not a product gap.
+
+**Nine claims plus one split remain PATCH-137's to prove. No PATCH-142 assertion is duplicated:
+PATCH-142 owns "the unrelated slide did not change"; PATCH-137 owns "the edited slide did."**
+
+### 21e. Chosen option — **A — TEST-ONLY MIGRATION**
+
+| Option | Verdict |
+|---|---|
+| **A — test-only migration** | **CHOSEN.** The only Fable 5 caller of the only mutation surface is one spec file. No production surface needs removal |
+| B — remove production mutation bridge | **NOT APPLICABLE.** The bridge has zero write methods, deep-freezes returns, and a live mutation attempt was rejected (§21c) |
+| C — remove a legacy PATCH-124 global | **NOT APPLICABLE.** `window.h` is upstream fork tooling, not installed by Fable 5, absent from production, and required by 8 of the fork's own test files. Deleting it would modify an excluded vendored tree and break upstream merges |
+| D — product UI gap | **NOT APPLICABLE.** Twelve of thirteen claims migrate unchanged; C10 is a test-semantic issue, not a missing control (§8) |
+| E — mixed removal and migration | **NOT APPLICABLE.** There is no production half |
+| F — insufficient evidence | **NOT APPLICABLE.** The census is complete and measured |
+
+### 21f. Real-UI characterization design
+
+Migrate `patch-124-slide-thumbnail-refresh.spec.ts` **in place**. Keeping the filename preserves
+PATCH-124's identity and renders the migration auditable as a single diff; a rename would obscure
+coverage equivalence, which is the one thing this patch must not lose.
+
+**Workflow, all through user-facing controls:**
+
+1. Open a disposable seeded board (existing harness, unchanged) and `waitForE2EBridge`.
+2. **Assert `typeof window.h === "undefined"`** — condition 7, and the spec that once required it
+   now proves its absence.
+3. Open the Slides panel; wait for both rows and for cold completeness.
+4. Select the rectangle tool via the enclosing `label` (§7a — the radio input is not the pointer
+   target), set **stroke** then **background** by hex, confirm **Solid** fill appears and is set.
+5. Drag with `page.mouse` between two points converted from scene to screen through
+   `getViewport()`. **Coordinates must be derived from the observed viewport, never assumed.**
+6. Verify through the read-only bridge: element exists · `type === "rectangle"` · bounds within
+   tolerance · `frameId` is the target frame · **and it resolves to no other frame**.
+7. Assert the target thumbnail gains > 12 matching pixels (C2, C12).
+8. Assert the unrelated thumbnail is unchanged — hash identity **and** zero pixels of the new
+   colour (C3), plus its per-slide raster count did not increase after a stable baseline.
+9. Repeat for the mirror direction (C4, C5, C6). Portrait requires a real viewport change; prove
+   the element lands in `frame-portrait` (§11 gate 1).
+10. Manual refresh → both `src` values change with unchanged content (C7); "Generating previews…"
+    clears (C8); no transient chrome (C9); no React console errors (C11).
+11. **C10a** — style one rectangle, select it, `Ctrl+D` twice inside the debounce window; assert
+    all three shapes present **and exactly one new target-slide raster** (measured 40–55 ms, §7d).
+    **C10b** — orange then teal, poll until **both** exceed threshold, closing the §3a race.
+
+**Persistence: NOT required.** Derived from PATCH-124 §3/§7 — no reload, revisit or database
+read-back appears in its thirteen claims. Adding it would widen the contract. Excluded.
+
+**Prohibited in the design:** CSS implementation selectors where an accessible role/name exists ·
+coordinates not anchored to observed geometry · sleeps as synchronization · any in-test repeat
+loop · retries around a failed draw.
+
+### 21g. PATCH-142 reuse — copy the technique, do not share the module
+
+PATCH-142's exact-dimension per-slide raster attribution is directly applicable to C10a and to
+step 8. **It must be copied, not extracted into a shared helper.** Both files are
+*characterization* specs whose purpose is to freeze behaviour; a shared module would mean a future
+edit to one silently changes the other's evidence, and PATCH-142's spec is frozen and may not be
+modified. The technique is ~15 lines; the coupling cost far exceeds the duplication cost.
+
+`e2eBridge.ts` (`waitForE2EBridge`) is already a shared PATCH-136 helper and **is** reused as-is.
+
+**No `drawingUiActions.ts` helper is authorized.** §12 permitted one "only if a second spec needs
+it". A second spec does draw through real UI — but it is PATCH-142's, which is frozen, so it
+cannot become a consumer. With one consumer, the actions stay inline.
+
+**No PATCH-142 test change is authorized.** Only a direct defect in it would reopen that.
+
+### 21h. Allowlists and limits
+
+**Production: NONE.** No production file is authorized. Explicitly excluded: the PATCH-136 bridge
+and its contract · thumbnail ordering/signature/readiness files · `DrawingLayout.tsx` · the
+Excalidraw fork (including `createTestHook`) · persistence and schema · `package.json` ·
+PATCH-144 tooling · generic editor architecture.
+
+**Test: exactly ONE file.**
+
+| File | Change | Limit |
+|---|---|---|
+| `e2e/characterization/patch-124-slide-thumbnail-refresh.spec.ts` | Replace `waitForHarness` → `waitForE2EBridge`; delete `addRectToFrame` entirely; add real-UI actions; add the `window.h` absence assertion; apply the §10a C10 split; add per-slide raster counting for C10a | current 293 → **≤ 360 lines** |
+
+No new bridge or type test: **PATCH-136's spec already asserts the exact 7-key surface, deep
+freezing, `hasMutationSurface === false` and clone-unaffected** (`patch-136-production-readiness.spec.ts:107-120`).
+Adding another would be duplicate coverage. The one genuinely unguarded condition — `window.h`
+absence — becomes a single assertion inside the migrated spec.
+
+### 21i. Removal safety, induced-failure plan and validation matrix
+
+**Removal safety.** Callers of M1: one (`patch-124-…spec.ts`). Migrate it; then prove zero
+remaining callers by repo-wide grep for `window.h` and `updateScene` outside the fork and outside
+legitimate production use. No dead global, no compatibility alias, no "just in case" retention —
+there is nothing in Fable 5 to retain.
+
+**Induced-failure plan.**
+
+1. **Legacy dependency — ALREADY PROVEN at `f8671aa` (§21c).** PATCH-124's spec times out at
+   `waitForHarness` against the governed artifact. Re-run once at implementation to restate it.
+2. **Surface absence.** `typeof window.h === "undefined"` in the E2E artifact — becomes a
+   **permanent** assertion, not a one-off check, because §21c shows the guard is evaluated at
+   runtime and the hook ships inert in the bundle. **No new API may be added to prove an old one
+   is gone** — `typeof` on the existing global is sufficient.
+3. **Post-migration positive.** The migrated spec passes against the same artifact.
+4. **Negative control — mandatory.** Draw the rectangle **outside** the target frame and prove the
+   spec fails. A membership assertion that cannot fail is not evidence (PATCH-142 §24e).
+5. **Coverage-equivalence table.** Claim-by-claim C1–C13, old assertion → new assertion, in the
+   closure record, so deleting `addRectToFrame` cannot silently drop coverage.
+
+**Validation matrix.**
+
+| Gate | Requirement |
+|---|---|
+| Clean environment | remove `dist/types` + `.next`; **one** `npm run typecheck` → exit 0, declarations regenerated |
+| Build | clean ordinary `next build` → exit 0 |
+| Exclusion | `assertBridgeExclusion.mjs` across all emitted files; **no** `E2E_BRIDGE_BUILD` marker |
+| E2E build | clean `build:e2e` → exit 0; marker contains `1` |
+| Units | 36 focused presentation tests still green; **250 ms constant untouched** |
+| Characterization | one focused run, then **ten independent `npx playwright test` process invocations** |
+| Draw reliability | a deterministic single-run setup failure is **blocking**. No retries, no sleeps to mask it. **PATCH-146 scope must not be consumed** |
+| Negative control | passes (i.e. correctly fails) |
+| Hygiene | `git diff --check` clean; ordinary `.next` restored; ports 3000–3003 and 3100 free |
+
+### 21j. Hard stops — evaluated
+
+| Stop | Result |
+|---|---|
+| A production feature depends on the private global | **NOT TRIGGERED** — `window.h` is absent from production and read by no Fable 5 code |
+| No stable user-facing route exists for the edit | **NOT TRIGGERED** — §7a selectors all pre-existing; PATCH-142 draws through them 20/20 |
+| Removing mutation access breaks non-test integration | **NOT TRIGGERED** — nothing is removed from production; one test helper is deleted |
+| Real UI cannot satisfy PATCH-124's contract | **PARTIALLY TRIGGERED, RESOLVED** — C10 alone is unsatisfiable whole (§8); the §10a split replaces it with two strictly stronger assertions |
+| More than a narrowly bounded production set required | **NOT TRIGGERED** — zero production files |
+| The bridge cannot remain read-only | **NOT TRIGGERED** — it already is; measured, including a rejected mutation attempt |
+| The test requires consuming PATCH-146 scope | **NOT TRIGGERED** — ten independent processes, no in-test loop |
+
+**All clear. PATCH-137 is bounded and authorized to implementation.**
+
+### 21j.2 Observations recorded, not authorized
+
+1. **PATCH-124 is currently red against the governed artifact** and has been since the E2E
+   production-build regime began. Any claim that it "runs unmodified and still green" holds only
+   against a dev server. Not a new defect — the direct consequence of §2a — but it means the
+   suite's green status has been reported against two different environments.
+2. **`lib/collabboard/layouts/LayoutDebug.ts` has zero importers** and installs a `LayoutDebugger`
+   global inside `interactive()`. Dead code, not a mutation surface, out of scope. Candidate for a
+   future dead-code patch.
+3. **`build:e2e` remains Windows-`cmd` only** (§14). Unchanged decision: a CI prerequisite, not a
+   PATCH-137 blocker — on POSIX it silently yields an ordinary build and the specs fail loudly and
+   legibly at `waitForE2EBridge`.
+
+### 21k. False-green protection — additions to §17
+
+Reject if: mutation is renamed rather than removed · `updateScene` remains reachable from any test
+· any writable member appears on the bridge · the spec mutates the database to simulate drawing ·
+frame ownership is inferred from coordinates without checking scene membership · a thumbnail
+change is asserted without first proving the element exists · the unrelated-slide control is
+dropped · bridge exclusion is skipped · any `window.h` caller remains · `addRectToFrame` is
+deleted without the equivalence table · any PATCH-142 assertion is weakened · retries or sleeps
+mask a draw failure · the 250 ms constant is touched · a new API is introduced to prove the old
+one is absent.
+
+### 21l. Status
+
+**PATCH-137: OPEN · UNBLOCKED · PRIVATE-SURFACE CENSUS COMPLETE AND MEASURED · `window.h` PROVEN
+ABSENT FROM BOTH PRODUCTION ARTIFACTS AND OWNED BY THE VENDORED FORK · BRIDGE PROVEN READ-ONLY
+WITH ZERO WRITE METHODS · PATCH-124 PROVEN TO HAVE NO COVERAGE IN THE GOVERNED ARTIFACT · OPTION A
+(TEST-ONLY MIGRATION) AUTHORIZED · ZERO PRODUCTION FILES · ONE TEST FILE, ≤ 360 LINES ·
+IMPLEMENTATION AUTHORIZED · NOT PUSHED.**
+
+**PATCH-142 / 144 / 145:** CLOSED prerequisites, frozen.
+**PATCH-138–141:** deferred; resume only after PATCH-137 closes.
+**PATCH-146 / 147:** reserved, non-blocking tooling debt. PATCH-137 must not consume PATCH-146's
+scope; its ten-invocation strategy is precisely the approach PATCH-146 hypothesised.
+
+### 21m. Recorded diagnostic notes
+
+- **Find the owner of a global before authorizing its removal.** Three of the six options in this
+  brief presupposed that Fable 5 installs the PATCH-124 mutation global. It is upstream
+  Excalidraw's own dev/test hook, correctly gated, absent from production, and load-bearing for
+  eight of the fork's own test files. The right disposition was to touch nothing and migrate the
+  single caller — the opposite of what "remove the legacy global" would have produced.
+- **A test that cannot run is not a passing test.** PATCH-124 was carried for several patches as
+  covered behaviour. Running it once against the governed artifact showed it times out at
+  readiness. **Coverage claims should be re-measured in the environment they are claimed for**,
+  not inherited from the environment they were written in.
+- **"Already correct" is a census result worth spending time on.** The bridge needed no change —
+  but that was only knowable by reading it, listing its keys at runtime, and attempting a mutation
+  through it. Assuming it was fine and assuming it was leaky would have cost the same and proven
+  nothing.
+- **Duplication between two characterization specs is cheaper than coupling them.** Both exist to
+  freeze behaviour. A shared helper would let a future edit to one silently rewrite the other's
+  evidence, which is exactly what a characterization suite must never allow.
+- **"Absent from production" and "removed from the bundle" are different claims.** The fork's test
+  hook ships in the production bundle and is held back only by a runtime environment check. Had
+  the census stopped at "the guard excludes production", the permanent assertion would have looked
+  redundant. It is the opposite: a runtime-only guard is exactly the kind that regresses silently.
