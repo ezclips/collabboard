@@ -35,6 +35,7 @@ import CustomMermaidModal from './CustomMermaidModal';
 import { sanitizeClonedPostMetadata } from '@/lib/infra/collabboard/clonedPostMetadata';
 import { resolveFrameMembership } from '@/lib/infra/drawing/frameMembership';
 import type { DrawingViewport } from '@/lib/infra/drawing/canvasLineCoordinates';
+import { registerE2EBridge } from '@/lib/e2e/bridgeRegistration';
 
 const ExcalidrawWrapper = dynamic(
   () => import('@/components/collabboard/editors/ExcalidrawWrapper'),
@@ -789,6 +790,10 @@ export default function DrawingLayout({
   const [isInitialViewportSettled, setIsInitialViewportSettled] = useState(true);
   // Ref so renderEmbeddable can read the API without recreating on every API change
   const excalidrawAPIRef = useRef<any>(null);
+  useEffect(() => {
+    if (!excalidrawAPI) return;
+    return registerE2EBridge(excalidrawAPI);
+  }, [excalidrawAPI]);
   // Ref so renderEmbeddable can call onPadletEdit without adding it to deps
   const onPadletEditRef = useRef(onPadletEdit);
   useEffect(() => { onPadletEditRef.current = onPadletEdit; }, [onPadletEdit]);
