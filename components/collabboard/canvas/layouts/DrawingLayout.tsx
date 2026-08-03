@@ -36,6 +36,7 @@ import { sanitizeClonedPostMetadata } from '@/lib/infra/collabboard/clonedPostMe
 import { resolveFrameMembership } from '@/lib/infra/drawing/frameMembership';
 import type { DrawingViewport } from '@/lib/infra/drawing/canvasLineCoordinates';
 import { registerE2EBridge } from '@/lib/e2e/bridgeRegistration';
+import { isElementBeingLaidOut } from '@/lib/infra/drawing/isElementBeingLaidOut';
 
 const ExcalidrawWrapper = dynamic(
   () => import('@/components/collabboard/editors/ExcalidrawWrapper'),
@@ -65,8 +66,11 @@ function AutoHeightContainer({ padlet, allPadlets, onNaturalHeight, onDropExisti
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    cbRef.current(el.scrollHeight);
-    const ro = new ResizeObserver(() => cbRef.current(el.scrollHeight));
+    const report = () => {
+      if (isElementBeingLaidOut(el)) cbRef.current(el.scrollHeight);
+    };
+    report();
+    const ro = new ResizeObserver(report);
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
@@ -563,7 +567,13 @@ function DrawingEmbeddableCard({
                 ...buildDrawingSceneUpdate({
                   elements: excAPI.getSceneElements().map((el: any) =>
                     el.type === 'embeddable' && el.link === `padlet://${padlet.id}` && !el.isDeleted
-                      ? { ...el, height: newHeight }
+                      ? {
+                          ...el,
+                          height: newHeight,
+                          version: (el.version ?? 1) + 1,
+                          versionNonce: Math.floor(Math.random() * 1e9),
+                          updated: Date.now(),
+                        }
                       : el
                   ),
                   commitToHistory: false,
