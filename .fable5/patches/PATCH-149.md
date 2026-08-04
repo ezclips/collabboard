@@ -1,7 +1,8 @@
 # PATCH-149 — DOCUMENT POST USABILITY, MODAL CLEANUP, PDF-READY FOUNDATION
 
-**Status:** **SPLIT · PATCH-149A AUTHORIZED (bounded modal cleanup) · PATCH-149B BLOCKED ON A
-PRODUCT DECISION (document editor identity) · TWO DEFECTS UNLOCATED, NOT AUTHORIZED · NOT PUSHED**
+**Status:** **SPLIT · PATCH-149A CLOSED (bounded modal cleanup, commit `c23be50`) · PATCH-149B
+BLOCKED ON A PRODUCT DECISION (document editor identity) · TWO DEFECTS UNLOCATED, NOT AUTHORIZED
+· NOT PUSHED**
 **Authored:** 2026-08-04 (governance architect). **Base:** `177645b`. **First authoring of this
 number** — `git log --all --diff-filter=A -- .fable5/patches/PATCH-149.md` is empty.
 **Inherits:** PATCH-138 label finding · PATCH-139 D3/D5/D6 · PATCH-140 component 6 ·
@@ -384,3 +385,197 @@ possible · absorbing any 149B item · adding PDF anything.
 - **An empty pink square is a precise bug.** `iconBgColor || '#ec4899'` with a conditional `<img>`
   renders nothing but its own background whenever the card has no clipart — the defect the user
   described in colour, reproduced exactly from source.
+
+---
+
+## 13. PATCH-149A — INDEPENDENT CLOSURE REVIEW
+
+**Reviewed:** 2026-08-04 (independent closure reviewer). **Implementation commit:** `c23be50`
+`fix(document): clean modal header and remove dead card view`. **Parent:** `a53a5f0`. All evidence
+below was re-executed independently in this review, not taken from the implementation's own
+report.
+
+### Source-scope result
+
+Confirmed via `git diff a53a5f0 c23be50 --numstat`: **exactly five files**, all within budget.
+
+| File | Lines changed | Budget | Result |
+|---|---|---|---|
+| `CardEditor.tsx` | 6 (2 ins / 4 del) | ≤12 | ✓ |
+| `editors/CardActionsToolbar.tsx` | 9 (1 ins / 8 del) | ≤20 | ✓ |
+| `canvas/ui/FreeformPadletCards.tsx` | 5 (0 ins / 5 del) | ≤8 | ✓ |
+| `CardEditor.test.tsx` | 36 (34 ins / 2 del) | ≤45 | ✓ |
+| `ClipartCardDraftModal.test.tsx` | 2 (1 ins / 1 del) | ≤20 | ✓ |
+
+**Production total: 20 lines** (budget ≤40). `git diff a53a5f0 c23be50 -- <frozen paths>` returned
+empty for `CanvasClient.tsx`, `lib/domain/canvas/cardModalRoute.ts`, `NoteEditor.tsx`,
+`NoteEditorToolbar.tsx`, `ClipartCardDraftModal.tsx`, `CardPreview.tsx`, `package.json`, `.fable5`.
+**Confirmed unchanged.**
+
+### Ordinary Document header result
+
+Confirmed by direct source read: `CardEditor.tsx:86-95` now reads
+`{metadata?.svgUrl && <div className="w-16 h-16 …">…</div>}`. For a document with no `svgUrl`,
+**the entire block — including its `gap-6` contribution — is absent**, not merely visually hidden;
+this was verified with a fresh `renderToStaticMarkup` render showing no `w-16 h-16`, no `#ec4899`,
+no `<img>` in the output. The title `<div className="flex-1">` is the header's only remaining
+child, so it reclaims the full width. **Not a hidden-but-space-consuming false green.**
+
+### Clipart regression result
+
+Verified against both branches: editable branch (`:86-95`, `!readOnly`) still renders the `<img>`
+when `svgUrl` is present (confirmed via render); read-only branch (`:114-123`, PATCH-151's viewer,
+**untouched by this diff**) still renders `<img src={metadata.svgUrl}>` with `View Document`
+fallback. `ClipartCardDraftModal.tsx` has **zero diff** — confirmed directly, not inferred. Creation
+flow (`ClipartCardDraftModal`'s own `CardEditor` mount at `:427-443`) is unchanged.
+
+### Reclaimed-layout result
+
+Confirmed: the conditional wraps the *entire* 64px block plus its `shadow-inner`/background, not
+just the `<img>` — there is no leftover empty pink square and no reserved column. **Not rejected.**
+
+### Dead Card view result — Classification A
+
+`CardActionsToolbar.tsx`'s `tools` array no longer contains a `'Card view'` entry (confirmed by
+direct read of the current tool list: Color, Icon, optional Caption, Reaction, Comment). The live
+prop wiring at `FreeformPadletCards.tsx:6010-6015`(new) no longer passes `onToggleCardView`
+(confirmed by diff — 5 lines removed, `onEditContent` at `:1758-1766` untouched). The **dead**
+`{false && cardToolbarPadletId === padlet.id && (…)}` block (`:1791`) still contains its own
+`onToggleCardView` at `:1808` — read directly and confirmed unreachable (`false &&` short-circuits
+before evaluation; `cardToolbarPadletId` cannot make it reachable).
+
+Grep for `showCardView` repo-wide (9 hits) confirms it has **zero writers** outside governance
+prose and the type declaration — only readers remain (`FreeformPadletCards.tsx:1768,1795,5992`,
+`ClipartCardDraftModal.tsx:180`). No live or user-visible route to the removed action exists
+anywhere in the codebase.
+
+**One thing worth recording that the implementation report did not claim, and that this review
+verified independently:** removing the `'Card view'` entry from `CardActionsToolbar`'s shared
+`tools` array — rather than only removing the prop at each call site — also **inertly dead-ends**
+`ClipartCardDraftModal.tsx`'s own `isCardViewOpen`/`setIsCardViewOpen` state (`:59, :194-196,
+:428-440`). That state's only setter is inside the `onToggleCardView` callback passed to
+`CardActionsToolbar`, and since the toolbar no longer renders a button that invokes it, the
+callback — and the `CardEditor` it would open at `:427-443` — is now unreachable through the UI,
+**without a single line changing in the frozen file**. The test `'keeps Color, Icon, and Card view
+actions functional'` (`ClipartCardDraftModal.test.tsx:871-884`) still passes because it invokes
+`props.onToggleCardView()` directly off the React element `ClipartCardDraftModal` authored, bypassing
+`CardActionsToolbar`'s button layer entirely — it tests that the wiring *would* still work if
+reconnected, not that a live button exists. This is a deeper and more complete removal than the
+allowlist strictly required, and it required no scope expansion to achieve.
+
+**`onToggleCardView?: () => void` classification: A — acceptable compatibility residue.** No
+visible action, no live invocation anywhere in the codebase (verified above, not assumed), retained
+solely so the frozen `ClipartCardDraftModal.tsx` and the dead `{false && …}` block remain
+typecheck-valid. `isCardView` was correspondingly left untouched at every call site, exactly as
+governed. `Open card` (`CardPreview.tsx:71,149`) confirmed unchanged — present verbatim, and its
+removal was independently proven to break 3 PATCH-139 tests (see Negative controls).
+
+### Scoped `handleSave` guard result — Classification A
+
+Read `CardEditor.test.tsx:92-98` directly. The test slices `src.indexOf('const handleSave')` to
+`src.indexOf('};', start)` — a narrow, function-body-only slice, not a whole-file scan — then
+asserts the short-circuit pattern is present in that slice **and** that `if (readOnly)` precedes
+`onSave(` within it. Independently reproduced PATCH-151 §14i's exact failure mode: with the literal
+relocated outside `handleSave` (short-circuit deleted from the function, `if (readOnly) { /* decoy
+*/ }` added below it, same literal text preserved elsewhere in the file), **the scoped guard fails**
+— confirmed by direct test run, not assumed. The anchors (`const handleSave` / next `};`) are stable
+for this file's structure and narrow enough to exclude the rest of the 174-line file. **Classification
+A — adequate for the current node-only test environment.** No jsdom or package change required or
+requested.
+
+### Runtime-semantics result
+
+Confirmed unchanged by direct source read and diff: `handleSave`'s save-on-close and read-only
+short-circuit logic (`:58-72`) is untouched — the diff touches only the header JSX, never the
+handler body. Viewer no-op `onSave`, modal close behaviour, `selectCardModalRoute` and both its call
+sites, the `?openPadlet=` route, normal-card and clipart-card routing, `NoteEditor`/`NoteEditorToolbar`
+(zero diff, confirmed), and persistence format are all untouched. **No PATCH-149B work is present**
+— no Save button, no dirty tracking, no editor-identity change, nothing routed to `NoteEditor`.
+
+### Parent induced-failure result
+
+Independently reproduced at `a53a5f0` by checking out the three parent production files against
+the current (HEAD) test files:
+
+1. Ordinary-document header test — **failed** (`w-16 h-16`/`#ec4899` block present in parent's
+   output, reproduced verbatim in the assertion diff).
+2. `Card view` label test — **failed** (`'Card view'` present in parent's toolbar label array).
+   Combined run: **2 failed / 61 passed** (matches the two independently-reproduced defects; the
+   implementation's own report of "1 failed/62" and "1 failed/44" reflects running the files
+   separately — the totals reconcile).
+3. Scoped-guard defeat of the old whole-file assertion was independently reproduced separately
+   (below, under negative controls) rather than assumed from the implementation's report.
+
+All three parent defects are corrected at `c23be50`.
+
+### Negative controls — 5/5, independently executed and reverted
+
+All five were performed by this reviewer directly (not re-trusted from the implementation), each
+reverted via `git checkout HEAD --` and confirmed byte-identical via `git hash-object` against the
+committed blob before and after:
+
+1. Restored the ordinary icon wrapper (reverted the conditional) → header test **failed** as
+   expected.
+2. Removed the clipart `<img>` from the read-only branch (`:114-123`) → PATCH-151 regression test
+   **failed** as expected (`renders the clipart image and content…`).
+3. Restored the `Card view` tool-array entry (via parent-file swap, combined with #1 above) →
+   label test **failed** as expected.
+4. Moved `handleSave`'s short-circuit out of the function body while leaving `if (readOnly) {`
+   elsewhere in the file → scoped guard test **failed** as expected (the defect the scoped guard
+   exists to catch).
+5. Altered `Open card` → `Open card ALTERED` in `CardPreview.tsx` → **3** PATCH-139 tests failed
+   as expected.
+
+All files hash-matched their committed blobs after revert:
+`CardEditor.tsx=a282407…`, `CardEditor.test.tsx=aaba4ec…`, `CardActionsToolbar.tsx=2b48357…`,
+`ClipartCardDraftModal.test.tsx=ef1c075…`, `FreeformPadletCards.tsx=f453f8f…`,
+`CardPreview.tsx=85f6db6…`.
+
+### Tests and builds — independently rerun
+
+- Focused (`CardEditor` · `CardPreview` · `ClipartCardDraftModal` · `cardModalRoute`): **98/98**.
+- Full Vitest: **66/66 files, 765/765 tests**.
+- Clean `npm run typecheck` (preflight + `tsc --noEmit`): **exit 0**.
+- `npx next build`: **first attempt failed** on a stale `.next` cache left over from an earlier
+  session build (`uncaughtException [TypeError: Cannot read properties of undefined (reading
+  'length')]`, no stack trace pointing at application code) — **not attributable to this
+  implementation**. After `rm -rf .next` and rebuilding clean: **exit 0**.
+- `npm run verify:bridge-exclusion`: **891 files, no marker, exit 0.**
+- `npm run build:e2e`: **exit 0**, `.next/E2E_BRIDGE_BUILD` contains `1`.
+- Ordinary `.next` restored (`rm -rf .next && next build`): **exit 0**, marker absent, exclusion
+  re-verified clean at 891 files.
+- `git diff --check`: **exit 0**.
+
+### Observations (non-blocking)
+
+- The stale-`.next`-cache build failure on first attempt is worth a standing note: a leftover
+  `.next` from a prior E2E or interrupted build in the same working tree can produce an opaque
+  `uncaughtException` with no actionable stack trace. `rm -rf .next` before any governed build
+  verification removes the ambiguity. Not a defect in this patch; recorded so the next
+  implementer or reviewer doesn't misattribute it.
+- The `onToggleCardView?` optional-prop residue (Classification A) is exactly the shape PATCH-149's
+  own §9 anticipated ("Do not require modifying ClipartCardDraftModal merely to delete an unused
+  prop unless the remaining prop causes actual behavior or false product semantics") — it causes
+  neither.
+- `components/collabboard/canvas/ui/FreeformPadletCards.tsx.image-canvas-editor-temp.bak` is a
+  tracked backup file containing a stale pre-149A copy of the dead block (`onToggleCardView` at its
+  own line 1624). It was untouched by `c23be50` and is out of scope for PATCH-149A, but its
+  presence in version control is itself an anomaly worth flagging for a future housekeeping patch —
+  not raised as a finding against this closure.
+
+### Final classification
+
+**1 — PASS · READY FOR CLOSURE.**
+
+No CRITICAL or HIGH issues. No false greens. All acceptance criteria independently re-verified
+rather than trusted. The one build hiccup was traced to environment cache state, reproduced as
+non-reproducible after a clean rebuild, and is not attributable to the changed files.
+
+### PATCH-149A status
+
+**CLOSED.**
+
+### PATCH-149B status
+
+**Unchanged — OPEN · BLOCKED** on B-i (document editor identity) and B-ii (save-versus-close),
+per §4. Not evaluated or reopened by this review.
