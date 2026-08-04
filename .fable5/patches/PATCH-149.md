@@ -3898,3 +3898,239 @@ at all** — it is already structural.
 | **PATCH-152** | **NOT RESERVED** — no number allocated; C5 and C7 are recorded, not scheduled |
 
 No production or test file was modified in this turn. Nothing was pushed.
+
+---
+
+## 27. PATCH-149B1b-iii — DOCUMENT "READ" AFFORDANCE · **AUTHORIZED, BLOCKED UNTIL B1b-ii CLOSES**
+
+**Authored:** 2026-08-04 (governance architect, on product-owner direction). **Base:** `2679c12`.
+Every path, line number and file size below was **measured at this HEAD**. No production or test file was
+modified in this turn.
+
+### 27.1 Why this is a separate unit, not a B1b-ii amendment
+
+The directive was measured before being costed. The affordance is **presentation**, B1b-ii is
+**routing**, and the two have disjoint owners: B1b-ii's four files (`documentModalRoute.ts`,
+`CanvasModals.tsx`, `CanvasClient.tsx`, `FreeformPadletCards.tsx`) contain **no preview rendering code
+at all**. Folding the affordance in would take B1b-ii from 4 files/≤175 lines to ~11 files/~200 lines
+and mix two concerns in one review.
+
+**PATCH-149B1b-ii's authorization is therefore UNCHANGED** (§25 as amended by §26): routing only,
+4 production files, ≤175 production lines. This section adds a new unit, sequenced after it.
+
+**Dependency:** the Read button has nothing to call until B1b-ii creates `documentModalDestination` and
+the open handler. B1b-iii is **authorized but blocked** until B1b-ii closes. This is a technical
+sequencing dependency, not an open question.
+
+### 27.2 Exact affordance owner — measured, and **it is two owners, not one**
+
+The brief proposed `CardPreview.tsx` or `FreeformPadletCards.tsx`. Both are wrong as a complete answer.
+
+**Finding C10 — a Document Post has no preview branch of its own today.** In
+`components/collabboard/PostCardContent.tsx` the clipart branch returns at `:894-905`, the AI branch at
+`:908-911`, and a Document (non-clipart card) falls through to the **TEXT / DEFAULT branch at
+`:915-931`** — byte-identical to how a note or text post renders, wrapped in
+`className="select-none pointer-events-none"`. Nothing in the tree renders a Document preview
+distinctly.
+
+**Finding C11 — freeform does not share that renderer.** `CardPreview.tsx` (191 lines) is
+**self-contained**; it imports `resolveCaptionStyle`, `Edit2` and `ReactionDisplay`, and **never renders
+`PostCardContent`**. Freeform Documents therefore render through `CardPreview` (`FreeformPadletCards:1748`)
+while every other layout renders through `PostCardContent`.
+
+| Owner | Path | Lines | Serves |
+|---|---|---|---|
+| **A — freeform** | `components/collabboard/CardPreview.tsx` | 191 | Freeform canvas cards (`FreeformPadletCards:1748`, `:6044`) |
+| **B — everything else** | `components/collabboard/PostCardContent.tsx` | **932 — over the 800 ceiling** | Columns, Rows, Wall, Drawing, Map, Grid, container editor, presentation |
+
+**Finding C12 — `PostCardContent` also serves non-canvas surfaces.** Measured call sites include
+`components/presentation/FullscreenPresentation.tsx:316`,
+`components/presentation/slide-renderer/createSlideRenderer.tsx:192`,
+`components/collabboard/editors/ContainerEditor.tsx:395`, `components/map/PostPopup.tsx:175` and
+`components/collabboard/RowColumnContainerCard.tsx:407`. **The Read button must never appear in a
+presentation slide or inside the container editor**, so it cannot be rendered unconditionally — it must
+be opt-in via a supplied handler (§27.4).
+
+**Finding C13 — the live layout stack is mixed across both canvas trees.** Measured from
+`CanvasClient` imports and mount points: Columns → `components/canvas/layouts/ColumnsLayout.tsx`
+(`:18`, mounted `:6465`); Rows → `components/collabboard/row/RowCanvasDnD.tsx` → `RowLane.tsx`
+(`:29`, `:6550`); Wall → `components/canvas/WallCanvas.tsx` (`:24`, `:6619`); Drawing →
+`components/collabboard/canvas/layouts/DrawingLayout.tsx` (`:19`, `:6699`); Map → `MapCanvas` →
+`components/map/PostPopup.tsx` (`:113`); Freeform → `FreeformPadletCards.tsx` (`:125`, `:7032`).
+`ColumnsLayoutRenderer.tsx`, `GridLayoutRenderer.tsx` and `ColumnsSection.tsx` are mounted only by
+`components/collabboard/canvas/LiveCanvas.tsx` — the **second canvas system**, which house rule 9
+forbids touching opportunistically. **They are out of scope**, and their absence from the affordance is
+recorded, not fixed.
+
+**Finding C14 — context cannot avoid prop threading.** `CanvasEditorProvider` is mounted at
+`CanvasClient:7031-7053` and wraps **only** `<FreeformPadletCards>` (`:7032`). Columns (`:6465`), Rows
+(`:6550`), Wall (`:6619`), Drawing (`:6699`) and Map are **outside** the provider. Supplying the open
+handler by context would require relocating the provider — an architecture change beyond this patch.
+**Explicit props are therefore the governed mechanism (AFF-A);** the context alternative (AFF-B) is
+recorded as rejected with its reason.
+
+### 27.3 Product contract
+
+| Post | Capability | Read button | Modal |
+|---|---|---|---|
+| Document | editable | **shown** | `DocumentEditor` `readOnly={false}` — title, text and formatting editable under the §22.4 temporary lifecycle |
+| Document | read-only | **shown** | **the same** `DocumentEditor` `readOnly={true}` |
+| **Clipart** | either | **never** | unchanged clipart editor/viewer |
+| Note, Todo, Link, Image, table, container, comment, drawing, ai-component | either | **never** | unchanged destinations |
+
+The button is **capability-independent**; only the modal it opens differs. **No separate "Edit" button
+is authorized in this patch.**
+
+Read-only mode is already closed and proven (§24.12, `DocumentEditor.readonly.test.tsx` 6/6): title as
+text, **no** title input, **no** description input, **no** toolbar, **no** Save action, `editable:false`
+plus total absence of a command surface, and `onSave` invoked **zero** times on Close **and** backdrop.
+B1b-iii must not reopen the wrapper; it must prove the **route** delivers `readOnly={true}`.
+
+### 27.4 Delivery mechanism — **AFF-A**, one new component, two owners delegate to it
+
+New `components/collabboard/DocumentCardContent.tsx`: renders the sanitized Document body exactly as
+`PostCardContent:915-931` does today, plus a semi-transparent overlay button labelled **"Read"**.
+
+- This **mirrors the pattern the file already uses** — `ClipartCardContent` is delegated to at
+  `PostCardContent:894-905` — so it is not a new idiom (P6).
+- `PostCardContent` gains a Document branch **before** the TEXT/DEFAULT return, delegating when
+  `isDocumentPost(padlet)` **and** an `onOpenDocument` handler was supplied. **≤12 lines** — the file is
+  932 lines and over the ceiling, so house rule 3 caps this at a delegation, never an inline
+  implementation.
+- `CardPreview` renders the same overlay for freeform, gated identically. Its existing `onEditContent`
+  pencil is **unchanged**.
+- The current default branch is `pointer-events-none`; the overlay button must re-enable pointer events
+  **on the button only**, and must `stopPropagation` so it does not also trigger the card's own click.
+- Accessibility: a real `<button type="button">` with an accessible name, keyboard-focusable — not a
+  `div` with an `onClick`.
+
+**Opt-in by handler presence is for affordance rendering only. Capability must still be passed
+explicitly** to the destination helper (§25.3); permission is never inferred from callback presence
+(§22.7). These are two different decisions and the tests must keep them separate.
+
+### 27.5 Production allowlist — re-measured
+
+| # | Path | Change | Lines | Max |
+|---|---|---|---|---|
+| 1 | `components/collabboard/DocumentCardContent.tsx` | **new** — body + Read overlay | new | **70** |
+| 2 | `components/collabboard/PostCardContent.tsx` | delegation branch only (932, over ceiling) | +≤12 | **12** |
+| 3 | `components/collabboard/CardPreview.tsx` | freeform overlay (191) | +≤25 | **25** |
+| 4 | `components/collabboard/canvas/ui/FreeformPadletCards.tsx` | pass handler (6,343, over ceiling) | +≤10 | **10** |
+| 5 | `components/canvas/layouts/ColumnsLayout.tsx` | thread handler (506) | +≤10 | **10** |
+| 6 | `components/collabboard/row/RowLane.tsx` | thread handler (527) | +≤10 | **10** |
+| 7 | `components/collabboard/row/RowCanvasDnD.tsx` | pass through (425) | +≤10 | **10** |
+| 8 | `components/canvas/WallCanvas.tsx` | thread handler (783) | +≤10 | **10** |
+| 9 | `components/collabboard/canvas/layouts/DrawingLayout.tsx` | thread handler (3,529, over ceiling) | +≤8 | **8** |
+| 10 | `components/map/PostPopup.tsx` | thread handler (224) | +≤8 | **8** |
+| 11 | `app/dashboard/canvas/[id]/CanvasClient.tsx` | supply `openDocumentModal` to each live layout (8,346, over ceiling) | +≤25 | **25** |
+
+**Production ≤ 198 / 11 files.** Tests: `DocumentCardContent.test.tsx` (≤140, jsdom),
+`documentAffordance.source.test.ts` (≤120, node, scoped slices). **Tests ≤ 260 / 2 files.**
+
+Files 2, 4, 9 and 11 are **over the 800-line ceiling**; every one of them is capped at **prop threading
+or delegation** and may contain no new rendering logic. Any implementer who cannot stay inside a cap
+must **stop and request an amendment**, not spill.
+
+**Explicitly excluded:** `DocumentEditor.tsx` and both its test files (closed, §24) ·
+`documentModalRoute.ts` and everything else in the B1b-ii allowlist · `usePadletSave.ts` ·
+`ClipartCardDraftModal.tsx` · `NoteEditor.tsx` · `ContainerChildPreviewCard.tsx` /
+`PostPreviewCard.tsx` (different renderer) · `LiveCanvas.tsx`, `ColumnsLayoutRenderer.tsx`,
+`GridLayoutRenderer.tsx`, `ColumnsSection.tsx` (second canvas system, C13) · presentation code ·
+`ContainerEditor.tsx` · schema/migrations · Excalidraw fork.
+
+### 27.6 Required tests
+
+`DocumentCardContent.test.tsx` (jsdom):
+
+- **A-1** a Document post renders a visible, accessible **"Read"** button.
+- **A-2** the button renders for **editable and read-only** capability alike.
+- **A-3** clicking it invokes the supplied open handler exactly once, and does **not** also trigger the
+  card's own click handler (`stopPropagation`).
+- **A-4** the button is a real focusable `<button>` reachable by keyboard.
+- **A-5** the Document body still renders sanitized and line-clamped exactly as before.
+- **A-6** **no** button renders when no handler is supplied (presentation / container-editor safety).
+- **A-7** **clipart** (`metadata.svgUrl`) renders **no** Read button in either capability state.
+- **A-8** note, todo, link, image, table, container, comment, drawing, ai-component render **no** Read
+  button.
+
+`documentAffordance.source.test.ts` (node, **scoped slices — whole-file substring counts forbidden**):
+
+- **A-9** every live Document presentation route (Freeform, Columns, Rows, Wall, Drawing, Map) supplies
+  the open handler — the suite **must fail if any one route omits it**.
+- **A-10** presentation and container-editor call sites supply **no** handler.
+- **A-11** the destination receives capability **explicitly**, not inferred from handler presence.
+- **A-12** `isDocumentPost` is the only predicate gating the button; `svgUrl` appears **zero** times in
+  the B1b-iii diff (§26.3 — no second clipart predicate).
+
+**Read-only proof (blocking, per directive):**
+
+- **A-13** a read-only user opening via the Read button reaches `DocumentEditor` with
+  `readOnly={true}`, and the rendered modal exposes **no** title input, **no** description input,
+  **no** toolbar and **no** Save control.
+- **A-14** a read-only user's Close **and** backdrop each invoke `onClose` once and the persistence
+  callback **zero** times.
+- **A-15** no ordinary DOM interaction in read-only mutates the document (`contenteditable="false"`
+  **and** absence of any command surface — never `contenteditable` alone, §22.16).
+
+### 27.7 Negative controls — 10, each detected and reverted hash-identically
+
+1. show the Read button for clipart → A-7 fails · 2. show it for notes → A-8 fails · 3. hide it for
+read-only users → A-2 fails · 4. render it unconditionally (presentation leak) → A-6/A-10 fail ·
+5. drop `stopPropagation` → A-3 fails · 6. omit the handler on one layout → A-9 fails · 7. infer
+capability from handler presence → A-11 fails · 8. force `readOnly={false}` for a read-only user →
+A-13 fails · 9. add a second clipart predicate → A-12 fails · 10. render a `div` instead of a
+`button` → A-4 fails.
+
+### 27.8 Induced failures — demonstrable at `2679c12`
+
+1. No Document preview branch exists — a Document renders through `PostCardContent:915-931`,
+   the same return that serves notes.
+2. That branch is `pointer-events-none`, so no in-preview affordance is even clickable.
+3. `CardPreview.tsx` renders no Read control; its only pencil is `onEditContent`.
+4. `DocumentCardContent.tsx` does not exist.
+5. No layout passes a Document-open handler to its preview renderer.
+
+### 27.9 Hard stops — evaluated
+
+| Hard stop | Result |
+|---|---|
+| The affordance cannot be added without growing files over the ceiling | **CONSTRAINED, not triggered** — files 2/4/9/11 are capped at delegation or prop threading; all rendering lives in the new file 1 |
+| Consistency across routes requires a shared wrapper that does not exist | **NOT TRIGGERED** — two owners cover every live route (C10/C11); the suite fails if any route omits the handler (A-9) |
+| Context could avoid the fan-out | **REJECTED with cause** — the provider wraps freeform only (C14) |
+| Clipart cannot be excluded structurally | **NOT TRIGGERED** — `PostCardContent`'s clipart branch returns at `:894`, **before** the Document branch, so clipart cannot reach it even if the gate were removed; `isDocumentPost` gates it again |
+| Read-only cannot be proven non-editable through the route | **NOT TRIGGERED** — the wrapper is closed and proven (§24.12); A-13–A-15 prove the route delivers it |
+| The second canvas system must also be changed | **NOT TRIGGERED** — `LiveCanvas` is out of scope by house rule 9 (C13), recorded |
+| Scope cannot be bounded | **RESOLVED** — 11 files, ≤198 lines, per-file caps |
+
+### 27.10 Validation matrix
+
+`DocumentCardContent` tests · affordance source tests · `DocumentEditor` editable 17/17 and read-only
+6/6 **unmodified** · `CardPreview` · `CardEditor` · `ClipartCardDraftModal` · NoteEditor
+characterization 11/11 · `documentPost` · `cardModalRoute` · `documentModalRoute` · **full Vitest** ·
+clean one-run `npm run typecheck` · **410** declarations · `npx next build` · bridge exclusion **891** ·
+clean E2E build (marker `1`) · ordinary `.next` restored and exclusion re-verified · marker absent ·
+`git diff --check` · only the five protected worktree paths. Clear `.next` before trusting any build
+that follows a `build:e2e` swap (§24.15 O3).
+
+**Baseline is B1b-ii's closing baseline, not today's** — B1b-ii lands first and moves the test counts.
+
+### 27.11 Status
+
+| Patch | Status |
+|---|---|
+| **PATCH-149A** | **CLOSED** (`c23be50`) |
+| **PATCH-149B0** | **CLOSED** (`c9ea345`) |
+| **PATCH-149B1a** | **CLOSED** (`c44a2ac` + `856f54b`) |
+| **PATCH-149B1b-i** | **CLOSED** (`80011ee` + `4c37205`, §23/§24) |
+| **PATCH-149B1b-ii** | **OPEN · AUTHORIZED, AMENDED (§25 + §26) — unchanged by this section.** Routing only; next implementation unit |
+| **PATCH-149B1b-iii** | **OPEN · AUTHORIZED · BLOCKED until B1b-ii closes** — 11 production files, ≤198 lines, ≤260 test lines, 10 negative controls |
+| **PATCH-149B2** | **BLOCKED until B1b-iii closes** |
+| **PATCH-149C** | **BLOCKED on user reproduction** (§14.11) |
+| **PATCH-150** | **RESERVED and separate**; untouched |
+| **PATCH-152** | **NOT RESERVED** — unchanged by this section |
+
+**Recorded, not scheduled** (no patch numbers reserved): C5 duplicate freeform router · C7 freeform
+clipart divergence · C13 the second canvas system (`LiveCanvas` + its renderers) lacking the affordance ·
+`PostCardContent:611` already carrying a second inline clipart predicate, pre-existing.
+
+No production or test file was modified in this turn. Nothing was pushed.
