@@ -23,6 +23,10 @@ export type ToolbarMode = 'text' | 'box';
 interface NoteEditorToolbarProps {
     mode: ToolbarMode;
     onModeChange: (mode: ToolbarMode) => void;
+    // PATCH-149B1b-i: 'document' hides the box-mode toggle and shows only
+    // controls with a supplied handler — Align is excluded structurally
+    // because DocumentEditor never passes onAlign (PATCH-149 §22.6).
+    variant?: 'note' | 'document';
     // Text mode handlers
     onBold?: () => void;
     onItalic?: () => void;
@@ -58,6 +62,7 @@ interface NoteEditorToolbarProps {
 export default function NoteEditorToolbar({
     mode,
     onModeChange,
+    variant = 'note',
     onBold,
     onItalic,
     onStrikethrough,
@@ -156,7 +161,9 @@ export default function NoteEditorToolbar({
         },
     ];
 
-    const currentTools = mode === 'text' ? textModeTools : boxModeTools;
+    const isDocument = variant === 'document';
+    const currentTools = isDocument ? textModeTools : (mode === 'text' ? textModeTools : boxModeTools);
+    const visibleTools = isDocument ? currentTools.filter((t) => typeof t.onClick === 'function') : currentTools;
 
     // Prevent focus loss when clicking toolbar buttons
     const preventFocusLoss = (e: React.MouseEvent) => {
@@ -172,6 +179,7 @@ export default function NoteEditorToolbar({
                 scrollbarColor: '#d1d5db transparent',
             }}
         >
+            {!isDocument && (<>
             {/* Toggle button - ALWAYS visible, toggles between text/box modes */}
             <div className="flex flex-col items-center shrink-0">
                 <button
@@ -187,10 +195,11 @@ export default function NoteEditorToolbar({
 
             {/* Divider line */}
             <div className="w-8 h-px bg-gray-200 shrink-0" />
+            </>)}
 
             {/* Tool buttons - vertical scroll */}
             <div className="flex flex-col items-center gap-1 overflow-y-auto min-h-0 flex-1 scrollbar-thin">
-                {currentTools.map((tool, index) => {
+                {visibleTools.map((tool, index) => {
                     const IconComponent = tool.icon;
                     const toolAny = tool as any;
                     const isDisabled = toolAny.disabled === true;
