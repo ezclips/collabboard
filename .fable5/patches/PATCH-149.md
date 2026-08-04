@@ -5,8 +5,9 @@ PATCH-149B1 **SPLIT after measurement** (§19) — corpus measured (2 Document r
 predicate **P1 safe**), routing census corrected (`DrawingLayout` not reachable; the two reachable
 routes are capability-gated but drop the title) · **PATCH-149B1a CLOSED (`c44a2ac` + correction
 `856f54b`) · REVIEWED §20 (classification 4, correction required) → CORRECTED → REVIEWED §21
-(classification 1, PASS · READY FOR CLOSURE)** · **PATCH-149B1b ELIGIBLE FOR GOVERNANCE** (not yet
-authorized or implemented) · PATCH-149B2 BLOCKED behind B1b · PATCH-149C RESERVED · NOT PUSHED**
+(classification 1, PASS · READY FOR CLOSURE)** · **PATCH-149B1b SPLIT (S2, §22) — B1b-i AUTHORIZED
+(wrapper · read-only · toolbar TB-A); B1b-ii BLOCKED behind B1b-i (routing · title-safe Columns/Rows ·
+wiring)** · PATCH-149B2 BLOCKED behind B1b-ii · PATCH-149C RESERVED · NOT PUSHED**
 **Authored:** 2026-08-04 (governance architect). **Base:** `177645b`. **First authoring of this
 number** — `git log --all --diff-filter=A -- .fable5/patches/PATCH-149.md` is empty.
 **Inherits:** PATCH-138 label finding · PATCH-139 D3/D5/D6 · PATCH-140 component 6 ·
@@ -2502,3 +2503,387 @@ original B1a surface. Full validation matches expected totals exactly.
 | **PATCH-150** | **RESERVED and separate**; untouched |
 
 No implementation file was modified by this review. Nothing was pushed.
+
+---
+
+## 22. PATCH-149B1b — DOCUMENT WRAPPER, TITLE-SAFE ROUTING, READ-ONLY, TOOLBAR · **AUTHORIZED, SPLIT (S2)**
+
+**Authored:** 2026-08-04 (governance architect). **Base:** `564a40d`. Every line number below was
+re-measured at this HEAD; no historical number was trusted. No production or test file was modified in
+this turn.
+
+### 22.1 Route census — measured at `564a40d`
+
+`openPadletInTypeEditor` (`CanvasClient.tsx:5685-5709`) is the central router. Its card branches:
+
+```
+:5700  card && metadata.svgUrl  → selectCardModalRoute(canUseFreeformEditButton)==='editor'
+                                   ? ClipartDraftModal : CardViewer        (clipart)
+:5704  card                     → selectCardModalRoute(...)==='editor'
+                                   ? CardEditor        : CardViewer        (DOCUMENT)
+```
+
+**Finding C1 — `:5704` *is* the exact Document predicate.** Clipart is fully consumed by `:5700`, so
+every post reaching `:5704` satisfies `post.type === 'card' && !post.metadata?.svgUrl`. The predicate
+is already structurally present, inlined and unnamed.
+
+| # | Route | Owner / path | Types | Capability | Destination now | Title | Content | Metadata | Editable | Save cb | Close cb | B1b destination |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | Freeform preview/open | `FreeformPadletCards` ← `openPadletInTypeEditor` (`:5864`) | all | `selectCardModalRoute(canUseFreeformEditButton)` | CardEditor / CardViewer | **passed** | passed | passed | both | `saveCard` | closes+clears | **Document wrapper** |
+| 2 | Direct `?openPadlet=` | `:341-351` → `openPadletInTypeEditorRef` → `:5685` | all | same | CardEditor / CardViewer | **passed** | passed | passed | both | `saveCard` | closes+clears | **Document wrapper** |
+| 3 | Freeform context menu | `openPadletTargetFromContextMenu` (`:5713-5721`) → `:5685` | all | same | CardEditor / CardViewer | **passed** | passed | passed | both | `saveCard` | closes+clears | **Document wrapper** |
+| 4 | CanvasModals | `CanvasModals.tsx` owns NoteEditor/Link/Todo/… — **does not own CardEditor**; CardEditor renders in `CanvasClient:7365-7390` | — | — | — | — | — | — | — | — | — | **hosts Document wrapper** (§22.9) |
+| 5 | **ColumnsLayout** | `:6479-6482` `onOpenPost` — **bypasses `:5685`** | any | `isEditable={canUseFreeformEditButton}` (`:6466`) | **NoteEditor** | **LOST** | passed | note-shaped | editable only | `saveNote` | — | **Document wrapper** |
+| 6 | **RowCanvasDnD** | `:6568-6571` `onOpenPost` — **bypasses `:5685`** | any | `isEditable={canUseFreeformEditButton}` (`:6551`) | **NoteEditor** | **LOST** | passed | note-shaped | editable only | `saveNote` | — | **Document wrapper** |
+| 7 | DrawingLayout | `:6727-6731` `onEditPadletAsPost` | **containers only** — `CanvasContextMenu.tsx:172` runs it only under `isContainerType && onEditPadletAsPost`, else `onEdit` | n/a | NoteEditor | n/a | n/a | n/a | n/a | n/a | n/a | **unchanged — not Document-reachable** |
+| 8 | Drawing normal edit | `:6718-6726` `onPadletEdit` → `:5685` | all | via `:5685` | CardEditor / CardViewer | passed | passed | passed | both | `saveCard` | closes+clears | **Document wrapper** |
+| 9 | Wall / Timeline / Map | `onOpenTarget` at `:6663`, `:6757`, `:6872` → `openPadletTargetFromContextMenu` → `:5685` | all | via `:5685` | CardEditor / CardViewer | passed | passed | passed | both | `saveCard` | closes+clears | **Document wrapper** |
+| 10 | **Creation** (`case 'document'`) | `:5401-5418` — drafts `{id:'new', type:'card', title:'', content:'', metadata:{...createMetadata}}` then `setIsCardEditorOpen(true)` | new | creation permission upstream | CardEditor | `''` | `''` | createMetadata | editable | `saveCard` | closes+clears | **Document wrapper (editable)** |
+
+**Earlier findings re-confirmed at HEAD:**
+
+- Columns and Rows **are** Document-reachable — **CONFIRMED** (rows 5, 6).
+- Both **are** capability-gated upstream by `canUseFreeformEditButton` — **CONFIRMED** (`:6466`, `:6551`).
+- Both currently send Documents into note-shaped data — **CONFIRMED**; `SaveNoteData`
+  (`usePadletSave.ts:34-48`) has **no `title` field**, and `saveNote` writes note metadata
+  (`cardColor`, `topStrip`, `reactions`, `badgeColor`, `detachedComments`).
+- Title can be lost — **CONFIRMED**, and it is the only live P3 data-loss path in this patch.
+- DrawingLayout is not Document-reachable — **CONFIRMED unchanged** (row 7).
+
+**Finding C2 — exactly two bypasses exist.** Every other route funnels through `:5685`. The routing
+work is therefore two call sites plus the central branch plus creation — bounded, as §19.5 predicted.
+
+**Finding C3 — `CardViewer` is shared.** The read-only `CardEditor` instance (`:7365-7376`) serves
+**both** clipart-read-only (`:5702`) and Document-read-only (`:5706`). B1b must move only the Document
+half; **clipart read-only stays on `CardEditor`**.
+
+**Finding C4 — `CardEditor` is a `<textarea>` with a fully inert toolbar.** `CardEditor.tsx:147-153`
+is a plain `<textarea>` (no TipTap, no formatting). Its toolbar buttons (`:137-142`) have **no
+`onClick` handlers at all** — six permanently dead controls, including an `AlignLeft`. This is the
+same inert-control defect class as Note's Align, and it is the strongest induced-failure proof that
+Documents need a real editor.
+
+### 22.2 Title contract — **preservable with no persistence change**
+
+`SaveCardData` (`usePadletSave.ts:136-140`) is already `{ title: string; content: string; metadata: any }`,
+and `saveCard` (`:973+`) writes `title` on both insert (`:1022`) and update (`:1060`, `:1077`).
+**`usePadletSave` is therefore NOT in the allowlist** — the hard stop "title cannot be preserved
+without broad persistence changes" is **NOT TRIGGERED**.
+
+Required: title loads from `padlets.title`; editable in editable mode only; visible but non-editable in
+read-only; **never embedded into TipTap HTML**; persisted through `saveCard`; **not dropped in Columns
+or Rows** (they must stop using `saveNote` for Documents); empty title falls back to the visible
+placeholder `"Untitled document"` for display while persisting `''` (no invented title string); no
+clipart icon and no empty-placeholder regression (PATCH-138/151).
+
+`metadata` passes through unchanged except `metadata.description`, which the current `CardEditor`
+footer owns and `saveCard` persists — the wrapper **must** keep a description input so the field is not
+silently dropped from the Document save payload.
+
+### 22.3 Document wrapper contract (M2)
+
+One new component, `components/collabboard/editors/DocumentEditor.tsx`.
+
+**Props:**
+
+```ts
+interface DocumentEditorProps {
+  isOpen: boolean;
+  title: string;
+  initialContent: string;         // raw stored content — wrapper adapts it
+  metadata: Record<string, any> | null;
+  readOnly?: boolean;             // default false
+  onSave: (data: { title: string; content: string; metadata: any }) => void;
+  onClose: () => void;
+}
+```
+
+The payload is **exactly `SaveCardData`** — no new save type, no adapter shim.
+
+**Owns:** modal shell (`role="dialog"`, `aria-modal="true"`, `aria-label`), title display/input,
+description input, adaptation of `initialContent` via `toEditorHtml`, the shared TipTap editor via
+`useSharedTipTapEditor`, editable/read-only mode, Document toolbar selection, temporary
+save-on-close compatibility, accessible Close (`aria-label="Close"`), metadata pass-through.
+
+**Must not:** duplicate the TipTap extension registry (consumes `useSharedTipTapEditor` only); become a
+NoteEditor copy (no reactions, no card colour, no top strip, no badge, no detached comments); own route
+permissions (receives `readOnly`, never computes capability); own PDF behaviour; embed title into body
+HTML; change persistence schema.
+
+**Accessibility note:** `NoteEditor` has no `role="dialog"`, `aria-modal`, or Close `aria-label` at
+HEAD. The Document wrapper must have all three — this is new correct behaviour, not a NoteEditor
+regression, and NoteEditor is explicitly **not** changed by this patch.
+
+### 22.4 Temporary save/close lifecycle — **explicit debt, B2 replaces it**
+
+B1b **must not** implement B2. The temporary rule:
+
+| Mode | Close (X) | Backdrop | Escape | Persistence |
+|---|---|---|---|---|
+| **Editable** | save-then-close via `onSave` + `onClose` | same as Close (matches `CardEditor:78` today) | characterized as a **no-op** (matches `CardEditor` and `NoteEditor` at HEAD) | exactly one `saveCard` call |
+| **Read-only** | close only | close only | no-op | **none** |
+
+Required: no new write path (reuse `saveCard`); **no duplicate save** — Close must not both call
+`onSave` and trigger a backdrop save; title and adapted HTML saved together in one payload; read-only
+close invokes no persistence; no dirty state, no discard confirmation, no autosave, no explicit Save
+button.
+
+**Recorded as temporary debt.** This is *not* the intended product behaviour. **PATCH-149B2 owns**
+replacing editable save-on-close with an explicit Save plus discard protection. B1b leaves the seam:
+all lifecycle decisions live in the wrapper's two handlers, not scattered across routes.
+
+### 22.5 Read-only contract
+
+`editable: false` through `useSharedTipTapEditor` — proven genuine in §21.2 (`isEditable`,
+`view.editable`, `options.editable` all `false`). Required: formatted content visible; title visible;
+**no title input**; **no description input**; **no toolbar**; no Save action; accessible Close; no
+persistence callback; closes immediately; no dirty state; no mutation through ordinary DOM interaction;
+registered custom TipTap nodes/marks render; adapted legacy content displays correctly.
+
+**Programmatic bypass acknowledged:** §21.2 measured that `chain().insertContent()` still mutates a
+non-editable editor. The wrapper therefore **must not expose any editor command surface in read-only
+mode** — no toolbar, no keyboard-shortcut handlers, no exported editor instance. Non-editability is
+enforced by absence of a command surface plus the real `editable:false` flag, and that combination is
+what the tests must assert.
+
+`CardEditor` is **not** the long-term Document viewer — it is a textarea (§22.1 C4).
+
+### 22.6 Toolbar — **TB-A selected** (variant prop, Document filters on handler presence)
+
+Measured cause of inert controls: `NoteEditorToolbar.tsx:193` maps **every** entry in `textModeTools`
+unconditionally, and `:109` includes Align whose `onClick` is `onAlign`. `NoteEditor.tsx:677-689`
+supplies ten handlers and **never supplies `onAlign`** — so Align renders permanently dead. Underline
+**is** real (`:680 onUnderline={handleUnderline}`, backed by the `Underline` extension in
+`SHARED_TIPTAP_EXTENSIONS`) and **must remain**; PATCH-149C is unresolved and must not be used to
+justify removing it.
+
+- **TB-B rejected:** deriving visibility from handler presence *globally* would delete Align from the
+  **Note** toolbar, changing Note behaviour and breaking
+  `NoteEditor.characterization.test.tsx:129`.
+- **TB-C rejected:** a separate `DocumentToolbar` duplicates the control-rendering loop — a P6 second
+  implementation of the same concern.
+- **TB-A selected:** add `variant?: 'note' | 'document'` (default `'note'`).
+  - `'note'` → **byte-identical current behaviour**, including Align.
+  - `'document'` → text tools only, **filtered to entries whose `onClick` is defined**, and **no
+    box-mode toggle** (Document has no card colour, reactions, or top strip in `SaveCardData`).
+  Align is excluded structurally, because the wrapper never passes `onAlign` — not by name-based
+  removal. This prevents the *next* inert control too.
+
+Every visible Document toolbar control must be proven to execute a real TipTap command, change editor
+state, and survive `getHTML()` serialization.
+
+### 22.7 Routing — **RTE-C**, one pure destination helper
+
+New `lib/domain/canvas/documentModalRoute.ts`:
+
+```ts
+export type DocumentModalDestination = 'document-editor' | 'document-viewer';
+
+export function selectDocumentModalDestination(
+  post: Pick<Padlet, 'type' | 'metadata'>,
+  canEditWorkspace: boolean,
+): DocumentModalDestination | null;
+```
+
+Returns `null` for every non-Document post so callers **fall through to today's behaviour untouched**;
+otherwise composes the existing capability decision. It **reuses `selectCardModalRoute`** internally
+(`'editor' → 'document-editor'`, `'viewer' → 'document-viewer'`) — semantically exact, so no second
+role model is created and PATCH-139/151 remain authoritative. It **uses `isDocumentPost`** rather than
+re-inlining the predicate, closing the §20.2 duality.
+
+Required behaviour: editable capability → editable wrapper · read-only capability → read-only wrapper ·
+clipart → existing clipart route (`:5700`, untouched) · non-Document card → n/a (none exist, C1) ·
+Note/Todo/Link/Image/table/container/comment/drawing/ai-component → **unchanged destinations**.
+Generic posts must never be routed through the Document helper — the `null` return is what guarantees
+that, and a test must prove it.
+
+**Capability source:** `canUseFreeformEditButton` (`CanvasClient:254`, from
+`canEditWorkspace(currentWorkspaceRole)`). No new permission model. Permission is never inferred from
+callback presence. Client gating remains UI-only and is not the persistence authorization boundary.
+
+### 22.8 Creation lifecycle — **preserved exactly**
+
+Measured at HEAD: `saveCard` (`usePadletSave.ts:990-999`) returns **without inserting** when
+`id === 'new'` and title, tag-stripped content, and `metadata.description` are all empty and no
+meaningful metadata exists. A blank draft therefore never orphans a row.
+
+Required: new Document opens the **editable** wrapper; title/content start empty from the existing
+`case 'document'` draft; the first temporary save-on-close creates the row through `saveCard`
+unchanged; read-only creation does not exist; **no row is inserted merely by opening the modal**; no
+destructive delete flow is added. B2 later redefines explicit first Save and discard.
+
+### 22.9 Where the wrapper renders — **CanvasModals**, not CanvasClient
+
+`CanvasClient.tsx` is **8,346 lines**, far over the 800-line ceiling; house rule 3 forbids growing a
+file already over it. `CanvasModals.tsx` (474 lines, under ceiling) already owns `NoteEditor` and the
+other type editors. **The Document wrapper renders in `CanvasModals`**; `CanvasClient` gains only modal
+state, the route branches, and prop pass-through. This also keeps modal ownership in one place (P6).
+
+### 22.10 Adapter integration
+
+The wrapper initializes content **only** through `toEditorHtml(initialContent)` and normalizes on save
+through `fromEditorHtml(editor.getHTML())`. Required: measured plain-text Documents open visibly;
+malformed angle-bracket Documents open without loss (§21.3); future valid HTML opens formatted; **no
+bulk migration**; read-only viewing never rewrites content; editable save may lazily normalize; title
+and metadata stay separate. **No layout may bypass the adapter** — because every layout reaches the
+same wrapper, this is structurally guaranteed, and a test must prove Columns/Rows use it too.
+
+### 22.11 CardEditor ownership after B1b
+
+- The exact Document predicate must no longer open `CardEditor` — routes `:5704`/`:5705` and creation
+  `:5417` move to the wrapper.
+- `CardEditor` is **not deleted**: it still serves **clipart read-only** (`:5702` → `CardViewer`,
+  finding C3).
+- Ordinary non-Document card behaviour: none exists (C1) — nothing to preserve, and this must be
+  stated rather than silently assumed.
+- Clipart editable (`ClipartCardDraftModal`) unchanged.
+
+A test must prove no Document route reaches `CardEditor` and no Document route reaches note-shaped
+`NoteEditor`.
+
+### 22.12 Split — **S2**, two independently testable units
+
+Combined scope measures ≈5 production files / ≈320 production lines / ≈4 test files / ≈520 test lines —
+over the brief's own 6-file/300-line/400-test-line guidance. The wrapper and the routing are
+independently testable (the wrapper is a pure component; the destination helper is a pure function), so
+the split is clean rather than compressed. **Nothing is compressed to fit a number.**
+
+#### PATCH-149B1b-i — wrapper, read-only, toolbar · **AUTHORIZED**
+
+| # | Path | Change | Max lines |
+|---|---|---|---|
+| 1 | `components/collabboard/editors/DocumentEditor.tsx` | **new** — §22.3 wrapper, editable + read-only | **200** |
+| 2 | `components/collabboard/editors/NoteEditorToolbar.tsx` | TB-A `variant` prop; `'note'` byte-identical | **25** |
+
+**Production ≤ 225 / 2 files.** Tests: `DocumentEditor.test.tsx` (≤170, **jsdom**),
+`DocumentEditor.readonly.test.tsx` (≤120, **jsdom**). **Tests ≤ 290 / 2 files.**
+
+Delivered unwired, exactly as B1a delivered the hook — reachability arrives in B1b-ii.
+
+#### PATCH-149B1b-ii — routing and wiring · **BLOCKED until B1b-i closes**
+
+| # | Path | Change | Max lines |
+|---|---|---|---|
+| 1 | `lib/domain/canvas/documentModalRoute.ts` | **new** — §22.7 pure helper | **35** |
+| 2 | `components/collabboard/canvas/ui/CanvasModals.tsx` | render the wrapper (§22.9) | **40** |
+| 3 | `app/dashboard/canvas/[id]/CanvasClient.tsx` | modal state; `:5704-5706`; creation `:5417`; Columns `:6479`; Rows `:6568` | **45** |
+
+**Production ≤ 120 / 3 files.** Tests: `documentModalRoute.test.ts` (≤110, node),
+`documentRoutes.source.test.ts` (≤120, node, scoped source slices). **Tests ≤ 230 / 2 files.**
+
+`hooks/canvas/usePadletSave.ts` is **explicitly excluded** — `SaveCardData` already carries title
+(§22.2). No schema change. No package change.
+
+### 22.13 Induced failures — each demonstrable at `564a40d`
+
+1. **Freeform Document opens `CardEditor`** — `CanvasClient:5705`; `CardEditor.tsx:147` is a
+   `<textarea>`.
+2. **Columns/Rows route Documents to note-shaped data** — `:6479-6482`, `:6568-6571` call
+   `setIsNoteEditorOpen(true)` directly, bypassing `:5685`.
+3. **Title absent from `SaveNoteData`** — `usePadletSave.ts:34-48` has no `title` key.
+4. **No Document wrapper exists** — no `DocumentEditor.tsx` in the tree.
+5. **Read-only Document uses textarea semantics** — `:5706` → `CardViewer` → `CardEditor` `<textarea readOnly>`.
+6. **Align present in the only rich-text toolbar** — `NoteEditorToolbar.tsx:109` renders it although
+   `NoteEditor` never passes `onAlign`; `CardEditor.tsx:142` renders a second, fully handler-less one.
+7. **No shared all-layout Document destination** — no `documentModalRoute.ts`; the predicate is inlined
+   and unnamed at `:5704`.
+
+Each production correction must map to one of these.
+
+### 22.14 Negative controls — all 14 must be detected
+
+1. route Document back to `CardEditor` · 2. route Columns Document to `NoteEditor` · 3. drop `title`
+from the save payload · 4. classify clipart as Document · 5. expose toolbar in read-only · 6. force
+read-only `editable=true` · 7. restore Align in Document mode · 8. bypass adapter for plain text ·
+9. bypass adapter for malformed text · 10. invoke save on read-only close · 11. duplicate save on
+editable close · 12. route Note/Todo/Link/Image through the Document wrapper · 13. leave direct-link or
+one layout route on the old destination · 14. introduce a PDF-specific branch.
+
+Each perturbation must be reverted and **hash-verified** byte-identical.
+
+### 22.15 Required test coverage
+
+**B1b-i** — wrapper items 1-14 and read-only items 15-24 of the brief, under the closed jsdom harness
+with real TipTap. Toolbar control tests must assert a real command ran (editor state changed **and**
+`getHTML()` reflects it), not merely that a button exists. Read-only non-editability must assert the
+genuine flags (`isEditable`/`view.editable`) **and** the absence of any command surface, not only
+`contenteditable`.
+
+**B1b-ii** — routing items 25-38. `documentModalRoute.test.ts` covers 25-30 directly as a pure
+function. `documentRoutes.source.test.ts` covers 31-38 with **scoped source slices** around each named
+route branch — slice the `openPadletInTypeEditor` body, the Columns `onOpenPost` body, the Rows
+`onOpenPost` body and the creation `case 'document'` block, and assert each references the shared
+Document destination. **Whole-file substring counts are forbidden.** The suite must fail if any one
+layout bypasses the shared route.
+
+**Regressions (both units):** NoteEditor characterization 11/11 green and unmodified · Note toolbar
+still includes Align · `CardEditor` · `CardPreview` · `ClipartCardDraftModal` · `cardModalRoute` ·
+`documentPost` · `documentContentAdapter` · `useSharedTipTapEditor` · creation flow unchanged · no PDF
+production code.
+
+### 22.16 False-green protections
+
+Reject either unit if: a Document route still reaches `CardEditor` or note-shaped `NoteEditor` · title
+is absent from any Document save payload · read-only performs any write · read-only exposes a toolbar
+or command surface · `editable=false` is asserted only via `contenteditable` · a toolbar test asserts
+only that a button renders · a second TipTap registry appears · Align returns to Document mode · the
+adapter is bypassed on any path · `NoteEditor` behaviour changes · Note's Align disappears · source
+tests use whole-file substring counts · PDF code appears · scope exceeds the allowlist · B2 behaviour
+(explicit Save, dirty state, discard confirmation) appears.
+
+### 22.17 PDF extension seam — confirmed clean
+
+`SHARED_TIPTAP_EXTENSIONS` remains the single registration point; a registered node renders in both
+editable and read-only modes because both use the same hook; the serializer preserves allowed `data-*`
+attributes (§21.7 boundary: sanitizer-allowed `data-*` only); the wrapper contains no PDF branch; title
+and modal routing are independent of any future PDF node. **No visible PDF placeholder, source panel,
+or backlinks area.**
+
+### 22.18 Validation matrix
+
+Both units: wrapper jsdom tests · read-only tests · toolbar command tests · adapter regressions ·
+routing helper tests · scoped CanvasClient route checks · NoteEditor characterization · `CardEditor` ·
+`CardPreview` · `ClipartCardDraftModal` · `cardModalRoute` · **full Vitest** · clean one-run
+`npm run typecheck` · **410** declarations · `npx next build` · bridge exclusion **891** · clean E2E
+build (marker `1`) · ordinary `.next` restored and exclusion re-verified · marker absent ·
+`git diff --check` · only the five protected worktree paths.
+
+**Baseline entering B1b: 70/70 files · 816/816 tests · 410 declarations · 891 exclusion files.**
+
+### 22.19 Hard stops — evaluated
+
+| Hard stop | Result |
+|---|---|
+| Title cannot be preserved without broad persistence changes | **NOT TRIGGERED** — `SaveCardData` already carries `title`; `usePadletSave` untouched (§22.2) |
+| Document routes cannot be separated from generic routes | **NOT TRIGGERED** — helper returns `null` for non-Documents; only 2 bypasses exist (C2) |
+| Wrapper requires duplicating the TipTap registry | **NOT TRIGGERED** — consumes `useSharedTipTapEditor` |
+| Read-only cannot be proven non-editable | **NOT TRIGGERED** — §21.2 proved the flag real; command-surface absence covers the programmatic gap |
+| Temporary save-on-close creates a new data-loss path | **NOT TRIGGERED** — it *removes* one (title loss); it reuses `saveCard` and adds no new write |
+| New-Document creation would orphan rows | **NOT TRIGGERED** — `saveCard:990-999` early-returns on blank drafts |
+| One layout cannot be brought under the shared destination | **NOT TRIGGERED** — Columns/Rows are two ordinary callbacks |
+| Production scope cannot be bounded | **RESOLVED by S2** — 2 files/≤225 then 3 files/≤120 |
+| B2 becomes inseparable from B1b | **NOT TRIGGERED** — lifecycle is confined to the wrapper's two handlers (§22.4) |
+
+### 22.20 Status
+
+**PATCH-149B1b-i: OPEN · AUTHORIZED** — 2 production files, ≤225 production lines, ≤290 test lines.
+**PATCH-149B1b-ii: OPEN · BLOCKED until B1b-i closes** — 3 production files, ≤120 production lines,
+≤230 test lines.
+
+| Patch | Status |
+|---|---|
+| **PATCH-149A** | **CLOSED** (`c23be50`) |
+| **PATCH-149B0** | **CLOSED** (`c9ea345`) |
+| **PATCH-149B1a** | **CLOSED** (`c44a2ac` + `856f54b`, reviews §20/§21) |
+| **PATCH-149B1b-i** | **OPEN · AUTHORIZED — next implementation unit** |
+| **PATCH-149B1b-ii** | **BLOCKED until B1b-i closes** |
+| **PATCH-149B2** | **BLOCKED until B1b-ii closes** — explicit Save, dirty state, discard, Close/Escape |
+| **PATCH-149C** | **BLOCKED on user reproduction** (§14.11) |
+| **PATCH-150** | **RESERVED and separate**; untouched |
+
+**Carried debt, explicitly:** the temporary save-on-close lifecycle (§22.4) is not the product
+behaviour and must not survive B2. **Carried defect:** `CardEditor`'s six handler-less toolbar buttons
+(C4) remain on the clipart-read-only surface after B1b; they are outside this patch's authorization and
+are recorded here so they are not mistaken for Document scope.
+
+No production or test file was modified in this turn. Nothing was pushed.
