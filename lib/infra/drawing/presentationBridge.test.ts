@@ -80,6 +80,17 @@ function expectLosslessNativeBands(
   expect(below.filter((id) => above.includes(id))).toEqual([]);
 }
 
+// PATCH-148: zIndex is a derived slide-local ordinal; assert visual order + monotonicity, not exact numbers.
+function expectResolvedOrder(
+  composition: ReturnType<typeof characterizeSlideComposition>,
+  expectedEmbeddableIds: string[],
+) {
+  const z = composition.resolvedPadlets.map((entry) => entry.zIndex);
+  expect(composition.resolvedPadlets.map((entry) => entry.embeddableId)).toEqual(expectedEmbeddableIds);
+  expect(z).toEqual([...z].sort((a, b) => a - b));
+  expect(new Set(z).size).toBe(z.length);
+}
+
 describe("presentation bridge characterization", () => {
   describe("frame discovery", () => {
     it("active frame produces one slide", () => {
@@ -272,7 +283,7 @@ describe("presentation bridge characterization", () => {
         [padlet("padlet-a")],
       );
 
-      expect(composition.resolvedPadlets.map((entry) => entry.zIndex)).toEqual([2]);
+      expectResolvedOrder(composition, ["emb-a"]);
       expect(composition.nativeBelowIds).toEqual(["native-before"]);
       expect(composition.nativeAboveIds).toEqual(["native-after"]);
       expectLosslessNativeBands(composition, ["native-before", "native-after"]);
@@ -291,7 +302,7 @@ describe("presentation bridge characterization", () => {
         [padlet("padlet-a"), padlet("padlet-b")],
       );
 
-      expect(composition.resolvedPadlets.map((entry) => entry.zIndex)).toEqual([2, 3]);
+      expectResolvedOrder(composition, ["emb-a", "emb-b"]);
       expect(composition.nativeBelowIds).toEqual(["native-before"]);
       expect(composition.nativeAboveIds).toEqual(["native-after"]);
       expectLosslessNativeBands(composition, ["native-before", "native-after"]);
@@ -310,7 +321,7 @@ describe("presentation bridge characterization", () => {
         [padlet("padlet-a"), padlet("padlet-b")],
       );
 
-      expect(composition.resolvedPadlets.map((entry) => entry.zIndex)).toEqual([1, 4]);
+      expectResolvedOrder(composition, ["emb-a", "emb-b"]);
       expect(composition.nativeBelowIds).toEqual([]);
       expect(composition.nativeAboveIds).toEqual(["native-middle-a", "native-middle-b"]);
       expectLosslessNativeBands(composition, ["native-middle-a", "native-middle-b"]);
@@ -332,7 +343,7 @@ describe("presentation bridge characterization", () => {
         [padlet("padlet-a"), padlet("padlet-b"), padlet("padlet-c"), padlet("padlet-portrait")],
       );
 
-      expect(composition.resolvedPadlets.map((entry) => entry.zIndex)).toEqual([2, 3, 7]);
+      expectResolvedOrder(composition, ["emb-slide-a", "emb-uploaded-image", "runtime-container-c"]);
       expect(composition.nativeBelowIds).toEqual([]);
       expect(composition.nativeAboveIds).toEqual(["text-landscape", "shape-landscape"]);
       expectLosslessNativeBands(composition, ["text-landscape", "shape-landscape"]);
@@ -351,7 +362,7 @@ describe("presentation bridge characterization", () => {
       );
 
       expect(composition.resolvedPadlets.map((entry) => entry.padletId)).toEqual(["padlet-a", "padlet-a"]);
-      expect(composition.resolvedPadlets.map((entry) => entry.zIndex)).toEqual([1, 3]);
+      expectResolvedOrder(composition, ["emb-a", "emb-a-copy"]);
       expect(composition.nativeBelowIds).toEqual([]);
       expect(composition.nativeAboveIds).toEqual(["native-between"]);
       expectLosslessNativeBands(composition, ["native-between"]);
@@ -387,10 +398,46 @@ describe("presentation bridge characterization", () => {
         [padlet("padlet-a"), padlet("padlet-b")],
       );
 
-      expect(composition.resolvedPadlets.map((entry) => entry.zIndex)).toEqual([1, 4]);
+      expectResolvedOrder(composition, ["emb-a", "emb-b"]);
       expect(composition.nativeBelowIds).toEqual([]);
       expect(composition.nativeAboveIds).toEqual(["native-after-deleted"]);
       expectLosslessNativeBands(composition, ["native-after-deleted"]);
+    });
+
+    it("cross-slide members do not shift the target slide's resolved ordering (PATCH-148)", () => {
+      const targetSlide = characterizeFrameSlides([frame()])[0];
+      const baseline = characterizeSlideComposition(
+        targetSlide,
+        deepFreeze([frame(), embeddable("emb-a", "padlet-a"), embeddable("emb-b", "padlet-b")]),
+        [padlet("padlet-a"), padlet("padlet-b")],
+      );
+      const withOtherSlide = characterizeSlideComposition(
+        targetSlide,
+        deepFreeze([
+          frame(),
+          frame({ id: "frame-b", x: 3000 }),
+          embeddable("emb-other", "padlet-o", { frameId: "frame-b" }),
+          embeddable("emb-a", "padlet-a"),
+          native("native-other", { frameId: "frame-b" }),
+          embeddable("emb-b", "padlet-b"),
+        ]),
+        [padlet("padlet-a"), padlet("padlet-b"), padlet("padlet-o")],
+      );
+
+      expectResolvedOrder(withOtherSlide, ["emb-a", "emb-b"]);
+      const baseZ = baseline.resolvedPadlets.map((entry) => entry.zIndex);
+      expect(withOtherSlide.resolvedPadlets.map((entry) => entry.zIndex)).toEqual(baseZ);
+    });
+    it("a native member interleaved among resolved padlets produces a documented, non-contiguous gap (PATCH-148)", () => {
+      const composition = characterizeSlideComposition(
+        characterizeFrameSlides([frame()])[0],
+        deepFreeze([frame(), embeddable("emb-x", "padlet-x"), native("native-gap"), embeddable("emb-z", "padlet-z")]),
+        [padlet("padlet-x"), padlet("padlet-z")],
+      );
+      expectResolvedOrder(composition, ["emb-x", "emb-z"]);
+      // native-gap consumes ordinal 1: a rank within full slide membership, not a dropped padlet.
+      expect(composition.resolvedPadlets.map((entry) => entry.zIndex)).toEqual([0, 2]);
+      expectLosslessNativeBands(composition, ["native-gap"]);
     });
 
     it("classifies every eligible native member exactly once across Stage 1 scenarios", () => {
