@@ -5,9 +5,10 @@ PATCH-149B1 **SPLIT after measurement** (§19) — corpus measured (2 Document r
 predicate **P1 safe**), routing census corrected (`DrawingLayout` not reachable; the two reachable
 routes are capability-gated but drop the title) · **PATCH-149B1a CLOSED (`c44a2ac` + correction
 `856f54b`) · REVIEWED §20 (classification 4, correction required) → CORRECTED → REVIEWED §21
-(classification 1, PASS · READY FOR CLOSURE)** · **PATCH-149B1b SPLIT (S2, §22) — B1b-i AUTHORIZED
-(wrapper · read-only · toolbar TB-A); B1b-ii BLOCKED behind B1b-i (routing · title-safe Columns/Rows ·
-wiring)** · PATCH-149B2 BLOCKED behind B1b-ii · PATCH-149C RESERVED · NOT PUSHED**
+(classification 1, PASS · READY FOR CLOSURE)** · **PATCH-149B1b SPLIT (S2, §22) — B1b-i IMPLEMENTED
+(`80011ee`) · REVIEWED §23 → CLASSIFICATION 4, CORRECTION REQUIRED (§23.15: F3 title/description reset
+on parent re-render) — DID NOT CLOSE; B1b-ii BLOCKED, NOT RELEASED** · PATCH-149B2 BLOCKED behind
+B1b-ii · PATCH-149C RESERVED · NOT PUSHED**
 **Authored:** 2026-08-04 (governance architect). **Base:** `177645b`. **First authoring of this
 number** — `git log --all --diff-filter=A -- .fable5/patches/PATCH-149.md` is empty.
 **Inherits:** PATCH-138 label finding · PATCH-139 D3/D5/D6 · PATCH-140 component 6 ·
@@ -2887,3 +2888,240 @@ behaviour and must not survive B2. **Carried defect:** `CardEditor`'s six handle
 are recorded here so they are not mistaken for Document scope.
 
 No production or test file was modified in this turn. Nothing was pushed.
+
+---
+
+## 23. PATCH-149B1b-i — INDEPENDENT CLOSURE REVIEW · **CLASSIFICATION 4 · CORRECTION REQUIRED**
+
+**Reviewed:** 2026-08-04 (independent closure reviewer). **Commit under review:** `80011ee`
+`feat(document): add TipTap document editor and viewer`, parent `f31b2bc`. All evidence re-executed
+independently with probes this review authored. **No implementation file was modified** — every
+perturbation reverted and hash-verified against `HEAD`.
+
+### 23.1 Source scope — **EXACT, within budget**
+
+| File | Lines | Budget | |
+|---|---|---|---|
+| `DocumentEditor.tsx` (new) | 141 | 200 | ✅ |
+| `NoteEditorToolbar.tsx` | 13 (11+/2−) | 25 | ✅ |
+| **Production** | **154** | **225** | ✅ |
+| `DocumentEditor.test.tsx` (new) | 166 | — | ✅ |
+| `DocumentEditor.readonly.test.tsx` (new) | 102 | — | ✅ |
+| **Tests** | **268** | **290** | ✅ |
+
+Verified unchanged in `80011ee`: `CanvasClient.tsx`, `CanvasModals.tsx`, `documentPost.ts`,
+`documentContentAdapter.ts`, `useSharedTipTapEditor.ts`, `NoteEditor.tsx`,
+`NoteEditor.characterization.test.tsx`, `CardEditor.tsx`, `CardPreview.tsx`,
+`ClipartCardDraftModal.tsx`, `usePadletSave.ts`, `package.json`, `package-lock.json`. No `.fable5`
+file, no routing file, no schema, no presentation code, no Excalidraw fork.
+`lib/domain/canvas/documentModalRoute.ts` **correctly does not exist** (B1b-ii scope). No PDF code.
+
+### 23.2 Wrapper architecture — **CORRECT**
+
+Consumes `useSharedTipTapEditor` and `documentContentAdapter`; imports `SaveCardData` **as a type only**
+(`import type`), so no runtime coupling to the persistence hook. A grep for `useEditor`, `_EXTENSIONS`,
+`DOMPurify`/`sanitize`, `supabase`/`.from(`, capability booleans and `pdf` returns **nothing** — no
+direct `useEditor`, no duplicated registry, no duplicated sanitizer, no persistence query, no
+route-permission logic, no PDF branch. It is an unwired wrapper, exactly as authorized.
+
+### 23.3 Props and save payload
+
+Props are exactly `{ isOpen, title, initialContent, metadata, readOnly?, onSave, onClose }`. `onSave`
+is typed `(data: SaveCardData) => void` — **no new persistence model was introduced**. Measured
+payload: `{ title, content: fromEditorHtml(getHTML()), metadata: { ...metadata, description } }` —
+title carried separately, content normalized through the adapter, unrelated metadata keys
+(`parentId`, `zIndex`) preserved, and the title provably absent from body HTML.
+
+**`metadata.description` — classification A (correct).** The wrapper keeps a description input and
+folds it back as `{ ...metadata, description }`, which is byte-for-byte the incumbent
+`CardEditor.tsx:63-70` semantics, so `saveCard` behaves identically. `saveCard:990-999` filters
+`description === ''` out of its blank-draft "meaningful metadata" test, so the creation lifecycle is
+preserved. **Non-blocking nuance:** when a row has no `description` key at all, saving adds
+`description: ''`. This is additive, benign, and inherited from `CardEditor` rather than introduced
+here — recorded so B2 does not mistake it for new behaviour.
+
+**Fallback title is not persisted.** `'Untitled document'` is a `placeholder` on the input and the
+read-only display fallback only; the saved value is the raw state, so an untouched empty title
+persists as `''`. Correct.
+
+### 23.4 Editable Document — verified
+
+Title renders as an editable input; description input is separate from body; TipTap body is editable;
+content passes through `toEditorHtml`; Document toolbar renders; **Align absent**; every visible control
+has a real handler; title never enters editor HTML; metadata preserved; Close invokes `onSave` once
+then `onClose` once; backdrop follows the same order; clicks inside the panel do **not** save
+(`stopPropagation` on the inner container); mount does not save; Escape is a characterized no-op; there
+is no explicit Save button and no dirty/discard UI. **B2 behaviour is absent, as required.**
+
+### 23.5 Read-only Document — verified, structurally safe
+
+Title renders as text with the `Untitled document` fallback; no title input; no description input;
+formatted body renders; `contenteditable="false"`; **no toolbar renders at all** — the entire
+`NoteEditorToolbar` subtree is behind `{!readOnly && …}`, so no command surface is exposed, satisfying
+§22.5's requirement that read-only safety not rest on the `editable` flag alone (§21.2 measured that
+programmatic commands bypass it). No Save button; accessible Close (`aria-label="Close"`); Close and
+backdrop each invoke `onClose` exactly once and `onSave` **zero** times; no dirty/discard UI; the
+registered `Comment` mark's `data-comment-id` renders; malformed legacy content stays visible.
+
+### 23.6 Modal shell
+
+Overlay + panel + header + accessible Close, `role="dialog"`, `aria-modal="true"`, and a mode-specific
+`aria-label` — all three of which `NoteEditor` lacks at HEAD, so this is new correct behaviour, not a
+NoteEditor regression. **Measured size: `width: 640px; maxHeight: 80vh`** with an internal
+`overflow-y-auto` body — appropriate for long-form documents and a reasonable envelope for future
+PDF-linked content; the 280px sticky-note card was **not** copied. No pink clipart block, no icon
+placeholder, no reserved icon column.
+
+**Non-blocking observation:** backdrop dismissal is implemented as `onClick` on the overlay plus
+`stopPropagation` on the inner container, rather than `NoteEditor`'s `e.target === e.currentTarget`
+check. Behaviourally equivalent today and proven by test; if B1b-ii/B2 ever render a popup as a sibling
+of the panel inside the overlay, the `target`-equality form would be the safer idiom.
+
+### 23.7 Toolbar variant — **TB-A implemented correctly**
+
+`variant` defaults to `'note'`. The filter is applied **only** when `isDocument`
+(`NoteEditorToolbar.tsx:166`), so Note mode still renders `currentTools` unchanged — no global
+handler-presence filter leaked. The box-mode toggle is hidden only for Document. No duplicate
+`DocumentToolbar` was created.
+
+**Visible Document controls, independently enumerated and each proven to serialize:**
+
+| Control | Command | Serialized result |
+|---|---|---|
+| Bold | `toggleBold` | `<p><strong>hello world</strong></p>` |
+| Italic | `toggleItalic` | `<p><em>hello world</em></p>` |
+| Strikethrough | `toggleStrike` | `<p><s>hello world</s></p>` |
+| **Underline** | `toggleUnderline` | `<p><u>hello world</u></p>` |
+| Bullet list | `toggleBulletList` | `<ul><li><p>…</p></li></ul>` |
+| Numbered list | `toggleOrderedList` | `<ol><li><p>…</p></li></ol>` |
+| Code block | `toggleCodeBlock` | `<pre><code>…</code></pre>` |
+
+Plus the accessible `Close` button. **Align, Text style, Link, Comment and the box-mode toggle are all
+absent** — Align structurally, because `DocumentEditor` never passes `onAlign`, not by name-matching.
+**Underline is retained on evidence** (a real `toggleUnderline` producing `<u>`); the unresolved
+PATCH-149C report was correctly not treated as authority to remove it. **Zero inert controls.**
+
+### 23.8 NoteEditor and adapter regressions — clean
+
+NoteEditor characterization **11/11 green, file unmodified**: Align still visible, Close saves then
+closes, backdrop saves then closes, Escape no-op, payload keys unchanged, no title/`readOnly` prop,
+modal shell unchanged, teardown stable. Adapter used consistently for plain text, malformed
+angle-bracket content, valid HTML and empty content; malformed fixtures lose no visible characters;
+valid HTML stays formatted; no phantom `onUpdate` on mount (B1a's F1 fix holds through the wrapper).
+
+### 23.9 Induced failures — 5/5 reproduced at `f31b2bc`
+
+`DocumentEditor.tsx` absent · no `variant`/`isDocument`/`visibleTools` concept in the toolbar · Align
+rendered unconditionally via `currentTools.map` (`:193`) so it could not be excluded for Documents
+without affecting Notes · no read-only TipTap Document wrapper · no component consumed `SaveCardData`.
+
+### 23.10 Negative controls — 12/12 detected, 12/12 reverted and hash-verified
+
+Align-in-Document (1 fail) · Align-hidden-globally (Note characterization 1 fail) · toolbar-in-read-only
+(1) · read-only-forced-editable (1) · title-removed-from-payload (1) · title-embedded-in-body (1) ·
+metadata-dropped (1) · save-on-read-only-close (1) · duplicate-backdrop-save (**2**) ·
+adapter-bypassed (1) · PDF-branch (1) · duplicate-registry (1). Post-revert hashes match `HEAD` for all
+four files.
+
+### 23.11 Validation — all green
+
+Full Vitest **72/72 files · 833/833 tests** · `npm run typecheck` exit 0 · **410** declarations ·
+`npx next build` exit 0 · bridge exclusion **891** · `build:e2e` exit 0 with marker **`1`** · ordinary
+`.next` restored, exclusion re-verified **891**, marker **absent** · `git diff --check` exit 0 ·
+worktree shows only the five protected paths.
+
+### 23.12 **F3 — the user's typed title is silently discarded on a parent re-render. DEFECT.**
+
+`DocumentEditor.tsx:37-43` synchronises state from props:
+
+```ts
+useEffect(() => {
+  if (isOpen) { setTitle(initialTitle); setDescription(...); setMetadata(...); }
+}, [isOpen, initialTitle, initialMetadata]);   // <-- initialMetadata in deps
+```
+
+`initialMetadata` is an **object**, so the effect refires whenever the caller passes a new reference —
+and `CanvasClient` renders the incumbent `CardEditor` as
+`initialMetadata={padletToEdit?.metadata || {}}` (`:7374`, `:7388`), which yields a **fresh `{}` on
+every render** whenever the row's metadata is null/undefined. That is precisely the caller pattern
+B1b-ii is scheduled to reuse. `NoteEditor.tsx:144-152` documents and guards this exact hazard class
+("prevents infinite loops if a caller passes an unstable array reference (e.g. `|| []` on every
+render)"); the precedent was available and not applied.
+
+**Measured, reproducing the real caller pattern:**
+
+| Stored `metadata` | Caller expression | After typing | After ONE unrelated parent re-render | **Persisted title** |
+|---|---|---|---|---|
+| `undefined` / `null` | `padletToEdit?.metadata \|\| {}` → fresh `{}` | `User Renamed This` | **`Stored Title`** | **`Stored Title`** ❌ |
+| `{ parentId: 'p1' }` | stable reference | `User Renamed This` | `User Renamed This` | `User Renamed This` ✅ |
+
+The user renames a Document, any unrelated re-render occurs (realtime update, a sibling post moving,
+canvas state change), the input silently reverts, and **the stale title is what gets written**. The
+description is reset by the same effect. The body survives (the hook's content effect keys on the
+adapted *string*, whose value is stable), so the blast radius is title + description.
+
+**Why this blocks.** B1b exists to end title loss — §19.4 carried the Columns/Rows title-loss path as a
+first-class **P3** item, and §22.2 requires the title to persist through the wrapper. Delivering a
+wrapper that discards the user's title under a caller pattern already present in the repository is a
+defect in the governed contract, not a future concern. It is latent only because the wrapper is
+unwired; B1b-ii makes it live. The shipped tests cannot catch it — every test mounts once and never
+re-renders the parent.
+
+**Correction is narrow** and stays inside the one authorized file: make the sync effect not clobber
+live user edits — e.g. key it on a stable identity rather than the metadata object, drop
+`initialMetadata` from the dependency list and read metadata at save time, or bail out when the
+incoming values are unchanged (`NoteEditor`'s documented pattern). Any of these is a few lines.
+
+### 23.13 False-green review
+
+Not triggered: direct `useEditor` · duplicated registry · title embedded in body · read-only exposing
+controls · read-only writing · Align in Document · Align missing from Note · save on mount · double
+save · B2 behaviour · routing or persistence changed · PDF code · tests asserting only markup presence
+(they invoke real commands and assert serialized output, and this review re-proved each control
+independently). **Triggered: "metadata/title loss"** — via F3 (§23.12), for the title and description.
+
+### 23.14 Observations (non-blocking)
+
+1. Backdrop uses `stopPropagation` rather than `target === currentTarget` (§23.6).
+2. Saving adds `description: ''` to rows that had no description key — inherited from `CardEditor`,
+   benign (§23.3).
+3. ProseMirror emits `TypeError: target.getClientRects is not a function` to stderr under jsdom when
+   list/code-block commands scroll the selection into view. Harmless jsdom limitation; no test fails.
+   Recorded so it is not re-diagnosed later.
+4. `metadata` is held in component state but only ever written from props; once F3 is fixed it could
+   simply be read from props at save time, removing a state slice.
+
+### 23.15 Required correction
+
+| # | File | Correction |
+|---|---|---|
+| **F3** | `DocumentEditor.tsx` | Stop the prop-sync effect from overwriting live user input when the caller passes an unstable `metadata` reference (§23.12) |
+| **F3t** | `DocumentEditor.test.tsx` | Add a regression test that types a title, re-renders the parent with `metadata={x \|\| {}}`, and asserts the typed title both survives and is the value persisted |
+
+**Explicitly out of correction scope** — reviewed and correct as shipped: wrapper architecture, props
+and payload contract, read-only mode, modal shell, toolbar variant and control set, adapter
+integration, and the temporary save-on-close lifecycle. These must not be re-opened.
+
+### 23.16 Classification and status
+
+**CLASSIFICATION 4 — OPEN · IMPLEMENTATION CORRECTION REQUIRED.**
+
+The architecture is right and nearly all of the work is correct and well-evidenced — clean shared-core
+reuse, genuinely structural read-only safety, a Document toolbar with seven proven-live controls and
+zero inert ones, and no regression anywhere in the existing suites. One proven defect remains, and it
+is in the exact property this patch exists to protect: the user's title. It is contained, it has an
+obvious minimal fix inside the single authorized file, and fixing it now is far cheaper than
+discovering it after B1b-ii wires the wrapper into live routes.
+
+| Patch | Status |
+|---|---|
+| **PATCH-149A** | **CLOSED** (`c23be50`) |
+| **PATCH-149B0** | **CLOSED** (`c9ea345`) |
+| **PATCH-149B1a** | **CLOSED** (`c44a2ac` + `856f54b`) |
+| **PATCH-149B1b-i** | **OPEN · CORRECTION REQUIRED** (§23.15) — `80011ee` stands; correction lands on top |
+| **PATCH-149B1b-ii** | **BLOCKED — not released.** B1b-i did not close |
+| **PATCH-149B2** | **BLOCKED until B1b-ii closes** |
+| **PATCH-149C** | **BLOCKED on user reproduction** (§14.11) |
+| **PATCH-150** | **RESERVED and separate**; untouched |
+
+No implementation file was modified by this review. Nothing was pushed.
