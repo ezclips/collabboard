@@ -1,8 +1,11 @@
 # PATCH-139 — EDITOR / READ-ONLY MODAL SPLIT
 
-**Status:** **OPEN · AUTHORIZED · OPTION C (CAPABILITY-BASED CARD MODAL SPLIT)** · PRODUCT
-DECISION SUPPLIED · **NOT IMPLEMENTED** · **PATCH-140 NOT RELEASED (releases on PATCH-139
-closure)** · NOT PUSHED
+**Status:** **CLOSED · OPTION C (CAPABILITY-BASED CARD MODAL SPLIT) DELIVERED** · classification
+**3 (pass; governance amendment recorded for arithmetic scope deviations)** at §14 by independent
+review of `20d6f65` · **PATCH-140 RELEASED** (see §14l **O1** for the one product-owner call that
+may gate it) · **PATCH-151 RESERVED** · NOT PUSHED
+**Closed:** 2026-08-04 (independent reviewer). **Implementation:** `20d6f65`.
+§13k's line budgets are amended by **§14g** and **§14h**.
 **Amended:** 2026-08-04 (governance architect) at base `fcd1cc7` — see **§13**, which supersedes
 the §5 Option G block. Sections 1–12 are retained as authorization history; §3d's terminology
 hard stop remains binding (§13n).
@@ -765,3 +768,256 @@ NOT PUSHED.**
 | PATCH-146 / 147 | RESERVED, non-blocking |
 
 PATCH-139 may proceed independently of PATCH-135, PATCH-146/147 and PATCH-150.
+
+---
+
+## 14. Closure review — INDEPENDENT
+
+**Reviewer:** independent Fable 5 closure reviewer. **Reviewed HEAD:** `20d6f65`.
+**Governance base:** `b6786c5` (§13). **Implementation not modified. Commit not amended.
+Nothing pushed.** All evidence re-run independently, not copied from the implementation report.
+
+`.fable5.zip` (user-created, unrelated to implementation) confirmed **absent** at review time.
+
+### 14a. Implementation commit review
+
+`20d6f65` — `fix(canvas): route card modal by workspace capability`. **8 files, 108 insertions /
+7 deletions.**
+
+| File | Changed | §13k budget | Verdict |
+|---|---|---|---|
+| `lib/domain/canvas/cardModalRoute.ts` *(new)* | 5 | ≤20 | ✔ |
+| `lib/domain/canvas/cardModalRoute.test.ts` *(new)* | 17 | ≤40 | ✔ |
+| `components/collabboard/canvas/ui/FreeformPadletCards.tsx` | 7 | ≤10 | ✔ |
+| `app/dashboard/canvas/[id]/CanvasClient.tsx` | 6 | ≤12 | ✔ |
+| `components/collabboard/CardEditor.tsx` | 2 | ≤6 | ✔ |
+| `components/collabboard/CardEditor.test.tsx` *(new)* | 70 | ≤70 | ✔ at limit |
+| `components/collabboard/CardPreview.tsx` | 4 | ≤2 | **Deviation 1 — see §14g** |
+| `components/collabboard/CardPreview.test.tsx` | 4 | not allowlisted | **Deviation 2 — see §14h** |
+
+No `.fable5` file is in the commit. No excluded path changed: `git diff --exit-code` clean over
+`presentationBridge.ts`, both slide-renderer files, `lib/infra/presentation/`, `package.json`,
+`package-lock.json`, schema, Excalidraw fork, `CanvasSidebar.tsx`, `CardActionsToolbar.tsx`,
+`lib/e2e/`.
+
+### 14b. Helper review — **PASS**
+
+```ts
+export type CardModalRoute = 'editor' | 'viewer';
+export function selectCardModalRoute(canEditWorkspace: boolean): CardModalRoute {
+  return canEditWorkspace ? 'editor' : 'viewer';
+}
+```
+
+Pure: no React, no imports, no global state, no side effects, no role inference — it consumes an
+**already-computed** boolean. `true → 'editor'`, `false → 'viewer'`, verified by test and by
+negative control (§14i). **No permission architecture was created**, exactly as §13a required.
+
+### 14c. Freeform route result — **PASS**
+
+`FreeformPadletCards.tsx:1758-1766`: `onEditContent` now calls
+`selectCardModalRoute(canUseFreeformEditButton)` and branches to `setIsCardEditorOpen(true)` /
+`setIsCardViewerOpen(true)`. `closeAllToolbars()` and `setPadletToEdit(padlet)` still run **before**
+the branch, so selection state is set consistently for both routes. This closes **D1** — the
+pre-existing inversion where an *editable* user's pencil opened the read-only viewer.
+
+### 14d. Direct-link route result — **PASS**
+
+`CanvasClient.tsx:5701-5704`: the `card` branch of `openPadletInTypeEditor` — the branch actually
+reached by the ungated `?openPadlet=` effect at `:345-351` — now runs the same helper.
+`setPadletToEdit(post)` at `:5692` still precedes it. **D4 is closed for plain cards.**
+
+**No non-card branch was touched**, as §13k required: `todo`, `link`, `table`, `container`,
+`comment`, `drawing`, `ai-component` and the `else` note branch are byte-identical.
+
+### 14e. Read-only route safety — full re-census at `20d6f65`
+
+All six `setIsCardEditorOpen(true)` sites re-enumerated and re-checked:
+
+| Site | Route | Gate at HEAD |
+|---|---|---|
+| `CanvasClient.tsx:5417` | create-card toolbar (R5) | creation flow; toolbar itself gated by `canUseCanvasToolbar = canUseFreeformEditButton` (`:258`) |
+| `CanvasClient.tsx:5702` | `?openPadlet=` card branch (R6) | **helper ✔ (new)** |
+| `FreeformPadletCards.tsx:421` | `openFreeformPadletModal` (R4) | sole caller `:3227` gated by `showModalEditButton` (`:3091`) ✔ |
+| `FreeformPadletCards.tsx:1762` | `CardPreview` pencil (R1) | **helper ✔ (new)** |
+| `FreeformPadletCards.tsx:1811` | inline toolbar (R7) | **dead** — `{false && …}` still present ✔ |
+| `FreeformPadletCards.tsx:6016` | `CardActionsToolbar` "Card view" (R3) | reachable only via R2, gated ✔ |
+
+**Read-only enforcement in `CardEditor` is unchanged and remains genuine.** Independently
+re-measured: read-only renders content, **no** title input, **no** formatting toolbar, **no**
+footer, `readonly` textarea, **exactly one** button; `handleSave` still short-circuits to
+`onClose()` and the viewer's `onSave` is still a no-op. Nine of the eleven `CardEditor` assertions
+pass **at parent** (§14i), proving the implementation neither created nor weakened read-only safety.
+
+### 14f. Editable route and close control — **PASS**
+
+Editable route untouched: `CanvasClient.tsx:7374-7385` still `readOnly={false}` with
+`onSave={saveCard}`. Toolbar, title input and footer all still render. **Save/close semantics were
+not redesigned** — `onClick={handleSave}` is unchanged on both the button and the backdrop, so
+**D3** remains exactly as governed (routed to PATCH-149, §13m).
+
+Close control: the **only** change is `aria-label="Close"` added to the existing `<Button>`
+(`CardEditor.tsx:124`). Semantic button retained, no second close control introduced, present in
+**both** modes (proven by two separate tests). §13g satisfied.
+
+### 14g. Deviation 1 — `CardPreview.tsx`, 4 lines against ≤2 — **CLASSIFIED A**
+
+**A — acceptable arithmetic consequence of one governed change.**
+
+The diff is exactly two occurrences of `aria-label="Edit card"` → `aria-label="Open card"`, at
+`:71` (clipart branch) and `:149` (default branch). Both buttons invoke the *same*
+`onEditContent` callback; they are two render branches of one affordance.
+
+§13n mandated the rename **"unconditionally, for both capabilities"**. Since the control renders
+in two branches, "unconditionally" necessarily means both — the ≤2-line figure in §13k undercounted
+the mechanical cost of the decision §13n had already taken. **No behaviour, prop, conditional or
+product decision was added**; the diff is 100 % string substitution.
+
+Renaming only one branch would have produced an inconsistent affordance and a genuine defect. Per
+the review brief, no artificial code extraction is required merely to satisfy the numeral.
+**The §13k budget is amended to ≤4 for this file.**
+
+### 14h. Deviation 2 — `CardPreview.test.tsx`, 4 lines, not allowlisted — **CLASSIFIED A**
+
+**A — necessary test reconciliation implied by the authorized production rename.**
+
+Two literals were updated, both pinning the renamed label:
+
+- `:311` — the `findEditCardButton` predicate `element.props['aria-label'] === 'Edit card'` → `'Open card'`
+- `:342` — `expect(rendered).toContain('aria-label="Edit card"')` → `'Open card'`
+
+**No assertion was removed or weakened.** Independently verified:
+
+| Measure | parent `b6786c5` | HEAD `20d6f65` |
+|---|---|---|
+| `expect(` count | **50** | **50** |
+| `it`/`test` count | **15** | **15** |
+
+The predicate remains **strict equality** (`===`), not loosened to a substring or regex match.
+**Proven non-tautological by a reviewer-added control:** changing the production label to
+`"Something else"` fails **4** `CardPreview` tests. The reconciled suite therefore still genuinely
+pins the label — this is not a false green.
+
+Leaving these two literals stale was not an option: §13o gate 7 requires a green full suite.
+**The §13k test allowlist is amended to include `components/collabboard/CardPreview.test.tsx`,
+limited to literal reconciliation of the renamed label (≤4 lines).**
+
+### 14i. Induced failure and negative controls — all independently reproduced
+
+| # | Control | Result |
+|---|---|---|
+| **Parent induced failure** | `CardEditor.tsx` restored to `b6786c5`, HEAD tests run | **2 failed / 9 passed** — *only* the two close-accessible-name tests fail, in both modes ✔ exactly as §13l predicted |
+| **NC1** | `selectCardModalRoute` forced to return `'editor'` | **1 failed / 2 passed** — `expected 'editor' to be 'viewer'` ✔ |
+| **NC2** | close accessible name removed (= the parent-state run above) | close tests fail in both modes ✔ |
+| **NC3** | helper bypassed in `FreeformPadletCards` (inline `setIsCardEditorOpen(true)`) | detected by source review: `selectCardModalRoute(` call sites **1 → 0**, and `onEditContent` body shows an unconditional opener ✔ |
+| **NC4** *(reviewer-added)* | production label changed to `"Something else"` | **4** `CardPreview` tests fail ✔ — proves §14h's reconciliation is not a tautology |
+
+All four reverted; each file verified **byte-identical** to its committed blob via `git hash-object`
+(`CardEditor.tsx` `a59bcf5b…`, `cardModalRoute.ts` `fb66023b…`, `FreeformPadletCards.tsx`
+`e29d1996…`, `CardPreview.tsx` `85f6db67…`). **Nothing was committed.**
+
+NC3 is the governed substitute for unit-level wiring proof (§13k's accepted risk). It worked: the
+bypass was unambiguous under direct source inspection.
+
+### 14j. Terminology result — **PASS**
+
+- Both live `CardPreview` branches read `Open card` (`:71`, `:149`) ✔
+- **`View card` is not introduced anywhere in the repository** — repo-wide grep returns nothing ✔
+- `CardActionsToolbar.tsx:79` still reads `label: 'Card view'` — untouched ✔
+- `CardActionsToolbar.tsx` is not in the commit ✔
+
+The near-homograph pair was **not** worsened and PATCH-149's coordinated terminology scope is
+intact. The broader wording decision is not reopened here.
+
+### 14k. Test and environment validation
+
+| Gate | Requirement | Measured |
+|---|---|---|
+| Route helper | green | **3 / 3** ✔ |
+| `CardEditor` | green | **11 / 11** ✔ |
+| `CardPreview` | green | **29 / 29** ✔ |
+| Focused total | 43/43 | **43 / 43** ✔ |
+| `ClipartCardDraftModal` (adjacent suite) | unaffected | **45 / 45** ✔ |
+| Full Vitest, unfiltered | 66 files / 755 tests | **66 / 66 files · 755 / 755 tests** ✔ |
+| Clean one-run `npm run typecheck` | exit 0, declarations regenerated | **410 fresh declarations**, exit 0 ✔ |
+| `npx tsc --noEmit` | exit 0 | **exit 0** ✔ |
+| `npx next build` | exit 0 | **exit 0** ✔ |
+| Bridge exclusion | exit 0, no marker | **891 files**, no marker ✔ |
+| Clean E2E build | exit 0, marker `1` | **exit 0**, marker **`1`** ✔ |
+| Ordinary `.next` restored | exclusion re-proven, no marker | **891 files**, no marker ✔ |
+| `git diff --check` | exit 0 | **exit 0** ✔ |
+
+The generator's internal `exit 1` on the two pre-existing `SearchMenu.tsx` `TS18047` errors is the
+accepted closed **PATCH-144** contract, not a PATCH-139 finding.
+
+### 14l. Observations
+
+**O1 — MATERIAL · clipart cards still bypass the capability decision. Reserved as PATCH-151.**
+
+`openPadletInTypeEditor` tests the clipart branch **before** the gated card branch:
+
+```
+:5700  else if (post.type === 'card' && post.metadata?.svgUrl) setIsClipartDraftModalOpen(true);   // UNGATED
+:5701  else if (post.type === 'card') { …selectCardModalRoute… }                                    // gated ✔
+```
+
+`ClipartCardDraftModal` is an **editing surface** — it exposes `onChange`, an editable title, and
+internally renders a `CardEditor` with **`readOnly={false}`** (`ClipartCardDraftModal.tsx:442`).
+Its render site (`CanvasClient.tsx:7390`) carries **no capability guard**, and its `onClose`
+calls **`void saveCard(...)`**. So a read-only member opening `?openPadlet=<clipartCardId>` still
+reaches an editable surface that persists on close.
+
+**This is not an implementation defect.** §13k explicitly confined `CanvasClient` edits to *the
+card branch* and forbade touching other branches; §13c's route census — authored by this reviewer
+at `fcd1cc7` — **never enumerated the clipart branch**. The implementer followed governance
+exactly. **This is a governance census gap, and it is mine.**
+
+Scope note: the implementation brief already routes "clipart/header cleanup" to PATCH-149, and the
+fix requires a decision about whether clipart cards get a read-only presentation at all — which
+PATCH-139 has no mandate to make. **Reserved as PATCH-151 — clipart card capability routing.**
+**The product owner should decide whether PATCH-151 must close before PATCH-140 releases**, since
+the stated product contract ("direct `?openPadlet=` links obey the same decision") is only
+satisfied for non-clipart cards today.
+
+**O2 — cosmetic.** Two `CardPreview.test.tsx` *titles* still say "Edit card"
+(`:318`, `:326`) though the asserted label is now `Open card`. Titles only — no assertion is
+affected. Left alone deliberately: editing them is pure churn outside the reconciliation §14h
+authorizes. Fold into PATCH-149's terminology pass.
+
+**O3 — recorded.** `CardEditor` read-only still renders a real `<textarea>` (natively `readonly`)
+rather than static markup. Governed as acceptable at §13f/§13j; noted only so a future reviewer
+does not re-litigate it.
+
+### 14m. Final classification
+
+**3 — PASS · GOVERNANCE AMENDMENT REQUIRED FOR ARITHMETIC SCOPE DEVIATIONS.**
+
+Both deviations classify **A**: each is a mechanical consequence of a decision §13 had already
+taken, neither adds behaviour or product judgement, and neither weakens a test — the added NC4
+proves the reconciled assertions still bind. §13k is amended accordingly (§14g, §14h).
+
+The governed scope is delivered in full: one pure helper consumed by **both** owners, D1 and D4
+closed, read-only safety intact and re-proven, editable route and save semantics untouched, a
+named close control in both modes, neutral terminology that does not worsen the deferred pair, and
+a clean full matrix.
+
+The classification is **3 rather than 1** because closure requires appending amendments — and
+because **O1 reserves PATCH-151 for a residual bypass of the same class on the adjacent clipart
+branch**, which governance, not the implementation, failed to enumerate.
+
+**PATCH-139: CLOSED · CAPABILITY-BASED CARD MODAL SPLIT ACCEPTED · PRODUCTION CHANGED WITHIN
+AMENDED ALLOWLIST · NOT PUSHED.**
+
+### 14n. Dependency status after closure
+
+| Patch | Status |
+|---|---|
+| **PATCH-139** | **CLOSED** |
+| **PATCH-140** | **RELEASED** by this closure — *subject to the product-owner call in O1 on whether PATCH-151 gates it* |
+| PATCH-141 | DEFERRED unless governance says otherwise |
+| PATCH-148 | CLOSED |
+| PATCH-149 | **RESERVED** — carries D3, D5, D6, plus **O2** |
+| PATCH-150 | RESERVED — presentation index-domain divergence |
+| **PATCH-151** | **RESERVED · NEW** — clipart card capability routing (**O1**) |
+| PATCH-135 | Independently OPEN |
+| PATCH-146 / 147 | RESERVED, non-blocking |
