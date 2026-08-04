@@ -5697,7 +5697,10 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     else if (post.type === 'comment') setIsCommentEditorOpen(true);
     else if (post.type === 'drawing') setIsDrawingEditorOpen(true);
     else if (post.type === 'ai-component') setIsAIComponentEditorOpen(true);
-    else if (post.type === 'card' && post.metadata?.svgUrl) setIsClipartDraftModalOpen(true);
+    else if (post.type === 'card' && post.metadata?.svgUrl) {
+      if (selectCardModalRoute(canUseFreeformEditButton) === 'editor') setIsClipartDraftModalOpen(true);
+      else setIsCardViewerOpen(true);
+    }
     else if (post.type === 'card') {
       if (selectCardModalRoute(canUseFreeformEditButton) === 'editor') setIsCardEditorOpen(true);
       else setIsCardViewerOpen(true);

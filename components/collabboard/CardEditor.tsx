@@ -115,8 +115,12 @@ export default function CardEditor({
                             </>
                         ) : (
                             <div className="flex items-center gap-3">
-                                <FileText className="w-6 h-6 text-gray-500" />
-                                <span className="text-lg font-semibold text-gray-700">View Document</span>
+                                {metadata?.svgUrl ? (
+                                    <img src={metadata.svgUrl} alt="" className="w-8 h-8 object-contain shrink-0" />
+                                ) : (
+                                    <FileText className="w-6 h-6 text-gray-500" />
+                                )}
+                                <span className="text-lg font-semibold text-gray-700">{title || 'View Document'}</span>
                             </div>
                         )}
                     </div>
