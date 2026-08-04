@@ -3125,3 +3125,266 @@ discovering it after B1b-ii wires the wrapper into live routes.
 | **PATCH-150** | **RESERVED and separate**; untouched |
 
 No implementation file was modified by this review. Nothing was pushed.
+
+---
+
+## 24. PATCH-149B1b-i — SECOND INDEPENDENT CLOSURE REVIEW (POST-CORRECTION) · **CLASSIFICATION 2 · CLOSED**
+
+**Reviewed:** 2026-08-04 (independent closure reviewer). **HEAD:** `4c37205`. **Commits under review:**
+`80011ee` `feat(document): add TipTap document editor and viewer` + `4c37205`
+`fix(document): preserve draft fields across parent rerenders`. Every result below was re-executed with
+probes this review authored (`__review_f3_probe.test.tsx`, `__review_stale_save.test.tsx`, 11 assertions
+across 8 groups) — the implementer's own tests were used only as corroboration, never as evidence. All
+probes and perturbations removed; every touched file hash-verified back to `HEAD`.
+
+### 24.1 Correction scope — **EXACT (2 files)**; combined test budget **amended upward**
+
+`4c37205` changes exactly `DocumentEditor.tsx` (+8/−4) and `DocumentEditor.test.tsx` (+110/−0).
+`DocumentEditor.readonly.test.tsx` and `NoteEditorToolbar.tsx` are **byte-unchanged since `80011ee`**
+(`git diff 80011ee 4c37205` on those paths is empty), as §23.15 required.
+
+Combined B1b-i (`f31b2bc..4c37205`, governance file excluded):
+
+| File | Lines | Budget | |
+|---|---|---|---|
+| `DocumentEditor.tsx` | 145 | 200 | ✅ |
+| `NoteEditorToolbar.tsx` | 13 (11+/2−) | 25 | ✅ |
+| **Production** | **158** | **225** | ✅ |
+| `DocumentEditor.test.tsx` | 276 | — | |
+| `DocumentEditor.readonly.test.tsx` | 102 | — | |
+| **Tests** | **378** | **290 (§22.12)** | ⚠ **+88 — amended** |
+
+**Observation O1 — the test budget is exceeded, and the overrun is governance-caused, not drift.**
+§23.15 mandated F3t and set no revised cap; the correction brief then required six distinct scenarios,
+which cannot fit in the 14 lines §22.12 left. The overrun is **entirely regression tests for the defect
+governance itself ordered**, contains no production line, and every added test is load-bearing (§24.11).
+**Recorded as an amendment to §22.12: B1b-i tests ≤ 380 / 2 files.** No source-scope rule was breached.
+
+Nothing else changed anywhere: `CanvasClient.tsx`, `CanvasModals.tsx`, `NoteEditor.tsx`,
+`NoteEditor.characterization.test.tsx`, `useSharedTipTapEditor.ts`, `documentContentAdapter.ts`,
+`documentPost.ts`, `CardEditor.tsx`, `CardPreview.tsx`, `ClipartCardDraftModal.tsx`,
+`usePadletSave.ts`, `package.json`, `package-lock.json`, schema/persistence, presentation code and the
+Excalidraw fork are all outside the four-file combined diff.
+`lib/domain/canvas/documentModalRoute.ts` **correctly still does not exist** (B1b-ii scope). A token scan
+of `DocumentEditor.tsx` for `pdf`, `supabase`, `.from(`, `useEditor(`, `DOMPurify`, `_EXTENSIONS =`,
+`dirty`, `discard`, `unsaved`, `autosave` returns **one** hit: the §22.4 comment naming B2 as the owner
+of that lifecycle. **No routing, no persistence, no PDF, no B2 work.**
+
+### 24.2 F3 — **RESOLVED**, proven in both directions
+
+Corrected effect (`DocumentEditor.tsx:39-44`):
+
+```ts
+useEffect(() => {
+  if (isOpen) { setTitle(initialTitle); setDescription(initialMetadata?.description || ''); }
+}, [isOpen, initialTitle, initialMetadata?.description]);   // primitives only
+```
+
+The `metadata` state slice was **deleted** (closing §23.14 observation 4), and the payload now reads
+`{ ...(initialMetadata || {}), description }` from the live prop.
+
+| | `80011ee` | `4c37205` |
+|---|---|---|
+| Draft title after unrelated fresh-`{}` rerender | **`Stored Title`** ❌ | `User Renamed This` ✅ |
+| Draft description after same | **`''`** ❌ | `User Description` ✅ |
+| **`onSave` payload actually persisted** | **`{title:"Stored Title", description:""}`** ❌ | **`{title:"User Renamed This", description:"User Description"}`** ✅ |
+
+The persistence half was measured directly by logging the payload (probe P9), not inferred from the
+input value — at `80011ee` the user's typed title **and** description are both silently written away.
+This is the P3 data-loss path §22.2 exists to close, and it is now closed.
+
+Confirmed against the eight §23-required properties: (1) the object reference is gone from the
+dependency list; (2) a value-equivalent fresh object does not reset (P2); (3) an unrelated key change
+does not reset (P3); (4) a changed `initialTitle` while open **does** adopt (P6); (5) a changed
+`initialMetadata.description` while open **does** adopt (P6); (6) closed→open resets an abandoned draft
+(P4); (7) no permanent stale state — every genuine prop change still propagates; (8) **no** deep
+equality, **no** stringified dependency, **no** dirty-state machinery, **no** new required prop.
+
+### 24.3 Dependency strategy — **classification B** (acceptable, non-blocking identity caveat)
+
+Primitive dependencies are sufficient without a Document ID prop. **Observation O2 — residual corner:**
+the effect cannot distinguish a *same-open* switch between two Documents whose title **and** description
+are both identical; body would swap (the hook keys on the adapted string) while the draft title would
+not. **Not reachable at HEAD** — every route sets `padletToEdit` and *then* opens, the overlay is
+`fixed inset-0` so no second card is clickable while open, and backdrop click saves-and-closes. Per the
+review brief's own test ("an actual live route can switch documents while the modal remains continuously
+open"), **no identity prop is required**. **B1b-ii must re-verify this** when it wires the real routes;
+if any route ever re-targets the wrapper without an `isOpen` transition, an identity key becomes
+mandatory.
+
+### 24.4 Fresh empty-object rerender — **PASS**
+
+Exact `CanvasClient:7374` caller pattern (`metadata={stored.metadata || {}}`, stored metadata
+`undefined`), three consecutive unrelated rerenders: title and description both survive verbatim, and
+Close persists the edited values, not the stale ones. Also asserted: **`onSave` fires zero times during
+the rerenders** — no phantom save.
+
+### 24.5 Equivalent metadata object — **PASS**
+
+Newly allocated `{ description:'orig', parentId:'p1', zIndex:3 }` on rerender: both draft title and
+draft description unchanged. (The shipped test asserts title only; this review additionally proved
+description.)
+
+### 24.6 Unrelated metadata update — **PASS**; latest-at-save is **classification A**
+
+With `zIndex` 1→2 on rerender: draft title survives, draft description survives, body survives, and the
+save payload carries `zIndex: 2` — the **latest** value — plus `parentId:'p1'` and the edited
+description. **Incoming metadata is not mutated:** both prop objects were `Object.freeze`d and no throw
+occurred, the frozen object is unchanged after save, and `payload.metadata` is a *new* object
+(`not.toBe` the input). No user-edited field is overwritten.
+
+**"Latest metadata at save time" — classification A (correct conflict-minimizing behaviour).** It
+strictly dominates the opening snapshot: NC3 proves the snapshot alternative silently **drops** a newer
+unrelated key written by another client during the editing session, which is exactly the P3 class this
+patch exists to remove. Non-blocking nuance: the merge is last-writer-wins per key at save time; B2's
+explicit-Save model should state that contract deliberately rather than inherit it.
+
+### 24.7 Reopen contract — **PASS**, `isOpen` proven load-bearing
+
+Reopening the **same** Document (title *and* description identical across close→reopen) discards the
+abandoned draft and restores both supplied values — so the reset is driven by the `isOpen` transition
+alone, not by an incidental title change. Reopening a **different** Document initialises the new title
+and description. NC2 (removing `isOpen` from the dependency array) fails this pair, confirming the
+dependency is genuinely load-bearing and the test genuinely isolates it.
+
+### 24.8 Same-open prop change — **appropriate**
+
+While open, a changed `initialTitle` and a changed `initialMetadata.description` are both adopted, even
+over a local edit. For a caller switching the selected Document with the wrapper mounted this is the
+**correct** behaviour — it is what prevents the stale-mix state described in O2 for every case where the
+two Documents differ in either field. It is also, unavoidably, last-write-wins against an in-flight edit
+when an external realtime update changes the stored title mid-edit; that trade-off is inherent to a
+component with no dirty state and is **owned by B2**, not by B1b-i.
+
+### 24.9 Body preservation — **PASS**
+
+TipTap content is unaffected by a fresh `{}`, an equivalent object, or an unrelated key change. Proven
+beyond the shipped test: a **user-applied Bold** (a real `toggleBold` on a real selection) survives an
+unrelated-key rerender and is present as `<strong>` in the saved `content`. `useSharedTipTapEditor`'s
+content effect keys on the adapted *string*, whose value is stable across these rerenders, so
+`setContent` is never re-invoked. No phantom update and no save occurs during any rerender.
+
+### 24.10 Save payload — **correct**
+
+One `SaveCardData`-shaped payload per editable Close/backdrop: current user-edited `title`,
+`fromEditorHtml(getHTML())` content, latest unrelated metadata keys, current user-edited
+`description`. Title is provably **not** embedded in the body (NC12 detects it); description is not in
+the body; the metadata input object is not mutated; stale initial values are not persisted.
+
+### 24.11 Test review — six tests, six distinct mechanisms
+
+Fresh-`{}` · equivalent-object · unrelated-key-plus-latest-metadata · same-document reopen ·
+different-document reopen · body preservation. Each is independently load-bearing, proven by the
+negative-control matrix hitting **different** subsets: NC1 (6 fails), NC2 (2), NC3 (2), NC4 (6), NC5
+(5), NC6 (3), NC11 (2), NC12 (1). No case passes only by sharing a weak assertion. **Minor note:** the
+equivalent-object test asserts title but not description, and its `Parent` takes an unused `n` prop
+purely to force a rerender — cosmetic, and this review covered the description case independently.
+
+### 24.12 Regressions — all clean
+
+**Read-only** (file unmodified, 6/6 green): title as text with the `Untitled document` fallback, no
+title input, no description input, **no toolbar at all**, `editable:false`/`contenteditable="false"`,
+Close and backdrop invoke `onClose` once and `onSave` **zero** times, accessible Close, no dirty/discard
+UI — and this review additionally proved read-only is unaffected by a fresh-`{}` rerender.
+**Lifecycle:** editable Close saves-then-closes exactly once, backdrop identical, inner clicks never
+save, Escape still a characterized no-op, no explicit Save button, no dirty state, no discard
+confirmation, no autosave. **Toolbar:** Document still excludes Align (structurally — no `onAlign` is
+passed), Note still includes it, all seven Document controls remain real, NoteEditor characterization
+**11/11 green and unmodified**. **Adapter/shared core:** plain text, malformed angle-bracket content and
+valid HTML all behave as in §23.8; single shared registry; no sanitizer or TipTap duplication.
+
+### 24.13 Induced failure — reproduced at `80011ee`, absent at `4c37205`
+
+The pre-correction production file was materialised with `git show 80011ee:<path> > <path>` (not
+`git stash`, which can silently reapply the fix). At `80011ee`: **3/3** of this review's rerender probes
+fail and **3/3** of the shipped regression tests fail — 6 failures total, all with the stale
+`Stored Title` — plus the payload probe proving stale persistence. At `4c37205`: **11/11** probes pass
+and the payload is the user's edit. File restored, hash `8d20a8c…` = `HEAD`.
+
+### 24.14 Negative controls — **12/12 detected, 12/12 reverted hash-identical**
+
+| # | Perturbation | Detected |
+|---|---|---|
+| 1 | restore full `initialMetadata` object dependency | 6 fails |
+| 2 | remove `isOpen` from the dependency array | 2 fails (both reopen tests) |
+| 3 | snapshot metadata at opening only | 2 fails (latest-key) |
+| 4 | reset fields on every render | 6 fails |
+| 5 | remove title from save payload | 5 fails |
+| 6 | remove description from save payload | 3 fails |
+| 7 | expose toolbar in read-only | 1 fail |
+| 8 | show Align in Document mode | 1 fail |
+| 9 | hide Align in Note mode (global filter) | 1 fail (Note characterization) |
+| 10 | call save from read-only close | 1 fail |
+| 11 | duplicate save on backdrop (drop `stopPropagation`) | 2 fails |
+| 12 | embed title into body | 1 fail |
+
+Post-revert: `DocumentEditor.tsx` `8d20a8c44c4840d25a44c0dd04771d67d1aa655b`, `NoteEditorToolbar.tsx`
+`a3bf76c2fd7f6ef4c9f456f82daff53892d56fd9` — both **MATCH** baseline.
+
+### 24.15 Validation — all green
+
+Focused suites **80/80** (DocumentEditor 17, read-only 6, NoteEditor characterization 11, shared hook
+10, adapter 20, `documentPost` 10, `cardModalRoute` 6) · full Vitest **72/72 files · 839/839 tests**
+(833 + 6 new) · `npm run typecheck` exit 0 · **410** declarations · `npx next build` exit 0 · bridge
+exclusion **891** · `build:e2e` exit 0 with marker **`1`** and exclusion correctly *failing* on that
+build (proving the check is live) · ordinary `.next` restored, exclusion re-verified **891**, marker
+**absent** · `git diff --check` exit 0 · worktree shows only the five protected paths.
+
+**Observation O3 — environmental, recorded so it is not re-diagnosed.** The first `npx next build`
+crashed with `uncaughtException [TypeError: Cannot read properties of undefined (reading 'length')]`
+against the `.next` directory left over from the previous session's E2E-build cycle. `rm -rf .next`
+followed by a rebuild succeeded with exit 0. **Not caused by the correction** — the same stale artifact
+predates it. Rule: after any `build:e2e` / ordinary-build swap cycle, clear `.next` before trusting a
+build result.
+
+### 24.16 False-green review
+
+None of the twelve rejection triggers fired: equivalent metadata objects no longer reset drafts · reopen
+still resets abandoned drafts · latest metadata keys are carried, not dropped · the metadata input is
+not mutated · stale title/description are not persisted · body does not reset on parent rerender · no
+save fires during rerender · read-only behaviour is unchanged · no B2 behaviour appeared · no routing or
+persistence change · the correction is exactly two files · no test was weakened (the reopen test was
+*strengthened* to isolate `isOpen`, and NC2 proves it).
+
+### 24.17 Observations (non-blocking)
+
+1. **O1** — combined test lines 378 vs §22.12's 290; governance-caused, budget amended (§24.1).
+2. **O2** — same-open switch between two Documents with identical title *and* description is
+   indistinguishable to the primitive dependency set; unreachable at HEAD, **re-verify in B1b-ii**
+   (§24.3).
+3. **O3** — stale `.next` from an E2E-build cycle breaks the next ordinary build (§24.15).
+4. Latest-metadata-at-save is last-writer-wins per key; B2 should state the contract explicitly
+   (§24.6).
+5. Equivalent-object test asserts title only and carries an unused `n` prop — cosmetic (§24.11).
+6. Carried from §23 and still true: backdrop uses `stopPropagation` rather than
+   `target === currentTarget`; saving adds `description: ''` to rows that had no description key
+   (inherited from `CardEditor`); ProseMirror emits a harmless `getClientRects` `TypeError` to stderr
+   under jsdom.
+
+### 24.18 Classification and status
+
+**CLASSIFICATION 2 — PASS WITH NON-BLOCKING OBSERVATIONS. PATCH-149B1b-i CLOSES.**
+
+F3 is genuinely fixed at the narrowest correct boundary — primitives in the dependency list, one state
+slice *removed* rather than added, and metadata read from the live prop at save time, which also closes
+a second latent overwrite path the original review had only flagged as a tidy-up. The correction stayed
+inside its two authorized files, weakened nothing, and every other property §22 governs remains proven.
+The three observations are recorded, not blocking: one is a budget the correction brief itself
+necessitated, one is an unreachable corner that B1b-ii must re-check, and one is a build-artifact
+hygiene rule.
+
+| Patch | Status |
+|---|---|
+| **PATCH-149A** | **CLOSED** (`c23be50`) |
+| **PATCH-149B0** | **CLOSED** (`c9ea345`) |
+| **PATCH-149B1a** | **CLOSED** (`c44a2ac` + `856f54b`, reviews §20/§21) |
+| **PATCH-149B1b-i** | **CLOSED** (`80011ee` + `4c37205`, reviews §23/§24) |
+| **PATCH-149B1b-ii** | **RELEASED FOR GOVERNANCE — not authorized, not implemented.** Must re-verify O2 |
+| **PATCH-149B2** | **BLOCKED until B1b-ii closes** — explicit Save, dirty state, discard, Close/Escape |
+| **PATCH-149C** | **BLOCKED on user reproduction** (§14.11) |
+| **PATCH-150** | **RESERVED and separate**; untouched |
+
+**Carried debt, unchanged:** the temporary save-on-close lifecycle (§22.4) must not survive B2;
+`CardEditor`'s six handler-less toolbar buttons (§22.1 C4) remain on the clipart-read-only surface.
+
+No implementation file was modified by this review. Nothing was pushed.
