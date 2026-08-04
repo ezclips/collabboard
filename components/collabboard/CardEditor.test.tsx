@@ -89,8 +89,40 @@ describe('CardEditor read-only clipart-card rendering (PATCH-151)', () => {
   });
 });
 
-it('CardEditor retains the readOnly save short-circuit in source (PATCH-151 negative control)', () => {
-  expect(fs.readFileSync('components/collabboard/CardEditor.tsx', 'utf8')).toContain('if (readOnly) {');
+it('CardEditor scopes the readOnly save short-circuit to handleSave, not the whole file (PATCH-149A)', () => {
+  const src = fs.readFileSync('components/collabboard/CardEditor.tsx', 'utf8');
+  const start = src.indexOf('const handleSave');
+  const body = src.slice(start, src.indexOf('};', start));
+  expect(body).toMatch(/if \(readOnly\)\s*\{\s*onClose\(\);\s*return;/);
+  expect(body.indexOf('if (readOnly)')).toBeLessThan(body.indexOf('onSave('));
+});
+
+function renderEditable(metadata: Record<string, unknown> = {}) {
+  return renderToStaticMarkup(
+    <CardEditor
+      isOpen
+      onClose={() => {}}
+      title="My Document"
+      initialContent="Document body"
+      initialMetadata={metadata}
+      onSave={() => {}}
+      readOnly={false}
+    />,
+  );
+}
+
+describe('CardEditor editable header reclaims space (PATCH-149A)', () => {
+  it('renders no icon block for an ordinary document with no svgUrl', () => {
+    const markup = renderEditable();
+    expect(markup).not.toContain('w-16 h-16');
+    expect(markup).not.toContain('#ec4899');
+    expect(markup).not.toMatch(/<img/);
+  });
+
+  it('still renders the clipart icon when svgUrl is present', () => {
+    const markup = renderEditable({ svgUrl: 'https://cdn.example.com/icons/rocket.svg' });
+    expect(markup).toMatch(/<img[^>]*src="https:\/\/cdn\.example\.com\/icons\/rocket\.svg"/);
+  });
 });
 
 describe('CardEditor editable route (PATCH-139)', () => {

@@ -414,7 +414,7 @@ describe('ClipartCardDraftModal reaction and comment metadata', () => {
     const withCaption = renderToolbar({ onCaption: vi.fn() });
     expect(withCaption).toContain('title="Caption"');
     expect(withCaption).toContain('lucide-text-cursor');
-    expect(toolbarLabels(withCaption)).toEqual(['Color', 'Icon', 'Caption', 'Card view', 'Reaction', 'Comment']);
+    expect(toolbarLabels(withCaption)).toEqual(['Color', 'Icon', 'Caption', 'Reaction', 'Comment']);
   });
 
   it('invokes Caption from the toolbar and reflects active state', () => {

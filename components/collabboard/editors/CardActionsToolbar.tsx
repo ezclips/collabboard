@@ -5,7 +5,6 @@ import {
     Palette,
     Image as ImageIcon,
     TextCursor,
-    LayoutGrid,
     Smile,
     MessageSquare,
 } from 'lucide-react';
@@ -15,7 +14,7 @@ interface CardActionsToolbarProps {
     padlet: Padlet;
     onColorClick: (e: React.MouseEvent, type: 'topstrip' | 'icon' | 'background') => void;
     onReplaceIcon: () => void;
-    onToggleCardView: () => void;
+    onToggleCardView?: () => void;
     onAddReaction: (e: React.MouseEvent) => void;
     onComment: () => void;
     onCaption?: () => void;
@@ -74,12 +73,6 @@ export default function CardActionsToolbar({
             onClick: () => onCaption(),
             active: isCaptionActive,
         }] : []),
-        {
-            icon: LayoutGrid,
-            label: 'Card view',
-            onClick: () => onToggleCardView(),
-            active: isCardView,
-        },
         {
             icon: Smile,
             label: 'Reaction',

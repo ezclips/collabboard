@@ -83,18 +83,16 @@ export default function CardEditor({
                     <div className="flex items-center gap-6 flex-1">
                         {!readOnly ? (
                             <>
-                                <div
+                                {metadata?.svgUrl && <div
                                     className="w-16 h-16 rounded-2xl flex items-center justify-center shadow-inner shrink-0"
                                     style={{ backgroundColor: metadata?.iconBgColor || '#ec4899' }}
                                 >
-                                    {metadata?.svgUrl && (
                                         <img
                                             src={metadata.svgUrl}
                                             alt=""
                                             className="w-10 h-10 object-contain"
                                         />
-                                    )}
-                                </div>
+                                </div>}
 
                                 <div className="flex-1">
                                     <input

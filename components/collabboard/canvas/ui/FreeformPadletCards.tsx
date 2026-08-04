@@ -6010,11 +6010,6 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                 setPadletToEdit(activeCardToolbarPadlet);
                 setIsLibraryOpen(true);
               }}
-              onToggleCardView={() => {
-                setCardToolbarPadletId(null);
-                setPadletToEdit(activeCardToolbarPadlet);
-                setIsCardEditorOpen(true);
-              }}
               onAddReaction={(e) => {
                 e.stopPropagation();
                 const nextOpen = !isImageEmojiOpen;
