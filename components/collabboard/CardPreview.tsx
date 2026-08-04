@@ -68,7 +68,7 @@ export default function CardPreview({
                                 onClick={(e) => { e.stopPropagation(); onEditContent(); }}
                                 className="shrink-0 w-5 h-5 rounded flex items-center justify-center hover:bg-black/10 transition-opacity opacity-0 group-hover:opacity-100"
                                 style={{ color: stripIconColor }}
-                                aria-label="Edit card"
+                                aria-label="Open card"
                             >
                                 <Edit2 className="w-3 h-3" />
                             </button>
@@ -146,7 +146,7 @@ export default function CardPreview({
                     type="button"
                     onClick={(e) => { e.stopPropagation(); onEditContent(); }}
                     className={`absolute top-1 left-1 p-1.5 text-gray-500 bg-white/90 hover:bg-white hover:text-gray-800 rounded-full shadow-sm border border-gray-200/70 z-30 transition-all opacity-0 group-hover:opacity-100 ${isSelected ? 'opacity-100' : ''}`}
-                    aria-label="Edit card"
+                    aria-label="Open card"
                 >
                     <Edit2 className="w-4 h-4" />
                 </button>

@@ -30,6 +30,7 @@ import RowCanvasDnD from '@/components/collabboard/row/RowCanvasDnD';
 import { routeEdge, type GraphSide } from '@/lib/graph/edgeRouting';
 import { createFreeformGraphRepo } from '@/lib/graph/graphRepo';
 import { canEditWorkspace, canManageWorkspace, type WorkspaceRole } from '@/lib/workspace/context';
+import { selectCardModalRoute } from '@/lib/domain/canvas/cardModalRoute';
 import { resolveWorkspaceForUser } from '@/lib/infra/supabase/workspaceMembers';
 import '@/components/kanban-canvas/kanban-canvas.css';
 import ColumnContainerCreationPrompt from '@/components/canvas/layouts/ColumnContainerCreationPrompt';
@@ -5697,7 +5698,10 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     else if (post.type === 'drawing') setIsDrawingEditorOpen(true);
     else if (post.type === 'ai-component') setIsAIComponentEditorOpen(true);
     else if (post.type === 'card' && post.metadata?.svgUrl) setIsClipartDraftModalOpen(true);
-    else if (post.type === 'card') setIsCardEditorOpen(true);
+    else if (post.type === 'card') {
+      if (selectCardModalRoute(canUseFreeformEditButton) === 'editor') setIsCardEditorOpen(true);
+      else setIsCardViewerOpen(true);
+    }
     else setIsNoteEditorOpen(true);
   };
   // Keep the ref current so the early-mounted useEffect can call this function

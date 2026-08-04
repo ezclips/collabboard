@@ -121,7 +121,7 @@ export default function CardEditor({
                         )}
                     </div>
 
-                    <Button variant="ghost" size="icon" onClick={handleSave} className="h-10 w-10 rounded-full hover:bg-gray-200">
+                    <Button variant="ghost" size="icon" onClick={handleSave} aria-label="Close" className="h-10 w-10 rounded-full hover:bg-gray-200">
                         <X className="w-6 h-6 text-gray-500" />
                     </Button>
                 </div>

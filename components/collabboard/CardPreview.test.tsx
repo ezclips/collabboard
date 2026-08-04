@@ -308,7 +308,7 @@ function findEditCardButton(node: unknown): ReactElement<any> | undefined {
   }
   if (typeof node !== 'object') return undefined;
   const element = node as ReactElement<any>;
-  if (element.type === 'button' && element.props['aria-label'] === 'Edit card') return element;
+  if (element.type === 'button' && element.props['aria-label'] === 'Open card') return element;
   return findEditCardButton(element.props?.children);
 }
 describe('CardPreview edit-content affordance (PATCH-138)', () => {
@@ -339,7 +339,7 @@ describe('CardPreview edit-content affordance (PATCH-138)', () => {
       <CardPreview padlet={padlet()} isSelected={false} onOpenToolbar={() => {}} onEditContent={() => {}} />,
     );
     expect(rendered).toContain('Clipart caption');
-    expect(rendered).toContain('aria-label="Edit card"');
+    expect(rendered).toContain('aria-label="Open card"');
     expect((rendered.match(/<button/g) || []).length).toBe(2);
   });
 });

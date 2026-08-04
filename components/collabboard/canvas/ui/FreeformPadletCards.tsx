@@ -6,6 +6,7 @@ import DOMPurify from 'dompurify';
 import type { AuthUser } from '@/lib/domain/auth/user';
 import type { Padlet } from '@/types/collabboard';
 import { createUpdatePostFieldsCommand } from '@/lib/domain/canvas/posts';
+import { selectCardModalRoute } from '@/lib/domain/canvas/cardModalRoute';
 import { createPostsRepository } from '@/lib/infra/canvas/postsRepository';
 import ImageActionsToolbar from '@/components/collabboard/editors/ImageActionsToolbar';
 import ImageDrawingLayer from '@/components/collabboard/editors/ImageDrawingLayer';
@@ -1757,7 +1758,11 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
               onEditContent={() => {
                 closeAllToolbars();
                 setPadletToEdit(padlet);
-                setIsCardViewerOpen(true);
+                if (selectCardModalRoute(canUseFreeformEditButton) === 'editor') {
+                  setIsCardEditorOpen(true);
+                } else {
+                  setIsCardViewerOpen(true);
+                }
               }}
               isSelected={isPadletSelected(padlet.id)}
               isCardView={padlet.metadata?.showCardView}
