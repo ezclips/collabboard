@@ -255,6 +255,7 @@ type DrawingEmbeddableCardProps = {
   onBeforePadletEdit?: () => void;
   onDragEnd?: (padletId: string, x: number, y: number) => void;
   onNaturalResize?: (padletId: string, height: number) => void;
+  onOpenDocument?: (padlet: Padlet) => void; // PATCH-149B1b-iii §27.4
 };
 
 function DrawingEmbeddableCard({
@@ -278,6 +279,7 @@ function DrawingEmbeddableCard({
   onBeforePadletEdit,
   onDragEnd,
   onNaturalResize,
+  onOpenDocument,
 }: DrawingEmbeddableCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [canExpand, setCanExpand] = useState(false);
@@ -660,7 +662,7 @@ function DrawingEmbeddableCard({
               />
             );
           }
-          return <PostCardContent padlet={padlet} onScan={fetchData} canvasContext="drawing" />;
+          return <PostCardContent padlet={padlet} onScan={fetchData} canvasContext="drawing" onOpenDocument={onOpenDocument ? () => onOpenDocument(padlet) : undefined} />;
         })()}
       </div>
     </div>
@@ -679,6 +681,7 @@ interface DrawingLayoutProps {
   onDeleteOverlayPadlets?: (rootIds: string[]) => Promise<void>;
   onPadletEdit?: (padlet: Padlet) => void;
   onEditPadletAsPost?: (padlet: Padlet) => void;
+  onOpenDocument?: (padlet: Padlet) => void; // PATCH-149B1b-iii §27.4
   readOnly?: boolean;
   fetchData?: () => void;
   ghostDraft?: Partial<Padlet> | null;
@@ -704,6 +707,7 @@ export default function DrawingLayout({
   onDeleteOverlayPadlets,
   onPadletEdit,
   onEditPadletAsPost,
+  onOpenDocument,
   readOnly = false,
   fetchData,
   ghostDraft,
@@ -2245,9 +2249,10 @@ export default function DrawingLayout({
         onNaturalResize={(id, h) => {
           recentlyNaturalResizedRef.current.set(id, h);
         }}
+        onOpenDocument={onOpenDocument}
       />
     );
-  }, [canvasId, currentUserAvatar, currentUserId, currentUserName, fetchData, handleContextMenu, handleUpdateChildComments, onAddPadlet, onDeletePadlet, onUpdatePadletStrict, readOnly, savePadletPositionWithLock]);
+  }, [canvasId, currentUserAvatar, currentUserId, currentUserName, fetchData, handleContextMenu, handleUpdateChildComments, onAddPadlet, onDeletePadlet, onUpdatePadletStrict, readOnly, savePadletPositionWithLock, onOpenDocument]);
 
   // Stable viewport accessor for useCanvasActions -- reads appStateRef at call time so
   // callbacks never stale-close over scroll/zoom and never recreate on pan.

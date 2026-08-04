@@ -14,6 +14,8 @@ import { createToggleTaskCommand } from "@/lib/domain/canvas/posts";
 import { asUserId } from "@/lib/domain/core/ids";
 import { createPostsRepository } from "@/lib/infra/canvas/postsRepository";
 import { getMeaningfulTitle } from "@/lib/infra/collabboard/postTitle";
+import { isDocumentPost } from "@/lib/domain/canvas/documentPost";
+import DocumentCardContent from "./DocumentCardContent";
 
 type CellStyle = {
     bg?: string;
@@ -35,6 +37,7 @@ interface PostCardContentProps {
     currentUserName?: string;
     currentUserAvatar?: string;
     onUpdateChildComments?: (childId: string, comments: any[], options?: { field?: "comments" | "detachedComments" }) => void;
+    onOpenDocument?: () => void; // PATCH-149B1b-iii §27.4: opt-in Read affordance
 }
 
 // Decode HTML entities that may have been escaped
@@ -237,6 +240,7 @@ export default function PostCardContent({
     currentUserName,
     currentUserAvatar,
     onUpdateChildComments,
+    onOpenDocument,
 }: PostCardContentProps) {
 
     const type = normalizeType(padlet.type);
@@ -902,6 +906,14 @@ export default function PostCardContent({
                 iconBgColor={iconBgColor}
                 textColor={textColor}
             />
+        );
+    }
+
+    if (isDocumentPost(padlet) && onOpenDocument) {
+        return (
+            <div className="relative h-full w-full">
+                <DocumentCardContent content={DOMPurify.sanitize(decodeHtmlEntities(rawContent || ""))} onRead={onOpenDocument} />
+            </div>
         );
     }
 

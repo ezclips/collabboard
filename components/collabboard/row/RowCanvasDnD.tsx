@@ -49,6 +49,7 @@ export interface RowCanvasDnDProps {
     onEditPost: (post: Padlet) => void;
     onDeletePost: (post: Padlet) => void;
     onOpenPost: (post: Padlet) => void;
+    onOpenDocument?: (post: Padlet) => void; // PATCH-149B1b-iii §27.4
     onOpenTarget?: (post: Padlet) => void; // For opening specific child posts from containers
     onOpenInNewTab: (post: Padlet) => void;
     onCopyLink: (post: Padlet) => void;
@@ -90,6 +91,7 @@ export default function RowCanvasDnD({
     onEditPost,
     onDeletePost,
     onOpenPost,
+    onOpenDocument,
     onOpenTarget,
     onOpenInNewTab,
     onCopyLink,
@@ -350,6 +352,7 @@ export default function RowCanvasDnD({
                             onEditPost={onEditPost}
                             onDeletePost={onDeletePost}
                             onOpenPost={onOpenPost}
+                            onOpenDocument={onOpenDocument}
                             onOpenTarget={onOpenTarget}
                             onOpenInNewTab={onOpenInNewTab}
                             onCopyLink={onCopyLink}

@@ -42,6 +42,7 @@ interface ColumnsLayoutProps {
 
     onEditPost: (post: Padlet) => void;
     onOpenPost?: (post: Padlet) => void;
+    onOpenDocument?: (post: Padlet) => void; // PATCH-149B1b-iii §27.4
     onDeletePost?: (post: Padlet) => void;
     onStartSlideshow?: (post: Padlet) => void;
     onDownloadAttachment?: (post: Padlet) => void;
@@ -113,6 +114,7 @@ export default function ColumnsLayout({
 
     onEditPost,
     onOpenPost,
+    onOpenDocument,
     onDeletePost,
     onStartSlideshow,
     onDownloadAttachment,
@@ -438,6 +440,7 @@ export default function ColumnsLayout({
 
                                     onEditPost={onEditPost}
                                     onOpenPost={onOpenPost}
+                                    onOpenDocument={onOpenDocument}
                                     onDeletePost={onDeletePost}
                                     onStartSlideshow={onStartSlideshow}
                                     onDownloadAttachment={onDownloadAttachment}

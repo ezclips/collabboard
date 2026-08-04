@@ -49,6 +49,7 @@ type ColumnsLayoutProps = {
   onEditPost: (post: Padlet) => void;
   onDeletePost?: (post: Padlet) => void;
   onOpenPost?: (post: Padlet) => void;
+  onOpenDocument?: (post: Padlet) => void; // PATCH-149B1b-iii §27.4
   onOpenInNewTab?: (post: Padlet) => void;
   onCopyLink?: (post: Padlet) => void;
   onStartSlideshow?: (post: Padlet) => void;
@@ -149,6 +150,7 @@ export default function ColumnsCanvasRow({
   onEditPost,
   onDeletePost,
   onOpenPost,
+  onOpenDocument,
   onOpenInNewTab,
   onCopyLink,
   onStartSlideshow,
@@ -444,7 +446,7 @@ export default function ColumnsCanvasRow({
                   topStripColor={(post.metadata as any)?.topStrip && (post.metadata as any).topStrip !== 'transparent' ? (post.metadata as any).topStrip : null}
                   onEdit={isEditable ? () => onEditPost(post) : undefined}
                 >
-                  <PostCardContent padlet={post} allPadlets={allPadlets} />
+                  <PostCardContent padlet={post} allPadlets={allPadlets} onOpenDocument={onOpenDocument ? () => onOpenDocument(post) : undefined} />
                 </CardShell>
               </ColumnPostContextMenu>
             </div>

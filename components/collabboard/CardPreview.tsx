@@ -3,6 +3,7 @@ import { Padlet } from '@/types/collabboard';
 import { resolveCaptionStyle } from '@/lib/domain/canvas/captionStyle';
 import { Edit2 } from 'lucide-react';
 import ReactionDisplay from './editors/ReactionDisplay';
+import DocumentCardContent from './DocumentCardContent';
 
 interface CardPreviewProps {
     padlet: Padlet;
@@ -10,6 +11,7 @@ interface CardPreviewProps {
     onClick?: () => void;
     onOpenToolbar?: (e: React.MouseEvent) => void;
     onEditContent?: () => void;
+    onReadDocument?: () => void; // PATCH-149B1b-iii §27.4: opt-in Read affordance
     isCardView?: boolean;
     reactions?: string[];
     onAddReaction?: () => void;
@@ -22,6 +24,7 @@ export default function CardPreview({
     onClick,
     onOpenToolbar,
     onEditContent,
+    onReadDocument,
     reactions = [],
     onAddReaction,
     onReactionClick
@@ -186,6 +189,7 @@ export default function CardPreview({
                     />
                 </div>
             )}
+            <DocumentCardContent onRead={onReadDocument} className="absolute bottom-2 right-2 z-20 rounded-md bg-black/40 hover:bg-black/60 focus-visible:bg-black/60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-white px-2 py-1 text-[10px] font-semibold text-white backdrop-blur-sm transition-colors pointer-events-auto" />
         </div>
     );
 }

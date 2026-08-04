@@ -1779,6 +1779,10 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                   setIsCardViewerOpen(true);
                 }
               }}
+              onReadDocument={(() => {
+                const d = selectDocumentModalDestination(padlet, canUseFreeformEditButton);
+                return d ? () => { setPadletToEdit(padlet); setDocumentModalDestination(d); } : undefined;
+              })()}
               isSelected={isPadletSelected(padlet.id)}
               isCardView={padlet.metadata?.showCardView}
               reactions={padlet.metadata?.reactions || []}

@@ -52,6 +52,7 @@ interface WallCanvasProps {
   onPadletUpdate?: (padlet: Padlet) => void;
   onPadletDelete?: (padletId: string) => void;
   onPadletEdit?: (padlet: Padlet) => void;
+  onOpenDocument?: (padlet: Padlet) => void; // PATCH-149B1b-iii §27.4 -- accepted for interface parity; Wall's top-level posts are always containers (wallOrderedPadlets), so there is no live top-level Document card to attach it to today
   onOpenTarget?: (padlet: Padlet) => void; // For opening specific child posts from containers
   onPadletCreate?: () => void;
   onReorder?: (padlets: Padlet[]) => void;

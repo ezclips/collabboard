@@ -86,6 +86,7 @@ interface RowLaneProps {
     onEditPost: (post: Padlet) => void;
     onDeletePost?: (post: Padlet) => void;
     onOpenPost?: (post: Padlet) => void;
+    onOpenDocument?: (post: Padlet) => void; // PATCH-149B1b-iii §27.4
     onOpenTarget?: (post: Padlet) => void; // For opening specific child posts from containers
     onOpenInNewTab?: (post: Padlet) => void;
     onCopyLink?: (post: Padlet) => void;
@@ -127,6 +128,7 @@ export default function RowLane({
     onEditPost,
     onDeletePost,
     onOpenPost,
+    onOpenDocument,
     onOpenTarget,
     onOpenInNewTab,
     onCopyLink,
@@ -503,7 +505,7 @@ export default function RowLane({
                                                 className="cursor-grab active:cursor-grabbing"
                                             >
                                                 <div className="text-base text-gray-800 whitespace-pre-line break-words select-text w-full overflow-hidden">
-                                                    <PostCardContent padlet={post} allPadlets={allPadlets} />
+                                                    <PostCardContent padlet={post} allPadlets={allPadlets} onOpenDocument={onOpenDocument ? () => onOpenDocument(post) : undefined} />
                                                 </div>
                                             </CardShell>
                                         </ColumnPostContextMenu>

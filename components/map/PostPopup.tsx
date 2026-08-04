@@ -17,6 +17,7 @@ type PostPopupProps = {
   onContextMenuOpenChange?: (open: boolean) => void;
   onEditContainer?: (post: Padlet) => void;
   onEditPost?: (post: Padlet) => void;
+  onOpenDocument?: (post: Padlet) => void; // PATCH-149B1b-iii §27.4
   onDeleteContainer?: (post: Padlet) => void;
   onChangeContainerColor?: (post: Padlet, color: string) => void;
   onEditLocation?: (post: Padlet) => void;
@@ -36,6 +37,7 @@ export default function PostPopup({
   onContextMenuOpenChange,
   onEditContainer,
   onEditPost,
+  onOpenDocument,
   onDeleteContainer,
   onChangeContainerColor,
   onEditLocation,
@@ -172,7 +174,7 @@ export default function PostPopup({
       ) : (
         <div className="rounded-lg border border-slate-200 bg-white p-3">
           <div className="mt-2">
-            <PostCardContent padlet={post} allPadlets={allPadlets} />
+            <PostCardContent padlet={post} allPadlets={allPadlets} onOpenDocument={onOpenDocument ? () => onOpenDocument(post) : undefined} />
           </div>
         </div>
       )}

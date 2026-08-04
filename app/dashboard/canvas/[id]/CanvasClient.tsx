@@ -5716,6 +5716,15 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   // Keep the ref current so the early-mounted useEffect can call this function
   openPadletInTypeEditorRef.current = openPadletInTypeEditor;
 
+  // PATCH-149B1b-iii §27.4: the Read affordance's routing owner -- reuses
+  // the existing B1b-ii destination/state, no new predicate or permission model.
+  const openDocumentFromPreview = (post: Padlet) => {
+    const destination = selectDocumentModalDestination(post, canUseFreeformEditButton);
+    if (!destination) return;
+    setPadletToEdit(post);
+    setDocumentModalDestination(destination);
+  };
+
   const openPadletTargetFromContextMenu = (post: Padlet) => {
     if (post.type === 'image') {
       window.setTimeout(() => {
@@ -6491,6 +6500,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                   if (destination) setDocumentModalDestination(destination);
                   else setIsNoteEditorOpen(true);
                 }}
+                onOpenDocument={openDocumentFromPreview}
                 onDeletePost={(post: Padlet) => deletePadletById(post.id)}
                 onStartSlideshow={(post: Padlet) => startSlideshow(post)}
                 onDownloadAttachment={(post: Padlet) => downloadAttachment(post)}
@@ -6584,6 +6594,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                       if (destination) setDocumentModalDestination(destination);
                       else setIsNoteEditorOpen(true);
                     }}
+                    onOpenDocument={openDocumentFromPreview}
                     onOpenTarget={openPadletTargetFromContextMenu}
                     onOpenInNewTab={openPostInNewTab}
                     onCopyLink={copyPostLink}
@@ -6637,6 +6648,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                 canvasId={canvas?.id ?? ''}
                 canvasSettings={wallCanvasSettings}
                 isEditable={canUseFreeformEditButton}
+                onOpenDocument={openDocumentFromPreview}
                 onPadletUpdate={(updatedPadlet) => {
                   setPadlets(prev => prev.map(p => p.id === updatedPadlet.id ? updatedPadlet : p));
                 }}
@@ -6721,6 +6733,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                 onUpdatePadletStrict={handleDrawingLayoutUpdatePadletStrict}
                 onDeletePadlet={handleDrawingLayoutDeletePadlet}
                 onDeleteOverlayPadlets={handleDrawingLayoutDeleteOverlayPadlets}
+                onOpenDocument={openDocumentFromPreview}
                 ghostDraft={drawingGhostDraft}
                 onGhostDraftDropped={() => setDrawingGhostDraft(null)}
                 drawingAppStateRef={drawingAppStateRef}
@@ -6878,6 +6891,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                   canEditPosts={canUseFreeformEditButton}
                   onPinContainerOpen={handleMapPinContainerOpen}
                   onPinContainerClose={handleMapPinContainerClose}
+                  onOpenDocument={openDocumentFromPreview}
                   onEditPinContainer={canUseFreeformEditButton ? ((post) => {
                     if (post.type !== 'container') return;
                     setPadletToEdit(post);

@@ -100,6 +100,7 @@ type MapCanvasProps = {
   onPinContainerClose?: () => void;
   onEditPinContainer?: (post: Padlet) => void;
   onEditPinPost?: (post: Padlet) => void;
+  onOpenDocument?: (post: Padlet) => void; // PATCH-149B1b-iii §27.4
   onDeletePinContainer?: (post: Padlet) => void;
   onChangePinContainerColor?: (post: Padlet, color: string) => void;
   onAddPostToPinContainer?: (post: Padlet, toolType: string) => void;
@@ -135,6 +136,7 @@ function MapCanvas({
   onPinContainerClose,
   onEditPinContainer,
   onEditPinPost,
+  onOpenDocument,
   onDeletePinContainer,
   onChangePinContainerColor,
   onAddPostToPinContainer,
@@ -794,6 +796,7 @@ function MapCanvas({
                       post={post}
                       allPadlets={posts}
                       canEdit={canEditPosts}
+                      onOpenDocument={onOpenDocument}
                       onClose={() => {
                         setSelectedPostId(null);
                         setActiveMapContextMenuId(null);
