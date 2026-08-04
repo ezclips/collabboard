@@ -3739,3 +3739,162 @@ build (marker `1`) · ordinary `.next` restored and exclusion re-verified · mar
    untouched.
 
 No production or test file was modified in this turn. Nothing was pushed.
+
+---
+
+## 26. PATCH-149B1b-ii AMENDMENT — CLIPART EXCLUSION · **PRODUCT-OWNER DIRECTIVE, CLASS A**
+
+**Amended:** 2026-08-04 (governance architect, on product-owner direction). **Base:** `4dc1e93`.
+This section **amends §25 in place by reference** — where §26 and §25 differ, §26 governs. No production
+or test file was modified in this turn.
+
+### 26.1 Directive recorded
+
+1. **No PATCH-152 is reserved.** No follow-up patch number is allocated for the clipart divergence.
+2. **Clipart Posts are not Document Posts.**
+3. **Remove or suppress the Document-modal button/action for clipart posts.**
+4. **Do not reroute or redesign clipart editing in PATCH-149B1b-ii.**
+5. **Preserve the existing clipart editor/viewer behaviour otherwise.**
+
+Intended Document behaviour, restated as the governing product contract:
+
+| Post | Capability | Destination |
+|---|---|---|
+| Document Post | editable | `DocumentEditor`, `readOnly={false}` |
+| Document Post | read-only | **the same** `DocumentEditor`, `readOnly={true}` |
+| **Clipart post** | either | **never offered the Document modal** — existing clipart editor/viewer, unchanged |
+
+### 26.2 Predicate verification — clipart is outside `isDocumentPost`, measured
+
+`isDocumentPost` (`lib/domain/canvas/documentPost.ts:5`) is
+`post.type === 'card' && !post.metadata?.svgUrl`. Re-verified at `4dc1e93`:
+
+- **`metadata.svgUrl` is the sole clipart discriminator in the codebase.** `CardPreview.tsx:37` computes
+  `const isClipartCard = !!svgUrl` — the *identical* test the predicate negates — and the central
+  router's clipart branch (`CanvasClient:5700`) uses `post.type === 'card' && post.metadata?.svgUrl`.
+  A tree-wide scan for an alternative persisted flag (`isClipart`, `clipartUrl`, `iconUrl`) finds
+  **none**; `iconUrl` exists only in `lib/imports/*` for external file-import previews and is never a
+  post-metadata key.
+- **`selectDocumentModalDestination` therefore returns `null` for every clipart post**, in **both**
+  capability states, and the `null` fall-through (§25.5) leaves clipart on its existing destination
+  byte-identically.
+
+**Finding C9 — clipart-ness is mutable at runtime, and the asymmetry favours the exclusion.**
+The icon-replace flow (`CanvasClient:7530-7545`) calls `updatePadletMetadata(id, { svgUrl })` and
+clears the title, converting an existing card into a clipart card. Nothing anywhere **removes**
+`svgUrl` — a tree-wide scan for `svgUrl: null`, `svgUrl: undefined` and `delete …svgUrl` returns
+nothing. So the transition is **one-way**: a Document can become clipart, but clipart can never become a
+Document. Combined with §26.3's per-open evaluation rule, this makes the exclusion permanent once a post
+is clipart.
+
+### 26.3 Affordance requirement — how the suppression must be implemented
+
+The Document modal must be **unreachable** for clipart, not merely visually hidden after the fact.
+
+- **Governed mechanism:** every rewired route asks `selectDocumentModalDestination` **at the moment the
+  route runs**, reading the post's **live** metadata. A `null` result means the route falls through to
+  its current behaviour unchanged. Clipart therefore never sets `documentModalDestination`, so the
+  wrapper never mounts for it.
+- **The destination must never be cached, memoized per post, or stored anywhere but the single
+  `documentModalDestination` state slice set at open time** (§25.4). Because clipart-ness is mutable
+  (C9), a cached decision could outlive its inputs.
+- **No new clipart-specific branch, guard, prop or predicate may be added.** The exclusion is already
+  structural through `isDocumentPost`; a second clipart test would be a P6 duplicate of the
+  discriminator and is **rejected**.
+- **No clipart affordance may be removed, relabelled, reordered or restyled.** "Remove or suppress the
+  Document-modal button/action for clipart" is satisfied by clipart never being offered the Document
+  modal in the first place; the existing pencil/open affordances remain exactly as they are today and
+  continue to open the existing clipart editor/viewer.
+
+**Consequence for §25.5:** the freeform rows (`openFreeformPadletModal:420-421`,
+`CardPreview.onEditContent:1758-1766`) keep the `null` fall-through **exactly as authorized**. This
+amendment does not change the mechanism; it raises the clipart exclusion from an implementation detail
+to a **product contract with its own tests and false-green trigger**.
+
+### 26.4 C7 — closed as recorded divergence, **no follow-up patch**
+
+§25.1 C7 recorded that the freeform pencil and `CardPreview.onEditContent` send clipart to `CardEditor`
+while the central router sends it to `ClipartDraftModal`. Per directive items 4 and 5 this is
+**deliberately preserved and not scheduled**. §25.14 carried item 3 is **reclassified**:
+
+> ~~Carried defect~~ → **Recorded behavioural divergence. Deliberately preserved. Out of scope for
+> PATCH-149B1b-ii and every successor. No patch number is reserved.** It is recorded solely so a future
+> reader does not mistake it for Document scope or for a regression introduced by B1b-ii.
+
+The same treatment applies to §25.14 item 4 (C5, the duplicate freeform router): recorded, not
+scheduled, **no patch number reserved**. B1b-ii removes only its Document branch.
+
+### 26.5 Additional required tests — clipart exclusion
+
+Appended to §25.8. These are **blocking**, not optional.
+
+- **T-19** `selectDocumentModalDestination` returns `null` for a clipart post
+  (`type:'card'`, `metadata.svgUrl` present) with `canEditWorkspace=true` **and** with `false`.
+  (Strengthens §25.8 T-3 from a helper detail to a product contract.)
+- **T-20** A clipart post carrying **every other Document-shaped field** (non-empty `title`,
+  non-empty `content`, `metadata.description`) still returns `null` — the discriminator is `svgUrl`
+  alone and no other field can promote a clipart post into a Document.
+- **T-21** Scoped source slices: no rewired route (`openPadletInTypeEditor` card branch, Columns
+  `onOpenPost`, Rows `onOpenPost`, `openFreeformPadletModal`, `CardPreview.onEditContent`, creation
+  `case 'document'`) can set `documentModalDestination` on a path reachable by a clipart post; the
+  clipart branch at `CanvasClient:5700-5702` and the clipart replace flow at `:7513` are **textually
+  unchanged**.
+- **T-22** No second clipart predicate is introduced: `svgUrl` appears in the B1b-ii diff **zero**
+  times, and `isDocumentPost` remains the only Document/clipart discriminator consulted by routing.
+- **T-23** Post-C9 ordering: a post whose metadata gains `svgUrl` is routed as clipart on its **next**
+  open, proving the destination is computed per-open rather than cached.
+
+### 26.6 Amended negative controls
+
+§25.9 NC7 ("classify clipart as a Document") is **retained and strengthened**: the perturbation must
+make `isDocumentPost` — or the routing call site — treat `metadata.svgUrl` as non-disqualifying, and
+must be detected by **T-19, T-20 and T-21 together**, not by a single assertion. Two further controls
+are added, bringing the total to **16**:
+
+15. **cache the destination** per post instead of recomputing per open → **T-23 fails**.
+16. **add a second, clipart-specific guard** alongside `isDocumentPost` → **T-22 fails**.
+
+All 16 must be detected and reverted hash-identically.
+
+### 26.7 Amended false-green protections
+
+Added to §25.11 — reject if:
+
+- a clipart post can reach `DocumentEditor` in **either** capability state;
+- any clipart affordance is removed, hidden, relabelled, reordered or restyled;
+- clipart editing or viewing behaviour changes in any way;
+- a second clipart predicate or a clipart-specific routing branch is introduced;
+- the Document destination is cached rather than computed per open;
+- a follow-up patch number is reserved for C5 or C7.
+
+### 26.8 Unchanged by this amendment
+
+§25.2 (O2 → ID-B, keyed remount div) · §25.3 (helper contract) · §25.4 (single
+`documentModalDestination` state) · §25.6 (`usePadletSave` excluded) · §25.7 (allowlist: 4 production
+files ≤175 lines, `cardModalRoute.test.ts` ≤10, new tests ≤270) · §25.10 (7 induced failures) ·
+§25.12 (hard stops; split rejected) · §25.13 (validation matrix, baseline 72/72 files · 839/839 tests ·
+410 declarations · 891 exclusion files).
+
+The test-line ceiling in §25.7 is **raised from 270 to 300** to accommodate T-19–T-23; the production
+allowlist and line caps are **unchanged**, because the clipart exclusion requires **no production line
+at all** — it is already structural.
+
+### 26.9 Status
+
+**PATCH-149B1b-ii: OPEN · AUTHORIZED (as amended by §26)** — 4 production files, ≤175 production lines,
+1 existing-test edit ≤10 lines, ≤300 new test lines, 16 negative controls, 7 induced failures.
+
+| Patch | Status |
+|---|---|
+| **PATCH-149A** | **CLOSED** (`c23be50`) |
+| **PATCH-149B0** | **CLOSED** (`c9ea345`) |
+| **PATCH-149B1a** | **CLOSED** (`c44a2ac` + `856f54b`) |
+| **PATCH-149B1b-i** | **CLOSED** (`80011ee` + `4c37205`, reviews §23/§24) |
+| **PATCH-149B1b-ii** | **OPEN · AUTHORIZED, AMENDED (§25 + §26)** — next implementation unit |
+| **PATCH-149B2** | **BLOCKED until B1b-ii closes** |
+| **PATCH-149C** | **BLOCKED on user reproduction** (§14.11) |
+| **PATCH-150** | **RESERVED and separate**; untouched |
+| **PATCH-151** | **CLOSED** — referenced by `cardModalRoute.test.ts`; untouched |
+| **PATCH-152** | **NOT RESERVED** — no number allocated; C5 and C7 are recorded, not scheduled |
+
+No production or test file was modified in this turn. Nothing was pushed.
