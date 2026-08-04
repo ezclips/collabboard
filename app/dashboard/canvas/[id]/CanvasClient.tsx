@@ -31,6 +31,7 @@ import { routeEdge, type GraphSide } from '@/lib/graph/edgeRouting';
 import { createFreeformGraphRepo } from '@/lib/graph/graphRepo';
 import { canEditWorkspace, canManageWorkspace, type WorkspaceRole } from '@/lib/workspace/context';
 import { selectCardModalRoute } from '@/lib/domain/canvas/cardModalRoute';
+import { selectDocumentModalDestination, type DocumentModalDestination } from '@/lib/domain/canvas/documentModalRoute';
 import { resolveWorkspaceForUser } from '@/lib/infra/supabase/workspaceMembers';
 import '@/components/kanban-canvas/kanban-canvas.css';
 import ColumnContainerCreationPrompt from '@/components/canvas/layouts/ColumnContainerCreationPrompt';
@@ -505,6 +506,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   const setViewDrawingPadlet = (v: Padlet | null) => dispatch({ type: 'EDITORS_PATCH', payload: { viewDrawingPadlet: v } });
   const [isClipartDraftModalOpen, setIsClipartDraftModalOpen] = useState(false);
   const [isClipartDraftReplaceMode, setIsClipartDraftReplaceMode] = useState(false);
+  // PATCH-149B1b-ii: single destination slice (§25.4) -- isOpen is `!== null`,
+  // readOnly is `=== 'document-viewer'`; never a separate boolean pair.
+  const [documentModalDestination, setDocumentModalDestination] = useState<DocumentModalDestination | null>(null);
   // === END EDITORS REGION (state declarations; wiring at usePadletSave call below) ===
 
   // --- Container Creation Logic (Column Layout) ---
@@ -5414,7 +5418,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           updated_at: new Date().toISOString(),
           metadata: { ...createMetadata },
         });
-        setIsCardEditorOpen(true);
+        // PATCH-149B1b-ii: new Document always opens editable -- creation
+        // permission is already gated upstream (§25.6/§27 creation lifecycle).
+        setDocumentModalDestination('document-editor');
         break;
       case 'table':
         // Open Table/Spreadsheet Editor
@@ -5702,8 +5708,8 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       else setIsCardViewerOpen(true);
     }
     else if (post.type === 'card') {
-      if (selectCardModalRoute(canUseFreeformEditButton) === 'editor') setIsCardEditorOpen(true);
-      else setIsCardViewerOpen(true);
+      // PATCH-149B1b-ii: exact Document -- clipart already excluded above.
+      setDocumentModalDestination(selectDocumentModalDestination(post, canUseFreeformEditButton));
     }
     else setIsNoteEditorOpen(true);
   };
@@ -5840,6 +5846,8 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           setIsAIContentEditModalOpen={setIsAIContentEditModalOpen}
           isAIContentConvertModalOpen={isAIContentConvertModalOpen}
           setIsAIContentConvertModalOpen={setIsAIContentConvertModalOpen}
+          documentModalDestination={documentModalDestination}
+          setDocumentModalDestination={setDocumentModalDestination}
           padletToEdit={padletToEdit}
           setPadletToEdit={setPadletToEdit}
           padlets={padlets}
@@ -5860,6 +5868,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           saveImage={saveImage}
           saveDrawing={saveDrawing}
           saveAIComponent={saveAIComponent}
+          saveCard={saveCard}
           closeAllToolbars={closeAllToolbars}
           openPadletInTypeEditor={openPadletInTypeEditor}
           handleDetachChildFromFreeformContainer={handleDetachChildFromFreeformContainer}
@@ -6476,8 +6485,11 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                 onAddGlobalSection={() => handleAddSection()}
                 onEditPost={openPadletTargetFromContextMenu}
                 onOpenPost={(post: Padlet) => {
+                  // PATCH-149B1b-ii: Documents no longer bypass into NoteEditor.
                   setPadletToEdit(post);
-                  setIsNoteEditorOpen(true);
+                  const destination = selectDocumentModalDestination(post, canUseFreeformEditButton);
+                  if (destination) setDocumentModalDestination(destination);
+                  else setIsNoteEditorOpen(true);
                 }}
                 onDeletePost={(post: Padlet) => deletePadletById(post.id)}
                 onStartSlideshow={(post: Padlet) => startSlideshow(post)}
@@ -6566,8 +6578,11 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                     onEditPost={openPadletTargetFromContextMenu}
                     onDeletePost={(post) => deletePadletById(post.id)}
                     onOpenPost={(post) => {
+                      // PATCH-149B1b-ii: Documents no longer bypass into NoteEditor.
                       setPadletToEdit(post);
-                      setIsNoteEditorOpen(true);
+                      const destination = selectDocumentModalDestination(post, canUseFreeformEditButton);
+                      if (destination) setDocumentModalDestination(destination);
+                      else setIsNoteEditorOpen(true);
                     }}
                     onOpenTarget={openPadletTargetFromContextMenu}
                     onOpenInNewTab={openPostInNewTab}
@@ -7049,6 +7064,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                     handlePadletMouseDown={handlePadletMouseDown}
                     getClickedSide={(e: React.MouseEvent) => getClickedSide(e as React.MouseEvent<HTMLElement>)}
                     stableActions={stableActions}
+                    setDocumentModalDestination={setDocumentModalDestination}
                   />
                 </CanvasEditorProvider>
               </CanvasConfigProvider>

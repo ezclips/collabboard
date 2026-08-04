@@ -37,6 +37,11 @@ describe('selectCardModalRoute: clipart card branch wiring (PATCH-151)', () => {
   });
 
   it('no second route-decision helper is used alongside the shared one', () => {
-    expect((source.match(/selectCardModalRoute\(/g) || []).length).toBe(2);
+    // PATCH-149B1b-ii: was 2 (clipart branch + the exact-Document card
+    // branch). The Document branch now calls selectDocumentModalDestination
+    // instead, which itself reuses selectCardModalRoute inside
+    // documentModalRoute.ts -- a different file, not counted here. Only the
+    // clipart branch's direct call remains in CanvasClient.tsx.
+    expect((source.match(/selectCardModalRoute\(/g) || []).length).toBe(1);
   });
 });

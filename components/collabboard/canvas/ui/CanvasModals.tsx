@@ -7,7 +7,13 @@ import type { Padlet } from '@/types/collabboard';
 // Stable empty array to avoid creating a new [] reference on every render
 // (which would cause infinite useEffect loops in child editors)
 const EMPTY_COMMENTS: any[] = [];
+// PATCH-149B1b-ii: DocumentEditor's onSave prop is non-optional; read-only
+// mode never invokes it (its branch has no command surface), so this is a
+// typed inert stand-in, matching the DrawingEditor read-only idiom below.
+const noopDocumentSave = () => {};
 import NoteEditor from '@/components/collabboard/editors/NoteEditor';
+import DocumentEditor from '@/components/collabboard/editors/DocumentEditor';
+import type { DocumentModalDestination } from '@/lib/domain/canvas/documentModalRoute';
 import LinkEditor from '@/components/collabboard/editors/LinkEditor';
 import TableEditor from '@/components/collabboard/editors/TableEditor';
 import TodoEditor from '@/components/collabboard/editors/TodoEditor';
@@ -51,6 +57,8 @@ export interface CanvasModalsProps {
   setIsAIContentEditModalOpen: (v: boolean) => void;
   isAIContentConvertModalOpen: boolean;
   setIsAIContentConvertModalOpen: (v: boolean) => void;
+  documentModalDestination: DocumentModalDestination | null;
+  setDocumentModalDestination: (d: DocumentModalDestination | null) => void;
 
   // Data
   padletToEdit: Padlet | null;
@@ -75,6 +83,7 @@ export interface CanvasModalsProps {
   saveImage: (...args: any[]) => any;
   saveDrawing: (...args: any[]) => any;
   saveAIComponent: (data: SaveAIComponentData) => void;
+  saveCard: (...args: any[]) => any;
 
   // Container-specific callbacks
   closeAllToolbars: (except?: Record<string, boolean>) => void;
@@ -98,6 +107,7 @@ export default function CanvasModals({
   isAIComponentEditorOpen, setIsAIComponentEditorOpen,
   isAIContentEditModalOpen, setIsAIContentEditModalOpen,
   isAIContentConvertModalOpen, setIsAIContentConvertModalOpen,
+  documentModalDestination, setDocumentModalDestination,
   padletToEdit, setPadletToEdit,
   padlets, setPadlets,
   selectedPadletId,
@@ -108,6 +118,7 @@ export default function CanvasModals({
   saveNote, saveLink, saveTable, saveTodo, saveContainer,
   saveComment, saveImage, saveDrawing,
   saveAIComponent,
+  saveCard,
   closeAllToolbars,
   openPadletInTypeEditor,
   handleDetachChildFromFreeformContainer,
@@ -132,6 +143,31 @@ export default function CanvasModals({
 
   return (
     <div onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
+      {/* Document Editor/Viewer Modal (PATCH-149B1b-ii) -- key remounts on
+          open/close and on selected-Document-id change, resolving the O2
+          identity corner the same way every other editor below already does
+          (PATCH-149 §25.2/§27). */}
+      <div
+        key={
+          documentModalDestination
+            ? `document-${padletToEdit?.id === 'new' ? 'new' : padletToEdit?.id || 'new'}`
+            : 'document-closed'
+        }
+      >
+        <DocumentEditor
+          isOpen={documentModalDestination !== null}
+          readOnly={documentModalDestination === 'document-viewer'}
+          title={padletToEdit?.title || ''}
+          initialContent={padletToEdit?.content || ''}
+          metadata={padletToEdit?.metadata ?? null}
+          onSave={documentModalDestination === 'document-editor' ? saveCard : noopDocumentSave}
+          onClose={() => {
+            setDocumentModalDestination(null);
+            setPadletToEdit(null);
+          }}
+        />
+      </div>
+
       {/* Note Editor Modal */}
       <div key={isNoteEditorOpen ? `note-${padletToEdit?.id === 'new' ? 'new' : padletToEdit?.id || 'new'}` : 'note-closed'}>
         <NoteEditor

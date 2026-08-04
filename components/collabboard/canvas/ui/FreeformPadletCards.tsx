@@ -7,6 +7,7 @@ import type { AuthUser } from '@/lib/domain/auth/user';
 import type { Padlet } from '@/types/collabboard';
 import { createUpdatePostFieldsCommand } from '@/lib/domain/canvas/posts';
 import { selectCardModalRoute } from '@/lib/domain/canvas/cardModalRoute';
+import { selectDocumentModalDestination, type DocumentModalDestination } from '@/lib/domain/canvas/documentModalRoute';
 import { createPostsRepository } from '@/lib/infra/canvas/postsRepository';
 import ImageActionsToolbar from '@/components/collabboard/editors/ImageActionsToolbar';
 import ImageDrawingLayer from '@/components/collabboard/editors/ImageDrawingLayer';
@@ -167,6 +168,8 @@ export interface FreeformPadletCardsProps {
   handlePadletMouseDown: (e: React.MouseEvent, padletId: string) => void;
   getClickedSide: (e: React.MouseEvent) => any;
   stableActions: StableCanvasActions<FreeformPadletActionMap>;
+  // PATCH-149B1b-ii: Document-open destination, shared with the central router.
+  setDocumentModalDestination: (d: DocumentModalDestination | null) => void;
 }
 
 
@@ -180,6 +183,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
     selectedPadletId, selectedPadletIds, setSelectedPadletId, setGraphConnectSelection, graphRefreshToken,
     closeAllToolbars, handlePadletMouseDown, getClickedSide,
     stableActions,
+    setDocumentModalDestination,
   } = props;
   /**
    * PATCH-053: image-reaction writes already ignore a resolved Supabase error
@@ -418,7 +422,11 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
     } else if (padletType === 'drawing') {
       setIsDrawingEditorOpen(true);
     } else if (padletType === 'card') {
-      setIsCardEditorOpen(true);
+      // PATCH-149B1b-ii: exact Document -- clipart keeps its existing
+      // CardEditor destination unchanged (PATCH-149 §26.4 C7).
+      const destination = selectDocumentModalDestination(padlet, canUseFreeformEditButton);
+      if (destination) setDocumentModalDestination(destination);
+      else setIsCardEditorOpen(true);
     } else if (padletType === 'container') {
       setIsContainerEditorOpen(true);
     } else if (padletType === 'ai-component') {
@@ -435,6 +443,8 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
     setIsCommentEditorOpen,
     setIsDrawingEditorOpen,
     setIsCardEditorOpen,
+    setDocumentModalDestination,
+    canUseFreeformEditButton,
     setIsContainerEditorOpen,
     setIsAIComponentEditorOpen,
     setIsAIContentEditModalOpen,
@@ -1758,7 +1768,12 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
               onEditContent={() => {
                 closeAllToolbars();
                 setPadletToEdit(padlet);
-                if (selectCardModalRoute(canUseFreeformEditButton) === 'editor') {
+                // PATCH-149B1b-ii: exact Document -- clipart keeps its
+                // existing editor/viewer split unchanged (§26.4 C7).
+                const destination = selectDocumentModalDestination(padlet, canUseFreeformEditButton);
+                if (destination) {
+                  setDocumentModalDestination(destination);
+                } else if (selectCardModalRoute(canUseFreeformEditButton) === 'editor') {
                   setIsCardEditorOpen(true);
                 } else {
                   setIsCardViewerOpen(true);
