@@ -1,9 +1,10 @@
 # PATCH-149 — DOCUMENT POST USABILITY, MODAL CLEANUP, PDF-READY FOUNDATION
 
 **Status:** **STAGED · PATCH-149A CLOSED (`c23be50`) · PATCH-149B0 CLOSED (`c9ea345`, review §17) ·
-PATCH-149B1 **BLOCKED** (§18) — contracts settled, but the mandatory corpus measurement was denied
-by the environment and the routing census found three ungated Document-reachable openers ·
-PATCH-149B2 BLOCKED behind B1 · PATCH-149C RESERVED for the two unlocated defects · NOT PUSHED**
+PATCH-149B1 **SPLIT after measurement** (§19) — corpus measured (2 Document rows, zero HTML,
+predicate **P1 safe**), routing census corrected (`DrawingLayout` not reachable; the two reachable
+routes are capability-gated but drop the title) · **PATCH-149B1a AUTHORIZED** · PATCH-149B1b BLOCKED
+behind B1a · PATCH-149B2 BLOCKED behind B1b · PATCH-149C RESERVED · NOT PUSHED**
 **Authored:** 2026-08-04 (governance architect). **Base:** `177645b`. **First authoring of this
 number** — `git log --all --diff-filter=A -- .fable5/patches/PATCH-149.md` is empty.
 **Inherits:** PATCH-138 label finding · PATCH-139 D3/D5/D6 · PATCH-140 component 6 ·
@@ -1727,3 +1728,254 @@ regression." **That classification is superseded by §18.3.** They *are* Documen
 *are* ungated. The reasoning error is worth naming: it inferred reachability from where Documents are
 *created* (Freeform) rather than from what the handlers *accept* (any post). PATCH-139/151 remain
 correctly closed — their Freeform routes are sound — but the capability surface was never complete.
+
+> **§18.3 and §18.9 are themselves partly superseded by §19.3.** The measured census shows
+> `DrawingLayout` is **not** Document-reachable, and the two routes that are reachable are **capability-
+> gated after all**. The defect is real but is a *title-loss* hazard, not a permission bypass. §19.3
+> supersedes; this section is retained to show the correction chain.
+
+---
+
+## 19. PATCH-149B1 — MEASURED AMENDMENT · **AUTHORIZED, SPLIT (S2)**
+
+**Authored:** 2026-08-04 (governance architect). **Base:** `204c755`. The owner approved a one-time
+SELECT-only corpus inspection; it was executed, recorded, and the script deleted. Both §18 blockers
+are resolved. No production or test file was modified in this turn.
+
+### 19.1 Corpus measurement — method, safeguards, deletion
+
+**Method.** `scratchpad/corpus149b1.mjs` (Node + `@supabase/supabase-js`, service-role key read from
+`.env.local`) issued **one** query:
+`supabase.from('padlets').select('type,title,content,metadata,width,height').eq('type','card')`.
+
+**SELECT-only, verified.** A grep for `.insert(|.update(|.delete(|.upsert(|.rpc(` over the script
+returned only `crypto.createHash().update()` — no Supabase mutation, no RPC, no write-back. Exactly
+one `.from()/.select()` pair.
+
+**Privacy safeguards.** The script printed **aggregates only**: per-class counts, metadata *key*
+frequency (never values), title present/empty **counts**, `data-*` presence counts, tag-*name* sets,
+character length, newline counts, geometry buckets, and 8-char SHA1s used solely for duplicate-shape
+counting. **No stored content, no title text, no ids, no board/workspace/user identifiers** were
+emitted. Nothing below is an excerpt of user data.
+
+**Deletion.** The script was removed from both the repo root (where it was copied only so Node could
+resolve `@supabase/supabase-js`) and the scratchpad; no report file was written; `git status` shows
+only the five pre-existing protected paths. **No credentials or query results remain in the worktree.**
+
+### 19.2 Aggregate corpus result — and it reframes the patch
+
+| Measure | Value |
+|---|---|
+| Total `type:'card'` rows | **142** |
+| Clipart rows (`metadata.svgUrl`) | **140** |
+| **Rows satisfying the predicate (non-clipart)** | **2** |
+| Content classification | `plain-text` **1** · `malformed-html-like-text` **1** |
+| HTML fragments / full HTML documents / JSON / escaped-HTML / empty | **0 each** |
+| Rows with `data-*` attributes | **0** |
+| Rows with TipTap-style markup (`<strong>`, `<ul>`, `<h1>`…) | **0** |
+| Titles | present **2**, empty **0** |
+| `metadata.kind === 'card'` | **0** |
+| Metadata key frequency | `description` **2** · `parentId` **1** · `zIndex` **1** |
+| Geometry | `180x220` **1** · `300x200` **1** |
+| Distinct structural shapes | **2** (no duplicates) |
+| Newlines | LF-only **1** · none **1** |
+
+**Three findings that change the risk model:**
+
+1. **The "mixed corpus" premise is refuted by measurement.** §7 and §14.6 warned that some
+   `type:'card'` rows might already hold HTML from non-editor paths. **Zero rows contain HTML** — no
+   tags, no `data-*`, no TipTap markup. The adapter's HTML-input branch has **no real instance**, so
+   the migration's actual risk is far lower than governance had assumed. It must still be implemented
+   (defensively, and because `NoteEditor` emits HTML on save), but it is not load-bearing for
+   existing data.
+
+2. **The escaping requirement is real, not hypothetical.** The `malformed-html-like-text` row is
+   **9,250 characters, 332 LF newlines, and zero matched tags** — i.e. plain prose containing bare
+   `<`/`>` characters. Naively passing it to TipTap as HTML would silently swallow everything from the
+   first `<` onward. **This single row is the strongest fixture shape in the corpus** and the reason
+   the adapter must escape rather than trust. It also proves paragraph/newline preservation matters:
+   332 newlines must survive as structure.
+
+3. **Both rows are provably genuine Documents.** `metadata.description` appears in **2 of 2** rows,
+   and `description` is written *only* by `CardEditor`'s footer input (`CardEditor.tsx:29`, persisted
+   through `handleSave`). Both rows therefore passed through the Document editor. Combined with the
+   source-complete producer census (§14.3), no evidence of an "ordinary non-Document card" exists.
+
+**Geometry is explicitly rejected as a discriminator.** One row is `300x200`, which **no** creation
+site produces (all card creators use 180×220, or 200×200 for a container clipart drop). The
+explanation is user resizing, which is ordinary. Recorded so a future patch does not mistake geometry
+for provenance.
+
+### 19.3 Predicate classification — **P1 · SAFE FOR ALL MEASURED ROWS**
+
+`isDocumentPost(post) ≡ post.type === 'card' && !post.metadata?.svgUrl` holds for **2 of 2** measured
+rows, both independently corroborated as Documents by `metadata.description`. Clipart (140 rows) is
+excluded by `svgUrl` with no ambiguity. **No stable-discriminator work is required; no hard stop.**
+
+**Stated honestly:** n = 2 is a small Document corpus. P1 is a statement about *the entire accessible
+corpus*, not about a large sample — the strength of the predicate rests primarily on the
+source-complete producer census (§14.3), with the corpus confirming rather than establishing it. The
+implementation must still treat unclassifiable content defensively (§19.6), because the next
+Document written is not covered by a measurement of the previous two.
+
+### 19.4 Cross-layout route census — §18.3 **corrected on two counts**
+
+| Route | Component | Invoked for | Capability gate | Destination | Bypasses `openPadletInTypeEditor`? | Document-reachable? |
+|---|---|---|---|---|---|---|
+| `CanvasClient:6480` `onOpenPost` | **`ColumnsLayout`** → `ColumnsCanvasRow:344,409` → `ColumnPostContextMenu.onOpen` | any post | **`disabled={!isEditable}`**, and `isEditable={canUseFreeformEditButton}` (`:6466`) | `setIsNoteEditorOpen(true)` | yes | **YES** |
+| `CanvasClient:6570` `onOpenPost` | **`RowCanvasDnD`** → `RowLane:418,478` → `ColumnPostContextMenu.onOpen` | any post | **`disabled={!isEditable}`**, `isEditable={canUseFreeformEditButton}` (`:6551`) | `setIsNoteEditorOpen(true)` | yes | **YES** |
+| `CanvasClient:6729` `onEditPadletAsPost` | **`DrawingLayout`** → `CanvasContextMenu:172` | **only when `isContainerType`** — `padlet.type === 'container' \|\| metadata.isContainer === true` (`:105`) | n/a | `setIsNoteEditorOpen(true)` | yes | **NO** |
+
+**Correction 1 — `DrawingLayout` is not Document-reachable.** `CanvasContextMenu:172` calls
+`onEditPadletAsPost` only under `isContainerType && onEditPadletAsPost`, otherwise `onEdit(padlet)`.
+A Document is `type:'card'` without `metadata.isContainer`, so it never takes that branch. **§18.3
+over-reported the blast radius by one route.**
+
+**Correction 2 — the two reachable routes are capability-gated, and by the *right* boolean.** Both
+sites disable the context menu with `disabled={!isEditable}`, and `isEditable` is wired from
+**`canUseFreeformEditButton`** (`:6466`, `:6551`) — **the same boolean
+`selectCardModalRoute(canUseFreeformEditButton)` consumes**. A read-only user cannot open the menu at
+all, so they reach *no* modal rather than the wrong one. **This is not a permission bypass, and
+PATCH-139/151 are not weakened.** §18.3's "ungated" framing was wrong.
+
+**The real defect, correctly stated — a P3 data-integrity hazard, not a security one.** An *editable*
+user opening a Document from Columns or Rows lands in **`NoteEditor`**, whose save contract
+`SaveNoteData` has **no `title` field** (`usePadletSave.ts:34-47`; `saveNote` hardcodes
+`title: 'New Note'` only on insert and never updates title thereafter). Saving therefore **cannot
+persist the Document's title**, and writes note-shaped metadata (`cardColor`, `topStrip`,
+`reactions`, `badgeColor`, `detachedComments`) onto a Document row. Both measured Documents have
+titles, so this is a live path to losing user work (**P3**, P10).
+
+**Non-Document blast radius.** `onOpenPost` is a generic handler: Note, Todo, Link, Image and
+embedded-media posts also flow through it and **must keep their current destinations**. The fix must
+therefore branch *only* on the Document predicate and fall through untouched for everything else —
+which is precisely why RTE-C is selected below over centralisation.
+
+### 19.5 Routing architecture — **RTE-C · shared Document open helper**
+
+- **RTE-A rejected:** a central dispatcher would put Note/Todo/Link/Image/comment routing on the
+  table across three layouts — exactly the "generic modal-permission redesign without evidence" the
+  brief forbids.
+- **RTE-B rejected:** duplicating the predicate + capability branch at each of three owners
+  re-creates the P6 duality this patch exists to end.
+- **RTE-C selected:** one narrow helper returning the Document modal destination, consumed by the two
+  layout owners **and** the existing Freeform path, composing with — never replacing —
+  `selectCardModalRoute`. Non-Document posts fall through to today's behaviour, untouched.
+- RTE-D not needed: with `DrawingLayout` excluded, the routing work is two call sites.
+
+**Capability authority unchanged:** reuse `canUseFreeformEditButton` and `selectCardModalRoute`;
+introduce no second role model; never infer permission from callback presence; client gating remains
+UI-only and is not the persistence authorization boundary.
+
+### 19.6 Adapter contract (now specified against measured shapes)
+
+One boundary, `lib/domain/canvas/documentContentAdapter.ts`, pure and node-testable:
+
+- `classifyDocumentContent(raw)` → `empty | plain-text | html | escaped-html | malformed | json | unknown`.
+- `toEditorHtml(raw)` — **plain text (the measured majority case): HTML-escape `&`, `<`, `>` first**,
+  then map newlines to paragraph/`<br>` structure so the 332-newline row survives. **Never** hand raw
+  text to TipTap as HTML.
+- `html` — pass through the existing `DOMPurify` boundary; preserve supported marks **and `data-*`
+  attributes** (the PDF seam; §14.6).
+- `empty` → empty TipTap document. `malformed`/`unknown` → **fail safe by treating as plain text**;
+  never silently drop visible source.
+- `fromEditorHtml(html)` — normalize for persistence; treat `<p></p>` as empty; **metadata passes
+  through untouched**.
+- **No bulk migration, no schema change.** Lazy normalization only on a later user save, and **B1
+  does not change save semantics** (B2 owns that).
+
+### 19.7 Split decision — **S2**, and the budgets that force it
+
+Counting the work: 3 new domain/editor files + `NoteEditor` hook adoption + a Document wrapper +
+toolbar mode-filtering + 2 routing call sites + `CanvasClient` wiring exceeds the brief's own
+one-patch ceiling (≈6 production files / 250 production lines). **S2 is selected; nothing is
+compressed to fit.**
+
+**PATCH-149B1a — predicate, adapter, shared core.** Production allowlist:
+
+| # | Path | Change | Max lines |
+|---|---|---|---|
+| 1 | `lib/domain/canvas/documentPost.ts` | **new** — `isDocumentPost` predicate, pure | **25** |
+| 2 | `lib/domain/canvas/documentContentAdapter.ts` | **new** — §19.6 adapter, pure | **110** |
+| 3 | `components/collabboard/editors/useSharedTipTapEditor.ts` | **new** — R1 hook: `useEditor`, exported extension registry, content init, `getHTML`, `editable` flag; accepts optional `editorProps`/`handleClick` override (the one measured coupling, §18.4) | **90** |
+| 4 | `components/collabboard/editors/NoteEditor.tsx` | consume the hook; **behaviour-preserving only** — no lifecycle, toolbar, comment, colour or reaction change | **45** |
+
+**Production total ≤ 270 lines / 4 files.** Tests: `documentPost.test.ts` (≤80, node),
+`documentContentAdapter.test.ts` (≤160, node), `useSharedTipTapEditor.test.tsx` (≤120, **jsdom**, in
+`components/collabboard/editors/`), plus ≤20 lines of additions to
+`NoteEditor.characterization.test.tsx`. **Test total ≤ 380 / 4 files.**
+
+**PATCH-149B1b — wrapper, routing, read-only, toolbar. BLOCKED until B1a closes.** Indicative scope
+(budgets issued at its own authoring): `DocumentEditor.tsx` (new wrapper, editable + read-only via
+`editable:false`), `NoteEditorToolbar.tsx` (mode/capabilities filtering, **Align excluded from
+Document mode only**), the RTE-C helper's two layout call sites plus the Freeform path, and
+`CanvasClient`/`CanvasModals` wiring.
+
+### 19.8 Induced failures — each demonstrable at parent `204c755`
+
+**B1a:** (1) no `isDocumentPost` helper exists — the predicate is inlined at `CanvasClient:5700/5704`;
+(2) no content adapter exists — plain text with `<` reaches no escaping boundary anywhere;
+(3) no shared TipTap core exists — `NOTE_EXTENSIONS` is module-private and unexported
+(`NoteEditor.tsx:23`), consumed by exactly one `useEditor`;
+(4) feeding the measured 9,250-char angle-bracket shape to TipTap as HTML **loses content** — the
+proof that §19.6's escaping rule is required.
+
+**B1b (recorded, proven at its own authoring):** the Document predicate routes to `CardEditor`;
+read-only Documents render textarea semantics; `Align` renders in the only rich-text toolbar;
+Columns/Rows open Documents in `NoteEditor` where a save drops the title (§19.4).
+
+### 19.9 Negative controls
+
+**B1a:** classify clipart as Document → predicate test fails · classify a `'text'` note as Document →
+fails · treat plain `<example>` text as HTML → round-trip test fails on lost content · strip `data-*`
+in the adapter → attribute round-trip fails · drop the newline mapping → the 332-newline fixture
+fails · change `NoteEditor`'s save payload or lifecycle during hook adoption → B0 characterization
+fails (10 tests) · unexport/duplicate the extension registry → shared-core test fails.
+
+**B1b:** render read-only with an editable editor · expose a toolbar in read-only · restore `Align` in
+Document mode · route a Document back to `CardEditor` · bypass capability on the layout routes ·
+embed title into body HTML · add a PDF-specific branch. Each must be detected.
+
+### 19.10 Validation matrix
+
+Corpus evidence (§19.1–19.2, recorded — not re-runnable without fresh approval) · adapter tests ·
+predicate tests · shared-core jsdom tests · **B0 `NoteEditor` characterization regression, 10/10
+unchanged** · `CardEditor` · `CardPreview` · `ClipartCardDraftModal` · `cardModalRoute` · routing
+source-slices where full render is impractical · **full Vitest (baseline 67 files / 775 tests)** ·
+clean one-run `npm run typecheck` (**410** declarations) · `npx next build` · bridge exclusion
+(**891** files) · clean E2E build (marker `1`) · ordinary `.next` restored and exclusion re-verified ·
+`git diff --check` · only the five protected worktree paths. **No new test environment; no package or
+schema change.**
+
+### 19.11 Hard stops — re-evaluated
+
+| Hard stop | Result |
+|---|---|
+| Real corpus contains non-Document rows satisfying the predicate | **NOT TRIGGERED** — 2/2 rows are Documents, corroborated by `metadata.description` (§19.2) |
+| Corpus shapes cannot be safely distinguished | **NOT TRIGGERED** — two shapes, both plain text; zero HTML |
+| Extraction requires broad NoteEditor rewrite | **NOT TRIGGERED** — R1, one `useEditor`, single `handleClick` coupling |
+| Existing NoteEditor behavior cannot be preserved | **NOT TRIGGERED** — B0's 10 characterization tests are the guard; still under-covered for comment/colour/reaction (§18.4), so B1a is behaviour-preserving only |
+| Plain text cannot be adapted without schema changes | **NOT TRIGGERED** — escaping + newline mapping; no migration |
+| Custom attributes do not survive serialization | **NOT TRIGGERED** — proven by the shipped `Comment` extension |
+| Read-only TipTap still permits mutation | **UNVERIFIED — deferred to B1b**, must be proven in the B0 harness, not assumed |
+| **Routing requires weakening PATCH-139/151** | **NOT TRIGGERED** — §19.4 shows both reachable routes already gate on `canUseFreeformEditButton`; RTE-C composes with `selectCardModalRoute` |
+| Cannot be tested with the B0 harness | **NOT TRIGGERED** |
+| **Production scope cannot be bounded** | **RESOLVED** — `DrawingLayout` excluded; B1a is 4 files / ≤270 lines |
+
+### 19.12 Status
+
+**PATCH-149B1a: OPEN · AUTHORIZED** — 4 production files, ≤270 production lines, ≤380 test lines.
+**PATCH-149B1b: OPEN · BLOCKED until B1a closes.**
+
+| Patch | Status |
+|---|---|
+| **PATCH-149A** | **CLOSED** (`c23be50`) |
+| **PATCH-149B0** | **CLOSED** (`c9ea345`) |
+| **PATCH-149B1a** | **OPEN · AUTHORIZED — next implementation unit** |
+| **PATCH-149B1b** | **BLOCKED until B1a closes** — wrapper · RTE-C routing · read-only · toolbar |
+| **PATCH-149B2** | **BLOCKED until B1b closes** — Save/dirty/discard/Close/Escape; B1 leaves seams, implements none |
+| **PATCH-149C** | **BLOCKED on user reproduction** (§14.11) |
+| **PATCH-150** | **RESERVED and separate**; untouched |
+
+**Carried to B1b as a first-class item:** the Columns/Rows title-loss path (§19.4). It is a live P3
+hazard today, independent of the TipTap migration, and must not be lost behind the foundation work.
