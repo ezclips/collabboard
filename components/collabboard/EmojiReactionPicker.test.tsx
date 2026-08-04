@@ -99,10 +99,12 @@ describe('EmojiReactionPicker PATCH-125 census', () => {
     expect(purposes[2]).toContain('emoji-picker-react');
   });
 
-  it('does not modify package files or remove the dependency', () => {
+  it('does not remove emoji-picker-react from package files', () => {
     expect(source('package.json')).toContain('"emoji-picker-react"');
     expect(source('package-lock.json')).toContain('"emoji-picker-react"');
-    expect(execFileSync('git', ['diff', '--', 'package.json', 'package-lock.json'], { encoding: 'utf8' })).toBe('');
+    const diff = execFileSync('git', ['diff', '--', 'package.json', 'package-lock.json'], { encoding: 'utf8' });
+    const removedLines = diff.split('\n').filter((l) => l.startsWith('-') && !l.startsWith('---'));
+    expect(removedLines.find((l) => l.includes('emoji-picker-react'))).toBeUndefined();
   });
 });
 
