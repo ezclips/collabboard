@@ -1,7 +1,8 @@
 # PATCH-149 — DOCUMENT POST USABILITY, MODAL CLEANUP, PDF-READY FOUNDATION
 
-**Status:** **STAGED · PATCH-149A CLOSED (`c23be50`) · PATCH-149B0 AUTHORIZED — jsdom
-characterization harness for `NoteEditor`, 0 production files (§15) · PATCH-149B1/B2 BLOCKED behind
+**Status:** **STAGED · PATCH-149A CLOSED (`c23be50`) · PATCH-149B0 AUTHORIZED, amended — jsdom
+characterization harness for `NoteEditor` plus a stale PATCH-125 package-file guard correction
+(§15, §16), 0 production files, full suite proven 67/67 · 775/775 · PATCH-149B1/B2 BLOCKED behind
 B0 · PATCH-149C RESERVED for the two unlocated defects · NOT PUSHED**
 **Authored:** 2026-08-04 (governance architect). **Base:** `177645b`. **First authoring of this
 number** — `git log --all --diff-filter=A -- .fable5/patches/PATCH-149.md` is empty.
@@ -1120,3 +1121,168 @@ budgeted lines plus a bounded lockfile resolution.
 **Recorded for B1's benefit:** this harness already proves, executably, three claims §14 could only
 argue from source — save fires **before** close, the save payload carries **no title or metadata**,
 and **Escape does nothing**. B1 inherits them as measured baselines rather than assertions.
+
+---
+
+## 16. PATCH-149B0 AMENDMENT — STALE PATCH-125 PACKAGE-FILE FREEZE · **RESOLVED, CLASS A**
+
+**Authored:** 2026-08-04 (governance architect). **Base:** `76b95a3`, against the B0 implementation
+left uncommitted in the working tree. **Scope: one additional test file. Zero production. Zero
+change to the already-authorized B0 allowlist.**
+
+### 16.1 Blocker diagnosis
+
+Implementation reported the full suite at **1 failed / 774 passed** (67 files, 775 tests), the sole
+failure being `components/collabboard/EmojiReactionPicker.test.tsx:105`:
+
+```ts
+expect(execFileSync('git', ['diff', '--', 'package.json', 'package-lock.json'])).toBe('');
+```
+
+This fires on **any** working-tree diff to either file — including the governed, owner-authorized
+`jsdom` addition — because the assertion checks the *files*, not the *dependency*.
+
+### 16.2 The PATCH-125 invariant — read from source, not inferred
+
+`.fable5/patches/PATCH-125.md` was read in full. Its actual requirement:
+
+- **§3e:** *"`package.json` and `package-lock.json` remain PROHIBITED. Dependency removal is not
+  authorized…"* — this is PATCH-125's own **scope boundary** (§5's "Prohibited unless source proves
+  necessary" list, alongside `ReactionDisplay.tsx`, `CardActionsToolbar.tsx`, etc.), telling
+  **PATCH-125's implementer** not to touch those files while migrating reaction pickers. It is not
+  phrased as, and nothing else in the document treats it as, a permanent prohibition binding every
+  future patch.
+- **§7, the 22 required tests:** none specifies a `git diff` check. Item set §4/§7 governs behaviour
+  — *"No post Reaction path imports or renders `emoji-picker-react`"* (contract item 2, test item 3)
+  — never file immutability.
+- **§4 contract + §3e together** reduce to exactly one durable invariant: **`emoji-picker-react`
+  must remain declared and must not be removed.** The `toBe('')` diff check was the **implementer's
+  own proxy** for that invariant, and a strictly stronger one than governance asked for — it was
+  never itself authorized by PATCH-125's text.
+
+**Conclusion: the assertion has been over-scoped since PATCH-125 shipped (`3ea20ec`) and would have
+blocked *any* future dependency change to these two files, not only PATCH-149B0's.** This is a
+latent defect in a regression guard, exposed — not caused — by B0.
+
+### 16.3 Scope classification: **A — ACCEPTABLE GOVERNANCE AMENDMENT**
+
+B is not applicable: PATCH-125 itself never mandated immutable package files (§16.2). C is not
+applicable: a narrow semantic correction exists, was drafted, executed, and proven correct
+end-to-end (§16.4–16.6) without touching PATCH-125's actual production contract or any of its other
+21 required tests.
+
+### 16.4 Authorized correction — exact
+
+**File:** `components/collabboard/EmojiReactionPicker.test.tsx`, the single `it` block at
+(pre-amendment) lines 102–106. **Change type:** replace the file-level zero-diff assertion with a
+line-level "was this dependency's line removed" assertion; retain both existing presence checks
+unchanged.
+
+```ts
+  it('does not remove emoji-picker-react from package files', () => {
+    expect(source('package.json')).toContain('"emoji-picker-react"');
+    expect(source('package-lock.json')).toContain('"emoji-picker-react"');
+    const diff = execFileSync('git', ['diff', '--', 'package.json', 'package-lock.json'], { encoding: 'utf8' });
+    const removedLines = diff.split('\n').filter((l) => l.startsWith('-') && !l.startsWith('---'));
+    expect(removedLines.find((l) => l.includes('emoji-picker-react'))).toBeUndefined();
+  });
+```
+
+**Verified — this was drafted and executed by this governance turn as a probe, then reverted; it is
+authorized for the implementation engineer to reapply, not left applied here** (this document
+records source of truth; the working tree was returned to its pre-amendment state, hash
+`bca4f77…`, matching the already-uncommitted B0 implementation exactly).
+
+**Line budget: 6 changed lines** (`git diff --numstat`: 4 insertions, 2 deletions) — within the
+authorized ≤8.
+
+No other line in the file changes. `execFileSync` remains imported (already present, line 1) —
+no new import required.
+
+### 16.5 Amended allowlist
+
+| Category | Path | Authorization |
+|---|---|---|
+| Infrastructure | `package.json` | unchanged from §15.7 |
+| Infrastructure | `package-lock.json` | unchanged from §15.7 |
+| Infrastructure | `vitest.config.ts` | unchanged from §15.7 |
+| Test | `components/collabboard/editors/NoteEditor.characterization.test.tsx` | unchanged from §15.7 |
+| **Test (new)** | **`components/collabboard/EmojiReactionPicker.test.tsx`** | **one `it` block only, ≤8 changed lines, exact shape §16.4** |
+
+**Production remains frozen — zero files, unchanged from §15.7.** No PATCH-125 production source
+(`EmojiReactionPicker.tsx` or any of the 6 reaction call-site files) may change. No other `it` block
+in `EmojiReactionPicker.test.tsx` may change — the other 21 PATCH-125 assertions (migration census,
+non-reaction consumers, structure/search, persistence-route source guards) are untouched and remain
+binding exactly as PATCH-125 left them.
+
+### 16.6 Induced failure and validation — executed by this governance turn as probe evidence
+
+**Before correction** (stale assertion + governed jsdom diff, reproduced): **67 files, 775 tests,
+774 passed, 1 failed** — matches the implementer's report exactly.
+
+**After correction:** **67/67 files, 775/775 tests — full suite green.**
+
+**Negative controls — all 4 executed, all reverted, all hash-verified byte-identical to the
+pre-control state:**
+
+1. Removed `"emoji-picker-react"` from `package.json` → corrected test **fails** on the first
+   `toContain` (`package.json` restored via targeted single-line insert, not `npm`/`JSON.stringify`,
+   to avoid the same comma-style reformatting hazard noted in §15; hash confirmed `2657dea…`,
+   matching the implementer's own file exactly).
+2. Deleted the full `node_modules/emoji-picker-react` resolved block plus the root dependency line
+   from `package-lock.json` (3 occurrences → 0) → corrected test **fails** on the second `toContain`
+   (hash restored to `8189984…`).
+3. Restored the original whole-file `toBe('')` assertion → **fails** against the governed jsdom diff
+   — this is the original blocker, re-derived to confirm the amendment is what resolves it, not
+   something else (file restored to the corrected version, hash `b6f3ebe…`).
+4. Removed `node_modules/jsdom` (directory moved aside, `package.json`/lockfile text untouched) →
+   `NoteEditor.characterization.test.tsx` **fails outright at environment-init** (`Cannot find
+   package 'jsdom'`, 0 tests collected) — proving the B0 dependency is genuinely load-bearing for a
+   real test file, not merely declared. Directory restored; suite reconfirmed 10/10 immediately
+   after.
+
+**Full validation matrix, this turn:** full Vitest 67/67 · 775/775 (post-correction) and 67/67 ·
+775/775 again after every negative control's revert (no residual state). `git diff --numstat` on
+the amendment: `4 2`. The build/typecheck/exclusion/E2E matrix was already proven clean by the prior
+implementation turn against the same 4 unchanged B0 files (§15.12) and is unaffected by a
+test-only, non-production correction; the implementation engineer's own commit turn re-runs it
+per the standing contract.
+
+### 16.7 False-green check
+
+The correction does not merely delete protection: both presence checks (`toContain`) are retained
+verbatim, and the diff-based check is *narrower but still binding* — it fails on the exact defect it
+exists to catch (accidental removal) while no longer failing on unrelated, authorized additions. It
+does not touch PATCH-125's other 21 assertions, its production contract, or its census. **Rejected
+alternative:** deleting the whole `it` block — this would satisfy "stop failing" but strictly weaken
+PATCH-125's regression coverage, which is explicitly forbidden by this amendment's own brief
+("do not merely delete all dependency-protection assertions").
+
+### 16.8 Authorization status
+
+**PATCH-149B0: OPEN · AUTHORIZED, amended.** The implementation engineer may now apply exactly the
+§16.4 correction to `EmojiReactionPicker.test.tsx`, re-run the validation matrix, and commit all
+five authorized files together:
+
+```
+test(editor): characterize NoteEditor in jsdom
+```
+
+**The commit must not include `.fable5`.**
+
+| Patch | Status |
+|---|---|
+| **PATCH-149A** | **CLOSED** (`c23be50`; review `e6e9122`) |
+| **PATCH-149B0** | **OPEN · AUTHORIZED, amended** — 4 infrastructure/test files (§15) + 1 test
+  correction (§16), 0 production, full suite proven 67/67 · 775/775 |
+| **PATCH-149B1** | **BLOCKED until B0 closes** |
+| **PATCH-149B2** | **BLOCKED until B1 closes** |
+| **PATCH-149C** | **BLOCKED on user reproduction** |
+| **PATCH-150** | **RESERVED and separate**; untouched |
+
+**Existing B0 implementation files were not altered by this turn** — `package.json`,
+`package-lock.json`, `vitest.config.ts`, and `NoteEditor.characterization.test.tsx` remain at
+exactly the hashes the implementation turn left them (`2657dea…`, `8189984…`, `44fa672…`,
+`fb0a121…`). `EmojiReactionPicker.test.tsx` was probed to prove §16.4 correct, then **reverted to
+its committed HEAD state** (`bca4f77…`) — this document, not the working tree, is where the
+correction is authorized from.
