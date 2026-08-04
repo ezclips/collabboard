@@ -1,8 +1,11 @@
 # PATCH-148 — PRESENTATIONBRIDGE SLIDE-LOCAL INDEX TEST RECONCILIATION
 
-**Status:** **OPEN · PATCH-142 TEST RESIDUE CONFIRMED · TEST-ONLY SEMANTIC RECONCILIATION
-AUTHORIZED · PRODUCTION FROZEN · NOT PUSHED**
+**Status:** **CLOSED · TEST-ONLY SLIDE-LOCAL RECONCILIATION ACCEPTED · PRODUCTION FROZEN ·
+NOT PUSHED** — closed at §16 by independent review of `d41b6e6`, classification **2 (pass with
+non-blocking observations)**. Sections 1–15 are the authorization record and are preserved as
+written; see **§16l O1** for the one superseded detail (gap-fixture shape).
 **Authored:** 2026-08-04 (CTO). **Base:** `2eab01e`. **First authoring of this number.**
+**Closed:** 2026-08-04 (independent reviewer). **Implementation:** `d41b6e6`.
 **Origin:** PATCH-142 closure residue, diagnosed and reserved at PATCH-139 §4/§5b.
 **Reserved by:** PATCH-139 §11. **Does not advance PATCH-140. Does not unblock PATCH-139.**
 
@@ -372,3 +375,210 @@ Closing PATCH-148 releases **nothing**: it is corrective test debt outside the 1
 - **Six identical failures are one defect, not six.** Every failing assertion is the same
   expression in six fixtures. Reporting them as six problems would have justified a far larger
   allowlist than one file and sixty lines.
+
+---
+
+## 16. Closure review — INDEPENDENT
+
+**Reviewer:** independent Fable 5 closure reviewer. **Reviewed HEAD:** `d41b6e6`.
+**Implementation not modified. Scope not broadened. Commit not amended. Nothing pushed.**
+All evidence below was re-run independently at `d41b6e6`, not copied from the implementation report.
+
+### 16a. Implementation commit review
+
+| Check | Result |
+|---|---|
+| Commit subject | `test(presentation): reconcile bridge assertions with slide-local order` |
+| Files changed | **exactly 1** — `lib/infra/drawing/presentationBridge.test.ts` |
+| Changed lines | **59** (53 insertions / 6 deletions) — governed max **60** |
+| Non-test file in commit | **none** (`git show --name-only` filtered for non-`.test.ts` → empty) |
+| Parent → HEAD file delta | **1 file**; production byte-identical between `246d459` and `d41b6e6` |
+
+### 16b. Source-scope result — **PASS**
+
+`git diff --name-only 246d459 d41b6e6` over `presentationBridge.ts`, both slide-renderer files,
+`lib/infra/presentation/`, `package.json`, `package-lock.json`, `supabase/`, `types/`,
+`excalidraw-app/`, `vendor/` returns **empty**. All ten §7 exclusions confirmed unchanged:
+`presentationBridge.ts` · `resolveSlidePadlets.ts` · `planSlideComposition.ts` · PATCH-142
+production and tests · PATCH-136 bridge · `package.json` · schema/persistence · Excalidraw fork.
+**Production allowlist was empty and was honoured.**
+
+### 16c. Semantic-helper review — **PASS**
+
+`expectResolvedOrder` (test file `:83-92`) asserts:
+
+- resolved **`embeddableId` order** equals the expected list;
+- `zIndex` sorted ascending (`expect(z).toEqual([...z].sort(...))`);
+- `zIndex` **unique** (`new Set(z).size === z.length`).
+
+Sorted **∧** unique ⟹ **strictly increasing**. It does **not** require contiguity, does **not**
+require a fixed starting value, does **not** restore scene-global indices, and does **not** treat
+`zIndex` as persisted identity. No bare unexplained numeric `zIndex` array survives as a primary
+contract. The one retained numeral (`[0, 2]`, gap fixture) is the property under test and carries
+the §5-required one-line justification.
+
+### 16d. Fixture-by-fixture review — **PASS (6/6)**
+
+| Fixture | Stale numeric removed | Replaced with | Membership / band / fixture-specific assertions |
+|---|---|---|---|
+| S1 | `[2]` | `["emb-a"]` | `nativeBelowIds` + `nativeAboveIds` + lossless — **intact** |
+| S2 | `[2, 3]` | `["emb-a", "emb-b"]` | **intact** |
+| S3 | `[1, 4]` | `["emb-a", "emb-b"]` | **intact** |
+| S4 | `[2, 3, 7]` | `["emb-slide-a", "emb-uploaded-image", "runtime-container-c"]` | **intact** |
+| S5 | `[1, 3]` | `["emb-a", "emb-a-copy"]` | **intact**; separate `padletId` identity assertion `["padlet-a","padlet-a"]` **retained verbatim** |
+| S7 | `[1, 4]` | `["emb-a", "emb-b"]` | **intact** |
+
+All six now proceed past the former failure line (parent aborted there; 45/45 pass at HEAD).
+**No membership or band assertion was removed or weakened anywhere in the file.**
+
+**§6 item 2 verified structurally, not by eye:** `localOrdinalById` is assigned over
+`slideMembers` already sorted by `sceneIndex`, and `resolvedPadlets` is sorted by `zIndex`.
+Ordinal order is therefore identical to scene order, which is what the old global numbers encoded.
+The ID sequences necessarily preserve the prior visual ordering. **No expectation restores
+scene-global indexing** — confirmed against the measured parent actuals
+(`[1] [1,2] [0,3] [0,1,4] [0,2] [0,2]`), none of which appears as a literal in the commit.
+
+### 16e. Cross-slide result — **PASS**
+
+The new fixture builds a baseline composition and a second one containing a second frame
+(`frame-b`), an unrelated embeddable (`emb-other`, `frameId: "frame-b"`) and an unrelated native
+(`native-other`, `frameId: "frame-b"`) interleaved into scene order. It asserts resolved order is
+`["emb-a", "emb-b"]` **and** that the full `zIndex` array equals the baseline's. It does **not**
+merely check a final count. Genuineness proven by negative control 2 (§16h).
+
+### 16f. Safe-gap result — **PASS**
+
+Shape: `emb-x` (valid) → `native-gap` → `emb-z` (valid). Asserts resolved order `["emb-x","emb-z"]`,
+then `zIndex` `[0, 2]` with the comment naming the cause, then lossless native bands. The gap is
+correctly attributed to **rank within full slide membership**, not to a dropped padlet.
+
+### 16g. PATCH-150 boundary — **PASS · DEFECT NOT FROZEN**
+
+The §8 defect requires a **dropped** embeddable to inflate `firstPadletActiveIndex` in
+`resolveSlidePadlets`' sparse space while `planSlideComposition` re-indexes densely. The delivered
+fixture contains **zero dropped padlets** (`padlet-x` and `padlet-z` are both valid, non-drawing).
+With no drops, `localOrdinalById` and `localIndexById` are **provably identical**
+(`{emb-x:0, native-gap:1, emb-z:2}` in both), so the divergence is **structurally unreachable** by
+this fixture. It cannot encode the defective band placement as correct. **PATCH-150 remains
+reserved and untouched; it was neither reopened nor repaired here.**
+
+### 16h. Induced-failure and negative-control results
+
+| # | Control | Result |
+|---|---|---|
+| **Parent** | test file restored to `246d459` (production byte-identical, so this is an exact parent reproduction) | **6 failed / 37 passed (43)** — S1/S2/S3/S4/S5/S7, all on the `resolvedPadlets` `zIndex` expression ✔ matches §2 |
+| **NC1** | expected order reversed in S4 (`emb-uploaded-image` before `emb-slide-a`) | **1 failed / 44 passed** — fails on the **`embeddableId` order** assertion ✔ |
+| **NC2** | `emb-other` retargeted `frame-b` → `frame-a` | **1 failed / 44 passed** — cross-slide fixture: `['emb-other','emb-a','emb-b']` vs `['emb-a','emb-b']` ✔ |
+| **NC3** *(reviewer-added)* | **scene input** perturbed — `emb-x`/`emb-z` swapped in the gap fixture | **1 failed / 44 passed** — `['emb-z','emb-x']` vs `['emb-x','emb-z']` ✔ |
+
+NC3 was added because NC1 and NC2 perturb *expectations*; NC3 perturbs the *production input* and
+so proves the assertions track real production output rather than re-frozen constants — the exact
+false-green §12 exists to prevent.
+
+**All three controls reverted. File verified byte-identical to the committed blob:**
+`git hash-object` → `ec99696103da4638eb7e99c894d66b726550cdaf`, equal to
+`d41b6e6:lib/infra/drawing/presentationBridge.test.ts`. **No control was committed.**
+
+### 16i. Focused, full-suite and regression results
+
+| Gate | Requirement | Measured |
+|---|---|---|
+| Focused suite | 43 + 2 new | **45 / 45 passed** ✔ |
+| Full Vitest, no exclusions/filters | all pass | **64 / 64 files · 741 / 741 tests** ✔ |
+| PATCH-142 focused (`lib/infra/presentation`) | 36/36 unchanged | **4 files · 36 / 36 passed** ✔ |
+
+No suite skipped; `presentationBridge` not excluded; the final run was unfiltered.
+
+### 16j. Clean-environment validation
+
+| # | Gate | Result |
+|---|---|---|
+| 1–2 | Remove vendored `dist/types` + `.next` | done at the **real** fork path `components/collabboard/canvas/excalidraw_fork/packages/excalidraw/dist/types` |
+| 3–4 | `npm run typecheck`, one run | preflight reported *missing declaration* → regenerated **410 fresh declarations**, no TS5055 |
+| 5 | `tsc --noEmit` | **exit 0** (bare `npx tsc --noEmit` re-run independently: exit 0) |
+| 6 | `npx next build` | **exit 0** |
+| 7 | `node scripts/e2e/assertBridgeExclusion.mjs` | **exit 0** — "Bridge exclusion proven across **891** emitted files", **no marker** |
+| 8–10 | Clean E2E build | **exit 0**, marker `.next/E2E_BRIDGE_BUILD` = **`1`** |
+| 11–13 | Ordinary `.next` restored, exclusion re-run | **exit 0**, 891 files, **no marker remains** |
+| — | `git diff --check` | **exit 0** |
+
+The generator's internal `exit 1` on the two pre-existing `SearchMenu.tsx` `TS18047` errors is the
+**accepted, closed PATCH-144 contract** — declarations still regenerate and `npm run typecheck`
+exits 0. Not a PATCH-148 finding.
+
+### 16k. False-green review — **no rejection criterion triggered**
+
+| §12 / review criterion | Result |
+|---|---|
+| Old numerics replaced with unexplained new numerics | **NO** — six replaced with semantic ID assertions; the single retained numeral is the property under test and is justified |
+| Production altered | **NO** |
+| Membership or band assertions removed / weakened | **NO** |
+| Relative order no longer tested | **NO** — tested, and proven live by NC1 and NC3 |
+| Cross-slide independence not genuinely tested | **NO** — proven live by NC2 (see O3 for a partial-coverage note) |
+| PATCH-150 behaviour frozen as expected | **NO** — structurally unreachable (§16g) |
+| Tests skipped or excluded | **NO** |
+| Full Vitest remains red | **NO** — 741/741 green |
+| Contiguity or fixed slide-local basis asserted | **NO** |
+| `package.json` / test-environment dependency touched | **NO** |
+
+### 16l. Observations — all NON-BLOCKING
+
+**O1 · Governance text is now stale relative to what was authorized and delivered.**
+§5, §6 item 5 and §8 specify the gap fixture must use a **missing or `type:"drawing"` padlet
+record**, and forbid a native member sitting after a resolved padlet in that fixture. The delivered
+fixture is the **inverse shape**: two valid padlets with a native between them. This is **not an
+implementer deviation** — the implementation brief and the closure brief both specify exactly the
+delivered shape, and it is the shape §15's own second diagnostic note argues for (natives, not
+drops, are the dominant gap cause). It is also **strictly safer**: it removes the dropped-padlet
+element that made the §8 prohibition necessary in the first place. **Recorded as an amendment:
+§5 / §6 item 5 / §8's gap-fixture shape is superseded by the delivered native-interleaved shape.**
+No re-work required.
+
+**O2 · Dropped-padlet ordinal consumption is now untested.** As a consequence of O1, **no fixture
+in the file exercises a missing or `type:"drawing"` padlet record** (verified by grep). That the
+dropped embeddable consumes its ordinal slot is real, probe-confirmed production behaviour and is
+currently uncovered. Covering it in isolation (**no** native members) is safe — with no natives the
+band split has no observable output, so the §8 divergence stays unreachable. **Routed to PATCH-150's
+test scope**, which is where the dropped-padlet index question belongs anyway.
+
+**O3 · Cross-slide fixture covers the embeddable half only.** `native-other` is present in the
+fixture *input* but the fixture asserts no band contents, so "an unrelated **native** does not enter
+the target composition" is unasserted. Production does exclude it (`isNativeFrameMember` requires
+`element.frameId === slideFrame.id`), and band coverage exists in S1–S7, so this is a coverage
+edge, not a defect or a regression.
+
+**O4 · Strict monotonicity is asserted indirectly.** It emerges from *sorted* **∧** *unique* as two
+separate `expect` calls. Correct as written, but deleting either line silently weakens the contract
+to non-strict. Worth a comment if the helper is ever edited.
+
+**O5 · Cosmetic.** No blank line between the two new `it(` blocks (a line-budget trimming artifact).
+Style only.
+
+### 16m. Final classification
+
+**2 — PASS WITH NON-BLOCKING OBSERVATIONS.**
+
+PATCH-148 delivered exactly its governed scope: one test file, 59 of 60 permitted lines, production
+untouched, six stale numeric assertions replaced with a semantic contract that three independent
+negative controls prove is live, two new fixtures adding real coverage, and the reserved PATCH-150
+defect provably not frozen. O1 is a governance-text correction, O2/O3 are routed coverage edges,
+O4/O5 are notes. **None blocks closure.**
+
+**PATCH-148: CLOSED · TEST-ONLY SLIDE-LOCAL RECONCILIATION ACCEPTED · PRODUCTION FROZEN ·
+NOT PUSHED.**
+
+### 16n. Dependency status after closure
+
+| Patch | Status after PATCH-148 closes |
+|---|---|
+| **PATCH-148** | **CLOSED** |
+| PATCH-139 | **OPEN · BLOCKED** — modal capability product decision; next blocked product patch; **not advanced** |
+| PATCH-140 | **NOT RELEASED** — still gated on PATCH-139 |
+| PATCH-141 | DEFERRED |
+| PATCH-142 | CLOSED — not reopened |
+| PATCH-149 | RESERVED · BLOCKED |
+| **PATCH-150** | **RESERVED** — now also carries O2's dropped-padlet coverage |
+| PATCH-146 / 147 | RESERVED, non-blocking |
+
+**No numbered feature patch is released by this closure.** PATCH-148 was corrective test debt
+outside the 138–141 sequence, exactly as §14 anticipated.
