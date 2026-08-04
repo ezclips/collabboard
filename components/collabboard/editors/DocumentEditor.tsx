@@ -32,15 +32,16 @@ export default function DocumentEditor({
 }: DocumentEditorProps) {
   const [title, setTitle] = useState(initialTitle);
   const [description, setDescription] = useState(initialMetadata?.description || '');
-  const [metadata, setMetadata] = useState(initialMetadata || {});
 
+  // PATCH-149 §23.15 (F3): depend on primitives, not the metadata object --
+  // callers commonly pass metadata={x || {}}, a fresh reference on every
+  // render, which must never clobber an in-progress edit (PATCH-149 §22.2).
   useEffect(() => {
     if (isOpen) {
       setTitle(initialTitle);
       setDescription(initialMetadata?.description || '');
-      setMetadata(initialMetadata || {});
     }
-  }, [isOpen, initialTitle, initialMetadata]);
+  }, [isOpen, initialTitle, initialMetadata?.description]);
 
   const editor = useSharedTipTapEditor({
     initialContent: toEditorHtml(initialContent),
@@ -52,7 +53,10 @@ export default function DocumentEditor({
       onSave({
         title,
         content: fromEditorHtml(editor?.getHTML()),
-        metadata: { ...metadata, description },
+        // Read unrelated keys from the latest prop, not a stale open-time
+        // snapshot, so a concurrent unrelated metadata update is not
+        // overwritten by save (PATCH-149 §23.15 F3).
+        metadata: { ...(initialMetadata || {}), description },
       });
     }
     onClose();

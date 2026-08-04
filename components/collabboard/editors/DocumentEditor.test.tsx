@@ -164,3 +164,113 @@ describe('DocumentEditor editable (PATCH-149B1b-i)', () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 });
+
+function setInput(el: HTMLInputElement, v: string) {
+  act(() => {
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    setter.call(el, v);
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
+function titleInput(c: HTMLElement) {
+  return c.querySelector('input[placeholder="Untitled document"]') as HTMLInputElement;
+}
+function descInput(c: HTMLElement) {
+  return c.querySelector('input[placeholder="Add a description..."]') as HTMLInputElement;
+}
+
+describe('DocumentEditor draft stability across parent rerenders (PATCH-149 §23.15 F3)', () => {
+  it('survives a fresh {} metadata reference on an unrelated rerender; edits are what get saved', () => {
+    const onSave = vi.fn();
+    const stored = { title: 'Stored Title', metadata: undefined as any };
+    function Parent() {
+      return (
+        <DocumentEditor isOpen title={stored.title} initialContent="" metadata={stored.metadata || {}} onSave={onSave} onClose={vi.fn()} />
+      );
+    }
+    const container = mount(<Parent />);
+    const { root } = mounted[mounted.length - 1];
+    setInput(titleInput(container), 'User Renamed This');
+    setInput(descInput(container), 'User Description');
+    act(() => { root.render(<Parent />); }); // fresh {} every render, same caller pattern as CanvasClient:7374
+    expect(titleInput(container).value).toBe('User Renamed This');
+    expect(descInput(container).value).toBe('User Description');
+    click(container.firstElementChild!);
+    expect(onSave.mock.calls[0][0].title).toBe('User Renamed This');
+    expect(onSave.mock.calls[0][0].metadata.description).toBe('User Description');
+  });
+
+  it('survives a newly allocated but value-equivalent metadata object', () => {
+    function Parent({ n }: { n: number }) {
+      return (
+        <DocumentEditor isOpen title="Stored Title" initialContent="" metadata={{ description: 'orig', parentId: 'p1' }} onSave={vi.fn()} onClose={vi.fn()} />
+      );
+    }
+    const container = mount(<Parent n={0} />);
+    const { root } = mounted[mounted.length - 1];
+    setInput(titleInput(container), 'Edited Title');
+    act(() => { root.render(<Parent n={1} />); });
+    expect(titleInput(container).value).toBe('Edited Title');
+  });
+
+  it('survives an unrelated metadata key changing; save carries the latest unrelated keys', () => {
+    const onSave = vi.fn();
+    let zIndex = 1;
+    function Parent() {
+      return (
+        <DocumentEditor isOpen title="Stored Title" initialContent="" metadata={{ description: 'orig', zIndex }} onSave={onSave} onClose={vi.fn()} />
+      );
+    }
+    const container = mount(<Parent />);
+    const { root } = mounted[mounted.length - 1];
+    setInput(titleInput(container), 'Edited Title');
+    zIndex = 2;
+    act(() => { root.render(<Parent />); });
+    expect(titleInput(container).value).toBe('Edited Title');
+    click(container.firstElementChild!);
+    expect(onSave.mock.calls[0][0].metadata.zIndex).toBe(2);
+    expect(onSave.mock.calls[0][0].title).toBe('Edited Title');
+  });
+
+  it('discards an abandoned draft on reopen even when title/description are unchanged (isOpen transition)', () => {
+    function Parent({ open, t, d }: { open: boolean; t: string; d: string }) {
+      return (
+        <DocumentEditor isOpen={open} title={t} initialContent="" metadata={{ description: d }} onSave={vi.fn()} onClose={vi.fn()} />
+      );
+    }
+    const container = mount(<Parent open t="Doc A" d="Desc A" />);
+    const { root } = mounted[mounted.length - 1];
+    setInput(titleInput(container), 'Unsaved edit');
+    act(() => { root.render(<Parent open={false} t="Doc A" d="Desc A" />); });
+    // Same title/description as before -- only the isOpen transition should force the reset.
+    act(() => { root.render(<Parent open t="Doc A" d="Desc A" />); });
+    expect(titleInput(container).value).toBe('Doc A');
+  });
+
+  it('resets to a different document\'s values when reopened with new initial values', () => {
+    function Parent({ open, t, d }: { open: boolean; t: string; d: string }) {
+      return (
+        <DocumentEditor isOpen={open} title={t} initialContent="" metadata={{ description: d }} onSave={vi.fn()} onClose={vi.fn()} />
+      );
+    }
+    const container = mount(<Parent open t="Doc A" d="Desc A" />);
+    const { root } = mounted[mounted.length - 1];
+    setInput(titleInput(container), 'Unsaved edit');
+    act(() => { root.render(<Parent open={false} t="Doc A" d="Desc A" />); });
+    act(() => { root.render(<Parent open t="Doc B" d="Desc B" />); });
+    expect(titleInput(container).value).toBe('Doc B');
+    expect(descInput(container).value).toBe('Desc B');
+  });
+
+  it('preserves TipTap body content across the unrelated parent rerender', () => {
+    function Parent() {
+      return (
+        <DocumentEditor isOpen title="T" initialContent="<p>stable body</p>" metadata={{}} onSave={vi.fn()} onClose={vi.fn()} />
+      );
+    }
+    const container = mount(<Parent />);
+    const { root } = mounted[mounted.length - 1];
+    act(() => { root.render(<Parent />); });
+    expect(container.querySelector('.ProseMirror')!.textContent).toBe('stable body');
+  });
+});
