@@ -1,10 +1,8 @@
 # PATCH-149 — DOCUMENT POST USABILITY, MODAL CLEANUP, PDF-READY FOUNDATION
 
-**Status:** **SPLIT · PATCH-149A CLOSED (bounded modal cleanup, commit `c23be50`) · PATCH-149B
-ARCHITECTURE DEFINED BUT **BLOCKED** — product decisions B-i/B-ii supplied and accepted, migration
-not authorized because it cannot be validated in the current node-only test environment (§14.5) and
-`NoteEditor` cannot be reused as-is (§14.4) · PATCH-149C RESERVED for the two unlocated defects
-· NOT PUSHED**
+**Status:** **STAGED · PATCH-149A CLOSED (`c23be50`) · PATCH-149B0 AUTHORIZED — jsdom
+characterization harness for `NoteEditor`, 0 production files (§15) · PATCH-149B1/B2 BLOCKED behind
+B0 · PATCH-149C RESERVED for the two unlocated defects · NOT PUSHED**
 **Authored:** 2026-08-04 (governance architect). **Base:** `177645b`. **First authoring of this
 number** — `git log --all --diff-filter=A -- .fable5/patches/PATCH-149.md` is empty.
 **Inherits:** PATCH-138 label finding · PATCH-139 D3/D5/D6 · PATCH-140 component 6 ·
@@ -869,3 +867,256 @@ PATCH-139/151**).
 **PATCH-149B:** **OPEN · BLOCKED** — architecture defined, implementation not authorized.
 **PATCH-149C:** RESERVED — blocked on reproduction.
 **PATCH-150:** RESERVED, separate (presentation index-domain divergence); untouched.
+
+---
+
+## 15. PATCH-149B0 — NOTEEDITOR DOM CHARACTERIZATION HARNESS · **AUTHORIZED**
+
+**Authored:** 2026-08-04 (governance architect). **Base:** `e25fe32`. The owner has authorized a
+DOM-capable test environment and an expanded include glob for NoteEditor characterization. **This
+is test infrastructure, not product functionality. Production scope is empty.**
+
+**Every compatibility claim below was measured by executing it**, using a `npm install --no-save`
+probe (which leaves `package.json` and `package-lock.json` untouched — hashes verified identical
+before and after: `b769e4c…` / `605a84f…`) plus a temporary probe test, both fully removed and the
+suite re-verified at 66/66 · 765/765 before this document was written. **Nothing here is inferred.**
+
+### 15.1 Environment choice — **OPTION T2 · ADD `jsdom` AS A DEV DEPENDENCY**
+
+| Option | Result |
+|---|---|
+| **T1 — already available** | **REJECTED.** `node_modules/jsdom` and `node_modules/happy-dom` are both absent; `npm ls jsdom happy-dom` returns empty. Neither is declared nor transitively installed. |
+| **T2 — add `jsdom`** | **SELECTED.** See compatibility below. |
+| **T3 — add `happy-dom`** | Not needed. `jsdom` proved compatible on first attempt with zero polyfills; T3 is reserved as a fallback only if `jsdom` later proves heavy. |
+| **T4 — blocked** | **NOT TRIGGERED.** |
+
+**Compatibility — verified, not assumed:**
+
+- **`jsdom` and `happy-dom` are declared *optional peerDependencies* of `vitest@3.2.7`**
+  (`peerDependenciesMeta` marks both `optional: true`). Adding `jsdom` is therefore the officially
+  supported path, **not** a workaround.
+- Node **v24.11.1** satisfies vitest's `engines: ^18 || ^20 || >=22`.
+- **`jsdom@29.1.1`** installed and ran cleanly against the current React 19.2.7 / Next 15.5.20 /
+  TipTap 3.x / TypeScript 5 stack.
+- **No upgrade of React, Next.js, Vitest, TipTap, TypeScript or Node tooling is required or authorized.**
+
+### 15.2 TipTap actually mounts — the load-bearing measurement
+
+Mounting `NoteEditor` under `jsdom` via `react-dom/client` + React 19 `act`:
+
+| Measurement | Result |
+|---|---|
+| Mount error | **none** |
+| Rendered DOM | **9,024 characters** (vs **0** under `environment: 'node'` — §14.5) |
+| ProseMirror mounted | **yes** (`ProseMirror` class present) |
+| Legacy HTML content rendered | **yes** — `<p>Legacy HTML body</p>` visible as text |
+| Empty content | **safe** — 9,114 chars, ProseMirror present, no throw |
+| Buttons rendered | **12** |
+| `Bold` control | present |
+| **`Align` control** | **present and rendered** — so §14.10's dead control is *measurable*, not merely inferred |
+| Closed state (`isOpen=false`) | **0 characters** |
+
+**Browser-API census under `jsdom@29.1.1`:**
+
+| API | Present | Needed by this scope |
+|---|---|---|
+| `window`, `document`, `getSelection`, `Range`, `DOMParser`, `MutationObserver`, `requestAnimationFrame`, `getBoundingClientRect` | **yes** | yes — all satisfied |
+| `ResizeObserver` | **no** | **not required** — mount succeeded without it |
+| `matchMedia` | **no** | **not required** — mount succeeded without it |
+
+**Therefore NO setup file and NO polyfills are authorized.** The brief permits polyfills only when
+*actually required*; measurement proves none is. Should a future characterization open a Radix-backed
+popup (`TextStylePopup`, `LinkPopup`, `CommentPopup`, `EmojiReactionPicker`), `ResizeObserver` and
+`matchMedia` may become necessary — **that is a B0 follow-up, not authorized now**, and popup
+interaction is explicitly out of scope (§15.5).
+
+### 15.3 **Mandatory teardown discipline — a real hazard, and its proven fix**
+
+The first probe produced a genuine stability failure:
+
+```
+ReferenceError: document is not defined
+  ❯ EditorView.get root  prosemirror-view/dist/index.js:5586
+  ❯ DOMObserver.flush    prosemirror-view/dist/index.js:4685
+  ❯ Timeout._onTimeout   prosemirror-view/dist/index.js:4615
+Vitest caught 1 unhandled error during the test run.
+This might cause false positive tests.
+```
+
+ProseMirror's `DOMObserver` schedules a `setTimeout` flush that fires **after** the jsdom
+environment is torn down. Vitest itself flags this as a false-positive risk — which would have
+undermined the very honesty this harness exists to provide.
+
+**Proven fix, and it is binding:** unmounting every mounted root in `afterEach`
+(`act(() => root.unmount())` plus removing the container) **eliminated the error completely** —
+second probe ran 4/4 clean with zero unhandled errors. **No polyfill, no `NoteEditor` change, no
+production change.**
+
+> **BINDING RULE:** every `NoteEditor` characterization test **must** unmount in `afterEach`.
+> A test file that mounts without unmounting is a **rejectable defect**, not a style preference.
+
+### 15.4 Include-glob defect — and the trap that must not be sprung
+
+Current: `include: ['lib/domain/**/*.test.ts', 'lib/infra/**/*.test.ts', 'scripts/harness/**/*.test.ts', 'components/collabboard/*.test.tsx']`.
+
+The final entry is **non-recursive**, so `components/collabboard/editors/` — where `NoteEditor`
+lives — is **not discovered**. That is the defect.
+
+**MEASURED TRAP:** `components/collabboard` contains **148** `*.test.ts*` files, of which
+**143 belong to the vendored Excalidraw fork**. A recursive
+`components/collabboard/**/*.test.tsx` would therefore silently pull in **143 vendored fork tests** —
+precisely the "no vendored/fork files become included accidentally" hard stop, and it would also
+corrupt the 66/765 baseline beyond recognition.
+
+**AUTHORIZED CHANGE — exactly one array entry added, non-recursive:**
+
+```
+'components/collabboard/editors/*.test.tsx'
+```
+
+Verified: `components/collabboard/editors/` currently contains **0** test files and exactly one
+subdirectory (`extensions/`, no tests). A single-level glob there captures **0 fork files, 0 E2E
+files, 0 generated files** and creates **no duplicate discovery** (it is disjoint from the existing
+non-recursive `components/collabboard/*.test.tsx`). **Recursive globs are forbidden.**
+
+### 15.5 Environment strategy — **per-file, not global**
+
+**AUTHORIZED: the `// @vitest-environment jsdom` docblock on the characterization file only.**
+`test.environment` in `vitest.config.ts` **stays `'node'`.**
+
+**Verified by execution:** the probe ran with the config declaring `environment: 'node'` while the
+file's docblock declared `jsdom` — and it got a full DOM. The per-file override works on
+`vitest@3.2.7`.
+
+**Consequence: all 765 existing tests keep running in `node`.** Nothing is migrated to jsdom.
+The brief's *"Do not make all 765 existing tests run in jsdom unless source evidence proves that is
+the only safe option"* is satisfied by the narrowest possible means — no environment-match globs, no
+second Vitest project, no config `environment` change.
+
+### 15.6 Characterization contract — behaviour to *record*, never to correct
+
+Already measured by probe; the implementation must assert these as the frozen baseline:
+
+| # | Contract | Measured value at `e25fe32` |
+|---|---|---|
+| 1 | Closed state | `isOpen=false` ⇒ container innerHTML length **0** |
+| 2 | Open state | real DOM > 1,000 chars; overlay `fixed inset-0 z-[1000]`; ProseMirror present; toolbar present |
+| 3 | **Save-on-close order** | backdrop click ⇒ callbacks fire **`["save", "close"]`** — save strictly before close |
+| 4 | Backdrop | dismissal **does persist** (current defect — characterize, do not fix) |
+| 5 | **Escape** | **no handler exists** — `keydown{Escape}` ⇒ `onSave` calls **0**, `onClose` calls **0**. Assert the absence; **do not invent support** |
+| 6 | Content init | `<p>Legacy HTML body</p>` renders as text; `initialContent=""` initializes safely |
+| 7 | Formatting toolbar | working controls locatable; **`Align` renders** despite being unwired (§14.10) — measure, do not change |
+| 8 | Editor constraints | 280px card; **no `title` prop**; **no `readOnly` prop** |
+| 9 | **Save callback shape** | keys exactly `['content','cardColor','topStrip','textColor','reactions','badgeColor','detachedComments']` — **no `title`, no `metadata`** (empirically confirms §14.4) |
+| 10 | **Non-vacuity** | at least one assertion must **fail** if the modal renders empty while `isOpen` — e.g. `expect(container.innerHTML.length).toBeGreaterThan(1000)` **plus** a positive content assertion. A test that only checks "did not throw" or accepts an empty container is **rejected** |
+
+**Out of scope:** opening popups, formatting-command execution, dirty state, read-only, adapters,
+Save/Close correction. Those are B1/B2.
+
+### 15.7 Allowlists and line budgets
+
+**PRODUCTION ALLOWLIST: EMPTY.** No production file may change. `NoteEditor.tsx` and
+`NoteEditorToolbar.tsx` are **explicitly forbidden**, as is every file frozen by PATCH-139/151.
+
+| # | Path | Permitted change | Max lines |
+|---|---|---|---|
+| 1 | `package.json` | add **`"jsdom": "^29.1.1"`** to `devDependencies` **only** | **1** |
+| 2 | `package-lock.json` | resolution for `jsdom` + its required transitives **only** | not line-budgeted; **bounded by rule** — no unrelated refresh, no churn beyond the added package |
+| 3 | `vitest.config.ts` | add exactly one `include` entry (§15.4). **`environment` must remain `'node'`** | **1** |
+| 4 | `components/collabboard/editors/NoteEditor.characterization.test.tsx` | **new file** — the entire characterization suite, with the `// @vitest-environment jsdom` docblock and mandatory `afterEach` unmount | **220** |
+
+**No test setup file is authorized** (§15.2 — no polyfill is required).
+
+**Test authoring constraints:** mount with `react-dom/client` `createRoot` + React 19 `act` — both
+from **declared** dependencies. **`@testing-library/react` must NOT be used:** it is present at
+16.2.0 but is **extraneous**, leaking from the vendored Excalidraw fork's own devDependencies
+(`npm ls` shows `@excalidraw/excalidraw@0.18.0 -> @testing-library/react@16.2.0 … extraneous`).
+Depending on it would couple the suite to the fork's dependency tree and could vanish on any
+install. **Do not mock `NoteEditor`; mount the real component.**
+
+### 15.8 Dependency safety
+
+devDependency only · pinned via the normal `package-lock.json` · `jsdom@29.1.1` verified against
+Node 24.11.1 / vitest 3.2.7 · **no unrelated dependency refresh** · transitive impact to be recorded
+from the actual lockfile diff · `npm audit` **informational only** unless the addition directly
+introduces a new high-severity finding (the probe install surfaced pre-existing advisories unrelated
+to `jsdom`; these are **not** this patch's to resolve).
+
+### 15.9 Induced failures — all reproducible at parent `e25fe32`
+
+1. A test placed at `components/collabboard/editors/*.test.tsx` is **not discovered** by
+   `npx vitest run` — the glob is non-recursive (§15.4).
+2. Forced to run under `environment: 'node'`, DOM APIs are unavailable and **`NoteEditor` renders a
+   0-length string** (§14.5, reproduced again here).
+3. `renderToStaticMarkup` open-state assertions **pass vacuously** on that empty output — the
+   original false green.
+4. The governed DOM test **fails** if `NoteEditor` returns `null` while `isOpen=true` (negative
+   control 3).
+
+After implementation: discovered by the standard command · jsdom initializes · open-state observes
+real UI · save-on-close order characterized as `["save","close"]`.
+
+### 15.10 Negative controls — each must be reproduced, reverted, and hash-verified
+
+1. Remove the `// @vitest-environment jsdom` docblock → characterization **fails**.
+2. Remove the `editors/*.test.tsx` include entry → the file is **not discovered** (assert the file
+   count / discovery, not merely a pass).
+3. Force `NoteEditor` to return `null` while open → **non-vacuity test fails**. *Production
+   modification must be reverted and verified byte-identical via `git hash-object`; never committed.*
+4. Polyfill control — **N/A by measurement** (§15.2). If the implementer finds a polyfill genuinely
+   required, that is a **scope change requiring governance**, not a silent addition.
+5. Reverse the expected save/close order to `["close","save"]` → lifecycle test **fails**.
+6. **Remove the `afterEach` unmount → the ProseMirror teardown `ReferenceError` returns** (§15.3).
+   This control is **mandatory**: it proves the discipline is load-bearing rather than decorative.
+
+### 15.11 False-green protection
+
+Reject if: the test only asserts "did not throw" · an empty container is accepted · source-string
+checks substitute for DOM behaviour · all tests are moved to jsdom · **production is modified to make
+tests easier** · any characterized defect is *corrected* here · the glob captures E2E/vendor/fork
+tests · dependency changes extend beyond `jsdom` · `NoteEditor` is mocked instead of mounted · a
+mounted root is left unmounted.
+
+### 15.12 Validation matrix
+
+Focused characterization suite · **proof of discovery through the ordinary `npx vitest run`** (not a
+custom config) · `CardEditor` / `CardPreview` / `ClipartCardDraftModal` / `cardModalRoute`
+regressions · **full Vitest — expect 67 files (66 + 1) and 765 + N tests; report both totals** ·
+clean one-run `npm run typecheck` (410 declarations, exit 0) · `npx next build` · bridge exclusion
+(**891** files, no marker) · clean E2E build (marker `1`) · ordinary `.next` restored and exclusion
+re-verified · `git diff --check` · **explicit `package.json` + `package-lock.json` diff inspection** ·
+only the five protected worktree paths outside committed history.
+
+**Known environment note (from the PATCH-149A closure, §13):** a stale `.next` can produce an opaque
+`uncaughtException [TypeError: Cannot read properties of undefined (reading 'length')]`. Run
+`rm -rf .next` before build verification; it is not a defect of this patch.
+
+### 15.13 Hard stops — evaluated
+
+| Hard stop | Result |
+|---|---|
+| DOM package incompatible with current Node/Vitest | **NOT TRIGGERED** — `jsdom` is an optional peer of vitest 3.2.7; `jsdom@29.1.1` ran on Node 24.11.1 |
+| Requires upgrading Vitest or React | **NOT TRIGGERED** — no upgrade of any kind |
+| **TipTap cannot mount without extensive browser emulation** | **NOT TRIGGERED** — mounted with **zero polyfills**; `ResizeObserver`/`matchMedia` absent and unneeded |
+| **Suite becomes materially unstable** | **NOT TRIGGERED — but only because of §15.3.** The unmount discipline is the mitigation and is therefore binding |
+| **Include change causes duplicate/unintended discovery** | **NOT TRIGGERED — narrowly avoided.** A recursive glob would have captured **143 vendored fork tests**; the authorized single-level glob captures **0** |
+| Lockfile churn cannot be bounded | **NOT TRIGGERED** — one devDependency plus its transitives; no refresh authorized |
+| Production changes required for basic mounting | **NOT TRIGGERED** — mounted unmodified at `e25fe32` |
+
+### 15.14 Authorization status
+
+**PATCH-149B0: OPEN · AUTHORIZED.** 4 infrastructure/test files, **0 production files**, ≤222
+budgeted lines plus a bounded lockfile resolution.
+
+| Patch | Status |
+|---|---|
+| **PATCH-149A** | **CLOSED** (`c23be50`; review `e6e9122`) |
+| **PATCH-149B0** | **OPEN · AUTHORIZED — next implementation unit** |
+| **PATCH-149B1** | **BLOCKED until B0 closes** (predicate helper · legacy adapter · read-only renderer) |
+| **PATCH-149B2** | **BLOCKED until B1 closes** (explicit Save · dirty baseline · discard confirmation) |
+| **PATCH-149C** | **BLOCKED on user reproduction** of the exit / underline defects (§14.11) |
+| **PATCH-150** | **RESERVED and separate** — presentation index-domain divergence; untouched |
+
+**Recorded for B1's benefit:** this harness already proves, executably, three claims §14 could only
+argue from source — save fires **before** close, the save payload carries **no title or metadata**,
+and **Escape does nothing**. B1 inherits them as measured baselines rather than assertions.
