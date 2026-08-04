@@ -1,8 +1,11 @@
 # PATCH-139 — EDITOR / READ-ONLY MODAL SPLIT
 
-**Status:** **OPEN · BLOCKED · OPTION G (PRODUCT/OWNER DECISION REQUIRED)** · NO IMPLEMENTATION
-AUTHORIZED · PRODUCTION ALLOWLIST **EMPTY** · TEST ALLOWLIST **EMPTY** · **PATCH-140 NOT RELEASED**
-· **NEITHER PATCH-138 CLOSURE FINDING IS OWNED BY THIS NUMBER** · NOT PUSHED
+**Status:** **OPEN · AUTHORIZED · OPTION C (CAPABILITY-BASED CARD MODAL SPLIT)** · PRODUCT
+DECISION SUPPLIED · **NOT IMPLEMENTED** · **PATCH-140 NOT RELEASED (releases on PATCH-139
+closure)** · NOT PUSHED
+**Amended:** 2026-08-04 (governance architect) at base `fcd1cc7` — see **§13**, which supersedes
+the §5 Option G block. Sections 1–12 are retained as authorization history; §3d's terminology
+hard stop remains binding (§13n).
 **Authored:** 2026-08-04 (CTO). **Base:** `71f5807`. **First authoring of this number** — see §1.
 **Predecessors:** PATCH-133 §11 (scope origin) · PATCH-134 §5/§7/§8 · PATCH-136 §18f (sequence) ·
 PATCH-138 (closed, §13 pinned this slot) · PATCH-142 (closed; source of Finding B).
@@ -422,3 +425,343 @@ cleanup (PATCH-138 C-4). Untouched here.
   one type declaration, and zero writers — so a toolbar entry renders as a mode toggle that can
   never be on. That reframes the label question: Control 2 is not mislabelled, it is a control
   wearing the costume of a mode it does not have.
+
+---
+
+## 13. Amendment — product decision supplied, PATCH-139 AUTHORIZED
+
+**Authored:** 2026-08-04 (governance architect). **Base HEAD:** `fcd1cc7` (PATCH-148 closed).
+**Supersedes §5's Option G block for PATCH-139's own scope.** Sections 1–12 remain the
+authorization history; §3d's terminology hard stop is **retained** (see §13n).
+**No implementation performed. No production or test file modified. Nothing pushed.**
+
+### 13a. Product-owner decision (recorded verbatim in effect)
+
+The **existing workspace capability is the interim authority**:
+
+| Capability | Route |
+|---|---|
+| `canEditWorkspace === true` | existing **editable** card/document editor modal |
+| `canEditWorkspace === false` | genuine **read-only** card/document viewer modal |
+
+**Explicitly not created:** `resolveBoardPermission` · a permission service · a new role model ·
+schema changes · permission inference from ownership · a second editor implementation.
+The interim rule may later be replaced by a formal capability source; PATCH-139 uses the existing
+value only.
+
+### 13b. Path correction — fourth occurrence in this sequence
+
+| Named in brief | Actual |
+|---|---|
+| `components/collabboard/canvas/ui/CardActionsToolbar.tsx` | **`components/collabboard/editors/CardActionsToolbar.tsx`** |
+| `CanvasClient.tsx` (unqualified) | **`app/dashboard/canvas/[id]/CanvasClient.tsx`** |
+| `CardEditor` under `editors/` | **`components/collabboard/CardEditor.tsx`** |
+
+Prompt-path corrections, not scope changes. Cf. PATCH-138 §16a, PATCH-139 §1a, PATCH-148 §1a.
+
+### 13c. Complete card/document modal route census — measured at `fcd1cc7`
+
+Both modals are **`CardEditor`**, rendered twice in `CanvasClient.tsx` against two independent
+state flags:
+
+- **Viewer** — `CanvasClient.tsx:7359-7370`, `readOnly={true}`, `onSave={() => setIsCardViewerOpen(false)}` (a no-op).
+- **Editor** — `CanvasClient.tsx:7373-7384`, `readOnly={false}`, `onSave={saveCard}` (persists).
+
+Both `onClose` handlers clear selection: `setIs…Open(false); setPadletToEdit(null)`.
+
+| # | Source | Label | Callback | Setter | Card state | Modal / `readOnly` | Capability source | Editing controls | Editing possible |
+|---|---|---|---|---|---|---|---|---|---|
+| **R1** | `CardPreview` top-left pencil (PATCH-138) wired at `FreeformPadletCards.tsx:1757-1761` | `aria-label="Edit card"` | `onEditContent` | `setIsCardViewerOpen(true)` | `setPadletToEdit(padlet)` | Viewer · **true** | **NONE — supplied unconditionally** | no | no |
+| **R2** | `CardPreview` top-right pencil | icon only | `onOpenToolbar` | `setCardToolbarPadletId` | — | `CardActionsToolbar` | `canUseFreeformEditButton` ✔ | — | — |
+| **R3** | `CardActionsToolbar` **"Card view"** at `FreeformPadletCards.tsx:6008-6012` | `Card view` | `onToggleCardView` | `setIsCardEditorOpen(true)` | `setPadletToEdit` | **Editor · false** | inherited via R2 ✔ | yes | yes |
+| **R4** | Freeform strip pencil `FreeformPadletCards.tsx:3216-3222` | `title="Edit"` | `openFreeformPadletModal` → `:420` | `setIsCardEditorOpen(true)` | `setPadletToEdit` `:408` | **Editor · false** | `showModalEditButton` `:3086` ✔ | yes | yes |
+| **R5** | Canvas create-card `CanvasClient.tsx:5416` | — | toolbar create | `setIsCardEditorOpen(true)` | synthetic new padlet | **Editor · false** | creation flow, not a view route | yes | yes |
+| **R6** | `openPadletInTypeEditor` `CanvasClient.tsx:5684-5702`, card branch `:5700` | — | share-link `?openPadlet=` `:344-350`; context menu `:6717`; `:5709/:5713`; `CanvasModals.tsx:270` | `setIsCardEditorOpen(true)` | `setPadletToEdit(post)` `:5691` | **Editor · false** | **NONE at the function; the `?openPadlet=` effect has no guard whatsoever** | yes | yes |
+| **R7** | inline `CardActionsToolbar` `FreeformPadletCards.tsx:1786-1807` | `Card view` | `onToggleCardView` | `setIsCardEditorOpen(true)` | — | — | **DEAD — guarded by `{false && …}`** | — | — |
+
+### 13d. `canEditWorkspace` ownership — exact
+
+`canEditWorkspace` in `lib/workspace/context.ts:45` is a **pure function of `WorkspaceRole`**
+(`owner | admin | member` → `true`; `readonly` → `false`), **not** a boolean field. Its boolean
+form already exists at the two owners PATCH-139 needs:
+
+- `app/dashboard/canvas/[id]/CanvasClient.tsx:253` — `const canUseFreeformEditButton = canEditWorkspace(currentWorkspaceRole);`
+  — **in scope at R5/R6** (same component).
+- Threaded to `FreeformPadletCards` via `CanvasConfigContext` (`CanvasConfigContext.tsx:9`),
+  destructured at `FreeformPadletCards.tsx:238` — **in scope at R1/R3/R4**.
+
+**No new plumbing is required.** Allowlist candidate 3 ("thread `canEditWorkspace` narrowly") is
+therefore **not needed and not authorized**.
+
+### 13e. Root-cause answers
+
+1. **Does `CardPreview` always open the read-only viewer?** **Yes** — R1 is supplied
+   unconditionally; an **editable** user's pencil opens the *viewer*. This is PATCH-138 **O1**,
+   now confirmed as a capability defect rather than a labelling one.
+2. **Does `CardActionsToolbar` always open the editable editor?** **Yes** (R3), but it is
+   unreachable for read-only users because R2 gates the toolbar.
+3. **Where is `canEditWorkspace` available?** §13d — already at both owners.
+4. **Narrow owner for route selection?** Two: `FreeformPadletCards` (R1) and
+   `CanvasClient.openPadletInTypeEditor` (R6).
+5. **Can one callback select without duplicating modal state?** **Yes** — both modals already
+   exist and are correctly configured; only the flag choice changes.
+6. **Two branches or one governed `readOnly`?** **Keep the two existing branches.** Collapsing
+   them would rewrite `CanvasClient`'s modal region for no capability benefit.
+7. **Does `readOnly={true}` truly prevent mutation?** **Yes** — verified by probe (§13f).
+8. **Absent, disabled, or merely hidden?** **Structurally absent** — see §13f.
+9. **Visible close control present?** **Yes, but unnamed** — see §13g.
+10. **Does closing clear state safely?** **Yes** — both `onClose` handlers clear the flag and
+    `setPadletToEdit(null)`.
+
+### 13f. Read-only enforcement result — **ALREADY GENUINE**
+
+Measured by temporary probe (`renderToStaticMarkup`, run, deleted, never committed):
+
+| Property | `readOnly={true}` | `readOnly={false}` |
+|---|---|---|
+| Content rendered | **yes** | yes |
+| `<textarea>` `readonly` attribute | **true** (native) | false |
+| Title `<input>` | **absent** | present |
+| Formatting toolbar | **absent** (`CardEditor.tsx:133`) | present |
+| Description footer | **absent** (`:156`) | present |
+| Button count | **1** (close only) | 6 |
+| Header label | **"View Document"** | title input |
+
+`handleSave` (`:58-62`) short-circuits to `onClose()` when `readOnly`, so `onSave` is never
+invoked; the viewer additionally passes a no-op `onSave`. **Double-safe.** Controls are *absent
+from the tree*, not hidden by CSS and not merely disabled.
+
+**Therefore Option D is not required.** Read-only contract items 1–9 already pass; only item 10
+(accessible naming) and the §13g close-control naming gap are open.
+
+### 13g. Close/back result — control exists, **accessible name missing**
+
+`CardEditor.tsx:124-126` renders a visible close control in **both** modes
+(`<Button variant="ghost" size="icon">` containing only an `<X>` icon). Probe result:
+**zero `aria-label` attributes in the rendered read-only markup.**
+
+- Visible in both modes ✔ · closes ✔ · clears selection ✔
+- **Accessible name: absent** ✘ — violates ACCESSIBILITY ("no icon-only unnamed action") and
+  read-only contract item 10.
+- Escape: **not supported** (no key handler). Permitted to remain absent — Escape alone was
+  never sufficient, and a visible control exists.
+
+**Authorized:** add an accessible name to the existing control. **Not authorized:** redesigning
+the modal header.
+
+### 13h. Findings and their disposition
+
+| ID | Finding | Disposition |
+|---|---|---|
+| **D1** | R1 ignores capability entirely — editable users get the viewer | **FIX in PATCH-139** |
+| **D2** | Close control has no accessible name | **FIX in PATCH-139** |
+| **D3** | Close (X **and** backdrop, `:78`) calls `handleSave`, so editable mode **saves implicitly**; `CardEditor` has **no explicit Save button at all** | **ROUTED to PATCH-149** — see §13m |
+| **D4** | `?openPadlet=<cardId>` (`CanvasClient.tsx:344-350`) is **entirely ungated** and R6's card branch opens the **editable** editor → a read-only member reaches a full editing surface | **FIX in PATCH-139** |
+| **D5** | R7 is dead code (`{false && …}`) | Record only; removal belongs to PATCH-149 |
+| **D6** | Toolbar buttons (`Bold`/`Italic`/`Link`/`List`/`AlignLeft`, `:135-140`) have **no `onClick` at all** | **PATCH-149** — confirms "font buttons not working" is *no handler*, not a broken one |
+
+**D4 is the load-bearing defect** and is why Option A alone is insufficient.
+
+### 13i. Selected option — **OPTION C**
+
+**Two independent action sources (R1 and R6) require the same viewer/editor decision**, which is
+precisely Option C's stated trigger. Option A was the initial candidate but covers only R1 and
+would leave D4 unfixed.
+
+- **Not A** — single-owner selection does not reach R6.
+- **Not B** — collapsing to one modal state rewrites `CanvasClient`'s modal region for no gain.
+- **Not D** — read-only is already genuine (§13f).
+- **Not E** — the capability is already in scope at both owners (§13d).
+
+**Shape:** one pure selector, consumed by both owners.
+
+```ts
+// lib/domain/canvas/cardModalRoute.ts
+export type CardModalRoute = 'editor' | 'viewer';
+export function selectCardModalRoute(canEditWorkspace: boolean): CardModalRoute {
+  return canEditWorkspace ? 'editor' : 'viewer';
+}
+```
+
+This is **not** a permission service: it queries nothing, infers nothing from ownership, and
+introduces no role model. It maps an **existing** boolean to a route name. It is also the only
+seam at which the governed negative control 1 ("force `canEditWorkspace=false` through the
+editable route") can be exercised in this repository's test environment (§13k).
+
+### 13j. Contracts
+
+**Capability contract.** `canEditWorkspace` is PATCH-139's **only** capability input · `true` ⇒
+editor route · `false` ⇒ viewer route · **callback presence is not permission** (R1 proves the
+hazard: a supplied callback granted a route with no capability check) · **client-side selection is
+not the persistence boundary** — server/RLS authorization is unchanged and was **not** audited or
+modified by this patch · no backend authorization work is authorized (no direct defect found in
+the modal path: the viewer never invokes a write callback).
+
+**Read-only contract** — all ten items binding; items 1–9 already pass (§13f), item 10 closed by
+§13g. Setting `readOnly` on the textarea alone is explicitly **insufficient**; the toolbar, title
+input and footer must remain structurally absent.
+
+**Editable contract.** Editor opens for `canEditWorkspace === true` · existing editing controls
+unchanged · **existing save/update route unchanged** (`onSave={saveCard}`) · close behaviour
+available · no regression to R2/R3/R4/R5 or `CardPreview` interactions.
+
+**Close/back contract.** Semantic `<button>` (already) · accessible name `Close` (to add) ·
+visible in both modes (already) · closes and clears selection (already) · **does not save
+implicitly — binding for the read-only route only**, where it already holds; the editable route's
+implicit save is pre-existing and preserved under the editable contract (§13m).
+
+### 13k. Allowlists and line limits
+
+**Production allowlist — exact.**
+
+| # | Path | Purpose | Max changed lines |
+|---|---|---|---|
+| 1 | **`lib/domain/canvas/cardModalRoute.ts`** *(new)* | pure route selector | **20** (whole file) |
+| 2 | `components/collabboard/canvas/ui/FreeformPadletCards.tsx` | R1 route selection at `:1757-1761` | **10** |
+| 3 | `app/dashboard/canvas/[id]/CanvasClient.tsx` | R6 **card branch only** (`:5700`) route selection | **12** |
+| 4 | `components/collabboard/CardEditor.tsx` | accessible name on existing close control `:124` | **6** |
+| 5 | `components/collabboard/CardPreview.tsx` *(conditional)* | neutral accessible name — §13n | **2** |
+
+**Production total ≤ 50 changed lines.** `CanvasClient` changes are confined to the `card`
+branch of `openPadletInTypeEditor`; **no other type branch may be touched** — gating todo/link/
+table/container/comment/drawing/ai-component is **out of scope**.
+
+**Excluded by default (unchanged):** document-editor formatting internals · font/text-style
+controls · text-container behaviour · underline/line tools · PATCH-137 / PATCH-142 tests ·
+presentation code · Excalidraw fork · persistence/schema · `package.json` ·
+`GROUP_H`/`OVERHEAD_H` · PATCH-135 tests · `CardActionsToolbar.tsx` · R7 dead code.
+
+**Test allowlist — exact.**
+
+| # | Path | Coverage | Max changed lines |
+|---|---|---|---|
+| 1 | **`lib/domain/canvas/cardModalRoute.test.ts`** *(new)* | `true → 'editor'`, `false → 'viewer'`, exhaustive over both inputs | **40** |
+| 2 | **`components/collabboard/CardEditor.test.tsx`** *(new)* | read-only: content rendered, no title input, no toolbar, no footer, textarea `readonly`, exactly one button, close control carries `aria-label="Close"`; editable: toolbar present, textarea not `readonly`, footer present, close control named | **70** |
+
+Both paths are already inside `vitest.config.ts`'s `include` (`lib/domain/**/*.test.ts`,
+`components/collabboard/*.test.tsx`). **No `package.json` change. No new dependency.**
+PATCH-138 **O2** is **not** absorbed.
+
+**Environment constraint — recorded, and it bounds the test contract.** `vitest.config.ts` sets
+`environment: 'node'`; `jsdom` is **not resolvable** and `@testing-library/react` is **not
+declared in `package.json`**. Component proof therefore uses `renderToStaticMarkup`
+(`react-dom/server`), the established pattern in `CardPreview.test.tsx`. This was **probe-verified
+to work on `CardEditor`** (§13f).
+
+**Consequence — accepted governance risk.** `CanvasClient.tsx` (~7.4k lines) and
+`FreeformPadletCards.tsx` (~6k lines) are **not renderable** in this environment. The R1/R6
+**wiring** therefore cannot be proven at unit level; only the **decision** (allowlist item 1) can.
+Per the brief's test item 3, a focused integration test would be the fallback, but Playwright is
+**not authorized here** — the wiring change is a one-line substitution per owner. **The closure
+reviewer must verify R1 and R6 wiring by direct source inspection of the diff**, and is empowered
+to require an integration test if the diff does not make the substitution self-evident.
+
+### 13l. Induced-failure and negative-control plan
+
+**Parent-state induced failure at `fcd1cc7` — load-bearing, on existing production code:**
+
+- `components/collabboard/CardEditor.test.tsx` close-control test **must FAIL at `fcd1cc7`**,
+  because the rendered markup contains **no `aria-label`** (probe-verified: `aria-label present:
+  false`). This is a genuine parent failure, not a new-file artefact.
+- `lib/domain/canvas/cardModalRoute.test.ts` cannot run at parent (module absent). It is
+  **explicitly not counted** as the load-bearing proof.
+- D1/D4 parent failures are **source-evidenced** (§13c R1, R6): R1 supplies `onEditContent`
+  unconditionally; the `?openPadlet=` effect has no guard. Recorded as census evidence.
+
+**Negative controls — temporary, reverted, never committed:**
+
+| # | Perturbation | Must fail on |
+|---|---|---|
+| 1 | `selectCardModalRoute(false)` forced to return `'editor'` | route-selection test — the read-only user reaching the editor |
+| 2 | restore an editing control in read-only (e.g. drop the `!readOnly` guard on the toolbar at `CardEditor.tsx:133`) | read-only contract test (button count / toolbar absence) |
+| 3 | remove the close control's accessible name | close-control test |
+
+Each must be shown failing with its exact message, then reverted, with the file verified
+byte-identical (`git hash-object` against the committed blob).
+
+### 13m. Hard stops — evaluated
+
+| Hard stop | Result |
+|---|---|
+| `canEditWorkspace` unreachable within a narrow owner | **NOT TRIGGERED** — already in scope at both owners (§13d) |
+| Read-only safety requires rewriting the document editor | **NOT TRIGGERED** — read-only is already genuine (§13f) |
+| Server-side authorization demonstrably missing | **NOT TRIGGERED** — no direct defect found in the modal path; RLS not audited and explicitly out of scope |
+| Viewer writes through an unbounded indirect route | **NOT TRIGGERED** — `handleSave` short-circuits **and** the viewer's `onSave` is a no-op |
+| **Unsaved-changes behaviour undefined and directly required** | **NOT TRIGGERED for PATCH-139's scope — but only just.** D3 is real: X and backdrop both call `handleSave`, and `CardEditor` has **no explicit Save button**, so close *is* the only persistence path. Making close non-saving would remove the editable route's only save — forbidden by the editable contract's "save/update route remains unchanged" — and adding a Save button is new document-editor UI, which is **PATCH-149**. For the **read-only** route the requirement already holds. **PATCH-139 must not alter editable save semantics.** |
+| More than a narrow file set required | **NOT TRIGGERED** — 5 production files, ≤ 50 lines |
+
+**No hard stop blocks PATCH-139.**
+
+### 13n. PATCH-149 boundary and the terminology pair
+
+**§3d's hard stop is retained.** PATCH-139 **must not** ship the isolated half-rename
+`Edit card` → `View card` while R3 still reads `Card view`.
+
+Under Option C, R1's destination becomes capability-dependent, so a fixed `"Edit card"` name is
+wrong for read-only users (read-only contract item 10). **Authorized resolution — the narrowest
+one:** rename R1's accessible name to a **neutral** term (e.g. `Open card`) **unconditionally**,
+for both capabilities. It does not claim editing, it does not introduce `View card`, and it
+therefore **cannot worsen the `Card view` / `View card` near-homograph pair**.
+
+**Explicitly rejected alternative:** a capability-conditional accessible name. It requires a new
+`CardPreview` prop for a wording difference PATCH-149 will re-decide anyway.
+
+**Not repaired under PATCH-139** (all PATCH-149): font/text-style buttons (**D6** — no handlers
+at all) · exiting a text/container after adding text · underline/line-post artefacts · broad
+document-editor usability · **D3** missing Save button and implicit save-on-close · coordinated
+`View card` / `Edit card` terminology and obsolete `Card view` removal · **D5** R7 dead code ·
+`showCardView` (four readers, one declaration, **zero writers**).
+
+**Not broadened into:** document-card substrate · links/backlinks · backend authorization.
+
+### 13o. Validation matrix
+
+| # | Gate | Requirement |
+|---|---|---|
+| 1 | Parent-state induced failure | `CardEditor.test.tsx` close-control test **fails at `fcd1cc7`** |
+| 2 | Focused route-selection tests | `cardModalRoute.test.ts` green |
+| 3 | Focused read-only tests | read-only contract items provable at markup level, green |
+| 4 | Focused editable-mode regression | toolbar/title/footer present, textarea writable, green |
+| 5 | Close/back tests | named close control in **both** modes |
+| 6 | Existing card suites | `components/collabboard/CardPreview.test.tsx` unchanged and green |
+| 7 | Full Vitest | **all pass**, unfiltered, no exclusions |
+| 8 | Clean one-run `npm run typecheck` | remove vendored `dist/types` (**`components/collabboard/canvas/excalidraw_fork/packages/excalidraw/dist/types`**) + `.next`; one run → exit 0, declarations regenerated (PATCH-144 contract) |
+| 9 | Ordinary `npx next build` | exit 0 |
+| 10 | `node scripts/e2e/assertBridgeExclusion.mjs` | exit 0, no marker |
+| 11 | Clean E2E build | exit 0, marker `1` |
+| 12 | `git diff --check` | exit 0 |
+| 13 | Final artefact | ordinary `.next` restored, **no** `E2E_BRIDGE_BUILD` marker |
+| 14 | Worktree | only the five pre-existing protected paths outside committed history |
+| 15 | Production frozen | `git diff --exit-code` clean on every §13k exclusion |
+
+**No ten-run Playwright requirement.** E2E is not authorized unless the closure reviewer finds the
+source proof of R1/R6 wiring insufficient (§13k).
+
+### 13p. False-green protection
+
+Reject any implementation that: relies on a hidden toolbar while editable inputs remain · uses
+callback presence as permission · creates a permission architecture · changes persistence
+authorization · duplicates the editor · treats `readOnly` **styling** as proof of immutability ·
+omits a visible, **named** close control · adds implicit save to the read-only route · alters
+editable save semantics · mixes PATCH-149 editor-control repairs · renames only one side of the
+terminology pair or introduces `View card` · gates any non-`card` branch of
+`openPadletInTypeEditor` · broadens to document-card substrate or links/backlinks · adds a test
+dependency or touches `package.json`.
+
+### 13q. Status and dependencies
+
+**PATCH-139: OPEN · AUTHORIZED · OPTION C · PRODUCT DECISION SUPPLIED · NOT IMPLEMENTED ·
+NOT PUSHED.**
+
+| Patch | Status |
+|---|---|
+| PATCH-148 | **CLOSED** |
+| **PATCH-139** | **OPEN · AUTHORIZED** (this amendment) |
+| PATCH-140 | **NOT RELEASED** — **released when PATCH-139 closes** |
+| PATCH-141 | DEFERRED in the authoritative sequence unless governance says otherwise |
+| PATCH-149 | **RESERVED** — now also carries **D3**, **D5**, **D6** |
+| PATCH-150 | RESERVED — presentation index-domain divergence; independent |
+| PATCH-135 | Independently OPEN; PATCH-139 does not depend on it |
+| PATCH-146 / 147 | RESERVED, non-blocking |
+
+PATCH-139 may proceed independently of PATCH-135, PATCH-146/147 and PATCH-150.
