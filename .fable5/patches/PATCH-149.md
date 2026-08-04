@@ -3,10 +3,10 @@
 **Status:** **STAGED · PATCH-149A CLOSED (`c23be50`) · PATCH-149B0 CLOSED (`c9ea345`, review §17) ·
 PATCH-149B1 **SPLIT after measurement** (§19) — corpus measured (2 Document rows, zero HTML,
 predicate **P1 safe**), routing census corrected (`DrawingLayout` not reachable; the two reachable
-routes are capability-gated but drop the title) · **PATCH-149B1a IMPLEMENTED (`c44a2ac`) · REVIEWED
-§20 → CLASSIFICATION 4, CORRECTION REQUIRED (§20.15: phantom `onUpdate`; mixed-content loss) — DID NOT
-CLOSE** · PATCH-149B1b BLOCKED, NOT RELEASED · PATCH-149B2 BLOCKED behind B1b · PATCH-149C RESERVED ·
-NOT PUSHED**
+routes are capability-gated but drop the title) · **PATCH-149B1a CLOSED (`c44a2ac` + correction
+`856f54b`) · REVIEWED §20 (classification 4, correction required) → CORRECTED → REVIEWED §21
+(classification 1, PASS · READY FOR CLOSURE)** · **PATCH-149B1b ELIGIBLE FOR GOVERNANCE** (not yet
+authorized or implemented) · PATCH-149B2 BLOCKED behind B1b · PATCH-149C RESERVED · NOT PUSHED**
 **Authored:** 2026-08-04 (governance architect). **Base:** `177645b`. **First authoring of this
 number** — `git log --all --diff-filter=A -- .fable5/patches/PATCH-149.md` is empty.
 **Inherits:** PATCH-138 label finding · PATCH-139 D3/D5/D6 · PATCH-140 component 6 ·
@@ -2275,6 +2275,228 @@ re-opening a closed foundation later.
 | **PATCH-149B0** | **CLOSED** (`c9ea345`) |
 | **PATCH-149B1a** | **OPEN · CORRECTION REQUIRED** (§20.15) — `c44a2ac` stands; correction lands on top |
 | **PATCH-149B1b** | **BLOCKED — not released.** B1a did not close |
+| **PATCH-149B2** | **BLOCKED until B1b closes** |
+| **PATCH-149C** | **BLOCKED on user reproduction** (§14.11) |
+| **PATCH-150** | **RESERVED and separate**; untouched |
+
+No implementation file was modified by this review. Nothing was pushed.
+
+---
+
+## 21. PATCH-149B1a — SECOND INDEPENDENT CLOSURE REVIEW (POST-CORRECTION) · **CLASSIFICATION 1 · CLOSED**
+
+**Reviewed:** 2026-08-04 (independent closure reviewer, second pass). **Commits under review:**
+`c44a2ac` (original) + `856f54b` `fix(editor): preserve document content and suppress phantom updates`
+(correction), against §20's two required fixes. All evidence below was re-executed independently.
+**No implementation file was modified by this review** — every perturbation was reverted and
+hash-verified against `HEAD` (`856f54b`).
+
+### 21.1 Correction source scope — **EXACT**
+
+`git diff --numstat c44a2ac 856f54b` touches exactly the four authorized files: `useSharedTipTapEditor.ts`
+(+3/−1), `useSharedTipTapEditor.test.tsx` (+13/−8), `documentContentAdapter.ts` (+15/−3),
+`documentContentAdapter.test.ts` (+23/−0) — 54 insertions / 12 deletions, matching the reported total
+exactly. No new file. `git diff --name-only 82b099c 856f54b -- . ':!.fable5'` returns exactly the
+original eight B1a files — the combined implementation-plus-correction still touches nothing beyond
+the §19.7 allowlist. Re-verified unchanged: `CanvasClient.tsx`, `FreeformPadletCards.tsx`,
+`cardModalRoute.ts`, `CardPreview.tsx`, `CardEditor.tsx`, `ClipartCardDraftModal.tsx`,
+`usePadletSave.ts`, `NoteEditorToolbar.tsx`, `package.json`, `package-lock.json`. No `.fable5` file in
+either commit. No routing, persistence, schema, presentation, or Excalidraw fork file touched. No
+Document wrapper, no read-only modal, no PDF implementation, no save/dirty/discard work — none of
+B1b/B2 leaked in.
+
+### 21.2 F1 — phantom update — **RESOLVED**
+
+Implementation: `editor.setEditable(editable, false)` — exactly the prescribed non-emitting form.
+
+Independently measured at `HEAD` with a fresh probe harness (not reusing the shipped test file):
+
+| Check | Result |
+|---|---|
+| Mount, `onUpdate` calls | **0** |
+| `true→false` editable toggle, `onUpdate` calls | **0** |
+| `false→true` editable toggle, `onUpdate` calls | **0** |
+| Real content mutation (`insertContent`) | **fires**, with correct serialized HTML |
+| `editable=false`: `isEditable` / `view.editable` / `options.editable` | **all `false`** — genuine ProseMirror state, not cosmetic |
+
+Update callbacks are not globally suppressed — real mutation still fires (verified both in the
+independent probe and via the shipped test at `useSharedTipTapEditor.test.tsx:105-115`). This is
+behavioral restoration, not test concealment: the probe used a harness the implementer never wrote,
+and it confirms zero calls on mount **and** on both toggle directions — stronger than governance's
+literal ask (only mount + one toggle direction were required).
+
+**Diagnosis correction carried from §20 is now moot** — the fix targets the actual mechanism
+(`setEditable`'s `emitUpdate` parameter), not a test-side workaround, so the corrected diagnosis and
+the corrected code agree.
+
+### 21.3 F2 — mixed-content loss — **RESOLVED**
+
+Implementation: `isWhollySupportedHtml(raw)` — extracts every tag-like token via
+`TAG_LIKE = /<\/?[a-zA-Z][^<>]*>/g` and requires **all** of them to match the anchored
+`SUPPORTED_TAG` allowlist before classifying as `html`; otherwise falls through to `malformed` →
+escaped visible text. One real tag can no longer promote an adjacent unsupported/bare sequence into
+the sanitizer.
+
+Independently re-measured, all seven required examples:
+
+| Input | Class | Visible text (DOM-parsed) |
+|---|---|---|
+| `Use <example> as a placeholder` | malformed | `<example>` fully visible |
+| `<p>Hello <strong>world</strong></p>` | **html** | paragraph + bold survive as markup |
+| `Use <example> as a placeholder <p>and real markup</p>` | **malformed** | `example`, `as a placeholder`, `and real markup` **all present**; input string unmutated |
+| `<p>Open paragraph` (unclosed) | html | `Open paragraph` fully visible (DOMPurify auto-closes) |
+| `x < y && y > z` | malformed | `x < y && y > z` fully visible |
+| `<span data-comment-id="c1" data-color="#fff">hi</span>` | html | both `data-*` attributes survive |
+| `null` / `''` / whitespace | empty | unchanged (`''`) |
+
+Boundary cases independently probed beyond the governed list, all fail-safe: **uppercase tags**
+(`<STRONG>`) classify `html` correctly (regex is `/i`); **self-closing** `<br/>` classifies `html`
+correctly; **comment-like** (`<!-- internal -->`) and **doctype-like** (`<!DOCTYPE html>`) sequences
+are not tag-like per `TAG_LIKE` (no letter immediately follows `<`) and fall through to `malformed` —
+no crash, no data loss, visible text fully retained. These forms are outside current governed editor
+output and are recorded as a non-blocking boundary, not a defect.
+
+`isWhollySupportedHtml` is **not** a permissive `<word>` matcher — it requires membership in the fixed
+17-name allowlist, tested per isolated token via an **anchored** (`^...$`) pattern, not a substring
+search against the raw string (the mechanism that caused the original defect). No new dependency was
+introduced (still `dompurify` only). Determinism/no-mutation re-confirmed (`input` string
+byte-identical after `classifyDocumentContent` and after `toEditorHtml`, both before and after this
+review's own probes).
+
+### 21.4 Induced failures — **reproduced at `c44a2ac`, resolved at `856f54b`**
+
+A probe harness independent of the shipped tests was run against the pre-correction files
+(`useSharedTipTapEditor.ts`/`documentContentAdapter.ts` checked out at `c44a2ac`, correction test
+files layered on top):
+
+- **F1 at parent:** mount → **1** phantom call; toggle → **2** calls (mount effect + toggle effect,
+  both emitting under the old unconditional default) — both assertions fail as required.
+- **F2 at parent:** `classifyDocumentContent(mixed)` → `'html'`; assertion fails as required.
+- **Control:** the `editable=false` realness check **passed even at parent** — confirming that
+  specific property was never broken and the correction did not need to touch it.
+
+At `856f54b` (current `HEAD`), the same three probes all pass: 0 phantom calls, mixed content
+preserved, `editable=false` remains real.
+
+### 21.5 Negative controls — **12/12 detected, 12/12 reverted and hash-verified**
+
+**F1 (3):** restore emitting `setEditable(editable)` → 2 tests fail · suppress `onUpdate` entirely →
+real-mutation test fails · force `editable=true` regardless of prop → editable=false test fails.
+
+**F2 (4):** restore old "one supported tag ⇒ html" rule → 3 tests fail · disable html classification
+entirely → 3 tests fail · strip unsupported tag-like sequences instead of escaping → 6 tests fail ·
+strip `data-*` attributes → 1 test fails (isolated to the adapter suite; the hook suite's own
+Comment-attribute round-trip test, which does not route through the adapter, is correctly unaffected).
+
+**Original B1a regressions re-checked (5):** clipart classified as Document → predicate suite 2 fail ·
+direct `useEditor` restored in NoteEditor → characterization suite 10/10 fail · Close/save order
+reversed → characterization 1 fail · `Align` removed from toolbar → characterization 1 fail · second
+extension registry introduced → hook suite 1 fail.
+
+All 9 governed files (`documentPost.ts`, `documentContentAdapter.ts`, `useSharedTipTapEditor.ts`,
+`NoteEditor.tsx`, and their four test files, plus `NoteEditorToolbar.tsx`) independently hashed against
+`HEAD` after every perturbation-and-revert cycle: **all match exactly**, no drift.
+
+### 21.6 Adapter classification surface — **A: semantically adequate, no amendment needed**
+
+§19.6 specified a seven-label surface (`empty | plain-text | html | escaped-html | malformed | json |
+unknown`); four are implemented (`empty | plain-text | html | malformed`), unchanged by this
+correction. Re-confirmed non-blocking: `json`/`unknown` inputs fold into `plain-text` (no tag-like
+tokens found → escaped, nothing lost) or `malformed` (bare brackets present → escaped, nothing lost);
+`escaped-html` has zero corpus instances and, if it ever appears, double-escapes to visible literal
+`&lt;p&gt;…` — content preserved, just not decoded to the SafeHtmlContent-style visual the label would
+imply. No governed content shape is misclassified in a way that loses data. **No governance wording
+amendment required** — the four-label implementation satisfies the contract's actual behavioral
+requirement (never silently drop visible source).
+
+### 21.7 Custom-attribute boundary — **restated, unchanged, sufficient**
+
+Guaranteed: sanitizer-allowed `data-*` attributes survive (default `ALLOW_DATA_ATTR: true`), confirmed
+against the shipped `Comment` extension's real attribute names (`data-comment-id`, `data-comment-text`,
+`data-comment-thread`, `data-user-id`, `data-user-name`, `data-timestamp`, `data-color`). **Not**
+guaranteed: arbitrary non-`data-*` custom attributes. No PDF-specific attribute or node exists in
+production. This boundary is sufficient as the extension seam for any future TipTap node whose state
+serializes through `data-*` — exactly the pattern the shipped `Comment` mark already uses — without
+requiring any change to the adapter.
+
+### 21.8 Shared hook — **regression-free**
+
+Single authoritative `SHARED_TIPTAP_EXTENSIONS` registry, still declared exactly once tree-wide
+(re-confirmed via NC-ORIG-5). Hook owns exactly `useEditor`, the registry, content init, `editable`,
+`onUpdate`, and caller-supplied `editorProps` — no modal shell, no Note-specific layout, no
+persistence, no title, no routing, no Save/Close lifecycle. The F1 fix is fully contained inside the
+hook's own `editable`-sync effect and touches nothing else in its contract.
+
+### 21.9 NoteEditor — **regression-free, 11/11**
+
+Characterization suite unchanged and passing in full: closed state renders nothing; open state
+produces real DOM (>1000 chars) with the same overlay class, ProseMirror body, and toolbar; `Align`
+still present; legacy HTML initializes; visible Close and backdrop both save then close, in that
+order; Escape is a no-op; payload keys unchanged with no `title`/`metadata`; 280px width intact;
+extraction-ownership source guard holds (`useSharedTipTapEditor(` present, `useEditor(` and
+`NOTE_EXTENSIONS` absent). No B1b or B2 behavior appears anywhere in the diff.
+
+### 21.10 Document predicate — **byte-identical, unaffected**
+
+`documentPost.ts` hash `257ee9e4…` matches `HEAD` exactly — the correction touched only the two
+authorized files and never approached the predicate. All 10 predicate tests pass; NC-ORIG-1
+(clipart-as-Document) still correctly detected.
+
+### 21.11 Full validation — **all green, matching expected totals exactly**
+
+Full Vitest **70/70 files · 816/816 tests** (813 baseline + 3 net new: +2 F2 adapter tests, +1 net
+hook test after consolidating two F1 assertions into fewer, denser `it()` blocks) · `npm run
+typecheck` exit 0 · **410** declarations · `npx next build` exit 0 · bridge exclusion **891** files ·
+`npm run build:e2e` exit 0, marker **`1`** · ordinary `.next` restored, exclusion re-verified at
+**891**, marker **absent** · `git diff --check` exit 0 · worktree shows only the five pre-existing
+protected paths throughout.
+
+### 21.12 False-green review
+
+Checked against every reject criterion in the review brief. **None triggered:** mount emits an update
+(0, independently measured) · toggling editable emits a content update (0, both directions) · real
+mutations no longer emit (they do, verified) · mixed content still loses characters (it does not,
+DOM-measured) · valid HTML is always escaped (it is not — `<p>Hello <strong>world</strong></p>` still
+renders as markup) · Comment data attributes stripped (they survive) · tests only compare output
+length (this review used real DOM `textContent` parsing throughout, independent of the shipped tests'
+own approach) · NoteEditor behavior changed (11/11 unchanged) · routing or persistence changed (zero
+diff) · PDF-specific code introduced (none) · correction exceeded the four-file authorization (exactly
+four) · prior tests weakened to accept a regression (the two tests that changed shape — F1's mount
+assertion and the consolidated toggle test — both got *stronger*, not weaker: the original passing
+assertion was `toHaveBeenCalled()` after interaction only; it now additionally asserts zero calls
+before interaction and zero calls on toggle, which is new coverage, not removed coverage).
+
+### 21.13 Observations (non-blocking, carried to B1b)
+
+1. Comment-like (`<!-- -->`) and doctype-like (`<!DOCTYPE>`) sequences are outside current governed
+   editor output; they classify `malformed` and are escaped safely (§21.3). No action needed unless a
+   future content source can produce them.
+2. §19.6's seven-label classification surface remains four in practice (§21.6) — recorded again as a
+   documentation-only gap, not a functional one; amend §19.6's wording in a future patch if desired,
+   or leave as-is since behavior satisfies the contract.
+3. The Columns/Rows title-loss path (§19.4) remains carried to B1b, untouched and still live.
+4. `editor.setEditable(editable, false)` suppresses the update event on **every** editable change,
+   including one a future feature might want to observe (e.g., analytics on read-only toggles). Not a
+   defect against this patch's contract, but worth a one-line note if B1b/B2 ever need to react to
+   editable-state transitions specifically rather than content changes.
+
+### 21.14 Classification and status
+
+**CLASSIFICATION 1 — PASS · READY FOR CLOSURE.**
+
+Both defects recorded in §20 are independently confirmed resolved, using probes this review wrote
+itself rather than trusting the shipped tests. The fixes are minimal, mechanism-targeted (TipTap's own
+non-emitting API; a stricter tag-token check using the same allowlist philosophy already in the
+codebase), fully contained within the four authorized files and their line budgets, and introduce no
+new regression across 12 independently-verified negative controls spanning both the correction and the
+original B1a surface. Full validation matches expected totals exactly.
+
+| Patch | Status |
+|---|---|
+| **PATCH-149A** | **CLOSED** (`c23be50`) |
+| **PATCH-149B0** | **CLOSED** (`c9ea345`) |
+| **PATCH-149B1a** | **CLOSED** (`c44a2ac` + `856f54b`) |
+| **PATCH-149B1b** | **ELIGIBLE FOR GOVERNANCE** — not authorized or implemented by this review |
 | **PATCH-149B2** | **BLOCKED until B1b closes** |
 | **PATCH-149C** | **BLOCKED on user reproduction** (§14.11) |
 | **PATCH-150** | **RESERVED and separate**; untouched |
