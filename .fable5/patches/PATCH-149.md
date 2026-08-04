@@ -3388,3 +3388,354 @@ hygiene rule.
 `CardEditor`'s six handler-less toolbar buttons (§22.1 C4) remain on the clipart-read-only surface.
 
 No implementation file was modified by this review. Nothing was pushed.
+
+---
+
+## 25. PATCH-149B1b-ii — DOCUMENT ROUTING AND MODAL INTEGRATION · **AUTHORIZED (BUDGET AMENDED)**
+
+**Authored:** 2026-08-04 (governance architect). **Base:** `26ec7c0`. Every line number below was
+**re-measured at this HEAD**; no number from §22.1 was trusted, and §22.1 is **corrected** by this
+section. No production or test file was modified in this turn.
+
+### 25.1 Route census — re-measured at `26ec7c0`
+
+Method: enumerate every call site of `setIsCardEditorOpen(true)`, `setIsCardViewerOpen(true)`,
+`setIsClipartDraftModalOpen(true)` and `setIsNoteEditorOpen(true)` across the whole tree, then trace
+each back to its trigger. Only five files reference `setPadletToEdit` at all (`CanvasClient`,
+`FreeformPadletCards`, `CanvasModals`, `CanvasEditorContext`, `usePadletSave`); `CanvasEditorContext`
+owns no card-modal state, so the census below is closed.
+
+| # | Route | Path measured at HEAD | Types | Capability source | Destination now | Title | Content | Metadata | Save cb | Funnels? | B1b-ii destination |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | **Central router** `openPadletInTypeEditor` | `CanvasClient:5685-5709`; card branch `:5704-5707` | all | `selectCardModalRoute(canUseFreeformEditButton)` `:5705` | CardEditor / CardViewer | passed | passed | passed | `saveCard` | — (is the funnel) | **Document wrapper** |
+| 2 | Deep link `?openPadlet=` | `:342-351` → `openPadletInTypeEditorRef` → `:5685` | all | via 1 | via 1 | passed | passed | passed | `saveCard` | ✅ | via 1 |
+| 3 | Context-menu open | `openPadletTargetFromContextMenu` `:5713-5721` → `:5685` | all | via 1 | via 1 | passed | passed | passed | `saveCard` | ✅ | via 1 |
+| 4 | Wall `onOpenTarget` | `:6662-6664` → 3 | all | via 1 | via 1 | passed | passed | passed | `saveCard` | ✅ | via 1 |
+| 5 | Timeline `onOpenTarget` | `:6757` (`canUseFreeformEditButton ? … : undefined`) → 3 | all | via 1 | via 1 | passed | passed | passed | `saveCard` | ✅ | via 1 |
+| 6 | Map `onEditPinPost` | `:6871-6873` → 3 | all | via 1 | via 1 | passed | passed | passed | `saveCard` | ✅ | via 1 |
+| 7 | Drawing `onPadletEdit` | `:6718-6725` → `:5685` | all | via 1 | via 1 | passed | passed | passed | `saveCard` | ✅ | via 1 |
+| 8 | Drawing `onEditPadletAsPost` | `:6726-6730`; **container-guarded** at `CanvasContextMenu:172` (`isContainerType && onEditPadletAsPost ? … : onEdit`) | containers only | n/a | NoteEditor | n/a | n/a | n/a | `saveNote` | n/a | **unchanged — not Document-reachable** |
+| 9 | Columns `onEditPost` | `:6477` → 3 | all | via 1 | via 1 | passed | passed | passed | `saveCard` | ✅ | via 1 |
+| 10 | Rows `onEditPost` / `onOpenTarget` | `:6566`, `:6572` → 3 | all | via 1 | via 1 | passed | passed | passed | `saveCard` | ✅ | via 1 |
+| 11 | **Columns `onOpenPost`** | `:6478-6481` — `setPadletToEdit(post); setIsNoteEditorOpen(true);` | any | none in callback (`isEditable` `:6466` gates the affordance) | **NoteEditor** | **LOST** | passed | note-shaped | `saveNote` | ❌ **BYPASS** | **Document wrapper** |
+| 12 | **Rows `onOpenPost`** | `:6568-6571` — identical body | any | none in callback (`isEditable` `:6551`) | **NoteEditor** | **LOST** | passed | note-shaped | `saveNote` | ❌ **BYPASS** | **Document wrapper** |
+| 13 | **Freeform `openFreeformPadletModal`** | `FreeformPadletCards:402-444`; card branch `:420-421`; trigger = hover pencil `:3221-3235` under `showModalEditButton` (`:3091`) | all | **none in the router**; affordance hidden unless `canUseFreeformEditButton` | **CardEditor** (also for clipart) | passed | passed | passed | `saveCard` | ❌ **BYPASS (NEW)** | **Document wrapper** |
+| 14 | **Freeform `CardPreview.onEditContent`** | `FreeformPadletCards:1758-1766`; rendered for `padlet.type === 'card'` `:1708`; buttons `CardPreview.tsx:65-74`, `:144-150` | cards | `selectCardModalRoute(canUseFreeformEditButton)` `:1761` | CardEditor / CardViewer (**no clipart split**) | passed | passed | passed | `saveCard` | ❌ **BYPASS (NEW)** | **Document wrapper** |
+| 15 | Freeform `onToggleCardView` | `FreeformPadletCards:1808-1812`, inside `{false && …}` `:1791` | — | — | **DEAD** | — | — | — | — | — | **untouched — recorded as dead** |
+| 16 | **Creation** `case 'document'` | `CanvasClient:5401-5418` — drafts `{id:'new', type:'card', title:'', content:'', metadata:{...createMetadata}}` then `setIsCardEditorOpen(true)` `:5417` | new | creation permission upstream | CardEditor | `''` | `''` | createMetadata | `saveCard` | ❌ direct | **Document wrapper (editable)** |
+| 17 | Clipart open | `:5700-5702` | clipart | `selectCardModalRoute` | ClipartDraftModal / CardViewer | — | — | — | — | — | **unchanged** |
+| 18 | Clipart replace | `:7513` | clipart | — | ClipartDraftModal | — | — | — | — | — | **unchanged** |
+| 19 | CanvasModals | `components/collabboard/canvas/ui/CanvasModals.tsx` (474 lines) — owns NoteEditor/Link/Table/Todo/Container/Comment/Image/Drawing/AI; **does not own CardEditor**, which renders at `CanvasClient:7366-7391` | — | — | — | — | — | — | — | — | **hosts the Document wrapper** (§22.9) |
+| 20 | Sidebar / search / mobile | **none exist** — no other file sets card-modal state | — | — | — | — | — | — | — | — | n/a |
+
+**Path correction:** the brief's `components/collabboard/CanvasModals.tsx` does not exist. The real path
+is **`components/collabboard/canvas/ui/CanvasModals.tsx`**.
+
+#### Prior findings — reconfirmed or corrected
+
+- **C1 reconfirmed.** `:5704` *is* the exact Document branch: clipart is fully consumed by `:5700`, so
+  every post reaching `:5704` satisfies `type === 'card' && !metadata?.svgUrl`.
+- **C3 reconfirmed.** `isCardViewerOpen` is shared between clipart read-only (`:5702`) and Document
+  read-only (`:5706`). Only the Document half moves.
+- **C4 reconfirmed.** `CardEditor.tsx` (173 lines) is a `<textarea>` with six handler-less toolbar
+  buttons.
+- **Columns/Rows bypass — reconfirmed** (rows 11, 12), and both carry a **second, funnelling** entry
+  point (`onEditPost`, rows 9/10). Only `onOpenPost` bypasses.
+- **DrawingLayout not Document-reachable — reconfirmed** (row 8).
+- **C2 — “exactly two bypasses exist” — WRONG at HEAD. Corrected to C2′: there are FOUR.** Columns
+  `onOpenPost`, Rows `onOpenPost`, `openFreeformPadletModal`, and `CardPreview.onEditContent`.
+  §22.1's claim that freeform open funnels through `openPadletInTypeEditor` is false, because of C5.
+
+#### New findings
+
+- **C5 — `openPadletInTypeEditor` is a dead prop on `FreeformPadletCards`.** `CanvasClient:5864` passes
+  `openPadletInTypeEditor={openPadletInTypeEditor}`, but the identifier appears **nowhere** in
+  `FreeformPadletCards.tsx` and is **not declared** in `FreeformPadletCardsProps` (`:143`) — an excess
+  prop, silently discarded. Freeform therefore runs its **own duplicate type router** (row 13), a P6
+  second implementation of `openPadletInTypeEditor`. This is why §22.1 mis-measured route 1.
+- **C6 — `saveCard` closes the modal itself.** `usePadletSave.ts:996-997`, `:1007`, `:1069-1070` call
+  `setIsCardEditorOpen(false)` **and** `setPadletToEdit(null)`. A new `documentModalDestination` state
+  is *not* cleared by `saveCard`. This is safe **only** because the wrapper calls `onSave(...)` then
+  `onClose()` synchronously in the same handler, so the Document modal closes through its own
+  `onClose`, and `saveCard`'s `useCallback` closure has already captured the live `padletToEdit`. This
+  ordering is now a **governed contract** and must be tested (§25.8 T-13), not assumed.
+- **C7 — the freeform pencil does not split clipart.** Row 13 sends a clipart card to `CardEditor`,
+  whereas the central router sends it to `ClipartDraftModal` (`:5701`). Row 14 has the same gap.
+  **Pre-existing, out of B1b-ii scope, carried in §25.13** so it is not mistaken for Document work.
+- **C8 — an existing test hard-codes the helper occurrence count.**
+  `lib/domain/canvas/cardModalRoute.test.ts:44` asserts `selectCardModalRoute(` appears **exactly 2**
+  times in `CanvasClient.tsx` (measured: 2 in `CanvasClient`, 1 more in `FreeformPadletCards`, which
+  that assertion does not see). B1b-ii changes those branches, so this file **must** be in the
+  allowlist. The implementer must **re-measure** the new number, never guess it.
+
+### 25.2 O2 identity corner — **ID-B (reachable, but naturally remounts)** · no identity prop required
+
+`CanvasModals` already wraps **every** editor in a keyed div:
+
+```tsx
+<div key={isNoteEditorOpen ? `note-${padletToEdit?.id === 'new' ? 'new' : padletToEdit?.id || 'new'}` : 'note-closed'}>
+```
+
+measured at `:136` (Note), `:152` (Link), `:181` (Table), `:195` (Todo), `:226` (Container), `:354`
+(Image), `:387` (Drawing), `:426` (AI). The key changes on **both** a post-id change **and** an
+open/close transition, so React unmounts and remounts the editor on a document switch — resetting all
+draft state structurally, with no dirty-state machinery.
+
+The incumbent `CardEditor` instances at `CanvasClient:7366` and `:7380` carry **no key at all** — which
+is precisely the environment in which O2 was raised. Rendering the Document wrapper in `CanvasModals`
+under the identical keyed-div idiom therefore resolves O2 **by construction**, and independently
+vindicates §22.9's choice of host.
+
+**Governed:** the Document wrapper **must** render inside
+`<div key={documentModalDestination ? \`document-${padletToEdit?.id === 'new' ? 'new' : padletToEdit?.id || 'new'}\` : 'document-closed'}>`.
+**No `documentId` prop, no React `key` on the wrapper itself, no dirty-state behaviour.** A negative
+control removing the keyed div must fail the suite (§25.9 NC11).
+
+### 25.3 Routing helper — **RTE-C**, one pure destination function
+
+New `lib/domain/canvas/documentModalRoute.ts`:
+
+```ts
+export type DocumentModalDestination = 'document-editor' | 'document-viewer';
+
+export function selectDocumentModalDestination(
+  post: Pick<Padlet, 'type' | 'metadata'> | null | undefined,
+  canEditWorkspace: boolean,
+): DocumentModalDestination | null;
+```
+
+Required: uses **`isDocumentPost`** (never re-inlines the predicate — closes the §20.2 duality); reuses
+**`selectCardModalRoute(canEditWorkspace)`** internally (`'editor' → 'document-editor'`,
+`'viewer' → 'document-viewer'`) so no second role model is created and PATCH-139/151 stay
+authoritative; returns **`null`** for every non-Document post and for `null`/`undefined`, so callers
+fall through to today's behaviour untouched; **no React, no state, no role inference, no persistence,
+no capability computation of its own, no PDF branch**.
+
+Capability source stays `canUseFreeformEditButton` (`CanvasClient:254`, from
+`canEditWorkspace(currentWorkspaceRole)`). **Permission is never inferred from callback presence.**
+Client gating remains UI-only and is not the persistence authorization boundary.
+
+### 25.4 Modal state — **one variable, not two**
+
+`CanvasClient` gains exactly one new state slice:
+
+```ts
+documentModalDestination: DocumentModalDestination | null
+```
+
+`isOpen` is `destination !== null`; `readOnly` is `destination === 'document-viewer'`. A boolean pair
+(`isDocumentEditorOpen` + `isDocumentViewerOpen`, or open + readOnly) is **rejected**: two variables can
+desynchronise into an editable viewer, and the helper's own return type already carries both facts (P6).
+
+`CanvasModals` receives `documentModalDestination` and `setDocumentModalDestination` plus the explicit
+capability boolean it needs; it derives `isOpen`/`readOnly` and must not recompute capability.
+
+### 25.5 Rewiring contract — per route
+
+Every rewired site follows the same shape: ask the helper first; **`null` ⇒ existing behaviour
+byte-identical**.
+
+| Route | Change |
+|---|---|
+| Central `:5704-5707` | Document branch opens the wrapper; clipart `:5700-5702` **untouched** |
+| Columns `onOpenPost` `:6478-6481` | helper first; `null` ⇒ current `setIsNoteEditorOpen(true)` unchanged |
+| Rows `onOpenPost` `:6568-6571` | identical treatment |
+| `openFreeformPadletModal` card branch `:420-421` | helper first; `null` ⇒ current `setIsCardEditorOpen(true)` unchanged (**clipart behaviour preserved exactly** — C7 is not fixed here) |
+| `CardPreview.onEditContent` `:1758-1766` | helper first; `null` ⇒ current `selectCardModalRoute` branch unchanged |
+| Creation `case 'document'` `:5417` | opens the wrapper editable; draft shape at `:5403-5416` unchanged |
+
+**Payload:** the wrapper receives `title={padletToEdit?.title || ''}`,
+`initialContent={padletToEdit?.content || ''}`, `metadata={padletToEdit?.metadata || null}`,
+`onSave={saveCard}` in editable mode and a **non-writing** `onSave` in read-only mode, `onClose` that
+sets `documentModalDestination` to `null` **and** `padletToEdit` to `null`.
+
+`metadata` **should be passed as `padletToEdit?.metadata ?? null`, not `|| {}`** — the wrapper's prop
+type already accepts `null`, and the `|| {}` idiom is the exact unstable-reference pattern that caused
+F3 (§23.12). This is a hardening requirement, not a style preference; F3 is fixed either way (§24.2),
+but the repository should stop propagating the pattern.
+
+**Not permitted:** no new write path (reuse `saveCard`); no schema change; no `SaveNoteData` for
+Documents; no capability recomputation downstream; no B2 behaviour.
+
+### 25.6 `usePadletSave` — **still excluded**, on measured grounds
+
+`SaveCardData` is already `{ title, content, metadata }` (`usePadletSave.ts:136-140`) and `saveCard`
+writes `title` on insert and update. The C6 modal-close side effect does **not** force an edit, because
+the wrapper owns its own close. **`hooks/canvas/usePadletSave.ts` is NOT in the allowlist.** If the
+implementer finds the Document modal cannot close without editing `saveCard`, that is a **hard stop**,
+not a licence to widen scope.
+
+**Creation lifecycle preserved exactly:** `saveCard:980-999` early-returns without inserting when
+`id === 'new'` and title, tag-stripped content and `metadata.description` are all empty with no
+meaningful metadata. A blank new Document must still orphan no row.
+
+### 25.7 Scope, allowlist and **budget amendment**
+
+§22.12 budgeted B1b-ii at 3 production files / ≤120 lines / ≤230 test lines. That estimate was derived
+from the **incorrect** two-bypass census (C2). With four bypasses, the dead-prop finding (C5) and the
+test collision (C8), the true scope is larger. §22.12 states *“Nothing is compressed to fit a number”*;
+the number is therefore **amended, with the measurement that forced it recorded above**.
+
+| # | Path | Change | Max lines |
+|---|---|---|---|
+| 1 | `lib/domain/canvas/documentModalRoute.ts` | **new** — §25.3 pure helper | **35** |
+| 2 | `components/collabboard/canvas/ui/CanvasModals.tsx` | render the wrapper under the keyed div (§25.2); new props | **55** |
+| 3 | `app/dashboard/canvas/[id]/CanvasClient.tsx` | `documentModalDestination` state; `:5704-5707`; creation `:5417`; Columns `:6478`; Rows `:6568`; pass state + capability to `CanvasModals` | **55** |
+| 4 | `components/collabboard/canvas/ui/FreeformPadletCards.tsx` | rewire the two bypasses (`:420-421`, `:1758-1766`) only | **30** |
+| 5 | `lib/domain/canvas/cardModalRoute.test.ts` | re-measure the occurrence-count assertion (C8) | **10** |
+
+**Production ≤ 175 / 4 files. Existing-test edit ≤ 10 / 1 file.**
+New tests: `documentModalRoute.test.ts` (≤110, node), `documentRoutes.source.test.ts` (≤160, node,
+scoped source slices). **New tests ≤ 270 / 2 files.**
+
+**File-ceiling note (house rule 3).** `CanvasClient.tsx` is **8,346 lines** and
+`FreeformPadletCards.tsx` is **6,343** — both far over the 800 ceiling, and rule 3 forbids growing a
+file already over it. Both edits are therefore capped hard and must be **rewiring, not addition**:
+replace an inline destination decision with a helper call. The implementer should aim for a **net-zero
+or negative** delta in file 4 and must justify any net growth in file 3 beyond the state slice and the
+`CanvasModals` prop pass-through. Removing the dead `openPadletInTypeEditor` prop at `CanvasClient:5864`
+(C5) is **permitted and encouraged** within the file-3 budget.
+
+**Explicitly excluded:** `hooks/canvas/usePadletSave.ts` · `CardEditor.tsx` · `CardPreview.tsx` ·
+`ClipartCardDraftModal.tsx` · `NoteEditor.tsx` · `NoteEditorToolbar.tsx` · `DocumentEditor.tsx` ·
+`DocumentEditor.test.tsx` · `DocumentEditor.readonly.test.tsx` · `useSharedTipTapEditor.ts` ·
+`documentContentAdapter.ts` · `documentPost.ts` · `NoteEditor.characterization.test.tsx` ·
+`package.json` · `package-lock.json` · schema/migrations · presentation code · the Excalidraw fork.
+**The B1b-i wrapper is closed and must not be reopened** — if routing appears to need a wrapper change,
+stop and request a governance amendment.
+
+### 25.8 Required test coverage
+
+`documentModalRoute.test.ts` (pure, node):
+
+- T-1 Document + `canEditWorkspace=true` → `'document-editor'`.
+- T-2 Document + `false` → `'document-viewer'`.
+- T-3 clipart card (`metadata.svgUrl`) → `null` in **both** capability states.
+- T-4 note, todo, link, image, table, container, comment, drawing, ai-component → `null`.
+- T-5 `null`/`undefined` post → `null`.
+- T-6 the new-Document draft shape (`type:'card'`, no `svgUrl`) → `'document-editor'`.
+- T-7 the module imports `isDocumentPost` and `selectCardModalRoute` and re-inlines neither predicate.
+- T-8 deterministic and side-effect free.
+
+`documentRoutes.source.test.ts` (node, **scoped source slices — whole-file substring counts are
+forbidden**): slice and assert each of
+
+- T-9 `openPadletInTypeEditor` body — Document branch references the shared destination; the clipart
+  branch at `:5700` is **unchanged**.
+- T-10 Columns `onOpenPost` body · T-11 Rows `onOpenPost` body.
+- T-12 `openFreeformPadletModal` body · T-13 the `CardPreview onEditContent` body in
+  `FreeformPadletCards`.
+- T-14 creation `case 'document'` block.
+- T-15 **no** Document-reachable slice still references `setIsCardEditorOpen(true)` or
+  `setIsNoteEditorOpen(true)`.
+- T-16 `CanvasModals` renders the wrapper inside a keyed div whose key contains `padletToEdit?.id` and
+  a closed sentinel (O2 / §25.2).
+- T-17 read-only Documents receive a non-writing save callback, and capability is passed explicitly
+  rather than inferred from callback presence.
+- T-18 (C6) the wrapper's save-then-close ordering is preserved at every editable Document call site.
+
+**The suite must fail if any one layout bypasses the shared route.**
+
+**Regressions:** NoteEditor characterization 11/11 green and unmodified · `DocumentEditor` 17/17 and
+read-only 6/6 unmodified · `CardEditor` · `CardPreview` · `ClipartCardDraftModal` · `cardModalRoute`
+(count re-measured) · `documentPost` · `documentContentAdapter` · `useSharedTipTapEditor` · creation
+flow unchanged · no PDF production code.
+
+### 25.9 Negative controls — all 14 must be detected and reverted hash-identically
+
+1. route the Document branch back to `CardEditor` (`:5704`) · 2. leave Columns `onOpenPost` on
+`NoteEditor` · 3. leave Rows `onOpenPost` on `NoteEditor` · 4. leave `openFreeformPadletModal` on
+`CardEditor` · 5. leave `CardPreview.onEditContent` on `CardEditor` · 6. drop `title` from the wrapper
+props · 7. classify clipart as a Document · 8. route Note/Todo/Link/Image through the Document helper ·
+9. leave creation `:5417` on `CardEditor` · 10. force read-only capability to editable ·
+11. **remove the keyed remount div in `CanvasModals`** (O2) · 12. pass `saveCard` as the read-only save
+callback · 13. leave the deep-link route on the old destination · 14. introduce a PDF-specific branch.
+
+### 25.10 Induced failures — each demonstrable at `26ec7c0`
+
+1. `lib/domain/canvas/documentModalRoute.ts` does not exist; the Document predicate is inlined and
+   unnamed at `:5704`.
+2. A freeform Document opens `CardEditor` — a `<textarea>` (`CardEditor.tsx:147`).
+3. Columns and Rows `onOpenPost` call `setIsNoteEditorOpen(true)` directly (`:6480`, `:6570`) and
+   `SaveNoteData` (`usePadletSave.ts:34-48`) **has no `title` field** — the live P3 title-loss path.
+4. `openFreeformPadletModal` (`FreeformPadletCards:420-421`) opens `CardEditor` with **no**
+   `selectCardModalRoute` call at all.
+5. `openPadletInTypeEditor` is passed to `FreeformPadletCards` and silently discarded (C5).
+6. A read-only Document opens `CardViewer` → `CardEditor` `<textarea readOnly>` (`:5706`).
+7. The incumbent `CardEditor` instances (`CanvasClient:7366`, `:7380`) have **no remount key**, unlike
+   every editor in `CanvasModals`.
+
+Each production correction must map to one of these.
+
+### 25.11 False-green protections
+
+Reject if: any Document route still reaches `CardEditor`, note-shaped `NoteEditor`, or
+`ClipartCardDraftModal` · title is absent from any Document save payload · a source test uses whole-file
+substring counts · the keyed remount div is absent · capability is inferred from callback presence ·
+read-only receives a writing callback · clipart routing changes · Note/Todo/Link/Image/table/container/
+comment/drawing/ai-component destinations change · `NoteEditor` behaviour changes · the B1b-i wrapper or
+its tests are edited · `usePadletSave` is edited · scope exceeds the allowlist · PDF code appears · B2
+behaviour (explicit Save, dirty state, discard confirmation, Escape redesign) appears.
+
+### 25.12 Hard stops — evaluated
+
+| Hard stop | Result |
+|---|---|
+| Title cannot be preserved without persistence changes | **NOT TRIGGERED** — `SaveCardData` already carries `title` (§22.2) |
+| Document routes cannot be separated from generic routes | **NOT TRIGGERED** — the helper returns `null` for non-Documents; four bounded bypasses (C2′) |
+| The Document modal cannot close without editing `saveCard` | **NOT TRIGGERED** — the wrapper's `onSave`-then-`onClose` ordering closes it (C6); if disproven in implementation, **stop** |
+| O2 requires a new identity prop | **NOT TRIGGERED** — resolved ID-B by the existing keyed-div idiom (§25.2) |
+| Rewiring requires growing a file already over the 800 ceiling | **CONSTRAINED, not triggered** — both edits are rewiring with hard caps; C5's dead-prop removal offsets file 3 |
+| Clipart behaviour cannot be preserved while rewiring freeform | **NOT TRIGGERED** — the `null` fall-through preserves it exactly; C7 stays carried |
+| Read-only Document cannot be separated from clipart read-only | **NOT TRIGGERED** — clipart keeps `isCardViewerOpen` (C3); only the Document half moves |
+| B2 becomes inseparable from B1b-ii | **NOT TRIGGERED** — lifecycle stays inside the wrapper's two handlers (§22.4) |
+| Production scope cannot be bounded | **RESOLVED by the §25.7 amendment** — 4 files / ≤175 lines, measured, not estimated |
+
+**Split evaluated and rejected.** §22.15 requires that the suite fail *if any one layout bypasses the
+shared route* — an all-or-nothing property. Splitting the helper/central branch from the four bypasses
+would ship an intermediate state in which Columns and Rows still destroy Document titles (P3). B1b-ii
+ships as **one unit**.
+
+### 25.13 Validation matrix
+
+Helper tests · scoped route-source tests · `DocumentEditor` editable + read-only · NoteEditor
+characterization · `CardEditor` · `CardPreview` · `ClipartCardDraftModal` · `cardModalRoute` ·
+`documentPost` · `documentContentAdapter` · `useSharedTipTapEditor` · **full Vitest** · clean one-run
+`npm run typecheck` · **410** declarations · `npx next build` · bridge exclusion **891** · clean E2E
+build (marker `1`) · ordinary `.next` restored and exclusion re-verified · marker absent ·
+`git diff --check` · only the five protected worktree paths.
+
+**Baseline entering B1b-ii: 72/72 files · 839/839 tests · 410 declarations · 891 exclusion files.**
+
+**Build hygiene (§24.15 O3):** clear `.next` before trusting any build result that follows a
+`build:e2e` / ordinary-build swap.
+
+### 25.14 Status
+
+**PATCH-149B1b-ii: OPEN · AUTHORIZED** — 4 production files, ≤175 production lines, 1 existing-test edit
+≤10 lines, ≤270 new test lines, 14 negative controls, 7 induced failures.
+
+| Patch | Status |
+|---|---|
+| **PATCH-149A** | **CLOSED** (`c23be50`) |
+| **PATCH-149B0** | **CLOSED** (`c9ea345`) |
+| **PATCH-149B1a** | **CLOSED** (`c44a2ac` + `856f54b`) |
+| **PATCH-149B1b-i** | **CLOSED** (`80011ee` + `4c37205`, reviews §23/§24) |
+| **PATCH-149B1b-ii** | **OPEN · AUTHORIZED — next implementation unit** |
+| **PATCH-149B2** | **BLOCKED until B1b-ii closes** — explicit Save, dirty state, discard, Escape/backdrop |
+| **PATCH-149C** | **BLOCKED on user reproduction** (§14.11) |
+| **PATCH-150** | **RESERVED and separate**; untouched |
+
+**Carried debt and defects — recorded so they are not mistaken for Document scope:**
+
+1. The temporary save-on-close lifecycle (§22.4) must not survive B2.
+2. `CardEditor`'s six handler-less toolbar buttons (§22.1 C4) remain on the clipart-read-only surface.
+3. **C7** — the freeform pencil and `CardPreview.onEditContent` send **clipart** cards to `CardEditor`
+   rather than `ClipartDraftModal`, diverging from the central router. Pre-existing; **not** fixed by
+   B1b-ii, which preserves it byte-identically via the `null` fall-through.
+4. **C5** — `openFreeformPadletModal` is a P6 duplicate of `openPadletInTypeEditor`. B1b-ii removes only
+   its Document branch; collapsing the two routers entirely is a separate refactor.
+5. **Row 15** — `FreeformPadletCards:1791` gates a whole toolbar behind `{false && …}`; dead code,
+   untouched.
+
+No production or test file was modified in this turn. Nothing was pushed.
