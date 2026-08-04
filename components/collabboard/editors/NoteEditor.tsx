@@ -1,16 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from 'react';
-import { useEditor, EditorContent } from '@tiptap/react';
-import StarterKit from '@tiptap/starter-kit';
-import { Underline } from '@tiptap/extension-underline';
-import { Link } from '@tiptap/extension-link';
-import { Highlight } from '@tiptap/extension-highlight';
-import { TextStyle } from '@tiptap/extension-text-style';
-import { Color } from '@tiptap/extension-color';
-import Placeholder from '@tiptap/extension-placeholder';
-import { FontSize } from './extensions/FontSize';
-import { Comment } from './extensions/Comment';
+import { EditorContent, useSharedTipTapEditor } from './useSharedTipTapEditor';
 import NoteEditorToolbar, { ToolbarMode } from './NoteEditorToolbar';
 import TextStylePopup from './TextStylePopup';
 import EmojiReactionPicker from './EmojiReactionPicker';
@@ -18,23 +9,6 @@ import LinkPopup from './LinkPopup';
 import CommentPopup from './CommentPopup';
 import { Palette, PenTool, X, Strikethrough, Trash2 } from 'lucide-react';
 import { ColorPickerContent } from '../ColorPicker';
-
-// Module-level constant -- stable reference, never recreated on render
-const NOTE_EXTENSIONS = [
-  StarterKit.configure({
-    heading: { levels: [1, 2] },
-    link: false,
-    underline: false,
-  }),
-  Underline,
-  Link.configure({ openOnClick: false }),
-  Highlight.configure({ multicolor: true }),
-  TextStyle,
-  Color,
-  FontSize,
-  Comment,
-  Placeholder.configure({ placeholder: 'Start typing...' }),
-];
 
 const BACKGROUND_COLORS = [
   "#ffffff",
@@ -229,10 +203,7 @@ export default function NoteEditor({
     };
   };
 
-  const editor = useEditor({
-    immediatelyRender: false,
-    extensions: NOTE_EXTENSIONS,
-    content: initialContent,
+  const editor = useSharedTipTapEditor({ initialContent,
     editorProps: {
       attributes: {
         class: 'focus:outline-none min-h-[100px] w-full text-sm',
@@ -278,15 +249,7 @@ export default function NoteEditor({
         return false;
       },
     },
-    // NO onBlur handler - it causes issues when clicking toolbar
-  }, []);
-
-  // Reset content when initialContent changes
-  useEffect(() => {
-    if (editor && initialContent !== editor.getHTML()) {
-      editor.commands.setContent(initialContent);
-    }
-  }, [initialContent, editor]);
+  });
 
   useEffect(() => {
     if (!editor) return;

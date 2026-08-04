@@ -148,3 +148,12 @@ describe('NoteEditor prop surface (source-level; not observable from rendered DO
     expect(card.style.width).toBe('280px');
   });
 });
+
+describe('NoteEditor extraction ownership (PATCH-149B1a; source-level)', () => {
+  it('constructs its editor via the shared hook, not a direct useEditor call', () => {
+    const src = fs.readFileSync('components/collabboard/editors/NoteEditor.tsx', 'utf8');
+    expect(src).toContain('useSharedTipTapEditor(');
+    expect(src).not.toContain('useEditor(');
+    expect(src).not.toContain('NOTE_EXTENSIONS');
+  });
+});
