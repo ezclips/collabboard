@@ -64,8 +64,10 @@ export function useSharedTipTapEditor({
     }
   }, [initialContent, editor]);
 
+  // PATCH-149 §20.15 (F1): emitUpdate=false — setEditable defaults to true and
+  // fires a content-less "update" on every mount/toggle otherwise.
   useEffect(() => {
-    if (editor) editor.setEditable(editable);
+    if (editor) editor.setEditable(editable, false);
   }, [editable, editor]);
 
   return editor;

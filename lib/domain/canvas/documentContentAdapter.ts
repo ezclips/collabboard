@@ -7,12 +7,24 @@ export type DocumentContentClass = 'empty' | 'plain-text' | 'html' | 'malformed'
 
 // Conservative, matches the real-tag allowlist SafeHtmlContent uses — never a
 // permissive "<word>" match, so bare angle brackets in prose are never
-// mistaken for markup.
-const SUPPORTED_TAG = /<\/?(?:p|br|div|span|ul|ol|li|strong|em|b|i|u|s|a|h[1-6]|blockquote|code|pre|mark)(?:\s[^>]*)?\/?>/i;
+// mistaken for markup. Anchored: tested per-token, not against the raw string.
+const SUPPORTED_TAG = /^<\/?(?:p|br|div|span|ul|ol|li|strong|em|b|i|u|s|a|h[1-6]|blockquote|code|pre|mark)(?:\s[^>]*)?\/?>$/i;
+
+// Any HTML-tag-shaped token ('<'/'</' immediately followed by a letter — bare
+// comparisons like "x < y" never match). PATCH-149 §20.15 (F2): classify as
+// html only when EVERY tag-like token is supported, so one real tag can never
+// cause an adjacent unsupported/bare tag-like sequence to be silently dropped
+// by the sanitizer.
+const TAG_LIKE = /<\/?[a-zA-Z][^<>]*>/g;
+
+function isWhollySupportedHtml(raw: string): boolean {
+  const tokens = raw.match(TAG_LIKE);
+  return !!tokens && tokens.length > 0 && tokens.every((t) => SUPPORTED_TAG.test(t));
+}
 
 export function classifyDocumentContent(raw: unknown): DocumentContentClass {
   if (typeof raw !== 'string' || raw.trim() === '') return 'empty';
-  if (SUPPORTED_TAG.test(raw)) return 'html';
+  if (isWhollySupportedHtml(raw)) return 'html';
   if (/[<>]/.test(raw)) return 'malformed';
   return 'plain-text';
 }

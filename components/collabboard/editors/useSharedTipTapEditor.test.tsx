@@ -92,16 +92,21 @@ describe('useSharedTipTapEditor (PATCH-149B1a)', () => {
     expect(container.innerHTML).toContain('data-comment-id="c1"');
   });
 
-  it('onUpdate receives serialized HTML on content change', () => {
+  it('does not call onUpdate when only the editable flag toggles (F1)', () => {
+    const onUpdate = vi.fn();
+    mount(<Harness initialContent="<p>start</p>" editable onUpdate={onUpdate} />);
+    const { root } = mounted[mounted.length - 1];
+    act(() => {
+      root.render(<Harness initialContent="<p>start</p>" editable={false} onUpdate={onUpdate} />);
+    });
+    expect(onUpdate).not.toHaveBeenCalled();
+  });
+
+  it('does not call onUpdate on mount, and receives serialized HTML on real content change (F1)', () => {
     const onUpdate = vi.fn();
     let liveEditor: NonNullable<ReturnType<typeof useSharedTipTapEditor>> | null = null;
-    mount(
-      <Harness
-        initialContent="<p>start</p>"
-        onUpdate={onUpdate}
-        onEditor={(e) => { liveEditor = e; }}
-      />,
-    );
+    mount(<Harness initialContent="<p>start</p>" onUpdate={onUpdate} onEditor={(e) => { liveEditor = e; }} />);
+    expect(onUpdate).not.toHaveBeenCalled();
     act(() => {
       liveEditor!.chain().focus().insertContent(' more').run();
     });

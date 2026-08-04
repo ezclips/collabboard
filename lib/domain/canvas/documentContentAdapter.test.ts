@@ -111,6 +111,29 @@ describe('toEditorHtml', () => {
   });
 });
 
+function visibleText(html: string): string {
+  const div = document.createElement('div');
+  div.innerHTML = html;
+  return div.textContent || '';
+}
+
+describe('F2: mixed/ambiguous content fails safe (PATCH-149 §20.15)', () => {
+  it('classifies mixed valid-tag + unsupported-tag input as non-html and preserves every visible character', () => {
+    const input = 'Use <example> as a placeholder <p>and real markup</p>';
+    expect(classifyDocumentContent(input)).not.toBe('html');
+    const text = visibleText(toEditorHtml(input));
+    expect(text).toContain('example');
+    expect(text).toContain('as a placeholder');
+    expect(text).toContain('and real markup');
+    expect(input).toBe('Use <example> as a placeholder <p>and real markup</p>');
+  });
+
+  it('does not lose text for an unclosed supported tag, or comparison-operator brackets', () => {
+    expect(visibleText(toEditorHtml('<p>Open paragraph'))).toContain('Open paragraph');
+    expect(visibleText(toEditorHtml('x < y && y > z'))).toContain('x < y && y > z');
+  });
+});
+
 describe('fromEditorHtml', () => {
   it('normalizes an empty TipTap document to an empty string', () => {
     expect(fromEditorHtml('<p></p>')).toBe('');
