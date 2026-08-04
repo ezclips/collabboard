@@ -1,7 +1,9 @@
 # PATCH-149 — DOCUMENT POST USABILITY, MODAL CLEANUP, PDF-READY FOUNDATION
 
 **Status:** **SPLIT · PATCH-149A CLOSED (bounded modal cleanup, commit `c23be50`) · PATCH-149B
-BLOCKED ON A PRODUCT DECISION (document editor identity) · TWO DEFECTS UNLOCATED, NOT AUTHORIZED
+ARCHITECTURE DEFINED BUT **BLOCKED** — product decisions B-i/B-ii supplied and accepted, migration
+not authorized because it cannot be validated in the current node-only test environment (§14.5) and
+`NoteEditor` cannot be reused as-is (§14.4) · PATCH-149C RESERVED for the two unlocated defects
 · NOT PUSHED**
 **Authored:** 2026-08-04 (governance architect). **Base:** `177645b`. **First authoring of this
 number** — `git log --all --diff-filter=A -- .fable5/patches/PATCH-149.md` is empty.
@@ -579,3 +581,291 @@ non-reproducible after a clean rebuild, and is not attributable to the changed f
 
 **Unchanged — OPEN · BLOCKED** on B-i (document editor identity) and B-ii (save-versus-close),
 per §4. Not evaluated or reopened by this review.
+
+---
+
+## 14. PATCH-149B — MIGRATION ARCHITECTURE · **BLOCKED**
+
+**Authored:** 2026-08-04 (governance architect). **Base:** `e6e9122`. **Product decisions B-i and
+B-ii are supplied and binding** (§14.1). **Result: the migration is architecturally correct and is
+NOT authorized for implementation, because it cannot be verified in the current test environment
+(§14.5), and because `NoteEditor` cannot be reused without restructuring 1,165 untested lines
+(§14.4).** No production or test file was modified in this authoring turn.
+
+### 14.1 Supplied product decisions — recorded as binding
+
+**B-i — Editor identity.** Document Posts must use the existing TipTap `NoteEditor` path. No second
+rich-text editor. No new `document` padlet type. Continue persisting as the existing card type if
+that is narrowest. **Accepted, and confirmed correct by §14.4 evidence** — the direction is right;
+only its *verifiability* blocks it.
+
+**B-ii — Save/close.** Explicit Save · non-saving Close · unsaved-change confirmation · backdrop and
+Escape follow the same dirty rules · read-only Close immediate and non-writing · never silently
+auto-save on Close. **Accepted. Not implementable inside `NoteEditor` without changing Note Post
+behaviour** (§14.7) — which B-ii does not authorize, since it governs Document Posts only.
+
+### 14.2 Route and type census (measured at `e6e9122`)
+
+| Concern | Exact path | State owner | Persisted type | Modal component | Capability guard | Content format | Title | Close/Save behaviour | Disposition |
+|---|---|---|---|---|---|---|---|---|---|
+| Document tool | `canvasToolbarRegistry.tsx:97` — `{ icon: FileText, label: "Document", type: "document" }` | registry | — | — | workspace toolbar gate | — | — | — | frozen |
+| Document creation | `CanvasClient.tsx:5400-5418` | `setPadletToEdit` | **`'card'`**, `title:''`, `content:''`, 180×220, `metadata:{...createMetadata}` — **no discriminator** | `CardEditor` via `setIsCardEditorOpen(true)` | — | plain text | `padlets.title` | — | **B2** |
+| Note creation | `CanvasClient.tsx:5380-5399` | `setPadletToEdit` | `'text'`, `title:'New Note'`, 280×250 | `NoteEditor` via `setIsNoteEditorOpen(true)` | — | HTML | hardcoded | — | frozen |
+| Open (all routes) | `CanvasClient.tsx:5692-5708` `openPadletInTypeEditor` | — | — | branch chain | `selectCardModalRoute(canUseFreeformEditButton)` | — | — | — | **frozen (PATCH-139/151)** |
+| ↳ clipart branch | `:5700-5703` — `type==='card' && metadata?.svgUrl` | — | `'card'` | `ClipartCardDraftModal` / `CardEditor` viewer | capability | — | — | — | **frozen** |
+| ↳ document branch | `:5704-5707` — `type==='card'` (no `svgUrl`) | — | `'card'` | `CardEditor` editor / viewer | capability | plain text | `title` | save-on-close | **B2** |
+| ↳ fallback | `:5708` `else setIsNoteEditorOpen(true)` | — | `'text'`/other | `NoteEditor` | none | HTML | — | save-on-close | frozen |
+| Context-menu route | `CanvasClient.tsx:5713-5721` `openPadletTargetFromContextMenu` → same `openPadletInTypeEditor` | — | — | — | inherited | — | — | — | frozen |
+| Section "open post" | `CanvasClient.tsx:6480`, `:6570`, `:6729` — `setPadletToEdit(post); setIsNoteEditorOpen(true)` | — | — | `NoteEditor` | **none — bypasses `openPadletInTypeEditor` entirely** | — | — | — | **observation, §14.11** |
+| Preview affordance | `CardPreview.tsx:71,149` `aria-label="Open card"` → `onEditContent` | — | — | — | `FreeformPadletCards.tsx:1761` capability | — | — | — | **frozen (PATCH-139)** |
+| Direct `?openPadlet=` | `openPadletInTypeEditorRef` (`CanvasClient.tsx:5711`) | — | — | same chain | same capability | — | — | — | **frozen** |
+| Editable document modal | `CanvasClient.tsx:~7379` `<CardEditor isOpen={isCardEditorOpen} …>` | `CanvasClient` | `'card'` | `CardEditor` | — | plain text | prop | `handleSave` on X + backdrop | **B2/B3** |
+| Read-only document viewer | `CanvasClient.tsx:7366-7377` `<CardEditor isOpen={isCardViewerOpen} … readOnly onSave={() => setIsCardViewerOpen(false)}>` | `CanvasClient` | `'card'` | `CardEditor` | capability-routed | plain text | prop | no-op save, immediate close | **B2** |
+| Note modal mount | **`components/collabboard/canvas/ui/CanvasModals.tsx:136-149`** (474 lines) — *not* `CanvasClient` | `CanvasModals` | `'text'` | `NoteEditor` | none | HTML | **not passed** | save-on-close | **B2** |
+| Document save | `usePadletSave.ts:973` `saveCard(data: {title, content, metadata})` | hook | `'card'` | — | — | plain text | **has title** | insert on `id==='new'` | **B3** |
+| Note save | `usePadletSave.ts:359` `saveNote(data: SaveNoteData)` | hook | `'text'` | — | — | HTML | **no title field; hardcodes `'New Note'`** | insert on `id==='new'` | **B2 blocker** |
+| Empty-draft guard | `usePadletSave.ts:981-999` | hook | — | — | — | — | — | **silently discards blank new cards** | **answers C-lifecycle, §14.8** |
+
+### 14.3 Document predicate — **STABLE, verified; hard stop NOT triggered**
+
+Every `type: 'card'` creation site in the repository was enumerated and traced:
+
+| # | Site | Produces `svgUrl`? | Is a Document? |
+|---|---|---|---|
+| 1 | `CanvasClient.tsx:5408` — Document tool | **no** | **yes** |
+| 2 | `CanvasClient.tsx:4868` — `handleFreeformCardDrop` | yes | no (clipart) |
+| 3 | `CanvasClient.tsx:7503` — clipart library pick | yes | no (clipart) |
+| 4 | `RowColumnContainerCard.tsx:284` — SVG drop into container | yes | no (clipart) |
+| 5 | `usePadletSave.ts:1024` — `saveCard` insert | inherits draft metadata | either |
+| 6 | `CanvasClient.tsx:1695-1704` — draft `kind:'card'` | inherits draft metadata | either |
+
+`kind: 'card'` is produced at **exactly one** site — `usePadletSave.ts:1006`, the `saveCard`
+placement-prompt draft — so #5 and #6 are not independent creators; they re-persist an existing
+draft's own metadata. **Therefore no path creates a non-clipart `type:'card'` post except the
+Document tool.**
+
+**THE DOCUMENT PREDICATE (single, exact, reused everywhere):**
+
+```
+isDocumentPost(post) ≡ post.type === 'card' && !post.metadata?.svgUrl
+```
+
+This is not new: it is already the de-facto discriminator at `CanvasClient.tsx:5700` vs `:5704`, and
+PATCH-134 §239 states it verbatim (*"`type: 'card'` and no `svgUrl` is what makes it document-like
+rather than clipart"*). It correctly **excludes** clipart cards (`svgUrl`), text/sticky notes
+(`'text'`), comments (`'comment'`), embedded media (`'image'`/`'link'`), and every other type.
+**No new metadata discriminator is required or authorized** — introducing one would create a second
+source of truth for the same concern (P6) and would not classify legacy rows anyway.
+
+### 14.4 Editor migration option — **M4 · HARD STOP** (target M2 once unblocked)
+
+`NoteEditor` was read in full. It **cannot** host a Document Post as it stands:
+
+| Requirement | `NoteEditor` at `e6e9122` | Verdict |
+|---|---|---|
+| Mountable inside a document modal | **No** — it *is* a modal: `:697-700` renders `fixed inset-0 z-[1000] … bg-black/50` with its own overlay click handler, and `:692` returns `null` unless `isOpen` | **M1 impossible** — nesting yields modal-in-modal |
+| Document-sized surface | **No** — `:749` hardcodes `width: '280px'` (sticky-note geometry) | blocker |
+| `title` prop | **Absent** from `NoteEditorProps` (`:88-122`) | blocker — Documents own a title (`saveCard.title`) |
+| `readOnly` prop | **Absent entirely** | blocker — read-only Document view is a required deliverable |
+| Save contract | `:102-119` `onSave` emits `content, cardColor, topStrip, textColor, reactions, badgeColor, detachedComments` — **no `title`, no metadata passthrough** | blocker — incompatible with `SaveCardData {title, content, metadata}` |
+| Explicit Save | **None** — `:657` `handleSaveAndClose`, `:672` `handleClose → handleSaveAndClose`, `:677` `handleOverlayClick → handleSaveAndClose` | **the identical B-ii defect** |
+| Dirty state | **None** — no dirty flag, no change callback, no imperative getter, no baseline | blocker |
+| Escape handling | **None** at modal level (`:997` is a comment-input-local key handler only) | blocker |
+
+**M1 (mount directly): impossible** — nested modals, no title, no readOnly, wrong save shape.
+**M2 (narrow wrapper): collapses into M3** — a wrapper cannot suppress `NoteEditor`'s own overlay,
+280px card, or save-on-close without editing `NoteEditor` itself.
+**M3 (extract shared TipTap core): the only technically viable route** — and it means restructuring
+a **1,165-line component with zero test coverage** that owns the shipped Note Post, in an
+environment that **cannot execute it** (§14.5). The extraction would move `useEditor`,
+`NOTE_EXTENSIONS`, 11 formatting handlers, the comment-thread system, colour state and popup
+wiring — i.e. most of the file.
+
+**SELECTED: M4 — HARD STOP.** The brief's own hard stop *"NoteEditor cannot be reused without
+duplicating most of it"* is triggered on measured evidence. **M2 remains the correct target** once
+§14.5 is resolved; this is a sequencing block, not a rejection of B-i.
+
+### 14.5 **Decisive blocker — the migration cannot be verified in this environment**
+
+Measured, not assumed:
+
+1. `vitest.config.ts` sets **`environment: 'node'`**.
+2. **`jsdom` and `happy-dom` are absent from `node_modules`.** (`@testing-library/{dom,jest-dom,react}` are present but cannot render without a DOM environment.)
+3. The include glob is `components/collabboard/*.test.tsx` — it does **not** cover
+   `components/collabboard/editors/`, where `NoteEditor` lives. A test placed beside it would not
+   even be collected.
+4. **`NoteEditor` has no test file. Zero.**
+5. **Proven by direct probe** (temporary throwaway config + probe file, both deleted; tree verified
+   clean): `renderToStaticMarkup(<NoteEditor isOpen initialContent="<p>Legacy HTML body</p>" … />)`
+   **does not throw — it returns a string of length 0.** Because `useEditor({immediatelyRender:
+   false})` leaves `editor` null on first render, `:692` returns `null`.
+
+**Consequence.** Every SSR string assertion — the only technique this repository's card/document
+tests possess — evaluates against **empty markup**. Required test items **5, 6, 7, 8, 10, 11, 12,
+13, 14, 15, 16, 17, 21** (legacy plain-text load, HTML load, formatting persistence, dirty
+tracking, Save writes, baseline reset, clean/dirty close, Keep editing, Discard, backdrop, Escape,
+read-only has no Save/toolbar, TipTap seam) are **unachievable**.
+
+**Worse than unachievable — actively dangerous.** The read-only assertions (`expect(markup).not.
+toContain('Save')`, `not.toContain('toolbar')`) would **pass vacuously against an empty string**.
+That is precisely the false green this patch's own rules demand rejection of, and it would
+manufacture a green validation matrix for a migration nobody had tested.
+
+**The brief forbids the remedy:** *"Do not add jsdom or dependencies unless current NoteEditor tests
+already require and support them."* There are no NoteEditor tests. **Adding jsdom is therefore not
+authorized here, and without it the migration cannot be honestly validated.** This is the blocker.
+
+### 14.6 TipTap serialization contract (recorded; sufficient for P1, no envelope needed)
+
+- **Input:** `content: initialContent` (`:235`) — TipTap accepts an HTML string; plain text loads as a single paragraph.
+- **Reset:** `:285-289` — `setContent(initialContent)` when `initialContent !== editor.getHTML()`.
+- **Output:** `editor.getHTML()` (`:658`) — **HTML string**, written to `padlets.content` (`TEXT`).
+- **Empty:** TipTap emits `<p></p>` for an empty document, **not** `''` — load-bearing for dirty comparison (§14.7) and for the empty-draft guard (`usePadletSave.ts:981-999`, which strips tags via `/<[^>]*>/g` before testing emptiness — so `<p></p>` correctly reads as empty).
+- **Sanitization:** at render, via `DOMPurify` on card/note bodies — not at write.
+- **Custom-node preservation:** `NOTE_EXTENSIONS` (`:23-37`) already registers custom nodes/marks (`FontSize`, `Comment`) whose attributes round-trip through `getHTML()` as `data-*` attributes — `Comment` is read back at `:243-272` from `data-comment-id`, `data-comment-thread`, `data-user-id`, `data-timestamp`, `data-color`. **This proves the mechanism a future `PdfHighlight` node needs already works end-to-end in HTML.**
+- **Title:** stored **separately** (`padlets.title`), never inside content.
+- **Metadata:** `saveNote` spreads `...padletToEdit?.metadata` (`:362`) — passthrough preserved.
+
+**Conclusion: PDF foundation Option P1 is confirmed sufficient. No schema change, no persistence
+envelope, no versioning is required** — and none is authorized. The seam is exactly: register a node
+in `NOTE_EXTENSIONS`; carry reference data as **node attributes** serialized to `data-*` in HTML;
+no modal-level PDF special-casing.
+
+### 14.7 Save/dirty-state architecture (specified, not authorized)
+
+`NoteEditor` currently exposes **none** of: current HTML to the parent, change callback, dirty
+callback, imperative getter, Save button, keyboard shortcut, or baseline reset. The governed
+contract, for whichever patch implements it:
+
+- **One source of truth:** a `dirty` boolean derived from `normalize(currentTitle, currentHTML) !== normalize(baselineTitle, baselineHTML)`.
+- **Normalization boundary (required, because raw HTML comparison is unstable):** compare
+  `editor.getHTML()` against a baseline that was itself produced by loading the stored content into
+  the editor and reading `getHTML()` back — never against the raw stored string. A stored plain-text
+  `"hello"` becomes `<p>hello</p>` on load; comparing raw-vs-serialized would mark every legacy
+  document dirty on open. Treat `<p></p>` as equal to `''`.
+- Successful Save resets the baseline. Switching documents resets the baseline. **Read-only never becomes dirty.**
+- **Save UI:** semantic `<button>` labelled `Save`; disabled when not dirty; `saveCard` is `async`, so a pending state and an error path are required — **errors must surface, never be swallowed** (P3/P10).
+- **Save does not close** (B-ii §2). No `Ctrl/Cmd+S` — no existing shortcut infrastructure was found, and adding one is out of scope.
+
+### 14.8 New-document lifecycle — **C1, already the architecture**
+
+`usePadletSave.ts:981-999`: when `padletToEdit.id === 'new'`, `saveCard` inserts **only** on save,
+and **silently discards** a draft whose title, tag-stripped content, description and metadata are
+all empty. So today: **the row is created on first Save; nothing is orphaned; discard-before-save
+is already a no-op.**
+
+**SELECTED: C1 — create the row only on first Save.** It is the least destructive option, it is
+what the code already does, and it makes Discard trivially safe (close without persisting; no row
+exists to delete). **C2 is explicitly rejected** — creating a placeholder row up front would require
+Discard to *delete* it, introducing a destructive path where none exists today.
+
+### 14.9 Read-only rendering — decision recorded, blocked with the rest
+
+**Preferred: a `NoteEditor`-derived read-only renderer** (TipTap in `editable: false`), so viewer and
+editor content semantics cannot diverge and future PDF-reference nodes render in both. It must
+preserve: capability routing, accessible Close, **no toolbar, no Save, no mutation, no dirty
+dialog**, meaningful title, formatted content — and must not regress clipart-card viewing
+(PATCH-151 §14). **Blocked by §14.5**: "no toolbar / no Save" is exactly the assertion pair that
+passes vacuously on empty SSR output, so this decision cannot be safely validated yet. Until then
+the current `CardEditor` read-only viewer (PATCH-151, closed and green) **remains in place
+untouched**.
+
+### 14.10 Formatting contract — `NoteEditorToolbar` census
+
+All controls are **wired and functional** (`NoteEditorToolbar.tsx:94-127` ↔ handlers at
+`NoteEditor.tsx:308-314`) — in stark contrast to `CardEditor`'s five class-C no-ops (§3a):
+
+| Control | Handler | Persists via `getHTML()` | Document classification |
+|---|---|---|---|
+| Text style / Bold / Italic / Strikethrough / Underline | `onTextStyle`, `toggleBold`, `toggleItalic`, `toggleStrike`, `toggleUnderline` | yes | **working — include** |
+| Bullet list / Numbered list / Code | `toggleBulletList`, `toggleOrderedList`, `toggleCodeBlock` | yes | **working — include** |
+| Link | `handleLink` (`:316`), disabled without selection | yes | **working — include** |
+| Comment (text) | `onTextComment`, `Comment` extension | yes (`data-*`) | working — **defer**, overlaps three existing comment systems |
+| **Align** | `onAlign` — **passed `undefined` at the call site** (`:711-739` never supplies `onAlign`); `@tiptap/extension-text-align` is **not** in `NOTE_EXTENSIONS` | no | **class C — dead; must not be shown on the Document toolbar** |
+| Box mode: Card color / Reaction / Post comment | wired | metadata | **note-only — exclude from Documents** |
+
+**Contract:** the Document toolbar exposes only the proven-working text controls; it **must not**
+render `Align` (unsupported, would repeat the exact defect PATCH-149 was raised for), and must not
+render box-mode note chrome. **No formatting capability beyond existing TipTap extensions is added.**
+
+### 14.11 Unlocated defects — still unlocated; **PATCH-149C**
+
+- **Text/container exit (defect 2).** Re-inspected `NoteEditor`: there is **no modal-level key
+  handler and no Escape handling** (the only `Escape` at `:997` is local to a comment input), and
+  **no focus trap**. Dismissal is exclusively backdrop-click → `handleSaveAndClose`. So a user who
+  clicks *inside* the 280px card has no keyboard exit — consistent with the complaint, but the same
+  is true of several surfaces, and **the reporting surface was never identified**. Candidate homes
+  remain `NoteEditor`, the Excalidraw text container, and canvas text-edit mode. **Not authorized —
+  reproduction still required.**
+- **Underline / line-post (defect 3).** `Underline` in `NoteEditorToolbar.tsx:106` is a **legitimate,
+  working formatting control and must not be removed on suspicion.** No horizontal-rule control
+  exists (`StarterKit`'s `horizontalRule` is bundled but unexposed by the toolbar). A canvas line
+  tool exists separately in `FreeformPadletCards`. **Not authorized — the complaint cannot be tied
+  to a specific reproducible element.**
+
+**Required to unblock either:** which surface, and what the user clicked immediately before. One
+sentence converts both into bounded work.
+
+**Also recorded (new, incidental):** `CanvasClient.tsx:6480`, `:6570`, `:6729` open posts via
+`setPadletToEdit(post); setIsNoteEditorOpen(true)` **without** passing through
+`openPadletInTypeEditor`, therefore **without the `selectCardModalRoute` capability check**. This is
+outside PATCH-149's scope and is **not** a Document-Post route (Documents are `type:'card'` and are
+not reachable through these section handlers), so it is **not** a PATCH-139/151 regression — but it
+is a capability-routing inconsistency worth its own investigation. **Recorded, not authorized.**
+
+### 14.12 Hard stops — evaluated
+
+| Hard stop | Result |
+|---|---|
+| No stable Document predicate exists | **NOT TRIGGERED** — `type==='card' && !svgUrl`, verified complete against all six creation sites (§14.3) |
+| **`NoteEditor` cannot be reused without duplicating most of it** | **TRIGGERED** (§14.4) — it is a self-contained modal with no title, no readOnly, wrong save shape; M1/M2 both fail |
+| Legacy content cannot be read safely without schema migration | **NOT TRIGGERED** — TipTap accepts plain text and HTML; no migration needed (§14.6). *But the corpus remains unmeasured per row* (§7), so the adapter spec is not yet writable |
+| New-document discard behaviour unresolvable | **NOT TRIGGERED** — C1 is already the architecture (§14.8) |
+| TipTap output cannot preserve future custom nodes | **NOT TRIGGERED** — `Comment` proves attribute round-trip through HTML (§14.6) |
+| Save errors cannot be surfaced safely | **NOT TRIGGERED** — `saveCard` is async and throwable; a pending/error path is specifiable (§14.7) |
+| Requires touching broad generic card persistence | **NOT TRIGGERED** — no schema/type change; `saveCard` already carries `{title, content, metadata}` |
+| Exit/underline defects unlocatable and would require guessing | **TRIGGERED → split to PATCH-149C** (§14.11) — does not block the migration |
+| **(New) The migration cannot be validated in the current test environment** | **TRIGGERED — DECISIVE** (§14.5), proven by probe |
+
+### 14.13 Split decision and authorization status
+
+**PATCH-149B is SPLIT and NOT AUTHORIZED for implementation.**
+
+| Unit | Scope | Status |
+|---|---|---|
+| **PATCH-149B0** | *Prerequisite.* Governed decision on the test environment (§14.14) + per-row measurement of the `type:'card'` content corpus (plain vs HTML vs empty vs malformed), which §7 left unmeasured and which the legacy adapter spec depends on | **REQUIRED FIRST — owner decision** |
+| **PATCH-149B1** | Document predicate helper + legacy-content adapter, as **pure functions with node tests**, plus read-only TipTap renderer | **BLOCKED** on B0 |
+| **PATCH-149B2** | Explicit Save · dirty baseline · discard confirmation · backdrop/Escape unification | **BLOCKED** on B1 |
+| **PATCH-149C** | Reproducible text-exit and/or underline-line defect | **BLOCKED** on reproduction (§14.11) |
+
+**No production allowlist, test allowlist, line budget, induced-failure plan or negative-control set
+is issued in this document.** Issuing one would authorize work whose acceptance criteria cannot be
+evaluated (§14.5) — the validation matrix would be structurally incapable of distinguishing a
+correct migration from an empty render. The allowlists are written **after** B0, when it is known
+whether behavioural tests are possible.
+
+**Explicitly NOT authorized and NOT added by anything above:** PDF upload · PDF schema ·
+`pdfjs-dist` · viewer · highlights · PDF nodes · source badges · backlinks UI · drag-and-drop PDF ·
+a `'document'` padlet type · a second rich-text editor · any `jsdom`/dependency change · any edit to
+`selectCardModalRoute`, the normal-card route, the clipart route, `ClipartCardDraftModal`, clipart
+creation, the read-only clipart header, or the no-op read-only save route (**all frozen per
+PATCH-139/151**).
+
+### 14.14 The single question that unblocks everything
+
+> **May the test environment gain a DOM (`jsdom` or `happy-dom`) plus a `vitest.config.ts` include
+> glob covering `components/collabboard/editors/`, so that `NoteEditor` — currently 1,165 lines with
+> zero tests — can be characterized *before* Document Posts are migrated onto it?**
+
+- **If yes:** the sequence becomes B0 (add environment + characterize current `NoteEditor` behaviour)
+  → B1 → B2, and M2 becomes implementable behind a real safety net. This is the recommended path;
+  it also retires the standing risk that the Note Post has no regression coverage at all.
+- **If no:** the migration cannot proceed honestly. The only alternative consistent with B-i would be
+  source-guard-only validation, which §14.5 shows produces vacuous passes — and PATCH-151 §14i
+  already demonstrated in this very file family how a source-text guard passes while the behaviour it
+  claims to protect is gone. **Governance will not authorize a migration validated that way.**
+
+**PATCH-149A:** CLOSED (`c23be50`, review `e6e9122`).
+**PATCH-149B:** **OPEN · BLOCKED** — architecture defined, implementation not authorized.
+**PATCH-149C:** RESERVED — blocked on reproduction.
+**PATCH-150:** RESERVED, separate (presentation index-domain divergence); untouched.
