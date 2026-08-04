@@ -1,9 +1,9 @@
 # PATCH-149 — DOCUMENT POST USABILITY, MODAL CLEANUP, PDF-READY FOUNDATION
 
-**Status:** **STAGED · PATCH-149A CLOSED (`c23be50`) · PATCH-149B0 AUTHORIZED, amended — jsdom
-characterization harness for `NoteEditor` plus a stale PATCH-125 package-file guard correction
-(§15, §16), 0 production files, full suite proven 67/67 · 775/775 · PATCH-149B1/B2 BLOCKED behind
-B0 · PATCH-149C RESERVED for the two unlocated defects · NOT PUSHED**
+**Status:** **STAGED · PATCH-149A CLOSED (`c23be50`) · PATCH-149B0 CLOSED (`c9ea345`, review §17) —
+jsdom characterization harness for `NoteEditor` plus a stale PATCH-125 package-file guard
+correction, 0 production files, suite 67/67 · 775/775 · PATCH-149B1 RELEASED for governance ·
+PATCH-149B2 BLOCKED behind B1 · PATCH-149C RESERVED for the two unlocated defects · NOT PUSHED**
 **Authored:** 2026-08-04 (governance architect). **Base:** `177645b`. **First authoring of this
 number** — `git log --all --diff-filter=A -- .fable5/patches/PATCH-149.md` is empty.
 **Inherits:** PATCH-138 label finding · PATCH-139 D3/D5/D6 · PATCH-140 component 6 ·
@@ -1286,3 +1286,253 @@ exactly the hashes the implementation turn left them (`2657dea…`, `8189984…`
 `fb0a121…`). `EmojiReactionPicker.test.tsx` was probed to prove §16.4 correct, then **reverted to
 its committed HEAD state** (`bca4f77…`) — this document, not the working tree, is where the
 correction is authorized from.
+
+---
+
+## 17. PATCH-149B0 — INDEPENDENT CLOSURE REVIEW
+
+**Reviewed:** 2026-08-04 (independent closure reviewer). **Implementation commit:** `c9ea345`
+`test(editor): characterize NoteEditor in jsdom`. **Parent:** `e73b7de`. All evidence below was
+re-executed independently; nothing was taken on the implementer's word.
+
+### 17.1 Source-scope result
+
+`git show --numstat c9ea345` — **exactly the five authorized files, 707 insertions / 3 deletions:**
+
+| File | +/− | Budget |
+|---|---|---|
+| `package.json` | 1 / 0 | ≤1 ✓ |
+| `package-lock.json` | 551 / 0 | bounded ✓ |
+| `vitest.config.ts` | 1 / 1 | ≤1 ✓ |
+| `NoteEditor.characterization.test.tsx` | 150 / 0 | ≤220 ✓ |
+| `EmojiReactionPicker.test.tsx` | 4 / 2 | ≤8 ✓ |
+
+Filtering the commit's file list against the allowlist returns **empty** — no sixth file. **Zero
+production files.** `git diff e73b7de c9ea345` over `NoteEditor.tsx`, `NoteEditorToolbar.tsx`,
+`app/**`, `hooks/**`, `lib/**`, `types/**`, `supabase/**`, `components/collabboard/canvas/**`
+(CanvasClient, CardEditor, modal routing, presentation, Excalidraw fork) returns **empty**.
+**No `.fable5` file appears in the commit.**
+
+### 17.2 `package.json` result
+
+Adds exactly `"jsdom": "29.1.1"` to `devDependencies`, alphabetically placed. **No script changes**
+— critically, none of the leading-comma `harness:*` script lines were reformatted, which the
+implementer's own report flagged as an `npm install` hazard they had to work around by hand. No
+dependency upgrades. React 19.2.7, Next 15.5.20, Vitest ^3.2.7, TipTap 3.x, TypeScript ^5 all
+untouched.
+
+### 17.3 `package-lock.json` result
+
+- **Removed lines: 0.** The diff is *purely additive*.
+- **39 new package entries, and 39 `"dev": true` markers** — a 1:1 match, so every added package is
+  dev-only. Nothing leaks into the production dependency graph.
+- Root `packages[""].devDependencies.jsdom = "29.1.1"`; `packages["node_modules/jsdom"].version =
+  "29.1.1"`, `dev: true`.
+- Enumerated all 39 added packages: `jsdom` plus recognized transitives only — `@asamuzakjp/*`,
+  `@csstools/*`, `@bramus/specificity`, `@exodus/bytes`, `bidi-js`, `css-tree`, `data-urls`,
+  `decimal.js`, `entities`, `html-encoding-sniffer`, `is-potential-custom-element-name`, `lru-cache`,
+  `mdn-data`, `parse5`, `saxes`, `symbol-tree`, `tldts`, `tldts-core`, `tough-cookie`, `tr46`,
+  `undici`, `w3c-xmlserializer`, `webidl-conversions`, `whatwg-mimetype`, `whatwg-url`,
+  `xml-name-validator`, `xmlchars`. **No unrelated package, no version change to any pre-existing
+  entry, no removal.**
+- Lockfile parses as valid JSON.
+
+### 17.4 Vitest include / discovery result
+
+Sole config change: one appended non-recursive entry `'components/collabboard/editors/*.test.tsx'`.
+`environment: 'node'` **unchanged**. No `**` recursion, no `setupFiles`, no `environmentMatchGlobs`,
+no second project.
+
+`npx vitest list --filesOnly` — **67 files total**, of which under `components/collabboard`:
+the five pre-existing top-level tests plus **exactly one** new `editors/` file. Grep of the
+discovered list for `excalidraw_fork`, `/e2e/`, `node_modules` returns **0**. No duplicate
+discovery (the two globs are disjoint; the new file appears once).
+
+**Independently confirmed the trap governance identified was real and avoided:** removing the new
+entry (NC2) returns discovery to exactly **66 files / 765 tests**, proving the entry contributes
+precisely **1 file / 10 tests** and nothing else — no fork tests, no hidden inflation.
+
+### 17.5 jsdom environment result
+
+`// @vitest-environment jsdom` is **line 1** of the characterization file, and applies to that file
+only. No shared setup file. Global environment still `node`. **No polyfills** — grep for
+`ResizeObserver`, `matchMedia`, `polyfill` returns empty, matching §15.2's measurement that none is
+required. **`@testing-library/react` is not imported** (grep empty), avoiding the extraneous
+fork-transitive trap; the suite uses `createRoot` from `react-dom/client` and `act` from `react`,
+both declared dependencies.
+
+### 17.6 Characterization result — all 10 contract items present
+
+| §15.6 item | Verified in source and by execution |
+|---|---|
+| 1 Closed state | `isOpen={false}` ⇒ `innerHTML.length` **toBe(0)** |
+| 2 Open non-vacuity | `length > 1000` **plus** overlay class, `.ProseMirror` node, text content, button count — see §17.7 |
+| 3 Legacy HTML | `<p>Legacy HTML body</p>` / `<p>Stored note</p>` asserted via `textContent` (so raw tags cannot pass as literal text); `initialContent=""` asserts `.ProseMirror` present |
+| 4 Toolbar | `button[title*="Bold"]`, `[title*="Italic"]`, and **`[title*="Text alignment"]`** — dead `Align` characterized as *present*, not removed |
+| 5/6 Close & backdrop | backdrop is `container.firstElementChild`, i.e. the real overlay carrying `onClick={handleOverlayClick}` — **not** a child element; asserts `['save','close']` |
+| 7 Escape | `onSave`/`onClose` both `not.toHaveBeenCalled()` — absence pinned, support not invented |
+| 8 Modal constraints | overlay `fixed inset-0 z-[1000]`; card `style.width === '280px'`; `NoteEditorProps` sliced to assert **no `title:`, no `readOnly:`** |
+| 9 Payload | exact 7-key sort-comparison, plus explicit `not.toContain('title')` / `not.toContain('metadata')` |
+| 10 Cleanup | `afterEach` unmounts every root through `act` and removes containers |
+
+**Nothing is corrected.** Save-on-close, backdrop persistence, the missing Escape handler, the dead
+`Align` control, the absent `title`/`readOnly` props are all recorded as-is. No PDF work, no
+`readOnly`/`title` addition, no toolbar change.
+
+**On item 8 — one honest scoping note:** the "no `title`/`readOnly` prop" assertion is a **source
+slice**, not DOM behaviour, and the test names itself accordingly (*"source-level; not observable
+from rendered DOM"*). That is the correct treatment — a prop's *absence* has no DOM manifestation to
+assert — and it is paired with real DOM assertions in the same block (the 280px width). This is not
+the "source strings substituting for DOM behaviour" false-green: 9 of 10 tests are behavioural.
+
+### 17.7 Non-vacuity proof — independently executed
+
+Forced `NoteEditor` to `return null` while open (`if (true)` at `:692`, a genuine production
+perturbation): **7 of 10 tests failed**, and the designated non-vacuity assertion failed with
+exactly the intended message — **`AssertionError: expected 0 to be greater than 1000`**. An empty
+container **cannot** pass. Production reverted and verified byte-identical (`3fd235f…`), never
+committed.
+
+For contrast, re-ran the *old* technique under `environment: 'node'`: `renderToStaticMarkup` on an
+open `NoteEditor` still returns **length 0** — confirming §14.5's original finding and that this
+suite is the first thing in the repository capable of catching an empty render.
+
+### 17.8 Lifecycle, backdrop, Escape, payload results
+
+- **Visible close / backdrop:** callbacks fire **`['save','close']`** — save strictly precedes close;
+  `onSave` called exactly once. The event is dispatched on the overlay itself (the element that owns
+  `handleOverlayClick`), so the `e.target === e.currentTarget` guard is genuinely exercised rather
+  than bypassed by a child click. NC4 (reversing the expected order) **fails**, proving the ordering
+  is pinned rather than incidentally satisfied.
+- **Escape:** 0 saves, 0 closes — matching `NoteEditor`'s complete absence of a modal-level key
+  handler (§14.11).
+- **Payload:** exactly `['badgeColor','cardColor','content','detachedComments','reactions','textColor','topStrip']`
+  — **no `title`, no `metadata`**, executably confirming §14.4's source-derived claim.
+
+### 17.9 Teardown result — hazard reproduced, discipline proven load-bearing
+
+Focused suite run **8 consecutive times with cleanup: 8/8 clean** — no `ReferenceError`, no Vitest
+unhandled-error warning, no ProseMirror `DOMObserver` warning.
+
+With the `afterEach` unmount removed (NC5), the same 8-run loop reproduced the warning on **2 of 8
+runs** (runs 4 and 7). This **independently confirms both halves of §15.3**: the hazard is real, and
+it is nondeterministic — exactly why governance made the discipline binding rather than relying on a
+single green run. **The unmount is load-bearing, not decorative.** Restored; 8/8 clean again.
+
+### 17.10 PATCH-125 amendment — **Classification A: semantic correction preserving the invariant**
+
+Retains both presence assertions verbatim (`package.json` and `package-lock.json` each
+`toContain('"emoji-picker-react"')`). Replaces the file-level `toBe('')` with a scan of **removed
+diff lines only** for `emoji-picker-react`. Only that one `it` block changed; the other 21 PATCH-125
+assertions (10-site migration census, reaction-path exclusion, three non-reaction consumers,
+structure/search, persistence-route source guards, Note/Todo/Link semantics) are **untouched**, and
+the file's test count is unchanged at **10**. No dependency-protection assertion was deleted.
+
+**The decisive differential, executed on one identical diff:** with `package.json` reverted to its
+pre-jsdom state (a working-tree diff whose only removal is the `jsdom` line) —
+
+- the **old** assertion **fails** (`expected 'diff --git a/package.json…' to be ''`);
+- the **corrected** assertion **passes** (10/10).
+
+Yet the corrected assertion still **fails** when the dependency is actually removed — NC6
+(`package.json` line deleted) and NC7 (all 3 lockfile occurrences invalidated) both fail on the
+presence checks. **It tolerates governed additions while still catching real removal.** That is
+class A, not a weakened invariant.
+
+Cross-checked against `.fable5/patches/PATCH-125.md` directly: §3e's *"`package.json` and
+`package-lock.json` remain PROHIBITED"* sits in that patch's **§5 prohibited-files list** (beside
+`ReactionDisplay.tsx`, `CardActionsToolbar.tsx`, `IconSelector.tsx` …) — an implementer scope
+boundary, not a permanent freeze; and none of its **22 required tests (§7)** specifies a diff
+assertion. §16.2's diagnosis is confirmed correct.
+
+### 17.11 Induced failures — all four reproduced at parent
+
+1. Parent `vitest.config.ts` include array **lacks** the `editors/` entry — the new test is not
+   discovered.
+2. Under `environment: 'node'`, DOM APIs are unavailable — NC1 (docblock removed) fails **9/10**,
+   with only the pure source-slice test surviving.
+3. `renderToStaticMarkup` on an open `NoteEditor` in `node` returns **length 0** — vacuous by
+   construction.
+4. The old `EmojiReactionPicker` assertion **fails** against a governed package diff (§17.10).
+
+All four are resolved at `c9ea345`.
+
+### 17.12 Negative controls — 9/9 executed, reverted, hash-verified
+
+| # | Control | Result |
+|---|---|---|
+| 1 | Remove jsdom docblock | 9/10 fail ✓ |
+| 2 | Remove `editors/` include entry | discovery drops to 66 files / 765 tests ✓ |
+| 3 | Force `NoteEditor` null while open | 7/10 fail, non-vacuity assertion `expected 0 to be greater than 1000` ✓ |
+| 4 | Reverse save/close order | lifecycle test fails ✓ |
+| 5 | Omit root unmount | teardown warning reproduced **2/8 runs** ✓ (nondeterministic, as documented) |
+| 6 | Remove `emoji-picker-react` from `package.json` | corrected test fails ✓ |
+| 7 | Invalidate lockfile entry | corrected test fails ✓ |
+| 8 | Restore whole-file zero-diff assertion | fails against governed package diff ✓ |
+| 9 | Remove `node_modules/jsdom` | env init fails, `Cannot find package 'jsdom'`, 0 tests collected ✓ |
+
+Post-control hashes all match the committed blobs: `package.json` `2657dea…`, `package-lock.json`
+`8189984…`, `vitest.config.ts` `44fa672…`, characterization test `fb0a121…`,
+`EmojiReactionPicker.test.tsx` `b6f3ebe…`, **`NoteEditor.tsx` `3fd235f…` (production, untouched)**.
+
+*Process note: two `sed` invocations during this review failed on delimiter/escaping and left their
+target files unmodified. Both were caught by immediate `git hash-object` verification before any
+conclusion was drawn — the apparent "10/10 pass" in each case was the unmodified baseline, not a
+control result, and each control was then re-run correctly. Recorded because a hash check is the
+only thing that distinguishes "control passed" from "control never ran."*
+
+### 17.13 Full validation
+
+Focused (characterization · EmojiReactionPicker · CardEditor · CardPreview · ClipartCardDraftModal ·
+cardModalRoute): **6/6 files, 118/118 tests.**
+**Full Vitest: 67/67 files, 775/775 tests** (66+1 files, 765+10 tests), no `Errors` line.
+`npm run typecheck`: **exit 0**, **410 declarations** confirmed by direct count.
+`npx next build`: **exit 0**. Bridge exclusion: **891 files**, marker absent.
+`npm run build:e2e`: **exit 0**, `.next/E2E_BRIDGE_BUILD` = **`1`**.
+Ordinary `.next` restored: build exit 0, exclusion **891 files**, **marker absent**.
+`git diff --check`: **exit 0**.
+Worktree outside committed history: only the five protected paths.
+
+### 17.14 False-green review
+
+None of the rejection conditions holds: no production file changed · behaviour characterized, not
+corrected · an empty container provably cannot pass (§17.7) · 9 of 10 tests are DOM-behavioural ·
+global environment still `node` · `@testing-library/react` unused · discovery captures zero fork
+tests · no teardown warnings with the shipped cleanup · lockfile churn is jsdom-only and additive ·
+the PATCH-125 invariant still catches real removal · Save/Close unchanged · `Align` still rendered ·
+no `readOnly`/`title` added · no PDF work.
+
+### 17.15 Observations (non-blocking)
+
+- **The `Align` control is now pinned as present.** This is correct for B0 (characterize, don't
+  correct), but §14.10 rules `Align` must **not** appear on the Document toolbar. Whichever patch
+  acts on that will need to update this assertion in the same commit — it is a deliberate tripwire,
+  not an obstacle, and worth naming so it is not mistaken for a regression later.
+- **`NoteEditor` remains characterized, not covered.** Ten tests over a 1,165-line component pin the
+  seams B1/B2 depend on (mount, content load, save payload, lifecycle order, Escape absence); they
+  are not a regression suite for the Note Post's colour, comment-thread, reaction or popup systems,
+  none of which has any test. That gap predates B0 and is not B0's to close — but B1 should not
+  mistake a green characterization suite for freedom to restructure `NoteEditor` safely.
+- **The nondeterministic teardown warning (2/8) deserves its binding rule.** Had the implementer
+  validated with a single run and no cleanup, it would likely have passed and shipped a latent
+  cross-file flake. This is the clearest evidence in the patch that §15.3 earned its "binding" status.
+
+### 17.16 Final classification
+
+**2 — PASS WITH NON-BLOCKING OBSERVATIONS.**
+
+No CRITICAL or HIGH issues. Every governed acceptance criterion was independently re-executed rather
+than trusted. The three observations in §17.15 are forward-looking notes for B1, not defects in B0.
+
+### 17.17 Status
+
+| Patch | Status |
+|---|---|
+| **PATCH-149A** | **CLOSED** (`c23be50`; review `e6e9122`) |
+| **PATCH-149B0** | **CLOSED** (`c9ea345`; this review) |
+| **PATCH-149B1** | **RELEASED — eligible for governance authorship.** Not authorized here; scope (Document predicate helper · legacy-content adapter · read-only TipTap renderer) must be governed in its own turn, and §14.13's B0 prerequisite of a **per-row `type:'card'` content-corpus measurement** remains outstanding input to the adapter spec |
+| **PATCH-149B2** | **BLOCKED until B1 closes** |
+| **PATCH-149C** | **BLOCKED on user reproduction** of the exit / underline defects (§14.11) |
+| **PATCH-150** | **RESERVED and separate**; untouched |
+
+**No implementation was modified by this review; `c9ea345` was not amended; nothing was pushed.**
