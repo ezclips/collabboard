@@ -1,11 +1,13 @@
 # PATCH-151 — CLIPART CARD MODAL CAPABILITY ROUTING
 
-**Status:** **OPEN · DEFECT CONFIRMED · CAPABILITY ROUTING AUTHORIZED · OPTION A (BOUNDED) ·
-PRODUCTION ALLOWLIST NARROW · NOT IMPLEMENTED · NOT PUSHED**
+**Status:** **CLOSED · CLIPART CARD CAPABILITY ROUTING DELIVERED · OPTION A (BOUNDED)** ·
+classification **2 (pass with non-blocking observations)** at §14 by independent review of
+`cca070e` · **all four line budgets respected, no scope deviation** · **PATCH-140 RELEASED** ·
+NOT PUSHED
 **Authored:** 2026-08-04 (governance architect). **Base:** `5194d59`. **First authoring of this
 number** — `git log --all --diff-filter=A -- .fable5/patches/PATCH-151.md` is empty.
-**Origin:** PATCH-139 §14l **O1** (closure finding). **PATCH-151 gates PATCH-140.**
-**PATCH-139 is not reopened.**
+**Closed:** 2026-08-04 (independent reviewer). **Implementation:** `cca070e`.
+**Origin:** PATCH-139 §14l **O1** (closure finding). **PATCH-139 is not reopened.**
 
 ---
 
@@ -320,3 +322,234 @@ proves wiring by comment rather than by the source guard · touches `package.jso
   unit-proven" as a governance risk, yet `ClipartCardDraftModal.test.tsx` had been reading source
   text with `fs.readFileSync` for guards all along. The constraint was real; the conclusion was
   not.
+
+---
+
+## 14. Closure review — INDEPENDENT
+
+**Reviewer:** independent Fable 5 closure reviewer. **Reviewed HEAD:** `cca070e`.
+**Governance base:** `8dbd898`. **Implementation not modified. Commit not amended. Scope not
+broadened. Nothing pushed.** All evidence re-run independently.
+
+### 14a. Implementation commit review — **PASS**
+
+`cca070e` — `fix(canvas): route clipart cards by workspace capability`. **4 files, 79 insertions /
+3 deletions.**
+
+| File | Changed | §7 limit | Verdict |
+|---|---|---|---|
+| `app/dashboard/canvas/[id]/CanvasClient.tsx` | 5 | ≤12 | ✔ |
+| `components/collabboard/CardEditor.tsx` | 8 | ≤12 | ✔ |
+| `components/collabboard/CardEditor.test.tsx` | 44 | ≤45 | ✔ |
+| `lib/domain/canvas/cardModalRoute.test.ts` | 25 | ≤25 | ✔ at limit |
+
+**No line budget exceeded — the first patch in this sequence with zero scope deviations.**
+
+### 14b. Source-scope result — **PASS**
+
+`git diff --name-only 8dbd898 cca070e` over every §7 exclusion returns **empty**:
+`ClipartCardDraftModal.tsx` · `ClipartCardDraftModal.test.tsx` · `CardPreview.tsx` ·
+`CardPreview.test.tsx` · `FreeformPadletCards.tsx` · `components/presentation/` ·
+`lib/infra/presentation/` · `lib/infra/drawing/` · `package.json` · `package-lock.json` ·
+`supabase/` · `types/` · Excalidraw fork · **`.fable5/`** · and `cardModalRoute.ts` itself
+(the helper was reused, not modified). Filtering the commit for non-authorized paths returns
+nothing.
+
+### 14c. Clipart route review — **PASS (8/8)**
+
+```
+:5700  else if (post.type === 'card' && post.metadata?.svgUrl) {
+:5701    if (selectCardModalRoute(canUseFreeformEditButton) === 'editor') setIsClipartDraftModalOpen(true);
+:5702    else setIsCardViewerOpen(true);
+:5703  }
+```
+
+1. Predicate `post.type === 'card' && post.metadata?.svgUrl` **unchanged** ✔
+2. Uses `selectCardModalRoute(canUseFreeformEditButton)` — the PATCH-139 helper, **reused, not
+   duplicated** ✔
+3. `'editor'` → existing `ClipartCardDraftModal` ✔
+4. `'viewer'` → existing read-only `CardEditor` viewer ✔
+5. `setPadletToEdit(post)` at `:5692` still precedes the whole branch chain ✔
+6. **All funnelling callers protected by one gate:** `?openPadlet=` (`:346-351`), the four
+   context-menu routes via `openPadletTargetFromContextMenu`, and `CanvasModals.tsx:270` — none
+   needed individual gating ✔
+7. Creation route at **`:7513`** (`id:'new'`) **untouched** ✔ — see §14g
+8. PATCH-139's normal-card branch (`:5704-5707`) **byte-identical** ✔
+
+The whole `CanvasClient` diff is a **single 7-line hunk**; no other branch of
+`openPadletInTypeEditor` was touched.
+
+### 14d. Read-only destination — **PASS**
+
+Read-only clipart cards reach the standard viewer (`CanvasClient.tsx:7368-7377`), **not**
+`ClipartCardDraftModal`. Verified at HEAD: `readOnly={true}` · `onSave={() => setIsCardViewerOpen(false)}`
+(**still a no-op**) · `onClose` clears `setPadletToEdit(null)` · no editable title input · no
+formatting toolbar · no footer/save controls · `readonly` textarea · accessible `Close` retained.
+`saveCard` is unreachable from this route.
+
+### 14e. Read-only clipart presentation — **PASS**
+
+`CardEditor.tsx:117-124` read-only header now renders:
+
+- `<img src={metadata.svgUrl}>` when present, falling back to the `FileText` glyph;
+- `{title || 'View Document'}` — the card title, with a stable fallback;
+- the existing document body and the existing single close control.
+
+**Effect-independence verified.** The fallback reads the `title` **state**, whose initial value is
+`initialTitle` (`:26`) — set at construction, *before* any effect. `renderToStaticMarkup` runs no
+effects, and the tests still observe both the real title and the empty-title fallback. The
+modal therefore **cannot initially appear blank** for a clipart card. This closes §5b, the
+limitation flagged at authorization.
+
+### 14f. Editable destination — **PASS**
+
+`ClipartCardDraftModal.tsx` has **zero diff**: editable title/content, save-on-close,
+discard/delete, props and architecture all unchanged. Its suite is **45/45 unchanged**, which is
+the positive evidence that Option B was not taken. No PATCH-149 save/close work is present —
+`handleSave`, the backdrop handler and the absence of a Save button are exactly as PATCH-139
+left them (**D3 remains PATCH-149's**).
+
+### 14g. Creation-flow review — **PASS**
+
+The creation trigger at `:7513` (`setPadletToEdit({id:'new',…})` → `setIsClipartDraftModalOpen(true)`)
+is **outside the diff** and unchanged. It remains reachable only through the clipart library, whose
+toolbar `case 'library'` is gated upstream by `canUseCanvasToolbar = canUseFreeformEditButton`
+(`:258`). **No read-only creation route was introduced**, and creation was not made read-only.
+
+### 14h. Test and source-guard review
+
+**Route source guard (`cardModalRoute.test.ts`) — narrow and well-scoped.** It does not grep the
+whole file for the helper; it `indexOf`s the clipart predicate, slices to the branch's closing
+`\n    }`, and asserts **within that slice** that the helper is called and that *both*
+`setIsClipartDraftModalOpen(true)` and `setIsCardViewerOpen(true)` appear. A third assertion pins
+the helper's total call count at exactly **2**, so the branch cannot be satisfied by unrelated
+usage elsewhere in the 7.4k-line file, and a third route owner cannot appear unnoticed. This is
+the correct answer to "helper use only asserted somewhere else in the file" — **it is not**.
+
+**`CardEditor` tests** prove all seven required items: read-only normal card unchanged; read-only
+clipart image + title + content; accessible `Close`; no editing surface; editable mode unchanged;
+initial markup correct without effects; and the save short-circuit machine-checked.
+
+### 14i. Source-guard caveat — **CLASSIFIED B (non-blocking brittle observation)**
+
+The guard is `expect(readFileSync('…/CardEditor.tsx')).toContain('if (readOnly) {')` — a bare
+substring over the **whole file**, unlike the route guard's scoped slice.
+
+**Tested directly.** Removing `handleSave`'s short-circuit *while adding* `if (readOnly) {`
+elsewhere in the file leaves the suite **16/16 green**. So the guard is bypassable in principle.
+
+**Why B and not C.** C requires that it "can pass while read-only still writes". In the wired
+routes it cannot: the viewer passes `onSave={() => setIsCardViewerOpen(false)}`, a no-op, so even
+with the short-circuit gone the read-only route **still does not persist**. The short-circuit is
+defence-in-depth, not the sole barrier, and the guard is load-bearing against the realistic
+regression (plain deletion, §14j NC2). Today `if (readOnly) {` occurs **exactly once** in the file.
+
+**Recommended strengthening — routed forward, not required for closure.** Scope the assertion to
+the `handleSave` body using the same slice technique the route guard already demonstrates:
+
+```ts
+const src = fs.readFileSync('components/collabboard/CardEditor.tsx', 'utf8');
+const body = src.slice(src.indexOf('const handleSave'), src.indexOf('};', src.indexOf('const handleSave')));
+expect(body).toMatch(/if \(readOnly\)\s*\{\s*onClose\(\);\s*return;/);
+```
+
+No new dependency, no `package.json` change, no jsdom. **Assigned to PATCH-149**, which already
+owns `CardEditor` save/close semantics.
+
+### 14j. Induced failure and negative controls — all independently reproduced
+
+| # | Control | Result |
+|---|---|---|
+| **Parent** | production restored to `8dbd898`, HEAD tests run | **5 failed / 17 passed** — the 3 route-guard tests and the 2 clipart-presentation tests; **every PATCH-139 test green** ✔ |
+| **NC1** | clipart route forced to always open the editor | **3 failed** (all route-guard assertions) ✔ |
+| **NC2** | `handleSave` read-only short-circuit deleted | **1 failed** — the save-safety guard ✔ |
+| **NC3** | helper bypassed with an inline `canUseFreeformEditButton` check | **2 failed** (helper-in-branch + call-count) ✔ |
+| **NC4** | clipart image/header rendering removed | **2 failed** (image+content, title+fallback) ✔ |
+| **NC5** *(reviewer-added)* | short-circuit deleted **and** literal reintroduced elsewhere | **0 failed** — see §14i |
+
+All reverted; every file verified **byte-identical** to its committed blob via `git hash-object`
+(`CanvasClient.tsx`, `CardEditor.tsx`, `CardEditor.test.tsx`, `cardModalRoute.test.ts`).
+**Nothing was committed.**
+
+**Reported-figure note:** the implementer reported the parent as *5 failed / 16 passed*; I measure
+*5 failed / 17 passed*. The **failure set is identical**; the difference is one extra passing test
+(the save-safety guard), which was added after their induced-failure run. Not a discrepancy in
+substance.
+
+### 14k. Validation results
+
+| Gate | Requirement | Measured |
+|---|---|---|
+| Focused (`CardEditor` + route) | 22/22 | **22 / 22** ✔ |
+| `ClipartCardDraftModal` | 45/45 unchanged | **45 / 45** ✔ |
+| `CardPreview` | 29/29 unchanged | **29 / 29** ✔ |
+| Full Vitest, unfiltered | 66 files / 763 tests | **66 / 66 files · 763 / 763 tests** ✔ |
+| Clean one-run `npm run typecheck` | exit 0, declarations regenerated | **410 fresh declarations**, exit 0 ✔ |
+| `npx tsc --noEmit` | exit 0 | **exit 0** ✔ |
+| `npx next build` | exit 0 | **exit 0** ✔ |
+| Bridge exclusion | exit 0, no marker | **891 files**, no marker ✔ |
+| Clean E2E build | exit 0, marker `1` | **exit 0**, marker **`1`** ✔ |
+| Ordinary `.next` restored | exclusion re-proven, no marker | **891 files**, no marker ✔ |
+| `git diff --check` | exit 0 | **exit 0** ✔ |
+
+### 14l. False-green review — no rejection criterion triggered
+
+| Criterion | Result |
+|---|---|
+| Read-only users still reach `ClipartCardDraftModal` | **NO** — branch gated; NC1/NC3 prove the gate is live |
+| Viewer remains blank | **NO** — image, title and content all render on the first static pass (§14e) |
+| `saveCard` reachable in read-only mode | **NO** — no-op `onSave` **and** the short-circuit |
+| Helper use only asserted elsewhere in the file | **NO** — the guard slices to the branch and pins the call count at 2 |
+| Clipart creation altered | **NO** — `:7513` outside the diff |
+| `ClipartCardDraftModal` changed | **NO** — zero diff, 45/45 unchanged |
+| PATCH-149 editor work mixed in | **NO** |
+| Only CSS hides editing controls | **NO** — controls are structurally absent from the read-only tree |
+
+### 14m. Observations — all NON-BLOCKING
+
+**O1 · Save-guard brittleness.** §14i, classified **B**, strengthening routed to PATCH-149.
+
+**O2 · Read-only clipart drops `iconBgColor`.** The editable header wraps the icon in a coloured
+tile (`CardEditor.tsx:86-89`); the read-only header renders a bare `<img>`. Governance required
+only that the clipart be *visible*, and the brief forbade moving the editable branch wholesale, so
+this is compliant. Cosmetic parity is a PATCH-149 presentation question.
+
+**O3 · `alt=""` on the clipart image.** Correct as authored: the adjacent `<span>` carries the
+title, so the image is decorative and an empty `alt` avoids duplicate announcement. Recorded so a
+future accessibility pass does not "fix" it into a redundant label.
+
+**O4 · The `useEffect` title-clearing rule still applies to the editable route.** PATCH-151's
+fallback protects the read-only header only. For auto-named clipart in the *editable* modal the
+title input still blanks after the effect — pre-existing, untouched, and PATCH-149's territory.
+
+### 14n. Final classification
+
+**2 — PASS WITH NON-BLOCKING OBSERVATIONS.**
+
+PATCH-151 delivers its governed scope exactly: one shared gate closing the deep link, four
+context-menu routes and `CanvasModals` at once; the read-only destination is the already-proven
+non-writing viewer; the previously blank clipart presentation now renders on the first static
+pass; creation is untouched; `ClipartCardDraftModal` is untouched; and **all four line budgets are
+respected with no scope deviation** — the cleanest implementation in this sequence. Four
+independent negative controls plus a reviewer-added fifth confirm the guards are live.
+
+The single reservation is O1: the save-safety guard is a whole-file substring rather than a scoped
+slice, and I demonstrated it can be defeated. It is **not** blocking, because read-only does not
+write even without the short-circuit — the viewer's no-op `onSave` is the effective barrier — and
+the guard does catch the realistic regression. The strengthening is specified and assigned.
+
+**PATCH-151: CLOSED · CLIPART CARD CAPABILITY ROUTING ACCEPTED · NOT PUSHED.**
+
+### 14o. Dependency status after closure
+
+| Patch | Status |
+|---|---|
+| **PATCH-151** | **CLOSED** |
+| **PATCH-140** | **RELEASED** — the gate is lifted. The product contract ("direct `?openPadlet=` links obey the same decision") now holds for **both** normal and clipart cards. **Not to be implemented automatically** — it requires its own authorization |
+| PATCH-139 | **CLOSED** — not reopened; its branch, helper and tests are untouched |
+| PATCH-148 | CLOSED |
+| PATCH-141 | DEFERRED unless governance says otherwise |
+| PATCH-149 | **RESERVED** — D3, D5, D6, stale test titles, plus **O1**, **O2**, **O4** |
+| PATCH-150 | RESERVED — presentation index-domain divergence; independent |
+| PATCH-135 | Independently OPEN |
+| PATCH-146 / 147 | RESERVED, non-blocking |
