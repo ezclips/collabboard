@@ -3,8 +3,10 @@
 **Status:** **STAGED · PATCH-149A CLOSED (`c23be50`) · PATCH-149B0 CLOSED (`c9ea345`, review §17) ·
 PATCH-149B1 **SPLIT after measurement** (§19) — corpus measured (2 Document rows, zero HTML,
 predicate **P1 safe**), routing census corrected (`DrawingLayout` not reachable; the two reachable
-routes are capability-gated but drop the title) · **PATCH-149B1a AUTHORIZED** · PATCH-149B1b BLOCKED
-behind B1a · PATCH-149B2 BLOCKED behind B1b · PATCH-149C RESERVED · NOT PUSHED**
+routes are capability-gated but drop the title) · **PATCH-149B1a IMPLEMENTED (`c44a2ac`) · REVIEWED
+§20 → CLASSIFICATION 4, CORRECTION REQUIRED (§20.15: phantom `onUpdate`; mixed-content loss) — DID NOT
+CLOSE** · PATCH-149B1b BLOCKED, NOT RELEASED · PATCH-149B2 BLOCKED behind B1b · PATCH-149C RESERVED ·
+NOT PUSHED**
 **Authored:** 2026-08-04 (governance architect). **Base:** `177645b`. **First authoring of this
 number** — `git log --all --diff-filter=A -- .fable5/patches/PATCH-149.md` is empty.
 **Inherits:** PATCH-138 label finding · PATCH-139 D3/D5/D6 · PATCH-140 component 6 ·
@@ -1979,3 +1981,302 @@ schema change.**
 
 **Carried to B1b as a first-class item:** the Columns/Rows title-loss path (§19.4). It is a live P3
 hazard today, independent of the TipTap migration, and must not be lost behind the foundation work.
+
+---
+
+## 20. PATCH-149B1a — INDEPENDENT CLOSURE REVIEW · **CLASSIFICATION 4 · CORRECTION REQUIRED**
+
+**Reviewed:** 2026-08-04 (independent closure reviewer). **Commit under review:** `c44a2ac`
+`refactor(editor): extract shared TipTap document foundation`, parent `82b099c`. All evidence below
+was re-executed independently; nothing was taken from the implementer's report. **No implementation
+file was modified by this review** — every perturbation was reverted and hash-verified.
+
+### 20.1 Source scope — **EXACT, within budget**
+
+Eight files, matching the §19.7 allowlist precisely.
+
+| File | Lines | Budget | |
+|---|---|---|---|
+| `lib/domain/canvas/documentPost.ts` | 6 | 25 | ✅ |
+| `lib/domain/canvas/documentContentAdapter.ts` | 55 | 110 | ✅ |
+| `components/collabboard/editors/useSharedTipTapEditor.ts` | 72 | 90 | ✅ |
+| `components/collabboard/editors/NoteEditor.tsx` | 43 (3+/40−) | 45 | ✅ |
+| **Production** | **176** | **270** | ✅ |
+| `documentPost.test.ts` | 52 | 80 | ✅ |
+| `documentContentAdapter.test.ts` | 125 | 160 | ✅ |
+| `useSharedTipTapEditor.test.tsx` | 111 | 120 | ✅ |
+| `NoteEditor.characterization.test.tsx` | 9 | 20 | ✅ |
+| **Tests** | **297** | **380** | ✅ |
+
+**Verified unchanged in `c44a2ac`** (`git diff --numstat` empty for each): `CanvasClient.tsx`,
+`FreeformPadletCards.tsx`, `cardModalRoute.ts`, `CardPreview.tsx`, `CardEditor.tsx`,
+`ClipartCardDraftModal.tsx`, `usePadletSave.ts`, `NoteEditorToolbar.tsx`, `SafeHtmlContent.tsx`,
+`extensions/Comment.ts`, `package.json`, `package-lock.json`. No `.fable5` file, no routing file, no
+persistence hook, no schema, no migration, no presentation code, no Excalidraw fork file. **No PDF
+production code** — the single `pdf` occurrence is a comment in the hook naming the extension seam,
+which is what §6/P4 asked for.
+
+### 20.2 Document predicate — **CORRECT**
+
+`isDocumentPost(post) ≡ post.type === 'card' && !post.metadata?.svgUrl` matches §19.3 exactly. Pure,
+deterministic, no React/persistence/permission work, no new `document` type, tolerant of absent
+metadata, and structurally incapable of consulting title or geometry (they are not in its
+`Pick<Padlet,'type'|'metadata'>` signature). Accepts ordinary Documents; excludes clipart and
+`text`/`todo`/`link`/`image`/`comment`/`file`.
+
+**Empty-string `svgUrl` edge — NOT blocking.** `metadata.svgUrl === ''` is falsy, so the row
+classifies as a Document. That is the governed reading ("absence of a *usable* svgUrl") and matches
+real source semantics: every clipart producer writes a non-empty URL, and an empty string would
+render no clipart. Correct as written.
+
+**Open duality (authorized, not a defect):** the predicate remains inlined at `CanvasClient:5700/5704`
+because `CanvasClient` is outside B1a's allowlist. P6 duality closes when B1b wires the helper.
+
+### 20.3 Adapter — classification and safety
+
+Structure is right: one pure boundary, three exported functions, reusing the project's existing
+DOMPurify sanitizer rather than a second one. `SUPPORTED_TAG` is a genuine real-tag allowlist — it is
+`SafeHtmlContent.looksLikeHtml`'s tag set plus `s` and `mark` (which correspond to the shipped
+`StarterKit` strike and `Highlight` extensions), so it is consistent with the precedent, broad enough
+for current NoteEditor output, and **not** a permissive `<word>` detector. `fromEditorHtml` normalizes
+`<p></p>`/whitespace to `''` and touches neither title nor metadata.
+
+**Malformed angle-bracket proof — PASSES decisively, and is quantified.** Mounting the corpus-shaped
+fixture (9,000 chars, 600 LF, zero real tags) in real jsdom TipTap:
+
+| Path | Visible chars | Text after first `<` | Paragraphs |
+|---|---|---|---|
+| **Raw → TipTap as HTML** (parent behaviour / NC2) | **4,399** — 51% lost | **swallowed** | 1 (600 newlines gone) |
+| **Through `toEditorHtml`** | **8,400** | **retained** | 201 `<p>` + 201 `<br>` |
+
+8,400 = 9,000 − 600 newlines, i.e. **every non-newline character survives** and newlines become
+structure. §19.6's escaping rule is load-bearing and correctly implemented for this shape.
+
+**F2 — mixed real-tag + bare-bracket content silently drops text. DEFECT.** Measured:
+
+```
+toEditorHtml('Use <example> as a placeholder <p>and real markup</p>')
+  → 'Use  as a placeholder <p>and real markup</p>'      // "example" gone
+```
+
+One real tag flips the whole string to `html`, and DOMPurify then strips the unknown `<example>`
+element **and its text**. This violates §19.6's explicit rule — *"`malformed`/`unknown` → fail safe by
+treating as plain text; **never silently drop visible source**"* — and it is the same defect class the
+patch exists to eliminate. It is currently **unreachable in production** (corpus has 0 HTML rows;
+NoteEditor serializes user-typed brackets as entities before storage), so it is latent, not live —
+but it is a defect in the delivered boundary, not future work.
+
+### 20.4 Corpus fidelity — **CLEAN**
+
+Fixtures are synthetic (`'Line one <not a tag\n\nLine two > also not one\n'.repeat(40)`) and reproduce
+the measured structural risks — bare brackets, many LF newlines, zero real tags — without copying
+stored content. **No real corpus content, title, or identifier appears in any test or in this
+governance record.**
+
+### 20.5 Custom attributes — **PRESERVED, with the boundary stated precisely**
+
+`data-comment-id` and `data-color` survive `DOMPurify.sanitize` (default `ALLOW_DATA_ATTR: true`), and
+both are the **actual** attribute names emitted by the shipped `Comment` mark (`extensions/Comment.ts`
+renders `data-comment-id`, `data-comment-text`, `data-comment-thread`, `data-user-id`,
+`data-user-name`, `data-timestamp`, `data-color`). A round-trip through real TipTap `getHTML()`
+confirms retention. No PDF-specific attribute or node exists in production; the seam is a comment.
+
+**Precise boundary — the guarantee is narrower than "custom attributes survive."** What is guaranteed
+is **sanitizer-allowed `data-*` attributes**. A future custom node using a non-`data-*` attribute
+would be stripped and is **not** covered by this patch's evidence. Recorded so B1b does not inherit an
+overbroad assumption.
+
+### 20.6 Shared hook — architecture **CORRECT**, contract **DEFECTIVE**
+
+Extracts exactly the reusable foundation (`useEditor`, one exported registry, initial content,
+`editable`, `onUpdate`, `getHTML` access, caller-supplied `editorProps`) and owns **none** of the
+modal shell, sticky-note layout, reactions, colour popup, comment popup, overlays, title, persistence,
+routing, or Save/Close lifecycle. **Exactly one authoritative registry** — `SHARED_TIPTAP_EXTENSIONS`
+is declared once and no duplicate exists anywhere in the tree.
+
+**Editor-props boundary — architecturally correct.** Leaving `editorProps.attributes` with the caller
+is right: the hook hard-codes none of NoteEditor's 280px sticky-note styling, NoteEditor still supplies
+its own attributes, and a Document wrapper can supply different layout attributes. That it also
+resolved a 47→43 line-budget overage does not weaken the reasoning.
+
+**F1 — the hook emits a phantom `onUpdate` on mount. DEFECT.** Proven by differential probe with
+identical extensions and content:
+
+| Harness | `onUpdate` calls before any interaction |
+|---|---|
+| Raw `useEditor` | **0** |
+| `useSharedTipTapEditor` | **1** — `"<p>start</p>"` |
+
+**Mechanism:** `@tiptap/core@3.13.0` `setEditable(editable, emitUpdate = true)` emits `"update"`
+**unconditionally**, without comparing to the current value. The hook's
+`useEffect(() => { if (editor) editor.setEditable(editable); }, [editable, editor])` therefore fires a
+content-less update on every mount.
+
+**This corrects the implementer's stated diagnosis.** The report attributed the extra call to TipTap
+firing `onUpdate` on creation; TipTap does not (0 calls above). The cause is the hook's own effect —
+and the shared-hook test's `not.toHaveBeenCalled()` assertion was **removed** to accommodate an
+artifact the hook itself introduced. The surviving assertion (`toHaveBeenCalled()` after an
+interaction) cannot detect a regression here.
+
+**Why it blocks rather than defers:** the delivered API documents `onUpdate` as firing "on content
+change"; it demonstrably fires when content did not change. B2 explicitly owns dirty state and discard
+confirmation, whose canonical implementation is `onUpdate → setDirty(true)` — on this foundation every
+freshly-opened Document would be dirty on arrival and prompt a discard confirmation the user never
+earned (P3, P10). NoteEditor is unaffected today only because it does not use `onUpdate`.
+
+**Proven correction, one line, inside the authorized file and budget:**
+
+```ts
+if (editor && editor.isEditable !== editable) editor.setEditable(editable);
+```
+
+Re-probed with this guard: phantom count **0**; raw-vs-hook parity restored. (Applied only as a probe
+and reverted; `useSharedTipTapEditor.ts` is byte-identical to `c44a2ac` at
+`4b321f518a2dd3e49a50a2ac9f8ea15fa606bbd3`.)
+
+### 20.7 `editable=false` — **REAL, not cosmetic**
+
+Measured under real jsdom TipTap with `editable={false}`:
+
+```
+contenteditable = "false"   editor.isEditable = false
+view.editable   = false     options.editable  = false
+```
+
+This is genuine ProseMirror editable state, which rejects user-originated input — **not** a CSS or
+attribute veneer. The core flag is real, as the brief required.
+
+Programmatic commands still mutate (`chain().focus().insertContent(' HACKED').run()` →
+`<p> HACKEDlocked</p>`). That is ordinary ProseMirror semantics and is precisely the hard stop §19.11
+recorded as **"UNVERIFIED — deferred to B1b"**; it remains deferred, now with a measurement attached.
+**Observation:** the shipped test asserts only the `contenteditable` attribute; asserting
+`editor.isEditable` would bind the stronger fact the evidence supports.
+
+### 20.8 NoteEditor adoption — **NARROW EXTRACTION, NO REWRITE**
+
+The diff replaces 10 import lines with 1, deletes the 16-line `NOTE_EXTENSIONS` array, swaps the
+`useEditor` call header for the hook, and removes the now-duplicated content-reset `useEffect`. The
+`attributes` block and the ~37-line `handleClick` body appear as **unchanged context** — preserved at
+their original nesting and semantics. No modal UI moved, no save lifecycle changed, no title or
+`readOnly` prop added, no Align/reaction/colour/comment/focus behaviour touched.
+
+**Regression: 11/11 pass**, including all 10 unmodified B0 characterization tests — closed state
+renders nothing; open state renders real DOM (>1000 chars) with the same overlay class, ProseMirror
+body and toolbar; Align still present; legacy HTML initializes; visible Close and backdrop both save
+**then** close; Escape does nothing; payload keys unchanged with no `title`/`metadata`; 280px width
+intact; cleanup stable with no delayed ProseMirror warning.
+
+The added source guard is correctly scoped to shared-hook adoption (`useSharedTipTapEditor(` present,
+`useEditor(` and `NOTE_EXTENSIONS` absent) and provably detects reversion (NC7).
+
+### 20.9 jsdom adapter-test deviation — **CLASSIFICATION A**
+
+`documentContentAdapter.test.ts` opts into jsdom via a per-file docblock because `dompurify` throws
+`DOMPurify.sanitize is not a function` under plain Node. This is **correct use of the already-approved
+B0 harness**: only that file opts in, `vitest.config.ts`'s global `environment: 'node'` is untouched,
+no setup file, polyfill, mock or dependency was added, and it exercises the **real** sanitizer instead
+of mocking it away. The implementer flagged it proactively. §19.7's "node" annotation was the
+governance error, not the implementation's — corrected here.
+
+### 20.10 Induced failures — **6/6 reproduced at `82b099c`**
+
+1. `documentPost.ts` absent. 2. `documentContentAdapter.ts` absent. 3. malformed content handed to
+TipTap as HTML loses 51% of it (§20.3 table). 4. `useSharedTipTapEditor.ts` absent. 5. `NoteEditor`
+owns `useEditor` directly (`:232`) over a module-private, unexported `NOTE_EXTENSIONS` (`:23`).
+6. no `isDocumentPost`/`toEditorHtml`/`classifyDocumentContent` symbol exists anywhere in the tree.
+The implementation resolves 1, 2, 4, 5, 6 fully and 3 for all non-mixed shapes (see F2).
+
+### 20.11 Negative controls — **10/10 detected, 10/10 reverted and hash-verified**
+
+| # | Perturbation | Detection |
+|---|---|---|
+| 1 | classify clipart as Document | predicate suite **2 fail** |
+| 2 | treat all angle-bracket input as HTML | 51% content loss measured |
+| 3 | omit `<` escaping | adapter suite **4 fail** |
+| 4 | strip `data-*` (`ALLOW_DATA_ATTR:false`) | adapter suite **1 fail** |
+| 5 | force `editable=true` when `false` requested | hook suite **1 fail** |
+| 6 | second extension registry in NoteEditor | hook suite **1 fail** |
+| 7 | restore direct `useEditor` ownership | characterization **10 fail** |
+| 8 | reverse Close/save order | characterization **1 fail** |
+| 9 | remove Align | characterization **1 fail** |
+| 10 | fake PDF production branch | source gate flags it |
+
+Post-revert hashes, all matching `c44a2ac`: `documentPost.ts` `257ee9e4…`,
+`documentContentAdapter.ts` `0eabf1a6…`, `useSharedTipTapEditor.ts` `4b321f51…`, `NoteEditor.tsx`
+`6220f21d…`, `NoteEditorToolbar.tsx` `f15694bf…`.
+
+### 20.12 Validation — **all green**
+
+Full Vitest **70/70 files · 813/813 tests** (matching the expected totals) · `npm run typecheck`
+exit 0 · **410** declarations · `npx next build` exit 0 · bridge exclusion **891** files ·
+`npm run build:e2e` exit 0 with marker **`1`** · ordinary `.next` restored, exclusion re-verified at
+**891**, marker **absent** · `git diff --check` exit 0 · worktree shows only the five pre-existing
+protected paths.
+
+**Environment observation:** the first ordinary build of this review failed with
+`TypeError: Cannot read properties of undefined (reading 'length')` against the `.next` left in the
+worktree; `rm -rf .next` followed by a rebuild succeeded and every subsequent build was clean. A stale
+build cache, not a code defect — recorded so it is not re-diagnosed later.
+
+### 20.13 False-green review
+
+Checked against every reject criterion. **Not triggered:** real corpus content in tests · NoteEditor
+behaviour changed · Align removed · save/close changed · routing changed · persistence changed ·
+Document wrapper added · read-only Document modal added · second TipTap registry · PDF production code
+· `editable=false` cosmetic (proven real, §20.7) · adapter tests mocking the sanitizer (proven real,
+§20.9) · production scope exceeded.
+
+**Partially triggered — "malformed corpus-shaped text is interpreted as HTML":** the pure
+corpus-shaped row is handled correctly, but a *mixed* string containing one real tag is classified
+`html` and loses its malformed portion (F2, §20.3).
+
+### 20.14 Observations (non-blocking, for B1b)
+
+1. **Classification surface narrowed 7 → 4.** §19.6 specified `empty | plain-text | html |
+   escaped-html | malformed | json | unknown`; four are implemented. `json`/`unknown` fold into
+   `plain-text` harmlessly. `escaped-html` has no class and no entity decoding, so
+   `&lt;p&gt;hi&lt;/p&gt;` double-escapes to a literal `&lt;p&gt;…` display — **content preserved, no
+   loss**, but diverging from `SafeHtmlContent`'s `decodeEntitiesDeep` precedent. Zero corpus
+   instances. Either implement the classes or amend §19.6 to the four that exist.
+2. `NoteEditor.tsx`'s `useSharedTipTapEditor({ initialContent,` brace-hugging formatting is a
+   diff-minimisation artifact that reads oddly; cosmetic, safe to normalise in a later patch.
+3. The hook-test `editable=false` assertion could bind `editor.isEditable` (§20.7).
+4. The Columns/Rows title-loss path (§19.4) remains carried to B1b, untouched and still live.
+
+### 20.15 Required correction — **narrow and fully specified**
+
+Scope is confined to two already-authorized files; **no new file, no budget increase, no re-authoring
+of §19.**
+
+| # | File | Correction |
+|---|---|---|
+| **F1** | `useSharedTipTapEditor.ts` | Guard the editable effect: `if (editor && editor.isEditable !== editable) editor.setEditable(editable);` (proven, §20.6) |
+| **F1t** | `useSharedTipTapEditor.test.tsx` | Restore an assertion that `onUpdate` is **not** called before any interaction, so the phantom cannot regress |
+| **F2** | `documentContentAdapter.ts` | Do not let one real tag make the whole string `html` when unmatched bare brackets remain. Either escape residual bare brackets before sanitizing, or require the input to be *wholly* tag-structured to classify as `html` and fall back to escaped text otherwise — §19.6's "never silently drop visible source" must hold for mixed input |
+| **F2t** | `documentContentAdapter.test.ts` | Add the mixed-content case: `'Use <example> as a placeholder <p>and real markup</p>'` must retain `example` |
+
+**Explicitly out of correction scope:** the predicate, the extraction, the registry, the editor-props
+boundary, NoteEditor's diff, and the jsdom decision — all reviewed and **correct as shipped**. They
+must not be re-opened.
+
+### 20.16 Classification and status
+
+**CLASSIFICATION 4 — OPEN · IMPLEMENTATION CORRECTION REQUIRED.**
+
+The architecture is right and the great majority of the work is correct and well-evidenced. Two proven
+defects sit in the delivered foundation's contract — a phantom `onUpdate` (with a weakened test that
+would hide its regression) and silent content loss on mixed input — and both land in exactly the seams
+B1b and B2 are about to build on. Correcting them costs a handful of lines now; inheriting them means
+re-opening a closed foundation later.
+
+| Patch | Status |
+|---|---|
+| **PATCH-149A** | **CLOSED** (`c23be50`) |
+| **PATCH-149B0** | **CLOSED** (`c9ea345`) |
+| **PATCH-149B1a** | **OPEN · CORRECTION REQUIRED** (§20.15) — `c44a2ac` stands; correction lands on top |
+| **PATCH-149B1b** | **BLOCKED — not released.** B1a did not close |
+| **PATCH-149B2** | **BLOCKED until B1b closes** |
+| **PATCH-149C** | **BLOCKED on user reproduction** (§14.11) |
+| **PATCH-150** | **RESERVED and separate**; untouched |
+
+No implementation file was modified by this review. Nothing was pushed.
