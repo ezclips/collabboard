@@ -32,6 +32,8 @@ import { createFreeformGraphRepo } from '@/lib/graph/graphRepo';
 import { canEditWorkspace, canManageWorkspace, type WorkspaceRole } from '@/lib/workspace/context';
 import { selectCardModalRoute } from '@/lib/domain/canvas/cardModalRoute';
 import { selectDocumentModalDestination, type DocumentModalDestination } from '@/lib/domain/canvas/documentModalRoute';
+import { decideDocumentSwitch, type QueuedDocumentAction } from '@/lib/domain/canvas/documentSwitchGuard';
+import DiscardChangesDialog from '@/components/collabboard/editors/DiscardChangesDialog';
 import { resolveWorkspaceForUser } from '@/lib/infra/supabase/workspaceMembers';
 import '@/components/kanban-canvas/kanban-canvas.css';
 import ColumnContainerCreationPrompt from '@/components/canvas/layouts/ColumnContainerCreationPrompt';
@@ -509,6 +511,10 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   // PATCH-149B1b-ii: single destination slice (§25.4) -- isOpen is `!== null`,
   // readOnly is `=== 'document-viewer'`; never a separate boolean pair.
   const [documentModalDestination, setDocumentModalDestination] = useState<DocumentModalDestination | null>(null);
+  // PATCH-149B2-ii §34: parent-owned dirty boolean + queued continuation (§32.12/§32.15).
+  const [documentIsDirty, setDocumentIsDirty] = useState(false);
+  const [queuedDocumentAction, setQueuedDocumentAction] = useState<QueuedDocumentAction | null>(null);
+  useEffect(() => { if (documentModalDestination === null) setDocumentIsDirty(false); }, [documentModalDestination]);
   // === END EDITORS REGION (state declarations; wiring at usePadletSave call below) ===
 
   // --- Container Creation Logic (Column Layout) ---
@@ -5333,6 +5339,8 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   });
 
   const handleToolClick = (toolType: string) => {
+    // PATCH-149B2-ii §34/§32.12: guard runs before any tool mutation.
+    if (resolveDocumentSwitch({ kind: 'open-tool', toolType })) return;
     if (selectedPadletIds.length > 0) {
       setSelectedPadletIds([]);
     }
@@ -5688,12 +5696,51 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     }
   };
 
+  // PATCH-149B2-ii §34/§32.12: O4-C -- close if clean, block+queue if dirty.
+  // Returns true when the caller must stop (a confirmation is now pending).
+  const resolveDocumentSwitch = (action: QueuedDocumentAction): boolean => {
+    const decision = decideDocumentSwitch({ destination: documentModalDestination, isDirty: documentIsDirty }, action);
+    if (decision.type === 'blocked') { setQueuedDocumentAction(action); return true; }
+    if (decision.type === 'proceed-after-clear') {
+      setDocumentModalDestination(null);
+      setPadletToEdit(null);
+      setDocumentIsDirty(false);
+    }
+    return false;
+  };
+  const requestOpenDocument = (post: Padlet, destination: DocumentModalDestination) => {
+    if (resolveDocumentSwitch({ kind: 'open-document', post, destination })) return;
+    setPadletToEdit(post);
+    setDocumentModalDestination(destination);
+  };
+  const handleDocumentSwitchKeepEditing = () => setQueuedDocumentAction(null);
+  const handleDocumentSwitchDiscard = () => {
+    const action = queuedDocumentAction;
+    setQueuedDocumentAction(null);
+    setDocumentModalDestination(null);
+    setPadletToEdit(null);
+    setDocumentIsDirty(false);
+    if (!action) return;
+    if (action.kind === 'open-document') { setPadletToEdit(action.post); setDocumentModalDestination(action.destination); }
+    else if (action.kind === 'open-tool') handleToolClick(action.toolType);
+    else {
+      closeDrawingEditorsBeforePadletEdit();
+      if (isImageEditPadlet(action.padlet)) openImagePostEditor(action.padlet);
+      else openPadletInTypeEditor(action.padlet);
+    }
+  };
+
   const openPadletInTypeEditor = (post: Padlet) => {
     closeDrawingSelectedShapePanel();
     closeAllToolbarLaunchedUi();
     if (post.type === 'image') {
       openImagePostEditor(post);
       return;
+    }
+    // PATCH-149B2-ii §34: resolved before setPadletToEdit below (clipart already excluded).
+    if (post.type === 'card') {
+      const destination = selectDocumentModalDestination(post, canUseFreeformEditButton);
+      if (destination) { requestOpenDocument(post, destination); return; }
     }
     setPadletToEdit(post);
     if (post.type === 'todo') setIsTodoEditorOpen(true);
@@ -5707,10 +5754,6 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       if (selectCardModalRoute(canUseFreeformEditButton) === 'editor') setIsClipartDraftModalOpen(true);
       else setIsCardViewerOpen(true);
     }
-    else if (post.type === 'card') {
-      // PATCH-149B1b-ii: exact Document -- clipart already excluded above.
-      setDocumentModalDestination(selectDocumentModalDestination(post, canUseFreeformEditButton));
-    }
     else setIsNoteEditorOpen(true);
   };
   // Keep the ref current so the early-mounted useEffect can call this function
@@ -5721,8 +5764,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   const openDocumentFromPreview = (post: Padlet) => {
     const destination = selectDocumentModalDestination(post, canUseFreeformEditButton);
     if (!destination) return;
-    setPadletToEdit(post);
-    setDocumentModalDestination(destination);
+    requestOpenDocument(post, destination);
   };
 
   const openPadletTargetFromContextMenu = (post: Padlet) => {
@@ -5857,6 +5899,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           setIsAIContentConvertModalOpen={setIsAIContentConvertModalOpen}
           documentModalDestination={documentModalDestination}
           setDocumentModalDestination={setDocumentModalDestination}
+          onDirtyChange={setDocumentIsDirty}
           padletToEdit={padletToEdit}
           setPadletToEdit={setPadletToEdit}
           padlets={padlets}
@@ -5885,6 +5928,13 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           fetchData={fetchData}
           updatePadletById={updatePostFieldsOrThrow}
         />
+
+        {/* PATCH-149B2-ii §34: parent-intercepted switch/tool confirmation -- gated on a
+            non-null queued continuation; mutually exclusive with DocumentEditor's own
+            local dialog (its full-screen backdrop blocks external interaction while open). */}
+        {queuedDocumentAction && (
+          <DiscardChangesDialog onKeepEditing={handleDocumentSwitchKeepEditing} onDiscard={handleDocumentSwitchDiscard} />
+        )}
 
         {/* Canvas Content - Vertical scrolling for Wall, Horizontal for others */}
         <CanvasViewport
@@ -6494,11 +6544,10 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                 onAddGlobalSection={() => handleAddSection()}
                 onEditPost={openPadletTargetFromContextMenu}
                 onOpenPost={(post: Padlet) => {
-                  // PATCH-149B1b-ii: Documents no longer bypass into NoteEditor.
-                  setPadletToEdit(post);
                   const destination = selectDocumentModalDestination(post, canUseFreeformEditButton);
-                  if (destination) setDocumentModalDestination(destination);
-                  else setIsNoteEditorOpen(true);
+                  if (destination) { requestOpenDocument(post, destination); return; }
+                  setPadletToEdit(post);
+                  setIsNoteEditorOpen(true);
                 }}
                 onOpenDocument={openDocumentFromPreview}
                 onDeletePost={(post: Padlet) => deletePadletById(post.id)}
@@ -6588,11 +6637,10 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                     onEditPost={openPadletTargetFromContextMenu}
                     onDeletePost={(post) => deletePadletById(post.id)}
                     onOpenPost={(post) => {
-                      // PATCH-149B1b-ii: Documents no longer bypass into NoteEditor.
-                      setPadletToEdit(post);
                       const destination = selectDocumentModalDestination(post, canUseFreeformEditButton);
-                      if (destination) setDocumentModalDestination(destination);
-                      else setIsNoteEditorOpen(true);
+                      if (destination) { requestOpenDocument(post, destination); return; }
+                      setPadletToEdit(post);
+                      setIsNoteEditorOpen(true);
                     }}
                     onOpenDocument={openDocumentFromPreview}
                     onOpenTarget={openPadletTargetFromContextMenu}
@@ -6744,6 +6792,8 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                 currentUserAvatar={user?.user_metadata?.avatar_url}
                 viewportContainerRef={containerRef}
                 onPadletEdit={(padlet) => {
+                  // PATCH-149B2-ii §34/§32.12: the sole closeDrawingEditorsBeforePadletEdit call site.
+                  if (resolveDocumentSwitch({ kind: 'open-drawing-editor', padlet })) return;
                   closeDrawingEditorsBeforePadletEdit();
                   if (isImageEditPadlet(padlet)) {
                     openImagePostEditor(padlet);
@@ -7078,7 +7128,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                     handlePadletMouseDown={handlePadletMouseDown}
                     getClickedSide={(e: React.MouseEvent) => getClickedSide(e as React.MouseEvent<HTMLElement>)}
                     stableActions={stableActions}
-                    setDocumentModalDestination={setDocumentModalDestination}
+                    requestOpenDocument={requestOpenDocument}
                   />
                 </CanvasEditorProvider>
               </CanvasConfigProvider>

@@ -80,10 +80,9 @@ describe('16: Freeform/CardPreview owner', () => {
 
   it('exact Document uses selectDocumentModalDestination and reuses the existing state/predicate; T1: never gated on document-editor (§30.5)', () => {
     expect(branch).toContain('selectDocumentModalDestination(padlet, canUseFreeformEditButton)');
-    expect(branch).toContain('setDocumentModalDestination(d)');
-    // 24: the complete post (not just the destination) reaches the route.
-    expect(branch).toContain('setPadletToEdit(padlet)');
-    expect(branch).toContain('return d ? () => { setPadletToEdit(padlet); setDocumentModalDestination(d); } : undefined;');
+    // PATCH-149B2-ii: routed through the shared guard -- requestOpenDocument
+    // receives the complete post (24), not just the destination.
+    expect(branch).toContain('return d ? () => requestOpenDocument(padlet, d) : undefined;');
     expect(branch).not.toMatch(/d\s*===\s*['"]document-(editor|viewer)['"]/);
   });
 });
@@ -94,12 +93,13 @@ describe('23: CanvasClient supplies one Document-open callback, reused everywher
     canvasClientSrc.indexOf('const openPadletTargetFromContextMenu'),
   );
 
-  it('reuses the B1b-ii destination helper and state; T1: capability-blind early return; T2: setPadletToEdit(post) retained', () => {
+  it('reuses the B1b-ii destination helper and state; T1: capability-blind early return; T2: complete post retained', () => {
     expect(body).toContain('selectDocumentModalDestination(post, canUseFreeformEditButton)');
-    expect(body).toContain('setDocumentModalDestination(destination)');
+    // PATCH-149B2-ii: routed through the shared guard (requestOpenDocument
+    // receives the complete post, same T2 invariant as before).
+    expect(body).toContain('requestOpenDocument(post, destination)');
     expect(body).toContain('if (!destination) return;');
     expect(body).not.toMatch(/destination\s*!==?\s*['"]document-editor['"]/);
-    expect(body).toMatch(/setPadletToEdit\(post\);\s*setDocumentModalDestination\(destination\);/);
   });
 
   it('the same callback instance is passed to all five interactive layout owners', () => {

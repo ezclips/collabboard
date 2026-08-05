@@ -16,6 +16,8 @@ interface DocumentEditorProps {
   readOnly?: boolean;
   onSave: (data: SaveCardData) => Promise<SaveCardResult | void> | SaveCardResult | void;
   onClose: () => void;
+  // PATCH-149B2-ii §34.4: fires only on clean<->dirty transitions (ref-guarded).
+  onDirtyChange?: (isDirty: boolean) => void;
 }
 
 // PATCH-149B2-i §32: explicit Save + dirty-state tracking against a saved baseline;
@@ -28,6 +30,7 @@ export default function DocumentEditor({
   readOnly = false,
   onSave,
   onClose,
+  onDirtyChange,
 }: DocumentEditorProps) {
   const [title, setTitle] = useState(initialTitle);
   const [description, setDescription] = useState(initialMetadata?.description || '');
@@ -58,6 +61,14 @@ export default function DocumentEditor({
 
   const currentBody = editor ? fromEditorHtml(editor.getHTML()) : '';
   const isDirty = !readOnly && (title !== baseline.title || description !== baseline.description || currentBody !== baseline.body);
+  // §34.5: ref-guarded so an unstable parent callback identity cannot re-fire
+  // this without a genuine clean<->dirty transition (Design A measured unsafe).
+  const lastReportedDirty = useRef<boolean | null>(null);
+  useEffect(() => {
+    if (lastReportedDirty.current === isDirty) return;
+    lastReportedDirty.current = isDirty;
+    onDirtyChange?.(isDirty);
+  }, [isDirty, onDirtyChange]);
   const attemptClose = () => {
     if (isSaving) return;
     if (isDirty) { setShowDiscardConfirm(true); return; }

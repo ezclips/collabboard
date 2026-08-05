@@ -19,9 +19,10 @@ function slice(source: string, startMarker: string, endMarker: string): string {
 describe('central route (openPadletInTypeEditor): Document branch', () => {
   const body = slice(canvasClientSrc, 'const openPadletInTypeEditor = (post: Padlet) => {', '\n  };');
 
-  it('the exact-Document branch uses the shared destination helper', () => {
+  it('the exact-Document branch uses the shared destination helper (PATCH-149B2-ii: via requestOpenDocument)', () => {
     expect(body).toContain("post.type === 'card') {");
-    expect(body).toContain('setDocumentModalDestination(selectDocumentModalDestination(post, canUseFreeformEditButton))');
+    expect(body).toContain('selectDocumentModalDestination(post, canUseFreeformEditButton)');
+    expect(body).toContain('requestOpenDocument(post, destination)');
   });
 
   it('the clipart branch is unchanged -- still opens ClipartDraftModal/CardViewer via selectCardModalRoute', () => {
@@ -57,8 +58,8 @@ describe('Columns onOpenPost: Document branch', () => {
 
   it('uses the shared Document destination and no longer opens NoteEditor unconditionally', () => {
     expect(body).toContain('selectDocumentModalDestination(post, canUseFreeformEditButton)');
-    expect(body).toContain('if (destination) setDocumentModalDestination(destination);');
-    expect(body).toContain('else setIsNoteEditorOpen(true);');
+    expect(body).toContain('requestOpenDocument(post, destination)');
+    expect(body).toContain('setIsNoteEditorOpen(true);');
   });
 
   it('preserves title/content/metadata by passing the full post to setPadletToEdit', () => {
@@ -71,8 +72,8 @@ describe('Rows onOpenPost: Document branch', () => {
 
   it('uses the shared Document destination and no longer opens NoteEditor unconditionally', () => {
     expect(body).toContain('selectDocumentModalDestination(post, canUseFreeformEditButton)');
-    expect(body).toContain('if (destination) setDocumentModalDestination(destination);');
-    expect(body).toContain('else setIsNoteEditorOpen(true);');
+    expect(body).toContain('requestOpenDocument(post, destination)');
+    expect(body).toContain('setIsNoteEditorOpen(true);');
   });
 });
 
@@ -102,17 +103,19 @@ describe('Freeform: openFreeformPadletModal card branch', () => {
   });
 
   it('clipart preserves its existing CardEditor destination unchanged (C7)', () => {
-    const cardBranch = slice(body, "padletType === 'card') {", '\n    }');
-    expect(cardBranch).toContain('else setIsCardEditorOpen(true);');
+    // PATCH-149B2-ii: the guard's early return leaves clipart (destination null)
+    // to fall through to the original per-type dispatch further down.
+    const secondCardBranch = body.slice(body.indexOf("padletType === 'card') {", body.indexOf("padletType === 'card') {") + 1));
+    expect(secondCardBranch.slice(0, 60)).toContain('setIsCardEditorOpen(true);');
   });
 });
 
 describe('Freeform: CardPreview.onEditContent Document branch', () => {
   const body = slice(freeformSrc, 'onEditContent={() => {', '\n              }}');
 
-  it('exact Document uses the shared destination helper', () => {
+  it('exact Document uses the shared destination helper (PATCH-149B2-ii: via requestOpenDocument)', () => {
     expect(body).toContain('selectDocumentModalDestination(padlet, canUseFreeformEditButton)');
-    expect(body).toContain('setDocumentModalDestination(destination);');
+    expect(body).toContain('requestOpenDocument(padlet, destination)');
   });
 
   it('clipart falls through to the existing selectCardModalRoute editor/viewer split, unchanged', () => {

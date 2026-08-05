@@ -84,6 +84,8 @@ export interface CanvasModalsProps {
   saveDrawing: (...args: any[]) => any;
   saveAIComponent: (data: SaveAIComponentData) => void;
   saveCard: (data: SaveCardData) => Promise<SaveCardResult>;
+  // PATCH-149B2-ii §34.6: threaded straight through to DocumentEditor.
+  onDirtyChange?: (isDirty: boolean) => void;
 
   // Container-specific callbacks
   closeAllToolbars: (except?: Record<string, boolean>) => void;
@@ -119,6 +121,7 @@ export default function CanvasModals({
   saveComment, saveImage, saveDrawing,
   saveAIComponent,
   saveCard,
+  onDirtyChange,
   closeAllToolbars,
   openPadletInTypeEditor,
   handleDetachChildFromFreeformContainer,
@@ -161,6 +164,7 @@ export default function CanvasModals({
           initialContent={padletToEdit?.content || ''}
           metadata={padletToEdit?.metadata ?? null}
           onSave={documentModalDestination === 'document-editor' ? saveCard : noopDocumentSave}
+          onDirtyChange={onDirtyChange}
           onClose={() => {
             setDocumentModalDestination(null);
             setPadletToEdit(null);

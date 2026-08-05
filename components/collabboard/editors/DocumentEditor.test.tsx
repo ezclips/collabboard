@@ -328,6 +328,58 @@ describe('PATCH-149B2-i: dirty-state definition (5-10)', () => {
   });
 });
 
+describe('PATCH-149B2-ii §34.4/§34.6: onDirtyChange transition reporting', () => {
+  it('1: emits false once on clean open', () => {
+    const spy = vi.fn();
+    mount(<DocumentEditor isOpen title="T" initialContent="" metadata={{}} onSave={vi.fn()} onClose={vi.fn()} onDirtyChange={spy} />);
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy).toHaveBeenLastCalledWith(false);
+  });
+
+  it('2/3: clean->dirty emits true once; further edits while dirty emit nothing further', () => {
+    const spy = vi.fn();
+    const container = mount(<DocumentEditor isOpen title="T" initialContent="" metadata={{}} onSave={vi.fn()} onClose={vi.fn()} onDirtyChange={spy} />);
+    setInput(titleInput(container), 'Edited');
+    expect(spy).toHaveBeenCalledTimes(2);
+    expect(spy).toHaveBeenLastCalledWith(true);
+    setInput(descInput(container), 'more');
+    expect(spy).toHaveBeenCalledTimes(2); // still dirty -- no further emission
+  });
+
+  it('4: dirty->clean (revert) emits false once', () => {
+    const spy = vi.fn();
+    const container = mount(<DocumentEditor isOpen title="Base" initialContent="" metadata={{}} onSave={vi.fn()} onClose={vi.fn()} onDirtyChange={spy} />);
+    setInput(titleInput(container), 'Changed');
+    setInput(titleInput(container), 'Base');
+    expect(spy).toHaveBeenCalledTimes(3); // false, true, false
+    expect(spy).toHaveBeenLastCalledWith(false);
+  });
+
+  it('5: read-only emits the initial false and never true', () => {
+    const spy = vi.fn();
+    mount(<DocumentEditor isOpen readOnly title="T" initialContent="<p>x</p>" metadata={{}} onSave={vi.fn()} onClose={vi.fn()} onDirtyChange={spy} />);
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy).toHaveBeenCalledWith(false);
+    expect(spy).not.toHaveBeenCalledWith(true);
+  });
+
+  it('6: an unrelated rerender AND a changed onDirtyChange identity emit nothing when isDirty is unchanged (proves the ref guard, not Design A)', () => {
+    const spy = vi.fn();
+    function Parent({ n }: { n: number }) {
+      // A fresh inline lambda every render -- an unstable callback identity.
+      return <DocumentEditor isOpen title="T" initialContent="" metadata={{ n } as any} onSave={vi.fn()} onClose={vi.fn()} onDirtyChange={(d) => spy(d)} />;
+    }
+    const container = mount(<Parent n={0} />);
+    const { root } = mounted[mounted.length - 1];
+    expect(spy).toHaveBeenCalledTimes(1);
+    act(() => { root.render(<Parent n={1} />); });
+    act(() => { root.render(<Parent n={2} />); });
+    expect(spy).toHaveBeenCalledTimes(1); // no spam from identity changes alone
+    setInput(titleInput(container), 'Edited');
+    expect(spy).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe('PATCH-149B2-i: creation flow (35-40)', () => {
   it('35: a blank untouched new draft closes without confirmation on Close/backdrop/Escape', () => {
     for (const via of ['close', 'backdrop', 'escape'] as const) {

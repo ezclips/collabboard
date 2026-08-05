@@ -168,8 +168,8 @@ export interface FreeformPadletCardsProps {
   handlePadletMouseDown: (e: React.MouseEvent, padletId: string) => void;
   getClickedSide: (e: React.MouseEvent) => any;
   stableActions: StableCanvasActions<FreeformPadletActionMap>;
-  // PATCH-149B1b-ii: Document-open destination, shared with the central router.
-  setDocumentModalDestination: (d: DocumentModalDestination | null) => void;
+  // PATCH-149B2-ii §34: guarded Document open (dirty-draft protection, §32.14 6-8).
+  requestOpenDocument: (post: Padlet, destination: DocumentModalDestination) => void;
 }
 
 
@@ -183,7 +183,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
     selectedPadletId, selectedPadletIds, setSelectedPadletId, setGraphConnectSelection, graphRefreshToken,
     closeAllToolbars, handlePadletMouseDown, getClickedSide,
     stableActions,
-    setDocumentModalDestination,
+    requestOpenDocument,
   } = props;
   /**
    * PATCH-053: image-reaction writes already ignore a resolved Supabase error
@@ -409,6 +409,11 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
       openFreeformImageEditModal(padlet);
       return;
     }
+    // PATCH-149B2-ii §34: resolved before setPadletToEdit below (§26.4 C7 unchanged).
+    if (padletType === 'card') {
+      const destination = selectDocumentModalDestination(padlet, canUseFreeformEditButton);
+      if (destination) { requestOpenDocument(padlet, destination); return; }
+    }
     closeAllToolbars();
     setPadletToEdit(padlet);
     if (padletType === 'table') {
@@ -422,11 +427,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
     } else if (padletType === 'drawing') {
       setIsDrawingEditorOpen(true);
     } else if (padletType === 'card') {
-      // PATCH-149B1b-ii: exact Document -- clipart keeps its existing
-      // CardEditor destination unchanged (PATCH-149 §26.4 C7).
-      const destination = selectDocumentModalDestination(padlet, canUseFreeformEditButton);
-      if (destination) setDocumentModalDestination(destination);
-      else setIsCardEditorOpen(true);
+      setIsCardEditorOpen(true);
     } else if (padletType === 'container') {
       setIsContainerEditorOpen(true);
     } else if (padletType === 'ai-component') {
@@ -443,7 +444,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
     setIsCommentEditorOpen,
     setIsDrawingEditorOpen,
     setIsCardEditorOpen,
-    setDocumentModalDestination,
+    requestOpenDocument,
     canUseFreeformEditButton,
     setIsContainerEditorOpen,
     setIsAIComponentEditorOpen,
@@ -1766,14 +1767,11 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                 setCardToolbarPadletId(padlet.id);
               }) : undefined}
               onEditContent={() => {
+                const destination = selectDocumentModalDestination(padlet, canUseFreeformEditButton);
+                if (destination) { requestOpenDocument(padlet, destination); return; }
                 closeAllToolbars();
                 setPadletToEdit(padlet);
-                // PATCH-149B1b-ii: exact Document -- clipart keeps its
-                // existing editor/viewer split unchanged (§26.4 C7).
-                const destination = selectDocumentModalDestination(padlet, canUseFreeformEditButton);
-                if (destination) {
-                  setDocumentModalDestination(destination);
-                } else if (selectCardModalRoute(canUseFreeformEditButton) === 'editor') {
+                if (selectCardModalRoute(canUseFreeformEditButton) === 'editor') {
                   setIsCardEditorOpen(true);
                 } else {
                   setIsCardViewerOpen(true);
@@ -1781,7 +1779,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
               }}
               onReadDocument={(() => {
                 const d = selectDocumentModalDestination(padlet, canUseFreeformEditButton);
-                return d ? () => { setPadletToEdit(padlet); setDocumentModalDestination(d); } : undefined;
+                return d ? () => requestOpenDocument(padlet, d) : undefined;
               })()}
               isSelected={isPadletSelected(padlet.id)}
               isCardView={padlet.metadata?.showCardView}
