@@ -6337,3 +6337,249 @@ Both were re-measured at `b773b4f` and neither needs a further amendment:
 
 O-1 remains **recommended within the governed test scope** (§34.9), not a blocker. No production or
 test file was modified in this turn. Nothing was pushed.
+
+## §35 PATCH-149B2-ii independent closure review — CORRECTION REQUIRED
+
+Independent review of `cc95a1b` against `.fable5/patches/PATCH-149.md` §§32–34, run against a
+fresh `npm ci` install (this session's `node_modules` was empty prior to review). No implementation
+file was modified by this review; all perturbations were hash-verified byte-identical restorations.
+
+### 35.1 Source scope — CONFIRMED
+
+`git diff --numstat 655dcd4 cc95a1b` independently reproduced and matches the implementation
+report exactly: 5 production files (`CanvasClient.tsx` 80, `CanvasModals.tsx` 4,
+`FreeformPadletCards.tsx` 30, `DocumentEditor.tsx` 11, `documentSwitchGuard.ts` 36 — **161/200**,
+all five per-file caps respected) and 5 physically-changed test files (`DocumentEditor.test.tsx` 52,
+`documentAffordance.source.test.ts` 14, `documentRoutes.source.test.ts` 23,
+`documentSwitchGuard.source.test.ts` 109, `documentSwitchGuard.test.ts` 56 — **254/310**, not
+239/310 as this review's own prompt stated; the prompt's figure is a transcription error, not a
+discrepancy in the commit). No `.fable5` file in the commit. All 13 explicitly-named files
+(`DiscardChangesDialog.tsx`, `usePadletSave.ts`, `DocumentCardContent.tsx`, `PostCardContent.tsx`,
+`CardPreview.tsx`, `documentModalRoute.ts`, `documentPost.ts`, `NoteEditor.tsx`,
+`NoteEditorToolbar.tsx`, `CardEditor.tsx`, `ClipartCardDraftModal.tsx`, `package.json`,
+`package-lock.json`) independently confirmed zero-diff. No PDF/schema/presentation/Excalidraw-fork
+change (the only `/pdf/i` hit in the diff is the new scope-boundary test's own regex string).
+
+### 35.2 Test-slot classification — **A, and explicitly pre-authorized, not merely reasonable**
+
+The implementer's own report hedged this as "a reasonable but self-disclosed interpretation."
+Independent reading of the governance text shows it is stronger than that: §32 (original,
+line 5717-5719) already read **"and ≤50 changed lines in the B1b-iii affordance suites if
+threading requires it. B2-ii tests ≤ 250 / 3 files"**, and §34.7's amended table restates
+**"B1b-iii affordance suites, if threading requires it | ≤50"** as one of the four named slots —
+plural "suites", conditional "if threading requires it". The implementation threading
+(`requestOpenDocument`) changed literal patterns depended on by both `documentRoutes.source.test.ts`
+(13+10) and `documentAffordance.source.test.ts` (7+7) = **37/50**, both like-for-like source-pattern
+updates preserving original test intent, no test weakened or broadened. **Classification A**,
+confirmed as the governed, named interpretation — not a judgment call.
+
+### 35.3 Redundant `svgUrl` check — **A, pre-existing fallthrough, verbatim, non-blocking**
+
+Traced `CanvasClient.tsx`'s central router. At parent `655dcd4` the branch order was
+`else if (post.type==='card' && post.metadata?.svgUrl)` **then** `else if (post.type==='card')`
+(document). At `cc95a1b` the document check is hoisted above `setPadletToEdit` and returns early;
+the `else if (post.type==='card' && post.metadata?.svgUrl)` line is byte-identical text, unmoved in
+content, now reached only when the hoisted check has already excluded real Documents (since
+`selectDocumentModalDestination` → `isDocumentPost` already gates on `!svgUrl`). The `&& svgUrl`
+clause is now logically redundant at that point but was **not newly written** — it was never
+removed from the parent, only left in place while the branch above it changed. Does not create a
+second Document/clipart authority; `isDocumentPost` remains sole gate. `FreeformPadletCards.tsx`'s
+equivalent site has **no** such redundant re-check (falls through directly to
+`setIsCardEditorOpen(true)`). `cardModalRoute.test.ts` — independently confirmed **zero diff** in
+`cc95a1b` (`git diff --numstat 655dcd4 cc95a1b -- cardModalRoute.test.ts` is empty); its slice
+anchor still matches verbatim, no scope deviation.
+
+### 35.4 DocumentEditor §34.4 boundary — CONFIRMED
+
+`DocumentEditor.tsx` diff is exactly the `onDirtyChange` prop, the `lastReportedDirty` ref, and the
+7-line transition effect, plus destructuring. Independently confirmed unchanged: dirty calculation
+(`isDirty` expression, line 63), baseline (`useState`/reset effect, lines 37/50-60), `handleSave`
+(79-97), `attemptClose` (72-76), Escape listener (98-108), discard wiring (77-78, 206), error banner
+(187), read-only branch (150-153, 193-202), toolbar (121-143), TipTap content (44-48, 190),
+title/description state (35-36, 155-161, 195-200), persistence (`onSave` call at 86, unchanged
+signature). No ROLE-prose broadening detected.
+
+### 35.5 Dirty callback contract and ref-guard tripwire — CONFIRMED, empirically
+
+`DocumentEditor.test.tsx`'s 6 dirty-transition tests independently re-run: clean open emits `false`
+once; clean→dirty emits `true` once, further dirty edits emit nothing; dirty→clean emits `false`
+once; read-only emits initial `false`, never `true`; unrelated rerender + changed callback identity
+emit nothing. **Tripwire independently reproduced**: removed the `lastReportedDirty` ref and reduced
+the effect to a plain `useEffect(() => { onDirtyChange?.(isDirty); }, [isDirty, onDirtyChange])`
+(Design A), re-ran the suite — test 6 failed exactly as governed (32/33 passed, only test 6 failed),
+confirming the ref guard is the mechanism under test and not incidental. File hash-restored and
+reverified byte-identical (`sha256sum` before/after match).
+
+### 35.6 Parent dirty state / switch-guard architecture / shared open guard — CONFIRMED
+
+`documentIsDirty`/`queuedDocumentAction` (CanvasClient.tsx:515-516), reset effect on modal close
+(:517), `resolveDocumentSwitch`/`requestOpenDocument` (:5701-5715) independently re-read and match
+the implementation report verbatim. `documentSwitchGuard.ts` independently confirmed pure,
+React-free (no `react` import, no hooks), state-free, a 3-variant discriminated union
+(`open-document` / `open-tool` / `open-drawing-editor`), no function-typed field. No-document →
+`proceed`; read-only or clean → `proceed-after-clear`; dirty editable → `blocked` with the complete
+action preserved. `setDocumentModalDestination(` independently counted at exactly 5 call sites in
+`CanvasClient.tsx` (creation, `resolveDocumentSwitch`'s clear, `requestOpenDocument`,
+`handleDocumentSwitchDiscard`'s clear and its `open-document` re-open) — matches the source test's
+assertion and the JSX prop-pass at :5901 does not add a 6th (`setDocumentModalDestination={...}`
+does not match the `\(` pattern). `FreeformPadletCards.tsx` has zero raw
+`setDocumentModalDestination(` — confirmed via independent diff read.
+
+### 35.7 Eight entry points — CONFIRMED reachable and guarded
+
+Re-measured independently (not the report's count): `requestOpenDocument(` appears 4× in
+`CanvasClient.tsx` (`openPadletInTypeEditor`, `openDocumentFromPreview`, Columns, Rows) and 3× in
+`FreeformPadletCards.tsx` (`openFreeformPadletModal`, `onEditContent`, `onReadDocument`); entry 1
+(creation) is reached only via `handleToolClick`'s top-of-function `resolveDocumentSwitch` call,
+independently confirmed to run before `selectedPadletIds` reset, before the editor-close cascade,
+and before the `switch (toolType)` block containing `case 'document'`. `closeDrawingEditorsBeforePadletEdit`'s
+sole JSX call site (Drawing layout `onPadletEdit`) is guarded first — independently confirmed via
+`lastIndexOf` anchoring (two `onPadletEdit={(padlet) => {` occurrences exist; the guard sits before
+the correct, later one). No live path found that writes both `setPadletToEdit` and
+`setDocumentModalDestination` outside a guarded function.
+
+### 35.8 O-1 ordering guard — CONFIRMED, both statically and via the existing negative control
+
+Independently read `saveCard`'s full body (`usePadletSave.ts:982-1090`). The `skipped-blank` /
+`deferred-placement` early resets (:1005-1006, inside the `if (padletToEdit.id === 'new')` branch)
+sit **before** any persistence `await` but are legitimate no-op aborts pre-dating B2-ii — not the
+ordering concern. The real success-path reset (:1078-1079, `setIsCardEditorOpen(false)` /
+`setPadletToEdit(null)`) sits **after** both persistence `await`s (:1027, :1066) and before the
+single `return { status: 'saved' }`; `catch` remains below it. The source test's 150-character
+preamble-after-`try{` window and its `try`-block-scoped slicing (not whole-file position comparison)
+independently confirmed correct and load-bearing per §33's own O-1 lesson. Not re-perturbed in this
+review (§33's closure review already proved detection empirically; re-tracing the static ordering
+here was sufficient).
+
+### 35.9 CanvasModals / discard dialog reuse — CONFIRMED
+
+`CanvasModals.tsx` diff is exactly `onDirtyChange?: (isDirty: boolean) => void` threaded through as
+a prop and passed to `<DocumentEditor onDirtyChange={onDirtyChange} />`; key wrapper, title/content/
+metadata, `readOnly` (still derived from `documentModalDestination`), `onSave`, and the close
+handler (`setDocumentModalDestination(null); setPadletToEdit(null);`) all unchanged. Exactly one
+`<DocumentEditor` render. `DiscardChangesDialog.tsx` independently confirmed zero-diff and is reused,
+not duplicated, at the parent confirmation site (`CanvasClient.tsx:5935-5936`); it is gated on
+`queuedDocumentAction !== null`, mutually exclusive by construction from `DocumentEditor`'s own
+local confirmation (gated on that component's internal `showDiscardConfirm`, never both at once
+since the parent guard intercepts entry before `DocumentEditor` ever sees a close/switch event).
+
+### 35.10 Queued continuation — **FAIL, empirically reproduced defect**
+
+This is the correction this review requires. §32.12/§34 govern: *"queued continuation executes
+exactly once ... cannot execute twice ... For a queued tool/editor: exact requested action runs
+once."* Independent inspection of `handleDocumentSwitchDiscard` (`CanvasClient.tsx:5717-5731`)
+found a stale-closure defect that the shipped test suite cannot see, because every B2-ii test is
+either a pure-function unit test or a static source-string-slice test — none of them execute the
+actual closures with realistic React state timing.
+
+**Mechanism.** `handleDocumentSwitchDiscard` calls the raw setters (`setQueuedDocumentAction(null)`,
+`setDocumentModalDestination(null)`, `setPadletToEdit(null)`, `setDocumentIsDirty(false)`) and then,
+in the **same synchronous call**, for `action.kind === 'open-tool'` invokes `handleToolClick(action.toolType)`,
+and for `action.kind === 'open-drawing-editor'` (targeting a Document) invokes `openPadletInTypeEditor(action.padlet)`.
+Both of those functions independently call `resolveDocumentSwitch` again at their own top. Because
+React state setters are batched and do not update the closures of functions defined in the current
+render until the *next* render, `resolveDocumentSwitch`'s second call reads the **pre-discard**
+`documentModalDestination`/`documentIsDirty` values (still the dirty destination, still `true`) —
+not the just-cleared ones — and re-classifies the situation as `blocked`, calling
+`setQueuedDocumentAction(action)` again. The explicit `setQueuedDocumentAction(null)` from two lines
+earlier is silently overwritten in the same batch (last write wins), so after the render:
+`documentModalDestination` is correctly `null`, but `queuedDocumentAction` is **the same action
+again**, and the tool/document **never actually opens**.
+
+**Empirical proof.** Reproduced in an isolated jsdom/React probe mirroring the exact shipped pattern
+(`decideDocumentSwitch` → `resolveDocumentSwitch` → `handleToolClick`, called from
+`handleDiscard` after `setQueued(null)`): first Discard click leaves `toolRanCount === 0` and
+`queued` re-populated with the original action (not `null`); a **second** Discard click is required
+before the tool actually runs. Probe file was created under `lib/domain/canvas/`, run via
+`npx vitest run`, and deleted after use — no probe artifact is part of this commit or any prior one.
+
+**Scope of the defect.** Affects `open-tool` (all `handleToolClick` targets) and
+`open-drawing-editor` whenever `action.padlet.type === 'card'` and is not an image-edit or clipart
+target (i.e., whenever the queued drawing-edit target is itself an exact Document, reached through
+`openPadletInTypeEditor`'s own hoisted guard). **Does not** affect `open-document` — that branch
+(`if (action.kind === 'open-document') { setPadletToEdit(action.post); setDocumentModalDestination(action.destination); }`)
+calls the raw setters directly, bypassing `resolveDocumentSwitch` entirely, and is unaffected.
+
+**User-visible symptom.** With a dirty Document open, clicking a toolbar tool (or opening another
+Document through the guarded Drawing-layout edit path) triggers the confirmation as governed; but
+clicking **Discard** does not open the queued tool/Document on the first click — the Document modal
+closes, but the queued action silently re-arms, requiring a second, unexplained click on a dialog
+that (from the user's perspective) never visibly reappeared or changed. This violates "executes
+exactly once" and "no duplicate old path also runs" in spirit (it under-runs, not over-runs, but the
+governed contract is violated either way) and is a genuine correctness regression, not a coverage
+gap alone.
+
+**Not caught because:** no B2-ii test exercises `handleDocumentSwitchDiscard` end-to-end through
+real React state updates for the `open-tool` or `open-drawing-editor` variants; `documentSwitchGuard.test.ts`
+tests only the pure `decideDocumentSwitch` function (no React), and `documentSwitchGuard.source.test.ts`
+tests only static text patterns (e.g. "Keep editing clears the queued continuation and nothing else"
+checks the *text* of `handleDocumentSwitchKeepEditing`'s body, not runtime behavior of
+`handleDocumentSwitchDiscard`). No test in the authorized allowlist mounts `CanvasClient` or
+otherwise drives this interaction through real state timing.
+
+**Required correction (for the next implementation turn, not made in this review):** the
+`open-tool`/`open-drawing-editor` branches of `handleDocumentSwitchDiscard` must not re-enter a
+function that itself calls `resolveDocumentSwitch`. The straightforward fix is for those two
+branches to call the raw target logic directly (mirroring how `open-document` already bypasses the
+guard), or to defer the continuation to a `useEffect` keyed off `queuedDocumentAction` clearing so it
+runs against the *next* render's state rather than the current one. This is a same-file,
+same-allowlist correction (`CanvasClient.tsx`, already at 80/90 of its own cap) — it does not require
+a new governance amendment, only a corrected implementation turn against the existing §32/§34
+allowlist, plus a new integration-style test (mounting `CanvasClient` or an isolated reproduction of
+this exact call chain) added to the existing `documentSwitchGuard.source.test.ts` or
+`DocumentEditor.test.tsx` slot budget.
+
+### 35.11 Other governed areas — not separately re-verified beyond §35.1-35.9
+
+Selected-state cleanup, successful/failed-save cleanup, and the remaining negative controls beyond
+those exercised above were not independently re-run in full in this review once the §35.10 defect
+was found and confirmed sufficient to block closure; re-running the full 24-control matrix is better
+spent verifying the corrected implementation in the next turn, against a version where §35.10 no
+longer masks other findings.
+
+### 35.12 Validation
+
+- **Environment**: this session's `node_modules` was empty; `npm ci` run first (clean install).
+- **Full Vitest**: **80/80 files, 945/945 tests pass** at `cc95a1b` — independently confirmed,
+  matches the implementation report.
+- **Typecheck**: `preflight:excalidraw-types` emits 410 fresh declarations (confirmed, matches
+  report) but the subsequent `tsc --noEmit` shows 2 pre-existing errors unrelated to this diff
+  (`components/SearchMenu.tsx:396,398` nullability; `DrawingLayout.tsx`/an e2e spec failing to
+  resolve `@excalidraw/element`) — neither file is in the B2-ii change set, and the excalidraw-fork
+  module-resolution error traces to `dist/prod` not being built for the fork's `element`/`common`/
+  `math` sub-packages in this fresh-install session (confirmed: `file:` symlinks under
+  `node_modules/@excalidraw/*` are correctly created by `npm ci`, but only the `excalidraw` package's
+  own `dist/prod` was buildable in the time available; its siblings were not). **Not attributable to
+  cc95a1b** — none of its 10 files touch excalidraw-fork build tooling, and the same import chain
+  (`CanvasClient.tsx` → `DrawingLayout.tsx` → Excalidraw) already existed at parent `655dcd4`.
+- **Ordinary build / bridge exclusion / E2E build / marker checks**: **BLOCKED — ENVIRONMENT** in
+  this session. Attempted; the ordinary `next build` fails on the same pre-existing excalidraw-fork
+  multi-package build gap described above, independent of this patch. Not independently completed.
+- **`git diff --check`**: clean (no whitespace errors) across `655dcd4..cc95a1b`.
+
+### 35.13 Classification
+
+**7. FAIL — QUEUED CONTINUATION**
+
+Everything in §35.1-35.9 independently confirms the implementation report: source scope, both caps,
+the test-slot interpretation (stronger than claimed — explicitly named, not inferred), the redundant
+`svgUrl` trace, the `DocumentEditor` boundary, the dirty-callback contract with an empirically-proven
+load-bearing ref guard, the switch-guard architecture, all eight entry points, and the O-1 guard.
+**§35.10's empirically-reproduced stale-closure defect in `handleDocumentSwitchDiscard`'s
+`open-tool`/`open-drawing-editor` branches is real, user-visible, and violates the governed
+"executes exactly once" queued-continuation contract.** This blocks closure. It does not require a
+governance amendment (existing allowlist and caps already cover the fix) — it requires a corrected
+implementation turn.
+
+### 35.14 Status
+
+| Patch | Status |
+|---|---|
+| **PATCH-149B2-i** | **CLOSED** (`f4bd92b`, §33), unchanged |
+| **PATCH-149B2-ii** | **OPEN — IMPLEMENTATION CORRECTION REQUIRED** (§35.10); `cc95a1b` is not closed; correct the `open-tool`/`open-drawing-editor` discard branches against the existing §32/§34 allowlist and re-submit for closure review |
+| **PATCH-149B2 (overall)** | **NOT COMPLETE** — blocked on B2-ii's correction |
+| **PATCH-149C** | **BLOCKED on user reproduction** (§14.11), unchanged |
+| **PATCH-150** | **RESERVED and separate**, unchanged |
+
+No implementation file was modified by this review. All perturbations (ref-guard removal,
+probe-file creation) were hash-verified restored / deleted. Nothing was pushed.
