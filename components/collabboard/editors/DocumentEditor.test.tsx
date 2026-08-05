@@ -83,15 +83,15 @@ describe('DocumentEditor editable (PATCH-149B1b-i)', () => {
     expect(container.querySelector('strong')).not.toBeNull();
   });
 
-  it('shows the Document toolbar with real controls, no Align, and no Link/Comment/TextStyle', () => {
+  it('shows the Document toolbar with real controls, no Align, no Box, and present Link/Text style (PATCH-152)', () => {
     const container = mount(
       <DocumentEditor isOpen title="" initialContent="<p>x</p>" metadata={{}} onSave={vi.fn()} onClose={vi.fn()} />,
     );
     expect(container.querySelector('button[title*="Bold"]')).not.toBeNull();
     expect(container.querySelector('button[title*="Underline"]')).not.toBeNull();
     expect(container.querySelector('button[title*="Text alignment"]')).toBeNull();
-    expect(container.querySelector('button[title="Link text first!"]')).toBeNull();
-    expect(container.querySelector('button[title="Change text formatting"]')).toBeNull();
+    expect(container.querySelector('button[title="Link text first!"]')).not.toBeNull();
+    expect(container.querySelector('button[title="Change text formatting"]')).not.toBeNull();
     expect(container.querySelector('button[title*="Switch to Box"]')).toBeNull();
   });
 

@@ -165,6 +165,8 @@ export default function CanvasModals({
           metadata={padletToEdit?.metadata ?? null}
           onSave={documentModalDestination === 'document-editor' ? saveCard : noopDocumentSave}
           onDirtyChange={onDirtyChange}
+          currentUserId={user?.id}
+          currentUserName={user?.user_metadata?.name || user?.email?.split('@')[0] || 'Anonymous'}
           onClose={() => {
             setDocumentModalDestination(null);
             setPadletToEdit(null);

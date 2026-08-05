@@ -4,9 +4,14 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Loader2, X } from 'lucide-react';
 import { EditorContent, useSharedTipTapEditor } from './useSharedTipTapEditor';
 import NoteEditorToolbar from './NoteEditorToolbar';
+import TextStylePopup from './TextStylePopup';
+import LinkPopup from './LinkPopup';
+import CommentPopup from './CommentPopup';
 import DiscardChangesDialog from './DiscardChangesDialog';
 import { toEditorHtml, fromEditorHtml } from '@/lib/domain/canvas/documentContentAdapter';
 import type { SaveCardData, SaveCardResult } from '@/hooks/canvas/usePadletSave';
+
+type Comment152 = { id: string; text: string; userId: string; userName: string; timestamp: number };
 
 interface DocumentEditorProps {
   isOpen: boolean;
@@ -18,6 +23,9 @@ interface DocumentEditorProps {
   onClose: () => void;
   // PATCH-149B2-ii §34.4: fires only on clean<->dirty transitions (ref-guarded).
   onDirtyChange?: (isDirty: boolean) => void;
+  // PATCH-152 §4.3 (OQ-2 Route B): real authenticated identity for Comment.
+  currentUserId?: string;
+  currentUserName?: string;
 }
 
 // PATCH-149B2-i §32: explicit Save + dirty-state tracking against a saved baseline;
@@ -31,6 +39,8 @@ export default function DocumentEditor({
   onSave,
   onClose,
   onDirtyChange,
+  currentUserId,
+  currentUserName,
 }: DocumentEditorProps) {
   const [title, setTitle] = useState(initialTitle);
   const [description, setDescription] = useState(initialMetadata?.description || '');
@@ -41,11 +51,32 @@ export default function DocumentEditor({
   const [saveError, setSaveError] = useState<string | null>(null);
   const titleInputRef = useRef<HTMLInputElement>(null);
 
+  // PATCH-152 §4.1-4.4: toolbar popup state, ported narrowly from NoteEditor.
+  const [, forceSelectionTick] = useState(0);
+  const [textStyleOpen, setTextStyleOpen] = useState(false);
+  const [currentHeading, setCurrentHeading] = useState('normal');
+  const [currentTextColor, setCurrentTextColor] = useState('#1a1a1a');
+  const [currentHighlight, setCurrentHighlight] = useState('transparent');
+  const [linkPopupOpen, setLinkPopupOpen] = useState(false);
+  const [linkViewUrl, setLinkViewUrl] = useState('');
+  const [commentPopupOpen, setCommentPopupOpen] = useState(false);
+  const [activeThread, setActiveThread] = useState<{ id: string; comments: Comment152[] } | null>(null);
+  const [savedSelection, setSavedSelection] = useState<{ from: number; to: number } | null>(null);
+
   const editor = useSharedTipTapEditor({
     initialContent: toEditorHtml(initialContent),
     editable: !readOnly,
     onUpdate: readOnly ? undefined : () => forceBodyTick((c) => c + 1),
   });
+
+  // PATCH-152 §2 OQ-3: local, Document-only selection reactivity -- deliberate, scoped divergence; Note is unfixed.
+  useEffect(() => {
+    if (!editor) return;
+    const handleSelectionUpdate = () => forceSelectionTick((c) => c + 1);
+    editor.on('selectionUpdate', handleSelectionUpdate);
+    return () => { editor.off('selectionUpdate', handleSelectionUpdate); };
+  }, [editor]);
+
   // §23.15 (F3): primitives only, never the metadata object; also re-establishes the saved baseline for a new open session.
   useEffect(() => {
     if (!isOpen || !editor) return;
@@ -107,7 +138,87 @@ export default function DocumentEditor({
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, editor, isSaving, showDiscardConfirm, isDirty, onClose]);
 
+  // PATCH-152 §4.1: heading/color/highlight semantics ported narrowly from NoteEditor.tsx:561-617.
+  const handleSelectHeading = (level: string) => {
+    if (!editor) return;
+    setCurrentHeading(level);
+    editor.chain().focus().clearNodes().unsetFontSize().run();
+    switch (level) {
+      case 'h1': editor.chain().focus().toggleHeading({ level: 1 }).run(); break;
+      case 'h2': editor.chain().focus().toggleHeading({ level: 2 }).run(); break;
+      case 'normal': editor.chain().focus().setParagraph().setFontSize('14px').run(); break;
+      case 'small': editor.chain().focus().setParagraph().setFontSize('12px').setColor('#6b7280').run(); break;
+      case 'code': editor.chain().focus().toggleCodeBlock().run(); break;
+      case 'callout': {
+        editor.chain().focus().setParagraph().run();
+        const { from, to } = editor.state.selection;
+        const text = editor.state.doc.textBetween(from, to, ' ');
+        if (!text.startsWith('⚠')) editor.chain().focus().insertContentAt(from, '⚠ ').setHighlight({ color: '#fef3c7' }).run();
+        else editor.chain().focus().setHighlight({ color: '#fef3c7' }).run();
+        break;
+      }
+      case 'quote': editor.chain().focus().toggleBlockquote().run(); break;
+      default: editor.chain().focus().setParagraph().run();
+    }
+  };
+  const handleSelectTextColor = (color: string) => { setCurrentTextColor(color); editor?.chain().focus().setColor(color).run(); };
+  const handleSelectHighlight = (color: string) => {
+    setCurrentHighlight(color);
+    if (color === 'transparent') editor?.chain().focus().unsetHighlight().run();
+    else editor?.chain().focus().setHighlight({ color }).run();
+  };
+
+  // PATCH-152 §4.2: link workflow ported narrowly from NoteEditor.tsx:279-313.
+  const handleLink = () => {
+    if (!editor) return;
+    const { from, to } = editor.state.selection;
+    if (!editor.state.doc.textBetween(from, to, '').trim()) return;
+    const linkMark = editor.getAttributes('link');
+    setLinkViewUrl(linkMark?.href || '');
+    setTextStyleOpen(false);
+    setCommentPopupOpen(false);
+    setLinkPopupOpen(true);
+  };
+  const handleAddLink = (url: string) => { if (url && editor) editor.chain().focus().setLink({ href: url }).run(); };
+  const handleRemoveLink = () => { editor?.chain().focus().unsetLink().run(); };
+
+  // PATCH-152 §4.3/§4.4: thread semantics ported narrowly from NoteEditor.tsx:180-204/316-371/407-445.
+  const buildThreadFromAttrs = (attrs: { commentId?: string | null; commentThread?: string | null; commentText?: string | null; userId?: string | null; userName?: string | null; timestamp?: number | null }) => {
+    const commentId = attrs.commentId || '';
+    let comments: Comment152[] = [];
+    if (attrs.commentThread) {
+      try { const parsed = JSON.parse(attrs.commentThread); if (Array.isArray(parsed)) comments = parsed; } catch { /* ignore invalid thread payload */ }
+    } else if (attrs.commentText) {
+      comments = [{ id: commentId || `comment-${Date.now()}`, text: attrs.commentText, userId: attrs.userId || currentUserId || '', userName: attrs.userName || currentUserName || 'Anonymous', timestamp: attrs.timestamp || Date.now() }];
+    }
+    return { id: commentId, comments };
+  };
+  const handleTextComment = () => {
+    if (!editor) return;
+    const { from, to } = editor.state.selection;
+    if (!editor.state.doc.textBetween(from, to, '').trim()) return;
+    editor.chain().focus().setTextSelection({ from, to }).run();
+    const attrs = editor.getAttributes('comment');
+    setActiveThread(attrs?.commentId ? buildThreadFromAttrs(attrs) : { id: `comment-${Date.now()}`, comments: [] });
+    setSavedSelection({ from, to });
+    setTextStyleOpen(false);
+    setLinkPopupOpen(false);
+    setCommentPopupOpen(true);
+  };
+  const handleAddComment = (commentText: string) => {
+    if (!editor || !commentText || !activeThread || !savedSelection) return;
+    const newComment: Comment152 = { id: `comment-${Date.now()}`, text: commentText, userId: currentUserId || '', userName: currentUserName || 'Anonymous', timestamp: Date.now() };
+    const nextComments = [...activeThread.comments, newComment];
+    editor.chain().focus().setTextSelection(savedSelection).setComment({
+      commentId: activeThread.id, commentText: newComment.text, commentThread: JSON.stringify(nextComments),
+      userId: newComment.userId, userName: newComment.userName, timestamp: newComment.timestamp,
+    }).run();
+    setActiveThread({ ...activeThread, comments: nextComments });
+  };
+
   if (!isOpen || !editor) return null;
+
+  const hasSelection = !editor.state.selection.empty;
 
   return (
     <div
@@ -119,7 +230,7 @@ export default function DocumentEditor({
     >
       <div className="flex items-start gap-3" onClick={(e) => e.stopPropagation()}>
         {!readOnly && (
-          <div className="min-w-[72px]">
+          <div className="relative min-w-[72px]">
             <NoteEditorToolbar
               variant="document"
               mode="text"
@@ -131,6 +242,9 @@ export default function DocumentEditor({
               onBulletList={() => editor.chain().focus().toggleBulletList().run()}
               onOrderedList={() => editor.chain().focus().toggleOrderedList().run()}
               onCode={() => editor.chain().focus().toggleCodeBlock().run()}
+              onTextStyle={() => { setLinkPopupOpen(false); setCommentPopupOpen(false); setTextStyleOpen(true); }}
+              onLink={handleLink}
+              onTextComment={handleTextComment}
               isBold={editor.isActive('bold')}
               isItalic={editor.isActive('italic')}
               isStrikethrough={editor.isActive('strike')}
@@ -138,7 +252,46 @@ export default function DocumentEditor({
               isBulletList={editor.isActive('bulletList')}
               isOrderedList={editor.isActive('orderedList')}
               isCode={editor.isActive('codeBlock')}
+              isLink={editor.isActive('link')}
+              isComment={editor.isActive('comment')}
+              hasSelection={hasSelection}
             />
+            {textStyleOpen && (
+              <div className="absolute left-full top-0 ml-2 z-[60] bg-white rounded-lg shadow-xl border border-gray-200 p-4" style={{ width: '300px' }}>
+                <button onClick={() => setTextStyleOpen(false)} className="absolute top-2 right-2 w-4 h-4 flex items-center justify-center rounded hover:bg-gray-100">
+                  <X className="w-3 h-3 text-gray-400" />
+                </button>
+                <TextStylePopup
+                  isOpen={true}
+                  onOpenChange={setTextStyleOpen}
+                  onSelectHeading={handleSelectHeading}
+                  onSelectColor={handleSelectTextColor}
+                  onSelectHighlight={handleSelectHighlight}
+                  currentHeading={currentHeading}
+                  currentColor={currentTextColor}
+                  currentHighlight={currentHighlight}
+                />
+              </div>
+            )}
+            <LinkPopup
+              isOpen={linkPopupOpen}
+              onOpenChange={setLinkPopupOpen}
+              onSubmit={handleAddLink}
+              onRemoveLink={handleRemoveLink}
+              initialUrl={linkViewUrl}
+            />
+            {commentPopupOpen && (
+              <div className="absolute left-full top-0 ml-2 z-[60]" style={{ width: '300px' }}>
+                <CommentPopup
+                  isOpen={commentPopupOpen}
+                  onOpenChange={setCommentPopupOpen}
+                  onSubmit={handleAddComment}
+                  comments={activeThread?.comments || []}
+                  currentUserId={currentUserId}
+                  currentUserName={currentUserName}
+                />
+              </div>
+            )}
           </div>
         )}
 
