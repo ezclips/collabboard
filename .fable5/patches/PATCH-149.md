@@ -6750,3 +6750,193 @@ bus.** The `open-document` continuation already bypasses the guard and must not 
 
 No production or test file was modified in this turn. The measurement harness used to set the ≤85
 cap was run from a scratch path and deleted; it is not part of any commit. Nothing was pushed.
+
+## §37 PATCH-149B2-ii final closure review — PASS
+
+Independent review of the corrected implementation. Every figure was independently re-derived at
+`9d19071`; no implementation file was modified, and all perturbations were hash-verified restored.
+
+**Commit chain.** `cc95a1b` (original B2-ii implementation) → `0fb2999` (§35 closure **FAIL —
+QUEUED CONTINUATION**) → `5c2135c` (§36 behavioural-test authorization) → **`9d19071`**
+(`fix(document): execute queued actions without reentering switch guard`).
+
+### 37.1 Source scope — CONFIRMED
+
+`9d19071` is **4 files, 140 insertions / 37 deletions**: `CanvasClient.tsx` (14/8),
+`documentQueuedContinuation.behavior.test.tsx` (84 new), `documentRoutes.source.test.ts` (6/4),
+`documentSwitchGuard.source.test.ts` (36/25). **Only `CanvasClient.tsx` changed in production.** No
+governance file is in the commit. All **15** not-authorized files independently confirmed zero-diff
+against `cc95a1b`: `DocumentEditor.tsx`, `CanvasModals.tsx`, `FreeformPadletCards.tsx`,
+`documentSwitchGuard.ts`, `DiscardChangesDialog.tsx`, `usePadletSave.ts`, `vitest.config.ts`,
+`package.json`, `package-lock.json`, `documentModalRoute.ts`, `documentPost.ts`,
+`cardModalRoute.test.ts`, `documentAffordance.source.test.ts`, `DocumentEditor.test.tsx`,
+`documentSwitchGuard.test.ts`. No schema/PDF/Excalidraw-source change.
+
+| Budget | Measured | Cap |
+|---|---|---|
+| `CanvasClient.tsx` cumulative vs `655dcd4` | **90** | ≤90 |
+| Production aggregate | **171** | ≤200 |
+| `documentSwitchGuard.source.test.ts` | **120** | ≤120 |
+| `documentQueuedContinuation.behavior.test.tsx` | **84** | ≤85 |
+| B1b-iii conceptual slot | **43** | ≤50 |
+| `documentSwitchGuard.test.ts` / `DocumentEditor.test.tsx` | 56 / 52 | ≤90 / ≤60 |
+| Test aggregate | **355** | ≤405 |
+
+Three budgets land exactly at cap (production file, source suite, and — at 84/85 — the harness).
+All are within authorization; none was reached by deleting coverage (see §37.6).
+
+### 37.2 Root cause and structural correction — CONFIRMED
+
+§35.10's defect is reproduced and removed. At `cc95a1b` the discard continuation called the guarded
+public entries, which re-invoked `resolveDocumentSwitch` against the pre-discard closure and
+re-queued. At `9d19071` each affected entry is split into an **unguarded execution core** and a
+**thin guarded wrapper**, and the continuation calls the cores.
+
+**Execution cores — independently verified guard-free.** Grepping `executeToolAction`'s full body
+(`CanvasClient.tsx:5341-5695`, the ~355-line tool `switch`) and `executePadletTypeEditor`'s
+(`:5735-5759`) for `resolveDocumentSwitch|handleToolClick|openPadletInTypeEditor|requestOpenDocument|
+documentIsDirty|documentModalDestination|setQueuedDocumentAction|setTimeout|queueMicrotask|flushSync`
+returns **nothing** in either. The transitive helpers they call (`openImagePostEditor`,
+`closeAllToolbarLaunchedUi`, `closeDrawingSelectedShapePanel`, `closeDrawingEditorsBeforePadletEdit`)
+were each checked and are likewise guard-free, so no re-entry hides one level down. The single
+`setDocumentModalDestination('document-editor')` inside `executeToolAction` is entry 1 (creation) —
+a **write**, never a read of guard state — reached only once the guard has authorized.
+
+**Guarded wrappers — thin.** `handleToolClick` is one line (`if (!resolveDocumentSwitch(...))
+executeToolAction(toolType);`); `openPadletInTypeEditor` computes the destination, routes real
+Documents through `requestOpenDocument`, else delegates. Neither mutates tool/editor state before
+authorization, and neither duplicates the dispatch body.
+
+**Correctness does not depend on committed state**: the cores never read
+`documentModalDestination`/`documentIsDirty` at all, so the stale closure is irrelevant to them.
+
+### 37.3 Discard order — CONFIRMED
+
+`handleDocumentSwitchDiscard` (`:5718-5734`), read directly: (1) `const action = queuedDocumentAction`
+(capture); (2) `setQueuedDocumentAction(null)`; (3) `setDocumentModalDestination(null)` +
+`setPadletToEdit(null)`; (4) `setDocumentIsDirty(false)`; (5) executes the **captured local**
+through a single `if / else if / else` chain. The queued state is **never re-read** after clearing,
+so no stale continuation survives and the action cannot run twice. No timer, microtask, `flushSync`,
+bypass flag or stored callback anywhere in the function.
+
+### 37.4 Behavioural harness — CONFIRMED
+
+`components/collabboard/documentQueuedContinuation.behavior.test.tsx` is **collected** by the
+existing config (verified via `vitest list` — 4 tests; §36.1's path correction was necessary and is
+vindicated), carries the file-level `// @vitest-environment jsdom` pragma, mounts through real
+`react-dom/client` + `act()`, and **imports the real `decideDocumentSwitch`**. No snapshots. Exact
+counters throughout — `toEqual([expected])` and `toHaveLength(0)`, never "at least once".
+
+Both variants covered and independently re-run green: for **open-tool** and
+**drawing/padlet-editor** alike, the harness asserts nothing ran before confirmation, the queue is
+populated, the confirmation is visible, and **one** Discard click executes exactly once, empties the
+queue, and removes the confirmation.
+
+### 37.5 Defect reproduction and production binding — CONFIRMED, and jointly load-bearing
+
+The harness's `reenter` mode reproduces the shipped pattern; independently perturbing it so the
+correction path also re-enters fails the matching variant (§37.7 NC1/NC2), with the exact §36.5
+symptoms: count stays 0, queue repopulates, the Discard button remains rendered.
+
+Because the harness is a **reproduction** (CanvasClient cannot be mounted — §36.3), the paired
+source proof in `documentSwitchGuard.source.test.ts` is what binds production: scoped to
+`handleDocumentSwitchDiscard`'s own body via `fnBody()`, it asserts the continuation contains
+`executeToolAction(` and `executePadletTypeEditor(`, contains **neither** `handleToolClick(` nor
+`openPadletInTypeEditor(`, matches capture-before-clear, and contains no
+`setTimeout|queueMicrotask|flushSync|requestAnimationFrame`. A second scoped assertion proves both
+wrappers stay thin. No whole-file ordering is used anywhere. **Induced failure**: restoring
+`cc95a1b`'s `CanvasClient.tsx` under the corrected suite fails **3** assertions, including both
+bindings — neither proof is decorative.
+
+### 37.6 Merged test blocks — no coverage lost
+
+The reported −1 test was audited assertion-by-assertion rather than accepted. `it()` blocks went
+**14 → 13**, but `expect()` calls went **23 → 33**. Four old assertion strings do not appear
+verbatim in the new file; each was traced and is preserved in equivalent form:
+
+- the `setDocumentModalDestination(` writer count `toBe(5)` → `toBe(6)` (a legitimate new authorized
+  writer, `executePadletTypeEditor`);
+- the open-tool guard assertion — variable renamed `body` → `tool`, text identical;
+- the catch-below-reset ordering — inlined into one expression, same comparison;
+- the `documentModalRoute.ts` untouched assertion — `read(...)` inlined, same regex.
+
+No assertion was removed, no behaviour weakened; the reduction is structural only and net coverage
+**increased by 10 assertions**.
+
+### 37.7 Negative controls — all 14 independently applied and detected
+
+Each perturbation was verified to have **actually landed** (grep/`sed` on the perturbed file) before
+its result was accepted — §35's and the implementer's own NC7 near-miss made that mandatory. **NC7
+was re-applied independently here in slurp mode, confirmed present in the file, and confirmed
+detected**; the implementer's disclosure of the initial misapplication was accurate and correctly
+handled rather than banked as a false green.
+
+| # | Control | Detected by |
+|---|---|---|
+| 1 | discard → `handleToolClick` (harness) | tool behavioural case |
+| 2 | discard → `openPadletInTypeEditor` (harness) | editor behavioural case |
+| 3 | remove `executeToolAction` binding | discard source binding |
+| 4 | remove `executePadletTypeEditor` binding | discard source binding |
+| 5 | execute action twice | exact counter (2 cases) |
+| 6 | clear queue without executing | all 4 behavioural cases |
+| 7 | execute before capture/clear | capture-before-clear regex |
+| 8 | Keep Editing executes continuation | Keep-editing source test |
+| 9 | timer/microtask workaround | no-timer assertion |
+| 10 | mutate tool in wrapper pre-guard | wrapper-thinness |
+| 11 | mutate editor state in wrapper pre-guard | wrapper-thinness |
+| 12 | reintroduce save-on-close | 3 B2-i lifecycle tests |
+| 13 | remove `DocumentEditor` ref guard | §34.6 callback-identity test |
+| 14 | add PDF branch | scope-boundary test |
+
+Every file restored **byte-identically** (SHA-256 verified after each control).
+
+### 37.8 Regressions — none
+
+`open-document` continuation is textually unchanged and still uses raw setters (no guard re-entry,
+complete post + destination preserved). Clean and read-only paths are unchanged — `decideDocumentSwitch`
+still returns `proceed`/`proceed-after-clear`, so no confirmation and no queue. Keep Editing is
+byte-identical. All B2-i lifecycle behaviour is intact: `DocumentEditor.tsx` is zero-diff, and its
+33 tests (explicit Save, SAVE-B, no save-on-close, dirty Close/backdrop/Escape, clean Close, failed
+save retry, read-only, skipped-blank/deferred-placement) all pass. O-1 ordering guard intact with
+`usePadletSave.ts` zero-diff. Read affordance, clipart routing/fallthrough, keyed remount, ref-guarded
+dirty callback, eight guarded entry points and parent dirty reset all unchanged; no PDF code.
+
+### 37.9 Validation
+
+- **Full Vitest: 81/81 files, 948/948 tests** (baseline 80/945; +1 file, +4 behavioural, −1 structural).
+- **Typecheck clean**; **410 declarations**.
+- Clean ordinary build → **exclusion 891**, marker **absent** → clean E2E build → marker **present**
+  → ordinary `.next` restored → **exclusion 891**, marker **absent**. `git diff --check` clean.
+
+**Environment observation — reproducible repository setup issue, not implementation-caused.** A
+fresh `npm ci` leaves the vendored fork's `packages/{common,math,element}` without `dist`, which
+fails `tsc` and `next build` on `@excalidraw/element` etc. Root `package.json` has **no**
+`postinstall`/`prepare` and no script that builds the fork sub-packages; their `dist` is gitignored
+by `excalidraw_fork/.gitignore:16`. `9d19071` touches no package, config or build-tooling file, so
+the diff cannot have caused it. Once the sub-packages are built, typecheck and both builds pass
+clean. Recorded as a repo-setup gap worth its own fix; **not attributable to this correction and not
+a blocker here**.
+
+### 37.10 Classification — **1. PASS — READY FOR CLOSURE**
+
+No false-green condition applies: the harness is collected and uses real React timing, both variants
+are covered with exact counters, the source binding proves production wiring, discard calls no
+wrapper, the cores cannot re-enter the guard, the first Discard executes exactly once with no
+repopulated queue and no second click, no wrapper mutates pre-authorization, no timer workaround
+exists, the continuation cannot run twice, Keep Editing executes nothing, `open-document` and the
+B2-i lifecycle do not regress, Read/clipart/PDF scope is untouched, every cap holds, and all 14
+negative controls were genuinely applied and detected.
+
+### 37.11 Status
+
+| Item | Status |
+|---|---|
+| **PATCH-149B2-i** | **CLOSED** (`f4bd92b`, §33) |
+| **PATCH-149B2-ii** | **CLOSED** (`cc95a1b` + correction `9d19071`, §§35-37) |
+| **PATCH-149B2 (overall)** | **COMPLETE** |
+| **Document Post lifecycle** | **COMPLETE** |
+| **PATCH-149C** | **BLOCKED on user reproduction** (§14.11), unchanged |
+| **PATCH-150** | **RESERVED and separate**, unchanged |
+
+PATCH-149C and PATCH-150 are **not** started by this review. No implementation file was modified;
+all perturbations were hash-verified restored; review scratch files were deleted. Nothing was pushed.
