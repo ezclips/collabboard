@@ -6,6 +6,8 @@ interface DocumentCardContentProps {
   // Pre-sanitized HTML. Omit to render only the overlay button (CardPreview
   // already renders its own preview body beneath it).
   content?: string;
+  // Presentation-only; mirrors PostCardContent's default-branch fallback (§29.6/§30.4).
+  textColor?: string | null;
   // Presence-gated: no handler -> no button (PATCH-149B1b-iii §27.4).
   // Capability is decided entirely by the caller's routing, never here.
   onRead?: () => void;
@@ -16,7 +18,7 @@ interface DocumentCardContentProps {
 // CardPreview and PostCardContent both delegate here so the button has one
 // implementation (PATCH-149 §27 NC9). Owns no capability, routing, predicate
 // or persistence logic.
-export default function DocumentCardContent({ content, onRead, className }: DocumentCardContentProps) {
+export default function DocumentCardContent({ content, textColor, onRead, className }: DocumentCardContentProps) {
   return (
     <>
       {content !== undefined && (
@@ -30,6 +32,7 @@ export default function DocumentCardContent({ content, onRead, className }: Docu
               display: '-webkit-box',
               WebkitLineClamp: 12,
               WebkitBoxOrient: 'vertical',
+              color: textColor || '#1F2937',
             }}
             dangerouslySetInnerHTML={{ __html: content }}
           />

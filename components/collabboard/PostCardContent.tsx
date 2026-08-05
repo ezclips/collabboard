@@ -912,7 +912,7 @@ export default function PostCardContent({
     if (isDocumentPost(padlet) && onOpenDocument) {
         return (
             <div className="relative h-full w-full">
-                <DocumentCardContent content={DOMPurify.sanitize(decodeHtmlEntities(rawContent || ""))} onRead={onOpenDocument} />
+                <DocumentCardContent content={DOMPurify.sanitize(decodeHtmlEntities(rawContent || ""))} textColor={padlet.metadata?.textColor} onRead={onOpenDocument} />
             </div>
         );
     }

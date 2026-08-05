@@ -73,15 +73,18 @@ describe('18-22: every interactive owner threads onOpenDocument', () => {
 });
 
 describe('16: Freeform/CardPreview owner', () => {
-  it('exact Document uses selectDocumentModalDestination and reuses the existing state/predicate, no new one', () => {
-    const branch = freeformSrc.slice(
-      freeformSrc.indexOf('onReadDocument={(() => {'),
-      freeformSrc.indexOf('isSelected={isPadletSelected(padlet.id)}'),
-    );
+  const branch = freeformSrc.slice(
+    freeformSrc.indexOf('onReadDocument={(() => {'),
+    freeformSrc.indexOf('isSelected={isPadletSelected(padlet.id)}'),
+  );
+
+  it('exact Document uses selectDocumentModalDestination and reuses the existing state/predicate; T1: never gated on document-editor (§30.5)', () => {
     expect(branch).toContain('selectDocumentModalDestination(padlet, canUseFreeformEditButton)');
     expect(branch).toContain('setDocumentModalDestination(d)');
     // 24: the complete post (not just the destination) reaches the route.
     expect(branch).toContain('setPadletToEdit(padlet)');
+    expect(branch).toContain('return d ? () => { setPadletToEdit(padlet); setDocumentModalDestination(d); } : undefined;');
+    expect(branch).not.toMatch(/d\s*===\s*['"]document-(editor|viewer)['"]/);
   });
 });
 
@@ -91,13 +94,25 @@ describe('23: CanvasClient supplies one Document-open callback, reused everywher
     canvasClientSrc.indexOf('const openPadletTargetFromContextMenu'),
   );
 
-  it('reuses the B1b-ii destination helper and state -- no duplicated selector or permission logic', () => {
+  it('reuses the B1b-ii destination helper and state; T1: capability-blind early return; T2: setPadletToEdit(post) retained', () => {
     expect(body).toContain('selectDocumentModalDestination(post, canUseFreeformEditButton)');
     expect(body).toContain('setDocumentModalDestination(destination)');
+    expect(body).toContain('if (!destination) return;');
+    expect(body).not.toMatch(/destination\s*!==?\s*['"]document-editor['"]/);
+    expect(body).toMatch(/setPadletToEdit\(post\);\s*setDocumentModalDestination\(destination\);/);
   });
 
   it('the same callback instance is passed to all five interactive layout owners', () => {
     expect((canvasClientSrc.match(/onOpenDocument=\{openDocumentFromPreview\}/g) || []).length).toBe(5);
+  });
+});
+
+describe('T3: CardPreview Document branch delegates to the shared component, no local duplicate (§29.14 NC9)', () => {
+  it('renders DocumentCardContent, passes the Read handler, and contains no locally reimplemented button', () => {
+    const branch = cardPreviewSrc.slice(cardPreviewSrc.indexOf('{/* Edit Button */}'));
+    expect(branch).toContain('<DocumentCardContent');
+    expect(branch).toContain('onRead={onReadDocument}');
+    expect(branch).not.toMatch(/<button[^>]*aria-label="Read document"/);
   });
 });
 

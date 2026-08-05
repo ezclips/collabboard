@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Padlet } from '@/types/collabboard';
 import PostCardContent from './PostCardContent';
 import CardPreview from './CardPreview';
+import DocumentCardContent from './DocumentCardContent';
 import DocumentEditor from './editors/DocumentEditor';
 import { selectDocumentModalDestination } from '@/lib/domain/canvas/documentModalRoute';
 
@@ -136,5 +137,25 @@ describe('CAPABILITY -> readOnly routing (13/14/15): handler presence never deci
     expect((c.querySelector('.ProseMirror') as HTMLElement).getAttribute('contenteditable')).toBe('false');
     click(c.querySelector('button[aria-label="Close"]')!);
     expect(onSave).not.toHaveBeenCalled();
+  });
+});
+
+describe('F4/T4 (§29.6/§30.4): interactive body honors metadata.textColor, falling back to #1F2937', () => {
+  const bodyStyle = (c: HTMLElement) => (c.querySelector('.tiptap') as HTMLElement).style;
+
+  it('1-4/8: explicit textColor colors the body only (Read carries no inline style); undefined/null/empty fall back to #1F2937; body/Read survive handler presence; PostCardContent threads it end-to-end', () => {
+    for (const [tc, expected] of [['#ff0000', 'rgb(255, 0, 0)'], [undefined, 'rgb(31, 41, 55)'], [null, 'rgb(31, 41, 55)'], ['', 'rgb(31, 41, 55)']] as const) {
+      const c = mount(<DocumentCardContent content="<p>hi</p>" textColor={tc as any} onRead={vi.fn()} />);
+      expect(bodyStyle(c).color).toBe(expected);
+      expect(readBtn(c)!.getAttribute('style')).toBeNull();
+    }
+    const withHandler = mount(<DocumentCardContent content="<p>exact text</p>" textColor="#ff0000" onRead={vi.fn()} />);
+    const withoutHandler = mount(<DocumentCardContent content="<p>exact text</p>" textColor="#ff0000" />);
+    expect(withHandler.textContent).toContain('exact text');
+    expect(readBtn(withHandler)).not.toBeNull();
+    expect(readBtn(withoutHandler)).toBeNull();
+    expect(withHandler.querySelector('.tiptap')!.innerHTML).toBe(withoutHandler.querySelector('.tiptap')!.innerHTML);
+    const post = doc({ metadata: { description: 'd', textColor: '#ff0000' } });
+    expect(bodyStyle(mount(<PostCardContent padlet={post} onOpenDocument={vi.fn()} />)).color).toBe('rgb(255, 0, 0)');
   });
 });
