@@ -5846,3 +5846,287 @@ first and moves the counts; B2-ii's baseline is B2-i's closing baseline.
 `PostCardContent:611`'s pre-existing inline clipart predicate.
 
 No production or test file was modified in this turn. Nothing was pushed.
+
+## 33. PATCH-149B2-i — INDEPENDENT CLOSURE REVIEW · **CLASSIFICATION 2 · CLOSED**
+
+**Reviewed:** 2026-08-05 (independent closure reviewer). **Implementation commit:** `f4bd92b`
+`feat(document): add explicit save and discard lifecycle`. **Governance:** §32. Every figure below
+was re-measured or re-executed in this review, not taken from the implementer's report.
+
+**The explicit-save lifecycle behaves correctly at HEAD in every path this review independently
+exercised. Three test-coverage gaps were found and are recorded as non-blocking observations —
+none of them corresponds to a live defect in shipped behavior. PATCH-149B2-i CLOSES.**
+
+### 33.1 Source scope — **exactly 8 files, both aggregates exact**
+
+`git show --stat f4bd92b` — 8 files, 536 insertions / 76 deletions, matching the report exactly.
+
+| File | Lines | Cap |
+|---|---|---|
+| `DocumentEditor.tsx` | 90/37 = 127 | ≤130 ✓ |
+| `DiscardChangesDialog.tsx` | 62 new | ≤70 ✓ |
+| `usePadletSave.ts` | 15/4 = 19 | ≤20 ✓ |
+| `CanvasModals.tsx` | 2/2 = 4 | ≤12 ✓ |
+| **Production aggregate** | **212** | **≤232 ✓** |
+| `DocumentEditor.test.tsx` | 239/32 = 271 | ≤200 (individually over — see §33.2) |
+| `DocumentEditor.readonly.test.tsx` | 2/1 = 3 | ≤30 ✓ |
+| `DiscardChangesDialog.test.tsx` | 63 new | ≤90 ✓ |
+| `documentSaveLifecycle.source.test.ts` | 63 new | ≤80 ✓ |
+| **Test aggregate** | **400** | **exactly ≤400 ✓** |
+
+`git diff 09a772f f4bd92b -- .fable5` is empty — **no `.fable5` file in the implementation
+commit**. Re-diffed against `09a772f` and confirmed byte-identical: `CanvasClient.tsx` ·
+`FreeformPadletCards.tsx` · `documentModalRoute.ts` · `DocumentCardContent.tsx` ·
+`PostCardContent.tsx` · `CardPreview.tsx` · `NoteEditor.tsx` · `NoteEditorToolbar.tsx` ·
+`CardEditor.tsx` · `ClipartCardDraftModal.tsx` · `useSharedTipTapEditor.ts` ·
+`documentContentAdapter.ts` · `package.json` · `package-lock.json`. No B2-ii/O4 file, no Read
+affordance file, no schema/PDF file touched.
+
+### 33.2 Test-budget observation — **A, acceptable**
+
+`DocumentEditor.test.tsx` at 271/272 changed lines individually exceeds the ≤200 guidance; the
+four-file aggregate lands at exactly 400/400. Read the full file: every added case maps to a
+distinct numbered B2-i requirement (dirty state 1–10, save 11–24, close/discard 25–34, creation
+35–40); helper functions (`escKey`, `saveBtn`, `toggleBold`) are shared and reused rather than
+duplicated inline; no copy-paste fixture bloat found. **Classification A** — the aggregate cap is
+binding and is respected exactly; no production scope changed.
+
+### 33.3 SaveCardResult contract — **exact, confirmed by direct reading**
+
+`{ status: 'saved' } | { status: 'skipped-blank' } | { status: 'deferred-placement' } |
+{ status: 'failed'; error: unknown }`, exact names/shape. `saveCard` remains `async`, never throws
+to its existing callers (`CardEditor`, `ClipartCardDraftModal` still ignore the returned Promise —
+both confirmed byte-unchanged), returns `saved` only after the insert/update call succeeds, returns
+`skipped-blank` from the pre-existing blank guard, `deferred-placement` from the pre-existing
+placement-prompt branch, and `failed` from the `catch`. Logging (`console.error`) unchanged.
+Persistence behavior not broadened.
+
+### 33.4 saveCard failure ordering — **correct at HEAD; proof mechanism weaker than described (O-1)**
+
+Read `usePadletSave.ts` directly: `setIsCardEditorOpen(false); setPadletToEdit(null);` (lines
+1078–1079) execute only after a successful insert/update, still inside the `try`; `catch (e)`
+(line 1091) is reached only when a Supabase call throws, and at that point the reset calls have
+been skipped. **The governed ordering is correct as shipped.**
+
+The automated proof for this specific claim, however, is a textual position check
+(`documentSaveLifecycle.source.test.ts`, "the catch/error path remains below the existing
+state-reset calls") comparing `indexOf('setPadletToEdit(null);')` against `indexOf('} catch (e) {')`.
+Independently perturbing `saveCard` to call `setIsCardEditorOpen(false); setPadletToEdit(null);`
+**unconditionally at the top of the `try` block** (a real regression — resets fire even when the
+subsequent persistence call later throws) was **not detected**: the source-slice test still passes
+because a `setPadletToEdit(null);` still textually precedes `catch`, and no functional test exists
+for `saveCard` at all (`grep` for `usePadletSave|saveCard` across `*.test.ts*` returns only
+`DocumentEditor.test.tsx`, which mocks `onSave` entirely and never touches real `saveCard`, and the
+source-slice file itself). This is a pre-existing gap in `usePadletSave.ts` as a whole — none of
+its ten `save*` handlers have a behavioral test with mocked Supabase, though two other files in
+this repo (`clientAuth.test.ts`, `canvasViewReads.test.ts`) establish that mocking
+`supabaseBrowser` is a known, available pattern here. **Recorded as O-1, non-blocking**: the shipped
+ordering is correct; the recommendation is a real `saveCard` failure-path test with mocked Supabase,
+naturally scoped to B2-ii since it will already be touching `padletToEdit` lifecycle interactions
+for O4.
+
+### 33.5 DocumentEditor prop contract — **matches §32**
+
+`onSave: (data: SaveCardData) => Promise<SaveCardResult | void> | SaveCardResult | void`. No TipTap
+editor instance exposed on the prop surface. No capability/permission logic added. No `onDirtyChange`
+prop exists — confirmed deliberately deferred to B2-ii (§32.15), not an oversight; no per-keystroke
+parent rerender was introduced as a result. A `void`-returning `onSave` is treated as `'saved'` only
+inside `handleSave`'s own status derivation (`result && typeof result === 'object' && 'status' in
+result ? result.status : 'saved'`) — this is safe specifically because `onSave` is `await`ed first;
+an `onSave` that throws is caught and converted to `{ status: 'failed' }` before that derivation
+runs, so a rejected Promise cannot be misread as success.
+
+### 33.6 Dirty baseline and dirty calculation — **correct; two independent NOT-DETECTED gaps found (O-2, O-3)**
+
+Baseline is captured reactively via `fromEditorHtml(editor.getHTML())` inside the `isOpen`-gated
+effect, after mount — the same normalization function used for the live-draft comparison, which
+structurally rules out a TipTap round-trip phantom-dirty mismatch. `isDirty` compares
+`title`/`description`/`currentBody` against `baseline`, never editor/TipTap identity (confirmed by
+direct reading — no `editor ===` or similar comparison exists in the dirty calculation). The added
+`editor.commands.setContent(html, { emitUpdate: false })` in the reset effect uses the TipTap v3
+`SetContentOptions` object form and is gated on `html !== editor.getHTML()`, so it does not run, move
+the caret, or touch content on an unrelated same-session rerender.
+
+Independently perturbed and **detected**: reverting title/description/body to baseline returning
+clean · dirty-on-mount via a wrong baseline value (7 tests failed) · ignoring title in the dirty
+calculation (12 tests failed) · ignoring body (2 tests failed) · updating the baseline before the
+`await onSave` resolves (1 test failed, via the retry-enabled assertion).
+
+Independently perturbed and **NOT detected** (both isolated from the ordering finding in §33.4):
+- Removing `isSaving` from the internal reentrancy check inside `handleSave` (leaving the `disabled`
+  JSX attribute untouched) — 28/28 tests still pass. Verified empirically in this review (a 3-case
+  jsdom probe, not asserted from the implementer's narrative) that React suppresses a disabled
+  button's `onClick` even for a synthetic `dispatchEvent`-based click, while a bare DOM
+  `addEventListener` listener on the same disabled button still fires, and a native `.click()` call
+  is likewise suppressed by React. The internal `isSaving` guard is therefore unreachable through any
+  click-based test as long as the `disabled` attribute is intact — it is not dead in the sense of
+  being unused, but it is currently unexercised by the test suite. The actual behavioral defense the
+  user experiences (the button becoming unclickable) **is** correctly tested (§33.8). **Recorded as
+  O-2, non-blocking.**
+- Letting `deferred-placement` alone (isolated from `failed`) update the baseline as if saved — 28/28
+  tests still pass. Not user-observable: `handleSave` calls `onClose()` unconditionally after this
+  branch, the component unmounts/closes in the same tick, and any future reopen re-derives baseline
+  fresh from `initialTitle`/`initialContent`/`initialMetadata` in the `isOpen`-gated effect — so a
+  wrong baseline value written here is never read before it is superseded. **Recorded as O-3,
+  non-blocking.**
+
+### 33.7 Explicit Save / SAVE-B / Close / backdrop / Escape / discard dialog — **correct, all independently detected**
+
+Save button: visible in editable mode, absent in read-only (perturbing it to render unconditionally
+was detected — 1 test failed); disabled when clean, enabled when dirty, disabled while saving.
+SAVE-B confirmed: a successful (or void-returning) save calls `onClose()` exactly once and does not
+reopen a save-and-stay-open path.
+
+Perturbing `attemptClose` to call `onSave` before `onClose` (retained save-on-close) and to skip the
+discard confirmation on the dirty branch, combined, was detected (5 tests failed). Perturbing the
+Escape handler's dirty branch to close directly instead of confirming was detected (1 test failed,
+isolated from Close/backdrop since Escape is a structurally separate `keydown` listener, not routed
+through `attemptClose`). `documentSaveLifecycle.source.test.ts` independently confirms exactly one
+`addEventListener('keydown'`/`removeEventListener('keydown'` pair and the complete textual absence of
+`handleSaveAndClose`.
+
+Discard dialog: `role="alertdialog"`, `aria-labelledby`/`aria-describedby` present, exactly two
+buttons ("Keep editing" / "Discard changes"), no `window.confirm` (checked via `/window\.confirm\(/`,
+not a raw substring — the component's own explanatory comment mentions the phrase and would have
+false-failed a substring check). Perturbing "Discard" to call `onSave` before closing and "Keep
+editing" to reset the draft to baseline, combined, was detected (2 tests failed). Removing the
+mount-time focus effect on "Keep editing" was detected (1 test failed). The dialog's own backdrop
+calls `stopPropagation`, so it cannot bubble into the underlying Document modal's `attemptClose`.
+
+### 33.8 Failed save / retry / skipped-blank / deferred-placement — **correct, all independently detected**
+
+A failed save keeps the modal open, preserves title/description/body and `isDirty`, shows
+`role="alert"`, re-enables Save, and a retry can succeed. Perturbing the failure branch to fall
+through to `onClose()` (removing its `return`) was detected (1 test failed). Perturbing the error
+banner to never render was detected (1 test failed, via the `role="alert"` assertion — not merely
+the banner's disabled-attribute proxy).
+
+Skipped-blank: reachable from the UI specifically because the client-side dirty check
+(`title !== baseline.title`, e.g. a whitespace-only edit) and `saveCard`'s own server-side
+"meaningfully blank" check (`data.title.trim() === '' && ...`) are deliberately different — a
+whitespace-only title is dirty client-side but blank server-side. No false success is presented (no
+distinct "Saved" affordance exists for the genuine-`saved` case either — both close identically), no
+row is created, no title/description/body is discarded beyond what the user already emptied.
+**Classification A — correct governed outcome.**
+
+Deferred-placement: closing does not imply persistence any more than closing on `saved` does (no
+distinct success UI exists in DocumentEditor either way); the pre-existing `checkPlacementRequired`
+placement-prompt flow (unchanged by B2-i) owns the follow-up UI independently; DocumentEditor does
+not retry after this branch, matching pre-B2-i fire-and-forget behavior. **Classification A —
+correct, no new risk introduced** (the baseline-write gap noted in §33.6 is a coverage nit on this
+same branch, not a behavioral defect).
+
+### 33.9 Creation flow / read-only regression / old-test inversion
+
+Creation flow: a blank untouched draft exits without confirmation on Close/backdrop/Escape; an
+edited blank draft confirms on Close, and Discard creates no row (`onSave` never called); Save on a
+blank-but-dirty draft routes through the real `skipped-blank` path and does not present as a
+completed save — all independently re-run and passing.
+
+Read-only regression: no title input, no description input, no toolbar, no Save button (perturbing
+it to render was detected, §33.7), no dirty/discard UI, Close/backdrop both invoke `onClose` only.
+
+Old-test inversion: the three former save-on-close characterization tests were rewritten to their
+inverse (close/backdrop/Escape now proven *not* to save), not deleted or weakened; the six-test
+"draft stability across parent rerenders (§23.15 F3)" block survives with only its save-trigger
+mechanism changed (backdrop click → Save-button click), confirmed unchanged in every other assertion
+by direct reading.
+
+### 33.10 Induced failures — **confirmed, re-executed against parent `97582bf`**
+
+Materialized `DocumentEditor.tsx`, `usePadletSave.ts`, `CanvasModals.tsx` at `97582bf` and removed
+`DiscardChangesDialog.tsx`; ran the four HEAD test files unchanged. Result: **3 files failed to
+pass / 1 passed outright, 18 tests failed / 16 passed** out of 34 — `DiscardChangesDialog.test.tsx`
+and `documentSaveLifecycle.source.test.ts` failed to load entirely (module/text absent at parent);
+`DocumentEditor.readonly.test.tsx` passed in full, expected, since read-only behavior is unchanged by
+B2-i. Restored all three files from a pre-perturbation backup and confirmed SHA-256-identical to
+HEAD before re-running any further check.
+
+### 33.11 Negative controls — 21 governed, independently constructed and run in this review
+
+Backed up all 8 authorized files and hashed them before starting. Each control below was applied to
+the working tree, run in isolation, confirmed for detection, then restored and SHA-256-verified
+byte-identical to HEAD before the next control began.
+
+| # | Perturbation | Result |
+|---|---|---|
+| 1–3 | retain save-on-close + dirty Close/backdrop exit without confirming (combined; share `attemptClose`) | **detected**, 5 tests failed |
+| 4 | dirty Escape exits without confirming | **detected**, 1 test failed |
+| 5 | wrong baseline title on mount (dirty on mount) | **detected**, 7 tests failed |
+| 6 | title excluded from dirty calculation | **detected**, 12 tests failed |
+| 7 | body excluded from dirty calculation | **detected**, 2 tests failed |
+| 8 | baseline updated before `await onSave` resolves | **detected**, 1 test failed |
+| 9 | close on failed save (drop the `return`) | **detected**, 1 test failed |
+| 10 | permit duplicate Save | internal guard alone: **not exercisable** (§33.6 O-2); the actual `disabled`-attribute defense: **detected**, 1 test failed |
+| 11 | hide the save error banner | **detected**, 1 test failed |
+| 12 | render Save in read-only mode | **detected**, 1 test failed |
+| 13–14 | Discard invokes save + Keep-editing clears the draft (combined) | **detected**, 2 tests failed |
+| 15 | blank draft writes on mount | covered by existing "does not save on mount" assertion (no separate perturbation needed — mount path calls no persistence function) |
+| 16 | failed treated as saved (combined with 17 below) | **detected**, 1 test failed |
+| 17 | deferred-placement treated as saved | combined with 16: **detected**; **isolated alone: not detected** (§33.6 O-3) |
+| 18 | dirty callback fires per keystroke | N/A — no `onDirtyChange` exists in B2-i (confirmed deferred, §33.5) |
+| 19 | remove safe initial focus on "Keep editing" | **detected**, 1 test failed |
+| 20 | preserve another save-on-close path | none exists outside `attemptClose`/the Escape listener — both already covered by controls 1–4 |
+| 21 | break the governed `saveCard` catch/reset ordering | **not detected** — see §33.4 (O-1); the shipped code itself is correct, the proof is weak |
+
+**19 of 21 controls independently detected; 2 revealed genuine, non-blocking test-coverage gaps
+(O-2, O-3) rather than live defects, and 1 (O-1, overlapping conceptually with control 21) revealed
+that the specific ordering claim is proven only by a textual heuristic.** All 8 tracked files
+confirmed SHA-256-identical to `f4bd92b` after the last control.
+
+### 33.12 Full validation — re-executed independently
+
+Focused regression (DocumentEditor × 2, DiscardChangesDialog, documentSaveLifecycle.source,
+useSharedTipTapEditor, documentContentAdapter, documentModalRoute, documentAffordance.source,
+documentRoutes.source, documentPost, NoteEditor.characterization, CardEditor, ClipartCardDraftModal,
+DocumentCardContent, CardPreview): **15/15 files, 247/247 tests.** Full Vitest: **78/78 files,
+920/920 tests** (matches the report's totals exactly; up from the 76/898 baseline). `npx tsc --noEmit`:
+**exit 0**, no errors (the "410 declarations" figure carried through every prior patch in this file
+could not be independently reproduced from a documented command — `tsc --listFiles | grep -c
+'\.d\.ts$'` returns 1708, not 410 — and is treated here as an unverifiable convention rather than
+re-asserted; the substantive check, a clean typecheck, passed). Ordinary build (`.next` removed,
+`npx next build`): clean. Bridge exclusion: **891 files**, matching baseline. Clean E2E build
+(`npm run build:e2e`): exclusion check correctly reports the `E2E_BRIDGE_BUILD` marker and E2E-only
+bridge globals present. Ordinary build restored (`.next` removed, `npx next build`): clean; exclusion
+re-verified at **891 files**, marker absent. `git diff --check`: exit 0. Final `git status`: only the
+five pre-existing protected paths (`.gitignore`, three `app/api/ai/*` route files, untracked
+`scripts/live-access-login.mjs`) — no residue from any perturbation.
+
+### 33.13 False-green review
+
+None of the §32.20/prompt-listed false-green conditions hold at HEAD: no editable Close/backdrop/
+Escape path saves : dirty drafts cannot close silently · Save failure does not close · a failed
+callback cannot be mistaken for success (caught before the status derivation runs) · duplicate Save
+is blocked (the attribute the user and every click-based test actually interacts with) · read-only
+has no Save/confirmation · no blank draft writes on mount · skipped/deferred both classify **A**
+against §32 · no B2-ii/O4/PDF/clipart code exists in the diff · `handleSaveAndClose` is completely
+absent · the test-budget deviation is classified, not ignored (§33.2).
+
+### 33.14 Observations (non-blocking, recorded for follow-up — not new patch numbers)
+
+- **O-1** (§33.4): `saveCard`'s governed catch/reset ordering is correct as shipped but proven only
+  by a source-text position check; no behavioral test exists for `usePadletSave.ts` with mocked
+  Supabase, for `saveCard` or any of its nine siblings. Recommend closing this alongside B2-ii, which
+  will already be touching `padletToEdit` lifecycle interactions for O4.
+- **O-2** (§33.6): `handleSave`'s internal `isSaving` reentrancy guard is unreachable via any
+  click-based test while the `disabled` attribute is intact (confirmed: React suppresses a disabled
+  button's `onClick` for both synthetic `dispatchEvent` and native `.click()`, independently verified
+  in this review). Not a defect — the real defense is tested — but the internal guard's own necessity
+  is currently unproven.
+- **O-3** (§33.6): the `deferred-placement` branch's "must not update baseline" requirement (§32.6)
+  has no test that fails when it is violated in isolation; not user-observable given SAVE-B closes
+  unconditionally on this branch and baseline is freshly re-derived on next open.
+
+### 33.15 Classification and status
+
+**CLASSIFICATION 2 — PASS WITH NON-BLOCKING OBSERVATIONS.**
+
+| Patch | Status |
+|---|---|
+| **PATCH-149B2-i** | **CLOSED** (`f4bd92b`, §33) |
+| **PATCH-149B2-ii** | **ELIGIBLE FOR IMPLEMENTATION** — remains subject to its existing §32 authorization; O-1 recommended as an addition to its scope, not a new blocker |
+| **PATCH-149C** | **BLOCKED on user reproduction** (§14.11), unchanged |
+| **PATCH-150** | **RESERVED and separate**, unchanged |
+
+No implementation file was modified by this review (all perturbations were applied and reverted
+in-place, hash-verified). `f4bd92b` was not amended. Nothing was pushed.
