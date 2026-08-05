@@ -729,7 +729,10 @@ landed or restored byte-identically; the protected worktree changes.
 2. **Inert secondary controls in the Document Comment popup** — Edit/Strikethrough/Delete render
    but have no handlers; the inline edit path **silently discards the user's edit** (P3). Should be
    resolved by the shell consolidating the comment workflow.
-3. **Note selection-reactivity defect** — `NoteEditor` toolbar state is stale; unfixed.
+3. ~~**Note selection-reactivity defect** — `NoteEditor` toolbar state is stale; unfixed.~~
+   **STRUCK — INCORRECT. Superseded by §21.2**, which records
+   `NOTE SELECTION REACTIVITY: FUNCTIONAL THROUGH LOAD-BEARING INCIDENTAL STATE UPDATE`.
+   Do not rely on this row.
 4. **`CanvasModals.tsx` identity-expression divergence** — three display-name derivations coexist.
 5. **`CardEditor.tsx`** — a legacy card modal with five inert, handler-less toolbar buttons over a
    plain `<textarea>`; a P6 duplicate of the Document editing surface. Recorded, unscheduled.
@@ -755,5 +758,268 @@ Do not amend `57e3fcf` or any previous commit. Do not rebase. Do not push.
 | **Formatting semantics** | **DEFERRED** — decision packet required before any change |
 | **PATCH-150** | **RESERVED and separate**, unchanged |
 | **PATCH-151** | **CLOSED** (`cca070e`), unchanged |
+
+No production or test file was modified in this turn. Nothing was pushed.
+
+## 21. C1 CORRECTION AMENDMENT — coverage completion and selection-reactivity correction
+
+**Authored:** 2026-08-06 (governance architect). **Base:** `0c08558af02a4447ec7efcbd78813b5b992deb4f`.
+No production or test file was modified in this turn. This section amends §20.6, §20.11 and
+§20.14.3 for stage 152-C1 only. Sections §1–§20 are otherwise unchanged.
+
+### 21.1 C1 review outcome — recorded
+
+Stage 152-C1 was implemented at `0c08558` (309 changed test lines, zero production lines) and
+**independently reviewed: FAIL — CORRECTION REQUIRED.** The net is otherwise sound — 30/30
+focused, 986/986 full, all eight §20.11-derived controls landed and failed correctly, existing
+11 tests byte-identical (0 deletions), real-DOM interaction throughout.
+
+**The failure:** *link removal is entirely uncovered*, proven by two independent landed
+perturbations that each left the suite green:
+
+| Probe | Perturbation of `NoteEditor.tsx` | Result |
+|---|---|---|
+| G1 | neutralize `editor.chain().focus().unsetLink().run()` | **30 passed — no test fired** |
+| G2 | disconnect `onRemoveLink={handleRemoveLink}` | **30 passed — no test fired** |
+| G3 *(control)* | neutralize `setLink({ href: url })` | 1 failed — suite *is* link-sensitive |
+
+`LinkPopup.tsx:275` wires **Cancel** to `handleRemoveLink`, so the existing Cancel test does not
+incidentally cover removal. Two further gaps were bounded and are now **also mandatory** by
+Product Owner decision: reaction *application* (probe H1 — 30 passed) and detached post-comment
+*submission* (probe H2 — 30 passed). Opening a picker or a panel is not evidence that it applies.
+
+### 21.2 NOTE SELECTION REACTIVITY — correction, supersedes §20.14.3
+
+**§20.14.3 is STRUCK.** Its claim that "`NoteEditor` toolbar state is stale" is **incorrect** and
+must not be relied on by any implementer.
+
+```
+NOTE SELECTION REACTIVITY:
+FUNCTIONAL THROUGH LOAD-BEARING INCIDENTAL STATE UPDATE
+```
+
+Established facts, from perturbation evidence against the **real** `NoteEditor`:
+
+1. Real selection changes **do** update Link and selected-text Comment state.
+2. `NoteEditor.tsx:257-262` handles `selectionUpdate` by calling `setLastSelection`.
+3. `setLastSelection` is a **React state update**.
+4. That state update is what causes the toolbar rerender. `NoteEditorToolbar` derives enablement
+   from `hasSelection={!editor.state.selection.empty}` (`NoteEditor.tsx:701`), evaluated at
+   render time, and `shouldRerenderOnTransaction` is `false` — so nothing else schedules it.
+5. The behaviour is **functional today**.
+6. The mechanism is **incidental and load-bearing**: the *rerender* is functional, the *stored
+   value* is not. `handleLink` reads `editor.state.selection` directly and never consumes
+   `lastSelection`.
+
+**Isolating proof** (both landed, both restored byte-identically):
+
+| Probe | Perturbation | Result | Conclusion |
+|---|---|---|---|
+| R1 | remove the state update, keep the handler | **7 failed** (4 Link, 2 text-Comment, 1 thread) | the rerender is required |
+| R2 | keep the state update, corrupt the value to `{from:-1,to:-1}` | **30 passed** | the stored value is irrelevant |
+
+**Any statement that selection alone does not rerender the real `NoteEditor` is withdrawn.**
+
+**On the earlier probe.** The finding recorded in §20.14.3 came from a **replica probe** that
+omitted the real `setLastSelection` effect. It therefore did not reproduce the production
+component accurately and **is not authoritative runtime evidence.** It is retained only as a
+record of how the error arose. Runtime claims about Note require perturbation of the real
+component.
+
+### 21.3 C2 preservation rule — binding
+
+C2 **must preserve equivalent live selection reactivity** when Note moves to `PostEditorShell`.
+
+The extracted shell **may** either continue using `setLastSelection`, **or** replace it with
+another explicit local selection-update rerender mechanism. It **must** preserve all current
+user-visible behaviour:
+
+- selecting text **enables** Link;
+- selecting text **enables** selected-text Comment;
+- clearing the selection **disables** both;
+- **no unrelated user action is required** to observe either transition.
+
+**The implementation must not remove the rerender effect of `setLastSelection` without an
+equivalent tested replacement.** Replacing it with a `useRef` or any other non-rendering store is
+prohibited.
+
+**Mandatory C2 negative control (additional to §20.11's seventeen):**
+
+> **C2-NC18 — remove the shell's selection-update rerender mechanism.**
+> Expected: the Note **Link selection-reactivity** test fails **and** the Note **selected-text
+> Comment selection-reactivity** test fails. A green suite under this perturbation is a C2
+> closure failure.
+
+### 21.4 Revised C1 cap — amends §20.6
+
+| File | Old cap | **New cap** |
+|---|---|---|
+| `components/collabboard/editors/NoteEditor.characterization.test.tsx` | ≤320 changed | **≤370 changed** |
+
+**Aggregate C1 test cap: ≤370 changed lines. Aggregate C1 production cap: 0 — unchanged.**
+
+The cap is **cumulative against the original governed C1 parent
+`e0be00237c6044d168eac907b71b0cf405647e76`** — *not* against `0c08558`. Measured cumulative at
+`0c08558`: **309 changed**. Remaining headroom for the correction: **61 changed lines.**
+No second test file. No production file. No `vitest.config.ts` change.
+
+### 21.5 Required correction tests
+
+All three mount the **real** `NoteEditor` and interact through the rendered jsdom DOM. Source
+inspection, snapshots, mocks and handler-spies are not acceptable as primary proof.
+
+**REQUIRED TEST 1 — link removal.** Verified reachable: `LinkPopup.tsx:145` enters VIEW MODE when
+`initialUrl` is non-empty, rendering `title="Remove link"` (`:215-222`) wired to
+`handleRemoveLink` → `onRemoveLink()`.
+
+1. render Note content containing a real existing link;
+2. create a real selection over the linked text;
+3. open `LinkPopup` through the real toolbar control;
+4. confirm the existing URL is **prefilled**;
+5. activate the real link-removal affordance;
+6. confirm the `<a>` element is **removed**;
+7. confirm the linked **text remains**;
+8. confirm surrounding text remains unchanged;
+9. confirm no unrelated text is modified.
+
+**REQUIRED TEST 2 — reaction application.** Verified reachable: `EmojiReactionPicker.tsx:174-186`
+renders option buttons carrying `title={emoji}` wired to `onSelectEmoji`; `NoteEditor.tsx:725-726`
+applies to `reactions`; `NoteEditor.tsx:827-839` renders them.
+
+1. switch to Box mode;
+2. open the real Reaction picker;
+3. choose a **real reaction option**;
+4. prove the current Note reaction state or rendered reaction output updates;
+5. prove the picker path is connected to actual **application**, not only opening.
+
+**REQUIRED TEST 3 — detached post-comment submission.** Verified reachable:
+`NoteEditor.tsx:1042-1053` input + Enter → `handleAddDetachedComment` (`:389-405`) →
+`setDetachedComments`; observable via the thread list (`:916`), the card badge (`:764-785`) and
+`postCommentCount` (`:690`), which retitles the toolbar control to `View 1 comment`.
+
+1. switch to Box mode;
+2. open the real detached post-level Comment surface;
+3. enter a comment;
+4. submit **through the real UI**;
+5. prove the detached Comment thread/state updates;
+6. prove **no selected-text comment mark** is created;
+7. preserve the distinction between text Comment and post-level Comment.
+
+**Selector hazard — binding.** The detached panel's input and `CommentPopup`'s input **share the
+placeholder `Add a comment...`** (`NoteEditor.tsx:1046`, `CommentPopup.tsx:483`). Test 3 must
+scope its query so it cannot bind to `CommentPopup`.
+
+### 21.6 Negative controls for the C1 correction — twelve
+
+The existing eight are **preserved and must be re-run**. Four are added.
+
+| # | Control | Expected failure |
+|---|---|---|
+| 1 | disconnect Text/Box mode switch | mode + box-tool tests fail |
+| 2 | disconnect TextStylePopup opening | style-popup + placement tests fail |
+| 3 | disconnect LinkPopup opening | Link workflow tests fail |
+| 4 | disconnect selected-text Comment opening | text-Comment tests fail |
+| 5 | disconnect Card colour | card-colour + placement tests fail |
+| 6 | disconnect Reaction picker | reaction-picker test fails |
+| 7 | disconnect detached post-level Comment | post-comment test fails |
+| 8 | render panel content inside the toolbar wrapper | panel-placement test fails |
+| **9** | **neutralize the `unsetLink` command** | **link-removal test fails** |
+| **10** | **disconnect `onRemoveLink={handleRemoveLink}`** | **link-removal test fails** |
+| **11** | **neutralize reaction application** | **reaction-application test fails** |
+| **12** | **neutralize detached-comment submission** | **detached-submission test fails** |
+
+**For all twelve, every one of these is mandatory:**
+
+- the mutation anchor occurs **exactly once** (abort if 0 or >1);
+- the mutation is **proven to have landed**;
+- the file's **SHA-256 changes**;
+- the **expected test fails**;
+- the original bytes are **restored from a saved snapshot**;
+- the **SHA-256 returns to the pre-mutation value**;
+- a **clean focused rerun passes**.
+
+**A mutation that fails to land is not a control and must not be accepted.** A landed mutation
+that leaves its named test green is a correction failure.
+
+**Restoration method — binding.** This repository has `core.autocrlf=true`. **Do not use
+`git checkout --` for restoration**, which rewrites line endings and invalidates byte-level
+comparison. Snapshot the original bytes before the first mutation and write them back verbatim.
+
+**Landed-verification method — binding.** Verify by **positive facts only**: the replacement
+string is present with the expected occurrence count, the SHA-256 differs from baseline, and the
+byte-length delta equals the expected delta. **Do not verify by asserting the anchor is absent** —
+when a replacement contains its anchor as a prefix, that check produces a false negative.
+
+### 21.7 Validation — exact commands
+
+```
+npx vitest run components/collabboard/editors/NoteEditor.characterization.test.tsx
+npx vitest run
+npm run typecheck
+find components/collabboard/canvas/excalidraw_fork/packages/excalidraw/dist/types -name "*.d.ts" | wc -l
+rm -rf .next && npm run build
+npm run verify:bridge-exclusion
+ls .next/E2E_BRIDGE_BUILD 2>/dev/null || echo "MARKER ABSENT"
+cp -r .next .next-ordinary-backup
+rm -rf .next && E2E_BRIDGE_BUILD=1 npm run build
+ls .next/E2E_BRIDGE_BUILD && echo "MARKER PRESENT"
+rm -rf .next && mv .next-ordinary-backup .next
+npm run verify:bridge-exclusion
+ls .next/E2E_BRIDGE_BUILD 2>/dev/null || echo "MARKER ABSENT"
+git diff --check
+```
+
+**Baseline measured at `0c08558` (independently re-verified at review): 83/83 test files ·
+986/986 tests · 410 declarations · exclusion 891 emitted files · ordinary marker absent · E2E
+marker present · typecheck clean.** The correction adds tests only: test-file count must stay
+**83**, and the test count must rise from 986 by exactly the number of tests added. Every other
+figure must be unchanged. New observed totals must be reported.
+
+### 21.8 Allowlist for the C1 correction
+
+| File | State | Cap |
+|---|---|---|
+| `components/collabboard/editors/NoteEditor.characterization.test.tsx` | existing | ≤370 cumulative changed vs `e0be002` |
+
+**No second test file. No production file. No `vitest.config.ts` change. No governance change
+during the correction turn.** Temporary negative-control mutations of `NoteEditor.tsx` are
+permitted **only** under §21.6 and must be restored byte-identically. The protected worktree rules
+of §12 remain in force: `.gitignore`, `app/api/ai/classify-intent/route.ts`,
+`app/api/ai/convert-component/route.ts`, `app/api/ai/generate-component/route.ts` and
+`scripts/live-access-login.mjs` must never be edited, staged, restored, cleaned or moved.
+
+### 21.9 Hard stops for the C1 correction
+
+Stop without committing if: the cumulative ≤370 cap is insufficient; any production file would be
+required; a second test file is required; the real removal affordance cannot be exercised from
+`NoteEditor`; reaction application cannot be observed through the real UI; detached Comment
+submission cannot be observed through the real UI; a mutation cannot be landed or restored
+byte-identically; the protected worktree changes; or any existing C1 test would have to be
+weakened, skipped or deleted to make the correction pass.
+
+### 21.10 Commit rule and implementation HEAD
+
+One correction commit:
+
+```
+152-C1 correction   test(note): complete Note editor shell characterization coverage
+```
+
+**The implementation turn must start from the full SHA of this governance commit, not from
+`0c08558`.** Do not amend `0c08558` or any previous commit. Do not rebase. Do not push.
+
+### 21.11 Status
+
+| Item | Status |
+|---|---|
+| **PATCH-152** | **OPEN** |
+| **152-C1** | **FAIL — CORRECTION REQUIRED**; coverage completion authorized under §21 |
+| **152-C2** | **BLOCKED** until the C1 correction passes independent review |
+| **152-C3** | **BLOCKED** |
+| **§20.14.3** | **STRUCK** — superseded by §21.2 |
+| **Note selection reactivity** | **FUNCTIONAL THROUGH LOAD-BEARING INCIDENTAL STATE UPDATE** |
+| **Formatting semantics** | **DEFERRED** — unchanged |
+| **PATCH-150** | **RESERVED**, unchanged |
+| **PATCH-151** | **CLOSED**, unchanged |
 
 No production or test file was modified in this turn. Nothing was pushed.
