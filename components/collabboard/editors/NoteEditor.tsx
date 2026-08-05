@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { EditorContent, useSharedTipTapEditor } from './useSharedTipTapEditor';
-import NoteEditorToolbar, { ToolbarMode } from './NoteEditorToolbar';
+import PostEditorShell, { useShellPanels, useShellSelection } from './PostEditorShell';
 import TextStylePopup from './TextStylePopup';
 import EmojiReactionPicker from './EmojiReactionPicker';
 import LinkPopup from './LinkPopup';
@@ -11,29 +11,13 @@ import { Palette, PenTool, X, Strikethrough, Trash2 } from 'lucide-react';
 import { ColorPickerContent } from '../ColorPicker';
 
 const BACKGROUND_COLORS = [
-  "#ffffff",
-  "#f3f4f6",
-  "#fee2e2",
-  "#ffedd5",
-  "#fef3c7",
-  "#dcfce7",
-  "#dbeafe",
-  "#e0e7ff",
-  "#f3e8ff",
-  "#fce7f3",
+  "#ffffff", "#f3f4f6", "#fee2e2", "#ffedd5", "#fef3c7",
+  "#dcfce7", "#dbeafe", "#e0e7ff", "#f3e8ff", "#fce7f3",
 ];
 
 const TOP_STRIP_COLORS = [
-  "transparent",
-  "#ef4444",
-  "#f97316",
-  "#eab308",
-  "#22c55e",
-  "#3b82f6",
-  "#8b5cf6",
-  "#ec4899",
-  "#6b7280",
-  "#1f2937",
+  "transparent", "#ef4444", "#f97316", "#eab308", "#22c55e",
+  "#3b82f6", "#8b5cf6", "#ec4899", "#6b7280", "#1f2937",
 ];
 
 const BADGE_COLORS = [
@@ -58,19 +42,20 @@ interface InlineComment {
   isStrikethrough?: boolean;
 }
 
+interface DetachedCommentData {
+  id: string;
+  text: string;
+  userId: string;
+  userName: string;
+  timestamp: number;
+  isStrikethrough?: boolean;
+  textColor?: string;
+  backgroundColor?: string;
+}
 
 interface NoteEditorProps {
   initialContent?: string;
-  initialDetachedComments?: Array<{
-    id: string;
-    text: string;
-    userId: string;
-    userName: string;
-    timestamp: number;
-    isStrikethrough?: boolean;
-    textColor?: string;
-    backgroundColor?: string;
-  }>;
+  initialDetachedComments?: DetachedCommentData[];
   initialBadgeColor?: string;
   initialTextColor?: string;
   onSave: (data: {
@@ -80,47 +65,37 @@ interface NoteEditorProps {
     textColor?: string;
     reactions?: string[];
     badgeColor?: string;
-    detachedComments?: Array<{
-      id: string;
-      text: string;
-      userId: string;
-      userName: string;
-      timestamp: number;
-      isStrikethrough?: boolean;
-      textColor?: string;
-      backgroundColor?: string;
-    }>;
+    detachedComments?: DetachedCommentData[];
   }) => void;
   onClose: () => void;
   isOpen: boolean;
 }
 
+// PATCH-152 §22.6 (Route D2): a stable module-level reference so an omitted
+// prop can never recreate a fresh array each render -- the :147-152 sync
+// effect below compares this reference, and an unstable one would wipe
+// locally added detached comments on the very next render.
+const EMPTY_DETACHED_COMMENTS: NonNullable<NoteEditorProps['initialDetachedComments']> = [];
+
 export default function NoteEditor({
   initialContent = '',
-  initialDetachedComments = [],
+  initialDetachedComments = EMPTY_DETACHED_COMMENTS,
   initialBadgeColor = '#facc15',
   initialTextColor = '#1F2937',
   onSave,
   onClose,
   isOpen,
 }: NoteEditorProps) {
-  const [toolbarMode, setToolbarMode] = useState<ToolbarMode>('text');
+  const panels = useShellPanels();
   const [cardColor, setCardColor] = useState('#FFFFFF');
   const [topStrip, setTopStrip] = useState<string | null>(null);
   const [textColor, setTextColor] = useState(initialTextColor);
   const [reactions, setReactions] = useState<string[]>([]);
   const [activeTab, setActiveTab] = useState<'background' | 'topstrip'>('background');
 
-  // Popup states
-  const [textStyleOpen, setTextStyleOpen] = useState(false);
-  const [cardColorOpen, setCardColorOpen] = useState(false);
-  const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
-  const [linkPopupOpen, setLinkPopupOpen] = useState(false);
   const [linkViewUrl, setLinkViewUrl] = useState('');
-  const [commentPopupOpen, setCommentPopupOpen] = useState(false);
   const [commentPopupPosition, setCommentPopupPosition] = useState<{ x: number; y: number } | null>(null);
   const [savedSelection, setSavedSelection] = useState<{ from: number; to: number } | null>(null);
-  const [lastSelection, setLastSelection] = useState<{ from: number; to: number } | null>(null);
   const [activeThread, setActiveThread] = useState<{
     id: string;
     comments: InlineComment[];
@@ -128,7 +103,6 @@ export default function NoteEditor({
   } | null>(null);
   // Detached comments - stored separately from inline text
   const [detachedComments, setDetachedComments] = useState(initialDetachedComments);
-  const [detachedPopupOpen, setDetachedPopupOpen] = useState(false);
   const [detachedPopupPosition, setDetachedPopupPosition] = useState({ x: 0, y: 0 });
   const [detachedColorPickerOpen, setDetachedColorPickerOpen] = useState(false);
   const [textCommentColorPickerOpen, setTextCommentColorPickerOpen] = useState(false);
@@ -137,8 +111,6 @@ export default function NoteEditor({
   const [editingDetachedText, setEditingDetachedText] = useState('');
   const [activeDetachedId, setActiveDetachedId] = useState<string | null>(null);
   const [commentColorPopupId, setCommentColorPopupId] = useState<string | null>(null);
-  // Store absolute viewport coordinates for comment panel and color picker
-  const [linkedTextPosition, setLinkedTextPosition] = useState<{ top: number; cardLeft: number; cardRight: number } | null>(null);
   const noteCardRef = useRef<HTMLDivElement | null>(null);
 
   // Sync detachedComments when initialDetachedComments changes (e.g., when opening a different padlet)
@@ -217,17 +189,6 @@ export default function NoteEditor({
           const commentText = commentTarget.getAttribute('data-comment-text');
           if (!commentId) return false;
 
-          // Calculate absolute viewport coordinates for positioning panels
-          const commentRect = commentTarget.getBoundingClientRect();
-          const cardRect = noteCardRef.current?.getBoundingClientRect();
-          if (cardRect) {
-            setLinkedTextPosition({
-              top: cardRect.top,
-              cardLeft: cardRect.left,
-              cardRight: cardRect.right,
-            });
-          }
-
           setCommentPopupPosition(null);
 
           const thread = buildThreadFromAttrs({
@@ -243,7 +204,7 @@ export default function NoteEditor({
           });
 
           setActiveThread(thread);
-          setCommentPopupOpen(true);
+          panels.openPanel('comment');
           return true;
         }
         return false;
@@ -251,21 +212,7 @@ export default function NoteEditor({
     },
   });
 
-  useEffect(() => {
-    if (!editor) return;
-
-    const handleSelectionUpdate = () => {
-      const { from, to, empty } = editor.state.selection;
-      if (!empty) {
-        setLastSelection({ from, to });
-      }
-    };
-
-    editor.on('selectionUpdate', handleSelectionUpdate);
-    return () => {
-      editor.off('selectionUpdate', handleSelectionUpdate);
-    };
-  }, [editor]);
+  const { hasSelection, lastSelection } = useShellSelection(editor);
 
   // Text formatting handlers
   const handleBold = () => editor?.chain().focus().toggleBold().run();
@@ -297,7 +244,7 @@ export default function NoteEditor({
     }
 
     // Text is selected, open the link popup
-    setLinkPopupOpen(true);
+    panels.openPanel('link');
   };
 
   const handleAddLink = (url: string) => {
@@ -331,18 +278,6 @@ export default function NoteEditor({
 
     editor.chain().focus().setTextSelection(selection).run();
 
-    // Calculate absolute viewport coordinates for positioning panels
-    const view = editor.view;
-    const startCoords = view.coordsAtPos(selection.from);
-    const cardRect = noteCardRef.current?.getBoundingClientRect();
-    if (cardRect) {
-      setLinkedTextPosition({
-        top: cardRect.top,
-        cardLeft: cardRect.left,
-        cardRight: cardRect.right,
-      });
-    }
-
     const commentAttrs = editor.getAttributes('comment');
     if (commentAttrs && commentAttrs.commentId) {
       const thread = buildThreadFromAttrs({
@@ -364,10 +299,7 @@ export default function NoteEditor({
 
     setCommentPopupPosition(null);
     setSavedSelection(selection);
-    setCommentPopupOpen(true);
-    setTextStyleOpen(false);
-    setCardColorOpen(false);
-    setEmojiPickerOpen(false);
+    panels.openPanel('comment', ['textStyle', 'cardColor', 'reaction']);
   };
 
   const handlePostComment = (anchor?: DOMRect) => {
@@ -378,7 +310,7 @@ export default function NoteEditor({
         y: rect.top,
       });
     }
-    setDetachedPopupOpen(true);
+    panels.openPanel('detached');
     setActiveDetachedId(detachedComments[detachedComments.length - 1]?.id || null);
     setEditingDetachedId(null);
     setEditingDetachedText('');
@@ -526,7 +458,7 @@ export default function NoteEditor({
     if (!editor || !activeThread) return;
     removeCommentThreadFromDoc(activeThread.id);
     setActiveThread(null);
-    setCommentPopupOpen(false);
+    panels.closePanel('comment');
   };
 
   const handleToggleCommentStrikethrough = (commentId: string) => {
@@ -631,21 +563,11 @@ export default function NoteEditor({
     onClose();
   };
 
-  // Close handler - save before closing
-  const handleClose = () => {
-    handleSaveAndClose();
-  };
-
-  // Click outside to save and close
-  const handleOverlayClick = (e: React.MouseEvent) => {
-    if (e.target === e.currentTarget) {
-      handleSaveAndClose();
-    }
-  };
-
   const handleCommentPopupOpenChange = (open: boolean) => {
-    setCommentPopupOpen(open);
-    if (!open) {
+    if (open) {
+      panels.openPanel('comment');
+    } else {
+      panels.closePanel('comment');
       setActiveThread(null);
       setCommentPopupPosition(null);
       setSavedSelection(null);
@@ -656,55 +578,42 @@ export default function NoteEditor({
     return null;
   }
 
+  const toolbarProps = {
+    onBold: handleBold,
+    onItalic: handleItalic,
+    onStrikethrough: handleStrikethrough,
+    onUnderline: handleUnderline,
+    onBulletList: handleBulletList,
+    onOrderedList: handleOrderedList,
+    onCode: handleCode,
+    onLink: handleLink,
+    onTextStyle: () => panels.openPanel('textStyle'),
+    onCardColor: () => panels.openPanel('cardColor'),
+    onAddReaction: () => panels.openPanel('reaction'),
+    onPostComment: handlePostComment,
+    onTextComment: handleTextComment,
+    postCommentCount: detachedComments.length,
+    postCommentBadgeColor: badgeColor,
+    isBold: editor.isActive('bold'),
+    isItalic: editor.isActive('italic'),
+    isStrikethrough: editor.isActive('strike'),
+    isUnderline: editor.isActive('underline'),
+    isBulletList: editor.isActive('bulletList'),
+    isOrderedList: editor.isActive('orderedList'),
+    isCode: editor.isActive('codeBlock'),
+    isLink: editor.isActive('link'),
+    isComment: editor.isActive('comment'),
+  };
+
   return (
-    <div
-      className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/50"
-      onClick={handleOverlayClick}
-    >
-      {/* Editor container with toolbar and card as siblings */}
-      <div
-        className="flex items-start gap-3"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* LEFT ZONE: Toolbar + Comment Color Picker */}
-        <div className="relative flex items-start gap-3">
-          {/* Toolbar */}
-          <div className="min-w-[72px]">
-            <div className={(detachedColorPickerOpen || textCommentColorPickerOpen) ? 'opacity-0 pointer-events-none' : ''}>
-              <NoteEditorToolbar
-                mode={toolbarMode}
-                onModeChange={setToolbarMode}
-                onBold={handleBold}
-                onItalic={handleItalic}
-                onStrikethrough={handleStrikethrough}
-                onUnderline={handleUnderline}
-                onBulletList={handleBulletList}
-                onOrderedList={handleOrderedList}
-                onCode={handleCode}
-                onLink={handleLink}
-                onTextStyle={() => setTextStyleOpen(true)}
-                onCardColor={() => setCardColorOpen(true)}
-                onAddReaction={() => setEmojiPickerOpen(true)}
-                onPostComment={handlePostComment}
-                onTextComment={handleTextComment}
-                postCommentCount={detachedComments.length}
-                postCommentBadgeColor={badgeColor}
-                isBold={editor.isActive('bold')}
-                isItalic={editor.isActive('italic')}
-                isStrikethrough={editor.isActive('strike')}
-                isUnderline={editor.isActive('underline')}
-                isBulletList={editor.isActive('bulletList')}
-                isOrderedList={editor.isActive('orderedList')}
-                isCode={editor.isActive('codeBlock')}
-                isLink={editor.isActive('link')}
-                isComment={editor.isActive('comment')}
-                hasSelection={!editor.state.selection.empty}
-              />
-            </div>
-          </div>
-
-        </div>
-
+    <PostEditorShell
+      isOpen={isOpen}
+      onBackdropClick={handleSaveAndClose}
+      toolbarHidden={detachedColorPickerOpen || textCommentColorPickerOpen}
+      hasSelection={hasSelection}
+      toolbar={toolbarProps}
+      centre={
+        <>
         {/* Main Note Card */}
         <div
           ref={noteCardRef}
@@ -712,20 +621,20 @@ export default function NoteEditor({
           style={{ width: '280px' }}
         >
           {/* Reaction Picker Popup - positioned to the right of the card */}
-          {emojiPickerOpen && (
+          {panels.open.reaction && (
             <div
               className="absolute left-full top-0 ml-2 z-[60]"
               onMouseDown={(e) => e.preventDefault()}
             >
               <div>
                 <EmojiReactionPicker
-                  isOpen={emojiPickerOpen}
-                  onOpenChange={setEmojiPickerOpen}
+                  isOpen={panels.open.reaction}
+                  onOpenChange={(open) => (open ? panels.openPanel('reaction') : panels.closePanel('reaction'))}
                   onSelectEmoji={(emoji) => {
                     if (!reactions.includes(emoji)) {
                       setReactions([...reactions, emoji]);
                     }
-                    setEmojiPickerOpen(false);
+                    panels.closePanel('reaction');
                   }}
                   className="note-emoji-picker"
                   inline
@@ -736,8 +645,8 @@ export default function NoteEditor({
 
           {/* Link Popup */}
           <LinkPopup
-            isOpen={linkPopupOpen}
-            onOpenChange={setLinkPopupOpen}
+            isOpen={panels.open.link}
+            onOpenChange={(open) => (open ? panels.openPanel('link') : panels.closePanel('link'))}
             onSubmit={handleAddLink}
             onRemoveLink={handleRemoveLink}
             initialUrl={linkViewUrl}
@@ -745,7 +654,7 @@ export default function NoteEditor({
 
           {/* Comment Popup */}
           <CommentPopup
-            isOpen={commentPopupOpen}
+            isOpen={panels.open.comment}
             onOpenChange={handleCommentPopupOpenChange}
             onSubmit={handleAddComment}
             onEditComment={handleEditComment}
@@ -775,7 +684,7 @@ export default function NoteEditor({
                     y: rect.top,
                   });
                 }
-                setDetachedPopupOpen(!detachedPopupOpen);
+                panels.open.detached ? panels.closePanel('detached') : panels.openPanel('detached');
                 setActiveDetachedId(detachedComments[detachedComments.length - 1]?.id || null);
                 setEditingDetachedId(null);
                 setEditingDetachedText('');
@@ -843,7 +752,7 @@ export default function NoteEditor({
         </div>
 
         {/* Detached Comments Popup - Canvas style */}
-        {detachedPopupOpen && (
+        {panels.open.detached && (
           <div
             className="fixed z-[100]"
             style={{
@@ -869,7 +778,7 @@ export default function NoteEditor({
                   </button>
                   <button
                     onClick={() => {
-                      setDetachedPopupOpen(false);
+                      panels.closePanel('detached');
                       setActiveDetachedId(null);
                       setDetachedColorPickerOpen(false);
                       setEditingDetachedId(null);
@@ -1055,19 +964,22 @@ export default function NoteEditor({
             </div>
           </div>
         )}
-
+        </>
+      }
+      sharedPanel={
+        <>
         {/* Text Style Popup - attached to the right of card */}
-        {textStyleOpen && (
+        {panels.open.textStyle && (
           <div className="bg-white rounded-lg shadow-xl border border-gray-200 p-4 relative" style={{ width: '300px' }}>
             <button
-              onClick={() => setTextStyleOpen(false)}
+              onClick={() => panels.closePanel('textStyle')}
               className="absolute top-2 right-2 w-4 h-4 flex items-center justify-center rounded hover:bg-gray-100"
             >
               <X className="w-3 h-3 text-gray-400" />
             </button>
             <TextStylePopup
               isOpen={true}
-              onOpenChange={setTextStyleOpen}
+              onOpenChange={(open) => (open ? panels.openPanel('textStyle') : panels.closePanel('textStyle'))}
               onSelectHeading={handleSelectHeading}
               onSelectColor={handleSelectTextColor}
               onSelectHighlight={handleSelectHighlight}
@@ -1079,7 +991,7 @@ export default function NoteEditor({
         )}
 
         {/* Note Color Picker - attached to the right */}
-        {cardColorOpen && (
+        {panels.open.cardColor && (
           <div
             className="bg-white rounded-lg shadow-xl border border-gray-200 p-4 h-fit self-start"
             style={{ width: '260px' }}
@@ -1121,8 +1033,8 @@ export default function NoteEditor({
             </div>
           </div>
         )}
-
-      </div>
-    </div>
+        </>
+      }
+    />
   );
 }
