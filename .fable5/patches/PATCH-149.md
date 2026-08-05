@@ -6583,3 +6583,170 @@ implementation turn.
 
 No implementation file was modified by this review. All perturbations (ref-guard removal,
 probe-file creation) were hash-verified restored / deleted. Nothing was pushed.
+
+## §36 PATCH-149B2-ii correction — behavioral test authorization
+
+Narrow amendment resolving the second hard stop (§35.10's defect is real; the correction was
+implemented, validated and correctly reverted because no authorized test file could host the
+mandatory behavioral proof). Every figure below was **measured at `0fb2999`**, not estimated.
+No production or test file was modified in this turn.
+
+### 36.1 Two measured corrections to the requested amendment
+
+The amendment request proposed a path and a cap that measurement shows are both unusable. Both
+are corrected here rather than passed through, so the implementer does not hit a third stop.
+
+**The proposed path cannot run.** `vitest.config.ts:12` collects only:
+
+```
+lib/domain/**/*.test.ts · lib/infra/**/*.test.ts · scripts/harness/**/*.test.ts
+components/collabboard/*.test.tsx · components/collabboard/editors/*.test.tsx
+```
+
+`app/**` is **not** collected, so `app/dashboard/canvas/[id]/documentQueuedContinuation.behavior.test.tsx`
+would silently never execute — a false green of exactly the kind §35 exists to reject. This was
+verified empirically earlier in the session: a `.test.tsx` probe placed under `lib/domain/canvas/`
+returned "No test files found" and only ran once renamed to `.test.ts` (the `lib/domain` glob is
+`.ts`-only). Amending `vitest.config.ts` is **not** authorized — it is outside every allowlist and
+would widen collection for the whole repository to serve one patch.
+
+**The proposed ≤40-line cap is not achievable.** A complete both-variant harness was written and
+run at `0fb2999`: it imports the real `decideDocumentSwitch`, drives mount → request → confirmation
+→ single Discard through real React `act()` batching, and carries a `reenter` mode that reproduces
+the shipped defect. It measured **76 lines with all four cases passing** (both variants × correction
+and defect modes). 40 lines does not fit the React harness (pragma, imports, act-environment flag,
+mount/cleanup, the wiring mirror, and the assertions) even before the second variant.
+
+### 36.2 Authorized new test file — **1 file, ≤85**
+
+| Test file | Environment | Max |
+|---|---|---|
+| `components/collabboard/documentQueuedContinuation.behavior.test.tsx` (**new**) | jsdom via `// @vitest-environment jsdom` (file-level pragma, the established convention — `DocumentEditor.test.tsx:1`, `DiscardChangesDialog.test.tsx:1`) | **≤85** |
+
+`components/collabboard/*.test.tsx` is collected, is where the repository's other React behavioural
+suites already live (`CardEditor.test.tsx`, `CardPreview.test.tsx`, `DocumentCardContent.test.tsx`),
+and needs no config change. **≤85** is the measured 76 plus modest headroom; it is a ceiling, not a
+target. Additive only, no snapshots, and no static source-text substitute for the behavioural proof.
+
+### 36.3 The honest limit of this test, and the assertion that closes it
+
+This must be recorded plainly, because it is the difference between a real proof and a comfortable
+one. **The behavioural test cannot mount `CanvasClient`.** That file is 8,500+ lines behind Supabase,
+auth and layout providers; mounting it is not achievable inside any cap this patch could justify.
+The authorized file is therefore a **reproduction harness** — it mirrors the guard/continuation
+wiring and proves the *mechanism* under real React state timing:
+
+- calling the guarded wrapper from the discard continuation re-reads the pre-discard closure,
+  re-queues the action, and executes nothing;
+- calling the unguarded execution core executes exactly once and leaves the queue empty.
+
+A reproduction harness proves the mechanism but **cannot by itself prove production uses it** — it
+can drift from `CanvasClient` silently. It is therefore **insufficient alone**, and the amendment
+requires it to be paired with a binding assertion in the already-authorized source suite:
+
+> `handleDocumentSwitchDiscard`'s `open-tool` and `open-drawing-editor` branches must be asserted to
+> call `executeToolAction(` / `executePadletTypeEditor(` and to **not** call `handleToolClick(` /
+> `openPadletInTypeEditor(`, scoped to that function's own slice (not a whole-file match).
+
+Behavioural test = the mechanism is real. Source assertion = production is wired to it. **Both are
+mandatory; neither may be dropped in favour of the other.**
+
+### 36.4 Both continuation variants are mandatory
+
+The correction introduces **two distinct execution helpers** (`executeToolAction` and
+`executePadletTypeEditor`), so per the amendment request's own rule both variants require
+behavioural coverage — a shared-mechanism argument would leave one helper unproven. The measured
+harness covers both in 76 lines by parameterising one `drive()` over the two triggers, so this
+costs almost nothing.
+
+Required proof points, all binding, for **each** variant:
+
+1. a dirty Document is active; 2. the user requests the continuation; 3. the parent confirmation
+appears; 4. the user clicks Discard **once**; 5. the requested action executes **exactly once**;
+6. the confirmation closes; 7. the queued action is empty; 8. **no second Discard is required.**
+
+### 36.5 Load-bearing negative control
+
+The behavioural test must **fail** when the discard continuation is switched back to
+`handleToolClick` / `openPadletInTypeEditor`, and must fail on the specific symptoms:
+
+- the action did **not** execute on the first click (an execution counter, asserted `=== 1` / `=== 0`
+  — not "at least once");
+- the queue was **repopulated** rather than left empty;
+- a second Discard would have been required.
+
+A test that only asserts the confirmation eventually closes is **rejected**: the shipped defect
+already closes the Document modal on the first click, so that assertion passes against `cc95a1b`
+and proves nothing. The implementer may satisfy this either by an in-harness mode toggle (as
+measured) or by a manual perturbation run, but the failure must be demonstrated on those symptoms.
+
+### 36.6 Source-suite cap raised to absorb the split — **≤120**
+
+`documentSwitchGuard.source.test.ts` is **109 lines at `0fb2999`** against a ≤110 cap. The reverted
+correction measured that the like-for-like updates forced by the execution-core split alone take it
+to **exactly 110/110**, leaving no room for §36.3's mandatory binding assertion. Its cap is raised
+from **≤110 to ≤120** so the binding assertion has somewhere to live. No existing cap is reduced.
+
+### 36.7 Amended B2-ii test table — **6 slots, ≤405**
+
+| Test file | Max | Change |
+|---|---|---|
+| `lib/domain/canvas/documentSwitchGuard.test.ts` | **≤90** | unchanged |
+| `lib/domain/canvas/documentSwitchGuard.source.test.ts` | **≤120** | **raised from ≤110** (§36.6) |
+| B1b-iii affordance suites, if threading requires it | **≤50** | unchanged |
+| `components/collabboard/editors/DocumentEditor.test.tsx` | **≤60** | unchanged |
+| `components/collabboard/documentQueuedContinuation.behavior.test.tsx` (**new**) | **≤85** | **NEW AUTHORIZATION** (§36.2) |
+
+**B2-ii tests amended from ≤310 / 4 files to ≤405 / 5 files.** `DocumentEditor.test.tsx` is 535
+lines and stays additive-only; its 33 existing tests, including all six §34.6 dirty-callback tests
+and the ref-guard tripwire, must survive **unchanged in meaning**.
+
+### 36.8 Source-test update authority — confirmed
+
+Like-for-like updates to the already-authorized source-test slots **remain allowed** where internal
+function names or scoped slices change because of the execution-core split (the reverted attempt
+measured 6 such assertions across `documentSwitchGuard.source.test.ts` and
+`documentRoutes.source.test.ts`). They must **preserve original test meaning**, must **not weaken
+guard ownership** (a slice that now covers a thin wrapper must still prove the guard runs before any
+mutation, and must additionally prove the wrapper performs no mutation of its own), must stay within
+per-file and aggregate caps, and **must not substitute for the new behavioural test**.
+
+### 36.9 Production authority — unchanged, restated
+
+No production cap or file is amended by §36:
+
+- the **§32.16 table as amended by §34.3 remains the sole production authority**;
+- this correction is expected to modify **only `app/dashboard/canvas/[id]/CanvasClient.tsx`**;
+- **cumulative `CanvasClient.tsx` cap remains ≤90** (the reverted correction measured 89/90);
+- **aggregate production cap remains ≤200**; **no new production file is authorized**.
+
+Not authorized for change: `DocumentEditor.tsx` · `CanvasModals.tsx` · `FreeformPadletCards.tsx` ·
+`documentSwitchGuard.ts` · `DiscardChangesDialog.tsx` · `usePadletSave.ts` · `vitest.config.ts` ·
+Read affordance · clipart · persistence · PDF · schema · package files · Excalidraw fork.
+
+The correction design proven in the reverted attempt stands as governed: an unguarded execution core
+plus a thin guarded public wrapper per entry, with `handleDocumentSwitchDiscard` calling the cores
+directly. **No timer, microtask, `flushSync`, ignore-next-guard flag, stored callback or command
+bus.** The `open-document` continuation already bypasses the guard and must not regress.
+
+### 36.10 Authority settlement
+
+- The **§36.7 table is the sole authority** on which test files may be touched during this correction.
+- **ROLE prose in an implementer prompt authorizes no additional test or production file** (§34.8,
+  reaffirmed). The amendment request's own suggested path and cap were both overridden here by
+  measurement — prompt text is an input to governance, not an authorization.
+- **Any further unlisted production or test file requires another hard stop** (`B`). Three stops in
+  this patch family have each been the process working correctly.
+
+### 36.11 Status
+
+| Patch | Status |
+|---|---|
+| **PATCH-149B2-i** | **CLOSED** (`f4bd92b`, §33), unchanged |
+| **PATCH-149B2-ii** | **AUTHORIZED FOR NARROW CORRECTION · UNBLOCKED** — production unchanged at ≤90 / ≤200 and expected to touch only `CanvasClient.tsx`; tests ≤405 / 5 files; behavioural test **and** source binding assertion both mandatory; both continuation variants mandatory |
+| **PATCH-149B2 (overall)** | **OPEN** pending the correction and a further independent closure review |
+| **PATCH-149C** | **BLOCKED on user reproduction** (§14.11), unchanged |
+| **PATCH-150** | **RESERVED and separate**, unchanged |
+
+No production or test file was modified in this turn. The measurement harness used to set the ≤85
+cap was run from a scratch path and deleted; it is not part of any commit. Nothing was pushed.
