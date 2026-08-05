@@ -6130,3 +6130,210 @@ absent · the test-budget deviation is classified, not ignored (§33.2).
 
 No implementation file was modified by this review (all perturbations were applied and reverted
 in-place, hash-verified). `f4bd92b` was not amended. Nothing was pushed.
+
+## 34. PATCH-149B2-ii — DIRTY-STATE INTEGRATION SCOPE AMENDMENT · **BLOCKER RESOLVED**
+
+**Authored:** 2026-08-05 (governance architect). **Base:** `b773b4f`. Every path, line number and
+behaviour below was **re-measured at this HEAD**. No production or test file was modified in this
+turn.
+
+**Two allowlist gaps blocked B2-ii, not one.** The reported blocker (production) is resolved in
+§34.3; a second, unreported gap (the dirty-callback tests have no authorized home) is measured and
+resolved in §34.7. Both are amended here so implementation does not hard-stop a third time.
+
+### 34.1 Hard-stop report — **correct, and upheld**
+
+The implementer twice returned **B — HARD STOP** rather than editing
+`components/collabboard/editors/DocumentEditor.tsx`, and made zero code changes on both turns
+(`git status` clean apart from the five long-standing protected paths; HEAD never moved off
+`b773b4f`). **That was the correct call and is upheld without qualification.** §32.16's B2-ii table
+lists exactly four production files and does not include `DocumentEditor.tsx`, so no cap existed
+for it and any edit — however small — would have been unauthorized spill of exactly the kind
+§32.16's closing sentence forbids ("An implementer who cannot stay inside a cap must **stop and
+request an amendment, not spill**").
+
+### 34.2 Why `DocumentEditor.tsx` is genuinely required
+
+§32.15 places draft, baseline and dirty computation **inside** `DocumentEditor` and names
+`onDirtyChange(isDirty: boolean)` as the cross-boundary contract. Re-measured at `b773b4f`,
+`isDirty` is a local expression (`DocumentEditor.tsx:60`) derived from local `title`/`description`
+state and the live TipTap body; **nothing outside the component can observe it** — there is no
+prop, ref or exported value carrying it today.
+
+The three conceivable workarounds are each forbidden by governance already in force:
+
+| Workaround | Why it fails |
+|---|---|
+| Re-derive dirty in `CanvasModals`/`CanvasClient` | Violates §32.15's ownership split — dirty computation lives in `DocumentEditor`, not the modal owner — and duplicates the baseline logic (house rule P6, one implementation per concern) |
+| Expose the TipTap editor or draft payload upward | Explicitly forbidden by §32.15 ("The TipTap editor instance is **never** exposed as a prop or ref") |
+| Treat every switch as dirty, or every switch as clean | Blanket-dirty violates NC11 (clean Document must not confirm); blanket-clean silently destroys drafts, violating the binding product decision and P3 |
+
+**There is no in-scope path to the governed behaviour without editing `DocumentEditor.tsx`.**
+
+### 34.3 Amended B2-ii production allowlist — **5 files, ≤200**
+
+| # | Path | Change | Max |
+|---|---|---|---|
+| 1 | `app/dashboard/canvas/[id]/CanvasClient.tsx` | guard sites 1-5, `handleToolClick`, `closeDrawingEditorsBeforePadletEdit`, continuation state, parent dirty boolean, intercepted discard dialog (§34.6) | **≤90** (unchanged) |
+| 2 | `components/collabboard/canvas/ui/FreeformPadletCards.tsx` | guard sites 6-8 | **≤30** (unchanged) |
+| 3 | `components/collabboard/canvas/ui/CanvasModals.tsx` | `onDirtyChange` threading only | **≤15** (unchanged) |
+| 4 | `lib/domain/canvas/documentSwitchGuard.ts` | **new** — pure decision helper | **≤50** (unchanged) |
+| 5 | `components/collabboard/editors/DocumentEditor.tsx` | **NEW AUTHORIZATION** — dirty reporting only (§34.4) | **≤15** |
+
+**B2-ii production aggregate amended from ≤185 to ≤200 across 5 files.** No existing file's cap is
+reduced to absorb this, per the amendment request. `DocumentEditor.tsx` is 198 lines at `b773b4f`;
+a ≤15-line delta keeps it far below the 800-line file ceiling.
+
+**Path note:** the implementer prompt referenced `components/collabboard/CanvasModals.tsx`, which
+**does not exist**. The binding path is §32.16's `components/collabboard/canvas/ui/CanvasModals.tsx`
+(verified present at HEAD). Where prompt prose and the §32.16 table disagree on a path, **the table
+governs** (§34.8).
+
+### 34.4 Exactly what is authorized in `DocumentEditor.tsx`
+
+Only these three things:
+
+1. one optional prop — `onDirtyChange?: (isDirty: boolean) => void` — added to
+   `DocumentEditorProps` and destructured;
+2. one previous-value ref and one bounded effect implementing the transition-only rule (§34.5);
+3. nothing else. `useEffect` and `useRef` are **already imported** (`DocumentEditor.tsx:3`), so no
+   import change is required or authorized.
+
+**The edit must not alter** — and each of these is re-asserted as load-bearing: the dirty
+calculation (`:60`) · the baseline calculation or its capture effect (`:47-57`) · `handleSave` and
+the `SaveCardResult` branch table (`:68-86`) · SAVE-B · `attemptClose` (`:61-65`) · the Escape
+listener (`:87-97`) · `DiscardChangesDialog` wiring (`:195`) · the error banner (`:176`) ·
+read-only behaviour · the toolbar · TipTap content handling · `title`/`description` state ·
+persistence.
+
+**`DocumentEditor` gains no knowledge of routes, tools, destinations or queued actions.** It reports
+a single boolean upward and nothing else. No draft payload and no editor instance leaves the
+component.
+
+### 34.5 Transition-only decision — **B (ref guard), decided by measurement, not preference**
+
+The amendment request asked whether the plain dependency effect suffices, or whether to require a
+stable parent callback (A) or authorize a ref guard (B). **This was measured at `b773b4f` with a
+throwaway probe (created, run, deleted; working tree verified clean afterward), not reasoned from
+assumed React semantics** — the §33.6 disabled-button finding is a standing reminder that framework
+behaviour must be measured before it is governed.
+
+| Design | Probe result |
+|---|---|
+| **A** — `useEffect(() => { onDirtyChange?.(isDirty) }, [isDirty, onDirtyChange])`, parent passes an inline lambda | **3 calls** across a mount plus two unrelated rerenders in which `isDirty` never changed — **violates §32.15** |
+| **B** — same effect guarded by a previous-value ref | exactly `[false, true, false]` across mount → 2 unrelated rerenders → clean→dirty → 2 more rerenders while dirty → dirty→clean — **satisfies §32.15 exactly** |
+
+**Decision: B.** A is rejected as the *sole* mechanism: it makes correctness depend on `useCallback`
+discipline inside `CanvasClient.tsx` — an 8,300-line file that B2-ii may touch for only ≤90 lines of
+guards — and across a second hop through `CanvasModals`. A future inline lambda at either boundary
+would silently reintroduce per-render reporting into the canvas's hottest render path, and no test
+inside `DocumentEditor`'s own suite could catch it. B is self-contained, provable by test 6 (§34.7),
+and correct regardless of parent callback identity.
+
+Authorized shape (illustrative, not a required transcription):
+
+```tsx
+const lastReportedDirty = useRef<boolean | null>(null);
+useEffect(() => {
+  if (lastReportedDirty.current === isDirty) return;
+  lastReportedDirty.current = isDirty;
+  onDirtyChange?.(isDirty);
+}, [isDirty, onDirtyChange]);
+```
+
+Wrapping the parent callback in `useCallback` remains **recommended defence-in-depth** and is within
+`CanvasClient`'s existing cap, but it is **not** the governed mechanism and must not be relied upon.
+
+### 34.6 Dirty callback contract — binding
+
+| Requirement | Governed behaviour |
+|---|---|
+| Clean open | emits `false` **once** on mount (the `null` initial ref makes the first run a genuine transition), giving the parent its initialization value |
+| First clean→dirty | emits `true` exactly once |
+| Further edits while dirty | emits **nothing** |
+| dirty→clean revert | emits `false` exactly once |
+| Unrelated rerender, same value | emits **nothing**, including when the parent callback identity changes |
+| Read-only | `isDirty` is `!readOnly && (…)` and is therefore **always `false`**; a read-only mount emits the single initialization `false` and **must never emit `true`**. Test 4 asserts "never `true`", *not* "never called" — this distinction is explicit so it is not guessed |
+| Close / successful Save (SAVE-B) | the keyed remount (`CanvasModals:151-155`) unmounts and remounts `DocumentEditor`, and the fresh instance emits `false`. **The parent must also reset its own boolean explicitly in its close path** and must not depend on an unmount emission — none is authorized |
+| Payload leakage | none — a boolean only |
+
+### 34.7 Test allowlist — **second gap measured and amended: 4 files, ≤310**
+
+The six required dirty-callback tests are React component behaviour tests of `DocumentEditor`, and
+**the existing B2-ii test allowlist has nowhere to put them**: `documentSwitchGuard.test.ts` covers a
+pure `lib/domain` helper (mounting React there violates the domain-purity convention),
+`documentSwitchGuard.source.test.ts` is node/source-slice only, and the B1b-iii affordance slot
+covers the Read affordance, which B2-ii is forbidden to change. This gap was not in the hard-stop
+report but would have caused a third stop.
+
+| Test file | Max |
+|---|---|
+| `lib/domain/canvas/documentSwitchGuard.test.ts` (**new**) | **≤90** (unchanged) |
+| `lib/domain/canvas/documentSwitchGuard.source.test.ts` (**new**, node, scoped slices) | **≤110** (unchanged) |
+| B1b-iii affordance suites, if threading requires it | **≤50** (unchanged) |
+| `components/collabboard/editors/DocumentEditor.test.tsx` | **≤60** (**NEW AUTHORIZATION**) |
+
+**B2-ii tests amended from ≤250 / 3 files to ≤310 / 4 files.** `DocumentEditor.test.tsx` is 483
+lines at `b773b4f`; a ≤60-line delta keeps it under the 800-line ceiling. Its existing 28 tests must
+survive **unchanged in meaning** — this slot is additive only.
+
+Required dirty-callback tests, all six binding:
+
+1. clean→dirty reports exactly once; 2. further edits while dirty report nothing; 3. dirty→clean
+reports exactly once; 4. read-only never reports `true` (§34.6); 5. an unrelated rerender carrying
+the same dirty value reports nothing; 6. **a changed parent callback identity produces no false
+transition** — this is the test that makes §34.5's decision load-bearing and must fail against
+Design A.
+
+### 34.8 ROLE prose vs. the allowlist — authority settled
+
+Recorded explicitly, and binding on every future turn in this patch family:
+
+- **The exact production and test allowlist tables in §32.16, as amended by §34.3 and §34.7, are the
+  sole authority on which files may be touched.**
+- **ROLE prose in an implementer prompt does not authorize any file outside those tables.** The
+  B2-ii prompt's "except where the exact B2-ii callback contract requires integration" is narrative
+  framing, not an allowlist entry; reading it as authorization would have been wrong, and the
+  implementer was right not to.
+- **§34 is the sole authorization for the `DocumentEditor` dirty callback.** It authorizes §34.4's
+  three items and nothing else — not a general licence to edit `DocumentEditor.tsx` during B2-ii.
+- **If any further unlisted production file becomes necessary, the implementer must hard-stop again**
+  with `B. HARD STOP — GOVERNANCE AMENDMENT REQUIRED`. Repeated stops are the process working, not
+  friction to route around.
+- Where prompt prose and a §32.16 path disagree, **the table governs** (§34.3's `CanvasModals` path
+  note is the live instance).
+
+### 34.9 Two integration questions pre-answered, to prevent a third stop
+
+Both were re-measured at `b773b4f` and neither needs a further amendment:
+
+- **Intercepted discard dialog.** `DiscardChangesDialog.tsx` is **reused unmodified** and is
+  therefore *not* added to any allowlist — importing and rendering an existing component is not
+  editing it. The parent-intercepted confirmation renders in **`CanvasClient.tsx`**, which already
+  owns the queued-continuation state and already renders an inline confirm at `:7722`; this keeps
+  `CanvasModals.tsx` to `onDirtyChange` threading only, inside its unchanged ≤15. Rendering it from
+  `CanvasModals` instead would need ~16 lines and breach that cap. The two dialogs are mutually
+  exclusive by construction — the parent guard intercepts *before* `DocumentEditor` sees any close
+  event — and a source assertion must prove the parent's dialog is gated on a non-null queued
+  continuation, satisfying "do not render two overlapping discard dialogs".
+- **O-1 ordering guard.** It belongs in `documentSwitchGuard.source.test.ts` (≤110, already
+  authorized), and **must not** be a comparison of two arbitrary whole-file string positions — that
+  is precisely the weak proof §33.4 found. It must **slice `saveCard`'s `try` block specifically**
+  and assert that no selected-state reset (`setPadletToEdit(null)` / `setIsCardEditorOpen(false)`)
+  occurs before the first persistence `await` within that slice, so that hoisting the reset to the
+  top of the `try` — the exact perturbation §33.4 proved undetectable — fails the test. NC19 must
+  demonstrate that. This closes O-1's *ordering* half only; a behavioural `saveCard` test with mocked
+  Supabase still has no authorized home and remains recorded, not scheduled. **`usePadletSave.ts`
+  remains outside the B2-ii allowlist and must not be modified.**
+
+### 34.10 Status
+
+| Patch | Status |
+|---|---|
+| **PATCH-149B2-i** | **CLOSED** (`f4bd92b`, §33), unchanged |
+| **PATCH-149B2-ii** | **AUTHORIZED · UNBLOCKED · READY FOR IMPLEMENTATION** — 5 production files ≤200; 4 test files ≤310; all other §32 B2-ii requirements (eight entry points, O4-C queued continuation, 21 negative controls, regression contract) **unchanged** |
+| **PATCH-149C** | **BLOCKED on user reproduction** (§14.11), unchanged |
+| **PATCH-150** | **RESERVED and separate**, unchanged |
+
+O-1 remains **recommended within the governed test scope** (§34.9), not a blocker. No production or
+test file was modified in this turn. Nothing was pushed.
