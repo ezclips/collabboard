@@ -5093,3 +5093,272 @@ Reject the correction if:
 | **PATCH-152** | **NOT RESERVED** — unchanged |
 
 No production or test file was modified in this turn. Nothing was pushed.
+
+---
+
+## 31. PATCH-149B1b-iii — FINAL CLOSURE REVIEW · **CLASSIFICATION 2 · CLOSED**
+
+**Reviewed:** 2026-08-05 (independent closure reviewer). **Correction commit:** `0985bb7`
+`fix(document): preserve preview styling and affordance routing guards`. **Implementation:**
+`f841990`. **Governance:** §29 (review), §30 (corrective scope amendment).
+Every figure below was re-measured or re-executed in this review.
+
+**F4 is resolved and T1–T4 are all load-bearing, each proven by an independent perturbation this
+review constructed rather than by re-running the implementer's own controls. PATCH-149B1b-iii
+CLOSES.**
+
+### 31.1 Correction scope — **EXACT, both caps respected**
+
+`git show --numstat 0985bb7` — **4 files, 47 insertions / 8 deletions**, no new file, matching the
+report exactly.
+
+| File | Delta | Cap (§30.2/§30.3) |
+|---|---|---|
+| `components/collabboard/DocumentCardContent.tsx` | 4 / 1 | ≤8 ✓ |
+| `components/collabboard/PostCardContent.tsx` | 1 / 1 | ≤4 ✓ |
+| `components/collabboard/DocumentCardContent.test.tsx` | 21 / 0 | — |
+| `lib/domain/canvas/documentAffordance.source.test.ts` | 21 / 6 | — |
+
+**Corrective production aggregate 7 / ≤12.** Test files reach **290 / ≤290** — exactly at the
+amended cap, nothing to spare.
+
+Verified byte-unchanged between `f841990` and `0985bb7`: `CardPreview.tsx` ·
+`FreeformPadletCards.tsx` · `CanvasClient.tsx` · `ColumnsLayout.tsx` · `ColumnsCanvasRow.tsx` ·
+`RowLane.tsx` · `RowCanvasDnD.tsx` · `WallCanvas.tsx` · `DrawingLayout.tsx` · `PostPopup.tsx` ·
+`MapCanvas.tsx` · `DocumentEditor.tsx` and **both** its test files · `CanvasModals.tsx` ·
+`documentModalRoute.ts` · `documentPost.ts` · `hooks/canvas/usePadletSave.ts` · `package.json` ·
+`package-lock.json` · schema. `0985bb7` touched **no** `.fable5` file.
+
+### 31.2 Combined B1b-iii census — **13 files, 121 lines, every cap satisfied**
+
+Re-measured `cd791bf → 0985bb7`, production only:
+
+| File | Lines | Cap |
+|---|---|---|
+| `DocumentCardContent.tsx` | 56 | ≤70 ✓ |
+| `PostCardContent.tsx` | **12** | ≤12 ✓ (at cap) |
+| `CardPreview.tsx` | 4 | ≤25 ✓ |
+| `FreeformPadletCards.tsx` | 4 | ≤10 ✓ |
+| `ColumnsLayout.tsx` | 3 | ≤10 ✓ |
+| `ColumnsCanvasRow.tsx` | 4 | ≤6 ✓ (§29.2) |
+| `RowLane.tsx` | 4 | ≤10 ✓ |
+| `RowCanvasDnD.tsx` | 3 | ≤10 ✓ |
+| `WallCanvas.tsx` | 1 | ≤10 ✓ |
+| `DrawingLayout.tsx` | 9 | ≤9 ✓ (§29.2) |
+| `PostPopup.tsx` | 4 | ≤8 ✓ |
+| `MapCanvas.tsx` | 3 | ≤5 ✓ (§29.2) |
+| `CanvasClient.tsx` | 14 | ≤25 ✓ |
+
+**Aggregate 121 / ≤198.** The §29.2 retrospective 13-file amendment **remains valid and is
+confirmed**; the correction consumed none of the remaining headroom in any file it did not own.
+`PostCardContent.tsx` sits exactly at its ≤12 cap — the correction modified an already-added line,
+so the count did not grow.
+
+### 31.3 F4 — **RESOLVED**
+
+`DocumentCardContent.tsx` gains `textColor?: string | null` and applies
+`color: textColor || '#1F2937'` as the final entry of the **body** style object, inside the
+`content !== undefined` block. Semantics are byte-equivalent to `PostCardContent`'s TEXT/DEFAULT
+branch (`color: padlet.metadata?.textColor || "#1F2937"`), including declaration order.
+
+The Read button is untouched: its `className`, `aria-label`, `type`, `stopPropagation` and the
+`className || <default overlay>` fallback are unchanged, and it carries **no** inline style at all.
+No metadata object, post, capability, type, `svgUrl`, persistence or route logic entered the
+component — the prop is a bare presentation value, the narrowest possible (§30.7).
+
+`PostCardContent.tsx` changed **one line**: the existing delegation now reads
+`<DocumentCardContent content={DOMPurify.sanitize(decodeHtmlEntities(rawContent || ""))} textColor={padlet.metadata?.textColor} onRead={onOpenDocument} />`.
+No new branch, no second delegation. Sanitiser, clamp, typography, both wrappers, the clipart
+early-return, the AI branch and the TEXT/DEFAULT branch are all unchanged.
+
+**The §29.6 divergence is closed:** a Document now renders with identical body colour whether it is
+reached through the interactive Document branch or the passive default branch.
+
+**Behavioural result, re-verified in real DOM:** `#ff0000` → `rgb(255, 0, 0)`; `undefined`, `null`
+and `''` each → `rgb(31, 41, 55)`; body content visible; Read button present; body markup byte-identical
+with and without a handler; the colour lands on `.tiptap` and the button's `style` attribute is
+`null`. `metadata.textColor` was additionally traced end-to-end through a real `PostCardContent`
+mount.
+
+### 31.4 T1 — **load-bearing at both owners**
+
+**Freeform.** The scoped slice (between `onReadDocument={(() => {` and
+`isSelected={isPadletSelected(padlet.id)}`) pins the exact capability-blind construction
+`return d ? () => { setPadletToEdit(padlet); setDocumentModalDestination(d); } : undefined;` and
+additionally rejects `/d\s*===\s*['"]document-(editor|viewer)['"]/`. Capability reaches only
+`selectDocumentModalDestination(padlet, canUseFreeformEditButton)`, never the supply decision.
+Independently detected **both** phrasings of the defect — an `=== 'document-editor'` ternary gate and
+an inserted `if (d === 'document-viewer') return undefined;` guard.
+
+**CanvasClient.** The scoped `openDocumentFromPreview` body positively requires
+`if (!destination) return;` and rejects `/destination\s*!==?\s*['"]document-editor['"]/`. The callback
+prop itself is passed to all five interactive owners unconditionally (exactly 5 occurrences,
+re-counted); capability is resolved **inside** the callback. Independently detected the governed
+defect written as `if (destination !== 'document-editor') return;`.
+
+Neither proof relies on the component harness — the harness tests remain, but T1 is carried entirely
+by owner-level source slices, as §30.5 required.
+
+One narrow asymmetry is recorded in §31.9 O1.
+
+### 31.5 T2 — **load-bearing**
+
+The assertion slices the actual `openDocumentFromPreview` body (from the `const openDocumentFromPreview = (post: Padlet) => {`
+declaration to `const openPadletTargetFromContextMenu`) and requires
+`/setPadletToEdit\(post\);\s*setDocumentModalDestination\(destination\);/`. The whitespace-tolerant
+form is correct and necessary — `CanvasClient.tsx` uses **CRLF**, so a literal `\n` match would
+false-fail. No whole-file occurrence count is used for this property.
+
+Independently detected deletion of `setPadletToEdit(post)` from the real callback body, **and** — a
+bonus the contract did not require — detected reordering the two calls so the destination is set
+before the selected post.
+
+**A first attempt at this control did not fail, and the cause was the control, not the test:**
+`setPadletToEdit(post);` occurs **five** times in `CanvasClient.tsx` and a first-occurrence replace
+landed on `openPadletInTypeEditor` (`:5698`), never touching `openDocumentFromPreview` (`:5724`).
+Re-anchored on the full unique callback body, the control detects immediately. Recorded because it
+is exactly the mis-targeting failure §29.14 warned about, and because a "0 failures" result must
+never be accepted without checking that the perturbation landed.
+
+The separate Freeform selected-post proof (`setPadletToEdit(padlet)`) is retained and still passes.
+
+### 31.6 T3 — **load-bearing**
+
+The proof slices `CardPreview.tsx` from `{/* Edit Button */}` (`:135`) to end of file (`:195`) — the
+non-clipart return branch only, excluding the clipart branch at `:56-126` and all setup. It requires
+`<DocumentCardContent` **and** `onRead={onReadDocument}`, and rejects any
+`<button … aria-label="Read document">`. This is a genuinely scoped slice, not a whole-file search
+for the component name.
+
+Independently detected a byte-faithful inline duplicate — same `aria-label`, same
+`stopPropagation`, same overlay classes, same visible label. The §29.14 NC9 gap is closed.
+
+### 31.7 T4 — **load-bearing, real DOM**
+
+Real jsdom mounts with body content **and** `onRead`, inspecting `HTMLElement.style` rather than
+source strings. Covers explicit colour, all three fallback inputs, body visibility, Read presence,
+body/Read coexistence, sanitiser preservation (`innerHTML` compared across handler/no-handler
+mounts), colour ownership (body styled, button `style` attribute `null`), and structural invariance
+across handler presence. The `PostCardContent` end-to-end thread is asserted in the same test and
+fails when the pass-through prop is removed.
+
+### 31.8 Regression review, induced failures, negative controls, validation
+
+**Product contract re-confirmed in full.** One shared `DocumentCardContent` (T3 now enforces it) ·
+Read visible to editable **and** read-only users (harness 14/15 plus owner-level T1) · editable →
+`document-editor` `readOnly={false}` with a title input · read-only → `document-viewer`
+`readOnly={true}` with no title input, no description input, no toolbar, no Save, no command
+surface, `contenteditable="false"` asserted **in addition to** command-surface absence, and `onSave`
+invoked **zero** times on Close · `DocumentEditor.readonly.test.tsx` 6/6 green and byte-unchanged ·
+clipart receives no Read in either owner and the correction diff contains **zero**
+`svgUrl`/`isClipart`/`clipart` additions · passive surfaces without a handler receive no Read · all
+thirteen layout threadings intact · complete post id/title/content/metadata reaches routing ·
+`CanvasModals:152-154`'s `document-${padletToEdit?.id}` keyed remount byte-unchanged and still
+load-bearing · no B2 lifecycle, no persistence change, no PDF code.
+
+**Induced failures — all reproduced at `f841990`, all resolved at `0985bb7`:**
+
+- `f841990` production + corrected tests → **1 failed / 22 passed**: explicit `textColor` cannot
+  reach the body and the interactive body ignores metadata colour.
+- All three T-defects applied simultaneously (editor-only gate at both owners, `setPadletToEdit`
+  removed, CardPreview inline duplicate) against the **`f841990` tests** → **21/21 pass** — the old
+  suite is blind to every one.
+- The identical tree against the **corrected tests** → **3 failed / 20 passed**, one failure per
+  T-item. This single paired run is the cleanest demonstration that T1, T2 and T3 are load-bearing
+  and were not merely re-fitted to the implementer's own perturbations.
+
+All backup/restore cycles hash-verified: **all 7 tracked files SHA-256-identical after every
+control**.
+
+**Negative controls — 14 run, 13 detected, 1 recorded gap:**
+
+| # | Control | Result |
+|---|---|---|
+| 1 | omit `textColor` pass-through at `PostCardContent` | **DETECTED** |
+| 2 | accept the prop but ignore it | **DETECTED** |
+| 3 | force `#1F2937` despite an explicit colour | **DETECTED** |
+| 4 | gate Read on `document-editor` — Freeform, `===` ternary | **DETECTED** |
+| 4b | gate Read on `document-editor` — CanvasClient, `!==` early return | **DETECTED** |
+| 4c | editor-only gate — CanvasClient, `=== 'document-viewer'` added line | **NOT DETECTED** (§31.9 O1) |
+| 4d | editor-only gate — Freeform, `=== 'document-viewer'` added line | **DETECTED** |
+| 5 | remove `setPadletToEdit(post)` from the real callback body | **DETECTED** |
+| 5b | reorder destination before selected post | **DETECTED** |
+| 6 | faithful inline duplicate in `CardPreview` | **DETECTED** |
+| 7 | remove `onRead` while retaining body | **DETECTED** (7 failures) |
+| 8 | remove body content while retaining Read | **DETECTED** |
+| 9 | local `svgUrl` discriminator in `DocumentCardContent` | **DETECTED** |
+
+Controls 2 and 3 together prove the colour is genuinely plumbed and not hard-coded — 2 that the prop
+is read, 3 that the incumbent `textColor || '#1F2937'` expression is intact. **All nine governed
+§30.6 controls are detected.** No test was weakened anywhere; every change to the two test files is
+additive or a tightening.
+
+**Validation — all green.** Focused (`DocumentCardContent` · affordance source · `CardPreview` ·
+`CardEditor` · `ClipartCardDraftModal` · NoteEditor characterization · `DocumentEditor` 17/17 ·
+`DocumentEditor.readonly` 6/6 · `documentModalRoute` · `documentPost` · `cardModalRoute`):
+**11/11 files, 180/180 tests**. **Full Vitest: 76/76 files, 898/898 tests** — exactly the expected
+totals. `npm run typecheck` **exit 0**, **410** declarations. `.next` cleared · `npx next build`
+exit 0 · bridge exclusion **891 files**, marker absent · `npm run build:e2e` exit 0,
+`.next/E2E_BRIDGE_BUILD` = **`1`** · ordinary `.next` restored, exclusion **891**, marker absent.
+`git diff --check` exit 0. Worktree outside committed history: only the five long-standing protected
+paths.
+
+**False-green review.** Explicit `textColor` reaches the body · the fallback is not hard-coded
+(control 3) · Read is not hidden from read-only users · the selected post is assigned before the
+destination opens (control 5b) · `CardPreview` does not duplicate the shared UI · clipart gets no
+Read · passive surfaces get no Read · body and Read do not diverge between handler paths · routing
+semantics unchanged · no B2, persistence or PDF code · no test weakened. **Every criterion passes.**
+
+### 31.9 Observations (non-blocking)
+
+1. **O1 — the two T1 guards are asymmetric.** Freeform rejects
+   `/d === 'document-(editor|viewer)'/` (both values); `CanvasClient` rejects only
+   `/destination !=|!== 'document-editor'/`. An editor-only gate expressed at `CanvasClient` as an
+   **added** `if (destination === 'document-viewer') return;` line is therefore undetected
+   (control 4c), because `if (!destination) return;` survives alongside it. The **governed** control
+   is detected in both its natural phrasings, and the guard cannot be *replaced* — only supplemented
+   — so this is a narrowing, not a hole in the product contract. One-line fix when the file is next
+   touched: widen the CanvasClient pattern to
+   `/destination\s*(===|!==?)\s*['"]document-(editor|viewer)['"]/`. **Not required for closure.**
+2. Freeform's T1 assertion pins an exact single-line string. It is precise and load-bearing but will
+   break on innocent reformatting; a future editor should re-derive it rather than delete it.
+3. Test budget is fully consumed at **290/290**. Any further B1b-iii test work needs a cap amendment.
+4. Carried unchanged from §29.19: `DrawingLayout` now holds two idioms for keeping `renderEmbeddable`
+   current, and the dependency entry defeats its memoization on every `CanvasClient` render —
+   recorded for B2's consideration · `CardPreview` has no local Document gate; correctness rests on
+   its single caller · `WallCanvas`'s prop is accepted and discarded, and the `OWNER_FILES` string
+   check cannot distinguish that from wiring · §27.6 **A-10** still has no test · combined production
+   census is **121**.
+5. Carried unchanged from §28.25: **O4** remains open and is **B2's** (§28.4) — correctly untouched
+   here · the central route's unguarded `setDocumentModalDestination(helper(...))` ·
+   `DocumentEditor`'s shared `z-[1000]` · the temporary save-on-close lifecycle (§22.4) must not
+   survive B2 · `PostCardContent:611`'s pre-existing inline clipart predicate · C7 · the second
+   canvas system (`LiveCanvas`).
+
+### 31.10 Classification and status
+
+**CLASSIFICATION 2 — PASS WITH NON-BLOCKING OBSERVATIONS. PATCH-149B1b-iii CLOSES.**
+
+F4 is fixed at the narrowest possible seam — one prop, one pass-through, seven production lines —
+and the fix is defended by three independent controls that distinguish "plumbed" from "hard-coded".
+T1, T2 and T3 are each proven load-bearing against defects this review constructed, and the paired
+old-tests/new-tests run against an identical defective tree (21/21 green versus 3 failures) settles
+that the §29.14 gaps are genuinely closed rather than papered over. The retrospective 13-file
+amendment holds, every per-file and aggregate cap is satisfied, and nothing outside the two-file
+corrective allowlist moved. The remaining observations are one guard asymmetry with a known one-line
+fix, an exhausted test budget, and context carried forward from earlier sections.
+
+| Patch | Status |
+|---|---|
+| **PATCH-149A** | **CLOSED** (`c23be50`) |
+| **PATCH-149B0** | **CLOSED** (`c9ea345`) |
+| **PATCH-149B1a** | **CLOSED** (`c44a2ac` + `856f54b`) |
+| **PATCH-149B1b-i** | **CLOSED** (`80011ee` + `4c37205`, §23/§24) |
+| **PATCH-149B1b-ii** | **CLOSED** (`510aa8d`, §28) |
+| **PATCH-149B1b-iii** | **CLOSED** (`f841990` + `0985bb7`; reviews §29, scope amendment §30, closure §31) |
+| **PATCH-149B2** | **ELIGIBLE FOR GOVERNANCE** — unblocked by this closure. Must close **O4** (§28.4) and must not preserve the §22.4 temporary save-on-close lifecycle. **Not authorized and not started.** |
+| **PATCH-149C** | **BLOCKED on user reproduction** (§14.11) |
+| **PATCH-150** | **RESERVED and separate**; untouched |
+| **PATCH-152** | **NOT RESERVED** — unchanged |
+
+No implementation file was modified by this review. Nothing was pushed.
