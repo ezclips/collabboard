@@ -140,6 +140,15 @@ export type SaveCardData = {
   metadata: any;
 };
 
+// PATCH-149B2-i §32.3: the narrowest observable-result contract -- never a
+// throwing contract, since existing CardEditor/ClipartCardDraftModal callers
+// ignore the returned Promise and would surface as unhandled rejections.
+export type SaveCardResult =
+  | { status: 'saved' }
+  | { status: 'skipped-blank' }
+  | { status: 'deferred-placement' }
+  | { status: 'failed'; error: unknown };
+
 export type SaveImageData = {
   imageUrl: string;
   caption?: string;
@@ -970,8 +979,8 @@ export function usePadletSave(params: UsePadletSaveParams) {
   // ============================================================================
   // handleSaveCard - verbatim from CanvasClient.tsx lines 3901-3939
   // ============================================================================
-  const saveCard = useCallback(async (data: SaveCardData) => {
-    if (!canvasId || !padletToEdit) return;
+  const saveCard = useCallback(async (data: SaveCardData): Promise<SaveCardResult> => {
+    if (!canvasId || !padletToEdit) return { status: 'failed', error: new Error('No active canvas or target padlet') };
 
     try {
       let createdPadlet: any = null;
@@ -995,7 +1004,7 @@ export function usePadletSave(params: UsePadletSaveParams) {
         ) {
           setIsCardEditorOpen(false);
           setPadletToEdit(null);
-          return;
+          return { status: 'skipped-blank' };
         }
 
         // For freeform layout: place directly on canvas
@@ -1006,7 +1015,7 @@ export function usePadletSave(params: UsePadletSaveParams) {
             { kind: 'card', content: data.content, title: data.title, metadata: data.metadata },
             () => { setIsCardEditorOpen(false); setPadletToEdit(null); }
           )) {
-            return;
+            return { status: 'deferred-placement' };
           }
         }
 
@@ -1078,8 +1087,10 @@ export function usePadletSave(params: UsePadletSaveParams) {
             : p
         ));
       }
+      return { status: 'saved' };
     } catch (e) {
       console.error('Failed to save card:', e);
+      return { status: 'failed', error: e };
     }
   }, [
     canvasId,

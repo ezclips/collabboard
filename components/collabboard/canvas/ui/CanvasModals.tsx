@@ -25,7 +25,7 @@ import AIComponentEditor from '@/components/collabboard/editors/AIComponentEdito
 import AIContentEditModal from '@/components/ai/editors/AIContentEditModal';
 import AIContentConvertModal from '@/components/ai/editors/AIContentConvertModal';
 import type { DiagramData, StoredAIContent } from '@/lib/ai/contracts';
-import { SaveAIComponentData } from '@/hooks/canvas/usePadletSave';
+import { SaveAIComponentData, SaveCardData, SaveCardResult } from '@/hooks/canvas/usePadletSave';
 import {
   extractAIContentFromPadletMetadata,
   normalizeAIContent,
@@ -83,7 +83,7 @@ export interface CanvasModalsProps {
   saveImage: (...args: any[]) => any;
   saveDrawing: (...args: any[]) => any;
   saveAIComponent: (data: SaveAIComponentData) => void;
-  saveCard: (...args: any[]) => any;
+  saveCard: (data: SaveCardData) => Promise<SaveCardResult>;
 
   // Container-specific callbacks
   closeAllToolbars: (except?: Record<string, boolean>) => void;

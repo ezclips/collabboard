@@ -54,12 +54,13 @@ describe('DocumentEditor read-only (PATCH-149B1b-i)', () => {
     expect(c2.innerHTML).toContain('data-comment-id="c1"');
   });
 
-  it('renders no toolbar and no description input', () => {
+  it('renders no toolbar, no description input, and no Save control (PATCH-149B2-i 12)', () => {
     const container = mount(
       <DocumentEditor isOpen readOnly title="" initialContent="<p>x</p>" metadata={{}} onSave={vi.fn()} onClose={vi.fn()} />,
     );
     expect(container.querySelector('button[title*="Bold"]')).toBeNull();
     expect(container.querySelector('input[placeholder="Add a description..."]')).toBeNull();
+    expect(container.querySelector('button[aria-label="Save document"]')).toBeNull();
   });
 
   it('the editor is genuinely non-editable', () => {
