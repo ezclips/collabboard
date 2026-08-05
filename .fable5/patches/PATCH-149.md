@@ -4894,3 +4894,202 @@ does not close because three governed negative controls do not hold and the body
 | **PATCH-152** | **NOT RESERVED** — unchanged |
 
 No implementation file was modified by this review. Nothing was pushed.
+
+---
+
+## 30. PATCH-149B1b-iii — CORRECTIVE SCOPE AMENDMENT · **F4 REQUIRES TWO FILES**
+
+**Authored:** 2026-08-05 (governance architect), on an implementation hard stop. **Base:** `e8729c7`.
+No production or test file was modified in this turn.
+
+### 30.1 Hard-stop report — **CORRECT, and the fault is governance's**
+
+The correction engineer stopped with **B — HARD STOP, GOVERNANCE AMENDMENT REQUIRED** before
+touching any file, and returned a clean worktree. The stop is **upheld**: §29.18's one-file
+authorization was unsatisfiable, and the engineer was right not to spill into a second file to make
+it work.
+
+Re-verified at `e8729c7`:
+
+- `DocumentCardContentProps` (`DocumentCardContent.tsx:5-13`) is exactly
+  `{ content?: string; onRead?: () => void; className?: string }`. **No post, no metadata, no colour
+  of any kind reaches this component.**
+- Only **two** production call sites exist. `PostCardContent.tsx:915` is the sole one that passes
+  `content`, i.e. the only site that renders a body:
+  `<DocumentCardContent content={DOMPurify.sanitize(decodeHtmlEntities(rawContent || ""))} onRead={onOpenDocument} />`.
+  `CardPreview.tsx:192` passes `onRead` and `className` only — its Document branch is icon, title
+  and word-counter, with **no body text at all**.
+- Therefore F4 is unreachable from inside `DocumentCardContent.tsx`. Honouring
+  `metadata.textColor` requires a value to arrive, and the only place a real value can originate is
+  the `PostCardContent` delegation site.
+
+**§29.18 correction #1 was mis-worded and is hereby corrected.** It read "Restore
+`color: padlet.metadata?.textColor || '#1F2937'` to `DocumentCardContent`'s body style", which
+presumes `padlet` is in scope in that file. It is not, and never was — §27.4 deliberately kept the
+component post-free. The defect finding in §29.6 stands unchanged and fully verified; only the
+prescribed remedy was wrong. Recorded in the same spirit as §28.10's C5 strike, so the mistaken
+census is not repeated.
+
+**No implementer error occurred.** Nothing was implemented, nothing was amended, nothing was pushed.
+
+### 30.2 Corrective production allowlist — **11 → 13 files stands (§29.2); the *correction* uses two**
+
+The B1b-iii **implementation** allowlist remains the 13 files amended in §29.2. This section
+authorizes only the **corrective delta** on top of `f841990`, which may touch exactly these two:
+
+| # | Path | Corrective change | Max delta |
+|---|---|---|---|
+| 1 | `components/collabboard/DocumentCardContent.tsx` | accept `textColor` and apply it to the body style | **≤8 changed lines** |
+| 2 | `components/collabboard/PostCardContent.tsx` | pass `textColor` at the **existing** delegation site only | **≤4 changed lines** |
+
+**Maximum corrective production total: ≤12 changed lines across two files.**
+
+`DocumentCardContent.tsx` is 53 lines against §27.5's ≤70 file cap; the ≤8 delta fits without
+touching that cap. `PostCardContent.tsx` remains over the 800-line ceiling, so its ≤4 delta is a
+**prop pass-through at the existing call site and nothing else** — no new branch, no new logic, no
+second delegation.
+
+**No other production file may change.** Specifically unchanged: `CardPreview.tsx` ·
+`FreeformPadletCards.tsx` · `CanvasClient.tsx` · `ColumnsLayout.tsx` · `ColumnsCanvasRow.tsx` ·
+`RowLane.tsx` · `RowCanvasDnD.tsx` · `WallCanvas.tsx` · `DrawingLayout.tsx` · `PostPopup.tsx` ·
+`MapCanvas.tsx` · `DocumentEditor.tsx` and both its test files · `documentModalRoute.ts` ·
+`documentPost.ts` · `NoteEditor.tsx` · `usePadletSave.ts` · `CanvasModals.tsx` · package files ·
+schema · `.fable5`.
+
+### 30.3 Test allowlist — **unchanged from §29**
+
+| Path | Cap |
+|---|---|
+| `components/collabboard/DocumentCardContent.test.tsx` | — |
+| `lib/domain/canvas/documentAffordance.source.test.ts` | — |
+
+**Aggregate test cap remains ≤290 changed lines** (currently 254: 140 + 114). **No third test file.**
+
+### 30.4 `textColor` prop contract
+
+`DocumentCardContent.tsx` gains:
+
+```
+textColor?: string | null;
+```
+
+applied as `textColor || '#1F2937'` — the incumbent-equivalent expression from
+`PostCardContent`'s TEXT/DEFAULT branch (`:937`). The runtime shape on `Padlet['metadata']` is
+`textColor?: string` (`types/collabboard.ts:152`, `:159`); `| null` is permitted tolerance for
+null-bearing metadata records and costs nothing.
+
+`PostCardContent.tsx` passes exactly `textColor={padlet.metadata?.textColor}` at its existing
+`<DocumentCardContent>` delegation, and nowhere else.
+
+**Required behaviour:**
+
+- an explicitly supplied `metadata.textColor` is applied to the interactive Document body;
+- missing, `null` or empty `textColor` falls back to **`#1F2937`**;
+- handler presence changes **only** whether Read appears — never body fidelity;
+- the sanitiser (`DOMPurify.sanitize(decodeHtmlEntities(...))`) is unchanged;
+- body typography, `WebkitLineClamp: 12`, overflow rules and both wrapper `div`s are unchanged;
+- the Read button's markup, `aria-label`, `type`, click semantics and styling are unchanged;
+- passive / TEXT-DEFAULT rendering in `PostCardContent` is unchanged;
+- **`CardPreview` remains button-only and does not pass `textColor`** — it renders no body, so
+  there is nothing to colour. Passing it there would be scope growth and is a false-green
+  condition (§30.7).
+
+**The prop is presentation-only.** It must not mutate metadata, inspect capability, inspect post
+type, inspect `svgUrl`, add persistence, or introduce a new colour model. Colour handling stays in
+exactly one place: the shared component, fed by the one owner that renders a body.
+
+### 30.5 T1–T4 remain required, unchanged
+
+The amendment resolves the F4 mechanism only. **All four test protections from §29.18 remain
+mandatory and blocking**, and B1b-iii does not close until each is load-bearing:
+
+**T1 — owner capability-blindness.** Prove the Read handler is supplied to read-only users at the
+**actual owners** (`FreeformPadletCards`'s local handler and `CanvasClient`'s
+`openDocumentFromPreview`), not merely inside a component harness that hands `onRead` in by hand.
+The test must fail when an owner is changed to supply the handler only for
+`destination === 'document-editor'`. This is §27.3's central product contract and it is currently
+undefended (§29.14 NC3a/NC3b).
+
+**T2 — selected-document assignment.** A scoped slice of `openDocumentFromPreview`'s body must
+require **both** `setPadletToEdit(post)` **and** `setDocumentModalDestination(destination)`. Whole-file
+occurrence counts are forbidden. The existing Freeform-specific `setPadletToEdit(padlet)` proof is
+retained, not replaced. Load-bearing because `CanvasModals:152-154` keys the Document modal on
+`padletToEdit?.id` (§29.14 NC8b).
+
+**T3 — shared delegation.** A scoped slice of `CardPreview`'s Document branch must require
+`DocumentCardContent` **and** reject a byte-faithful inline duplicate. Asserting that the string
+`DocumentCardContent` appears somewhere in the file is insufficient (§29.14 NC9).
+
+**T4 — interactive body fidelity.** Behavioural, real-DOM, with **both** `content` and `onRead`
+supplied: explicit `textColor` honoured; absent `textColor` yields `#1F2937`; body visible; Read
+button present; sanitiser and text rendering unchanged. **Source-string inspection of the rendered
+colour is not acceptable proof** (§30.7).
+
+Recommended but not blocking, carried from §29.13: an **A-10** assertion that the presentation and
+container-editor call sites supply no handler.
+
+### 30.6 Induced failures and negative controls
+
+**Induced failure — demonstrable at `f841990`:**
+
+1. an explicit `metadata.textColor` is dropped from the interactive Document body;
+2. neither the `textColor` prop nor the call-site pass-through exists;
+3. T1, T2 and T3's protections are absent or insufficient — each of the three governed
+   perturbations ships green (independently reproduced in §29.14).
+
+**Negative controls — nine, each detected and reverted byte-identically:**
+
+1. omit `textColor` at the `PostCardContent` call site → T4 explicit-colour test fails;
+2. ignore the supplied `textColor` inside `DocumentCardContent` → T4 explicit-colour test fails;
+3. force the `#1F2937` fallback even when an explicit colour is supplied → T4 explicit-colour test
+   fails (this control is what proves the value is genuinely plumbed and not hard-coded);
+4. gate the Read handler on `destination === 'document-editor'` at an owner → T1 fails;
+5. remove `setPadletToEdit(post)` from `openDocumentFromPreview` → T2 fails;
+6. replace `CardPreview`'s delegation with a faithful inline duplicate → T3 fails;
+7. remove `onRead` while retaining body → Read-presence assertion fails;
+8. remove body content while retaining `onRead` → body assertion fails;
+9. add a local `svgUrl` / clipart discriminator to `DocumentCardContent` → the existing
+   no-second-discriminator test fails.
+
+Controls 2 and 3 are **not** redundant: 2 proves the prop is read, 3 proves the incumbent
+expression is `textColor || '#1F2937'` and not a constant.
+
+### 30.7 False-green rejection
+
+Reject the correction if:
+
+- `textColor` is hard-coded, or defaulted in a way that never accepts the real value;
+- `PostCardContent.tsx` is left outside the corrective allowlist and F4 is "solved" some other way;
+- the full post or the whole `metadata` object is passed into `DocumentCardContent` — the prop must
+  be the narrowest presentation value, not a post handle;
+- `CardPreview.tsx` is modified for F4;
+- colour handling appears in more than one owner;
+- the rendered colour is proven only by inspecting source strings rather than the real DOM;
+- any of T1, T2 or T3 remains undefended;
+- routing semantics, B2 lifecycle, persistence, clipart or PDF behaviour changes;
+- corrective production exceeds ≤12 lines or two files, or tests exceed ≤290 lines or two files.
+
+### 30.8 Status
+
+| Item | Value |
+|---|---|
+| **Corrective production allowlist** | **2 files** — `DocumentCardContent.tsx` (≤8), `PostCardContent.tsx` (≤4) |
+| **Corrective production cap** | **≤12 changed lines** |
+| **Test allowlist** | 2 files, unchanged from §29 |
+| **Test cap** | **≤290 changed lines** (254 used) |
+| **T1–T4** | **all four remain required and blocking** |
+
+| Patch | Status |
+|---|---|
+| **PATCH-149A** | **CLOSED** (`c23be50`) |
+| **PATCH-149B0** | **CLOSED** (`c9ea345`) |
+| **PATCH-149B1a** | **CLOSED** (`c44a2ac` + `856f54b`) |
+| **PATCH-149B1b-i** | **CLOSED** (`80011ee` + `4c37205`, §23/§24) |
+| **PATCH-149B1b-ii** | **CLOSED** (`510aa8d`, §28) |
+| **PATCH-149B1b-iii** | **OPEN · CORRECTION AUTHORIZED AND UNBLOCKED** — implemented at `f841990`; review §29; corrective scope amended here; F4 + T1–T4 outstanding |
+| **PATCH-149B2** | **BLOCKED — B1b-iii has not closed**; must also close O4 (§28.4) |
+| **PATCH-149C** | **BLOCKED on user reproduction** (§14.11) |
+| **PATCH-150** | **RESERVED and separate**; untouched |
+| **PATCH-152** | **NOT RESERVED** — unchanged |
+
+No production or test file was modified in this turn. Nothing was pushed.
