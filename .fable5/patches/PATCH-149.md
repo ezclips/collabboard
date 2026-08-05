@@ -7099,3 +7099,100 @@ exposes the Read affordance whether or not its preview overflows.**
 
 No production or test file was modified in this investigation. The reproduction probe was run from a
 collected path and deleted. Nothing was pushed.
+
+## §39 PATCH-149C — amendment: DrawingLayout forwarding scope (cap correction)
+
+Amended at `231f0e4`. **No implementation occurred in this section.** Role: governance
+architect, cap amendment only.
+
+### 39.1 Measurement gap in §38.4 row 6
+
+§38.4 row 6 assumed `DrawingLayout.tsx` forwards `onOpenDocument` in one hop, directly from
+the component that owns it to `RowColumnContainerCard`, matching the shape of rows 4, 5 and 7.
+The implementation engineer traced the live file before writing any code and found an
+additional module-level indirection §38 did not anticipate:
+
+```
+DrawingEmbeddableCard   (owns onOpenDocument, destructured in its own props)
+  → AutoHeightContainer  (separate module-level component; own AutoHeightContainerProps;
+                           no closure access to DrawingEmbeddableCard's props)
+    → RowColumnContainerCard
+```
+
+`AutoHeightContainer` is the file's **only** call site of `RowColumnContainerCard` (confirmed
+by grep — one match). A type-safe fix must thread the callback through it as an explicit new
+prop:
+
+1. `AutoHeightContainerProps`: add `onOpenDocument?: (post: Padlet) => void;` — insertion.
+2. `AutoHeightContainer`'s destructuring signature: add `onOpenDocument` — a modified existing
+   line (deletion + insertion under this patch's counting convention).
+3. `AutoHeightContainer`'s own `<RowColumnContainerCard>` call: add
+   `onOpenDocument={onOpenDocument}` — insertion.
+4. `DrawingEmbeddableCard`'s `<AutoHeightContainer>` call site: add
+   `onOpenDocument={onOpenDocument}` — insertion.
+
+Measured cost: **5 changed lines**, against the §38.4 cap of **≤3** — a 2-line shortfall.
+Rejected alternatives: an `any`-cast (violates the repo's no-`any` rule), a shared spread
+object (none exists at either call site), an intersection type (costs more lines, not fewer).
+No second, cheaper container-render branch exists in the file. Zero production files were
+edited to reach this conclusion; the engineer hard-stopped per this patch's standing rule that
+a cap shortfall discovered mid-implementation is reported, never silently absorbed.
+
+### 39.2 Other six files — re-confirmed sufficient, unchanged
+
+Independently re-measured by the implementation engineer against the exact same live code; all
+fit inside their existing §38.4 caps with room to spare:
+
+| File | Required | Cap (unchanged) |
+|---|---|---|
+| `RowColumnContainerCard.tsx` | 3 | ≤10 |
+| `PostCardContent.tsx` | 1 | ≤5 |
+| `WallCanvas.tsx` | 3 | ≤4 |
+| `ColumnsCanvasRow.tsx` | 1 | ≤3 |
+| `RowLane.tsx` | 1 | ≤3 |
+| `PostPopup.tsx` | 1 | ≤3 |
+
+No other §38.4 gap was found. This amendment touches **only** row 6 of the production table
+and the production aggregate.
+
+### 39.3 Amendment
+
+§38.4 row 6 and the production aggregate are amended:
+
+| # | Production file | Change | Max (was) | Max (amended) |
+|---|---|---|---|---|
+| 6 | `components/collabboard/canvas/layouts/DrawingLayout.tsx` | forward `onOpenDocument` from `DrawingEmbeddableCard` through `AutoHeightContainer` to `RowColumnContainerCard` | ~~≤3~~ | **≤8** |
+
+**Production aggregate: ~~≤31~~ → ≤36** (5 measured + 3 lines headroom, consistent with the
+margin already present in rows 4/5/7). No other row's cap changes; no cap is reduced to
+compensate.
+
+**Authorized `DrawingLayout.tsx` change, exactly:**
+- an optional callback field added to `AutoHeightContainerProps`;
+- that parameter added to `AutoHeightContainer`'s destructuring;
+- forwarding it into `AutoHeightContainer`'s existing `<RowColumnContainerCard>` call;
+- forwarding it from `DrawingEmbeddableCard` into its existing `<AutoHeightContainer>` call;
+- minimal formatting/whitespace incidental to those four edits.
+
+**Not authorized by this amendment:** any layout, sizing, measurement or embeddable-positioning
+change; any new callback creation or destination computation; any change to Document
+classification, capability logic, modal routing, clipart behaviour or PDF behaviour. Any file
+or change outside this list remains an immediate hard stop.
+
+Unchanged by this amendment: every other §38.4 production cap; the production allowlist; the
+§38.4 test allowlist and both test caps (≤90 / ≤25, aggregate ≤115); §38.5's eight required
+behavioural proof points; §38.6's eleven negative controls; the current Read contract (§38.7 —
+Read shows regardless of overflow, overflow-only remains a recorded, unauthorized product
+idea); PATCH-149B2's COMPLETE status; PATCH-150's RESERVED status.
+
+### 39.4 Status
+
+| Item | Status |
+|---|---|
+| **PATCH-149C** | **AUTHORIZED FOR CORRECTION · UNBLOCKED** — production ≤36 / 7 files (row 6 amended); tests ≤115 / 2 files (unchanged) |
+| **PATCH-149B2** | **COMPLETE** (§37), unaffected |
+| **Document Post lifecycle** | **COMPLETE**, with the PATCH-149C affordance correction still open |
+| **PATCH-150** | **RESERVED and separate**, unchanged |
+
+No implementation occurred in this section. No production or test file was modified. Nothing
+was pushed.
