@@ -7196,3 +7196,122 @@ idea); PATCH-149B2's COMPLETE status; PATCH-150's RESERVED status.
 
 No implementation occurred in this section. No production or test file was modified. Nothing
 was pushed.
+
+## §40 PATCH-149C — amendment: WallCanvas forwarding scope (cap correction)
+
+Amended at `4308598`. **No implementation occurred in this section.** Role: governance
+architect, cap amendment only. This is the same class of gap as §39, on the Wall side.
+
+### 40.1 Measurement gap in §38.4 row 3
+
+§38.4 row 3 assumed `WallCanvas.tsx` forwards `onOpenDocument` in one hop, directly from the
+component that receives it into `RowColumnContainerCard`. The implementation engineer traced
+the live render path and found an additional module-level indirection:
+
+```
+WallCanvas            (receives onOpenDocument from CanvasClient:6705)
+  → SortablePadletCard  (module-level React.FC; own SortablePadletProps;
+                          no closure access to WallCanvas's props)
+    → RowColumnContainerCard
+```
+
+Independently re-verified for this amendment:
+
+- `onOpenDocument` occurs **exactly once** in the whole file — line 55, the props-type
+  declaration bearing the stale "interface parity" comment. It is never destructured and never
+  used. This is the strongest available confirmation of §38.3's false-positive finding: the
+  B1b-iii assertion passed on that one comment-bearing line.
+- There is **exactly one** `<RowColumnContainerCard>` call site (line 186), and it lies inside
+  `SortablePadletCard` (lines 94–204), not inside `WallCanvas` (line 216+).
+- `SortablePadletCard` is Wall's **sole** container-card renderer and has exactly one call site
+  (line 695).
+
+A type-safe fix must thread the callback through it as an explicit new prop:
+
+1. `SortablePadletProps`: add `onOpenDocument?: (padlet: Padlet) => void;` — insertion.
+2. `SortablePadletCard`'s destructuring: add `onOpenDocument` — insertion.
+3. `SortablePadletCard`'s own `<RowColumnContainerCard>` call: forward it — insertion.
+4. `WallCanvas`'s `<SortablePadletCard>` call site: forward it — insertion.
+5. `WallCanvas`'s own destructuring: add `onOpenDocument` — insertion.
+6. Line 55's stale comment: correct it — a modified line (deletion + insertion).
+
+Re-derived cost: **6 insertions + 1 deletion = 7 changed lines**, against the §38.4 cap of
+**≤4** — a 3-line shortfall.
+
+This is not a cosmetic gap. Without steps 1–4, `onOpenDocument` is out of scope inside
+`SortablePadletCard` and the file does not compile (`TS2304`). The engineer confirmed the
+7-line version passes a full `tsc --noEmit` with zero project-wide errors.
+
+**Wall is not optional.** §38.2 records Wall as the worst-affected route — its top-level posts
+are always containers, so today **no** Document on Wall can ever show Read, and Wall is the
+likeliest source of the reported screenshot. Shipping the other six files without Wall would
+leave the reported defect live while presenting the correction as complete. A partial
+correction is **not authorized**; the engineer correctly reverted to zero net diff rather than
+ship one.
+
+### 40.2 Other six files — re-confirmed sufficient, unchanged
+
+| File | Required | Cap (unchanged) |
+|---|---|---|
+| `RowColumnContainerCard.tsx` | 3 | ≤10 |
+| `PostCardContent.tsx` | 1 | ≤5 |
+| `ColumnsCanvasRow.tsx` | 1 | ≤3 |
+| `RowLane.tsx` | 1 | ≤3 |
+| `DrawingLayout.tsx` | 5 | ≤8 (§39) |
+| `PostPopup.tsx` | 1 | ≤3 |
+
+**These figures are now measured by implementation, not estimated.** The engineer built the
+complete correction across all seven files, ran the focused suites, the full Vitest run and all
+eleven negative controls with hash-verified restoration before reverting. Every production cap
+in PATCH-149C is therefore backed by a real compiled diff. §40 is expected to be the **last**
+cap amendment for this patch; any further discrepancy would indicate a measurement failure and
+requires another hard stop rather than a third amendment.
+
+### 40.3 Amendment
+
+§38.4 row 3 and the production aggregate are amended:
+
+| # | Production file | Change | Max (was) | Max (amended) |
+|---|---|---|---|---|
+| 3 | `components/canvas/WallCanvas.tsx` | forward `onOpenDocument` from `WallCanvas` through `SortablePadletCard` to `RowColumnContainerCard`; correct the stale comment | ~~≤4~~ | **≤8** |
+
+**Production aggregate: ~~≤36~~ → ≤40** (7 measured + 1 line headroom). The amended per-file
+caps sum to exactly 40 — 10 + 5 + 8 + 3 + 3 + 8 + 3 — against 19 measured changed lines. No
+other row's cap changes; no cap is reduced to compensate.
+
+The ≤8 cap is deliberately tight because 7 is an **exact, compiled** figure rather than a
+static estimate. Exceeding it signals a divergence from the verified diff and is an immediate
+hard stop.
+
+**Authorized `WallCanvas.tsx` change, exactly:**
+- an optional callback field added to `SortablePadletProps`;
+- that parameter added to `SortablePadletCard`'s destructuring;
+- forwarding it into `SortablePadletCard`'s existing `<RowColumnContainerCard>` call;
+- forwarding it from `WallCanvas` into its existing `<SortablePadletCard>` call;
+- the callback destructured in `WallCanvas`'s own signature;
+- a minimal correction to the stale line-55 comment;
+- minimal formatting/whitespace incidental to those edits.
+
+**Not authorized by this amendment:** any change to sorting, drag-and-drop, Wall layout, card
+sizing or positioning; any new callback creation or destination computation; any change to
+Document classification, capability logic, modal routing, clipart behaviour or PDF behaviour.
+Any file or change outside this list remains an immediate hard stop.
+
+Unchanged by this amendment: every other §38.4 production cap (including §39's `DrawingLayout`
+≤8); the production allowlist; the §38.4 test allowlist and both test caps (≤90 / ≤25,
+aggregate ≤115) — measured at ~86–87 and ~18–19 respectively and confirmed sufficient; §38.5's
+eight required behavioural proof points; §38.6's eleven negative controls; the current Read
+contract (§38.7 — Read shows regardless of overflow, overflow-only remains a recorded,
+unauthorized product idea); PATCH-149B2's COMPLETE status; PATCH-150's RESERVED status.
+
+### 40.4 Status
+
+| Item | Status |
+|---|---|
+| **PATCH-149C** | **AUTHORIZED FOR CORRECTION · UNBLOCKED** — production ≤40 / 7 files (rows 3 and 6 amended); tests ≤115 / 2 files (unchanged) |
+| **PATCH-149B2** | **COMPLETE** (§37), unaffected |
+| **Document Post lifecycle** | **COMPLETE**, with the PATCH-149C Read-affordance correction still open |
+| **PATCH-150** | **RESERVED and separate**, unchanged |
+
+No implementation occurred in this section. No production or test file was modified. Nothing
+was pushed.
