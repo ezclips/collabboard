@@ -6940,3 +6940,162 @@ negative controls were genuinely applied and detected.
 
 PATCH-149C and PATCH-150 are **not** started by this review. No implementation file was modified;
 all perturbations were hash-verified restored; review scratch files were deleted. Nothing was pushed.
+
+## §38 PATCH-149C — REPRODUCED: missing Read affordance on container-nested Documents
+
+Investigated at `4367523`. **Classification A — REPRODUCED, MISSING READ RENDER** (10-point scale:
+**1 — the Read affordance is not rendered**). No production file was modified.
+
+### 38.1 Reproduction — runtime DOM evidence, not a source-only conclusion
+
+A throwaway jsdom probe rendered the **real** `PostCardContent` and queried the live DOM for
+`button[aria-label="Read document"]`:
+
+| Case | Read button in DOM | Content rendered |
+|---|---|---|
+| A — top-level Document **with** `onOpenDocument` | **PRESENT** (`textContent` = "Read") | yes |
+| B — top-level Document **without** `onOpenDocument` | ABSENT (presence-gated by design) | yes |
+| C — **Document nested in a container** | **ABSENT** | **yes** — "line one" visible, 1 `.tiptap` preview node, container title "New Container" rendered |
+
+Case C reproduces the screenshot exactly: a card titled **"New Container"**, Document content
+rendering as formatted preview, and **no Read button**. The probe was deleted; it is in no commit.
+
+This rules out options 2, 3, 4 and 9 outright: the button is not hidden, clipped, covered or
+substituted — **it never enters the DOM**. It also rules out 5 and 6: `isDocumentPost(child)` is
+`true` and capability/destination logic is never consulted, because the render condition fails
+first. Option 10 is rejected: B1b-iii's contract is a visible Read affordance for qualifying
+Documents, and this Document qualifies.
+
+### 38.2 Ownership trace and root cause
+
+```
+post data (child card, type 'card', no svgUrl)
+  → isDocumentPost(child) = TRUE
+  → but the container render path never supplies onOpenDocument
+  → PostCardContent:912  `isDocumentPost(padlet) && onOpenDocument`  = FALSE
+  → falls through to the TEXT/DEFAULT branch (same `prose prose-sm tiptap` styling)
+  → content renders, DocumentCardContent is never mounted, no Read button, no click handler
+```
+
+Two sibling render sites drop the callback:
+
+1. **`RowColumnContainerCard.tsx:407`** — the shared container card. `grep onOpenDocument` returns
+   **zero** matches: the component **does not even accept the prop**, so it structurally cannot pass
+   it to its children. It is rendered by **every** live layout — Wall (`:186`), Columns
+   (`ColumnsCanvasRow:387`), Rows (`RowLane:453`), Freeform (`FreeformPadletCards:3623`), Drawing
+   (`DrawingLayout:79`), Map (`PostPopup:159`), ChronoTimeline (`:563`) and `CanvasClient:7735`.
+2. **`PostCardContent.tsx:859`** — its own container-children recursion re-renders each child with
+   `<PostCardContent …/>` and omits `onOpenDocument` from the forwarded props.
+
+**Consequence:** a Document Post nested inside a container has **no Read affordance in any layout**.
+Wall is worst-affected: `WallCanvas.tsx:55`'s own comment records that "Wall's top-level posts are
+always containers", so on Wall **no Document can ever show Read**.
+
+`WallCanvas` already **receives** `onOpenDocument={openDocumentFromPreview}` from
+`CanvasClient:6705` (one of the five wired owners, alongside `ColumnsLayout`, `RowCanvasDnD`,
+`DrawingLayout`, `MapCanvas`) — it simply never forwards it. So most of the fix is forwarding an
+already-available callback, not new plumbing.
+
+### 38.3 B1b-iii test gap — the exact miss
+
+`documentAffordance.source.test.ts` proves **source presence only**, never rendered visibility, and
+its `OWNER_FILES` list covers **top-level owners exclusively**. Three specific weaknesses:
+
+- **No test renders anything.** Every assertion is a string match on file contents, so a component
+  that never mounts `DocumentCardContent` still passes.
+- **Container nesting is untested.** Neither `PostCardContent`'s container recursion nor
+  `RowColumnContainerCard` appears in any B1b-iii assertion.
+- **`WallCanvas` is a live false positive.** `expect(read(f)).toContain('onOpenDocument')` passes on
+  the **prop-type declaration comment at line 55** — the only occurrence in the file — while no live
+  card receives it. The test proves a comment exists.
+
+**The exact missing test:** a rendered-visibility test that mounts a container holding a Document
+child and asserts `button[aria-label="Read document"]` is present in the DOM. That single test would
+have failed at B1b-iii and would fail today.
+
+### 38.4 Correction authorization — narrow, smallest complete fix
+
+Thread the existing callback through the two container paths. **No new predicate, no capability
+logic, no routing change** — `DocumentCardContent`, `documentPost.ts`, `documentModalRoute.ts` and
+all B2 lifecycle code stay untouched.
+
+| # | Production file | Change | Max |
+|---|---|---|---|
+| 1 | `components/collabboard/RowColumnContainerCard.tsx` | accept `onOpenDocument?: (post: Padlet) => void`; forward per child as `onOpenDocument={onOpenDocument ? () => onOpenDocument(child) : undefined}` | **≤10** |
+| 2 | `components/collabboard/PostCardContent.tsx` | forward `onOpenDocument` in the container-children recursion (`:859`) only | **≤5** |
+| 3 | `components/canvas/WallCanvas.tsx` | forward the received prop to `RowColumnContainerCard`; delete the stale "interface parity" comment | **≤4** |
+| 4 | `components/canvas/layouts/ColumnsCanvasRow.tsx` | forward to `RowColumnContainerCard` | **≤3** |
+| 5 | `components/collabboard/row/RowLane.tsx` | forward to `RowColumnContainerCard` | **≤3** |
+| 6 | `components/collabboard/canvas/layouts/DrawingLayout.tsx` | forward to `RowColumnContainerCard` | **≤3** |
+| 7 | `components/map/PostPopup.tsx` | forward to `RowColumnContainerCard` | **≤3** |
+
+**Production ≤31 / 7 files.** `PostCardContent.tsx` and `WallCanvas.tsx` are near/over the file
+ceiling and are capped at threading only — no new rendering or business logic.
+
+**Not authorized in this correction** (recorded, with reasons): `FreeformPadletCards.tsx` and
+`ChronoTimelineCanvas.tsx` have **zero** `onOpenDocument` occurrences — Freeform routes its Read
+affordance through `CardPreview`/`requestOpenDocument` instead, so its container path needs a
+separate wiring decision; ChronoTimeline has no Document route wired at all. `CanvasClient:7735`
+(scheduler popover) is likewise deferred. An implementer who finds any of these is a **live** Read
+route must **hard-stop** with `B` rather than widen scope.
+
+| # | Test file | Change | Max |
+|---|---|---|---|
+| 1 | `components/collabboard/documentReadAffordance.behavior.test.tsx` (**new**, jsdom) | rendered-visibility proof | **≤90** |
+| 2 | `lib/domain/canvas/documentAffordance.source.test.ts` | close the `WallCanvas` false positive: assert **forwarding**, not mere presence | **≤25** |
+
+**Tests ≤115 / 2 files.** The path in row 1 is inside `components/collabboard/*.test.tsx`, which the
+existing `vitest.config.ts` collects — **`vitest.config.ts` must not be edited** (§36.1).
+
+### 38.5 Required behavioural tests — rendered visibility, not source text
+
+Mounting real components and querying the DOM. **A source-text assertion may not substitute.**
+
+1. Document nested in a container → `button[aria-label="Read document"]` **is present**.
+2. Clicking it invokes the callback **exactly once** with the **child** post (not the container).
+3. Top-level Document → still present (B1b-iii non-regression).
+4. Clipart child (`metadata.svgUrl`) inside a container → **absent** (clipart unchanged).
+5. Non-Document children (note/todo/link) → **absent**.
+6. No `onOpenDocument` supplied → **absent** (presence-gating preserved).
+7. Read-only and editable capability both render the affordance — destination differs, visibility
+   does not (the callback owner decides viewer vs editor; the card never inspects capability).
+8. Coverage through the shared container card for the layouts fixed in §38.4.
+
+### 38.6 Negative controls — each must be detected
+
+1. Remove the forward in `RowColumnContainerCard` → container-nesting test fails.
+2. Remove the forward in `PostCardContent`'s recursion → nesting test fails.
+3. Remove any one layout owner's forward → that layout's case fails.
+4. Pass the **container** instead of the child to the callback → wrong-target test fails.
+5. Gate the affordance on capability inside the card → read-only case fails.
+6. Render Read for a clipart child → clipart control fails.
+7. Render Read with no callback supplied → presence-gating control fails.
+8. Revert to the source-presence-only `WallCanvas` assertion → the forwarding assertion fails.
+9. Any change to Document modal routing/destination → B1b-ii routing tests fail.
+10. Any change to B2 switching/save lifecycle → B2 suites fail.
+11. Add a PDF branch → scope guard fails.
+
+Restore every perturbation byte-identically with hash verification. Regression contract: no change
+to Document modal routing, B2-i/B2-ii lifecycle, clipart behaviour, persistence, PDF or schema.
+
+### 38.7 Overflow-only Read — a separate product decision, NOT authorized here
+
+Recorded so it cannot be merged in by implication. The user has proposed hiding Read when content
+fits and showing it only when the preview visually overflows. **That is a product change, not part
+of this bug**, and §38.4 must not implement it. If a product owner later authorizes it, it needs its
+own governance covering: measuring real DOM overflow (`scrollHeight` vs `clientHeight`) rather than
+text length; `ResizeObserver` updates on card resize; keyboard accessibility when the control is
+conditional; and preserved modal routing. The current contract remains: **a qualifying Document Post
+exposes the Read affordance whether or not its preview overflows.**
+
+### 38.8 Status
+
+| Item | Status |
+|---|---|
+| **PATCH-149B2** | **COMPLETE** (§37), unaffected by this defect — routing and lifecycle are correct; only the affordance's prop threading is missing |
+| **PATCH-149C** | **REPRODUCED (A) · CORRECTION AUTHORIZED** — production ≤31 / 7 files; tests ≤115 / 2 files; no longer blocked on reproduction |
+| **Overflow-only Read** | **RECORDED AS A SEPARATE PRODUCT DECISION**, not authorized |
+| **PATCH-150** | **RESERVED and separate**, unchanged |
+
+No production or test file was modified in this investigation. The reproduction probe was run from a
+collected path and deleted. Nothing was pushed.
