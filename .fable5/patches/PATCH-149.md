@@ -4496,3 +4496,401 @@ correction, and recorded context.
 | **PATCH-152** | **NOT RESERVED** — unchanged |
 
 No implementation file was modified by this review. Nothing was pushed.
+
+---
+
+## 29. PATCH-149B1b-iii — INDEPENDENT CLOSURE REVIEW · **CLASSIFICATION 4 · CORRECTION REQUIRED**
+
+**Reviewed:** 2026-08-05 (independent closure reviewer). **Implementation commit:** `f841990`
+`feat(document): add read affordance to document previews`. **Parent:** `cd791bf`.
+Every figure below was re-measured or re-executed in this review; nothing is taken from the
+implementer's report.
+
+**The production implementation is correct on every product-contract dimension this review could
+test.** It does not close, for two independent reasons: **three governed negative controls do not
+hold** (§29.14) and **the Document body loses `metadata.textColor` on the interactive path**
+(§29.6), a measurable deviation from §27.4's "exactly as `PostCardContent:915-931` does today".
+Both corrections are small and neither requires re-architecture.
+
+### 29.1 Source scope — **EXACT (15 files), one census correction**
+
+`git show --numstat f841990` — 15 files, **367 insertions / 5 deletions**, matching the report.
+
+Verified absent from the commit: any `.fable5` file · `DocumentEditor.tsx` and both its test files ·
+`documentModalRoute.ts` · `documentPost.ts` · `NoteEditor.tsx` · `hooks/canvas/usePadletSave.ts` ·
+`CanvasModals.tsx` · `package.json` / `package-lock.json` · schema/migrations · any PDF code · any
+B2 lifecycle code. Each confirmed byte-unchanged against `cd791bf` by direct diff, not by assertion.
+No modal-routing semantic change: `CanvasModals:152-163` — the keyed remount, `isOpen`, `readOnly`
+and the `noopDocumentSave` split — is byte-identical to B1b-ii.
+
+Every production file contains **only** shared affordance rendering, Document delegation, callback
+threading or invocation of the existing B1b-ii route. No role check, no persistence call, no modal
+state and no new predicate appears in any visual owner.
+
+**Census correction:** the report states **114** production changed lines. Measured: **113
+insertions + 5 deletions = 118** changed production lines (tests are 254, as reported). Both figures
+sit far inside the ≤198 aggregate cap, so nothing turns on it, but the recorded number is 118.
+
+### 29.2 Production-scope amendment — **VALIDATED, classification A**
+
+Both extra files are genuine live render boundaries, and both were traced before being accepted.
+
+**`components/canvas/layouts/ColumnsCanvasRow.tsx` — REQUIRED.** `ColumnsLayout.tsx`'s own single
+`<PostCardContent>` (`:495`) is inside `<DragOverlay>` and is `pointer-events-none` — a drag ghost,
+which must **not** carry the affordance and correctly does not. The live column card renders at
+`ColumnsCanvasRow:449`. Without this file the handler reaches nothing in Columns. Change is 4 lines:
+interface field, destructure, and the `<PostCardContent onOpenDocument={...}>` wiring.
+
+**`components/map/MapCanvas.tsx` — REQUIRED.** `MapCanvas:796` is the only renderer of `<PostPopup>`;
+`PostPopup` cannot receive a handler any other way. Change is 3 lines, pass-through only.
+
+Neither file gained logic beyond threading. §27.5's abbreviated names were a governance census
+error, not implementer scope growth — the same class as §28.10's C5 correction.
+
+**Retrospective amendment to §27.5, effective now:**
+
+| # | Path | Change | Actual | Amended max |
+|---|---|---|---|---|
+| 12 | `components/canvas/layouts/ColumnsCanvasRow.tsx` | thread handler to the live column card | 4 | **≤6** |
+| 13 | `components/map/MapCanvas.tsx` | pass handler to `PostPopup` | 3 | **≤5** |
+| 9 | `components/collabboard/canvas/layouts/DrawingLayout.tsx` | thread handler | 9 | **≤8 → ≤9** |
+
+**B1b-iii production allowlist: 11 → 13 files. Aggregate cap ≤198 preserved and satisfied (118).**
+Classified as a census / render-owner correction. **No implementation correction is required on
+scope.**
+
+### 29.3 Drawing dependency line — **VALIDATED**
+
+`renderEmbeddable` (`DrawingLayout:2218-2253`) captures `onOpenDocument` in the `DrawingEmbeddableCard`
+it returns. `openDocumentFromPreview` is a plain function body in `CanvasClient` — **not** memoized —
+so it takes a new identity every render and closes over `canUseFreeformEditButton`. Omitting it from
+the dependency array would let Drawing route through a stale capability after any permission change:
+the wrong modal for the wrong user. The ninth line is neither formatting nor avoidable without
+reducing correctness. Context-menu routing is untouched — `CanvasContextMenu:172`'s
+`isContainerType && onEditPadletAsPost` guard is unchanged and slice-asserted. **Cap amended to ≤9.**
+
+Recorded, non-blocking: `DrawingLayout:811-813` already carries an idiom for exactly this problem —
+`onPadletEditRef`, commented "Ref so renderEmbeddable can call onPadletEdit without adding it to
+deps". Adding an unstable callback to the array instead defeats that memoization on every
+`CanvasClient` render. Correct, but a second idiom where the file already had one (P6).
+
+### 29.4 `DocumentCardContent` architecture — **sound**
+
+53 lines. Single shared visual implementation; both owners delegate to it. `content` supplied →
+body **and** button (`PostCardContent`); `content` omitted → button only, layered over
+`CardPreview`'s own preview. Opt-in strictly via `onRead`.
+
+Confirmed absent: capability logic, role checks, persistence, modal state, `isDocumentPost`,
+`svgUrl` / `isClipart` / any clipart discriminator, PDF behaviour. The source suite asserts the last
+two directly and both assertions were proven load-bearing (§29.14 NC10).
+
+The optional-`content` design does **not** create two inconsistent UI modes: the button markup,
+`aria-label`, `type` and click semantics are identical in both, and only the caller-supplied
+`className` differs (larger inset-x pill inside a card body; smaller bottom-right pill over a
+freeform preview). The one real inconsistency it does introduce is §29.6.
+
+### 29.5 Visual affordance and accessibility — **PASS**
+
+Real `<button type="button">`, visible label `Read`, accessible name `aria-label="Read document"`,
+natively keyboard-focusable, no `tabindex="-1"`. Visible without hover — the class list contains no
+`opacity-0`, unlike the two existing pencils at `CardPreview:139` and `:150`, which are
+`opacity-0 group-hover:opacity-100`. Semi-transparent `bg-black/40` deepening to `bg-black/60` on
+hover **and** `focus-visible`, plus a `focus-visible:outline-2 outline-white` ring.
+`pointer-events-auto` re-enables interaction on the button alone inside the
+`pointer-events-none select-none` preview.
+
+Preview content stays visible — the overlay is `absolute` at `bottom-2`, never replacing the body.
+Styling matches the existing house treatment (`ColumnsLayout:480`'s "Add section" control uses the
+same `bg-black/40 hover:bg-black/60` pair). Not confusable with a destructive or edit-only action:
+it is a labelled text button, while every edit affordance in these owners is an unlabelled `Edit2`
+pencil icon.
+
+### 29.6 Body fidelity — **FINDING, correction required**
+
+`PostCardContent`'s TEXT/DEFAULT branch (`:926-941`) renders the body with
+`color: padlet.metadata?.textColor || "#1F2937"`. `DocumentCardContent` reproduces the wrapper,
+classes, `WebkitLineClamp: 12`, overflow rules and the identical
+`DOMPurify.sanitize(decodeHtmlEntities(rawContent || ""))` pipeline — **but drops the `color`
+declaration.**
+
+§27.4 requires the new component render the body "exactly as `PostCardContent:915-931` does today";
+A-5 requires "sanitized and line-clamped exactly as before". It does not.
+
+Consequence: the same Document renders **with** its text colour in presentation, the container
+editor and any other handler-less surface (default branch) and **without** it in Columns, Rows,
+Drawing and Map (Document branch). Latent today — no card editor writes `metadata.textColor`
+(`CardEditor.tsx` and `DocumentEditor.tsx` never reference it; only `NoteEditor:626` does) — but it
+is a live divergence the moment a Document carries the field, and it is the kind of split that is
+very hard to attribute later.
+
+Undetected because **no test asserts the body at all on the handler-supplied path**: the only body
+assertion (`DocumentCardContent.test.tsx:62`) runs the *no-handler* case, which never reaches
+`DocumentCardContent`. **Fix: one line in `DocumentCardContent` plus one assertion.**
+
+### 29.7 Event handling — **PASS**
+
+Click invokes the handler exactly once and the parent `onClick` zero times
+(`DocumentCardContent.test.tsx:41-57`, proven load-bearing by NC6). The existing `onEditContent`
+pencil does not co-fire (`:82-89`, proven by NC5). Prevention is local: a single
+`e.stopPropagation()` inside the button's own `onClick`; no global handler, no capture-phase
+interception, no `preventDefault`. Keyboard activation is the browser default for a real `<button>`.
+
+**Pointer/mousedown propagation is deliberately not stopped, and this is correct in every live
+owner.** Freeform already calls `e.stopPropagation()` in the card wrapper's own `onMouseDown`
+(`FreeformPadletCards:1746-1749`) before any drag begins; Columns, Rows and Wall attach dnd-kit
+`listeners` to an ancestor wrapper, where a `mousedown` reaching the button would at most begin a
+drag the subsequent `click` still resolves; `PostPopup:64-73` stops `mousedown`/`pointerdown`
+wholesale for Mapbox. No reachable drag conflict was demonstrated — **non-blocking**.
+
+### 29.8 `PostCardContent` — **PASS**
+
+Clipart early-return remains first at `:898`; the AI branch remains at `:920`; the Document branch
+sits between them, gated `isDocumentPost(padlet) && onOpenDocument`, delegating only. Non-Documents
+and handler-less Documents fall through to the untouched TEXT/DEFAULT return. 12/12 lines, exactly
+at cap, no inline rendering. Note, todo, link, image and ai-component were each mounted **with** a
+handler and render no button.
+
+### 29.9 `CardPreview` / Freeform — **PASS, one latent note**
+
+`CardPreview`'s clipart branch returns at `:125`, before the overlay ever mounts. The shared
+component is rendered once; no duplicate overlay exists in the file. `onEditContent` and
+`onOpenToolbar` are unchanged, as is B1b-ii's destination selection inside `onEditContent`.
+Freeform builds the handler from `selectDocumentModalDestination(padlet, canUseFreeformEditButton)`
+and passes `undefined` when it returns `null` — no new predicate, no new state.
+
+The second `CardPreview` call site (`FreeformPadletCards:6063`, the card-toolbar preview) correctly
+receives no handler.
+
+Latent, non-blocking: `CardPreview` has **no local `isDocumentPost` gate** — it renders the overlay
+whenever a handler is supplied, delegating the Document decision entirely to the caller's route
+helper. Correct today because the one live caller gates properly, and it is what keeps the file free
+of a second predicate (§27.6 A-12) — but §27.4's "gated identically" is satisfied by the caller, not
+by the file.
+
+### 29.10 Columns · Rows · Wall · Drawing · Map — **all traced to the live renderer**
+
+| Layout | Chain re-traced | Result |
+|---|---|---|
+| Columns | `CanvasClient:6503` → `ColumnsLayout` → `ColumnsCanvasRow:449` → `PostCardContent` | live; complete `post` passed |
+| Rows | `CanvasClient:6597` → `RowCanvasDnD` → `RowLane:508` → `PostCardContent` | live; complete `post` passed |
+| Wall | `CanvasClient:6651` → `WallCanvas` | **no live target** — see below |
+| Drawing | `CanvasClient:6736` → `DrawingLayout` → `DrawingEmbeddableCard:665` → `PostCardContent` | live; complete `padlet` passed |
+| Map | `CanvasClient:6894` → `MapCanvas:796` → `PostPopup:177` → `PostCardContent` | live; complete `post` passed |
+
+Every wiring uses `onOpenDocument ? () => onOpenDocument(post) : undefined` — the complete post
+object, never a reconstruction, never an id-only projection. Drag, ordering, selection, popup close
+and context-menu behaviour are untouched in all five; the only diff lines are interface fields,
+destructures and the pass-through itself. The three `<PostCardContent>` renders inside `DragOverlay`
+(`ColumnsLayout:495`, `WallCanvas:735`, `RowCanvasDnD:395`) correctly receive no handler.
+
+**Wall — the implementer's report is accurate.** Verified independently and doubly:
+`CanvasClient:1344-1348` filters `wallOrderedPadlets` to `rootContainers` only, and
+`WallCanvas:154/201` renders `null` for any non-container. `WallCanvas`'s single changed line adds
+the prop to `WallCanvasProps` **and nothing else** — it is never destructured (`:216-231`) and never
+consumed. No false render path was fabricated and no dead UI was added; the interface is ready if a
+Document render path becomes live. **Non-blocking architecture observation, correctly disclosed.**
+
+Recorded: the source suite's `OWNER_FILES` loop asserts only that the string `onOpenDocument`
+*appears* in `WallCanvas.tsx`. It passes on a declaration that is never consumed, so for Wall it
+proves nothing about wiring. Harmless while Wall has no Document surface; it must not be mistaken
+for A-9 coverage there.
+
+### 29.11 `CanvasClient` — **PASS**
+
+One function, `openDocumentFromPreview` (`:5719-5727`), reusing B1b-ii's helper and both state
+setters. No duplicated `selectDocumentModalDestination`, no new modal state, no role inference, no
+selected-post state, no `DocumentEditor` or lifecycle change. Passed unchanged to all five
+interactive owners — `onOpenDocument={openDocumentFromPreview}` occurs **exactly 5 times**,
+independently re-counted. Capability stays explicit at this owner, exactly as §27.4 requires.
+
+### 29.12 Editable and read-only routes — **both PASS**
+
+Proven through the real `DocumentEditor` in a harness that mirrors `CanvasModals`' wiring, not
+through mocks.
+
+Editable: Read is visible, click passes the complete Document, `selectDocumentModalDestination`
+returns `document-editor`, the modal renders `readOnly={false}`, the title input
+(`placeholder="Untitled document"`) is present and the §22.4 temporary save-on-close lifecycle is
+untouched.
+
+Read-only: Read is visible — **the same button, from the same code path** — click passes the same
+complete Document, the helper returns `document-viewer`, the modal renders `readOnly={true}` with
+**no** title input, **no** description input, **no** toolbar, **no** Save control and no exposed
+command surface, and Close invokes the persistence callback **zero** times. `contenteditable="false"`
+is asserted **in addition to** command-surface absence, never alone (§22.16). Backdrop and the
+remaining read-only guarantees are carried by `DocumentEditor.readonly.test.tsx` 6/6, re-run green
+and byte-unchanged.
+
+### 29.13 Clipart · passive safety · O2 identity
+
+**Clipart — PASS, structurally excluded twice.** `PostCardContent:898` returns before the Document
+branch; `CardPreview:125` returns before the overlay. No added production line contains `svgUrl`,
+`isClipart`, `clipartUrl` or any equivalent — the single occurrence in the whole diff is the
+`clipart()` **test fixture**, which the exclusion test requires. `ClipartCardDraftModal.tsx` is
+byte-unchanged. No clipart button, styling, ordering or route was altered.
+
+**Passive safety — PASS by construction.** All five passive `PostCardContent` call sites were
+inspected directly and none supplies a handler: `FullscreenPresentation:316`,
+`createSlideRenderer:192`, `ContainerEditor:395`, `RowColumnContainerCard:407`, `WallLayout:37`
+(plus the second canvas system's `ColumnsLayoutRenderer`, `GridLayoutRenderer`, `ColumnsSection`,
+`SortablePadlet`, `PadletComponent`). No handler → preview still renders, no button, no fake
+disabled control, no exception.
+**Recorded gap:** §27.6 **A-10** required a *test* asserting this. None exists — the source suite
+never inspects the presentation or container-editor call sites. The property holds today; it is
+undefended.
+
+**O2 identity — PASS in production, undefended at one owner.** Every handler receives the original
+post; no layout reconstructs a partial. Two Documents with identical title and description resolve
+to distinct ids through independent handlers. `CanvasModals:152-154`'s
+`document-${padletToEdit?.id}` key is unchanged and remains load-bearing — which is precisely why
+§29.14 NC8b matters. No new identity prop and no metadata-derived identity was introduced.
+
+### 29.14 Negative controls — **9 of 13 detected; three governed controls DO NOT HOLD**
+
+Thirteen controls were applied independently (§27.7's ten plus the review directive's variants),
+each run against both new suites, each reverted from a pre-taken backup and **all 15 files
+SHA-256-verified identical after every single one**. Restoration is exact.
+
+| # | Control | Result |
+|---|---|---|
+| 1 | Read overlay added to `CardPreview`'s clipart branch | **DETECTED** (1) |
+| 2 | Document gate widened to any type (Note) | **DETECTED** (3) |
+| 3a | Read handler hidden from read-only users — **Freeform owner** | **NOT DETECTED** |
+| 3b | Read handler hidden from read-only users — **`CanvasClient` owner** | **NOT DETECTED** |
+| 4 | Capability inferred (`selectDocumentModalDestination(post, true)`) | **DETECTED** (1) |
+| 5 | Read also fires `onEditContent` | **DETECTED** (1) |
+| 6 | `stopPropagation` removed | **DETECTED** (1) |
+| 7 | Button rendered unconditionally (presentation leak) | **DETECTED** (4) |
+| 8a | `setPadletToEdit(padlet)` dropped — Freeform | **DETECTED** (1) |
+| 8b | `setPadletToEdit(post)` dropped — **`CanvasClient`** | **NOT DETECTED** |
+| 9 | Shared component replaced by a faithful inline duplicate in `CardPreview` | **NOT DETECTED** |
+| 10 | Second clipart discriminator added to `DocumentCardContent` | **DETECTED** (1) |
+| 11 | `<button>` replaced by `<div role="presentation">` | **DETECTED** (6) |
+
+**This contradicts the implementer's reported 10/10.** That figure was reached against
+self-retargeted perturbations; three governed defect surfaces are genuinely undefended.
+
+**NC3 — the patch's central product contract is untested at the owners.** §27.3 makes the button
+capability-**independent** and §27.7 #3 makes "hide it for read-only users" a mandatory control.
+Gating the handler on `destination === 'document-editor'` in **either** owner ships **21/21 green**.
+A-2 is proven only inside a test-local harness that supplies the handler unconditionally — it never
+exercises the owners' handler construction. A future edit that hides Read from read-only users would
+pass every check in this patch.
+
+**NC8b — O2 identity is undefended at the owner that serves four of the six layouts.** Deleting
+`setPadletToEdit(post)` from `openDocumentFromPreview` ships green. Because `CanvasModals` keys the
+Document modal on `padletToEdit?.id`, the live consequence is that Read in Columns, Rows, Drawing or
+Map opens **whatever document was last selected** — wrong content, or a stale/blank modal. The
+implementer added exactly this assertion for Freeform (NC8a detects) and did not carry it to
+`CanvasClient`.
+
+**NC9 — the shared-component contract is undefended.** A byte-faithful inline `<button>` in
+`CardPreview` — same `aria-label`, same `stopPropagation`, same classes — ships green. Nothing
+asserts `CardPreview` delegates to `DocumentCardContent`. §27.4's single-implementation requirement
+therefore rests on inspection alone. Lowest severity of the three, but it is a governed control.
+
+**No test was weakened around any control.** These are gaps that were never closed, not regressions.
+
+### 29.15 Induced failures — **5/5 reproduced at `cd791bf`**
+
+Run in two attributable stages, from a pre-taken backup, with all 15 hashes verified identical
+afterwards.
+
+Stage A — `PostCardContent` and `CardPreview` reverted to parent, `DocumentCardContent.tsx` removed:
+`documentAffordance.source.test.ts` fails to collect (**IF1** — module absent);
+`DocumentCardContent.test.tsx` **6 failed / 3 passed**, comprising the `CardPreview` Document case
+(**IF2**), the interactive `PostCardContent` branch and identity cases (**IF3**), and both harness
+capability cases (**IF5** — read-only users have no visible Document-opening affordance).
+
+Stage B — the nine owner files and `CanvasClient` reverted to parent: source suite **8 failed / 4
+passed**, every owner-threading and `CanvasClient` assertion failing (**IF4**).
+
+At `f841990` all five are resolved.
+
+### 29.16 Validation — all green
+
+Focused (`CardPreview` · `CardEditor` · `ClipartCardDraftModal` · NoteEditor characterization ·
+`DocumentCardContent` · affordance source): **6/6 files, 124/124 tests**. Document family
+(`documentPost` · `cardModalRoute` · `documentModalRoute` · `DocumentEditor` 17/17 ·
+`DocumentEditor.readonly` 6/6 · both new suites): **7/7 files, 75/75**.
+**Full Vitest: 76/76 files, 896/896 tests** — exactly the expected totals (74+2, 875+21).
+`npm run typecheck`: **exit 0**, **410** declarations. `.next` cleared · `npx next build` exit 0 ·
+bridge exclusion **891 files**, marker absent · `npm run build:e2e` exit 0, `.next/E2E_BRIDGE_BUILD`
+= **`1`** · ordinary `.next` restored, exclusion **891**, marker absent. `git diff --check` exit 0.
+Worktree outside committed history: only the five long-standing protected paths.
+
+### 29.17 False-green review
+
+Read appears for both capabilities · read-only opens the viewer · clipart never receives Read ·
+passive presentation never receives Read · the visual implementation is not duplicated · no live
+Document layout lacks the callback · the complete post reaches every handler · Read never co-fires
+edit · callback presence is never used as permission · modal routing is not duplicated · no B2,
+persistence or PDF code appears · both extra files contain threading only · Drawing's ninth line is
+necessary · no test was weakened. **The implementation passes every false-green criterion.** What it
+does not pass is the evidence bar: §27.7 requires each control to be detected, and three are not.
+
+### 29.18 Required corrections
+
+Production — one line:
+
+1. Restore `color: padlet.metadata?.textColor || '#1F2937'` to `DocumentCardContent`'s body style
+   (§29.6). `DocumentCardContent.tsx` is 53/70; the cap absorbs it.
+
+Test evidence — four assertions:
+
+2. Assert both owners construct the Read handler **without** consulting capability (closes NC3).
+3. Assert `setPadletToEdit(post)` inside `openDocumentFromPreview`'s slice (closes NC8b).
+4. Assert `CardPreview` renders `<DocumentCardContent` (closes NC9).
+5. Assert the Document body renders sanitized and line-clamped **with** a handler supplied, and
+   carries the text colour (defends §29.6, closes the A-5 gap).
+
+Recommended, not required: an A-10 assertion that the presentation and container-editor call sites
+supply no handler (§29.13).
+
+**Test budget:** 254/260 is nearly exhausted. The test cap is therefore amended from **≤260 to
+≤290** for these five additions only. No production cap changes beyond §29.2.
+
+The corrections are additive and touch no closed file. Everything in §29.1–§29.13 and §29.15–§29.16
+is accepted as re-verified and must **not** be re-litigated in the correction turn.
+
+### 29.19 Observations (non-blocking)
+
+1. `DrawingLayout` now carries two idioms for keeping `renderEmbeddable` current — the pre-existing
+   `onPadletEditRef` and the new dependency entry — and the latter defeats that memoization on
+   every `CanvasClient` render (§29.3). Making `openDocumentFromPreview` a `useCallback`, or
+   mirroring the ref, would resolve both. Recorded for B2's consideration; not required here.
+2. `CardPreview` has no local Document gate; correctness rests on its single caller (§29.9).
+3. `WallCanvas`'s prop is accepted and discarded; the source suite's string check cannot tell that
+   apart from wiring (§29.10).
+4. §27.6 **A-10** has no test (§29.13).
+5. Production census is **118**, not the reported 114 (§29.1).
+6. Carried unchanged from §28.25: **O4** remains open and is B2's (§28.4) — correctly untouched
+   here · the central route's unguarded `setDocumentModalDestination(helper(...))` ·
+   `DocumentEditor`'s shared `z-[1000]` · the temporary save-on-close lifecycle (§22.4) ·
+   `PostCardContent:611`'s pre-existing inline clipart predicate · C7 · the second canvas system.
+
+### 29.20 Classification and status
+
+**CLASSIFICATION 4 — OPEN · IMPLEMENTATION CORRECTION REQUIRED.**
+
+The scope deviations are **validated and retrospectively amended** (§29.2, §29.3) — they were a
+governance census error, not scope growth, and required no implementation change. The affordance
+itself is right: one shared component, capability-blind button, capability-explicit route, clipart
+excluded twice, presentation safe by construction, the complete post preserved end to end. B1b-iii
+does not close because three governed negative controls do not hold and the body drops
+`metadata.textColor`. Both are narrow, additive fixes.
+
+| Patch | Status |
+|---|---|
+| **PATCH-149A** | **CLOSED** (`c23be50`) |
+| **PATCH-149B0** | **CLOSED** (`c9ea345`) |
+| **PATCH-149B1a** | **CLOSED** (`c44a2ac` + `856f54b`) |
+| **PATCH-149B1b-i** | **CLOSED** (`80011ee` + `4c37205`, §23/§24) |
+| **PATCH-149B1b-ii** | **CLOSED** (`510aa8d`, §28) |
+| **PATCH-149B1b-iii** | **OPEN · CORRECTION REQUIRED** — implemented at `f841990`; scope amended (§29.2/§29.3); five corrections listed in §29.18; test cap ≤290 |
+| **PATCH-149B2** | **BLOCKED — B1b-iii has not closed**; must also close O4 (§28.4) |
+| **PATCH-149C** | **BLOCKED on user reproduction** (§14.11) |
+| **PATCH-150** | **RESERVED and separate**; untouched |
+| **PATCH-152** | **NOT RESERVED** — unchanged |
+
+No implementation file was modified by this review. Nothing was pushed.
