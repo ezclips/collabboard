@@ -17,12 +17,14 @@ function slice(source: string, startMarker: string, endMarker: string): string {
 }
 
 describe('central route (openPadletInTypeEditor): Document branch', () => {
-  const body = slice(canvasClientSrc, 'const openPadletInTypeEditor = (post: Padlet) => {', '\n  };');
+  // §36: per-type dispatch moved to the unguarded core; the guard stayed in the wrapper.
+  const body = slice(canvasClientSrc, 'const executePadletTypeEditor = (post: Padlet) => {', '\n  };');
 
   it('the exact-Document branch uses the shared destination helper (PATCH-149B2-ii: via requestOpenDocument)', () => {
-    expect(body).toContain("post.type === 'card') {");
-    expect(body).toContain('selectDocumentModalDestination(post, canUseFreeformEditButton)');
-    expect(body).toContain('requestOpenDocument(post, destination)');
+    const wrapper = slice(canvasClientSrc, 'const openPadletInTypeEditor = (post: Padlet) => {', '\n  };');
+    expect(wrapper).toContain("post.type === 'card'");
+    expect(wrapper).toContain('selectDocumentModalDestination(post, canUseFreeformEditButton)');
+    expect(wrapper).toContain('requestOpenDocument(post, destination)');
   });
 
   it('the clipart branch is unchanged -- still opens ClipartDraftModal/CardViewer via selectCardModalRoute', () => {

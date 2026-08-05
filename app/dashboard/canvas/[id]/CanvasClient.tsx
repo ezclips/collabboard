@@ -5338,9 +5338,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     canUseFreeformEditButton,
   });
 
-  const handleToolClick = (toolType: string) => {
-    // PATCH-149B2-ii §34/§32.12: guard runs before any tool mutation.
-    if (resolveDocumentSwitch({ kind: 'open-tool', toolType })) return;
+  const executeToolAction = (toolType: string) => {
     if (selectedPadletIds.length > 0) {
       setSelectedPadletIds([]);
     }
@@ -5695,6 +5693,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         break;
     }
   };
+  const handleToolClick = (toolType: string) => {
+    if (!resolveDocumentSwitch({ kind: 'open-tool', toolType })) executeToolAction(toolType);
+  };
 
   // PATCH-149B2-ii §34/§32.12: O4-C -- close if clean, block+queue if dirty.
   // Returns true when the caller must stop (a confirmation is now pending).
@@ -5722,25 +5723,25 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     setDocumentIsDirty(false);
     if (!action) return;
     if (action.kind === 'open-document') { setPadletToEdit(action.post); setDocumentModalDestination(action.destination); }
-    else if (action.kind === 'open-tool') handleToolClick(action.toolType);
+    // §36: unguarded cores -- re-entering a wrapper reads stale pre-discard state.
+    else if (action.kind === 'open-tool') executeToolAction(action.toolType);
     else {
       closeDrawingEditorsBeforePadletEdit();
       if (isImageEditPadlet(action.padlet)) openImagePostEditor(action.padlet);
-      else openPadletInTypeEditor(action.padlet);
+      else executePadletTypeEditor(action.padlet);
     }
   };
 
-  const openPadletInTypeEditor = (post: Padlet) => {
+  const executePadletTypeEditor = (post: Padlet) => {
     closeDrawingSelectedShapePanel();
     closeAllToolbarLaunchedUi();
     if (post.type === 'image') {
       openImagePostEditor(post);
       return;
     }
-    // PATCH-149B2-ii §34: resolved before setPadletToEdit below (clipart already excluded).
     if (post.type === 'card') {
       const destination = selectDocumentModalDestination(post, canUseFreeformEditButton);
-      if (destination) { requestOpenDocument(post, destination); return; }
+      if (destination) { setPadletToEdit(post); setDocumentModalDestination(destination); return; }
     }
     setPadletToEdit(post);
     if (post.type === 'todo') setIsTodoEditorOpen(true);
@@ -5755,6 +5756,11 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       else setIsCardViewerOpen(true);
     }
     else setIsNoteEditorOpen(true);
+  };
+  const openPadletInTypeEditor = (post: Padlet) => {
+    const destination = post.type === 'card' ? selectDocumentModalDestination(post, canUseFreeformEditButton) : null;
+    if (destination) { requestOpenDocument(post, destination); return; }
+    executePadletTypeEditor(post);
   };
   // Keep the ref current so the early-mounted useEffect can call this function
   openPadletInTypeEditorRef.current = openPadletInTypeEditor;

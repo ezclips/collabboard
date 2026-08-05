@@ -6,6 +6,8 @@ const read = (p: string) => fs.readFileSync(path.join(process.cwd(), p), 'utf8')
 const canvasClientSrc = read('app/dashboard/canvas/[id]/CanvasClient.tsx');
 const freeformSrc = read('components/collabboard/canvas/ui/FreeformPadletCards.tsx');
 const usePadletSaveSrc = read('hooks/canvas/usePadletSave.ts');
+const fnBody = (marker: string) =>
+  canvasClientSrc.slice(canvasClientSrc.indexOf(marker), canvasClientSrc.indexOf('\n  };', canvasClientSrc.indexOf(marker)));
 
 describe('PATCH-149B2-ii §32.14: all eight entry points use the shared guard', () => {
   it('exactly seven requestOpenDocument call sites exist (entries 2-8; entry 1 is guarded via handleToolClick)', () => {
@@ -32,27 +34,45 @@ describe('PATCH-149B2-ii §32.14: all eight entry points use the shared guard', 
   });
 
   it('every setDocumentModalDestination( call in CanvasClient sits inside a guarded context', () => {
-    // Direct writers: the guard machinery itself (resolveDocumentSwitch/requestOpenDocument/
-    // handleDocumentSwitchDiscard), plus entry 1 (creation), reached only via handleToolClick's guard.
-    expect((canvasClientSrc.match(/setDocumentModalDestination\(/g) || []).length).toBe(5);
+    // 6 direct writers: the guard machinery, creation (via handleToolClick's guard), and
+    // executePadletTypeEditor -- reachable only once the guard has authorized (§36).
+    expect((canvasClientSrc.match(/setDocumentModalDestination\(/g) || []).length).toBe(6);
   });
 });
 
 describe('PATCH-149B2-ii §32.12 O4: handleToolClick and the drawing-editor path are guarded before mutation', () => {
+  // §36.3: the harness cannot mount CanvasClient, so these two bind production to the
+  // mechanism it proves. Neither proof is sufficient alone.
+  it('discard runs queued actions through the cores, never the wrappers, never via a timer', () => {
+    const discard = fnBody('const handleDocumentSwitchDiscard = () => {');
+    expect(discard).toContain('executeToolAction(action.toolType)');
+    expect(discard).toContain('executePadletTypeEditor(action.padlet)');
+    // Re-entering a wrapper is the cc95a1b defect: the guard re-reads the stale
+    // pre-discard closure and re-queues instead of running the action.
+    expect(discard).not.toMatch(/handleToolClick\(|openPadletInTypeEditor\(/);
+    expect(discard).toMatch(/const action = queuedDocumentAction;[\s\S]*setQueuedDocumentAction\(null\);/);
+    expect(discard).not.toMatch(/setTimeout|queueMicrotask|flushSync|requestAnimationFrame/);
+  });
+
+  // §36: the guard sits in each thin wrapper, which mutates nothing itself; the
+  // dispatch bodies moved to the unguarded cores (original intent, retargeted).
+  it('both guarded wrappers stay thin: guard first, delegate, no duplicated mutation body', () => {
+    const tool = fnBody('const handleToolClick = (toolType: string) => {');
+    expect(tool).toContain("resolveDocumentSwitch({ kind: 'open-tool', toolType })");
+    expect(tool).toContain('executeToolAction(toolType)');
+    expect(tool).not.toMatch(/setSelectedPadletIds|setPadletToEdit|setIsNoteEditorOpen|switch \(toolType\)/);
+    const editor = fnBody('const openPadletInTypeEditor = (post: Padlet) => {');
+    expect(editor).toContain('requestOpenDocument(post, destination)');
+    expect(editor).toContain('executePadletTypeEditor(post)');
+    expect(editor).not.toMatch(/setIsNoteEditorOpen|setIsTodoEditorOpen|setIsClipartDraftModalOpen/);
+  });
+
   it('§34.6: the parent dirty state resets when the Document modal closes', () => {
     expect(canvasClientSrc).toMatch(/if \(documentModalDestination === null\) setDocumentIsDirty\(false\);.*\n?.*\}, \[documentModalDestination\]\);/);
   });
 
-  it('handleToolClick calls resolveDocumentSwitch before any tool-state mutation', () => {
-    const start = canvasClientSrc.indexOf('const handleToolClick = (toolType: string) => {');
-    const body = canvasClientSrc.slice(start, canvasClientSrc.indexOf('setSelectedPadletIds([])', start));
-    expect(body).toContain("resolveDocumentSwitch({ kind: 'open-tool', toolType })");
-  });
-
   it("closeDrawingEditorsBeforePadletEdit's sole JSX call site is guarded first, and no naive unconditional clear was substituted", () => {
-    // Anchor on the LAST onPadletEdit (the Drawing layout's, not WallCanvas's unrelated
-    // one) -- handleDocumentSwitchDiscard's own executor also names this function
-    // and a bare first-occurrence text match would hit the wrong site (§31.5 trap).
+    // Anchor on the LAST onPadletEdit -- a first-occurrence match hits the wrong site (§31.5).
     const jsxSiteIdx = canvasClientSrc.lastIndexOf('onPadletEdit={(padlet) => {');
     expect(jsxSiteIdx).toBeGreaterThan(canvasClientSrc.indexOf('onPadletEdit={(padlet) => {'));
     const callSiteIdx = canvasClientSrc.indexOf('closeDrawingEditorsBeforePadletEdit();', jsxSiteIdx);
@@ -66,18 +86,13 @@ describe('PATCH-149B2-ii O-1: saveCard failure-ordering guard (§33.4/§34.9 -- 
   const start = usePadletSaveSrc.indexOf('const saveCard = useCallback');
   const body = usePadletSaveSrc.slice(start, usePadletSaveSrc.indexOf(', [\n    canvasId,', start));
 
-  it('no selected-state reset sits between the try block opening and the first persistence attempt', () => {
+  it('no selected-state reset precedes the first persistence attempt; catch stays below the reset', () => {
     const tryIdx = body.indexOf('try {');
     expect(tryIdx).toBeGreaterThan(-1);
     const preamble = body.slice(tryIdx + 'try {'.length, tryIdx + 'try {'.length + 150);
     expect(preamble).not.toMatch(/setPadletToEdit\(null\)/);
     expect(preamble).not.toMatch(/setIsCardEditorOpen\(false\)/);
-  });
-
-  it('the catch path still remains below the success-path reset (§32.3, re-verified)', () => {
-    const resetAt = body.lastIndexOf('setPadletToEdit(null);');
-    const catchAt = body.indexOf('} catch (e) {');
-    expect(catchAt).toBeGreaterThan(resetAt);
+    expect(body.indexOf('} catch (e) {')).toBeGreaterThan(body.lastIndexOf('setPadletToEdit(null);'));
   });
 });
 
@@ -96,14 +111,10 @@ describe('PATCH-149B2-ii: queued continuation is a discriminated descriptor, not
 });
 
 describe('PATCH-149B2-ii: scope boundary -- no PDF, Read-affordance, or clipart work', () => {
-  it('no PDF-specific branch was added to any authorized B2-ii file', () => {
+  it('no PDF branch was added, and the B1b-iii Read-affordance owners stay untouched', () => {
     const guardSrc = read('lib/domain/canvas/documentSwitchGuard.ts');
     for (const src of [canvasClientSrc, freeformSrc, guardSrc]) expect(src).not.toMatch(/pdf/i);
-  });
-
-  it('the B1b-iii Read-affordance owners were not touched by this patch', () => {
     // documentModalRoute.ts (the destination helper) is reused, never modified by B2-ii.
-    const routeSrc = read('lib/domain/canvas/documentModalRoute.ts');
-    expect(routeSrc).not.toMatch(/QueuedDocumentAction|documentIsDirty|resolveDocumentSwitch/);
+    expect(read('lib/domain/canvas/documentModalRoute.ts')).not.toMatch(/QueuedDocumentAction|documentIsDirty|resolveDocumentSwitch/);
   });
 });
