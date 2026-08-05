@@ -7315,3 +7315,32 @@ unauthorized product idea); PATCH-149B2's COMPLETE status; PATCH-150's RESERVED 
 
 No implementation occurred in this section. No production or test file was modified. Nothing
 was pushed.
+
+---
+
+## 41. Ledger reconciliation — PATCH-152 allocated (unrelated to §26.1)
+
+**Authored:** 2026-08-05 (governance architect). **Base:** `e9f7946`. No production or test file
+was modified in this turn.
+
+§26.1 recorded, as product-owner directive: *"No PATCH-152 is reserved. No follow-up patch number
+is allocated for the clipart divergence."* That directive stands **unchanged and unreversed** — the
+clipart-modal Document-exclusion follow-up (informally C5/C7) remains permanently unnumbered.
+§26.9 and §32.22's carried-forward `PATCH-152 | NOT RESERVED` rows are correct historical records
+of that directive at the time they were written and are not edited here.
+
+Separately, and without conflict, an **unrelated** body of work — Document post toolbar parity
+with the Note template — was governed as chat-only text in a prior session and never committed to
+a file. Repository inspection at `e9f7946` confirmed no file, ledger row, or historical directive
+assigns PATCH-152 to anything currently active, and that the clipart non-allocation was scoped
+only to the clipart divergence, not to the number itself in perpetuity. PATCH-152 is therefore
+allocated, for the first time, to Document post toolbar parity. See `.fable5/patches/PATCH-152.md`
+for the complete governance.
+
+| Patch | Status |
+|---|---|
+| **PATCH-150** | **RESERVED and separate**, unchanged |
+| **PATCH-151** | **CLOSED** (`cca070e`), unchanged |
+| **PATCH-152** | **AUTHORIZED FOR IMPLEMENTATION · UNBLOCKED** — Document post toolbar parity; see PATCH-152.md. Not the clipart divergence, which remains permanently unnumbered per §26.1 |
+
+No production or test file was modified in this turn. Nothing was pushed.
