@@ -5362,3 +5362,487 @@ fix, an exhausted test budget, and context carried forward from earlier sections
 | **PATCH-152** | **NOT RESERVED** — unchanged |
 
 No implementation file was modified by this review. Nothing was pushed.
+
+---
+
+## 32. PATCH-149B2 — EXPLICIT DOCUMENT SAVE LIFECYCLE · **AUTHORIZED AS A TWO-STAGE SPLIT**
+
+**Authored:** 2026-08-05 (governance architect). **Base:** `97582bf`. Every path, line number, type
+and behaviour below was **measured at this HEAD**. No production or test file was modified in this
+turn.
+
+**Outcome: authorized, split into B2-i and B2-ii.** Three measurements drove the shape of this
+patch and are stated up front because they overturn the brief's default assumptions:
+
+- **`saveCard` cannot report failure today** — it swallows every error (`catch (e) { console.error(...) }`)
+  and its Promise always resolves. A narrowly scoped result contract is therefore **authorized**, not
+  optional (§32.3).
+- **SAVE-A is architecturally impossible** without changing state that `CardEditor` shares. `saveCard`
+  calls `setPadletToEdit(null)` on success, and the whole Document modal — `isOpen`, `title`,
+  `initialContent`, `metadata` and its React `key` — is derived from `padletToEdit`. **SAVE-B is
+  mandated by measurement, not preference** (§32.4).
+- **There are seven Document-modal entry points across two files**, not one. A switch guard placed
+  only on `openDocumentFromPreview` would leave six unguarded paths that silently destroy a dirty
+  draft (§32.14).
+
+### 32.1 Current-lifecycle census — measured at `97582bf`
+
+| Aspect | Measured behaviour |
+|---|---|
+| Title state | `useState(initialTitle)` (`DocumentEditor:33`), re-synced by an `isOpen`-gated effect on **primitives** (`:39-44`, the §23.15 F3 fix) |
+| Description state | `useState(initialMetadata?.description \|\| '')` (`:34`), same effect |
+| Body state | Owned by TipTap via `useSharedTipTapEditor` (`:46-49`); **no** `onUpdate` subscriber is passed, so React never observes body edits today |
+| `onSave` timing | **Save-on-close.** `handleSaveAndClose` (`:51-63`) calls `onSave(...)` then `onClose()` unconditionally |
+| Close button | `onClick={handleSaveAndClose}` (`:120`) — **saves** |
+| Backdrop | `onClick={handleSaveAndClose}` on the overlay (`:70`); panel stops propagation (`:75`) — backdrop **saves** |
+| Escape | **No handler anywhere.** Currently a no-op, characterized by `DocumentEditor.test.tsx:156` |
+| Read-only | `handleSaveAndClose` guards with `if (!readOnly)`; no title input, no description, no toolbar, no Save, `editable:false` (§24.12, 6/6) |
+| Creation draft | `padletToEdit.id === 'new'`; **no row exists before first save** |
+| `saveCard` early return | Blank new draft → `setIsCardEditorOpen(false); setPadletToEdit(null); return;` (`usePadletSave:995-999`) — **no insert, no signal** |
+| Placement deferral | `checkPlacementRequired` (`:277-299`) returns `true` **only for new posts** in drawing/non-freeform/non-map layouts; it calls `closeEditor()` and defers the insert. For `id !== 'new'` it returns `false` immediately |
+| Return type | `async (data: SaveCardData) => { … }` — declared `Promise<void>`; **returns `undefined` on every path**, and `createdPadlet` is a local never returned |
+| Error behaviour | `catch (e) { console.error('Failed to save card:', e); }` — **swallowed. The Promise always resolves.** |
+| Sync or async | Genuinely `async`, but the **`CanvasModals` prop type erases it**: `saveCard: (...args: any[]) => any` (`CanvasModals:86`), and `DocumentEditorProps.onSave` is `(data: SaveCardData) => void` (`DocumentEditor:16`) |
+| `CanvasModals` close | `onClose={() => { setDocumentModalDestination(null); setPadletToEdit(null); }}` (`:164-167`) |
+| Selected-post cleanup | Owned by `CanvasModals`' `onClose` **and** independently by `saveCard` itself |
+| Keyed remount | `key={documentModalDestination ? \`document-${padletToEdit?.id ?? 'new'}\` : 'document-closed'}` (`:151-155`) — B1b-ii/§28.5, load-bearing |
+| Read-only save stand-in | `noopDocumentSave` (`CanvasModals:13`) |
+
+**`saveCard` has exactly three real consumers** — `onSave={saveCard}` for `CardEditor`
+(`CanvasClient:7419`), `void saveCard({…})` in `ClipartCardDraftModal`'s close
+(`CanvasClient:7432`), and the Document modal. (`components/kanban-canvas/store.tsx`'s `saveCard` is
+a **different** function from `@/lib/kanban/supabaseAdapter` and is out of scope.)
+**Both non-Document consumers ignore the returned Promise.**
+
+### 32.2 Hard stops — evaluated honestly
+
+| Hard stop | Result |
+|---|---|
+| Save success/failure cannot be observed | **TRIGGERED as-is, RESOLVED by narrow authorization.** Errors are swallowed; the fix is a result return across 3 call sites, not a save-layer redesign (§32.3) |
+| Callback returns before the real save completes | **TRIGGERED for one measured path only** — new-post placement deferral. Governed as an explicit `'deferred'` result; the modal must never report success there (§32.3) |
+| `saveCard` mutates state incompatibly with a persistent open modal | **TRIGGERED.** Decides SAVE-B (§32.4) |
+| Save-and-stay-open needs a created-row identity | **TRIGGERED** — `saveCard` never returns the created row. Also decides SAVE-B |
+| Dirty state cannot be normalized safely | **NOT TRIGGERED** — `fromEditorHtml` already collapses `''` and `'<p></p>'` to `''` |
+| Competing modal actions cannot be intercepted | **NOT TRIGGERED** — `handleToolClick` is one function; `closeDrawingEditorsBeforePadletEdit` has exactly **one** call site (`CanvasClient:6747`) |
+| Route-switch continuation needs a broad modal rewrite | **NOT TRIGGERED, but it is what forces the split** — seven entry points across two files (§32.14) |
+| Read-only and editable cannot stay separated | **NOT TRIGGERED** — already separated throughout |
+| Persistence exceeds a narrow callback result contract | **NOT TRIGGERED** if §32.3 is obeyed |
+| Entanglement with PDF or PATCH-149C | **NOT TRIGGERED** — both explicitly excluded |
+
+**No hard stop blocks authorization.** Two are triggered by the current code and are resolved by
+changes this section authorizes at their exact minimum size.
+
+### 32.3 Save callback and persistence boundary — **result contract, never a throwing contract**
+
+`saveCard` gains a **discriminated result**; it must **not** be converted to throw. Two existing
+consumers ignore the Promise, so a throwing contract would convert every save failure into an
+unhandled rejection — a regression in files B2 does not own.
+
+```
+export type SaveCardResult =
+  | { status: 'saved' }
+  | { status: 'skipped-blank' }      // existing blank-new-draft early return
+  | { status: 'deferred-placement' } // checkPlacementRequired took over
+  | { status: 'failed'; error: unknown };
+```
+
+- `saveCard`'s `catch` returns `{ status: 'failed', error: e }` **and keeps the existing
+  `console.error`**; it must not rethrow.
+- The success tail returns `{ status: 'saved' }`.
+- The blank early return returns `{ status: 'skipped-blank' }`; the placement branch returns
+  `{ status: 'deferred-placement' }`.
+- **The `catch` must remain outside the `setIsCardEditorOpen(false); setPadletToEdit(null)` pair.**
+  It already is — those calls sit inside the `try` after the awaits — which is precisely why a failed
+  save leaves `padletToEdit` intact and the draft recoverable. This ordering is now **load-bearing**
+  and a negative control must prove it.
+- No other `usePadletSave` export changes. `saveImage`, `saveNote` and the rest are untouched.
+
+`DocumentEditorProps.onSave` becomes
+`(data: SaveCardData) => Promise<SaveCardResult | void> | SaveCardResult | void`, and
+`CanvasModals`' `saveCard: (...args: any[]) => any` is narrowed to the real signature so the result
+survives the boundary. A `void`/`undefined` result must be treated as **success** so that
+`noopDocumentSave` and any future caller stay valid — but the read-only branch never invokes it.
+
+**Forbidden:** awaiting a fire-and-forget call, treating `'skipped-blank'` or `'deferred-placement'`
+as `'saved'` for baseline purposes, or claiming success from a Promise that resolved before the
+insert completed.
+
+### 32.4 SAVE-A vs SAVE-B — **SAVE-B, decided by measurement**
+
+| Question | Measured answer |
+|---|---|
+| Does `saveCard` return the created row or id? | **No.** `createdPadlet` is local; every path returns `undefined` |
+| Is `padletToEdit` updated after creation? | **No.** It is set to `null` (`usePadletSave:1066`) |
+| Can an open modal survive its own save? | **No.** `isOpen`, `title`, `initialContent`, `metadata` and the React `key` all derive from `padletToEdit`; nulling it unmounts the modal |
+| Do existing modal patterns save-and-close? | **Yes** — `CardEditor`, `NoteEditor`, `ContainerEditor` and the current Document lifecycle all close on save |
+| Would keeping it open need broad synchronization? | **Yes** — a created-row id contract plus removing `saveCard`'s state side-effects, which `CardEditor` shares |
+
+**SAVE-B: Save persists and closes the modal on success.** SAVE-A would require changing shared
+state semantics in a file B2 is only authorized to touch for a result contract.
+
+**This is not save-on-close by another name.** Close, backdrop and Escape must never invoke `onSave`
+under any circumstances; only the explicit Save control may. The §22.4 temporary lifecycle is
+**removed completely** — `handleSaveAndClose` must not survive in any form.
+
+### 32.5 Dirty-state definition and baseline normalization
+
+Dirty is `draft ≠ lastSavedBaseline` over exactly three fields:
+
+| Field | Comparison |
+|---|---|
+| `title` | exact user-visible string, **no trimming** |
+| `description` | exact user-visible string, **no trimming** |
+| body | `fromEditorHtml(editor.getHTML())` on both sides |
+
+- **Normalization is `fromEditorHtml` and nothing new** — it already maps `''` and `'<p></p>'` to
+  `''`, so an untouched empty Document and a fully-cleared one compare clean. Do not add a second
+  normalizer, and do not normalize with `toEditorHtml` (that is the inbound direction).
+- **Never compare TipTap object identity, editor state or `getJSON()` references.**
+- Baseline initializes at open from the same props the draft initializes from, so a Document is
+  **clean on open by construction**.
+- Reverting any field to its baseline value must return the document to clean — dirty is a
+  comparison, never a latch.
+- Unrelated metadata keys are **not** baseline fields. A concurrent outside metadata change must not
+  make the local draft dirty; §23.15 F3's "read unrelated keys from the latest prop at save time"
+  behaviour is preserved exactly.
+- The phantom mount update B1a fixed (`setEditable(editable, false)`, §20.15 F1) must not mark
+  dirty. Observing body changes requires an `onUpdate` subscriber that does not exist today —
+  whatever mechanism is chosen, **mounting must not produce a dirty document**, and a dedicated test
+  (item 9) and negative control (NC5) enforce it.
+
+### 32.6 Explicit Save contract
+
+On Save, in order: gather `title`; gather `description`; gather `fromEditorHtml(editor.getHTML())`;
+spread unrelated keys from the **latest** `metadata` prop (`{ ...(initialMetadata || {}), description }`,
+unchanged from `:59`); invoke `onSave` **exactly once**; await it if thenable; then branch on the
+result.
+
+| Result | Behaviour |
+|---|---|
+| `'saved'` (or `void`) | update baseline to the just-saved values, clear dirty, clear any error, **close** (SAVE-B) |
+| `'failed'` | **stay open**, keep draft, keep dirty **true**, keep the selected Document, show an accessible error, allow retry, **do not** call `onClose`, **do not** update baseline |
+| `'skipped-blank'` | the draft is genuinely blank, so closing is correct; **must not** report success or write a baseline that would mask a later genuine edit |
+| `'deferred-placement'` | the modal closes because `saveCard` already cleared the selection; **must not** report a completed save |
+
+### 32.7 Close, backdrop, Escape
+
+| State | Close | Backdrop | Escape |
+|---|---|---|---|
+| Editable, clean | close immediately, **no save** | close immediately, **no save** | close immediately, **no save** |
+| Editable, dirty | open discard confirmation, modal stays open | open discard confirmation, modal stays open | open discard confirmation, modal stays open |
+| Confirmation open | — | — | close the confirmation, return to editing |
+| Read-only | close immediately | close immediately | close immediately |
+| Saving in progress | blocked (§32.9) | blocked | blocked |
+
+Clicks inside the panel must continue to stop propagation (`:75`) so they never reach backdrop
+handling. **Escape ownership:** the Document modal registers **one** listener while open, and the
+confirmation takes precedence while it is open. No duplicate global listeners, and no listener
+survives unmount. There is no existing modal-level Escape convention in this tree to conform to —
+every measured `Escape` handler in `components/collabboard/editors/` is on an inner input — so B2-i
+establishes it for the Document modal only and must not retrofit other editors.
+
+### 32.8 Discard confirmation — **two actions**
+
+`Keep editing` and `Discard changes`. **No third `Save` action** — it would fork save-error handling
+into the confirmation and is explicitly rejected.
+
+- `Keep editing` — closes only the confirmation, preserves every draft field, returns focus to the
+  Document modal.
+- `Discard changes` — closes the confirmation, closes the Document modal, clears the selected
+  Document through the existing `onClose`, performs **no** save, discards title, description and body.
+
+**No `window.confirm`.** The measured alternatives are unsuitable: `components/kanban-canvas/ConfirmModal.tsx`
+belongs to the separate kanban system (house rule 9), and `CanvasClient:7722`'s inline delete-confirm
+has **no `role` and no accessible name** and lives in a file B2-i does not touch. A dedicated
+`DiscardChangesDialog.tsx` is therefore authorized.
+
+Accessibility, all required: `role="alertdialog"`, an accessible name, an explicit unsaved-changes
+message, keyboard-focusable actions, initial focus on `Keep editing` (the safe action), focus
+containment where the primitive supports it, defined Escape semantics (§32.7), focus returned to the
+Document modal on `Keep editing`, and no interaction with the underlying modal while it is open.
+
+### 32.9 Saving state and save errors
+
+Visible Save button in editable mode; **absent** in read-only. While a save is in flight: Save is
+disabled and shows a loading label or indicator; a second Save is impossible; Close, backdrop, Escape
+and discard are **blocked** until completion. **Two concurrent saves must be unreachable** — proven
+by test 17 and NC10. Cancellation is not authorized in B2.
+
+On failure: modal open, draft intact, dirty still true, selected Document intact, error visible and
+accessible, retry possible, error cleared or replaced on retry, `onClose` **not** called, baseline
+**not** updated.
+
+Save enablement when clean: **disabled**, matching the dirty-state contract. If implementation finds
+a repository convention that strongly contradicts this, it must stop and request an amendment rather
+than silently enable it.
+
+### 32.10 Creation flow
+
+Opening a blank draft performs **no** write — `padletToEdit.id === 'new'` and no row exists until
+`saveCard` inserts. A blank, untouched draft is **clean**, so Close, backdrop and Escape all exit
+with no confirmation and no write. Editing title, description or body makes it dirty and all three
+exits then require confirmation. Discard produces **no** row and there is **no** delete-on-discard
+path. Save creates the row through the existing `saveCard` insert. A blank Save hits the existing
+early return and must surface as `'skipped-blank'` — never as a completed save. No orphan row on
+open. Because SAVE-B closes on success, **no created-row identity reconciliation is required**, which
+is the second reason SAVE-A was rejected.
+
+### 32.11 Read-only contract — unchanged, and must not regress
+
+No title input, no description input, no toolbar, no Save, no dirty state, no discard confirmation,
+no persistence callback, no command surface; Close, backdrop and Escape all close immediately.
+`DocumentEditor.readonly.test.tsx` (6/6, §24.12) is **extended, never weakened** — its existing
+assertions, including `renders no dirty/discard UI`, must all still pass unmodified in meaning.
+
+### 32.12 O4 — competing-modal cleanup · **O4-C with queued continuation**
+
+§28.4/§28.25 recorded that `handleToolClick` (`CanvasClient:5352-5364`) and
+`closeDrawingEditorsBeforePadletEdit` (`:5738-5751`) close every editor flag but never clear
+`documentModalDestination`.
+
+**The naive fix is now forbidden.** Adding an unconditional `setDocumentModalDestination(null)` would
+silently destroy a dirty draft — it would satisfy §28.4 while violating the binding product decision.
+§28.4's observation is hereby **superseded** by this section.
+
+**Decision: O4-C — close if clean, block if dirty — with a queued continuation.**
+
+| Document state | Behaviour |
+|---|---|
+| Clean editable | close the Document modal, clear the selected Document, **continue** the requested action |
+| Read-only | close immediately, **continue** |
+| Dirty editable | **block** the competing action, open the discard confirmation, queue the action; `Discard changes` runs the queued action, `Keep editing` **discards the queue** and changes nothing |
+
+The continuation must carry everything needed to resume: for a tool click, the `toolType` string; for
+a Document switch, the **complete target post** and its capability-derived destination — never an id
+alone (§25.2/O2). A queued continuation must never survive `Keep editing`, and must never be replaced
+by a newer request without an explicit governed rule.
+
+`onBeforeToolClick` on `CanvasSidebar` (`:98-103`) is **not** a viable interception point: it is
+`void` and `dispatchTool` calls `handleToolClick` unconditionally afterwards. The guard therefore
+belongs at the **top of `handleToolClick` itself**, which is a single function with one definition.
+`closeDrawingEditorsBeforePadletEdit` has exactly one call site and is guarded the same way.
+
+### 32.13 Route-switch / preview-open contract
+
+Clicking Read (or any Document-open path) while a Document modal is open:
+
+- current draft **clean** → switch and remount through the existing keyed boundary;
+- current draft **dirty** → discard confirmation first; on `Discard changes` continue to the queued
+  target, on `Keep editing` cancel the switch entirely;
+- current document **read-only** → switch immediately.
+
+**One document's Save must never write another document's payload.** The queued target and the live
+draft are separate values, and the keyed remount (`CanvasModals:151-155`) must remain load-bearing
+and unmodified.
+
+### 32.14 Entry-point census — **seven write sites, all must be guarded**
+
+Measured writers of `setDocumentModalDestination` outside `CanvasModals`' own close:
+
+| # | Site | Path |
+|---|---|---|
+| 1 | `CanvasClient:5423` | creation — `case 'document'` |
+| 2 | `CanvasClient:5712` | central router `openPadletInTypeEditor` |
+| 3 | `CanvasClient:5725` | `openDocumentFromPreview` (B1b-iii Read) |
+| 4 | `CanvasClient:6500` | Columns `onOpenPost` |
+| 5 | `CanvasClient:6594` | Rows `onOpenPost` |
+| 6 | `FreeformPadletCards:428` | freeform bypass router |
+| 7 | `FreeformPadletCards:1775` | freeform `onEditContent` pencil |
+| 8 | `FreeformPadletCards:1784` | freeform Read affordance (B1b-iii) |
+
+**`FreeformPadletCards` opens the Document modal without passing through `CanvasClient`.** Any guard
+applied only to `openDocumentFromPreview` leaves seven unguarded paths. B2-ii must cover **all** of
+them, and its source suite must fail if any one is missed — the same shape as B1b-iii's A-9.
+
+### 32.15 State ownership — **D, split across the two stages**
+
+- **Draft, baseline, dirty computation, save-in-flight and save-error live in `DocumentEditor`.**
+  The TipTap editor instance is **never** exposed as a prop or ref.
+- **Switch intent and queued continuations live at the modal owner** (`CanvasClient`, with a pure
+  helper). No TipTap or draft state may leak into `CanvasClient`.
+- **No capability logic in `DocumentEditor`** — routing stays with `selectDocumentModalDestination`.
+- **No generic application-wide modal state machine.**
+
+Smallest cross-boundary contract:
+
+- `onRequestClose(reason: 'close-button' | 'backdrop' | 'escape')` — B2-i may keep this internal if
+  the discard flow is fully local;
+- `onDirtyChange(isDirty: boolean)` — **must fire only on clean↔dirty transitions**, never per
+  keystroke. `CanvasClient` is 8,300+ lines; a per-character callback would re-render the entire
+  canvas. This is a binding constraint, not a suggestion.
+- `onSaveSuccess` / `onDiscardConfirmed` — only if B2-ii proves they are required.
+
+### 32.16 Authorized scope — **SPLIT into B2-i and B2-ii**
+
+The split is required, not preferred: the combined work exceeds the 5-file / 320-line production
+threshold, and O4's seven-entry-point coordination is a materially different concern from the
+editor-local lifecycle.
+
+**B2-i — DocumentEditor-local lifecycle.**
+
+| # | Path | Change | Max |
+|---|---|---|---|
+| 1 | `components/collabboard/editors/DocumentEditor.tsx` | explicit Save, dirty/baseline, save state + error, backdrop/Escape, discard wiring; **remove `handleSaveAndClose` entirely** (145 lines today) | **≤130** |
+| 2 | `components/collabboard/editors/DiscardChangesDialog.tsx` | **new** — accessible `alertdialog`, two actions | **≤70** |
+| 3 | `components/collabboard/canvas/ui/CanvasModals.tsx` | narrow the erased `saveCard` prop type; pass the result through | **≤12** |
+| 4 | `hooks/canvas/usePadletSave.ts` | **`SaveCardResult` only** (§32.3) | **≤20** |
+
+**B2-i production ≤ 232 / 4 files.**
+
+| Test file | Max |
+|---|---|
+| `components/collabboard/editors/DocumentEditor.test.tsx` | **≤200** |
+| `components/collabboard/editors/DocumentEditor.readonly.test.tsx` | **≤30** |
+| `components/collabboard/editors/DiscardChangesDialog.test.tsx` (**new**, jsdom) | **≤90** |
+| `lib/domain/canvas/documentSaveLifecycle.source.test.ts` (**new**, node, scoped slices) | **≤80** |
+
+**B2-i tests ≤ 400 / 4 files.**
+
+**Explicitly authorized test rewrite.** `DocumentEditor.test.tsx:116` (`Close saves exactly once
+then closes exactly once`), `:127` (`backdrop click saves exactly once …`) and `:156` (`Escape is
+characterized as a no-op`) are **characterizations of the temporary §22.4 lifecycle**. B2-i must
+**invert** them, not delete them: Close and backdrop must be re-asserted to save **zero** times, and
+Escape must gain real behaviour. Every other test in both files, including all six read-only
+assertions and the six §23.15 F3 draft-stability tests, must survive unchanged in meaning.
+
+**B2-ii — route switching, queued continuations, O4.**
+
+| # | Path | Change | Max |
+|---|---|---|---|
+| 1 | `app/dashboard/canvas/[id]/CanvasClient.tsx` | guard sites 1-5, `handleToolClick`, `closeDrawingEditorsBeforePadletEdit`, continuation state (8,300+ lines — guards and threading only) | **≤90** |
+| 2 | `components/collabboard/canvas/ui/FreeformPadletCards.tsx` | guard sites 6-8 (6,300+ lines — guards only) | **≤30** |
+| 3 | `components/collabboard/canvas/ui/CanvasModals.tsx` | dirty reporting / continuation plumbing | **≤15** |
+| 4 | `lib/domain/canvas/documentSwitchGuard.ts` | **new** — pure decision helper, mirroring the `documentModalRoute.ts` precedent | **≤50** |
+
+**B2-ii production ≤ 185 / 4 files.** Tests: `documentSwitchGuard.test.ts` (**new**, ≤90),
+`documentSwitchGuard.source.test.ts` (**new**, node scoped slices, ≤110), and ≤50 changed lines in
+the B1b-iii affordance suites if threading requires it. **B2-ii tests ≤ 250 / 3 files.**
+
+Files 1, 2 and `usePadletSave.ts` are **over the 800-line ceiling**; each is capped at guards,
+threading or a result type and may contain no new rendering or business logic. An implementer who
+cannot stay inside a cap must **stop and request an amendment, not spill**.
+
+**B2 does not own:** PDF nodes, source references, backlinks, autosave, version history,
+PATCH-149C's unresolved formatting/container issues, or any generic modal redesign.
+**Explicitly excluded files:** `documentModalRoute.ts` · `documentPost.ts` · `documentContentAdapter.ts` ·
+`useSharedTipTapEditor.ts` · `NoteEditor.tsx` · `CardEditor.tsx` · `ClipartCardDraftModal.tsx` ·
+`DocumentCardContent.tsx` and its owners · all B1b-iii layout threading · `LiveCanvas.tsx` and the
+second canvas system · presentation code · schema/migrations · Excalidraw fork.
+
+### 32.17 Required tests — 56 items
+
+**Dirty state (B2-i):** 1 clean on open · 2 title edit dirties · 3 description edit dirties · 4 body
+edit dirties · 5 title revert returns clean · 6 description revert returns clean · 7 body revert to
+normalized baseline returns clean · 8 unrelated rerender does not change dirty · 9 phantom mount
+update does not dirty · 10 successful Save resets baseline.
+
+**Save (B2-i):** 11 Save visible editable · 12 Save absent read-only · 13 clean Save disabled ·
+14 dirty Save enabled · 15 payload title/body/metadata correct · 16 exactly one save · 17 duplicate
+clicks blocked · 18 saving indicator · 19 SAVE-B close on success · 20 failure leaves modal open ·
+21 failure preserves draft · 22 failure preserves dirty · 23 retry succeeds · 24 baseline updates
+only on success.
+
+**Close / discard (B2-i):** 25 clean Close no save · 26 dirty Close confirms · 27 Keep editing
+preserves draft · 28 Discard closes without save · 29 clean backdrop closes · 30 dirty backdrop
+confirms · 31 clean Escape closes · 32 dirty Escape confirms · 33 confirmation Escape returns to
+editing · 34 read-only Close/backdrop/Escape close without save.
+
+**Creation (B2-i):** 35 blank untouched closes without confirmation · 36 edited blank confirms ·
+37 Discard creates no row · 38 Save creates through the existing path · 39 blank no-op Save does not
+fake persistence · 40 no orphan row on open.
+
+**Route switch / O4 (B2-ii):** 41 clean switches · 42 dirty blocks · 43 Discard runs the queued
+switch · 44 Keep editing cancels the queue · 45 same for `handleToolClick` · 46 same for
+`closeDrawingEditorsBeforePadletEdit` · 47 read-only switches immediately · 48 no stale selected-post
+payload · 49 no cross-document save. **Plus 49a: the source suite must fail if any one of the eight
+§32.14 entry points is left unguarded.**
+
+**Regressions (both):** 50 B1b-iii Read affordance intact · 51 read-only no command surface ·
+52 NoteEditor unchanged · 53 CardEditor unchanged · 54 clipart unchanged · 55 no PDF code ·
+56 PATCH-149C controls unchanged.
+
+Behavioural tests use real React DOM and real TipTap in the existing jsdom setup. Source tests use
+**scoped slices**; whole-file substring counts are forbidden. **No new dependencies.**
+
+### 32.18 Induced failures — demonstrable at `97582bf`
+
+1. Editable Close saves automatically (`DocumentEditor:120` → `handleSaveAndClose`).
+2. Backdrop saves automatically (`:70`).
+3. No Save button exists anywhere in the component.
+4. No dirty state exists — there is no baseline and no body-change subscriber.
+5. No discard confirmation exists in any form.
+6. Escape is a no-op — characterized by `DocumentEditor.test.tsx:156`.
+7. Save failures cannot be surfaced — `saveCard` swallows and returns `undefined`.
+8. `handleToolClick` and `closeDrawingEditorsBeforePadletEdit` never clear the Document modal.
+9. Switching documents bypasses unsaved-change protection at all eight §32.14 entry points.
+
+Each authorized change must resolve a listed parent failure or a governed source proof. Anything
+that resolves neither is out of scope.
+
+### 32.19 Negative controls — 20, each detected and reverted hash-identically
+
+1. retain save-on-close in **any** path · 2. dirty Close without confirmation · 3. dirty backdrop
+without confirmation · 4. dirty Escape closes directly · 5. mark a clean draft dirty on mount ·
+6. ignore title in the dirty calculation · 7. ignore body · 8. update the baseline before the save
+resolves · 9. close on a failed save · 10. allow duplicate Save · 11. hide the save error ·
+12. read-only renders Save · 13. Discard invokes save · 14. Keep editing clears the draft ·
+15. blank draft creates a row on open · 16. competing tool silently clears a dirty Document ·
+17. queued switch opens the wrong Document · 18. clear the selected Document before the confirmation
+resolves · 19. preserve the temporary save-on-close lifecycle anywhere · 20. add a PDF-specific
+branch.
+
+**Additionally required by §32.3:** moving `setPadletToEdit(null)` into or above `saveCard`'s
+`catch`, which would destroy the draft on failure, must be detected.
+
+**Every control must be shown to land on the intended code before "0 failures" is accepted as
+detection** (§31.5 — `setPadletToEdit(post);` alone occurs five times in `CanvasClient.tsx`; a
+first-occurrence replace silently hits the wrong function). Anchor on a unique enclosing block.
+
+### 32.20 False-green rejection
+
+Reject if: any editable Close path still saves · dirty backdrop or Escape silently discards ·
+clean/dirty uses raw editor identity · success cannot be distinguished from failure · a failed save
+closes the modal · duplicate saves are possible · read-only gains Save or confirmation · creation
+opens a row before Save · O4 clears the modal regardless of dirty state · switching can overwrite the
+target or current payload · fewer than all eight §32.14 entry points are guarded · `onDirtyChange`
+fires per keystroke · B1b-iii's Read affordance regresses · clipart changes · persistence scope
+broadens beyond `SaveCardResult` · `handleSaveAndClose` survives in any form · PDF or PATCH-149C work
+appears.
+
+### 32.21 Validation matrix
+
+DocumentEditor lifecycle tests · discard dialog tests · save failure/retry tests · creation tests ·
+route-switch/O4 tests · B1b-iii affordance tests · B1b-ii routing/source tests · DocumentEditor
+read-only tests · NoteEditor characterization 11/11 · CardEditor · ClipartCardDraftModal · **full
+Vitest** · clean one-run `npm run typecheck` · **410** declarations · remove `.next` · ordinary
+`npx next build` · bridge exclusion **891** · clean E2E build, marker `1` · ordinary `.next` restored,
+exclusion re-verified, marker absent · `git diff --check` · only the five protected worktree paths.
+
+**Baseline: 76/76 test files · 898/898 tests · 410 declarations · 891 exclusion files.** B2-i lands
+first and moves the counts; B2-ii's baseline is B2-i's closing baseline.
+
+### 32.22 Status
+
+| Patch | Status |
+|---|---|
+| **PATCH-149A** | **CLOSED** (`c23be50`) |
+| **PATCH-149B0** | **CLOSED** (`c9ea345`) |
+| **PATCH-149B1a** | **CLOSED** (`c44a2ac` + `856f54b`) |
+| **PATCH-149B1b-i** | **CLOSED** (`80011ee` + `4c37205`) |
+| **PATCH-149B1b-ii** | **CLOSED** (`510aa8d`, §28) |
+| **PATCH-149B1b-iii** | **CLOSED** (`f841990` + `0985bb7`, §§29–31) |
+| **PATCH-149B2-i** | **AUTHORIZED · READY FOR IMPLEMENTATION** — 4 production files, ≤232 lines; 4 test files, ≤400 lines; SAVE-B; 20 negative controls |
+| **PATCH-149B2-ii** | **AUTHORIZED · BLOCKED until B2-i closes** — 4 production files, ≤185 lines; 3 test files, ≤250 lines; O4-C with queued continuation; all eight §32.14 entry points |
+| **PATCH-149C** | **BLOCKED on user reproduction** (§14.11) |
+| **PATCH-150** | **RESERVED and separate**; untouched |
+| **PATCH-152** | **NOT RESERVED** — unchanged |
+
+**O4 is now owned by B2-ii**, and §28.4's "add `setDocumentModalDestination(null)`" observation is
+**superseded** by §32.12 — the unconditional form is forbidden.
+
+**Recorded, not scheduled** (no patch numbers reserved): the §31.9 O1 CanvasClient guard asymmetry ·
+`DrawingLayout`'s duplicated `renderEmbeddable` idiom · `CardPreview`'s missing local Document gate ·
+`WallCanvas`'s inert prop · §27.6 A-10's missing test · C5 · C7 · C13's second canvas system ·
+`PostCardContent:611`'s pre-existing inline clipart predicate.
+
+No production or test file was modified in this turn. Nothing was pushed.
