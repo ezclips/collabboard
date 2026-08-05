@@ -1023,3 +1023,397 @@ One correction commit:
 | **PATCH-151** | **CLOSED**, unchanged |
 
 No production or test file was modified in this turn. Nothing was pushed.
+
+## 22. STAGE 152-C2 — EXTRACT `PostEditorShell`, MIGRATE NOTE ONTO IT
+
+**Authored:** 2026-08-06 (governance architect). **Base:** `0a565160dff9f1c0f0f42878afd93275f3afb341`.
+No production or test file was modified in this turn. This section governs stage 152-C2 only and
+amends the C2 rows of §20.6. §§1–21 are unchanged.
+
+### 22.1 C1 acceptance — recorded
+
+**152-C1 PASSED independent review and is ACCEPTED BY THE PRODUCT OWNER.** Accepted baseline at
+`0a56516`: **33/33 focused Note tests · 83/83 test files · 989/989 tests · 410 declarations ·
+exclusion 891 · ordinary marker absent · E2E marker present · typecheck clean.** Cumulative C1
+test cost: 370/370 changed lines against `e0be002`. Zero production lines.
+
+All 33 characterization tests are **binding regression gates for C2**.
+
+### 22.2 Architecture — Route A confirmed, alternatives re-rejected
+
+**SELECTED: ROUTE A — extract `PostEditorShell.tsx` and migrate Note onto it.** Confirmed
+unchanged from §20.3.
+
+**ROUTE B (NoteEditor as shell host) — PROHIBITED.** `NoteEditor.tsx` is **1128 lines**, already
+over the 800-line ceiling; CLAUDE.md rule 3 forbids growing it. Threading slot props into the
+existing component while the shell stays embedded there is explicitly prohibited.
+
+**ROUTE C (toolbar-wrapper-only extraction) — PROHIBITED.** Extracting a toolbar wrapper while
+`NoteEditor` keeps panel placement, mode state, selection coordination or the shell row leaves two
+parallel shell compositions. The extraction **must remove those four responsibilities from
+`NoteEditor`.**
+
+### 22.3 Measured shell boundary — **a structural finding that binds C2**
+
+Repository tracing at `0a56516` shows the current Note "right-side panel region" holds **two of
+six panels**, not six. The shell row (`NoteEditor.tsx:665` `flex items-start gap-3`) has these DOM
+children:
+
+| Region member | Line | Placement today |
+|---|---|---|
+| Left zone → toolbar | `:670`, `:672` | flex child |
+| Note card (280px) | `:709` | flex child |
+| Detached post-comment popup | `:846` | flex child, but **viewport-`fixed`** at computed coords |
+| `TextStylePopup` wrapper | `:1060` | **true flex sibling, right-side region** |
+| Card colour panel | `:1082` | **true flex sibling, right-side region** |
+
+The remaining three mount **inside the Note card** and position themselves:
+
+| Panel | Line | Self-positioning |
+|---|---|---|
+| `EmojiReactionPicker` | `:715-735` | `absolute left-full top-0 ml-2` |
+| `LinkPopup` | `:738` | `absolute right-0 top-1/2 -translate-y-1/2 translate-x-full` (`LinkPopup.tsx:148`) |
+| `CommentPopup` | `:747` | `fixed z-[3000]` at computed coords (`CommentPopup.tsx:498`) |
+
+**Consequence.** Relocating `LinkPopup`, `CommentPopup`, `EmojiReactionPicker` or the detached
+popup into the flex-sibling region would **visibly move them on screen**. That contradicts
+"strictly behaviour-preserving" and the C2 success condition "Note lifecycle remains unchanged".
+
+**It would also pass silently.** Of the 33 C1 tests, only C1/9 asserts placement, and only for
+`TextStylePopup` and the Card colour panel. The Link, Comment, Reaction and detached tests are
+placement-agnostic. A C2 that moved four panels would go green.
+
+**Governed resolution — the shell owns *coordination* for six, *placement* for two:**
+
+- **Placement ownership (C2):** the shell's right-side region hosts exactly the two panels that
+  already occupy it — `TextStylePopup` and the Card colour panel.
+- **Coordination ownership (C2):** the shell owns active-panel identity, mutual exclusion,
+  open/close, and close-cleanup for **all six** panels.
+- **Placement of the other four is FROZEN at its current mount point and positioning for C2.**
+  Converging them into the shared region is a **visible change deferred to a later governed
+  stage**; it requires PO sign-off and new characterization first. **C2 must not attempt it.**
+
+C2 must add tests that **pin the current mount point of all four frozen panels** so no later stage
+can move them silently. See proof 22.10/21–24 and control 22.11/19.
+
+### 22.4 Ownership split
+
+**`PostEditorShell.tsx` owns:** overlay and modal frame · shell row and its sibling ordering ·
+left toolbar region and placement · Text/Box mode state and switching · centre-slot placement ·
+the right-side secondary-panel region (two panels, §22.3) · active-panel identity and mutual
+exclusion for all six panels · panel open/close coordination and close cleanup · the
+**render-triggering selection state** (§22.5) · selection capture and restoration before panel
+actions · toolbar disabled/active state inputs · shared shell spacing, dimensions and visual
+classes · backdrop and keyboard interaction boundary **exactly as Note implements it today**.
+
+**`NoteEditor.tsx` retains:** TipTap editor creation (`useSharedTipTapEditor`) · Note title/body
+content and centre markup · Note formatting callbacks · Save lifecycle · close lifecycle · card
+colour state · reactions state · detached-comments state · selected-text comments · identity
+values (`user1`/`R`) · data serialization · metadata persistence · existing defaults · the 280px
+card width and appearance.
+
+**Prohibited moves into the shell:** persistence of any kind · metadata mutation · TipTap schema
+or extension registration · Note business state. Where a shell callback needs Note state, define a
+**narrow typed prop**. **Do not build a god component.**
+
+### 22.5 Selection reactivity — binding extraction requirement
+
+Accepted classification, unchanged:
+
+```
+NOTE SELECTION REACTIVITY:
+FUNCTIONAL THROUGH LOAD-BEARING INCIDENTAL STATE UPDATE
+```
+
+`NoteEditorToolbar` derives enablement from `hasSelection={!editor.state.selection.empty}`
+(`NoteEditor.tsx:701`), evaluated at render time; `shouldRerenderOnTransaction` is `false`, so the
+**only** thing scheduling that render is the `setLastSelection` React state update in the
+`selectionUpdate` handler (`NoteEditor.tsx:257-262`). Re-verified at C1 review: removing it fails
+**8** of the 33 tests; corrupting the stored value while keeping the update leaves 33/33 green —
+the *rerender* is load-bearing, the *stored value* is not.
+
+**C2 must preserve:** selecting text enables Link · selecting text enables selected-text Comment ·
+clearing the selection disables both · **no unrelated click, action or rerender is required.**
+
+**C2 may:** keep `setLastSelection`, or replace it with a clearer shell-owned state update.
+
+**C2 may not:** move selection state into `useRef` only · remove the React rerender effect · rely
+on editor internals rerendering incidentally · defer toolbar refresh until another action ·
+weaken any existing selection-reactivity test.
+
+**The shell must explicitly own or explicitly receive the render-triggering selection state.** The
+mechanism must be named and commented at its definition — it must not be incidental a second time.
+
+### 22.6 Detached-comments stability — **ROUTE D2 SELECTED**
+
+The C1 review confirmed this current defect: `NoteEditor.tsx:100` `initialDetachedComments = []`
+creates a fresh array on every render when the prop is omitted; the sync effect at `:147-152`
+(`JSON.stringify` compare, dep `[initialDetachedComments]`) then re-runs and **wipes locally added
+detached comments**. Proven by perturbation: forcing the effect to re-run every render made the
+detached-submission test fail with the comment absent. It is currently **unreachable** — the sole
+production caller `CanvasModals.tsx:179` passes
+`padletToEdit?.metadata?.detachedComments || EMPTY_COMMENTS`, with `EMPTY_COMMENTS` a module-level
+constant at `CanvasModals.tsx:9`. (`CanvasModals.tsx:277` is `ContainerEditor`, a different
+component.)
+
+**`PostEditorShell` is exactly the kind of new caller that would make it reachable.**
+
+| | **Route D1 — caller stability** | **Route D2 — hoist the Note default** |
+|---|---|---|
+| Exact file | `PostEditorShell.tsx` (+ every Note call path) | `NoteEditor.tsx` |
+| Exact symbol | shell prop plumbing + a module const per caller | `initialDetachedComments` default at `:100` + one new module-level constant |
+| Changed-line cost | ~4–8, spread across callers | **2** |
+| Lifecycle risk | none | **none** — reference identity only; the effect's `JSON.stringify` compare means content behaviour is bit-identical on every reachable path |
+| Test impact | none | none — C1/13 already passes a stable ref; no other test adds detached comments |
+| Prevents future reintroduction | **No** — `NoteEditor`'s own default stays defective; any future omitting caller re-breaks it | **Yes** — the default itself becomes stable, structurally |
+| Recommendation | insufficient alone | **SELECTED** |
+
+**ROUTE D2 IS SELECTED**, with the D1 rule folded in as a standing constraint:
+
+1. Replace the inline `= []` default with a **module-level stable constant** in `NoteEditor.tsx`.
+2. **Standing constraint:** neither `PostEditorShell` nor any Note call path may introduce a fresh
+   array literal for detached comments. No inline `= []`, no `|| []` at a call site.
+
+**Scope honesty.** D2 is behaviour-preserving on **every reachable production path** (proven
+above), and observably different only on the omitted-prop path, which has **no production caller**.
+On that path it converts silent user-work loss into correct retention — required by CLAUDE.md
+rule 10 (P3). This is the **one intentional behaviour delta in C2**, bounded to two lines, and it
+must be proven by both the §22.10/15 test and the §22.11/15 control. **It does not license any
+other lifecycle change.**
+
+### 22.7 Contracts
+
+**Centre slot.** The shell accepts the Note centre as a supplied React node or equivalent typed
+slot. **The shell must not know Note title/body semantics.** Structural order is fixed:
+`toolbar → centre → active secondary panel`, with the panel a **flex sibling**. The panel must
+never be nested in the toolbar wrapper, positioned over the centre, rendered below it, or
+absolutely positioned by `NoteEditor`.
+
+**Panel contract.** One right-side region, holding the two panels of §22.3. Only one secondary
+panel may occupy it at a time. Opening a panel must not unmount the centre, move the panel into
+the toolbar, create a second shell, alter Note body HTML, or lose the selection before the action
+applies. Close behaviour unchanged.
+
+**Text/Box contract.** Exact current control sets, in order. Text mode: `Switch to Box Design`,
+`Change text formatting`, `Bold (Ctrl+B)`, `Italic (Ctrl+I)`, `Strikethrough`,
+`Underline (Ctrl+U)`, `Bullet list`, `Numbered list`, `Text alignment`, `Code block`,
+`Link text first!`/`Add link to selected text`, `Highlight text first!`/`Add comment to selected
+text`. Box mode: `Switch to Text Design`, `Change card background and top strip color`,
+`Add emoji reaction to this post`, `Add a comment to this post`. **No control may disappear. No
+duplicate toolbar may appear. The unwired Align control stays unwired. Do not correct tooltips or
+labels.**
+
+**Link contract.** Preserve: disabled without selection · enabled with selection · popup opening ·
+URL prefill · Apply · Cancel · **removal** · former-link text preservation · surrounding-text
+preservation. The accepted C1 link-removal test must pass **unchanged**.
+
+**Selected-text Comment contract.** Preserve enablement, popup opening, hardcoded `user1`/`R`
+identity, and selection-scoped mark application. **Do not merge with post-level Comment.**
+
+**Reaction contract.** Preserve picker opening, real option selection, rendered reaction output
+and close behaviour. **Reaction persistence stays in `NoteEditor`;** the shell owns panel
+coordination only.
+
+**Detached post-Comment contract.** Preserve panel opening, real input submission, rendered
+thread, count/badge/title, separation from selected-text Comment, absence of any selected-text
+mark, and **persistence across shell rerenders**. **Detached-comment persistence stays in
+`NoteEditor`.**
+
+**Detached input semantics.** The detached key handler reads closure state
+(`NoteEditor.tsx:1048-1052`) while `CommentPopup` reads `e.currentTarget.value`
+(`CommentPopup.tsx:474`). **Preserve current user-visible behaviour; do not refactor this
+asymmetry unless the extraction forces it.** If touched, prove: normal typing then Enter still
+submits · no comment is lost · no duplicate submission · tests keep realistic React sequencing
+(separate `act()` boundaries).
+
+### 22.8 Lifecycle hard boundary
+
+**Do not change:** save-on-backdrop (save then close, in that order) · close callbacks · Escape
+behaviour (currently neither saves nor closes) · content serialization · the 280px card width ·
+default colour behaviour · reaction persistence · comment persistence · Note TipTap extensions ·
+identity values · `CanvasModals` routing · authentication · permissions · database schema ·
+migrations. **C2 is a shell extraction, not a Note redesign.**
+
+### 22.9 Allowlist, caps and the file-size rule
+
+**Production**
+
+| File | State | Cap |
+|---|---|---|
+| `components/collabboard/editors/PostEditorShell.tsx` | **new** | ≤380 |
+| `components/collabboard/editors/NoteEditor.tsx` | existing | ≤420 changed |
+
+**Aggregate production ≤800 changed.**
+
+**Tests**
+
+| File | State | Cap |
+|---|---|---|
+| `components/collabboard/editors/postEditorShell.behavior.test.tsx` | **new** | ≤300 *(amends §20.6's ≤260 — 30 proofs and 18 controls do not fit 260)* |
+| `components/collabboard/editors/NoteEditor.characterization.test.tsx` | existing | **0 — READ-ONLY** |
+
+**Aggregate test ≤300.** No second characterization file. No broad snapshot suites.
+
+**`NoteEditor.characterization.test.tsx` is read-only during C2.** Editing it requires a hard stop
+and a governance amendment proving a specific assertion is implementation-specific rather than
+behavioural. A C2 that needs to change a C1 test has failed to preserve behaviour until proven
+otherwise.
+
+**File-size rule.** `NoteEditor.tsx` is **1128 lines** today, over the 800 ceiling. C2 must
+**reduce it**, satisfying CLAUDE.md rule 3 ("never grow a file already over the ceiling").
+
+- **Hard requirement: final `NoteEditor.tsx` ≤ 1060 lines** (≥68 fewer). It must decrease.
+- **Target: ≤ 1030.** Measured removable shell surface is ~134 lines (`:659-670` frame,
+  `:671-707` toolbar block, `:1059-1079` and `:1081-1123` panels, `:254-268` selection effect,
+  six state declarations), against ~50 lines of shell invocation returning.
+- **Qualitative rules, which are the real gate — a line count alone must not be gamed:**
+  `NoteEditor.tsx` must contain **no** shell-row layout string, **no** direct `NoteEditorToolbar`
+  render, **no** right-side panel-region layout, and **no** duplicated shell JSX. Verified by test,
+  not by inspection.
+- **Do not authorize a superficial split** into helper files to hit a number.
+  `PostEditorShell.tsx` must stay focused — **a 1000-line replacement shell is prohibited.**
+- `NoteEditor.tsx` remains over 800 after C2. Full ceiling compliance requires extracting the Note
+  **centre** as well; that is **deferred and unscheduled**, recorded here so it is not lost.
+
+**Not authorized:** `DocumentEditor.tsx` · `NoteEditorToolbar.tsx` (unless a typed shell-prop
+boundary provably cannot be expressed otherwise — then stop and request an amendment) ·
+`CanvasModals.tsx` (D2 makes a caller adjustment unnecessary; if C2 believes otherwise, stop) ·
+TipTap registry files · `useSharedTipTapEditor.ts` · shared schema · migrations · PDF files ·
+Document card files · permissions files · `vitest.config.ts` · `package.json` · lockfiles · the
+Excalidraw fork · all governance files. **Protected worktree (§12) unchanged and untouchable.**
+
+### 22.10 Mandatory proofs
+
+All render the **real** `NoteEditor`; a synthetic shell harness is not sufficient evidence for
+Note behaviour.
+
+1. `PostEditorShell` renders toolbar, centre and panel as siblings; 2. `NoteEditor` consumes
+`PostEditorShell`; 3. exactly one shell exists — no second shell composition anywhere;
+4. Text mode unchanged; 5. Box mode unchanged; 6. mode switching unchanged; 7. `TextStylePopup`
+unchanged; 8. Link workflow unchanged; 9. link removal unchanged; 10. selected-text Comment
+unchanged; 11. Card colour unchanged; 12. Reaction **application** unchanged; 13. detached Comment
+opening unchanged; 14. detached Comment **submission** unchanged; **15. a detached comment
+survives a shell rerender** — open with none, add one, force a shell rerender, comment still
+visible, badge/title still correct, no sync-effect wipe, and this holds when the supplied initial
+list is empty **and** when the prop is omitted entirely; 16. detached badge/title unchanged;
+17. selected-text and post-level Comment remain distinct; 18. selection enables Link
+**immediately**; 19. selection enables selected-text Comment **immediately**; 20. clearing the
+selection disables both; **21.–24. the four frozen panels keep their current mount points** —
+`LinkPopup` and `EmojiReactionPicker` inside the card, `CommentPopup` viewport-`fixed`, the
+detached popup viewport-`fixed` (§22.3); 25. panels remain after the centre; 26. panels are not
+inside the toolbar wrapper; 27. centre stays mounted while panels open; 28. Save/backdrop order
+unchanged; 29. Escape behaviour unchanged; 30. card width 280px unchanged; 31. serialization
+unchanged (same `onSave` key set); 32. `CanvasModals.tsx:179` still supplies stable detached data;
+33. no Document production file changed; 34. no read-only behaviour change; 35. no PDF or
+future-Document implementation introduced.
+
+### 22.11 Negative controls — eighteen, all mandatory
+
+1. bypass `PostEditorShell` and render the old local shell; 2. duplicate the toolbar in
+`NoteEditor`; 3. render a secondary panel inside the toolbar wrapper; 4. render the panel before
+the centre; 5. remove the mode-switch callback; 6. **remove the shell's selection-update rerender
+mechanism** — expected: the Link and selected-text Comment selection-reactivity tests fail, **and
+the link-removal test fails** because it depends on selection enablement; 7. replace the selection
+state with `useRef` only — same expectation as 6; 8. disconnect `LinkPopup` opening; 9. disconnect
+link removal (both `unsetLink` and the `onRemoveLink` wiring, as two sub-controls);
+10. disconnect selected-text Comment opening; 11. disconnect Card colour; 12. disconnect Reaction
+application; 13. disconnect detached Comment opening; 14. disconnect detached Comment submission;
+**15. reintroduce an unstable empty-array reference into the governed path** — expected: the
+detached-comment persistence-after-rerender test fails; 16. move Note persistence into
+`PostEditorShell`; 17. alter the backdrop save/close order; 18. alter Escape behaviour;
+**19. relocate one frozen panel (§22.3) into the shared right-side region** — expected: the
+corresponding mount-point test fails.
+
+**For every control:** the anchor must occur **exactly once** (abort on 0 or >1) · the mutation
+must be **proven landed** · SHA-256 must change · the expected byte-length delta must be observed ·
+the intended test must **fail** · the original bytes must be restored **from a saved snapshot** ·
+SHA-256 must return exactly · a clean focused rerun must pass. **No control may touch a protected
+path.** A mutation that does not land is not a control; a landed mutation whose named test stays
+green is a C2 failure.
+
+**Restoration method — binding.** `core.autocrlf=true`. **Do not use `git checkout --`** — it
+rewrites line endings and invalidates byte comparison. Snapshot bytes first, write them back
+verbatim.
+
+**Landed-verification method — binding.** Verify by **positive facts only**: replacement present
+at the expected occurrence count, SHA-256 differs, byte-length delta matches. **Never verify by
+asserting the anchor is absent** — a replacement containing its anchor as a prefix yields a false
+negative, and an ambiguous replacement colliding with pre-existing text yields a false positive.
+Both failure modes were observed during C1.
+
+### 22.12 Validation — exact commands
+
+```
+npx vitest run components/collabboard/editors/postEditorShell.behavior.test.tsx
+npx vitest run components/collabboard/editors/NoteEditor.characterization.test.tsx
+npx vitest run components/collabboard/editors/useSharedTipTapEditor.test.tsx
+npx vitest run components/collabboard/EmojiReactionPicker.test.tsx
+npx vitest run components/collabboard/editors/DiscardChangesDialog.test.tsx
+npx vitest run components/collabboard/editors/DocumentEditor.test.tsx components/collabboard/editors/DocumentEditor.readonly.test.tsx
+npx vitest run
+npm run typecheck
+find components/collabboard/canvas/excalidraw_fork/packages/excalidraw/dist/types -name "*.d.ts" | wc -l
+rm -rf .next && npm run build
+npm run verify:bridge-exclusion
+ls .next/E2E_BRIDGE_BUILD 2>/dev/null || echo "MARKER ABSENT"
+cp -r .next .next-ordinary-backup
+rm -rf .next && E2E_BRIDGE_BUILD=1 npm run build
+ls .next/E2E_BRIDGE_BUILD && echo "MARKER PRESENT"
+rm -rf .next && mv .next-ordinary-backup .next
+npm run verify:bridge-exclusion
+ls .next/E2E_BRIDGE_BUILD 2>/dev/null || echo "MARKER ABSENT"
+git diff --check
+wc -l components/collabboard/editors/NoteEditor.tsx components/collabboard/editors/PostEditorShell.tsx
+```
+
+**Baseline at `0a56516`: 83/83 test files · 989/989 tests · 410 declarations · exclusion 891 ·
+ordinary marker absent · E2E marker present · typecheck clean · `git diff --check` clean.**
+C2 adds one test file: final test-file count **84**; test count rises from 989 by exactly the
+number added. **`NoteEditor.characterization.test.tsx` must report 33/33 unchanged.** Every other
+figure must be unchanged. Report new observed totals, plus both post-extraction line counts.
+
+### 22.13 Success condition
+
+C2 is complete only when: `PostEditorShell` is the **authoritative** shell · `NoteEditor` consumes
+it · all **33** C1 tests pass **unchanged** · the new shell-ownership tests pass · Note lifecycle
+is unchanged · `NoteEditor.tsx` line count **materially decreases** and the §22.9 qualitative rules
+hold · **no second shell remains** · selection reactivity survives its control · detached comments
+survive shell rerenders · **no Document production file changes.**
+
+### 22.14 Hard stops
+
+Stop without committing if: one authoritative shell cannot be extracted · `NoteEditor` must grow ·
+Note lifecycle must change · a C1 test must be modified · detached-comments stability cannot be
+made explicit · selection reactivity cannot be preserved · a Document production file must change ·
+persisted content must change · TipTap schema must change · database or migration work is required ·
+a required file falls outside the allowlist · any cap would be exceeded · a mutation cannot be
+landed or restored byte-identically · the protected worktree changes · relocating a frozen panel
+appears necessary. On a hard stop: create no commit, restore all mutations, return to zero
+unauthorized diff, and report the exact blocker.
+
+### 22.15 Commit rule and implementation HEAD
+
+One implementation commit, after every gate passes:
+
+```
+152-C2   refactor(editors): extract shared post editor shell
+```
+
+**The implementation turn starts from the full SHA of this governance commit, not `0a56516`.**
+Do not amend `0a56516`, `f519510`, `0c08558` or any previous commit. Do not rebase. Do not push.
+
+### 22.16 Status
+
+| Item | Status |
+|---|---|
+| **PATCH-152** | **OPEN** |
+| **152-C1** | **PASS · ACCEPTED BY PRODUCT OWNER** (`0a56516`) |
+| **152-C2** | **AUTHORIZED** — Route A, staged per §22 |
+| **152-C3** | **BLOCKED** until C2 passes independent review |
+| **Frozen-panel convergence** | **DEFERRED** — visible change, needs PO sign-off (§22.3) |
+| **Note centre extraction / 800-line compliance** | **DEFERRED**, unscheduled (§22.9) |
+| **Formatting semantics** | **DEFERRED** — unchanged (§20.9) |
+| **PATCH-150** | **RESERVED**, unchanged |
+| **PATCH-151** | **CLOSED**, unchanged |
+
+No production or test file was modified in this turn. Nothing was pushed.
