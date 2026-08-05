@@ -52,7 +52,7 @@ interface WallCanvasProps {
   onPadletUpdate?: (padlet: Padlet) => void;
   onPadletDelete?: (padletId: string) => void;
   onPadletEdit?: (padlet: Padlet) => void;
-  onOpenDocument?: (padlet: Padlet) => void; // PATCH-149B1b-iii §27.4 -- accepted for interface parity; Wall's top-level posts are always containers (wallOrderedPadlets), so there is no live top-level Document card to attach it to today
+  onOpenDocument?: (padlet: Padlet) => void; // PATCH-149C §40: forwarded through SortablePadletCard into RowColumnContainerCard for nested Document children
   onOpenTarget?: (padlet: Padlet) => void; // For opening specific child posts from containers
   onPadletCreate?: () => void;
   onReorder?: (padlets: Padlet[]) => void;
@@ -86,6 +86,7 @@ interface SortablePadletProps {
   currentUserName?: string;
   currentUserAvatar?: string;
   onUpdateChildComments?: (childId: string, comments: any[], options?: { field?: 'comments' | 'detachedComments' }) => void;
+  onOpenDocument?: (padlet: Padlet) => void;
 }
 
 
@@ -110,6 +111,7 @@ const SortablePadletCard: React.FC<SortablePadletProps> = ({
   currentUserName,
   currentUserAvatar,
   onUpdateChildComments,
+  onOpenDocument,
 }) => {
   // Helper to generate a label for the open target submenu
   const getOpenTargetLabel = (p: Padlet): string => {
@@ -194,6 +196,7 @@ const SortablePadletCard: React.FC<SortablePadletProps> = ({
                 currentUserName={currentUserName}
                 currentUserAvatar={currentUserAvatar}
                 onUpdateChildComments={onUpdateChildComments}
+                onOpenDocument={onOpenDocument ? () => onOpenDocument(padlet) : undefined}
               />
             </CardShell>
           </div>
@@ -229,6 +232,7 @@ const WallCanvas: React.FC<WallCanvasProps> = ({
   currentUserName,
   currentUserAvatar,
   onUpdateChildComments,
+  onOpenDocument,
 }) => {
   // Cookie-authenticated client — see useCanvasData.ts for why this must match
   // supabaseBrowser() rather than the plain lib/supabase.ts singleton.
@@ -711,6 +715,7 @@ const WallCanvas: React.FC<WallCanvasProps> = ({
                                 currentUserName={currentUserName}
                                 currentUserAvatar={currentUserAvatar}
                                 onUpdateChildComments={onUpdateChildComments}
+                                onOpenDocument={onOpenDocument}
                               />
                             )}
                           </div>

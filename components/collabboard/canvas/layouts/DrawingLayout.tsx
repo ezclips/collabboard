@@ -58,8 +58,9 @@ type AutoHeightContainerProps = {
   onScanChild?: () => void;
   isExpanded?: boolean;
   onExpandAvailabilityChange?: (available: boolean) => void;
+  onOpenDocument?: (post: Padlet) => void;
 };
-function AutoHeightContainer({ padlet, allPadlets, onNaturalHeight, onDropExistingPadlet, onDropDraftIntoContainer, currentUserId, currentUserName, currentUserAvatar, onUpdateChildComments, onScanChild, isExpanded, onExpandAvailabilityChange }: AutoHeightContainerProps) {
+function AutoHeightContainer({ padlet, allPadlets, onNaturalHeight, onDropExistingPadlet, onDropDraftIntoContainer, currentUserId, currentUserName, currentUserAvatar, onUpdateChildComments, onScanChild, isExpanded, onExpandAvailabilityChange, onOpenDocument }: AutoHeightContainerProps) {
   const ref = useRef<HTMLDivElement>(null);
   const cbRef = useRef(onNaturalHeight);
   cbRef.current = onNaturalHeight;
@@ -90,6 +91,7 @@ function AutoHeightContainer({ padlet, allPadlets, onNaturalHeight, onDropExisti
         onUpdateChildComments={onUpdateChildComments}
         onScanChild={onScanChild}
         onExpandAvailabilityChange={onExpandAvailabilityChange}
+        onOpenDocument={onOpenDocument}
       />
     </div>
   );
@@ -556,6 +558,7 @@ function DrawingEmbeddableCard({
             onUpdateChildComments={onUpdateChildComments}
             onScanChild={fetchData}
             onExpandAvailabilityChange={setCanExpand}
+            onOpenDocument={onOpenDocument}
             onNaturalHeight={(h) => {
               const stripH = 28;
               const newHeight = Math.max(stripH + 22 + h, 80); // p-2 (16px) + 2px border + 4px buffer

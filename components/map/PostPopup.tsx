@@ -168,6 +168,7 @@ export default function PostPopup({
             currentUserAvatar={currentUserAvatar}
             onUpdateChildComments={onUpdateChildComments}
             onScanChild={onRefreshChildren}
+            onOpenDocument={onOpenDocument ? () => onOpenDocument(post) : undefined}
           />
           </div>
         </div>

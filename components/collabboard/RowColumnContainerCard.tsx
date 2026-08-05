@@ -92,6 +92,7 @@ type RowColumnContainerCardProps = {
   isExpanded?: boolean;
   // Content-only mode: parent CardShell provides the outer shell styling
   isContentOnly?: boolean;
+  onOpenDocument?: (post: Padlet) => void;
 };
 
 export default function RowColumnContainerCard({
@@ -116,6 +117,7 @@ export default function RowColumnContainerCard({
   onExpandAvailabilityChange,
   isExpanded: controlledIsExpanded,
   isContentOnly = false,
+  onOpenDocument,
 }: RowColumnContainerCardProps) {
   const COLLAPSED_SCROLL_MAX_HEIGHT = 300;
   const [localIsExpanded, setLocalIsExpanded] = useState(false);
@@ -414,6 +416,7 @@ export default function RowColumnContainerCard({
                           currentUserName={currentUserName}
                           currentUserAvatar={currentUserAvatar}
                           onUpdateChildComments={onUpdateChildComments}
+                          onOpenDocument={onOpenDocument ? () => onOpenDocument(child) : undefined}
                         />
                       </div>
                       {showChildCommentToggle && (

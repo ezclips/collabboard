@@ -866,6 +866,7 @@ export default function PostCardContent({
                                                 currentUserName={currentUserName}
                                                 currentUserAvatar={currentUserAvatar}
                                                 onUpdateChildComments={onUpdateChildComments}
+                                                onOpenDocument={onOpenDocument}
                                             />
                                         </div>
                                     </div>

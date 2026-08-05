@@ -116,6 +116,28 @@ describe('T3: CardPreview Document branch delegates to the shared component, no 
   });
 });
 
+describe('39/40: layout owners -- real forwarding into RowColumnContainerCard, not mere token presence (closes the B1b-iii false positive)', () => {
+  it('each layout forwards onOpenDocument into its own RowColumnContainerCard JSX (all Wall/Drawing hops)', () => {
+    for (const [f, arg] of [['components/canvas/WallCanvas.tsx', 'padlet'], ['components/canvas/layouts/ColumnsCanvasRow.tsx', 'post'], ['components/collabboard/row/RowLane.tsx', 'post'], ['components/map/PostPopup.tsx', 'post']] as const) {
+      expect(read(f).slice(read(f).indexOf('<RowColumnContainerCard'), read(f).indexOf('/>', read(f).indexOf('<RowColumnContainerCard'))), f).toContain(`onOpenDocument={onOpenDocument ? () => onOpenDocument(${arg}) : undefined}`);
+    }
+    const wall = read('components/canvas/WallCanvas.tsx');
+    expect(wall.slice(wall.indexOf('<SortablePadletCard'), wall.indexOf('/>', wall.indexOf('<SortablePadletCard')))).toContain('onOpenDocument={onOpenDocument}');
+    const drawing = read('components/collabboard/canvas/layouts/DrawingLayout.tsx');
+    for (const tag of ['<AutoHeightContainer', '<RowColumnContainerCard']) {
+      expect(drawing.slice(drawing.indexOf(tag), drawing.indexOf('/>', drawing.indexOf(tag))), tag).toContain('onOpenDocument={onOpenDocument}');
+    }
+  });
+
+  it('WallCanvas and SortablePadletCard both destructure onOpenDocument, not merely declare it in a comment', () => {
+    const wallSrc = read('components/canvas/WallCanvas.tsx');
+    const wallSig = wallSrc.slice(wallSrc.indexOf('const WallCanvas: React.FC<WallCanvasProps> = ({'), wallSrc.indexOf('}) => {', wallSrc.indexOf('const WallCanvas: React.FC<WallCanvasProps> = ({')));
+    expect(wallSig).toMatch(/^\s*onOpenDocument,\s*$/m);
+    const cardSig = wallSrc.slice(wallSrc.indexOf('const SortablePadletCard'), wallSrc.indexOf('}) => {', wallSrc.indexOf('const SortablePadletCard')));
+    expect(cardSig).toMatch(/^\s*onOpenDocument,\s*$/m);
+  });
+});
+
 describe('13: the affordance never appears without isDocumentPost as the sole gate', () => {
   it('CardPreview and DocumentCardContent contain no capability, role or persistence logic', () => {
     for (const src of [cardPreviewSrc, documentCardContentSrc]) {

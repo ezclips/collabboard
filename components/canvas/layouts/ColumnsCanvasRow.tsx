@@ -397,6 +397,7 @@ export default function ColumnsCanvasRow({
                     isExpanded={expandedContainers[post.id] ?? false}
                     onExpandAvailabilityChange={(available) => setExpandableContainers(prev => prev[post.id] === available ? prev : { ...prev, [post.id]: available })}
                     isContentOnly
+                    onOpenDocument={onOpenDocument ? () => onOpenDocument(post) : undefined}
                   />
                 </CardShell>
               </ColumnPostContextMenu>
