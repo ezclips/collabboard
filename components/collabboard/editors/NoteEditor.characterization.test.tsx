@@ -466,3 +466,64 @@ describe('C1/10: known defects characterized as-is (NOT future requirements)', (
     expect(onClose).not.toHaveBeenCalled(); // characterized absence, unchanged
   });
 });
+
+// PATCH-152 152-C1 correction (§21): link removal, reaction, and detached-
+// comment submission, each proved as an EFFECT, not just an opening.
+// Scope to the detached wrapper's "z-[100]" class -- its input shares a
+// placeholder with CommentPopup's (NoteEditor.tsx:848, :1046, CommentPopup.tsx:483).
+function detachedPanel(c: HTMLElement): HTMLElement {
+  return Array.from(c.querySelectorAll('div')).find((d) => d.className.includes('z-[100]')) as HTMLElement;
+}
+
+describe('C1/11: Link removal through the real LinkPopup (not just Cancel)', () => {
+  it('removes an existing link via the real removal affordance, preserving surrounding text', () => {
+    const c = openNote('<p>hello <a href="https://example.com">world</a> again</p>');
+    selectText(c, 'world');
+    click(btn(c, 'Add link to selected text')!);
+    expect(c.querySelector('[title="https://example.com"]')).not.toBeNull();
+    click(btn(c, 'Remove link')!);
+    const html = c.querySelector('.ProseMirror')!.innerHTML;
+    expect(html).not.toContain('<a');
+    expect(html).toContain('world');
+    expect(html).toContain('hello');
+    expect(html).toContain('again');
+  });
+});
+
+describe('C1/12: Box mode - Reaction application (selecting an emoji, not just opening)', () => {
+  it('applies the chosen emoji to the current Note reaction state', () => {
+    const c = openNote();
+    click(btn(c, 'Switch to Box Design')!);
+    click(btn(c, 'Add emoji reaction to this post')!);
+    // jsdom can't attribute-select an astral emoji in title="..."; filter in JS.
+    const option = Array.from(c.querySelectorAll<HTMLButtonElement>('.note-emoji-picker button')).find((b) => b.title === '👍')!;
+    click(option);
+    expect(c.querySelector('.note-emoji-picker')).toBeNull();
+    expect(Array.from(c.querySelectorAll('span')).some((s) => s.textContent === '👍' && s.className.includes('cursor-pointer'))).toBe(true);
+  });
+});
+
+// Real callers (CanvasModals.tsx:186,277) pass a stable initialDetachedComments
+// reference; NoteEditor.tsx:100's own `= []` default is recreated every render,
+// which :147-152's sync effect then wipes back to empty -- mirror the real
+// caller instead of tripping that unreachable-in-production default path.
+const STABLE_EMPTY_DETACHED: never[] = [];
+
+describe('C1/13: Box mode - detached Comment submission (not just opening)', () => {
+  it('submitting adds to the thread, updates the toolbar title, and leaves no text-comment mark', () => {
+    const c = mount(<NoteEditor isOpen initialContent="<p>hello world again</p>"
+      initialDetachedComments={STABLE_EMPTY_DETACHED} onSave={vi.fn()} onClose={vi.fn()} />);
+    click(btn(c, 'Switch to Box Design')!);
+    click(btn(c, 'Add a comment to this post')!);
+    const input = detachedPanel(c).querySelector('input[placeholder="Add a comment..."]') as HTMLInputElement;
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+      setter.call(input, 'nice note');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    act(() => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
+    expect(c.textContent).toContain('nice note');
+    expect(btn(c, 'View 1 comment')).not.toBeNull();
+    expect(c.querySelector('.ProseMirror span[data-comment-id]')).toBeNull();
+  });
+});
