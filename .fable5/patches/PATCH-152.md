@@ -463,3 +463,297 @@ patch CLOSED; the implementer's own return is never a closure.
 | **PATCH-152** | **AUTHORIZED FOR IMPLEMENTATION · UNBLOCKED** — production ≤166 / 2 files; tests ≤300 / 2 files; OQ-1/OQ-2/OQ-3 settled per §2 |
 
 No production or test file was modified by this governance turn. Nothing was pushed.
+
+---
+
+## 20. SHELL-CONVERGENCE CORRECTION — **SUPERSEDES THE SMART-SCOPE PROPOSAL**
+
+**Authored:** 2026-08-05 (governance architect). **Base:** `57e3fcf51cc08133bf8660a3db395a493edd7a86`.
+No production or test file was modified in this turn.
+
+### 20.1 Supersession
+
+The uncommitted "Smart-scope" correction proposal (panel repositioning + per-command
+selection-scoping + inline-quote extension) is **SUPERSEDED and must not be authored or
+implemented**. It treated the symptoms — each popup and each command patched separately inside a
+separately-composed `DocumentEditor`. The Product Owner has ruled that the root cause is
+architectural: **the Document editor is a hybrid that re-implements the Note shell instead of
+sharing it.** Sections §1–§19 remain the historical record of PATCH-152 as implemented at
+`57e3fcf` and are not deleted or rewritten.
+
+### 20.2 Product Owner decision
+
+The Document post must use the **complete Note editor shell** as its authoritative design and
+interaction template. The target architecture is:
+
+```
+Shared Note-derived editor shell          Document-specific centre
+- overlay + modal layout                  - title
+- left toolbar (72px)                     - rich document body
+- Text mode / Box mode                    - description
+- right secondary-panel region            - Save / Close
+- panel positioning + spacing             - Save/discard lifecycle
+- stored + visible selection              - editable / read-only mode
+- link / text-comment workflows           - permission handling
+- card colour / reaction / post-comment   - future internal links + backlinks
+- responsive + interaction rules          - future structured blocks / PDF refs
+```
+
+### 20.3 Architecture routes — measured
+
+| | **Route A — extract a shared shell** | **Route B — NoteEditor as shell host** | **Route C — narrow composition layer** |
+|---|---|---|---|
+| New file | `PostEditorShell.tsx` | none | `PostEditorShell.tsx` (thin) |
+| Files touched | shell + `NoteEditor.tsx` + `DocumentEditor.tsx` | `NoteEditor.tsx` (grows) + `DocumentEditor.tsx` | shell + `DocumentEditor.tsx` |
+| Extraction volume | shell layout + mode + panel/selection coordination (~250 lines out of NoteEditor) | none — Document threaded *into* Note | layout + mode + panel coordination only |
+| Risk to Note | **Medium** — real refactor, mitigated by a characterization net | **High** — Document lifecycle entangles Note | **None initially** |
+| Risk to Document lifecycle | Low — centre keeps Save/discard verbatim | High | Low |
+| Prevents future drift | **Yes — one authoritative shell** | Partly | **No — two shells coexist** |
+| Supports read-only | Yes (shell gains the concept) | Awkward — Note has none | Yes |
+| Supports future Document/PDF blocks | Yes — centre is a slot | Poor | Yes |
+| **Blocking constraint** | — | **`NoteEditor.tsx` is 1128 lines, already over the 800-line ceiling; CLAUDE.md rule 3 forbids growing it. ROUTE B IS PROHIBITED.** | leaves the drift the PO ruled against |
+
+**SELECTED: ROUTE A**, executed in three governed stages (§20.5). Route B is prohibited by the
+file-ceiling rule. Route C is rejected because it would leave two shells — the exact divergence
+this correction exists to end — even though it is the smallest diff. **The route was not chosen
+for fewest changed lines.**
+
+### 20.4 Ownership map
+
+| # | Concern | Current owner | Intended owner | Path · symbol | Reuse | Extraction | Lifecycle risk | Coverage today |
+|---|---|---|---|---|---|---|---|---|
+| 1 | Shell layout | inline in Note | **shell** | `NoteEditor.tsx:659-670` overlay + `flex items-start gap-3` | yes | **required** | none | thin (1 test) |
+| 2 | Toolbar | shared already | shell | `NoteEditorToolbar.tsx` | **yes, as-is** | none | none | good |
+| 3 | Text/Box mode state | inline in Note | **shell** | `NoteEditor.tsx:107` `toolbarMode` | yes | required | none | none |
+| 4 | Secondary panels | split: flex siblings (`:1060`, `:1082`) + card-absolute (`:738`, `:747`) | **shell right region** | as listed | yes | required | none | none |
+| 5 | Selection handling | partial in Note (`:122` `savedSelection`, `:123` `lastSelection`) | **shell** | — | partial | required + **new visible decoration** | none | none |
+| 6 | Note centre | Note | **Note centre slot** | `NoteEditor.tsx:709-843` | n/a | unchanged | **must not change** | thin |
+| 7 | Document centre | Document | **Document centre slot** | `DocumentEditor.tsx:225-330` | n/a | unchanged | **must not change** | strong (33 tests) |
+| 8 | Document Save/discard | Document | **Document centre — unchanged** | `DocumentEditor.tsx:110-142` | n/a | **none** | **Tier 3 protected** | strong |
+| 9 | Read-only | Document only | **shell honours, centre renders** | `DocumentEditor.tsx:38` `readOnly` | yes | shell gains concept | medium | 9 tests |
+| 10 | Permissions | upstream | **unchanged — modal parent** | `CanvasModals.tsx:162`, `documentModalRoute.ts` | yes | none | **out of scope** | good |
+| 11 | Card colour | Note box mode | shell box mode | `NoteEditor.tsx:686` + layout wrappers | yes | none | none | none for Document |
+| 12 | Reaction | Note box mode | shell box mode | `NoteEditor.tsx:687`, `EmojiReactionPicker` | yes | none | none | none for Document |
+| 13 | Text comment | both | shell | `NoteEditor.tsx:316-371`; `DocumentEditor.tsx:196-221` | yes | consolidate | none | Document only |
+| 14 | Post-level comment | Note only | shell box mode | `NoteEditor.tsx:373-405` `detachedComments` | yes | required | none | none for Document |
+| 15 | Document card render | `PostCardContent.tsx:913-919` | unchanged funnel | early return, content-only | yes | **extend branch** | none | none |
+| 16 | Internal links / backlinks | **do not exist** | future centre | — | — | — | — | — |
+| 17 | Attachments / files | **no Document abstraction** | future centre | — | — | — | — | — |
+| 18 | PDF code / types | **none in repo** | future centre slot | — | — | — | — | — |
+| 19 | Future extension points | none | Document centre | — | — | typed slots only | none | — |
+
+**Document card funnel confirmed:** `PostCardContent.tsx` is rendered by **21 files / 23 call
+sites** (Wall, Columns, Grid, Freeform, Row/Table, Map popup, presentation slide renderer,
+container/nested paths, previews). Its Document branch at `:913-919` is a single early return.
+**One branch change reaches every layout — layout-by-layout edits are NOT authorized.**
+`cardColor` is already applied generically by layout wrappers (`WallCanvas.tsx:181`,
+`RowCanvas.tsx:153/214`, `FreeformPadletCards.tsx:1351`).
+
+### 20.5 Mandatory staging
+
+Shell extraction against an 11-test Note net would be reckless; CLAUDE.md rule 8 requires
+behaviour-preserving refactors to ride a characterization suite. Three commits, in order:
+
+- **152-C1 — Note characterization net (TESTS ONLY, zero production lines).** Characterize the
+  Note shell behaviours a refactor could silently break: Text/Box switching, TextStylePopup open
+  and option set, Link workflow, text-comment workflow, card-colour panel, reaction picker,
+  detached post-comments, panel placement, tooltips and disabled states. **Gate: C2 may not begin
+  until C1 is green.**
+- **152-C2 — extract `PostEditorShell` and migrate Note onto it.** Strictly behaviour-preserving;
+  every C1 test must pass **unchanged**. Net effect on Note must be zero user-visible change.
+- **152-C3 — migrate Document onto the shell; add Box mode and Document card rendering.**
+
+### 20.6 Allowlist and caps
+
+**152-C1 — tests only**
+
+| File | Cap |
+|---|---|
+| `components/collabboard/editors/NoteEditor.characterization.test.tsx` | ≤320 changed |
+
+**152-C2 — extraction**
+
+| File | State | Cap |
+|---|---|---|
+| `components/collabboard/editors/PostEditorShell.tsx` | new | ≤380 |
+| `components/collabboard/editors/NoteEditor.tsx` | existing | ≤420 changed (net line count **must decrease**) |
+| `components/collabboard/editors/postEditorShell.behavior.test.tsx` | new | ≤260 |
+
+**152-C3 — Document convergence**
+
+| File | State | Cap |
+|---|---|---|
+| `components/collabboard/editors/DocumentEditor.tsx` | existing | ≤300 changed |
+| `components/collabboard/editors/PostEditorShell.tsx` | existing | ≤120 changed |
+| `components/collabboard/editors/NoteEditorToolbar.tsx` | existing | ≤20 changed |
+| `components/collabboard/PostCardContent.tsx` | existing | ≤60 changed |
+| `components/collabboard/canvas/ui/CanvasModals.tsx` | existing | ≤16 changed |
+| `components/collabboard/editors/documentShellIntegration.behavior.test.tsx` | new | ≤300 |
+| `components/collabboard/documentCardBoxRender.behavior.test.tsx` | new | ≤200 |
+| `components/collabboard/editors/DocumentEditor.test.tsx` | existing | ≤40 changed |
+
+**Aggregates:** C1 ≤320 test. C2 ≤800 production / ≤260 test. C3 ≤516 production / ≤540 test.
+**`vitest.config.ts`, `package.json`, lockfiles, schema, migrations, the Excalidraw fork and all
+governance files remain prohibited.** `DocumentCardContent.tsx` and `CardPreview.tsx` are **not**
+authorized unless C3 inspection proves them necessary; if so, stop and request an amendment.
+
+### 20.7 Contracts
+
+**Panel contract.** The shell owns a single right-hand panel region rendered as a **flex sibling
+after the centre**, matching `NoteEditor.tsx:1060`. No editor may position a shared panel itself.
+Panels must never render inside the toolbar wrapper, over the centre, below the description, or
+at an invented absolute position. Exactly one panel is open at a time; closing restores the plain
+shell; Save and Close stay reachable. Responsive fallback must be defined for insufficient
+horizontal space.
+
+**Selection contract.** The shell owns: active panel, open/close state, stored range, **visible
+selection indication while focus is in a panel**, restoration of the range before applying any
+action, cleanup on cancel/close, and safe invalidation when content changes. The visible
+indicator must be a render-time ProseMirror `Decoration` — **it must never enter saved HTML** and
+must never be confused with a user-chosen `highlight` mark.
+
+**Mode contract.** Text and Box modes switch via the shell's back-arrow. Box exposes Card colour,
+Reaction and post-level Comment — **functional, never decorative**. Text-comment (selected text)
+and post-level Comment (the card) are **permanently distinct features and must not be merged**.
+
+**Read-only contract.** Read-only shows title, formatted body, description, working links and
+future reference blocks, plus a Close/exit control. It must not show or permit the editing
+toolbar, mode controls, Save, colour/reaction mutation, text-comment creation, or edit handles.
+**Reactions and post-level comments remain *viewable* in read-only mode; mutation is suppressed.**
+The same stored content drives both modes — **a second serialization format is prohibited.**
+
+**Permission contract.** Unchanged and out of scope. `CanvasModals.tsx:162` and
+`documentModalRoute.ts` continue to decide capability; the shell only honours the resulting
+`readOnly` flag. Authenticated identity continues to come from the modal parent (OQ-2 Route B,
+§2) — the shell must not derive identity.
+
+**Document card contract.** `PostCardContent.tsx:913-919` extends to render card colour and top
+strip, reaction state and the post-comment indicator for Document posts, reusing
+`ReactionDisplay` and `EmbeddedCommentList`. One branch; no per-layout edits.
+
+### 20.8 Future extension points and the PDF boundary
+
+The Document centre may define **typed, inert slots only** for: internal Document links,
+backlinks, structured blocks, embedded images and files, PDF document/page/highlight references,
+page coordinates, source title and preview, jump-to-source, and read-only reference rendering.
+
+**Prohibited under PATCH-152:** PDF upload/processing, `pdfjs-dist` or any new dependency, OCR,
+vector search, database tables, schema migrations, storage buckets, PDF rendering, highlight
+extraction, annotation UI, export implementation. **Slots must not change saved HTML** — proven
+by test. *No PDF plan document exists in this repository and none was supplied to the governance
+turn; this boundary is derived solely from the Product Owner's stated requirements. If a plan
+exists, it must be supplied and this section re-verified before C3.*
+
+### 20.9 Formatting semantics — **DEFERRED, decision packet required**
+
+Per the Product Owner, the Smart-scope design is **not** carried forward, and **no inline-quote
+extension may be created and `useSharedTipTapEditor.ts` may not be edited** until the shell is
+settled and a semantic decision is returned. Measured facts, to be re-verified against the shell:
+
+| Command | Effect on a substring | Scope |
+|---|---|---|
+| `toggleHeading(1/2)`, `toggleCodeBlock`, `toggleBlockquote` | restyle the **entire paragraph** | block node |
+| `setColor`, `setHighlight`, `setFontSize`, `toggleCode`, bold/italic/underline/strike/link | apply to the selection | inline mark |
+
+Registered marks: `link, textStyle, bold, code, italic, strike, underline, highlight, comment`.
+Registered nodes: `paragraph, blockquote, bulletList, codeBlock, doc, hardBreak, heading,
+horizontalRule, listItem, orderedList, text`. The packet must distinguish partial-block,
+whole-block and multi-block selection. **C3 ships the shell's existing Note formatting semantics
+unchanged**; any change to those semantics is a separate governed decision.
+
+### 20.10 Mandatory proofs
+
+All suites render through the real chain **`CanvasModals` → shell → centre**; mounting
+`DocumentEditor` alone is not sufficient evidence.
+
+1. editable Document opens in the shared shell; 2. Note and Document use the **same** shell
+component; 3. Document centre renders title/body/description; 4. Note centre unchanged;
+5. Text toolbar parity; 6. Box toolbar parity; 7. Text panel opens right; 8. Link panel opens
+right; 9. Comment panel opens right; 10. no panel overlaps the centre at the governed desktop
+viewport; 11. panel close restores the shell; 12. selected text stays visibly identified while a
+panel holds focus; 13. Link applies to the original selection; 14. text Comment applies to the
+original selection; 15. Card colour works end-to-end; 16. Reaction works end-to-end;
+17. post-level Comment works end-to-end; 18. text Comment and post-level Comment stay distinct;
+19. editable user sees toolbar and Save; 20. read-only user sees neither; 21. read-only user sees
+formatted content; 22. Save/discard unchanged; 23. Note behaviour unchanged; 24. Document card
+rendering consistent across the shared funnel; 25. no duplicate edit controls; 26. extension
+slots do not change saved HTML; 27. no PDF functionality present; **28.** the OQ-2 Route B
+identity expression in `CanvasModals.tsx` is asserted end-to-end — this path is currently
+**uncovered**, and a broken expression passes all 967 tests today (proven by control 16).
+
+### 20.11 Negative controls
+
+All seventeen are mandatory: 1. force a separate local Document toolbar; 2. place a panel inside
+the toolbar wrapper; 3. remove the shared right-panel slot; 4. break stored-selection
+restoration; 5. persist the temporary decoration; 6. hide Box mode from Document; 7. disconnect
+Card colour rendering; 8. disconnect Reaction rendering; 9. disconnect post-level Comment
+rendering; 10. expose editing controls in read-only mode; 11. hide formatted content in read-only
+mode; 12. alter Note centre content; 13. alter Document Save/discard; 14. route Document through
+the old hybrid composition; 15. duplicate the shell implementation; 16. break authenticated
+Comment identity; 17. add a premature PDF dependency or schema artifact.
+
+Each must be anchor-verified as landed (grep/hash/exact diff), make its named test fail, be
+restored **byte-identically**, and be followed by a clean rerun. A perturbation that does not land
+is not a control; a test that stays green under a landed perturbation is a closure failure.
+
+### 20.12 Validation
+
+Per stage: focused suite · `NoteEditor.characterization.test.tsx` · Document editor + read-only +
+discard + shared-hook suites · Document lifecycle/routing suite · card-render suite · full
+`npx vitest run` · `npm run typecheck` · declaration count · `rm -rf .next && npm run build` ·
+`npm run verify:bridge-exclusion` · ordinary marker absence · E2E build and marker presence ·
+`.next` restoration and re-verification · Excalidraw fork state · `git diff --check` · final
+protected-worktree check.
+
+**Baselines measured at `57e3fcf`: 83/83 test files · 967/967 tests · 410 declarations ·
+exclusion 891 emitted files · ordinary marker absent · E2E marker present · typecheck clean.**
+Each stage re-measures against its own parent; baselines are not reused across stages.
+
+### 20.13 Lifecycle hard boundary and hard stops
+
+Do not redesign Save/discard, autosave, dirty-state, Document creation lifecycle, authentication,
+permissions architecture, routing, schema, migrations, unrelated post types, PDF implementation
+or Clipart controls.
+
+**Stop without committing if:** no safe shell boundary can be held; the only viable approach
+duplicates `NoteEditor`; the extraction changes any Note behaviour; Document Save/discard must be
+rewritten; the persisted Document format must change; read-only requires a broader permissions
+amendment; Box requires schema or migration work; PDF preparation would require implementation;
+a required file is outside the allowlist; any cap would be exceeded; a perturbation cannot be
+landed or restored byte-identically; the protected worktree changes.
+
+### 20.14 Deferred findings — no patch number allocated
+
+1. **Clipart duplicate edit button** — recorded, **not fixed here**; the extraction must not alter
+   Clipart controls.
+2. **Inert secondary controls in the Document Comment popup** — Edit/Strikethrough/Delete render
+   but have no handlers; the inline edit path **silently discards the user's edit** (P3). Should be
+   resolved by the shell consolidating the comment workflow.
+3. **Note selection-reactivity defect** — `NoteEditor` toolbar state is stale; unfixed.
+4. **`CanvasModals.tsx` identity-expression divergence** — three display-name derivations coexist.
+5. **`CardEditor.tsx`** — a legacy card modal with five inert, handler-less toolbar buttons over a
+   plain `<textarea>`; a P6 duplicate of the Document editing surface. Recorded, unscheduled.
+
+### 20.15 Commit rule
+
+Exactly one implementation commit per stage, after every gate for that stage passes:
+
+```
+152-C1   test(note): characterize Note editor shell behaviour
+152-C2   refactor(editors): extract shared post editor shell
+152-C3   fix(document): converge Document onto the shared editor shell
+```
+
+Do not amend `57e3fcf` or any previous commit. Do not rebase. Do not push.
+
+### 20.16 Status
+
+| Item | Status |
+|---|---|
+| **Smart-scope correction** | **SUPERSEDED** — must not be authored or implemented |
+| **PATCH-152** | **OPEN · shell-convergence correction authorized, staged C1 → C2 → C3** |
+| **Formatting semantics** | **DEFERRED** — decision packet required before any change |
+| **PATCH-150** | **RESERVED and separate**, unchanged |
+| **PATCH-151** | **CLOSED** (`cca070e`), unchanged |
+
+No production or test file was modified in this turn. Nothing was pushed.
