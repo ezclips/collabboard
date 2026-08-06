@@ -136,13 +136,16 @@ export default function CardPreview({
     return (
         <div
             onClick={onClick}
-            className={`group relative h-full border overflow-hidden transition-colors flex flex-col ${isSelected ? 'border-blue-500 ring-2 ring-blue-100 shadow-md' : 'border-gray-200'}`}
-            style={{ backgroundColor: cardBgColor }}
+            className={`group relative h-full overflow-hidden transition-colors flex flex-col ${isSelected ? 'ring-2 ring-blue-500 ring-offset-2' : ''}`}
+            style={{ backgroundColor: cardBgColor, border: '1px solid #e5e7eb' }}
         >
             {/* Note-style square-corner chrome: a gray title bar (same strip
                 structure as the Clipart branch) holding the title text, edit
                 controls in its left/right slots -- no rounded corners, no
-                floating overlay buttons. */}
+                floating overlay buttons. Border applied inline (not a
+                Tailwind `border` class) to exactly match the Note post's own
+                technique -- a class-based border was rendering unreliably in
+                practice while Note's inline border did not. */}
             <div
                 className="w-full flex-shrink-0 grid"
                 style={{ gridTemplateColumns: 'auto 1fr auto', minHeight: '22px', backgroundColor: stripBg }}
