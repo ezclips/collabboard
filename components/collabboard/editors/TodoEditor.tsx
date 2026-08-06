@@ -1097,7 +1097,7 @@ export default function TodoEditor({
                             {showTextStylePanel && (
                                 <div className="absolute left-full top-0 ml-3 z-[1100]">
                                     <div
-                                        className="relative bg-white rounded-lg shadow-lg border border-gray-200 p-3 w-64"
+                                        className="relative bg-white rounded-lg shadow-lg border border-gray-200 p-3 w-64 max-h-[calc(100vh-2rem)] overflow-y-auto"
                                         onClick={(e) => e.stopPropagation()}
                                     >
                                         <button

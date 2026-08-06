@@ -645,47 +645,6 @@ export default function CommentEditor({
             </div>
           )}
 
-          {/* Text Style Popup */}
-          {textStyleOpen && (
-            <div
-              className="absolute left-full top-0 ml-2 z-[60] bg-white rounded-lg shadow-2xl p-4 w-[300px] border border-gray-100"
-              onMouseDown={(e) => e.preventDefault()}
-            >
-              <button
-                onClick={() => setTextStyleOpen(false)}
-                className="absolute top-2 right-2 w-4 h-4 flex items-center justify-center rounded hover:bg-gray-100"
-                title="Close"
-              >
-                <X className="w-3 h-3 text-gray-400" />
-              </button>
-              <TextStylePopup
-                isOpen={true}
-                onOpenChange={setTextStyleOpen}
-                onSelectHeading={() => {}}
-                onSelectColor={handleTextColor}
-                onSelectHighlight={handleHighlight}
-                currentColor={currentTextColor}
-                currentHighlight={currentHighlight}
-                hideCloseButton
-                onBold={handleBold}
-                onItalic={handleItalic}
-                onStrikethrough={handleStrike}
-                onUnderline={handleUnderline}
-                onBulletList={handleBulletList}
-                onOrderedList={handleOrderedList}
-                onCode={handleCode}
-                onAlign={handleAlign}
-                isBold={editor.isActive('bold')}
-                isItalic={editor.isActive('italic')}
-                isStrikethrough={editor.isActive('strike')}
-                isUnderline={editor.isActive('underline')}
-                isBulletList={editor.isActive('bulletList')}
-                isOrderedList={editor.isActive('orderedList')}
-                isCode={editor.isActive('codeBlock')}
-              />
-            </div>
-          )}
-
           {/* Link Input Popup */}
           {linkInputOpen && (
             <div
@@ -990,6 +949,51 @@ export default function CommentEditor({
 
           {/* Save/Close is handled by clicking outside or ESC */}
         </div>
+
+        {/* Text Style Popup -- a real flex sibling (like Note/Document's
+            sharedPanel), not an absolutely-positioned overlay, so a tall
+            panel grows the row's height and the overlay's vertical
+            centering compensates instead of letting the panel run off
+            the bottom of a short window. */}
+        {textStyleOpen && (
+          <div
+            className="relative z-[60] bg-white rounded-lg shadow-2xl p-4 w-[300px] border border-gray-100 max-h-[calc(100vh-2rem)] overflow-y-auto"
+            onMouseDown={(e) => e.preventDefault()}
+          >
+            <button
+              onClick={() => setTextStyleOpen(false)}
+              className="absolute top-2 right-2 w-4 h-4 flex items-center justify-center rounded hover:bg-gray-100"
+              title="Close"
+            >
+              <X className="w-3 h-3 text-gray-400" />
+            </button>
+            <TextStylePopup
+              isOpen={true}
+              onOpenChange={setTextStyleOpen}
+              onSelectHeading={() => {}}
+              onSelectColor={handleTextColor}
+              onSelectHighlight={handleHighlight}
+              currentColor={currentTextColor}
+              currentHighlight={currentHighlight}
+              hideCloseButton
+              onBold={handleBold}
+              onItalic={handleItalic}
+              onStrikethrough={handleStrike}
+              onUnderline={handleUnderline}
+              onBulletList={handleBulletList}
+              onOrderedList={handleOrderedList}
+              onCode={handleCode}
+              onAlign={handleAlign}
+              isBold={editor.isActive('bold')}
+              isItalic={editor.isActive('italic')}
+              isStrikethrough={editor.isActive('strike')}
+              isUnderline={editor.isActive('underline')}
+              isBulletList={editor.isActive('bulletList')}
+              isOrderedList={editor.isActive('orderedList')}
+              isCode={editor.isActive('codeBlock')}
+            />
+          </div>
+        )}
       </div>
     </div>
   );

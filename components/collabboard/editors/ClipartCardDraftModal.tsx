@@ -297,7 +297,7 @@ export default function ClipartCardDraftModal({
         {isCaptionEditing ? (
           <div
             data-testid="clipart-caption-style-panel"
-            className="relative bg-white rounded-lg shadow-xl border border-gray-200 p-3 min-w-[240px]"
+            className="relative bg-white rounded-lg shadow-xl border border-gray-200 p-3 min-w-[240px] max-h-[calc(100vh-2rem)] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
             onMouseDown={(e) => e.stopPropagation()}
           >

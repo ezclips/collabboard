@@ -950,7 +950,7 @@ export default function NoteEditor({
         <>
         {/* Text Style Popup - attached to the right of card */}
         {panels.open.textStyle && (
-          <div className="bg-white rounded-lg shadow-xl border border-gray-200 p-4 relative" style={{ width: '300px' }}>
+          <div className="bg-white rounded-lg shadow-xl border border-gray-200 p-4 relative max-h-[calc(100vh-2rem)] overflow-y-auto" style={{ width: '300px' }}>
             <button
               onClick={() => panels.closePanel('textStyle')}
               className="absolute top-2 right-2 w-4 h-4 flex items-center justify-center rounded hover:bg-gray-100"

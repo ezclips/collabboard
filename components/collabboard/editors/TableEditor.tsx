@@ -1360,10 +1360,11 @@ export default function TableEditor({
                 {/* Text Style Panel - Right side of table */}
                 {activeSubmenu === "textStyle" && (
                     <div
-                        className="fixed z-[100] bg-white rounded-xl shadow-lg border border-gray-200"
+                        className="fixed z-[100] bg-white rounded-xl shadow-lg border border-gray-200 overflow-y-auto"
                         style={{
                             top: tableCardRef.current ? tableCardRef.current.getBoundingClientRect().top + 8 : 100,
                             left: tableCardRef.current ? tableCardRef.current.getBoundingClientRect().right + 12 : 100,
+                            maxHeight: `calc(100vh - ${(tableCardRef.current ? tableCardRef.current.getBoundingClientRect().top + 8 : 100) + 16}px)`,
                         }}
                         onClick={(e) => e.stopPropagation()}
                     >
