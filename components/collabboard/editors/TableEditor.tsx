@@ -312,6 +312,15 @@ export default function TableEditor({
         }
 
         const { minRow, maxRow, minCol, maxCol } = normalizeRange(selectionRange);
+        // Single-cell selections already get their own inset ring drawn
+        // directly on the <td> (see "Active cell inner ring" below), which
+        // hugs that cell's real border exactly. This overlay is only for
+        // multi-cell ranges, where a bounding-box outline is needed.
+        if (minRow === maxRow && minCol === maxCol) {
+            setSelectionBox(null);
+            return;
+        }
+
         const tl = cellRefs.current.get(`${minRow}-${minCol}`);
         const br = cellRefs.current.get(`${maxRow}-${maxCol}`);
 
@@ -905,6 +914,13 @@ export default function TableEditor({
                                                                 if (!isCellSelected(row.index, colIndex)) handleCellMouseDown(row.index, colIndex);
                                                             }}
                                                         >
+                                                            {/* Active cell inner ring -- hugs this cell's own
+                                                                border exactly; the selectionBox overlay below
+                                                                only draws a bounding-box outline for multi-cell
+                                                                ranges, since its computed pixel offsets don't
+                                                                line up with the table's own cell borders. */}
+                                                            {isActive && <div className="absolute inset-0 pointer-events-none ring-2 ring-purple-500 ring-inset" />}
+
                                                             <input
                                                                 type="text"
                                                                 value={(cell.getValue() as string) || ""}
