@@ -212,7 +212,10 @@ describe('Detached comment persists across a shell rerender (§22.10/15-17)', ()
     });
     act(() => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
     expect(c.textContent).toContain('persists');
-    // Force a PostEditorShell rerender unrelated to the detached-comment state.
+    // The Enter-triggered submission above -- not this mode toggle -- is what
+    // exposes the unstable-default defect: mode is owned by PostEditorShell,
+    // and the centre it renders is referentially stable, so NoteEditor itself
+    // does not rerender here. Kept as a harmless additional shell-survives-toggle check.
     click(btn(c, 'Switch to Text Design')!);
     click(btn(c, 'Switch to Box Design')!);
   }
@@ -270,5 +273,55 @@ describe('Frozen panels keep their current mount points (§22.3/§22.10 21-24)',
     const panel = detachedPanel(c);
     expect(card(c).contains(panel)).toBe(false);
     expect(shellRow(c).contains(panel)).toBe(true);
+  });
+});
+
+// PATCH-152 P1 (§23.3): pins the real NoteEditor call site -- a synthetic
+// useShellPanels-only test cannot detect a regression at handleTextComment
+// itself. Measured coexistence (Task 1): TextStylePopup, Card colour,
+// Reaction and Link never close one another; only opening selected-text
+// Comment closes textStyle/cardColor/reaction.
+describe('Real NoteEditor panel coordination (§23.3): selected-text Comment closes textStyle/cardColor/reaction, not Link', () => {
+  it('closes exactly the three declared panels and leaves Link and later coexistence unaffected', () => {
+    const c = openNote();
+    const textStyle = () => c.querySelector('[style*="width: 300px"]');
+    const cardColorPanel = () => c.querySelector('.bg-white.rounded-lg.shadow-xl.border.border-gray-200.p-4.h-fit');
+    const reaction = () => c.querySelector('.note-emoji-picker');
+
+    click(btn(c, 'Change text formatting')!);
+    expect(textStyle()).not.toBeNull();
+
+    click(btn(c, 'Switch to Box Design')!);
+    click(btn(c, 'Change card background and top strip color')!);
+    expect(textStyle()).not.toBeNull();
+    expect(cardColorPanel()).not.toBeNull();
+
+    click(btn(c, 'Add emoji reaction to this post')!);
+    expect(textStyle()).not.toBeNull();
+    expect(cardColorPanel()).not.toBeNull();
+    expect(reaction()).not.toBeNull();
+
+    click(btn(c, 'Switch to Text Design')!);
+    selectText(c, 'world');
+    click(btn(c, 'Add link to selected text')!);
+    expect(textStyle()).not.toBeNull();
+    expect(c.querySelector('input[placeholder="Paste or type a URL"]')).not.toBeNull();
+
+    selectText(c, 'world');
+    click(btn(c, 'Add comment to selected text')!);
+    expect(card(c).querySelector('input[placeholder="Add a comment..."]')).not.toBeNull();
+    expect(textStyle()).toBeNull();
+    expect(cardColorPanel()).toBeNull();
+    expect(reaction()).toBeNull();
+    // Link is not in the declared closing list -- it must survive the Comment
+    // transition (over-closing detector, §23.3/12).
+    expect(c.querySelector('input[placeholder="Paste or type a URL"]')).not.toBeNull();
+
+    click(btn(c, 'Close')!);
+    click(btn(c, 'Change text formatting')!);
+    click(btn(c, 'Switch to Box Design')!);
+    click(btn(c, 'Change card background and top strip color')!);
+    expect(textStyle()).not.toBeNull();
+    expect(cardColorPanel()).not.toBeNull();
   });
 });
