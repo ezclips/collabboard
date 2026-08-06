@@ -137,15 +137,18 @@ export default function CardPreview({
         <div
             onClick={onClick}
             className={`group relative h-full overflow-hidden transition-colors flex flex-col ${isSelected ? 'ring-2 ring-blue-500 ring-offset-2' : ''}`}
-            style={{ backgroundColor: cardBgColor, border: '1px solid #e5e7eb' }}
+            style={{ backgroundColor: cardBgColor, boxShadow: 'inset 0 0 0 1px #e5e7eb' }}
         >
             {/* Note-style square-corner chrome: a gray title bar (same strip
                 structure as the Clipart branch) holding the title text, edit
                 controls in its left/right slots -- no rounded corners, no
-                floating overlay buttons. Border applied inline (not a
-                Tailwind `border` class) to exactly match the Note post's own
-                technique -- a class-based border was rendering unreliably in
-                practice while Note's inline border did not. */}
+                floating overlay buttons. Outline drawn as an inset box-shadow
+                rather than a stroked `border` -- under this canvas's zoom/pan
+                CSS transform a 1px stroked border can land on a fractional
+                device pixel and anti-alias away on some edges while staying
+                crisp on others (a hairline-border-under-transform artifact);
+                an inset shadow is a filled region rather than a stroked line
+                and does not suffer that same edge-dependent disappearance. */}
             <div
                 className="w-full flex-shrink-0 grid"
                 style={{ gridTemplateColumns: 'auto 1fr auto', minHeight: '22px', backgroundColor: stripBg }}

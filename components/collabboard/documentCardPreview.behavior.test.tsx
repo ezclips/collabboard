@@ -201,18 +201,19 @@ describe('follow-up correction: Document Freeform card has square corners and a 
     expect(wrapper.className).not.toMatch(/rounded/);
   });
 
-  it('the outer border is applied inline, matching the Note post\'s own technique exactly (not a Tailwind border class, which was found to render unreliably)', () => {
+  it('the outer outline is an inset box-shadow, not a stroked border (a stroked 1px border can anti-alias away under the canvas zoom transform on some edges while staying crisp on others)', () => {
     const c = mount(<CardPreview padlet={doc()} isSelected={false} />);
     const wrapper = c.firstElementChild as HTMLElement;
-    expect(wrapper.style.border).toBe('1px solid rgb(229, 231, 235)');
+    expect(wrapper.style.boxShadow).toBe('inset 0 0 0 1px #e5e7eb');
+    expect(wrapper.style.border).toBe('');
     expect(wrapper.className).not.toMatch(/\bborder\b/);
     expect(wrapper.className).not.toMatch(/border-gray-200/);
   });
 
-  it('the inline border persists on the selected card too (only a ring accent is added on top, mirroring Note)', () => {
+  it('the inset outline persists on the selected card too (only a ring accent is added on top, mirroring Note)', () => {
     const c = mount(<CardPreview padlet={doc()} isSelected={true} />);
     const wrapper = c.firstElementChild as HTMLElement;
-    expect(wrapper.style.border).toBe('1px solid rgb(229, 231, 235)');
+    expect(wrapper.style.boxShadow).toBe('inset 0 0 0 1px #e5e7eb');
     expect(wrapper.className).toContain('ring-2');
   });
 
