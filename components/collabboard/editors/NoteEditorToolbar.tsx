@@ -162,8 +162,15 @@ export default function NoteEditorToolbar({
     ];
 
     const isDocument = variant === 'document';
-    const currentTools = isDocument ? textModeTools : (mode === 'text' ? textModeTools : boxModeTools);
+    // PATCH-152 follow-up: Document now gets the same Text/Box mode toggle as
+    // Note (e.g. Card color, to change the top strip color) -- it just still
+    // filters box-mode tools down to whichever handlers are actually supplied
+    // (DocumentEditor wires onCardColor but not onAddReaction/onPostComment
+    // yet), same as it already did for text-mode tools like onAlign.
+    const currentTools = mode === 'text' ? textModeTools : boxModeTools;
     const visibleTools = isDocument ? currentTools.filter((t) => typeof t.onClick === 'function') : currentTools;
+    const hasReachableBoxTool = boxModeTools.some((t) => typeof t.onClick === 'function');
+    const showModeToggle = !isDocument || hasReachableBoxTool;
 
     // Prevent focus loss when clicking toolbar buttons
     const preventFocusLoss = (e: React.MouseEvent) => {
@@ -179,8 +186,8 @@ export default function NoteEditorToolbar({
                 scrollbarColor: '#d1d5db transparent',
             }}
         >
-            {!isDocument && (<>
-            {/* Toggle button - ALWAYS visible, toggles between text/box modes */}
+            {showModeToggle && (<>
+            {/* Toggle button - visible whenever box mode has something to show */}
             <div className="flex flex-col items-center shrink-0">
                 <button
                     onMouseDown={preventFocusLoss}

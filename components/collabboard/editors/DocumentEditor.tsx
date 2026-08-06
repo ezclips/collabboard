@@ -7,10 +7,26 @@ import PostEditorShell, { useShellPanels, useShellSelection } from './PostEditor
 import TextStylePopup from './TextStylePopup';
 import LinkPopup from './LinkPopup';
 import CommentPopup from './CommentPopup';
+import { ColorPickerContent } from '../ColorPicker';
 import { toEditorHtml, fromEditorHtml } from '@/lib/domain/canvas/documentContentAdapter';
 import type { SaveCardData, SaveCardResult } from '@/hooks/canvas/usePadletSave';
 
 type Comment152 = { id: string; text: string; userId: string; userName: string; timestamp: number };
+
+// Same palette Note's own Card Color picker uses (NoteEditor.tsx) -- kept as
+// a local copy, matching this codebase's existing convention of each editor
+// owning its own preset list rather than a shared module.
+const BACKGROUND_COLORS = [
+  '#ffffff', '#f3f4f6', '#fee2e2', '#ffedd5', '#fef3c7',
+  '#dcfce7', '#dbeafe', '#e0e7ff', '#f3e8ff', '#fce7f3',
+];
+const TOP_STRIP_COLORS = [
+  'transparent', '#ef4444', '#f97316', '#eab308', '#22c55e',
+  '#3b82f6', '#8b5cf6', '#ec4899', '#6b7280', '#1f2937',
+];
+// Matches CardPreview.tsx's own fallback defaults for a Document card.
+const DEFAULT_BACKGROUND_COLOR = '#ffffff';
+const DEFAULT_TOP_STRIP_COLOR = '#4f46e5';
 
 interface DocumentEditorProps {
   isOpen: boolean;
@@ -44,7 +60,16 @@ export default function DocumentEditor({
 }: DocumentEditorProps) {
   const [title, setTitle] = useState(initialTitle);
   const [description, setDescription] = useState(initialMetadata?.description || '');
-  const [baseline, setBaseline] = useState({ title: initialTitle, description: initialMetadata?.description || '', body: '' });
+  const [backgroundColor, setBackgroundColor] = useState(initialMetadata?.backgroundColor || DEFAULT_BACKGROUND_COLOR);
+  const [topStripColor, setTopStripColor] = useState(initialMetadata?.topStripColor || DEFAULT_TOP_STRIP_COLOR);
+  const [activeColorTab, setActiveColorTab] = useState<'background' | 'topstrip'>('background');
+  const [baseline, setBaseline] = useState({
+    title: initialTitle,
+    description: initialMetadata?.description || '',
+    body: '',
+    backgroundColor: initialMetadata?.backgroundColor || DEFAULT_BACKGROUND_COLOR,
+    topStripColor: initialMetadata?.topStripColor || DEFAULT_TOP_STRIP_COLOR,
+  });
   const [, forceBodyTick] = useState(0);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -99,16 +124,26 @@ export default function DocumentEditor({
   useEffect(() => {
     if (!isOpen || !editor) return;
     const desc = initialMetadata?.description || '';
+    const bg = initialMetadata?.backgroundColor || DEFAULT_BACKGROUND_COLOR;
+    const ts = initialMetadata?.topStripColor || DEFAULT_TOP_STRIP_COLOR;
     setTitle(initialTitle);
     setDescription(desc);
+    setBackgroundColor(bg);
+    setTopStripColor(ts);
     const html = toEditorHtml(initialContent);
     if (html !== editor.getHTML()) editor.commands.setContent(html, { emitUpdate: false });
-    setBaseline({ title: initialTitle, description: desc, body: fromEditorHtml(editor.getHTML()) });
+    setBaseline({ title: initialTitle, description: desc, body: fromEditorHtml(editor.getHTML()), backgroundColor: bg, topStripColor: ts });
     setSaveError(null);
-  }, [isOpen, editor, initialTitle, initialContent, initialMetadata?.description]);
+  }, [isOpen, editor, initialTitle, initialContent, initialMetadata?.description, initialMetadata?.backgroundColor, initialMetadata?.topStripColor]);
 
   const currentBody = editor ? fromEditorHtml(editor.getHTML()) : '';
-  const isDirty = !readOnly && (title !== baseline.title || description !== baseline.description || currentBody !== baseline.body);
+  const isDirty = !readOnly && (
+    title !== baseline.title
+    || description !== baseline.description
+    || currentBody !== baseline.body
+    || backgroundColor !== baseline.backgroundColor
+    || topStripColor !== baseline.topStripColor
+  );
   // §34.5: ref-guarded so an unstable parent callback identity cannot re-fire
   // this without a genuine clean<->dirty transition (Design A measured unsafe).
   const lastReportedDirty = useRef<boolean | null>(null);
@@ -128,7 +163,16 @@ export default function DocumentEditor({
     setIsSaving(true);
     setSaveError(null);
     // Unrelated keys from the latest prop, not a stale open-time snapshot (§23.15 F3).
-    const payload: SaveCardData = { title, content: currentBody, metadata: { ...(initialMetadata || {}), description } };
+    const payload: SaveCardData = {
+      title,
+      content: currentBody,
+      metadata: {
+        ...(initialMetadata || {}),
+        description,
+        backgroundColor: backgroundColor !== DEFAULT_BACKGROUND_COLOR ? backgroundColor : undefined,
+        topStripColor: topStripColor !== DEFAULT_TOP_STRIP_COLOR ? topStripColor : undefined,
+      },
+    };
     let result: SaveCardResult | void;
     try { result = await onSave(payload); } catch (e) { result = { status: 'failed', error: e }; }
     const status = result && typeof result === 'object' && 'status' in result ? result.status : 'saved';
@@ -138,7 +182,7 @@ export default function DocumentEditor({
       return;
     }
     // skipped-blank/deferred-placement close without updating baseline (§32.6).
-    if (status === 'saved') setBaseline({ title, description, body: currentBody });
+    if (status === 'saved') setBaseline({ title, description, body: currentBody, backgroundColor, topStripColor });
     setIsSaving(false);
     onClose();
   };
@@ -191,7 +235,7 @@ export default function DocumentEditor({
     if (!editor.state.doc.textBetween(from, to, '').trim()) return;
     const linkMark = editor.getAttributes('link');
     setLinkViewUrl(linkMark?.href || '');
-    panels.openPanel('link', ['textStyle', 'comment']);
+    panels.openPanel('link', ['textStyle', 'comment', 'cardColor']);
   };
   const handleAddLink = (url: string) => { if (!url || !editor || !restoreSelection(lastSelection)) return; editor.chain().focus().setLink({ href: url }).run(); };
   const handleRemoveLink = () => { if (!editor || !restoreSelection(lastSelection)) return; editor.chain().focus().unsetLink().run(); };
@@ -215,7 +259,7 @@ export default function DocumentEditor({
     const attrs = editor.getAttributes('comment');
     setActiveThread(attrs?.commentId ? buildThreadFromAttrs(attrs) : { id: `comment-${Date.now()}`, comments: [] });
     setSavedSelection({ from, to });
-    panels.openPanel('comment', ['textStyle', 'link']);
+    panels.openPanel('comment', ['textStyle', 'link', 'cardColor']);
   };
   const handleAddComment = (commentText: string) => {
     if (!editor || !commentText || !activeThread || !savedSelection) return;
@@ -239,9 +283,10 @@ export default function DocumentEditor({
     onBulletList: () => editor.chain().focus().toggleBulletList().run(),
     onOrderedList: () => editor.chain().focus().toggleOrderedList().run(),
     onCode: () => editor.chain().focus().toggleCodeBlock().run(),
-    onTextStyle: () => panels.openPanel('textStyle', ['link', 'comment']),
+    onTextStyle: () => panels.openPanel('textStyle', ['link', 'comment', 'cardColor']),
     onLink: handleLink,
     onTextComment: handleTextComment,
+    onCardColor: () => panels.openPanel('cardColor', ['textStyle', 'link', 'comment']),
     isBold: editor.isActive('bold'), isItalic: editor.isActive('italic'),
     isStrikethrough: editor.isActive('strike'), isUnderline: editor.isActive('underline'),
     isBulletList: editor.isActive('bulletList'), isOrderedList: editor.isActive('orderedList'),
@@ -322,7 +367,7 @@ export default function DocumentEditor({
                 </button>
                 <TextStylePopup
                   isOpen={true}
-                  onOpenChange={(open) => (open ? panels.openPanel('textStyle', ['link', 'comment']) : panels.closePanel('textStyle'))}
+                  onOpenChange={(open) => (open ? panels.openPanel('textStyle', ['link', 'comment', 'cardColor']) : panels.closePanel('textStyle'))}
                   onSelectHeading={handleSelectHeading}
                   onSelectColor={handleSelectTextColor}
                   onSelectHighlight={handleSelectHighlight}
@@ -335,7 +380,7 @@ export default function DocumentEditor({
             <LinkPopup
               inline
               isOpen={panels.open.link}
-              onOpenChange={(open) => (open ? panels.openPanel('link', ['textStyle', 'comment']) : panels.closePanel('link'))}
+              onOpenChange={(open) => (open ? panels.openPanel('link', ['textStyle', 'comment', 'cardColor']) : panels.closePanel('link'))}
               onSubmit={handleAddLink}
               onRemoveLink={handleRemoveLink}
               initialUrl={linkViewUrl}
@@ -344,12 +389,53 @@ export default function DocumentEditor({
               <div style={{ width: '300px' }}>
                 <CommentPopup
                   isOpen={panels.open.comment}
-                  onOpenChange={(open) => (open ? panels.openPanel('comment', ['textStyle', 'link']) : panels.closePanel('comment'))}
+                  onOpenChange={(open) => (open ? panels.openPanel('comment', ['textStyle', 'link', 'cardColor']) : panels.closePanel('comment'))}
                   onSubmit={handleAddComment}
                   comments={activeThread?.comments || []}
                   currentUserId={currentUserId}
                   currentUserName={currentUserName}
                 />
+              </div>
+            )}
+            {panels.open.cardColor && (
+              <div
+                className="bg-white rounded-lg shadow-xl border border-gray-200 p-4 h-fit self-start"
+                style={{ width: '260px' }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex items-center justify-between mb-4">
+                  <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Document Color</span>
+                  <div className="flex bg-gray-100 p-1 rounded-lg gap-1">
+                    <button
+                      onClick={() => setActiveColorTab('background')}
+                      className={`w-8 h-8 flex items-center justify-center text-xs font-bold rounded-md transition-all ${activeColorTab === 'background'
+                        ? 'bg-white text-gray-900 shadow-sm'
+                        : 'text-gray-500 hover:text-gray-700'
+                        }`}
+                      title="Background Color"
+                    >
+                      BG
+                    </button>
+                    <button
+                      onClick={() => setActiveColorTab('topstrip')}
+                      className={`w-8 h-8 flex items-center justify-center text-xs font-bold rounded-md transition-all ${activeColorTab === 'topstrip'
+                        ? 'bg-white text-gray-900 shadow-sm'
+                        : 'text-gray-500 hover:text-gray-700'
+                        }`}
+                      title="Top Strip Color"
+                    >
+                      TS
+                    </button>
+                  </div>
+                </div>
+                <div className="mb-0">
+                  <ColorPickerContent
+                    color={activeColorTab === 'background' ? backgroundColor : topStripColor}
+                    onChange={(c) => (activeColorTab === 'background' ? setBackgroundColor(c) : setTopStripColor(c))}
+                    hasOpacity={true}
+                    presets={activeColorTab === 'background' ? BACKGROUND_COLORS : TOP_STRIP_COLORS}
+                  />
+                </div>
               </div>
             )}
           </>

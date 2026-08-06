@@ -83,7 +83,7 @@ describe('DocumentEditor editable (PATCH-149B1b-i)', () => {
     expect(container.querySelector('strong')).not.toBeNull();
   });
 
-  it('shows the Document toolbar with real controls, no Align, no Box, and present Link/Text style (PATCH-152)', () => {
+  it('shows the Document toolbar with real controls, no Align, present Link/Text style, and the Box toggle (Card color parity with Note)', () => {
     const container = mount(
       <DocumentEditor isOpen title="" initialContent="<p>x</p>" metadata={{}} onSave={vi.fn()} onClose={vi.fn()} />,
     );
@@ -92,7 +92,7 @@ describe('DocumentEditor editable (PATCH-149B1b-i)', () => {
     expect(container.querySelector('button[title*="Text alignment"]')).toBeNull();
     expect(container.querySelector('button[title="Link text first!"]')).not.toBeNull();
     expect(container.querySelector('button[title="Change text formatting"]')).not.toBeNull();
-    expect(container.querySelector('button[title*="Switch to Box"]')).toBeNull();
+    expect(container.querySelector('button[title*="Switch to Box"]')).not.toBeNull();
   });
 
   it('Bold control executes a real command, dirties the draft (reported via onDirtyChange), and formatting survives the save-on-close payload', async () => {

@@ -545,9 +545,9 @@ describe('Note: Link and selected-text Comment share the same right-side slot an
     expect(c.querySelector('.ProseMirror')!.innerHTML).toBe(before);
   });
 
-  it('Document panels remain byte-identical and unchanged by this Note-only correction', () => {
+  it('Document panels remain unchanged by this Note-only correction (Document separately gained cardColor exclusivity via the follow-up Card color parity fix)', () => {
     const src = fs.readFileSync('components/collabboard/editors/DocumentEditor.tsx', 'utf8');
-    expect(src).toContain("panels.openPanel('link', ['textStyle', 'comment'])");
-    expect(src).toContain("panels.openPanel('comment', ['textStyle', 'link'])");
+    expect(src).toContain("panels.openPanel('link', ['textStyle', 'comment', 'cardColor'])");
+    expect(src).toContain("panels.openPanel('comment', ['textStyle', 'link', 'cardColor'])");
   });
 });

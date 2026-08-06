@@ -103,14 +103,16 @@ function open(title = '', content = '<p>hello world</p>', extra: Record<string, 
   return mount(<DocumentEditor isOpen title={title} initialContent={content} metadata={{}} onSave={vi.fn()} onClose={vi.fn()} {...extra} />);
 }
 
-describe('PATCH-152 §8 1-7: toolbar renders the required controls, excludes Box/Align', () => {
-  it('renders Text style, Link, Comment; never Box or Align', () => {
+describe('PATCH-152 §8 1-7 (superseded by the follow-up Card color parity fix): toolbar renders the required text controls, still excludes Align', () => {
+  it('renders Text style, Link, Comment, and the Box-mode toggle (Card color parity with Note); never Align', () => {
     const c = open();
     expect(textStyleBtn(c)).not.toBeNull(); // 1
     expect(linkBtn(c)).not.toBeNull(); // 2
     expect(commentBtn(c)).not.toBeNull(); // 3
-    expect(c.querySelector('button[title*="Switch to Box"]')).toBeNull(); // 4
-    expect(c.querySelector('button[title*="Text alignment"]')).toBeNull(); // 5
+    // Follow-up correction: Document now exposes the same Text/Box toggle
+    // Note has, so a user can reach Card color to change the top strip color.
+    expect(c.querySelector('button[title*="Switch to Box"]')).not.toBeNull();
+    expect(c.querySelector('button[title*="Text alignment"]')).toBeNull(); // 5: Align is still never wired for Document
   });
 
   it('Text style opens TextStylePopup exposing only the authorized options', () => {
@@ -119,7 +121,66 @@ describe('PATCH-152 §8 1-7: toolbar renders the required controls, excludes Box
     for (const expected of ['Large heading', 'Normal heading', 'Normal text', 'Small text', 'Code block', 'Callout', '"Quote block"']) {
       expect(c.textContent).toContain(expected); // 7
     }
-    expect(c.querySelector('button[title*="Switch to Box"]')).toBeNull();
+  });
+});
+
+describe('follow-up correction: Document Card color toolbar parity with Note', () => {
+  function cardColorBtn(c: HTMLElement) {
+    return c.querySelector('button[title="Change card background and top strip color"]') as HTMLButtonElement | null;
+  }
+
+  it('switching to Box mode shows exactly one tool: Card color (Reaction/Comment are not wired yet, so they are absent, not broken)', () => {
+    const c = open();
+    click(c.querySelector('button[title*="Switch to Box"]')!);
+    expect(cardColorBtn(c)).not.toBeNull();
+    expect(c.querySelector('button[title="Add emoji reaction to this post"]')).toBeNull();
+    expect(c.querySelector('button[title*="Add a comment to this post"]')).toBeNull();
+  });
+
+  it('opens a BG/TS color panel; changing BG updates the saved backgroundColor', async () => {
+    const onSave = vi.fn().mockResolvedValue({ status: 'saved' });
+    const c = mount(<DocumentEditor isOpen title="T" initialContent="<p>hi</p>" metadata={{}} onSave={onSave} onClose={vi.fn()} />);
+    click(c.querySelector('button[title*="Switch to Box"]')!);
+    click(cardColorBtn(c)!);
+    expect(c.textContent).toContain('Document Color');
+    const bgSwatch = Array.from(c.querySelectorAll('button')).find((b) => b.title === 'Background Color')!;
+    expect(bgSwatch.className).toContain('bg-white text-gray-900'); // BG tab active by default
+    // ColorPickerContent's hex field displays/accepts digits WITHOUT the
+    // leading '#' (it prepends one itself before validating/applying).
+    const hexInput = c.querySelector('input[type="text"]') as HTMLInputElement;
+    setValue(hexInput, 'f3f4f6');
+    await act(async () => {
+      c.querySelector('button[aria-label="Close"]')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+    });
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
+      metadata: expect.objectContaining({ backgroundColor: '#f3f4f6' }),
+    }));
+  });
+
+  it('the TS tab edits topStripColor independently from BG', async () => {
+    const onSave = vi.fn().mockResolvedValue({ status: 'saved' });
+    const c = mount(<DocumentEditor isOpen title="T" initialContent="<p>hi</p>" metadata={{}} onSave={onSave} onClose={vi.fn()} />);
+    click(c.querySelector('button[title*="Switch to Box"]')!);
+    click(cardColorBtn(c)!);
+    click(Array.from(c.querySelectorAll('button')).find((b) => b.title === 'Top Strip Color')!);
+    // "transparent" is a preset swatch, not a typeable hex value.
+    click(c.querySelector('button[title="transparent"]')!);
+    await act(async () => {
+      c.querySelector('button[aria-label="Close"]')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+    });
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
+      metadata: expect.objectContaining({ topStripColor: 'transparent' }),
+    }));
+  });
+
+  it('closing without touching colors does not include backgroundColor/topStripColor overrides (no spurious dirty state)', () => {
+    const dirtySpy = vi.fn();
+    const c = mount(<DocumentEditor isOpen title="T" initialContent="<p>hi</p>" metadata={{}} onSave={vi.fn()} onClose={vi.fn()} onDirtyChange={dirtySpy} />);
+    click(c.querySelector('button[title*="Switch to Box"]')!);
+    click(cardColorBtn(c)!);
+    expect(dirtySpy).toHaveBeenLastCalledWith(false); // opening the panel alone does not dirty the draft
   });
 });
 
