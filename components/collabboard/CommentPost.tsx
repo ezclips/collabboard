@@ -142,6 +142,12 @@ export default function CommentPost({
     const strikeActiveClass = isDarkCard ? 'text-white bg-white/20' : 'text-blue-500 bg-blue-50';
     const deleteHoverClass = isDarkCard ? 'hover:text-red-300' : 'hover:text-red-500';
 
+    // Same top strip as Note/Document's own card bar (CardPreview.tsx):
+    // a 3-column grid -- [pencil placeholder | title centered | edit pencil].
+    const showTopStrip = !!topStrip && topStrip !== 'transparent';
+    const stripBg = showTopStrip ? topStrip : 'rgba(0,0,0,0.04)';
+    const stripIconColor = showTopStrip ? '#f3f4f6' : '#9ca3af';
+
     return (
         <div
             className={`group bg-white shadow-lg border border-gray-200 flex flex-col cursor-pointer transition-shadow relative ${selected ? 'ring-2 ring-blue-500 ring-offset-2' : 'hover:shadow-xl'}`}
@@ -179,26 +185,75 @@ export default function CommentPost({
                     {comments.length}
                 </div>
             )}
-            {/* Edit button -- positioned just under the counter badge, at the
-                card's top-right corner, matching the Note/Document card's own
-                pencil placement (their top strip sits flush with the top edge,
-                right-aligned) rather than inset inside the padded body. */}
-            {showMenu && (
-                <button
-                    onClick={(e) => {
-                        e.stopPropagation();
-                        if (onMenuClick) onMenuClick();
-                    }}
-                    className="absolute top-2 right-2 z-10 w-6 h-6 flex items-center justify-center rounded text-gray-500 hover:bg-gray-100 hover:text-blue-500 transition-colors"
-                    title="Edit"
-                    data-no-drag="true"
-                >
-                    <Edit2 className="w-3 h-3" />
-                </button>
-            )}
-            {topStrip && topStrip !== 'transparent' && (
-                <div className="h-1.5 w-full" style={{ backgroundColor: topStrip }} />
-            )}
+            {/* Top strip -- exact same bar as Note/Document's own card chrome:
+                3-column grid, title centered, edit pencil in the right slot. */}
+            <div
+                className="w-full flex-shrink-0 grid"
+                style={{ gridTemplateColumns: 'auto 1fr auto', minHeight: '22px', backgroundColor: stripBg }}
+            >
+                <div className="flex items-center pl-1.5">
+                    <div className="w-5 h-5 shrink-0" aria-hidden="true" />
+                </div>
+                <div className="flex items-center justify-center px-1 min-w-0">
+                    {isEditingTitle ? (
+                        <input
+                            type="text"
+                            value={localTitle}
+                            onChange={(e) => setLocalTitle(e.target.value)}
+                            onBlur={() => {
+                                setIsEditingTitle(false);
+                                if (onTitleChange && localTitle.trim()) {
+                                    onTitleChange(localTitle.trim());
+                                }
+                            }}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                    setIsEditingTitle(false);
+                                    if (onTitleChange && localTitle.trim()) {
+                                        onTitleChange(localTitle.trim());
+                                    }
+                                }
+                                if (e.key === 'Escape') {
+                                    setIsEditingTitle(false);
+                                    setLocalTitle(commentTitle);
+                                }
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                            onMouseDown={(e) => e.stopPropagation()}
+                            className="text-xs font-semibold text-center bg-transparent border-b border-blue-400 outline-none px-0 py-0 w-24"
+                            autoFocus
+                        />
+                    ) : (
+                        <span
+                            className="text-xs font-semibold text-center truncate cursor-pointer"
+                            onDoubleClick={(e) => {
+                                e.stopPropagation();
+                                setIsEditingTitle(true);
+                                setLocalTitle(commentTitle);
+                            }}
+                            title="Double-click to edit title"
+                        >
+                            {commentTitle}
+                        </span>
+                    )}
+                </div>
+                <div className="flex items-center pr-1.5">
+                    {showMenu && (
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                if (onMenuClick) onMenuClick();
+                            }}
+                            className="shrink-0 w-5 h-5 rounded flex items-center justify-center hover:bg-black/10 transition-opacity opacity-0 group-hover:opacity-100"
+                            style={{ color: stripIconColor }}
+                            title="Edit"
+                            data-no-drag="true"
+                        >
+                            <Edit2 className="w-3 h-3" />
+                        </button>
+                    )}
+                </div>
+            </div>
             <div className="p-4 flex-1 flex flex-col relative">
                 {commentColorPopupId && (
                     <div
@@ -230,51 +285,6 @@ export default function CommentPost({
                         />
                     </div>
                 )}
-                <div className="flex items-center mb-3">
-                    <div className="flex items-center gap-2">
-                        {isEditingTitle ? (
-                            <input
-                                type="text"
-                                value={localTitle}
-                                onChange={(e) => setLocalTitle(e.target.value)}
-                                onBlur={() => {
-                                    setIsEditingTitle(false);
-                                    if (onTitleChange && localTitle.trim()) {
-                                        onTitleChange(localTitle.trim());
-                                    }
-                                }}
-                                onKeyDown={(e) => {
-                                    if (e.key === 'Enter') {
-                                        setIsEditingTitle(false);
-                                        if (onTitleChange && localTitle.trim()) {
-                                            onTitleChange(localTitle.trim());
-                                        }
-                                    }
-                                    if (e.key === 'Escape') {
-                                        setIsEditingTitle(false);
-                                        setLocalTitle(commentTitle);
-                                    }
-                                }}
-                                onClick={(e) => e.stopPropagation()}
-                                onMouseDown={(e) => e.stopPropagation()}
-                                className="text-sm font-semibold text-gray-700 bg-transparent border-b border-blue-400 outline-none px-0 py-0 w-24"
-                                autoFocus
-                            />
-                        ) : (
-                            <span
-                                className="text-sm font-semibold text-gray-700 cursor-pointer hover:text-blue-600 transition-colors"
-                                onDoubleClick={(e) => {
-                                    e.stopPropagation();
-                                    setIsEditingTitle(true);
-                                    setLocalTitle(commentTitle);
-                                }}
-                                title="Double-click to edit title"
-                            >
-                                {commentTitle}
-                            </span>
-                        )}
-                    </div>
-                </div>
                 {comments.length === 0 ? (
                     <p className="text-xs text-gray-400 text-center py-4">No comments yet</p>
                 ) : (

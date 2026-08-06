@@ -261,20 +261,27 @@ describe('follow-up correction: Document Freeform card has square corners and a 
     expect(src).not.toContain('title="Badge Color"');
   });
 
-  it("the standalone Comment post's Edit button sits just under the counter badge (top-right corner overlay, sibling of the badge), not inset inside the padded title row, and uses the real pencil icon rather than the old three-dot kebab", () => {
+  it("the standalone Comment post has the exact same top-strip bar as Note/Document (3-column grid, minHeight 22px, title centered, pencil in the right slot) instead of no bar at all", () => {
     const src = fs.readFileSync('components/collabboard/CommentPost.tsx', 'utf8');
     // No more custom three-circle kebab icon.
     expect(src).not.toContain('<circle cx="12" cy="5" r="2" />');
-    // The Edit button is a sibling of the counter badge -- both absolutely
-    // positioned against the outer card, before the `p-4` padded body starts.
-    const badgeIndex = src.indexOf('Comment counter badge on card edge');
+    // Same 3-column grid strip CardPreview.tsx uses for Document/Clipart.
+    const stripIndex = src.indexOf("className=\"w-full flex-shrink-0 grid\"");
     const bodyIndex = src.indexOf('className="p-4 flex-1 flex flex-col relative"');
+    expect(stripIndex).toBeGreaterThan(-1);
+    expect(bodyIndex).toBeGreaterThan(stripIndex);
+    const stripBlock = src.slice(stripIndex, bodyIndex);
+    expect(stripBlock).toContain("gridTemplateColumns: 'auto 1fr auto', minHeight: '22px'");
+    // Title is centered in the strip, not left in the old padded header.
+    expect(stripBlock).toContain('{commentTitle}');
+    // Edit pencil lives in the strip's right slot, hover-revealed like Document's.
+    expect(stripBlock).toContain('showMenu &&');
+    expect(stripBlock).toContain('opacity-0 group-hover:opacity-100');
+    expect(stripBlock).toContain('<Edit2 className="w-3 h-3" />');
+    // The counter badge (outside the strip, on the card's outer edge) is untouched.
+    const badgeIndex = src.indexOf('Comment counter badge on card edge');
     expect(badgeIndex).toBeGreaterThan(-1);
-    expect(bodyIndex).toBeGreaterThan(badgeIndex);
-    const outerRegion = src.slice(badgeIndex, bodyIndex);
-    expect(outerRegion).toContain('showMenu &&');
-    expect(outerRegion).toContain('absolute top-2 right-2');
-    expect(outerRegion).toContain('<Edit2 className="w-3 h-3" />');
+    expect(badgeIndex).toBeLessThan(stripIndex);
   });
 
   it('renders a title bar containing the title text, not a centered title inside the body', () => {
