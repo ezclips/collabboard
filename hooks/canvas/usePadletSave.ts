@@ -99,6 +99,8 @@ export type SaveTodoData = {
     isStrikethrough?: boolean;
   }>;
   badgeColor?: string;
+  textColor?: string;
+  highlightColor?: string;
 };
 
 export type SaveTableData = {
@@ -626,6 +628,8 @@ export function usePadletSave(params: UsePadletSaveParams) {
       detachedComments: data.detachedComments,
       comments: data.detachedComments,
       badgeColor: data.badgeColor || padletToEdit?.metadata?.badgeColor,
+      textColor: data.textColor,
+      highlightColor: data.highlightColor,
     };
 
     // Check if placement prompt is needed (grid/columns/wall layouts)

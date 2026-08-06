@@ -252,6 +252,8 @@ export default function CanvasModals({
             detachedComments: padletToEdit.metadata.detachedComments || padletToEdit.metadata.comments,
             comments: padletToEdit.metadata.comments,
             badgeColor: padletToEdit.metadata.badgeColor,
+            textColor: padletToEdit.metadata.textColor,
+            highlightColor: padletToEdit.metadata.highlightColor,
           } : undefined}
           onSave={saveTodo}
           padletId={padletToEdit?.id !== 'new' ? padletToEdit?.id : undefined}

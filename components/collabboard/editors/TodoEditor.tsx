@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Palette, Calendar, User, Smile, MessageSquare, Trash2, ChevronLeft, ChevronRight, Clock, Bell, X, Share2, GripVertical, PenTool } from 'lucide-react';
+import { Palette, Type, Calendar, User, Smile, MessageSquare, Trash2, ChevronLeft, ChevronRight, Clock, Bell, X, Share2, GripVertical, PenTool } from 'lucide-react';
 import ShareModal from './ShareModal';
 import { ColorPickerContent } from '../ColorPicker';
 import TextStylePopup from './TextStylePopup';
@@ -43,6 +43,8 @@ interface TodoEditorProps {
         detachedComments?: PadletComment[];
         comments?: PadletComment[];
         badgeColor?: string;
+        textColor?: string;
+        highlightColor?: string;
     }) => void;
     initialData?: {
         todoTitle?: string;
@@ -54,6 +56,8 @@ interface TodoEditorProps {
         detachedComments?: PadletComment[];
         comments?: PadletComment[];
         badgeColor?: string;
+        textColor?: string;
+        highlightColor?: string;
     };
     padletId?: string; // For share functionality
     boardId?: string; // For share functionality (fallback when no padletId)
@@ -126,6 +130,11 @@ export default function TodoEditor({
     const [showShareModal, setShowShareModal] = useState(false);
     const [activeTab, setActiveTab] = useState<'background' | 'topstrip'>('background');
 
+    // Text style (title + task text color/highlight)
+    const [showTextStylePanel, setShowTextStylePanel] = useState(false);
+    const [textColor, setTextColor] = useState<string | undefined>(undefined);
+    const [highlightColor, setHighlightColor] = useState<string | undefined>(undefined);
+
     // Comments state
     const [comments, setComments] = useState<PadletComment[]>([]);
     const [showCommentPopup, setShowCommentPopup] = useState(false);
@@ -169,6 +178,8 @@ export default function TodoEditor({
                     isStrikethrough: comment.isStrikethrough,
                 })));
                 setBadgeColor(initialData.badgeColor || '#facc15');
+                setTextColor(initialData.textColor);
+                setHighlightColor(initialData.highlightColor);
             } else {
                 setTodoTitle('');
                 setTasks([]);
@@ -180,6 +191,8 @@ export default function TodoEditor({
                 setReactions([]);
                 setComments([]);
                 setBadgeColor('#facc15');
+                setTextColor(undefined);
+                setHighlightColor(undefined);
             }
         }
         prevOpenRef.current = isOpen;
@@ -196,6 +209,8 @@ export default function TodoEditor({
             detachedComments: comments,
             comments,
             badgeColor: badgeColor || '#facc15',
+            textColor,
+            highlightColor,
         });
         onClose();
     };
@@ -390,12 +405,30 @@ export default function TodoEditor({
                 <div className="flex items-start gap-3" onClick={(e) => e.stopPropagation()}>
                     {/* Left Toolbar - fixed height, vertically centered with the card */}
                     <div className={`flex flex-col items-center bg-white rounded-lg shadow-lg p-2 gap-1 self-center flex-shrink-0 ${commentColorPopupId ? "opacity-0 pointer-events-none" : ""}`}>
+                        {/* Text style */}
+                        <div className="flex flex-col items-center">
+                            <button
+                                onClick={() => {
+                                    setShowTextStylePanel(!showTextStylePanel);
+                                    setShowColorPicker(false);
+                                    setShowReactionPicker(false);
+                                }}
+                                className={`w-10 h-10 flex items-center justify-center rounded-lg transition-colors ${showTextStylePanel ? 'bg-blue-100 text-blue-600' : 'hover:bg-gray-200 text-gray-600'
+                                    }`}
+                                title="Text style"
+                            >
+                                <Type className="w-5 h-5" />
+                            </button>
+                            <span className="text-[9px] text-gray-500 text-center">Text style</span>
+                        </div>
+
                         {/* Color */}
                         <div className="relative flex flex-col items-center">
                             <button
                                 onClick={() => {
                                     setShowColorPicker(!showColorPicker);
                                     setShowReactionPicker(false);
+                                    setShowTextStylePanel(false);
                                 }}
                                 className={`w-10 h-10 flex items-center justify-center rounded-lg transition-colors ${showColorPicker ? 'bg-blue-100 text-blue-600' : 'hover:bg-gray-200 text-gray-600'
                                     }`}
@@ -447,6 +480,7 @@ export default function TodoEditor({
                                     const isOpening = !showReactionPicker;
                                     setShowReactionPicker(isOpening);
                                     setShowColorPicker(false);
+                                    setShowTextStylePanel(false);
                                     if (isOpening) {
                                         setShowCommentPopup(false);
                                         setActiveCommentId(null);
@@ -473,6 +507,7 @@ export default function TodoEditor({
                                     setShowCommentPopup(isOpening);
                                     setShowColorPicker(false);
                                     setShowReactionPicker(false);
+                                    setShowTextStylePanel(false);
                                     if (isOpening) {
                                         setActiveCommentId(comments[comments.length - 1]?.id || null);
                                         setEditingCommentId(null);
@@ -817,6 +852,7 @@ export default function TodoEditor({
                                 onChange={(e) => setTodoTitle(e.target.value)}
                                 className="w-full text-lg font-bold mb-3 p-1 bg-transparent border-b border-transparent focus:border-blue-400 outline-none placeholder:opacity-40 placeholder:font-normal"
                                 placeholder="Title"
+                                style={{ color: textColor, backgroundColor: highlightColor }}
                             />
 
                             {/* Task list */}
@@ -852,7 +888,10 @@ export default function TodoEditor({
                                                 onChange={() => toggleTask(task.id)}
                                                 className="w-4 h-4 flex-shrink-0 accent-blue-500 rounded border-gray-300"
                                             />
-                                            <span className={`text-sm flex-1 break-words ${task.completed ? 'line-through text-gray-400' : 'text-gray-800'}`}>
+                                            <span
+                                                className={`text-sm flex-1 break-words ${task.completed ? 'line-through text-gray-400' : 'text-gray-800'}`}
+                                                style={task.completed ? undefined : { color: textColor, backgroundColor: highlightColor }}
+                                            >
                                                 {task.text}
                                             </span>
 
@@ -1028,6 +1067,25 @@ export default function TodoEditor({
                     </div>
 
 
+
+                    {/* Text Style - Right Side Panel */}
+                    {showTextStylePanel && (
+                        <div
+                            className="bg-white rounded-lg shadow-lg border border-gray-200 p-3 w-64 self-start flex-shrink-0"
+                            onClick={(e) => e.stopPropagation()}
+                        >
+                            <TextStylePopup
+                                isOpen={true}
+                                onOpenChange={(open) => setShowTextStylePanel(open)}
+                                onSelectHeading={() => {}}
+                                hideHeadingSelect={true}
+                                onSelectColor={setTextColor}
+                                onSelectHighlight={setHighlightColor}
+                                currentColor={textColor}
+                                currentHighlight={highlightColor}
+                            />
+                        </div>
+                    )}
 
                     {/* Color Picker - Right Side Panel */}
                     {showColorPicker && (
