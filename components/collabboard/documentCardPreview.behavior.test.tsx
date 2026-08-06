@@ -217,6 +217,16 @@ describe('follow-up correction: Document Freeform card has square corners and a 
     expect(wrapper.className).toContain('ring-2');
   });
 
+  it('the Freeform selection ring for a Document post is square (Note-style, no rounded-lg/shadow-xl), only Clipart keeps its rounded selected ring', () => {
+    const src = fs.readFileSync('components/collabboard/canvas/ui/FreeformPadletCards.tsx', 'utf8');
+    expect(src).toContain('isDocumentPost(padlet)');
+    // The Document branch of the selected-state ternary must match Note's
+    // own selected styling exactly (ring-offset-2, no rounded-lg/shadow-xl).
+    expect(src).toContain("? 'ring-2 ring-blue-500 ring-offset-2'");
+    // The Clipart branch (the ternary's else) is untouched.
+    expect(src).toContain("'ring-2 ring-blue-500 rounded-lg shadow-xl'");
+  });
+
   it('renders a title bar containing the title text, not a centered title inside the body', () => {
     const c = mount(<CardPreview padlet={doc({ title: 'Meeting Notes' })} isSelected={false} />);
     const bar = c.querySelector('.grid') as HTMLElement | null;

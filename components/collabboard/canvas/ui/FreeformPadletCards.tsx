@@ -8,6 +8,7 @@ import type { Padlet } from '@/types/collabboard';
 import { createUpdatePostFieldsCommand } from '@/lib/domain/canvas/posts';
 import { selectCardModalRoute } from '@/lib/domain/canvas/cardModalRoute';
 import { selectDocumentModalDestination, type DocumentModalDestination } from '@/lib/domain/canvas/documentModalRoute';
+import { isDocumentPost } from '@/lib/domain/canvas/documentPost';
 import { createPostsRepository } from '@/lib/infra/canvas/postsRepository';
 import ImageActionsToolbar from '@/components/collabboard/editors/ImageActionsToolbar';
 import ImageDrawingLayer from '@/components/collabboard/editors/ImageDrawingLayer';
@@ -1732,7 +1733,16 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
         >
           <div
             key={padlet.id}
-            className={`absolute group cursor-pointer transition-colors duration-200 ${isPadletSelected(padlet.id) ? 'ring-2 ring-blue-500 rounded-lg shadow-xl' : 'hover:shadow-xl'}`}
+            className={`absolute group cursor-pointer transition-colors duration-200 ${isPadletSelected(padlet.id)
+              ? (isDocumentPost(padlet)
+                // Follow-up correction: Document's own card is square-cornered
+                // (Note-style); the selected-state ring must not reintroduce
+                // Clipart's rounded corner here, and Note's own selected ring
+                // uses ring-offset (no shadow) rather than shadow-xl.
+                ? 'ring-2 ring-blue-500 ring-offset-2'
+                : 'ring-2 ring-blue-500 rounded-lg shadow-xl')
+              : 'hover:shadow-xl'
+              }`}
             style={{
               width: padlet.width || 180,
               height: padlet.height || 220,
