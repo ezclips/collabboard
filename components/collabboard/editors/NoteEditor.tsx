@@ -652,23 +652,6 @@ export default function NoteEditor({
             initialUrl={linkViewUrl}
           />
 
-          {/* Comment Popup */}
-          <CommentPopup
-            isOpen={panels.open.comment}
-            onOpenChange={handleCommentPopupOpenChange}
-            onSubmit={handleAddComment}
-            onEditComment={handleEditComment}
-            onRemoveComment={handleRemoveComment}
-            onRemoveThread={handleRemoveThread}
-            onToggleCommentStrikethrough={handleToggleCommentStrikethrough}
-            onColor={handleColorComment}
-            comments={activeThread?.comments || []}
-            highlightColor={activeThread?.color}
-            currentUserId="user1"
-            currentUserName="R"
-            position={commentPopupPosition}
-          />
-
           {/* Comment Badge - Positioned on the outer card, matching canvas position */}
           {detachedComments.length > 0 && (
             <button
@@ -1031,6 +1014,29 @@ export default function NoteEditor({
                 presets={activeTab === "background" ? BACKGROUND_COLORS : TOP_STRIP_COLORS}
               />
             </div>
+          </div>
+        )}
+
+        {/* Selected-text Comment Popup - right-side flex sibling, per
+            .agent/skills/row_canvas_development/SKILL.md's documented layout
+            (sub-panels appear to the right as extra flex items) */}
+        {panels.open.comment && (
+          <div style={{ width: '300px' }}>
+            <CommentPopup
+              isOpen={panels.open.comment}
+              onOpenChange={handleCommentPopupOpenChange}
+              onSubmit={handleAddComment}
+              onEditComment={handleEditComment}
+              onRemoveComment={handleRemoveComment}
+              onRemoveThread={handleRemoveThread}
+              onToggleCommentStrikethrough={handleToggleCommentStrikethrough}
+              onColor={handleColorComment}
+              comments={activeThread?.comments || []}
+              highlightColor={activeThread?.color}
+              currentUserId="user1"
+              currentUserName="R"
+              position={commentPopupPosition}
+            />
           </div>
         )}
         </>

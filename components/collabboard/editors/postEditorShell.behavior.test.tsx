@@ -6,6 +6,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import PostEditorShell, { useShellPanels } from './PostEditorShell';
 import NoteEditor from './NoteEditor';
+import DocumentEditor from './DocumentEditor';
 
 // PATCH-152 152-C2 (§22.10): shell-ownership proofs the 33 NoteEditor
 // characterization tests (read-only during C2) do not cover -- structural
@@ -258,14 +259,6 @@ describe('Frozen panels keep their current mount points (§22.3/§22.10 21-24)',
     expect(card(c).contains(input)).toBe(true);
   });
 
-  it('selected-text CommentPopup stays card-relative', () => {
-    const c = openNote();
-    selectText(c, 'world');
-    click(btn(c, 'Add comment to selected text')!);
-    const input = card(c).querySelector('input[placeholder="Add a comment..."]');
-    expect(input).not.toBeNull();
-  });
-
   it('the detached post-comment popup stays a shell-row sibling, outside the card and the shared panel region', () => {
     const c = openNote();
     click(btn(c, 'Switch to Box Design')!);
@@ -284,7 +277,10 @@ describe('Frozen panels keep their current mount points (§22.3/§22.10 21-24)',
 describe('Real NoteEditor panel coordination (§23.3): selected-text Comment closes textStyle/cardColor/reaction, not Link', () => {
   it('closes exactly the three declared panels and leaves Link and later coexistence unaffected', () => {
     const c = openNote();
-    const textStyle = () => c.querySelector('[style*="width: 300px"]');
+    // §-targeted-correction: the selected-text CommentPopup wrapper now also
+    // uses `width: 300px`, so this must key off TextStylePopup's own wrapper
+    // classes too, not just the shared inline width.
+    const textStyle = () => c.querySelector('.bg-white.rounded-lg.shadow-xl.border.border-gray-200.p-4.relative[style*="width: 300px"]');
     const cardColorPanel = () => c.querySelector('.bg-white.rounded-lg.shadow-xl.border.border-gray-200.p-4.h-fit');
     const reaction = () => c.querySelector('.note-emoji-picker');
 
@@ -309,7 +305,7 @@ describe('Real NoteEditor panel coordination (§23.3): selected-text Comment clo
 
     selectText(c, 'world');
     click(btn(c, 'Add comment to selected text')!);
-    expect(card(c).querySelector('input[placeholder="Add a comment..."]')).not.toBeNull();
+    expect(c.querySelector('input[placeholder="Add a comment..."]')).not.toBeNull();
     expect(textStyle()).toBeNull();
     expect(cardColorPanel()).toBeNull();
     expect(reaction()).toBeNull();
@@ -337,5 +333,93 @@ describe('C3-A additions are opt-in and do not affect Note (§24.16)', () => {
     const input = c.querySelector('input[placeholder="Paste or type a URL"]')!;
     expect(input.closest('.absolute.right-0')).not.toBeNull();
     expect(c.querySelector('[data-testid="shell-selection-overlay"]')).toBeNull();
+  });
+});
+
+// PATCH-152 targeted correction: selected-text CommentPopup must follow the
+// documented .agent/skills/row_canvas_development/SKILL.md layout -- sub-panels
+// (TextStylePopup, EmojiPicker, comment popup, colour picker) appear to the
+// right as extra flex items, never inside the card/toolbar and never via
+// fixed/absolute escape. This governs both Note and Document.
+describe('Selected-text CommentPopup follows the documented right-side layout', () => {
+  function openDoc(overrides: Partial<React.ComponentProps<typeof DocumentEditor>> = {}) {
+    return mount(
+      <DocumentEditor isOpen title="Doc" initialContent="<p>hello world again</p>" metadata={{}} onSave={vi.fn()} onClose={vi.fn()} {...overrides} />,
+    );
+  }
+  const has = (el: Element, sel: string) => el.matches(sel) || !!el.querySelector(sel);
+  const idx = (row: HTMLElement, pred: (el: Element) => boolean) => Array.from(row.children).findIndex(pred);
+
+  it('Note: renders after the centre, outside the toolbar and card, with no fixed/absolute escape', () => {
+    const c = openNote();
+    selectText(c, 'world');
+    click(btn(c, 'Add comment to selected text')!);
+    const input = c.querySelector('input[placeholder="Add a comment..."]')!;
+
+    expect(card(c).contains(input)).toBe(false);
+    expect(c.querySelector('.min-w-\\[72px\\]')!.contains(input)).toBe(false);
+    expect(shellRow(c).contains(input)).toBe(true);
+
+    const row = shellRow(c);
+    const centreIdx = idx(row, (el) => has(el, '.rounded-lg.shadow-2xl.overflow-visible'));
+    const panelIdx = idx(row, (el) => has(el, 'input[placeholder="Add a comment..."]'));
+    expect(panelIdx).toBeGreaterThan(centreIdx);
+
+    const wrapper = input.closest('[style*="width: 300px"]') as HTMLElement;
+    expect(wrapper).not.toBeNull();
+    expect(wrapper.className).not.toMatch(/\babsolute\b|\bfixed\b/);
+  });
+
+  it('Note: selected-text comment submission still works from its new location', () => {
+    const c = openNote();
+    selectText(c, 'world');
+    click(btn(c, 'Add comment to selected text')!);
+    const input = c.querySelector('input[placeholder="Add a comment..."]') as HTMLInputElement;
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+      setter.call(input, 'a remark');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    });
+    const mark = c.querySelector('.ProseMirror span[data-comment-id]');
+    expect(mark).not.toBeNull();
+    expect(mark!.textContent).toBe('world');
+  });
+
+  it('Document: renders after the centre, outside the toolbar and card, with no fixed/absolute escape', () => {
+    const c = openDoc();
+    selectText(c, 'world');
+    click(btn(c, 'Add comment to selected text')!);
+    const input = c.querySelector('input[placeholder="Add a comment..."]')!;
+    const centreEl = c.querySelector('.rounded-2xl.shadow-2xl') as HTMLElement;
+
+    expect(centreEl.contains(input)).toBe(false);
+    expect(c.querySelector('.min-w-\\[72px\\]')!.contains(input)).toBe(false);
+    expect(shellRow(c).contains(input)).toBe(true);
+
+    const row = shellRow(c);
+    const centreIdx = idx(row, (el) => has(el, '.rounded-2xl.shadow-2xl'));
+    const panelIdx = idx(row, (el) => has(el, 'input[placeholder="Add a comment..."]'));
+    expect(panelIdx).toBeGreaterThan(centreIdx);
+
+    const wrapper = input.closest('[style*="width: 300px"]') as HTMLElement;
+    expect(wrapper).not.toBeNull();
+    expect(wrapper.className).not.toMatch(/\babsolute\b|\bfixed\b/);
+  });
+
+  it('Note and Document place the panel in the same structural position: last flex child of the shell row', () => {
+    const noteC = openNote();
+    selectText(noteC, 'world');
+    click(btn(noteC, 'Add comment to selected text')!);
+    const noteRow = shellRow(noteC);
+    const notePanelIdx = idx(noteRow, (el) => has(el, 'input[placeholder="Add a comment..."]'));
+    expect(notePanelIdx).toBe(noteRow.children.length - 1);
+
+    const docC = openDoc();
+    selectText(docC, 'world');
+    click(btn(docC, 'Add comment to selected text')!);
+    const docRow = shellRow(docC);
+    const docPanelIdx = idx(docRow, (el) => has(el, 'input[placeholder="Add a comment..."]'));
+    expect(docPanelIdx).toBe(docRow.children.length - 1);
   });
 });
