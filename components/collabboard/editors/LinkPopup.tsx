@@ -9,6 +9,10 @@ interface LinkPopupProps {
     onSubmit: (url: string) => void;
     onRemoveLink: () => void;
     initialUrl?: string;
+    // PATCH-152 §24.10: default preserves today's card-relative absolute
+    // positioning (Note, unaffected). When true, renders without it so a
+    // shell flex sibling can place this panel instead (Document).
+    inline?: boolean;
 }
 
 export default function LinkPopup({
@@ -17,6 +21,7 @@ export default function LinkPopup({
     onSubmit,
     onRemoveLink,
     initialUrl = '',
+    inline = false,
 }: LinkPopupProps) {
     const [url, setUrl] = useState('');
     const [isEditMode, setIsEditMode] = useState(false);
@@ -141,11 +146,13 @@ export default function LinkPopup({
 
     if (!isOpen) return null;
 
+    const wrapperClassName = inline ? '' : 'absolute right-0 top-1/2 -translate-y-1/2 translate-x-full pl-2';
+
     // VIEW MODE: Show existing link with action buttons
     if (hasExistingLink && !isEditMode) {
         return (
             <div
-                className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-full pl-2"
+                className={wrapperClassName}
                 onMouseDown={preventFocusLoss}
             >
                 <div className="bg-white rounded-lg shadow-xl border border-gray-200 overflow-hidden min-w-[280px]">
@@ -229,7 +236,7 @@ export default function LinkPopup({
     // ADD/EDIT MODE: Show input field
     return (
         <div
-            className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-full pl-2"
+            className={wrapperClassName}
             onMouseDown={preventFocusLoss}
         >
             <div className="bg-white rounded-lg shadow-xl border border-gray-200 overflow-hidden min-w-[280px]">

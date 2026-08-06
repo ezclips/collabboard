@@ -325,3 +325,17 @@ describe('Real NoteEditor panel coordination (§23.3): selected-text Comment clo
     expect(cardColorPanel()).not.toBeNull();
   });
 });
+
+// PATCH-152 C3-A (§24.16): proves the C3-A shell/LinkPopup additions (showToolbar,
+// selectionIndicator, LinkPopup's inline prop) are opt-in and leave Note byte-identical.
+describe('C3-A additions are opt-in and do not affect Note (§24.16)', () => {
+  it('renders the toolbar and LinkPopup absolute-positioned exactly as before, with no selection overlay', () => {
+    const c = openNote();
+    selectText(c, 'world');
+    click(btn(c, 'Add link to selected text')!);
+    expect(c.querySelector('.min-w-\\[72px\\]')).not.toBeNull();
+    const input = c.querySelector('input[placeholder="Paste or type a URL"]')!;
+    expect(input.closest('.absolute.right-0')).not.toBeNull();
+    expect(c.querySelector('[data-testid="shell-selection-overlay"]')).toBeNull();
+  });
+});

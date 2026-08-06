@@ -3,7 +3,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Loader2, X } from 'lucide-react';
 import { EditorContent, useSharedTipTapEditor } from './useSharedTipTapEditor';
-import NoteEditorToolbar from './NoteEditorToolbar';
+import PostEditorShell, { useShellPanels, useShellSelection } from './PostEditorShell';
 import TextStylePopup from './TextStylePopup';
 import LinkPopup from './LinkPopup';
 import CommentPopup from './CommentPopup';
@@ -51,15 +51,11 @@ export default function DocumentEditor({
   const [saveError, setSaveError] = useState<string | null>(null);
   const titleInputRef = useRef<HTMLInputElement>(null);
 
-  // PATCH-152 §4.1-4.4: toolbar popup state, ported narrowly from NoteEditor.
-  const [, forceSelectionTick] = useState(0);
-  const [textStyleOpen, setTextStyleOpen] = useState(false);
+  const panels = useShellPanels(); // PATCH-152 §24.6/24.10: coordinated via the shared shell's panel hook
   const [currentHeading, setCurrentHeading] = useState('normal');
   const [currentTextColor, setCurrentTextColor] = useState('#1a1a1a');
   const [currentHighlight, setCurrentHighlight] = useState('transparent');
-  const [linkPopupOpen, setLinkPopupOpen] = useState(false);
   const [linkViewUrl, setLinkViewUrl] = useState('');
-  const [commentPopupOpen, setCommentPopupOpen] = useState(false);
   const [activeThread, setActiveThread] = useState<{ id: string; comments: Comment152[] } | null>(null);
   const [savedSelection, setSavedSelection] = useState<{ from: number; to: number } | null>(null);
 
@@ -69,13 +65,15 @@ export default function DocumentEditor({
     onUpdate: readOnly ? undefined : () => forceBodyTick((c) => c + 1),
   });
 
-  // PATCH-152 §2 OQ-3: local, Document-only selection reactivity -- deliberate, scoped divergence; Note is unfixed.
-  useEffect(() => {
-    if (!editor) return;
-    const handleSelectionUpdate = () => forceSelectionTick((c) => c + 1);
-    editor.on('selectionUpdate', handleSelectionUpdate);
-    return () => { editor.off('selectionUpdate', handleSelectionUpdate); };
-  }, [editor]);
+  const { hasSelection, lastSelection } = useShellSelection(editor); // PATCH-152 §24.11: shared shell mechanism
+
+  // §24.11: restores the stored range before Link/Text-style apply; no-op if current, fails safe if invalid.
+  const restoreSelection = (range: { from: number; to: number } | null): boolean => {
+    if (!editor || !range) return false;
+    if (editor.state.selection.from === range.from && editor.state.selection.to === range.to) return true;
+    if (range.from < 0 || range.to > editor.state.doc.content.size || range.from > range.to) return false;
+    editor.chain().setTextSelection(range).run(); return true;
+  };
 
   // §23.15 (F3): primitives only, never the metadata object; also re-establishes the saved baseline for a new open session.
   useEffect(() => {
@@ -141,6 +139,7 @@ export default function DocumentEditor({
   // PATCH-152 §4.1: heading/color/highlight semantics ported narrowly from NoteEditor.tsx:561-617.
   const handleSelectHeading = (level: string) => {
     if (!editor) return;
+    restoreSelection(lastSelection);
     setCurrentHeading(level);
     editor.chain().focus().clearNodes().unsetFontSize().run();
     switch (level) {
@@ -161,26 +160,25 @@ export default function DocumentEditor({
       default: editor.chain().focus().setParagraph().run();
     }
   };
-  const handleSelectTextColor = (color: string) => { setCurrentTextColor(color); editor?.chain().focus().setColor(color).run(); };
+  const handleSelectTextColor = (color: string) => { restoreSelection(lastSelection); setCurrentTextColor(color); editor?.chain().focus().setColor(color).run(); };
   const handleSelectHighlight = (color: string) => {
+    restoreSelection(lastSelection);
     setCurrentHighlight(color);
     if (color === 'transparent') editor?.chain().focus().unsetHighlight().run();
     else editor?.chain().focus().setHighlight({ color }).run();
   };
 
-  // PATCH-152 §4.2: link workflow ported narrowly from NoteEditor.tsx:279-313.
+  // PATCH-152 §4.2/§24.10-24.11: link workflow via the shell's panel exclusivity; restores the stored range before applying (§24.4/10).
   const handleLink = () => {
     if (!editor) return;
     const { from, to } = editor.state.selection;
     if (!editor.state.doc.textBetween(from, to, '').trim()) return;
     const linkMark = editor.getAttributes('link');
     setLinkViewUrl(linkMark?.href || '');
-    setTextStyleOpen(false);
-    setCommentPopupOpen(false);
-    setLinkPopupOpen(true);
+    panels.openPanel('link', ['textStyle', 'comment']);
   };
-  const handleAddLink = (url: string) => { if (url && editor) editor.chain().focus().setLink({ href: url }).run(); };
-  const handleRemoveLink = () => { editor?.chain().focus().unsetLink().run(); };
+  const handleAddLink = (url: string) => { if (!url || !editor || !restoreSelection(lastSelection)) return; editor.chain().focus().setLink({ href: url }).run(); };
+  const handleRemoveLink = () => { if (!editor || !restoreSelection(lastSelection)) return; editor.chain().focus().unsetLink().run(); };
 
   // PATCH-152 §4.3/§4.4: thread semantics ported narrowly from NoteEditor.tsx:180-204/316-371/407-445.
   const buildThreadFromAttrs = (attrs: { commentId?: string | null; commentThread?: string | null; commentText?: string | null; userId?: string | null; userName?: string | null; timestamp?: number | null }) => {
@@ -201,9 +199,7 @@ export default function DocumentEditor({
     const attrs = editor.getAttributes('comment');
     setActiveThread(attrs?.commentId ? buildThreadFromAttrs(attrs) : { id: `comment-${Date.now()}`, comments: [] });
     setSavedSelection({ from, to });
-    setTextStyleOpen(false);
-    setLinkPopupOpen(false);
-    setCommentPopupOpen(true);
+    panels.openPanel('comment', ['textStyle', 'link']);
   };
   const handleAddComment = (commentText: string) => {
     if (!editor || !commentText || !activeThread || !savedSelection) return;
@@ -218,83 +214,41 @@ export default function DocumentEditor({
 
   if (!isOpen || !editor) return null;
 
-  const hasSelection = !editor.state.selection.empty;
+  const toolbarProps = {
+    variant: 'document' as const,
+    onBold: () => editor.chain().focus().toggleBold().run(),
+    onItalic: () => editor.chain().focus().toggleItalic().run(),
+    onStrikethrough: () => editor.chain().focus().toggleStrike().run(),
+    onUnderline: () => editor.chain().focus().toggleUnderline().run(),
+    onBulletList: () => editor.chain().focus().toggleBulletList().run(),
+    onOrderedList: () => editor.chain().focus().toggleOrderedList().run(),
+    onCode: () => editor.chain().focus().toggleCodeBlock().run(),
+    onTextStyle: () => panels.openPanel('textStyle', ['link', 'comment']),
+    onLink: handleLink,
+    onTextComment: handleTextComment,
+    isBold: editor.isActive('bold'), isItalic: editor.isActive('italic'),
+    isStrikethrough: editor.isActive('strike'), isUnderline: editor.isActive('underline'),
+    isBulletList: editor.isActive('bulletList'), isOrderedList: editor.isActive('orderedList'),
+    isCode: editor.isActive('codeBlock'),
+    isLink: editor.isActive('link'),
+    isComment: editor.isActive('comment'),
+  };
 
   return (
-    <div
-      className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/50"
-      onClick={attemptClose}
+    <>
+    <PostEditorShell
+      isOpen={isOpen}
+      onBackdropClick={attemptClose}
       role="dialog"
-      aria-modal="true"
-      aria-label={readOnly ? 'View document' : 'Edit document'}
-    >
-      <div className="flex items-start gap-3" onClick={(e) => e.stopPropagation()}>
-        {!readOnly && (
-          <div className="relative min-w-[72px]">
-            <NoteEditorToolbar
-              variant="document"
-              mode="text"
-              onModeChange={() => {}}
-              onBold={() => editor.chain().focus().toggleBold().run()}
-              onItalic={() => editor.chain().focus().toggleItalic().run()}
-              onStrikethrough={() => editor.chain().focus().toggleStrike().run()}
-              onUnderline={() => editor.chain().focus().toggleUnderline().run()}
-              onBulletList={() => editor.chain().focus().toggleBulletList().run()}
-              onOrderedList={() => editor.chain().focus().toggleOrderedList().run()}
-              onCode={() => editor.chain().focus().toggleCodeBlock().run()}
-              onTextStyle={() => { setLinkPopupOpen(false); setCommentPopupOpen(false); setTextStyleOpen(true); }}
-              onLink={handleLink}
-              onTextComment={handleTextComment}
-              isBold={editor.isActive('bold')}
-              isItalic={editor.isActive('italic')}
-              isStrikethrough={editor.isActive('strike')}
-              isUnderline={editor.isActive('underline')}
-              isBulletList={editor.isActive('bulletList')}
-              isOrderedList={editor.isActive('orderedList')}
-              isCode={editor.isActive('codeBlock')}
-              isLink={editor.isActive('link')}
-              isComment={editor.isActive('comment')}
-              hasSelection={hasSelection}
-            />
-            {textStyleOpen && (
-              <div className="absolute left-full top-0 ml-2 z-[60] bg-white rounded-lg shadow-xl border border-gray-200 p-4" style={{ width: '300px' }}>
-                <button onClick={() => setTextStyleOpen(false)} className="absolute top-2 right-2 w-4 h-4 flex items-center justify-center rounded hover:bg-gray-100">
-                  <X className="w-3 h-3 text-gray-400" />
-                </button>
-                <TextStylePopup
-                  isOpen={true}
-                  onOpenChange={setTextStyleOpen}
-                  onSelectHeading={handleSelectHeading}
-                  onSelectColor={handleSelectTextColor}
-                  onSelectHighlight={handleSelectHighlight}
-                  currentHeading={currentHeading}
-                  currentColor={currentTextColor}
-                  currentHighlight={currentHighlight}
-                />
-              </div>
-            )}
-            <LinkPopup
-              isOpen={linkPopupOpen}
-              onOpenChange={setLinkPopupOpen}
-              onSubmit={handleAddLink}
-              onRemoveLink={handleRemoveLink}
-              initialUrl={linkViewUrl}
-            />
-            {commentPopupOpen && (
-              <div className="absolute left-full top-0 ml-2 z-[60]" style={{ width: '300px' }}>
-                <CommentPopup
-                  isOpen={commentPopupOpen}
-                  onOpenChange={setCommentPopupOpen}
-                  onSubmit={handleAddComment}
-                  comments={activeThread?.comments || []}
-                  currentUserId={currentUserId}
-                  currentUserName={currentUserName}
-                />
-              </div>
-            )}
-          </div>
-        )}
-
+      ariaModal
+      ariaLabel={readOnly ? 'View document' : 'Edit document'}
+      showToolbar={!readOnly}
+      hasSelection={hasSelection}
+      selectionIndicator={panels.open.textStyle || panels.open.link || panels.open.comment}
+      selectionEditor={editor}
+      selectionRange={lastSelection}
+      toolbar={toolbarProps}
+      centre={
         <div
           className="relative bg-white rounded-2xl shadow-2xl overflow-hidden flex flex-col"
           style={{ width: '640px', maxHeight: '80vh' }}
@@ -354,9 +308,52 @@ export default function DocumentEditor({
             </div>
           )}
         </div>
-      </div>
-
-      {showDiscardConfirm && <DiscardChangesDialog onKeepEditing={handleKeepEditing} onDiscard={handleDiscardConfirmed} />}
-    </div>
+      }
+      sharedPanel={
+        !readOnly && (
+          <>
+            {panels.open.textStyle && (
+              <div className="bg-white rounded-lg shadow-xl border border-gray-200 p-4 relative" style={{ width: '300px' }}>
+                <button onClick={() => panels.closePanel('textStyle')} className="absolute top-2 right-2 w-4 h-4 flex items-center justify-center rounded hover:bg-gray-100">
+                  <X className="w-3 h-3 text-gray-400" />
+                </button>
+                <TextStylePopup
+                  isOpen={true}
+                  onOpenChange={(open) => (open ? panels.openPanel('textStyle', ['link', 'comment']) : panels.closePanel('textStyle'))}
+                  onSelectHeading={handleSelectHeading}
+                  onSelectColor={handleSelectTextColor}
+                  onSelectHighlight={handleSelectHighlight}
+                  currentHeading={currentHeading}
+                  currentColor={currentTextColor}
+                  currentHighlight={currentHighlight}
+                />
+              </div>
+            )}
+            <LinkPopup
+              inline
+              isOpen={panels.open.link}
+              onOpenChange={(open) => (open ? panels.openPanel('link', ['textStyle', 'comment']) : panels.closePanel('link'))}
+              onSubmit={handleAddLink}
+              onRemoveLink={handleRemoveLink}
+              initialUrl={linkViewUrl}
+            />
+            {panels.open.comment && (
+              <div style={{ width: '300px' }}>
+                <CommentPopup
+                  isOpen={panels.open.comment}
+                  onOpenChange={(open) => (open ? panels.openPanel('comment', ['textStyle', 'link']) : panels.closePanel('comment'))}
+                  onSubmit={handleAddComment}
+                  comments={activeThread?.comments || []}
+                  currentUserId={currentUserId}
+                  currentUserName={currentUserName}
+                />
+              </div>
+            )}
+          </>
+        )
+      }
+    />
+    {showDiscardConfirm && <DiscardChangesDialog onKeepEditing={handleKeepEditing} onDiscard={handleDiscardConfirmed} />}
+    </>
   );
 }
