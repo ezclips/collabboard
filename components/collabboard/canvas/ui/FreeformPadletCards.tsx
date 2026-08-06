@@ -2028,7 +2028,11 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
             {/* Card Comments Popup - Right side */}
             {cardCommentPopupPadletId === padlet.id && !cardToolbarPadletId && (
               <div className="absolute left-full top-0 ml-3 z-[1100] animate-in fade-in slide-in-from-left-2 duration-200 pointer-events-auto">
-                <div className="relative bg-white rounded-xl shadow-2xl border border-gray-200 p-4 min-w-[280px] max-w-[320px]">
+                {/* Follow-up correction: square corners, matching both the
+                    Document and Clipart card's own square outer boundary
+                    (neither is rounded-xl at the top level -- only Clipart's
+                    inner icon box is). */}
+                <div className="relative bg-white shadow-2xl border border-gray-200 p-4 min-w-[280px] max-w-[320px]">
                   <div className="flex items-center justify-between mb-3">
                     <h4 className="text-sm font-semibold text-gray-700">Comments</h4>
                     <button
@@ -2189,7 +2193,10 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                             title="Edit"
                             disabled={!activeCardComment}
                           >
-                            <PenTool className="w-3 h-3" />
+                            {/* Follow-up correction: the standard pencil icon used
+                                everywhere else for Edit (CardPreview, DrawingLayout strip)
+                                -- PenTool was a leftover icon that read as a smudge/dots at 12px. */}
+                            <Edit2 className="w-3 h-3" />
                           </button>
                         )}
                         <button

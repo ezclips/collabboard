@@ -227,6 +227,20 @@ describe('follow-up correction: Document Freeform card has square corners and a 
     expect(src).toContain("'ring-2 ring-blue-500 rounded-lg shadow-xl'");
   });
 
+  it('the Card Comments popup (reachable for both Clipart and Document card posts) has square corners and a real pencil icon, not the old rounded-xl box or the PenTool smudge', () => {
+    const src = fs.readFileSync('components/collabboard/canvas/ui/FreeformPadletCards.tsx', 'utf8');
+    const start = src.indexOf('{/* Card Comments Popup - Right side */}');
+    const end = src.indexOf('{/* Render Standalone Comment Marker */}');
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const block = src.slice(start, end);
+    expect(block).not.toContain('rounded-xl shadow-2xl border border-gray-200 p-4 min-w-[280px] max-w-[320px]');
+    expect(block).toContain('shadow-2xl border border-gray-200 p-4 min-w-[280px] max-w-[320px]');
+    expect(block).not.toContain('<PenTool');
+    expect(block).toContain('title="Edit"');
+    expect(block).toContain('<Edit2 className="w-3 h-3" />');
+  });
+
   it('renders a title bar containing the title text, not a centered title inside the body', () => {
     const c = mount(<CardPreview padlet={doc({ title: 'Meeting Notes' })} isSelected={false} />);
     const bar = c.querySelector('.grid') as HTMLElement | null;
