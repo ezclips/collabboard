@@ -2,6 +2,7 @@
 
 import type { LoadedAIContent } from '@/lib/ai/contracts';
 import { serializeAIContentForPersistence } from '@/lib/ai/persistence';
+import type { CaptionStyle } from '@/lib/domain/canvas/captionStyle';
 import { useGridPadletSave } from './useGridPadletSave';
 
 export type SaveAIComponentData = {
@@ -99,8 +100,7 @@ export type SaveTodoData = {
     isStrikethrough?: boolean;
   }>;
   badgeColor?: string;
-  textColor?: string;
-  highlightColor?: string;
+  captionStyle?: CaptionStyle;
 };
 
 export type SaveTableData = {
@@ -628,8 +628,7 @@ export function usePadletSave(params: UsePadletSaveParams) {
       detachedComments: data.detachedComments,
       comments: data.detachedComments,
       badgeColor: data.badgeColor || padletToEdit?.metadata?.badgeColor,
-      textColor: data.textColor,
-      highlightColor: data.highlightColor,
+      captionStyle: data.captionStyle,
     };
 
     // Check if placement prompt is needed (grid/columns/wall layouts)

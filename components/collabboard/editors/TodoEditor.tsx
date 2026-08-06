@@ -6,6 +6,7 @@ import ShareModal from './ShareModal';
 import { ColorPickerContent } from '../ColorPicker';
 import TextStylePopup from './TextStylePopup';
 import EmojiReactionPicker from './EmojiReactionPicker';
+import { CAPTION_STYLE_PRESETS, resolveCaptionStyle, type CaptionHeading, type CaptionStyle } from '@/lib/domain/canvas/captionStyle';
 
 interface Task {
     id: string;
@@ -43,8 +44,7 @@ interface TodoEditorProps {
         detachedComments?: PadletComment[];
         comments?: PadletComment[];
         badgeColor?: string;
-        textColor?: string;
-        highlightColor?: string;
+        captionStyle?: CaptionStyle;
     }) => void;
     initialData?: {
         todoTitle?: string;
@@ -56,8 +56,7 @@ interface TodoEditorProps {
         detachedComments?: PadletComment[];
         comments?: PadletComment[];
         badgeColor?: string;
-        textColor?: string;
-        highlightColor?: string;
+        captionStyle?: CaptionStyle;
     };
     padletId?: string; // For share functionality
     boardId?: string; // For share functionality (fallback when no padletId)
@@ -130,10 +129,10 @@ export default function TodoEditor({
     const [showShareModal, setShowShareModal] = useState(false);
     const [activeTab, setActiveTab] = useState<'background' | 'topstrip'>('background');
 
-    // Text style (title + task text color/highlight)
+    // Text style (title + task text heading/color/highlight) -- same
+    // captionStyle preset mechanism Document/Clipart's own Caption tool uses.
     const [showTextStylePanel, setShowTextStylePanel] = useState(false);
-    const [textColor, setTextColor] = useState<string | undefined>(undefined);
-    const [highlightColor, setHighlightColor] = useState<string | undefined>(undefined);
+    const [captionStyle, setCaptionStyle] = useState<CaptionStyle>({});
 
     // Comments state
     const [comments, setComments] = useState<PadletComment[]>([]);
@@ -178,8 +177,7 @@ export default function TodoEditor({
                     isStrikethrough: comment.isStrikethrough,
                 })));
                 setBadgeColor(initialData.badgeColor || '#facc15');
-                setTextColor(initialData.textColor);
-                setHighlightColor(initialData.highlightColor);
+                setCaptionStyle(initialData.captionStyle || {});
             } else {
                 setTodoTitle('');
                 setTasks([]);
@@ -191,8 +189,7 @@ export default function TodoEditor({
                 setReactions([]);
                 setComments([]);
                 setBadgeColor('#facc15');
-                setTextColor(undefined);
-                setHighlightColor(undefined);
+                setCaptionStyle({});
             }
         }
         prevOpenRef.current = isOpen;
@@ -209,8 +206,7 @@ export default function TodoEditor({
             detachedComments: comments,
             comments,
             badgeColor: badgeColor || '#facc15',
-            textColor,
-            highlightColor,
+            captionStyle: Object.keys(captionStyle).length > 0 ? captionStyle : undefined,
         });
         onClose();
     };
@@ -262,6 +258,19 @@ export default function TodoEditor({
                 : [...prev, emoji]
         );
     };
+
+    const writeCaptionStyle = (updates: Partial<CaptionStyle>) => {
+        setCaptionStyle((prev) => ({ ...prev, ...updates }));
+    };
+
+    const applyCaptionPreset = (level: CaptionHeading) => {
+        const selectedPreset = level === 'callout' && captionStyle.backgroundColor
+            ? { ...CAPTION_STYLE_PRESETS.callout, backgroundColor: captionStyle.backgroundColor }
+            : CAPTION_STYLE_PRESETS[level];
+        setCaptionStyle((prev) => ({ ...prev, ...selectedPreset }));
+    };
+
+    const resolvedTextStyle = resolveCaptionStyle(captionStyle);
 
     const activeComment = comments.find((comment) => comment.id === activeCommentId) || null;
 
@@ -852,7 +861,7 @@ export default function TodoEditor({
                                 onChange={(e) => setTodoTitle(e.target.value)}
                                 className="w-full text-lg font-bold mb-3 p-1 bg-transparent border-b border-transparent focus:border-blue-400 outline-none placeholder:opacity-40 placeholder:font-normal"
                                 placeholder="Title"
-                                style={{ color: textColor, backgroundColor: highlightColor }}
+                                style={resolvedTextStyle}
                             />
 
                             {/* Task list */}
@@ -890,7 +899,7 @@ export default function TodoEditor({
                                             />
                                             <span
                                                 className={`text-sm flex-1 break-words ${task.completed ? 'line-through text-gray-400' : 'text-gray-800'}`}
-                                                style={task.completed ? undefined : { color: textColor, backgroundColor: highlightColor }}
+                                                style={task.completed ? undefined : resolvedTextStyle}
                                             >
                                                 {task.text}
                                             </span>
@@ -1077,12 +1086,12 @@ export default function TodoEditor({
                             <TextStylePopup
                                 isOpen={true}
                                 onOpenChange={(open) => setShowTextStylePanel(open)}
-                                onSelectHeading={() => {}}
-                                hideHeadingSelect={true}
-                                onSelectColor={setTextColor}
-                                onSelectHighlight={setHighlightColor}
-                                currentColor={textColor}
-                                currentHighlight={highlightColor}
+                                onSelectHeading={applyCaptionPreset}
+                                onSelectColor={(color) => writeCaptionStyle({ color })}
+                                onSelectHighlight={(color) => writeCaptionStyle({ backgroundColor: color })}
+                                currentHeading={captionStyle.heading || 'normal'}
+                                currentColor={captionStyle.color}
+                                currentHighlight={captionStyle.backgroundColor}
                             />
                         </div>
                     )}

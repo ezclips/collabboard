@@ -157,7 +157,6 @@ export interface Padlet {
     isAllDay?: boolean;
     topStrip?: string;
     textColor?: string;
-    highlightColor?: string;
     reactions?: string[];
     badgeColor?: string;
     isCollapsed?: boolean;

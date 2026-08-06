@@ -4,6 +4,7 @@ import React from 'react';
 import type { AuthUser } from '@/lib/domain/auth/user';
 import type { Padlet } from '@/types/collabboard';
 import { getMeaningfulTitle } from '@/lib/infra/collabboard/postTitle';
+import type { CaptionStyle } from '@/lib/domain/canvas/captionStyle';
 
 // Stable empty array to avoid creating a new [] reference on every render
 // (which would cause infinite useEffect loops in child editors)
@@ -252,8 +253,7 @@ export default function CanvasModals({
             detachedComments: padletToEdit.metadata.detachedComments || padletToEdit.metadata.comments,
             comments: padletToEdit.metadata.comments,
             badgeColor: padletToEdit.metadata.badgeColor,
-            textColor: padletToEdit.metadata.textColor,
-            highlightColor: padletToEdit.metadata.highlightColor,
+            captionStyle: padletToEdit.metadata.captionStyle as CaptionStyle | undefined,
           } : undefined}
           onSave={saveTodo}
           padletId={padletToEdit?.id !== 'new' ? padletToEdit?.id : undefined}
