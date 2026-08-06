@@ -412,8 +412,10 @@ export default function TodoEditor({
             >
                 {/* Main container - uses flexbox to center all three columns */}
                 <div className="flex items-start gap-3" onClick={(e) => e.stopPropagation()}>
-                    {/* Left Toolbar - fixed height, vertically centered with the card */}
-                    <div className={`flex flex-col items-center bg-white rounded-lg shadow-lg p-2 gap-1 self-center flex-shrink-0 ${commentColorPopupId ? "opacity-0 pointer-events-none" : ""}`}>
+                    {/* Left Toolbar - top-aligned with the card and side panels
+                        (self-center previously made it sit below their top
+                        edge whenever the card/panel were taller). */}
+                    <div className={`flex flex-col items-center bg-white rounded-lg shadow-lg p-2 gap-1 self-start flex-shrink-0 ${commentColorPopupId ? "opacity-0 pointer-events-none" : ""}`}>
                         {/* Text style */}
                         <div className="flex flex-col items-center">
                             <button
