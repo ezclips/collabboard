@@ -247,6 +247,15 @@ describe('follow-up correction: Document Freeform card has square corners and a 
     expect(src).toContain('relative border border-gray-200 p-4');
   });
 
+  it("the standalone Comment post (padlet.type === 'comment', CommentPost.tsx -- a distinct post type from Document/Clipart) has square corners and a real pencil icon, not rounded-xl/rounded-t-xl or the PenTool smudge", () => {
+    const src = fs.readFileSync('components/collabboard/CommentPost.tsx', 'utf8');
+    expect(src).not.toContain('rounded-xl');
+    expect(src).not.toContain('rounded-t-xl');
+    expect(src).not.toContain('PenTool');
+    expect(src).toContain("import { Edit2, MessageSquare, Palette, Send, Strikethrough, Trash2 } from 'lucide-react';");
+    expect(src).toContain('<Edit2 className="w-3 h-3" />');
+  });
+
   it('renders a title bar containing the title text, not a centered title inside the body', () => {
     const c = mount(<CardPreview padlet={doc({ title: 'Meeting Notes' })} isSelected={false} />);
     const bar = c.querySelector('.grid') as HTMLElement | null;

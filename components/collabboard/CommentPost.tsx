@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import DOMPurify from 'dompurify';
-import { MessageSquare, Palette, PenTool, Send, Strikethrough, Trash2 } from 'lucide-react';
+import { Edit2, MessageSquare, Palette, Send, Strikethrough, Trash2 } from 'lucide-react';
 import TextStylePopup from './editors/TextStylePopup';
 
 interface CommentData {
@@ -144,7 +144,7 @@ export default function CommentPost({
 
     return (
         <div
-            className={`group bg-white rounded-xl shadow-lg border border-gray-200 flex flex-col cursor-pointer transition-shadow relative ${selected ? 'ring-2 ring-blue-500 ring-offset-2' : 'hover:shadow-xl'}`}
+            className={`group bg-white shadow-lg border border-gray-200 flex flex-col cursor-pointer transition-shadow relative ${selected ? 'ring-2 ring-blue-500 ring-offset-2' : 'hover:shadow-xl'}`}
             style={{
                 width: typeof width === 'number' ? `${width}px` : width,
                 minHeight: '100px',
@@ -180,7 +180,7 @@ export default function CommentPost({
                 </div>
             )}
             {topStrip && topStrip !== 'transparent' && (
-                <div className="h-1.5 w-full rounded-t-xl" style={{ backgroundColor: topStrip }} />
+                <div className="h-1.5 w-full" style={{ backgroundColor: topStrip }} />
             )}
             <div className="p-4 flex-1 flex flex-col relative">
                 {commentColorPopupId && (
@@ -440,7 +440,7 @@ export default function CommentPost({
                                                     className={`p-0.5 rounded transition-colors ${actionBaseClass}`}
                                                     title="Edit"
                                                 >
-                                                    <PenTool className="w-3 h-3" />
+                                                    <Edit2 className="w-3 h-3" />
                                                 </button>
                                             )}
                                             {/* Strikethrough Button */}
