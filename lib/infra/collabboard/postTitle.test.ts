@@ -65,7 +65,11 @@ describe("approved table-title surfaces", () => {
 
     expect(freeform).not.toContain("padlet.title || 'Table'");
     expect(preview).not.toContain('padlet.title || "Table"');
-    expect(freeform).toContain("getMeaningfulTitle(padlet.title, 'table')");
+    // FreeformPadletCards renders the Table title through the same shared
+    // Note/Todo/Table title bar (getMeaningfulTitle(padlet.title, padlet.type)),
+    // rather than a table-literal call -- assert that surface still covers 'table'.
+    expect(freeform).toContain("getMeaningfulTitle(padlet.title, padlet.type)");
+    expect(freeform).toContain("padlet.type === 'table'");
     expect(preview).toContain('getMeaningfulTitle(padlet.title, "table")');
     expect(postCard).toContain('getMeaningfulTitle(padlet.title, "table")');
   });

@@ -3259,7 +3259,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                     ) : null}
                   </div>
                   {/* Center: title -- containers show their real title
-                      unchanged; Note and Todo show a semi-transparent
+                      unchanged; Note, Todo and Table show a semi-transparent
                       "Title" placeholder until the user sets one, editable
                       in place via double-click (same pattern as the
                       Comment post's own title bar). */}
@@ -3273,7 +3273,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                           {padlet.title}
                         </span>
                       )
-                    ) : (padlet.type === 'text' || (padlet.type as string) === 'note' || padlet.type === 'todo') ? (
+                    ) : (padlet.type === 'text' || (padlet.type as string) === 'note' || padlet.type === 'todo' || padlet.type === 'table') ? (
                       editingNoteTitleId === padlet.id ? (
                         <input
                           type="text"
@@ -3591,18 +3591,11 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                 </div>
               )}
 
-              {/* Table Card Display */}
+              {/* Table Card Display -- title now lives in the shared top
+                  strip bar above, matching Note/Todo. */}
               {padlet.type === 'table' && (() => {
-                const tableTitle = getMeaningfulTitle(padlet.title, 'table');
-
                 return (
                   <div className="space-y-1">
-                    {/* Table Title */}
-                    {tableTitle && (
-                      <h4 className="text-xs font-semibold text-gray-800 mb-1">
-                        {tableTitle}
-                      </h4>
-                    )}
                     {/* Mini table preview */}
                     {(() => {
                     // CellStyle type for table cells
