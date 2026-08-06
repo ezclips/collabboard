@@ -25,6 +25,7 @@ import fs from 'node:fs';
 import type { Padlet } from '@/types/collabboard';
 import CardPreview from './CardPreview';
 import PostCardContent from './PostCardContent';
+import CommentPost from './CommentPost';
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 (globalThis as any).IntersectionObserver = class { observe() {} unobserve() {} disconnect() {} };
@@ -282,6 +283,24 @@ describe('follow-up correction: Document Freeform card has square corners and a 
     const badgeIndex = src.indexOf('Comment counter badge on card edge');
     expect(badgeIndex).toBeGreaterThan(-1);
     expect(badgeIndex).toBeLessThan(stripIndex);
+  });
+
+  it("the Comment post's title bar text auto-switches between light and dark to stay readable against any topStrip color, instead of a fixed color that can go black-on-black", () => {
+    const darkStrip = mount(
+      <CommentPost comments={[]} cardColor="#ffffff" topStrip="#000000" commentTitle="Comments" showMenu />
+    );
+    const darkTitle = darkStrip.querySelector('span.text-xs.font-semibold') as HTMLElement;
+    expect(darkTitle).not.toBeNull();
+    // contrastIconColor('#000000') -> '#f8fafc' (near-white) against a black strip.
+    expect(darkTitle.style.color).toBe('rgb(248, 250, 252)');
+
+    const lightStrip = mount(
+      <CommentPost comments={[]} cardColor="#ffffff" topStrip="#ffffff" commentTitle="Comments" showMenu />
+    );
+    const lightTitle = lightStrip.querySelector('span.text-xs.font-semibold') as HTMLElement;
+    expect(lightTitle).not.toBeNull();
+    // contrastIconColor('#ffffff') -> '#1e293b' (near-black) against a white strip.
+    expect(lightTitle.style.color).toBe('rgb(30, 41, 59)');
   });
 
   it('renders a title bar containing the title text, not a centered title inside the body', () => {

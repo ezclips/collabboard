@@ -4,6 +4,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import DOMPurify from 'dompurify';
 import { Edit2, MessageSquare, Palette, Send, Strikethrough, Trash2 } from 'lucide-react';
 import TextStylePopup from './editors/TextStylePopup';
+import { contrastIconColor } from './shells/CardShell';
 
 interface CommentData {
     id: string;
@@ -146,7 +147,12 @@ export default function CommentPost({
     // a 3-column grid -- [pencil placeholder | title centered | edit pencil].
     const showTopStrip = !!topStrip && topStrip !== 'transparent';
     const stripBg = showTopStrip ? topStrip : 'rgba(0,0,0,0.04)';
-    const stripIconColor = showTopStrip ? '#f3f4f6' : '#9ca3af';
+    // Real WCAG-luminance contrast against the strip color, not a static
+    // guess -- so light AND dark topStrip colors both keep the title/icon
+    // readable instead of e.g. black-on-black.
+    const stripContrastColor = showTopStrip ? contrastIconColor(topStrip as string) : undefined;
+    const stripIconColor = stripContrastColor || '#9ca3af';
+    const stripTitleColor = stripContrastColor || '#374151';
 
     return (
         <div
@@ -221,11 +227,13 @@ export default function CommentPost({
                             onClick={(e) => e.stopPropagation()}
                             onMouseDown={(e) => e.stopPropagation()}
                             className="text-xs font-semibold text-center bg-transparent border-b border-blue-400 outline-none px-0 py-0 w-24"
+                            style={{ color: stripTitleColor }}
                             autoFocus
                         />
                     ) : (
                         <span
                             className="text-xs font-semibold text-center truncate cursor-pointer"
+                            style={{ color: stripTitleColor }}
                             onDoubleClick={(e) => {
                                 e.stopPropagation();
                                 setIsEditingTitle(true);
