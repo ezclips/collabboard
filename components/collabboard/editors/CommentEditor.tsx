@@ -433,6 +433,9 @@ export default function CommentEditor({
   const handleItalic = () => editor?.chain().focus().toggleItalic().run();
   const handleStrike = () => editor?.chain().focus().toggleStrike().run();
   const handleUnderline = () => editor?.chain().focus().toggleUnderline().run();
+  const handleBulletList = () => editor?.chain().focus().toggleBulletList().run();
+  const handleOrderedList = () => editor?.chain().focus().toggleOrderedList().run();
+  const handleCode = () => editor?.chain().focus().toggleCodeBlock().run();
 
   const getActiveEditor = () => (editingCommentId ? editEditor : editor);
 
@@ -539,9 +542,6 @@ export default function CommentEditor({
               setCardColorOpen(true);
             }}
             onCollapse={handleCollapse}
-            onBold={handleBold}
-            onItalic={handleItalic}
-            onStrikethrough={handleStrike}
             onLink={handleLink}
             onTextStyle={() => {
               setEmojiOpen(false);
@@ -665,6 +665,20 @@ export default function CommentEditor({
                 currentColor={currentTextColor}
                 currentHighlight={currentHighlight}
                 hideCloseButton
+                onBold={handleBold}
+                onItalic={handleItalic}
+                onStrikethrough={handleStrike}
+                onUnderline={handleUnderline}
+                onBulletList={handleBulletList}
+                onOrderedList={handleOrderedList}
+                onCode={handleCode}
+                isBold={editor.isActive('bold')}
+                isItalic={editor.isActive('italic')}
+                isStrikethrough={editor.isActive('strike')}
+                isUnderline={editor.isActive('underline')}
+                isBulletList={editor.isActive('bulletList')}
+                isOrderedList={editor.isActive('orderedList')}
+                isCode={editor.isActive('codeBlock')}
               />
             </div>
           )}

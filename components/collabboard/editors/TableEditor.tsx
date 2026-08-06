@@ -15,9 +15,6 @@ import {
     MessageSquare,
     ChevronRight,
     Check,
-    Bold,
-    Italic,
-    Underline,
     X,
     Trash2,
     PenTool,
@@ -27,6 +24,7 @@ import { ColorPickerContent } from "../ColorPicker";
 import { TableCellContextMenu } from "../menus/TableCellContextMenu";
 import * as Popover from "@radix-ui/react-popover";
 import TextStylePopup from "./TextStylePopup";
+import TextFormattingButtons from "./TextFormattingButtons";
 
 // Comment interface
 interface PadletComment {
@@ -116,6 +114,7 @@ type CellStyle = {
     bold?: boolean;
     italic?: boolean;
     underline?: boolean;
+    strikethrough?: boolean;
     color?: string;
 };
 
@@ -903,7 +902,7 @@ export default function TableEditor({
                                                                 verticalAlign: style?.verticalAlign || "top",
                                                                 fontWeight: style?.bold ? "bold" : "normal",
                                                                 fontStyle: style?.italic ? "italic" : "normal",
-                                                                textDecoration: style?.underline ? "underline" : "none",
+                                                                textDecoration: [style?.underline && "underline", style?.strikethrough && "line-through"].filter(Boolean).join(" ") || "none",
                                                                 color: style?.color || "inherit",
                                                             }}
                                                             onMouseDown={(e) => handleCellMouseDown(row.index, colIndex, e)}
@@ -1367,83 +1366,62 @@ export default function TableEditor({
                         }}
                         onClick={(e) => e.stopPropagation()}
                     >
-                        {/* Header with B/I/U and Close button */}
-                        <div className="p-3 flex items-center justify-between gap-2 border-b border-gray-100">
-                            <div className="flex gap-1">
-                                <button
-                                    className="w-7 h-7 border rounded text-gray-700 border-gray-300 bg-white shadow-sm flex items-center justify-center hover:bg-gray-50"
-                                    onClick={() => {
-                                        const key = selectedCell
-                                            ? `${selectedCell.row}-${selectedCell.col}`
-                                            : selectionRange
-                                                ? `${selectionRange.start.row}-${selectionRange.start.col}`
-                                                : "";
-                                        if (!key) return;
-                                        const current = cellStyles[key]?.bold;
-                                        applyStyleToSelection({ bold: !current });
-                                    }}
-                                >
-                                    <Bold className="w-3.5 h-3.5" />
-                                </button>
-                                <button
-                                    className="w-7 h-7 border rounded text-gray-700 border-gray-300 bg-white shadow-sm flex items-center justify-center hover:bg-gray-50"
-                                    onClick={() => {
-                                        const key = selectedCell
-                                            ? `${selectedCell.row}-${selectedCell.col}`
-                                            : selectionRange
-                                                ? `${selectionRange.start.row}-${selectionRange.start.col}`
-                                                : "";
-                                        if (!key) return;
-                                        const current = cellStyles[key]?.italic;
-                                        applyStyleToSelection({ italic: !current });
-                                    }}
-                                >
-                                    <Italic className="w-3.5 h-3.5" />
-                                </button>
-                                <button
-                                    className="w-7 h-7 border rounded text-gray-700 border-gray-300 bg-white shadow-sm flex items-center justify-center hover:bg-gray-50"
-                                    onClick={() => {
-                                        const key = selectedCell
-                                            ? `${selectedCell.row}-${selectedCell.col}`
-                                            : selectionRange
-                                                ? `${selectionRange.start.row}-${selectionRange.start.col}`
-                                                : "";
-                                        if (!key) return;
-                                        const current = cellStyles[key]?.underline;
-                                        applyStyleToSelection({ underline: !current });
-                                    }}
-                                >
-                                    <Underline className="w-3.5 h-3.5" />
-                                </button>
-                            </div>
-                            <div className="flex gap-1">
-                                <button
-                                    className="w-6 h-6 rounded text-gray-400 hover:text-gray-600 hover:bg-gray-100 flex items-center justify-center"
-                                    onClick={() => {
-                                        setActiveSubmenu(null);
-                                        setPinnedTextStyle(false);
-                                    }}
-                                    title="Close panel"
-                                >
-                                    <X className="w-3.5 h-3.5" />
-                                </button>
-                            </div>
+                        {/* Header with Close button -- Bold/Italic/Underline/etc.
+                            now live in the shared formatting grid below,
+                            same as every other post's Text style panel. */}
+                        <div className="p-3 flex items-center justify-end border-b border-gray-100">
+                            <button
+                                className="w-6 h-6 rounded text-gray-400 hover:text-gray-600 hover:bg-gray-100 flex items-center justify-center"
+                                onClick={() => {
+                                    setActiveSubmenu(null);
+                                    setPinnedTextStyle(false);
+                                }}
+                                title="Close panel"
+                            >
+                                <X className="w-3.5 h-3.5" />
+                            </button>
                         </div>
-                        {/* Color Picker */}
-                        <div className="p-3">
-                            <ColorPickerContent
-                                color={(() => {
-                                    const key = selectedCell
-                                        ? `${selectedCell.row}-${selectedCell.col}`
-                                        : selectionRange
-                                            ? `${selectionRange.start.row}-${selectionRange.start.col}`
-                                            : "";
-                                    return cellStyles[key || ""]?.color || "#000000";
-                                })()}
-                                onChange={(color: string) => applyStyleToSelection({ color })}
-                                hasOpacity={true}
-                            />
-                        </div>
+                        {(() => {
+                            const key = selectedCell
+                                ? `${selectedCell.row}-${selectedCell.col}`
+                                : selectionRange
+                                    ? `${selectionRange.start.row}-${selectionRange.start.col}`
+                                    : "";
+                            const currentCellStyle = cellStyles[key] || {};
+                            const toggle = (field: "bold" | "italic" | "underline" | "strikethrough") => {
+                                if (!key) return;
+                                applyStyleToSelection({ [field]: !currentCellStyle[field] });
+                            };
+                            return (
+                                <>
+                                    {/* Formatting buttons -- same grid every Text style
+                                        panel shows, between the (absent here) font-size
+                                        section and the color picker below. Bullet
+                                        list/Numbered list/Align/Code are inert: a
+                                        single-line cell input can't hold them. */}
+                                    <div className="p-3 border-b border-gray-100">
+                                        <TextFormattingButtons
+                                            onBold={() => toggle("bold")}
+                                            onItalic={() => toggle("italic")}
+                                            onUnderline={() => toggle("underline")}
+                                            onStrikethrough={() => toggle("strikethrough")}
+                                            isBold={!!currentCellStyle.bold}
+                                            isItalic={!!currentCellStyle.italic}
+                                            isUnderline={!!currentCellStyle.underline}
+                                            isStrikethrough={!!currentCellStyle.strikethrough}
+                                        />
+                                    </div>
+                                    {/* Color Picker */}
+                                    <div className="p-3">
+                                        <ColorPickerContent
+                                            color={currentCellStyle.color || "#000000"}
+                                            onChange={(color: string) => applyStyleToSelection({ color })}
+                                            hasOpacity={true}
+                                        />
+                                    </div>
+                                </>
+                            );
+                        })()}
                     </div>
                 )}
 

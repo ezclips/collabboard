@@ -10,7 +10,7 @@ import { CardColorPanel } from '@/components/collabboard/editors/CardColorPanel'
 import CommentPopup from '@/components/collabboard/editors/CommentPopup';
 import InlineCaption from '@/components/collabboard/editors/InlineCaption';
 import TextStylePopup from '@/components/collabboard/editors/TextStylePopup';
-import { CAPTION_STYLE_PRESETS, type CaptionHeading } from '@/lib/domain/canvas/captionStyle';
+import { CAPTION_STYLE_PRESETS, captionTextDecoration, type CaptionHeading } from '@/lib/domain/canvas/captionStyle';
 import EmojiReactionPicker from '@/components/collabboard/editors/EmojiReactionPicker';
 import { getMeaningfulTitle } from '@/lib/infra/collabboard/postTitle';
 
@@ -162,6 +162,17 @@ export default function ClipartCardDraftModal({
     });
   };
 
+  // Bold/Italic/Underline/Strikethrough (TextFormattingButtons, shared
+  // across every Text style panel) toggle on top of whichever heading
+  // preset is active, same layering as a TipTap mark over a paragraph.
+  const captionStyle = previewPadlet.metadata?.captionStyle || {};
+  const isCaptionBold = captionStyle.fontWeight === '700' || captionStyle.fontWeight === 'bold';
+  const isCaptionItalic = captionStyle.fontStyle === 'italic';
+  const toggleCaptionBold = () => writeCaptionStyle({ ...captionStyle, fontWeight: isCaptionBold ? '400' : '700' });
+  const toggleCaptionItalic = () => writeCaptionStyle({ ...captionStyle, fontStyle: isCaptionItalic ? 'normal' : 'italic' });
+  const toggleCaptionUnderline = () => writeCaptionStyle({ ...captionStyle, underline: !captionStyle.underline });
+  const toggleCaptionStrikethrough = () => writeCaptionStyle({ ...captionStyle, strikethrough: !captionStyle.strikethrough });
+
   return (
     <div className="fixed inset-0 z-[160] flex items-start justify-center overflow-auto p-4">
       <button
@@ -256,6 +267,7 @@ export default function ClipartCardDraftModal({
                     fontStyle: previewPadlet.metadata?.captionStyle?.fontStyle,
                     fontFamily: previewPadlet.metadata?.captionStyle?.fontFamily,
                     lineHeight: previewPadlet.metadata?.captionStyle?.lineHeight,
+                    textDecoration: captionTextDecoration(previewPadlet.metadata?.captionStyle),
                   }}
                 />
               </div>
@@ -313,6 +325,14 @@ export default function ClipartCardDraftModal({
               currentHeading={previewPadlet.metadata?.captionStyle?.heading || 'normal'}
               currentColor={previewPadlet.metadata?.captionStyle?.color}
               currentHighlight={previewPadlet.metadata?.captionStyle?.backgroundColor}
+              onBold={toggleCaptionBold}
+              onItalic={toggleCaptionItalic}
+              onUnderline={toggleCaptionUnderline}
+              onStrikethrough={toggleCaptionStrikethrough}
+              isBold={isCaptionBold}
+              isItalic={isCaptionItalic}
+              isUnderline={!!captionStyle.underline}
+              isStrikethrough={!!captionStyle.strikethrough}
             />
           </div>
         ) : null}

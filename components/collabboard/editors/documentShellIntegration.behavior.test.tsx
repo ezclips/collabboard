@@ -109,13 +109,15 @@ describe('Editable Document consumes PostEditorShell (1-4)', () => {
 });
 
 describe('Document Text toolbar matches the governed set; Box mode now reaches only wired tools (5,6, follow-up Card color parity fix)', () => {
-  it('shows the governed control set in order, no Align, and the Box switch now present (Card color parity with Note)', () => {
+  it('shows Text style/Link on the toolbar; opening the panel reveals the shared formatting grid, including Align (now uniform with Note)', () => {
     const c = openDoc();
-    for (const title of ['Change text formatting', 'Bold (Ctrl+B)', 'Italic (Ctrl+I)', 'Strikethrough', 'Underline (Ctrl+U)', 'Bullet list', 'Numbered list', 'Code block']) {
+    expect(btn(c, 'Change text formatting')).not.toBeNull();
+    expect(c.querySelectorAll('button[title^="Switch to"]').length).toBe(1);
+    // Formatting buttons live in the Text style panel now, not the toolbar.
+    click(btn(c, 'Change text formatting')!);
+    for (const title of ['Bold', 'Italic', 'Strikethrough', 'Underline', 'Bullet list', 'Numbered list', 'Align', 'Code']) {
       expect(btn(c, title)).not.toBeNull();
     }
-    expect(c.querySelector('button[title="Text alignment"]')).toBeNull();
-    expect(c.querySelectorAll('button[title^="Switch to"]').length).toBe(1);
   });
 });
 

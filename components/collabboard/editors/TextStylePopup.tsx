@@ -2,8 +2,9 @@
 
 import React, { useState } from 'react';
 import { ColorPickerContent } from '../ColorPicker';
+import TextFormattingButtons, { type TextFormattingButtonsProps } from './TextFormattingButtons';
 
-interface TextStylePopupProps {
+interface TextStylePopupProps extends TextFormattingButtonsProps {
     isOpen: boolean;
     onOpenChange: (open: boolean) => void;
     onSelectHeading: (level: 'h1' | 'h2' | 'normal' | 'small' | 'code' | 'callout' | 'quote') => void;
@@ -60,6 +61,21 @@ export default function TextStylePopup({
     currentHighlight = 'transparent',
     hideHeadingSelect = false,
     hideCloseButton = false,
+    onBold,
+    onItalic,
+    onStrikethrough,
+    onUnderline,
+    onBulletList,
+    onOrderedList,
+    onAlign,
+    onCode,
+    isBold,
+    isItalic,
+    isStrikethrough,
+    isUnderline,
+    isBulletList,
+    isOrderedList,
+    isCode,
 }: TextStylePopupProps) {
     const [colorMode, setColorMode] = useState<'text' | 'highlight'>('text');
 
@@ -103,6 +119,34 @@ export default function TextStylePopup({
                             </span>
                         </button>
                     ))}
+                </div>
+            )}
+
+            {/* Formatting buttons -- same grid on every real "Text style"
+                panel (Note, Document, Comment, Todo, Clipart caption, Table
+                cell), between the heading/font-size list above and the
+                text/highlight color picker below. Hidden on the small
+                comment-swatch color popups (hideHeadingSelect), which were
+                never the "Text style" tool to begin with. */}
+            {!hideHeadingSelect && (
+                <div className="pt-2 border-t border-gray-100">
+                    <TextFormattingButtons
+                        onBold={onBold}
+                        onItalic={onItalic}
+                        onStrikethrough={onStrikethrough}
+                        onUnderline={onUnderline}
+                        onBulletList={onBulletList}
+                        onOrderedList={onOrderedList}
+                        onAlign={onAlign}
+                        onCode={onCode}
+                        isBold={isBold}
+                        isItalic={isItalic}
+                        isStrikethrough={isStrikethrough}
+                        isUnderline={isUnderline}
+                        isBulletList={isBulletList}
+                        isOrderedList={isOrderedList}
+                        isCode={isCode}
+                    />
                 </div>
             )}
 

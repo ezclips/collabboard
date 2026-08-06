@@ -178,6 +178,8 @@ export interface Padlet {
       fontFamily?: string;
       lineHeight?: string;
       heading?: string;
+      underline?: boolean;
+      strikethrough?: boolean;
     };
 
     // Container-specific

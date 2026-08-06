@@ -276,21 +276,10 @@ export default function DocumentEditor({
 
   const toolbarProps = {
     variant: 'document' as const,
-    onBold: () => editor.chain().focus().toggleBold().run(),
-    onItalic: () => editor.chain().focus().toggleItalic().run(),
-    onStrikethrough: () => editor.chain().focus().toggleStrike().run(),
-    onUnderline: () => editor.chain().focus().toggleUnderline().run(),
-    onBulletList: () => editor.chain().focus().toggleBulletList().run(),
-    onOrderedList: () => editor.chain().focus().toggleOrderedList().run(),
-    onCode: () => editor.chain().focus().toggleCodeBlock().run(),
     onTextStyle: () => panels.openPanel('textStyle', ['link', 'comment', 'cardColor']),
     onLink: handleLink,
     onTextComment: handleTextComment,
     onCardColor: () => panels.openPanel('cardColor', ['textStyle', 'link', 'comment']),
-    isBold: editor.isActive('bold'), isItalic: editor.isActive('italic'),
-    isStrikethrough: editor.isActive('strike'), isUnderline: editor.isActive('underline'),
-    isBulletList: editor.isActive('bulletList'), isOrderedList: editor.isActive('orderedList'),
-    isCode: editor.isActive('codeBlock'),
     isLink: editor.isActive('link'),
     isComment: editor.isActive('comment'),
   };
@@ -375,6 +364,20 @@ export default function DocumentEditor({
                   currentColor={currentTextColor}
                   currentHighlight={currentHighlight}
                   hideCloseButton
+                  onBold={() => editor.chain().focus().toggleBold().run()}
+                  onItalic={() => editor.chain().focus().toggleItalic().run()}
+                  onStrikethrough={() => editor.chain().focus().toggleStrike().run()}
+                  onUnderline={() => editor.chain().focus().toggleUnderline().run()}
+                  onBulletList={() => editor.chain().focus().toggleBulletList().run()}
+                  onOrderedList={() => editor.chain().focus().toggleOrderedList().run()}
+                  onCode={() => editor.chain().focus().toggleCodeBlock().run()}
+                  isBold={editor.isActive('bold')}
+                  isItalic={editor.isActive('italic')}
+                  isStrikethrough={editor.isActive('strike')}
+                  isUnderline={editor.isActive('underline')}
+                  isBulletList={editor.isActive('bulletList')}
+                  isOrderedList={editor.isActive('orderedList')}
+                  isCode={editor.isActive('codeBlock')}
                 />
               </div>
             )}

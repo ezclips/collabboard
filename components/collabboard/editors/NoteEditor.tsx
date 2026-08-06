@@ -584,13 +584,6 @@ export default function NoteEditor({
   }
 
   const toolbarProps = {
-    onBold: handleBold,
-    onItalic: handleItalic,
-    onStrikethrough: handleStrikethrough,
-    onUnderline: handleUnderline,
-    onBulletList: handleBulletList,
-    onOrderedList: handleOrderedList,
-    onCode: handleCode,
     onLink: handleLink,
     onTextStyle: () => panels.openPanel('textStyle'),
     onCardColor: () => panels.openPanel('cardColor'),
@@ -599,13 +592,6 @@ export default function NoteEditor({
     onTextComment: handleTextComment,
     postCommentCount: detachedComments.length,
     postCommentBadgeColor: badgeColor,
-    isBold: editor.isActive('bold'),
-    isItalic: editor.isActive('italic'),
-    isStrikethrough: editor.isActive('strike'),
-    isUnderline: editor.isActive('underline'),
-    isBulletList: editor.isActive('bulletList'),
-    isOrderedList: editor.isActive('orderedList'),
-    isCode: editor.isActive('codeBlock'),
     isLink: editor.isActive('link'),
     isComment: editor.isActive('comment'),
   };
@@ -980,6 +966,20 @@ export default function NoteEditor({
               currentColor={currentTextColor}
               currentHighlight={currentHighlight}
               hideCloseButton
+              onBold={handleBold}
+              onItalic={handleItalic}
+              onStrikethrough={handleStrikethrough}
+              onUnderline={handleUnderline}
+              onBulletList={handleBulletList}
+              onOrderedList={handleOrderedList}
+              onCode={handleCode}
+              isBold={editor.isActive('bold')}
+              isItalic={editor.isActive('italic')}
+              isStrikethrough={editor.isActive('strike')}
+              isUnderline={editor.isActive('underline')}
+              isBulletList={editor.isActive('bulletList')}
+              isOrderedList={editor.isActive('orderedList')}
+              isCode={editor.isActive('codeBlock')}
             />
           </div>
         )}

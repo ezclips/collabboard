@@ -117,15 +117,18 @@ describe('NoteEditor Escape handling (characterizes absence — does not invent 
 });
 
 describe('NoteEditor formatting toolbar (measured, not modified)', () => {
-  it('locates working text controls, including the unwired Align control (PATCH-149 §14.10)', () => {
+  it('locates working text controls inside the Text style panel, including the unwired Align control (PATCH-149 §14.10)', () => {
     const container = mount(
       <NoteEditor isOpen initialContent="<p>Body</p>" onSave={vi.fn()} onClose={vi.fn()} />,
     );
-    expect(container.querySelector('button[title*="Bold"]')).not.toBeNull();
-    expect(container.querySelector('button[title*="Italic"]')).not.toBeNull();
+    // Bold/Italic/.../Align now live inside the Text style panel
+    // (TextFormattingButtons), not the left toolbar -- open it first.
+    click(container.querySelector('button[title="Change text formatting"]')!);
+    expect(container.querySelector('button[title="Bold"]')).not.toBeNull();
+    expect(container.querySelector('button[title="Italic"]')).not.toBeNull();
     // Align renders despite being a dead control (no onAlign supplied, no
     // extension-text-align in NOTE_EXTENSIONS) — measured here, not corrected.
-    expect(container.querySelector('button[title*="Text alignment"]')).not.toBeNull();
+    expect(container.querySelector('button[title="Align"]')).not.toBeNull();
   });
 });
 
@@ -220,14 +223,6 @@ function rowIndexContaining(c: HTMLElement, predicate: (el: Element) => boolean)
 const TEXT_MODE_TITLES = [
   'Switch to Box Design',
   'Change text formatting',
-  'Bold (Ctrl+B)',
-  'Italic (Ctrl+I)',
-  'Strikethrough',
-  'Underline (Ctrl+U)',
-  'Bullet list',
-  'Numbered list',
-  'Text alignment',
-  'Code block',
   'Link text first!',
   'Highlight text first!',
 ];
@@ -242,8 +237,10 @@ describe('C1/1: Text mode is the default, with its current control set and order
   it('opens in Text mode and renders exactly the current text-mode controls, in order', () => {
     const c = openNote();
     expect(titles(c)).toEqual(TEXT_MODE_TITLES);
-    // Align renders despite being unwired (PATCH-149 §14.10) -- characterized, not corrected.
-    expect(btn(c, 'Text alignment')).not.toBeNull();
+    // Align now lives inside the Text style panel (unwired there too,
+    // PATCH-149 §14.10) rather than the toolbar -- characterized, not corrected.
+    click(btn(c, 'Change text formatting')!);
+    expect(btn(c, 'Align')).not.toBeNull();
   });
 
   it('shows the mode control labelled for the destination mode, not the current one', () => {
@@ -265,7 +262,7 @@ describe('C1/2: Text <-> Box mode switching', () => {
     const c = openNote();
     click(btn(c, 'Switch to Box Design')!);
     expect(titles(c)).toEqual(BOX_MODE_TITLES);
-    expect(btn(c, 'Bold (Ctrl+B)')).toBeNull(); // text tools replaced, not appended
+    expect(btn(c, 'Change text formatting')).toBeNull(); // text tools replaced, not appended
     expect(c.querySelectorAll('button[title^="Switch to"]').length).toBe(1); // no duplicate toolbar
 
     click(btn(c, 'Switch to Text Design')!);

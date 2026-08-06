@@ -4,14 +4,6 @@ import React from 'react';
 import {
     ArrowLeft,
     Type,
-    Bold,
-    Italic,
-    Strikethrough,
-    Underline,
-    List,
-    ListOrdered,
-    AlignLeft,
-    Code,
     Link,
     MessageSquare,
     Palette,
@@ -24,18 +16,10 @@ interface NoteEditorToolbarProps {
     mode: ToolbarMode;
     onModeChange: (mode: ToolbarMode) => void;
     // PATCH-149B1b-i: 'document' hides the box-mode toggle and shows only
-    // controls with a supplied handler — Align is excluded structurally
-    // because DocumentEditor never passes onAlign (PATCH-149 §22.6).
+    // controls with a supplied handler.
     variant?: 'note' | 'document';
-    // Text mode handlers
-    onBold?: () => void;
-    onItalic?: () => void;
-    onStrikethrough?: () => void;
-    onUnderline?: () => void;
-    onBulletList?: () => void;
-    onOrderedList?: () => void;
-    onAlign?: () => void;
-    onCode?: () => void;
+    // Text mode handlers -- formatting (Bold/Italic/.../Code) lives in the
+    // Text style panel now (TextFormattingButtons), not this toolbar.
     onLink?: () => void;
     onTextStyle?: () => void;
     // Box mode handlers
@@ -46,13 +30,6 @@ interface NoteEditorToolbarProps {
     postCommentCount?: number;
     postCommentBadgeColor?: string;
     // Active states
-    isBold?: boolean;
-    isItalic?: boolean;
-    isStrikethrough?: boolean;
-    isUnderline?: boolean;
-    isBulletList?: boolean;
-    isOrderedList?: boolean;
-    isCode?: boolean;
     isLink?: boolean;
     isComment?: boolean;
     // Selection state for contextual hints
@@ -63,14 +40,6 @@ export default function NoteEditorToolbar({
     mode,
     onModeChange,
     variant = 'note',
-    onBold,
-    onItalic,
-    onStrikethrough,
-    onUnderline,
-    onBulletList,
-    onOrderedList,
-    onAlign,
-    onCode,
     onLink,
     onTextStyle,
     onCardColor,
@@ -79,13 +48,6 @@ export default function NoteEditorToolbar({
     onTextComment,
     postCommentCount = 0,
     postCommentBadgeColor = '#facc15',
-    isBold = false,
-    isItalic = false,
-    isStrikethrough = false,
-    isUnderline = false,
-    isBulletList = false,
-    isOrderedList = false,
-    isCode = false,
     isLink = false,
     isComment = false,
     hasSelection = false,
@@ -95,7 +57,9 @@ export default function NoteEditorToolbar({
         onModeChange(mode === 'text' ? 'box' : 'text');
     };
 
-    // Text mode tools with contextual hints
+    // Text mode tools with contextual hints -- formatting buttons
+    // (Bold/Italic/Strikethrough/Underline/lists/Align/Code) now live in
+    // the Text style panel itself, not this toolbar.
     const textModeTools = [
         {
             icon: Type,
@@ -105,14 +69,6 @@ export default function NoteEditorToolbar({
             hasPopup: true,
             active: false
         },
-        { icon: Bold, label: 'Bold', hint: 'Bold (Ctrl+B)', onClick: onBold, active: isBold },
-        { icon: Italic, label: 'Italic', hint: 'Italic (Ctrl+I)', onClick: onItalic, active: isItalic },
-        { icon: Strikethrough, label: 'Strikethrough', hint: 'Strikethrough', onClick: onStrikethrough, active: isStrikethrough },
-        { icon: Underline, label: 'Underline', hint: 'Underline (Ctrl+U)', onClick: onUnderline, active: isUnderline },
-        { icon: List, label: 'Bullet list', hint: 'Bullet list', onClick: onBulletList, active: isBulletList },
-        { icon: ListOrdered, label: 'Numbered list', hint: 'Numbered list', onClick: onOrderedList, active: isOrderedList },
-        { icon: AlignLeft, label: 'Align', hint: 'Text alignment', onClick: onAlign, active: false },
-        { icon: Code, label: 'Code', hint: 'Code block', onClick: onCode, active: isCode },
         {
             icon: Link,
             label: 'Link',

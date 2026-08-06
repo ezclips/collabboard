@@ -9,6 +9,8 @@ export type CaptionStyle = {
   lineHeight?: string;
   color?: string;
   backgroundColor?: string;
+  underline?: boolean;
+  strikethrough?: boolean;
 };
 
 export const CAPTION_STYLE_PRESETS: Record<CaptionHeading, CaptionStyle> = {
@@ -79,6 +81,7 @@ export type ResolvedCaptionStyle = {
   fontStyle?: string;
   fontFamily?: string;
   lineHeight?: string;
+  textDecoration?: string;
 };
 
 const VALID_COLOR_RE = /^(#[0-9a-fA-F]{6}(?:[0-9a-fA-F]{2})?|transparent)$/;
@@ -152,12 +155,29 @@ export function normalizeCaptionStyle(value: unknown): Partial<CaptionStyle> | n
   const backgroundColor = validColor(value.backgroundColor);
   if (backgroundColor) normalized.backgroundColor = backgroundColor;
 
+  if (typeof value.underline === 'boolean') normalized.underline = value.underline;
+  if (typeof value.strikethrough === 'boolean') normalized.strikethrough = value.strikethrough;
+
   return Object.keys(normalized).length > 0 ? normalized : null;
+}
+
+// Bold/Italic/Underline/Strikethrough (TextFormattingButtons, shared across
+// every "Text style" panel) toggle on top of whichever heading preset is
+// active, rather than being tied to a specific heading -- same as how a
+// TipTap "bold" mark layers over a paragraph's own styling.
+export function captionTextDecoration(
+  style: { underline?: boolean; strikethrough?: boolean } | null | undefined,
+): string | undefined {
+  const parts: string[] = [];
+  if (style?.underline) parts.push('underline');
+  if (style?.strikethrough) parts.push('line-through');
+  return parts.length > 0 ? parts.join(' ') : undefined;
 }
 
 export function resolveCaptionStyle(value: unknown, metadataTextColor?: string | null): ResolvedCaptionStyle {
   const captionStyle = normalizeCaptionStyle(value);
   const color = captionStyle?.color || metadataTextColor || '#1F2937';
+  const textDecoration = captionTextDecoration(captionStyle);
 
   return {
     color,
@@ -167,5 +187,6 @@ export function resolveCaptionStyle(value: unknown, metadataTextColor?: string |
     ...(captionStyle?.fontFamily ? { fontFamily: captionStyle.fontFamily } : {}),
     ...(captionStyle?.lineHeight ? { lineHeight: captionStyle.lineHeight } : {}),
     ...(captionStyle?.backgroundColor ? { backgroundColor: captionStyle.backgroundColor } : {}),
+    ...(textDecoration ? { textDecoration } : {}),
   };
 }

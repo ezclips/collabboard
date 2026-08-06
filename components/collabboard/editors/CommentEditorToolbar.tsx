@@ -3,14 +3,7 @@
 import React from 'react';
 import {
     ArrowLeft,
-    Bold,
-    Italic,
-    Strikethrough,
-    Underline,
-    List,
-    ListOrdered,
-    AlignLeft,
-    Code,
+    Type,
     Link,
     MessageSquare,
     Palette,
@@ -26,10 +19,8 @@ interface CommentEditorToolbarProps {
     // Box mode handlers
     onCardColor?: () => void;
     onCollapse?: () => void;
-    // Text mode handlers
-    onBold?: () => void;
-    onItalic?: () => void;
-    onStrikethrough?: () => void;
+    // Text mode handlers -- formatting (Bold/Italic/Strikethrough/...) now
+    // lives in the Text style panel itself, not this toolbar.
     onLink?: () => void;
     onTextStyle?: () => void;
     textStyleOpen?: boolean;
@@ -43,9 +34,6 @@ export default function CommentEditorToolbar({
     onModeChange,
     onCardColor,
     onCollapse,
-    onBold,
-    onItalic,
-    onStrikethrough,
     onLink,
     onTextStyle,
     textStyleOpen = false,
@@ -59,13 +47,11 @@ export default function CommentEditorToolbar({
         onModeChange(mode === 'text' ? 'box' : 'text');
     };
 
-    // Text mode tools - basic formatting only. Title editing now happens
-    // directly in the card's own title bar (double-click, ghost placeholder)
-    // rather than through a separate toggle+input flow here.
+    // Text mode tools. Title editing now happens directly in the card's own
+    // title bar (double-click, ghost placeholder) rather than through a
+    // separate toggle+input flow here.
     const textModeTools = [
-        { icon: Bold, label: 'Bold', onClick: onBold, active: false },
-        { icon: Italic, label: 'Italic', onClick: onItalic, active: false },
-        { icon: Strikethrough, label: 'Strike', onClick: onStrikethrough, active: false },
+        { icon: Type, label: 'Text style', onClick: onTextStyle, active: textStyleOpen },
         { icon: Link, label: 'Link', onClick: onLink, active: false, disabled: !linkEnabled, disabledHint: 'Select text to add a link' },
     ];
 

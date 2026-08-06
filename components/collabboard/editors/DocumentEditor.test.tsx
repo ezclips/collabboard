@@ -38,8 +38,10 @@ function escKey() {
 function closeBtn(c: HTMLElement) {
   return c.querySelector('button[aria-label="Close"]') as HTMLButtonElement;
 }
-// Reuses the toolbar's real Bold command to produce a genuine body-HTML
-// change -- the same mechanism the existing formatting test already relied on.
+// Reuses the Text style panel's real Bold command to produce a genuine
+// body-HTML change -- the same mechanism the existing formatting test
+// already relied on. Bold now lives inside the Text style panel
+// (TextFormattingButtons), not the toolbar directly, so open it first.
 function toggleBold(c: HTMLElement) {
   const pm = c.querySelector('.ProseMirror') as HTMLElement;
   act(() => {
@@ -51,7 +53,11 @@ function toggleBold(c: HTMLElement) {
     sel?.addRange(range);
     document.dispatchEvent(new Event('selectionchange'));
   });
-  click(c.querySelector('button[title*="Bold"]')!);
+  const existingPanelBold = c.querySelector('button[title="Bold"]');
+  if (!existingPanelBold) {
+    click(c.querySelector('button[title="Change text formatting"]')!);
+  }
+  click(c.querySelector('button[title="Bold"]')!);
 }
 
 describe('DocumentEditor editable (PATCH-149B1b-i)', () => {
@@ -83,16 +89,22 @@ describe('DocumentEditor editable (PATCH-149B1b-i)', () => {
     expect(container.querySelector('strong')).not.toBeNull();
   });
 
-  it('shows the Document toolbar with real controls, no Align, present Link/Text style, and the Box toggle (Card color parity with Note)', () => {
+  it('shows the Document toolbar with Text style/Link and the Box toggle; Bold/Underline/Align live inside the Text style panel (Card color parity with Note)', () => {
     const container = mount(
       <DocumentEditor isOpen title="" initialContent="<p>x</p>" metadata={{}} onSave={vi.fn()} onClose={vi.fn()} />,
     );
-    expect(container.querySelector('button[title*="Bold"]')).not.toBeNull();
-    expect(container.querySelector('button[title*="Underline"]')).not.toBeNull();
-    expect(container.querySelector('button[title*="Text alignment"]')).toBeNull();
+    // Formatting buttons are no longer on the toolbar itself.
+    expect(container.querySelector('button[title="Bold"]')).toBeNull();
     expect(container.querySelector('button[title="Link text first!"]')).not.toBeNull();
     expect(container.querySelector('button[title="Change text formatting"]')).not.toBeNull();
     expect(container.querySelector('button[title*="Switch to Box"]')).not.toBeNull();
+
+    // Opening the Text style panel reveals the shared formatting grid,
+    // including Align (inert here, same as Note -- no onAlign is wired).
+    click(container.querySelector('button[title="Change text formatting"]')!);
+    expect(container.querySelector('button[title="Bold"]')).not.toBeNull();
+    expect(container.querySelector('button[title="Underline"]')).not.toBeNull();
+    expect(container.querySelector('button[title="Align"]')).not.toBeNull();
   });
 
   it('Bold control executes a real command, dirties the draft (reported via onDirtyChange), and formatting survives the save-on-close payload', async () => {

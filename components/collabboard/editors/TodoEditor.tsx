@@ -270,6 +270,16 @@ export default function TodoEditor({
         setCaptionStyle((prev) => ({ ...prev, ...selectedPreset }));
     };
 
+    // Bold/Italic/Underline/Strikethrough (TextFormattingButtons, shared
+    // across every Text style panel) toggle on top of whichever heading
+    // preset is active, same layering as a TipTap mark over a paragraph.
+    const isCaptionBold = captionStyle.fontWeight === '700' || captionStyle.fontWeight === 'bold';
+    const isCaptionItalic = captionStyle.fontStyle === 'italic';
+    const toggleCaptionBold = () => writeCaptionStyle({ fontWeight: isCaptionBold ? '400' : '700' });
+    const toggleCaptionItalic = () => writeCaptionStyle({ fontStyle: isCaptionItalic ? 'normal' : 'italic' });
+    const toggleCaptionUnderline = () => writeCaptionStyle({ underline: !captionStyle.underline });
+    const toggleCaptionStrikethrough = () => writeCaptionStyle({ strikethrough: !captionStyle.strikethrough });
+
     const resolvedTextStyle = resolveCaptionStyle(captionStyle);
 
     const activeComment = comments.find((comment) => comment.id === activeCommentId) || null;
@@ -1105,6 +1115,14 @@ export default function TodoEditor({
                                             currentColor={captionStyle.color}
                                             currentHighlight={captionStyle.backgroundColor}
                                             hideCloseButton
+                                            onBold={toggleCaptionBold}
+                                            onItalic={toggleCaptionItalic}
+                                            onUnderline={toggleCaptionUnderline}
+                                            onStrikethrough={toggleCaptionStrikethrough}
+                                            isBold={isCaptionBold}
+                                            isItalic={isCaptionItalic}
+                                            isUnderline={!!captionStyle.underline}
+                                            isStrikethrough={!!captionStyle.strikethrough}
                                         />
                                     </div>
                                 </div>
