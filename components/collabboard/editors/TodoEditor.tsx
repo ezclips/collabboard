@@ -1084,9 +1084,16 @@ export default function TodoEditor({
                                 picker above already uses. */}
                             {showTextStylePanel && (
                                 <div
-                                    className="absolute left-full top-0 ml-3 z-[1100] bg-white rounded-lg shadow-lg border border-gray-200 p-3 w-64"
+                                    className="absolute left-full top-0 ml-3 z-[1100] bg-white rounded-lg shadow-lg border border-gray-200 p-3 w-64 relative"
                                     onClick={(e) => e.stopPropagation()}
                                 >
+                                    <button
+                                        onClick={() => setShowTextStylePanel(false)}
+                                        className="absolute top-2 right-2 w-4 h-4 flex items-center justify-center rounded hover:bg-gray-100"
+                                        title="Close"
+                                    >
+                                        <X className="w-3 h-3 text-gray-400" />
+                                    </button>
                                     <TextStylePopup
                                         isOpen={true}
                                         onOpenChange={(open) => setShowTextStylePanel(open)}
@@ -1096,6 +1103,7 @@ export default function TodoEditor({
                                         currentHeading={captionStyle.heading || 'normal'}
                                         currentColor={captionStyle.color}
                                         currentHighlight={captionStyle.backgroundColor}
+                                        hideCloseButton
                                     />
                                 </div>
                             )}

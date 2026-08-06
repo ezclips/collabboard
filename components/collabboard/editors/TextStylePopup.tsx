@@ -13,6 +13,10 @@ interface TextStylePopupProps {
     currentColor?: string;
     currentHighlight?: string;
     hideHeadingSelect?: boolean;
+    // Callers that already render their own top-right close affordance
+    // (e.g. a round X in the panel's own header) pass this so the popup
+    // doesn't duplicate it with a second, inline "X" text button.
+    hideCloseButton?: boolean;
 }
 
 
@@ -55,6 +59,7 @@ export default function TextStylePopup({
     currentColor = '#1f2937',
     currentHighlight = 'transparent',
     hideHeadingSelect = false,
+    hideCloseButton = false,
 }: TextStylePopupProps) {
     const [colorMode, setColorMode] = useState<'text' | 'highlight'>('text');
 
@@ -134,14 +139,16 @@ export default function TextStylePopup({
                             {colorMode === 'text' ? 'Text Color' : 'Highlight Color'}
                         </span>
                     </div>
-                    <button
-                        onMouseDown={preventFocusLoss}
-                        onClick={() => onOpenChange(false)}
-                        className="w-7 h-7 flex items-center justify-center rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors text-xs font-bold"
-                        title="Close"
-                    >
-                        X
-                    </button>
+                    {!hideCloseButton && (
+                        <button
+                            onMouseDown={preventFocusLoss}
+                            onClick={() => onOpenChange(false)}
+                            className="w-7 h-7 flex items-center justify-center rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors text-xs font-bold"
+                            title="Close"
+                        >
+                            X
+                        </button>
+                    )}
                 </div>
 
                 <div onMouseDown={preventFocusLoss}>
