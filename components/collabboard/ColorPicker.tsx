@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Check, ChevronDown, Pipette } from 'lucide-react';
 import * as Popover from '@radix-ui/react-popover';
+import { contrastIconColor } from './shells/CardShell';
 
 // Standard Excalidraw-like palette
 const PRESET_COLORS = [
@@ -188,18 +189,24 @@ export function ColorPickerContent({
             <div>
                 <div className="text-[10px] font-semibold text-gray-400 mb-1.5 uppercase tracking-wider">Default Colors</div>
                 <div className="grid grid-cols-7 gap-1">
-                    {presets.map((c) => (
-                        <button
-                            key={c}
-                            onClick={() => handleColorSelect(c)}
-                            className={`w-6 h-6 rounded-md border transition-all hover:scale-110 ${color.startsWith(c) ? 'border-blue-500 ring-1 ring-blue-500 z-10' : 'border-gray-200 hover:border-gray-300'}`}
-                            style={{ backgroundColor: c === 'transparent' ? '#ffffff' : c }}
-                            title={c}
-                        >
-
-                            {c === 'transparent' && <span className="text-red-500 text-xs text-center block" style={{ lineHeight: '100%' }}>/</span>}
-                        </button>
-                    ))}
+                    {presets.map((c) => {
+                        const isSelected = color.startsWith(c);
+                        return (
+                            <button
+                                key={c}
+                                onClick={() => handleColorSelect(c)}
+                                className="w-6 h-6 rounded-md border border-gray-200 hover:border-gray-300 transition-all hover:scale-110 flex items-center justify-center"
+                                style={{ backgroundColor: c === 'transparent' ? '#ffffff' : c }}
+                                title={c}
+                            >
+                                {c === 'transparent' ? (
+                                    <span className="text-red-500 text-xs text-center block" style={{ lineHeight: '100%' }}>/</span>
+                                ) : isSelected ? (
+                                    <Check className="w-3.5 h-3.5" style={{ color: contrastIconColor(c) }} />
+                                ) : null}
+                            </button>
+                        );
+                    })}
                 </div>
             </div>
 
@@ -360,15 +367,20 @@ export default function ColorPicker({
                         <div>
                             <div className="text-[10px] font-semibold text-gray-400 mb-1.5 uppercase tracking-wider">Default Colors</div>
                             <div className="grid grid-cols-7 gap-1">
-                                {SIMPLE_PALETTE.map((c) => (
-                                    <button
-                                        key={c}
-                                        onClick={() => handleColorSelect(c)}
-                                        className={`w-6 h-6 rounded-md border transition-all hover:scale-110 ${color.startsWith(c) ? 'border-blue-500 ring-1 ring-blue-500 z-10' : 'border-gray-200 hover:border-gray-300'}`}
-                                        style={{ backgroundColor: c }}
-                                        title={c}
-                                    />
-                                ))}
+                                {SIMPLE_PALETTE.map((c) => {
+                                    const isSelected = color.startsWith(c);
+                                    return (
+                                        <button
+                                            key={c}
+                                            onClick={() => handleColorSelect(c)}
+                                            className="w-6 h-6 rounded-md border border-gray-200 hover:border-gray-300 transition-all hover:scale-110 flex items-center justify-center"
+                                            style={{ backgroundColor: c }}
+                                            title={c}
+                                        >
+                                            {isSelected && <Check className="w-3.5 h-3.5" style={{ color: contrastIconColor(c) }} />}
+                                        </button>
+                                    );
+                                })}
                             </div>
                         </div>
 
