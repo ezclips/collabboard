@@ -8,6 +8,7 @@ import { Link } from '@tiptap/extension-link';
 import { Highlight } from '@tiptap/extension-highlight';
 import { TextStyle } from '@tiptap/extension-text-style';
 import { Color } from '@tiptap/extension-color';
+import TextAlign from '@tiptap/extension-text-align';
 import Placeholder from '@tiptap/extension-placeholder';
 import { FontSize } from './extensions/FontSize';
 import { Comment } from './extensions/Comment';
@@ -29,6 +30,7 @@ export const SHARED_TIPTAP_EXTENSIONS = [
   Highlight.configure({ multicolor: true }),
   TextStyle,
   Color,
+  TextAlign.configure({ types: ['heading', 'paragraph'] }),
   FontSize,
   Comment,
   Placeholder.configure({ placeholder: 'Start typing...' }),

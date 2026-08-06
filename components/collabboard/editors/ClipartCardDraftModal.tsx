@@ -11,6 +11,7 @@ import CommentPopup from '@/components/collabboard/editors/CommentPopup';
 import InlineCaption from '@/components/collabboard/editors/InlineCaption';
 import TextStylePopup from '@/components/collabboard/editors/TextStylePopup';
 import { CAPTION_STYLE_PRESETS, captionTextDecoration, type CaptionHeading } from '@/lib/domain/canvas/captionStyle';
+import { nextTextAlign } from '@/components/collabboard/editors/textAlignCycle';
 import EmojiReactionPicker from '@/components/collabboard/editors/EmojiReactionPicker';
 import { getMeaningfulTitle } from '@/lib/infra/collabboard/postTitle';
 
@@ -172,6 +173,7 @@ export default function ClipartCardDraftModal({
   const toggleCaptionItalic = () => writeCaptionStyle({ ...captionStyle, fontStyle: isCaptionItalic ? 'normal' : 'italic' });
   const toggleCaptionUnderline = () => writeCaptionStyle({ ...captionStyle, underline: !captionStyle.underline });
   const toggleCaptionStrikethrough = () => writeCaptionStyle({ ...captionStyle, strikethrough: !captionStyle.strikethrough });
+  const cycleCaptionAlign = () => writeCaptionStyle({ ...captionStyle, textAlign: nextTextAlign(captionStyle.textAlign || 'left') });
 
   return (
     <div className="fixed inset-0 z-[160] flex items-start justify-center overflow-auto p-4">
@@ -268,6 +270,7 @@ export default function ClipartCardDraftModal({
                     fontFamily: previewPadlet.metadata?.captionStyle?.fontFamily,
                     lineHeight: previewPadlet.metadata?.captionStyle?.lineHeight,
                     textDecoration: captionTextDecoration(previewPadlet.metadata?.captionStyle),
+                    textAlign: previewPadlet.metadata?.captionStyle?.textAlign,
                   }}
                 />
               </div>
@@ -329,6 +332,7 @@ export default function ClipartCardDraftModal({
               onItalic={toggleCaptionItalic}
               onUnderline={toggleCaptionUnderline}
               onStrikethrough={toggleCaptionStrikethrough}
+              onAlign={cycleCaptionAlign}
               isBold={isCaptionBold}
               isItalic={isCaptionItalic}
               isUnderline={!!captionStyle.underline}

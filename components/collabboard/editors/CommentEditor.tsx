@@ -8,12 +8,14 @@ import Underline from "@tiptap/extension-underline";
 import { Highlight } from "@tiptap/extension-highlight";
 import { Color } from "@tiptap/extension-color";
 import { TextStyle } from "@tiptap/extension-text-style";
+import TextAlign from "@tiptap/extension-text-align";
 import { MessageSquare, Palette, PenTool, Send, Strikethrough, Trash2, X } from "lucide-react";
 import EmojiPicker from "emoji-picker-react";
 import DOMPurify from "dompurify";
 
 import CommentEditorToolbar, { ToolbarMode } from "./CommentEditorToolbar";
 import TextStylePopup from "./TextStylePopup";
+import { cycleEditorTextAlign } from "./textAlignCycle";
 import { getMeaningfulTitle } from "@/lib/infra/collabboard/postTitle";
 
 // Module-level constant -- stable reference, never recreated on render
@@ -29,6 +31,7 @@ const COMMENT_EXTENSIONS = [
   TextStyle,
   Color,
   Highlight.configure({ multicolor: true }),
+  TextAlign.configure({ types: ["heading", "paragraph"] }),
 ];
 import { ColorPickerContent } from "../ColorPicker";
 
@@ -436,6 +439,7 @@ export default function CommentEditor({
   const handleBulletList = () => editor?.chain().focus().toggleBulletList().run();
   const handleOrderedList = () => editor?.chain().focus().toggleOrderedList().run();
   const handleCode = () => editor?.chain().focus().toggleCodeBlock().run();
+  const handleAlign = () => editor && cycleEditorTextAlign(editor);
 
   const getActiveEditor = () => (editingCommentId ? editEditor : editor);
 
@@ -672,6 +676,7 @@ export default function CommentEditor({
                 onBulletList={handleBulletList}
                 onOrderedList={handleOrderedList}
                 onCode={handleCode}
+                onAlign={handleAlign}
                 isBold={editor.isActive('bold')}
                 isItalic={editor.isActive('italic')}
                 isStrikethrough={editor.isActive('strike')}

@@ -7,6 +7,7 @@ import { ColorPickerContent } from '../ColorPicker';
 import TextStylePopup from './TextStylePopup';
 import EmojiReactionPicker from './EmojiReactionPicker';
 import { CAPTION_STYLE_PRESETS, resolveCaptionStyle, type CaptionHeading, type CaptionStyle } from '@/lib/domain/canvas/captionStyle';
+import { nextTextAlign } from './textAlignCycle';
 
 interface Task {
     id: string;
@@ -279,6 +280,7 @@ export default function TodoEditor({
     const toggleCaptionItalic = () => writeCaptionStyle({ fontStyle: isCaptionItalic ? 'normal' : 'italic' });
     const toggleCaptionUnderline = () => writeCaptionStyle({ underline: !captionStyle.underline });
     const toggleCaptionStrikethrough = () => writeCaptionStyle({ strikethrough: !captionStyle.strikethrough });
+    const cycleCaptionAlign = () => writeCaptionStyle({ textAlign: nextTextAlign(captionStyle.textAlign || 'left') });
 
     const resolvedTextStyle = resolveCaptionStyle(captionStyle);
 
@@ -1119,6 +1121,7 @@ export default function TodoEditor({
                                             onItalic={toggleCaptionItalic}
                                             onUnderline={toggleCaptionUnderline}
                                             onStrikethrough={toggleCaptionStrikethrough}
+                                            onAlign={cycleCaptionAlign}
                                             isBold={isCaptionBold}
                                             isItalic={isCaptionItalic}
                                             isUnderline={!!captionStyle.underline}

@@ -4,6 +4,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { X } from 'lucide-react';
 import { EditorContent, useSharedTipTapEditor } from './useSharedTipTapEditor';
 import PostEditorShell, { useShellPanels, useShellSelection } from './PostEditorShell';
+import { cycleEditorTextAlign } from './textAlignCycle';
 import TextStylePopup from './TextStylePopup';
 import LinkPopup from './LinkPopup';
 import CommentPopup from './CommentPopup';
@@ -371,6 +372,7 @@ export default function DocumentEditor({
                   onBulletList={() => editor.chain().focus().toggleBulletList().run()}
                   onOrderedList={() => editor.chain().focus().toggleOrderedList().run()}
                   onCode={() => editor.chain().focus().toggleCodeBlock().run()}
+                  onAlign={() => cycleEditorTextAlign(editor)}
                   isBold={editor.isActive('bold')}
                   isItalic={editor.isActive('italic')}
                   isStrikethrough={editor.isActive('strike')}

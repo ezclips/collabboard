@@ -25,6 +25,7 @@ import { TableCellContextMenu } from "../menus/TableCellContextMenu";
 import * as Popover from "@radix-ui/react-popover";
 import TextStylePopup from "./TextStylePopup";
 import TextFormattingButtons from "./TextFormattingButtons";
+import { nextTextAlign } from "./textAlignCycle";
 
 // Comment interface
 interface PadletComment {
@@ -1392,19 +1393,25 @@ export default function TableEditor({
                                 if (!key) return;
                                 applyStyleToSelection({ [field]: !currentCellStyle[field] });
                             };
+                            const cycleAlign = () => {
+                                if (!key) return;
+                                applyStyleToSelection({ align: nextTextAlign(currentCellStyle.align || "left") });
+                            };
                             return (
                                 <>
                                     {/* Formatting buttons -- same grid every Text style
                                         panel shows, between the (absent here) font-size
                                         section and the color picker below. Bullet
-                                        list/Numbered list/Align/Code are inert: a
-                                        single-line cell input can't hold them. */}
+                                        list/Numbered list/Code are inert: a single-line
+                                        cell input can't hold them. Align cycles the
+                                        cell's existing left/center/right style. */}
                                     <div className="p-3 border-b border-gray-100">
                                         <TextFormattingButtons
                                             onBold={() => toggle("bold")}
                                             onItalic={() => toggle("italic")}
                                             onUnderline={() => toggle("underline")}
                                             onStrikethrough={() => toggle("strikethrough")}
+                                            onAlign={cycleAlign}
                                             isBold={!!currentCellStyle.bold}
                                             isItalic={!!currentCellStyle.italic}
                                             isUnderline={!!currentCellStyle.underline}

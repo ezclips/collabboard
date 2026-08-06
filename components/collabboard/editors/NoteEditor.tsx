@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { EditorContent, useSharedTipTapEditor } from './useSharedTipTapEditor';
 import PostEditorShell, { useShellPanels, useShellSelection } from './PostEditorShell';
+import { cycleEditorTextAlign } from './textAlignCycle';
 import TextStylePopup from './TextStylePopup';
 import EmojiReactionPicker from './EmojiReactionPicker';
 import LinkPopup from './LinkPopup';
@@ -226,6 +227,7 @@ export default function NoteEditor({
   const handleBulletList = () => editor?.chain().focus().toggleBulletList().run();
   const handleOrderedList = () => editor?.chain().focus().toggleOrderedList().run();
   const handleCode = () => editor?.chain().focus().toggleCodeBlock().run();
+  const handleAlign = () => editor && cycleEditorTextAlign(editor);
 
   const handleLink = () => {
     if (!editor) return;
@@ -973,6 +975,7 @@ export default function NoteEditor({
               onBulletList={handleBulletList}
               onOrderedList={handleOrderedList}
               onCode={handleCode}
+              onAlign={handleAlign}
               isBold={editor.isActive('bold')}
               isItalic={editor.isActive('italic')}
               isStrikethrough={editor.isActive('strike')}

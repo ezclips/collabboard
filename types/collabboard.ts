@@ -180,6 +180,7 @@ export interface Padlet {
       heading?: string;
       underline?: boolean;
       strikethrough?: boolean;
+      textAlign?: 'left' | 'center' | 'right';
     };
 
     // Container-specific

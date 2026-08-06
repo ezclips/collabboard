@@ -11,6 +11,7 @@ export type CaptionStyle = {
   backgroundColor?: string;
   underline?: boolean;
   strikethrough?: boolean;
+  textAlign?: 'left' | 'center' | 'right';
 };
 
 export const CAPTION_STYLE_PRESETS: Record<CaptionHeading, CaptionStyle> = {
@@ -82,6 +83,7 @@ export type ResolvedCaptionStyle = {
   fontFamily?: string;
   lineHeight?: string;
   textDecoration?: string;
+  textAlign?: 'left' | 'center' | 'right';
 };
 
 const VALID_COLOR_RE = /^(#[0-9a-fA-F]{6}(?:[0-9a-fA-F]{2})?|transparent)$/;
@@ -158,6 +160,11 @@ export function normalizeCaptionStyle(value: unknown): Partial<CaptionStyle> | n
   if (typeof value.underline === 'boolean') normalized.underline = value.underline;
   if (typeof value.strikethrough === 'boolean') normalized.strikethrough = value.strikethrough;
 
+  const textAlign = validString(value.textAlign);
+  if (textAlign === 'left' || textAlign === 'center' || textAlign === 'right') {
+    normalized.textAlign = textAlign;
+  }
+
   return Object.keys(normalized).length > 0 ? normalized : null;
 }
 
@@ -188,5 +195,6 @@ export function resolveCaptionStyle(value: unknown, metadataTextColor?: string |
     ...(captionStyle?.lineHeight ? { lineHeight: captionStyle.lineHeight } : {}),
     ...(captionStyle?.backgroundColor ? { backgroundColor: captionStyle.backgroundColor } : {}),
     ...(textDecoration ? { textDecoration } : {}),
+    ...(captionStyle?.textAlign ? { textAlign: captionStyle.textAlign } : {}),
   };
 }

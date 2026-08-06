@@ -133,23 +133,38 @@ function useSelectionOverlayRect(
       setRect(null);
       return;
     }
-    const docSize = editor.state.doc.content.size;
-    if (range.from < 0 || range.to > docSize || range.from > range.to) {
-      setRect(null);
-      return;
-    }
-    try {
-      const start = editor.view.coordsAtPos(range.from);
-      const end = editor.view.coordsAtPos(range.to);
-      setRect({
-        top: Math.min(start.top, end.top),
-        left: Math.min(start.left, end.left),
-        width: Math.max(4, end.right - start.left),
-        height: Math.max(start.bottom, end.bottom) - Math.min(start.top, end.top),
-      });
-    } catch {
-      setRect(null);
-    }
+
+    const recompute = () => {
+      const docSize = editor.state.doc.content.size;
+      if (range.from < 0 || range.to > docSize || range.from > range.to) {
+        setRect(null);
+        return;
+      }
+      try {
+        const start = editor.view.coordsAtPos(range.from);
+        const end = editor.view.coordsAtPos(range.to);
+        setRect({
+          top: Math.min(start.top, end.top),
+          left: Math.min(start.left, end.left),
+          width: Math.max(4, end.right - start.left),
+          height: Math.max(start.bottom, end.bottom) - Math.min(start.top, end.top),
+        });
+      } catch {
+        setRect(null);
+      }
+    };
+
+    recompute();
+    // A block-type change (e.g. toggling a code block from the Text style
+    // panel) reflows the document without changing range.from/range.to --
+    // the dependency array below never re-fires, so the overlay stayed
+    // stuck at its pre-toggle pixel position ("below the text" after the
+    // reflow). Recompute on every doc update too, not just when the
+    // stored range's own endpoints change.
+    editor.on('update', recompute);
+    return () => {
+      editor.off('update', recompute);
+    };
   }, [editor, range?.from, range?.to, enabled]);
 
   return rect;
