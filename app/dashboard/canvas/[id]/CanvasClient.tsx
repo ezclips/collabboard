@@ -8084,6 +8084,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                     currentHeading={activeImageToolbarPadlet.metadata?.captionStyle?.heading || 'normal'}
                     currentColor={activeImageToolbarPadlet.metadata?.captionStyle?.color}
                     currentHighlight={activeImageToolbarPadlet.metadata?.captionStyle?.backgroundColor}
+                    hideCloseButton
                   />
                 </div>
               )}

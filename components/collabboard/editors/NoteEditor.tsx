@@ -966,6 +966,7 @@ export default function NoteEditor({
             <button
               onClick={() => panels.closePanel('textStyle')}
               className="absolute top-2 right-2 w-4 h-4 flex items-center justify-center rounded hover:bg-gray-100"
+              title="Close"
             >
               <X className="w-3 h-3 text-gray-400" />
             </button>
@@ -978,6 +979,7 @@ export default function NoteEditor({
               currentHeading={currentHeading}
               currentColor={currentTextColor}
               currentHighlight={currentHighlight}
+              hideCloseButton
             />
           </div>
         )}

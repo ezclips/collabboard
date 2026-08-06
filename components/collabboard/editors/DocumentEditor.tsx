@@ -362,7 +362,7 @@ export default function DocumentEditor({
           <>
             {panels.open.textStyle && (
               <div className="bg-white rounded-lg shadow-xl border border-gray-200 p-4 relative" style={{ width: '300px' }}>
-                <button onClick={() => panels.closePanel('textStyle')} className="absolute top-2 right-2 w-4 h-4 flex items-center justify-center rounded hover:bg-gray-100">
+                <button onClick={() => panels.closePanel('textStyle')} className="absolute top-2 right-2 w-4 h-4 flex items-center justify-center rounded hover:bg-gray-100" title="Close">
                   <X className="w-3 h-3 text-gray-400" />
                 </button>
                 <TextStylePopup
@@ -374,6 +374,7 @@ export default function DocumentEditor({
                   currentHeading={currentHeading}
                   currentColor={currentTextColor}
                   currentHighlight={currentHighlight}
+                  hideCloseButton
                 />
               </div>
             )}

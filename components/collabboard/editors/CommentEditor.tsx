@@ -664,6 +664,7 @@ export default function CommentEditor({
                 onSelectHighlight={handleHighlight}
                 currentColor={currentTextColor}
                 currentHighlight={currentHighlight}
+                hideCloseButton
               />
             </div>
           )}

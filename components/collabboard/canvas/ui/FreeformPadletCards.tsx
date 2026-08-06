@@ -1512,11 +1512,19 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
 
             {/* Text Style Popup - Positioned to the right */}
             {textStylePadletId === padlet.id && !imageToolbarPadletId && (
+              <div className="absolute left-full top-0 ml-3 z-[70] animate-in fade-in zoom-in duration-200">
               <div
-                className="absolute left-full top-0 ml-3 z-[70] animate-in fade-in zoom-in duration-200 bg-white rounded-lg shadow-xl border border-gray-200 p-3 min-w-[240px]"
+                className="relative bg-white rounded-lg shadow-xl border border-gray-200 p-3 min-w-[240px]"
                 onClick={(e) => e.stopPropagation()}
                 onMouseDown={(e) => e.stopPropagation()}
               >
+                <button
+                  onClick={() => setTextStylePadletId(null)}
+                  className="absolute top-2 right-2 w-4 h-4 flex items-center justify-center rounded hover:bg-gray-100"
+                  title="Close"
+                >
+                  <X className="w-3 h-3 text-gray-400" />
+                </button>
                 <TextStylePopup
                   isOpen={true}
                   onOpenChange={(open) => !open && setTextStylePadletId(null)}
@@ -1637,7 +1645,9 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                   currentHeading={padlet.metadata?.captionStyle?.heading || "normal"}
                   currentColor={padlet.metadata?.captionStyle?.color}
                   currentHighlight={padlet.metadata?.captionStyle?.backgroundColor}
+                  hideCloseButton
                 />
+              </div>
               </div>
             )}
 
@@ -5708,6 +5718,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                   currentHeading={activeImageToolbarPadlet.metadata?.captionStyle?.heading || 'normal'}
                   currentColor={activeImageToolbarPadlet.metadata?.captionStyle?.color}
                   currentHighlight={activeImageToolbarPadlet.metadata?.captionStyle?.backgroundColor}
+                  hideCloseButton
                 />
               </div>
             )}

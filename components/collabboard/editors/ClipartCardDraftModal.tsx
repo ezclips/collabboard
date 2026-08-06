@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useMemo, useState } from 'react';
+import { X } from 'lucide-react';
 import type { Padlet } from '@/types/collabboard';
 import CardPreview from '@/components/collabboard/CardPreview';
 import CardEditor from '@/components/collabboard/CardEditor';
@@ -281,14 +282,22 @@ export default function ClipartCardDraftModal({
         {isCaptionEditing ? (
           <div
             data-testid="clipart-caption-style-panel"
-            className="bg-white rounded-lg shadow-xl border border-gray-200 p-3 min-w-[240px]"
+            className="relative bg-white rounded-lg shadow-xl border border-gray-200 p-3 min-w-[240px]"
             onClick={(e) => e.stopPropagation()}
             onMouseDown={(e) => e.stopPropagation()}
           >
+            <button
+              onClick={() => setIsCaptionEditing(false)}
+              className="absolute top-2 right-2 w-4 h-4 flex items-center justify-center rounded hover:bg-gray-100"
+              title="Close"
+            >
+              <X className="w-3 h-3 text-gray-400" />
+            </button>
             <TextStylePopup
               isOpen={isCaptionEditing}
               onOpenChange={(open) => setIsCaptionEditing(open)}
               onSelectHeading={applyCaptionPreset}
+              hideCloseButton
               onSelectColor={(color) => {
                 writeCaptionStyle({
                   ...(previewPadlet.metadata?.captionStyle || {}),
