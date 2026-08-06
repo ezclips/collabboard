@@ -193,3 +193,33 @@ describe('16/17/18: Note, Clipart and Freeform placement are unaffected by the D
     expect(freeformSrc).toContain('top: padlet.position_y || 0,');
   });
 });
+
+describe('follow-up correction: Document Freeform card has square corners and a gray title bar (Note-style, not Clipart-style)', () => {
+  it('the outer card wrapper has no rounded-corner classes', () => {
+    const c = mount(<CardPreview padlet={doc()} isSelected={false} />);
+    const wrapper = c.firstElementChild as HTMLElement;
+    expect(wrapper.className).not.toMatch(/rounded/);
+  });
+
+  it('renders a title bar containing the title text, not a centered title inside the body', () => {
+    const c = mount(<CardPreview padlet={doc({ title: 'Meeting Notes' })} isSelected={false} />);
+    const bar = c.querySelector('.grid') as HTMLElement | null;
+    expect(bar).not.toBeNull();
+    expect(bar!.textContent).toContain('Meeting Notes');
+  });
+
+  it('the Read button, when overflowing, is positioned inside the clamped text area (not the whole card)', () => {
+    const c = withOverflow(() => mount(<CardPreview padlet={doc()} isSelected={false} onReadDocument={vi.fn()} />));
+    const btn = readBtn(c)!;
+    // Its positioning ancestor is the relative body wrapper directly around
+    // DocumentCardContent, not the outer card -- i.e. it overlays the text,
+    // matching "Read Me over the bottom half of the text" rather than the card.
+    expect(btn.parentElement?.className).toContain('relative');
+    expect(btn.parentElement?.className).toContain('overflow-hidden');
+  });
+
+  it('does not render with no title bar when title is absent (empty center slot, bar itself still present)', () => {
+    const c = mount(<CardPreview padlet={doc({ title: '' })} isSelected={false} />);
+    expect(c.querySelector('.grid')).not.toBeNull();
+  });
+});

@@ -136,53 +136,61 @@ export default function CardPreview({
     return (
         <div
             onClick={onClick}
-            className={`group relative h-full rounded-xl border transition-colors ${isSelected ? 'border-blue-500 ring-2 ring-blue-100 shadow-md' : 'border-gray-200'
-                }`}
+            className={`group relative h-full border overflow-hidden transition-colors flex flex-col ${isSelected ? 'border-blue-500 ring-2 ring-blue-100 shadow-md' : 'border-gray-200'}`}
             style={{ backgroundColor: cardBgColor }}
         >
-            {/* Edit Button */}
-            {onOpenToolbar && (
-                <button
-                    onClick={(e) => {
-                        e.stopPropagation();
-                        onOpenToolbar(e);
-                    }}
-                    className={`absolute top-1 right-1 p-1.5 text-gray-500 bg-white/90 hover:bg-white hover:text-gray-800 rounded-full shadow-sm border border-gray-200/70 z-30 transition-all opacity-0 group-hover:opacity-100 ${isSelected ? 'opacity-100' : ''}`}
-                >
-                    <Edit2 className="w-4 h-4" />
-                </button>
-            )}
-            {onEditContent && (
-                <button
-                    type="button"
-                    onClick={(e) => { e.stopPropagation(); onEditContent(); }}
-                    className={`absolute top-1 left-1 p-1.5 text-gray-500 bg-white/90 hover:bg-white hover:text-gray-800 rounded-full shadow-sm border border-gray-200/70 z-30 transition-all opacity-0 group-hover:opacity-100 ${isSelected ? 'opacity-100' : ''}`}
-                    aria-label="Open card"
-                >
-                    <Edit2 className="w-4 h-4" />
-                </button>
-            )}
-
-            {showTopStrip && (
-                <div
-                    className="absolute left-0 top-0 h-1 w-full rounded-t-xl"
-                    style={{ backgroundColor: topStripColor }}
-                />
-            )}
-
-            {/* PATCH-152 targeted correction: Note-style body -- title plus a
-                clamped text preview of the Document's own content, no
-                icon/image placeholder block (that belonged to Clipart). */}
-            <div className="relative flex h-full flex-col gap-1 px-4 pb-4 pt-6">
-                {title ? (
-                    <div className="text-center text-xs font-semibold" style={titleStyle}>
-                        {title}
-                    </div>
-                ) : null}
-
-                <div className="flex-1 min-h-0 overflow-hidden">
-                    <DocumentCardContent content={sanitizedDocumentContent} textColor={metadata?.textColor} onRead={onReadDocument} />
+            {/* Note-style square-corner chrome: a gray title bar (same strip
+                structure as the Clipart branch) holding the title text, edit
+                controls in its left/right slots -- no rounded corners, no
+                floating overlay buttons. */}
+            <div
+                className="w-full flex-shrink-0 grid"
+                style={{ gridTemplateColumns: 'auto 1fr auto', minHeight: '22px', backgroundColor: stripBg }}
+            >
+                <div className="flex items-center pl-1.5">
+                    {onEditContent ? (
+                        <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); onEditContent(); }}
+                            className="shrink-0 w-5 h-5 rounded flex items-center justify-center hover:bg-black/10 transition-opacity opacity-0 group-hover:opacity-100"
+                            style={{ color: stripIconColor }}
+                            aria-label="Open card"
+                        >
+                            <Edit2 className="w-3 h-3" />
+                        </button>
+                    ) : (
+                        <div className="w-5 h-5 shrink-0" aria-hidden="true" />
+                    )}
                 </div>
+                <div className="flex items-center justify-center px-1 min-w-0">
+                    {title ? (
+                        <span className="text-xs font-semibold text-center truncate" style={titleStyle}>
+                            {title}
+                        </span>
+                    ) : null}
+                </div>
+                <div className="flex items-center pr-1.5">
+                    {onOpenToolbar && (
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                onOpenToolbar(e);
+                            }}
+                            className="shrink-0 w-5 h-5 rounded flex items-center justify-center hover:bg-black/10 transition-opacity opacity-0 group-hover:opacity-100"
+                            style={{ color: stripIconColor }}
+                            title="Edit"
+                        >
+                            <Edit2 className="w-3 h-3" />
+                        </button>
+                    )}
+                </div>
+            </div>
+
+            {/* Body: clamped Document text preview; Read overlays the bottom
+                half of the text only once it overflows (DocumentCardContent
+                owns that gating -- same button already used everywhere else). */}
+            <div className="relative flex-1 min-h-0 overflow-hidden p-2">
+                <DocumentCardContent content={sanitizedDocumentContent} textColor={metadata?.textColor} onRead={onReadDocument} />
             </div>
 
             {/* Reactions (if any) */}

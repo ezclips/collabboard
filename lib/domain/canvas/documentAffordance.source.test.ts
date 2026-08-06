@@ -109,7 +109,7 @@ describe('23: CanvasClient supplies one Document-open callback, reused everywher
 
 describe('T3: CardPreview Document branch delegates to the shared component, no local duplicate (§29.14 NC9)', () => {
   it('renders DocumentCardContent, passes the Read handler, and contains no locally reimplemented button', () => {
-    const branch = cardPreviewSrc.slice(cardPreviewSrc.indexOf('{/* Edit Button */}'));
+    const branch = cardPreviewSrc.slice(cardPreviewSrc.indexOf('Note-style square-corner chrome'));
     expect(branch).toContain('<DocumentCardContent');
     expect(branch).toContain('onRead={onReadDocument}');
     expect(branch).not.toMatch(/<button[^>]*aria-label="Read document"/);

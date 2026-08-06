@@ -211,7 +211,10 @@ describe('CardPreview captionStyle reader rendering', () => {
     expect(rendered).toContain('class="absolute bottom-2 left-2 flex flex-wrap gap-1 z-10"');
     expect(rendered).toContain('👍');
     expect(rendered).toContain('>2</span>');
-    expect(style(rendered)).toBe('color:#111827');
+    // Document branch title lives in the gray title-bar span, not the
+    // Clipart branch's centered div -- extract its style attribute directly.
+    const titleSpan = rendered.match(/<span class="text-xs font-semibold text-center truncate" style="([^"]*)">Clipart caption<\/span>/);
+    expect(titleSpan?.[1]).toBe('color:#111827');
   });
 });
 
