@@ -390,6 +390,31 @@ describe('follow-up correction: Document Freeform card has square corners and a 
     expect(realSpan.className).not.toContain('opacity-40');
   });
 
+  it('the Clipart branch shows the same ghost "Title" placeholder below its icon when unset, and the real title in full opacity otherwise', () => {
+    const clip = (over: Partial<Padlet> = {}) =>
+      doc({ metadata: { svgUrl: 'https://example.com/witch.svg' }, ...over });
+
+    const empty = mount(<CardPreview padlet={clip({ title: '' })} isSelected={false} />);
+    const emptyDiv = empty.querySelector('div.text-center.text-xs.font-semibold') as HTMLElement;
+    expect(emptyDiv.textContent).toBe('Title');
+    expect(emptyDiv.className).toContain('opacity-40');
+
+    const legacyDefault = mount(<CardPreview padlet={clip({ title: 'New Post' })} isSelected={false} />);
+    const legacyDiv = legacyDefault.querySelector('div.text-center.text-xs.font-semibold') as HTMLElement;
+    expect(legacyDiv.textContent).toBe('Title');
+    expect(legacyDiv.className).toContain('opacity-40');
+
+    const real = mount(<CardPreview padlet={clip({ title: 'OpenClipart SVG' })} isSelected={false} />);
+    const realDiv = real.querySelector('div.text-center.text-xs.font-semibold') as HTMLElement;
+    expect(realDiv.textContent).toBe('OpenClipart SVG');
+    expect(realDiv.className).not.toContain('opacity-40');
+  });
+
+  it("the Clipart editor's InlineCaption also treats a legacy placeholder title as unset, matching CardPreview's own display", () => {
+    const src = fs.readFileSync('components/collabboard/editors/ClipartCardDraftModal.tsx', 'utf8');
+    expect(src).toContain("value={getMeaningfulTitle(previewPadlet.title, 'card')}");
+  });
+
   it("NoteEditor's modal now has a title field (it previously had none at all) -- ghost \"Title\" placeholder, wired into onSave's payload", () => {
     const src = fs.readFileSync('components/collabboard/editors/NoteEditor.tsx', 'utf8');
     expect(src).toContain('initialTitle');

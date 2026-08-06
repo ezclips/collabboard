@@ -116,11 +116,12 @@ export default function CardPreview({
                     >
                         <img src={svgUrl} alt="" className="h-28 w-28 object-contain" />
                     </div>
-                    {title ? (
-                        <div className="text-center text-xs font-semibold" style={titleStyle}>
-                            {title}
-                        </div>
-                    ) : null}
+                    <div
+                        className={`text-center text-xs font-semibold${documentTitle ? '' : ' opacity-40 select-none'}`}
+                        style={titleStyle}
+                    >
+                        {documentTitle || 'Title'}
+                    </div>
                     <div className="text-[10px] text-gray-600">{calculateCounter()}</div>
                 </div>
 

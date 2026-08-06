@@ -11,6 +11,7 @@ import InlineCaption from '@/components/collabboard/editors/InlineCaption';
 import TextStylePopup from '@/components/collabboard/editors/TextStylePopup';
 import { CAPTION_STYLE_PRESETS, type CaptionHeading } from '@/lib/domain/canvas/captionStyle';
 import EmojiReactionPicker from '@/components/collabboard/editors/EmojiReactionPicker';
+import { getMeaningfulTitle } from '@/lib/infra/collabboard/postTitle';
 
 const BADGE_COLORS = [
   '#fef9c3', '#fef08a', '#fde047', '#facc15', '#eab308', '#ca8a04',
@@ -240,7 +241,7 @@ export default function ClipartCardDraftModal({
               />
               <div data-testid="clipart-inline-caption">
                 <InlineCaption
-                  value={previewPadlet.title || ''}
+                  value={getMeaningfulTitle(previewPadlet.title, 'card')}
                   isEditing={isCaptionEditing}
                   onChange={(nextTitle) => onChange({ ...previewPadlet, title: nextTitle })}
                   onCommit={() => setIsCaptionEditing(false)}
