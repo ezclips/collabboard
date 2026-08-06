@@ -92,12 +92,12 @@ describe('Editable Document consumes PostEditorShell (1-4)', () => {
     expect(c.querySelectorAll('.min-w-\\[72px\\]').length).toBe(1);
   });
 
-  it('preserves title/body/description/Save/Close in the centre', () => {
+  it('preserves title/body/description/Close in the centre; no Save button (PATCH-152)', () => {
     const c = openDoc();
     expect(c.querySelector('input[placeholder="Untitled document"]')).not.toBeNull();
     expect(c.querySelector('.ProseMirror')).not.toBeNull();
     expect(c.querySelector('input[placeholder="Add a description..."]')).not.toBeNull();
-    expect(c.querySelector('button[aria-label="Save document"]')).not.toBeNull();
+    expect(c.querySelector('button[aria-label="Save document"]')).toBeNull();
     expect(c.querySelector('button[aria-label="Close"]')).not.toBeNull();
   });
 
@@ -284,15 +284,19 @@ describe('OQ-2: authenticated identity reaches CommentPopup through DocumentEdit
   });
 });
 
-describe('Save/discard lifecycle unchanged through the shell (25)', () => {
-  it('a successful save updates the baseline, so Save re-disables with no further edits', async () => {
+describe('PATCH-152: close-always-saves lifecycle through the shell (replaces the Save-button baseline check, 25)', () => {
+  it('a dirty Close saves, updates the baseline (reported clean via onDirtyChange), then closes', async () => {
     const onSave = vi.fn(async () => ({ status: 'saved' as const }));
-    const c = openDoc({ onSave, title: 'T' });
+    const onClose = vi.fn();
+    const dirtySpy = vi.fn();
+    const c = openDoc({ onSave, onClose, onDirtyChange: dirtySpy, title: 'T' });
     const titleInput = c.querySelector('input[placeholder="Untitled document"]') as HTMLInputElement;
     setInput(titleInput, 'Edited');
-    const saveBtn = c.querySelector('button[aria-label="Save document"]') as HTMLButtonElement;
-    expect(saveBtn.disabled).toBe(false);
-    await act(async () => { click(saveBtn); });
-    expect(saveBtn.disabled).toBe(true);
+    expect(dirtySpy).toHaveBeenLastCalledWith(true);
+    const close = c.querySelector('button[aria-label="Close"]') as HTMLButtonElement;
+    await act(async () => { click(close); });
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(dirtySpy).toHaveBeenLastCalledWith(false); // baseline caught up before close
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 });

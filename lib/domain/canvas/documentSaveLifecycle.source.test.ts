@@ -23,6 +23,55 @@ describe('PATCH-149B2-i: temporary save-on-close lifecycle is fully removed', ()
   });
 });
 
+// PATCH-152 targeted correction: the PATCH-149B2-i explicit-Save-button +
+// discard-confirmation lifecycle above is superseded for Freeform's benefit
+// (a Document created directly on Freeform must persist on outside-click/X,
+// not require a Save click or offer a Discard option). DocumentEditor itself
+// has no layout awareness, so this lifecycle change is global to the editor;
+// only the placement/routing logic downstream (saveCard, checkPlacementRequired)
+// stays layout-specific and untouched.
+describe('PATCH-152: close-always-saves lifecycle replaces the explicit Save button and discard dialog', () => {
+  it('has no visible Save button', () => {
+    expect(documentEditorSrc).not.toMatch(/aria-label="Save document"/);
+    expect(documentEditorSrc).not.toMatch(/>\s*Save\s*</);
+  });
+
+  it('no longer imports or renders DiscardChangesDialog, and drops its confirm state entirely', () => {
+    expect(documentEditorSrc).not.toContain('DiscardChangesDialog');
+    expect(documentEditorSrc).not.toContain('showDiscardConfirm');
+    expect(documentEditorSrc).not.toContain('handleKeepEditing');
+    expect(documentEditorSrc).not.toContain('handleDiscardConfirmed');
+  });
+
+  it('attemptClose is the sole close path for backdrop, X and Escape, and awaits onSave before onClose when dirty', () => {
+    expect((documentEditorSrc.match(/onClick=\{attemptClose\}/g) || []).length).toBe(1);
+    expect(documentEditorSrc).toContain('onBackdropClick={attemptClose}');
+    expect(documentEditorSrc).toContain('void attemptClose()');
+    const fnStart = documentEditorSrc.indexOf('const attemptClose = async () => {');
+    expect(fnStart).toBeGreaterThan(-1);
+    const fnBody = documentEditorSrc.slice(fnStart, documentEditorSrc.indexOf('\n  };', fnStart));
+    expect(fnBody).toContain('await onSave(payload)');
+    // The final onClose() (after a successful save) must come after the
+    // await -- the earlier onClose() in the fast path is the deliberate
+    // read-only/not-dirty early return, not a save-skipping close.
+    expect(fnBody.indexOf('await onSave(payload)')).toBeLessThan(fnBody.lastIndexOf('onClose();'));
+  });
+
+  it('a failed save keeps the editor open instead of closing (no content loss)', () => {
+    const fnStart = documentEditorSrc.indexOf('const attemptClose = async () => {');
+    const fnBody = documentEditorSrc.slice(fnStart, documentEditorSrc.indexOf('\n  };', fnStart));
+    const failedBranch = fnBody.slice(fnBody.indexOf("status === 'failed'"), fnBody.indexOf("if (status === 'saved')"));
+    expect(failedBranch).toContain('return;');
+    expect(failedBranch).not.toContain('onClose();');
+  });
+
+  it('read-only closes immediately without attempting a save', () => {
+    const fnStart = documentEditorSrc.indexOf('const attemptClose = async () => {');
+    const fnBody = documentEditorSrc.slice(fnStart, documentEditorSrc.indexOf('\n  };', fnStart));
+    expect(fnBody).toContain('if (readOnly || !isDirty) { onClose(); return; }');
+  });
+});
+
 describe('PATCH-149B2-i: SaveCardResult contract (§32.3)', () => {
   const saveCardStart = usePadletSaveSrc.indexOf('const saveCard = useCallback');
   const saveCardBody = usePadletSaveSrc.slice(

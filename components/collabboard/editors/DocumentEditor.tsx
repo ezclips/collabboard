@@ -1,13 +1,12 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from 'react';
-import { Loader2, X } from 'lucide-react';
+import { X } from 'lucide-react';
 import { EditorContent, useSharedTipTapEditor } from './useSharedTipTapEditor';
 import PostEditorShell, { useShellPanels, useShellSelection } from './PostEditorShell';
 import TextStylePopup from './TextStylePopup';
 import LinkPopup from './LinkPopup';
 import CommentPopup from './CommentPopup';
-import DiscardChangesDialog from './DiscardChangesDialog';
 import { toEditorHtml, fromEditorHtml } from '@/lib/domain/canvas/documentContentAdapter';
 import type { SaveCardData, SaveCardResult } from '@/hooks/canvas/usePadletSave';
 
@@ -28,8 +27,9 @@ interface DocumentEditorProps {
   currentUserName?: string;
 }
 
-// PATCH-149B2-i §32: explicit Save + dirty-state tracking against a saved baseline;
-// Close/backdrop/Escape never save. Replaces the B1b-i §22.4 save-on-close lifecycle.
+// PATCH-152 targeted correction: closing (backdrop/X/Escape) always saves a
+// dirty document first, then closes -- no explicit Save button, no discard
+// confirmation. Replaces the PATCH-149B2-i §32 explicit-Save-button lifecycle.
 export default function DocumentEditor({
   isOpen,
   title: initialTitle,
@@ -46,7 +46,6 @@ export default function DocumentEditor({
   const [description, setDescription] = useState(initialMetadata?.description || '');
   const [baseline, setBaseline] = useState({ title: initialTitle, description: initialMetadata?.description || '', body: '' });
   const [, forceBodyTick] = useState(0);
-  const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const titleInputRef = useRef<HTMLInputElement>(null);
@@ -84,7 +83,6 @@ export default function DocumentEditor({
     const html = toEditorHtml(initialContent);
     if (html !== editor.getHTML()) editor.commands.setContent(html, { emitUpdate: false });
     setBaseline({ title: initialTitle, description: desc, body: fromEditorHtml(editor.getHTML()) });
-    setShowDiscardConfirm(false);
     setSaveError(null);
   }, [isOpen, editor, initialTitle, initialContent, initialMetadata?.description]);
 
@@ -98,15 +96,14 @@ export default function DocumentEditor({
     lastReportedDirty.current = isDirty;
     onDirtyChange?.(isDirty);
   }, [isDirty, onDirtyChange]);
-  const attemptClose = () => {
+  // PATCH-152 targeted correction: closing (backdrop, X, Escape) always saves
+  // first when dirty -- no explicit Save button, no discard confirmation.
+  // onClose only fires once persistence completes (or immediately when there
+  // is nothing to save), so content is never lost and the editor never closes
+  // ahead of the write.
+  const attemptClose = async () => {
     if (isSaving) return;
-    if (isDirty) { setShowDiscardConfirm(true); return; }
-    onClose();
-  };
-  const handleKeepEditing = () => { setShowDiscardConfirm(false); titleInputRef.current?.focus(); };
-  const handleDiscardConfirmed = () => { setShowDiscardConfirm(false); onClose(); };
-  const handleSave = async () => {
-    if (readOnly || !isDirty || isSaving) return;
+    if (readOnly || !isDirty) { onClose(); return; }
     setIsSaving(true);
     setSaveError(null);
     // Unrelated keys from the latest prop, not a stale open-time snapshot (§23.15 F3).
@@ -128,13 +125,11 @@ export default function DocumentEditor({
     if (!isOpen || !editor) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || isSaving) return;
-      if (showDiscardConfirm) { setShowDiscardConfirm(false); return; }
-      if (isDirty) { setShowDiscardConfirm(true); return; }
-      onClose();
+      void attemptClose();
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, editor, isSaving, showDiscardConfirm, isDirty, onClose]);
+  }, [isOpen, editor, isSaving, attemptClose]);
 
   // PATCH-152 §4.1: heading/color/highlight semantics ported narrowly from NoteEditor.tsx:561-617.
   const handleSelectHeading = (level: string) => {
@@ -235,7 +230,6 @@ export default function DocumentEditor({
   };
 
   return (
-    <>
     <PostEditorShell
       isOpen={isOpen}
       onBackdropClick={attemptClose}
@@ -268,18 +262,6 @@ export default function DocumentEditor({
               />
             )}
             <div className="flex items-center gap-2 shrink-0">
-              {!readOnly && (
-                <button
-                  type="button"
-                  aria-label="Save document"
-                  onClick={handleSave}
-                  disabled={!isDirty || isSaving}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-40 disabled:hover:bg-blue-600"
-                >
-                  {isSaving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                  {isSaving ? 'Saving…' : 'Save'}
-                </button>
-              )}
               <button
                 type="button"
                 aria-label="Close"
@@ -353,7 +335,5 @@ export default function DocumentEditor({
         )
       }
     />
-    {showDiscardConfirm && <DiscardChangesDialog onKeepEditing={handleKeepEditing} onDiscard={handleDiscardConfirmed} />}
-    </>
   );
 }

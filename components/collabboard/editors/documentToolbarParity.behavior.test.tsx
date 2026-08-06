@@ -243,13 +243,14 @@ describe('PATCH-152 §8 28/29: selectionUpdate listener lifecycle', () => {
 });
 
 describe('PATCH-152 §8 30-33: no regression to Document lifecycle or Note', () => {
-  it('Save/discard, dirty-state and identity absence remain unaffected by the new controls', () => {
+  it('dirty-state and identity absence remain unaffected by the new controls (PATCH-152: observed via onDirtyChange, no Save button)', () => {
     const onSave = vi.fn();
-    const c = mount(<DocumentEditor isOpen title="T" initialContent="<p>hello</p>" metadata={{}} onSave={onSave} onClose={vi.fn()} />);
-    const saveBtn = c.querySelector('button[aria-label="Save document"]') as HTMLButtonElement;
-    expect(saveBtn.disabled).toBe(true); // clean on open, unaffected
+    const dirtySpy = vi.fn();
+    const c = mount(<DocumentEditor isOpen title="T" initialContent="<p>hello</p>" metadata={{}} onSave={onSave} onClose={vi.fn()} onDirtyChange={dirtySpy} />);
+    expect(c.querySelector('button[aria-label="Save document"]')).toBeNull();
+    expect(dirtySpy).toHaveBeenLastCalledWith(false); // clean on open, unaffected
     selectText(c, 'hello');
     click(linkBtn(c)!);
-    expect(saveBtn.disabled).toBe(true); // opening a popup alone does not dirty the draft
+    expect(dirtySpy).toHaveBeenLastCalledWith(false); // opening a popup alone does not dirty the draft
   });
 });
