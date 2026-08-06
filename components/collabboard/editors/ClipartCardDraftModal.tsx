@@ -226,6 +226,7 @@ export default function ClipartCardDraftModal({
               <CardPreview
                 padlet={previewPadlet}
                 isSelected={false}
+                hideTitle
                 reactions={reactions}
                 onAddReaction={openReactionPicker}
                 onReactionClick={(emoji) => {
@@ -242,6 +243,7 @@ export default function ClipartCardDraftModal({
               <div data-testid="clipart-inline-caption">
                 <InlineCaption
                   value={getMeaningfulTitle(previewPadlet.title, 'card')}
+                  placeholder="Title"
                   isEditing={isCaptionEditing}
                   onChange={(nextTitle) => onChange({ ...previewPadlet, title: nextTitle })}
                   onCommit={() => setIsCaptionEditing(false)}

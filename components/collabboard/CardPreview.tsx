@@ -19,6 +19,10 @@ interface CardPreviewProps {
     reactions?: string[];
     onAddReaction?: () => void;
     onReactionClick?: (emoji: string) => void;
+    // ClipartCardDraftModal renders its own editable title (InlineCaption)
+    // directly below this preview -- without this, the same title shows
+    // twice (once as this static heading, once in that editable field).
+    hideTitle?: boolean;
 }
 
 export default function CardPreview({
@@ -30,7 +34,8 @@ export default function CardPreview({
     onReadDocument,
     reactions = [],
     onAddReaction,
-    onReactionClick
+    onReactionClick,
+    hideTitle = false
 }: CardPreviewProps) {
     const { metadata, title, content } = padlet;
     const iconBgColor = metadata?.iconBgColor || '#f8f9fa'; // Small square behind icon (Tab 1: "Icon")
@@ -116,12 +121,14 @@ export default function CardPreview({
                     >
                         <img src={svgUrl} alt="" className="h-28 w-28 object-contain" />
                     </div>
-                    <div
-                        className={`text-center text-xs font-semibold${documentTitle ? '' : ' opacity-40 select-none'}`}
-                        style={titleStyle}
-                    >
-                        {documentTitle || 'Title'}
-                    </div>
+                    {!hideTitle && (
+                        <div
+                            className={`text-center text-xs font-semibold${documentTitle ? '' : ' opacity-40 select-none'}`}
+                            style={titleStyle}
+                        >
+                            {documentTitle || 'Title'}
+                        </div>
+                    )}
                     <div className="text-[10px] text-gray-600">{calculateCounter()}</div>
                 </div>
 

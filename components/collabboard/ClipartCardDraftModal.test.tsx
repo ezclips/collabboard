@@ -608,7 +608,10 @@ describe('ClipartCardDraftModal reaction and comment metadata', () => {
       fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
       lineHeight: '1.45',
     });
-    expect(markup).toContain('color:#111827cc;font-size:18px;font-weight:700;font-style:italic;font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;line-height:1.45;background-color:#fef3c7');
+    // CardPreview's own title heading is suppressed (hideTitle) so this
+    // caption style shows exactly once, on the editable InlineCaption --
+    // not duplicated in a second, non-interactive title element.
+    expect(markup).toContain('font-size:18px;font-weight:700;font-style:italic;font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;line-height:1.45;color:#111827cc;background-color:#fef3c7');
   });
 
   it('renders InlineCaption inside the compact card and edits previewPadlet.title only', () => {
@@ -616,9 +619,11 @@ describe('ClipartCardDraftModal reaction and comment metadata', () => {
     const { element: emptyElement, markup: emptyMarkup } = renderModal({ title: '', onChange });
     const emptyInlineCaption = inlineCaptionNode(emptyElement);
     const emptyInlineCaptionComponent = findByComponentName(emptyInlineCaption, 'InlineCaption');
-    expect(emptyInlineCaptionComponent.props.placeholder).toBeUndefined();
+    // Explicit "Title" placeholder (not InlineCaption's own default "Write a
+    // caption...") -- this field edits the post's title, not a photo caption.
+    expect(emptyInlineCaptionComponent.props.placeholder).toBe('Title');
     expect(emptyInlineCaptionComponent.props.value).toBe('');
-    expect(emptyMarkup).toContain('placeholder="Write a caption..."');
+    expect(emptyMarkup).toContain('placeholder="Title"');
     expect(String(emptyInlineCaption.props.className || '')).not.toContain('w-[320px]');
     expect(findElement(previewWrapperNode(emptyElement), (node) => node.props?.['data-testid'] === 'clipart-inline-caption')).toBeTruthy();
 
