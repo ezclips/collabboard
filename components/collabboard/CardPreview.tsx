@@ -1,6 +1,8 @@
 import React from 'react';
+import DOMPurify from 'dompurify';
 import { Padlet } from '@/types/collabboard';
 import { resolveCaptionStyle } from '@/lib/domain/canvas/captionStyle';
+import { decodeHtmlEntities } from '@/lib/html-utils';
 import { Edit2 } from 'lucide-react';
 import ReactionDisplay from './editors/ReactionDisplay';
 import DocumentCardContent from './DocumentCardContent';
@@ -40,6 +42,12 @@ export default function CardPreview({
     const isClipartCard = !!svgUrl;
     const stripBg = showTopStrip ? topStripColor : 'rgba(0,0,0,0.04)';
     const stripIconColor = showTopStrip ? '#f3f4f6' : '#9ca3af';
+    // PATCH-152 targeted correction: Document is a plain-text card, not an
+    // icon/image card -- sanitize the same way PostCardContent's Document
+    // branch does, guarded for the SSR/plain-Node render path this component
+    // is also exercised under (DOMPurify has no window there).
+    const sanitizedDocumentContent =
+        typeof window !== 'undefined' ? DOMPurify.sanitize(decodeHtmlEntities(content || '')) : '';
 
     // Calculate counter
     const calculateCounter = () => {
@@ -162,21 +170,19 @@ export default function CardPreview({
                 />
             )}
 
-            <div className="pointer-events-none select-none flex h-full flex-col items-center justify-center gap-2 px-4 pb-4 pt-6">
-                <div
-                    className="flex h-32 w-32 items-center justify-center rounded-2xl shadow-inner"
-                    style={{ backgroundColor: iconBgColor }}
-                >
-                    <div className="h-28 w-28 rounded-md bg-gray-200" />
-                </div>
-
+            {/* PATCH-152 targeted correction: Note-style body -- title plus a
+                clamped text preview of the Document's own content, no
+                icon/image placeholder block (that belonged to Clipart). */}
+            <div className="relative flex h-full flex-col gap-1 px-4 pb-4 pt-6">
                 {title ? (
                     <div className="text-center text-xs font-semibold" style={titleStyle}>
                         {title}
                     </div>
                 ) : null}
 
-                <div className="text-[10px] text-gray-600">{calculateCounter()}</div>
+                <div className="flex-1 min-h-0 overflow-hidden">
+                    <DocumentCardContent content={sanitizedDocumentContent} textColor={metadata?.textColor} onRead={onReadDocument} />
+                </div>
             </div>
 
             {/* Reactions (if any) */}
@@ -189,7 +195,6 @@ export default function CardPreview({
                     />
                 </div>
             )}
-            <DocumentCardContent onRead={onReadDocument} className="absolute bottom-2 right-2 z-20 rounded-md bg-black/40 hover:bg-black/60 focus-visible:bg-black/60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-white px-2 py-1 text-[10px] font-semibold text-white backdrop-blur-sm transition-colors pointer-events-auto" />
         </div>
     );
 }

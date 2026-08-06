@@ -28,6 +28,28 @@ afterEach(() => {
   mounted = [];
 });
 
+// jsdom performs no real layout, so scrollHeight/clientHeight are always 0/0
+// -- DocumentCardContent's real overflow measurement (PATCH-152 targeted
+// correction) never observes overflow there by default. Any test that needs
+// a genuinely-overflowing preview stubs the two layout properties on
+// HTMLElement.prototype for the duration of its mount call, then restores
+// them -- the standard technique for exercising scrollHeight/clientHeight
+// based code under jsdom.
+function withOverflow<T>(fn: () => T): T {
+  const scrollDesc = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollHeight');
+  const clientDesc = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight');
+  Object.defineProperty(HTMLElement.prototype, 'scrollHeight', { configurable: true, get: () => 500 });
+  Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get: () => 100 });
+  try {
+    return fn();
+  } finally {
+    if (scrollDesc) Object.defineProperty(HTMLElement.prototype, 'scrollHeight', scrollDesc);
+    else delete (HTMLElement.prototype as any).scrollHeight;
+    if (clientDesc) Object.defineProperty(HTMLElement.prototype, 'clientHeight', clientDesc);
+    else delete (HTMLElement.prototype as any).clientHeight;
+  }
+}
+
 const doc = (over: Partial<Omit<Padlet, 'metadata'>> & { metadata?: any } = {}): Padlet => ({
   id: 'doc-1', board_id: 'b', type: 'card', title: 'Doc Title', content: '<p>body</p>',
   position_x: 0, position_y: 0, width: 180, height: 220,
@@ -38,12 +60,12 @@ const clipart = (): Padlet => doc({ id: 'clip-1', metadata: { svgUrl: 'x.svg' } 
 const readBtn = (c: HTMLElement) => c.querySelector('button[aria-label="Read document"]');
 const click = (el: Element) => act(() => { el.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
-describe('DocumentCardContent (PATCH-149B1b-iii): affordance, opt-in, identity', () => {
-  it('1-6: renders an accessible, keyboard-reachable, overlay-styled Read button; click invokes the handler once with the complete post and does not fire the parent click', () => {
+describe('DocumentCardContent (PATCH-149B1b-iii, overflow-gated per PATCH-152): affordance, opt-in, identity', () => {
+  it('1-6: renders an accessible, keyboard-reachable, overlay-styled Read button when overflowing; click invokes the handler once with the complete post and does not fire the parent click', () => {
     const onOpenDocument = vi.fn();
     const onClick = vi.fn();
     const post = doc({ id: 'doc-42', title: 'Exact Title', content: '<p>exact</p>', metadata: { description: 'exact-desc', parentId: 'p9' } });
-    const c = mount(<div onClick={onClick}><PostCardContent padlet={post} onOpenDocument={onOpenDocument} /></div>);
+    const c = withOverflow(() => mount(<div onClick={onClick}><PostCardContent padlet={post} onOpenDocument={onOpenDocument} /></div>));
     const btn = readBtn(c)!;
     expect(btn.tagName).toBe('BUTTON');
     expect(btn.textContent).toBe('Read');
@@ -57,33 +79,38 @@ describe('DocumentCardContent (PATCH-149B1b-iii): affordance, opt-in, identity',
     expect(onOpenDocument.mock.calls[0][0]).toBeUndefined(); // owner already bound `post` in its own closure
   });
 
-  it('11/12: no handler -> preview renders, no Read button (presentation-safe by construction)', () => {
-    const c = mount(<PostCardContent padlet={doc()} />);
+  it('11/12: no handler -> preview renders, no Read button (presentation-safe by construction), regardless of overflow', () => {
+    const c = withOverflow(() => mount(<PostCardContent padlet={doc()} />));
     expect(readBtn(c)).toBeNull();
     expect(c.textContent).toContain('body');
   });
 
-  it('7/8/28: clipart never renders Read, in either owner, regardless of a supplied handler (structural, not a second predicate)', () => {
-    expect(readBtn(mount(<PostCardContent padlet={clipart()} onOpenDocument={vi.fn()} />))).toBeNull();
-    expect(readBtn(mount(<CardPreview padlet={clipart()} isSelected={false} onReadDocument={vi.fn()} />))).toBeNull();
+  it('PATCH-152: Read is absent when the preview content fits (handler present, no overflow) -- never shown merely because a handler exists', () => {
+    expect(readBtn(mount(<PostCardContent padlet={doc()} onOpenDocument={vi.fn()} />))).toBeNull();
+    expect(readBtn(mount(<CardPreview padlet={doc()} isSelected={false} onReadDocument={vi.fn()} />))).toBeNull();
+  });
+
+  it('7/8/28: clipart never renders Read, in either owner, regardless of a supplied handler or overflow (structural, not a second predicate)', () => {
+    expect(readBtn(withOverflow(() => mount(<PostCardContent padlet={clipart()} onOpenDocument={vi.fn()} />)))).toBeNull();
+    expect(readBtn(withOverflow(() => mount(<CardPreview padlet={clipart()} isSelected={false} onReadDocument={vi.fn()} />)))).toBeNull();
   });
 
   it('9/10/29/30: Note, Todo, Link, Image and AI-component render no Document Read button; default/AI rendering unaffected', () => {
     for (const type of ['text', 'todo', 'link', 'image', 'ai-component']) {
-      const c = mount(<PostCardContent padlet={{ ...doc(), type } as Padlet} onOpenDocument={vi.fn()} />);
+      const c = withOverflow(() => mount(<PostCardContent padlet={{ ...doc(), type } as Padlet} onOpenDocument={vi.fn()} />));
       expect(readBtn(c), type).toBeNull();
     }
   });
 
-  it('16: CardPreview/freeform Document renders Read via the shared component; no handler -> no button (mirrors 11/12 at this owner)', () => {
-    expect(readBtn(mount(<CardPreview padlet={doc()} isSelected={false} onReadDocument={vi.fn()} />))).not.toBeNull();
-    expect(readBtn(mount(<CardPreview padlet={doc()} isSelected={false} />))).toBeNull();
+  it('16: CardPreview/freeform Document renders Read via the shared component when overflowing; no handler -> no button (mirrors 11/12 at this owner)', () => {
+    expect(readBtn(withOverflow(() => mount(<CardPreview padlet={doc()} isSelected={false} onReadDocument={vi.fn()} />)))).not.toBeNull();
+    expect(readBtn(withOverflow(() => mount(<CardPreview padlet={doc()} isSelected={false} />)))).toBeNull();
   });
 
   it('5/6: Read and the existing edit pencil are independent -- clicking Read never also fires onEditContent', () => {
     const onReadDocument = vi.fn();
     const onEditContent = vi.fn();
-    const c = mount(<CardPreview padlet={doc()} isSelected={false} onEditContent={onEditContent} onReadDocument={onReadDocument} />);
+    const c = withOverflow(() => mount(<CardPreview padlet={doc()} isSelected={false} onEditContent={onEditContent} onReadDocument={onReadDocument} />));
     click(readBtn(c)!);
     expect(onReadDocument).toHaveBeenCalledTimes(1);
     expect(onEditContent).not.toHaveBeenCalled();
@@ -94,8 +121,8 @@ describe('DocumentCardContent (PATCH-149B1b-iii): affordance, opt-in, identity',
     const b = doc({ id: 'doc-b', title: 'Same', metadata: { description: 'Same' } });
     const seen: string[] = [];
     const openFor = (p: Padlet) => () => seen.push(p.id);
-    click(readBtn(mount(<PostCardContent padlet={a} onOpenDocument={openFor(a)} />))!);
-    click(readBtn(mount(<PostCardContent padlet={b} onOpenDocument={openFor(b)} />))!);
+    click(readBtn(withOverflow(() => mount(<PostCardContent padlet={a} onOpenDocument={openFor(a)} />)))!);
+    click(readBtn(withOverflow(() => mount(<PostCardContent padlet={b} onOpenDocument={openFor(b)} />)))!);
     expect(seen).toEqual(['doc-a', 'doc-b']);
   });
 });
@@ -122,14 +149,14 @@ describe('CAPABILITY -> readOnly routing (13/14/15): handler presence never deci
   }
 
   it('14: editable capability opens readOnly=false (title/description editable)', () => {
-    const c = mount(<Harness post={doc()} canEdit onSave={vi.fn()} />);
+    const c = withOverflow(() => mount(<Harness post={doc()} canEdit onSave={vi.fn()} />));
     click(readBtn(c)!);
     expect(c.querySelector('input[placeholder="Untitled document"]')).not.toBeNull();
   });
 
   it('15: read-only capability opens readOnly=true with no command surface, and never persists on Close/backdrop', () => {
     const onSave = vi.fn();
-    const c = mount(<Harness post={doc()} canEdit={false} onSave={onSave} />);
+    const c = withOverflow(() => mount(<Harness post={doc()} canEdit={false} onSave={onSave} />));
     click(readBtn(c)!);
     expect(c.querySelector('input[placeholder="Untitled document"]')).toBeNull();
     expect(c.querySelector('input[placeholder="Add a description..."]')).toBeNull();
@@ -143,14 +170,14 @@ describe('CAPABILITY -> readOnly routing (13/14/15): handler presence never deci
 describe('F4/T4 (§29.6/§30.4): interactive body honors metadata.textColor, falling back to #1F2937', () => {
   const bodyStyle = (c: HTMLElement) => (c.querySelector('.tiptap') as HTMLElement).style;
 
-  it('1-4/8: explicit textColor colors the body only (Read carries no inline style); undefined/null/empty fall back to #1F2937; body/Read survive handler presence; PostCardContent threads it end-to-end', () => {
+  it('1-4/8: explicit textColor colors the body only (Read carries no inline style); undefined/null/empty fall back to #1F2937; body/Read survive handler presence when overflowing; PostCardContent threads it end-to-end', () => {
     for (const [tc, expected] of [['#ff0000', 'rgb(255, 0, 0)'], [undefined, 'rgb(31, 41, 55)'], [null, 'rgb(31, 41, 55)'], ['', 'rgb(31, 41, 55)']] as const) {
-      const c = mount(<DocumentCardContent content="<p>hi</p>" textColor={tc as any} onRead={vi.fn()} />);
+      const c = withOverflow(() => mount(<DocumentCardContent content="<p>hi</p>" textColor={tc as any} onRead={vi.fn()} />));
       expect(bodyStyle(c).color).toBe(expected);
       expect(readBtn(c)!.getAttribute('style')).toBeNull();
     }
-    const withHandler = mount(<DocumentCardContent content="<p>exact text</p>" textColor="#ff0000" onRead={vi.fn()} />);
-    const withoutHandler = mount(<DocumentCardContent content="<p>exact text</p>" textColor="#ff0000" />);
+    const withHandler = withOverflow(() => mount(<DocumentCardContent content="<p>exact text</p>" textColor="#ff0000" onRead={vi.fn()} />));
+    const withoutHandler = withOverflow(() => mount(<DocumentCardContent content="<p>exact text</p>" textColor="#ff0000" />));
     expect(withHandler.textContent).toContain('exact text');
     expect(readBtn(withHandler)).not.toBeNull();
     expect(readBtn(withoutHandler)).toBeNull();

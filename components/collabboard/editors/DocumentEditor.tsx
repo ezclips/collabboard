@@ -64,6 +64,27 @@ export default function DocumentEditor({
     onUpdate: readOnly ? undefined : () => forceBodyTick((c) => c + 1),
   });
 
+  // PATCH-152 targeted correction: read-only links stay clickable (opened
+  // safely in a new tab) even though the shared extension registry disables
+  // in-editor navigation (Link.configure({ openOnClick: false }), so editing
+  // near a link never accidentally navigates away). A plain DOM click
+  // handler on the body wrapper -- not TipTap's editorProps.handleClick --
+  // since ProseMirror's own click routing resolves a document position from
+  // layout coordinates first and only then calls handleClick, which is not
+  // exercised by a synthetic click in a layout-free environment. This only
+  // activates when readOnly; it never places a cursor, opens a panel, or
+  // mutates document/selection state -- it just hands the href to the
+  // browser. Read-only-only (not reactive) is safe here: readOnly is fixed
+  // for the lifetime of a given open session (CanvasModals remounts the
+  // editor via a key change whenever the destination differs).
+  const handleReadOnlyBodyClick = (event: React.MouseEvent) => {
+    if (!readOnly) return;
+    const anchor = (event.target as HTMLElement).closest?.('a[href]') as HTMLAnchorElement | null;
+    if (!anchor) return;
+    event.preventDefault();
+    window.open(anchor.href, '_blank', 'noopener,noreferrer');
+  };
+
   const { hasSelection, lastSelection } = useShellSelection(editor); // PATCH-152 §24.11: shared shell mechanism
 
   // §24.11: restores the stored range before Link/Text-style apply; no-op if current, fails safe if invalid.
@@ -275,7 +296,7 @@ export default function DocumentEditor({
 
           {saveError && <div role="alert" className="px-6 py-2 text-sm text-red-700 bg-red-50 border-b border-red-100">{saveError}</div>}
 
-          <div className="flex-1 overflow-y-auto px-6 py-4">
+          <div className="flex-1 overflow-y-auto px-6 py-4" onClick={handleReadOnlyBodyClick}>
             <EditorContent editor={editor} className="prose max-w-none" />
           </div>
 

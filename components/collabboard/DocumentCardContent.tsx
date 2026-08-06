@@ -1,6 +1,6 @@
 "use client";
 
-import React from 'react';
+import React, { useLayoutEffect, useRef, useState } from 'react';
 
 interface DocumentCardContentProps {
   // Pre-sanitized HTML. Omit to render only the overlay button (CardPreview
@@ -8,8 +8,10 @@ interface DocumentCardContentProps {
   content?: string;
   // Presentation-only; mirrors PostCardContent's default-branch fallback (§29.6/§30.4).
   textColor?: string | null;
-  // Presence-gated: no handler -> no button (PATCH-149B1b-iii §27.4).
-  // Capability is decided entirely by the caller's routing, never here.
+  // Presence-gated AND overflow-gated: no handler -> no button; a handler
+  // with content that fits inside the clamp -> no button either (PATCH-152
+  // targeted correction). Capability is decided entirely by the caller's
+  // routing, never here -- this component only measures rendered overflow.
   onRead?: () => void;
   className?: string;
 }
@@ -18,12 +20,27 @@ interface DocumentCardContentProps {
 // CardPreview and PostCardContent both delegate here so the button has one
 // implementation (PATCH-149 §27 NC9). Owns no capability, routing, predicate
 // or persistence logic.
+//
+// PATCH-152 targeted correction: Read is no longer shown merely because a
+// handler is present -- it only appears when the clamped preview actually
+// overflows its available area (real scrollHeight > clientHeight measured
+// after render), so short Documents never show a Read button.
 export default function DocumentCardContent({ content, textColor, onRead, className }: DocumentCardContentProps) {
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const [isOverflowing, setIsOverflowing] = useState(false);
+
+  useLayoutEffect(() => {
+    const el = bodyRef.current;
+    if (!el) { setIsOverflowing(false); return; }
+    setIsOverflowing(el.scrollHeight > el.clientHeight);
+  }, [content]);
+
   return (
     <>
       {content !== undefined && (
         <div className="select-none pointer-events-none">
           <div
+            ref={bodyRef}
             className="text-xs prose prose-sm break-words tiptap"
             style={{
               wordWrap: 'break-word',
@@ -38,7 +55,7 @@ export default function DocumentCardContent({ content, textColor, onRead, classN
           />
         </div>
       )}
-      {onRead && (
+      {onRead && isOverflowing && (
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); onRead(); }}
