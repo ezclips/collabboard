@@ -408,4 +408,9 @@ describe('follow-up correction: Document Freeform card has square corners and a 
     const occurrences = src.split("getMeaningfulTitle(initialCommentTitle, 'comment')").length - 1;
     expect(occurrences).toBe(2);
   });
+
+  it("saveNote's optimistic local update includes the saved title, not just content/metadata -- otherwise the Supabase write succeeds but the canvas keeps rendering the stale (ghost-placeholder) title until a full refetch", () => {
+    const src = fs.readFileSync('hooks/canvas/usePadletSave.ts', 'utf8');
+    expect(src).toContain("if (p.id === padletToEdit!.id) return { ...p, title: data.title || '', content: data.content, metadata };");
+  });
 });

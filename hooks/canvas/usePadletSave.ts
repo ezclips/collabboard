@@ -469,7 +469,7 @@ export function usePadletSave(params: UsePadletSaveParams) {
       } else if (padletToEdit) {
         const syncedWithId = (padletToEdit.metadata as any)?.syncedWith;
         setPadlets(prev => prev.map(p => {
-          if (p.id === padletToEdit!.id) return { ...p, content: data.content, metadata };
+          if (p.id === padletToEdit!.id) return { ...p, title: data.title || '', content: data.content, metadata };
           if (syncedWithId && p.id === syncedWithId) return { ...p, content: data.content, metadata: { ...metadata, syncedWith: padletToEdit!.id } };
           return p;
         }));
