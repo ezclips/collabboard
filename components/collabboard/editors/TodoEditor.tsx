@@ -1075,181 +1075,189 @@ export default function TodoEditor({
                                 </div>
                             )}
                         </div>
-                    </div>
 
-
-
-                    {/* Text Style - Right Side Panel */}
-                    {showTextStylePanel && (
-                        <div
-                            className="bg-white rounded-lg shadow-lg border border-gray-200 p-3 w-64 self-start flex-shrink-0"
-                            onClick={(e) => e.stopPropagation()}
-                        >
-                            <TextStylePopup
-                                isOpen={true}
-                                onOpenChange={(open) => setShowTextStylePanel(open)}
-                                onSelectHeading={applyCaptionPreset}
-                                onSelectColor={(color) => writeCaptionStyle({ color })}
-                                onSelectHighlight={(color) => writeCaptionStyle({ backgroundColor: color })}
-                                currentHeading={captionStyle.heading || 'normal'}
-                                currentColor={captionStyle.color}
-                                currentHighlight={captionStyle.backgroundColor}
-                            />
-                        </div>
-                    )}
-
-                    {/* Color Picker - Right Side Panel */}
-                    {showColorPicker && (
-                        <div
-                            className="bg-white rounded-lg shadow-lg border border-gray-200 p-3 w-64 self-start flex-shrink-0"
-                            onClick={(e) => e.stopPropagation()}
-                        >
-                            <div className="flex items-center justify-between mb-2">
-                                <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">List Color</span>
-                                <div className="flex bg-gray-100 p-1 rounded-lg gap-1">
-                                    <button
-                                        onClick={() => setActiveTab('background')}
-                                        className={`w-8 h-8 flex items-center justify-center text-xs font-bold rounded-md transition-all ${activeTab === 'background'
-                                            ? "bg-white text-gray-900 shadow-sm"
-                                            : "text-gray-500 hover:text-gray-700"
-                                            }`}
-                                        title="Background Color"
-                                    >
-                                        BG
-                                    </button>
-                                    <button
-                                        onClick={() => setActiveTab('topstrip')}
-                                        className={`w-8 h-8 flex items-center justify-center text-xs font-bold rounded-md transition-all ${activeTab === 'topstrip'
-                                            ? "bg-white text-gray-900 shadow-sm"
-                                            : "text-gray-500 hover:text-gray-700"
-                                            }`}
-                                        title="Top Strip Color"
-                                    >
-                                        TS
-                                    </button>
+                        {/* Text Style - overlays to the right of the card
+                                (absolute, not a flex sibling of the outer
+                                row) so opening it can't grow the row's
+                                height and shift the whole toolbar/card group
+                                vertically -- same technique the Reaction
+                                picker above already uses. */}
+                            {showTextStylePanel && (
+                                <div
+                                    className="absolute left-full top-0 ml-3 z-[1100] bg-white rounded-lg shadow-lg border border-gray-200 p-3 w-64"
+                                    onClick={(e) => e.stopPropagation()}
+                                >
+                                    <TextStylePopup
+                                        isOpen={true}
+                                        onOpenChange={(open) => setShowTextStylePanel(open)}
+                                        onSelectHeading={applyCaptionPreset}
+                                        onSelectColor={(color) => writeCaptionStyle({ color })}
+                                        onSelectHighlight={(color) => writeCaptionStyle({ backgroundColor: color })}
+                                        currentHeading={captionStyle.heading || 'normal'}
+                                        currentColor={captionStyle.color}
+                                        currentHighlight={captionStyle.backgroundColor}
+                                    />
                                 </div>
-                            </div>
+                            )}
 
-                            <ColorPickerContent
-                                color={activeTab === "background" ? cardColor : (topStrip || 'transparent')}
-                                onChange={(c) => activeTab === "background" ? setCardColor(c) : setTopStrip(c)}
-                                hasOpacity={true}
-                                presets={activeTab === "background" ? BACKGROUND_COLORS : TOP_STRIP_COLORS}
-                            />
-                        </div>
-                    )}
-
-                    {/* Date Picker - fixed position to the right of the card */}
-                    {showDatePicker && (
-                        <div
-                            className="relative bg-white rounded-lg shadow-xl p-4 w-80 border border-gray-200 self-center flex-shrink-0"
-                            onClick={(e) => e.stopPropagation()}
-                        >
-                            {/* Close button */}
-                            <button
-                                onClick={() => saveDatePicker()}
-                                className="absolute top-2 right-2 p-1 hover:bg-gray-100 rounded text-gray-400 hover:text-gray-600"
-                            >
-                                <X className="w-4 h-4" />
-                            </button>
-
-                            {/* Calendar Header */}
-                            <div className="flex items-center justify-between mb-4">
-                                <button
-                                    onClick={() => setViewMonth(new Date(viewMonth.getFullYear(), viewMonth.getMonth() - 1, 1))}
-                                    className="p-1 hover:bg-gray-100 rounded"
+                            {/* Color Picker - same overlay treatment as Text Style */}
+                            {showColorPicker && (
+                                <div
+                                    className="absolute left-full top-0 ml-3 z-[1100] bg-white rounded-lg shadow-lg border border-gray-200 p-3 w-64"
+                                    onClick={(e) => e.stopPropagation()}
                                 >
-                                    <ChevronLeft className="w-5 h-5" />
-                                </button>
-                                <span className="font-medium capitalize">{formatMonth(viewMonth)}</span>
-                                <button
-                                    onClick={() => setViewMonth(new Date(viewMonth.getFullYear(), viewMonth.getMonth() + 1, 1))}
-                                    className="p-1 hover:bg-gray-100 rounded"
-                                >
-                                    <ChevronRight className="w-5 h-5" />
-                                </button>
-                            </div>
-
-                            {/* Weekday headers */}
-                            <div className="grid grid-cols-7 gap-1 mb-2">
-                                {['M', 'D', 'M', 'D', 'F', 'S', 'S'].map((day, i) => (
-                                    <div key={i} className="text-center text-xs text-gray-400 font-medium py-1">
-                                        {day}
+                                    <div className="flex items-center justify-between mb-2">
+                                        <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">List Color</span>
+                                        <div className="flex bg-gray-100 p-1 rounded-lg gap-1">
+                                            <button
+                                                onClick={() => setActiveTab('background')}
+                                                className={`w-8 h-8 flex items-center justify-center text-xs font-bold rounded-md transition-all ${activeTab === 'background'
+                                                    ? "bg-white text-gray-900 shadow-sm"
+                                                    : "text-gray-500 hover:text-gray-700"
+                                                    }`}
+                                                title="Background Color"
+                                            >
+                                                BG
+                                            </button>
+                                            <button
+                                                onClick={() => setActiveTab('topstrip')}
+                                                className={`w-8 h-8 flex items-center justify-center text-xs font-bold rounded-md transition-all ${activeTab === 'topstrip'
+                                                    ? "bg-white text-gray-900 shadow-sm"
+                                                    : "text-gray-500 hover:text-gray-700"
+                                                    }`}
+                                                title="Top Strip Color"
+                                            >
+                                                TS
+                                            </button>
+                                        </div>
                                     </div>
-                                ))}
-                            </div>
 
-                            {/* Calendar days */}
-                            <div className="grid grid-cols-7 gap-1 mb-4">
-                                {getDaysInMonth(viewMonth).map((date, i) => (
-                                    <button
-                                        key={i}
-                                        disabled={!date}
-                                        onClick={() => date && setSelectedDate(date)}
-                                        className={`w-8 h-8 text-sm rounded flex items-center justify-center ${!date ? '' :
-                                            isSelected(date) ? 'bg-gray-800 text-white' :
-                                                isToday(date) ? 'border border-gray-800' :
-                                                    'hover:bg-gray-100'
-                                            }`}
-                                    >
-                                        {date?.getDate() || ''}
-                                    </button>
-                                ))}
-                            </div>
-
-                            {/* Due time */}
-                            <div className="border-t border-gray-100 pt-3 mb-3">
-                                <div className="flex items-center gap-2 mb-2">
-                                    <Clock className="w-4 h-4 text-gray-400" />
-                                    <span className="text-sm text-gray-500">Add due time...</span>
+                                    <ColorPickerContent
+                                        color={activeTab === "background" ? cardColor : (topStrip || 'transparent')}
+                                        onChange={(c) => activeTab === "background" ? setCardColor(c) : setTopStrip(c)}
+                                        hasOpacity={true}
+                                        presets={activeTab === "background" ? BACKGROUND_COLORS : TOP_STRIP_COLORS}
+                                    />
                                 </div>
-                                <div className="flex items-center gap-2">
-                                    <Clock className="w-4 h-4 text-gray-400" />
-                                    <input
-                                        type="text"
-                                        value={dueTimeHour}
-                                        onChange={(e) => setDueTimeHour(e.target.value.replace(/\D/g, '').slice(0, 2))}
-                                        placeholder="00"
-                                        className="w-10 text-center border border-gray-200 rounded px-1 py-1 text-sm"
-                                        maxLength={2}
-                                    />
-                                    <span>:</span>
-                                    <input
-                                        type="text"
-                                        value={dueTimeMinute}
-                                        onChange={(e) => setDueTimeMinute(e.target.value.replace(/\D/g, '').slice(0, 2))}
-                                        placeholder="00"
-                                        className="w-10 text-center border border-gray-200 rounded px-1 py-1 text-sm"
-                                        maxLength={2}
-                                    />
-                                    {(dueTimeHour || dueTimeMinute) && (
+                            )}
+
+                            {/* Date Picker - same overlay treatment; kept in
+                                its own relative wrapper since its Close
+                                button is itself absolutely positioned
+                                within it. */}
+                            {showDatePicker && (
+                                <div className="absolute left-full top-0 ml-3 z-[1100]">
+                                    <div
+                                        className="relative bg-white rounded-lg shadow-xl p-4 w-80 border border-gray-200"
+                                        onClick={(e) => e.stopPropagation()}
+                                    >
+                                        {/* Close button */}
                                         <button
-                                            onClick={clearDueTime}
-                                            className="text-xs text-blue-500 hover:underline ml-2"
+                                            onClick={() => saveDatePicker()}
+                                            className="absolute top-2 right-2 p-1 hover:bg-gray-100 rounded text-gray-400 hover:text-gray-600"
                                         >
-                                            Clear
+                                            <X className="w-4 h-4" />
                                         </button>
-                                    )}
-                                </div>
-                            </div>
 
-                            {/* Reminder */}
-                            <div className="border-t border-gray-100 pt-3">
-                                <div className="flex items-center gap-2">
-                                    <Bell className="w-4 h-4 text-gray-400" />
-                                    <select
-                                        value={selectedReminder}
-                                        onChange={(e) => setSelectedReminder(e.target.value)}
-                                        className="flex-1 text-sm border border-gray-200 rounded px-2 py-1"
-                                    >
-                                        {REMINDER_OPTIONS.map(opt => (
-                                            <option key={opt.value} value={opt.value}>{opt.label}</option>
-                                        ))}
-                                    </select>
+                                        {/* Calendar Header */}
+                                        <div className="flex items-center justify-between mb-4">
+                                            <button
+                                                onClick={() => setViewMonth(new Date(viewMonth.getFullYear(), viewMonth.getMonth() - 1, 1))}
+                                                className="p-1 hover:bg-gray-100 rounded"
+                                            >
+                                                <ChevronLeft className="w-5 h-5" />
+                                            </button>
+                                            <span className="font-medium capitalize">{formatMonth(viewMonth)}</span>
+                                            <button
+                                                onClick={() => setViewMonth(new Date(viewMonth.getFullYear(), viewMonth.getMonth() + 1, 1))}
+                                                className="p-1 hover:bg-gray-100 rounded"
+                                            >
+                                                <ChevronRight className="w-5 h-5" />
+                                            </button>
+                                        </div>
+
+                                        {/* Weekday headers */}
+                                        <div className="grid grid-cols-7 gap-1 mb-2">
+                                            {['M', 'D', 'M', 'D', 'F', 'S', 'S'].map((day, i) => (
+                                                <div key={i} className="text-center text-xs text-gray-400 font-medium py-1">
+                                                    {day}
+                                                </div>
+                                            ))}
+                                        </div>
+
+                                        {/* Calendar days */}
+                                        <div className="grid grid-cols-7 gap-1 mb-4">
+                                            {getDaysInMonth(viewMonth).map((date, i) => (
+                                                <button
+                                                    key={i}
+                                                    disabled={!date}
+                                                    onClick={() => date && setSelectedDate(date)}
+                                                    className={`w-8 h-8 text-sm rounded flex items-center justify-center ${!date ? '' :
+                                                        isSelected(date) ? 'bg-gray-800 text-white' :
+                                                            isToday(date) ? 'border border-gray-800' :
+                                                                'hover:bg-gray-100'
+                                                        }`}
+                                                >
+                                                    {date?.getDate() || ''}
+                                                </button>
+                                            ))}
+                                        </div>
+
+                                        {/* Due time */}
+                                        <div className="border-t border-gray-100 pt-3 mb-3">
+                                            <div className="flex items-center gap-2 mb-2">
+                                                <Clock className="w-4 h-4 text-gray-400" />
+                                                <span className="text-sm text-gray-500">Add due time...</span>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <Clock className="w-4 h-4 text-gray-400" />
+                                                <input
+                                                    type="text"
+                                                    value={dueTimeHour}
+                                                    onChange={(e) => setDueTimeHour(e.target.value.replace(/\D/g, '').slice(0, 2))}
+                                                    placeholder="00"
+                                                    className="w-10 text-center border border-gray-200 rounded px-1 py-1 text-sm"
+                                                    maxLength={2}
+                                                />
+                                                <span>:</span>
+                                                <input
+                                                    type="text"
+                                                    value={dueTimeMinute}
+                                                    onChange={(e) => setDueTimeMinute(e.target.value.replace(/\D/g, '').slice(0, 2))}
+                                                    placeholder="00"
+                                                    className="w-10 text-center border border-gray-200 rounded px-1 py-1 text-sm"
+                                                    maxLength={2}
+                                                />
+                                                {(dueTimeHour || dueTimeMinute) && (
+                                                    <button
+                                                        onClick={clearDueTime}
+                                                        className="text-xs text-blue-500 hover:underline ml-2"
+                                                    >
+                                                        Clear
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </div>
+
+                                        {/* Reminder */}
+                                        <div className="border-t border-gray-100 pt-3">
+                                            <div className="flex items-center gap-2">
+                                                <Bell className="w-4 h-4 text-gray-400" />
+                                                <select
+                                                    value={selectedReminder}
+                                                    onChange={(e) => setSelectedReminder(e.target.value)}
+                                                    className="flex-1 text-sm border border-gray-200 rounded px-2 py-1"
+                                                >
+                                                    {REMINDER_OPTIONS.map(opt => (
+                                                        <option key={opt.value} value={opt.value}>{opt.label}</option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
-                            </div>
-                        </div>
-                    )}
+                            )}
+                    </div>
                 </div>
             </div>
 
