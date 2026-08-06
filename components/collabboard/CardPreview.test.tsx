@@ -311,6 +311,97 @@ function findEditCardButton(node: unknown): ReactElement<any> | undefined {
   if (element.type === 'button' && element.props['aria-label'] === 'Open card') return element;
   return findEditCardButton(element.props?.children);
 }
+function countButtons(node: unknown): number {
+  if (node == null || node === false || node === true) return 0;
+  if (Array.isArray(node)) return node.reduce((sum: number, child) => sum + countButtons(child), 0);
+  if (typeof node !== 'object') return 0;
+  const element = node as ReactElement<any>;
+  const own = element.type === 'button' ? 1 : 0;
+  return own + countButtons(element.props?.children);
+}
+
+// PATCH-152 targeted correction (fix(clipart): remove duplicate edit control):
+// FreeformPadletCards.tsx used to wire BOTH onOpenToolbar (a "Card Post Modal"
+// ad hoc system) and onEditContent (the CardEditor system) onto the same
+// Clipart CardPreview, rendering two Edit-like controls in the top strip.
+// The fix keeps a single control (onOpenToolbar, the standard top-strip
+// position) and routes it through the same shared ClipartCardDraftModal
+// (setIsClipartDraftModalOpen) that Columns/Grid already use via
+// executePadletTypeEditor -- CardPreview itself is untouched; only its caller's
+// wiring changed.
+describe('Clipart post has exactly one Edit control (PATCH-152 targeted correction)', () => {
+  it('1: renders exactly one Edit button for the exact prop shape FreeformPadletCards now supplies (onOpenToolbar only)', () => {
+    const tree = CardPreview({ padlet: padlet(), isSelected: false, onOpenToolbar: () => {} }) as ReactElement;
+    expect(countButtons(tree)).toBe(1);
+  });
+
+  it('2: the remaining button opens the Clipart editor', () => {
+    const onOpenToolbar = vi.fn();
+    const tree = CardPreview({ padlet: padlet(), isSelected: false, onOpenToolbar }) as ReactElement;
+    const button = findEditCardButton2(tree)!;
+    button.props.onClick({ stopPropagation: () => {} });
+    expect(onOpenToolbar).toHaveBeenCalledTimes(1);
+
+    const src = require('node:fs').readFileSync('components/collabboard/canvas/ui/FreeformPadletCards.tsx', 'utf8');
+    expect(src).not.toContain('onEditContent=');
+    expect(src).toContain('setIsClipartDraftModalOpen(true)');
+    // Same trigger the other layouts already use for card+svgUrl (§ executePadletTypeEditor).
+    const canvasClientSrc = require('node:fs').readFileSync('app/dashboard/canvas/[id]/CanvasClient.tsx', 'utf8');
+    expect(canvasClientSrc).toContain('setIsClipartDraftModalOpen(true)');
+  });
+
+  it('3: read-only users (no onOpenToolbar, no onEditContent) see no Edit button', () => {
+    const tree = CardPreview({ padlet: padlet(), isSelected: false }) as ReactElement;
+    expect(countButtons(tree)).toBe(0);
+  });
+
+  it('4: Freeform and the RowLane-based layouts (Wall/Columns/Grid/Table/Timeline/Stream/Map) converge on the same shared trigger', async () => {
+    const [freeform, rowLane, canvasClient] = await Promise.all([
+      import('node:fs/promises').then((fs) => fs.readFile('components/collabboard/canvas/ui/FreeformPadletCards.tsx', 'utf8')),
+      import('node:fs/promises').then((fs) => fs.readFile('components/collabboard/row/RowLane.tsx', 'utf8')),
+      import('node:fs/promises').then((fs) => fs.readFile('app/dashboard/canvas/[id]/CanvasClient.tsx', 'utf8')),
+    ]);
+
+    // Freeform's single remaining Edit control calls the canonical setter directly.
+    expect(freeform).toContain('setIsClipartDraftModalOpen(true)');
+    expect(freeform).not.toContain('onEditContent');
+
+    // RowLane (Columns/Grid, and the other row-based layouts that reuse it) exposes
+    // a single onEdit affordance via CardShell -- not two -- for every post type.
+    expect((rowLane.match(/onEdit=\{isEditable \? \(\(\) => onEditPost\(post\)\) : undefined\}/g) || []).length).toBeGreaterThan(0);
+
+    // Both paths resolve card+svgUrl posts to the same canonical modal in CanvasClient.
+    expect(canvasClient).toMatch(/post\.type === 'card' && post\.metadata\?\.svgUrl[\s\S]{0,120}setIsClipartDraftModalOpen\(true\)/);
+  });
+
+  it('5: no other post type\'s edit wiring in FreeformPadletCards.tsx changed', async () => {
+    const freeform = await import('node:fs/promises').then((fs) => fs.readFile('components/collabboard/canvas/ui/FreeformPadletCards.tsx', 'utf8'));
+    // Image posts keep their own, untouched toolbar trigger.
+    expect(freeform).toContain('setImageToolbarPadletId');
+    // The generic openFreeformPadletModal dispatcher (double-click path for
+    // table/link/todo/comment/drawing/container/ai-component/note) is unchanged.
+    expect(freeform).toContain("setIsTableEditorOpen(true);");
+    expect(freeform).toContain("setIsLinkEditorOpen(true);");
+    expect(freeform).toContain("setIsTodoEditorOpen(true);");
+    expect(freeform).toContain("setIsCommentEditorOpen(true);");
+  });
+});
+
+function findEditCardButton2(node: unknown): ReactElement<any> | undefined {
+  if (node == null || node === false || node === true) return undefined;
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const found = findEditCardButton2(child);
+      if (found) return found;
+    }
+    return undefined;
+  }
+  if (typeof node !== 'object') return undefined;
+  const element = node as ReactElement<any>;
+  if (element.type === 'button') return element;
+  return findEditCardButton2(element.props?.children);
+}
+
 describe('CardPreview edit-content affordance (PATCH-138)', () => {
   it.each<[string, Partial<Padlet>]>([
     ['clipart branch', {}],

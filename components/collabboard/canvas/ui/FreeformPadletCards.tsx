@@ -257,6 +257,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
     setIsDrawingEditorOpen,
     setIsCardEditorOpen,
     setIsCardViewerOpen,
+    setIsClipartDraftModalOpen,
     setIsAIComponentEditorOpen,
     setIsAIContentEditModalOpen,
     setIsAIContentConvertModalOpen,
@@ -1761,22 +1762,23 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
               onClick={() => {
                 // Handled by parent div
               }}
+              /* PATCH-152 targeted correction: a single Edit control, routed
+                 through the same shared Clipart editor (ClipartCardDraftModal)
+                 Columns/Grid already use via executePadletTypeEditor -- not
+                 the two ad hoc systems (cardToolbarPadletId's local modal and
+                 CardEditor) that previously produced two buttons here. */
               onOpenToolbar={canUseFreeformEditButton ? ((e) => {
                 e.stopPropagation();
-                closeAllToolbars({ cardToolbar: true });
-                setCardToolbarPadletId(padlet.id);
-              }) : undefined}
-              onEditContent={() => {
                 const destination = selectDocumentModalDestination(padlet, canUseFreeformEditButton);
                 if (destination) { requestOpenDocument(padlet, destination); return; }
                 closeAllToolbars();
                 setPadletToEdit(padlet);
                 if (selectCardModalRoute(canUseFreeformEditButton) === 'editor') {
-                  setIsCardEditorOpen(true);
+                  setIsClipartDraftModalOpen(true);
                 } else {
                   setIsCardViewerOpen(true);
                 }
-              }}
+              }) : undefined}
               onReadDocument={(() => {
                 const d = selectDocumentModalDestination(padlet, canUseFreeformEditButton);
                 return d ? () => requestOpenDocument(padlet, d) : undefined;

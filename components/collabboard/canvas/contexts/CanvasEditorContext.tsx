@@ -16,6 +16,7 @@ export type CanvasEditorState = {
   setIsDrawingEditorOpen: (v: boolean) => void;
   setIsCardEditorOpen: (v: boolean) => void;
   setIsCardViewerOpen: (v: boolean) => void;
+  setIsClipartDraftModalOpen: (v: boolean) => void;
   setIsAIComponentEditorOpen: (v: boolean) => void;
   setIsAIContentEditModalOpen: (v: boolean) => void;
   setIsAIContentConvertModalOpen: (v: boolean) => void;

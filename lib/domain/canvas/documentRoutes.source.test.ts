@@ -112,18 +112,26 @@ describe('Freeform: openFreeformPadletModal card branch', () => {
   });
 });
 
-describe('Freeform: CardPreview.onEditContent Document branch', () => {
-  const body = slice(freeformSrc, 'onEditContent={() => {', '\n              }}');
+describe('Freeform: CardPreview.onOpenToolbar Document/Clipart branch (PATCH-152 targeted correction)', () => {
+  // PATCH-152: onEditContent was removed (it duplicated onOpenToolbar's Edit
+  // control in the top strip); this routing logic now lives on the single
+  // remaining onOpenToolbar handler.
+  const body = slice(freeformSrc, 'onOpenToolbar={canUseFreeformEditButton ? ((e) => {', '\n              }) : undefined}');
 
   it('exact Document uses the shared destination helper (PATCH-149B2-ii: via requestOpenDocument)', () => {
     expect(body).toContain('selectDocumentModalDestination(padlet, canUseFreeformEditButton)');
     expect(body).toContain('requestOpenDocument(padlet, destination)');
   });
 
-  it('clipart falls through to the existing selectCardModalRoute editor/viewer split, unchanged', () => {
+  it('clipart routes through the shared ClipartCardDraftModal via selectCardModalRoute, not CardEditor', () => {
     expect(body).toContain('selectCardModalRoute(canUseFreeformEditButton)');
-    expect(body).toContain('setIsCardEditorOpen(true);');
+    expect(body).toContain('setIsClipartDraftModalOpen(true);');
     expect(body).toContain('setIsCardViewerOpen(true);');
+    expect(body).not.toContain('setIsCardEditorOpen');
+  });
+
+  it('no onEditContent wiring remains on this CardPreview call', () => {
+    expect(freeformSrc).not.toContain('onEditContent=');
   });
 });
 

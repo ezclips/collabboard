@@ -5229,6 +5229,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     setIsDrawingEditorOpen,
     setIsCardEditorOpen,
     setIsCardViewerOpen,
+    setIsClipartDraftModalOpen,
     setIsAIComponentEditorOpen,
     setIsAIContentEditModalOpen,
     setIsAIContentConvertModalOpen,
