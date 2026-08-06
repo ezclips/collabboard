@@ -244,7 +244,7 @@ export default function NoteEditor({
     }
 
     // Text is selected, open the link popup
-    panels.openPanel('link');
+    panels.openPanel('link', ['comment']);
   };
 
   const handleAddLink = (url: string) => {
@@ -299,7 +299,7 @@ export default function NoteEditor({
 
     setCommentPopupPosition(null);
     setSavedSelection(selection);
-    panels.openPanel('comment', ['textStyle', 'cardColor', 'reaction']);
+    panels.openPanel('comment', ['textStyle', 'cardColor', 'reaction', 'link']);
   };
 
   const handlePostComment = (anchor?: DOMRect) => {
@@ -642,15 +642,6 @@ export default function NoteEditor({
               </div>
             </div>
           )}
-
-          {/* Link Popup */}
-          <LinkPopup
-            isOpen={panels.open.link}
-            onOpenChange={(open) => (open ? panels.openPanel('link') : panels.closePanel('link'))}
-            onSubmit={handleAddLink}
-            onRemoveLink={handleRemoveLink}
-            initialUrl={linkViewUrl}
-          />
 
           {/* Comment Badge - Positioned on the outer card, matching canvas position */}
           {detachedComments.length > 0 && (
@@ -1014,6 +1005,23 @@ export default function NoteEditor({
                 presets={activeTab === "background" ? BACKGROUND_COLORS : TOP_STRIP_COLORS}
               />
             </div>
+          </div>
+        )}
+
+        {/* Link Popup - right-side flex sibling, same slot/wrapper as the
+            selected-text Comment popup below (PATCH-152 targeted correction:
+            align Link and Comment). Uses LinkPopup's existing inline mode so
+            no independent absolute/fixed positioning is introduced here. */}
+        {panels.open.link && (
+          <div style={{ width: '300px' }}>
+            <LinkPopup
+              inline
+              isOpen={panels.open.link}
+              onOpenChange={(open) => (open ? panels.openPanel('link', ['comment']) : panels.closePanel('link'))}
+              onSubmit={handleAddLink}
+              onRemoveLink={handleRemoveLink}
+              initialUrl={linkViewUrl}
+            />
           </div>
         )}
 

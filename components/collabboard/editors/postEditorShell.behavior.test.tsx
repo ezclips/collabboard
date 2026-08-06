@@ -251,14 +251,6 @@ describe('Frozen panels keep their current mount points (§22.3/§22.10 21-24)',
     expect(card(c).contains(picker)).toBe(true);
   });
 
-  it('LinkPopup stays card-relative', () => {
-    const c = openNote();
-    selectText(c, 'world');
-    click(btn(c, 'Add link to selected text')!);
-    const input = c.querySelector('input[placeholder="Paste or type a URL"]')!;
-    expect(card(c).contains(input)).toBe(true);
-  });
-
   it('the detached post-comment popup stays a shell-row sibling, outside the card and the shared panel region', () => {
     const c = openNote();
     click(btn(c, 'Switch to Box Design')!);
@@ -271,11 +263,12 @@ describe('Frozen panels keep their current mount points (§22.3/§22.10 21-24)',
 
 // PATCH-152 P1 (§23.3): pins the real NoteEditor call site -- a synthetic
 // useShellPanels-only test cannot detect a regression at handleTextComment
-// itself. Measured coexistence (Task 1): TextStylePopup, Card colour,
-// Reaction and Link never close one another; only opening selected-text
-// Comment closes textStyle/cardColor/reaction.
-describe('Real NoteEditor panel coordination (§23.3): selected-text Comment closes textStyle/cardColor/reaction, not Link', () => {
-  it('closes exactly the three declared panels and leaves Link and later coexistence unaffected', () => {
+// itself. Measured coexistence (Task 1): TextStylePopup, Card colour and
+// Reaction never close one another or Link. PATCH-152 targeted correction
+// (align Link and Comment): selected-text Comment closes textStyle/cardColor/
+// reaction AND Link now too (mutual exclusion between Link and Comment).
+describe('Real NoteEditor panel coordination (§23.3): selected-text Comment closes textStyle/cardColor/reaction/Link', () => {
+  it('closes exactly the declared panels, now including Link, and leaves later coexistence unaffected', () => {
     const c = openNote();
     // §-targeted-correction: the selected-text CommentPopup wrapper now also
     // uses `width: 300px`, so this must key off TextStylePopup's own wrapper
@@ -309,9 +302,9 @@ describe('Real NoteEditor panel coordination (§23.3): selected-text Comment clo
     expect(textStyle()).toBeNull();
     expect(cardColorPanel()).toBeNull();
     expect(reaction()).toBeNull();
-    // Link is not in the declared closing list -- it must survive the Comment
-    // transition (over-closing detector, §23.3/12).
-    expect(c.querySelector('input[placeholder="Paste or type a URL"]')).not.toBeNull();
+    // PATCH-152 targeted correction: Link and Comment are now mutually
+    // exclusive -- opening Comment must also close Link.
+    expect(c.querySelector('input[placeholder="Paste or type a URL"]')).toBeNull();
 
     click(btn(c, 'Close')!);
     click(btn(c, 'Change text formatting')!);
@@ -322,16 +315,18 @@ describe('Real NoteEditor panel coordination (§23.3): selected-text Comment clo
   });
 });
 
-// PATCH-152 C3-A (§24.16): proves the C3-A shell/LinkPopup additions (showToolbar,
-// selectionIndicator, LinkPopup's inline prop) are opt-in and leave Note byte-identical.
-describe('C3-A additions are opt-in and do not affect Note (§24.16)', () => {
-  it('renders the toolbar and LinkPopup absolute-positioned exactly as before, with no selection overlay', () => {
+// PATCH-152 C3-A (§24.16): proves the C3-A shell additions (showToolbar,
+// selectionIndicator) stay opt-in and unused by Note. LinkPopup's inline prop
+// is the one C3-A addition Note *does* now opt into (PATCH-152 targeted
+// correction: align Link and Comment) -- covered by the dedicated alignment
+// tests below, not here.
+describe('C3-A shell additions stay opt-in and unused by Note (§24.16)', () => {
+  it('renders the toolbar normally, with no selection overlay', () => {
     const c = openNote();
     selectText(c, 'world');
     click(btn(c, 'Add link to selected text')!);
     expect(c.querySelector('.min-w-\\[72px\\]')).not.toBeNull();
-    const input = c.querySelector('input[placeholder="Paste or type a URL"]')!;
-    expect(input.closest('.absolute.right-0')).not.toBeNull();
+    expect(c.querySelector('input[placeholder="Paste or type a URL"]')).not.toBeNull();
     expect(c.querySelector('[data-testid="shell-selection-overlay"]')).toBeNull();
   });
 });
@@ -421,5 +416,138 @@ describe('Selected-text CommentPopup follows the documented right-side layout', 
     const docRow = shellRow(docC);
     const docPanelIdx = idx(docRow, (el) => has(el, 'input[placeholder="Add a comment..."]'));
     expect(docPanelIdx).toBe(docRow.children.length - 1);
+  });
+});
+
+// PATCH-152 targeted Note-panel correction: LinkPopup and the selected-text
+// CommentPopup must share the same right-side sharedPanel slot (same left
+// edge, top alignment, width, spacing from the centre) and be mutually
+// exclusive. Document is untouched by this change.
+describe('Note: Link and selected-text Comment share the same right-side slot and are mutually exclusive', () => {
+  const has = (el: Element, sel: string) => el.matches(sel) || !!el.querySelector(sel);
+  const idx = (row: HTMLElement, pred: (el: Element) => boolean) => Array.from(row.children).findIndex(pred);
+  function linkWrapper(c: HTMLElement): HTMLElement | null {
+    const input = c.querySelector('input[placeholder="Paste or type a URL"]');
+    return input ? (input.closest('[style*="width: 300px"]') as HTMLElement) : null;
+  }
+  function commentWrapper(c: HTMLElement): HTMLElement | null {
+    const input = c.querySelector('input[placeholder="Add a comment..."]');
+    return input ? (input.closest('[style*="width: 300px"]') as HTMLElement) : null;
+  }
+
+  it('1: Link opens to the right of the Note centre, outside the toolbar and card', () => {
+    const c = openNote();
+    selectText(c, 'world');
+    click(btn(c, 'Add link to selected text')!);
+    const input = c.querySelector('input[placeholder="Paste or type a URL"]')!;
+
+    expect(card(c).contains(input)).toBe(false);
+    expect(c.querySelector('.min-w-\\[72px\\]')!.contains(input)).toBe(false);
+    expect(shellRow(c).contains(input)).toBe(true);
+
+    const row = shellRow(c);
+    const centreIdx = idx(row, (el) => has(el, '.rounded-lg.shadow-2xl.overflow-visible'));
+    const panelIdx = idx(row, (el) => has(el, 'input[placeholder="Paste or type a URL"]'));
+    expect(panelIdx).toBeGreaterThan(centreIdx);
+  });
+
+  it('2: selected-text Comment opens at the same right-side position as Link (last flex child)', () => {
+    const c = openNote();
+    selectText(c, 'world');
+    click(btn(c, 'Add comment to selected text')!);
+    const row = shellRow(c);
+    const panelIdx = idx(row, (el) => has(el, 'input[placeholder="Add a comment..."]'));
+    expect(panelIdx).toBe(row.children.length - 1);
+  });
+
+  it('3: Link and Comment wrappers have identical width and occupy the same flex-slot index', () => {
+    const linkC = openNote();
+    selectText(linkC, 'world');
+    click(btn(linkC, 'Add link to selected text')!);
+    const lw = linkWrapper(linkC)!;
+    expect(lw).not.toBeNull();
+    expect(lw.getAttribute('style')).toContain('width: 300px');
+    const linkRow = shellRow(linkC);
+    const linkIdx = Array.from(linkRow.children).indexOf(lw);
+
+    const commentC = openNote();
+    selectText(commentC, 'world');
+    click(btn(commentC, 'Add comment to selected text')!);
+    const cw = commentWrapper(commentC)!;
+    expect(cw).not.toBeNull();
+    expect(cw.getAttribute('style')).toContain('width: 300px');
+    const commentRow = shellRow(commentC);
+    const commentIdx = Array.from(commentRow.children).indexOf(cw);
+
+    expect(linkIdx).toBe(commentIdx);
+    expect(linkIdx).toBe(linkRow.children.length - 1);
+  });
+
+  it('4: neither Link nor Comment renders inside the toolbar', () => {
+    const c = openNote();
+    selectText(c, 'world');
+    click(btn(c, 'Add link to selected text')!);
+    expect(c.querySelector('.min-w-\\[72px\\]')!.contains(c.querySelector('input[placeholder="Paste or type a URL"]'))).toBe(false);
+
+    selectText(c, 'world');
+    click(btn(c, 'Add comment to selected text')!);
+    expect(c.querySelector('.min-w-\\[72px\\]')!.contains(c.querySelector('input[placeholder="Add a comment..."]'))).toBe(false);
+  });
+
+  it('5: neither Link nor Comment renders inside the Note card', () => {
+    const c = openNote();
+    selectText(c, 'world');
+    click(btn(c, 'Add link to selected text')!);
+    expect(card(c).contains(c.querySelector('input[placeholder="Paste or type a URL"]'))).toBe(false);
+
+    selectText(c, 'world');
+    click(btn(c, 'Add comment to selected text')!);
+    expect(card(c).contains(c.querySelector('input[placeholder="Add a comment..."]'))).toBe(false);
+  });
+
+  it('6: opening Link closes an already-open selected-text Comment', () => {
+    const c = openNote();
+    selectText(c, 'world');
+    click(btn(c, 'Add comment to selected text')!);
+    expect(c.querySelector('input[placeholder="Add a comment..."]')).not.toBeNull();
+    selectText(c, 'world');
+    click(btn(c, 'Add link to selected text')!);
+    expect(c.querySelector('input[placeholder="Paste or type a URL"]')).not.toBeNull();
+    expect(c.querySelector('input[placeholder="Add a comment..."]')).toBeNull();
+  });
+
+  it('7: opening selected-text Comment closes an already-open Link', () => {
+    const c = openNote();
+    selectText(c, 'world');
+    click(btn(c, 'Add link to selected text')!);
+    expect(c.querySelector('input[placeholder="Paste or type a URL"]')).not.toBeNull();
+    selectText(c, 'world');
+    click(btn(c, 'Add comment to selected text')!);
+    expect(c.querySelector('input[placeholder="Add a comment..."]')).not.toBeNull();
+    expect(c.querySelector('input[placeholder="Paste or type a URL"]')).toBeNull();
+  });
+
+  it('closing Link does not change the Note body', () => {
+    const c = openNote();
+    const before = c.querySelector('.ProseMirror')!.innerHTML;
+    selectText(c, 'world');
+    click(btn(c, 'Add link to selected text')!);
+    click(Array.from(c.querySelectorAll('button')).find((b) => b.textContent === 'Cancel')!);
+    expect(c.querySelector('.ProseMirror')!.innerHTML).toBe(before);
+  });
+
+  it('closing selected-text Comment does not change the Note body', () => {
+    const c = openNote();
+    const before = c.querySelector('.ProseMirror')!.innerHTML;
+    selectText(c, 'world');
+    click(btn(c, 'Add comment to selected text')!);
+    click(btn(c, 'Close')!);
+    expect(c.querySelector('.ProseMirror')!.innerHTML).toBe(before);
+  });
+
+  it('Document panels remain byte-identical and unchanged by this Note-only correction', () => {
+    const src = fs.readFileSync('components/collabboard/editors/DocumentEditor.tsx', 'utf8');
+    expect(src).toContain("panels.openPanel('link', ['textStyle', 'comment'])");
+    expect(src).toContain("panels.openPanel('comment', ['textStyle', 'link'])");
   });
 });
