@@ -272,7 +272,7 @@ export default function CommentPopup({
     const panel = (
         <div
             ref={panelRef}
-            className={`relative rounded-xl border border-gray-200 p-4 ${
+            className={`relative border border-gray-200 p-4 ${
                 embedded
                     ? 'shadow-none border-0 p-0 w-full max-w-none'
                     : fullWidth

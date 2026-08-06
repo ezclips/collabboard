@@ -241,6 +241,12 @@ describe('follow-up correction: Document Freeform card has square corners and a 
     expect(block).toContain('<Edit2 className="w-3 h-3" />');
   });
 
+  it('the shared CommentPopup (rendered via OverlayLayer for canvas comment markers on Note/Document/Clipart alike) has square corners, not rounded-xl', () => {
+    const src = fs.readFileSync('components/collabboard/editors/CommentPopup.tsx', 'utf8');
+    expect(src).not.toContain('relative rounded-xl border border-gray-200 p-4');
+    expect(src).toContain('relative border border-gray-200 p-4');
+  });
+
   it('renders a title bar containing the title text, not a centered title inside the body', () => {
     const c = mount(<CardPreview padlet={doc({ title: 'Meeting Notes' })} isSelected={false} />);
     const bar = c.querySelector('.grid') as HTMLElement | null;
