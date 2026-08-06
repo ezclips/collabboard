@@ -905,9 +905,6 @@ export default function TableEditor({
                                                                 if (!isCellSelected(row.index, colIndex)) handleCellMouseDown(row.index, colIndex);
                                                             }}
                                                         >
-                                                            {/* Active cell inner ring */}
-                                                            {isActive && <div className="absolute inset-0 pointer-events-none ring-2 ring-purple-500 ring-inset" />}
-
                                                             <input
                                                                 type="text"
                                                                 value={(cell.getValue() as string) || ""}
