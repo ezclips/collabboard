@@ -179,6 +179,23 @@ export default function CommentPost({
                     {comments.length}
                 </div>
             )}
+            {/* Edit button -- positioned just under the counter badge, at the
+                card's top-right corner, matching the Note/Document card's own
+                pencil placement (their top strip sits flush with the top edge,
+                right-aligned) rather than inset inside the padded body. */}
+            {showMenu && (
+                <button
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        if (onMenuClick) onMenuClick();
+                    }}
+                    className="absolute top-2 right-2 z-10 w-6 h-6 flex items-center justify-center rounded text-gray-500 hover:bg-gray-100 hover:text-blue-500 transition-colors"
+                    title="Edit"
+                    data-no-drag="true"
+                >
+                    <Edit2 className="w-3 h-3" />
+                </button>
+            )}
             {topStrip && topStrip !== 'transparent' && (
                 <div className="h-1.5 w-full" style={{ backgroundColor: topStrip }} />
             )}
@@ -213,7 +230,7 @@ export default function CommentPost({
                         />
                     </div>
                 )}
-                <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center mb-3">
                     <div className="flex items-center gap-2">
                         {isEditingTitle ? (
                             <input
@@ -255,25 +272,6 @@ export default function CommentPost({
                             >
                                 {commentTitle}
                             </span>
-                        )}
-                    </div>
-                    <div className="flex items-center gap-2">
-                        {showMenu && (
-                            <button
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    if (onMenuClick) onMenuClick();
-                                }}
-                                className="w-7 h-7 flex items-center justify-center rounded hover:bg-gray-100"
-                                title="Edit"
-                                data-no-drag="true"
-                            >
-                                <svg className="w-4 h-4 text-gray-500" viewBox="0 0 24 24" fill="currentColor">
-                                    <circle cx="12" cy="5" r="2" />
-                                    <circle cx="12" cy="12" r="2" />
-                                    <circle cx="12" cy="19" r="2" />
-                                </svg>
-                            </button>
                         )}
                     </div>
                 </div>

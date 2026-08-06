@@ -261,6 +261,22 @@ describe('follow-up correction: Document Freeform card has square corners and a 
     expect(src).not.toContain('title="Badge Color"');
   });
 
+  it("the standalone Comment post's Edit button sits just under the counter badge (top-right corner overlay, sibling of the badge), not inset inside the padded title row, and uses the real pencil icon rather than the old three-dot kebab", () => {
+    const src = fs.readFileSync('components/collabboard/CommentPost.tsx', 'utf8');
+    // No more custom three-circle kebab icon.
+    expect(src).not.toContain('<circle cx="12" cy="5" r="2" />');
+    // The Edit button is a sibling of the counter badge -- both absolutely
+    // positioned against the outer card, before the `p-4` padded body starts.
+    const badgeIndex = src.indexOf('Comment counter badge on card edge');
+    const bodyIndex = src.indexOf('className="p-4 flex-1 flex flex-col relative"');
+    expect(badgeIndex).toBeGreaterThan(-1);
+    expect(bodyIndex).toBeGreaterThan(badgeIndex);
+    const outerRegion = src.slice(badgeIndex, bodyIndex);
+    expect(outerRegion).toContain('showMenu &&');
+    expect(outerRegion).toContain('absolute top-2 right-2');
+    expect(outerRegion).toContain('<Edit2 className="w-3 h-3" />');
+  });
+
   it('renders a title bar containing the title text, not a centered title inside the body', () => {
     const c = mount(<CardPreview padlet={doc({ title: 'Meeting Notes' })} isSelected={false} />);
     const bar = c.querySelector('.grid') as HTMLElement | null;
