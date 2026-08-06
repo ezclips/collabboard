@@ -651,15 +651,13 @@ export default function CommentEditor({
               className="absolute left-full top-0 ml-2 z-[60] bg-white rounded-lg shadow-2xl p-4 w-[300px] border border-gray-100"
               onMouseDown={(e) => e.preventDefault()}
             >
-              <div className="flex items-center justify-between mb-4">
-                <span className="font-semibold text-gray-800">Text style</span>
-                <button
-                  onClick={() => setTextStyleOpen(false)}
-                  className="p-1 hover:bg-gray-100 rounded-full transition-colors font-bold"
-                >
-                  ✕
-                </button>
-              </div>
+              <button
+                onClick={() => setTextStyleOpen(false)}
+                className="absolute top-2 right-2 w-4 h-4 flex items-center justify-center rounded hover:bg-gray-100"
+                title="Close"
+              >
+                <X className="w-3 h-3 text-gray-400" />
+              </button>
               <TextStylePopup
                 isOpen={true}
                 onOpenChange={setTextStyleOpen}
