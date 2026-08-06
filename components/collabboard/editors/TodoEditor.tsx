@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Palette, Type, Calendar, User, Smile, MessageSquare, Trash2, ChevronLeft, ChevronRight, Clock, Bell, X, Share2, GripVertical, PenTool } from 'lucide-react';
+import { Palette, Calendar, User, Smile, MessageSquare, Trash2, ChevronLeft, ChevronRight, Clock, Bell, X, Share2, GripVertical, PenTool } from 'lucide-react';
 import ShareModal from './ShareModal';
 import { ColorPickerContent } from '../ColorPicker';
 import TextStylePopup from './TextStylePopup';
@@ -113,7 +113,6 @@ export default function TodoEditor({
     boardId,
 }: TodoEditorProps) {
     const [todoTitle, setTodoTitle] = useState('');
-    const [showTitleInput, setShowTitleInput] = useState(false);
     const [tasks, setTasks] = useState<Task[]>([]);
     const [newTaskText, setNewTaskText] = useState('');
     const [cardColor, setCardColor] = useState('#ffffff');
@@ -157,7 +156,6 @@ export default function TodoEditor({
             // Modal just opened — seed state from initialData
             if (initialData) {
                 setTodoTitle(initialData.todoTitle || '');
-                setShowTitleInput(!!initialData.todoTitle);
                 setTasks(initialData.tasks || []);
                 setCardColor(initialData.cardColor || '#ffffff');
                 setTopStrip(initialData.topStrip || null);
@@ -173,7 +171,6 @@ export default function TodoEditor({
                 setBadgeColor(initialData.badgeColor || '#facc15');
             } else {
                 setTodoTitle('');
-                setShowTitleInput(false);
                 setTasks([]);
                 setNewTaskText('');
                 setHoveredTaskId(null);
@@ -409,19 +406,6 @@ export default function TodoEditor({
                             <span className="text-[9px] text-gray-500 text-center">Color</span>
 
 
-                        </div>
-
-                        {/* Title */}
-                        <div className="flex flex-col items-center">
-                            <button
-                                onClick={() => setShowTitleInput(!showTitleInput)}
-                                className={`w-10 h-10 flex items-center justify-center rounded-lg transition-colors ${showTitleInput ? 'bg-blue-100 text-blue-600' : 'hover:bg-gray-200 text-gray-600'
-                                    }`}
-                                title="Title"
-                            >
-                                <Type className="w-5 h-5" />
-                            </button>
-                            <span className="text-[9px] text-gray-500 text-center">Title</span>
                         </div>
 
                         {/* Due date */}
@@ -825,17 +809,15 @@ export default function TodoEditor({
                         )}
 
                         <div className="p-4 overflow-y-auto flex-1" ref={taskListRef}>
-                            {/* Title input (when enabled) */}
-                            {showTitleInput && (
-                                <input
-                                    type="text"
-                                    value={todoTitle}
-                                    onChange={(e) => setTodoTitle(e.target.value)}
-                                    className="w-full text-lg font-bold mb-3 p-1 bg-transparent border-b border-transparent focus:border-blue-400 outline-none placeholder-gray-400"
-                                    placeholder="Details"
-                                    autoFocus
-                                />
-                            )}
+                            {/* Title -- semi-transparent "Title" placeholder until the
+                                user sets one, same pattern as Note/Comment/Document. */}
+                            <input
+                                type="text"
+                                value={todoTitle}
+                                onChange={(e) => setTodoTitle(e.target.value)}
+                                className="w-full text-lg font-bold mb-3 p-1 bg-transparent border-b border-transparent focus:border-blue-400 outline-none placeholder:opacity-40 placeholder:font-normal"
+                                placeholder="Title"
+                            />
 
                             {/* Task list */}
                             <div className="space-y-1">
@@ -1033,25 +1015,6 @@ export default function TodoEditor({
                                     />
                                 </div>
                             </div>
-
-                            {/* Title prompt (when no title and tasks exist) */}
-                            {!showTitleInput && !todoTitle && tasks.length > 0 && (
-                                <div className="mt-4 pt-4 border-t border-gray-100 text-xs text-gray-500 font-medium flex items-center gap-2">
-                                    <span>Add a title to this list?</span>
-                                    <button
-                                        onClick={() => setShowTitleInput(true)}
-                                        className="text-gray-500 underline hover:text-gray-700"
-                                    >
-                                        Yes
-                                    </button>
-                                    <button
-                                        onClick={() => { }}
-                                        className="text-gray-500 underline hover:text-gray-700"
-                                    >
-                                        No thanks
-                                    </button>
-                                </div>
-                            )}
 
                             {/* Reactions display */}
                             {reactions.length > 0 && (

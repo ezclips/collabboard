@@ -15,6 +15,9 @@ export const isPlaceholderTitle = (title: unknown, type: unknown): boolean => {
     // regardless of the post's actual type -- not just "new <type>".
     titleNorm === "new post" ||
     titleNorm === "new note" ||
+    // "To-Do List" is the Todo editor's own create/save-time default
+    // (usePadletSave's saveTodo), stamped on type "todo".
+    titleNorm === "to-do list" ||
     (typeNorm !== "" && titleNorm === typeNorm) ||
     (typeNorm !== "" && titleNorm === `new ${typeNorm}`) ||
     (typeNorm !== "" && titleNorm === `untitled ${typeNorm}`) ||

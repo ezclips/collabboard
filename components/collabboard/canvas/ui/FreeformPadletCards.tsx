@@ -3249,10 +3249,10 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                     ) : null}
                   </div>
                   {/* Center: title -- containers show their real title
-                      unchanged; Note shows a semi-transparent "Title"
-                      placeholder until the user sets one, editable in
-                      place via double-click (same pattern as the Comment
-                      post's own title bar). */}
+                      unchanged; Note and Todo show a semi-transparent
+                      "Title" placeholder until the user sets one, editable
+                      in place via double-click (same pattern as the
+                      Comment post's own title bar). */}
                   <div className="flex items-center justify-center px-1 min-w-0">
                     {isContainer ? (
                       padlet.title && (
@@ -3263,7 +3263,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                           {padlet.title}
                         </span>
                       )
-                    ) : (padlet.type === 'text' || (padlet.type as string) === 'note') ? (
+                    ) : (padlet.type === 'text' || (padlet.type as string) === 'note' || padlet.type === 'todo') ? (
                       editingNoteTitleId === padlet.id ? (
                         <input
                           type="text"
@@ -3519,12 +3519,9 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
               {/* Todo Card Display */}
               {padlet.type === 'todo' && padlet.metadata?.tasks && (
                 <div className="space-y-1">
-                  {/* Todo Title */}
-                  {padlet.metadata.todoTitle && (
-                    <h4 className="text-xs font-semibold text-gray-800 mb-1">
-                      {padlet.metadata.todoTitle}
-                    </h4>
-                  )}
+                  {/* Title now lives in the shared top-strip bar above
+                      (same ghost-placeholder pattern as Note) -- no longer
+                      duplicated here. */}
                   {/* Task list preview (show first 4) */}
                   {padlet.metadata.tasks.slice(0, 4).map((task: { id: string; text: string; completed: boolean; dueDate?: string; assignee?: string }) => (
                     <div key={task.id} className="flex items-start gap-1.5">
