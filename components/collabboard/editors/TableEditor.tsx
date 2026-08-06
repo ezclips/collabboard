@@ -236,7 +236,6 @@ export default function TableEditor({
     // Submenu states
     const [activeSubmenu, setActiveSubmenu] = useState<string | null>(null);
     const [pinnedTextStyle, setPinnedTextStyle] = useState(false);
-    const [showTitleEdit, setShowTitleEdit] = useState(false);
     const [showCaptionEdit, setShowCaptionEdit] = useState(false);
 
     // Comment state
@@ -670,7 +669,6 @@ export default function TableEditor({
     const preventFocusLoss = (e: React.MouseEvent) => e.preventDefault();
 
     const outsideModeTools: TableTool[] = [
-        { id: "title", icon: Type, label: "Title", onClick: () => setShowTitleEdit(true) },
         { id: "caption", icon: AlignLeft, label: "Caption", onClick: () => setShowCaptionEdit((v: any) => !v) },
         {
             id: "comment",
@@ -776,23 +774,16 @@ export default function TableEditor({
                             className="rounded-lg overflow-hidden bg-white shadow-lg"
                             style={{ minHeight: "200px", maxHeight: "450px", width: "400px" }}
                         >
-                            {/* Header */}
+                            {/* Header -- ghost "Title" placeholder until the user sets
+                                one, same pattern as Note/Todo/Comment/Document. */}
                             <div className="p-3 border-b">
-                                {showTitleEdit ? (
-                                    <input
-                                        type="text"
-                                        value={title}
-                                        onChange={(e) => setTitle(e.target.value)}
-                                        onBlur={() => setShowTitleEdit(false)}
-                                        onKeyDown={(e) => e.key === "Enter" && setShowTitleEdit(false)}
-                                        className="w-full text-lg font-semibold border-b border-gray-300 outline-none"
-                                        autoFocus
-                                    />
-                                ) : (
-                                    <h3 className="text-lg font-semibold text-gray-800 cursor-pointer" onClick={() => setShowTitleEdit(true)}>
-                                        {title}
-                                    </h3>
-                                )}
+                                <input
+                                    type="text"
+                                    value={title}
+                                    onChange={(e) => setTitle(e.target.value)}
+                                    placeholder="Title"
+                                    className="w-full text-lg font-semibold text-gray-800 bg-transparent outline-none border-none placeholder:opacity-40 placeholder:font-normal"
+                                />
                             </div>
 
                             {/* Table viewport */}
