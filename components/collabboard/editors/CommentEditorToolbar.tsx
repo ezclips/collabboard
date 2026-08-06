@@ -3,7 +3,6 @@
 import React from 'react';
 import {
     ArrowLeft,
-    Type,
     Bold,
     Italic,
     Strikethrough,
@@ -37,8 +36,6 @@ interface CommentEditorToolbarProps {
     onEmoji?: () => void;
     emojiOpen?: boolean;
     linkEnabled?: boolean;
-    onTitle?: () => void;
-    titleActive?: boolean;
 }
 
 export default function CommentEditorToolbar({
@@ -55,8 +52,6 @@ export default function CommentEditorToolbar({
     onEmoji,
     emojiOpen = false,
     linkEnabled = false,
-    onTitle,
-    titleActive = false,
 }: CommentEditorToolbarProps) {
 
     // Toggle between text and box modes
@@ -64,9 +59,10 @@ export default function CommentEditorToolbar({
         onModeChange(mode === 'text' ? 'box' : 'text');
     };
 
-    // Text mode tools - basic formatting only
+    // Text mode tools - basic formatting only. Title editing now happens
+    // directly in the card's own title bar (double-click, ghost placeholder)
+    // rather than through a separate toggle+input flow here.
     const textModeTools = [
-        { icon: Type, label: 'Title', onClick: onTitle, active: titleActive },
         { icon: Bold, label: 'Bold', onClick: onBold, active: false },
         { icon: Italic, label: 'Italic', onClick: onItalic, active: false },
         { icon: Strikethrough, label: 'Strike', onClick: onStrikethrough, active: false },

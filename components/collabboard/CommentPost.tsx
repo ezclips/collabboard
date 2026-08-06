@@ -5,6 +5,7 @@ import DOMPurify from 'dompurify';
 import { Edit2, MessageSquare, Palette, Send, Strikethrough, Trash2 } from 'lucide-react';
 import TextStylePopup from './editors/TextStylePopup';
 import { contrastIconColor } from './shells/CardShell';
+import { getMeaningfulTitle } from '@/lib/infra/collabboard/postTitle';
 
 interface CommentData {
     id: string;
@@ -48,7 +49,7 @@ export default function CommentPost({
     cardColor = '#ffffff',
     badgeColor = '#facc15',
     topStrip,
-    commentTitle = 'Comments',
+    commentTitle = '',
     onTitleChange,
     onEdit,
     onClick,
@@ -72,7 +73,8 @@ export default function CommentPost({
     const [editingText, setEditingText] = useState('');
     const [commentColorPopupId, setCommentColorPopupId] = useState<string | null>(null);
     const [isEditingTitle, setIsEditingTitle] = useState(false);
-    const [localTitle, setLocalTitle] = useState(commentTitle);
+    const meaningfulTitle = getMeaningfulTitle(commentTitle, 'comment');
+    const [localTitle, setLocalTitle] = useState(meaningfulTitle);
     const [shouldSelectText, setShouldSelectText] = useState(false);
     const editTextareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -208,40 +210,37 @@ export default function CommentPost({
                             onChange={(e) => setLocalTitle(e.target.value)}
                             onBlur={() => {
                                 setIsEditingTitle(false);
-                                if (onTitleChange && localTitle.trim()) {
-                                    onTitleChange(localTitle.trim());
-                                }
+                                onTitleChange?.(localTitle.trim());
                             }}
                             onKeyDown={(e) => {
                                 if (e.key === 'Enter') {
                                     setIsEditingTitle(false);
-                                    if (onTitleChange && localTitle.trim()) {
-                                        onTitleChange(localTitle.trim());
-                                    }
+                                    onTitleChange?.(localTitle.trim());
                                 }
                                 if (e.key === 'Escape') {
                                     setIsEditingTitle(false);
-                                    setLocalTitle(commentTitle);
+                                    setLocalTitle(meaningfulTitle);
                                 }
                             }}
                             onClick={(e) => e.stopPropagation()}
                             onMouseDown={(e) => e.stopPropagation()}
-                            className="text-xs font-semibold text-center bg-transparent border-b border-blue-400 outline-none px-0 py-0 w-24"
+                            placeholder="Title"
+                            className="text-xs font-semibold text-center bg-transparent border-b border-blue-400 outline-none px-0 py-0 w-24 placeholder:opacity-40"
                             style={{ color: stripTitleColor }}
                             autoFocus
                         />
                     ) : (
                         <span
-                            className="text-xs font-semibold text-center truncate cursor-pointer"
+                            className={`text-xs font-semibold text-center truncate cursor-pointer ${meaningfulTitle ? '' : 'opacity-40 select-none'}`}
                             style={{ color: stripTitleColor }}
                             onDoubleClick={(e) => {
                                 e.stopPropagation();
                                 setIsEditingTitle(true);
-                                setLocalTitle(commentTitle);
+                                setLocalTitle(meaningfulTitle);
                             }}
                             title="Double-click to edit title"
                         >
-                            {commentTitle}
+                            {meaningfulTitle || 'Title'}
                         </span>
                     )}
                 </div>

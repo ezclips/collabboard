@@ -50,6 +50,9 @@ export function useCanvasOverlays() {
     timestamp: number;
   }>>([]);
 
+  const [editingNoteTitleId, setEditingNoteTitleId] = useState<string | null>(null);
+  const [noteTitleDraft, setNoteTitleDraft] = useState('');
+
   const [cardCommentPopupPadletId, setCardCommentPopupPadletId] = useState<string | null>(null);
   const [cardCommentList, setCardCommentList] = useState<Array<{
     id: string;
@@ -160,6 +163,10 @@ export function useCanvasOverlays() {
     setDetachedBadgeColorOpen,
     detachedPopupComments,
     setDetachedPopupComments,
+    editingNoteTitleId,
+    setEditingNoteTitleId,
+    noteTitleDraft,
+    setNoteTitleDraft,
     cardCommentPopupPadletId,
     setCardCommentPopupPadletId,
     cardCommentList,

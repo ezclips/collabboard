@@ -290,6 +290,10 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
     setCaptionEditorPadletId,
     setIsLibraryOpen,
     setIconReplaceTargetPadlet,
+    editingNoteTitleId,
+    setEditingNoteTitleId,
+    noteTitleDraft,
+    setNoteTitleDraft,
     cardCommentPopupPadletId,
     setCardCommentPopupPadletId,
     cardCommentList,
@@ -2655,7 +2659,10 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                   cardColor={padlet.metadata?.cardColor || '#ffffff'}
                   badgeColor={padlet.metadata?.badgeColor || '#facc15'}
                   topStrip={padlet.metadata?.topStrip || 'transparent'}
-                  commentTitle={padlet.metadata?.commentTitle || 'Comments'}
+                  commentTitle={padlet.metadata?.commentTitle || ''}
+                  onTitleChange={(title) => {
+                    updatePadletMetadata(padlet.id, { commentTitle: title || undefined });
+                  }}
                   selected={isPadletSelected(padlet.id)}
                   showMenu={true}
                   onMenuClick={() => {
@@ -3241,16 +3248,61 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                       <div className="w-5 h-5 shrink-0" aria-hidden="true" />
                     ) : null}
                   </div>
-                  {/* Center: title for containers */}
+                  {/* Center: title -- containers show their real title
+                      unchanged; Note shows a semi-transparent "Title"
+                      placeholder until the user sets one, editable in
+                      place via double-click (same pattern as the Comment
+                      post's own title bar). */}
                   <div className="flex items-center justify-center px-1 min-w-0">
-                    {isContainer && padlet.title && (
-                      <span
-                        className="text-xs font-semibold text-center break-words leading-snug py-1"
-                        style={{ color: freeformTitleColor }}
-                      >
-                        {padlet.title}
-                      </span>
-                    )}
+                    {isContainer ? (
+                      padlet.title && (
+                        <span
+                          className="text-xs font-semibold text-center break-words leading-snug py-1"
+                          style={{ color: freeformTitleColor }}
+                        >
+                          {padlet.title}
+                        </span>
+                      )
+                    ) : padlet.type === 'note' ? (
+                      editingNoteTitleId === padlet.id ? (
+                        <input
+                          type="text"
+                          value={noteTitleDraft}
+                          onChange={(e) => setNoteTitleDraft(e.target.value)}
+                          onBlur={() => {
+                            setEditingNoteTitleId(null);
+                            updatePadletTitle(padlet.id, noteTitleDraft.trim());
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') e.currentTarget.blur();
+                            if (e.key === 'Escape') setEditingNoteTitleId(null);
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                          onMouseDown={(e) => e.stopPropagation()}
+                          data-no-drag="true"
+                          placeholder="Title"
+                          className="text-xs font-semibold text-center bg-transparent border-b border-blue-400 outline-none px-0 py-0 w-24 placeholder:opacity-40"
+                          style={{ color: freeformTitleColor }}
+                          autoFocus
+                        />
+                      ) : (() => {
+                        const noteTitle = getMeaningfulTitle(padlet.title, 'note');
+                        return (
+                          <span
+                            className={`text-xs font-semibold text-center truncate cursor-pointer ${noteTitle ? '' : 'opacity-40 select-none'}`}
+                            style={{ color: freeformTitleColor }}
+                            onDoubleClick={(e) => {
+                              e.stopPropagation();
+                              setEditingNoteTitleId(padlet.id);
+                              setNoteTitleDraft(noteTitle);
+                            }}
+                            title="Double-click to edit title"
+                          >
+                            {noteTitle || 'Title'}
+                          </span>
+                        );
+                      })()
+                    ) : null}
                   </div>
                   {/* Right: pencil hover-only */}
                   <div className="flex items-center pr-1.5">

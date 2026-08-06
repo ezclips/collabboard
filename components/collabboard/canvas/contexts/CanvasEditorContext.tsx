@@ -48,6 +48,10 @@ export type CanvasEditorState = {
   setCaptionEditorPadletId: (v: string | null) => void;
   setIsLibraryOpen: (v: boolean) => void;
   setIconReplaceTargetPadlet: (v: any) => void;
+  editingNoteTitleId: string | null;
+  setEditingNoteTitleId: (v: string | null) => void;
+  noteTitleDraft: string;
+  setNoteTitleDraft: (v: string) => void;
   cardCommentPopupPadletId: string | null;
   setCardCommentPopupPadletId: (v: string | null) => void;
   cardCommentList: any[];

@@ -38,6 +38,18 @@ describe("post title placeholders", () => {
     expect(isPlaceholderTitle("New Ai Component", "ai-component")).toBe(true);
     expect(getMeaningfulTitle("AI Summary", "ai_component")).toBe("AI Summary");
   });
+
+  it("treats the shared 'New Post' default (viewport-center add flow) as a placeholder for any type", () => {
+    expect(isPlaceholderTitle("New Post", "note")).toBe(true);
+    expect(isPlaceholderTitle("new post", "card")).toBe(true);
+    expect(getMeaningfulTitle("New Post", "note")).toBe("");
+  });
+
+  it("treats the Comment post's legacy plural default 'Comments' as a placeholder, without applying that to other types", () => {
+    expect(isPlaceholderTitle("Comments", "comment")).toBe(true);
+    expect(getMeaningfulTitle("Comments", "comment")).toBe("");
+    expect(isPlaceholderTitle("Comments", "note")).toBe(false);
+  });
 });
 
 describe("approved table-title surfaces", () => {

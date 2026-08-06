@@ -116,7 +116,7 @@ export default function CommentEditor({
   initialCardColor = "#ffffff",
   initialBadgeColor = "#facc15",
   initialTopStrip = "transparent",
-  initialCommentTitle = "Comments",
+  initialCommentTitle = "",
   currentUserId = "user1",
   currentUserName = "R",
   currentUserAvatar,
@@ -126,7 +126,6 @@ export default function CommentEditor({
   const [cardColor, setCardColor] = useState(initialCardColor);
   const [badgeColor, setBadgeColor] = useState(initialBadgeColor);
   const [commentTitle, setCommentTitle] = useState(initialCommentTitle);
-  const [showTitleInput, setShowTitleInput] = useState(!!initialCommentTitle && initialCommentTitle !== "Comments");
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
   const [commentColorPopupId, setCommentColorPopupId] = useState<string | null>(null);
@@ -217,8 +216,7 @@ export default function CommentEditor({
     setCardColor(initialCardColor);
     setBadgeColor(initialBadgeColor);
     setTopStrip(initialTopStrip || null);
-    setCommentTitle(initialCommentTitle || "Comments");
-    setShowTitleInput(!!initialCommentTitle && initialCommentTitle !== "Comments");
+    setCommentTitle(initialCommentTitle);
     setEditingCommentId(null);
     setActiveCommentId(initialComments[initialComments.length - 1]?.id || null);
     setCommentColorPopupId(null);
@@ -297,7 +295,7 @@ export default function CommentEditor({
         );
       }
     }
-    onSave({ comments: finalComments, cardColor, badgeColor, topStrip: topStrip || undefined, commentTitle: commentTitle || "Comments" });
+    onSave({ comments: finalComments, cardColor, badgeColor, topStrip: topStrip || undefined, commentTitle: commentTitle.trim() || undefined });
     // Ensure drafts never persist between opens
     resetEditors();
     onClose();
@@ -422,7 +420,7 @@ export default function CommentEditor({
         );
       }
     }
-    onSave({ comments: finalComments, cardColor, badgeColor, isCollapsed: true, topStrip: topStrip || undefined, commentTitle: commentTitle || "Comments" });
+    onSave({ comments: finalComments, cardColor, badgeColor, isCollapsed: true, topStrip: topStrip || undefined, commentTitle: commentTitle.trim() || undefined });
     resetEditors();
     onClose();
   };
@@ -544,8 +542,6 @@ export default function CommentEditor({
             onItalic={handleItalic}
             onStrikethrough={handleStrike}
             onLink={handleLink}
-            onTitle={() => setShowTitleInput((prev) => !prev)}
-            titleActive={showTitleInput}
             onTextStyle={() => {
               setEmojiOpen(false);
               setLinkInputOpen(false);
@@ -741,17 +737,16 @@ export default function CommentEditor({
             )}
 
             <div className="flex items-center justify-between mb-3">
-              {showTitleInput ? (
-                <input
-                  type="text"
-                  value={commentTitle}
-                  onChange={(e) => setCommentTitle(e.target.value)}
-                  className="text-sm font-semibold text-gray-700 bg-transparent border-b border-gray-200 focus:border-blue-400 outline-none px-0 py-0.5 w-full max-w-[200px]"
-                  placeholder="Comments"
-                />
-              ) : (
-                <h4 className="text-sm font-semibold text-gray-700">{commentTitle || 'Comments'}</h4>
-              )}
+              {/* Title editing now always available inline (ghost "Title"
+                  placeholder when unset), matching the card's own bar --
+                  no separate toggle button needed to reveal this field. */}
+              <input
+                type="text"
+                value={commentTitle}
+                onChange={(e) => setCommentTitle(e.target.value)}
+                className="text-sm font-semibold text-gray-700 bg-transparent border-b border-transparent hover:border-gray-200 focus:border-blue-400 outline-none px-0 py-0.5 w-full max-w-[200px] placeholder:opacity-40 placeholder:font-normal"
+                placeholder="Title"
+              />
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => {

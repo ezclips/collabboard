@@ -262,6 +262,35 @@ describe('follow-up correction: Document Freeform card has square corners and a 
     expect(src).not.toContain('title="Badge Color"');
   });
 
+  it("the Note post's top-strip bar shows a ghost 'Title' placeholder until the user sets a meaningful title, editable in place via the same double-click pattern as Comment/Document, backed by the shared getMeaningfulTitle placeholder check", () => {
+    const src = fs.readFileSync('components/collabboard/canvas/ui/FreeformPadletCards.tsx', 'utf8');
+    const start = src.indexOf('{/* Center: title -- containers show their real title');
+    const end = src.indexOf('{/* Right: pencil hover-only */}');
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const block = src.slice(start, end);
+    expect(block).toContain("padlet.type === 'note'");
+    expect(block).toContain("getMeaningfulTitle(padlet.title, 'note')");
+    expect(block).toContain('editingNoteTitleId === padlet.id');
+    expect(block).toContain('{noteTitle || \'Title\'}');
+    expect(block).toContain("noteTitle ? '' : 'opacity-40 select-none'");
+    expect(block).toContain('updatePadletTitle(padlet.id, noteTitleDraft.trim())');
+  });
+
+  it("CommentEditorToolbar no longer has a separate 'Title' toggle tool -- title editing happens directly in the card's own bar now", () => {
+    const src = fs.readFileSync('components/collabboard/editors/CommentEditorToolbar.tsx', 'utf8');
+    expect(src).not.toContain("label: 'Title'");
+    expect(src).not.toContain('onTitle');
+    expect(src).not.toContain('titleActive');
+  });
+
+  it("CommentEditor's modal title field is always editable inline (ghost 'Title' placeholder) instead of gated behind a toggle button, and no longer force-stores the legacy 'Comments' default", () => {
+    const src = fs.readFileSync('components/collabboard/editors/CommentEditor.tsx', 'utf8');
+    expect(src).not.toContain('showTitleInput');
+    expect(src).not.toContain('commentTitle || "Comments"');
+    expect(src).toContain('placeholder="Title"');
+  });
+
   it("the standalone Comment post has the exact same top-strip bar as Note/Document (3-column grid, minHeight 22px, title centered, pencil in the right slot) instead of no bar at all", () => {
     const src = fs.readFileSync('components/collabboard/CommentPost.tsx', 'utf8');
     // No more custom three-circle kebab icon.
@@ -273,8 +302,9 @@ describe('follow-up correction: Document Freeform card has square corners and a 
     expect(bodyIndex).toBeGreaterThan(stripIndex);
     const stripBlock = src.slice(stripIndex, bodyIndex);
     expect(stripBlock).toContain("gridTemplateColumns: 'auto 1fr auto', minHeight: '22px'");
-    // Title is centered in the strip, not left in the old padded header.
-    expect(stripBlock).toContain('{commentTitle}');
+    // Title is centered in the strip (ghost "Title" placeholder when unset,
+    // via getMeaningfulTitle), not left in the old padded header.
+    expect(stripBlock).toContain('{meaningfulTitle || \'Title\'}');
     // Edit pencil lives in the strip's right slot, hover-revealed like Document's.
     expect(stripBlock).toContain('showMenu &&');
     expect(stripBlock).toContain('opacity-0 group-hover:opacity-100');
@@ -301,6 +331,23 @@ describe('follow-up correction: Document Freeform card has square corners and a 
     expect(lightTitle).not.toBeNull();
     // contrastIconColor('#ffffff') -> '#1e293b' (near-black) against a white strip.
     expect(lightTitle.style.color).toBe('rgb(30, 41, 59)');
+  });
+
+  it("the Comment post shows a semi-transparent 'Title' ghost placeholder when unset (or still the legacy 'Comments'/empty default), and the real title in full opacity once the user sets one", () => {
+    const unset = mount(<CommentPost comments={[]} cardColor="#ffffff" commentTitle="" showMenu />);
+    const ghost = unset.querySelector('span.text-xs.font-semibold') as HTMLElement;
+    expect(ghost.textContent).toBe('Title');
+    expect(ghost.className).toContain('opacity-40');
+
+    const legacyDefault = mount(<CommentPost comments={[]} cardColor="#ffffff" commentTitle="Comments" showMenu />);
+    const legacyGhost = legacyDefault.querySelector('span.text-xs.font-semibold') as HTMLElement;
+    expect(legacyGhost.textContent).toBe('Title');
+    expect(legacyGhost.className).toContain('opacity-40');
+
+    const real = mount(<CommentPost comments={[]} cardColor="#ffffff" commentTitle="Launch feedback" showMenu />);
+    const realSpan = real.querySelector('span.text-xs.font-semibold') as HTMLElement;
+    expect(realSpan.textContent).toBe('Launch feedback');
+    expect(realSpan.className).not.toContain('opacity-40');
   });
 
   it('renders a title bar containing the title text, not a centered title inside the body', () => {

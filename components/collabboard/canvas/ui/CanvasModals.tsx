@@ -384,7 +384,7 @@ export default function CanvasModals({
           initialCardColor={padletToEdit?.metadata?.cardColor || '#ffffff'}
           initialBadgeColor={padletToEdit?.metadata?.badgeColor || '#facc15'}
           initialTopStrip={padletToEdit?.metadata?.topStrip || 'transparent'}
-          initialCommentTitle={padletToEdit?.metadata?.commentTitle || 'Comments'}
+          initialCommentTitle={padletToEdit?.metadata?.commentTitle || ''}
           onSave={saveComment}
           currentUserId={user?.id}
           currentUserName={user?.user_metadata?.name || user?.email?.split('@')[0] || 'Anonymous'}
