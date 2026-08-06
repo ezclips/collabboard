@@ -1417,3 +1417,428 @@ Do not amend `0a56516`, `f519510`, `0c08558` or any previous commit. Do not reba
 | **PATCH-151** | **CLOSED**, unchanged |
 
 No production or test file was modified in this turn. Nothing was pushed.
+
+## 23. PRE-C3 PREPARATION AND STAGE 152-C3 — DOCUMENT MIGRATION ONTO `PostEditorShell`
+
+**Authored:** 2026-08-06 (governance architect). **Base:** `8c8f0da79f3a4f1cc3188e2ee611b605e30d5769`.
+No production or test file was modified in this turn. This section governs pre-C3 preparation and
+the C3 contract. §§1–22 are unchanged.
+
+### 23.1 C2 acceptance — recorded
+
+**152-C2 PASSED independent review and is ACCEPTED BY THE PRODUCT OWNER.** Accepted baseline at
+`8c8f0da`: **84/84 test files · 1008/1008 tests · 410 declarations · exclusion 891 · ordinary
+marker absent · E2E marker present · typecheck clean · `NoteEditor.tsx` 1040 lines ·
+`PostEditorShell.tsx` 137 lines.** Cumulative C2 cost: 407 production + 274 test changed lines.
+
+All 33 C1 tests and all 19 C2 shell tests are **binding regression gates for C3.**
+
+### 23.2 Preparation route — **P1 SELECTED**
+
+**ROUTE P1 (preparation commit before C3) is SELECTED.** Rationale, decisive over P2:
+
+1. All three preparation items are **corrections to accepted C2 work** — a Note-behaviour pin, a
+   C2-artifact encoding defect, and a C2 test comment. Attributing them to C3 would mean C3 does
+   not measure from the accepted C2 baseline.
+2. The preparation commit is **test-and-comment only, with zero production diff**, which is the
+   cheapest artifact this process can review independently. Folding it into a C3-A that also
+   begins Document work invites the two scopes to contaminate each other's caps and controls.
+3. §23.4 establishes that line-ending normalization produces **no commit diff at all**. It must be
+   a recorded worktree operation performed *before* any C3 harness snapshot. Keeping it in a
+   dedicated preparation turn removes any chance of a C3 harness capturing an LF baseline.
+4. Repository history is uniformly staged (C1, C1-correction, C2 each committed and reviewed
+   separately). P1 matches that precedent; P2 does not.
+
+**C3 itself is additionally substaged — see §23.14. Only P1 is authorized by this section.**
+
+### 23.3 Preparation item 1 — real panel-coordination test (MANDATORY)
+
+The C2 review proved the gap: mutating the real call site from
+`openPanel('comment', ['textStyle', 'cardColor', 'reaction'])` to `openPanel('comment', [])`
+**lands cleanly and leaves all 52 tests green.** The synthetic `useShellPanels` harness pins the
+hook contract, not the production transition.
+
+**Required test — real `NoteEditor`, in `postEditorShell.behavior.test.tsx`:**
+
+1. render the real `NoteEditor`; 2. open `TextStylePopup`; 3. open Card colour — current behaviour
+permits coexistence, so assert both are open simultaneously; 4. open the Reaction picker — assert
+coexistence likewise; 5. create a real text selection; 6. activate selected-text Comment;
+7. prove Comment opens; 8. prove `TextStylePopup` closed; 9. prove Card colour closed; 10. prove
+Reaction picker closed; 11. prove Link is unaffected — opening Link does **not** close
+`TextStylePopup`; 12. prove no generic one-panel-only policy exists — assert at least one pair of
+panels still coexists after the Comment transition completes and is dismissed.
+
+Steps 3 and 4 are conditional on measured current behaviour: **measure first.** If Card colour and
+Reaction cannot in fact coexist with `TextStylePopup` today, characterize what *is* true and record
+the measurement in the implementation report — **do not force coexistence that does not exist.**
+
+**Binding acceptance:** the test must **fail** when the real call site's closing list is emptied,
+and must **pass** unmodified at `8c8f0da`. Mandatory control NC-P1 (§23.7).
+
+### 23.4 Preparation item 2 — line-ending normalization (MANDATORY, ZERO-DIFF)
+
+**Measured state at `8c8f0da`:** the committed blob for `PostEditorShell.tsx` is **LF**; the
+worktree copy is **LF**; `NoteEditor.tsx` worktree is **CRLF**; `core.autocrlf=true`;
+`git diff --check` warns *"LF will be replaced by CRLF the next time Git touches it."*
+
+**Consequence — this is the governed hazard:** because `autocrlf` normalizes CRLF→LF on add, the
+committed blob is already correct. Rewriting the worktree file to CRLF therefore produces
+**no commit diff whatsoever.** Normalization is a **worktree-only operation, not a commit
+deliverable.** It cannot be "included in a commit" and any implementation claiming it was has
+misunderstood the mechanism.
+
+**Exact governed sequence:**
+
+1. Rewrite `components/collabboard/editors/PostEditorShell.tsx` in place, LF → CRLF, **content
+   bytes otherwise unchanged**.
+2. Prove semantic emptiness: `git status --short` must show the file as **not modified**, and
+   `git diff -- <file>` must be **empty**. This is the proof that only line endings changed.
+3. Record the **new worktree SHA-256** in the implementation report.
+4. `git diff --check` must be clean and the warning must be gone.
+5. Re-run the focused suites; runtime output must be unchanged.
+
+**Binding sequencing rule.** Normalization happens **before** any C3 mutation-harness snapshot is
+taken. The C3 harness baseline for `PostEditorShell.tsx` is the **post-normalization CRLF SHA-256**,
+never the current LF hash. **A harness that snapshots an LF baseline and later restores a
+CRLF-normalized file is a C3 failure**, not a tolerable discrepancy.
+
+**Hard stop.** If step 2 shows the file *as modified*, the blob is not LF and this analysis is
+wrong — **stop, change nothing, and report**.
+
+### 23.5 Preparation item 3 — test comment correction (COMMENT ONLY)
+
+In `postEditorShell.behavior.test.tsx`, `addAndRerender`'s comment *"Force a PostEditorShell
+rerender unrelated to the detached-comment state"* is inaccurate: `setMode` lives in the child, and
+the `centre` element is referentially stable, so React bails out of that subtree — `NoteEditor`
+does not re-render and its sync effect does not re-run. The wipe the test genuinely detects is
+triggered by the **submission** rerender (confirmed by controls 15 and X3).
+
+**Authorized: correct the comment only.** The mode-toggle steps stay — they are harmless and assert
+the shell survives the toggle. **Do not change the test's behaviour or assertions** except as
+§23.3 requires. **Do not renumber or rename the existing tests.**
+
+### 23.6 Preparation allowlist and caps
+
+| File | State | Cap |
+|---|---|---|
+| `components/collabboard/editors/postEditorShell.behavior.test.tsx` | existing | **≤66 changed** *(amends §22.9's ≤300 file cap to ≤340 total)* |
+| `components/collabboard/editors/PostEditorShell.tsx` | existing | **0 committed lines** — worktree renormalization only, proven zero-diff |
+| `components/collabboard/editors/NoteEditor.tsx` | existing | **0 — READ-ONLY** |
+| `components/collabboard/editors/NoteEditor.characterization.test.tsx` | existing | **0 — READ-ONLY** |
+
+**No production file may change in preparation.** No other file is authorized. Protected worktree
+(§12) unchanged and untouchable.
+
+### 23.7 Preparation negative controls — three, all mandatory
+
+**NC-P1** — empty the real closing list: `openPanel('comment', ['textStyle','cardColor','reaction'])`
+→ `openPanel('comment', [] /* NC-P1 */)`. Expected: the new §23.3 test **fails**. *(Use a unique
+replacement: the bare `openPanel('comment')` form already occurs twice and collides — the C2 review
+hit exactly this ambiguity abort.)*
+
+**NC-P2** — invert one coexistence assertion by adding `'link'` to the real closing list. Expected:
+the §23.3 step-11/12 assertions **fail**, proving the test detects **over**-closing as well as
+under-closing.
+
+**NC-P3** — revert `PostEditorShell.tsx` to LF after normalization. Expected: `git diff --check`
+re-emits the CRLF warning. Proves the normalization is real and detectable.
+
+Standing method, unchanged and binding: anchor occurs **exactly once**; verify landing by
+**positive facts only** (replacement present at expected count, SHA-256 differs, byte-delta
+matches); **never** assert anchor absence; restore from a saved byte snapshot; **never**
+`git checkout --`; confirm exact SHA-256 return; clean focused rerun.
+
+### 23.8 Preparation validation and commit
+
+```
+npx vitest run components/collabboard/editors/postEditorShell.behavior.test.tsx
+npx vitest run components/collabboard/editors/NoteEditor.characterization.test.tsx
+npx vitest run components/collabboard/editors/DocumentEditor.test.tsx components/collabboard/editors/DocumentEditor.readonly.test.tsx
+npx vitest run
+npm run typecheck
+find components/collabboard/canvas/excalidraw_fork/packages/excalidraw/dist/types -name "*.d.ts" | wc -l
+rm -rf .next && npm run build
+npm run verify:bridge-exclusion
+ls .next/E2E_BRIDGE_BUILD 2>/dev/null || echo "MARKER ABSENT"
+cp -r .next .next-ordinary-backup
+rm -rf .next && E2E_BRIDGE_BUILD=1 npm run build
+ls .next/E2E_BRIDGE_BUILD && echo "MARKER PRESENT"
+rm -rf .next && mv .next-ordinary-backup .next
+npm run verify:bridge-exclusion
+ls .next/E2E_BRIDGE_BUILD 2>/dev/null || echo "MARKER ABSENT"
+git diff --check
+git status --short
+```
+
+**Expected:** Note characterization **33/33 unchanged** · shell suite **19 + the new coordination
+test** · Document suites **39/39 unchanged** · full Vitest **84/84 files**, tests rise from 1008 by
+exactly the number added · 410 declarations · exclusion 891 · ordinary marker absent · E2E marker
+present · typecheck clean · `git diff --check` clean **with the CRLF warning gone**.
+
+One commit: `test(note): pin real panel coordination transition`. Do not amend `8c8f0da` or any
+earlier commit. Do not rebase. Do not push.
+
+### 23.9 C3 architecture — Document consumes the shell
+
+`DocumentEditor.tsx` (362 lines) today renders its **own complete second shell**: overlay
+`fixed inset-0 z-[1000] … bg-black/50` (`:225`) and shell row `flex items-start gap-3` (`:231`).
+**C2 removed the Note shell duplicate; C3 removes the Document one.** After C3 exactly one shell
+composition exists repo-wide.
+
+**`PostEditorShell` owns for Document:** overlay/frame · shell row and sibling order · toolbar
+region · Text/Box mode · centre-slot placement · the right-side panel region · panel coordination ·
+selection reactivity · selection restoration · the render-only selection indicator (§23.12) ·
+shared spacing and layout.
+
+**`DocumentEditor` retains:** title · rich body · description · Save · Close · dirty state ·
+Save/discard lifecycle · Document serialization (`toEditorHtml`/`fromEditorHtml`) · permissions and
+`readOnly` inputs · Document metadata mutation · `DiscardChangesDialog` · the Escape handler
+(§23.10) · future extension slots.
+
+**Prohibited moves into the shell:** Document persistence · dirty-state computation · serialization ·
+`SaveCardData` shaping · metadata mutation · TipTap schema or extension registration.
+
+### 23.10 Keyboard boundary — **§22.4 IS AMENDED**
+
+§22.4 assigned the "backdrop and keyboard interaction boundary" to the shell "exactly as Note
+implements it today". **Measured conflict:** Note has **no** Escape handling (C1 characterization
+*"does not save or close on Escape"*; C2 control 18 proves that adding Escape to the shell breaks
+two C1 tests). Document **has** Escape handling (`DocumentEditor.tsx:129-139`) covered by Document
+tests 31–33 (*clean Escape closes; dirty Escape confirms; Escape inside the confirmation returns to
+editing*). A shell-owned keyboard boundary cannot satisfy both.
+
+**Governed resolution — binding:** **`PostEditorShell` does not own Escape and must not add any
+`keydown` listener.** The keyboard boundary belongs to the **consumer**. Note keeps none; Document
+keeps its existing handler unchanged. §22.4's "keyboard interaction boundary" clause is **struck**.
+
+**Backdrop, by contrast, is already shell-compatible.** The existing `onBackdropClick` prop takes
+Note's save-then-close and Document's `attemptClose` without modification. Note the mechanism
+differs: Document guards by `stopPropagation` on the inner row (`:231`); the shell guards by
+`e.target === e.currentTarget`. Both satisfy Document test 29/30 (*inner clicks never trigger it*),
+and the shell's guard is strictly the safer of the two. **Prove test 29/30 passes unchanged.**
+
+**`DiscardChangesDialog`** is `fixed inset-0 z-[1100]` with its own `stopPropagation` (`:25-27`) —
+it is a self-positioned full-screen overlay and **does not need to live inside the shell**.
+`DocumentEditor` renders it as a sibling of the shell. **Do not add an overlay slot to the shell
+for it.**
+
+### 23.11 Document panel convergence — deliberate UI correction
+
+**Measured today:** every Document secondary panel is rendered **inside the toolbar column**
+(`<div className="relative min-w-[72px]">`, `:233`) and escapes it with `absolute left-full top-0
+ml-2` — `TextStylePopup` (`:259`), `LinkPopup` (`:276`), `CommentPopup` (`:283`). All three vanish
+entirely in read-only because the whole block is `{!readOnly && …}` (`:232`).
+
+**C3 requirement — converge into the shell's right-side region.** All Document secondary panels
+(`TextStylePopup`, `LinkPopup`, selected-text `CommentPopup`, Card colour, Reaction, post-level
+Comment) must render as **flex siblings to the right of the Document centre**, must not open inside
+the toolbar, must not open below the description, must not overlap the centre, and must not use
+absolute placement invented by `DocumentEditor`.
+
+**This is a deliberate, visible Document UI correction — approved by the Product Owner.** It is
+*not* a Note change: **the four frozen Note panels (§22.3) do not move in C3** and their C2
+mount-point tests must stay green. Frozen-panel convergence for Note remains DEFERRED.
+
+### 23.12 Selection visibility — feasible, governed design
+
+**Determination: implementable inside `PostEditorShell` without changing Note behaviour.** The
+shell already receives the editor through `useShellSelection(editor)`. The governed mechanism is a
+**render-only rect overlay**: compute client rects from `editor.view.coordsAtPos(from/to)` and
+render absolutely-positioned presentational divs above the centre.
+
+It **must**: keep the original selection visibly identifiable while focus is in a panel · restore
+the correct range before Apply · clear on close/cancel · invalidate safely when content changes ·
+**never** persist into saved HTML · **never** become a real mark.
+
+**It must not**: add a ProseMirror plugin or decoration · touch `useSharedTipTapEditor.ts` · use or
+extend the `Highlight` mark · alter the TipTap schema.
+
+**Opt-in per consumer** (e.g. `selectionIndicator?: boolean`, default off) so **Note renders
+byte-identically to C2**. Mandatory control NC-C11 (§23.16).
+
+### 23.13 Read-only, Text/Box, and card-rendering contracts
+
+**Read-only.** Editable: toolbar visible · Text/Box controls visible · Save visible · mutations per
+permission. Read-only: title visible · formatted body visible · description visible · links
+functional · reference blocks renderable · Close available · **no** toolbar, Text/Box switch, Save,
+formatting mutation, colour mutation, reaction mutation, or comment creation where permission
+forbids. Reactions and comments stay viewable where existing permissions already allow.
+**One serialization format only — do not create a second read-only content format.** The existing
+6 read-only tests must pass **unchanged**.
+
+**Text/Box.** Text-mode control set and order match Note exactly (§22.7). **Document Box mode
+becomes functional** with Card colour, Reaction and post-level Comment. Selected-text Comment stays
+a **Text**-mode feature; post-level Comment stays a **Box**-mode feature; **do not merge them.**
+
+**This changes an accepted characterization.** `DocumentEditor.test.tsx:86` currently asserts
+*"no Box"*. That test **must be amended** when Box mode lands — explicitly authorized here, and
+only for the Box-switch assertion. **Every other Document assertion is read-only.** `Align` stays
+unwired. Do not correct tooltips or labels.
+
+**Document card rendering — TRACED, AND IT DOES NOT CONVERGE.** `PostCardContent.tsx` has a single
+Document branch (`:913`, `isDocumentPost(padlet) && onOpenDocument`) reaching one shared
+`DocumentCardContent`, but it renders **only** body HTML and `textColor`. Card colour, reaction
+output and comment counts are **not** rendered by any shared funnel: `cardColor` and `reactions`
+chrome is concentrated in `FreeformPadletCards.tsx` (6.4k lines, a known strangler target, ~20
+call sites) plus one `PostCardContent` path gated on `useDrawingContainerImageBinding` (`:671`).
+`PostCardContent` is consumed by **two parallel canvas stacks** (`components/canvas/*` legacy and
+`components/collabboard/canvas/*`) across at least eight renderers.
+
+**Therefore: tracing proves no shared card-chrome funnel exists.** Per the Product Owner's own
+rule — *"authorize only the shared rendering funnel if possible; do not authorize layout-by-layout
+edits unless tracing proves no shared funnel exists"* — **Document card metadata rendering is NOT
+authorized in C3.** Delivering it would require editing `FreeformPadletCards.tsx` and multiple
+layout renderers, which is a strangler-scale change and is explicitly out of scope. It becomes
+**decision packet DP-2 (§23.18)** and a separate stage. **C3 persists Box-mode metadata; it does
+not render it on cards.**
+
+### 23.14 C3 substaging — only the shape is governed here
+
+| Substage | Scope | Status |
+|---|---|---|
+| **P1** | coordination test · normalization · comment | **AUTHORIZED** (§23.3–23.8) |
+| **C3-A** | Document consumes `PostEditorShell`; panel convergence; shell selection reactivity; keyboard amendment. **No new features.** | **NOT YET AUTHORIZED** — needs its own turn after P1 review |
+| **C3-B** | extract shared Box-mode panels (Card colour, Reaction, post-level Comment) from `NoteEditor` into shared components; wire Document Box mode | **NOT YET AUTHORIZED** — requires DP-3 |
+| **C3-C** | Document card metadata rendering | **BLOCKED** on **DP-2** |
+
+**Why C3-B cannot be folded into C3-A.** Card colour (~50 lines) and the post-level Comment popup
+(~200 lines) are implemented **inline inside `NoteEditor.tsx`**. Document cannot obtain them by
+duplication — CLAUDE.md rule 2 (P6, one implementation per concern) forbids a third comment UI, and
+`DocumentEditor` at 362 lines would breach the 400-line component ceiling immediately. The only
+compliant path is extraction into shared components, which **must edit `NoteEditor.tsx`** — a file
+this section does not authorize. That is **decision packet DP-3**.
+
+### 23.15 C3-A allowlist and caps — evidence-derived, for the future authorization turn
+
+| File | Evidence | Cap |
+|---|---|---|
+| `components/collabboard/editors/DocumentEditor.tsx` | owns the duplicate shell being removed | ≤300 changed |
+| `components/collabboard/editors/PostEditorShell.tsx` | gains the selection indicator + opt-in props | ≤120 changed, **file ≤380** |
+| `components/collabboard/editors/NoteEditorToolbar.tsx` | `variant='document'` gates the Box switch (`:164-165`, `:185-198`); Box mode cannot be enabled without it | ≤40 changed |
+| `components/collabboard/editors/documentEditorShell.behavior.test.tsx` | **new** | ≤320 |
+| `components/collabboard/editors/DocumentEditor.test.tsx` | **only** the `:86` "no Box" assertion, and only in C3-B | ≤10 changed |
+
+**Aggregate production ≤460 · aggregate test ≤330.** `DocumentEditor.tsx` must stay **≤400 lines**
+(CLAUDE.md rule 3); if convergence cannot fit, extract the Document centre rather than breach it.
+
+**Not authorized in C3-A:** `NoteEditor.tsx` · `NoteEditor.characterization.test.tsx` ·
+`postEditorShell.behavior.test.tsx` · `DocumentEditor.readonly.test.tsx` · `DocumentCardContent.tsx` ·
+`PostCardContent.tsx` · `FreeformPadletCards.tsx` · `CanvasModals.tsx` *(already wires `readOnly`,
+identity and keyed remount at `:145-175`; trace shows no change needed — if C3 believes otherwise,
+**stop and request an amendment**)* · `useSharedTipTapEditor.ts` · TipTap extensions · schema ·
+migrations · PDF files · `vitest.config.ts` · `package.json` · lockfiles · the Excalidraw fork ·
+all governance files. **Protected worktree (§12) untouchable.**
+
+### 23.16 C3-A proofs and controls — carried into the authorization turn
+
+**Proofs.** 1. editable Document uses `PostEditorShell`; 2. read-only Document uses the same centre
+serialization without editing controls; 3. exactly one shell repo-wide; 4. Document toolbar matches
+Note's Text-mode set and order; 5. Text/Box switching works; 6.–11. Text style, Link, selected-text
+Comment, Card colour, Reaction and post-level Comment each open **to the right of the centre** as
+flex siblings *(6–8 in C3-A; 9–11 in C3-B)*; 12. panels never overlap or unmount the centre;
+13. selected text stays visibly identifiable while a panel holds focus; 14. Link applies to the
+original selection; 15. selected-text Comment applies to the original selection; 16.–18. Card
+colour, Reaction and post-level Comment persist into Document metadata *(C3-B)*; 19. text Comment
+and post-level Comment remain distinct; 20. Save/discard/dirty lifecycle unchanged — Document tests
+pass unchanged except the authorized `:86` amendment; 21. read-only hides every mutation affordance;
+22. formatted read-only content still renders; 23. **all 33 C1 + 19 C2 + the §23.3 test pass
+unchanged**; 24. all four frozen Note panel placements unchanged; 25. the real Note coordination
+transition stays pinned; 26. no PDF implementation; 27. no serialization change — `toEditorHtml`/
+`fromEditorHtml` output byte-identical; 28. **card-rendering convergence explicitly out of scope
+(DP-2)**.
+
+**Controls.** Bypass shell · duplicate toolbar · Document panel below description · Document panel
+inside toolbar · panel overlapping centre · break selection restoration · **NC-C11: persist the
+temporary selection indicator into saved HTML** · expose toolbar in read-only · disconnect Card
+colour · disconnect Reaction · disconnect post-level Comment · merge text and post-level Comment ·
+break `CanvasModals` identity/`readOnly` routing · move a frozen Note panel · empty the real Note
+coordination close-list · introduce a PDF dependency · change persisted HTML · **add an Escape
+listener to the shell** (must fail Note C1 Escape). Every mutation must land by positive facts,
+fail its named test, restore byte-identically from a saved snapshot, and rerun clean.
+
+### 23.17 Formatting semantics — decision packet (DEFERRED, unchanged)
+
+§20.9 remains **DEFERRED**. C3 **preserves existing Note formatting semantics**; the abandoned
+Smart-scope design is **not revived**. No inline quote extension. No `useSharedTipTapEditor.ts`
+change. No TipTap schema change without Product Owner approval.
+
+Measured current Document behaviour, for the PO's later decision — `DocumentEditor.tsx:142-169`:
+**inline marks** apply to the selected range · **heading** `h1`/`h2` via `toggleHeading` after
+`clearNodes().unsetFontSize()`, whole-block by ProseMirror semantics · **blockquote**
+`toggleBlockquote`, whole-block · **code block** `toggleCodeBlock`, whole-block · **partial-block
+selection** applies inline marks to the range but promotes block commands to the whole block ·
+**whole-block selection** behaves identically · **multi-block selection** applies the block command
+to every touched block. `normal`/`small` additionally set font size and colour; `callout` inserts a
+`⚠ ` prefix plus highlight — a Document-only affordance with no Note equivalent. **The
+block-command-promotes-to-whole-block asymmetry is the substantive open question** and is the one
+item requiring a product decision before formatting is touched.
+
+### 23.18 Decision packets required before further authorization
+
+**DP-1 — keyboard boundary. CLOSED by §23.10** (shell never owns Escape; §22.4 amended).
+**DP-4 — selection visibility. CLOSED by §23.12** (render-only rect overlay, opt-in, feasible).
+
+**DP-2 — Document card metadata rendering. OPEN, PO decision required.** No shared card-chrome
+funnel exists (§23.13). Options: **(a)** accept freeform-only rendering as an interim and defer the
+rest; **(b)** build a shared card-chrome funnel first, as its own patch — the clean answer, and
+aligned with the `FreeformPadletCards` strangler; **(c)** defer Document card metadata rendering
+entirely until that strangler completes. **Recommendation: (b) as a separate patch, with (c) as the
+interim posture.** Layout-by-layout edits are not recommended under any option.
+
+**DP-3 — shared Box-mode panel extraction. OPEN, PO decision required.** Enabling Document Box mode
+requires extracting Card colour and the post-level Comment popup out of `NoteEditor.tsx` into shared
+components, which edits an accepted, characterized file. Options: **(a)** authorize the extraction
+under the C1/C2 characterization net as C3-B; **(b)** ship C3-A shell migration only and defer Box
+mode. **Recommendation: (a)**, sequenced strictly after C3-A passes review, since the 33+19+1 test
+net is exactly the safety apparatus such an extraction needs.
+
+### 23.19 PDF boundary — recorded direction, no code
+
+**Approved product direction, recorded:** the **Document post is the future structured-writing and
+PDF-assembly destination**; **Note remains lightweight**; **prior plan assumptions targeting Note
+assembly or `note_post_links` are superseded.**
+
+**No PDF plan document was supplied with this authorization turn and none exists in the repository**
+(`find . -name "*.pdf"` outside `node_modules` returns nothing). The direction above is recorded
+**solely from the Product Owner's written instruction in this turn.** No PDF plan content has been
+inferred, reconstructed, or assumed. Any C3 requirement that depends on the plan's specifics
+requires the plan to be supplied first.
+
+**C3 adds no PDF code.** Prohibited now: PDF upload · `pdfjs-dist` · OCR · vector search · database
+tables · migrations · storage buckets · PDF rendering · highlight extraction · PDF annotations ·
+export implementation. Inert, type-safe extension boundaries are permitted **only if strictly
+necessary**; **if no code is necessary now, add none** — which is the expected outcome.
+
+### 23.20 Lifecycle hard boundary and hard stops
+
+**Do not redesign:** Document Save/discard · dirty-state calculation · serialization · modal
+routing · authentication · permissions architecture · database schema · migrations · Note
+behaviour · the PDF system.
+
+**Stop without committing if:** the real Note coordination transition cannot be pinned without
+changing Note behaviour · line endings cannot be normalized with an empty commit diff (§23.4 step 2)
+· Document cannot consume `PostEditorShell` safely · Document lifecycle must change · read-only must
+be broadly redesigned · persisted content must change · TipTap schema must change · a frozen Note
+panel must move · PDF implementation is required now · files cannot be bounded · HEAD or the
+protected worktree differs · production or tests become dirty during governance authoring · any cap
+would be exceeded · a mutation cannot be landed or restored byte-identically.
+
+### 23.21 Status
+
+| Item | Status |
+|---|---|
+| **PATCH-152** | **OPEN** |
+| **152-C1** | **PASS · ACCEPTED** (`0a56516`) |
+| **152-C2** | **PASS · ACCEPTED** (`8c8f0da`) |
+| **P1 preparation** | **AUTHORIZED** — §23.3–23.8 |
+| **152-C3-A** | **NOT AUTHORIZED** — needs a turn after P1 independent review |
+| **152-C3-B** | **BLOCKED** on **DP-3** |
+| **152-C3-C** | **BLOCKED** on **DP-2** |
+| **DP-1 / DP-4** | **CLOSED** (§23.10 / §23.12) |
+| **Frozen Note panel convergence** | **DEFERRED** — unchanged (§22.3) |
+| **Note centre extraction / 800-line compliance** | **DEFERRED**, unscheduled (§22.9) |
+| **Formatting semantics** | **DEFERRED** — packet in §23.17 |
+| **PATCH-150** | **RESERVED**, unchanged |
+| **PATCH-151** | **CLOSED**, unchanged |
+
+No production or test file was modified in this turn. Nothing was pushed.
