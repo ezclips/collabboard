@@ -256,6 +256,11 @@ describe('follow-up correction: Document Freeform card has square corners and a 
     expect(src).toContain('<Edit2 className="w-3 h-3" />');
   });
 
+  it("the standalone Comment post's canvas header has no decorative (non-interactive) Badge Color swatch -- that control belongs only to CommentEditor's editing modal", () => {
+    const src = fs.readFileSync('components/collabboard/CommentPost.tsx', 'utf8');
+    expect(src).not.toContain('title="Badge Color"');
+  });
+
   it('renders a title bar containing the title text, not a centered title inside the body', () => {
     const c = mount(<CardPreview padlet={doc({ title: 'Meeting Notes' })} isSelected={false} />);
     const bar = c.querySelector('.grid') as HTMLElement | null;

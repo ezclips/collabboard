@@ -258,15 +258,6 @@ export default function CommentPost({
                         )}
                     </div>
                     <div className="flex items-center gap-2">
-                        <div
-                            className="w-7 h-7 flex items-center justify-center rounded"
-                            title="Badge Color"
-                        >
-                            <div
-                                className="w-4 h-4 rounded border border-gray-300"
-                                style={{ backgroundColor: badgeColor }}
-                            />
-                        </div>
                         {showMenu && (
                             <button
                                 onClick={(e) => {
