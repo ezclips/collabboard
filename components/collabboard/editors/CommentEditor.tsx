@@ -14,6 +14,7 @@ import DOMPurify from "dompurify";
 
 import CommentEditorToolbar, { ToolbarMode } from "./CommentEditorToolbar";
 import TextStylePopup from "./TextStylePopup";
+import { getMeaningfulTitle } from "@/lib/infra/collabboard/postTitle";
 
 // Module-level constant -- stable reference, never recreated on render
 const COMMENT_EXTENSIONS = [
@@ -125,7 +126,7 @@ export default function CommentEditor({
   const [comments, setComments] = useState<CommentData[]>(initialComments);
   const [cardColor, setCardColor] = useState(initialCardColor);
   const [badgeColor, setBadgeColor] = useState(initialBadgeColor);
-  const [commentTitle, setCommentTitle] = useState(initialCommentTitle);
+  const [commentTitle, setCommentTitle] = useState(getMeaningfulTitle(initialCommentTitle, 'comment'));
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
   const [commentColorPopupId, setCommentColorPopupId] = useState<string | null>(null);
@@ -216,7 +217,7 @@ export default function CommentEditor({
     setCardColor(initialCardColor);
     setBadgeColor(initialBadgeColor);
     setTopStrip(initialTopStrip || null);
-    setCommentTitle(initialCommentTitle);
+    setCommentTitle(getMeaningfulTitle(initialCommentTitle, 'comment'));
     setEditingCommentId(null);
     setActiveCommentId(initialComments[initialComments.length - 1]?.id || null);
     setCommentColorPopupId(null);

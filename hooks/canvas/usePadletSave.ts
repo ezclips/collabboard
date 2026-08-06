@@ -32,6 +32,7 @@ import { supabaseBrowser } from '@/lib/supabase/browser';
 // ============================================================================
 
 export type SaveNoteData = {
+  title?: string;
   content: string;
   cardColor?: string;
   topStrip?: string;
@@ -395,7 +396,7 @@ export function usePadletSave(params: UsePadletSaveParams) {
           .from('padlets')
           .insert({
             board_id: canvasId,
-            title: 'New Note',
+            title: data.title || 'New Note',
             content: data.content,
             type: 'text',
             position_x,
@@ -436,6 +437,7 @@ export function usePadletSave(params: UsePadletSaveParams) {
         const { error } = await supabase
           .from('padlets')
           .update({
+            title: data.title || '',
             content: data.content,
             metadata,
           })

@@ -3,6 +3,7 @@
 import React from 'react';
 import type { AuthUser } from '@/lib/domain/auth/user';
 import type { Padlet } from '@/types/collabboard';
+import { getMeaningfulTitle } from '@/lib/infra/collabboard/postTitle';
 
 // Stable empty array to avoid creating a new [] reference on every render
 // (which would cause infinite useEffect loops in child editors)
@@ -160,7 +161,7 @@ export default function CanvasModals({
         <DocumentEditor
           isOpen={documentModalDestination !== null}
           readOnly={documentModalDestination === 'document-viewer'}
-          title={padletToEdit?.title || ''}
+          title={getMeaningfulTitle(padletToEdit?.title, padletToEdit?.type)}
           initialContent={padletToEdit?.content || ''}
           metadata={padletToEdit?.metadata ?? null}
           onSave={documentModalDestination === 'document-editor' ? saveCard : noopDocumentSave}
@@ -182,6 +183,7 @@ export default function CanvasModals({
             setIsNoteEditorOpen(false);
             setPadletToEdit(null);
           }}
+          initialTitle={getMeaningfulTitle(padletToEdit?.title, padletToEdit?.type)}
           initialContent={padletToEdit?.content || ''}
           initialDetachedComments={padletToEdit?.metadata?.detachedComments || EMPTY_COMMENTS}
           initialBadgeColor={padletToEdit?.metadata?.badgeColor || '#facc15'}

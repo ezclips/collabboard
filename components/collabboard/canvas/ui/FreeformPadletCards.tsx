@@ -3263,7 +3263,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                           {padlet.title}
                         </span>
                       )
-                    ) : padlet.type === 'note' ? (
+                    ) : (padlet.type === 'text' || (padlet.type as string) === 'note') ? (
                       editingNoteTitleId === padlet.id ? (
                         <input
                           type="text"
@@ -3286,7 +3286,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                           autoFocus
                         />
                       ) : (() => {
-                        const noteTitle = getMeaningfulTitle(padlet.title, 'note');
+                        const noteTitle = getMeaningfulTitle(padlet.title, padlet.type);
                         return (
                           <span
                             className={`text-xs font-semibold text-center truncate cursor-pointer ${noteTitle ? '' : 'opacity-40 select-none'}`}

@@ -6,6 +6,7 @@ import { decodeHtmlEntities } from '@/lib/html-utils';
 import { Edit2 } from 'lucide-react';
 import ReactionDisplay from './editors/ReactionDisplay';
 import DocumentCardContent from './DocumentCardContent';
+import { getMeaningfulTitle } from '@/lib/infra/collabboard/postTitle';
 
 interface CardPreviewProps {
     padlet: Padlet;
@@ -48,6 +49,9 @@ export default function CardPreview({
     // is also exercised under (DOMPurify has no window there).
     const sanitizedDocumentContent =
         typeof window !== 'undefined' ? DOMPurify.sanitize(decodeHtmlEntities(content || '')) : '';
+    // Placeholder-aware title, matching Note/Comment's own top-strip bar --
+    // a legacy default like "New Post" reads as unset, not a real title.
+    const documentTitle = getMeaningfulTitle(title, 'card');
 
     // Calculate counter
     const calculateCounter = () => {
@@ -169,11 +173,12 @@ export default function CardPreview({
                     )}
                 </div>
                 <div className="flex items-center justify-center px-1 min-w-0">
-                    {title ? (
-                        <span className="text-xs font-semibold text-center truncate" style={titleStyle}>
-                            {title}
-                        </span>
-                    ) : null}
+                    <span
+                        className={`text-xs font-semibold text-center truncate${documentTitle ? '' : ' opacity-40 select-none'}`}
+                        style={titleStyle}
+                    >
+                        {documentTitle || 'Title'}
+                    </span>
                 </div>
                 <div className="flex items-center pr-1.5">
                     {onOpenToolbar && (

@@ -54,11 +54,13 @@ interface DetachedCommentData {
 }
 
 interface NoteEditorProps {
+  initialTitle?: string;
   initialContent?: string;
   initialDetachedComments?: DetachedCommentData[];
   initialBadgeColor?: string;
   initialTextColor?: string;
   onSave: (data: {
+    title?: string;
     content: string;
     cardColor?: string;
     topStrip?: string;
@@ -78,6 +80,7 @@ interface NoteEditorProps {
 const EMPTY_DETACHED_COMMENTS: NonNullable<NoteEditorProps['initialDetachedComments']> = [];
 
 export default function NoteEditor({
+  initialTitle = '',
   initialContent = '',
   initialDetachedComments = EMPTY_DETACHED_COMMENTS,
   initialBadgeColor = '#facc15',
@@ -87,6 +90,7 @@ export default function NoteEditor({
   isOpen,
 }: NoteEditorProps) {
   const panels = useShellPanels();
+  const [title, setTitle] = useState(initialTitle);
   const [cardColor, setCardColor] = useState('#FFFFFF');
   const [topStrip, setTopStrip] = useState<string | null>(null);
   const [textColor, setTextColor] = useState(initialTextColor);
@@ -552,6 +556,7 @@ export default function NoteEditor({
   const handleSaveAndClose = () => {
     const content = editor?.getHTML() || '';
     onSave({
+      title: title.trim() || undefined,
       content,
       cardColor: cardColor !== '#FFFFFF' ? cardColor : undefined,
       topStrip: topStrip || undefined,
@@ -688,6 +693,19 @@ export default function NoteEditor({
                 {topStrip && (
                   <div className="h-1.5 w-full" style={{ backgroundColor: topStrip }} />
                 )}
+
+                {/* Title -- ghost "Title" placeholder until the user sets
+                    one, matching Comment/Document's editor title fields. */}
+                <div className="px-3 pt-3">
+                  <input
+                    type="text"
+                    value={title}
+                    onChange={(e) => setTitle(e.target.value)}
+                    placeholder="Title"
+                    className="w-full text-sm font-semibold bg-transparent outline-none border-none placeholder:opacity-40 placeholder:font-normal"
+                    style={{ color: textColor }}
+                  />
+                </div>
 
                 {/* Editor */}
                 <div

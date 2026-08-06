@@ -45,6 +45,11 @@ describe("post title placeholders", () => {
     expect(getMeaningfulTitle("New Post", "note")).toBe("");
   });
 
+  it("treats 'New Note' (the Note editor's real create-on-first-save default, stamped on type 'text') as a placeholder", () => {
+    expect(isPlaceholderTitle("New Note", "text")).toBe(true);
+    expect(getMeaningfulTitle("New Note", "text")).toBe("");
+  });
+
   it("treats the Comment post's legacy plural default 'Comments' as a placeholder, without applying that to other types", () => {
     expect(isPlaceholderTitle("Comments", "comment")).toBe(true);
     expect(getMeaningfulTitle("Comments", "comment")).toBe("");

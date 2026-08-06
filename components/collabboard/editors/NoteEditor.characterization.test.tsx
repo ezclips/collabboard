@@ -86,7 +86,7 @@ describe('NoteEditor current save-on-close lifecycle (characterized, not correct
     expect(onSave).toHaveBeenCalledTimes(1);
   });
 
-  it('save callback carries only content/style/reaction fields — no title, no metadata', () => {
+  it('save callback carries content/style/reaction fields plus title (a top-level padlet field, added for the ghost-placeholder title bar) — still no metadata', () => {
     const onSave = vi.fn();
     const container = mount(
       <NoteEditor isOpen initialContent="<p>Body</p>" onSave={onSave} onClose={vi.fn()} />,
@@ -97,9 +97,8 @@ describe('NoteEditor current save-on-close lifecycle (characterized, not correct
     });
     const keys = Object.keys(onSave.mock.calls[0][0]).sort();
     expect(keys).toEqual(
-      ['badgeColor', 'cardColor', 'content', 'detachedComments', 'reactions', 'textColor', 'topStrip'].sort(),
+      ['badgeColor', 'cardColor', 'content', 'detachedComments', 'reactions', 'textColor', 'title', 'topStrip'].sort(),
     );
-    expect(keys).not.toContain('title');
     expect(keys).not.toContain('metadata');
   });
 });

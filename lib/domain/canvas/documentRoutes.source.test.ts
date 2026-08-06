@@ -142,7 +142,9 @@ describe('CanvasModals: DocumentEditor integration', () => {
 
   it('passes title, content and metadata from the selected post', () => {
     const block = slice(canvasModalsSrc, '<DocumentEditor', '/>');
-    expect(block).toContain("title={padletToEdit?.title || ''}");
+    // getMeaningfulTitle strips legacy placeholder defaults (e.g. "New Post")
+    // so they read as unset rather than as a real stored title.
+    expect(block).toContain('title={getMeaningfulTitle(padletToEdit?.title, padletToEdit?.type)}');
     expect(block).toContain("initialContent={padletToEdit?.content || ''}");
     expect(block).toContain('metadata={padletToEdit?.metadata ?? null}');
   });

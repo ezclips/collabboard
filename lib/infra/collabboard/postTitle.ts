@@ -9,10 +9,12 @@ export const isPlaceholderTitle = (title: unknown, type: unknown): boolean => {
   return (
     titleNorm === "" ||
     titleNorm === "untitled" ||
-    // "New Post" is the generic default title stamped by the shared
-    // add-post-at-viewport-center flow, regardless of the post's actual
-    // type -- not just "new <type>".
+    // "New Post" (viewport-center add flow) and "New Note" (the Note
+    // editor's own create-on-first-save flow, which stamps type "text"
+    // with title "New Note" -- not "New Text") are generic default titles,
+    // regardless of the post's actual type -- not just "new <type>".
     titleNorm === "new post" ||
+    titleNorm === "new note" ||
     (typeNorm !== "" && titleNorm === typeNorm) ||
     (typeNorm !== "" && titleNorm === `new ${typeNorm}`) ||
     (typeNorm !== "" && titleNorm === `untitled ${typeNorm}`) ||

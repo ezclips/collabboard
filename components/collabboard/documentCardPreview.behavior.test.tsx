@@ -269,8 +269,12 @@ describe('follow-up correction: Document Freeform card has square corners and a 
     expect(start).toBeGreaterThan(-1);
     expect(end).toBeGreaterThan(start);
     const block = src.slice(start, end);
-    expect(block).toContain("padlet.type === 'note'");
-    expect(block).toContain("getMeaningfulTitle(padlet.title, 'note')");
+    // Real Note posts are created with type 'text' (see usePadletSave.ts's
+    // saveNote: `type: 'text', title: 'New Note'`) -- 'note' is a type the
+    // union allows but the live create flow never actually stamps, so both
+    // are accepted defensively.
+    expect(block).toContain("padlet.type === 'text' || (padlet.type as string) === 'note'");
+    expect(block).toContain('getMeaningfulTitle(padlet.title, padlet.type)');
     expect(block).toContain('editingNoteTitleId === padlet.id');
     expect(block).toContain('{noteTitle || \'Title\'}');
     expect(block).toContain("noteTitle ? '' : 'opacity-40 select-none'");
@@ -367,8 +371,41 @@ describe('follow-up correction: Document Freeform card has square corners and a 
     expect(btn.parentElement?.className).toContain('overflow-hidden');
   });
 
-  it('does not render with no title bar when title is absent (empty center slot, bar itself still present)', () => {
-    const c = mount(<CardPreview padlet={doc({ title: '' })} isSelected={false} />);
-    expect(c.querySelector('.grid')).not.toBeNull();
+  it('shows a semi-transparent "Title" ghost placeholder in the bar when title is empty or a legacy placeholder default, and the real title in full opacity otherwise', () => {
+    const empty = mount(<CardPreview padlet={doc({ title: '' })} isSelected={false} />);
+    const emptyBar = empty.querySelector('.grid') as HTMLElement;
+    expect(emptyBar).not.toBeNull();
+    const emptySpan = empty.querySelector('span.text-xs.font-semibold.text-center.truncate') as HTMLElement;
+    expect(emptySpan.textContent).toBe('Title');
+    expect(emptySpan.className).toContain('opacity-40');
+
+    const legacyDefault = mount(<CardPreview padlet={doc({ title: 'New Post' })} isSelected={false} />);
+    const legacySpan = legacyDefault.querySelector('span.text-xs.font-semibold.text-center.truncate') as HTMLElement;
+    expect(legacySpan.textContent).toBe('Title');
+    expect(legacySpan.className).toContain('opacity-40');
+
+    const real = mount(<CardPreview padlet={doc({ title: 'Q3 Roadmap' })} isSelected={false} />);
+    const realSpan = real.querySelector('span.text-xs.font-semibold.text-center.truncate') as HTMLElement;
+    expect(realSpan.textContent).toBe('Q3 Roadmap');
+    expect(realSpan.className).not.toContain('opacity-40');
+  });
+
+  it("NoteEditor's modal now has a title field (it previously had none at all) -- ghost \"Title\" placeholder, wired into onSave's payload", () => {
+    const src = fs.readFileSync('components/collabboard/editors/NoteEditor.tsx', 'utf8');
+    expect(src).toContain('initialTitle');
+    expect(src).toContain("const [title, setTitle] = useState(initialTitle);");
+    expect(src).toContain('placeholder="Title"');
+    expect(src).toContain('title: title.trim() || undefined');
+  });
+
+  it("CanvasModals passes NoteEditor a placeholder-aware initialTitle (getMeaningfulTitle), so a legacy \"New Note\" default reads as unset rather than as real text", () => {
+    const src = fs.readFileSync('components/collabboard/canvas/ui/CanvasModals.tsx', 'utf8');
+    expect(src).toContain('initialTitle={getMeaningfulTitle(padletToEdit?.title, padletToEdit?.type)}');
+  });
+
+  it("CommentEditor's title input no longer shows the legacy \"Comments\" default as if it were real user text -- both the initial state and the reset-on-open effect run it through getMeaningfulTitle", () => {
+    const src = fs.readFileSync('components/collabboard/editors/CommentEditor.tsx', 'utf8');
+    const occurrences = src.split("getMeaningfulTitle(initialCommentTitle, 'comment')").length - 1;
+    expect(occurrences).toBe(2);
   });
 });
