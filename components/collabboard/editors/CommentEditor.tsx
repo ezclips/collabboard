@@ -580,7 +580,7 @@ export default function CommentEditor({
           <div
             className="w-full flex-shrink-0 flex items-center px-2 rounded-t-xl"
             style={{
-              minHeight: '28px',
+              minHeight: '22px',
               backgroundColor: topStrip && topStrip !== 'transparent' ? topStrip : 'rgba(0,0,0,0.04)',
             }}
           >
@@ -588,7 +588,7 @@ export default function CommentEditor({
               type="text"
               value={commentTitle}
               onChange={(e) => setCommentTitle(e.target.value)}
-              placeholder="Title"
+              placeholder="Post name"
               className="w-full text-sm font-semibold bg-transparent outline-none border-b border-transparent focus:border-blue-400 placeholder:opacity-40 placeholder:font-normal rounded px-1 -mx-1"
               style={{ color: topStrip && topStrip !== 'transparent' ? contrastIconColor(topStrip) : '#374151' }}
             />

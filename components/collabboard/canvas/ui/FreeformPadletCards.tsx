@@ -1446,7 +1446,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                         onClick={(e) => e.stopPropagation()}
                         onMouseDown={(e) => e.stopPropagation()}
                         data-no-drag="true"
-                        placeholder="Title"
+                        placeholder="Post name"
                         className="text-xs font-semibold text-center bg-transparent border-b border-blue-400 outline-none px-0 py-0 w-full placeholder:opacity-40"
                         style={titleTextStyle}
                         autoFocus
@@ -3388,7 +3388,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                           onClick={(e) => e.stopPropagation()}
                           onMouseDown={(e) => e.stopPropagation()}
                           data-no-drag="true"
-                          placeholder="Title"
+                          placeholder="Post name"
                           className="text-xs font-semibold text-center bg-transparent border-b border-blue-400 outline-none px-0 py-0 w-full placeholder:opacity-40"
                           style={titleTextStyle}
                           autoFocus
@@ -5825,7 +5825,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                   <X className="w-3 h-3 text-gray-400" />
                 </button>
                 <div className="absolute top-2 left-3 text-[10px] font-semibold text-gray-400 uppercase tracking-wider">
-                  {activeImageStyleTarget === 'title' ? 'Editing: Title' : 'Editing: Caption'}
+                  {activeImageStyleTarget === 'title' ? 'Editing: Post name' : 'Editing: Caption'}
                 </div>
                 {(() => {
                   // Title and caption each have their own style object

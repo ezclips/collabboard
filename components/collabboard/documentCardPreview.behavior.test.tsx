@@ -295,7 +295,7 @@ describe('follow-up correction: Document Freeform card has square corners and a 
     const src = fs.readFileSync('components/collabboard/editors/CommentEditor.tsx', 'utf8');
     expect(src).not.toContain('showTitleInput');
     expect(src).not.toContain('commentTitle || "Comments"');
-    expect(src).toContain('placeholder="Title"');
+    expect(src).toContain('placeholder="Post name"');
   });
 
   it("the standalone Comment post has the exact same top-strip bar as Note/Document (3-column grid, minHeight 22px, title centered, pencil in the right slot) instead of no bar at all", () => {
@@ -422,7 +422,7 @@ describe('follow-up correction: Document Freeform card has square corners and a 
     const src = fs.readFileSync('components/collabboard/editors/NoteEditor.tsx', 'utf8');
     expect(src).toContain('initialTitle');
     expect(src).toContain("const [title, setTitle] = useState(initialTitle);");
-    expect(src).toContain('placeholder="Title"');
+    expect(src).toContain('placeholder="Post name"');
     expect(src).toContain('title: title.trim() || undefined');
   });
 

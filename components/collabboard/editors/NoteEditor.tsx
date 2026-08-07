@@ -723,6 +723,30 @@ export default function NoteEditor({
 
           {/* Note Card content */}
           <div className="flex flex-col relative">
+            {/* Top strip -- flush against the outer card's own edges (no
+                inset gap on any side), same as the canvas card's own top
+                strip. Sits above the m-2 inset inner card rather than
+                inside it, since that margin was leaving a visible gap on
+                the left/right/top between the strip and the card outline. */}
+            <div
+              className="w-full flex-shrink-0 flex items-center px-2 rounded-t-lg"
+              style={{ minHeight: '22px', backgroundColor: topStrip || 'rgba(0,0,0,0.04)' }}
+            >
+              <input
+                type="text"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                onFocus={() => {
+                  setActiveStyleTarget('title');
+                  if (!panels.open.textStyle) panels.openPanel('textStyle');
+                }}
+                placeholder="Post name"
+                className={`w-full text-sm font-semibold bg-transparent outline-none border-b placeholder:opacity-40 placeholder:font-normal rounded px-1 -mx-1 ${
+                  activeStyleTarget === 'title' ? 'border-blue-400 bg-blue-50/40' : 'border-transparent focus:border-blue-400'
+                }`}
+                style={resolveCaptionStyle(titleStyle, topStrip ? contrastIconColor(topStrip) : textColor)}
+              />
+            </div>
             <div className="m-2 relative">
               {/* Inner card */}
               <div
@@ -736,31 +760,6 @@ export default function NoteEditor({
                   width: '240px',
                 }}
               >
-                {/* Top strip -- Title lives inside it, same as the canvas
-                    card's own top strip (a single colored bar with the
-                    title centered in it), not a separate row underneath.
-                    Matches the Image editor's modal treatment for
-                    consistency across every post type's edit window. */}
-                <div
-                  className="w-full flex-shrink-0 flex items-center px-2"
-                  style={{ minHeight: '28px', backgroundColor: topStrip || 'rgba(0,0,0,0.04)' }}
-                >
-                  <input
-                    type="text"
-                    value={title}
-                    onChange={(e) => setTitle(e.target.value)}
-                    onFocus={() => {
-                      setActiveStyleTarget('title');
-                      if (!panels.open.textStyle) panels.openPanel('textStyle');
-                    }}
-                    placeholder="Title"
-                    className={`w-full text-sm font-semibold bg-transparent outline-none border-b placeholder:opacity-40 placeholder:font-normal rounded px-1 -mx-1 ${
-                      activeStyleTarget === 'title' ? 'border-blue-400 bg-blue-50/40' : 'border-transparent focus:border-blue-400'
-                    }`}
-                    style={resolveCaptionStyle(titleStyle, topStrip ? contrastIconColor(topStrip) : textColor)}
-                  />
-                </div>
-
                 {/* Editor */}
                 <div
                   className="p-3"
@@ -1025,7 +1024,7 @@ export default function NoteEditor({
               <X className="w-3 h-3 text-gray-400" />
             </button>
             <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-2 truncate pr-4">
-              {activeStyleTarget === 'title' ? 'Editing: Title' : 'Editing: Note text'}
+              {activeStyleTarget === 'title' ? 'Editing: Post name' : 'Editing: Note text'}
             </div>
             <TextStylePopup
               isOpen={true}

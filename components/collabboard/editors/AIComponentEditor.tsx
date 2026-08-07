@@ -397,13 +397,13 @@ export default function AIComponentEditor({
             neutral gray every other type falls back to when unset. */}
         <div
           className="w-full flex-shrink-0 flex items-center px-3"
-          style={{ minHeight: '28px', backgroundColor: 'rgba(0,0,0,0.04)' }}
+          style={{ minHeight: '22px', backgroundColor: 'rgba(0,0,0,0.04)' }}
         >
           <input
             type="text"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
-            placeholder="Title"
+            placeholder="Post name"
             className="w-full text-sm font-semibold text-gray-800 bg-transparent outline-none border-b border-transparent focus:border-blue-400 placeholder:opacity-40 placeholder:font-normal rounded px-1 -mx-1"
           />
         </div>

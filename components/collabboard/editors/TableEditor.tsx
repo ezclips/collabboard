@@ -812,7 +812,7 @@ export default function TableEditor({
                                 back to when no strip color is set. */}
                             <div
                                 className="w-full flex-shrink-0 flex items-center px-2"
-                                style={{ minHeight: '28px', backgroundColor: 'rgba(0,0,0,0.04)' }}
+                                style={{ minHeight: '22px', backgroundColor: 'rgba(0,0,0,0.04)' }}
                             >
                                 <input
                                     type="text"
@@ -824,7 +824,7 @@ export default function TableEditor({
                                         setSelectionRange(null);
                                         setActiveSubmenu('textStyle');
                                     }}
-                                    placeholder="Title"
+                                    placeholder="Post name"
                                     className={`w-full text-sm font-semibold bg-transparent outline-none border-b placeholder:opacity-40 placeholder:font-normal rounded px-1 -mx-1 ${
                                         activeStyleTarget === 'title' ? 'border-blue-400 bg-blue-50/40' : 'border-transparent focus:border-blue-400'
                                     }`}
@@ -1445,7 +1445,7 @@ export default function TableEditor({
                             return (
                                 <>
                                     <div className="px-3 pt-2 text-[10px] font-semibold text-gray-400 uppercase tracking-wider truncate">
-                                        {isTitleTarget ? 'Editing: Title' : 'Editing: Cell'}
+                                        {isTitleTarget ? 'Editing: Post name' : 'Editing: Cell'}
                                     </div>
                                     {/* Formatting buttons -- same grid every Text style
                                         panel shows, between the (absent here) font-size

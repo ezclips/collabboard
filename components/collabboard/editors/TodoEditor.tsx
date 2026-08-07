@@ -297,7 +297,7 @@ export default function TodoEditor({
     // text a style pick is about to apply to.
     const activeTargetLabel =
         activeStyleTargetId === 'title'
-            ? (todoTitle || 'Title')
+            ? (todoTitle || 'Post name')
             : tasks.find((task) => task.id === activeStyleTargetId)?.text || 'Task';
 
     const applyActiveTargetHeading = (level: CaptionHeading) => {
@@ -627,10 +627,11 @@ export default function TodoEditor({
                         )}
                         {/* Top strip -- Title lives inside it, same as the canvas
                             card's own top strip, matching every other post
-                            type's edit window. */}
+                            type's edit window. Flush against this card's own
+                            edges -- no inset wrapper here to create a gap. */}
                         <div
-                            className="w-full flex-shrink-0 flex items-center px-2"
-                            style={{ minHeight: '28px', backgroundColor: topStrip || 'rgba(0,0,0,0.04)' }}
+                            className="w-full flex-shrink-0 flex items-center px-2 rounded-t-lg"
+                            style={{ minHeight: '22px', backgroundColor: topStrip || 'rgba(0,0,0,0.04)' }}
                         >
                             <input
                                 type="text"
@@ -640,7 +641,7 @@ export default function TodoEditor({
                                 className={`w-full text-sm font-semibold bg-transparent outline-none border-b placeholder:opacity-40 placeholder:font-normal rounded px-1 -mx-1 ${
                                     activeStyleTargetId === 'title' ? 'border-blue-400 bg-blue-50/40' : 'border-transparent focus:border-blue-400'
                                 }`}
-                                placeholder="Title"
+                                placeholder="Post name"
                                 style={resolvedTitleStyle}
                             />
                         </div>

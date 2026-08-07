@@ -817,13 +817,13 @@ export default function LinkEditor({
                         input now occupies. */}
                     <div
                         className="w-full flex-shrink-0 flex items-center px-2 rounded-t-lg"
-                        style={{ minHeight: '28px', backgroundColor: topStrip || 'rgba(0,0,0,0.04)' }}
+                        style={{ minHeight: '22px', backgroundColor: topStrip || 'rgba(0,0,0,0.04)' }}
                     >
                         <input
                             type="text"
                             value={linkTitle}
                             onChange={(e) => setLinkTitle(e.target.value)}
-                            placeholder="Title"
+                            placeholder="Post name"
                             className="w-full text-sm font-semibold bg-transparent outline-none border-b border-transparent focus:border-blue-400 placeholder:opacity-40 placeholder:font-normal rounded px-1 -mx-1"
                             style={{ color: topStrip ? contrastIconColor(topStrip) : '#374151' }}
                         />
