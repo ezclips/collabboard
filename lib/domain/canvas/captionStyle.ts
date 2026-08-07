@@ -181,6 +181,33 @@ export function captionTextDecoration(
   return parts.length > 0 ? parts.join(' ') : undefined;
 }
 
+// Every post type with a title stores its title's style in a different
+// place: Todo keeps it on metadata.captionStyle (the same field its tasks
+// reuse), Table serializes its whole state -- including titleStyle -- as
+// JSON in `content` rather than metadata, and everything else (text/note/
+// image) keeps a dedicated metadata.titleStyle. This centralizes that
+// per-type lookup so every renderer (Freeform canvas, Columns, Grid/Row)
+// resolves a title's style identically to how the editor modal wrote it.
+export function resolvePadletTitleStyle(
+  padlet: { type?: string | null; content?: string | null; metadata?: unknown },
+  fallbackColor?: string | null,
+): ResolvedCaptionStyle {
+  const metadata = (padlet.metadata && typeof padlet.metadata === 'object' ? padlet.metadata : {}) as Record<string, unknown>;
+  let source: unknown;
+  if (padlet.type === 'todo') {
+    source = metadata.captionStyle;
+  } else if (padlet.type === 'table') {
+    try {
+      source = (JSON.parse(padlet.content || '{}') as Record<string, unknown>)?.titleStyle;
+    } catch {
+      source = undefined;
+    }
+  } else {
+    source = metadata.titleStyle;
+  }
+  return resolveCaptionStyle(source, fallbackColor);
+}
+
 export function resolveCaptionStyle(value: unknown, metadataTextColor?: string | null): ResolvedCaptionStyle {
   const captionStyle = normalizeCaptionStyle(value);
   const color = captionStyle?.color || metadataTextColor || '#1F2937';

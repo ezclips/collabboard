@@ -15,6 +15,7 @@ import { asUserId } from "@/lib/domain/core/ids";
 import { createPostsRepository } from "@/lib/infra/canvas/postsRepository";
 import { getMeaningfulTitle } from "@/lib/infra/collabboard/postTitle";
 import { isDocumentPost } from "@/lib/domain/canvas/documentPost";
+import { resolvePadletTitleStyle } from "@/lib/domain/canvas/captionStyle";
 import DocumentCardContent from "./DocumentCardContent";
 
 type CellStyle = {
@@ -38,6 +39,10 @@ interface PostCardContentProps {
     currentUserAvatar?: string;
     onUpdateChildComments?: (childId: string, comments: any[], options?: { field?: "comments" | "detachedComments" }) => void;
     onOpenDocument?: () => void; // PATCH-149B1b-iii §27.4: opt-in Read affordance
+    // Set by callers that already render this padlet's title themselves
+    // (e.g. CardShell's strip, styled via resolvePadletTitleStyle) so the
+    // todo/table branches below don't render a second, unstyled title.
+    hideOwnTitle?: boolean;
 }
 
 // Decode HTML entities that may have been escaped
@@ -241,6 +246,7 @@ export default function PostCardContent({
     currentUserAvatar,
     onUpdateChildComments,
     onOpenDocument,
+    hideOwnTitle = false,
 }: PostCardContentProps) {
 
     const type = normalizeType(padlet.type);
@@ -365,8 +371,13 @@ export default function PostCardContent({
     if (type === "todo" && padlet.metadata?.tasks) {
         return (
             <div className="space-y-1 select-none">
-                {padlet.metadata.todoTitle && (
-                    <h4 className="text-xs font-semibold text-gray-800 mb-1">{padlet.metadata.todoTitle}</h4>
+                {!hideOwnTitle && padlet.metadata.todoTitle && (
+                    <h4
+                        className="text-xs font-semibold text-gray-800 mb-1"
+                        style={resolvePadletTitleStyle(padlet)}
+                    >
+                        {padlet.metadata.todoTitle}
+                    </h4>
                 )}
 
                 {padlet.metadata.tasks.slice(0, 4).map(
@@ -461,7 +472,14 @@ export default function PostCardContent({
 
         return (
             <div className="space-y-1 select-none">
-                {tableTitle && <h4 className="text-xs font-semibold text-gray-800 mb-1">{tableTitle}</h4>}
+                {!hideOwnTitle && tableTitle && (
+                    <h4
+                        className="text-xs font-semibold text-gray-800 mb-1"
+                        style={resolvePadletTitleStyle(padlet)}
+                    >
+                        {tableTitle}
+                    </h4>
+                )}
 
                 <div className="overflow-x-auto rounded border border-gray-200 bg-white">
                     <table className="w-full text-[9px]">

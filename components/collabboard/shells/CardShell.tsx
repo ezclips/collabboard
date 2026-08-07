@@ -30,6 +30,11 @@ export interface CardShellProps {
 
   // Container title rendered inside the strip (replaces RowColumnContainerCard header)
   title?: string;
+  // Fully-resolved title text style (heading/size, bold/italic, underline/
+  // strikethrough, align, color) -- caller resolves it via resolveCaptionStyle
+  // against whichever metadata field owns that padlet type's title style, so
+  // the strip renders identically to what the Text style panel produced.
+  titleStyle?: React.CSSProperties;
 
   // Edit button (permission-gated by parent)
   onEdit?: () => void;              // if provided -> pencil shows; if undefined -> hidden
@@ -52,6 +57,7 @@ export default function CardShell({
   cardColor,
   isContainer,
   title,
+  titleStyle,
   className,
   onEdit,
   onExpandToggle,
@@ -115,8 +121,8 @@ export default function CardShell({
         <div className="flex items-center justify-center px-1 min-w-0">
           {title && (
             <span
-              className="text-xs font-semibold text-center break-words leading-snug py-1"
-              style={{ color: titleColor }}
+              className="block w-full text-xs font-semibold text-center break-words leading-snug py-1"
+              style={{ color: titleColor, ...titleStyle }}
             >
               {title}
             </span>

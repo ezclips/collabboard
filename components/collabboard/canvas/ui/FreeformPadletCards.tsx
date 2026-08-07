@@ -19,7 +19,7 @@ import CardEditor from '@/components/collabboard/CardEditor';
 import CommentPost from '@/components/collabboard/CommentPost';
 import TextStylePopup from '@/components/collabboard/editors/TextStylePopup';
 import { nextTextAlign } from '@/components/collabboard/editors/textAlignCycle';
-import { resolveCaptionStyle } from '@/lib/domain/canvas/captionStyle';
+import { resolveCaptionStyle, resolvePadletTitleStyle } from '@/lib/domain/canvas/captionStyle';
 import { CardColorPanel } from '@/components/collabboard/editors/CardColorPanel';
 import ReactionDisplay from '@/components/collabboard/editors/ReactionDisplay';
 import EmojiReactionPicker from '@/components/collabboard/editors/EmojiReactionPicker';
@@ -1425,11 +1425,11 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                 <div />
                 <div className="flex items-center justify-center min-w-0">
                   {(() => {
-                    // The title's own chosen color wins over the generic
-                    // strip-contrast color -- otherwise a color picked in
-                    // the Text style panel never showed up on the canvas.
-                    const titleTextColor = (padlet.metadata as any)?.titleStyle?.color
-                      || (isStripVisible(padlet.metadata?.topStrip) ? contrastIconColor(padlet.metadata?.topStrip as string) : '#374151');
+                    // Full title style (heading/size, bold, italic,
+                    // underline, strikethrough, align, color) -- not just
+                    // color -- matching the Text style panel exactly.
+                    const fallbackTitleColor = isStripVisible(padlet.metadata?.topStrip) ? contrastIconColor(padlet.metadata?.topStrip as string) : '#374151';
+                    const titleTextStyle = resolvePadletTitleStyle(padlet, fallbackTitleColor);
                     return editingNoteTitleId === padlet.id ? (
                       <input
                         type="text"
@@ -1447,16 +1447,16 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                         onMouseDown={(e) => e.stopPropagation()}
                         data-no-drag="true"
                         placeholder="Title"
-                        className="text-xs font-semibold text-center bg-transparent border-b border-blue-400 outline-none px-0 py-0 w-24 placeholder:opacity-40"
-                        style={{ color: titleTextColor }}
+                        className="text-xs font-semibold text-center bg-transparent border-b border-blue-400 outline-none px-0 py-0 w-full placeholder:opacity-40"
+                        style={titleTextStyle}
                         autoFocus
                       />
                     ) : (() => {
                       const imageTitle = getMeaningfulTitle(padlet.title, padlet.type);
                       return (
                         <span
-                          className="text-xs font-semibold text-center truncate cursor-pointer"
-                          style={{ color: titleTextColor }}
+                          className="block w-full text-xs font-semibold text-center truncate cursor-pointer"
+                          style={titleTextStyle}
                           onDoubleClick={(e) => {
                             e.stopPropagation();
                             setEditingNoteTitleId(padlet.id);
@@ -3366,29 +3366,12 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                         </span>
                       )
                     ) : (padlet.type === 'text' || (padlet.type as string) === 'note' || padlet.type === 'todo' || padlet.type === 'table' || padlet.type === 'image') ? (() => {
-                      // The title's own chosen color (Todo stores it on the
-                      // shared captionStyle since that field is title-only;
-                      // every other type keeps a dedicated titleStyle) wins
-                      // over the generic strip-contrast color -- otherwise a
-                      // color picked in the Text style panel never actually
-                      // showed up on the canvas card itself.
-                      // Table stores its whole state (including titleStyle)
-                      // as a JSON blob in `content`, not in `metadata` like
-                      // every other type -- has to be parsed separately.
-                      const tableTitleColor = (() => {
-                        if (padlet.type !== 'table') return undefined;
-                        try {
-                          return JSON.parse(padlet.content || '{}')?.titleStyle?.color;
-                        } catch {
-                          return undefined;
-                        }
-                      })();
-                      const titleOwnColor = padlet.type === 'todo'
-                        ? padlet.metadata?.captionStyle?.color
-                        : padlet.type === 'table'
-                          ? tableTitleColor
-                          : (padlet.metadata as any)?.titleStyle?.color;
-                      const titleTextColor = titleOwnColor || freeformTitleColor;
+                      // Resolve the title's FULL style (heading/size, bold,
+                      // italic, underline, strikethrough, align, color) the
+                      // same way the editor modal's Text style panel wrote
+                      // it -- not just color -- so the canvas card matches
+                      // what was actually configured in the panel.
+                      const titleTextStyle = resolvePadletTitleStyle(padlet, freeformTitleColor);
                       return editingNoteTitleId === padlet.id ? (
                         <input
                           type="text"
@@ -3406,8 +3389,8 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                           onMouseDown={(e) => e.stopPropagation()}
                           data-no-drag="true"
                           placeholder="Title"
-                          className="text-xs font-semibold text-center bg-transparent border-b border-blue-400 outline-none px-0 py-0 w-24 placeholder:opacity-40"
-                          style={{ color: titleTextColor }}
+                          className="text-xs font-semibold text-center bg-transparent border-b border-blue-400 outline-none px-0 py-0 w-full placeholder:opacity-40"
+                          style={titleTextStyle}
                           autoFocus
                         />
                       ) : (() => {
@@ -3419,8 +3402,8 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                         // double-click target to add a first title.
                         return (
                           <span
-                            className="text-xs font-semibold text-center truncate cursor-pointer"
-                            style={{ color: titleTextColor }}
+                            className="block w-full text-xs font-semibold text-center truncate cursor-pointer"
+                            style={titleTextStyle}
                             onDoubleClick={(e) => {
                               e.stopPropagation();
                               setEditingNoteTitleId(padlet.id);

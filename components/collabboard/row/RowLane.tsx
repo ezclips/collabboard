@@ -24,7 +24,11 @@ import { BoardSection, Padlet, DropIndicatorState } from "@/types/collabboard";
 import PostCardContent from "../PostCardContent";
 import RowColumnContainerCard from "../RowColumnContainerCard";
 import { ColumnPostContextMenu } from "../menus/ColumnPostContextMenu";
-import CardShell from "@/components/collabboard/shells/CardShell";
+import CardShell, { contrastIconColor } from "@/components/collabboard/shells/CardShell";
+import { getMeaningfulTitle } from "@/lib/infra/collabboard/postTitle";
+import { resolvePadletTitleStyle } from "@/lib/domain/canvas/captionStyle";
+
+const TITLED_POST_TYPES = new Set(["text", "note", "todo", "table", "image"]);
 
 function DropIndicator() {
     return (
@@ -497,18 +501,27 @@ export default function RowLane({
                                             onDelete={isEditable && onDeletePost ? (() => onDeletePost(post)) : undefined}
                                             onAddContainerAt={isEditable ? onAddContainerAt : undefined}
                                         >
-                                            <CardShell
-                                                padletId={post.id}
-                                                isContainer={false}
-                                                cardColor={post.metadata?.cardColor || '#ffffff'}
-                                                topStripColor={post.metadata?.topStrip && post.metadata.topStrip !== 'transparent' ? post.metadata.topStrip : null}
-                                                onEdit={isEditable ? () => onEditPost(post) : undefined}
-                                                className="cursor-grab active:cursor-grabbing"
-                                            >
-                                                <div className="text-base text-gray-800 whitespace-pre-line break-words select-text w-full overflow-hidden">
-                                                    <PostCardContent padlet={post} allPadlets={allPadlets} onOpenDocument={onOpenDocument ? () => onOpenDocument(post) : undefined} />
-                                                </div>
-                                            </CardShell>
+                                            {(() => {
+                                                const topStripColor = post.metadata?.topStrip && post.metadata.topStrip !== 'transparent' ? post.metadata.topStrip : null;
+                                                const hasTitle = TITLED_POST_TYPES.has(post.type);
+                                                const fallbackTitleColor = topStripColor ? contrastIconColor(topStripColor) : '#374151';
+                                                return (
+                                                    <CardShell
+                                                        padletId={post.id}
+                                                        isContainer={false}
+                                                        cardColor={post.metadata?.cardColor || '#ffffff'}
+                                                        topStripColor={topStripColor}
+                                                        title={hasTitle ? getMeaningfulTitle(post.title, post.type) || undefined : undefined}
+                                                        titleStyle={hasTitle ? resolvePadletTitleStyle(post, fallbackTitleColor) : undefined}
+                                                        onEdit={isEditable ? () => onEditPost(post) : undefined}
+                                                        className="cursor-grab active:cursor-grabbing"
+                                                    >
+                                                        <div className="text-base text-gray-800 whitespace-pre-line break-words select-text w-full overflow-hidden">
+                                                            <PostCardContent padlet={post} allPadlets={allPadlets} onOpenDocument={onOpenDocument ? () => onOpenDocument(post) : undefined} hideOwnTitle={hasTitle} />
+                                                        </div>
+                                                    </CardShell>
+                                                );
+                                            })()}
                                         </ColumnPostContextMenu>
                                     </SortableContainerItem>
                                 </React.Fragment >
