@@ -448,6 +448,8 @@ export default function CanvasModals({
               }
               : undefined
           }
+          initialTitle={getMeaningfulTitle(padletToEdit?.title, padletToEdit?.type)}
+          initialMetadata={padletToEdit?.metadata || {}}
           readOnly={false}
         />
       </div>
@@ -466,6 +468,7 @@ export default function CanvasModals({
             }
             : undefined
         }
+        initialTitle={getMeaningfulTitle(viewDrawingPadlet?.title, viewDrawingPadlet?.type)}
         readOnly={true}
       />
 

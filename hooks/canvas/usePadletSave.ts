@@ -178,6 +178,8 @@ export type SaveDrawingData = {
   drawingAppState: string;
   drawingFiles: string;
   previewUrl?: string;
+  title?: string;
+  metadata?: Record<string, unknown>;
 };
 
 // ============================================================================
@@ -1227,15 +1229,17 @@ export function usePadletSave(params: UsePadletSaveParams) {
 
     const metadata = {
       ...padletToEdit.metadata,
+      ...data.metadata,
       drawingData: data.drawingData,
       drawingAppState: data.drawingAppState,
       drawingFiles: data.drawingFiles,
       previewUrl: data.previewUrl,
     };
+    const nextTitle = data.title !== undefined ? data.title : padletToEdit.title;
 
     // Check if placement prompt is needed (grid/columns/wall layouts)
     if (checkPlacementRequired(
-      { kind: 'drawing', content: '', file_url: data.previewUrl, title: 'Drawing', metadata },
+      { kind: 'drawing', content: '', file_url: data.previewUrl, title: nextTitle || 'Drawing', metadata },
       () => { setIsDrawingEditorOpen(false); setPadletToEdit(null); }
     )) {
       return;
@@ -1249,7 +1253,7 @@ export function usePadletSave(params: UsePadletSaveParams) {
           .from('padlets')
           .insert({
             board_id: canvasId,
-            title: 'Drawing',
+            title: data.title || 'Drawing',
             content: '',
             type: 'drawing',
             position_x,
@@ -1266,6 +1270,7 @@ export function usePadletSave(params: UsePadletSaveParams) {
         const { error } = await supabase
           .from('padlets')
           .update({
+            title: nextTitle,
             metadata,
             updated_at: new Date().toISOString(),
           })
@@ -1281,7 +1286,7 @@ export function usePadletSave(params: UsePadletSaveParams) {
       } else {
         setPadlets(prev => prev.map(p =>
           p.id === padletToEdit!.id
-            ? { ...p, metadata }
+            ? { ...p, title: nextTitle, metadata }
             : p
         ));
       }

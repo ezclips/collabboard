@@ -3365,7 +3365,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                           {padlet.title}
                         </span>
                       )
-                    ) : (padlet.type === 'text' || (padlet.type as string) === 'note' || padlet.type === 'todo' || padlet.type === 'table' || padlet.type === 'image' || padlet.type === 'link' || padlet.type === 'ai-component') ? (() => {
+                    ) : (padlet.type === 'text' || (padlet.type as string) === 'note' || padlet.type === 'todo' || padlet.type === 'table' || padlet.type === 'image' || padlet.type === 'link' || padlet.type === 'ai-component' || padlet.type === 'drawing') ? (() => {
                       // Resolve the title's FULL style (heading/size, bold,
                       // italic, underline, strikethrough, align, color) the
                       // same way the editor modal's Text style panel wrote

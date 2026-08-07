@@ -37,14 +37,18 @@ export function CardColorPanel({
     topStrip,
     onChangeTarget,
     onClose,
+    tabs = ["icon", "bg", "ts"],
 }: {
     iconColor?: string;          // e.g. metadata.iconColor
     bgColor?: string;            // e.g. metadata.cardColor
     topStrip?: string;           // e.g. metadata.topStrip
     onChangeTarget: (target: CardColorTarget, value: string) => void;
     onClose?: () => void;
+    // Post types with no icon element (e.g. Drawing) omit "icon" so the tab
+    // list doesn't offer a control with nothing to apply it to.
+    tabs?: CardColorTarget[];
 }) {
-    const [tab, setTab] = React.useState<CardColorTarget>("bg");
+    const [tab, setTab] = React.useState<CardColorTarget>(tabs.includes("bg") ? "bg" : tabs[0]);
 
     return (
         <div
@@ -55,36 +59,42 @@ export function CardColorPanel({
             <div className="mb-3 grid items-center gap-3" style={{ gridTemplateColumns: '1fr auto 1fr' }}>
                 <div className="text-sm font-semibold text-slate-800">Card Color</div>
                 <div className="inline-flex rounded-lg border bg-slate-50 p-1">
-                    <button
-                        type="button"
-                        onClick={() => setTab("icon")}
-                        className={[
-                            "px-3 py-1 text-xs font-medium rounded-md",
-                            tab === "icon" ? "bg-white shadow-sm" : "text-slate-600",
-                        ].join(" ")}
-                    >
-                        Icon
-                    </button>
-                    <button
-                        type="button"
-                        onClick={() => setTab("bg")}
-                        className={[
-                            "px-3 py-1 text-xs font-medium rounded-md",
-                            tab === "bg" ? "bg-white shadow-sm" : "text-slate-600",
-                        ].join(" ")}
-                    >
-                        BG
-                    </button>
-                    <button
-                        type="button"
-                        onClick={() => setTab("ts")}
-                        className={[
-                            "px-3 py-1 text-xs font-medium rounded-md",
-                            tab === "ts" ? "bg-white shadow-sm" : "text-slate-600",
-                        ].join(" ")}
-                    >
-                        TS
-                    </button>
+                    {tabs.includes("icon") && (
+                        <button
+                            type="button"
+                            onClick={() => setTab("icon")}
+                            className={[
+                                "px-3 py-1 text-xs font-medium rounded-md",
+                                tab === "icon" ? "bg-white shadow-sm" : "text-slate-600",
+                            ].join(" ")}
+                        >
+                            Icon
+                        </button>
+                    )}
+                    {tabs.includes("bg") && (
+                        <button
+                            type="button"
+                            onClick={() => setTab("bg")}
+                            className={[
+                                "px-3 py-1 text-xs font-medium rounded-md",
+                                tab === "bg" ? "bg-white shadow-sm" : "text-slate-600",
+                            ].join(" ")}
+                        >
+                            BG
+                        </button>
+                    )}
+                    {tabs.includes("ts") && (
+                        <button
+                            type="button"
+                            onClick={() => setTab("ts")}
+                            className={[
+                                "px-3 py-1 text-xs font-medium rounded-md",
+                                tab === "ts" ? "bg-white shadow-sm" : "text-slate-600",
+                            ].join(" ")}
+                        >
+                            TS
+                        </button>
+                    )}
                 </div>
                 <div className="flex justify-end">
                     {onClose && (

@@ -2,8 +2,15 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import dynamic from 'next/dynamic';
-import { X, Save, CircleHelp, Move, ZoomIn } from 'lucide-react';
+import { X, Save, CircleHelp, Move, ZoomIn, Palette, TextCursor, Smile, MessageSquare } from 'lucide-react';
 import { getExcalidrawLibrary } from '@/lib/collabboard/excalidrawLibrary';
+import { CardColorPanel } from './CardColorPanel';
+import TextStylePopup from './TextStylePopup';
+import EmojiReactionPicker from './EmojiReactionPicker';
+import CommentPopup from './CommentPopup';
+import { resolveCaptionStyle, CAPTION_STYLE_PRESETS, type CaptionHeading } from '@/lib/domain/canvas/captionStyle';
+import { nextTextAlign } from './textAlignCycle';
+import { getMeaningfulTitle } from '@/lib/infra/collabboard/postTitle';
 
 // Dynamically import the wrapper that contains all Excalidraw-specific code
 // This is necessary to prevent "window is not defined" errors during SSR
@@ -20,20 +27,34 @@ interface DrawingEditorProps {
         drawingAppState: string;
         drawingFiles: string; // JSON serialized binary files
         previewUrl?: string;
+        title?: string;
+        metadata?: Record<string, unknown>;
     }) => void;
     initialData?: {
         drawingData?: string;
         drawingAppState?: string;
         drawingFiles?: string;
     };
+    initialTitle?: string;
+    initialMetadata?: Record<string, unknown>;
     readOnly?: boolean;
 }
+
+type CommentDraft = {
+    id: string;
+    text: string;
+    userId: string;
+    userName: string;
+    timestamp: number;
+};
 
 export default function DrawingEditor({
     isOpen,
     onClose,
     onSave,
     initialData,
+    initialTitle = '',
+    initialMetadata,
     readOnly = false,
 }: DrawingEditorProps) {
     // Use refs to store current state without causing re-renders
@@ -49,6 +70,48 @@ export default function DrawingEditor({
     const [libraryItems, setLibraryItems] = useState<any[]>([]); // New state
     const [key, setKey] = useState(0);
     const [showHelp, setShowHelp] = useState(false);
+
+    // Post customization: title + the same color/style/reaction/comment
+    // metadata every other post type supports, entered directly in the
+    // header strip -- saved together with the drawing on Save Changes.
+    const [title, setTitle] = useState(initialTitle);
+    const [cardColor, setCardColor] = useState('#ffffff');
+    const [topStrip, setTopStrip] = useState('transparent');
+    const [captionStyle, setCaptionStyle] = useState<Record<string, any>>({});
+    const [reactions, setReactions] = useState<string[]>([]);
+    const [detachedComments, setDetachedComments] = useState<CommentDraft[]>([]);
+    const [badgeColor, setBadgeColor] = useState('#facc15');
+
+    const [isTextStyleOpen, setIsTextStyleOpen] = useState(false);
+    const [isColorPanelOpen, setIsColorPanelOpen] = useState(false);
+    const [isReactionPickerOpen, setIsReactionPickerOpen] = useState(false);
+    const [isCommentPanelOpen, setIsCommentPanelOpen] = useState(false);
+
+    const togglePanel = (panel: 'text' | 'color' | 'reaction' | 'comment') => {
+        setIsTextStyleOpen((prev) => (panel === 'text' ? !prev : false));
+        setIsColorPanelOpen((prev) => (panel === 'color' ? !prev : false));
+        setIsReactionPickerOpen((prev) => (panel === 'reaction' ? !prev : false));
+        setIsCommentPanelOpen((prev) => (panel === 'comment' ? !prev : false));
+    };
+
+    const isCaptionBold = captionStyle.fontWeight === '700' || captionStyle.fontWeight === 'bold';
+    const isCaptionItalic = captionStyle.fontStyle === 'italic';
+    const toggleCaptionBold = () => setCaptionStyle((prev) => ({ ...prev, fontWeight: isCaptionBold ? '400' : '700' }));
+    const toggleCaptionItalic = () => setCaptionStyle((prev) => ({ ...prev, fontStyle: isCaptionItalic ? 'normal' : 'italic' }));
+    const toggleCaptionUnderline = () => setCaptionStyle((prev) => ({ ...prev, underline: !prev.underline }));
+    const toggleCaptionStrikethrough = () => setCaptionStyle((prev) => ({ ...prev, strikethrough: !prev.strikethrough }));
+    const cycleCaptionAlign = () => setCaptionStyle((prev) => ({ ...prev, textAlign: nextTextAlign(prev.textAlign || 'left') }));
+    const applyCaptionPreset = (level: CaptionHeading) => {
+        setCaptionStyle((prev) => {
+            const selectedPreset = level === 'callout' && prev.backgroundColor
+                ? { ...CAPTION_STYLE_PRESETS.callout, backgroundColor: prev.backgroundColor }
+                : CAPTION_STYLE_PRESETS[level];
+            return { ...prev, ...selectedPreset };
+        });
+    };
+
+    const commentCount = detachedComments.length;
+    const titleInputStyle = resolveCaptionStyle(captionStyle, undefined);
 
     // Parse initial data only when opening
     useEffect(() => {
@@ -98,8 +161,20 @@ export default function DrawingEditor({
             setInitialAppState(appState);
             setInitialFiles(files);
             setKey(prev => prev + 1);
+
+            setTitle(initialTitle);
+            setCardColor(typeof initialMetadata?.cardColor === 'string' ? initialMetadata.cardColor : '#ffffff');
+            setTopStrip(typeof initialMetadata?.topStrip === 'string' ? initialMetadata.topStrip : 'transparent');
+            setCaptionStyle((initialMetadata?.titleStyle as Record<string, unknown>) || {});
+            setReactions(Array.isArray(initialMetadata?.reactions) ? initialMetadata.reactions as string[] : []);
+            setDetachedComments(Array.isArray(initialMetadata?.detachedComments) ? initialMetadata.detachedComments as CommentDraft[] : []);
+            setBadgeColor(typeof initialMetadata?.badgeColor === 'string' ? initialMetadata.badgeColor : '#facc15');
+            setIsTextStyleOpen(false);
+            setIsColorPanelOpen(false);
+            setIsReactionPickerOpen(false);
+            setIsCommentPanelOpen(false);
         }
-    }, [isOpen, initialData?.drawingData, initialData?.drawingAppState, initialData?.drawingFiles]);
+    }, [isOpen, initialData?.drawingData, initialData?.drawingAppState, initialData?.drawingFiles, initialTitle, initialMetadata]);
 
     // Memoized onChange handler that only updates refs
     const handleChange = useCallback((elements: readonly any[], appState: any, files: any) => {
@@ -142,6 +217,15 @@ export default function DrawingEditor({
             drawingAppState: JSON.stringify(appState),
             drawingFiles: JSON.stringify(files),
             previewUrl,
+            title: title.trim() || undefined,
+            metadata: {
+                cardColor,
+                topStrip,
+                titleStyle: captionStyle,
+                reactions,
+                detachedComments,
+                badgeColor,
+            },
         });
         onClose();
     };
@@ -181,8 +265,8 @@ export default function DrawingEditor({
             >
                 {/* Header toolbar */}
                 <div className="flex items-center justify-between px-6 py-3 border-b bg-gray-50">
-                    <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-lg bg-red-100 flex items-center justify-center text-red-600">
+                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                        <div className="w-8 h-8 rounded-lg bg-red-100 flex items-center justify-center text-red-600 shrink-0">
                             <svg
                                 width="20"
                                 height="20"
@@ -199,12 +283,153 @@ export default function DrawingEditor({
                                 <path d="M7 11l5-5"></path>
                             </svg>
                         </div>
-                        <h2 className="text-lg font-semibold text-gray-800">
-                            {readOnly ? "View Drawing" : "Sketch & Draw"}
-                        </h2>
+                        {readOnly ? (
+                            <h2 className="text-lg font-semibold text-gray-800 truncate">
+                                {title || "View Drawing"}
+                            </h2>
+                        ) : (
+                            <input
+                                type="text"
+                                value={title}
+                                onChange={(e) => setTitle(e.target.value)}
+                                placeholder="Post name"
+                                className="flex-1 min-w-0 truncate bg-transparent text-lg font-semibold text-gray-800 outline-none border-none placeholder:text-gray-400 placeholder:font-normal"
+                                style={titleInputStyle}
+                            />
+                        )}
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 shrink-0">
+                        {!readOnly && (
+                            <div className="flex items-center gap-1 mr-1">
+                                <div className="relative">
+                                    <button
+                                        type="button"
+                                        onClick={() => togglePanel('text')}
+                                        className={`w-9 h-9 flex items-center justify-center rounded-lg transition-colors ${isTextStyleOpen ? 'bg-blue-100 text-blue-600' : 'hover:bg-gray-200 text-gray-600'}`}
+                                        title="Text style"
+                                    >
+                                        <TextCursor className="w-4 h-4" />
+                                    </button>
+                                    {isTextStyleOpen && (
+                                        <div
+                                            className="absolute right-0 top-full mt-2 z-[200] bg-white rounded-lg shadow-xl border border-gray-200 p-3 min-w-[240px]"
+                                            onClick={(e) => e.stopPropagation()}
+                                        >
+                                            <TextStylePopup
+                                                isOpen={isTextStyleOpen}
+                                                onOpenChange={setIsTextStyleOpen}
+                                                onSelectHeading={applyCaptionPreset}
+                                                hideCloseButton
+                                                onSelectColor={(color) => setCaptionStyle((prev) => ({ ...prev, color }))}
+                                                onSelectHighlight={(color) => setCaptionStyle((prev) => ({ ...prev, backgroundColor: color }))}
+                                                currentHeading={captionStyle.heading || 'normal'}
+                                                currentColor={captionStyle.color}
+                                                currentHighlight={captionStyle.backgroundColor}
+                                                onBold={toggleCaptionBold}
+                                                onItalic={toggleCaptionItalic}
+                                                onUnderline={toggleCaptionUnderline}
+                                                onStrikethrough={toggleCaptionStrikethrough}
+                                                onAlign={cycleCaptionAlign}
+                                                isBold={isCaptionBold}
+                                                isItalic={isCaptionItalic}
+                                                isUnderline={!!captionStyle.underline}
+                                                isStrikethrough={!!captionStyle.strikethrough}
+                                            />
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div className="relative">
+                                    <button
+                                        type="button"
+                                        onClick={() => togglePanel('color')}
+                                        className={`w-9 h-9 flex items-center justify-center rounded-lg transition-colors ${isColorPanelOpen ? 'bg-blue-100 text-blue-600' : 'hover:bg-gray-200 text-gray-600'}`}
+                                        title="Color"
+                                    >
+                                        <Palette className="w-4 h-4" />
+                                    </button>
+                                    {isColorPanelOpen && (
+                                        <div className="absolute right-0 top-full mt-2 z-[200]" onClick={(e) => e.stopPropagation()}>
+                                            <CardColorPanel
+                                                bgColor={cardColor}
+                                                topStrip={topStrip}
+                                                tabs={['bg', 'ts']}
+                                                onChangeTarget={(target, value) => {
+                                                    if (target === 'bg') setCardColor(value);
+                                                    if (target === 'ts') setTopStrip(value);
+                                                }}
+                                                onClose={() => setIsColorPanelOpen(false)}
+                                            />
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div className="relative">
+                                    <button
+                                        type="button"
+                                        onClick={() => togglePanel('reaction')}
+                                        className={`w-9 h-9 flex items-center justify-center rounded-lg transition-colors ${isReactionPickerOpen ? 'bg-blue-100 text-blue-600' : 'hover:bg-gray-200 text-gray-600'}`}
+                                        title="Reaction"
+                                    >
+                                        <Smile className="w-4 h-4" />
+                                    </button>
+                                    {isReactionPickerOpen && (
+                                        <div className="absolute right-0 top-full mt-2 z-[200]" onClick={(e) => e.stopPropagation()}>
+                                            <EmojiReactionPicker
+                                                isOpen={isReactionPickerOpen}
+                                                onOpenChange={setIsReactionPickerOpen}
+                                                onSelectEmoji={(emoji) => {
+                                                    setReactions((prev) => [...prev, emoji]);
+                                                    setIsReactionPickerOpen(false);
+                                                }}
+                                                inline
+                                            />
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div className="relative">
+                                    <button
+                                        type="button"
+                                        onClick={() => togglePanel('comment')}
+                                        className={`relative w-9 h-9 flex items-center justify-center rounded-lg transition-colors ${isCommentPanelOpen ? 'bg-blue-100 text-blue-600' : 'hover:bg-gray-200 text-gray-600'}`}
+                                        title="Comment"
+                                    >
+                                        <MessageSquare className="w-4 h-4" />
+                                        {commentCount > 0 && (
+                                            <span
+                                                className="absolute -top-1 -right-1 w-4 h-4 rounded-full text-[9px] font-bold text-gray-800 flex items-center justify-center"
+                                                style={{ backgroundColor: badgeColor }}
+                                            >
+                                                {commentCount}
+                                            </span>
+                                        )}
+                                    </button>
+                                    {isCommentPanelOpen && (
+                                        <div className="absolute right-0 top-full mt-2 z-[200]" style={{ minWidth: '320px' }} onClick={(e) => e.stopPropagation()}>
+                                            <CommentPopup
+                                                isOpen={isCommentPanelOpen}
+                                                onOpenChange={setIsCommentPanelOpen}
+                                                onSubmit={(commentText) => {
+                                                    setDetachedComments((prev) => [...prev, {
+                                                        id: `comment-${Date.now()}`,
+                                                        text: commentText,
+                                                        userId: 'anon',
+                                                        userName: 'You',
+                                                        timestamp: Date.now(),
+                                                    }]);
+                                                }}
+                                                comments={detachedComments}
+                                                currentUserId="anon"
+                                                currentUserName="You"
+                                                embedded
+                                            />
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
                         {!readOnly && (
                             <button
                                 onClick={handleSaveAndClose}
