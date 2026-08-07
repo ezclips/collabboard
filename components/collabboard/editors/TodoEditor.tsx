@@ -312,6 +312,12 @@ export default function TodoEditor({
     const cycleCaptionAlign = () => writeCaptionStyle({ textAlign: nextTextAlign(captionStyle.textAlign || 'left') });
 
     const resolvedTextStyle = resolveCaptionStyle(captionStyle);
+    // Tasks with no color of their own fall back to this fixed default --
+    // NOT to resolvedTextStyle.color, which is the title's own color.
+    // Sharing that fallback used to mean picking a title color silently
+    // recolored every task that hadn't been individually overridden yet;
+    // title and task-default colors must stay fully independent.
+    const DEFAULT_TASK_TEXT_COLOR = '#1F2937';
 
     const activeComment = comments.find((comment) => comment.id === activeCommentId) || null;
 
@@ -711,7 +717,7 @@ export default function TodoEditor({
                                                 className={`text-sm flex-1 break-words cursor-text rounded ${task.completed ? 'line-through text-gray-400' : 'text-gray-800'} ${
                                                     activeStyleTargetId === task.id ? 'ring-1 ring-blue-400' : ''
                                                 }`}
-                                                style={task.completed ? undefined : { ...resolvedTextStyle, color: task.color || resolvedTextStyle.color }}
+                                                style={task.completed ? undefined : { ...resolvedTextStyle, color: task.color || DEFAULT_TASK_TEXT_COLOR }}
                                             >
                                                 {task.text}
                                             </span>

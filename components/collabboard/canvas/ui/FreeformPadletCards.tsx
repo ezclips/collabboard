@@ -3297,18 +3297,23 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                         />
                       ) : (() => {
                         const noteTitle = getMeaningfulTitle(padlet.title, padlet.type);
+                        // No placeholder text here -- unlike the modal's "Title"
+                        // input hint, an untitled card on the canvas itself
+                        // should show nothing until the user actually enters
+                        // one. The span still renders (empty) so there's a
+                        // double-click target to add a first title.
                         return (
                           <span
-                            className={`text-xs font-semibold text-center truncate cursor-pointer ${noteTitle ? '' : 'opacity-40 select-none'}`}
+                            className="text-xs font-semibold text-center truncate cursor-pointer"
                             style={{ color: freeformTitleColor }}
                             onDoubleClick={(e) => {
                               e.stopPropagation();
                               setEditingNoteTitleId(padlet.id);
                               setNoteTitleDraft(noteTitle);
                             }}
-                            title="Double-click to edit title"
+                            title="Double-click to add a title"
                           >
-                            {noteTitle || 'Title'}
+                            {noteTitle}
                           </span>
                         );
                       })()

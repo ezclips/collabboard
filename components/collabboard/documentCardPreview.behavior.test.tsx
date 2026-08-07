@@ -262,7 +262,7 @@ describe('follow-up correction: Document Freeform card has square corners and a 
     expect(src).not.toContain('title="Badge Color"');
   });
 
-  it("the Note post's top-strip bar shows a ghost 'Title' placeholder until the user sets a meaningful title, editable in place via the same double-click pattern as Comment/Document, backed by the shared getMeaningfulTitle placeholder check", () => {
+  it("the Note post's top-strip bar shows nothing until the user sets a meaningful title (no ghost 'Title' text on the canvas itself), editable in place via the same double-click pattern as Comment/Document, backed by the shared getMeaningfulTitle placeholder check", () => {
     const src = fs.readFileSync('components/collabboard/canvas/ui/FreeformPadletCards.tsx', 'utf8');
     const start = src.indexOf('{/* Center: title -- containers show their real title');
     const end = src.indexOf('{/* Right: pencil hover-only */}');
@@ -276,8 +276,11 @@ describe('follow-up correction: Document Freeform card has square corners and a 
     expect(block).toContain("padlet.type === 'text' || (padlet.type as string) === 'note'");
     expect(block).toContain('getMeaningfulTitle(padlet.title, padlet.type)');
     expect(block).toContain('editingNoteTitleId === padlet.id');
-    expect(block).toContain('{noteTitle || \'Title\'}');
-    expect(block).toContain("noteTitle ? '' : 'opacity-40 select-none'");
+    // The canvas card renders the real title only -- no literal 'Title'
+    // ghost text like the modal's input placeholder shows. An untitled
+    // card's top strip should look empty, not display the word "Title".
+    expect(block).toContain('{noteTitle}');
+    expect(block).not.toContain('{noteTitle || \'Title\'}');
     expect(block).toContain('updatePadletTitle(padlet.id, noteTitleDraft.trim())');
   });
 
