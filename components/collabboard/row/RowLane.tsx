@@ -27,6 +27,7 @@ import { ColumnPostContextMenu } from "../menus/ColumnPostContextMenu";
 import CardShell, { contrastIconColor } from "@/components/collabboard/shells/CardShell";
 import { getMeaningfulTitle } from "@/lib/infra/collabboard/postTitle";
 import { resolvePadletTitleStyle } from "@/lib/domain/canvas/captionStyle";
+import { getContainerEditTargetLabel } from "@/lib/infra/collabboard/containerEditTargetLabel";
 
 const TITLED_POST_TYPES = new Set(["text", "note", "todo", "table", "image"]);
 
@@ -169,11 +170,10 @@ export default function RowLane({
         return allPadlets.filter(p => (p.metadata as any)?.parentId === containerId);
     };
 
-    // Helper to generate a label for the open target submenu
-    const getOpenTargetLabel = (padlet: Padlet): string => {
-        const rawType = padlet.type || (padlet.metadata as any)?.kind || 'post';
-        return String(rawType).replace(/_/g, ' ');
-    };
+    // Label for the open-target submenu -- prefers the child's own title
+    // (set via getContainerEditTargetLabel) so a container holding many
+    // same-typed posts (ten notes, say) doesn't show "note" ten times.
+    const getOpenTargetLabel = getContainerEditTargetLabel;
 
     const [isEditing, setIsEditing] = useState(false);
     const [editingTitle, setEditingTitle] = useState(section.title);

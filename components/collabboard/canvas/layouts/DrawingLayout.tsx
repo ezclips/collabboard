@@ -13,7 +13,7 @@ import {
   shouldAutoCreateDrawingContainer,
   type ImportedDrawingScene,
 } from '@/lib/infra/drawing/importScene';
-import { getDrawingContainerEditTargetLabel } from '@/lib/infra/drawing/containerEditTargetLabel';
+import { getContainerEditTargetLabel } from '@/lib/infra/collabboard/containerEditTargetLabel';
 import { sortSlidesByPresentationOrder } from '@/lib/infra/presentation/slideOrder';
 import { syncInvalidIndicesImmutable, validateFractionalIndices, getSceneVersion } from '@excalidraw/element';
 import { createSettledScenePropagation } from '@/lib/infra/drawing/settledScenePropagation';
@@ -3507,7 +3507,7 @@ export default function DrawingLayout({
           padlet={contextMenu.padlet}
           openTargets={contextMenuOpenTargets}
           onOpenTarget={(p) => { onPadletEdit?.(p); setContextMenu(null); }}
-          getOpenTargetLabel={getDrawingContainerEditTargetLabel}
+          getOpenTargetLabel={getContainerEditTargetLabel}
           hasPaste={!!clipboard}
           onEdit={(p) => { onPadletEdit?.(p); setContextMenu(null); }}
           onEditPadletAsPost={onEditPadletAsPost ? (p) => { onEditPadletAsPost(p); setContextMenu(null); } : undefined}

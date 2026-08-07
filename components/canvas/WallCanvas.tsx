@@ -35,6 +35,7 @@ import CardShell from '@/components/collabboard/shells/CardShell';
 import RowColumnContainerCard from '@/components/collabboard/RowColumnContainerCard';
 
 import { Padlet } from "@/types/collabboard";
+import { getContainerEditTargetLabel } from "@/lib/infra/collabboard/containerEditTargetLabel";
 
 // Removed local Padlet interface to use shared type
 
@@ -113,11 +114,10 @@ const SortablePadletCard: React.FC<SortablePadletProps> = ({
   onUpdateChildComments,
   onOpenDocument,
 }) => {
-  // Helper to generate a label for the open target submenu
-  const getOpenTargetLabel = (p: Padlet): string => {
-    const rawType = p.type || (p.metadata as any)?.kind || 'post';
-    return String(rawType).replace(/_/g, ' ');
-  };
+  // Label for the open-target submenu -- prefers the child's own title (set
+  // via getContainerEditTargetLabel) so a container holding many same-typed
+  // posts (ten notes, say) doesn't show "note" ten times.
+  const getOpenTargetLabel = getContainerEditTargetLabel;
 
   const {
     attributes,

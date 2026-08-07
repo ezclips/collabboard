@@ -26,6 +26,7 @@ import { useDroppable, useDraggable } from "@dnd-kit/core";
 import CardShell, { contrastIconColor } from "@/components/collabboard/shells/CardShell";
 import { getMeaningfulTitle } from "@/lib/infra/collabboard/postTitle";
 import { resolvePadletTitleStyle } from "@/lib/domain/canvas/captionStyle";
+import { getContainerEditTargetLabel } from "@/lib/infra/collabboard/containerEditTargetLabel";
 
 const TITLED_POST_TYPES = new Set(["text", "note", "todo", "table", "image"]);
 
@@ -346,7 +347,7 @@ export default function ColumnsCanvasRow({
                 disabled={!isEditable}
                 openTargets={isEditable ? openTargets : undefined}
                 onOpenTarget={isEditable ? onEditPost : undefined}
-                getOpenTargetLabel={(target) => target.type || "post"}
+                getOpenTargetLabel={getContainerEditTargetLabel}
                 onOpen={() => onOpenPost?.(post)}
                 onOpenInNewTab={() => onOpenInNewTab?.(post)}
                 onCopyLink={() => onCopyLink?.(post)}

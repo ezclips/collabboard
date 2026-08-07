@@ -6,6 +6,7 @@ import type { Padlet } from '@/types/collabboard';
 import RowColumnContainerCard from '@/components/collabboard/RowColumnContainerCard';
 import PostCardContent from '@/components/collabboard/PostCardContent';
 import { ColumnPostContextMenu } from '@/components/collabboard/menus/ColumnPostContextMenu';
+import { getContainerEditTargetLabel } from '@/lib/infra/collabboard/containerEditTargetLabel';
 import { getPadletMapLocation } from '@/lib/map/geojson';
 
 type PostPopupProps = {
@@ -196,6 +197,7 @@ export default function PostPopup({
       disabled={!canEdit}
       onEdit={canEdit && onEditContainer ? () => onEditContainer(post) : undefined}
       openTargets={orderedOpenTargets}
+      getOpenTargetLabel={getContainerEditTargetLabel}
       onOpenTarget={canEdit ? onEditPost : undefined}
       onDelete={canEdit && onDeleteContainer ? () => onDeleteContainer(post) : undefined}
       deleteLabel="Delete map pin"

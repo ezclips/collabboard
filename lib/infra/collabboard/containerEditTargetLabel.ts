@@ -1,6 +1,6 @@
-import { isPlaceholderTitle } from "../collabboard/postTitle";
+import { isPlaceholderTitle } from "./postTitle";
 
-type DrawingEditTargetLabelPadlet = {
+type EditTargetLabelPadlet = {
   title?: unknown;
   type?: unknown;
   metadata?: Record<string, unknown> | null;
@@ -33,8 +33,15 @@ const formatSemanticType = (value: unknown) => {
     .replace(/\b\w/g, (char) => char.toUpperCase());
 };
 
-export const getDrawingContainerEditTargetLabel = (
-  padlet: DrawingEditTargetLabelPadlet,
+// Label for a container child in any "which post do you want to edit?"
+// picker (context menu submenus across Freeform/Drawing/Columns/Grid/Wall).
+// A container can hold many same-typed children (ten notes, say) -- showing
+// the bare type ("note") for all of them makes the picker useless, so this
+// prefers the child's own title, then a few metadata fields that function as
+// a title for certain types (caption/linkTitle/todoTitle), and only falls
+// back to the formatted type name when none of those are set.
+export const getContainerEditTargetLabel = (
+  padlet: EditTargetLabelPadlet,
 ) => {
   const title = toText(padlet.title);
   const semanticSource = padlet.type ?? padlet.metadata?.kind;

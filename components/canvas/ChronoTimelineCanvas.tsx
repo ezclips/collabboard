@@ -7,6 +7,7 @@ import CardShell from '@/components/collabboard/shells/CardShell';
 import { ColorPickerContent } from '@/components/collabboard/ColorPicker';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { ColumnPostContextMenu } from '@/components/collabboard/menus/ColumnPostContextMenu';
+import { getContainerEditTargetLabel } from '@/lib/infra/collabboard/containerEditTargetLabel';
 import type { Padlet, ChronoMode } from '@/types/collabboard';
 
 interface TimelineCanvasProps {
@@ -463,7 +464,7 @@ export default function ChronoTimelineCanvas({
         disabled={!isEditable}
         openTargets={isEditable ? openTargets : undefined}
         onOpenTarget={isEditable ? onOpenTarget : undefined}
-        getOpenTargetLabel={(target) => target.type || 'post'}
+        getOpenTargetLabel={getContainerEditTargetLabel}
         onDuplicate={isEditable ? (() => onDuplicateContainer?.(container.id)) : undefined}
         onDelete={isEditable ? (() => onDeleteContainer?.(container.id)) : undefined}
         onRename={isEditable ? (() => handleOpenRename(container)) : undefined}
