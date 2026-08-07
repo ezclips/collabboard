@@ -230,6 +230,22 @@ export default function TableEditor({
         return {};
     });
 
+    // Title's own style, independent of any cell's -- `activeStyleTarget`
+    // tracks whether the Text style panel is currently formatting the
+    // title or the selected cell(s), same click-to-target pattern used for
+    // Todo's per-item color. Defaults to 'cell' so existing cell-styling
+    // behaviour is unchanged until the user actually clicks into the title.
+    const [titleStyle, setTitleStyle] = useState<CellStyle>(() => {
+        try {
+            if (initialContent) {
+                const parsed = JSON.parse(initialContent);
+                if (parsed.titleStyle) return parsed.titleStyle;
+            }
+        } catch { /* ignore */ }
+        return {};
+    });
+    const [activeStyleTarget, setActiveStyleTarget] = useState<'title' | 'cell'>('cell');
+
     // Context Menu state
     const [contextMenu, setContextMenu] = useState<{ x: number; y: number; isOpen: boolean } | null>(null);
 
@@ -419,6 +435,10 @@ export default function TableEditor({
 
     // Apply style to current selection
     const applyStyleToSelection = (style: CellStyle) => {
+        if (activeStyleTarget === 'title') {
+            setTitleStyle((prev) => ({ ...prev, ...style }));
+            return;
+        }
         if (!selectedCell && !selectionRange) return;
 
         setCellStyles((prev) => {
@@ -471,6 +491,7 @@ export default function TableEditor({
 
     // Handle cell mouse down (Start Selection)
     const handleCellMouseDown = (rowIndex: number, colIndex: number, e?: React.MouseEvent) => {
+        setActiveStyleTarget('cell');
         // Right click: focus cell only (don't start drag)
         if (e && e.button === 2) {
             if (!isCellSelected(rowIndex, colIndex)) {
@@ -665,7 +686,7 @@ export default function TableEditor({
     const handleSaveAndClose = () => {
         onSave({
             title,
-            content: JSON.stringify({ rows, columns, caption, comments, cellStyles, badgeColor }),
+            content: JSON.stringify({ rows, columns, caption, comments, cellStyles, badgeColor, titleStyle }),
             isCollapsed,
         });
         onClose();
@@ -784,14 +805,31 @@ export default function TableEditor({
                             style={{ minHeight: "200px", maxHeight: "450px", width: "400px" }}
                         >
                             {/* Header -- ghost "Title" placeholder until the user sets
-                                one, same pattern as Note/Todo/Comment/Document. */}
+                                one, same pattern as Note/Todo/Comment/Document.
+                                Styleable via the Text style panel, independent
+                                of any cell's style (see titleStyle above). */}
                             <div className="p-3 border-b">
                                 <input
                                     type="text"
                                     value={title}
                                     onChange={(e) => setTitle(e.target.value)}
+                                    onFocus={() => {
+                                        setActiveStyleTarget('title');
+                                        setSelectedCell(null);
+                                        setSelectionRange(null);
+                                        setActiveSubmenu('textStyle');
+                                    }}
                                     placeholder="Title"
-                                    className="w-full text-lg font-semibold text-gray-800 bg-transparent outline-none border-none placeholder:opacity-40 placeholder:font-normal"
+                                    className={`w-full text-lg font-semibold text-gray-800 bg-transparent outline-none border-b placeholder:opacity-40 placeholder:font-normal rounded px-1 -mx-1 ${
+                                        activeStyleTarget === 'title' ? 'border-blue-400 bg-blue-50/40' : 'border-transparent focus:border-blue-400'
+                                    }`}
+                                    style={{
+                                        color: titleStyle.color,
+                                        fontWeight: titleStyle.bold ? '700' : undefined,
+                                        fontStyle: titleStyle.italic ? 'italic' : undefined,
+                                        textDecoration: [titleStyle.underline && 'underline', titleStyle.strikethrough && 'line-through'].filter(Boolean).join(' ') || undefined,
+                                        textAlign: titleStyle.align,
+                                    }}
                                 />
                             </div>
 
@@ -1389,23 +1427,27 @@ export default function TableEditor({
                                 : selectionRange
                                     ? `${selectionRange.start.row}-${selectionRange.start.col}`
                                     : "";
-                            const currentCellStyle = cellStyles[key] || {};
+                            const isTitleTarget = activeStyleTarget === 'title';
+                            const currentCellStyle = isTitleTarget ? titleStyle : (cellStyles[key] || {});
                             const toggle = (field: "bold" | "italic" | "underline" | "strikethrough") => {
-                                if (!key) return;
+                                if (!isTitleTarget && !key) return;
                                 applyStyleToSelection({ [field]: !currentCellStyle[field] });
                             };
                             const cycleAlign = () => {
-                                if (!key) return;
+                                if (!isTitleTarget && !key) return;
                                 applyStyleToSelection({ align: nextTextAlign(currentCellStyle.align || "left") });
                             };
                             return (
                                 <>
+                                    <div className="px-3 pt-2 text-[10px] font-semibold text-gray-400 uppercase tracking-wider truncate">
+                                        {isTitleTarget ? 'Editing: Title' : 'Editing: Cell'}
+                                    </div>
                                     {/* Formatting buttons -- same grid every Text style
                                         panel shows, between the (absent here) font-size
                                         section and the color picker below. Bullet
                                         list/Numbered list/Code are inert: a single-line
-                                        cell input can't hold them. Align cycles the
-                                        cell's existing left/center/right style. */}
+                                        cell or title input can't hold them. Align cycles
+                                        the active target's left/center/right style. */}
                                     <div className="p-3 border-b border-gray-100">
                                         <TextFormattingButtons
                                             onBold={() => toggle("bold")}

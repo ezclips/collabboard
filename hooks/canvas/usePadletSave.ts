@@ -40,6 +40,7 @@ export type SaveNoteData = {
   reactions?: string[];
   badgeColor?: string;
   textColor?: string;
+  titleStyle?: Record<string, unknown>;
   detachedComments?: Array<{
     id: string;
     text: string;
@@ -377,6 +378,7 @@ export function usePadletSave(params: UsePadletSaveParams) {
       reactions: data.reactions,
       badgeColor: data.badgeColor,
       textColor: data.textColor,
+      titleStyle: data.titleStyle,
       detachedComments: data.detachedComments,
     });
     // Check if placement prompt is needed (grid/columns/wall layouts)

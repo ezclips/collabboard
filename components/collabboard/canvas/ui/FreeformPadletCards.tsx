@@ -18,6 +18,8 @@ import CardPreview from '@/components/collabboard/CardPreview';
 import CardEditor from '@/components/collabboard/CardEditor';
 import CommentPost from '@/components/collabboard/CommentPost';
 import TextStylePopup from '@/components/collabboard/editors/TextStylePopup';
+import { nextTextAlign } from '@/components/collabboard/editors/textAlignCycle';
+import { resolveCaptionStyle } from '@/lib/domain/canvas/captionStyle';
 import { CardColorPanel } from '@/components/collabboard/editors/CardColorPanel';
 import ReactionDisplay from '@/components/collabboard/editors/ReactionDisplay';
 import EmojiReactionPicker from '@/components/collabboard/editors/EmojiReactionPicker';
@@ -1410,8 +1412,8 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
               }}
             >
               {/* Top Strip — title centered, pencil right (same layout as
-                  the Note/Todo/Table/Table strip below: nothing shown until
-                  a real title is set, editable in place via double-click). */}
+                  the Note/Todo/Table strip below: nothing shown until a
+                  real title is set, editable in place via double-click). */}
               <div
                 className="w-full flex-shrink-0 grid items-center px-1.5"
                 style={{
@@ -1422,43 +1424,50 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
               >
                 <div />
                 <div className="flex items-center justify-center min-w-0">
-                  {editingNoteTitleId === padlet.id ? (
-                    <input
-                      type="text"
-                      value={noteTitleDraft}
-                      onChange={(e) => setNoteTitleDraft(e.target.value)}
-                      onBlur={() => {
-                        setEditingNoteTitleId(null);
-                        updatePadletTitle(padlet.id, noteTitleDraft.trim());
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') e.currentTarget.blur();
-                        if (e.key === 'Escape') setEditingNoteTitleId(null);
-                      }}
-                      onClick={(e) => e.stopPropagation()}
-                      onMouseDown={(e) => e.stopPropagation()}
-                      data-no-drag="true"
-                      placeholder="Title"
-                      className="text-xs font-semibold text-center bg-transparent border-b border-blue-400 outline-none px-0 py-0 w-24 placeholder:opacity-40"
-                      style={{ color: isStripVisible(padlet.metadata?.topStrip) ? contrastIconColor(padlet.metadata?.topStrip as string) : '#374151' }}
-                      autoFocus
-                    />
-                  ) : (() => {
-                    const imageTitle = getMeaningfulTitle(padlet.title, padlet.type);
-                    return (
-                      <span
-                        className="text-xs font-semibold text-center truncate cursor-pointer"
-                        style={{ color: isStripVisible(padlet.metadata?.topStrip) ? contrastIconColor(padlet.metadata?.topStrip as string) : '#374151' }}
-                        onDoubleClick={(e) => {
-                          e.stopPropagation();
-                          setEditingNoteTitleId(padlet.id);
-                          setNoteTitleDraft(imageTitle);
+                  {(() => {
+                    // The title's own chosen color wins over the generic
+                    // strip-contrast color -- otherwise a color picked in
+                    // the Text style panel never showed up on the canvas.
+                    const titleTextColor = (padlet.metadata as any)?.titleStyle?.color
+                      || (isStripVisible(padlet.metadata?.topStrip) ? contrastIconColor(padlet.metadata?.topStrip as string) : '#374151');
+                    return editingNoteTitleId === padlet.id ? (
+                      <input
+                        type="text"
+                        value={noteTitleDraft}
+                        onChange={(e) => setNoteTitleDraft(e.target.value)}
+                        onBlur={() => {
+                          setEditingNoteTitleId(null);
+                          updatePadletTitle(padlet.id, noteTitleDraft.trim());
                         }}
-                        title="Double-click to add a title"
-                      >
-                        {imageTitle}
-                      </span>
-                    );
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') e.currentTarget.blur();
+                          if (e.key === 'Escape') setEditingNoteTitleId(null);
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                        onMouseDown={(e) => e.stopPropagation()}
+                        data-no-drag="true"
+                        placeholder="Title"
+                        className="text-xs font-semibold text-center bg-transparent border-b border-blue-400 outline-none px-0 py-0 w-24 placeholder:opacity-40"
+                        style={{ color: titleTextColor }}
+                        autoFocus
+                      />
+                    ) : (() => {
+                      const imageTitle = getMeaningfulTitle(padlet.title, padlet.type);
+                      return (
+                        <span
+                          className="text-xs font-semibold text-center truncate cursor-pointer"
+                          style={{ color: titleTextColor }}
+                          onDoubleClick={(e) => {
+                            e.stopPropagation();
+                            setEditingNoteTitleId(padlet.id);
+                            setNoteTitleDraft(imageTitle);
+                          }}
+                          title="Double-click to add a title"
+                        >
+                          {imageTitle}
+                        </span>
+                      );
+                    })();
                   })()}
                 </div>
                 {canUseFreeformEditButton && (
@@ -1562,13 +1571,18 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                 isEditing={(captionPopupPadletId === padlet.id || textStylePadletId === padlet.id) && !imageToolbarPadletId}
                 color={padlet.metadata?.captionStyle?.color}
                 backgroundColor={padlet.metadata?.captionStyle?.backgroundColor}
-                textStyle={{
-                  fontSize: padlet.metadata?.captionStyle?.fontSize,
-                  fontWeight: padlet.metadata?.captionStyle?.fontWeight,
-                  fontStyle: padlet.metadata?.captionStyle?.fontStyle,
-                  fontFamily: padlet.metadata?.captionStyle?.fontFamily,
-                  lineHeight: padlet.metadata?.captionStyle?.lineHeight
-                }}
+                textStyle={(() => {
+                  const resolved = resolveCaptionStyle(padlet.metadata?.captionStyle);
+                  return {
+                    fontSize: resolved.fontSize,
+                    fontWeight: resolved.fontWeight,
+                    fontStyle: resolved.fontStyle,
+                    fontFamily: resolved.fontFamily,
+                    lineHeight: resolved.lineHeight,
+                    textDecoration: resolved.textDecoration,
+                    textAlign: resolved.textAlign,
+                  };
+                })()}
                 onChange={(next) => setEditingCaption(next)}
                 onCommit={async () => {
                   try {
@@ -3351,8 +3365,31 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                           {padlet.title}
                         </span>
                       )
-                    ) : (padlet.type === 'text' || (padlet.type as string) === 'note' || padlet.type === 'todo' || padlet.type === 'table' || padlet.type === 'image') ? (
-                      editingNoteTitleId === padlet.id ? (
+                    ) : (padlet.type === 'text' || (padlet.type as string) === 'note' || padlet.type === 'todo' || padlet.type === 'table' || padlet.type === 'image') ? (() => {
+                      // The title's own chosen color (Todo stores it on the
+                      // shared captionStyle since that field is title-only;
+                      // every other type keeps a dedicated titleStyle) wins
+                      // over the generic strip-contrast color -- otherwise a
+                      // color picked in the Text style panel never actually
+                      // showed up on the canvas card itself.
+                      // Table stores its whole state (including titleStyle)
+                      // as a JSON blob in `content`, not in `metadata` like
+                      // every other type -- has to be parsed separately.
+                      const tableTitleColor = (() => {
+                        if (padlet.type !== 'table') return undefined;
+                        try {
+                          return JSON.parse(padlet.content || '{}')?.titleStyle?.color;
+                        } catch {
+                          return undefined;
+                        }
+                      })();
+                      const titleOwnColor = padlet.type === 'todo'
+                        ? padlet.metadata?.captionStyle?.color
+                        : padlet.type === 'table'
+                          ? tableTitleColor
+                          : (padlet.metadata as any)?.titleStyle?.color;
+                      const titleTextColor = titleOwnColor || freeformTitleColor;
+                      return editingNoteTitleId === padlet.id ? (
                         <input
                           type="text"
                           value={noteTitleDraft}
@@ -3370,7 +3407,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                           data-no-drag="true"
                           placeholder="Title"
                           className="text-xs font-semibold text-center bg-transparent border-b border-blue-400 outline-none px-0 py-0 w-24 placeholder:opacity-40"
-                          style={{ color: freeformTitleColor }}
+                          style={{ color: titleTextColor }}
                           autoFocus
                         />
                       ) : (() => {
@@ -3383,7 +3420,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                         return (
                           <span
                             className="text-xs font-semibold text-center truncate cursor-pointer"
-                            style={{ color: freeformTitleColor }}
+                            style={{ color: titleTextColor }}
                             onDoubleClick={(e) => {
                               e.stopPropagation();
                               setEditingNoteTitleId(padlet.id);
@@ -3394,8 +3431,8 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                             {noteTitle}
                           </span>
                         );
-                      })()
-                    ) : null}
+                      })();
+                    })() : null}
                   </div>
                   {/* Right: pencil hover-only */}
                   <div className="flex items-center pr-1.5">
@@ -5708,18 +5745,12 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                     className={`w-full text-sm font-semibold bg-transparent outline-none border-b placeholder:opacity-40 placeholder:font-normal rounded px-1 -mx-1 ${
                       activeImageStyleTarget === 'title' ? 'border-blue-400 bg-blue-50/40' : 'border-transparent focus:border-blue-400'
                     }`}
-                    style={{
-                      color: activeImageToolbarPadlet.metadata?.titleStyle?.color
-                        || (isStripVisible(activeImageToolbarPadlet.metadata?.topStrip)
-                          ? contrastIconColor(activeImageToolbarPadlet.metadata?.topStrip as string)
-                          : '#374151'),
-                      backgroundColor: activeImageToolbarPadlet.metadata?.titleStyle?.backgroundColor,
-                      fontSize: activeImageToolbarPadlet.metadata?.titleStyle?.fontSize,
-                      fontWeight: activeImageToolbarPadlet.metadata?.titleStyle?.fontWeight,
-                      fontStyle: activeImageToolbarPadlet.metadata?.titleStyle?.fontStyle,
-                      fontFamily: activeImageToolbarPadlet.metadata?.titleStyle?.fontFamily,
-                      lineHeight: activeImageToolbarPadlet.metadata?.titleStyle?.lineHeight,
-                    }}
+                    style={resolveCaptionStyle(
+                      activeImageToolbarPadlet.metadata?.titleStyle,
+                      isStripVisible(activeImageToolbarPadlet.metadata?.topStrip)
+                        ? contrastIconColor(activeImageToolbarPadlet.metadata?.topStrip as string)
+                        : '#374151'
+                    )}
                   />
                 </div>
                 {/* Image */}
@@ -5771,6 +5802,10 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                     color={activeImageToolbarPadlet.metadata?.captionStyle?.color}
                     backgroundColor={activeImageToolbarPadlet.metadata?.captionStyle?.backgroundColor}
                     textStyle={{
+                      ...(() => {
+                        const resolved = resolveCaptionStyle(activeImageToolbarPadlet.metadata?.captionStyle);
+                        return { textDecoration: resolved.textDecoration, textAlign: resolved.textAlign };
+                      })(),
                       fontSize: activeImageToolbarPadlet.metadata?.captionStyle?.fontSize,
                       fontWeight: activeImageToolbarPadlet.metadata?.captionStyle?.fontWeight,
                       fontStyle: activeImageToolbarPadlet.metadata?.captionStyle?.fontStyle,
@@ -5815,7 +5850,14 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                   // whichever one activeImageStyleTarget currently points
                   // at, same per-target pattern as Todo's title/task color.
                   const styleKey = activeImageStyleTarget === 'title' ? 'titleStyle' : 'captionStyle';
-                  const activeStyle = activeImageToolbarPadlet.metadata?.[styleKey] || {};
+                  const activeStyle: NonNullable<typeof activeImageToolbarPadlet.metadata>['captionStyle'] = activeImageToolbarPadlet.metadata?.[styleKey] || {};
+                  const writeActiveStyle = (updates: typeof activeStyle) => {
+                    const nextMeta = { ...(activeImageToolbarPadlet.metadata || {}), [styleKey]: { ...activeStyle, ...updates } };
+                    setPadlets((prev) => prev.map((p) => (p.id === activeImageToolbarPadlet.id ? { ...p, metadata: nextMeta } : p)));
+                    commitPadletMeta(activeImageToolbarPadlet.id, nextMeta);
+                  };
+                  const isActiveBold = activeStyle.fontWeight === '700' || activeStyle.fontWeight === 'bold';
+                  const isActiveItalic = activeStyle.fontStyle === 'italic';
                   return (
                     <TextStylePopup
                       isOpen={true}
@@ -5834,24 +5876,23 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                             default: return { ...baseStyle, heading: 'normal', fontSize: '14px', fontWeight: '400', fontStyle: 'normal', fontFamily: undefined, lineHeight: '1.4' };
                           }
                         })();
-                        const nextMeta = { ...(activeImageToolbarPadlet.metadata || {}), [styleKey]: nextStyle };
-                        setPadlets((prev) => prev.map((p) => (p.id === activeImageToolbarPadlet.id ? { ...p, metadata: nextMeta } : p)));
-                        commitPadletMeta(activeImageToolbarPadlet.id, nextMeta);
+                        writeActiveStyle(nextStyle);
                       }}
-                      onSelectColor={(color) => {
-                        const nextMeta = { ...(activeImageToolbarPadlet.metadata || {}), [styleKey]: { ...activeStyle, color } };
-                        setPadlets((prev) => prev.map((p) => (p.id === activeImageToolbarPadlet.id ? { ...p, metadata: nextMeta } : p)));
-                        commitPadletMeta(activeImageToolbarPadlet.id, nextMeta);
-                      }}
-                      onSelectHighlight={(color) => {
-                        const nextMeta = { ...(activeImageToolbarPadlet.metadata || {}), [styleKey]: { ...activeStyle, backgroundColor: color } };
-                        setPadlets((prev) => prev.map((p) => (p.id === activeImageToolbarPadlet.id ? { ...p, metadata: nextMeta } : p)));
-                        commitPadletMeta(activeImageToolbarPadlet.id, nextMeta);
-                      }}
+                      onSelectColor={(color) => writeActiveStyle({ color })}
+                      onSelectHighlight={(color) => writeActiveStyle({ backgroundColor: color })}
                       currentHeading={activeStyle.heading || 'normal'}
                       currentColor={activeStyle.color}
                       currentHighlight={activeStyle.backgroundColor}
                       hideCloseButton
+                      onBold={() => writeActiveStyle({ fontWeight: isActiveBold ? '400' : '700' })}
+                      onItalic={() => writeActiveStyle({ fontStyle: isActiveItalic ? 'normal' : 'italic' })}
+                      onUnderline={() => writeActiveStyle({ underline: !activeStyle.underline })}
+                      onStrikethrough={() => writeActiveStyle({ strikethrough: !activeStyle.strikethrough })}
+                      onAlign={() => writeActiveStyle({ textAlign: nextTextAlign(activeStyle.textAlign || 'left') })}
+                      isBold={isActiveBold}
+                      isItalic={isActiveItalic}
+                      isUnderline={!!activeStyle.underline}
+                      isStrikethrough={!!activeStyle.strikethrough}
                     />
                   );
                 })()}

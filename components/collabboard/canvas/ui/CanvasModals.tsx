@@ -189,6 +189,7 @@ export default function CanvasModals({
           initialDetachedComments={padletToEdit?.metadata?.detachedComments || EMPTY_COMMENTS}
           initialBadgeColor={padletToEdit?.metadata?.badgeColor || '#facc15'}
           initialTextColor={padletToEdit?.metadata?.textColor}
+          initialTitleStyle={padletToEdit?.metadata?.titleStyle as any}
           onSave={saveNote}
         />
       </div>

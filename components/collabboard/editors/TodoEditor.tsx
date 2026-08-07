@@ -9,7 +9,12 @@ import EmojiReactionPicker from './EmojiReactionPicker';
 import { CAPTION_STYLE_PRESETS, resolveCaptionStyle, type CaptionHeading, type CaptionStyle } from '@/lib/domain/canvas/captionStyle';
 import { nextTextAlign } from './textAlignCycle';
 
-interface Task {
+// Extends CaptionStyle so a task carries the exact same style fields as the
+// title (color/heading/bold/italic/underline/strikethrough/align) -- each
+// one is a per-task override, independent of every other task and of the
+// title's own captionStyle. `color` is also read by presentation-mode's
+// slide renderer for the completed-task marker fill (PresentationPadletCard.tsx).
+interface Task extends Partial<CaptionStyle> {
     id: string;
     text: string;
     completed: boolean;
@@ -18,7 +23,6 @@ interface Task {
     reminder?: string;
     assignee?: string;
     indentLevel?: number; // 0, 1, or 2 - for sub-task hierarchy
-    color?: string; // Per-task text color override -- falls back to captionStyle.color when unset
 }
 
 interface PadletComment {
@@ -271,53 +275,50 @@ export default function TodoEditor({
         setCaptionStyle((prev) => ({ ...prev, ...updates }));
     };
 
-    // Text color is per-item (title or one task), unlike the rest of
-    // captionStyle which stays shared -- writes to whichever text was last
-    // clicked instead of always recoloring the whole card.
-    const writeActiveTargetColor = (color: string) => {
+    // Every style attribute (heading/color/highlight/bold/italic/underline/
+    // strikethrough/align) is per-item -- title or exactly one task -- not
+    // shared across the whole card. Writes go to whichever text was last
+    // clicked; a task with no override of its own falls back to
+    // resolveCaptionStyle's own fixed defaults, never to the title's style,
+    // so styling the title can never bleed into an untouched task.
+    const writeActiveTargetStyle = (updates: Partial<CaptionStyle>) => {
         if (activeStyleTargetId === 'title') {
-            writeCaptionStyle({ color });
+            writeCaptionStyle(updates);
         } else {
-            updateTask(activeStyleTargetId, { color });
+            updateTask(activeStyleTargetId, updates);
         }
     };
-    const activeTargetColor =
+    const activeTargetStyle: Partial<CaptionStyle> =
         activeStyleTargetId === 'title'
-            ? captionStyle.color
-            : tasks.find((task) => task.id === activeStyleTargetId)?.color;
+            ? captionStyle
+            : (tasks.find((task) => task.id === activeStyleTargetId) ?? {});
     // Shown at the top of the Text style panel so it's never ambiguous which
-    // text a color pick is about to apply to (color is per-item; everything
-    // else in the panel stays shared across the whole card).
+    // text a style pick is about to apply to.
     const activeTargetLabel =
         activeStyleTargetId === 'title'
             ? (todoTitle || 'Title')
             : tasks.find((task) => task.id === activeStyleTargetId)?.text || 'Task';
 
-    const applyCaptionPreset = (level: CaptionHeading) => {
-        const selectedPreset = level === 'callout' && captionStyle.backgroundColor
-            ? { ...CAPTION_STYLE_PRESETS.callout, backgroundColor: captionStyle.backgroundColor }
+    const applyActiveTargetHeading = (level: CaptionHeading) => {
+        const selectedPreset = level === 'callout' && activeTargetStyle.backgroundColor
+            ? { ...CAPTION_STYLE_PRESETS.callout, backgroundColor: activeTargetStyle.backgroundColor }
             : CAPTION_STYLE_PRESETS[level];
-        setCaptionStyle((prev) => ({ ...prev, ...selectedPreset }));
+        writeActiveTargetStyle(selectedPreset);
     };
 
-    // Bold/Italic/Underline/Strikethrough (TextFormattingButtons, shared
-    // across every Text style panel) toggle on top of whichever heading
-    // preset is active, same layering as a TipTap mark over a paragraph.
-    const isCaptionBold = captionStyle.fontWeight === '700' || captionStyle.fontWeight === 'bold';
-    const isCaptionItalic = captionStyle.fontStyle === 'italic';
-    const toggleCaptionBold = () => writeCaptionStyle({ fontWeight: isCaptionBold ? '400' : '700' });
-    const toggleCaptionItalic = () => writeCaptionStyle({ fontStyle: isCaptionItalic ? 'normal' : 'italic' });
-    const toggleCaptionUnderline = () => writeCaptionStyle({ underline: !captionStyle.underline });
-    const toggleCaptionStrikethrough = () => writeCaptionStyle({ strikethrough: !captionStyle.strikethrough });
-    const cycleCaptionAlign = () => writeCaptionStyle({ textAlign: nextTextAlign(captionStyle.textAlign || 'left') });
+    // Bold/Italic/Underline/Strikethrough/Align (TextFormattingButtons,
+    // shared component across every Text style panel) toggle on top of
+    // whichever heading preset is active, same layering as a TipTap mark
+    // over a paragraph -- but scoped to the active target, same as color.
+    const isActiveTargetBold = activeTargetStyle.fontWeight === '700' || activeTargetStyle.fontWeight === 'bold';
+    const isActiveTargetItalic = activeTargetStyle.fontStyle === 'italic';
+    const toggleActiveTargetBold = () => writeActiveTargetStyle({ fontWeight: isActiveTargetBold ? '400' : '700' });
+    const toggleActiveTargetItalic = () => writeActiveTargetStyle({ fontStyle: isActiveTargetItalic ? 'normal' : 'italic' });
+    const toggleActiveTargetUnderline = () => writeActiveTargetStyle({ underline: !activeTargetStyle.underline });
+    const toggleActiveTargetStrikethrough = () => writeActiveTargetStyle({ strikethrough: !activeTargetStyle.strikethrough });
+    const cycleActiveTargetAlign = () => writeActiveTargetStyle({ textAlign: nextTextAlign(activeTargetStyle.textAlign || 'left') });
 
-    const resolvedTextStyle = resolveCaptionStyle(captionStyle);
-    // Tasks with no color of their own fall back to this fixed default --
-    // NOT to resolvedTextStyle.color, which is the title's own color.
-    // Sharing that fallback used to mean picking a title color silently
-    // recolored every task that hadn't been individually overridden yet;
-    // title and task-default colors must stay fully independent.
-    const DEFAULT_TASK_TEXT_COLOR = '#1F2937';
+    const resolvedTitleStyle = resolveCaptionStyle(captionStyle);
 
     const activeComment = comments.find((comment) => comment.id === activeCommentId) || null;
 
@@ -674,7 +675,7 @@ export default function TodoEditor({
                                     activeStyleTargetId === 'title' ? 'border-blue-400 bg-blue-50/40' : 'border-transparent focus:border-blue-400'
                                 }`}
                                 placeholder="Title"
-                                style={resolvedTextStyle}
+                                style={resolvedTitleStyle}
                             />
 
                             {/* Task list */}
@@ -717,7 +718,7 @@ export default function TodoEditor({
                                                 className={`text-sm flex-1 break-words cursor-text rounded ${task.completed ? 'line-through text-gray-400' : 'text-gray-800'} ${
                                                     activeStyleTargetId === task.id ? 'ring-1 ring-blue-400' : ''
                                                 }`}
-                                                style={task.completed ? undefined : { ...resolvedTextStyle, color: task.color || DEFAULT_TASK_TEXT_COLOR }}
+                                                style={task.completed ? undefined : resolveCaptionStyle(task)}
                                             >
                                                 {task.text}
                                             </span>
@@ -1034,22 +1035,22 @@ export default function TodoEditor({
                             <TextStylePopup
                                 isOpen={true}
                                 onOpenChange={(open) => setShowTextStylePanel(open)}
-                                onSelectHeading={applyCaptionPreset}
-                                onSelectColor={writeActiveTargetColor}
-                                onSelectHighlight={(color) => writeCaptionStyle({ backgroundColor: color })}
-                                currentHeading={captionStyle.heading || 'normal'}
-                                currentColor={activeTargetColor}
-                                currentHighlight={captionStyle.backgroundColor}
+                                onSelectHeading={applyActiveTargetHeading}
+                                onSelectColor={(color) => writeActiveTargetStyle({ color })}
+                                onSelectHighlight={(color) => writeActiveTargetStyle({ backgroundColor: color })}
+                                currentHeading={activeTargetStyle.heading || 'normal'}
+                                currentColor={activeTargetStyle.color}
+                                currentHighlight={activeTargetStyle.backgroundColor}
                                 hideCloseButton
-                                onBold={toggleCaptionBold}
-                                onItalic={toggleCaptionItalic}
-                                onUnderline={toggleCaptionUnderline}
-                                onStrikethrough={toggleCaptionStrikethrough}
-                                onAlign={cycleCaptionAlign}
-                                isBold={isCaptionBold}
-                                isItalic={isCaptionItalic}
-                                isUnderline={!!captionStyle.underline}
-                                isStrikethrough={!!captionStyle.strikethrough}
+                                onBold={toggleActiveTargetBold}
+                                onItalic={toggleActiveTargetItalic}
+                                onUnderline={toggleActiveTargetUnderline}
+                                onStrikethrough={toggleActiveTargetStrikethrough}
+                                onAlign={cycleActiveTargetAlign}
+                                isBold={isActiveTargetBold}
+                                isItalic={isActiveTargetItalic}
+                                isUnderline={!!activeTargetStyle.underline}
+                                isStrikethrough={!!activeTargetStyle.strikethrough}
                             />
                         </div>
                     )}

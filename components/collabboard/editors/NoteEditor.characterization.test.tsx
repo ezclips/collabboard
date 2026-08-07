@@ -97,7 +97,7 @@ describe('NoteEditor current save-on-close lifecycle (characterized, not correct
     });
     const keys = Object.keys(onSave.mock.calls[0][0]).sort();
     expect(keys).toEqual(
-      ['badgeColor', 'cardColor', 'content', 'detachedComments', 'reactions', 'textColor', 'title', 'topStrip'].sort(),
+      ['badgeColor', 'cardColor', 'content', 'detachedComments', 'reactions', 'textColor', 'title', 'titleStyle', 'topStrip'].sort(),
     );
     expect(keys).not.toContain('metadata');
   });

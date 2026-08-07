@@ -3,13 +3,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { EditorContent, useSharedTipTapEditor } from './useSharedTipTapEditor';
 import PostEditorShell, { useShellPanels, useShellSelection } from './PostEditorShell';
-import { cycleEditorTextAlign } from './textAlignCycle';
+import { cycleEditorTextAlign, nextTextAlign } from './textAlignCycle';
 import TextStylePopup from './TextStylePopup';
 import EmojiReactionPicker from './EmojiReactionPicker';
 import LinkPopup from './LinkPopup';
 import CommentPopup from './CommentPopup';
 import { Palette, PenTool, X, Strikethrough, Trash2 } from 'lucide-react';
 import { ColorPickerContent } from '../ColorPicker';
+import { CAPTION_STYLE_PRESETS, resolveCaptionStyle, type CaptionHeading, type CaptionStyle } from '@/lib/domain/canvas/captionStyle';
 
 const BACKGROUND_COLORS = [
   "#ffffff", "#f3f4f6", "#fee2e2", "#ffedd5", "#fef3c7",
@@ -60,6 +61,7 @@ interface NoteEditorProps {
   initialDetachedComments?: DetachedCommentData[];
   initialBadgeColor?: string;
   initialTextColor?: string;
+  initialTitleStyle?: CaptionStyle;
   onSave: (data: {
     title?: string;
     content: string;
@@ -69,6 +71,7 @@ interface NoteEditorProps {
     reactions?: string[];
     badgeColor?: string;
     detachedComments?: DetachedCommentData[];
+    titleStyle?: CaptionStyle;
   }) => void;
   onClose: () => void;
   isOpen: boolean;
@@ -86,12 +89,24 @@ export default function NoteEditor({
   initialDetachedComments = EMPTY_DETACHED_COMMENTS,
   initialBadgeColor = '#facc15',
   initialTextColor = '#1F2937',
+  initialTitleStyle,
   onSave,
   onClose,
   isOpen,
 }: NoteEditorProps) {
   const panels = useShellPanels();
   const [title, setTitle] = useState(initialTitle);
+  // Title's own style, independent of the TipTap content's rich-text marks
+  // -- `activeStyleTarget` tracks whether the Text style panel is currently
+  // formatting the title or the note body, same click-to-target pattern as
+  // Todo's per-item color. Defaults to 'content' so existing behaviour
+  // (panel always acted on the editor selection) is unchanged until the
+  // user actually clicks into the title.
+  const [titleStyle, setTitleStyle] = useState<CaptionStyle>(initialTitleStyle || {});
+  const [activeStyleTarget, setActiveStyleTarget] = useState<'title' | 'content'>('content');
+  useEffect(() => {
+    setTitleStyle(initialTitleStyle || {});
+  }, [initialTitleStyle]);
   const [cardColor, setCardColor] = useState('#FFFFFF');
   const [topStrip, setTopStrip] = useState<string | null>(null);
   const [textColor, setTextColor] = useState(initialTextColor);
@@ -219,15 +234,42 @@ export default function NoteEditor({
 
   const { hasSelection, lastSelection } = useShellSelection(editor);
 
-  // Text formatting handlers
-  const handleBold = () => editor?.chain().focus().toggleBold().run();
-  const handleItalic = () => editor?.chain().focus().toggleItalic().run();
-  const handleStrikethrough = () => editor?.chain().focus().toggleStrike().run();
-  const handleUnderline = () => editor?.chain().focus().toggleUnderline().run();
+  // Clicking into the TipTap content hands the Text style panel's target
+  // back to 'content' -- without this, formatting the title once would
+  // permanently steal every subsequent panel action away from the note body.
+  useEffect(() => {
+    if (!editor) return;
+    const handleFocus = () => setActiveStyleTarget('content');
+    editor.on('focus', handleFocus);
+    return () => {
+      editor.off('focus', handleFocus);
+    };
+  }, [editor]);
+
+  const writeTitleStyle = (updates: Partial<CaptionStyle>) => {
+    setTitleStyle((prev) => ({ ...prev, ...updates }));
+  };
+
+  // Text formatting handlers -- act on the title's own style when it's the
+  // active target, otherwise unchanged: act on the TipTap selection.
+  const handleBold = () => activeStyleTarget === 'title'
+    ? writeTitleStyle({ fontWeight: (titleStyle.fontWeight === '700' || titleStyle.fontWeight === 'bold') ? '400' : '700' })
+    : editor?.chain().focus().toggleBold().run();
+  const handleItalic = () => activeStyleTarget === 'title'
+    ? writeTitleStyle({ fontStyle: titleStyle.fontStyle === 'italic' ? 'normal' : 'italic' })
+    : editor?.chain().focus().toggleItalic().run();
+  const handleStrikethrough = () => activeStyleTarget === 'title'
+    ? writeTitleStyle({ strikethrough: !titleStyle.strikethrough })
+    : editor?.chain().focus().toggleStrike().run();
+  const handleUnderline = () => activeStyleTarget === 'title'
+    ? writeTitleStyle({ underline: !titleStyle.underline })
+    : editor?.chain().focus().toggleUnderline().run();
   const handleBulletList = () => editor?.chain().focus().toggleBulletList().run();
   const handleOrderedList = () => editor?.chain().focus().toggleOrderedList().run();
   const handleCode = () => editor?.chain().focus().toggleCodeBlock().run();
-  const handleAlign = () => editor && cycleEditorTextAlign(editor);
+  const handleAlign = () => activeStyleTarget === 'title'
+    ? writeTitleStyle({ textAlign: nextTextAlign(titleStyle.textAlign || 'left') })
+    : (editor && cycleEditorTextAlign(editor));
 
   const handleLink = () => {
     if (!editor) return;
@@ -497,6 +539,13 @@ export default function NoteEditor({
   };
 
   const handleSelectHeading = (level: string) => {
+    if (activeStyleTarget === 'title') {
+      const preset = level === 'callout' && titleStyle.backgroundColor
+        ? { ...CAPTION_STYLE_PRESETS.callout, backgroundColor: titleStyle.backgroundColor }
+        : CAPTION_STYLE_PRESETS[level as CaptionHeading];
+      if (preset) writeTitleStyle(preset);
+      return;
+    }
     if (!editor) return;
     setCurrentHeading(level);
 
@@ -541,11 +590,19 @@ export default function NoteEditor({
   };
 
   const handleSelectTextColor = (color: string) => {
+    if (activeStyleTarget === 'title') {
+      writeTitleStyle({ color });
+      return;
+    }
     setCurrentTextColor(color);
     editor?.chain().focus().setColor(color).run();
   };
 
   const handleSelectHighlight = (color: string) => {
+    if (activeStyleTarget === 'title') {
+      writeTitleStyle({ backgroundColor: color === 'transparent' ? undefined : color });
+      return;
+    }
     setCurrentHighlight(color);
     if (color === 'transparent') {
       editor?.chain().focus().unsetHighlight().run();
@@ -566,6 +623,7 @@ export default function NoteEditor({
       reactions: reactions.length > 0 ? reactions : undefined,
       badgeColor,
       detachedComments: detachedComments.length > 0 ? detachedComments : undefined,
+      titleStyle: Object.keys(titleStyle).length > 0 ? titleStyle : undefined,
     });
     onClose();
   };
@@ -683,15 +741,23 @@ export default function NoteEditor({
                 )}
 
                 {/* Title -- ghost "Title" placeholder until the user sets
-                    one, matching Comment/Document's editor title fields. */}
+                    one, matching Comment/Document's editor title fields.
+                    Styleable via the Text style panel, independent of the
+                    note body's own TipTap marks (see titleStyle above). */}
                 <div className="px-3 pt-3">
                   <input
                     type="text"
                     value={title}
                     onChange={(e) => setTitle(e.target.value)}
+                    onFocus={() => {
+                      setActiveStyleTarget('title');
+                      if (!panels.open.textStyle) panels.openPanel('textStyle');
+                    }}
                     placeholder="Title"
-                    className="w-full text-sm font-semibold bg-transparent outline-none border-none placeholder:opacity-40 placeholder:font-normal"
-                    style={{ color: textColor }}
+                    className={`w-full text-sm font-semibold bg-transparent outline-none border-b placeholder:opacity-40 placeholder:font-normal rounded px-1 -mx-1 ${
+                      activeStyleTarget === 'title' ? 'border-blue-400 bg-blue-50/40' : 'border-transparent focus:border-blue-400'
+                    }`}
+                    style={resolveCaptionStyle(titleStyle, textColor)}
                   />
                 </div>
 
@@ -958,31 +1024,34 @@ export default function NoteEditor({
             >
               <X className="w-3 h-3 text-gray-400" />
             </button>
+            <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-2 truncate pr-4">
+              {activeStyleTarget === 'title' ? 'Editing: Title' : 'Editing: Note text'}
+            </div>
             <TextStylePopup
               isOpen={true}
               onOpenChange={(open) => (open ? panels.openPanel('textStyle') : panels.closePanel('textStyle'))}
               onSelectHeading={handleSelectHeading}
               onSelectColor={handleSelectTextColor}
               onSelectHighlight={handleSelectHighlight}
-              currentHeading={currentHeading}
-              currentColor={currentTextColor}
-              currentHighlight={currentHighlight}
+              currentHeading={activeStyleTarget === 'title' ? (titleStyle.heading || 'normal') : currentHeading}
+              currentColor={activeStyleTarget === 'title' ? titleStyle.color : currentTextColor}
+              currentHighlight={activeStyleTarget === 'title' ? titleStyle.backgroundColor : currentHighlight}
               hideCloseButton
               onBold={handleBold}
               onItalic={handleItalic}
               onStrikethrough={handleStrikethrough}
               onUnderline={handleUnderline}
-              onBulletList={handleBulletList}
-              onOrderedList={handleOrderedList}
-              onCode={handleCode}
+              onBulletList={activeStyleTarget === 'title' ? undefined : handleBulletList}
+              onOrderedList={activeStyleTarget === 'title' ? undefined : handleOrderedList}
+              onCode={activeStyleTarget === 'title' ? undefined : handleCode}
               onAlign={handleAlign}
-              isBold={editor.isActive('bold')}
-              isItalic={editor.isActive('italic')}
-              isStrikethrough={editor.isActive('strike')}
-              isUnderline={editor.isActive('underline')}
-              isBulletList={editor.isActive('bulletList')}
-              isOrderedList={editor.isActive('orderedList')}
-              isCode={editor.isActive('codeBlock')}
+              isBold={activeStyleTarget === 'title' ? (titleStyle.fontWeight === '700' || titleStyle.fontWeight === 'bold') : editor.isActive('bold')}
+              isItalic={activeStyleTarget === 'title' ? titleStyle.fontStyle === 'italic' : editor.isActive('italic')}
+              isStrikethrough={activeStyleTarget === 'title' ? !!titleStyle.strikethrough : editor.isActive('strike')}
+              isUnderline={activeStyleTarget === 'title' ? !!titleStyle.underline : editor.isActive('underline')}
+              isBulletList={activeStyleTarget === 'title' ? false : editor.isActive('bulletList')}
+              isOrderedList={activeStyleTarget === 'title' ? false : editor.isActive('orderedList')}
+              isCode={activeStyleTarget === 'title' ? false : editor.isActive('codeBlock')}
             />
           </div>
         )}
