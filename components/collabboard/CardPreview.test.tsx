@@ -109,7 +109,7 @@ function metadata(value: Record<string, unknown>): Padlet['metadata'] {
 }
 
 function titleDiv(markup: string): string {
-  const match = markup.match(/<div class="text-center text-xs font-semibold" style="[^"]*">Clipart caption<\/div>/);
+  const match = markup.match(/<span class="text-xs font-semibold text-center truncate" style="[^"]*">Clipart caption<\/span>/);
   expect(match).toBeTruthy();
   return match?.[0] ?? '';
 }
@@ -131,7 +131,7 @@ describe('CardPreview captionStyle reader legacy compatibility', () => {
     const rendered = renderCard(padlet({ metadata: metadata({ captionStyle }) }));
 
     expect(rendered).toBe(legacy);
-    expect(titleDiv(rendered)).toContain('class="text-center text-xs font-semibold"');
+    expect(titleDiv(rendered)).toContain('class="text-xs font-semibold text-center truncate"');
     expect(style(rendered)).toBe('color:#334155');
   });
 

@@ -26,7 +26,7 @@ import { useDroppable, useDraggable } from "@dnd-kit/core";
 import CardShell from "@/components/collabboard/shells/CardShell";
 import { getContainerEditTargetLabel } from "@/lib/infra/collabboard/containerEditTargetLabel";
 
-const TITLED_POST_TYPES = new Set(["text", "note", "todo", "table", "image"]);
+const TITLED_POST_TYPES = new Set(["text", "note", "todo", "table", "image", "card"]);
 
 const isContainerPadlet = (p: Padlet) =>
   p.type === "container" ||

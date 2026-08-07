@@ -393,24 +393,24 @@ describe('follow-up correction: Document Freeform card has square corners and a 
     expect(realSpan.className).not.toContain('opacity-40');
   });
 
-  it('the Clipart branch shows the same ghost "Title" placeholder below its icon when unset, and the real title in full opacity otherwise', () => {
+  it('the Clipart branch shows its title in the same top-strip bar as every other post type (not floating below the icon), with the same ghost "Title" placeholder when unset', () => {
     const clip = (over: Partial<Padlet> = {}) =>
       doc({ metadata: { svgUrl: 'https://example.com/witch.svg' }, ...over });
 
     const empty = mount(<CardPreview padlet={clip({ title: '' })} isSelected={false} />);
-    const emptyDiv = empty.querySelector('div.text-center.text-xs.font-semibold') as HTMLElement;
-    expect(emptyDiv.textContent).toBe('Title');
-    expect(emptyDiv.className).toContain('opacity-40');
+    const emptySpan = empty.querySelector('span.text-xs.font-semibold.text-center.truncate') as HTMLElement;
+    expect(emptySpan.textContent).toBe('Title');
+    expect(emptySpan.className).toContain('opacity-40');
 
     const legacyDefault = mount(<CardPreview padlet={clip({ title: 'New Post' })} isSelected={false} />);
-    const legacyDiv = legacyDefault.querySelector('div.text-center.text-xs.font-semibold') as HTMLElement;
-    expect(legacyDiv.textContent).toBe('Title');
-    expect(legacyDiv.className).toContain('opacity-40');
+    const legacySpan = legacyDefault.querySelector('span.text-xs.font-semibold.text-center.truncate') as HTMLElement;
+    expect(legacySpan.textContent).toBe('Title');
+    expect(legacySpan.className).toContain('opacity-40');
 
     const real = mount(<CardPreview padlet={clip({ title: 'OpenClipart SVG' })} isSelected={false} />);
-    const realDiv = real.querySelector('div.text-center.text-xs.font-semibold') as HTMLElement;
-    expect(realDiv.textContent).toBe('OpenClipart SVG');
-    expect(realDiv.className).not.toContain('opacity-40');
+    const realSpan = real.querySelector('span.text-xs.font-semibold.text-center.truncate') as HTMLElement;
+    expect(realSpan.textContent).toBe('OpenClipart SVG');
+    expect(realSpan.className).not.toContain('opacity-40');
   });
 
   it("the Clipart editor's InlineCaption also treats a legacy placeholder title as unset, matching CardPreview's own display", () => {

@@ -921,7 +921,7 @@ export default function PostCardContent({
         return (
             <ClipartCardContent
                 svgUrl={svgUrl}
-                title={padlet.title}
+                title={hideOwnTitle ? undefined : padlet.title}
                 iconBgColor={iconBgColor}
                 textColor={textColor}
             />
