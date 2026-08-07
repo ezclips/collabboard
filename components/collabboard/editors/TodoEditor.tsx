@@ -161,7 +161,6 @@ export default function TodoEditor({
     const [selectedReminder, setSelectedReminder] = useState('');
     const [datePickerPosition, setDatePickerPosition] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
     const taskListRef = useRef<HTMLDivElement>(null);
-    const mainCardRef = useRef<HTMLDivElement>(null);
     // Only reset state when the modal transitions from closed → open.
     // initialData is an inline object (new reference every parent render), so using it
     // as a dep would wipe local state on every ancestor re-render.
@@ -437,25 +436,6 @@ export default function TodoEditor({
         return selectedDate && date.toDateString() === selectedDate.toDateString();
     };
 
-    // Text style / Color / Comment panels anchor to the card's actual
-    // on-screen position (fixed + measured, not absolute-within-the-card)
-    // so a tall panel's top lines up with the card's top like every other
-    // post's side panel, and its max-height is capped to whatever room is
-    // actually left below that point -- instead of running off the bottom
-    // of a short window with no way to reach the rest of it.
-    const sidePanelStyle = (): React.CSSProperties => {
-        const rect = mainCardRef.current?.getBoundingClientRect();
-        if (!rect) return { position: 'fixed', top: 100, left: 100 };
-        return { position: 'fixed', top: rect.top, left: rect.right + 12 };
-    };
-    // Separate from sidePanelStyle because it applies to the inner
-    // (scrollable) box, one level down from the outer fixed-position wrapper.
-    const sidePanelMaxHeight = (): React.CSSProperties => {
-        const rect = mainCardRef.current?.getBoundingClientRect();
-        if (!rect) return {};
-        return { maxHeight: `calc(100vh - ${rect.top + 16}px)` };
-    };
-
     if (!isOpen) return null;
 
     return (
@@ -601,7 +581,6 @@ export default function TodoEditor({
 
                     {/* Main Card - scrollable content, limited max height */}
                     <div
-                        ref={mainCardRef}
                         className="rounded-lg shadow-lg border border-gray-200 overflow-visible relative bg-white flex-shrink-0"
                         style={{
                             backgroundColor: cardColor,
@@ -667,248 +646,6 @@ export default function TodoEditor({
                                     currentColor={comments.find(c => c.id === commentColorPopupId)?.textColor || comments.find(c => c.id === commentColorPopupId)?.color}
                                     currentHighlight={comments.find(c => c.id === commentColorPopupId)?.backgroundColor}
                                 />
-                            </div>
-                        )}
-
-                        {showCommentPopup && (
-                            <div
-                                className="z-[1100] animate-in fade-in slide-in-from-left-2 duration-200 pointer-events-auto overflow-y-auto"
-                                style={{ ...sidePanelStyle(), ...sidePanelMaxHeight() }}
-                            >
-                                <div className="relative bg-white rounded-xl shadow-2xl border border-gray-200 p-4 min-w-[280px] max-w-[320px]">
-                                    <div className="flex items-center justify-between mb-3">
-                                        <h4 className="text-sm font-semibold text-gray-700">Comments</h4>
-                                        <div className="flex items-center gap-2">
-                                            <button
-                                                onClick={() => {
-                                                    setShowBadgeColorPicker((prev) => !prev);
-                                                    setCommentColorPopupId(null);
-                                                }}
-                                                className="w-7 h-7 flex items-center justify-center rounded hover:bg-gray-100"
-                                                title="Badge Color"
-                                            >
-                                                <div
-                                                    className="w-4 h-4 rounded border border-gray-300"
-                                                    style={{ backgroundColor: badgeColor }}
-                                                />
-                                            </button>
-                                            <button
-                                                onClick={() => {
-                                                    setShowCommentPopup(false);
-                                                    setActiveCommentId(null);
-                                                    setEditingCommentId(null);
-                                                    setEditingCommentText('');
-                                                    setCommentColorPopupId(null);
-                                                    setShowBadgeColorPicker(false);
-                                                }}
-                                                className="text-gray-400 hover:text-gray-600 p-1 rounded hover:bg-gray-100"
-                                            >
-                                                <X className="w-4 h-4" />
-                                            </button>
-                                        </div>
-                                    </div>
-                                    {showBadgeColorPicker && (
-                                        <div className="absolute right-3 top-12 z-10 bg-white rounded-lg shadow-lg border border-gray-200 p-2">
-                                            <div className="grid grid-cols-6 gap-1.5">
-                                                {BADGE_COLORS.map((color) => (
-                                                    <button
-                                                        key={color}
-                                                        onClick={() => {
-                                                            setBadgeColor(color);
-                                                            setShowBadgeColorPicker(false);
-                                                        }}
-                                                        className={`rounded transition-transform hover:scale-110 ${badgeColor === color ? 'ring-2 ring-blue-500' : ''}`}
-                                                        style={{
-                                                            width: '20px',
-                                                            height: '20px',
-                                                            backgroundColor: color,
-                                                            border: ['#f3f4f6', '#e5e7eb', '#fef9c3', '#fef08a'].includes(color) ? '1px solid #d1d5db' : 'none',
-                                                        }}
-                                                        title={color}
-                                                    />
-                                                ))}
-                                            </div>
-                                        </div>
-                                    )}
-                                    {comments.length === 0 ? (
-                                        <p className="text-xs text-gray-400 text-center py-4">No comments yet</p>
-                                    ) : (
-                                        <div className="flex gap-3">
-                                            <div className="flex-1 space-y-3 max-h-[300px] overflow-y-auto pr-1 scrollbar-ultrathin">
-                                                {comments.map((comment) => {
-                                                    const isEditing = editingCommentId === comment.id;
-                                                    const isActive = activeCommentId === comment.id;
-                                                    const commitEdit = () => {
-                                                        const trimmed = editingCommentText.trim();
-                                                        if (!trimmed) {
-                                                            setEditingCommentId(null);
-                                                            setEditingCommentText('');
-                                                            setCommentColorPopupId(null);
-                                                            return;
-                                                        }
-                                                        setComments((prev) => prev.map((c) =>
-                                                            c.id === comment.id ? { ...c, text: trimmed } : c
-                                                        ));
-                                                        setEditingCommentId(null);
-                                                        setEditingCommentText('');
-                                                        setCommentColorPopupId(null);
-                                                    };
-
-                                                    return (
-                                                        <div
-                                                            key={comment.id}
-                                                            className={`flex gap-2 rounded p-1 -m-1 cursor-pointer ${isActive ? 'bg-blue-50' : 'hover:bg-gray-50'}`}
-                                                            onClick={() => setActiveCommentId(comment.id)}
-                                                        >
-                                                            <div className="w-6 h-6 rounded-full bg-blue-500 flex items-center justify-center text-white text-[10px] font-bold shrink-0">
-                                                                {getInitial(comment.userName)}
-                                                            </div>
-                                                            <div className="flex-1">
-                                                                <div className="flex items-center gap-2">
-                                                                    <span className="text-xs font-medium text-gray-700">{comment.userName || 'User'}</span>
-                                                                    <span className="text-[10px] text-gray-400">{getTimeAgo(comment.timestamp)}</span>
-                                                                </div>
-                                                                {isEditing ? (
-                                                                    <textarea
-                                                                        value={editingCommentText}
-                                                                        onChange={(e) => setEditingCommentText(e.target.value)}
-                                                                        onInput={(e) => {
-                                                                            const el = e.currentTarget;
-                                                                            el.style.height = 'auto';
-                                                                            el.style.height = `${el.scrollHeight}px`;
-                                                                        }}
-                                                                        onKeyDown={(e) => {
-                                                                            if (e.key === 'Enter' && !e.shiftKey) {
-                                                                                e.preventDefault();
-                                                                                commitEdit();
-                                                                            }
-                                                                            if (e.key === 'Escape') {
-                                                                                setEditingCommentId(null);
-                                                                                setEditingCommentText('');
-                                                                                setCommentColorPopupId(null);
-                                                                            }
-                                                                        }}
-                                                                        onBlur={() => {
-                                                                            if (commentColorPopupId === comment.id) return;
-                                                                            commitEdit();
-                                                                        }}
-                                                                        className="w-full text-xs mt-0.5 bg-gray-50 rounded px-2 py-1 outline-none border border-gray-200 focus:border-blue-400 resize-none overflow-hidden break-words whitespace-pre-wrap"
-                                                                        style={{
-                                                                            wordBreak: 'break-word',
-                                                                            color: comment.textColor || comment.color,
-                                                                            backgroundColor: comment.backgroundColor || undefined,
-                                                                        }}
-                                                                        rows={1}
-                                                                        autoFocus
-                                                                    />
-                                                                ) : (
-                                                                    <p
-                                                                        className={`text-xs text-gray-600 mt-0.5 break-words whitespace-pre-wrap ${comment.isStrikethrough ? 'line-through' : ''}`}
-                                                                        style={{
-                                                                            wordBreak: 'break-word',
-                                                                            color: comment.textColor || comment.color,
-                                                                            backgroundColor: comment.backgroundColor || undefined,
-                                                                        }}
-                                                                    >
-                                                                        {renderTextWithLinks(comment.text)}
-                                                                    </p>
-                                                                )}
-                                                            </div>
-                                                        </div>
-                                                    );
-                                                })}
-                                            </div>
-                                            <div className="flex flex-col gap-1 flex-shrink-0 pt-1">
-                                                {editingCommentId && activeComment && editingCommentId === activeComment.id ? (
-                                                    <button
-                                                        onMouseDown={(e) => {
-                                                            e.preventDefault();
-                                                            e.stopPropagation();
-                                                            setCommentColorPopupId((prev) => (prev === activeComment.id ? null : activeComment.id));
-                                                        }}
-                                                        className="p-1 rounded transition-colors text-gray-300 hover:text-blue-500"
-                                                        title="Color"
-                                                        disabled={!activeComment}
-                                                    >
-                                                        <Palette className="w-3 h-3" />
-                                                    </button>
-                                                ) : (
-                                                    <button
-                                                        onClick={() => {
-                                                            if (!activeComment) return;
-                                                            setEditingCommentId(activeComment.id);
-                                                            setEditingCommentText(activeComment.text || '');
-                                                            setCommentColorPopupId(null);
-                                                        }}
-                                                        className="p-1 rounded transition-colors text-gray-300 hover:text-blue-500 disabled:opacity-40 disabled:hover:text-gray-300"
-                                                        title="Edit"
-                                                        disabled={!activeComment}
-                                                    >
-                                                        <PenTool className="w-3 h-3" />
-                                                    </button>
-                                                )}
-                                                <button
-                                                    onClick={() => {
-                                                        if (!activeComment) return;
-                                                        setComments((prev) => prev.map((comment) =>
-                                                            comment.id === activeComment.id
-                                                                ? { ...comment, isStrikethrough: !comment.isStrikethrough }
-                                                                : comment
-                                                        ));
-                                                    }}
-                                                    className={`p-1 rounded transition-colors ${activeComment?.isStrikethrough ? 'text-blue-500 bg-blue-50' : 'text-gray-300 hover:text-blue-500'} disabled:opacity-40 disabled:hover:text-gray-300`}
-                                                    title="Strikethrough"
-                                                    disabled={!activeComment}
-                                                >
-                                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                                        <path d="M16 4H9a3 3 0 0 0-2.83 4" />
-                                                        <path d="M14 12a4 4 0 0 1 0 8H6" />
-                                                        <line x1="4" y1="12" x2="20" y2="12" />
-                                                    </svg>
-                                                </button>
-                                                <button
-                                                    onClick={() => {
-                                                        if (!activeComment) return;
-                                                        setComments((prev) => prev.filter((comment) => comment.id !== activeComment.id));
-                                                        setActiveCommentId(null);
-                                                        setEditingCommentId(null);
-                                                        setEditingCommentText('');
-                                                        setCommentColorPopupId(null);
-                                                    }}
-                                                    className="p-1 text-gray-300 hover:text-red-500 transition-colors disabled:opacity-40 disabled:hover:text-gray-300"
-                                                    title="Delete"
-                                                    disabled={!activeComment}
-                                                >
-                                                    <Trash2 className="w-3 h-3" />
-                                                </button>
-                                            </div>
-                                        </div>
-                                    )}
-                                    <div className="mt-3 pt-3 border-t border-gray-100">
-                                        <input
-                                            type="text"
-                                            value={newCommentText}
-                                            onChange={(e) => setNewCommentText(e.target.value)}
-                                            placeholder="Add a comment..."
-                                            className="w-full text-xs px-3 py-2 rounded-lg border border-gray-200 focus:border-blue-400 focus:ring-1 focus:ring-blue-100 outline-none"
-                                            onKeyDown={(e) => {
-                                                if (e.key === 'Enter' && newCommentText.trim()) {
-                                                    const commentText = newCommentText.trim();
-                                                    const newComment = {
-                                                        id: `comment-${Date.now()}`,
-                                                        text: commentText,
-                                                        userId: 'user1',
-                                                        userName: 'You',
-                                                        timestamp: Date.now(),
-                                                    };
-                                                    setComments((prev) => [...prev, newComment]);
-                                                    setNewCommentText('');
-                                                    setActiveCommentId(newComment.id);
-                                                }
-                                            }}
-                                        />
-                                    </div>
-                                </div>
                             </div>
                         )}
 
@@ -1140,91 +877,6 @@ export default function TodoEditor({
                             )}
                         </div>
 
-                        {/* Text Style - fixed + measured from the card (see
-                                sidePanelStyle) so its top lines up with the
-                                card regardless of the card's own height, and
-                                it never runs off the bottom of a short
-                                window. */}
-                            {showTextStylePanel && (
-                                <div className="z-[1100]" style={sidePanelStyle()}>
-                                    <div
-                                        className="relative bg-white rounded-lg shadow-lg border border-gray-200 p-3 w-64 overflow-y-auto"
-                                        style={sidePanelMaxHeight()}
-                                        onClick={(e) => e.stopPropagation()}
-                                    >
-                                        <button
-                                            onClick={() => setShowTextStylePanel(false)}
-                                            className="absolute top-2 right-2 w-4 h-4 flex items-center justify-center rounded hover:bg-gray-100"
-                                            title="Close"
-                                        >
-                                            <X className="w-3 h-3 text-gray-400" />
-                                        </button>
-                                        <TextStylePopup
-                                            isOpen={true}
-                                            onOpenChange={(open) => setShowTextStylePanel(open)}
-                                            onSelectHeading={applyCaptionPreset}
-                                            onSelectColor={writeActiveTargetColor}
-                                            onSelectHighlight={(color) => writeCaptionStyle({ backgroundColor: color })}
-                                            currentHeading={captionStyle.heading || 'normal'}
-                                            currentColor={activeTargetColor}
-                                            currentHighlight={captionStyle.backgroundColor}
-                                            hideCloseButton
-                                            onBold={toggleCaptionBold}
-                                            onItalic={toggleCaptionItalic}
-                                            onUnderline={toggleCaptionUnderline}
-                                            onStrikethrough={toggleCaptionStrikethrough}
-                                            onAlign={cycleCaptionAlign}
-                                            isBold={isCaptionBold}
-                                            isItalic={isCaptionItalic}
-                                            isUnderline={!!captionStyle.underline}
-                                            isStrikethrough={!!captionStyle.strikethrough}
-                                        />
-                                    </div>
-                                </div>
-                            )}
-
-                            {/* Color Picker - same overlay treatment as Text Style */}
-                            {showColorPicker && (
-                                <div
-                                    className="z-[1100] bg-white rounded-lg shadow-lg border border-gray-200 p-3 w-64 overflow-y-auto"
-                                    style={{ ...sidePanelStyle(), ...sidePanelMaxHeight() }}
-                                    onClick={(e) => e.stopPropagation()}
-                                >
-                                    <div className="flex items-center justify-between mb-2">
-                                        <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">List Color</span>
-                                        <div className="flex bg-gray-100 p-1 rounded-lg gap-1">
-                                            <button
-                                                onClick={() => setActiveTab('background')}
-                                                className={`w-8 h-8 flex items-center justify-center text-xs font-bold rounded-md transition-all ${activeTab === 'background'
-                                                    ? "bg-white text-gray-900 shadow-sm"
-                                                    : "text-gray-500 hover:text-gray-700"
-                                                    }`}
-                                                title="Background Color"
-                                            >
-                                                BG
-                                            </button>
-                                            <button
-                                                onClick={() => setActiveTab('topstrip')}
-                                                className={`w-8 h-8 flex items-center justify-center text-xs font-bold rounded-md transition-all ${activeTab === 'topstrip'
-                                                    ? "bg-white text-gray-900 shadow-sm"
-                                                    : "text-gray-500 hover:text-gray-700"
-                                                    }`}
-                                                title="Top Strip Color"
-                                            >
-                                                TS
-                                            </button>
-                                        </div>
-                                    </div>
-
-                                    <ColorPickerContent
-                                        color={activeTab === "background" ? cardColor : (topStrip || 'transparent')}
-                                        onChange={(c) => activeTab === "background" ? setCardColor(c) : setTopStrip(c)}
-                                        hasOpacity={true}
-                                        presets={activeTab === "background" ? BACKGROUND_COLORS : TOP_STRIP_COLORS}
-                                    />
-                                </div>
-                            )}
-
                             {/* Date Picker - same overlay treatment; kept in
                                 its own relative wrapper since its Close
                                 button is itself absolutely positioned
@@ -1342,6 +994,324 @@ export default function TodoEditor({
                                 </div>
                             )}
                     </div>
+
+                    {/* Text style / Color / Comment panels -- real flex
+                        siblings of the toolbar/card row (same architecture
+                        as Note/Document's shared panel slot), so a tall
+                        panel grows the row and the outer items-center
+                        recentres the whole row upward instead of the panel
+                        running off the bottom of the screen. */}
+                    {showTextStylePanel && (
+                        <div
+                            className="relative bg-white rounded-lg shadow-lg border border-gray-200 p-3 w-64 flex-shrink-0"
+                            onClick={(e) => e.stopPropagation()}
+                        >
+                            <button
+                                onClick={() => setShowTextStylePanel(false)}
+                                className="absolute top-2 right-2 w-4 h-4 flex items-center justify-center rounded hover:bg-gray-100"
+                                title="Close"
+                            >
+                                <X className="w-3 h-3 text-gray-400" />
+                            </button>
+                            <TextStylePopup
+                                isOpen={true}
+                                onOpenChange={(open) => setShowTextStylePanel(open)}
+                                onSelectHeading={applyCaptionPreset}
+                                onSelectColor={writeActiveTargetColor}
+                                onSelectHighlight={(color) => writeCaptionStyle({ backgroundColor: color })}
+                                currentHeading={captionStyle.heading || 'normal'}
+                                currentColor={activeTargetColor}
+                                currentHighlight={captionStyle.backgroundColor}
+                                hideCloseButton
+                                onBold={toggleCaptionBold}
+                                onItalic={toggleCaptionItalic}
+                                onUnderline={toggleCaptionUnderline}
+                                onStrikethrough={toggleCaptionStrikethrough}
+                                onAlign={cycleCaptionAlign}
+                                isBold={isCaptionBold}
+                                isItalic={isCaptionItalic}
+                                isUnderline={!!captionStyle.underline}
+                                isStrikethrough={!!captionStyle.strikethrough}
+                            />
+                        </div>
+                    )}
+
+                    {showColorPicker && (
+                        <div
+                            className="bg-white rounded-lg shadow-lg border border-gray-200 p-3 w-64 flex-shrink-0"
+                            onClick={(e) => e.stopPropagation()}
+                        >
+                            <div className="flex items-center justify-between mb-2">
+                                <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">List Color</span>
+                                <div className="flex bg-gray-100 p-1 rounded-lg gap-1">
+                                    <button
+                                        onClick={() => setActiveTab('background')}
+                                        className={`w-8 h-8 flex items-center justify-center text-xs font-bold rounded-md transition-all ${activeTab === 'background'
+                                            ? "bg-white text-gray-900 shadow-sm"
+                                            : "text-gray-500 hover:text-gray-700"
+                                            }`}
+                                        title="Background Color"
+                                    >
+                                        BG
+                                    </button>
+                                    <button
+                                        onClick={() => setActiveTab('topstrip')}
+                                        className={`w-8 h-8 flex items-center justify-center text-xs font-bold rounded-md transition-all ${activeTab === 'topstrip'
+                                            ? "bg-white text-gray-900 shadow-sm"
+                                            : "text-gray-500 hover:text-gray-700"
+                                            }`}
+                                        title="Top Strip Color"
+                                    >
+                                        TS
+                                    </button>
+                                </div>
+                            </div>
+
+                            <ColorPickerContent
+                                color={activeTab === "background" ? cardColor : (topStrip || 'transparent')}
+                                onChange={(c) => activeTab === "background" ? setCardColor(c) : setTopStrip(c)}
+                                hasOpacity={true}
+                                presets={activeTab === "background" ? BACKGROUND_COLORS : TOP_STRIP_COLORS}
+                            />
+                        </div>
+                    )}
+
+                    {showCommentPopup && (
+                        <div className="relative bg-white rounded-xl shadow-2xl border border-gray-200 p-4 min-w-[280px] max-w-[320px] flex-shrink-0 animate-in fade-in slide-in-from-left-2 duration-200">
+                            <div className="flex items-center justify-between mb-3">
+                                <h4 className="text-sm font-semibold text-gray-700">Comments</h4>
+                                <div className="flex items-center gap-2">
+                                    <button
+                                        onClick={() => {
+                                            setShowBadgeColorPicker((prev) => !prev);
+                                            setCommentColorPopupId(null);
+                                        }}
+                                        className="w-7 h-7 flex items-center justify-center rounded hover:bg-gray-100"
+                                        title="Badge Color"
+                                    >
+                                        <div
+                                            className="w-4 h-4 rounded border border-gray-300"
+                                            style={{ backgroundColor: badgeColor }}
+                                        />
+                                    </button>
+                                    <button
+                                        onClick={() => {
+                                            setShowCommentPopup(false);
+                                            setActiveCommentId(null);
+                                            setEditingCommentId(null);
+                                            setEditingCommentText('');
+                                            setCommentColorPopupId(null);
+                                            setShowBadgeColorPicker(false);
+                                        }}
+                                        className="text-gray-400 hover:text-gray-600 p-1 rounded hover:bg-gray-100"
+                                    >
+                                        <X className="w-4 h-4" />
+                                    </button>
+                                </div>
+                            </div>
+                            {showBadgeColorPicker && (
+                                <div className="absolute right-3 top-12 z-10 bg-white rounded-lg shadow-lg border border-gray-200 p-2">
+                                    <div className="grid grid-cols-6 gap-1.5">
+                                        {BADGE_COLORS.map((color) => (
+                                            <button
+                                                key={color}
+                                                onClick={() => {
+                                                    setBadgeColor(color);
+                                                    setShowBadgeColorPicker(false);
+                                                }}
+                                                className={`rounded transition-transform hover:scale-110 ${badgeColor === color ? 'ring-2 ring-blue-500' : ''}`}
+                                                style={{
+                                                    width: '20px',
+                                                    height: '20px',
+                                                    backgroundColor: color,
+                                                    border: ['#f3f4f6', '#e5e7eb', '#fef9c3', '#fef08a'].includes(color) ? '1px solid #d1d5db' : 'none',
+                                                }}
+                                                title={color}
+                                            />
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                            {comments.length === 0 ? (
+                                <p className="text-xs text-gray-400 text-center py-4">No comments yet</p>
+                            ) : (
+                                <div className="flex gap-3">
+                                    <div className="flex-1 space-y-3 max-h-[300px] overflow-y-auto pr-1 scrollbar-ultrathin">
+                                        {comments.map((comment) => {
+                                            const isEditing = editingCommentId === comment.id;
+                                            const isActive = activeCommentId === comment.id;
+                                            const commitEdit = () => {
+                                                const trimmed = editingCommentText.trim();
+                                                if (!trimmed) {
+                                                    setEditingCommentId(null);
+                                                    setEditingCommentText('');
+                                                    setCommentColorPopupId(null);
+                                                    return;
+                                                }
+                                                setComments((prev) => prev.map((c) =>
+                                                    c.id === comment.id ? { ...c, text: trimmed } : c
+                                                ));
+                                                setEditingCommentId(null);
+                                                setEditingCommentText('');
+                                                setCommentColorPopupId(null);
+                                            };
+
+                                            return (
+                                                <div
+                                                    key={comment.id}
+                                                    className={`flex gap-2 rounded p-1 -m-1 cursor-pointer ${isActive ? 'bg-blue-50' : 'hover:bg-gray-50'}`}
+                                                    onClick={() => setActiveCommentId(comment.id)}
+                                                >
+                                                    <div className="w-6 h-6 rounded-full bg-blue-500 flex items-center justify-center text-white text-[10px] font-bold shrink-0">
+                                                        {getInitial(comment.userName)}
+                                                    </div>
+                                                    <div className="flex-1">
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="text-xs font-medium text-gray-700">{comment.userName || 'User'}</span>
+                                                            <span className="text-[10px] text-gray-400">{getTimeAgo(comment.timestamp)}</span>
+                                                        </div>
+                                                        {isEditing ? (
+                                                            <textarea
+                                                                value={editingCommentText}
+                                                                onChange={(e) => setEditingCommentText(e.target.value)}
+                                                                onInput={(e) => {
+                                                                    const el = e.currentTarget;
+                                                                    el.style.height = 'auto';
+                                                                    el.style.height = `${el.scrollHeight}px`;
+                                                                }}
+                                                                onKeyDown={(e) => {
+                                                                    if (e.key === 'Enter' && !e.shiftKey) {
+                                                                        e.preventDefault();
+                                                                        commitEdit();
+                                                                    }
+                                                                    if (e.key === 'Escape') {
+                                                                        setEditingCommentId(null);
+                                                                        setEditingCommentText('');
+                                                                        setCommentColorPopupId(null);
+                                                                    }
+                                                                }}
+                                                                onBlur={() => {
+                                                                    if (commentColorPopupId === comment.id) return;
+                                                                    commitEdit();
+                                                                }}
+                                                                className="w-full text-xs mt-0.5 bg-gray-50 rounded px-2 py-1 outline-none border border-gray-200 focus:border-blue-400 resize-none overflow-hidden break-words whitespace-pre-wrap"
+                                                                style={{
+                                                                    wordBreak: 'break-word',
+                                                                    color: comment.textColor || comment.color,
+                                                                    backgroundColor: comment.backgroundColor || undefined,
+                                                                }}
+                                                                rows={1}
+                                                                autoFocus
+                                                            />
+                                                        ) : (
+                                                            <p
+                                                                className={`text-xs text-gray-600 mt-0.5 break-words whitespace-pre-wrap ${comment.isStrikethrough ? 'line-through' : ''}`}
+                                                                style={{
+                                                                    wordBreak: 'break-word',
+                                                                    color: comment.textColor || comment.color,
+                                                                    backgroundColor: comment.backgroundColor || undefined,
+                                                                }}
+                                                            >
+                                                                {renderTextWithLinks(comment.text)}
+                                                            </p>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                    <div className="flex flex-col gap-1 flex-shrink-0 pt-1">
+                                        {editingCommentId && activeComment && editingCommentId === activeComment.id ? (
+                                            <button
+                                                onMouseDown={(e) => {
+                                                    e.preventDefault();
+                                                    e.stopPropagation();
+                                                    setCommentColorPopupId((prev) => (prev === activeComment.id ? null : activeComment.id));
+                                                }}
+                                                className="p-1 rounded transition-colors text-gray-300 hover:text-blue-500"
+                                                title="Color"
+                                                disabled={!activeComment}
+                                            >
+                                                <Palette className="w-3 h-3" />
+                                            </button>
+                                        ) : (
+                                            <button
+                                                onClick={() => {
+                                                    if (!activeComment) return;
+                                                    setEditingCommentId(activeComment.id);
+                                                    setEditingCommentText(activeComment.text || '');
+                                                    setCommentColorPopupId(null);
+                                                }}
+                                                className="p-1 rounded transition-colors text-gray-300 hover:text-blue-500 disabled:opacity-40 disabled:hover:text-gray-300"
+                                                title="Edit"
+                                                disabled={!activeComment}
+                                            >
+                                                <PenTool className="w-3 h-3" />
+                                            </button>
+                                        )}
+                                        <button
+                                            onClick={() => {
+                                                if (!activeComment) return;
+                                                setComments((prev) => prev.map((comment) =>
+                                                    comment.id === activeComment.id
+                                                        ? { ...comment, isStrikethrough: !comment.isStrikethrough }
+                                                        : comment
+                                                ));
+                                            }}
+                                            className={`p-1 rounded transition-colors ${activeComment?.isStrikethrough ? 'text-blue-500 bg-blue-50' : 'text-gray-300 hover:text-blue-500'} disabled:opacity-40 disabled:hover:text-gray-300`}
+                                            title="Strikethrough"
+                                            disabled={!activeComment}
+                                        >
+                                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                <path d="M16 4H9a3 3 0 0 0-2.83 4" />
+                                                <path d="M14 12a4 4 0 0 1 0 8H6" />
+                                                <line x1="4" y1="12" x2="20" y2="12" />
+                                            </svg>
+                                        </button>
+                                        <button
+                                            onClick={() => {
+                                                if (!activeComment) return;
+                                                setComments((prev) => prev.filter((comment) => comment.id !== activeComment.id));
+                                                setActiveCommentId(null);
+                                                setEditingCommentId(null);
+                                                setEditingCommentText('');
+                                                setCommentColorPopupId(null);
+                                            }}
+                                            className="p-1 text-gray-300 hover:text-red-500 transition-colors disabled:opacity-40 disabled:hover:text-gray-300"
+                                            title="Delete"
+                                            disabled={!activeComment}
+                                        >
+                                            <Trash2 className="w-3 h-3" />
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                            <div className="mt-3 pt-3 border-t border-gray-100">
+                                <input
+                                    type="text"
+                                    value={newCommentText}
+                                    onChange={(e) => setNewCommentText(e.target.value)}
+                                    placeholder="Add a comment..."
+                                    className="w-full text-xs px-3 py-2 rounded-lg border border-gray-200 focus:border-blue-400 focus:ring-1 focus:ring-blue-100 outline-none"
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter' && newCommentText.trim()) {
+                                            const commentText = newCommentText.trim();
+                                            const newComment = {
+                                                id: `comment-${Date.now()}`,
+                                                text: commentText,
+                                                userId: 'user1',
+                                                userName: 'You',
+                                                timestamp: Date.now(),
+                                            };
+                                            setComments((prev) => [...prev, newComment]);
+                                            setNewCommentText('');
+                                            setActiveCommentId(newComment.id);
+                                        }
+                                    }}
+                                />
+                            </div>
+                        </div>
+                    )}
                 </div>
             </div>
 
