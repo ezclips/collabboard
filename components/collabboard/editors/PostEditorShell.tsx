@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import type { Editor } from '@tiptap/react';
 import NoteEditorToolbar, { type ToolbarMode } from './NoteEditorToolbar';
 
@@ -125,6 +125,7 @@ function useSelectionOverlayRect(
   editor: Editor | null | undefined,
   range: { from: number; to: number } | null | undefined,
   enabled: boolean,
+  rowRef: React.RefObject<HTMLDivElement | null>,
 ) {
   const [rect, setRect] = useState<{ top: number; left: number; width: number; height: number } | null>(null);
 
@@ -162,10 +163,22 @@ function useSelectionOverlayRect(
     // reflow). Recompute on every doc update too, not just when the
     // stored range's own endpoints change.
     editor.on('update', recompute);
+
+    // Switching between side panels (e.g. Comment -> Link) changes the
+    // shared-panel slot's width/height, which re-centers the whole
+    // toolbar/card/panel row -- moving the card (and the real selection
+    // inside it) without firing an editor 'update'. Watch the row itself so
+    // the overlay follows the card instead of staying frozen at its
+    // pre-switch position.
+    const row = rowRef.current;
+    const resizeObserver = row && typeof ResizeObserver !== 'undefined' ? new ResizeObserver(recompute) : null;
+    resizeObserver?.observe(row!);
+
     return () => {
       editor.off('update', recompute);
+      resizeObserver?.disconnect();
     };
-  }, [editor, range?.from, range?.to, enabled]);
+  }, [editor, range?.from, range?.to, enabled, rowRef]);
 
   return rect;
 }
@@ -195,7 +208,8 @@ export default function PostEditorShell({
   ariaLabel,
 }: PostEditorShellProps) {
   const [mode, setMode] = useState<ToolbarMode>('text');
-  const overlayRect = useSelectionOverlayRect(selectionEditor, selectionRange, selectionIndicator);
+  const rowRef = useRef<HTMLDivElement>(null);
+  const overlayRect = useSelectionOverlayRect(selectionEditor, selectionRange, selectionIndicator, rowRef);
 
   if (!isOpen) return null;
 
@@ -211,7 +225,7 @@ export default function PostEditorShell({
       aria-modal={ariaModal}
       aria-label={ariaLabel}
     >
-      <div className="flex items-start gap-3" onClick={(e) => e.stopPropagation()}>
+      <div ref={rowRef} className="flex items-start gap-3" onClick={(e) => e.stopPropagation()}>
         {showToolbar && (
           <div className="relative flex items-start gap-3">
             <div className="min-w-[72px]">

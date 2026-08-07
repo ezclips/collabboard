@@ -383,14 +383,24 @@ export default function DocumentEditor({
                 />
               </div>
             )}
-            <LinkPopup
-              inline
-              isOpen={panels.open.link}
-              onOpenChange={(open) => (open ? panels.openPanel('link', ['textStyle', 'comment', 'cardColor']) : panels.closePanel('link'))}
-              onSubmit={handleAddLink}
-              onRemoveLink={handleRemoveLink}
-              initialUrl={linkViewUrl}
-            />
+            {panels.open.link && (
+              // Fixed width matches the textStyle/comment panels above and
+              // below -- otherwise LinkPopup's own min-w-[280px] lets it
+              // size to content, and switching to/from a differently-sized
+              // panel changes the shared-panel slot's width, re-centering
+              // the whole toolbar/card/panel row and visibly shifting the
+              // card out from under the user.
+              <div style={{ width: '300px' }}>
+                <LinkPopup
+                  inline
+                  isOpen={panels.open.link}
+                  onOpenChange={(open) => (open ? panels.openPanel('link', ['textStyle', 'comment', 'cardColor']) : panels.closePanel('link'))}
+                  onSubmit={handleAddLink}
+                  onRemoveLink={handleRemoveLink}
+                  initialUrl={linkViewUrl}
+                />
+              </div>
+            )}
             {panels.open.comment && (
               <div style={{ width: '300px' }}>
                 <CommentPopup
