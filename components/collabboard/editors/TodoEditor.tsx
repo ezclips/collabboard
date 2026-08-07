@@ -285,6 +285,13 @@ export default function TodoEditor({
         activeStyleTargetId === 'title'
             ? captionStyle.color
             : tasks.find((task) => task.id === activeStyleTargetId)?.color;
+    // Shown at the top of the Text style panel so it's never ambiguous which
+    // text a color pick is about to apply to (color is per-item; everything
+    // else in the panel stays shared across the whole card).
+    const activeTargetLabel =
+        activeStyleTargetId === 'title'
+            ? (todoTitle || 'Title')
+            : tasks.find((task) => task.id === activeStyleTargetId)?.text || 'Task';
 
     const applyCaptionPreset = (level: CaptionHeading) => {
         const selectedPreset = level === 'callout' && captionStyle.backgroundColor
@@ -700,8 +707,10 @@ export default function TodoEditor({
                                                 className="w-4 h-4 flex-shrink-0 accent-blue-500 rounded border-gray-300"
                                             />
                                             <span
-                                                onClick={() => setActiveStyleTargetId(task.id)}
-                                                className={`text-sm flex-1 break-words cursor-text ${task.completed ? 'line-through text-gray-400' : 'text-gray-800'}`}
+                                                onMouseDown={() => setActiveStyleTargetId(task.id)}
+                                                className={`text-sm flex-1 break-words cursor-text rounded ${task.completed ? 'line-through text-gray-400' : 'text-gray-800'} ${
+                                                    activeStyleTargetId === task.id ? 'ring-1 ring-blue-400' : ''
+                                                }`}
                                                 style={task.completed ? undefined : { ...resolvedTextStyle, color: task.color || resolvedTextStyle.color }}
                                             >
                                                 {task.text}
@@ -1013,6 +1022,9 @@ export default function TodoEditor({
                             >
                                 <X className="w-3 h-3 text-gray-400" />
                             </button>
+                            <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-2 truncate pr-4">
+                                Editing: {activeTargetLabel}
+                            </div>
                             <TextStylePopup
                                 isOpen={true}
                                 onOpenChange={(open) => setShowTextStylePanel(open)}
