@@ -413,7 +413,7 @@ describe('follow-up correction: Document Freeform card has square corners and a 
     expect(realSpan.className).not.toContain('opacity-40');
   });
 
-  it("the Clipart editor's InlineCaption also treats a legacy placeholder title as unset, matching CardPreview's own display", () => {
+  it("the Clipart editor's post-name input also treats a legacy placeholder title as unset, matching CardPreview's own display", () => {
     const src = fs.readFileSync('components/collabboard/editors/ClipartCardDraftModal.tsx', 'utf8');
     expect(src).toContain("value={getMeaningfulTitle(previewPadlet.title, 'card')}");
   });

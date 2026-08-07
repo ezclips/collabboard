@@ -8,9 +8,8 @@ import CardEditor from '@/components/collabboard/CardEditor';
 import CardActionsToolbar from '@/components/collabboard/editors/CardActionsToolbar';
 import { CardColorPanel } from '@/components/collabboard/editors/CardColorPanel';
 import CommentPopup from '@/components/collabboard/editors/CommentPopup';
-import InlineCaption from '@/components/collabboard/editors/InlineCaption';
 import TextStylePopup from '@/components/collabboard/editors/TextStylePopup';
-import { CAPTION_STYLE_PRESETS, captionTextDecoration, type CaptionHeading } from '@/lib/domain/canvas/captionStyle';
+import { CAPTION_STYLE_PRESETS, resolveCaptionStyle, type CaptionHeading } from '@/lib/domain/canvas/captionStyle';
 import { nextTextAlign } from '@/components/collabboard/editors/textAlignCycle';
 import EmojiReactionPicker from '@/components/collabboard/editors/EmojiReactionPicker';
 import { getMeaningfulTitle } from '@/lib/infra/collabboard/postTitle';
@@ -167,6 +166,7 @@ export default function ClipartCardDraftModal({
   // across every Text style panel) toggle on top of whichever heading
   // preset is active, same layering as a TipTap mark over a paragraph.
   const captionStyle = previewPadlet.metadata?.captionStyle || {};
+  const titleInputStyle = resolveCaptionStyle(captionStyle, previewPadlet.metadata?.textColor);
   const isCaptionBold = captionStyle.fontWeight === '700' || captionStyle.fontWeight === 'bold';
   const isCaptionItalic = captionStyle.fontStyle === 'italic';
   const toggleCaptionBold = () => writeCaptionStyle({ ...captionStyle, fontWeight: isCaptionBold ? '400' : '700' });
@@ -240,7 +240,18 @@ export default function ClipartCardDraftModal({
               <CardPreview
                 padlet={previewPadlet}
                 isSelected={false}
-                hideTitle
+                titleEditor={
+                  <input
+                    type="text"
+                    data-testid="clipart-post-name-input"
+                    value={getMeaningfulTitle(previewPadlet.title, 'card')}
+                    onChange={(e) => onChange({ ...previewPadlet, title: e.target.value })}
+                    placeholder="Post name"
+                    className="w-full min-w-0 truncate bg-transparent text-center text-xs font-semibold outline-none placeholder:opacity-40"
+                    style={titleInputStyle}
+                    onMouseDown={(e) => e.stopPropagation()}
+                  />
+                }
                 reactions={reactions}
                 onAddReaction={openReactionPicker}
                 onReactionClick={(emoji) => {
@@ -254,26 +265,6 @@ export default function ClipartCardDraftModal({
                   });
                 }}
               />
-              <div data-testid="clipart-inline-caption">
-                <InlineCaption
-                  value={getMeaningfulTitle(previewPadlet.title, 'card')}
-                  placeholder="Title"
-                  isEditing={isCaptionEditing}
-                  onChange={(nextTitle) => onChange({ ...previewPadlet, title: nextTitle })}
-                  onCommit={() => setIsCaptionEditing(false)}
-                  color={previewPadlet.metadata?.captionStyle?.color}
-                  backgroundColor={previewPadlet.metadata?.captionStyle?.backgroundColor}
-                  textStyle={{
-                    fontSize: previewPadlet.metadata?.captionStyle?.fontSize,
-                    fontWeight: previewPadlet.metadata?.captionStyle?.fontWeight,
-                    fontStyle: previewPadlet.metadata?.captionStyle?.fontStyle,
-                    fontFamily: previewPadlet.metadata?.captionStyle?.fontFamily,
-                    lineHeight: previewPadlet.metadata?.captionStyle?.lineHeight,
-                    textDecoration: captionTextDecoration(previewPadlet.metadata?.captionStyle),
-                    textAlign: previewPadlet.metadata?.captionStyle?.textAlign,
-                  }}
-                />
-              </div>
             </div>
             {commentCount > 0 ? (
               <button

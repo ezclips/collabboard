@@ -19,10 +19,13 @@ interface CardPreviewProps {
     reactions?: string[];
     onAddReaction?: () => void;
     onReactionClick?: (emoji: string) => void;
-    // ClipartCardDraftModal renders its own editable title (InlineCaption)
-    // directly below this preview -- without this, the same title shows
-    // twice (once as this static heading, once in that editable field).
     hideTitle?: boolean;
+    // Overrides the strip's title slot with a live editable control --
+    // ClipartCardDraftModal uses this to put a real "Post name" input
+    // directly in the gray strip, the same place every other post type's
+    // title lives, instead of a separate field elsewhere that only looked
+    // like an unrelated caption.
+    titleEditor?: React.ReactNode;
 }
 
 export default function CardPreview({
@@ -35,7 +38,8 @@ export default function CardPreview({
     reactions = [],
     onAddReaction,
     onReactionClick,
-    hideTitle = false
+    hideTitle = false,
+    titleEditor
 }: CardPreviewProps) {
     const { metadata, title, content } = padlet;
     const iconBgColor = metadata?.iconBgColor || '#f8f9fa'; // Small square behind icon (Tab 1: "Icon")
@@ -97,14 +101,14 @@ export default function CardPreview({
                         )}
                     </div>
                     <div className="flex items-center justify-center px-1 min-w-0">
-                        {!hideTitle && (
+                        {titleEditor ? titleEditor : (!hideTitle && (
                             <span
                                 className={`text-xs font-semibold text-center truncate${documentTitle ? '' : ' opacity-40 select-none'}`}
                                 style={titleStyle}
                             >
                                 {documentTitle || 'Title'}
                             </span>
-                        )}
+                        ))}
                     </div>
                     <div className="flex items-center pr-1.5">
                         {onOpenToolbar && (

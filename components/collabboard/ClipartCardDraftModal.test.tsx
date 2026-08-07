@@ -186,10 +186,11 @@ function compositionRowNode(element: ReactNode): ReactNode {
   return node!;
 }
 
-function inlineCaptionNode(element: ReactNode): ReactNode {
-  const node = testIdNode(element, 'clipart-inline-caption');
-  expect(node, 'inline caption should render').toBeTruthy();
-  return node!;
+function titleEditorInput(element: ReactNode): ReactNode {
+  const cardPreview = findByComponentName(element, 'CardPreview');
+  const input = cardPreview.props.titleEditor as ReactNode;
+  expect(input, 'CardPreview should receive a titleEditor input').toBeTruthy();
+  return input;
 }
 
 function textStylePopupProps(element: ReactNode) {
@@ -210,11 +211,6 @@ function emojiReactionPickerNode(element: ReactNode): ReactNode {
   expect(node.props?.inline, 'shared EmojiReactionPicker should render inline').toBe(true);
   expect(typeof node.props?.onSelectEmoji).toBe('function');
   return node!;
-}
-
-function collectText(node: unknown): string {
-  if (typeof node === 'string' || typeof node === 'number') return String(node);
-  return childrenOf(node).map(collectText).join('');
 }
 
 function toolbarLabels(markup: string): string[] {
@@ -375,7 +371,7 @@ describe('ClipartCardDraftModal reaction and comment metadata', () => {
     const mainPanel = mainPanelNode(element);
     const anchor = previewAnchorNode(element);
     const wrapper = previewWrapperNode(element);
-    const inlineCaption = inlineCaptionNode(element);
+    const titleInput = titleEditorInput(element);
 
     expect(String(mainPanel.props.className)).toContain('w-[220px]');
     expect(String(mainPanel.props.className)).not.toContain('w-[320px]');
@@ -392,11 +388,11 @@ describe('ClipartCardDraftModal reaction and comment metadata', () => {
     expect((wrapper.props.style as { width?: string; minHeight?: string }).width).toBe('220px');
     expect((wrapper.props.style as { width?: string; minHeight?: string }).minHeight).toBe('200px');
 
-    expect(findElement(wrapper, (node) => node.props?.['data-testid'] === 'clipart-inline-caption')).toBeTruthy();
+    // The title lives directly in CardPreview's own gray strip now (via the
+    // titleEditor override), not a separate caption field elsewhere.
+    expect(titleInput.props.placeholder).toBe('Post name');
     expect(findElement(mainPanel, (node) => node.props?.['data-testid'] === 'clipart-caption-editor')).toBeNull();
     expect(findElement(mainPanel, (node) => node.props?.placeholder === 'Optional caption')).toBeNull();
-    expect(collectText(inlineCaption)).not.toContain('CAPTION');
-    expect(collectText(inlineCaption)).not.toContain('Caption');
 
     for (const oldShellClass of ['min-h-[520px]', 'rounded-[28px]', 'w-[320px]', 'p-5']) {
       expect(source).not.toContain(oldShellClass);
@@ -431,7 +427,7 @@ describe('ClipartCardDraftModal reaction and comment metadata', () => {
     expect(state.calls).toContainEqual({ index: 5, value: true });
   });
 
-  it('keeps toolbar panel-switch clicks from being consumed by InlineCaption blur', () => {
+  it('keeps toolbar panel-switch clicks from stealing focus away from the post-name input', () => {
     const { element: captionOpen } = renderModal({ stateValues: [false, false, false, false, false, true] });
     const toolbarWrapper = testIdNode(captionOpen, 'clipart-toolbar-wrapper');
     const preventDefault = vi.fn();
@@ -583,7 +579,7 @@ describe('ClipartCardDraftModal reaction and comment metadata', () => {
     );
   });
 
-  it('passes saved caption style to InlineCaption and CardPreview', () => {
+  it('passes saved caption style to the post-name input and CardPreview', () => {
     const { element, markup } = renderModal({
       metadata: {
         captionStyle: {
@@ -597,41 +593,40 @@ describe('ClipartCardDraftModal reaction and comment metadata', () => {
         },
       },
     });
-    const inlineCaption = findByComponentName(inlineCaptionNode(element), 'InlineCaption');
+    const titleInput = titleEditorInput(element);
 
-    expect(inlineCaption.props.color).toBe('#111827cc');
-    expect(inlineCaption.props.backgroundColor).toBe('#fef3c7');
-    expect(inlineCaption.props.textStyle).toMatchObject({
+    expect(titleInput.props.style).toMatchObject({
+      color: '#111827cc',
+      backgroundColor: '#fef3c7',
       fontSize: '18px',
       fontWeight: '700',
       fontStyle: 'italic',
       fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
       lineHeight: '1.45',
     });
-    // CardPreview's own title heading is suppressed (hideTitle) so this
-    // caption style shows exactly once, on the editable InlineCaption --
-    // not duplicated in a second, non-interactive title element.
-    expect(markup).toContain('font-size:18px;font-weight:700;font-style:italic;font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;line-height:1.45;color:#111827cc;background-color:#fef3c7');
+    // The titleEditor override replaces CardPreview's own static title
+    // heading, so this caption style shows exactly once, on the editable
+    // input -- not duplicated in a second, non-interactive title element.
+    expect(markup).toContain('color:#111827cc;font-size:18px;font-weight:700;font-style:italic;font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;line-height:1.45;background-color:#fef3c7');
   });
 
-  it('renders InlineCaption inside the compact card and edits previewPadlet.title only', () => {
+  it('renders the post-name input inside the compact card and edits previewPadlet.title only', () => {
     const onChange = vi.fn();
     const { element: emptyElement, markup: emptyMarkup } = renderModal({ title: '', onChange });
-    const emptyInlineCaption = inlineCaptionNode(emptyElement);
-    const emptyInlineCaptionComponent = findByComponentName(emptyInlineCaption, 'InlineCaption');
-    // Explicit "Title" placeholder (not InlineCaption's own default "Write a
-    // caption...") -- this field edits the post's title, not a photo caption.
-    expect(emptyInlineCaptionComponent.props.placeholder).toBe('Title');
-    expect(emptyInlineCaptionComponent.props.value).toBe('');
-    expect(emptyMarkup).toContain('placeholder="Title"');
-    expect(String(emptyInlineCaption.props.className || '')).not.toContain('w-[320px]');
-    expect(findElement(previewWrapperNode(emptyElement), (node) => node.props?.['data-testid'] === 'clipart-inline-caption')).toBeTruthy();
+    const emptyTitleInput = titleEditorInput(emptyElement);
+    // Explicit "Post name" placeholder -- this field edits the post's
+    // title directly in the strip, not a separate caption concept.
+    expect(emptyTitleInput.props.placeholder).toBe('Post name');
+    expect(emptyTitleInput.props.value).toBe('');
+    expect(emptyMarkup).toContain('placeholder="Post name"');
 
     const { element: filledElement } = renderModal({ title: 'Existing clipart caption', onChange });
-    const filledInlineCaptionComponent = findByComponentName(inlineCaptionNode(filledElement), 'InlineCaption');
-    expect(filledInlineCaptionComponent.props.value).toBe('Existing clipart caption');
+    const filledTitleInput = titleEditorInput(filledElement);
+    expect(filledTitleInput.props.value).toBe('Existing clipart caption');
 
-    (filledInlineCaptionComponent.props.onChange as (nextTitle: string) => void)('Edited inline caption');
+    (filledTitleInput.props.onChange as (event: { target: { value: string } }) => void)({
+      target: { value: 'Edited inline caption' },
+    });
     expect(onChange).toHaveBeenCalledWith(
       expect.objectContaining({
         title: 'Edited inline caption',

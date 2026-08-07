@@ -294,7 +294,7 @@ describe('CardPreview consumer characterization and static guards', () => {
     expect(cardPreview).toContain('metadata?.captionStyle');
     expect(cardPreview).not.toMatch(/captionStyle\s*:/);
     expect(cardPreview).not.toContain('TextStylePopup');
-    expect(clipart).toContain('InlineCaption');
+    expect(clipart).toContain('titleEditor');
     expect(toolbar).toContain('TextCursor');
     expect(textStylePopup).toContain('ColorPickerContent');
     expect(reactionDisplay).toContain('reactions.reduce');
