@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import dynamic from 'next/dynamic';
-import { X, Save, CircleHelp, Move, ZoomIn, Palette, TextCursor, Smile, MessageSquare } from 'lucide-react';
+import { X, Save, CircleHelp, Move, ZoomIn, Palette, Type, Smile, MessageSquare } from 'lucide-react';
 import { getExcalidrawLibrary } from '@/lib/collabboard/excalidrawLibrary';
 import { CardColorPanel } from './CardColorPanel';
 import TextStylePopup from './TextStylePopup';
@@ -292,7 +292,7 @@ export default function DrawingEditor({
                                 type="text"
                                 value={title}
                                 onChange={(e) => setTitle(e.target.value)}
-                                placeholder="Post name"
+                                placeholder="Title"
                                 className="flex-1 min-w-0 truncate bg-transparent text-lg font-semibold text-gray-800 outline-none border-none placeholder:text-gray-400 placeholder:font-normal"
                                 style={titleInputStyle}
                             />
@@ -309,7 +309,7 @@ export default function DrawingEditor({
                                         className={`w-9 h-9 flex items-center justify-center rounded-lg transition-colors ${isTextStyleOpen ? 'bg-blue-100 text-blue-600' : 'hover:bg-gray-200 text-gray-600'}`}
                                         title="Text style"
                                     >
-                                        <TextCursor className="w-4 h-4" />
+                                        <Type className="w-4 h-4" />
                                     </button>
                                     {isTextStyleOpen && (
                                         <div
