@@ -182,6 +182,21 @@ export interface Padlet {
       strikethrough?: boolean;
       textAlign?: 'left' | 'center' | 'right';
     };
+    // Image post's own title -- independent of captionStyle above so
+    // formatting the title never bleeds into the caption or vice versa.
+    titleStyle?: {
+      color?: string;
+      backgroundColor?: string;
+      fontSize?: string;
+      fontWeight?: string;
+      fontStyle?: string;
+      fontFamily?: string;
+      lineHeight?: string;
+      heading?: string;
+      underline?: boolean;
+      strikethrough?: boolean;
+      textAlign?: 'left' | 'center' | 'right';
+    };
 
     // Container-specific
     childPadletIds?: string[];

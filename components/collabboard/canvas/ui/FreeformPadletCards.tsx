@@ -383,6 +383,21 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
   const activeImageToolbarPadlet = imageToolbarPadletId
     ? padlets.find((padlet) => padlet.id === imageToolbarPadletId) ?? null
     : null;
+  // Image editing modal's own Title field -- independent of the caption
+  // below it. `activeImageStyleTarget` tracks which of the two the Text
+  // style panel is currently formatting (default 'caption' preserves the
+  // existing behaviour of the toolbar's own "Text style" button; clicking
+  // into the Title input switches it, same click-to-target pattern as
+  // Todo's per-item color).
+  const [activeImageStyleTarget, setActiveImageStyleTarget] = React.useState<'title' | 'caption'>('caption');
+  const [imageTitleDraft, setImageTitleDraft] = React.useState('');
+  React.useEffect(() => {
+    if (imageToolbarPadletId && activeImageToolbarPadlet) {
+      setImageTitleDraft(getMeaningfulTitle(activeImageToolbarPadlet.title, activeImageToolbarPadlet.type));
+      setActiveImageStyleTarget('caption');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- seed once per modal open (id change), not on every padlet field update
+  }, [imageToolbarPadletId]);
   const activeCardToolbarPadlet = cardToolbarPadletId
     ? padlets.find((p) => p.id === cardToolbarPadletId) ?? null
     : null;
@@ -1376,14 +1391,58 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                 }
               }}
             >
-              {/* Top Strip — pencil right */}
+              {/* Top Strip — title centered, pencil right (same layout as
+                  the Note/Todo/Table/Table strip below: nothing shown until
+                  a real title is set, editable in place via double-click). */}
               <div
-                className="w-full flex-shrink-0 flex items-center justify-end px-1.5"
+                className="w-full flex-shrink-0 grid items-center px-1.5"
                 style={{
+                  gridTemplateColumns: 'auto 1fr auto',
                   minHeight: '22px',
                   backgroundColor: isStripVisible(padlet.metadata?.topStrip) ? padlet.metadata?.topStrip : 'rgba(0,0,0,0.04)',
                 }}
               >
+                <div />
+                <div className="flex items-center justify-center min-w-0">
+                  {editingNoteTitleId === padlet.id ? (
+                    <input
+                      type="text"
+                      value={noteTitleDraft}
+                      onChange={(e) => setNoteTitleDraft(e.target.value)}
+                      onBlur={() => {
+                        setEditingNoteTitleId(null);
+                        updatePadletTitle(padlet.id, noteTitleDraft.trim());
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') e.currentTarget.blur();
+                        if (e.key === 'Escape') setEditingNoteTitleId(null);
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                      onMouseDown={(e) => e.stopPropagation()}
+                      data-no-drag="true"
+                      placeholder="Title"
+                      className="text-xs font-semibold text-center bg-transparent border-b border-blue-400 outline-none px-0 py-0 w-24 placeholder:opacity-40"
+                      style={{ color: isStripVisible(padlet.metadata?.topStrip) ? contrastIconColor(padlet.metadata?.topStrip as string) : '#374151' }}
+                      autoFocus
+                    />
+                  ) : (() => {
+                    const imageTitle = getMeaningfulTitle(padlet.title, padlet.type);
+                    return (
+                      <span
+                        className="text-xs font-semibold text-center truncate cursor-pointer"
+                        style={{ color: isStripVisible(padlet.metadata?.topStrip) ? contrastIconColor(padlet.metadata?.topStrip as string) : '#374151' }}
+                        onDoubleClick={(e) => {
+                          e.stopPropagation();
+                          setEditingNoteTitleId(padlet.id);
+                          setNoteTitleDraft(imageTitle);
+                        }}
+                        title="Double-click to add a title"
+                      >
+                        {imageTitle}
+                      </span>
+                    );
+                  })()}
+                </div>
                 {canUseFreeformEditButton && (
                   <button
                     data-no-drag="true"
@@ -3259,10 +3318,11 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                     ) : null}
                   </div>
                   {/* Center: title -- containers show their real title
-                      unchanged; Note, Todo and Table show a semi-transparent
-                      "Title" placeholder until the user sets one, editable
-                      in place via double-click (same pattern as the
-                      Comment post's own title bar). */}
+                      unchanged; Note, Todo, Table and Image show nothing
+                      until the user sets a real title, editable in place
+                      via double-click (same pattern as the Comment post's
+                      own title bar). No ghost "Title" placeholder text
+                      here -- that's the modal editor's own input hint. */}
                   <div className="flex items-center justify-center px-1 min-w-0">
                     {isContainer ? (
                       padlet.title && (
@@ -3273,7 +3333,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                           {padlet.title}
                         </span>
                       )
-                    ) : (padlet.type === 'text' || (padlet.type as string) === 'note' || padlet.type === 'todo' || padlet.type === 'table') ? (
+                    ) : (padlet.type === 'text' || (padlet.type as string) === 'note' || padlet.type === 'todo' || padlet.type === 'table' || padlet.type === 'image') ? (
                       editingNoteTitleId === padlet.id ? (
                         <input
                           type="text"
@@ -5492,6 +5552,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                         : ''
                     );
                     setEditingCaption(initialValue);
+                    setActiveImageStyleTarget('caption');
                     setIsImageColorPickerOpen(false);
                     setIsImageEmojiOpen(false);
                     if (cardCommentPopupPadletId === activeImageToolbarPadlet.id) {
@@ -5513,6 +5574,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                     setEditingCaption(initialValue);
                   }
                   if (isOpening) {
+                    setActiveImageStyleTarget('caption');
                     setIsImageColorPickerOpen(false);
                     setIsImageEmojiOpen(false);
                     if (cardCommentPopupPadletId === activeImageToolbarPadlet.id) {
@@ -5604,6 +5666,40 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                       : 'rgba(0,0,0,0.04)',
                   }}
                 />
+                {/* Title -- modal-only placeholder (same as Note/Todo/Table:
+                    no ghost "Title" text on the canvas card itself until a
+                    real title is set), independent of the caption below. */}
+                <div className="px-3 pt-2">
+                  <input
+                    type="text"
+                    value={imageTitleDraft}
+                    onChange={(e) => setImageTitleDraft(e.target.value)}
+                    onFocus={() => {
+                      setActiveImageStyleTarget('title');
+                      if (textStylePadletId !== activeImageToolbarPadlet.id) {
+                        setTextStylePadletId(activeImageToolbarPadlet.id);
+                      }
+                    }}
+                    onBlur={() => updatePadletTitle(activeImageToolbarPadlet.id, imageTitleDraft.trim())}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') e.currentTarget.blur();
+                    }}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    placeholder="Title"
+                    className={`w-full text-sm font-semibold bg-transparent outline-none border-b placeholder:opacity-40 placeholder:font-normal rounded px-1 -mx-1 ${
+                      activeImageStyleTarget === 'title' ? 'border-blue-400 bg-blue-50/40' : 'border-transparent focus:border-blue-400'
+                    }`}
+                    style={{
+                      color: activeImageToolbarPadlet.metadata?.titleStyle?.color,
+                      backgroundColor: activeImageToolbarPadlet.metadata?.titleStyle?.backgroundColor,
+                      fontSize: activeImageToolbarPadlet.metadata?.titleStyle?.fontSize,
+                      fontWeight: activeImageToolbarPadlet.metadata?.titleStyle?.fontWeight,
+                      fontStyle: activeImageToolbarPadlet.metadata?.titleStyle?.fontStyle,
+                      fontFamily: activeImageToolbarPadlet.metadata?.titleStyle?.fontFamily,
+                      lineHeight: activeImageToolbarPadlet.metadata?.titleStyle?.lineHeight,
+                    }}
+                  />
+                </div>
                 {/* Image */}
                 <div className="relative overflow-hidden bg-gray-50 flex items-center justify-center min-h-[100px]">
                   <img
@@ -5639,34 +5735,40 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                     />
                   </div>
                 )}
-                {/* Caption */}
-                <InlineCaption
-                  value={(captionPopupPadletId === activeImageToolbarPadlet.id || textStylePadletId === activeImageToolbarPadlet.id)
-                    ? editingCaption
-                    : (activeImageToolbarPadlet.metadata?.caption || (activeImageToolbarPadlet.metadata?.photographer ? `Photo by ${activeImageToolbarPadlet.metadata.photographer}` : ''))}
-                  isEditing={captionPopupPadletId === activeImageToolbarPadlet.id || textStylePadletId === activeImageToolbarPadlet.id}
-                  color={activeImageToolbarPadlet.metadata?.captionStyle?.color}
-                  backgroundColor={activeImageToolbarPadlet.metadata?.captionStyle?.backgroundColor}
-                  textStyle={{
-                    fontSize: activeImageToolbarPadlet.metadata?.captionStyle?.fontSize,
-                    fontWeight: activeImageToolbarPadlet.metadata?.captionStyle?.fontWeight,
-                    fontStyle: activeImageToolbarPadlet.metadata?.captionStyle?.fontStyle,
-                    fontFamily: activeImageToolbarPadlet.metadata?.captionStyle?.fontFamily,
-                    lineHeight: activeImageToolbarPadlet.metadata?.captionStyle?.lineHeight,
-                  }}
-                  onChange={(next) => setEditingCaption(next)}
-                  onCommit={async () => {
-                    try {
-                      await updatePostFieldsPreservingFailureChannels(activeImageToolbarPadlet.id, {
-                        metadata: { ...activeImageToolbarPadlet.metadata, caption: editingCaption },
-                        updated_at: new Date().toISOString(),
-                      });
-                      fetchData();
-                    } catch (err) {
-                      console.error('Save failed on commit:', err);
-                    }
-                  }}
-                />
+                {/* Caption -- the wrapping mousedown hands the Text style
+                    panel's target back to 'caption' if the Title input had
+                    it, so clicking into the caption always makes it
+                    editable rather than staying readOnly under a stale
+                    'title' target. */}
+                <div onMouseDown={() => setActiveImageStyleTarget('caption')}>
+                  <InlineCaption
+                    value={(captionPopupPadletId === activeImageToolbarPadlet.id || (textStylePadletId === activeImageToolbarPadlet.id && activeImageStyleTarget === 'caption'))
+                      ? editingCaption
+                      : (activeImageToolbarPadlet.metadata?.caption || (activeImageToolbarPadlet.metadata?.photographer ? `Photo by ${activeImageToolbarPadlet.metadata.photographer}` : ''))}
+                    isEditing={captionPopupPadletId === activeImageToolbarPadlet.id || (textStylePadletId === activeImageToolbarPadlet.id && activeImageStyleTarget === 'caption')}
+                    color={activeImageToolbarPadlet.metadata?.captionStyle?.color}
+                    backgroundColor={activeImageToolbarPadlet.metadata?.captionStyle?.backgroundColor}
+                    textStyle={{
+                      fontSize: activeImageToolbarPadlet.metadata?.captionStyle?.fontSize,
+                      fontWeight: activeImageToolbarPadlet.metadata?.captionStyle?.fontWeight,
+                      fontStyle: activeImageToolbarPadlet.metadata?.captionStyle?.fontStyle,
+                      fontFamily: activeImageToolbarPadlet.metadata?.captionStyle?.fontFamily,
+                      lineHeight: activeImageToolbarPadlet.metadata?.captionStyle?.lineHeight,
+                    }}
+                    onChange={(next) => setEditingCaption(next)}
+                    onCommit={async () => {
+                      try {
+                        await updatePostFieldsPreservingFailureChannels(activeImageToolbarPadlet.id, {
+                          metadata: { ...activeImageToolbarPadlet.metadata, caption: editingCaption },
+                          updated_at: new Date().toISOString(),
+                        });
+                        fetchData();
+                      } catch (err) {
+                        console.error('Save failed on commit:', err);
+                      }
+                    }}
+                  />
+                </div>
               </div>
             )}
             {activeImageToolbarPadlet && textStylePadletId === activeImageToolbarPadlet.id && (
@@ -5682,42 +5784,55 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                 >
                   <X className="w-3 h-3 text-gray-400" />
                 </button>
-                <TextStylePopup
-                  isOpen={true}
-                  onOpenChange={(open) => !open && setTextStylePadletId(null)}
-                  onSelectHeading={(level) => {
-                    const baseStyle = activeImageToolbarPadlet.metadata?.captionStyle || {};
-                    const nextStyle = (() => {
-                      switch (level) {
-                        case 'h1': return { ...baseStyle, heading: 'h1', fontSize: '18px', fontWeight: '700', fontStyle: 'normal', fontFamily: undefined, lineHeight: '1.3' };
-                        case 'h2': return { ...baseStyle, heading: 'h2', fontSize: '16px', fontWeight: '600', fontStyle: 'normal', fontFamily: undefined, lineHeight: '1.35' };
-                        case 'small': return { ...baseStyle, heading: 'small', fontSize: '12px', fontWeight: '400', fontStyle: 'normal', fontFamily: undefined, lineHeight: '1.4' };
-                        case 'code': return { ...baseStyle, heading: 'code', fontSize: '13px', fontWeight: '400', fontStyle: 'normal', fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace", lineHeight: '1.4' };
-                        case 'quote': return { ...baseStyle, heading: 'quote', fontSize: '14px', fontWeight: '400', fontStyle: 'italic', fontFamily: undefined, lineHeight: '1.45' };
-                        case 'callout': return { ...baseStyle, heading: 'callout', fontSize: '14px', fontWeight: '500', fontStyle: 'normal', fontFamily: undefined, lineHeight: '1.4', backgroundColor: baseStyle.backgroundColor || '#fef3c7' };
-                        case 'normal':
-                        default: return { ...baseStyle, heading: 'normal', fontSize: '14px', fontWeight: '400', fontStyle: 'normal', fontFamily: undefined, lineHeight: '1.4' };
-                      }
-                    })();
-                    const nextMeta = { ...(activeImageToolbarPadlet.metadata || {}), captionStyle: nextStyle };
-                    setPadlets((prev) => prev.map((p) => (p.id === activeImageToolbarPadlet.id ? { ...p, metadata: nextMeta } : p)));
-                    commitPadletMeta(activeImageToolbarPadlet.id, nextMeta);
-                  }}
-                  onSelectColor={(color) => {
-                    const nextMeta = { ...(activeImageToolbarPadlet.metadata || {}), captionStyle: { ...(activeImageToolbarPadlet.metadata?.captionStyle || {}), color } };
-                    setPadlets((prev) => prev.map((p) => (p.id === activeImageToolbarPadlet.id ? { ...p, metadata: nextMeta } : p)));
-                    commitPadletMeta(activeImageToolbarPadlet.id, nextMeta);
-                  }}
-                  onSelectHighlight={(color) => {
-                    const nextMeta = { ...(activeImageToolbarPadlet.metadata || {}), captionStyle: { ...(activeImageToolbarPadlet.metadata?.captionStyle || {}), backgroundColor: color } };
-                    setPadlets((prev) => prev.map((p) => (p.id === activeImageToolbarPadlet.id ? { ...p, metadata: nextMeta } : p)));
-                    commitPadletMeta(activeImageToolbarPadlet.id, nextMeta);
-                  }}
-                  currentHeading={activeImageToolbarPadlet.metadata?.captionStyle?.heading || 'normal'}
-                  currentColor={activeImageToolbarPadlet.metadata?.captionStyle?.color}
-                  currentHighlight={activeImageToolbarPadlet.metadata?.captionStyle?.backgroundColor}
-                  hideCloseButton
-                />
+                <div className="absolute top-2 left-3 text-[10px] font-semibold text-gray-400 uppercase tracking-wider">
+                  {activeImageStyleTarget === 'title' ? 'Editing: Title' : 'Editing: Caption'}
+                </div>
+                {(() => {
+                  // Title and caption each have their own style object
+                  // (titleStyle / captionStyle) -- the panel reads/writes
+                  // whichever one activeImageStyleTarget currently points
+                  // at, same per-target pattern as Todo's title/task color.
+                  const styleKey = activeImageStyleTarget === 'title' ? 'titleStyle' : 'captionStyle';
+                  const activeStyle = activeImageToolbarPadlet.metadata?.[styleKey] || {};
+                  return (
+                    <TextStylePopup
+                      isOpen={true}
+                      onOpenChange={(open) => !open && setTextStylePadletId(null)}
+                      onSelectHeading={(level) => {
+                        const baseStyle = activeStyle;
+                        const nextStyle = (() => {
+                          switch (level) {
+                            case 'h1': return { ...baseStyle, heading: 'h1', fontSize: '18px', fontWeight: '700', fontStyle: 'normal', fontFamily: undefined, lineHeight: '1.3' };
+                            case 'h2': return { ...baseStyle, heading: 'h2', fontSize: '16px', fontWeight: '600', fontStyle: 'normal', fontFamily: undefined, lineHeight: '1.35' };
+                            case 'small': return { ...baseStyle, heading: 'small', fontSize: '12px', fontWeight: '400', fontStyle: 'normal', fontFamily: undefined, lineHeight: '1.4' };
+                            case 'code': return { ...baseStyle, heading: 'code', fontSize: '13px', fontWeight: '400', fontStyle: 'normal', fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace", lineHeight: '1.4' };
+                            case 'quote': return { ...baseStyle, heading: 'quote', fontSize: '14px', fontWeight: '400', fontStyle: 'italic', fontFamily: undefined, lineHeight: '1.45' };
+                            case 'callout': return { ...baseStyle, heading: 'callout', fontSize: '14px', fontWeight: '500', fontStyle: 'normal', fontFamily: undefined, lineHeight: '1.4', backgroundColor: baseStyle.backgroundColor || '#fef3c7' };
+                            case 'normal':
+                            default: return { ...baseStyle, heading: 'normal', fontSize: '14px', fontWeight: '400', fontStyle: 'normal', fontFamily: undefined, lineHeight: '1.4' };
+                          }
+                        })();
+                        const nextMeta = { ...(activeImageToolbarPadlet.metadata || {}), [styleKey]: nextStyle };
+                        setPadlets((prev) => prev.map((p) => (p.id === activeImageToolbarPadlet.id ? { ...p, metadata: nextMeta } : p)));
+                        commitPadletMeta(activeImageToolbarPadlet.id, nextMeta);
+                      }}
+                      onSelectColor={(color) => {
+                        const nextMeta = { ...(activeImageToolbarPadlet.metadata || {}), [styleKey]: { ...activeStyle, color } };
+                        setPadlets((prev) => prev.map((p) => (p.id === activeImageToolbarPadlet.id ? { ...p, metadata: nextMeta } : p)));
+                        commitPadletMeta(activeImageToolbarPadlet.id, nextMeta);
+                      }}
+                      onSelectHighlight={(color) => {
+                        const nextMeta = { ...(activeImageToolbarPadlet.metadata || {}), [styleKey]: { ...activeStyle, backgroundColor: color } };
+                        setPadlets((prev) => prev.map((p) => (p.id === activeImageToolbarPadlet.id ? { ...p, metadata: nextMeta } : p)));
+                        commitPadletMeta(activeImageToolbarPadlet.id, nextMeta);
+                      }}
+                      currentHeading={activeStyle.heading || 'normal'}
+                      currentColor={activeStyle.color}
+                      currentHighlight={activeStyle.backgroundColor}
+                      hideCloseButton
+                    />
+                  );
+                })()}
               </div>
             )}
             {activeImageToolbarPadlet && isImageEmojiOpen && (

@@ -1143,7 +1143,7 @@ export function usePadletSave(params: UsePadletSaveParams) {
 
       // Check if placement prompt is needed (grid/columns/wall layouts)
       if (checkPlacementRequired(
-        { kind: 'image', content: '', file_url: data.imageUrl, title: data.caption || 'Image', metadata },
+        { kind: 'image', content: '', file_url: data.imageUrl, title: 'Image', metadata },
         () => { setIsImageEditorOpen(false); setPadletToEdit(null); }
       )) {
         return;
@@ -1151,11 +1151,13 @@ export function usePadletSave(params: UsePadletSaveParams) {
 
       let createdPadlet: any = null;
       if (!padletToEdit || padletToEdit.id === 'new') {
-        // New Image
+        // New Image -- title stays independent of the caption (set later,
+        // if at all, via the image editing modal's own Title field), not
+        // derived from it.
         const { x: position_x, y: position_y } = getNewPostPosition(300, 200);
         const { data: newImage, error } = await supabase.from('padlets').insert({
           board_id: canvasId,
-          title: data.caption || 'Image',
+          title: 'Image',
           content: '',
           type: 'image',
           file_url: data.imageUrl,
@@ -1168,11 +1170,11 @@ export function usePadletSave(params: UsePadletSaveParams) {
         if (error) throw error;
         createdPadlet = newImage;
       } else {
-        // Update Image
+        // Update Image -- title is left untouched here; it's only ever
+        // changed through the image editing modal's own Title field now.
         await supabase
           .from('padlets')
           .update({
-            title: data.caption || 'Image',
             file_url: data.imageUrl,
             metadata,
             updated_at: new Date().toISOString(),
@@ -1188,7 +1190,7 @@ export function usePadletSave(params: UsePadletSaveParams) {
       } else {
         setPadlets(prev => prev.map(p =>
           p.id === padletToEdit!.id
-            ? { ...p, title: data.caption || 'Image', file_url: data.imageUrl, metadata }
+            ? { ...p, file_url: data.imageUrl, metadata }
             : p
         ));
       }
