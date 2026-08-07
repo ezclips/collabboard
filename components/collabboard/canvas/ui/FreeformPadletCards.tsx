@@ -398,6 +398,24 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- seed once per modal open (id change), not on every padlet field update
   }, [imageToolbarPadletId]);
+  // Blur alone isn't a reliable commit trigger for this input: clicking a
+  // control inside the Text style panel (heading, color swatch) calls
+  // preventDefault on mousedown so it doesn't steal focus away from a live
+  // text selection elsewhere (see TextStylePopup's preventFocusLoss) --
+  // which also means it never blurs THIS input, so clearing the title and
+  // clicking straight into the panel would silently discard the change.
+  // Debounce-commit on every change too, so the title always saves without
+  // requiring Enter first.
+  React.useEffect(() => {
+    if (!activeImageToolbarPadlet) return;
+    const persistedTitle = getMeaningfulTitle(activeImageToolbarPadlet.title, activeImageToolbarPadlet.type);
+    if (imageTitleDraft === persistedTitle) return;
+    const timeout = setTimeout(() => {
+      updatePadletTitle(activeImageToolbarPadlet.id, imageTitleDraft.trim());
+    }, 500);
+    return () => clearTimeout(timeout);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fire only on draft changes; activeImageToolbarPadlet is read fresh from the same render
+  }, [imageTitleDraft]);
   const activeCardToolbarPadlet = cardToolbarPadletId
     ? padlets.find((p) => p.id === cardToolbarPadletId) ?? null
     : null;
@@ -5656,20 +5674,21 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                 onClick={(e) => e.stopPropagation()}
                 onMouseDown={(e) => e.stopPropagation()}
               >
-                {/* Top strip */}
+                {/* Top strip -- Title lives inside it, same as the canvas
+                    card's own top strip (a single colored bar with the
+                    title centered in it), not a separate row underneath.
+                    Modal-only placeholder: no ghost "Title" text is ever
+                    written to the canvas -- this is the real editable
+                    field, independent of the caption below. */}
                 <div
-                  className="w-full flex-shrink-0"
+                  className="w-full flex-shrink-0 flex items-center px-2"
                   style={{
-                    minHeight: '22px',
+                    minHeight: '28px',
                     backgroundColor: isStripVisible(activeImageToolbarPadlet.metadata?.topStrip)
                       ? activeImageToolbarPadlet.metadata?.topStrip
                       : 'rgba(0,0,0,0.04)',
                   }}
-                />
-                {/* Title -- modal-only placeholder (same as Note/Todo/Table:
-                    no ghost "Title" text on the canvas card itself until a
-                    real title is set), independent of the caption below. */}
-                <div className="px-3 pt-2">
+                >
                   <input
                     type="text"
                     value={imageTitleDraft}
@@ -5690,7 +5709,10 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                       activeImageStyleTarget === 'title' ? 'border-blue-400 bg-blue-50/40' : 'border-transparent focus:border-blue-400'
                     }`}
                     style={{
-                      color: activeImageToolbarPadlet.metadata?.titleStyle?.color,
+                      color: activeImageToolbarPadlet.metadata?.titleStyle?.color
+                        || (isStripVisible(activeImageToolbarPadlet.metadata?.topStrip)
+                          ? contrastIconColor(activeImageToolbarPadlet.metadata?.topStrip as string)
+                          : '#374151'),
                       backgroundColor: activeImageToolbarPadlet.metadata?.titleStyle?.backgroundColor,
                       fontSize: activeImageToolbarPadlet.metadata?.titleStyle?.fontSize,
                       fontWeight: activeImageToolbarPadlet.metadata?.titleStyle?.fontWeight,
