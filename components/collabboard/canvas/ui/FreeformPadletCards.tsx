@@ -3350,11 +3350,11 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                     ) : null}
                   </div>
                   {/* Center: title -- containers show their real title
-                      unchanged; Note, Todo, Table and Image show nothing
-                      until the user sets a real title, editable in place
-                      via double-click (same pattern as the Comment post's
-                      own title bar). No ghost "Title" placeholder text
-                      here -- that's the modal editor's own input hint. */}
+                      unchanged; Note, Todo, Table, Image, Link and AI show
+                      nothing until the user sets a real title, editable in
+                      place via double-click (same pattern as the Comment
+                      post's own title bar). No ghost "Title" placeholder
+                      text here -- that's the modal editor's own input hint. */}
                   <div className="flex items-center justify-center px-1 min-w-0">
                     {isContainer ? (
                       padlet.title && (
@@ -3365,7 +3365,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                           {padlet.title}
                         </span>
                       )
-                    ) : (padlet.type === 'text' || (padlet.type as string) === 'note' || padlet.type === 'todo' || padlet.type === 'table' || padlet.type === 'image') ? (() => {
+                    ) : (padlet.type === 'text' || (padlet.type as string) === 'note' || padlet.type === 'todo' || padlet.type === 'table' || padlet.type === 'image' || padlet.type === 'link' || padlet.type === 'ai-component') ? (() => {
                       // Resolve the title's FULL style (heading/size, bold,
                       // italic, underline, strikethrough, align, color) the
                       // same way the editor modal's Text style panel wrote

@@ -6,6 +6,7 @@ import type { CaptionStyle } from '@/lib/domain/canvas/captionStyle';
 import { useGridPadletSave } from './useGridPadletSave';
 
 export type SaveAIComponentData = {
+  title?: string;
   aiComponentCode?: string;
   aiComponentJson?: LoadedAIContent;
   aiPrompt: string;
@@ -1390,7 +1391,7 @@ export function usePadletSave(params: UsePadletSaveParams) {
           .from('padlets')
           .insert({
             board_id: canvasId,
-            title: 'AI Component',
+            title: data.title || 'AI Component',
             content: data.aiPrompt,
             type: 'ai-component',
             position_x,
@@ -1404,9 +1405,15 @@ export function usePadletSave(params: UsePadletSaveParams) {
         if (error) throw error;
         createdPadlet = newAIComp;
       } else {
+        // Preserve the existing title when this save came from a flow that
+        // doesn't surface a title field (AI Content Field Editor, Convert)
+        // rather than silently clobbering a title set elsewhere (e.g. the
+        // canvas card's own double-click-to-edit).
+        const nextTitle = data.title !== undefined ? data.title : padletToEdit.title;
         const { error } = await supabase
           .from('padlets')
           .update({
+            title: nextTitle,
             content: data.aiPrompt,
             metadata,
             updated_at: new Date().toISOString(),
@@ -1423,7 +1430,7 @@ export function usePadletSave(params: UsePadletSaveParams) {
       } else {
         setPadlets(prev => prev.map(p =>
           p.id === padletToEdit!.id
-            ? { ...p, content: data.aiPrompt, metadata }
+            ? { ...p, title: data.title !== undefined ? data.title : p.title, content: data.aiPrompt, metadata }
             : p
         ));
       }

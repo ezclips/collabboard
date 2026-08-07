@@ -24,9 +24,7 @@ import { BoardSection, Padlet, DropIndicatorState } from "@/types/collabboard";
 import PostCardContent from "../PostCardContent";
 import RowColumnContainerCard from "../RowColumnContainerCard";
 import { ColumnPostContextMenu } from "../menus/ColumnPostContextMenu";
-import CardShell, { contrastIconColor } from "@/components/collabboard/shells/CardShell";
-import { getMeaningfulTitle } from "@/lib/infra/collabboard/postTitle";
-import { resolvePadletTitleStyle } from "@/lib/domain/canvas/captionStyle";
+import CardShell from "@/components/collabboard/shells/CardShell";
 import { getContainerEditTargetLabel } from "@/lib/infra/collabboard/containerEditTargetLabel";
 
 const TITLED_POST_TYPES = new Set(["text", "note", "todo", "table", "image"]);
@@ -502,17 +500,17 @@ export default function RowLane({
                                             onAddContainerAt={isEditable ? onAddContainerAt : undefined}
                                         >
                                             {(() => {
+                                                // Title TEXT only ever renders on the Freeform canvas -- see
+                                                // matching comment in ColumnsCanvasRow.tsx. hideOwnTitle still
+                                                // suppresses Table/Todo's own internal fallback title.
                                                 const topStripColor = post.metadata?.topStrip && post.metadata.topStrip !== 'transparent' ? post.metadata.topStrip : null;
                                                 const hasTitle = TITLED_POST_TYPES.has(post.type);
-                                                const fallbackTitleColor = topStripColor ? contrastIconColor(topStripColor) : '#374151';
                                                 return (
                                                     <CardShell
                                                         padletId={post.id}
                                                         isContainer={false}
                                                         cardColor={post.metadata?.cardColor || '#ffffff'}
                                                         topStripColor={topStripColor}
-                                                        title={hasTitle ? getMeaningfulTitle(post.title, post.type) || undefined : undefined}
-                                                        titleStyle={hasTitle ? resolvePadletTitleStyle(post, fallbackTitleColor) : undefined}
                                                         onEdit={isEditable ? () => onEditPost(post) : undefined}
                                                         className="cursor-grab active:cursor-grabbing"
                                                     >

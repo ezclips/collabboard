@@ -6,6 +6,7 @@ import { ColorPickerContent } from '../ColorPicker';
 import EmojiReactionPicker from './EmojiReactionPicker';
 import TextStylePopup from './TextStylePopup';
 import LinkMediaEmbed, { getLinkEmbedKind } from '../LinkMediaEmbed';
+import { contrastIconColor } from '../shells/CardShell';
 
 // Comment type
 interface Comment {
@@ -807,18 +808,26 @@ export default function LinkEditor({
                             </div>
                         </div>
                     )}
-                    {/* Top strip */}
-                    {topStrip && (
-                        <div className="h-2" style={{ backgroundColor: topStrip }} />
-                    )}
-
-                    {/* Close button */}
-                    <button
-                        onClick={handleSave}
-                        className="absolute top-2 right-2 w-6 h-6 flex items-center justify-center rounded-full bg-black/20 hover:bg-black/40 text-white z-10"
+                    {/* Top strip -- Title lives inside it, same as the canvas
+                        card's own top strip, matching every other post
+                        type's edit window. Replaces the old floating Close
+                        button (redundant -- clicking the backdrop already
+                        saves and closes, same as every other editor) which
+                        sat in the exact top-right corner this strip's title
+                        input now occupies. */}
+                    <div
+                        className="w-full flex-shrink-0 flex items-center px-2 rounded-t-lg"
+                        style={{ minHeight: '28px', backgroundColor: topStrip || 'rgba(0,0,0,0.04)' }}
                     >
-                        <X className="w-4 h-4" />
-                    </button>
+                        <input
+                            type="text"
+                            value={linkTitle}
+                            onChange={(e) => setLinkTitle(e.target.value)}
+                            placeholder="Title"
+                            className="w-full text-sm font-semibold bg-transparent outline-none border-b border-transparent focus:border-blue-400 placeholder:opacity-40 placeholder:font-normal rounded px-1 -mx-1"
+                            style={{ color: topStrip ? contrastIconColor(topStrip) : '#374151' }}
+                        />
+                    </div>
 
                     {/* Content */}
                     <div className="p-4">

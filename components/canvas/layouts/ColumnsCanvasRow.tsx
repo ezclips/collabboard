@@ -23,9 +23,7 @@ import RowColumnContainerCard from "@/components/collabboard/RowColumnContainerC
 import { ColumnPostContextMenu } from "@/components/collabboard/menus/ColumnPostContextMenu";
 
 import { useDroppable, useDraggable } from "@dnd-kit/core";
-import CardShell, { contrastIconColor } from "@/components/collabboard/shells/CardShell";
-import { getMeaningfulTitle } from "@/lib/infra/collabboard/postTitle";
-import { resolvePadletTitleStyle } from "@/lib/domain/canvas/captionStyle";
+import CardShell from "@/components/collabboard/shells/CardShell";
 import { getContainerEditTargetLabel } from "@/lib/infra/collabboard/containerEditTargetLabel";
 
 const TITLED_POST_TYPES = new Set(["text", "note", "todo", "table", "image"]);
@@ -446,17 +444,21 @@ export default function ColumnsCanvasRow({
                 }
               >
                 {(() => {
+                  // Title TEXT only ever renders on the Freeform canvas --
+                  // here the post's title still exists (it's what the
+                  // "which post do you want to edit" picker shows) but the
+                  // card face itself stays title-less, same as a container's
+                  // strip with no title set. hideOwnTitle still suppresses
+                  // Table/Todo's own internal fallback title so it doesn't
+                  // resurface now that CardShell isn't showing one either.
                   const topStripColor = (post.metadata as any)?.topStrip && (post.metadata as any).topStrip !== 'transparent' ? (post.metadata as any).topStrip : null;
                   const hasTitle = TITLED_POST_TYPES.has(post.type);
-                  const fallbackTitleColor = topStripColor ? contrastIconColor(topStripColor) : '#374151';
                   return (
                     <CardShell
                       padletId={post.id}
                       isContainer={false}
                       cardColor={(post.metadata as any)?.cardColor || '#ffffff'}
                       topStripColor={topStripColor}
-                      title={hasTitle ? getMeaningfulTitle(post.title, post.type) || undefined : undefined}
-                      titleStyle={hasTitle ? resolvePadletTitleStyle(post, fallbackTitleColor) : undefined}
                       onEdit={isEditable ? () => onEditPost(post) : undefined}
                     >
                       <PostCardContent

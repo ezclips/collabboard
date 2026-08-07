@@ -804,11 +804,16 @@ export default function TableEditor({
                             className="rounded-lg overflow-hidden bg-white shadow-lg"
                             style={{ minHeight: "200px", maxHeight: "450px", width: "400px" }}
                         >
-                            {/* Header -- ghost "Title" placeholder until the user sets
-                                one, same pattern as Note/Todo/Comment/Document.
-                                Styleable via the Text style panel, independent
-                                of any cell's style (see titleStyle above). */}
-                            <div className="p-3 border-b">
+                            {/* Top strip -- Title lives inside it, same as the
+                                canvas card's own top strip, matching every
+                                other post type's edit window. Table has no
+                                topStrip color of its own today, so this uses
+                                the same neutral gray every other type falls
+                                back to when no strip color is set. */}
+                            <div
+                                className="w-full flex-shrink-0 flex items-center px-2"
+                                style={{ minHeight: '28px', backgroundColor: 'rgba(0,0,0,0.04)' }}
+                            >
                                 <input
                                     type="text"
                                     value={title}
@@ -820,7 +825,7 @@ export default function TableEditor({
                                         setActiveSubmenu('textStyle');
                                     }}
                                     placeholder="Title"
-                                    className={`w-full text-lg font-semibold text-gray-800 bg-transparent outline-none border-b placeholder:opacity-40 placeholder:font-normal rounded px-1 -mx-1 ${
+                                    className={`w-full text-sm font-semibold bg-transparent outline-none border-b placeholder:opacity-40 placeholder:font-normal rounded px-1 -mx-1 ${
                                         activeStyleTarget === 'title' ? 'border-blue-400 bg-blue-50/40' : 'border-transparent focus:border-blue-400'
                                     }`}
                                     style={{

@@ -478,6 +478,7 @@ export default function CanvasModals({
             setPadletToEdit(null);
           }}
           onSave={saveAIComponent}
+          initialTitle={getMeaningfulTitle(padletToEdit?.title, padletToEdit?.type)}
           initialPrompt={padletToEdit?.metadata?.aiPrompt || ''}
           initialContent={extractAIContentFromPadletMetadata(padletToEdit?.metadata)}
           lockedMode={lockedMode}

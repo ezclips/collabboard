@@ -34,6 +34,7 @@ const COMMENT_EXTENSIONS = [
   TextAlign.configure({ types: ["heading", "paragraph"] }),
 ];
 import { ColorPickerContent } from "../ColorPicker";
+import { contrastIconColor } from "../shells/CardShell";
 
 const BACKGROUND_COLORS = [
   "#ffffff",
@@ -572,12 +573,26 @@ export default function CommentEditor({
           className="relative rounded-xl shadow-2xl border border-gray-200 overflow-visible"
           style={{ width: "320px", backgroundColor: cardColor }}
         >
-          {topStrip && topStrip !== "transparent" && (
-            <div
-              className="absolute left-0 top-0 w-full h-1.5 rounded-t-xl"
-              style={{ backgroundColor: topStrip }}
+          {/* Top strip -- Title lives inside it, same as the canvas card's
+              own top strip, matching every other post type's edit window.
+              A flow element (not the old absolute-positioned accent line)
+              so it actually pushes the rest of the card down. */}
+          <div
+            className="w-full flex-shrink-0 flex items-center px-2 rounded-t-xl"
+            style={{
+              minHeight: '28px',
+              backgroundColor: topStrip && topStrip !== 'transparent' ? topStrip : 'rgba(0,0,0,0.04)',
+            }}
+          >
+            <input
+              type="text"
+              value={commentTitle}
+              onChange={(e) => setCommentTitle(e.target.value)}
+              placeholder="Title"
+              className="w-full text-sm font-semibold bg-transparent outline-none border-b border-transparent focus:border-blue-400 placeholder:opacity-40 placeholder:font-normal rounded px-1 -mx-1"
+              style={{ color: topStrip && topStrip !== 'transparent' ? contrastIconColor(topStrip) : '#374151' }}
             />
-          )}
+          </div>
           {/* Card Color Popup - New style matching NoteEditor */}
           {cardColorOpen && (
             <div
@@ -714,39 +729,23 @@ export default function CommentEditor({
               </div>
             )}
 
-            <div className="flex items-center justify-between mb-3">
-              {/* Title editing now always available inline (ghost "Title"
-                  placeholder when unset), matching the card's own bar --
-                  no separate toggle button needed to reveal this field. */}
-              <input
-                type="text"
-                value={commentTitle}
-                onChange={(e) => setCommentTitle(e.target.value)}
-                className="text-sm font-semibold text-gray-700 bg-transparent border-b border-transparent hover:border-gray-200 focus:border-blue-400 outline-none px-0 py-0.5 w-full max-w-[200px] placeholder:opacity-40 placeholder:font-normal"
-                placeholder="Title"
-              />
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => {
-                    setBadgeColorOpen((prev) => !prev);
-                    setCommentColorPopupId(null);
-                  }}
-                  className="w-7 h-7 flex items-center justify-center rounded hover:bg-gray-100"
-                  title="Badge Color"
-                >
-                  <div
-                    className="w-4 h-4 rounded border border-gray-300"
-                    style={{ backgroundColor: badgeColor }}
-                  />
-                </button>
-                <button
-                  onClick={handleSave}
-                  className="text-gray-400 hover:text-gray-600 p-1 rounded hover:bg-gray-100"
-                  title="Close"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
+            <div className="flex items-center justify-end mb-3">
+              {/* Close button removed -- redundant with the backdrop click
+                  (handleOverlayClick) which already saves and closes, same
+                  as every other editor. */}
+              <button
+                onClick={() => {
+                  setBadgeColorOpen((prev) => !prev);
+                  setCommentColorPopupId(null);
+                }}
+                className="w-7 h-7 flex items-center justify-center rounded hover:bg-gray-100"
+                title="Badge Color"
+              >
+                <div
+                  className="w-4 h-4 rounded border border-gray-300"
+                  style={{ backgroundColor: badgeColor }}
+                />
+              </button>
             </div>
 
             {badgeColorOpen && (

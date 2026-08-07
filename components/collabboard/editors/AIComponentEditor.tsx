@@ -41,11 +41,13 @@ interface AIComponentEditorProps {
   isOpen: boolean;
   onClose: () => void;
   onSave: (data: {
+    title?: string;
     aiPrompt: string;
     aiComponentJson?: LoadedAIContent;
     aiComponentCode?: string;
     aiRawCode?: string;
   }) => void;
+  initialTitle?: string;
   initialPrompt?: string;
   initialContent?: unknown;
   // When set, mode and subtype selectors are locked (regenerate flow)
@@ -174,12 +176,14 @@ export default function AIComponentEditor({
   isOpen,
   onClose,
   onSave,
+  initialTitle = '',
   initialPrompt = '',
   initialContent,
   lockedMode,
   lockedSubtype,
 }: AIComponentEditorProps) {
   const isLocked = Boolean(lockedMode);
+  const [title, setTitle] = useState(initialTitle);
 
   const initialSelection = useMemo(
     () => inferInitialSelection(initialContent),
@@ -204,6 +208,7 @@ export default function AIComponentEditor({
 
     const selection = inferInitialSelection(initialContent);
     const resolvedMode = lockedMode ?? selection.mode;
+    setTitle(initialTitle);
     setPrompt(initialPrompt);
     setUiMode(lockedMode ?? selection.mode);
     setMode(resolvedMode);
@@ -216,7 +221,7 @@ export default function AIComponentEditor({
     setStage(initialContent ? 'done' : 'idle');
     setError(null);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, initialPrompt, initialContent]);
+  }, [isOpen, initialTitle, initialPrompt, initialContent]);
 
   const isLoading = stage === 'classifying' || stage === 'generating' || stage === 'rendering';
 
@@ -371,6 +376,7 @@ export default function AIComponentEditor({
     if (!persistedContent) return;
 
     onSave({
+      title: title.trim() || undefined,
       aiPrompt: prompt,
       aiComponentJson: persistedContent,
     });
@@ -385,6 +391,22 @@ export default function AIComponentEditor({
         className="flex max-h-[90vh] w-[980px] max-w-[94vw] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl animate-in fade-in zoom-in duration-200"
         onClick={(e) => e.stopPropagation()}
       >
+        {/* Top strip -- Title lives inside it, same as the canvas card's own
+            top strip, matching every other post type's edit window. AI
+            components have no topStrip color concept, so this uses the same
+            neutral gray every other type falls back to when unset. */}
+        <div
+          className="w-full flex-shrink-0 flex items-center px-3"
+          style={{ minHeight: '28px', backgroundColor: 'rgba(0,0,0,0.04)' }}
+        >
+          <input
+            type="text"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="Title"
+            className="w-full text-sm font-semibold text-gray-800 bg-transparent outline-none border-b border-transparent focus:border-blue-400 placeholder:opacity-40 placeholder:font-normal rounded px-1 -mx-1"
+          />
+        </div>
         <div className="flex items-center justify-between border-b bg-gray-50/50 px-6 py-4">
           <div className="flex items-center gap-2">
             <div className="rounded-lg bg-purple-100 p-2">

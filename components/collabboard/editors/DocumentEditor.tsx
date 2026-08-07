@@ -9,6 +9,7 @@ import TextStylePopup from './TextStylePopup';
 import LinkPopup from './LinkPopup';
 import CommentPopup from './CommentPopup';
 import { ColorPickerContent } from '../ColorPicker';
+import { contrastIconColor } from '../shells/CardShell';
 import { toEditorHtml, fromEditorHtml } from '@/lib/domain/canvas/documentContentAdapter';
 import type { SaveCardData, SaveCardResult } from '@/hooks/canvas/usePadletSave';
 
@@ -303,9 +304,16 @@ export default function DocumentEditor({
           className="relative bg-white rounded-2xl shadow-2xl overflow-hidden flex flex-col"
           style={{ width: '640px', maxHeight: '80vh' }}
         >
-          <div className="px-6 py-4 border-b flex items-center justify-between gap-4">
+          {/* Top strip -- Title lives inside it, same as the canvas card's
+              own top strip, matching every other post type's edit window
+              (was a plain white bordered header, not respecting
+              topStripColor at all). */}
+          <div
+            className="px-6 py-4 flex items-center justify-between gap-4"
+            style={{ backgroundColor: topStripColor !== 'transparent' ? topStripColor : 'rgba(0,0,0,0.04)' }}
+          >
             {readOnly ? (
-              <span className="text-lg font-semibold text-gray-800 truncate">
+              <span className="text-lg font-semibold truncate" style={{ color: topStripColor !== 'transparent' ? contrastIconColor(topStripColor) : '#1f2937' }}>
                 {title || 'Untitled document'}
               </span>
             ) : (
@@ -314,7 +322,8 @@ export default function DocumentEditor({
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 placeholder="Untitled document"
-                className="flex-1 text-lg font-semibold text-gray-900 bg-transparent outline-none border-none placeholder:text-gray-300"
+                className="flex-1 text-lg font-semibold bg-transparent outline-none border-none placeholder:opacity-40"
+                style={{ color: topStripColor !== 'transparent' ? contrastIconColor(topStripColor) : '#1f2937' }}
               />
             )}
             <div className="flex items-center gap-2 shrink-0">
@@ -322,7 +331,8 @@ export default function DocumentEditor({
                 type="button"
                 aria-label="Close"
                 onClick={attemptClose}
-                className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-500 shrink-0"
+                className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-black/10 shrink-0"
+                style={{ color: topStripColor !== 'transparent' ? contrastIconColor(topStripColor) : '#6b7280' }}
               >
                 <X className="w-5 h-5" />
               </button>

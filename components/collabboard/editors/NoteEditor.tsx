@@ -11,6 +11,7 @@ import CommentPopup from './CommentPopup';
 import { Palette, PenTool, X, Strikethrough, Trash2 } from 'lucide-react';
 import { ColorPickerContent } from '../ColorPicker';
 import { CAPTION_STYLE_PRESETS, resolveCaptionStyle, type CaptionHeading, type CaptionStyle } from '@/lib/domain/canvas/captionStyle';
+import { contrastIconColor } from '../shells/CardShell';
 
 const BACKGROUND_COLORS = [
   "#ffffff", "#f3f4f6", "#fee2e2", "#ffedd5", "#fef3c7",
@@ -735,16 +736,15 @@ export default function NoteEditor({
                   width: '240px',
                 }}
               >
-                {/* Top Strip */}
-                {topStrip && (
-                  <div className="h-1.5 w-full" style={{ backgroundColor: topStrip }} />
-                )}
-
-                {/* Title -- ghost "Title" placeholder until the user sets
-                    one, matching Comment/Document's editor title fields.
-                    Styleable via the Text style panel, independent of the
-                    note body's own TipTap marks (see titleStyle above). */}
-                <div className="px-3 pt-3">
+                {/* Top strip -- Title lives inside it, same as the canvas
+                    card's own top strip (a single colored bar with the
+                    title centered in it), not a separate row underneath.
+                    Matches the Image editor's modal treatment for
+                    consistency across every post type's edit window. */}
+                <div
+                  className="w-full flex-shrink-0 flex items-center px-2"
+                  style={{ minHeight: '28px', backgroundColor: topStrip || 'rgba(0,0,0,0.04)' }}
+                >
                   <input
                     type="text"
                     value={title}
@@ -757,7 +757,7 @@ export default function NoteEditor({
                     className={`w-full text-sm font-semibold bg-transparent outline-none border-b placeholder:opacity-40 placeholder:font-normal rounded px-1 -mx-1 ${
                       activeStyleTarget === 'title' ? 'border-blue-400 bg-blue-50/40' : 'border-transparent focus:border-blue-400'
                     }`}
-                    style={resolveCaptionStyle(titleStyle, textColor)}
+                    style={resolveCaptionStyle(titleStyle, topStrip ? contrastIconColor(topStrip) : textColor)}
                   />
                 </div>
 

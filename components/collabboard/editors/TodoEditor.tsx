@@ -8,6 +8,7 @@ import TextStylePopup from './TextStylePopup';
 import EmojiReactionPicker from './EmojiReactionPicker';
 import { CAPTION_STYLE_PRESETS, resolveCaptionStyle, type CaptionHeading, type CaptionStyle } from '@/lib/domain/canvas/captionStyle';
 import { nextTextAlign } from './textAlignCycle';
+import { contrastIconColor } from '../shells/CardShell';
 
 // Extends CaptionStyle so a task carries the exact same style fields as the
 // title (color/heading/bold/italic/underline/strikethrough/align) -- each
@@ -318,7 +319,7 @@ export default function TodoEditor({
     const toggleActiveTargetStrikethrough = () => writeActiveTargetStyle({ strikethrough: !activeTargetStyle.strikethrough });
     const cycleActiveTargetAlign = () => writeActiveTargetStyle({ textAlign: nextTextAlign(activeTargetStyle.textAlign || 'left') });
 
-    const resolvedTitleStyle = resolveCaptionStyle(captionStyle);
+    const resolvedTitleStyle = resolveCaptionStyle(captionStyle, topStrip ? contrastIconColor(topStrip) : undefined);
 
     const activeComment = comments.find((comment) => comment.id === activeCommentId) || null;
 
@@ -624,9 +625,25 @@ export default function TodoEditor({
                                 </div>
                             </div>
                         )}
-                        {topStrip && (
-                            <div className="h-2 flex-shrink-0" style={{ backgroundColor: topStrip }} />
-                        )}
+                        {/* Top strip -- Title lives inside it, same as the canvas
+                            card's own top strip, matching every other post
+                            type's edit window. */}
+                        <div
+                            className="w-full flex-shrink-0 flex items-center px-2"
+                            style={{ minHeight: '28px', backgroundColor: topStrip || 'rgba(0,0,0,0.04)' }}
+                        >
+                            <input
+                                type="text"
+                                value={todoTitle}
+                                onChange={(e) => setTodoTitle(e.target.value)}
+                                onFocus={() => setActiveStyleTargetId('title')}
+                                className={`w-full text-sm font-semibold bg-transparent outline-none border-b placeholder:opacity-40 placeholder:font-normal rounded px-1 -mx-1 ${
+                                    activeStyleTargetId === 'title' ? 'border-blue-400 bg-blue-50/40' : 'border-transparent focus:border-blue-400'
+                                }`}
+                                placeholder="Title"
+                                style={resolvedTitleStyle}
+                            />
+                        </div>
 
                         {showCommentPopup && commentColorPopupId && (
                             <div
@@ -664,20 +681,6 @@ export default function TodoEditor({
                         )}
 
                         <div className="p-4 overflow-y-auto flex-1" ref={taskListRef}>
-                            {/* Title -- semi-transparent "Title" placeholder until the
-                                user sets one, same pattern as Note/Comment/Document. */}
-                            <input
-                                type="text"
-                                value={todoTitle}
-                                onChange={(e) => setTodoTitle(e.target.value)}
-                                onFocus={() => setActiveStyleTargetId('title')}
-                                className={`w-full text-lg font-bold mb-3 p-1 bg-transparent border-b outline-none placeholder:opacity-40 placeholder:font-normal rounded ${
-                                    activeStyleTargetId === 'title' ? 'border-blue-400 bg-blue-50/40' : 'border-transparent focus:border-blue-400'
-                                }`}
-                                placeholder="Title"
-                                style={resolvedTitleStyle}
-                            />
-
                             {/* Task list */}
                             <div className="space-y-1">
                                 {tasks.map((task, index) => (
