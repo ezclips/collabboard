@@ -40,6 +40,18 @@ const highlightColors = [
     { color: 'transparent', bgColor: 'white', textColor: '#1f2937', border: true },
 ];
 
+// Same palette ColorPickerContent falls back to on its own (SIMPLE_PALETTE
+// in ColorPicker.tsx, not exported), with "transparent" prepended -- the
+// only way to clear a highlight back to none. Without it, a highlight set
+// to e.g. white sits as a mismatched box on top of a colored title strip,
+// and the only fix was hunting down the strip's exact hex by hand.
+const HIGHLIGHT_COLOR_PRESETS = [
+    'transparent', '#ffffff', '#f8f9fa', '#e9ecef', '#868e96', '#212529',
+    '#fa5252', '#e64980', '#be4bdb', '#7950f2', '#4c6ef5',
+    '#228be6', '#15aabf', '#12b886', '#40c057', '#82c91e',
+    '#fab005', '#fd7e14',
+];
+
 const headingStyles = [
     { level: 'h1' as const, label: 'Large heading', shortcut: '⌘1', className: 'text-lg font-bold' },
     { level: 'h2' as const, label: 'Normal heading', shortcut: '⌘2', className: 'text-base font-semibold' },
@@ -200,6 +212,7 @@ export default function TextStylePopup({
                         color={colorMode === 'text' ? currentColor : currentHighlight}
                         onChange={(c) => colorMode === 'text' ? onSelectColor(c) : onSelectHighlight(c)}
                         hasOpacity={true}
+                        presets={colorMode === 'highlight' ? HIGHLIGHT_COLOR_PRESETS : undefined}
                     />
                 </div>
             </div>
