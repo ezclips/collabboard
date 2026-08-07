@@ -18,6 +18,7 @@ interface Task {
     reminder?: string;
     assignee?: string;
     indentLevel?: number; // 0, 1, or 2 - for sub-task hierarchy
+    color?: string; // Per-task text color override -- falls back to captionStyle.color when unset
 }
 
 interface PadletComment {
@@ -134,6 +135,10 @@ export default function TodoEditor({
     // captionStyle preset mechanism Document/Clipart's own Caption tool uses.
     const [showTextStylePanel, setShowTextStylePanel] = useState(false);
     const [captionStyle, setCaptionStyle] = useState<CaptionStyle>({});
+    // Heading/bold/italic/underline/strikethrough/align stay shared across the
+    // whole card (captionStyle above), but text COLOR is per-item: 'title' or
+    // a task id. Whichever was last clicked is where the color swatch writes.
+    const [activeStyleTargetId, setActiveStyleTargetId] = useState<string>('title');
 
     // Comments state
     const [comments, setComments] = useState<PadletComment[]>([]);
@@ -156,6 +161,7 @@ export default function TodoEditor({
     const [selectedReminder, setSelectedReminder] = useState('');
     const [datePickerPosition, setDatePickerPosition] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
     const taskListRef = useRef<HTMLDivElement>(null);
+    const mainCardRef = useRef<HTMLDivElement>(null);
     // Only reset state when the modal transitions from closed → open.
     // initialData is an inline object (new reference every parent render), so using it
     // as a dep would wipe local state on every ancestor re-render.
@@ -179,6 +185,7 @@ export default function TodoEditor({
                 })));
                 setBadgeColor(initialData.badgeColor || '#facc15');
                 setCaptionStyle(initialData.captionStyle || {});
+                setActiveStyleTargetId('title');
             } else {
                 setTodoTitle('');
                 setTasks([]);
@@ -191,6 +198,7 @@ export default function TodoEditor({
                 setComments([]);
                 setBadgeColor('#facc15');
                 setCaptionStyle({});
+                setActiveStyleTargetId('title');
             }
         }
         prevOpenRef.current = isOpen;
@@ -263,6 +271,21 @@ export default function TodoEditor({
     const writeCaptionStyle = (updates: Partial<CaptionStyle>) => {
         setCaptionStyle((prev) => ({ ...prev, ...updates }));
     };
+
+    // Text color is per-item (title or one task), unlike the rest of
+    // captionStyle which stays shared -- writes to whichever text was last
+    // clicked instead of always recoloring the whole card.
+    const writeActiveTargetColor = (color: string) => {
+        if (activeStyleTargetId === 'title') {
+            writeCaptionStyle({ color });
+        } else {
+            updateTask(activeStyleTargetId, { color });
+        }
+    };
+    const activeTargetColor =
+        activeStyleTargetId === 'title'
+            ? captionStyle.color
+            : tasks.find((task) => task.id === activeStyleTargetId)?.color;
 
     const applyCaptionPreset = (level: CaptionHeading) => {
         const selectedPreset = level === 'callout' && captionStyle.backgroundColor
@@ -414,6 +437,25 @@ export default function TodoEditor({
         return selectedDate && date.toDateString() === selectedDate.toDateString();
     };
 
+    // Text style / Color / Comment panels anchor to the card's actual
+    // on-screen position (fixed + measured, not absolute-within-the-card)
+    // so a tall panel's top lines up with the card's top like every other
+    // post's side panel, and its max-height is capped to whatever room is
+    // actually left below that point -- instead of running off the bottom
+    // of a short window with no way to reach the rest of it.
+    const sidePanelStyle = (): React.CSSProperties => {
+        const rect = mainCardRef.current?.getBoundingClientRect();
+        if (!rect) return { position: 'fixed', top: 100, left: 100 };
+        return { position: 'fixed', top: rect.top, left: rect.right + 12 };
+    };
+    // Separate from sidePanelStyle because it applies to the inner
+    // (scrollable) box, one level down from the outer fixed-position wrapper.
+    const sidePanelMaxHeight = (): React.CSSProperties => {
+        const rect = mainCardRef.current?.getBoundingClientRect();
+        if (!rect) return {};
+        return { maxHeight: `calc(100vh - ${rect.top + 16}px)` };
+    };
+
     if (!isOpen) return null;
 
     return (
@@ -559,6 +601,7 @@ export default function TodoEditor({
 
                     {/* Main Card - scrollable content, limited max height */}
                     <div
+                        ref={mainCardRef}
                         className="rounded-lg shadow-lg border border-gray-200 overflow-visible relative bg-white flex-shrink-0"
                         style={{
                             backgroundColor: cardColor,
@@ -628,7 +671,10 @@ export default function TodoEditor({
                         )}
 
                         {showCommentPopup && (
-                            <div className="absolute left-full top-0 ml-3 z-[1100] animate-in fade-in slide-in-from-left-2 duration-200 pointer-events-auto">
+                            <div
+                                className="z-[1100] animate-in fade-in slide-in-from-left-2 duration-200 pointer-events-auto overflow-y-auto"
+                                style={{ ...sidePanelStyle(), ...sidePanelMaxHeight() }}
+                            >
                                 <div className="relative bg-white rounded-xl shadow-2xl border border-gray-200 p-4 min-w-[280px] max-w-[320px]">
                                     <div className="flex items-center justify-between mb-3">
                                         <h4 className="text-sm font-semibold text-gray-700">Comments</h4>
@@ -873,7 +919,10 @@ export default function TodoEditor({
                                 type="text"
                                 value={todoTitle}
                                 onChange={(e) => setTodoTitle(e.target.value)}
-                                className="w-full text-lg font-bold mb-3 p-1 bg-transparent border-b border-transparent focus:border-blue-400 outline-none placeholder:opacity-40 placeholder:font-normal"
+                                onFocus={() => setActiveStyleTargetId('title')}
+                                className={`w-full text-lg font-bold mb-3 p-1 bg-transparent border-b outline-none placeholder:opacity-40 placeholder:font-normal rounded ${
+                                    activeStyleTargetId === 'title' ? 'border-blue-400 bg-blue-50/40' : 'border-transparent focus:border-blue-400'
+                                }`}
                                 placeholder="Title"
                                 style={resolvedTextStyle}
                             />
@@ -883,7 +932,9 @@ export default function TodoEditor({
                                 {tasks.map((task, index) => (
                                     <div
                                         key={task.id}
-                                        className="group relative flex flex-col gap-1 py-1 hover:bg-gray-50 rounded px-1 -mx-1"
+                                        className={`group relative flex flex-col gap-1 py-1 rounded px-1 -mx-1 ${
+                                            activeStyleTargetId === task.id ? 'bg-blue-50' : 'hover:bg-gray-50'
+                                        }`}
                                         style={{ marginLeft: `${(task.indentLevel || 0) * 24}px` }}
                                         onMouseEnter={() => setHoveredTaskId(task.id)}
                                         onMouseLeave={() => setHoveredTaskId(null)}
@@ -912,8 +963,9 @@ export default function TodoEditor({
                                                 className="w-4 h-4 flex-shrink-0 accent-blue-500 rounded border-gray-300"
                                             />
                                             <span
-                                                className={`text-sm flex-1 break-words ${task.completed ? 'line-through text-gray-400' : 'text-gray-800'}`}
-                                                style={task.completed ? undefined : resolvedTextStyle}
+                                                onClick={() => setActiveStyleTargetId(task.id)}
+                                                className={`text-sm flex-1 break-words cursor-text ${task.completed ? 'line-through text-gray-400' : 'text-gray-800'}`}
+                                                style={task.completed ? undefined : { ...resolvedTextStyle, color: task.color || resolvedTextStyle.color }}
                                             >
                                                 {task.text}
                                             </span>
@@ -1088,16 +1140,16 @@ export default function TodoEditor({
                             )}
                         </div>
 
-                        {/* Text Style - overlays to the right of the card
-                                (absolute, not a flex sibling of the outer
-                                row) so opening it can't grow the row's
-                                height and shift the whole toolbar/card group
-                                vertically -- same technique the Reaction
-                                picker above already uses. */}
+                        {/* Text Style - fixed + measured from the card (see
+                                sidePanelStyle) so its top lines up with the
+                                card regardless of the card's own height, and
+                                it never runs off the bottom of a short
+                                window. */}
                             {showTextStylePanel && (
-                                <div className="absolute left-full top-0 ml-3 z-[1100]">
+                                <div className="z-[1100]" style={sidePanelStyle()}>
                                     <div
-                                        className="relative bg-white rounded-lg shadow-lg border border-gray-200 p-3 w-64 max-h-[calc(100vh-2rem)] overflow-y-auto"
+                                        className="relative bg-white rounded-lg shadow-lg border border-gray-200 p-3 w-64 overflow-y-auto"
+                                        style={sidePanelMaxHeight()}
                                         onClick={(e) => e.stopPropagation()}
                                     >
                                         <button
@@ -1111,10 +1163,10 @@ export default function TodoEditor({
                                             isOpen={true}
                                             onOpenChange={(open) => setShowTextStylePanel(open)}
                                             onSelectHeading={applyCaptionPreset}
-                                            onSelectColor={(color) => writeCaptionStyle({ color })}
+                                            onSelectColor={writeActiveTargetColor}
                                             onSelectHighlight={(color) => writeCaptionStyle({ backgroundColor: color })}
                                             currentHeading={captionStyle.heading || 'normal'}
-                                            currentColor={captionStyle.color}
+                                            currentColor={activeTargetColor}
                                             currentHighlight={captionStyle.backgroundColor}
                                             hideCloseButton
                                             onBold={toggleCaptionBold}
@@ -1134,7 +1186,8 @@ export default function TodoEditor({
                             {/* Color Picker - same overlay treatment as Text Style */}
                             {showColorPicker && (
                                 <div
-                                    className="absolute left-full top-0 ml-3 z-[1100] bg-white rounded-lg shadow-lg border border-gray-200 p-3 w-64"
+                                    className="z-[1100] bg-white rounded-lg shadow-lg border border-gray-200 p-3 w-64 overflow-y-auto"
+                                    style={{ ...sidePanelStyle(), ...sidePanelMaxHeight() }}
                                     onClick={(e) => e.stopPropagation()}
                                 >
                                     <div className="flex items-center justify-between mb-2">
