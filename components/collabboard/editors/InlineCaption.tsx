@@ -8,6 +8,7 @@ type InlineCaptionProps = {
     isEditing: boolean;
     onChange: (next: string) => void;
     onCommit?: () => void;
+    onFocus?: () => void;
     color?: string;
     backgroundColor?: string;
     textStyle?: React.CSSProperties;
@@ -19,6 +20,7 @@ export default function InlineCaption({
     isEditing,
     onChange,
     onCommit,
+    onFocus,
     color,
     backgroundColor,
     textStyle,
@@ -57,6 +59,7 @@ export default function InlineCaption({
                 onChange={(e) => {
                     onChange(e.target.value);
                 }}
+                onFocus={() => onFocus?.()}
                 onBlur={() => onCommit?.()}
                 onMouseDown={(e) => e.stopPropagation()}
                 className={[
