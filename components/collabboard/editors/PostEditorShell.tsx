@@ -45,14 +45,15 @@ export function useShellSelection(editor: Editor | null) {
 }
 
 // ---------------------------------------------------------------------------
-// Panel coordination (PATCH-152 §22.3/§22.4): active-panel identity across
-// the six current Note panel types. Mutual exclusion here replicates ONLY
-// the transitions NoteEditor already performs today (opening the
-// selected-text Comment popup closes textStyle/cardColor/reaction) -- it does
-// not invent new exclusivity between panels that coexist today (e.g. Link and
-// TextStylePopup have never closed one another). Callers pass `closing` to
-// reproduce an existing transition; omitting it opens without side effects,
-// matching current behaviour.
+// Panel coordination (PATCH-152 §22.3/§22.4, revised): active-panel identity
+// across the six current Note/Document panel types. Only one of these panels
+// may ever be open at a time -- opening any panel closes every other one.
+// This used to be opt-in per call site (a caller had to remember to pass a
+// `closing` list), which regressed silently whenever a new call site forgot
+// to declare it (e.g. NoteEditor's toolbar onTextStyle/onCardColor/
+// onAddReaction never did). Making exclusivity the hook's own behaviour
+// removes that whole class of bug -- there is no longer a way to open a
+// panel without closing the rest.
 // ---------------------------------------------------------------------------
 export type ShellPanelId = 'textStyle' | 'cardColor' | 'link' | 'comment' | 'reaction' | 'detached';
 
@@ -68,14 +69,8 @@ export function useShellPanels() {
     detached: false,
   });
 
-  const openPanel = (id: ShellPanelId, closing: ShellPanelId[] = []) => {
-    setOpen((prev) => {
-      const next = { ...prev, [id]: true };
-      closing.forEach((c) => {
-        next[c] = false;
-      });
-      return next;
-    });
+  const openPanel = (id: ShellPanelId) => {
+    setOpen(() => Object.fromEntries(ALL_PANELS.map((p) => [p, p === id])) as Record<ShellPanelId, boolean>);
   };
   const closePanel = (id: ShellPanelId) => setOpen((prev) => ({ ...prev, [id]: false }));
   const closeAll = () => setOpen(Object.fromEntries(ALL_PANELS.map((id) => [id, false])) as Record<ShellPanelId, boolean>);

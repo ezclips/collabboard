@@ -237,7 +237,7 @@ export default function DocumentEditor({
     if (!editor.state.doc.textBetween(from, to, '').trim()) return;
     const linkMark = editor.getAttributes('link');
     setLinkViewUrl(linkMark?.href || '');
-    panels.openPanel('link', ['textStyle', 'comment', 'cardColor']);
+    panels.openPanel('link');
   };
   const handleAddLink = (url: string) => { if (!url || !editor || !restoreSelection(lastSelection)) return; editor.chain().focus().setLink({ href: url }).run(); };
   const handleRemoveLink = () => { if (!editor || !restoreSelection(lastSelection)) return; editor.chain().focus().unsetLink().run(); };
@@ -261,7 +261,7 @@ export default function DocumentEditor({
     const attrs = editor.getAttributes('comment');
     setActiveThread(attrs?.commentId ? buildThreadFromAttrs(attrs) : { id: `comment-${Date.now()}`, comments: [] });
     setSavedSelection({ from, to });
-    panels.openPanel('comment', ['textStyle', 'link', 'cardColor']);
+    panels.openPanel('comment');
   };
   const handleAddComment = (commentText: string) => {
     if (!editor || !commentText || !activeThread || !savedSelection) return;
@@ -278,10 +278,10 @@ export default function DocumentEditor({
 
   const toolbarProps = {
     variant: 'document' as const,
-    onTextStyle: () => panels.openPanel('textStyle', ['link', 'comment', 'cardColor']),
+    onTextStyle: () => panels.openPanel('textStyle'),
     onLink: handleLink,
     onTextComment: handleTextComment,
-    onCardColor: () => panels.openPanel('cardColor', ['textStyle', 'link', 'comment']),
+    onCardColor: () => panels.openPanel('cardColor'),
     isLink: editor.isActive('link'),
     isComment: editor.isActive('comment'),
   };
@@ -300,10 +300,19 @@ export default function DocumentEditor({
       selectionRange={lastSelection}
       toolbar={toolbarProps}
       centre={
-        <div
-          className="relative bg-white rounded-2xl shadow-2xl overflow-hidden flex flex-col"
-          style={{ width: '640px', maxHeight: '80vh' }}
-        >
+        <div className="relative" style={{ width: '640px' }}>
+          <button
+            type="button"
+            aria-label="Close"
+            onClick={attemptClose}
+            className="absolute -right-3 -top-3 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-400 shadow-md transition-all hover:text-gray-600"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+          <div
+            className="bg-white rounded-2xl shadow-2xl overflow-hidden flex flex-col"
+            style={{ maxHeight: '80vh' }}
+          >
           {/* Top strip -- Title lives inside it, same as the canvas card's
               own top strip, matching every other post type's edit window
               (was a plain white bordered header, not respecting
@@ -326,17 +335,6 @@ export default function DocumentEditor({
                 style={{ color: topStripColor !== 'transparent' ? contrastIconColor(topStripColor) : '#1f2937' }}
               />
             )}
-            <div className="flex items-center gap-2 shrink-0">
-              <button
-                type="button"
-                aria-label="Close"
-                onClick={attemptClose}
-                className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-black/10 shrink-0"
-                style={{ color: topStripColor !== 'transparent' ? contrastIconColor(topStripColor) : '#6b7280' }}
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
           </div>
 
           {saveError && <div role="alert" className="px-6 py-2 text-sm text-red-700 bg-red-50 border-b border-red-100">{saveError}</div>}
@@ -355,19 +353,21 @@ export default function DocumentEditor({
               />
             </div>
           )}
+          </div>
         </div>
       }
       sharedPanel={
         !readOnly && (
           <>
             {panels.open.textStyle && (
-              <div className="bg-white rounded-lg shadow-xl border border-gray-200 p-4 relative max-h-[calc(100vh-2rem)] overflow-y-auto" style={{ width: '300px' }}>
-                <button onClick={() => panels.closePanel('textStyle')} className="absolute top-2 right-2 w-4 h-4 flex items-center justify-center rounded hover:bg-gray-100" title="Close">
-                  <X className="w-3 h-3 text-gray-400" />
+              <div className="relative" style={{ width: '300px' }}>
+                <button onClick={() => panels.closePanel('textStyle')} className="absolute -right-3 -top-3 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-400 shadow-md transition-all hover:text-gray-600" title="Close">
+                  <X className="h-3.5 w-3.5" />
                 </button>
+                <div className="bg-white rounded-lg shadow-xl border border-gray-200 p-4 max-h-[calc(100vh-2rem)] overflow-y-auto">
                 <TextStylePopup
                   isOpen={true}
-                  onOpenChange={(open) => (open ? panels.openPanel('textStyle', ['link', 'comment', 'cardColor']) : panels.closePanel('textStyle'))}
+                  onOpenChange={(open) => (open ? panels.openPanel('textStyle') : panels.closePanel('textStyle'))}
                   onSelectHeading={handleSelectHeading}
                   onSelectColor={handleSelectTextColor}
                   onSelectHighlight={handleSelectHighlight}
@@ -391,6 +391,7 @@ export default function DocumentEditor({
                   isOrderedList={editor.isActive('orderedList')}
                   isCode={editor.isActive('codeBlock')}
                 />
+                </div>
               </div>
             )}
             {panels.open.link && (
@@ -404,7 +405,7 @@ export default function DocumentEditor({
                 <LinkPopup
                   inline
                   isOpen={panels.open.link}
-                  onOpenChange={(open) => (open ? panels.openPanel('link', ['textStyle', 'comment', 'cardColor']) : panels.closePanel('link'))}
+                  onOpenChange={(open) => (open ? panels.openPanel('link') : panels.closePanel('link'))}
                   onSubmit={handleAddLink}
                   onRemoveLink={handleRemoveLink}
                   initialUrl={linkViewUrl}
@@ -415,7 +416,7 @@ export default function DocumentEditor({
               <div style={{ width: '300px' }}>
                 <CommentPopup
                   isOpen={panels.open.comment}
-                  onOpenChange={(open) => (open ? panels.openPanel('comment', ['textStyle', 'link', 'cardColor']) : panels.closePanel('comment'))}
+                  onOpenChange={(open) => (open ? panels.openPanel('comment') : panels.closePanel('comment'))}
                   onSubmit={handleAddComment}
                   comments={activeThread?.comments || []}
                   currentUserId={currentUserId}
@@ -424,34 +425,41 @@ export default function DocumentEditor({
               </div>
             )}
             {panels.open.cardColor && (
-              <div
-                className="bg-white rounded-lg shadow-xl border border-gray-200 p-4 h-fit self-start"
-                style={{ width: '260px' }}
-                onClick={(e) => e.stopPropagation()}
-              >
+              <div className="relative h-fit self-start" style={{ width: '260px' }}>
+                <button
+                  onClick={() => panels.closePanel('cardColor')}
+                  className="absolute -right-3 -top-3 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-400 shadow-md transition-all hover:text-gray-600"
+                  title="Close"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+                <div
+                  className="bg-white rounded-lg shadow-xl border border-gray-200 p-4"
+                  onClick={(e) => e.stopPropagation()}
+                >
                 <div className="flex items-center justify-between mb-4">
                   <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Document Color</span>
                   <div className="flex bg-gray-100 p-1 rounded-lg gap-1">
-                    <button
-                      onClick={() => setActiveColorTab('background')}
-                      className={`w-8 h-8 flex items-center justify-center text-xs font-bold rounded-md transition-all ${activeColorTab === 'background'
-                        ? 'bg-white text-gray-900 shadow-sm'
-                        : 'text-gray-500 hover:text-gray-700'
-                        }`}
-                      title="Background Color"
-                    >
-                      BG
-                    </button>
-                    <button
-                      onClick={() => setActiveColorTab('topstrip')}
-                      className={`w-8 h-8 flex items-center justify-center text-xs font-bold rounded-md transition-all ${activeColorTab === 'topstrip'
-                        ? 'bg-white text-gray-900 shadow-sm'
-                        : 'text-gray-500 hover:text-gray-700'
-                        }`}
-                      title="Top Strip Color"
-                    >
-                      TS
-                    </button>
+                      <button
+                        onClick={() => setActiveColorTab('background')}
+                        className={`w-8 h-8 flex items-center justify-center text-xs font-bold rounded-md transition-all ${activeColorTab === 'background'
+                          ? 'bg-white text-gray-900 shadow-sm'
+                          : 'text-gray-500 hover:text-gray-700'
+                          }`}
+                        title="Background Color"
+                      >
+                        BG
+                      </button>
+                      <button
+                        onClick={() => setActiveColorTab('topstrip')}
+                        className={`w-8 h-8 flex items-center justify-center text-xs font-bold rounded-md transition-all ${activeColorTab === 'topstrip'
+                          ? 'bg-white text-gray-900 shadow-sm'
+                          : 'text-gray-500 hover:text-gray-700'
+                          }`}
+                        title="Top Strip Color"
+                      >
+                        TS
+                      </button>
                   </div>
                 </div>
                 <div className="mb-0">
@@ -461,6 +469,7 @@ export default function DocumentEditor({
                     hasOpacity={true}
                     presets={activeColorTab === 'background' ? BACKGROUND_COLORS : TOP_STRIP_COLORS}
                   />
+                </div>
                 </div>
               </div>
             )}

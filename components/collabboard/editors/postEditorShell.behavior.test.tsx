@@ -127,21 +127,21 @@ describe('useShellPanels: active-panel coordination', () => {
         <span data-testid="comment">{String(panels.open.comment)}</span>
         <button onClick={() => panels.openPanel('textStyle')}>openTextStyle</button>
         <button onClick={() => panels.openPanel('cardColor')}>openCardColor</button>
-        <button onClick={() => panels.openPanel('comment', ['textStyle', 'cardColor', 'reaction'])}>openComment</button>
+        <button onClick={() => panels.openPanel('comment')}>openComment</button>
       </div>
     );
   }
   const find = (c: HTMLElement, text: string) => Array.from(c.querySelectorAll('button')).find((b) => b.textContent === text)!;
 
-  it('opening one panel does not close an unrelated one that has no declared conflict', () => {
+  it('opening a panel always closes every other panel, with no per-call-site opt-in required', () => {
     const c = mount(<Harness />);
     click(find(c, 'openTextStyle'));
     click(find(c, 'openCardColor'));
-    expect(c.querySelector('[data-testid="textStyle"]')!.textContent).toBe('true');
+    expect(c.querySelector('[data-testid="textStyle"]')!.textContent).toBe('false');
     expect(c.querySelector('[data-testid="cardColor"]')!.textContent).toBe('true');
   });
 
-  it('opening with an explicit closing list reproduces the current handleTextComment transition', () => {
+  it('opening Comment closes a previously open TextStyle', () => {
     const c = mount(<Harness />);
     click(find(c, 'openTextStyle'));
     click(find(c, 'openComment'));
@@ -261,20 +261,21 @@ describe('Frozen panels keep their current mount points (§22.3/§22.10 21-24)',
   });
 });
 
-// PATCH-152 P1 (§23.3): pins the real NoteEditor call site -- a synthetic
-// useShellPanels-only test cannot detect a regression at handleTextComment
-// itself. Measured coexistence (Task 1): TextStylePopup, Card colour and
-// Reaction never close one another or Link. PATCH-152 targeted correction
-// (align Link and Comment): selected-text Comment closes textStyle/cardColor/
-// reaction AND Link now too (mutual exclusion between Link and Comment).
-describe('Real NoteEditor panel coordination (§23.3): selected-text Comment closes textStyle/cardColor/reaction/Link', () => {
-  it('closes exactly the declared panels, now including Link, and leaves later coexistence unaffected', () => {
+// Revised: only one right-side panel may ever be open at a time. This used
+// to allow TextStylePopup/CardColor/Reaction to coexist (an opt-in exclusion
+// list per call site), which regressed silently when a call site forgot to
+// declare its conflicts (NoteEditor's toolbar buttons). Exclusivity is now
+// the hook's own behaviour, so every panel closes every other one.
+describe('Real NoteEditor panel coordination: only one right-side panel is ever open at a time', () => {
+  it('opening any panel closes every other one, including Link/Comment mutual exclusion', () => {
     const c = openNote();
-    // §-targeted-correction: the selected-text CommentPopup wrapper now also
-    // uses `width: 300px`, so this must key off TextStylePopup's own wrapper
-    // classes too, not just the shared inline width.
-    const textStyle = () => c.querySelector('.bg-white.rounded-lg.shadow-xl.border.border-gray-200.p-4.relative[style*="width: 300px"]');
-    const cardColorPanel = () => c.querySelector('.bg-white.rounded-lg.shadow-xl.border.border-gray-200.p-4.h-fit');
+    // The close button now floats outside the panel's own box (a separate
+    // absolutely-positioned sibling), so the panel's visual chrome moved to
+    // an inner div -- these selectors key off each panel's still-unique
+    // outer wrapper (position + width + a wrapper-only class) rather than
+    // the box styling, which Text style and Card color now share.
+    const textStyle = () => c.querySelector('div[style*="width: 300px"].relative');
+    const cardColorPanel = () => c.querySelector('div[style*="width: 260px"].relative.h-fit');
     const reaction = () => c.querySelector('.note-emoji-picker');
 
     click(btn(c, 'Change text formatting')!);
@@ -282,18 +283,17 @@ describe('Real NoteEditor panel coordination (§23.3): selected-text Comment clo
 
     click(btn(c, 'Switch to Box Design')!);
     click(btn(c, 'Change card background and top strip color')!);
-    expect(textStyle()).not.toBeNull();
+    expect(textStyle()).toBeNull();
     expect(cardColorPanel()).not.toBeNull();
 
     click(btn(c, 'Add emoji reaction to this post')!);
-    expect(textStyle()).not.toBeNull();
-    expect(cardColorPanel()).not.toBeNull();
+    expect(cardColorPanel()).toBeNull();
     expect(reaction()).not.toBeNull();
 
     click(btn(c, 'Switch to Text Design')!);
     selectText(c, 'world');
     click(btn(c, 'Add link to selected text')!);
-    expect(textStyle()).not.toBeNull();
+    expect(reaction()).toBeNull();
     expect(c.querySelector('input[placeholder="Paste or type a URL"]')).not.toBeNull();
 
     selectText(c, 'world');
@@ -302,15 +302,14 @@ describe('Real NoteEditor panel coordination (§23.3): selected-text Comment clo
     expect(textStyle()).toBeNull();
     expect(cardColorPanel()).toBeNull();
     expect(reaction()).toBeNull();
-    // PATCH-152 targeted correction: Link and Comment are now mutually
-    // exclusive -- opening Comment must also close Link.
+    // Link and Comment are mutually exclusive -- opening Comment must also close Link.
     expect(c.querySelector('input[placeholder="Paste or type a URL"]')).toBeNull();
 
     click(btn(c, 'Close')!);
     click(btn(c, 'Change text formatting')!);
     click(btn(c, 'Switch to Box Design')!);
     click(btn(c, 'Change card background and top strip color')!);
-    expect(textStyle()).not.toBeNull();
+    expect(textStyle()).toBeNull();
     expect(cardColorPanel()).not.toBeNull();
   });
 });
@@ -545,9 +544,9 @@ describe('Note: Link and selected-text Comment share the same right-side slot an
     expect(c.querySelector('.ProseMirror')!.innerHTML).toBe(before);
   });
 
-  it('Document panels remain unchanged by this Note-only correction (Document separately gained cardColor exclusivity via the follow-up Card color parity fix)', () => {
+  it('Document panels also use the shared exclusivity mechanism, with no per-call-site exclusion list', () => {
     const src = fs.readFileSync('components/collabboard/editors/DocumentEditor.tsx', 'utf8');
-    expect(src).toContain("panels.openPanel('link', ['textStyle', 'comment', 'cardColor'])");
-    expect(src).toContain("panels.openPanel('comment', ['textStyle', 'link', 'cardColor'])");
+    expect(src).toContain("panels.openPanel('link')");
+    expect(src).toContain("panels.openPanel('comment')");
   });
 });

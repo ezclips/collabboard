@@ -293,7 +293,7 @@ export default function NoteEditor({
     }
 
     // Text is selected, open the link popup
-    panels.openPanel('link', ['comment']);
+    panels.openPanel('link');
   };
 
   const handleAddLink = (url: string) => {
@@ -348,7 +348,7 @@ export default function NoteEditor({
 
     setCommentPopupPosition(null);
     setSavedSelection(selection);
-    panels.openPanel('comment', ['textStyle', 'cardColor', 'reaction', 'link']);
+    panels.openPanel('comment');
   };
 
   const handlePostComment = (anchor?: DOMRect) => {
@@ -807,33 +807,32 @@ export default function NoteEditor({
             onClick={(e) => e.stopPropagation()}
           >
             <div className="relative bg-white rounded-xl shadow-2xl border border-gray-200 p-4 min-w-[280px] max-w-[320px]">
+              <button
+                onClick={() => {
+                  panels.closePanel('detached');
+                  setActiveDetachedId(null);
+                  setDetachedColorPickerOpen(false);
+                  setEditingDetachedId(null);
+                  setCommentColorPopupId(null);
+                }}
+                className="absolute -right-3 -top-3 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-400 shadow-md transition-all hover:text-gray-600"
+                title="Close"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
               {/* Header with badge color button */}
               <div className="flex items-center justify-between mb-3">
                 <h4 className="text-sm font-semibold text-gray-700">Comments</h4>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setDetachedColorPickerOpen(!detachedColorPickerOpen)}
-                    className="w-7 h-7 flex items-center justify-center rounded hover:bg-gray-100"
-                    title="Badge Color"
-                  >
-                    <div
-                      className="w-4 h-4 rounded border border-gray-300"
-                      style={{ backgroundColor: badgeColor }}
-                    />
-                  </button>
-                  <button
-                    onClick={() => {
-                      panels.closePanel('detached');
-                      setActiveDetachedId(null);
-                      setDetachedColorPickerOpen(false);
-                      setEditingDetachedId(null);
-                      setCommentColorPopupId(null);
-                    }}
-                    className="text-gray-400 hover:text-gray-600 p-1 rounded hover:bg-gray-100"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
+                <button
+                  onClick={() => setDetachedColorPickerOpen(!detachedColorPickerOpen)}
+                  className="w-7 h-7 flex items-center justify-center rounded hover:bg-gray-100"
+                  title="Badge Color"
+                >
+                  <div
+                    className="w-4 h-4 rounded border border-gray-300"
+                    style={{ backgroundColor: badgeColor }}
+                  />
+                </button>
               </div>
 
               {/* Badge color picker popup */}
@@ -1015,14 +1014,15 @@ export default function NoteEditor({
         <>
         {/* Text Style Popup - attached to the right of card */}
         {panels.open.textStyle && (
-          <div className="bg-white rounded-lg shadow-xl border border-gray-200 p-4 relative max-h-[calc(100vh-2rem)] overflow-y-auto" style={{ width: '300px' }}>
+          <div className="relative" style={{ width: '300px' }}>
             <button
               onClick={() => panels.closePanel('textStyle')}
-              className="absolute top-2 right-2 w-4 h-4 flex items-center justify-center rounded hover:bg-gray-100"
+              className="absolute -right-3 -top-3 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-400 shadow-md transition-all hover:text-gray-600"
               title="Close"
             >
-              <X className="w-3 h-3 text-gray-400" />
+              <X className="h-3.5 w-3.5" />
             </button>
+            <div className="bg-white rounded-lg shadow-xl border border-gray-200 p-4 max-h-[calc(100vh-2rem)] overflow-y-auto">
             <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-2 truncate pr-4">
               {activeStyleTarget === 'title' ? 'Editing: Post name' : 'Editing: Note text'}
             </div>
@@ -1052,39 +1052,47 @@ export default function NoteEditor({
               isOrderedList={activeStyleTarget === 'title' ? false : editor.isActive('orderedList')}
               isCode={activeStyleTarget === 'title' ? false : editor.isActive('codeBlock')}
             />
+            </div>
           </div>
         )}
 
         {/* Note Color Picker - attached to the right */}
         {panels.open.cardColor && (
-          <div
-            className="bg-white rounded-lg shadow-xl border border-gray-200 p-4 h-fit self-start"
-            style={{ width: '260px' }}
-            onClick={(e) => e.stopPropagation()}
-          >
+          <div className="relative h-fit self-start" style={{ width: '260px' }}>
+            <button
+              onClick={() => panels.closePanel('cardColor')}
+              className="absolute -right-3 -top-3 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-400 shadow-md transition-all hover:text-gray-600"
+              title="Close"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+            <div
+              className="bg-white rounded-lg shadow-xl border border-gray-200 p-4"
+              onClick={(e) => e.stopPropagation()}
+            >
             <div className="flex items-center justify-between mb-4">
               <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Note Color</span>
               <div className="flex bg-gray-100 p-1 rounded-lg gap-1">
-                <button
-                  onClick={() => setActiveTab('background')}
-                  className={`w-8 h-8 flex items-center justify-center text-xs font-bold rounded-md transition-all ${activeTab === 'background'
-                    ? "bg-white text-gray-900 shadow-sm"
-                    : "text-gray-500 hover:text-gray-700"
-                    }`}
-                  title="Background Color"
-                >
-                  BG
-                </button>
-                <button
-                  onClick={() => setActiveTab('topstrip')}
-                  className={`w-8 h-8 flex items-center justify-center text-xs font-bold rounded-md transition-all ${activeTab === 'topstrip'
-                    ? "bg-white text-gray-900 shadow-sm"
-                    : "text-gray-500 hover:text-gray-700"
-                    }`}
-                  title="Top Strip Color"
-                >
-                  TS
-                </button>
+                  <button
+                    onClick={() => setActiveTab('background')}
+                    className={`w-8 h-8 flex items-center justify-center text-xs font-bold rounded-md transition-all ${activeTab === 'background'
+                      ? "bg-white text-gray-900 shadow-sm"
+                      : "text-gray-500 hover:text-gray-700"
+                      }`}
+                    title="Background Color"
+                  >
+                    BG
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('topstrip')}
+                    className={`w-8 h-8 flex items-center justify-center text-xs font-bold rounded-md transition-all ${activeTab === 'topstrip'
+                      ? "bg-white text-gray-900 shadow-sm"
+                      : "text-gray-500 hover:text-gray-700"
+                      }`}
+                    title="Top Strip Color"
+                  >
+                    TS
+                  </button>
               </div>
             </div>
 
@@ -1095,6 +1103,7 @@ export default function NoteEditor({
                 hasOpacity={true}
                 presets={activeTab === "background" ? BACKGROUND_COLORS : TOP_STRIP_COLORS}
               />
+            </div>
             </div>
           </div>
         )}
@@ -1108,7 +1117,7 @@ export default function NoteEditor({
             <LinkPopup
               inline
               isOpen={panels.open.link}
-              onOpenChange={(open) => (open ? panels.openPanel('link', ['comment']) : panels.closePanel('link'))}
+              onOpenChange={(open) => (open ? panels.openPanel('link') : panels.closePanel('link'))}
               onSubmit={handleAddLink}
               onRemoveLink={handleRemoveLink}
               initialUrl={linkViewUrl}
