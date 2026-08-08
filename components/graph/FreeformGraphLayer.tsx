@@ -5,6 +5,7 @@ import { routeEdge, type Rect, type GraphSide, type RouteEdgeResult } from '@/li
 import type { FreeformGraphEdge } from '@/types/graphTypes';
 import type { Padlet } from '@/types/collabboard';
 import { toast } from 'sonner';
+import { ArrowDownToLine, ArrowDown, ArrowUp, ArrowUpToLine } from 'lucide-react';
 
 interface FreeformGraphLayerProps {
     boardId: string;
@@ -18,6 +19,11 @@ const LINE_COLORS = ['#9ca3af', '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b
 const EDGE_GAP = 32;
 const FREEFORM_COMMENT_FALLBACK_WIDTH = 300;
 const FREEFORM_COMMENT_FALLBACK_HEIGHT = 280;
+// Render-only fallback for edges with no explicit style.zIndex -- keeps today's
+// "line always on top" look for anyone who's never touched the new layer
+// controls, while still comfortably outranking anything a post's own
+// bringToFront can reach (posts self-normalize once their zIndex passes 9000).
+const EDGE_DEFAULT_Z = 999999;
 
 interface EdgeMenuState {
     edgeId: string;
@@ -258,12 +264,57 @@ export default function FreeformGraphLayer({ boardId, posts, refreshToken = 0, c
         setEdges((prev) => prev.filter((e) => e.id !== edgeId));
     };
 
+    const getEdgeZ = (edge: FreeformGraphEdge): number => {
+        const style = (edge.style && typeof edge.style === 'object') ? edge.style as Record<string, unknown> : {};
+        return typeof style.zIndex === 'number' ? style.zIndex : EDGE_DEFAULT_Z;
+    };
+
+    // Reorders a line against BOTH other lines and the posts themselves (using
+    // the same zIndex scale posts already use), so a line can be tucked behind
+    // a post it currently always painted over, or pulled back in front of it.
+    const moveEdgeLayer = async (edgeId: string, action: 'bringToFront' | 'bringForward' | 'sendBackward' | 'sendToBack') => {
+        const edge = edges.find((e) => e.id === edgeId);
+        if (!edge) return;
+
+        const postZValues = posts.map((p) => (p.metadata as any)?.zIndex ?? 1);
+        const edgeZValues = edges.map(getEdgeZ);
+        const allZ = [...postZValues, ...edgeZValues];
+        const maxZ = Math.max(...allZ, 1);
+        const minZ = Math.min(...allZ, 1);
+        const currentZ = getEdgeZ(edge);
+
+        let newZ: number;
+        switch (action) {
+            case 'bringToFront': newZ = maxZ + 1; break;
+            case 'sendToBack': newZ = minZ - 1; break;
+            case 'bringForward': newZ = currentZ + 1; break;
+            case 'sendBackward': newZ = currentZ - 1; break;
+            default: return;
+        }
+
+        try {
+            await updateEdge(edgeId, {}, { zIndex: newZ });
+        } catch {
+            toast.error('Failed to reorder line.');
+        }
+    };
+
     const menuEdge = edgeMenu ? edges.find((e) => e.id === edgeMenu.edgeId) || null : null;
+    // The edge's actual on-screen angle, so the Arrow buttons' icons rotate to
+    // show the real direction they'll produce instead of a fixed →/← glyph
+    // that only reads correctly when the line happens to run left-to-right.
+    const menuAngleDeg = menuEdge
+        ? (renderEdges.find((r) => r.edge.id === menuEdge.id)?.route.startAngle ?? 0) * (180 / Math.PI)
+        : 0;
 
     return (
         <>
-            <svg ref={svgRef} className="absolute inset-0 w-full h-full" style={{ pointerEvents: 'none' }}>
-                {renderEdges.map(({ edge, route, strokeColor, strokeDasharray }) => {
+            {/* Present regardless of edge count purely so label-dragging always has
+                a stable rect to project cursor coordinates against -- the per-edge
+                svgs below are all inset-0 anyway, so any one of them would give the
+                same rect, but this keeps that independent of render order/z-index. */}
+            <svg ref={svgRef} className="absolute inset-0 w-full h-full" style={{ pointerEvents: 'none' }} aria-hidden="true" />
+            {renderEdges.map(({ edge, route, strokeColor, strokeDasharray }) => {
                     const { sx, sy, cx, cy, ex, ey, endAngle, startAngle, pathD } = route;
                     const endDeg = endAngle * (180 / Math.PI);
                     const startDeg = startAngle * (180 / Math.PI);
@@ -274,8 +325,16 @@ export default function FreeformGraphLayer({ boardId, posts, refreshToken = 0, c
 
 
                     return (
-                        <g
+                        // Each line gets its own absolutely-positioned svg (instead of
+                        // sharing one fixed-z layer above every post) so its zIndex can
+                        // be moved independently -- interleaving it with individual
+                        // posts via moveEdgeLayer, not just toggling above/below all of them.
+                        <svg
                             key={edge.id}
+                            className="absolute inset-0 w-full h-full"
+                            style={{ pointerEvents: 'none', zIndex: getEdgeZ(edge) }}
+                        >
+                        <g
                             onContextMenu={(event) => {
                                 event.preventDefault();
                                 event.stopPropagation();
@@ -373,9 +432,9 @@ export default function FreeformGraphLayer({ boardId, posts, refreshToken = 0, c
                                 );
                             })()}
                         </g>
+                        </svg>
                     );
                 })}
-            </svg>
 
             {edgeMenu && menuEdge && (
                 <div
@@ -429,14 +488,15 @@ export default function FreeformGraphLayer({ boardId, posts, refreshToken = 0, c
                         <div className="text-[11px] text-gray-500 mb-1">Arrow</div>
                         <div className="flex items-center gap-1">
                             {([
-                                { value: 'none', label: '—' },
-                                { value: 'forward', label: '→' },
-                                { value: 'backward', label: '←' },
-                                { value: 'bidirectional', label: '↔' },
+                                { value: 'none', heads: 0, rotate: menuAngleDeg },
+                                { value: 'forward', heads: 1, rotate: menuAngleDeg },
+                                { value: 'backward', heads: 1, rotate: menuAngleDeg + 180 },
+                                { value: 'bidirectional', heads: 2, rotate: menuAngleDeg },
                             ] as const).map((opt) => (
                                 <button
                                     key={opt.value}
-                                    className={`px-2 py-1 text-xs rounded border ${(menuEdge.direction || 'forward') === opt.value ? 'border-blue-500 text-blue-700 bg-blue-50' : 'border-gray-300 text-gray-700'}`}
+                                    title={opt.value}
+                                    className={`flex h-7 w-9 items-center justify-center rounded border ${(menuEdge.direction || 'forward') === opt.value ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-300 text-gray-700'}`}
                                     onClick={async () => {
                                         try {
                                             await updateEdge(menuEdge.id, { direction: opt.value });
@@ -445,7 +505,35 @@ export default function FreeformGraphLayer({ boardId, posts, refreshToken = 0, c
                                         }
                                     }}
                                 >
-                                    {opt.label}
+                                    {/* Rotated to the edge's real on-screen angle, so the icon
+                                        always shows the arrowhead where it will actually land —
+                                        a fixed →/← glyph reads backwards whenever the connected
+                                        posts aren't laid out left-to-right. */}
+                                    <svg width="18" height="10" viewBox="-9 -5 18 10" style={{ transform: `rotate(${opt.rotate}deg)` }}>
+                                        <line x1="-7" y1="0" x2="7" y2="0" stroke="currentColor" strokeWidth="1.5" />
+                                        {opt.heads >= 1 && <polygon points="7,0 2,-3 2,3" fill="currentColor" />}
+                                        {opt.heads === 2 && <polygon points="-7,0 -2,-3 -2,3" fill="currentColor" />}
+                                    </svg>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                    <div className="mb-3">
+                        <div className="text-[11px] text-gray-500 mb-1">Layer</div>
+                        <div className="flex items-center gap-1">
+                            {([
+                                { action: 'sendToBack' as const, Icon: ArrowDownToLine, title: 'Send to back' },
+                                { action: 'sendBackward' as const, Icon: ArrowDown, title: 'Send backward' },
+                                { action: 'bringForward' as const, Icon: ArrowUp, title: 'Bring forward' },
+                                { action: 'bringToFront' as const, Icon: ArrowUpToLine, title: 'Bring to front' },
+                            ]).map(({ action, Icon, title }) => (
+                                <button
+                                    key={action}
+                                    title={title}
+                                    className="flex h-7 w-9 items-center justify-center rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
+                                    onClick={() => moveEdgeLayer(menuEdge.id, action)}
+                                >
+                                    <Icon className="h-4 w-4" />
                                 </button>
                             ))}
                         </div>
