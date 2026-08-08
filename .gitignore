@@ -30,6 +30,9 @@ yarn-error.log*
 # env files
 .env*
 
+# live-access session state (contains live session tokens, never commit)
+scripts/.live-access-state.json
+
 # vercel
 .vercel
 
