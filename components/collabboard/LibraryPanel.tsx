@@ -48,6 +48,16 @@ import {
 } from '@/lib/collabboard/excalidrawLibrary';
 import ExcalidrawBrowseModal from './ExcalidrawBrowseModal';
 import ExternalClipartBrowserModal, { ExternalClipartItem } from './ExternalClipartBrowserModal';
+import { extractAIContentFromPadletMetadata, normalizeAIContent } from '@/lib/ai/normalize-ai-content';
+
+function resolveAIThumbnailUrl(metadata: unknown): string | undefined {
+    const aiContent = extractAIContentFromPadletMetadata(metadata as any);
+    if (!aiContent) return undefined;
+    const normalized = normalizeAIContent(aiContent);
+    return normalized.kind === 'structured' && normalized.data.type === 'photo'
+        ? normalized.data.image.url || undefined
+        : undefined;
+}
 
 interface LibraryPanelProps {
     isOpen: boolean;
@@ -102,6 +112,8 @@ function typeLabel(type?: string) {
             return 'Drawing';
         case 'comment':
             return 'Comment';
+        case 'ai-component':
+            return 'AI';
         default:
             return 'Note';
     }
@@ -428,7 +440,9 @@ export default function LibraryPanel({
                         return m;
                     })(),
                     // file_url is a top-level padlet field, not inside metadata
-                    file_url: padletData.file_url || padletData.metadata?.imageUrl,
+                    file_url: padletData.type === 'ai-component'
+                        ? (resolveAIThumbnailUrl(padletData.metadata) || padletData.file_url)
+                        : (padletData.file_url || padletData.metadata?.imageUrl),
                     file_name: padletData.file_name || padletData.metadata?.file_name,
                     file_type: padletData.file_type || padletData.metadata?.file_type,
                 },
@@ -612,7 +626,7 @@ export default function LibraryPanel({
                                                         <div className="grid grid-cols-2 gap-2">
                                                             {personalPreviews.map(({ item, preview }) => {
                                                                 const Icon = getTypeIcon(preview.type);
-                                                                const hasThumb = !!preview.thumb && preview.type === 'image';
+                                                                const hasThumb = !!preview.thumb && (preview.type === 'image' || preview.type === 'ai-component' || preview.type === 'drawing');
 
                                                                 return (
                                                                     <div
@@ -701,7 +715,7 @@ export default function LibraryPanel({
 
                                                 {personalItems.length > 0 && (
                                                     <div className="mt-2 text-[11px] text-gray-400 text-center">
-                                                        Tip: drag a post here to save it — drag a saved item back onto the canvas to reuse it.
+                                                        Tip: drag a saved item back onto the canvas to reuse it.
                                                     </div>
                                                 )}
                                             </>
