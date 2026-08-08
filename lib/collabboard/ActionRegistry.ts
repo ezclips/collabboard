@@ -29,6 +29,7 @@ export type ActionId =
     | 'post.bringForward'
     | 'post.sendBackward'
     | 'post.createSyncedCopy'
+    | 'post.addToLibrary'
     | 'post.addImage'
     | 'post.copyLinkAddress'
     | 'post.rename'

@@ -25,6 +25,7 @@ interface ImagePostContextMenuProps {
     onReplaceImage?: () => void;
     onDownloadImage?: () => void;
     onToggleCropToGrid?: () => void;
+    onAddToLibrary?: () => void;
     disabled?: boolean;
 }
 
@@ -45,6 +46,7 @@ export function ImagePostContextMenu({
     onReplaceImage,
     onDownloadImage,
     onToggleCropToGrid,
+    onAddToLibrary,
     disabled = false,
 }: ImagePostContextMenuProps) {
     if (disabled) {
@@ -66,6 +68,7 @@ export function ImagePostContextMenu({
             case 'image.replace': onReplaceImage?.(); break;
             case 'image.download': onDownloadImage?.(); break;
             case 'image.cropToGrid': onToggleCropToGrid?.(); break;
+            case 'post.addToLibrary': onAddToLibrary?.(); break;
         }
 
         actionRegistry.execute(id, {
@@ -90,6 +93,7 @@ export function ImagePostContextMenu({
                     <ContextMenuItem label="Cut" shortcut={["Ctrl", "X"]} onClick={() => handleAction('edit.cut')} />
                     <ContextMenuItem label="Copy" shortcut={["Ctrl", "C"]} onClick={() => handleAction('edit.copy')} />
                     <ContextMenuItem label="Duplicate" shortcut={["Ctrl", "D"]} onClick={() => handleAction('edit.duplicate')} />
+                    <ContextMenuItem label="Add to Library" onClick={() => handleAction('post.addToLibrary')} />
                     <ContextMenuItem label="Delete" shortcut={["Backspace"]} onClick={() => handleAction('edit.delete')} />
 
                     <ContextMenu.Separator className="h-[1px] bg-gray-100 m-1" />

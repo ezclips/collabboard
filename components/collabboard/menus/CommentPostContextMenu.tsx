@@ -21,6 +21,7 @@ interface CommentPostContextMenuProps {
     onBringForward?: () => void;
     onSendBackward?: () => void;
     onSendToBack?: () => void;
+    onAddToLibrary?: () => void;
     disabled?: boolean;
 }
 
@@ -39,6 +40,7 @@ export function CommentPostContextMenu({
     onBringForward,
     onSendBackward,
     onSendToBack,
+    onAddToLibrary,
     disabled = false,
 }: CommentPostContextMenuProps) {
     if (disabled) {
@@ -58,6 +60,7 @@ export function CommentPostContextMenu({
             case 'post.bringForward': onBringForward?.(); break;
             case 'post.sendBackward': onSendBackward?.(); break;
             case 'post.sendToBack': onSendToBack?.(); break;
+            case 'post.addToLibrary': onAddToLibrary?.(); break;
         }
 
         actionRegistry.execute(id, {
@@ -81,6 +84,7 @@ export function CommentPostContextMenu({
                     <ContextMenuItem label="Cut" shortcut={["Ctrl", "X"]} onClick={() => handleAction('edit.cut')} />
                     <ContextMenuItem label="Copy" shortcut={["Ctrl", "C"]} onClick={() => handleAction('edit.copy')} />
                     <ContextMenuItem label="Duplicate" shortcut={["Ctrl", "D"]} onClick={() => handleAction('edit.duplicate')} />
+                    <ContextMenuItem label="Add to Library" onClick={() => handleAction('post.addToLibrary')} />
                     <ContextMenuItem label="Delete" shortcut={["Backspace"]} onClick={() => handleAction('edit.delete')} />
 
                     <ContextMenu.Separator className="h-[1px] bg-gray-100 m-1" />

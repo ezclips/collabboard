@@ -25,6 +25,7 @@ interface LinkPostContextMenuProps {
     // Link-specific actions
     onAddImage?: () => void;
     onCopyLinkAddress?: () => void;
+    onAddToLibrary?: () => void;
     disabled?: boolean;
 }
 
@@ -44,6 +45,7 @@ export function LinkPostContextMenu({
     onGroupIntoColumn,
     onAddImage,
     onCopyLinkAddress,
+    onAddToLibrary,
     disabled = false,
 }: LinkPostContextMenuProps) {
     if (disabled) {
@@ -65,6 +67,7 @@ export function LinkPostContextMenu({
             case 'post.groupIntoColumn': onGroupIntoColumn?.(); break;
             case 'post.addImage': onAddImage?.(); break;
             case 'post.copyLinkAddress': onCopyLinkAddress?.(); break;
+            case 'post.addToLibrary': onAddToLibrary?.(); break;
         }
 
         // Also trigger via registry for extensibility
@@ -88,6 +91,7 @@ export function LinkPostContextMenu({
                     <ContextMenuItem label="Cut" shortcut={["Ctrl", "X"]} onClick={() => handleAction('edit.cut')} />
                     <ContextMenuItem label="Copy" shortcut={["Ctrl", "C"]} onClick={() => handleAction('edit.copy')} />
                     <ContextMenuItem label="Duplicate" shortcut={["Ctrl", "D"]} onClick={() => handleAction('edit.duplicate')} />
+                    <ContextMenuItem label="Add to Library" onClick={() => handleAction('post.addToLibrary')} />
                     <ContextMenuItem label="Delete" shortcut={["Backspace"]} onClick={() => handleAction('edit.delete')} />
 
                     <ContextMenu.Separator className="h-[1px] bg-gray-100 m-1" />

@@ -23,6 +23,7 @@ interface NotePostContextMenuProps {
     onSendToBack?: () => void;
     onCreateSyncedCopy?: () => void;
     onGroupIntoColumn?: () => void;
+    onAddToLibrary?: () => void;
     disabled?: boolean;
 }
 
@@ -41,6 +42,7 @@ export function NotePostContextMenu({
     onSendToBack,
     onCreateSyncedCopy,
     onGroupIntoColumn,
+    onAddToLibrary,
     disabled = false,
 }: NotePostContextMenuProps) {
     if (disabled) {
@@ -61,6 +63,7 @@ export function NotePostContextMenu({
             case 'post.sendToBack': onSendToBack?.(); break;
             case 'post.createSyncedCopy': onCreateSyncedCopy?.(); break;
             case 'post.groupIntoColumn': onGroupIntoColumn?.(); break;
+            case 'post.addToLibrary': onAddToLibrary?.(); break;
         }
 
         // Also trigger via registry for extensibility
@@ -85,6 +88,7 @@ export function NotePostContextMenu({
                     <ContextMenuItem label="Copy" shortcut={["Ctrl", "C"]} onClick={() => handleAction('edit.copy')} />
                     <ContextMenuItem label="Duplicate" shortcut={["Ctrl", "D"]} onClick={() => handleAction('edit.duplicate')} />
                     <ContextMenuItem label="Create Synced Copy" onClick={() => handleAction('post.createSyncedCopy')} />
+                    <ContextMenuItem label="Add to Library" onClick={() => handleAction('post.addToLibrary')} />
                     <ContextMenuItem label="Delete" shortcut={["Backspace"]} onClick={() => handleAction('edit.delete')} />
 
                     <ContextMenu.Separator className="h-[1px] bg-gray-100 m-1" />
