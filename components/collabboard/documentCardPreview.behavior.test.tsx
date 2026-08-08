@@ -174,12 +174,12 @@ describe('19: the same canonical Document card renderer is used by every layout 
 });
 
 describe('16/17/18: Note, Clipart and Freeform placement are unaffected by the Document preview correction', () => {
-  it('Clipart branch keeps its icon/image placeholder and word counter untouched', () => {
+  it('Clipart branch keeps its icon/image placeholder, without the leftover word counter from when Clipart was attached to Document', () => {
     const clip = doc({ id: 'clip-1', metadata: { svgUrl: 'x.svg' } });
     const c = mount(<CardPreview padlet={clip} isSelected={false} />);
     expect(c.querySelector('.h-32.w-32')).not.toBeNull();
     expect(c.querySelector('img[src="x.svg"]')).not.toBeNull();
-    expect(c.textContent).toContain('words');
+    expect(c.textContent).not.toContain('words');
   });
 
   it('Note (type: text) never reaches CardPreview\'s Document branch or DocumentCardContent (PostCardContent gates on isDocumentPost)', () => {

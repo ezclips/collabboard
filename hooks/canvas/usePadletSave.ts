@@ -22,6 +22,7 @@ export type SaveAIComponentData = {
       authorLink?: string | null;
     }>;
   };
+  metadata?: Record<string, unknown>;
 };
 
 
@@ -1372,6 +1373,7 @@ export function usePadletSave(params: UsePadletSaveParams) {
 
     const metadata = {
       ...padletToEdit.metadata,
+      ...data.metadata,
       aiComponentCode: finalCode,
       aiComponentJson: serializeAIContentForPersistence(finalJson),
       aiPrompt: data.aiPrompt,

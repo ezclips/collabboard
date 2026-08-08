@@ -41,6 +41,20 @@ const PhotoImageSchema = z.object({
   url: z.string().url().optional(),
 });
 
+const PhotoCardTextStyleSchema = z.object({
+  heading: z.enum(['h1', 'h2', 'normal', 'small', 'code', 'callout', 'quote']).optional(),
+  color: z.string().optional(),
+  backgroundColor: z.string().optional(),
+  fontSize: z.string().optional(),
+  fontWeight: z.string().optional(),
+  fontStyle: z.string().optional(),
+  fontFamily: z.string().optional(),
+  lineHeight: z.string().optional(),
+  underline: z.boolean().optional(),
+  strikethrough: z.boolean().optional(),
+  textAlign: z.enum(['left', 'center', 'right']).optional(),
+});
+
 const WorkshopBoardBlockSchema = z.object({
   title: z.string().min(1),
   description: z.string().optional(),
@@ -108,9 +122,11 @@ export const ComparisonDiagramSchema: z.ZodType<ComparisonDiagramData> = z.objec
 
 export const PhotoCardSchema: z.ZodType<PhotoCardData> = z.object({
   type: z.literal('photo'),
-  title: z.string().min(1),
+  title: z.string(),
   image: PhotoImageSchema,
   caption: z.string().optional(),
+  kicker: z.string().optional(),
+  textStyle: PhotoCardTextStyleSchema.optional(),
 });
 
 export const WorkshopBoardSchema: z.ZodType<WorkshopBoardData> = z.object({

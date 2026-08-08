@@ -484,6 +484,7 @@ export default function CanvasModals({
           initialTitle={getMeaningfulTitle(padletToEdit?.title, padletToEdit?.type)}
           initialPrompt={padletToEdit?.metadata?.aiPrompt || ''}
           initialContent={extractAIContentFromPadletMetadata(padletToEdit?.metadata)}
+          initialMetadata={padletToEdit?.metadata || {}}
           lockedMode={lockedMode}
           lockedSubtype={lockedSubtype}
         />

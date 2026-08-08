@@ -168,7 +168,7 @@ describe('CardPreview captionStyle reader rendering', () => {
     expect(style(renderCard(padlet({ metadata: { textColor: undefined, captionStyle: { color: 'red' } } })))).toBe('color:#1F2937');
   });
 
-  it('renders only valid supplied captionStyle fields without reading caption metadata or writing metadata', () => {
+  it('renders only valid supplied captionStyle fields, without writing metadata, and renders the real caption text below reactions', () => {
     const source = padlet({
       metadata: metadata({
         caption: 'Stored metadata caption',
@@ -192,7 +192,9 @@ describe('CardPreview captionStyle reader rendering', () => {
       'color:#111827cc;font-size:18px;font-weight:700;font-style:italic;font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;line-height:1.45;background-color:#fef3c7',
     );
     expect(rendered).toContain('Clipart caption');
-    expect(rendered).not.toContain('Stored metadata caption');
+    // metadata.caption is the real caption text field (below reactions) --
+    // distinct from metadata.captionStyle, which styles the title span.
+    expect(rendered).toContain('Stored metadata caption');
     expect(rendered).not.toContain('Wrong source');
     expect(JSON.stringify(source)).toBe(before);
   });

@@ -70,7 +70,7 @@ describe('EmojiReactionPicker PATCH-125 census', () => {
     );
 
     expect(counts).toEqual({
-      'components/collabboard/canvas/ui/FreeformPadletCards.tsx': 5,
+      'components/collabboard/canvas/ui/FreeformPadletCards.tsx': 8,
       'components/collabboard/editors/ClipartCardDraftModal.tsx': 1,
       'app/dashboard/canvas/[id]/CanvasClient.tsx': 1,
       'components/collabboard/editors/NoteEditor.tsx': 1,
@@ -150,7 +150,7 @@ describe('EmojiReactionPicker semantics and persistence source guards', () => {
     const clipart = source('components/collabboard/editors/ClipartCardDraftModal.tsx');
     const canvasClient = source('app/dashboard/canvas/[id]/CanvasClient.tsx');
 
-    expect((freeform.match(/newReactions = \[\.\.\.currentReactions, emoji\]/g) ?? []).length).toBe(5);
+    expect((freeform.match(/newReactions = \[\.\.\.currentReactions, emoji\]/g) ?? []).length).toBe(8);
     expect(freeform).toContain('updatePostFieldsPreservingFailureChannels(padlet.id');
     expect(freeform).toContain('updatePostFieldsPreservingFailureChannels(activeImageToolbarPadlet.id');
     expect((freeform.match(/await updatePadletMetadata\(padlet\.id, \{ reactions: newReactions \}\)/g) ?? []).length).toBeGreaterThanOrEqual(2);

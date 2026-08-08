@@ -1,3 +1,5 @@
+import type { CaptionHeading } from '@/lib/domain/canvas/captionStyle';
+
 export type AIMode =
   | 'lesson_board'
   | 'diagram'
@@ -116,6 +118,24 @@ export interface ComparisonDiagramData extends DiagramDataBase {
   columns: ComparisonColumn[];
 }
 
+// Mirrors CaptionStyle (lib/domain/canvas/captionStyle.ts) -- the same
+// heading-preset system every other post type's title/caption uses -- so
+// the Photo Card's text goes through the one real "Text style" panel
+// instead of a second, more limited implementation.
+export interface PhotoCardTextStyle {
+  heading?: CaptionHeading;
+  color?: string;
+  backgroundColor?: string;
+  fontSize?: string;
+  fontWeight?: string;
+  fontStyle?: string;
+  fontFamily?: string;
+  lineHeight?: string;
+  underline?: boolean;
+  strikethrough?: boolean;
+  textAlign?: 'left' | 'center' | 'right';
+}
+
 export interface PhotoCardData {
   type: 'photo';
   title: string;
@@ -124,6 +144,11 @@ export interface PhotoCardData {
     url?: string;
   };
   caption?: string;
+  // The small uppercase eyebrow label above the title (defaults to "photo
+  // card" when undefined). Editable/removable like title and caption --
+  // an explicit empty string means the user cleared it.
+  kicker?: string;
+  textStyle?: PhotoCardTextStyle;
 }
 
 export interface WorkshopBoardBlock {

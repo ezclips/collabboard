@@ -26,6 +26,11 @@ interface CardPreviewProps {
     // title lives, instead of a separate field elsewhere that only looked
     // like an unrelated caption.
     titleEditor?: React.ReactNode;
+    // Overrides the Clipart branch's caption slot (below reactions) with a
+    // live editable control, same override pattern as titleEditor -- lets
+    // ClipartCardDraftModal put a real caption text field there instead of
+    // this read-only paragraph.
+    captionEditor?: React.ReactNode;
 }
 
 export default function CardPreview({
@@ -39,13 +44,13 @@ export default function CardPreview({
     onAddReaction,
     onReactionClick,
     hideTitle = false,
-    titleEditor
+    titleEditor,
+    captionEditor
 }: CardPreviewProps) {
     const { metadata, title, content } = padlet;
     const iconBgColor = metadata?.iconBgColor || '#f8f9fa'; // Small square behind icon (Tab 1: "Icon")
     const cardBgColor = metadata?.backgroundColor || '#ffffff'; // Outer card background (Tab 2: "Icon BG")
     const svgUrl = metadata?.svgUrl;
-    const counterType = metadata?.counterType || 'words';
     const topStripColor = metadata?.topStripColor || '#4f46e5'; // Top strip (Tab 3: "Icon Strip")
     const titleStyle = resolveCaptionStyle(metadata?.captionStyle, metadata?.textColor);
     const showTopStrip = !!topStripColor && topStripColor !== 'transparent';
@@ -61,18 +66,6 @@ export default function CardPreview({
     // Placeholder-aware title, matching Note/Comment's own top-strip bar --
     // a legacy default like "New Post" reads as unset, not a real title.
     const documentTitle = getMeaningfulTitle(title, 'card');
-
-    // Calculate counter
-    const calculateCounter = () => {
-        if (counterType === 'words') {
-            const text = (content || '').replace(/<[^>]*>/g, '').trim();
-            const wordCount = text ? text.split(/\s+/).length : 0;
-            return `${wordCount} words`;
-        } else {
-            const cardCount = metadata?.childPadletIds?.length || 0;
-            return `${cardCount} cards`;
-        }
-    };
 
     if (isClipartCard) {
         return (
@@ -134,16 +127,25 @@ export default function CardPreview({
                     >
                         <img src={svgUrl} alt="" className="h-28 w-28 object-contain" />
                     </div>
-                    <div className="text-[10px] text-gray-600">{calculateCounter()}</div>
                 </div>
 
                 {reactions.length > 0 && (
-                    <div className="absolute bottom-2 left-2 flex flex-wrap gap-1 z-10">
+                    <div className="flex flex-wrap items-center gap-1 px-4 pt-1">
                         <ReactionDisplay
                             reactions={reactions}
                             onAddClick={onAddReaction}
                             onReactionClick={onReactionClick}
                         />
+                    </div>
+                )}
+
+                {(captionEditor || padlet.metadata?.caption) && (
+                    <div className="pb-2 pt-1">
+                        {captionEditor ? captionEditor : (
+                            <p className="px-4 text-xs text-gray-600 break-words" style={titleStyle}>
+                                {padlet.metadata?.caption}
+                            </p>
+                        )}
                     </div>
                 )}
             </div>

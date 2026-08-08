@@ -36,6 +36,15 @@ interface AIContentRendererProps {
   // capture it for PDF/canvas export. Not used for the legacy_html path —
   // that path registers its own target via legacyHtmlProps.onExportTargetReady.
   onExportTargetReady?: (el: HTMLDivElement | null) => void;
+  // Lets structured renderers that support it (currently Photo Card) expose
+  // in-place text editing/removal instead of routing through the separate
+  // "Edit AI Component" field modal.
+  editable?: boolean;
+  onContentChange?: (next: AIContentData) => void;
+  // Reports which text field the user just focused so the caller's own
+  // (single, shared) Text style button knows what to style next, instead
+  // of each renderer growing its own duplicate style popup.
+  onFocusField?: (field: string) => void;
 }
 
 class AIContentErrorBoundary extends React.Component<
@@ -84,12 +93,26 @@ function renderDiagram(data: DiagramData): React.ReactNode {
   }
 }
 
-function renderStructuredContent(data: AIContentData): React.ReactNode {
+function renderStructuredContent(
+  data: AIContentData,
+  options?: {
+    editable?: boolean;
+    onDataChange?: (next: AIContentData) => void;
+    onFocusField?: (field: string) => void;
+  },
+): React.ReactNode {
   switch (data.type) {
     case 'lesson_board':
       return <StructuredLessonBoardRenderer data={data} />;
     case 'photo':
-      return <PhotoCardRenderer data={data} />;
+      return (
+        <PhotoCardRenderer
+          data={data}
+          editable={options?.editable}
+          onChange={options?.onDataChange}
+          onFocusField={options?.onFocusField}
+        />
+      );
     case 'workshop_board':
       return <WorkshopBoardRenderer data={data} />;
     case 'diagram':
@@ -105,6 +128,9 @@ export default function AIContentRenderer({
   className,
   legacyHtmlProps,
   onExportTargetReady,
+  editable,
+  onContentChange,
+  onFocusField,
 }: AIContentRendererProps) {
   const normalized = normalizeAIContent(content);
   const structuredRef = useRef<HTMLDivElement>(null);
@@ -149,7 +175,7 @@ export default function AIContentRenderer({
       // entire rendered output (header + visual + source code).
       rendered = (
         <div ref={structuredRef} className="h-full w-full">
-          {renderStructuredContent(normalized.data)}
+          {renderStructuredContent(normalized.data, { editable, onDataChange: onContentChange, onFocusField })}
         </div>
       );
       break;
