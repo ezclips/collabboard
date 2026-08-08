@@ -90,7 +90,8 @@ import EmojiReactionPicker from '@/components/collabboard/editors/EmojiReactionP
 import AIComponentEditor from '@/components/collabboard/editors/AIComponentEditor';
 import LibraryPanel from '@/components/collabboard/LibraryPanel';
 import ImportsDialog from '@/components/collabboard/imports/ImportsDialog';
-import { LibraryItemContent } from '@/lib/collabboard/library';
+import { LibraryItemContent, addToLibrary } from '@/lib/collabboard/library';
+import { extractAIContentFromPadletMetadata, normalizeAIContent } from '@/lib/ai/normalize-ai-content';
 import { clipboardManager } from '@/lib/collabboard/ClipboardManager';
 import { toast } from 'sonner';
 import PlacementPrompt from '@/components/collabboard/PlacementPrompt';
@@ -814,7 +815,10 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       isAIContentEditModalOpen ||
       isAIContentConvertModalOpen ||
       isCardEditorOpen ||
-      isLibraryOpen ||
+      // isLibraryOpen intentionally excluded -- it's a non-modal side panel
+      // (like a sidebar, not a blocking editor), and including it here was
+      // disabling canvas panning everywhere, not just under the panel's own
+      // ~320px-wide DOM footprint (which already blocks its own clicks).
       isMapStylePanelOpen ||
       isPlacementPromptOpen ||
       isDrawingMode ||
@@ -840,7 +844,6 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     isAIContentEditModalOpen,
     isAIContentConvertModalOpen,
     isCardEditorOpen,
-    isLibraryOpen,
     isMapStylePanelOpen,
     isPlacementPromptOpen,
     isDrawingMode,
@@ -3393,6 +3396,58 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     }
   };
 
+  // AI Component posts keep their resolved image inside the structured
+  // aiComponentJson envelope (e.g. a Photo Card's data.image.url), not in
+  // the flat file_url/metadata.imageUrl fields every other image-bearing
+  // post type uses -- resolve it so the library gets a real thumbnail
+  // instead of falling back to the generic file icon.
+  const resolveAIThumbnailUrl = (metadata: Padlet['metadata']): string | undefined => {
+    const aiContent = extractAIContentFromPadletMetadata(metadata);
+    if (!aiContent) return undefined;
+    const normalized = normalizeAIContent(aiContent);
+    return normalized.kind === 'structured' && normalized.data.type === 'photo'
+      ? normalized.data.image.url || undefined
+      : undefined;
+  };
+
+  // Add a post to the Personal Library, the same "type: X, content: {...}"
+  // shape LibraryPanel's own drag-and-drop save (handleDropOnPersonal) writes,
+  // so items added from the context menu show up identically to ones dragged
+  // in by hand and can be dragged back onto the canvas the same way.
+  const addPadletToLibrary = async (id: string) => {
+    const padlet = padlets.find(p => p.id === id);
+    if (!padlet) return;
+
+    try {
+      await addToLibrary({
+        type: padlet.type || 'note',
+        title: padlet.title || 'Untitled',
+        content: {
+          title: padlet.title || 'Untitled',
+          content: padlet.content,
+          type: padlet.type,
+          width: padlet.width || 300,
+          height: padlet.height || 200,
+          metadata: (() => {
+            const { parentId: _p, childPadletIds: _c, ...m } = (padlet.metadata || {}) as Record<string, unknown>;
+            return m;
+          })(),
+          file_url: padlet.type === 'ai-component'
+            ? (resolveAIThumbnailUrl(padlet.metadata) || padlet.file_url)
+            : (padlet.file_url || (padlet.metadata as { imageUrl?: string } | undefined)?.imageUrl),
+          file_name: padlet.file_name,
+          file_type: padlet.file_type,
+        },
+        is_public: false,
+      });
+      window.dispatchEvent(new Event('library-updated'));
+      toast.success('Added to library');
+    } catch (err) {
+      console.error('Failed to add post to library:', err);
+      toast.error('Failed to add to library');
+    }
+  };
+
   const buildPastedPadletData = useCallback((
     sourcePadlet: Padlet,
     nextId: string,
@@ -5186,6 +5241,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
 
   const rawActions = {
     duplicatePadlet,
+    addPadletToLibrary,
     requestDeletePadlet,
     cutPadlet,
     copyPadlet,
@@ -6314,8 +6370,21 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           {/* Layer 1: Background Lines (Behind Padlets) — back-plane only */}
           {/* pointer-events on the div stays 'none' (pass-through); the SVG enables its own
               events via forcePointerEvents so only actual line hit-paths are interactive.
-              Padlets above in z-order naturally block clicks on covered segments. */}
-          <div className="absolute inset-0" style={{ zIndex: 0, pointerEvents: 'none' }}>
+              Padlets above in z-order naturally block clicks on covered segments.
+              On Freeform, this div is a sibling of PadletLayer rather than nested inside
+              its zoomed stage (components/collabboard/canvas/ui/FreeformPadletCards.tsx's
+              own `transform: scale(canvasZoom)` wrapper), so legacy-coord-space lines never
+              inherited that scale — they rendered at a fixed 100% while every post around
+              them zoomed. Mirroring the same transform here re-aligns it with the stage
+              without having to relocate it into FreeformPadletCards' JSX tree. */}
+          <div
+            className="absolute inset-0"
+            style={{
+              zIndex: 0,
+              pointerEvents: 'none',
+              ...(isFreeformLayout ? { transform: `scale(${canvasZoom})`, transformOrigin: '0 0' } : {}),
+            }}
+          >
             <SimpleLineRenderer
               lines={isMapLayout ? [] : lines.filter(l => (l.layer_plane ?? 'front') === 'back')}
               selectedLineId={selectedLineId}
@@ -6330,6 +6399,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
               draggingLineId={draggingLineId}
               onDragChange={handleLineDragChange}
               onContextMenu={handleLineContextMenu}
+              canvasZoom={isFreeformLayout ? canvasZoom : undefined}
               forcePointerEvents={true}
               excalidrawAPIRef={isDrawingLayout ? drawingExcalidrawAPIRef : undefined}
               drawingViewport={isDrawingLayout ? drawingViewport : undefined}
@@ -7152,9 +7222,16 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           </PadletLayer>
 
           {/* Layer 3: Foreground Lines (On Top of most Padlets) - z-index 500 */}
+          {/* See the matching note on Layer 1: on Freeform this div sits outside
+              FreeformPadletCards' zoomed stage, so it needs the same canvasZoom
+              transform mirrored here to stay visually aligned with the posts. */}
           <div
             className="absolute inset-0"
-            style={{ zIndex: isFreeformGraphMode ? 2000 : 500, pointerEvents: 'none' }}
+            style={{
+              zIndex: isFreeformGraphMode ? 2000 : 500,
+              pointerEvents: 'none',
+              ...(isFreeformLayout ? { transform: `scale(${canvasZoom})`, transformOrigin: '0 0' } : {}),
+            }}
           >
             <SimpleLineRenderer
               lines={mapOverlayLines}
@@ -7252,35 +7329,33 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
               }}
               onClick={(e) => e.stopPropagation()}
             >
+              <button
+                onClick={() => {
+                  setDetachedPopupOpen(false);
+                  setDetachedPopupPadletId(null);
+                  setDetachedBadgeColorOpen(false);
+                }}
+                className="absolute -right-3 -top-3 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-400 shadow-md transition-all hover:text-gray-600"
+                title="Close"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
               <div className="relative p-4">
                 {/* Header */}
                 <div className="flex items-center justify-between mb-3">
                   <h4 className="text-sm font-semibold text-gray-700">Comments</h4>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => setDetachedBadgeColorOpen((prev) => !prev)}
-                      className="w-7 h-7 flex items-center justify-center rounded hover:bg-gray-100"
-                      title="Badge Color"
-                    >
-                      <div
-                        className="w-4 h-4 rounded border border-gray-300"
-                        style={{
-                          backgroundColor: padlets.find((p) => p.id === detachedPopupPadletId)?.metadata?.badgeColor || '#facc15',
-                        }}
-                      />
-                    </button>
-                    <button
-                      onClick={() => {
-                        setDetachedPopupOpen(false);
-                        setDetachedPopupPadletId(null);
-                        setDetachedBadgeColorOpen(false);
+                  <button
+                    onClick={() => setDetachedBadgeColorOpen((prev) => !prev)}
+                    className="w-7 h-7 flex items-center justify-center rounded hover:bg-gray-100"
+                    title="Badge Color"
+                  >
+                    <div
+                      className="w-4 h-4 rounded border border-gray-300"
+                      style={{
+                        backgroundColor: padlets.find((p) => p.id === detachedPopupPadletId)?.metadata?.badgeColor || '#facc15',
                       }}
-                      className="text-gray-400 hover:text-gray-600 p-1 rounded hover:bg-gray-100"
-                      title="Close"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
-                  </div>
+                    />
+                  </button>
                 </div>
 
                 {/* Badge Color Panel */}
@@ -8039,16 +8114,16 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
 
               {activeImageToolbarPadlet && textStylePadletId === activeImageToolbarPadlet.id && (
                 <div
-                  className="relative animate-in fade-in zoom-in duration-200 bg-white rounded-lg shadow-xl border border-gray-200 px-3 pb-3 pt-8 min-w-[240px]"
+                  className="relative animate-in fade-in zoom-in duration-200 bg-white rounded-lg shadow-xl border border-gray-200 px-3 pb-3 pt-3 min-w-[240px]"
                   onClick={(e) => e.stopPropagation()}
                   onMouseDown={(e) => e.stopPropagation()}
                 >
                   <button
                     onClick={() => setTextStylePadletId(null)}
-                    className="absolute top-2 right-2 w-4 h-4 flex items-center justify-center rounded hover:bg-gray-100"
+                    className="absolute -right-3 -top-3 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-400 shadow-md transition-all hover:text-gray-600"
                     title="Close"
                   >
-                    <X className="w-3 h-3 text-gray-400" />
+                    <X className="h-3.5 w-3.5" />
                   </button>
                   <TextStylePopup
                     isOpen={true}
@@ -8091,10 +8166,17 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
 
               {activeImageToolbarPadlet && isImageColorPickerOpen && (
                 <div
-                  className="animate-in fade-in zoom-in duration-200"
+                  className="relative animate-in fade-in zoom-in duration-200"
                   onClick={(e) => e.stopPropagation()}
                   onMouseDown={(e) => e.stopPropagation()}
                 >
+                  <button
+                    onClick={() => setIsImageColorPickerOpen(false)}
+                    className="absolute -right-3 -top-3 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-400 shadow-md transition-all hover:text-gray-600"
+                    title="Close"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
                   <div className="bg-white rounded-lg shadow-xl border border-gray-200 overflow-hidden w-[340px]">
                     <div className="p-4 flex flex-col gap-4">
                       <div className="grid items-center gap-3" style={{ gridTemplateColumns: '1fr auto 1fr' }}>
@@ -8111,15 +8193,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                             title="Top Strip Color"
                           >TS</button>
                         </div>
-                        <div className="flex justify-end">
-                          <button
-                            onClick={() => setIsImageColorPickerOpen(false)}
-                            className="w-5 h-5 rounded flex items-center justify-center text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-                            title="Close"
-                          >
-                            <X className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
+                        <div className="flex justify-end" />
                       </div>
                       <ColorPickerContent
                         color={imageColorTab === 'background' ? (activeImageToolbarPadlet.metadata?.cardColor || '#ffffff') : (activeImageToolbarPadlet.metadata?.topStrip || 'transparent')}
@@ -8181,36 +8255,35 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                   onMouseDown={(e) => e.stopPropagation()}
                 >
                   <div className="relative bg-white rounded-xl shadow-2xl border border-gray-200 p-4 min-w-[280px] max-w-[320px]">
+                    <button
+                      onClick={() => {
+                        setCardCommentPopupPadletId(null);
+                        setActiveCardCommentId(null);
+                        setEditingCardCommentId(null);
+                        setEditingCardCommentText('');
+                        setCommentColorPopupId(null);
+                        setNoteBadgeColorPadletId(null);
+                      }}
+                      className="absolute -right-3 -top-3 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-400 shadow-md transition-all hover:text-gray-600"
+                      title="Close"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
                     <div className="flex items-center justify-between mb-3">
                       <h4 className="text-sm font-semibold text-gray-700">Comments</h4>
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => {
-                            setNoteBadgeColorPadletId(noteBadgeColorPadletId === activeImageToolbarPadlet.id ? null : activeImageToolbarPadlet.id);
-                            setCommentColorPopupId(null);
-                          }}
-                          className="w-7 h-7 flex items-center justify-center rounded hover:bg-gray-100"
-                          title="Badge Color"
-                        >
-                          <div
-                            className="w-4 h-4 rounded border border-gray-300"
-                            style={{ backgroundColor: activeImageToolbarPadlet.metadata?.badgeColor || '#facc15' }}
-                          />
-                        </button>
-                        <button
-                          onClick={() => {
-                            setCardCommentPopupPadletId(null);
-                            setActiveCardCommentId(null);
-                            setEditingCardCommentId(null);
-                            setEditingCardCommentText('');
-                            setCommentColorPopupId(null);
-                            setNoteBadgeColorPadletId(null);
-                          }}
-                          className="text-gray-400 hover:text-gray-600 p-1 rounded hover:bg-gray-100"
-                        >
-                          <X className="w-4 h-4" />
-                        </button>
-                      </div>
+                      <button
+                        onClick={() => {
+                          setNoteBadgeColorPadletId(noteBadgeColorPadletId === activeImageToolbarPadlet.id ? null : activeImageToolbarPadlet.id);
+                          setCommentColorPopupId(null);
+                        }}
+                        className="w-7 h-7 flex items-center justify-center rounded hover:bg-gray-100"
+                        title="Badge Color"
+                      >
+                        <div
+                          className="w-4 h-4 rounded border border-gray-300"
+                          style={{ backgroundColor: activeImageToolbarPadlet.metadata?.badgeColor || '#facc15' }}
+                        />
+                      </button>
                     </div>
                     {noteBadgeColorPadletId === activeImageToolbarPadlet.id && (
                       <div className="absolute right-3 top-12 z-10 bg-white rounded-lg shadow-lg border border-gray-200 p-2">

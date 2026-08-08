@@ -9,6 +9,7 @@ import CardActionsToolbar from '@/components/collabboard/editors/CardActionsTool
 import { CardColorPanel } from '@/components/collabboard/editors/CardColorPanel';
 import CommentPopup from '@/components/collabboard/editors/CommentPopup';
 import TextStylePopup from '@/components/collabboard/editors/TextStylePopup';
+import InlineCaption from '@/components/collabboard/editors/InlineCaption';
 import { CAPTION_STYLE_PRESETS, resolveCaptionStyle, type CaptionHeading } from '@/lib/domain/canvas/captionStyle';
 import { nextTextAlign } from '@/components/collabboard/editors/textAlignCycle';
 import EmojiReactionPicker from '@/components/collabboard/editors/EmojiReactionPicker';
@@ -167,6 +168,7 @@ export default function ClipartCardDraftModal({
   // preset is active, same layering as a TipTap mark over a paragraph.
   const captionStyle = previewPadlet.metadata?.captionStyle || {};
   const titleInputStyle = resolveCaptionStyle(captionStyle, previewPadlet.metadata?.textColor);
+  const caption = typeof previewPadlet.metadata?.caption === 'string' ? previewPadlet.metadata.caption : '';
   const isCaptionBold = captionStyle.fontWeight === '700' || captionStyle.fontWeight === 'bold';
   const isCaptionItalic = captionStyle.fontStyle === 'italic';
   const toggleCaptionBold = () => writeCaptionStyle({ ...captionStyle, fontWeight: isCaptionBold ? '400' : '700' });
@@ -264,6 +266,16 @@ export default function ClipartCardDraftModal({
                     ],
                   });
                 }}
+                captionEditor={
+                  <InlineCaption
+                    value={caption}
+                    isEditing={isCaptionEditing}
+                    onChange={(next) => updateMetadata({ caption: next })}
+                    placeholder="Add a caption..."
+                    color={titleInputStyle.color}
+                    textStyle={titleInputStyle}
+                  />
+                }
               />
             </div>
             {commentCount > 0 ? (
@@ -286,19 +298,20 @@ export default function ClipartCardDraftModal({
         </div>
 
         {isCaptionEditing ? (
-          <div
-            data-testid="clipart-caption-style-panel"
-            className="relative bg-white rounded-lg shadow-xl border border-gray-200 p-3 min-w-[240px] max-h-[calc(100vh-2rem)] overflow-y-auto"
-            onClick={(e) => e.stopPropagation()}
-            onMouseDown={(e) => e.stopPropagation()}
-          >
+          <div className="relative">
             <button
               onClick={() => setIsCaptionEditing(false)}
-              className="absolute top-2 right-2 w-4 h-4 flex items-center justify-center rounded hover:bg-gray-100"
+              className="absolute -right-3 -top-3 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-400 shadow-md transition-all hover:text-gray-600"
               title="Close"
             >
-              <X className="w-3 h-3 text-gray-400" />
+              <X className="h-3.5 w-3.5" />
             </button>
+            <div
+              data-testid="clipart-caption-style-panel"
+              className="bg-white rounded-lg shadow-xl border border-gray-200 p-3 min-w-[240px] max-h-[calc(100vh-2rem)] overflow-y-auto"
+              onClick={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
+            >
             <TextStylePopup
               isOpen={isCaptionEditing}
               onOpenChange={(open) => setIsCaptionEditing(open)}
@@ -329,6 +342,7 @@ export default function ClipartCardDraftModal({
               isUnderline={!!captionStyle.underline}
               isStrikethrough={!!captionStyle.strikethrough}
             />
+            </div>
           </div>
         ) : null}
 
@@ -343,6 +357,7 @@ export default function ClipartCardDraftModal({
                 if (target === 'bg') updateMetadata({ backgroundColor: value });
                 if (target === 'ts') updateMetadata({ topStripColor: value });
               }}
+              onClose={() => setIsColorPanelOpen(false)}
             />
           </div>
         ) : null}

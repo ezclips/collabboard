@@ -152,9 +152,16 @@ export default function LinkPopup({
     if (hasExistingLink && !isEditMode) {
         return (
             <div
-                className={wrapperClassName}
+                className={inline ? 'relative' : wrapperClassName}
                 onMouseDown={preventFocusLoss}
             >
+                <button
+                    onClick={() => onOpenChange(false)}
+                    className="absolute -right-3 -top-3 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-400 shadow-md transition-all hover:text-gray-600"
+                    title="Close"
+                >
+                    <X className="h-3.5 w-3.5" />
+                </button>
                 <div className="bg-white rounded-lg shadow-xl border border-gray-200 overflow-hidden min-w-[280px]">
                     {/* Header */}
                     <div className="flex items-center justify-between px-3 py-2 border-b border-gray-100 bg-gray-50">
@@ -162,12 +169,6 @@ export default function LinkPopup({
                             <Link className="w-4 h-4 text-gray-500" />
                             <span className="text-xs font-medium text-gray-600">Link</span>
                         </div>
-                        <button
-                            onClick={() => onOpenChange(false)}
-                            className="w-5 h-5 flex items-center justify-center rounded hover:bg-gray-200 text-gray-400 hover:text-gray-600"
-                        >
-                            <X className="w-3 h-3" />
-                        </button>
                     </div>
 
                     {/* URL Display */}
@@ -236,9 +237,23 @@ export default function LinkPopup({
     // ADD/EDIT MODE: Show input field
     return (
         <div
-            className={wrapperClassName}
+            className={inline ? 'relative' : wrapperClassName}
             onMouseDown={preventFocusLoss}
         >
+            <button
+                onClick={() => {
+                    if (isEditMode && hasExistingLink) {
+                        setIsEditMode(false);
+                        setUrl(initialUrl);
+                    } else {
+                        onOpenChange(false);
+                    }
+                }}
+                className="absolute -right-3 -top-3 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-400 shadow-md transition-all hover:text-gray-600"
+                title="Close"
+            >
+                <X className="h-3.5 w-3.5" />
+            </button>
             <div className="bg-white rounded-lg shadow-xl border border-gray-200 overflow-hidden min-w-[280px]">
                 {/* Header */}
                 <div className="flex items-center justify-between px-3 py-2 border-b border-gray-100 bg-gray-50">
@@ -248,19 +263,6 @@ export default function LinkPopup({
                             {isEditMode ? 'Edit Link' : 'Add Link'}
                         </span>
                     </div>
-                    <button
-                        onClick={() => {
-                            if (isEditMode && hasExistingLink) {
-                                setIsEditMode(false);
-                                setUrl(initialUrl);
-                            } else {
-                                onOpenChange(false);
-                            }
-                        }}
-                        className="w-5 h-5 flex items-center justify-center rounded hover:bg-gray-200 text-gray-400 hover:text-gray-600"
-                    >
-                        <X className="w-3 h-3" />
-                    </button>
                 </div>
 
                 {/* Input Field */}

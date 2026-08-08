@@ -202,22 +202,23 @@ export default function CanvasShareModal({
   return (
     <div className="fixed inset-0 z-[3100] flex items-center justify-center bg-black/50 px-4" onMouseDown={onClose}>
       <div
-        className="w-full max-w-xl overflow-hidden rounded-2xl bg-white shadow-2xl"
+        className="relative w-full max-w-xl"
         onMouseDown={(event) => event.stopPropagation()}
       >
+        <button
+          type="button"
+          onClick={onClose}
+          className="absolute -right-3 -top-3 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-400 shadow-md transition-all hover:text-gray-600"
+          aria-label="Close share modal"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+        <div className="overflow-hidden rounded-2xl bg-white shadow-2xl">
         <div className="flex items-center justify-between border-b border-gray-200 px-6 py-5">
           <div>
             <h2 className="text-xl font-semibold text-gray-900">Share canvas</h2>
             <p className="mt-1 text-sm text-gray-500">Invite people directly to {canvasTitle}.</p>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-lg p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600"
-            aria-label="Close share modal"
-          >
-            <X className="h-5 w-5" />
-          </button>
         </div>
 
         <div className="space-y-5 px-6 py-6">
@@ -428,6 +429,7 @@ export default function CanvasShareModal({
             </button>
           ) : null}
         </div>
+      </div>
       </div>
     </div>
   );

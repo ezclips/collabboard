@@ -127,11 +127,19 @@ export default function ImportsDialog({ isOpen, onClose, onImportResolved, initi
   // still-open Radix Dialogs, and a plain nested fixed div there doesn't
   // receive clicks correctly.
   return createPortal(
-    <div className="fixed inset-0 bg-black/50 z-[4200] flex items-center justify-center p-4 backdrop-blur-sm">
+    <div className="fixed inset-0 bg-black/50 z-[4200] flex items-center justify-center p-4 backdrop-blur-sm" onClick={onClose}>
       <div
-        className="bg-white rounded-xl shadow-2xl w-full animate-in fade-in zoom-in duration-200 overflow-hidden"
+        className="relative w-full"
         style={{ maxWidth: screen.name === 'browser' ? '720px' : '480px', height: screen.name === 'browser' ? '80vh' : 'auto' }}
+        onClick={(e) => e.stopPropagation()}
       >
+        <button
+          onClick={onClose}
+          className="absolute -right-3 -top-3 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-400 shadow-md transition-all hover:text-gray-600"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+        <div className="bg-white rounded-xl shadow-2xl w-full h-full animate-in fade-in zoom-in duration-200 overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b">
           <div className="flex items-center gap-2">
@@ -151,12 +159,6 @@ export default function ImportsDialog({ isOpen, onClose, onImportResolved, initi
                   : 'Import File'}
             </h2>
           </div>
-          <button
-            onClick={onClose}
-            className="p-1.5 hover:bg-gray-100 rounded-full transition-colors"
-          >
-            <X className="w-5 h-5 text-gray-500" />
-          </button>
         </div>
 
         {/* Body */}
@@ -205,6 +207,7 @@ export default function ImportsDialog({ isOpen, onClose, onImportResolved, initi
             </div>
           );
         })()}
+      </div>
       </div>
     </div>,
     document.body

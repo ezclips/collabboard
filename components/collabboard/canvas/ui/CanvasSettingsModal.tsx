@@ -1,12 +1,12 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogClose, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
-import { Columns3, Grid3X3, Layers3, Clock, Loader2 } from 'lucide-react';
+import { Columns3, Grid3X3, Layers3, Clock, Loader2, X } from 'lucide-react';
 import { supabaseBrowser } from '@/lib/supabase/browser';
 import { canEditWorkspace, type WorkspaceRole } from '@/lib/workspace/context';
 import { toast } from 'sonner';
@@ -175,10 +175,25 @@ export default function CanvasSettingsModal({
           freeze that nested (non-Radix, portaled-to-body) picker underneath. */}
       <Dialog open={isOpen} onOpenChange={onClose} modal={false}>
         <DialogContent
-          className="z-[4100] sm:max-w-xl max-h-[85vh] overflow-y-auto"
-          onPointerDownOutside={(event) => event.preventDefault()}
-          onInteractOutside={(event) => event.preventDefault()}
+          className="z-[4100] sm:max-w-xl"
+          showCloseButton={false}
+          onPointerDownOutside={(event) => {
+            // Only block the outside-click-closes-me default while a nested
+            // picker (Wallpaper's Google/OneDrive import, Icon selector) is
+            // open on top of this dialog -- otherwise a click landing in
+            // that picker would count as "outside" and close Settings out
+            // from under it. With neither open, let the default close through.
+            if (wallpaperDialogOpen || iconDialogOpen) event.preventDefault();
+          }}
+          onInteractOutside={(event) => {
+            if (wallpaperDialogOpen || iconDialogOpen) event.preventDefault();
+          }}
         >
+          <DialogClose className="absolute -right-3 -top-3 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-400 shadow-md transition-all hover:text-gray-600">
+            <X className="h-3.5 w-3.5" />
+            <span className="sr-only">Close</span>
+          </DialogClose>
+          <div className="max-h-[85vh] overflow-y-auto space-y-4">
           <DialogHeader>
             <DialogTitle>Canvas settings</DialogTitle>
           </DialogHeader>
@@ -333,6 +348,7 @@ export default function CanvasSettingsModal({
               {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
               Save changes
             </Button>
+          </div>
           </div>
         </DialogContent>
       </Dialog>

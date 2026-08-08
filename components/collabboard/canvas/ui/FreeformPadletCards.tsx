@@ -50,7 +50,8 @@ import {
   resolveSavedAIHtmlFromMetadata,
 } from '@/lib/ai/normalize-ai-content';
 import { getConversionTargets } from '@/lib/ai/conversion-matrix';
-import type { DiagramSubtype } from '@/lib/ai/contracts';
+import { serializeAIContentForPersistence } from '@/lib/ai/persistence';
+import type { AIContentData, DiagramSubtype } from '@/lib/ai/contracts';
 import type { StableCanvasActions } from '@/hooks/canvas/useStableCanvasActions';
 import { useCanvasEditor } from '@/components/collabboard/canvas/contexts/CanvasEditorContext';
 import { useCanvasConfig } from '@/components/collabboard/canvas/contexts/CanvasConfigContext';
@@ -60,6 +61,7 @@ const DND_KIND_CONTAINER_MOVE = 'columns-container-move';
 
 type FreeformPadletActionMap = {
   duplicatePadlet: (id: string) => void;
+  addPadletToLibrary: (id: string) => void;
   requestDeletePadlet: (id: string) => void;
   cutPadlet: (id: string) => void;
   copyPadlet: (id: string) => void;
@@ -352,6 +354,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
 
   const {
     duplicatePadlet,
+    addPadletToLibrary,
     requestDeletePadlet,
     cutPadlet,
     copyPadlet,
@@ -814,6 +817,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
           onSelect={() => setSelectedPadletId(padlet.id)}
           disabled={!canUseFreeformEditButton}
           onDuplicate={() => duplicatePadlet(padlet.id)}
+          onAddToLibrary={() => addPadletToLibrary(padlet.id)}
           onDelete={() => requestDeletePadlet(padlet.id)}
           onCut={() => cutPadlet(padlet.id)}
           onCopy={() => copyPadlet(padlet.id)}
@@ -1107,36 +1111,35 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
             {cardCommentPopupPadletId === padlet.id && !imageToolbarPadletId && (
               <div className="absolute left-full top-0 ml-3 z-[1100] animate-in fade-in slide-in-from-left-2 duration-200 pointer-events-auto">
                 <div className="relative bg-white rounded-xl shadow-2xl border border-gray-200 p-4 min-w-[280px] max-w-[320px]">
+                  <button
+                    onClick={() => {
+                      setCardCommentPopupPadletId(null);
+                      setActiveCardCommentId(null);
+                      setEditingCardCommentId(null);
+                      setEditingCardCommentText('');
+                      setCommentColorPopupId(null);
+                      setNoteBadgeColorPadletId(null);
+                    }}
+                    className="absolute -right-3 -top-3 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-400 shadow-md transition-all hover:text-gray-600"
+                    title="Close"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
                   <div className="flex items-center justify-between mb-3">
                     <h4 className="text-sm font-semibold text-gray-700">Comments</h4>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => {
-                          setNoteBadgeColorPadletId(noteBadgeColorPadletId === padlet.id ? null : padlet.id);
-                          setCommentColorPopupId(null);
-                        }}
-                        className="w-7 h-7 flex items-center justify-center rounded hover:bg-gray-100"
-                        title="Badge Color"
-                      >
-                        <div
-                          className="w-4 h-4 rounded border border-gray-300"
-                          style={{ backgroundColor: padlet.metadata?.badgeColor || '#facc15' }}
-                        />
-                      </button>
-                      <button
-                        onClick={() => {
-                          setCardCommentPopupPadletId(null);
-                          setActiveCardCommentId(null);
-                          setEditingCardCommentId(null);
-                          setEditingCardCommentText('');
-                          setCommentColorPopupId(null);
-                          setNoteBadgeColorPadletId(null);
-                        }}
-                        className="text-gray-400 hover:text-gray-600 p-1 rounded hover:bg-gray-100"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                    </div>
+                    <button
+                      onClick={() => {
+                        setNoteBadgeColorPadletId(noteBadgeColorPadletId === padlet.id ? null : padlet.id);
+                        setCommentColorPopupId(null);
+                      }}
+                      className="w-7 h-7 flex items-center justify-center rounded hover:bg-gray-100"
+                      title="Badge Color"
+                    >
+                      <div
+                        className="w-4 h-4 rounded border border-gray-300"
+                        style={{ backgroundColor: padlet.metadata?.badgeColor || '#facc15' }}
+                      />
+                    </button>
                   </div>
                   {noteBadgeColorPadletId === padlet.id && (
                     <div className="absolute right-3 top-12 z-10 bg-white rounded-lg shadow-lg border border-gray-200 p-2">
@@ -1611,10 +1614,10 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
               >
                 <button
                   onClick={() => setTextStylePadletId(null)}
-                  className="absolute top-2 right-2 w-4 h-4 flex items-center justify-center rounded hover:bg-gray-100"
+                  className="absolute -right-3 -top-3 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-400 shadow-md transition-all hover:text-gray-600"
                   title="Close"
                 >
-                  <X className="w-3 h-3 text-gray-400" />
+                  <X className="h-3.5 w-3.5" />
                 </button>
                 <TextStylePopup
                   isOpen={true}
@@ -1835,6 +1838,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
           onSendToBack={() => movePadletLayer(padlet.id, 'sendToBack')}
           onLock={() => lockPadlet(padlet.id)}
           onCreateSyncedCopy={() => createSyncedCopy(padlet.id)}
+          onAddToLibrary={() => addPadletToLibrary(padlet.id)}
         >
           <div
             key={padlet.id}
@@ -2138,20 +2142,21 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                     (neither is rounded-xl at the top level -- only Clipart's
                     inner icon box is). */}
                 <div className="relative bg-white shadow-2xl border border-gray-200 p-4 min-w-[280px] max-w-[320px]">
+                  <button
+                    onClick={() => {
+                      setCardCommentPopupPadletId(null);
+                      setActiveCardCommentId(null);
+                      setEditingCardCommentId(null);
+                      setEditingCardCommentText('');
+                      setCommentColorPopupId(null);
+                    }}
+                    className="absolute -right-3 -top-3 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-400 shadow-md transition-all hover:text-gray-600"
+                    title="Close"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
                   <div className="flex items-center justify-between mb-3">
                     <h4 className="text-sm font-semibold text-gray-700">Comments</h4>
-                    <button
-                      onClick={() => {
-                        setCardCommentPopupPadletId(null);
-                        setActiveCardCommentId(null);
-                        setEditingCardCommentId(null);
-                        setEditingCardCommentText('');
-                        setCommentColorPopupId(null);
-                      }}
-                      className="text-gray-400 hover:text-gray-600 p-1 rounded hover:bg-gray-100"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
                   </div>
                   {cardCommentList.length === 0 ? (
                     <p className="text-xs text-gray-400 text-center py-4">No comments yet</p>
@@ -2386,6 +2391,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
           onSelect={() => setSelectedPadletId(padlet.id)}
           disabled={!canUseFreeformEditButton}
           onDuplicate={() => duplicatePadlet(padlet.id)}
+          onAddToLibrary={() => addPadletToLibrary(padlet.id)}
           onDelete={() => requestDeletePadlet(padlet.id)}
           onCut={() => cutPadlet(padlet.id)}
           onCopy={() => copyPadlet(padlet.id)}
@@ -2446,31 +2452,29 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                   onClick={(e) => e.stopPropagation()}
                   onMouseDown={(e) => e.stopPropagation()}
                 >
+                  <button
+                    className="absolute -right-3 -top-3 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-400 shadow-md transition-all hover:text-gray-600"
+                    onClick={() => {
+                      setCollapsedPopupPadletId(null);
+                      setCollapsedBadgeColorOpen(false);
+                    }}
+                    title="Close"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
                   <div className="relative">
                     <div className="flex items-center justify-between mb-3">
                       <h4 className="text-sm font-semibold text-gray-700">{padlet.metadata?.commentTitle || 'Comments'}</h4>
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => setCollapsedBadgeColorOpen(!collapsedBadgeColorOpen)}
-                          className="w-7 h-7 flex items-center justify-center rounded hover:bg-gray-100"
-                          title="Badge Color"
-                        >
-                          <div
-                            className="w-4 h-4 rounded border border-gray-300"
-                            style={{ backgroundColor: padlet.metadata?.badgeColor || '#facc15' }}
-                          />
-                        </button>
-                        <button
-                          className="text-gray-400 hover:text-gray-600 p-1 rounded hover:bg-gray-100"
-                          onClick={() => {
-                            setCollapsedPopupPadletId(null);
-                            setCollapsedBadgeColorOpen(false);
-                          }}
-                          title="Close"
-                        >
-                          <X className="w-4 h-4" />
-                        </button>
-                      </div>
+                      <button
+                        onClick={() => setCollapsedBadgeColorOpen(!collapsedBadgeColorOpen)}
+                        className="w-7 h-7 flex items-center justify-center rounded hover:bg-gray-100"
+                        title="Badge Color"
+                      >
+                        <div
+                          className="w-4 h-4 rounded border border-gray-300"
+                          style={{ backgroundColor: padlet.metadata?.badgeColor || '#facc15' }}
+                        />
+                      </button>
                     </div>
 
                     {collapsedBadgeColorOpen && (
@@ -2946,36 +2950,35 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                 {cardCommentPopupPadletId === padlet.id && (
                   <div className="absolute left-full top-0 ml-3 z-[1100] animate-in fade-in slide-in-from-left-2 duration-200 pointer-events-auto">
                     <div className="relative bg-white rounded-xl shadow-2xl border border-gray-200 p-4 min-w-[280px] max-w-[320px]">
+                      <button
+                        onClick={() => {
+                          setCardCommentPopupPadletId(null);
+                          setActiveCardCommentId(null);
+                          setEditingCardCommentId(null);
+                          setEditingCardCommentText('');
+                          setCommentColorPopupId(null);
+                          setNoteBadgeColorPadletId(null);
+                        }}
+                        className="absolute -right-3 -top-3 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-400 shadow-md transition-all hover:text-gray-600"
+                        title="Close"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
                       <div className="flex items-center justify-between mb-3">
                         <h4 className="text-sm font-semibold text-gray-700">Comments</h4>
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={() => {
-                              setNoteBadgeColorPadletId(noteBadgeColorPadletId === padlet.id ? null : padlet.id);
-                              setCommentColorPopupId(null);
-                            }}
-                            className="w-7 h-7 flex items-center justify-center rounded hover:bg-gray-100"
-                            title="Badge Color"
-                          >
-                            <div
-                              className="w-4 h-4 rounded border border-gray-300"
-                              style={{ backgroundColor: padlet.metadata?.badgeColor || '#facc15' }}
-                            />
-                          </button>
-                          <button
-                            onClick={() => {
-                              setCardCommentPopupPadletId(null);
-                              setActiveCardCommentId(null);
-                              setEditingCardCommentId(null);
-                              setEditingCardCommentText('');
-                              setCommentColorPopupId(null);
-                              setNoteBadgeColorPadletId(null);
-                            }}
-                            className="text-gray-400 hover:text-gray-600 p-1 rounded hover:bg-gray-100"
-                          >
-                            <X className="w-4 h-4" />
-                          </button>
-                        </div>
+                        <button
+                          onClick={() => {
+                            setNoteBadgeColorPadletId(noteBadgeColorPadletId === padlet.id ? null : padlet.id);
+                            setCommentColorPopupId(null);
+                          }}
+                          className="w-7 h-7 flex items-center justify-center rounded hover:bg-gray-100"
+                          title="Badge Color"
+                        >
+                          <div
+                            className="w-4 h-4 rounded border border-gray-300"
+                            style={{ backgroundColor: padlet.metadata?.badgeColor || '#facc15' }}
+                          />
+                        </button>
                       </div>
                       {noteBadgeColorPadletId === padlet.id && (
                         <div className="absolute right-3 top-12 z-10 bg-white rounded-lg shadow-lg border border-gray-200 p-2">
@@ -3200,7 +3203,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
         const isNote = padlet.type === 'text';
         const content = (
           <div
-            className={`group overflow-hidden flex flex-col cursor-pointer ${isPadletSelected(padlet.id)
+            className={`group group/image-container overflow-hidden flex flex-col cursor-pointer ${isPadletSelected(padlet.id)
                 ? 'ring-2 ring-blue-500 ring-offset-2'
               : ''
               }`}
@@ -3855,6 +3858,17 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                 />
               )}
 
+              {/* Caption -- same "room below the post" every Image/AI post
+                  gets, driven by the Drawing editor's own Caption button. */}
+              {padlet.type === 'drawing' && !!padlet.metadata?.caption && (
+                <p
+                  className="text-xs mt-1.5 pt-1.5 border-t border-gray-100 break-words"
+                  style={resolveCaptionStyle(padlet.metadata?.captionStyle)}
+                >
+                  {padlet.metadata.caption}
+                </p>
+              )}
+
               {/* Image as Link Display */}
               {padlet.file_url?.includes('https://') && padlet.type !== 'image' && (
                 <img
@@ -3874,6 +3888,12 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                     content={aiContent}
                     onExportTargetReady={(element) => {
                       aiExportTargetsRef.current[padlet.id] = element;
+                    }}
+                    editable={canUseFreeformEditButton}
+                    onContentChange={(nextData: AIContentData) => {
+                      const nextContent = serializeAIContentForPersistence(nextData);
+                      if (!nextContent) return;
+                      updatePadletMetadata(padlet.id, { aiComponentJson: nextContent });
                     }}
                     legacyHtmlProps={normalizedAIContent.kind === 'legacy_html'
                       ? {
@@ -3903,6 +3923,16 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                 );
               })()}
 
+              {/* Caption -- same "room below the post" every Image post
+                  gets, driven by the AI editor's own Caption button. */}
+              {padlet.type === 'ai-component' && !!padlet.metadata?.caption && (
+                <p
+                  className="text-xs mt-1.5 pt-1.5 border-t border-gray-100 break-words"
+                  style={resolveCaptionStyle(padlet.metadata?.captionStyle)}
+                >
+                  {padlet.metadata.caption}
+                </p>
+              )}
 
               {/* Generic / Note Display (Default) */}
               {(!['link', 'todo', 'table', 'container', 'drawing', 'ai-component'].includes(padlet.type) && !padlet.file_url?.includes('https://')) && (
@@ -4000,6 +4030,38 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                   }}
                 />
               )}
+
+              {/* Reactions Row -- same template as the Image post's own
+                  reactions row (lower area, add button on card hover),
+                  applied here so Note/Todo/Table/Link/AI/Drawing posts get
+                  the same on-canvas display Image already had. Container is
+                  excluded: its branch below has no relative-positioned
+                  wrapper to anchor the add-picker popup against. */}
+              {padlet.type !== 'container' && ((padlet.metadata?.reactions?.length ?? 0) > 0 || isPadletSelected(padlet.id)) && (
+                <div className="flex items-center gap-1.5 pt-1.5 mt-1.5 border-t border-gray-100">
+                  <ReactionDisplay
+                    reactions={padlet.metadata?.reactions || []}
+                    onAddClick={() => {
+                      setSelectedPadletId(padlet.id);
+                      setIsImageEmojiOpen(true);
+                    }}
+                    onReactionClick={async (emoji) => {
+                      try {
+                        const currentReactions = padlet.metadata?.reactions || [];
+                        const indexToRemove = currentReactions.indexOf(emoji);
+                        if (indexToRemove === -1) return;
+                        const newReactions = [
+                          ...currentReactions.slice(0, indexToRemove),
+                          ...currentReactions.slice(indexToRemove + 1)
+                        ];
+                        await updatePadletMetadata(padlet.id, { reactions: newReactions });
+                      } catch (err) {
+                        console.error('Failed to remove reaction:', err);
+                      }
+                    }}
+                  />
+                </div>
+              )}
             </div>
           </div>
         );
@@ -4012,6 +4074,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
               onSelect={() => setSelectedPadletId(padlet.id)}
               disabled={!canUseFreeformEditButton}
               onDuplicate={() => duplicatePadlet(padlet.id)}
+              onAddToLibrary={() => addPadletToLibrary(padlet.id)}
               onDelete={() => requestDeletePadlet(padlet.id)}
               onCut={() => cutPadlet(padlet.id)}
               onCopy={() => copyPadlet(padlet.id)}
@@ -4059,6 +4122,29 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                   );
                 })()}
 
+                {/* Emoji Picker - Positioned to the right */}
+                {isPadletSelected(padlet.id) && isImageEmojiOpen && (
+                  <div className="absolute left-full top-0 ml-3 z-[9999] animate-in fade-in zoom-in duration-200">
+                    <div>
+                      <EmojiReactionPicker
+                        isOpen={isImageEmojiOpen}
+                        onOpenChange={setIsImageEmojiOpen}
+                        onSelectEmoji={async (emoji) => {
+                          try {
+                            const currentReactions = padlet.metadata?.reactions || [];
+                            const newReactions = [...currentReactions, emoji];
+                            await updatePadletMetadata(padlet.id, { reactions: newReactions });
+                            setIsImageEmojiOpen(false);
+                          } catch (err) {
+                            console.error('Failed to add reaction:', err);
+                          }
+                        }}
+                        inline
+                      />
+                    </div>
+                  </div>
+                )}
+
                 {cardCommentPopupPadletId === padlet.id && commentColorPopupId && (
                   <div
                     className="absolute right-full top-0 mr-3 z-[1200] bg-white rounded-lg shadow-xl border border-gray-200 p-3 min-w-[240px]"
@@ -4104,36 +4190,35 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                 {cardCommentPopupPadletId === padlet.id && (
                   <div className="absolute left-full top-0 ml-3 z-[1100] animate-in fade-in slide-in-from-left-2 duration-200 pointer-events-auto">
                     <div className="relative bg-white rounded-xl shadow-2xl border border-gray-200 p-4 min-w-[280px] max-w-[320px]">
+                      <button
+                        onClick={() => {
+                          setCardCommentPopupPadletId(null);
+                          setActiveCardCommentId(null);
+                          setEditingCardCommentId(null);
+                          setEditingCardCommentText('');
+                          setCommentColorPopupId(null);
+                          setNoteBadgeColorPadletId(null);
+                        }}
+                        className="absolute -right-3 -top-3 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-400 shadow-md transition-all hover:text-gray-600"
+                        title="Close"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
                       <div className="flex items-center justify-between mb-3">
                         <h4 className="text-sm font-semibold text-gray-700">Comments</h4>
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={() => {
-                              setNoteBadgeColorPadletId(noteBadgeColorPadletId === padlet.id ? null : padlet.id);
-                              setCommentColorPopupId(null);
-                            }}
-                            className="w-7 h-7 flex items-center justify-center rounded hover:bg-gray-100"
-                            title="Badge Color"
-                          >
-                            <div
-                              className="w-4 h-4 rounded border border-gray-300"
-                              style={{ backgroundColor: padlet.metadata?.badgeColor || '#facc15' }}
-                            />
-                          </button>
-                          <button
-                            onClick={() => {
-                              setCardCommentPopupPadletId(null);
-                              setActiveCardCommentId(null);
-                              setEditingCardCommentId(null);
-                              setEditingCardCommentText('');
-                              setCommentColorPopupId(null);
-                              setNoteBadgeColorPadletId(null);
-                            }}
-                            className="text-gray-400 hover:text-gray-600 p-1 rounded hover:bg-gray-100"
-                          >
-                            <X className="w-4 h-4" />
-                          </button>
-                        </div>
+                        <button
+                          onClick={() => {
+                            setNoteBadgeColorPadletId(noteBadgeColorPadletId === padlet.id ? null : padlet.id);
+                            setCommentColorPopupId(null);
+                          }}
+                          className="w-7 h-7 flex items-center justify-center rounded hover:bg-gray-100"
+                          title="Badge Color"
+                        >
+                          <div
+                            className="w-4 h-4 rounded border border-gray-300"
+                            style={{ backgroundColor: padlet.metadata?.badgeColor || '#facc15' }}
+                          />
+                        </button>
                       </div>
                       {noteBadgeColorPadletId === padlet.id && (
                         <div className="absolute right-3 top-12 z-10 bg-white rounded-lg shadow-lg border border-gray-200 p-2">
@@ -4383,6 +4468,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
               onSelect={() => setSelectedPadletId(padlet.id)}
               disabled={!canUseFreeformEditButton}
               onDuplicate={() => duplicatePadlet(padlet.id)}
+              onAddToLibrary={() => addPadletToLibrary(padlet.id)}
               onDelete={() => requestDeletePadlet(padlet.id)}
               onCut={() => cutPadlet(padlet.id)}
               onCopy={() => copyPadlet(padlet.id)}
@@ -4427,6 +4513,29 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                     </button>
                   );
                 })()}
+
+                {/* Emoji Picker - Positioned to the right */}
+                {isPadletSelected(padlet.id) && isImageEmojiOpen && (
+                  <div className="absolute left-full top-0 ml-3 z-[9999] animate-in fade-in zoom-in duration-200">
+                    <div>
+                      <EmojiReactionPicker
+                        isOpen={isImageEmojiOpen}
+                        onOpenChange={setIsImageEmojiOpen}
+                        onSelectEmoji={async (emoji) => {
+                          try {
+                            const currentReactions = padlet.metadata?.reactions || [];
+                            const newReactions = [...currentReactions, emoji];
+                            await updatePadletMetadata(padlet.id, { reactions: newReactions });
+                            setIsImageEmojiOpen(false);
+                          } catch (err) {
+                            console.error('Failed to add reaction:', err);
+                          }
+                        }}
+                        inline
+                      />
+                    </div>
+                  </div>
+                )}
 
                 {cardCommentPopupPadletId === padlet.id && commentColorPopupId && (
                   <div
@@ -4473,37 +4582,36 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                 {cardCommentPopupPadletId === padlet.id && (
                   <div className="absolute left-full top-0 ml-3 z-[1100] animate-in fade-in slide-in-from-left-2 duration-200 pointer-events-auto">
                     <div className="relative bg-white rounded-xl shadow-2xl border border-gray-200 p-4 min-w-[280px] max-w-[320px]">
+                      <button
+                        onClick={() => {
+                          setCardCommentPopupPadletId(null);
+                          setActiveCardCommentId(null);
+                          setEditingCardCommentId(null);
+                          setEditingCardCommentText('');
+                          setCommentColorPopupId(null);
+                          setNoteBadgeColorPadletId(null);
+                        }}
+                        className="absolute -right-3 -top-3 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-400 shadow-md transition-all hover:text-gray-600"
+                        title="Close"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
                       <div className="flex items-center justify-between mb-3">
                         <h4 className="text-sm font-semibold text-gray-700">Comments</h4>
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={async () => {
-                              const nextOpen = noteBadgeColorPadletId === padlet.id ? null : padlet.id;
-                              setNoteBadgeColorPadletId(nextOpen);
-                              setCommentColorPopupId(null);
-                            }}
-                            className="w-7 h-7 flex items-center justify-center rounded hover:bg-gray-100"
-                            title="Badge Color"
-                          >
-                            <div
-                              className="w-4 h-4 rounded border border-gray-300"
-                              style={{ backgroundColor: tableBadgeColor }}
-                            />
-                          </button>
-                          <button
-                            onClick={() => {
-                              setCardCommentPopupPadletId(null);
-                              setActiveCardCommentId(null);
-                              setEditingCardCommentId(null);
-                              setEditingCardCommentText('');
-                              setCommentColorPopupId(null);
-                              setNoteBadgeColorPadletId(null);
-                            }}
-                            className="text-gray-400 hover:text-gray-600 p-1 rounded hover:bg-gray-100"
-                          >
-                            <X className="w-4 h-4" />
-                          </button>
-                        </div>
+                        <button
+                          onClick={async () => {
+                            const nextOpen = noteBadgeColorPadletId === padlet.id ? null : padlet.id;
+                            setNoteBadgeColorPadletId(nextOpen);
+                            setCommentColorPopupId(null);
+                          }}
+                          className="w-7 h-7 flex items-center justify-center rounded hover:bg-gray-100"
+                          title="Badge Color"
+                        >
+                          <div
+                            className="w-4 h-4 rounded border border-gray-300"
+                            style={{ backgroundColor: tableBadgeColor }}
+                          />
+                        </button>
                       </div>
                       {noteBadgeColorPadletId === padlet.id && (
                         <div className="absolute right-3 top-12 z-10 bg-white rounded-lg shadow-lg border border-gray-200 p-2">
@@ -4743,6 +4851,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
               onSelect={() => setSelectedPadletId(padlet.id)}
               disabled={!canUseFreeformEditButton}
               onDuplicate={() => duplicatePadlet(padlet.id)}
+              onAddToLibrary={() => addPadletToLibrary(padlet.id)}
               onDelete={() => requestDeletePadlet(padlet.id)}
               onCut={() => cutPadlet(padlet.id)}
               onCopy={() => copyPadlet(padlet.id)}
@@ -4789,6 +4898,29 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                   );
                 })()}
 
+                {/* Emoji Picker - Positioned to the right */}
+                {isPadletSelected(padlet.id) && isImageEmojiOpen && (
+                  <div className="absolute left-full top-0 ml-3 z-[9999] animate-in fade-in zoom-in duration-200">
+                    <div>
+                      <EmojiReactionPicker
+                        isOpen={isImageEmojiOpen}
+                        onOpenChange={setIsImageEmojiOpen}
+                        onSelectEmoji={async (emoji) => {
+                          try {
+                            const currentReactions = padlet.metadata?.reactions || [];
+                            const newReactions = [...currentReactions, emoji];
+                            await updatePadletMetadata(padlet.id, { reactions: newReactions });
+                            setIsImageEmojiOpen(false);
+                          } catch (err) {
+                            console.error('Failed to add reaction:', err);
+                          }
+                        }}
+                        inline
+                      />
+                    </div>
+                  </div>
+                )}
+
                 {cardCommentPopupPadletId === padlet.id && commentColorPopupId && (
                   <div
                     className="absolute right-full top-0 mr-3 z-[1200] bg-white rounded-lg shadow-xl border border-gray-200 p-3 min-w-[240px]"
@@ -4834,36 +4966,35 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                 {cardCommentPopupPadletId === padlet.id && (
                   <div className="absolute left-full top-0 ml-3 z-[1100] animate-in fade-in slide-in-from-left-2 duration-200 pointer-events-auto">
                     <div className="relative bg-white rounded-xl shadow-2xl border border-gray-200 p-4 min-w-[280px] max-w-[320px]">
+                      <button
+                        onClick={() => {
+                          setCardCommentPopupPadletId(null);
+                          setActiveCardCommentId(null);
+                          setEditingCardCommentId(null);
+                          setEditingCardCommentText('');
+                          setCommentColorPopupId(null);
+                          setNoteBadgeColorPadletId(null);
+                        }}
+                        className="absolute -right-3 -top-3 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-400 shadow-md transition-all hover:text-gray-600"
+                        title="Close"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
                       <div className="flex items-center justify-between mb-3">
                         <h4 className="text-sm font-semibold text-gray-700">Comments</h4>
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={() => {
-                              setNoteBadgeColorPadletId(noteBadgeColorPadletId === padlet.id ? null : padlet.id);
-                              setCommentColorPopupId(null);
-                            }}
-                            className="w-7 h-7 flex items-center justify-center rounded hover:bg-gray-100"
-                            title="Badge Color"
-                          >
-                            <div
-                              className="w-4 h-4 rounded border border-gray-300"
-                              style={{ backgroundColor: padlet.metadata?.badgeColor || '#facc15' }}
-                            />
-                          </button>
-                          <button
-                            onClick={() => {
-                              setCardCommentPopupPadletId(null);
-                              setActiveCardCommentId(null);
-                              setEditingCardCommentId(null);
-                              setEditingCardCommentText('');
-                              setCommentColorPopupId(null);
-                              setNoteBadgeColorPadletId(null);
-                            }}
-                            className="text-gray-400 hover:text-gray-600 p-1 rounded hover:bg-gray-100"
-                          >
-                            <X className="w-4 h-4" />
-                          </button>
-                        </div>
+                        <button
+                          onClick={() => {
+                            setNoteBadgeColorPadletId(noteBadgeColorPadletId === padlet.id ? null : padlet.id);
+                            setCommentColorPopupId(null);
+                          }}
+                          className="w-7 h-7 flex items-center justify-center rounded hover:bg-gray-100"
+                          title="Badge Color"
+                        >
+                          <div
+                            className="w-4 h-4 rounded border border-gray-300"
+                            style={{ backgroundColor: padlet.metadata?.badgeColor || '#facc15' }}
+                          />
+                        </button>
                       </div>
                       {noteBadgeColorPadletId === padlet.id && (
                         <div className="absolute right-3 top-12 z-10 bg-white rounded-lg shadow-lg border border-gray-200 p-2">
@@ -5125,6 +5256,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
             onSelect={() => setSelectedPadletId(padlet.id)}
             disabled={!canUseFreeformEditButton}
             onDuplicate={() => duplicatePadlet(padlet.id)}
+            onAddToLibrary={() => addPadletToLibrary(padlet.id)}
             onDelete={() => requestDeletePadlet(padlet.id)}
             onCut={() => cutPadlet(padlet.id)}
             onCopy={() => copyPadlet(padlet.id)}
@@ -5239,36 +5371,35 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
               {cardCommentPopupPadletId === padlet.id && (
                 <div className="absolute left-full top-0 ml-3 z-[1100] animate-in fade-in slide-in-from-left-2 duration-200 pointer-events-auto">
                   <div className="relative bg-white rounded-xl shadow-2xl border border-gray-200 p-4 min-w-[280px] max-w-[320px]">
+                    <button
+                      onClick={() => {
+                        setCardCommentPopupPadletId(null);
+                        setActiveCardCommentId(null);
+                        setEditingCardCommentId(null);
+                        setEditingCardCommentText('');
+                        setCommentColorPopupId(null);
+                        setNoteBadgeColorPadletId(null);
+                      }}
+                      className="absolute -right-3 -top-3 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-400 shadow-md transition-all hover:text-gray-600"
+                      title="Close"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
                     <div className="flex items-center justify-between mb-3">
                       <h4 className="text-sm font-semibold text-gray-700">Comments</h4>
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => {
-                            setNoteBadgeColorPadletId(noteBadgeColorPadletId === padlet.id ? null : padlet.id);
-                            setCommentColorPopupId(null);
-                          }}
-                          className="w-7 h-7 flex items-center justify-center rounded hover:bg-gray-100"
-                          title="Badge Color"
-                        >
-                          <div
-                            className="w-4 h-4 rounded border border-gray-300"
-                            style={{ backgroundColor: padlet.metadata?.badgeColor || '#facc15' }}
-                          />
-                        </button>
-                        <button
-                          onClick={() => {
-                            setCardCommentPopupPadletId(null);
-                            setActiveCardCommentId(null);
-                            setEditingCardCommentId(null);
-                            setEditingCardCommentText('');
-                            setCommentColorPopupId(null);
-                            setNoteBadgeColorPadletId(null);
-                          }}
-                          className="text-gray-400 hover:text-gray-600 p-1 rounded hover:bg-gray-100"
-                        >
-                          <X className="w-4 h-4" />
-                        </button>
-                      </div>
+                      <button
+                        onClick={() => {
+                          setNoteBadgeColorPadletId(noteBadgeColorPadletId === padlet.id ? null : padlet.id);
+                          setCommentColorPopupId(null);
+                        }}
+                        className="w-7 h-7 flex items-center justify-center rounded hover:bg-gray-100"
+                        title="Badge Color"
+                      >
+                        <div
+                          className="w-4 h-4 rounded border border-gray-300"
+                          style={{ backgroundColor: padlet.metadata?.badgeColor || '#facc15' }}
+                        />
+                      </button>
                     </div>
                     {noteBadgeColorPadletId === padlet.id && (
                       <div className="absolute right-3 top-12 z-10 bg-white rounded-lg shadow-lg border border-gray-200 p-2">
@@ -5503,12 +5634,12 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
     </div>
                 ))}
                 {/* Freeform Graph edges: rendered INSIDE the posts container so the SVG
-      fills the full 2000×1500 stage, not just the viewport. z-index 9999
-      ensures arrows paint on top of every post card. */}
+      fills the full 2000×1500 stage, not just the viewport. Each edge now
+      carries its own zIndex style (default: always on top) instead of one
+      fixed layer above every post, so a line's Edge Settings panel can send
+      it behind a specific post or bring it back in front. */}
                 {isFreeformGraphMode && canvasId && (
-    <div className="absolute inset-0" style={{ zIndex: 900, pointerEvents: 'none' }}>
       <FreeformGraphLayer boardId={canvasId.toString()} posts={padlets} refreshToken={graphRefreshToken} containerRef={containerRef} zoom={canvasZoom} />
-    </div>
                 )}
                 </div>
       {imageToolbarPadletId && (
@@ -5813,18 +5944,18 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
             )}
             {activeImageToolbarPadlet && textStylePadletId === activeImageToolbarPadlet.id && (
               <div
-                className="relative animate-in fade-in zoom-in duration-200 bg-white rounded-lg shadow-xl border border-gray-200 px-3 pb-3 pt-8 min-w-[240px]"
+                className="relative animate-in fade-in zoom-in duration-200 bg-white rounded-lg shadow-xl border border-gray-200 px-3 pb-3 pt-3 min-w-[240px]"
                 onClick={(e) => e.stopPropagation()}
                 onMouseDown={(e) => e.stopPropagation()}
               >
                 <button
                   onClick={() => setTextStylePadletId(null)}
-                  className="absolute top-2 right-2 w-4 h-4 flex items-center justify-center rounded hover:bg-gray-100"
+                  className="absolute -right-3 -top-3 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-400 shadow-md transition-all hover:text-gray-600"
                   title="Close"
                 >
-                  <X className="w-3 h-3 text-gray-400" />
+                  <X className="h-3.5 w-3.5" />
                 </button>
-                <div className="absolute top-2 left-3 text-[10px] font-semibold text-gray-400 uppercase tracking-wider">
+                <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">
                   {activeImageStyleTarget === 'title' ? 'Editing: Post name' : 'Editing: Caption'}
                 </div>
                 {(() => {
@@ -5917,36 +6048,35 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                 onMouseDown={(e) => e.stopPropagation()}
               >
                 <div className="relative bg-white rounded-xl shadow-2xl border border-gray-200 p-4 min-w-[280px] max-w-[320px]">
+                  <button
+                    onClick={() => {
+                      setCardCommentPopupPadletId(null);
+                      setActiveCardCommentId(null);
+                      setEditingCardCommentId(null);
+                      setEditingCardCommentText('');
+                      setCommentColorPopupId(null);
+                      setNoteBadgeColorPadletId(null);
+                    }}
+                    className="absolute -right-3 -top-3 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-400 shadow-md transition-all hover:text-gray-600"
+                    title="Close"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
                   <div className="flex items-center justify-between mb-3">
                     <h4 className="text-sm font-semibold text-gray-700">Comments</h4>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => {
-                          setNoteBadgeColorPadletId(noteBadgeColorPadletId === activeImageToolbarPadlet.id ? null : activeImageToolbarPadlet.id);
-                          setCommentColorPopupId(null);
-                        }}
-                        className="w-7 h-7 flex items-center justify-center rounded hover:bg-gray-100"
-                        title="Badge Color"
-                      >
-                        <div
-                          className="w-4 h-4 rounded border border-gray-300"
-                          style={{ backgroundColor: activeImageToolbarPadlet.metadata?.badgeColor || '#facc15' }}
-                        />
-                      </button>
-                      <button
-                        onClick={() => {
-                          setCardCommentPopupPadletId(null);
-                          setActiveCardCommentId(null);
-                          setEditingCardCommentId(null);
-                          setEditingCardCommentText('');
-                          setCommentColorPopupId(null);
-                          setNoteBadgeColorPadletId(null);
-                        }}
-                        className="text-gray-400 hover:text-gray-600 p-1 rounded hover:bg-gray-100"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                    </div>
+                    <button
+                      onClick={() => {
+                        setNoteBadgeColorPadletId(noteBadgeColorPadletId === activeImageToolbarPadlet.id ? null : activeImageToolbarPadlet.id);
+                        setCommentColorPopupId(null);
+                      }}
+                      className="w-7 h-7 flex items-center justify-center rounded hover:bg-gray-100"
+                      title="Badge Color"
+                    >
+                      <div
+                        className="w-4 h-4 rounded border border-gray-300"
+                        style={{ backgroundColor: activeImageToolbarPadlet.metadata?.badgeColor || '#facc15' }}
+                      />
+                    </button>
                   </div>
                   {noteBadgeColorPadletId === activeImageToolbarPadlet.id && (
                     <div className="absolute right-3 top-12 z-10 bg-white rounded-lg shadow-lg border border-gray-200 p-2">
@@ -6150,10 +6280,17 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
             )}
             {activeImageToolbarPadlet && isImageColorPickerOpen && (
               <div
-                className="animate-in fade-in zoom-in duration-200"
+                className="relative animate-in fade-in zoom-in duration-200"
                 onClick={(e) => e.stopPropagation()}
                 onMouseDown={(e) => e.stopPropagation()}
               >
+                <button
+                  onClick={() => setIsImageColorPickerOpen(false)}
+                  className="absolute -right-3 -top-3 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-400 shadow-md transition-all hover:text-gray-600"
+                  title="Close"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
                 <div className="bg-white rounded-lg shadow-xl border border-gray-200 overflow-hidden w-[340px]">
                   <div className="p-4 flex flex-col gap-4">
                     <div className="grid items-center gap-3" style={{ gridTemplateColumns: '1fr auto 1fr' }}>
@@ -6170,15 +6307,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                           title="Top Strip Color"
                         >TS</button>
                       </div>
-                      <div className="flex justify-end">
-                        <button
-                          onClick={() => setIsImageColorPickerOpen(false)}
-                          className="w-5 h-5 rounded flex items-center justify-center text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-                          title="Close"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
+                      <div className="flex justify-end" />
                     </div>
                     <ColorPickerContent
                       color={imageColorTab === 'background' ? (activeImageToolbarPadlet.metadata?.cardColor || '#ffffff') : (activeImageToolbarPadlet.metadata?.topStrip || 'transparent')}
@@ -6318,6 +6447,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                     if (target === 'bg') updatePadletMetadata(activeCardToolbarPadlet.id, { backgroundColor: value });
                     if (target === 'ts') updatePadletMetadata(activeCardToolbarPadlet.id, { topStripColor: value });
                   }}
+                  onClose={() => setIsCardColorPickerOpen(false)}
                 />
               </div>
             )}
@@ -6357,36 +6487,35 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                 onMouseDown={(e) => e.stopPropagation()}
               >
                 <div className="relative bg-white rounded-xl shadow-2xl border border-gray-200 p-4 min-w-[280px] max-w-[320px]">
+                  <button
+                    onClick={() => {
+                      setCardCommentPopupPadletId(null);
+                      setActiveCardCommentId(null);
+                      setEditingCardCommentId(null);
+                      setEditingCardCommentText('');
+                      setCommentColorPopupId(null);
+                      setNoteBadgeColorPadletId(null);
+                    }}
+                    className="absolute -right-3 -top-3 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-400 shadow-md transition-all hover:text-gray-600"
+                    title="Close"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
                   <div className="flex items-center justify-between mb-3">
                     <h4 className="text-sm font-semibold text-gray-700">Comments</h4>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => {
-                          setNoteBadgeColorPadletId(noteBadgeColorPadletId === activeCardToolbarPadlet.id ? null : activeCardToolbarPadlet.id);
-                          setCommentColorPopupId(null);
-                        }}
-                        className="w-7 h-7 flex items-center justify-center rounded hover:bg-gray-100"
-                        title="Badge Color"
-                      >
-                        <div
-                          className="w-4 h-4 rounded border border-gray-300"
-                          style={{ backgroundColor: activeCardToolbarPadlet.metadata?.badgeColor || '#facc15' }}
-                        />
-                      </button>
-                      <button
-                        onClick={() => {
-                          setCardCommentPopupPadletId(null);
-                          setActiveCardCommentId(null);
-                          setEditingCardCommentId(null);
-                          setEditingCardCommentText('');
-                          setCommentColorPopupId(null);
-                          setNoteBadgeColorPadletId(null);
-                        }}
-                        className="text-gray-400 hover:text-gray-600 p-1 rounded hover:bg-gray-100"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                    </div>
+                    <button
+                      onClick={() => {
+                        setNoteBadgeColorPadletId(noteBadgeColorPadletId === activeCardToolbarPadlet.id ? null : activeCardToolbarPadlet.id);
+                        setCommentColorPopupId(null);
+                      }}
+                      className="w-7 h-7 flex items-center justify-center rounded hover:bg-gray-100"
+                      title="Badge Color"
+                    >
+                      <div
+                        className="w-4 h-4 rounded border border-gray-300"
+                        style={{ backgroundColor: activeCardToolbarPadlet.metadata?.badgeColor || '#facc15' }}
+                      />
+                    </button>
                   </div>
                   {noteBadgeColorPadletId === activeCardToolbarPadlet.id && (
                     <div className="absolute right-3 top-12 z-10 bg-white rounded-lg shadow-lg border border-gray-200 p-2">

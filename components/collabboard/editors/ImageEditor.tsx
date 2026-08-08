@@ -201,16 +201,17 @@ export default function ImageEditor({
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-0 bg-black/50 z-[1000] flex items-center justify-center p-4 backdrop-blur-sm" role="dialog" aria-modal="true" data-ui="image-editor-modal">
-            <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl h-[80vh] flex flex-col overflow-hidden animate-in fade-in zoom-in duration-200">
+        <div className="fixed inset-0 bg-black/50 z-[1000] flex items-center justify-center p-4 backdrop-blur-sm" role="dialog" aria-modal="true" data-ui="image-editor-modal" onClick={onClose}>
+            <div className="relative w-full max-w-4xl h-[80vh]" onClick={(e) => e.stopPropagation()}>
+                <button onClick={onClose} className="absolute -right-3 -top-3 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-400 shadow-md transition-all hover:text-gray-600">
+                    <X className="h-3.5 w-3.5" />
+                </button>
+                <div className="bg-white rounded-xl shadow-2xl h-full flex flex-col overflow-hidden animate-in fade-in zoom-in duration-200">
                 <div className="flex items-center justify-between p-4 border-b">
                     <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
                         <ImageIcon className="w-6 h-6 text-purple-600" />
                         {isImportMode ? 'Import Preview' : initialData?.imageUrl ? 'Edit Image' : 'Add Image'}
                     </h2>
-                    <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
-                        <X className="w-5 h-5 text-gray-500" />
-                    </button>
                 </div>
 
                 <div className="flex flex-1 overflow-hidden">
@@ -464,6 +465,7 @@ export default function ImageEditor({
                         {isImportMode ? 'Add to Canvas' : isEditMode ? 'Save Changes' : 'Add Image'}
                     </button>
                 </div>
+            </div>
             </div>
         </div>
     );

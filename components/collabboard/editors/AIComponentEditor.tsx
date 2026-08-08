@@ -1,14 +1,18 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Sparkles, X, Loader2, Play, Save, StopCircle, Lock } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { Sparkles, X, Loader2, Play, Save, StopCircle, Lock, Palette, Type, Smile, MessageSquare, TextCursor } from 'lucide-react';
 
 import AIContentRenderer from '@/components/ai/AIContentRenderer';
 import type {
+  AIContentData,
   AIMode,
   DiagramSubtype,
   GenerateAIContentRequest,
   LoadedAIContent,
+  PhotoCardData,
+  PhotoCardTextStyle,
 } from '@/lib/ai/contracts';
 import {
   MODE_REGISTRY,
@@ -25,6 +29,14 @@ import {
   trackAIRegenerationStarted,
   trackAIRegenerationSucceeded,
 } from '@/lib/ai/telemetry';
+import { CardColorPanel } from './CardColorPanel';
+import TextStylePopup from './TextStylePopup';
+import EmojiReactionPicker from './EmojiReactionPicker';
+import CommentPopup from './CommentPopup';
+import ReactionDisplay from './ReactionDisplay';
+import InlineCaption from './InlineCaption';
+import { resolveCaptionStyle, CAPTION_STYLE_PRESETS, type CaptionHeading } from '@/lib/domain/canvas/captionStyle';
+import { nextTextAlign } from './textAlignCycle';
 
 type Stage = 'idle' | 'classifying' | 'generating' | 'rendering' | 'done' | 'error';
 
@@ -46,14 +58,24 @@ interface AIComponentEditorProps {
     aiComponentJson?: LoadedAIContent;
     aiComponentCode?: string;
     aiRawCode?: string;
+    metadata?: Record<string, unknown>;
   }) => void;
   initialTitle?: string;
   initialPrompt?: string;
   initialContent?: unknown;
+  initialMetadata?: Record<string, unknown>;
   // When set, mode and subtype selectors are locked (regenerate flow)
   lockedMode?: AIMode;
   lockedSubtype?: DiagramSubtype;
 }
+
+type CommentDraft = {
+  id: string;
+  text: string;
+  userId: string;
+  userName: string;
+  timestamp: number;
+};
 
 function isQuotaExceededMessage(message: string) {
   return /quota|exceeded.*quota|rate.?limit/i.test(message);
@@ -179,11 +201,77 @@ export default function AIComponentEditor({
   initialTitle = '',
   initialPrompt = '',
   initialContent,
+  initialMetadata,
   lockedMode,
   lockedSubtype,
 }: AIComponentEditorProps) {
   const isLocked = Boolean(lockedMode);
   const [title, setTitle] = useState(initialTitle);
+
+  // Post customization: color, title style, reaction, comment and caption --
+  // the same set every other post type (Note/Image/Drawing) supports,
+  // entered directly in the header row and saved together with the
+  // component on Save to Canvas.
+  const [cardColor, setCardColor] = useState('#ffffff');
+  const [topStrip, setTopStrip] = useState('transparent');
+  const [titleStyle, setTitleStyle] = useState<Record<string, any>>({});
+  const [reactions, setReactions] = useState<string[]>([]);
+  const [detachedComments, setDetachedComments] = useState<CommentDraft[]>([]);
+  const [badgeColor, setBadgeColor] = useState('#facc15');
+  const [caption, setCaption] = useState('');
+
+  const [isTextStyleOpen, setIsTextStyleOpen] = useState(false);
+  const [isColorPanelOpen, setIsColorPanelOpen] = useState(false);
+  const [isReactionPickerOpen, setIsReactionPickerOpen] = useState(false);
+  const [isCommentPanelOpen, setIsCommentPanelOpen] = useState(false);
+  const [isCaptionEditing, setIsCaptionEditing] = useState(false);
+
+  // The single Text style button doubles up: it either styles the post's
+  // own title (default) or, when the user has focused text inside a Photo
+  // Card's preview (kicker/title/caption), the Photo Card's own text --
+  // no second style button/popup duplicated inside the renderer itself.
+  const [activeStyleTarget, setActiveStyleTarget] = useState<'title' | 'photoCard'>('title');
+  const modalRef = useRef<HTMLDivElement>(null);
+  // Shared position for every popup that detaches to the right of the modal
+  // (Text style, Reaction, Comment) -- only one is ever open at a time, so
+  // one position is enough, computed fresh each time one of them opens.
+  const [detachedPopupPos, setDetachedPopupPos] = useState<{ left: number; top: number } | null>(null);
+
+  const togglePanel = (panel: 'text' | 'color' | 'reaction' | 'comment' | 'caption') => {
+    setIsTextStyleOpen((prev) => (panel === 'text' ? !prev : false));
+    setIsColorPanelOpen((prev) => (panel === 'color' ? !prev : false));
+    setIsReactionPickerOpen((prev) => (panel === 'reaction' ? !prev : false));
+    setIsCommentPanelOpen((prev) => (panel === 'comment' ? !prev : false));
+    setIsCaptionEditing((prev) => (panel === 'caption' ? !prev : false));
+  };
+
+  const openDetachedPanel = (panel: 'text' | 'color' | 'reaction' | 'comment', isCurrentlyOpen: boolean) => {
+    const opening = !isCurrentlyOpen;
+    togglePanel(panel);
+    if (opening && modalRef.current) {
+      const rect = modalRef.current.getBoundingClientRect();
+      setDetachedPopupPos({ left: rect.right + 12, top: rect.top });
+    }
+  };
+
+  const isTitleBold = titleStyle.fontWeight === '700' || titleStyle.fontWeight === 'bold';
+  const isTitleItalic = titleStyle.fontStyle === 'italic';
+  const toggleTitleBold = () => setTitleStyle((prev) => ({ ...prev, fontWeight: isTitleBold ? '400' : '700' }));
+  const toggleTitleItalic = () => setTitleStyle((prev) => ({ ...prev, fontStyle: isTitleItalic ? 'normal' : 'italic' }));
+  const toggleTitleUnderline = () => setTitleStyle((prev) => ({ ...prev, underline: !prev.underline }));
+  const toggleTitleStrikethrough = () => setTitleStyle((prev) => ({ ...prev, strikethrough: !prev.strikethrough }));
+  const cycleTitleAlign = () => setTitleStyle((prev) => ({ ...prev, textAlign: nextTextAlign(prev.textAlign || 'left') }));
+  const applyTitlePreset = (level: CaptionHeading) => {
+    setTitleStyle((prev) => {
+      const selectedPreset = level === 'callout' && prev.backgroundColor
+        ? { ...CAPTION_STYLE_PRESETS.callout, backgroundColor: prev.backgroundColor }
+        : CAPTION_STYLE_PRESETS[level];
+      return { ...prev, ...selectedPreset };
+    });
+  };
+
+  const commentCount = detachedComments.length;
+  const titleInputStyle = resolveCaptionStyle(titleStyle, undefined);
 
   const initialSelection = useMemo(
     () => inferInitialSelection(initialContent),
@@ -220,8 +308,23 @@ export default function AIComponentEditor({
     setContent(initialContent ?? null);
     setStage(initialContent ? 'done' : 'idle');
     setError(null);
+
+    setCardColor(typeof initialMetadata?.cardColor === 'string' ? initialMetadata.cardColor : '#ffffff');
+    setTopStrip(typeof initialMetadata?.topStrip === 'string' ? initialMetadata.topStrip : 'transparent');
+    setTitleStyle((initialMetadata?.titleStyle as Record<string, unknown>) || {});
+    setReactions(Array.isArray(initialMetadata?.reactions) ? initialMetadata.reactions as string[] : []);
+    setDetachedComments(Array.isArray(initialMetadata?.detachedComments) ? initialMetadata.detachedComments as CommentDraft[] : []);
+    setBadgeColor(typeof initialMetadata?.badgeColor === 'string' ? initialMetadata.badgeColor : '#facc15');
+    setCaption(typeof initialMetadata?.caption === 'string' ? initialMetadata.caption : '');
+    setIsTextStyleOpen(false);
+    setIsColorPanelOpen(false);
+    setIsReactionPickerOpen(false);
+    setIsCommentPanelOpen(false);
+    setIsCaptionEditing(false);
+    setActiveStyleTarget('title');
+    setDetachedPopupPos(null);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, initialTitle, initialPrompt, initialContent]);
+  }, [isOpen, initialTitle, initialPrompt, initialContent, initialMetadata]);
 
   const isLoading = stage === 'classifying' || stage === 'generating' || stage === 'rendering';
 
@@ -232,6 +335,69 @@ export default function AIComponentEditor({
   const helperDescription = subtypeConfig?.description ?? modeConfig.description;
   const persistedContent = serializeAIContentForPersistence(content);
   const canSave = Boolean(persistedContent) && !isLoading;
+
+  const normalizedContent = normalizeAIContent(content);
+  const photoCardData: PhotoCardData | null =
+    normalizedContent.kind === 'structured' && normalizedContent.data.type === 'photo'
+      ? normalizedContent.data
+      : null;
+
+  const photoCardTextStyle = photoCardData?.textStyle;
+  const isPhotoCardBold = photoCardTextStyle?.fontWeight === '700' || photoCardTextStyle?.fontWeight === 'bold';
+  const isPhotoCardItalic = photoCardTextStyle?.fontStyle === 'italic';
+  const patchPhotoCardTextStyle = (patch: Partial<PhotoCardTextStyle>) => {
+    if (!photoCardData) return;
+    const nextData: PhotoCardData = { ...photoCardData, textStyle: { ...photoCardData.textStyle, ...patch } };
+    const next = serializeAIContentForPersistence(nextData);
+    if (next) setContent(next);
+  };
+  const applyPhotoCardPreset = (level: CaptionHeading) => {
+    const prev = photoCardTextStyle || {};
+    const selectedPreset = level === 'callout' && prev.backgroundColor
+      ? { ...CAPTION_STYLE_PRESETS.callout, backgroundColor: prev.backgroundColor }
+      : CAPTION_STYLE_PRESETS[level];
+    patchPhotoCardTextStyle(selectedPreset);
+  };
+
+  // Whichever text the Text style button currently targets -- the post's
+  // own title, or (when focused) the Photo Card's kicker/title/caption --
+  // resolved once so the popup's props stay a simple pass-through below.
+  const styleTarget = activeStyleTarget === 'photoCard' && photoCardData ? 'photoCard' : 'title';
+  const textStylePopupProps = styleTarget === 'photoCard'
+    ? {
+      onSelectHeading: applyPhotoCardPreset,
+      onSelectColor: (color: string) => patchPhotoCardTextStyle({ color }),
+      onSelectHighlight: (color: string) => patchPhotoCardTextStyle({ backgroundColor: color }),
+      currentHeading: photoCardTextStyle?.heading || 'normal',
+      currentColor: photoCardTextStyle?.color,
+      currentHighlight: photoCardTextStyle?.backgroundColor,
+      onBold: () => patchPhotoCardTextStyle({ fontWeight: isPhotoCardBold ? '400' : '700' }),
+      onItalic: () => patchPhotoCardTextStyle({ fontStyle: isPhotoCardItalic ? 'normal' : 'italic' }),
+      onUnderline: () => patchPhotoCardTextStyle({ underline: !photoCardTextStyle?.underline }),
+      onStrikethrough: () => patchPhotoCardTextStyle({ strikethrough: !photoCardTextStyle?.strikethrough }),
+      onAlign: () => patchPhotoCardTextStyle({ textAlign: nextTextAlign(photoCardTextStyle?.textAlign || 'left') }),
+      isBold: isPhotoCardBold,
+      isItalic: isPhotoCardItalic,
+      isUnderline: !!photoCardTextStyle?.underline,
+      isStrikethrough: !!photoCardTextStyle?.strikethrough,
+    }
+    : {
+      onSelectHeading: applyTitlePreset,
+      onSelectColor: (color: string) => setTitleStyle((prev) => ({ ...prev, color })),
+      onSelectHighlight: (color: string) => setTitleStyle((prev) => ({ ...prev, backgroundColor: color })),
+      currentHeading: titleStyle.heading || 'normal',
+      currentColor: titleStyle.color,
+      currentHighlight: titleStyle.backgroundColor,
+      onBold: toggleTitleBold,
+      onItalic: toggleTitleItalic,
+      onUnderline: toggleTitleUnderline,
+      onStrikethrough: toggleTitleStrikethrough,
+      onAlign: cycleTitleAlign,
+      isBold: isTitleBold,
+      isItalic: isTitleItalic,
+      isUnderline: !!titleStyle.underline,
+      isStrikethrough: !!titleStyle.strikethrough,
+    };
 
   const stageMessage = (): string => {
     switch (stage) {
@@ -379,6 +545,15 @@ export default function AIComponentEditor({
       title: title.trim() || undefined,
       aiPrompt: prompt,
       aiComponentJson: persistedContent,
+      metadata: {
+        cardColor,
+        topStrip,
+        titleStyle,
+        reactions,
+        detachedComments,
+        badgeColor,
+        caption,
+      },
     });
     onClose();
   };
@@ -386,11 +561,179 @@ export default function AIComponentEditor({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/50 backdrop-blur-sm">
-      <div
-        className="flex max-h-[90vh] w-[980px] max-w-[94vw] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl animate-in fade-in zoom-in duration-200"
-        onClick={(e) => e.stopPropagation()}
-      >
+    <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={onClose}>
+      <div className="flex max-h-[90vh] items-start gap-6" onClick={(e) => e.stopPropagation()}>
+        {/* Left toolbar -- Text style/Color/Reaction/Comment/Caption, same
+            detached-vertical-icon-strip placement every other post type
+            (Note, Image, Clipart) uses, instead of buttons crowded into the
+            header row. */}
+        <div className="flex shrink-0 flex-col items-center gap-1 rounded-lg border border-gray-200 bg-white p-2 shadow-xl">
+          <div className="flex shrink-0 flex-col items-center">
+            <button
+              type="button"
+              onClick={() => openDetachedPanel('text', isTextStyleOpen)}
+              className={`flex h-10 w-10 items-center justify-center rounded-lg transition-colors ${isTextStyleOpen ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:bg-gray-100'}`}
+              title={styleTarget === 'photoCard' ? 'Text style (Photo Card text)' : 'Text style'}
+            >
+              <Type className="h-5 w-5" />
+            </button>
+            <span className="mt-1 text-center text-[9px] leading-none text-gray-500">Text style</span>
+            {isTextStyleOpen && detachedPopupPos && createPortal(
+              <div
+                className="fixed z-[1100] min-w-[240px] rounded-lg border border-gray-200 bg-white p-3 shadow-xl"
+                style={{ left: detachedPopupPos.left, top: detachedPopupPos.top }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <button
+                  onClick={() => setIsTextStyleOpen(false)}
+                  className="absolute -right-3 -top-3 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-400 shadow-md transition-all hover:text-gray-600"
+                  title="Close"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+                <TextStylePopup
+                  isOpen={isTextStyleOpen}
+                  onOpenChange={setIsTextStyleOpen}
+                  hideCloseButton
+                  {...textStylePopupProps}
+                />
+              </div>,
+              document.body,
+            )}
+          </div>
+
+          <div className="flex shrink-0 flex-col items-center">
+            <button
+              type="button"
+              onClick={() => openDetachedPanel('color', isColorPanelOpen)}
+              className={`flex h-10 w-10 items-center justify-center rounded-lg transition-colors ${isColorPanelOpen ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:bg-gray-100'}`}
+              title="Color"
+            >
+              <Palette className="h-5 w-5" />
+            </button>
+            <span className="mt-1 text-center text-[9px] leading-none text-gray-500">Color</span>
+            {isColorPanelOpen && detachedPopupPos && createPortal(
+              <div
+                className="fixed z-[1100]"
+                style={{ left: detachedPopupPos.left, top: detachedPopupPos.top }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <CardColorPanel
+                  bgColor={cardColor}
+                  topStrip={topStrip}
+                  tabs={['bg', 'ts']}
+                  onChangeTarget={(target, value) => {
+                    if (target === 'bg') setCardColor(value);
+                    if (target === 'ts') setTopStrip(value);
+                  }}
+                  onClose={() => setIsColorPanelOpen(false)}
+                />
+              </div>,
+              document.body,
+            )}
+          </div>
+
+          <div className="flex shrink-0 flex-col items-center">
+            <button
+              type="button"
+              onClick={() => openDetachedPanel('reaction', isReactionPickerOpen)}
+              className={`flex h-10 w-10 items-center justify-center rounded-lg transition-colors ${isReactionPickerOpen ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:bg-gray-100'}`}
+              title="Reaction"
+            >
+              <Smile className="h-5 w-5" />
+            </button>
+            <span className="mt-1 text-center text-[9px] leading-none text-gray-500">Reaction</span>
+            {isReactionPickerOpen && detachedPopupPos && createPortal(
+              <div
+                className="fixed z-[1100]"
+                style={{ left: detachedPopupPos.left, top: detachedPopupPos.top }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <EmojiReactionPicker
+                  isOpen={isReactionPickerOpen}
+                  onOpenChange={setIsReactionPickerOpen}
+                  onSelectEmoji={(emoji) => {
+                    setReactions((prev) => [...prev, emoji]);
+                    setIsReactionPickerOpen(false);
+                  }}
+                  inline
+                />
+              </div>,
+              document.body,
+            )}
+          </div>
+
+          <div className="relative flex shrink-0 flex-col items-center">
+            <button
+              type="button"
+              onClick={() => openDetachedPanel('comment', isCommentPanelOpen)}
+              className={`relative flex h-10 w-10 items-center justify-center rounded-lg transition-colors ${isCommentPanelOpen ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:bg-gray-100'}`}
+              title="Comment"
+            >
+              <MessageSquare className="h-5 w-5" />
+              {commentCount > 0 && (
+                <span
+                  className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full text-[9px] font-bold text-gray-800"
+                  style={{ backgroundColor: badgeColor }}
+                >
+                  {commentCount}
+                </span>
+              )}
+            </button>
+            <span className="mt-1 text-center text-[9px] leading-none text-gray-500">Comment</span>
+            {isCommentPanelOpen && detachedPopupPos && createPortal(
+              <div
+                className="fixed z-[1100]"
+                style={{ left: detachedPopupPos.left, top: detachedPopupPos.top }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <CommentPopup
+                  isOpen={isCommentPanelOpen}
+                  onOpenChange={setIsCommentPanelOpen}
+                  onSubmit={(commentText) => {
+                    setDetachedComments((prev) => [...prev, {
+                      id: `comment-${Date.now()}`,
+                      text: commentText,
+                      userId: 'anon',
+                      userName: 'You',
+                      timestamp: Date.now(),
+                    }]);
+                  }}
+                  comments={detachedComments}
+                  currentUserId="anon"
+                  currentUserName="You"
+                  badgeColor={badgeColor}
+                  onBadgeColorChange={setBadgeColor}
+                />
+              </div>,
+              document.body,
+            )}
+          </div>
+
+          <div className="flex shrink-0 flex-col items-center">
+            <button
+              type="button"
+              onClick={() => togglePanel('caption')}
+              className={`flex h-10 w-10 items-center justify-center rounded-lg transition-colors ${isCaptionEditing ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:bg-gray-100'}`}
+              title="Caption (shown below the post, like Image posts)"
+            >
+              <TextCursor className="h-5 w-5" />
+            </button>
+            <span className="mt-1 text-center text-[9px] leading-none text-gray-500">Caption</span>
+          </div>
+        </div>
+
+        <div className="relative">
+          <button
+            onClick={onClose}
+            className="absolute -right-3 -top-3 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-400 shadow-md transition-all hover:text-gray-600"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+          <div
+            ref={modalRef}
+            className="flex max-h-[90vh] w-[980px] max-w-[94vw] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl animate-in fade-in zoom-in duration-200"
+          >
         {/* Top strip -- Title lives inside it, same as the canvas card's own
             top strip, matching every other post type's edit window. AI
             components have no topStrip color concept, so this uses the same
@@ -403,8 +746,10 @@ export default function AIComponentEditor({
             type="text"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
+            onFocus={() => setActiveStyleTarget('title')}
             placeholder="Post name"
             className="w-full text-sm font-semibold text-gray-800 bg-transparent outline-none border-b border-transparent focus:border-blue-400 placeholder:opacity-40 placeholder:font-normal rounded px-1 -mx-1"
+            style={titleInputStyle}
           />
         </div>
         <div className="flex items-center justify-between border-b bg-gray-50/50 px-6 py-4">
@@ -423,9 +768,6 @@ export default function AIComponentEditor({
               )}
             </div>
           </div>
-          <button onClick={onClose} className="rounded-full p-2 transition-colors hover:bg-gray-200">
-            <X className="h-5 w-5 text-gray-500" />
-          </button>
         </div>
 
         <div className="flex flex-1 overflow-hidden">
@@ -651,7 +993,44 @@ export default function AIComponentEditor({
 
               {!!content && (
                 <div className="h-full w-full overflow-auto p-4">
-                  <AIContentRenderer content={content} />
+                  <AIContentRenderer
+                    content={content}
+                    editable
+                    onContentChange={(nextData: AIContentData) => {
+                      const next = serializeAIContentForPersistence(nextData);
+                      if (next) setContent(next);
+                    }}
+                    onFocusField={() => setActiveStyleTarget('photoCard')}
+                  />
+
+                  {/* Reactions, then caption -- same order and spacing as
+                      the Image post's own preview, below the AI content
+                      (image + any text it kept) rather than floating over
+                      it in a separate popup. */}
+                  {reactions.length > 0 && (
+                    <div className="mt-3 px-1">
+                      <ReactionDisplay
+                        reactions={reactions}
+                        onAddClick={() => openDetachedPanel('reaction', isReactionPickerOpen)}
+                        onReactionClick={(emoji) => {
+                          setReactions((prev) => {
+                            const index = prev.indexOf(emoji);
+                            if (index === -1) return prev;
+                            return [...prev.slice(0, index), ...prev.slice(index + 1)];
+                          });
+                        }}
+                      />
+                    </div>
+                  )}
+                  <div className="mt-3">
+                    <InlineCaption
+                      value={caption}
+                      isEditing={isCaptionEditing}
+                      onChange={setCaption}
+                      onCommit={() => setIsCaptionEditing(false)}
+                      placeholder="Add a caption..."
+                    />
+                  </div>
                 </div>
               )}
             </div>
@@ -679,6 +1058,8 @@ export default function AIComponentEditor({
           </div>
         </div>
       </div>
+      </div>
+    </div>
     </div>
   );
 }

@@ -199,21 +199,23 @@ export default function EmojiReactionPicker({
 
     if (inline) {
         return (
-            <div
-                className={`bg-white rounded-xl shadow-2xl border border-gray-200 overflow-hidden w-[360px] ${className || ''}`.trim()}
-                onMouseDown={preventFocusLoss}
-            >
-                <div className="flex items-center justify-between px-3 py-2 border-b">
-                    <span className="text-sm font-semibold text-gray-700">Add Reaction</span>
-                    <button
-                        className="text-gray-400 hover:text-gray-600 p-1 rounded hover:bg-gray-100"
-                        onClick={() => onOpenChange(false)}
-                        title="Close"
-                    >
-                        <X className="w-4 h-4" />
-                    </button>
+            <div className="relative">
+                <button
+                    className="absolute -right-3 -top-3 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-400 shadow-md transition-all hover:text-gray-600"
+                    onClick={() => onOpenChange(false)}
+                    title="Close"
+                >
+                    <X className="h-3.5 w-3.5" />
+                </button>
+                <div
+                    className={`bg-white rounded-xl shadow-2xl border border-gray-200 overflow-hidden w-[360px] ${className || ''}`.trim()}
+                    onMouseDown={preventFocusLoss}
+                >
+                    <div className="flex items-center justify-between px-3 py-2 border-b">
+                        <span className="text-sm font-semibold text-gray-700">Add Reaction</span>
+                    </div>
+                    {content}
                 </div>
-                {content}
             </div>
         );
     }

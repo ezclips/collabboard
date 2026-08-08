@@ -11,6 +11,19 @@ import { TextStyle as TipTapTextStyle } from '@tiptap/extension-text-style';
 import { Highlight } from '@tiptap/extension-highlight';
 import TextStylePopup from './TextStylePopup';
 
+// Same 48-color badge palette every other post's Comments panel (Note,
+// Clipart, Todo, Table, Link) uses for its badge-color swatch.
+const BADGE_COLORS = [
+    "#fef9c3", "#fef08a", "#fde047", "#facc15", "#eab308", "#ca8a04",
+    "#f3f4f6", "#e5e7eb", "#d1d5db", "#9ca3af", "#6b7280", "#4b5563",
+    "#ffedd5", "#fed7aa", "#fdba74", "#fb923c", "#f97316", "#ea580c",
+    "#fce7f3", "#fbcfe8", "#f9a8d4", "#f472b6", "#ec4899", "#db2777",
+    "#dbeafe", "#bfdbfe", "#93c5fd", "#60a5fa", "#3b82f6", "#2563eb",
+    "#dcfce7", "#bbf7d0", "#86efac", "#4ade80", "#22c55e", "#16a34a",
+    "#f3e8ff", "#e9d5ff", "#d8b4fe", "#c084fc", "#a855f7", "#9333ea",
+    "#ccfbf1", "#99f6e4", "#5eead4", "#2dd4bf", "#14b8a6", "#0d9488",
+];
+
 const COMMENT_POPUP_EXTENSIONS = [
     StarterKit.configure({
         heading: false,
@@ -58,6 +71,15 @@ interface CommentPopupProps {
     onColorPickerOpenChange?: (open: boolean) => void;
     fullWidth?: boolean;
     embedded?: boolean; // When true, renders inline without portal/positioning
+    // The comment-count badge's own background color (the little circle
+    // shown on the card, not an individual comment's text color) -- same
+    // "Badge Color" swatch + palette every other post type's Comments
+    // panel (Note, Clipart, Todo, Table, Link) already has.
+    badgeColor?: string;
+    onBadgeColorChange?: (color: string) => void;
+    // Suppresses the panel's own built-in close button, for callers that
+    // render their own close control instead.
+    hideCloseButton?: boolean;
 }
 
 export default function CommentPopup({
@@ -84,11 +106,15 @@ export default function CommentPopup({
     onColorPickerOpenChange,
     fullWidth = false,
     embedded = false,
+    badgeColor,
+    onBadgeColorChange,
+    hideCloseButton = false,
 }: CommentPopupProps) {
     const [newCommentText, setNewCommentText] = useState('');
     const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
     const [editingCommentText, setEditingCommentText] = useState('');
     const [colorPickerOpen, setColorPickerOpen] = useState(false);
+    const [badgeColorPickerOpen, setBadgeColorPickerOpen] = useState(false);
     const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
     const [colorPickerCoords, setColorPickerCoords] = useState<{ left: number; top: number } | null>(null);
     const [textareaSelection, setTextareaSelection] = useState<{ start: number; end: number } | null>(null);
@@ -126,6 +152,7 @@ export default function CommentPopup({
             setEditingCommentText('');
             setColorPickerOpen(false);
             setColorPickerCoords(null);
+            setBadgeColorPickerOpen(false);
         }
     }, [isOpen, hideComposer]);
 
@@ -290,18 +317,56 @@ export default function CommentPopup({
                 e.stopPropagation();
             }}
         >
+            {!embedded && !hideCloseButton && (
+                <button
+                    onClick={() => onOpenChange(false)}
+                    className="absolute -right-3 -top-3 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-400 shadow-md transition-all hover:text-gray-600"
+                    title="Close"
+                >
+                    <X className="h-3.5 w-3.5" />
+                </button>
+            )}
             <div className="flex items-center justify-between mb-3">
                 <h4 className="text-sm font-semibold text-gray-700">Comments</h4>
-                {!embedded && (
-                    <button
-                        onClick={() => onOpenChange(false)}
-                        className="text-gray-400 hover:text-gray-600 p-1 rounded hover:bg-gray-100"
-                        title="Close"
-                    >
-                        <X className="w-4 h-4" />
-                    </button>
-                )}
+                <div className="flex items-center gap-2">
+                    {onBadgeColorChange && (
+                        <button
+                            onClick={() => setBadgeColorPickerOpen((open) => !open)}
+                            className="w-7 h-7 flex items-center justify-center rounded hover:bg-gray-100"
+                            title="Badge Color"
+                        >
+                            <div
+                                className="w-4 h-4 rounded border border-gray-300"
+                                style={{ backgroundColor: badgeColor || '#facc15' }}
+                            />
+                        </button>
+                    )}
+                </div>
             </div>
+
+            {badgeColorPickerOpen && onBadgeColorChange && (
+                <div className="absolute right-3 top-12 z-10 bg-white rounded-lg shadow-lg border border-gray-200 p-2">
+                    <div className="grid grid-cols-6 gap-1.5">
+                        {BADGE_COLORS.map((color) => (
+                            <button
+                                key={color}
+                                onClick={() => {
+                                    onBadgeColorChange(color);
+                                    setBadgeColorPickerOpen(false);
+                                }}
+                                className={`rounded transition-transform hover:scale-110 ${badgeColor === color ? 'ring-2 ring-blue-500' : ''}`}
+                                style={{
+                                    width: '20px',
+                                    height: '20px',
+                                    backgroundColor: color,
+                                    border: ['#f3f4f6', '#e5e7eb', '#fef9c3', '#fef08a'].includes(color) ? '1px solid #d1d5db' : 'none',
+                                }}
+                                title={color}
+                            />
+                        ))}
+                    </div>
+                </div>
+            )}
 
             {colorPickerPortal}
 

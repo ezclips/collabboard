@@ -601,10 +601,16 @@ export default function CommentEditor({
               onClick={(e) => e.stopPropagation()}
               onMouseDown={(e) => e.preventDefault()}
             >
+              <button
+                onClick={() => setCardColorOpen(false)}
+                className="absolute -right-3 -top-3 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-400 shadow-md transition-all hover:text-gray-600"
+                title="Close"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
               <div className="flex items-center justify-between mb-4">
                 <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Note Color</span>
-                <div className="flex items-center gap-2">
-                  <div className="flex bg-gray-100 p-1 rounded-lg gap-1">
+                <div className="flex bg-gray-100 p-1 rounded-lg gap-1">
                     <button
                       onClick={() => setActiveColorTab('background')}
                       className={`w-8 h-8 flex items-center justify-center text-xs font-bold rounded-md transition-all ${activeColorTab === 'background'
@@ -625,14 +631,6 @@ export default function CommentEditor({
                     >
                       TS
                     </button>
-                  </div>
-                  <button
-                    onClick={() => setCardColorOpen(false)}
-                    className="w-7 h-7 flex items-center justify-center rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
-                    title="Close"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
                 </div>
               </div>
 
@@ -955,17 +953,18 @@ export default function CommentEditor({
             centering compensates instead of letting the panel run off
             the bottom of a short window. */}
         {textStyleOpen && (
-          <div
-            className="relative z-[60] bg-white rounded-lg shadow-2xl p-4 w-[300px] border border-gray-100 max-h-[calc(100vh-2rem)] overflow-y-auto"
-            onMouseDown={(e) => e.preventDefault()}
-          >
+          <div className="relative z-[60] w-[300px]">
             <button
               onClick={() => setTextStyleOpen(false)}
-              className="absolute top-2 right-2 w-4 h-4 flex items-center justify-center rounded hover:bg-gray-100"
+              className="absolute -right-3 -top-3 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-400 shadow-md transition-all hover:text-gray-600"
               title="Close"
             >
-              <X className="w-3 h-3 text-gray-400" />
+              <X className="h-3.5 w-3.5" />
             </button>
+            <div
+              className="bg-white rounded-lg shadow-2xl p-4 border border-gray-100 max-h-[calc(100vh-2rem)] overflow-y-auto"
+              onMouseDown={(e) => e.preventDefault()}
+            >
             <TextStylePopup
               isOpen={true}
               onOpenChange={setTextStyleOpen}
@@ -991,6 +990,7 @@ export default function CommentEditor({
               isOrderedList={editor.isActive('orderedList')}
               isCode={editor.isActive('codeBlock')}
             />
+            </div>
           </div>
         )}
       </div>

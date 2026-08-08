@@ -54,8 +54,19 @@ export function CardColorPanel({
         <div
             data-no-drag="true"
             onPointerDownCapture={(e) => e.stopPropagation()}
-            className="w-[320px] min-h-[300px] rounded-xl bg-white p-4 shadow-sm"
+            className="relative w-[320px] min-h-[300px] rounded-xl bg-white p-4 shadow-sm"
         >
+            {onClose && (
+                <button
+                    type="button"
+                    onClick={onClose}
+                    className="absolute -right-3 -top-3 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-400 shadow-md transition-all hover:text-gray-600"
+                    aria-label="Close color picker"
+                    title="Close"
+                >
+                    <X className="h-3.5 w-3.5" />
+                </button>
+            )}
             <div className="mb-3 grid items-center gap-3" style={{ gridTemplateColumns: '1fr auto 1fr' }}>
                 <div className="text-sm font-semibold text-slate-800">Card Color</div>
                 <div className="inline-flex rounded-lg border bg-slate-50 p-1">
@@ -96,19 +107,7 @@ export function CardColorPanel({
                         </button>
                     )}
                 </div>
-                <div className="flex justify-end">
-                    {onClose && (
-                        <button
-                            type="button"
-                            onClick={onClose}
-                            className="self-center w-5 h-5 rounded flex items-center justify-center text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-                            aria-label="Close color picker"
-                            title="Close"
-                        >
-                            <X className="w-3.5 h-3.5" />
-                        </button>
-                    )}
-                </div>
+                <div className="flex justify-end" />
             </div>
 
             {/* NEW palette component you already have */}

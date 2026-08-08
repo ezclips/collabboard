@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState } from 'react';
+import { X } from 'lucide-react';
 import { ColorPickerContent } from '../ColorPicker';
 import TextFormattingButtons, { type TextFormattingButtonsProps } from './TextFormattingButtons';
 
@@ -105,6 +106,16 @@ export default function TextStylePopup({
 
     return (
         <div className="space-y-4" onMouseDown={preventFocusLoss} onClick={(e) => e.stopPropagation()}>
+            {!hideCloseButton && (
+                <button
+                    onMouseDown={preventFocusLoss}
+                    onClick={() => onOpenChange(false)}
+                    className="absolute -right-3 -top-3 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-400 shadow-md transition-all hover:text-gray-600"
+                    title="Close"
+                >
+                    <X className="h-3.5 w-3.5" />
+                </button>
+            )}
 
             {/* Text Style Section */}
             {!hideHeadingSelect && (
@@ -195,16 +206,6 @@ export default function TextStylePopup({
                             {colorMode === 'text' ? 'Text Color' : 'Highlight Color'}
                         </span>
                     </div>
-                    {!hideCloseButton && (
-                        <button
-                            onMouseDown={preventFocusLoss}
-                            onClick={() => onOpenChange(false)}
-                            className="w-7 h-7 flex items-center justify-center rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors text-xs font-bold"
-                            title="Close"
-                        >
-                            X
-                        </button>
-                    )}
                 </div>
 
                 <div onMouseDown={preventFocusLoss}>

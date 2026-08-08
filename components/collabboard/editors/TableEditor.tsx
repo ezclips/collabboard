@@ -1067,36 +1067,35 @@ export default function TableEditor({
                         {showCommentsPopup && (
                             <div className="absolute left-full top-0 ml-3 z-[1100] animate-in fade-in slide-in-from-left-2 duration-200 pointer-events-auto">
                                 <div className="relative bg-white rounded-xl shadow-2xl border border-gray-200 p-4 min-w-[280px] max-w-[320px]">
+                                    <button
+                                        onClick={() => {
+                                            setShowCommentsPopup(false);
+                                            setActiveCommentId(null);
+                                            setEditingCommentId(null);
+                                            setEditingCommentText("");
+                                            setCommentColorPopupId(null);
+                                            setShowBadgeColorPicker(false);
+                                        }}
+                                        className="absolute -right-3 -top-3 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-400 shadow-md transition-all hover:text-gray-600"
+                                        title="Close"
+                                    >
+                                        <X className="h-3.5 w-3.5" />
+                                    </button>
                                     <div className="flex items-center justify-between mb-3">
                                         <h4 className="text-sm font-semibold text-gray-700">Comments</h4>
-                                        <div className="flex items-center gap-2">
-                                            <button
-                                                onClick={() => {
-                                                    setShowBadgeColorPicker((prev) => !prev);
-                                                    setCommentColorPopupId(null);
-                                                }}
-                                                className="w-7 h-7 flex items-center justify-center rounded hover:bg-gray-100"
-                                                title="Badge Color"
-                                            >
-                                                <div
-                                                    className="w-4 h-4 rounded border border-gray-300"
-                                                    style={{ backgroundColor: badgeColor }}
-                                                />
-                                            </button>
-                                            <button
-                                                onClick={() => {
-                                                    setShowCommentsPopup(false);
-                                                    setActiveCommentId(null);
-                                                    setEditingCommentId(null);
-                                                    setEditingCommentText("");
-                                                    setCommentColorPopupId(null);
-                                                    setShowBadgeColorPicker(false);
-                                                }}
-                                                className="text-gray-400 hover:text-gray-600 p-1 rounded hover:bg-gray-100"
-                                            >
-                                                <X className="w-4 h-4" />
-                                            </button>
-                                        </div>
+                                        <button
+                                            onClick={() => {
+                                                setShowBadgeColorPicker((prev) => !prev);
+                                                setCommentColorPopupId(null);
+                                            }}
+                                            className="w-7 h-7 flex items-center justify-center rounded hover:bg-gray-100"
+                                            title="Badge Color"
+                                        >
+                                            <div
+                                                className="w-4 h-4 rounded border border-gray-300"
+                                                style={{ backgroundColor: badgeColor }}
+                                            />
+                                        </button>
                                     </div>
                                     {showBadgeColorPicker && (
                                         <div className="absolute right-3 top-12 z-10 bg-white rounded-lg shadow-lg border border-gray-200 p-2">
@@ -1403,29 +1402,29 @@ export default function TableEditor({
                 {/* Text Style Panel - Right side of table */}
                 {activeSubmenu === "textStyle" && (
                     <div
-                        className="fixed z-[100] bg-white rounded-xl shadow-lg border border-gray-200 overflow-y-auto"
+                        className="fixed z-[100]"
                         style={{
                             top: tableCardRef.current ? tableCardRef.current.getBoundingClientRect().top + 8 : 100,
                             left: tableCardRef.current ? tableCardRef.current.getBoundingClientRect().right + 12 : 100,
-                            maxHeight: `calc(100vh - ${(tableCardRef.current ? tableCardRef.current.getBoundingClientRect().top + 8 : 100) + 16}px)`,
                         }}
                         onClick={(e) => e.stopPropagation()}
                     >
-                        {/* Header with Close button -- Bold/Italic/Underline/etc.
-                            now live in the shared formatting grid below,
-                            same as every other post's Text style panel. */}
-                        <div className="p-3 flex items-center justify-end border-b border-gray-100">
-                            <button
-                                className="w-6 h-6 rounded text-gray-400 hover:text-gray-600 hover:bg-gray-100 flex items-center justify-center"
-                                onClick={() => {
-                                    setActiveSubmenu(null);
-                                    setPinnedTextStyle(false);
-                                }}
-                                title="Close panel"
-                            >
-                                <X className="w-3.5 h-3.5" />
-                            </button>
-                        </div>
+                        <button
+                            className="absolute -right-3 -top-3 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-400 shadow-md transition-all hover:text-gray-600"
+                            onClick={() => {
+                                setActiveSubmenu(null);
+                                setPinnedTextStyle(false);
+                            }}
+                            title="Close panel"
+                        >
+                            <X className="h-3.5 w-3.5" />
+                        </button>
+                        <div
+                            className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-y-auto"
+                            style={{
+                                maxHeight: `calc(100vh - ${(tableCardRef.current ? tableCardRef.current.getBoundingClientRect().top + 8 : 100) + 16}px)`,
+                            }}
+                        >
                         {(() => {
                             const key = selectedCell
                                 ? `${selectedCell.row}-${selectedCell.col}`
@@ -1477,6 +1476,7 @@ export default function TableEditor({
                                 </>
                             );
                         })()}
+                        </div>
                     </div>
                 )}
 
@@ -1490,15 +1490,13 @@ export default function TableEditor({
                         }}
                         onClick={(e) => e.stopPropagation()}
                     >
-                        <div className="p-3 flex items-center justify-end border-b border-gray-100">
-                            <button
-                                className="w-6 h-6 rounded text-gray-400 hover:text-gray-600 hover:bg-gray-100 flex items-center justify-center"
-                                onClick={() => setActiveSubmenu(null)}
-                                title="Close panel"
-                            >
-                                <X className="w-3.5 h-3.5" />
-                            </button>
-                        </div>
+                        <button
+                            className="absolute -right-3 -top-3 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-400 shadow-md transition-all hover:text-gray-600"
+                            onClick={() => setActiveSubmenu(null)}
+                            title="Close panel"
+                        >
+                            <X className="h-3.5 w-3.5" />
+                        </button>
                         <div className="p-3">
                             <ColorPickerContent
                                 color={(() => {
