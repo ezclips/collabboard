@@ -1,7 +1,12 @@
 "use client";
 
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useMemo } from 'react';
 import { Check } from 'lucide-react';
+import {
+  PositionedContextMenu,
+  PositionedContextMenuItem,
+  PositionedContextMenuSeparator,
+} from '@/components/ui/context-menu';
 
 type FreeformCanvasBoardMenuProps = {
   x: number;
@@ -20,11 +25,6 @@ type FreeformCanvasBoardMenuProps = {
   onToggleDotGrid: () => void;
 };
 
-type MenuPosition = { left: number; top: number };
-
-const UI_FONT =
-  '"Assistant", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
-
 export const FREEFORM_BOARD_TOOL_ITEMS = [
   { label: 'New Note', type: 'note' },
   { label: 'New Link', type: 'link' },
@@ -42,37 +42,6 @@ export const FREEFORM_BOARD_TOOL_ITEMS = [
   { label: 'New AI Drawing', type: 'ai-component' },
 ];
 
-function MenuRow({
-  label,
-  disabled,
-  checked,
-  onClick,
-}: {
-  label: string;
-  disabled?: boolean;
-  checked?: boolean;
-  onClick?: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      disabled={disabled}
-      onClick={onClick}
-      className="flex w-full items-center justify-between px-4 py-1.5 text-left text-[13px] text-slate-600 transition hover:bg-slate-100 disabled:cursor-default disabled:text-slate-300"
-      style={{ fontFamily: UI_FONT }}
-    >
-      <span>{label}</span>
-      <span className="ml-6 flex items-center gap-2 shrink-0 text-[12px] text-slate-500">
-        {checked && <Check className="h-4 w-4 text-slate-700" />}
-      </span>
-    </button>
-  );
-}
-
-function Divider() {
-  return <div className="my-1 h-px bg-gray-200" />;
-}
-
 export default function FreeformCanvasBoardMenu({
   x,
   y,
@@ -89,82 +58,76 @@ export default function FreeformCanvasBoardMenu({
   onOpenBackgroundEditor,
   onToggleDotGrid,
 }: FreeformCanvasBoardMenuProps) {
-  const menuRef = useRef<HTMLDivElement>(null);
-  const [menuPosition, setMenuPosition] = useState<MenuPosition>({ left: x, top: y });
-
-  useEffect(() => {
-    const handlePointerDown = (event: MouseEvent) => {
-      const target = event.target as Node;
-      if (menuRef.current?.contains(target)) {
-        return;
-      }
-      onClose();
-    };
-
-    const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        onClose();
-      }
-    };
-
-    window.addEventListener('mousedown', handlePointerDown);
-    window.addEventListener('keydown', handleEscape);
-    return () => {
-      window.removeEventListener('mousedown', handlePointerDown);
-      window.removeEventListener('keydown', handleEscape);
-    };
-  }, [onClose]);
-
-  useLayoutEffect(() => {
-    const menuWidth = menuRef.current?.offsetWidth || 274;
-    const menuHeight = menuRef.current?.offsetHeight || 420;
-    setMenuPosition({
-      left: Math.min(x, window.innerWidth - menuWidth - 8),
-      top: Math.min(y, window.innerHeight - menuHeight - 8),
-    });
-  }, [x, y]);
-
   const visibleToolItems = useMemo(
     () => FREEFORM_BOARD_TOOL_ITEMS.filter((item) => item.type !== 'graph-line' || showGraphLine),
     [showGraphLine]
   );
 
   return (
-    <div
-      ref={menuRef}
-      className="fixed z-[9999] min-w-[272px] rounded-md border border-gray-200 bg-white py-1 shadow-[0_12px_32px_rgba(15,23,42,0.18)]"
-      style={{ left: menuPosition.left, top: menuPosition.top }}
+    <PositionedContextMenu
+      open
+      x={x}
+      y={y}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) onClose();
+      }}
+      // The board menu sits above every canvas overlay, so it keeps its high
+      // stacking order and its wider-than-default column.
+      className="z-[9999] min-w-[272px]"
       onClick={(e) => e.stopPropagation()}
-      onContextMenu={(e) => e.preventDefault()}
     >
-      <MenuRow label="Paste" disabled={!isEditable || !canPaste} onClick={onPaste} />
-      <MenuRow label="Undo" disabled={!isEditable || !canUndoPaste} onClick={onUndo} />
-      <MenuRow label="Select All" onClick={onSelectAll} />
-      <Divider />
+      <PositionedContextMenuItem
+        disabled={!isEditable || !canPaste}
+        onSelect={() => onPaste()}
+      >
+        Paste
+      </PositionedContextMenuItem>
+      <PositionedContextMenuItem
+        disabled={!isEditable || !canUndoPaste}
+        onSelect={() => onUndo()}
+      >
+        Undo
+      </PositionedContextMenuItem>
+      <PositionedContextMenuItem onSelect={() => onSelectAll()}>
+        Select All
+      </PositionedContextMenuItem>
+
+      <PositionedContextMenuSeparator />
 
       {visibleToolItems.map((item) => (
-        <MenuRow
+        <PositionedContextMenuItem
           key={item.type}
-          label={item.label}
           disabled={!isEditable}
-          onClick={() => onToolAction(item.type)}
-        />
+          onSelect={() => onToolAction(item.type)}
+        >
+          {item.label}
+        </PositionedContextMenuItem>
       ))}
 
-      <Divider />
-      <MenuRow
-        label="Change Board Background..."
+      <PositionedContextMenuSeparator />
+
+      <PositionedContextMenuItem
         disabled={!isEditable}
-        onClick={() => {
-          onOpenBackgroundEditor();
-          onClose();
+        // Dismissal comes from the shared shell, which routes through onClose.
+        onSelect={() => onOpenBackgroundEditor()}
+      >
+        Change Board Background...
+      </PositionedContextMenuItem>
+      <PositionedContextMenuItem
+        // An in-menu toggle: staying open is what makes the checkmark below a
+        // useful state indicator rather than something the user never sees.
+        onSelect={(event) => {
+          event.preventDefault();
+          onToggleDotGrid();
         }}
-      />
-      <MenuRow
-        label="Show Dot Grid"
-        checked={showDotGrid}
-        onClick={onToggleDotGrid}
-      />
-    </div>
+      >
+        Show Dot Grid
+        {showDotGrid && (
+          <span className="ml-auto pl-4 flex items-center text-slate-700">
+            <Check className="h-4 w-4" />
+          </span>
+        )}
+      </PositionedContextMenuItem>
+    </PositionedContextMenu>
   );
 }
