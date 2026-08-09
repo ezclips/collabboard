@@ -19,6 +19,9 @@ import {
   PositionedContextMenuItem,
   PositionedContextMenuLabel,
   PositionedContextMenuSeparator,
+  PositionedContextMenuSub,
+  PositionedContextMenuSubContent,
+  PositionedContextMenuSubTrigger,
   PositionedContextMenuSwatch,
 } from './context-menu';
 
@@ -570,5 +573,436 @@ describe('positioned context menu', () => {
     expect(surface()).not.toBeNull();
     expect(document.querySelector('[data-radix-context-menu-trigger]')).toBeNull();
     expect(document.querySelectorAll('[aria-haspopup="menu"]')).toHaveLength(0);
+  });
+});
+
+// ── Positioned submenus ───────────────────────────────────────────────────
+describe('positioned context menu submenu', () => {
+  /** React synthesizes onMouseEnter/onMouseLeave from native mouseover/mouseout. */
+  function enter(target: HTMLElement) {
+    act(() => {
+      target.dispatchEvent(
+        new MouseEvent('mouseover', { bubbles: true, cancelable: true, relatedTarget: document.body }),
+      );
+    });
+  }
+  function leave(target: HTMLElement) {
+    act(() => {
+      target.dispatchEvent(
+        new MouseEvent('mouseout', { bubbles: true, cancelable: true, relatedTarget: document.body }),
+      );
+    });
+  }
+  function key(target: HTMLElement, k: string) {
+    act(() => {
+      target.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }));
+    });
+  }
+
+  function SubFixture({
+    onOpenChange = vi.fn(),
+    onPick = vi.fn(),
+    onDisabledPick = vi.fn(),
+    subDisabled = false,
+    keepOpen = false,
+    rootStyle,
+  }: Record<string, any> = {}) {
+    return (
+      <PositionedContextMenu open x={20} y={30} onOpenChange={onOpenChange} style={rootStyle}>
+        <PositionedContextMenuItem>Cut</PositionedContextMenuItem>
+        <PositionedContextMenuSub>
+          <PositionedContextMenuSubTrigger disabled={subDisabled} icon={<TrashIcon />}>
+            Change Alignment...
+          </PositionedContextMenuSubTrigger>
+          <PositionedContextMenuSubContent>
+            <PositionedContextMenuItem
+              onSelect={keepOpen ? (event: any) => event.preventDefault() : onPick}
+            >
+              Left
+            </PositionedContextMenuItem>
+            <PositionedContextMenuItem disabled onSelect={onDisabledPick}>
+              Center
+            </PositionedContextMenuItem>
+            <PositionedContextMenuSeparator />
+            <PositionedContextMenuItem onSelect={onPick}>Right</PositionedContextMenuItem>
+          </PositionedContextMenuSubContent>
+        </PositionedContextMenuSub>
+        <PositionedContextMenuItem>Paste</PositionedContextMenuItem>
+      </PositionedContextMenu>
+    );
+  }
+
+  function root(): HTMLElement {
+    return document.querySelector<HTMLElement>('[data-slot="positioned-context-menu-content"]')!;
+  }
+  function subContent(): HTMLElement | null {
+    return document.querySelector<HTMLElement>('[data-slot="positioned-context-menu-sub-content"]');
+  }
+  function openSubContent(): HTMLElement {
+    const el = subContent();
+    expect(el, 'submenu is not open').not.toBeNull();
+    return el!;
+  }
+  function trigger(): HTMLElement {
+    return document.querySelector<HTMLElement>('[data-slot="context-menu-sub-trigger"]')!;
+  }
+  function rowByText(scope: ParentNode, text: string): HTMLElement {
+    const match = Array.from((scope as HTMLElement).querySelectorAll<HTMLElement>('[role="menuitem"]'))
+      .find((el) => el.textContent?.includes(text));
+    expect(match, `no menuitem containing "${text}"`).toBeTruthy();
+    return match!;
+  }
+
+  /** jsdom reports zero box metrics; pin them so positioning is measurable. */
+  function withMenuBox(width: number, height: number, run: () => void) {
+    const w = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetWidth');
+    const h = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight');
+    Object.defineProperty(HTMLElement.prototype, 'offsetWidth', { configurable: true, get: () => width });
+    Object.defineProperty(HTMLElement.prototype, 'offsetHeight', { configurable: true, get: () => height });
+    try { run(); } finally {
+      if (w) Object.defineProperty(HTMLElement.prototype, 'offsetWidth', w);
+      else delete (HTMLElement.prototype as any).offsetWidth;
+      if (h) Object.defineProperty(HTMLElement.prototype, 'offsetHeight', h);
+      else delete (HTMLElement.prototype as any).offsetHeight;
+    }
+  }
+
+  function stubTriggerRect(rect: Partial<DOMRect>) {
+    const full = { x: 0, y: 0, width: 0, height: 0, top: 0, left: 0, right: 0, bottom: 0, ...rect };
+    trigger().getBoundingClientRect = () => ({ ...full, toJSON: () => full }) as DOMRect;
+  }
+
+  // 1 / 2 — shared styling
+  it('renders the trigger with shared row styling and a trailing chevron', () => {
+    mount(<SubFixture />);
+    const el = trigger();
+    expect(el.className).toContain('text-[13px]');
+    expect(el.className).toContain('data-[highlighted]:bg-gray-200/70');
+    expect(el.className).toContain('data-[disabled]:opacity-50');
+    // Same leading icon slot as any other row, chevron last.
+    expect(el.firstElementChild?.getAttribute('data-slot')).toBe('context-menu-icon');
+    expect(el.lastElementChild?.tagName.toLowerCase()).toBe('svg');
+    expect(el.lastElementChild?.getAttribute('class')).toContain('ml-auto');
+  });
+
+  it('renders submenu content on the shared menu surface', () => {
+    mount(<SubFixture />);
+    enter(trigger());
+    const el = openSubContent();
+    expect(el.className).toContain('bg-gray-50');
+    expect(el.className).toContain('rounded-lg');
+    expect(el.className).toContain('fixed');
+    // Rows and separators inside a submenu are the same shared primitives.
+    expect(rowByText(el, 'Left').getAttribute('data-slot')).toBe('context-menu-item');
+    expect(el.querySelectorAll('[data-slot="context-menu-separator"]')).toHaveLength(1);
+  });
+
+  // 3 / 4 — pointer
+  it('opens on hover and stays open while the pointer travels into the content', async () => {
+    vi.useFakeTimers();
+    try {
+      mount(<SubFixture />);
+      enter(trigger());
+      expect(subContent()).not.toBeNull();
+
+      // Pointer leaves the trigger heading for the submenu.
+      leave(trigger());
+      act(() => { vi.advanceTimersByTime(50); });
+      expect(subContent(), 'closed before the pointer could arrive').not.toBeNull();
+
+      enter(openSubContent());
+      act(() => { vi.advanceTimersByTime(500); });
+      expect(subContent(), 'closed even though the pointer is inside it').not.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('closes once the pointer leaves and the grace period elapses', () => {
+    vi.useFakeTimers();
+    try {
+      mount(<SubFixture />);
+      enter(trigger());
+      leave(trigger());
+      act(() => { vi.advanceTimersByTime(500); });
+      expect(subContent()).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // 5 / 6 / 7 / 8 — keyboard
+  it('opens with ArrowRight and moves focus onto the first enabled submenu item', () => {
+    mount(<SubFixture />);
+    act(() => { trigger().focus(); });
+    // Focusing the trigger opens it, but must not steal focus.
+    expect(document.activeElement).toBe(trigger());
+
+    key(trigger(), 'ArrowRight');
+    expect(document.activeElement).toBe(rowByText(openSubContent(), 'Left'));
+  });
+
+  it('moves focus in on ArrowRight even when hover already opened the submenu', () => {
+    // There is no open-state transition to hang the focus move off in this
+    // case, so it must not be driven by one.
+    mount(<SubFixture />);
+    enter(trigger());
+    openSubContent();
+    expect(document.activeElement).not.toBe(rowByText(openSubContent(), 'Left'));
+
+    key(trigger(), 'ArrowRight');
+    expect(document.activeElement).toBe(rowByText(openSubContent(), 'Left'));
+  });
+
+  it('navigates submenu items with ArrowDown/ArrowUp, skipping disabled ones', () => {
+    mount(<SubFixture />);
+    key(trigger(), 'ArrowRight');
+    const content = openSubContent();
+    expect(document.activeElement).toBe(rowByText(content, 'Left'));
+
+    // "Center" is disabled, so ArrowDown skips straight to "Right".
+    key(document.activeElement as HTMLElement, 'ArrowDown');
+    expect(document.activeElement).toBe(rowByText(content, 'Right'));
+
+    key(document.activeElement as HTMLElement, 'ArrowUp');
+    expect(document.activeElement).toBe(rowByText(content, 'Left'));
+
+    key(document.activeElement as HTMLElement, 'End');
+    expect(document.activeElement).toBe(rowByText(content, 'Right'));
+
+    key(document.activeElement as HTMLElement, 'Home');
+    expect(document.activeElement).toBe(rowByText(content, 'Left'));
+  });
+
+  // 9 — ArrowLeft
+  it('closes on ArrowLeft and returns focus to its trigger without reopening', () => {
+    mount(<SubFixture />);
+    key(trigger(), 'ArrowRight');
+    openSubContent();
+
+    key(document.activeElement as HTMLElement, 'ArrowLeft');
+    expect(subContent(), 'ArrowLeft did not close the submenu').toBeNull();
+    expect(document.activeElement).toBe(trigger());
+  });
+
+  // 10 — Escape
+  it('dismisses the whole hierarchy on Escape from inside the submenu', () => {
+    const onOpenChange = vi.fn();
+    mount(<SubFixture onOpenChange={onOpenChange} />);
+    key(trigger(), 'ArrowRight');
+    // The portal still bubbles through the React tree to the root surface.
+    key(document.activeElement as HTMLElement, 'Escape');
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  // 11 / 12 / 13 — selection contract
+  it('fires a submenu item callback and closes the hierarchy', () => {
+    const onPick = vi.fn();
+    const onOpenChange = vi.fn();
+    mount(<SubFixture onPick={onPick} onOpenChange={onOpenChange} />);
+    enter(trigger());
+    act(() => {
+      rowByText(openSubContent(), 'Right')
+        .dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+    expect(onPick).toHaveBeenCalledTimes(1);
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it('honours preventDefault to keep the menu open, matching root items', () => {
+    const onOpenChange = vi.fn();
+    mount(<SubFixture keepOpen onOpenChange={onOpenChange} />);
+    enter(trigger());
+    act(() => {
+      rowByText(openSubContent(), 'Left')
+        .dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+    expect(onOpenChange).not.toHaveBeenCalled();
+    expect(subContent()).not.toBeNull();
+  });
+
+  it('does not activate a disabled submenu item', () => {
+    const onDisabledPick = vi.fn();
+    const onOpenChange = vi.fn();
+    mount(<SubFixture onDisabledPick={onDisabledPick} onOpenChange={onOpenChange} />);
+    enter(trigger());
+    const disabled = rowByText(openSubContent(), 'Center');
+    expect(disabled.getAttribute('aria-disabled')).toBe('true');
+    act(() => {
+      disabled.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+    expect(onDisabledPick).not.toHaveBeenCalled();
+    expect(onOpenChange).not.toHaveBeenCalled();
+  });
+
+  // 14 — disabled trigger
+  it('never opens from a disabled trigger, by hover, click or ArrowRight', () => {
+    mount(<SubFixture subDisabled />);
+    const el = trigger();
+    expect(el.getAttribute('aria-disabled')).toBe('true');
+    expect(el.hasAttribute('data-disabled')).toBe(true);
+    expect(el.getAttribute('aria-expanded')).toBe('false');
+
+    enter(el);
+    expect(subContent()).toBeNull();
+    act(() => { el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); });
+    expect(subContent()).toBeNull();
+    key(el, 'ArrowRight');
+    expect(subContent()).toBeNull();
+  });
+
+  it('skips a disabled submenu trigger during root navigation', () => {
+    mount(<SubFixture subDisabled />);
+    key(root(), 'ArrowDown');
+    expect(document.activeElement).toBe(rowByText(root(), 'Cut'));
+    key(document.activeElement as HTMLElement, 'ArrowDown');
+    expect(document.activeElement).toBe(rowByText(root(), 'Paste'));
+  });
+
+  // 15 — ARIA
+  it('exposes menu semantics on the trigger and the content', () => {
+    mount(<SubFixture />);
+    expect(trigger().getAttribute('role')).toBe('menuitem');
+    expect(trigger().getAttribute('aria-haspopup')).toBe('menu');
+    expect(trigger().getAttribute('aria-expanded')).toBe('false');
+
+    enter(trigger());
+    expect(trigger().getAttribute('aria-expanded')).toBe('true');
+    expect(openSubContent().getAttribute('role')).toBe('menu');
+    // The trigger points at the surface it controls.
+    expect(trigger().getAttribute('aria-controls')).toBe(openSubContent().id);
+  });
+
+  // 16 / 17 / 18 — positioning
+  it('positions itself against its trigger, with no coordinates from the consumer', () => {
+    withMenuBox(160, 120, () => {
+      mount(<SubFixture />);
+      stubTriggerRect({ left: 100, right: 300, top: 200, bottom: 224, width: 200, height: 24 });
+      enter(trigger());
+      const el = openSubContent();
+      // Right edge of the trigger, less the pointer-travel overlap.
+      expect(el.style.left).toBe(`${300 - 4}px`);
+      expect(el.style.top).toBe(`${200 - 4}px`);
+    });
+  });
+
+  it('flips to the left when the right side cannot hold it', () => {
+    withMenuBox(300, 120, () => {
+      mount(<SubFixture />);
+      // Trigger hard against the right edge of the 1024px jsdom viewport.
+      stubTriggerRect({ left: 800, right: 1000, top: 100, bottom: 124, width: 200, height: 24 });
+      enter(trigger());
+      // 1000 - 4 + 300 overflows, so it flips: left edge - width + overlap.
+      expect(openSubContent().style.left).toBe(`${800 - 300 + 4}px`);
+    });
+  });
+
+  it('clamps vertically instead of overflowing the bottom of the viewport', () => {
+    withMenuBox(160, 400, () => {
+      mount(<SubFixture />);
+      stubTriggerRect({ left: 10, right: 200, top: 700, bottom: 724, width: 190, height: 24 });
+      enter(trigger());
+      // jsdom viewport is 768 tall; 768 - 400 - 8.
+      expect(openSubContent().style.top).toBe(`${768 - 400 - 8}px`);
+    });
+  });
+
+  it('stacks above a root menu that raised its own z-index', () => {
+    mount(<SubFixture rootStyle={{ zIndex: 9999 }} />);
+    enter(trigger());
+    expect(openSubContent().style.zIndex).toBe('10000');
+  });
+
+  // 19 — outside-dismiss isolation
+  it('does not treat submenu interaction as an outside click on the root', async () => {
+    const onOpenChange = vi.fn();
+    mount(<SubFixture onOpenChange={onOpenChange} />);
+    enter(trigger());
+    // Let the root's deferred outside-pointer listener attach.
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+
+    act(() => {
+      openSubContent().dispatchEvent(
+        new MouseEvent('pointerdown', { bubbles: true, cancelable: true }),
+      );
+    });
+    expect(onOpenChange, 'submenu interaction closed the root menu').not.toHaveBeenCalled();
+    expect(subContent()).not.toBeNull();
+
+    // A genuine outside click still dismisses.
+    act(() => {
+      document.body.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, cancelable: true }));
+    });
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  // 20 — level separation
+  it('keeps root navigation out of submenu descendants while the submenu is open', () => {
+    mount(<SubFixture />);
+    enter(trigger());
+    const content = openSubContent();
+    expect(content).not.toBeNull();
+
+    // Three root rows: Cut, the sub trigger, Paste. Cycling must never leave them.
+    const seen: HTMLElement[] = [];
+    key(root(), 'ArrowDown');
+    for (let i = 0; i < 4; i += 1) {
+      seen.push(document.activeElement as HTMLElement);
+      key(document.activeElement as HTMLElement, 'ArrowDown');
+    }
+    expect(seen.some((el) => content.contains(el))).toBe(false);
+    expect(seen.map((el) => el.textContent?.trim())).toEqual([
+      'Cut', 'Change Alignment...', 'Paste', 'Cut',
+    ]);
+  });
+
+  it('never lets submenu rows join the root ring, even rendered inline', () => {
+    // Guards the level check itself rather than the portal: a row that is a DOM
+    // descendant of the root surface but belongs to another surface must not be
+    // reachable from the root ring.
+    mount(
+      <PositionedContextMenu open x={10} y={10} onOpenChange={vi.fn()}>
+        <PositionedContextMenuItem>Alpha</PositionedContextMenuItem>
+        <div data-positioned-menu-surface="">
+          <PositionedContextMenuItem>Nested</PositionedContextMenuItem>
+        </div>
+      </PositionedContextMenu>,
+    );
+    key(root(), 'ArrowDown');
+    expect(document.activeElement?.textContent).toBe('Alpha');
+    key(document.activeElement as HTMLElement, 'ArrowDown');
+    expect(document.activeElement?.textContent).toBe('Alpha');
+  });
+
+  // 23 — backward compatibility
+  it('adds the submenu exports without disturbing the existing ones', async () => {
+    const mod = await import('./context-menu');
+    for (const name of [
+      'ContextMenu', 'ContextMenuTrigger', 'ContextMenuContent', 'ContextMenuItem',
+      'ContextMenuCheckboxItem', 'ContextMenuRadioItem', 'ContextMenuLabel',
+      'ContextMenuSeparator', 'ContextMenuShortcut', 'ContextMenuGroup',
+      'ContextMenuPortal', 'ContextMenuSub', 'ContextMenuSubContent',
+      'ContextMenuSubTrigger', 'ContextMenuRadioGroup', 'ContextMenuSwatchRow',
+      'ContextMenuSwatch',
+      'PositionedContextMenu', 'PositionedContextMenuItem',
+      'PositionedContextMenuSeparator', 'PositionedContextMenuLabel',
+      'PositionedContextMenuSwatch',
+      'PositionedContextMenuSub', 'PositionedContextMenuSubTrigger',
+      'PositionedContextMenuSubContent',
+    ]) {
+      expect(mod, `missing export ${name}`).toHaveProperty(name);
+    }
+  });
+
+  it('leaves a positioned menu without a submenu completely unchanged', () => {
+    // No submenu means no haspopup, no satellite surface, no extra portal.
+    mount(
+      <PositionedContextMenu open x={10} y={10} onOpenChange={vi.fn()}>
+        <PositionedContextMenuItem>Only</PositionedContextMenuItem>
+      </PositionedContextMenu>,
+    );
+    expect(document.querySelectorAll('[aria-haspopup="menu"]')).toHaveLength(0);
+    expect(document.querySelectorAll('[data-positioned-menu-surface]')).toHaveLength(1);
+    expect(subContent()).toBeNull();
   });
 });
