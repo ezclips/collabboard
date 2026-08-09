@@ -7,6 +7,13 @@ import CardShell from '@/components/collabboard/shells/CardShell';
 import { ColorPickerContent } from '@/components/collabboard/ColorPicker';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { ColumnPostContextMenu } from '@/components/collabboard/menus/ColumnPostContextMenu';
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
 import { getContainerEditTargetLabel } from '@/lib/infra/collabboard/containerEditTargetLabel';
 import type { Padlet, ChronoMode } from '@/types/collabboard';
 
@@ -73,11 +80,9 @@ export default function ChronoTimelineCanvas({
   const [hasHorizontalOverflow, setHasHorizontalOverflow] = useState(false);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(false);
-  const [dateMenuOpen, setDateMenuOpen] = useState(false);
-  const [dateMenuPosition, setDateMenuPosition] = useState<{ x: number; y: number } | null>(null);
+  // Target container for the "Edit date label" dialog, set when that item is clicked.
   const [activeDateContainerId, setActiveDateContainerId] = useState<string | null>(null);
   const [showDateColorPicker, setShowDateColorPicker] = useState(false);
-  const dateMenuRef = useRef<HTMLDivElement>(null);
   const [dateEditOpen, setDateEditOpen] = useState(false);
   const [dateEditValue, setDateEditValue] = useState('');
   const [renameOpen, setRenameOpen] = useState(false);
@@ -181,33 +186,10 @@ export default function ChronoTimelineCanvas({
     };
   }, [chronoMode]);
 
-  useEffect(() => {
-    if (!dateMenuOpen) return;
-
-    const handleClickOutside = (event: MouseEvent) => {
-      if (dateMenuRef.current && !dateMenuRef.current.contains(event.target as Node)) {
-        setDateMenuOpen(false);
-        setShowDateColorPicker(false);
-      }
-    };
-
-    const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setDateMenuOpen(false);
-        setShowDateColorPicker(false);
-      }
-    };
-
-    setTimeout(() => {
-      document.addEventListener('mousedown', handleClickOutside);
-      document.addEventListener('keydown', handleEscape);
-    }, 10);
-
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-      document.removeEventListener('keydown', handleEscape);
-    };
-  }, [dateMenuOpen]);
+  // Outside-click/Escape closing is now handled natively by each date badge's
+  // Radix ContextMenu (see dateBadge's onOpenChange, which resets the
+  // "custom color" disclosure on every open/close transition -- matching the
+  // previous reset-on-open and reset-on-every-close behavior).
 
   const shouldIgnoreDragStart = (target: EventTarget | null) => {
     if (!(target instanceof HTMLElement)) return false;
@@ -231,24 +213,9 @@ export default function ChronoTimelineCanvas({
     dragStartScrollLeftRef.current = scrollRef.current.scrollLeft;
   };
 
-  const handleOpenDateMenu = (event: React.MouseEvent<HTMLDivElement>, containerId: string) => {
-    if (!isEditable) return;
-    event.preventDefault();
-    event.stopPropagation();
+  const handleOpenDateEditor = (containerId: string, currentLabel: string) => {
     setActiveDateContainerId(containerId);
-    setDateMenuPosition({ x: event.clientX, y: event.clientY });
-    setDateMenuOpen(true);
-    setShowDateColorPicker(false);
-  };
-
-  const handleOpenDateEditor = () => {
-    if (!activeDateContainerId) return;
-    const container = containerPadlets.find((c) => c.id === activeDateContainerId);
-    if (!container) return;
-    const currentLabel = (container.metadata as any)?.timelineLabel || new Date(container.created_at || '').toLocaleDateString();
     setDateEditValue(currentLabel);
-    setDateMenuOpen(false);
-    setShowDateColorPicker(false);
     setDateEditOpen(true);
   };
 
@@ -279,38 +246,26 @@ export default function ChronoTimelineCanvas({
     setRenameOpen(false);
   };
 
-  const handleResetDateLabel = () => {
-    if (!activeDateContainerId) return;
-    onUpdateContainerMetadata?.(activeDateContainerId, { timelineLabel: null });
-    setDateMenuOpen(false);
-    setShowDateColorPicker(false);
+  const handleResetDateLabel = (containerId: string) => {
+    onUpdateContainerMetadata?.(containerId, { timelineLabel: null });
   };
 
-  const handleSetDateColor = (color: string) => {
-    if (!activeDateContainerId) return;
-    onUpdateContainerMetadata?.(activeDateContainerId, { timelineBadgeColor: color });
-    setDateMenuOpen(false);
-    setShowDateColorPicker(false);
+  const handleSetDateColor = (containerId: string, color: string) => {
+    onUpdateContainerMetadata?.(containerId, { timelineBadgeColor: color });
   };
 
-  const handleApplyDateColorToAll = () => {
-    if (!activeDateContainerId) return;
-    const container = containerPadlets.find((c) => c.id === activeDateContainerId);
-    const color = (container?.metadata as any)?.timelineBadgeColor;
+  const handleApplyDateColorToAll = (container: Padlet) => {
+    const color = (container.metadata as any)?.timelineBadgeColor;
     if (!color) return;
     containerPadlets.forEach((c) => {
       onUpdateContainerMetadata?.(c.id, { timelineBadgeColor: color });
     });
-    setDateMenuOpen(false);
-    setShowDateColorPicker(false);
   };
 
   const handleResetAllDateColors = () => {
     containerPadlets.forEach((c) => {
       onUpdateContainerMetadata?.(c.id, { timelineBadgeColor: null });
     });
-    setDateMenuOpen(false);
-    setShowDateColorPicker(false);
   };
 
   // Handle drop on timeline line (plus points) - creates container with dropped item
@@ -581,13 +536,70 @@ export default function ChronoTimelineCanvas({
     );
 
     const dateBadge = (
-      <div
-        className="inline-block px-3 py-1 mb-3 text-xs font-medium text-white rounded whitespace-nowrap cursor-context-menu select-none"
-        style={{ backgroundColor: badgeColor }}
-        onContextMenu={(event) => handleOpenDateMenu(event, container.id)}
-      >
-        {badgeLabel}
-      </div>
+      <ContextMenu onOpenChange={() => setShowDateColorPicker(false)}>
+        <ContextMenuTrigger asChild disabled={!isEditable}>
+          <div
+            className="inline-block px-3 py-1 mb-3 text-xs font-medium text-white rounded whitespace-nowrap cursor-context-menu select-none"
+            style={{ backgroundColor: badgeColor }}
+          >
+            {badgeLabel}
+          </div>
+        </ContextMenuTrigger>
+        <ContextMenuContent className="min-w-[220px]">
+          <ContextMenuItem onClick={() => handleOpenDateEditor(container.id, badgeLabel)}>
+            Edit date label
+          </ContextMenuItem>
+          <ContextMenuItem onClick={() => handleResetDateLabel(container.id)}>
+            Reset to created date
+          </ContextMenuItem>
+
+          <ContextMenuSeparator />
+
+          <div className="flex gap-1 px-2 py-1.5">
+            {DATE_COLOR_PRESETS.map((color) => (
+              <button
+                key={color}
+                onClick={() => handleSetDateColor(container.id, color)}
+                className="w-5 h-5 rounded border transition-all hover:scale-110 border-gray-300 hover:border-gray-400"
+                style={{ backgroundColor: color }}
+                title={color}
+              />
+            ))}
+          </div>
+
+          <ContextMenuItem
+            onSelect={(event) => event.preventDefault()}
+            onClick={() => setShowDateColorPicker((open) => !open)}
+          >
+            Choose Custom Color...
+          </ContextMenuItem>
+
+          {showDateColorPicker && (
+            <div
+              className="absolute left-full top-0 ml-2 bg-white rounded-lg shadow-2xl border border-gray-200 p-3 animate-in fade-in slide-in-from-left-2 duration-200"
+              style={{ width: '256px', zIndex: 10000 }}
+            >
+              <ColorPickerContent
+                color={badgeColor}
+                onChange={(c) => {
+                  if (c) handleSetDateColor(container.id, c);
+                }}
+                hasOpacity={true}
+                presets={DATE_COLOR_PRESETS}
+              />
+            </div>
+          )}
+
+          <ContextMenuSeparator />
+
+          <ContextMenuItem onClick={() => handleApplyDateColorToAll(container)}>
+            Apply color to all dates
+          </ContextMenuItem>
+          <ContextMenuItem onClick={handleResetAllDateColors}>
+            Reset all date colors
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
     );
 
     if (mode === 'vertical') {
@@ -827,79 +839,6 @@ export default function ChronoTimelineCanvas({
     <div className="flex flex-col w-full h-full min-h-0" style={backgroundStyle}>
       {/* Scroll container */}
       <div className="relative flex-1 min-h-0">
-        {isEditable && dateMenuOpen && dateMenuPosition && activeDateContainerId && (
-          <div
-            ref={dateMenuRef}
-            className="fixed z-[9999] min-w-[220px] bg-white rounded-md overflow-visible p-1 shadow-[0px_10px_38px_-10px_rgba(22,_23,_24,_0.35),_0px_10px_20px_-15px_rgba(22,_23,_24,_0.2)] animate-in fade-in zoom-in-95 duration-100"
-            style={{ left: dateMenuPosition.x, top: dateMenuPosition.y }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <button
-              className="w-full text-[13px] leading-none text-slate-700 rounded-[3px] flex items-center h-8 px-2 select-none outline-none hover:bg-slate-100 cursor-pointer"
-              onClick={handleOpenDateEditor}
-            >
-              Edit date label
-            </button>
-            <button
-              className="w-full text-[13px] leading-none text-slate-700 rounded-[3px] flex items-center h-8 px-2 select-none outline-none hover:bg-slate-100 cursor-pointer"
-              onClick={handleResetDateLabel}
-            >
-              Reset to created date
-            </button>
-
-            <div className="h-[1px] bg-gray-100 m-1" />
-
-            <div className="flex gap-1 px-2 py-1.5">
-              {DATE_COLOR_PRESETS.map((color) => (
-                <button
-                  key={color}
-                  onClick={() => handleSetDateColor(color)}
-                  className="w-5 h-5 rounded border transition-all hover:scale-110 border-gray-300 hover:border-gray-400"
-                  style={{ backgroundColor: color }}
-                  title={color}
-                />
-              ))}
-            </div>
-
-            <button
-              className="w-full text-[13px] leading-none text-slate-700 rounded-[3px] flex items-center h-8 px-2 select-none outline-none hover:bg-slate-100 cursor-pointer"
-              onClick={() => setShowDateColorPicker((open) => !open)}
-            >
-              Choose Custom Color...
-            </button>
-
-            {showDateColorPicker && (
-              <div
-                className="absolute left-full top-0 ml-2 bg-white rounded-lg shadow-2xl border border-gray-200 p-3 animate-in fade-in slide-in-from-left-2 duration-200"
-                style={{ width: '256px', zIndex: 10000 }}
-              >
-                <ColorPickerContent
-                  color={(containerPadlets.find((c) => c.id === activeDateContainerId)?.metadata as any)?.timelineBadgeColor || '#3b82f6'}
-                  onChange={(c) => {
-                    if (c) handleSetDateColor(c);
-                  }}
-                  hasOpacity={true}
-                  presets={DATE_COLOR_PRESETS}
-                />
-              </div>
-            )}
-
-            <div className="h-[1px] bg-gray-100 m-1" />
-
-            <button
-              className="w-full text-[13px] leading-none text-slate-700 rounded-[3px] flex items-center h-8 px-2 select-none outline-none hover:bg-slate-100 cursor-pointer"
-              onClick={handleApplyDateColorToAll}
-            >
-              Apply color to all dates
-            </button>
-            <button
-              className="w-full text-[13px] leading-none text-slate-700 rounded-[3px] flex items-center h-8 px-2 select-none outline-none hover:bg-slate-100 cursor-pointer"
-              onClick={handleResetAllDateColors}
-            >
-              Reset all date colors
-            </button>
-          </div>
-        )}
         {chronoMode === 'horizontal' && hasHorizontalOverflow && (
           <>
             {canScrollLeft && (
