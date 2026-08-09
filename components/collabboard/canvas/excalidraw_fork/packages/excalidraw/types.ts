@@ -538,6 +538,37 @@ export type OnUserFollowedPayload = {
   action: "FOLLOW" | "UNFOLLOW";
 };
 
+/**
+ * A single entry handed to `customContextMenuRenderer`, already resolved by
+ * Excalidraw. Presentation only — there is deliberately no Action, no action
+ * name, and no keyboard-shortcut text here.
+ */
+export type ExcalidrawContextMenuRenderItem =
+  | { type: "separator"; key: string }
+  | {
+      type: "item";
+      key: string;
+      /** Display-ready, already translated. */
+      label: string;
+      /** Excalidraw's own checked evaluation for this action. */
+      checked: boolean;
+      /** Excalidraw's own destructive classification for this action. */
+      dangerous: boolean;
+      /** Closes the menu and executes the action, in Excalidraw's order. */
+      onSelect: () => void;
+    };
+
+export type ExcalidrawContextMenuRendererProps = {
+  /** Viewport (client) X of the right-click that opened the menu. */
+  x: number;
+  /** Viewport (client) Y of the right-click that opened the menu. */
+  y: number;
+  /** Visible entries, in Excalidraw's order, separators already collapsed. */
+  items: ExcalidrawContextMenuRenderItem[];
+  /** Clears Excalidraw's context-menu state. */
+  onClose: () => void;
+};
+
 export interface ExcalidrawProps {
   onChange?: (
     elements: readonly OrderedExcalidrawElement[],
@@ -583,6 +614,22 @@ export interface ExcalidrawProps {
     isMobile: boolean,
     appState: UIAppState,
   ) => JSX.Element | null;
+  /**
+   * Replaces the *visual surface* of the context menu. Excalidraw still owns
+   * everything functional: which actions exist, their order, predicates,
+   * checked state, translated labels, read-only/view-mode filtering,
+   * right-click selection, and execution via its ActionManager.
+   *
+   * Items arrive fully resolved, so a host renderer never sees an Action, the
+   * ActionManager, app state or translation keys. Activating an item is just
+   * calling its `onSelect` — which closes and executes through Excalidraw's
+   * existing path, in its existing order.
+   *
+   * Omit the prop to keep Excalidraw's native context menu.
+   */
+  customContextMenuRenderer?: (
+    props: ExcalidrawContextMenuRendererProps,
+  ) => React.ReactNode;
   langCode?: Language["code"];
   viewModeEnabled?: boolean;
   zenModeEnabled?: boolean;

@@ -6,19 +6,24 @@ import { t } from "../i18n";
 
 import { useExcalidrawAppState, useExcalidrawElements } from "./App";
 
+import {
+  CONTEXT_MENU_SEPARATOR,
+  resolveContextMenuItems,
+} from "./contextMenuPresentation";
+
 import { Popover } from "./Popover";
 
 import "./ContextMenu.scss";
 
 import type { ActionManager } from "../actions/manager";
 import type { ShortcutName } from "../actions/shortcuts";
-import type { Action } from "../actions/types";
 
-import type { TranslationKeys } from "../i18n";
-
-export type ContextMenuItem = typeof CONTEXT_MENU_SEPARATOR | Action;
-
-export type ContextMenuItems = (ContextMenuItem | false | null | undefined)[];
+import type { ExcalidrawProps } from "../types";
+import type {
+  ContextMenuItem,
+  ContextMenuItems,
+  ResolvedContextMenuItem,
+} from "./contextMenuPresentation";
 
 type ContextMenuProps = {
   actionManager: ActionManager;
@@ -28,29 +33,26 @@ type ContextMenuProps = {
   onClose: (callback?: () => void) => void;
 };
 
-export const CONTEXT_MENU_SEPARATOR = "separator";
+// Presentation resolution lives in ./contextMenuPresentation so that the native
+// renderer below and the custom-renderer host share one implementation. These
+// re-exports keep the long-standing import path (`./ContextMenu`) working for
+// App.tsx and types.ts.
+export { CONTEXT_MENU_SEPARATOR, resolveContextMenuItems };
+export type { ContextMenuItem, ContextMenuItems, ResolvedContextMenuItem };
 
 export const ContextMenu = React.memo(
   ({ actionManager, items, top, left, onClose }: ContextMenuProps) => {
     const appState = useExcalidrawAppState();
     const elements = useExcalidrawElements();
 
-    const filteredItems = items.reduce((acc: ContextMenuItem[], item) => {
-      if (
-        item &&
-        (item === CONTEXT_MENU_SEPARATOR ||
-          !item.predicate ||
-          item.predicate(
-            elements,
-            appState,
-            actionManager.app.props,
-            actionManager.app,
-          ))
-      ) {
-        acc.push(item);
-      }
-      return acc;
-    }, []);
+    const resolvedItems = resolveContextMenuItems({
+      items,
+      elements,
+      appState,
+      actionManager,
+      translate: t,
+      onClose,
+    });
 
     return (
       <Popover
@@ -70,57 +72,30 @@ export const ContextMenu = React.memo(
           className="context-menu"
           onContextMenu={(event) => event.preventDefault()}
         >
-          {filteredItems.map((item, idx) => {
-            if (item === CONTEXT_MENU_SEPARATOR) {
-              if (
-                !filteredItems[idx - 1] ||
-                filteredItems[idx - 1] === CONTEXT_MENU_SEPARATOR
-              ) {
-                return null;
-              }
-              return <hr key={idx} className="context-menu-item-separator" />;
-            }
-
-            const actionName = item.name;
-            let label = "";
-            if (item.label) {
-              if (typeof item.label === "function") {
-                label = t(
-                  item.label(
-                    elements,
-                    appState,
-                    actionManager.app,
-                  ) as unknown as TranslationKeys,
-                );
-              } else {
-                label = t(item.label as unknown as TranslationKeys);
-              }
+          {resolvedItems.map((item) => {
+            if (item.type === "separator") {
+              return (
+                <hr key={item.key} className="context-menu-item-separator" />
+              );
             }
 
             return (
               <li
-                key={idx}
-                data-testid={actionName}
-                onClick={() => {
-                  // we need update state before executing the action in case
-                  // the action uses the appState it's being passed (that still
-                  // contains a defined contextMenu) to return the next state.
-                  onClose(() => {
-                    actionManager.executeAction(item, "contextMenu");
-                  });
-                }}
+                key={item.key}
+                data-testid={item.name}
+                onClick={item.onSelect}
               >
                 <button
                   type="button"
                   className={clsx("context-menu-item", {
-                    dangerous: actionName === "deleteSelectedElements",
-                    checkmark: item.checked?.(appState),
+                    dangerous: item.dangerous,
+                    checkmark: item.checked,
                   })}
                 >
-                  <div className="context-menu-item__label">{label}</div>
+                  <div className="context-menu-item__label">{item.label}</div>
                   <kbd className="context-menu-item__shortcut">
-                    {actionName
-                      ? getShortcutFromShortcutName(actionName as ShortcutName)
+                    {item.name
+                      ? getShortcutFromShortcutName(item.name as ShortcutName)
                       : ""}
                   </kbd>
                 </button>
@@ -129,6 +104,72 @@ export const ContextMenu = React.memo(
           })}
         </ul>
       </Popover>
+    );
+  },
+);
+
+type CustomContextMenuProps = ContextMenuProps & {
+  render: NonNullable<ExcalidrawProps["customContextMenuRenderer"]>;
+  container: HTMLDivElement | null;
+};
+
+/**
+ * Delegates context-menu *presentation* to a host-supplied renderer, using the
+ * same hooks and the same resolver as the native menu above — so the item set,
+ * order, labels, checked and dangerous state are identical by construction
+ * rather than by agreement.
+ *
+ * Everything else stays inside Excalidraw: hit testing, right-click selection,
+ * which actions exist, predicates, read-only filtering, and execution.
+ */
+export const CustomContextMenu = React.memo(
+  ({
+    actionManager,
+    items,
+    top,
+    left,
+    onClose,
+    render,
+    container,
+  }: CustomContextMenuProps) => {
+    const appState = useExcalidrawAppState();
+    const elements = useExcalidrawElements();
+
+    const resolvedItems = resolveContextMenuItems({
+      items,
+      elements,
+      appState,
+      actionManager,
+      translate: t,
+      onClose,
+    });
+
+    // `top`/`left` are container-relative (App subtracts the container rect
+    // when opening). Add it back so the renderer receives plain viewport
+    // coordinates and never has to know Excalidraw's coordinate system. The
+    // native state contract is untouched.
+    const rect = container?.getBoundingClientRect();
+
+    return (
+      <>
+        {render({
+          x: (rect?.left ?? 0) + left,
+          y: (rect?.top ?? 0) + top,
+          items: resolvedItems.map((item) =>
+            item.type === "separator"
+              ? { type: "separator", key: item.key }
+              : {
+                  type: "item",
+                  key: item.key,
+                  label: item.label,
+                  checked: item.checked,
+                  dangerous: item.dangerous,
+                  onSelect: item.onSelect,
+                },
+          ),
+          onClose: () => onClose(),
+        })}
+      </>
     );
   },
 );

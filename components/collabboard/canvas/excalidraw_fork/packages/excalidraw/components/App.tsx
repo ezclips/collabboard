@@ -435,7 +435,11 @@ import ConvertElementTypePopup, {
 
 import { activeConfirmDialogAtom } from "./ActiveConfirmDialog";
 import BraveMeasureTextError from "./BraveMeasureTextError";
-import { ContextMenu, CONTEXT_MENU_SEPARATOR } from "./ContextMenu";
+import {
+  ContextMenu,
+  CustomContextMenu,
+  CONTEXT_MENU_SEPARATOR,
+} from "./ContextMenu";
 import { activeEyeDropperAtom } from "./EyeDropper";
 import FollowMode from "./FollowMode/FollowMode";
 import LayerUI from "./LayerUI";
@@ -2201,20 +2205,29 @@ class App extends React.Component<AppProps, AppState> {
                           />
                         )}
 
-                        {this.state.contextMenu && (
-                          <ContextMenu
-                            items={this.state.contextMenu.items}
-                            top={this.state.contextMenu.top}
-                            left={this.state.contextMenu.left}
-                            actionManager={this.actionManager}
-                            onClose={(callback) => {
-                              this.setState({ contextMenu: null }, () => {
-                                this.focusContainer();
-                                callback?.();
-                              });
-                            }}
-                          />
-                        )}
+                        {this.state.contextMenu &&
+                          (this.props.customContextMenuRenderer ? (
+                            // Presentation is delegated; everything functional
+                            // above this line is unchanged, and both branches
+                            // share one resolver and one onClose.
+                            <CustomContextMenu
+                              items={this.state.contextMenu.items}
+                              top={this.state.contextMenu.top}
+                              left={this.state.contextMenu.left}
+                              actionManager={this.actionManager}
+                              onClose={this.closeContextMenu}
+                              render={this.props.customContextMenuRenderer}
+                              container={this.excalidrawContainerRef.current}
+                            />
+                          ) : (
+                            <ContextMenu
+                              items={this.state.contextMenu.items}
+                              top={this.state.contextMenu.top}
+                              left={this.state.contextMenu.left}
+                              actionManager={this.actionManager}
+                              onClose={this.closeContextMenu}
+                            />
+                          ))}
                         <StaticCanvas
                           canvas={this.canvas}
                           rc={this.rc}
@@ -11668,6 +11681,17 @@ class App extends React.Component<AppProps, AppState> {
     } catch (error: any) {
       this.setState({ isLoading: false, errorMessage: error.message });
     }
+  };
+
+  /**
+   * Shared by the native context menu and the optional custom renderer, so
+   * both dismiss through exactly the same path and ordering.
+   */
+  private closeContextMenu = (callback?: () => void) => {
+    this.setState({ contextMenu: null }, () => {
+      this.focusContainer();
+      callback?.();
+    });
   };
 
   private handleCanvasContextMenu = (
