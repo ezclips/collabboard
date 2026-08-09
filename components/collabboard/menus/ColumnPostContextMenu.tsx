@@ -6,10 +6,18 @@ import {
     Plus,
     Repeat,
     Trash2,
-    ChevronRight
 } from 'lucide-react';
-import * as ContextMenu from '@radix-ui/react-context-menu';
-import { cn } from '@/lib/utils';
+import {
+    ContextMenu,
+    ContextMenuContent,
+    ContextMenuItem,
+    ContextMenuSeparator,
+    ContextMenuShortcut,
+    ContextMenuSub,
+    ContextMenuSubContent,
+    ContextMenuSubTrigger,
+    ContextMenuTrigger,
+} from '@/components/ui/context-menu';
 import { ActionId, actionRegistry } from '@/lib/collabboard/ActionRegistry';
 import { Padlet } from '@/types/collabboard';
 
@@ -178,8 +186,10 @@ export function ColumnPostContextMenu({
         </div>
     ) : children;
 
+    const hasLayerActions = Boolean(onBringToFront || onBringForward || onSendBackward || onSendToBack);
+
     return (
-        <ContextMenu.Root
+        <ContextMenu
             {...{ open, onOpenChange: (nextOpen: boolean) => {
                 if (nextOpen) {
                     onSelect();
@@ -189,168 +199,152 @@ export function ColumnPostContextMenu({
                 onOpenChange?.(nextOpen);
             }} as any}
         >
-            <ContextMenu.Trigger asChild>
+            <ContextMenuTrigger asChild>
                 {wrappedTrigger}
-            </ContextMenu.Trigger>
+            </ContextMenuTrigger>
 
-            <ContextMenu.Portal>
-                <ContextMenu.Content
-                    className="min-w-[240px] bg-white/95 backdrop-blur-sm rounded-md overflow-hidden p-1 shadow-[0px_10px_38px_-10px_rgba(22,_23,_24,_0.35),_0px_10px_20px_-15px_rgba(22,_23,_24,_0.2)] border border-gray-200"
-                    style={{ zIndex: 9999 }}
-                >
-                    {addPostItems && addPostItems.length > 0 && onAddPostType ? (
-                        <ContextMenu.Sub>
-                            <ContextMenu.SubTrigger className="group text-[13px] leading-none text-slate-700 rounded-[3px] flex items-center h-8 px-2 relative select-none outline-none data-[disabled]:text-slate-300 data-[disabled]:pointer-events-none data-[highlighted]:bg-slate-100 data-[highlighted]:text-slate-900 cursor-pointer">
-                                <span className="flex-1">{addPostLabel}</span>
-                                <span className="ml-2 flex items-center"><ChevronRight size={14} /></span>
-                            </ContextMenu.SubTrigger>
-                            <ContextMenu.Portal>
-                                <ContextMenu.SubContent className="min-w-[180px] bg-white/95 backdrop-blur-sm rounded-md overflow-hidden p-1 shadow-lg border border-gray-200" style={{ zIndex: 10000 }}>
-                                    {addPostItems.map((item) => (
-                                        <ContextMenuItem
-                                            key={item.type}
-                                            label={item.label}
-                                            onClick={() => onAddPostType(item.type)}
-                                            icon={<Plus size={14} />}
-                                        />
-                                    ))}
-                                </ContextMenu.SubContent>
-                            </ContextMenu.Portal>
-                        </ContextMenu.Sub>
-                    ) : null}
-                    {/* Main actions - Edit post with pencil icon */}
-                    {hasOpenTargets ? (
-                        openTargets!.length === 1 ? (
-                            <ContextMenuItem
-                                label={`Edit ${resolveOpenTargetLabel(openTargets![0])}`}
-                                icon={<Edit2 size={16} />}
-                                onClick={() => onOpenTarget!(openTargets![0])}
-                            />
-                        ) : (
-                            <ContextMenu.Sub>
-                                <ContextMenu.SubTrigger className="group text-[13px] leading-none text-slate-700 rounded-[3px] flex items-center h-8 px-2 relative select-none outline-none data-[disabled]:text-slate-300 data-[disabled]:pointer-events-none data-[highlighted]:bg-slate-100 data-[highlighted]:text-slate-900 cursor-pointer">
-                                    <span className="flex-1">Edit post</span>
-                                    <span className="ml-2 flex items-center"><ChevronRight size={14} /></span>
-                                </ContextMenu.SubTrigger>
-                                <ContextMenu.Portal>
-                                    <ContextMenu.SubContent className="min-w-[160px] bg-white/95 backdrop-blur-sm rounded-md overflow-hidden p-1 shadow-lg border border-gray-200" style={{ zIndex: 10000 }}>
-                                        {openTargets!.map(target => (
-                                            <ContextMenuItem
-                                                key={target.id}
-                                                label={resolveOpenTargetLabel(target)}
-                                                onClick={() => onOpenTarget!(target)}
-                                                icon={<Edit2 size={14} />}
-                                            />
-                                        ))}
-                                    </ContextMenu.SubContent>
-                                </ContextMenu.Portal>
-                            </ContextMenu.Sub>
-                        )
-                    ) : (
-                        onEdit && <ContextMenuItem label="Edit post" icon={<Edit2 size={16} />} onClick={onEdit} />
-                    )}
-                    {/* Color picker */}
-                    {onChangeColor && (
-                        <div className="flex items-center gap-1 px-2 py-1">
-                            {["#fff", "#f87171", "#fbbf24", "#34d399", "#60a5fa", "#a78bfa"].map((color) => (
-                                <button
-                                    key={color}
-                                    className="w-5 h-5 rounded-full border-2 border-white shadow-sm hover:scale-110 transition-transform"
-                                    style={{ backgroundColor: color }}
-                                    onClick={() => onChangeColor(color)}
-                                    title={color}
-                                />
+            <ContextMenuContent className="min-w-[240px]" style={{ zIndex: 9999 }}>
+                {addPostItems && addPostItems.length > 0 && onAddPostType ? (
+                    <ContextMenuSub>
+                        <ContextMenuSubTrigger>{addPostLabel}</ContextMenuSubTrigger>
+                        <ContextMenuSubContent className="min-w-[180px]" style={{ zIndex: 10000 }}>
+                            {addPostItems.map((item) => (
+                                <ContextMenuItem
+                                    key={item.type}
+                                    icon={<Plus size={14} />}
+                                    onClick={() => onAddPostType(item.type)}
+                                >
+                                    {item.label}
+                                </ContextMenuItem>
                             ))}
-                        </div>
-                    )}
-                    {onEditPosition && (
+                        </ContextMenuSubContent>
+                    </ContextMenuSub>
+                ) : null}
+                {/* Main actions - Edit post with pencil icon */}
+                {hasOpenTargets ? (
+                    openTargets!.length === 1 ? (
                         <ContextMenuItem
-                            label={editPositionLabel}
                             icon={<Edit2 size={16} />}
-                            onClick={onEditPosition}
-                        />
-                    )}
-                    {onOpenGoogleMaps && (
-                        <ContextMenuItem
-                            label="Google Maps"
-                            onClick={onOpenGoogleMaps}
-                        />
-                    )}
-                    {onOpenOsm && (
-                        <ContextMenuItem
-                            label="OSM"
-                            onClick={onOpenOsm}
-                        />
-                    )}
-                    {enableInsertActions && onAddBefore && (
-                        <ContextMenuItem
-                            label="Add post before"
-                            icon={<Plus size={16} />}
-                            onClick={() => {
-                                if (onAddContainerAt) {
-                                    const currentPos = Number((padlet.metadata as any)?.sectionPosition || 0);
-                                    onAddContainerAt(currentPos);
-                                } else {
-                                    onAddBefore();
-                                }
-                            }}
-                        />
-                    )}
-                    {enableInsertActions && onAddAfter && (
-                        <ContextMenuItem
-                            label="Add post after"
-                            icon={<Plus size={16} />}
-                            onClick={() => {
-                                if (onAddContainerAt) {
-                                    const currentPos = Number((padlet.metadata as any)?.sectionPosition || 0);
-                                    onAddContainerAt(currentPos + 1);
-                                } else {
-                                    onAddAfter();
-                                }
-                            }}
-                        />
-                    )}
-                    {enableInsertActions && onDuplicate && (
-                        <ContextMenuItem
-                            label="Duplicate post"
-                            icon={<Repeat size={16} />}
-                            onClick={onDuplicate}
-                        />
-                    )}
-                    {(onBringToFront || onBringForward || onSendBackward || onSendToBack) && (
-                        <ContextMenu.Separator className="h-[1px] bg-gray-100 m-1" />
-                    )}
-                    {onSendToBack && <ContextMenuItem label="Send to Back" shortcut={["Ctrl", "Shift", "["]} onClick={() => handleAction('post.sendToBack')} />}
-                    {onSendBackward && <ContextMenuItem label="Send Backward" onClick={() => handleAction('post.sendBackward')} />}
-                    {onBringForward && <ContextMenuItem label="Bring Forward" onClick={() => handleAction('post.bringForward')} />}
-                    {onBringToFront && <ContextMenuItem label="Bring to Front" shortcut={["Ctrl", "Shift", "]"]} onClick={() => handleAction('post.bringToFront')} />}
-                    {onDelete && <ContextMenuItem label={deleteLabel} icon={<Trash2 size={16} />} onClick={onDelete} className="text-red-600 focus:text-red-600 focus:bg-red-50" />}
-                </ContextMenu.Content>
-            </ContextMenu.Portal>
-        </ContextMenu.Root>
-    );
-}
-
-function ContextMenuItem({ label, icon, shortcut, onClick, className }: { label: string; icon?: React.ReactNode; shortcut?: string[]; onClick: () => void; className?: string }) {
-    return (
-        <ContextMenu.Item
-            className={cn(
-                "group text-[13px] leading-none text-slate-700 rounded-[3px] flex items-center h-8 px-2 relative select-none outline-none data-[disabled]:text-slate-300 data-[disabled]:pointer-events-none data-[highlighted]:bg-slate-100 data-[highlighted]:text-slate-900 cursor-pointer",
-                className
-            )}
-            onSelect={onClick}
-        >
-            <span className="flex-1">{label}</span>
-            {shortcut && (
-                <div className="ml-auto pl-5 flex gap-1">
-                    {shortcut.map((s, i) => (
-                        <kbd key={i} className="min-w-[1.2rem] h-5 px-1 bg-slate-100 border border-slate-200 rounded text-[10px] flex items-center justify-center font-sans text-slate-500">
-                            {s}
-                        </kbd>
-                    ))}
-                </div>
-            )}
-            {icon && <span className="ml-2 flex items-center">{icon}</span>}
-        </ContextMenu.Item>
+                            onClick={() => onOpenTarget!(openTargets![0])}
+                        >
+                            {`Edit ${resolveOpenTargetLabel(openTargets![0])}`}
+                        </ContextMenuItem>
+                    ) : (
+                        <ContextMenuSub>
+                            <ContextMenuSubTrigger>Edit post</ContextMenuSubTrigger>
+                            <ContextMenuSubContent className="min-w-[160px]" style={{ zIndex: 10000 }}>
+                                {openTargets!.map(target => (
+                                    <ContextMenuItem
+                                        key={target.id}
+                                        icon={<Edit2 size={14} />}
+                                        onClick={() => onOpenTarget!(target)}
+                                    >
+                                        {resolveOpenTargetLabel(target)}
+                                    </ContextMenuItem>
+                                ))}
+                            </ContextMenuSubContent>
+                        </ContextMenuSub>
+                    )
+                ) : (
+                    onEdit && (
+                        <ContextMenuItem icon={<Edit2 size={16} />} onClick={onEdit}>
+                            Edit post
+                        </ContextMenuItem>
+                    )
+                )}
+                {/* Color picker */}
+                {onChangeColor && (
+                    <div className="flex items-center gap-1 px-2 py-1">
+                        {["#fff", "#f87171", "#fbbf24", "#34d399", "#60a5fa", "#a78bfa"].map((color) => (
+                            <button
+                                key={color}
+                                className="w-5 h-5 rounded-full border-2 border-white shadow-sm hover:scale-110 transition-transform"
+                                style={{ backgroundColor: color }}
+                                onClick={() => onChangeColor(color)}
+                                title={color}
+                            />
+                        ))}
+                    </div>
+                )}
+                {onEditPosition && (
+                    <ContextMenuItem icon={<Edit2 size={16} />} onClick={onEditPosition}>
+                        {editPositionLabel}
+                    </ContextMenuItem>
+                )}
+                {onOpenGoogleMaps && (
+                    <ContextMenuItem onClick={onOpenGoogleMaps}>
+                        Google Maps
+                    </ContextMenuItem>
+                )}
+                {onOpenOsm && (
+                    <ContextMenuItem onClick={onOpenOsm}>
+                        OSM
+                    </ContextMenuItem>
+                )}
+                {enableInsertActions && onAddBefore && (
+                    <ContextMenuItem
+                        icon={<Plus size={16} />}
+                        onClick={() => {
+                            if (onAddContainerAt) {
+                                const currentPos = Number((padlet.metadata as any)?.sectionPosition || 0);
+                                onAddContainerAt(currentPos);
+                            } else {
+                                onAddBefore();
+                            }
+                        }}
+                    >
+                        Add post before
+                    </ContextMenuItem>
+                )}
+                {enableInsertActions && onAddAfter && (
+                    <ContextMenuItem
+                        icon={<Plus size={16} />}
+                        onClick={() => {
+                            if (onAddContainerAt) {
+                                const currentPos = Number((padlet.metadata as any)?.sectionPosition || 0);
+                                onAddContainerAt(currentPos + 1);
+                            } else {
+                                onAddAfter();
+                            }
+                        }}
+                    >
+                        Add post after
+                    </ContextMenuItem>
+                )}
+                {enableInsertActions && onDuplicate && (
+                    <ContextMenuItem icon={<Repeat size={16} />} onClick={onDuplicate}>
+                        Duplicate post
+                    </ContextMenuItem>
+                )}
+                {hasLayerActions && <ContextMenuSeparator />}
+                {onSendToBack && (
+                    <ContextMenuItem onClick={() => handleAction('post.sendToBack')}>
+                        Send to Back
+                        <ContextMenuShortcut>Ctrl+Shift+[</ContextMenuShortcut>
+                    </ContextMenuItem>
+                )}
+                {onSendBackward && (
+                    <ContextMenuItem onClick={() => handleAction('post.sendBackward')}>
+                        Send Backward
+                    </ContextMenuItem>
+                )}
+                {onBringForward && (
+                    <ContextMenuItem onClick={() => handleAction('post.bringForward')}>
+                        Bring Forward
+                    </ContextMenuItem>
+                )}
+                {onBringToFront && (
+                    <ContextMenuItem onClick={() => handleAction('post.bringToFront')}>
+                        Bring to Front
+                        <ContextMenuShortcut>Ctrl+Shift+]</ContextMenuShortcut>
+                    </ContextMenuItem>
+                )}
+                {onDelete && (
+                    <ContextMenuItem icon={<Trash2 size={16} />} onClick={onDelete} variant="destructive">
+                        {deleteLabel}
+                    </ContextMenuItem>
+                )}
+            </ContextMenuContent>
+        </ContextMenu>
     );
 }
