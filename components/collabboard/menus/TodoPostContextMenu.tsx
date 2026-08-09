@@ -7,7 +7,6 @@ import {
     ContextMenuContent,
     ContextMenuItem,
     ContextMenuSeparator,
-    ContextMenuShortcut,
     ContextMenuTrigger,
 } from '@/components/ui/context-menu';
 import { ActionId, actionRegistry } from '@/lib/collabboard/ActionRegistry';
@@ -92,29 +91,24 @@ export function TodoPostContextMenu({
             <ContextMenuContent className="min-w-[220px]" style={{ zIndex: 9999 }}>
                 <ContextMenuItem onClick={() => handleAction('edit.cut')}>
                     Cut
-                    <ContextMenuShortcut>Ctrl+X</ContextMenuShortcut>
                 </ContextMenuItem>
                 <ContextMenuItem onClick={() => handleAction('edit.copy')}>
                     Copy
-                    <ContextMenuShortcut>Ctrl+C</ContextMenuShortcut>
                 </ContextMenuItem>
                 <ContextMenuItem onClick={() => handleAction('edit.duplicate')}>
                     Duplicate
-                    <ContextMenuShortcut>Ctrl+D</ContextMenuShortcut>
                 </ContextMenuItem>
                 <ContextMenuItem onClick={() => handleAction('post.addToLibrary')}>
                     Add to Library
                 </ContextMenuItem>
                 <ContextMenuItem onClick={() => handleAction('edit.delete')}>
                     Delete
-                    <ContextMenuShortcut>Backspace</ContextMenuShortcut>
                 </ContextMenuItem>
 
                 <ContextMenuSeparator />
 
                 <ContextMenuItem onClick={() => handleAction('post.rename')}>
                     Rename
-                    <ContextMenuShortcut>Return</ContextMenuShortcut>
                 </ContextMenuItem>
 
                 <ContextMenuSeparator />

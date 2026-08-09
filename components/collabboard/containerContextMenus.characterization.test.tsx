@@ -130,6 +130,13 @@ function openSubmenu(trigger: HTMLElement): HTMLElement {
 
 const trigger = <div data-testid="trigger">container</div>;
 
+/**
+ * PATCH 4H: CollabBoard context menus display no keyboard-shortcut hints. The
+ * shortcuts themselves are untouched — they live in
+ * components/collabboard/canvas/hooks/useCanvasShortcuts.ts, not in menu markup.
+ */
+const SHORTCUT_TEXT = /Ctrl\+|Alt\+|Shift\+|Backspace|Return|⌥|⌘/;
+
 describe('ColumnPostContextMenu', () => {
   it('renders the FreeformPadletCards-style minimal action set (no edit target, no color)', () => {
     const menu = openMenu(mount(
@@ -151,8 +158,8 @@ describe('ColumnPostContextMenu', () => {
     ));
     expect(inventory(menu)).toEqual([
       '---',
-      'Send to Back | Ctrl+Shift+[',
-      'Bring to Front | Ctrl+Shift+]',
+      'Send to Back',
+      'Bring to Front',
       'Delete post',
     ]);
   });
@@ -320,6 +327,24 @@ describe('ColumnPostContextMenu', () => {
     expect(source).not.toMatch(/function ContextMenuItem\b/);
     expect(source).toContain("from '@/components/ui/context-menu'");
   });
+
+  it('displays no keyboard-shortcut hints', () => {
+    const menu = openMenu(mount(
+      <ColumnPostContextMenu
+        padlet={padlet()}
+        onSelect={vi.fn()}
+        onDelete={vi.fn()}
+        onCut={vi.fn()}
+        onCopy={vi.fn()}
+        onBringToFront={vi.fn()}
+        onSendToBack={vi.fn()}
+      >
+        {trigger}
+      </ColumnPostContextMenu>,
+    ));
+    expect(menu.querySelectorAll('[data-slot="context-menu-shortcut"]')).toHaveLength(0);
+    expect(menu.textContent ?? '').not.toMatch(SHORTCUT_TEXT);
+  });
 });
 
 describe('WallContainerContextMenu', () => {
@@ -343,6 +368,28 @@ describe('WallContainerContextMenu', () => {
     // No layer callbacks supplied here, so no separator and no layer items —
     // matching the real WallCanvas call site, which never wires those props.
     expect(inventory(menu)).toEqual(['Edit Note', '[color-picker]', 'Delete post']);
+  });
+
+  it('displays no keyboard-shortcut hints, including on its layer actions', () => {
+    const menu = openMenu(mount(
+      <WallContainerContextMenu
+        padlet={padlet()}
+        onSelect={vi.fn()}
+        openTargets={[target('child-1', 'note')]}
+        onOpenTarget={vi.fn()}
+        getOpenTargetLabel={() => 'Note'}
+        onChangeColor={vi.fn()}
+        onEdit={vi.fn()}
+        onDuplicate={vi.fn()}
+        onDelete={vi.fn()}
+        onBringToFront={vi.fn()}
+        onSendToBack={vi.fn()}
+      >
+        {trigger}
+      </WallContainerContextMenu>,
+    ));
+    expect(menu.querySelectorAll('[data-slot="context-menu-shortcut"]')).toHaveLength(0);
+    expect(menu.textContent ?? '').not.toMatch(SHORTCUT_TEXT);
   });
 
   it('renders multiple openTargets as an "Edit post" submenu, in order', () => {
@@ -388,10 +435,10 @@ describe('WallContainerContextMenu', () => {
     expect(inventory(menu)).toEqual([
       'Edit post',
       '---',
-      'Send to Back | Ctrl+Shift+[',
+      'Send to Back',
       'Send Backward',
       'Bring Forward',
-      'Bring to Front | Ctrl+Shift+]',
+      'Bring to Front',
       'Delete wall post',
     ]);
   });

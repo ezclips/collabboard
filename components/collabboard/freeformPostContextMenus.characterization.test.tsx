@@ -5,7 +5,14 @@
 //
 // The expected inventories below were captured from the pre-migration
 // (raw-Radix) implementations at fac3383. They are the contract: action set,
-// order, labels, shortcuts and separator placement must not drift.
+// order, labels and separator placement must not drift.
+//
+// PATCH 4H removed every visible keyboard-shortcut hint from CollabBoard
+// context menus. The shortcuts themselves are unaffected -- they live in
+// components/collabboard/canvas/hooks/useCanvasShortcuts.ts and the editors,
+// not here. `inventory()` still renders a row as `Label | Shortcut` when a
+// shortcut slot is present, so these bare-label constants are themselves the
+// guard against a hint reappearing.
 import fs from 'node:fs';
 import path from 'node:path';
 import React from 'react';
@@ -98,45 +105,45 @@ function itemByLabel(menu: HTMLElement, label: string): HTMLElement {
 }
 
 const NOTE_INVENTORY = [
-  'Cut | Ctrl+X',
-  'Copy | Ctrl+C',
-  'Duplicate | Ctrl+D',
+  'Cut',
+  'Copy',
+  'Duplicate',
   'Create Synced Copy',
   'Add to Library',
-  'Delete | Backspace',
+  'Delete',
   '---',
   'Group into Column',
   '---',
   'Lock Position',
   '---',
-  'Send to Back | Ctrl+Shift+[',
+  'Send to Back',
   'Send Backward',
   'Bring Forward',
-  'Bring to Front | Ctrl+Shift+]',
+  'Bring to Front',
 ];
 
 const COMMENT_INVENTORY = [
-  'Paste | Ctrl+V',
-  'Cut | Ctrl+X',
-  'Copy | Ctrl+C',
-  'Duplicate | Ctrl+D',
+  'Paste',
+  'Cut',
+  'Copy',
+  'Duplicate',
   'Add to Library',
-  'Delete | Backspace',
+  'Delete',
   '---',
-  'Rename | Return',
+  'Rename',
   '---',
   'Lock Position',
   '---',
-  'Bring to Front | Ctrl+Shift+]',
-  'Send to Back | Ctrl+Shift+[',
+  'Bring to Front',
+  'Send to Back',
 ];
 
 const LINK_INVENTORY = [
-  'Cut | Ctrl+X',
-  'Copy | Ctrl+C',
-  'Duplicate | Ctrl+D',
+  'Cut',
+  'Copy',
+  'Duplicate',
   'Add to Library',
-  'Delete | Backspace',
+  'Delete',
   '---',
   'Add Image',
   'Copy link address',
@@ -145,34 +152,33 @@ const LINK_INVENTORY = [
   '---',
   'Lock Position',
   '---',
-  'Bring to Front | Ctrl+Shift+]',
-  'Send to Back | Ctrl+Shift+[',
+  'Bring to Front',
+  'Send to Back',
 ];
 
 const TODO_INVENTORY = [
-  'Cut | Ctrl+X',
-  'Copy | Ctrl+C',
-  'Duplicate | Ctrl+D',
+  'Cut',
+  'Copy',
+  'Duplicate',
   'Add to Library',
-  'Delete | Backspace',
+  'Delete',
   '---',
-  'Rename | Return',
+  'Rename',
   '---',
   'Group into Column',
   '---',
   'Lock Position',
   '---',
-  // Todo is the one menu whose z-order actions carry no shortcuts.
   'Bring to Front',
   'Send to Back',
 ];
 
 const IMAGE_INVENTORY = [
-  'Cut | Ctrl+X',
-  'Copy | Ctrl+C',
-  'Duplicate | Ctrl+D',
+  'Cut',
+  'Copy',
+  'Duplicate',
   'Add to Library',
-  'Delete | Backspace',
+  'Delete',
   '---',
   'Replace Image',
   'Download Original Image',
@@ -182,8 +188,8 @@ const IMAGE_INVENTORY = [
   '---',
   'Lock Position',
   '---',
-  'Bring to Front | Ctrl+Shift+]',
-  'Send to Back | Ctrl+Shift+[',
+  'Bring to Front',
+  'Send to Back',
 ];
 
 const trigger = <div data-testid="trigger">post</div>;
@@ -242,9 +248,16 @@ const MENUS = [
 ] as const;
 
 describe.each(MENUS)('$name post context menu', ({ name, expected, file, render }) => {
-  it('preserves its action set, order, labels and shortcuts', () => {
+  it('preserves its action set, order and labels', () => {
     const menu = openMenu(mount(render()));
     expect(inventory(menu)).toEqual(expected);
+  });
+
+  it('displays no keyboard-shortcut hints', () => {
+    const menu = openMenu(mount(render()));
+    expect(menu.querySelectorAll('[data-slot="context-menu-shortcut"]')).toHaveLength(0);
+    // Nothing hand-written stands in for the removed slot either.
+    expect(menu.textContent ?? '').not.toMatch(/Ctrl+|Alt+|Shift+|Backspace|Return|⌥|⌘/);
   });
 
   it('renders every action through the shared shell primitives', () => {

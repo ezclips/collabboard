@@ -175,15 +175,12 @@ const ROOT_ACTIONS = [
   'Change Alignment...',
 ];
 
-const ROOT_SHORTCUTS = {
-  Cut: 'Ctrl+X',
-  Copy: 'Ctrl+C',
-  Paste: 'Ctrl+V',
-  'Add Row Above': 'Alt+↑',
-  'Add Row Below': 'Alt+↓',
-  'Add Column Left': 'Alt+←',
-  'Add Column Right': 'Alt+→',
-};
+/**
+ * PATCH 4H: CollabBoard context menus display no keyboard-shortcut hints. The
+ * shortcuts themselves are untouched — they live in the editors and in
+ * components/collabboard/canvas/hooks/useCanvasShortcuts.ts, not in menu markup.
+ */
+const SHORTCUT_TEXT = /Ctrl\+|Alt\+|Shift\+|Backspace|Return|⌥|⌘|↑|↓|←|→/;
 
 const ALIGNMENT_ITEMS = ['Left', 'Center', 'Right', 'Top', 'Middle', 'Bottom'];
 
@@ -193,9 +190,15 @@ describe('TableCellContextMenu', () => {
     expect(rowLabels()).toEqual(ROOT_ACTIONS);
   });
 
-  it('preserves every keyboard shortcut, and adds none to the delete/alignment rows', () => {
+  it('displays no keyboard-shortcut hints on any row, root or submenu', () => {
     renderMenu();
-    expect(rowShortcuts()).toEqual(ROOT_SHORTCUTS);
+    expect(rowShortcuts()).toEqual({});
+    expect(surface().querySelectorAll('[data-slot="context-menu-shortcut"]')).toHaveLength(0);
+    expect(surface().textContent ?? '').not.toMatch(SHORTCUT_TEXT);
+
+    openAlignmentSubmenu();
+    expect(openSubSurface().querySelectorAll('[data-slot="context-menu-shortcut"]')).toHaveLength(0);
+    expect(openSubSurface().textContent ?? '').not.toMatch(SHORTCUT_TEXT);
   });
 
   it('renders exactly three separators between the four root groups', () => {
@@ -542,13 +545,33 @@ describe('TableCellContextMenu shared-shell adoption', () => {
     expect(el.querySelectorAll('[data-slot="context-menu-separator"]')).toHaveLength(3);
   });
 
-  it('uses the shared right-aligned shortcut slot', () => {
+  it('reserves no right-side shortcut column on its rows', () => {
     renderMenu();
-    const cut = rowByLabel('Cut');
-    const shortcut = cut.querySelector<HTMLElement>('[data-slot="context-menu-shortcut"]');
-    expect(shortcut).not.toBeNull();
-    expect(shortcut!.textContent).toBe('Ctrl+X');
-    expect(shortcut!.className).toContain('ml-auto');
+    // Rows are icon + label only; the shared shortcut slot is simply unused.
+    expect(rowByLabel('Cut').querySelector('[data-slot="context-menu-shortcut"]')).toBeNull();
+    expect(rowByLabel('Cut').textContent?.trim()).toBe('Cut');
+  });
+
+  it('does not remove the shared ContextMenuShortcut primitive itself', async () => {
+    // 4H is a consumer-presentation change; the shared capability stays public.
+    const mod = await import('@/components/ui/context-menu');
+    expect(mod).toHaveProperty('ContextMenuShortcut');
+  });
+
+  it('leaves the real keyboard shortcut handlers in place', () => {
+    // The hints are gone from menu markup; the bindings that make Ctrl+Shift+[
+    // and friends work are a separate concern and must be untouched.
+    const shortcuts = fs.readFileSync(
+      path.join(process.cwd(), 'components/collabboard/canvas/hooks/useCanvasShortcuts.ts'),
+      'utf8',
+    );
+    expect(shortcuts).toContain('ctrlKey');
+    expect(shortcuts).toContain('metaKey');
+    expect(shortcuts).toMatch(/e\.key === '\['/);
+    expect(shortcuts).toMatch(/e\.key === '\]'/);
+    expect(shortcuts).toMatch(/toLowerCase\(\) === 'a'/);
+    expect(shortcuts).toMatch(/toLowerCase\(\) === 'z'/);
+    expect(shortcuts).toContain("e.key === 'Delete'");
   });
 
   it('marks the two delete rows with the shared destructive variant', () => {

@@ -3,7 +3,6 @@
 import React from 'react';
 import { Check } from "lucide-react";
 import {
-    ContextMenuShortcut,
     PositionedContextMenu,
     PositionedContextMenuItem,
     PositionedContextMenuSeparator,
@@ -77,34 +76,27 @@ export function TableCellContextMenu({
         >
             <PositionedContextMenuItem onSelect={() => onCut?.()}>
                 Cut
-                <ContextMenuShortcut>Ctrl+X</ContextMenuShortcut>
             </PositionedContextMenuItem>
             <PositionedContextMenuItem onSelect={() => onCopy?.()}>
                 Copy
-                <ContextMenuShortcut>Ctrl+C</ContextMenuShortcut>
             </PositionedContextMenuItem>
             <PositionedContextMenuItem onSelect={() => onPaste?.()}>
                 Paste
-                <ContextMenuShortcut>Ctrl+V</ContextMenuShortcut>
             </PositionedContextMenuItem>
 
             <PositionedContextMenuSeparator />
 
             <PositionedContextMenuItem onSelect={() => onAddRowAbove?.()}>
                 Add Row Above
-                <ContextMenuShortcut>Alt+↑</ContextMenuShortcut>
             </PositionedContextMenuItem>
             <PositionedContextMenuItem onSelect={() => onAddRowBelow?.()}>
                 Add Row Below
-                <ContextMenuShortcut>Alt+↓</ContextMenuShortcut>
             </PositionedContextMenuItem>
             <PositionedContextMenuItem onSelect={() => onAddColumnLeft?.()}>
                 Add Column Left
-                <ContextMenuShortcut>Alt+←</ContextMenuShortcut>
             </PositionedContextMenuItem>
             <PositionedContextMenuItem onSelect={() => onAddColumnRight?.()}>
                 Add Column Right
-                <ContextMenuShortcut>Alt+→</ContextMenuShortcut>
             </PositionedContextMenuItem>
 
             <PositionedContextMenuSeparator />

@@ -12,7 +12,6 @@ import {
     ContextMenuContent,
     ContextMenuItem,
     ContextMenuSeparator,
-    ContextMenuShortcut,
     ContextMenuSub,
     ContextMenuSubContent,
     ContextMenuSubTrigger,
@@ -320,7 +319,6 @@ export function ColumnPostContextMenu({
                 {onSendToBack && (
                     <ContextMenuItem onClick={() => handleAction('post.sendToBack')}>
                         Send to Back
-                        <ContextMenuShortcut>Ctrl+Shift+[</ContextMenuShortcut>
                     </ContextMenuItem>
                 )}
                 {onSendBackward && (
@@ -336,7 +334,6 @@ export function ColumnPostContextMenu({
                 {onBringToFront && (
                     <ContextMenuItem onClick={() => handleAction('post.bringToFront')}>
                         Bring to Front
-                        <ContextMenuShortcut>Ctrl+Shift+]</ContextMenuShortcut>
                     </ContextMenuItem>
                 )}
                 {onDelete && (
