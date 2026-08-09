@@ -33,10 +33,22 @@ describe('PATCH-149B2-ii §32.14: all eight entry points use the shared guard', 
     expect(body).not.toMatch(/setDocumentModalDestination|setPadletToEdit/);
   });
 
-  it('every setDocumentModalDestination( call in CanvasClient sits inside a guarded context', () => {
-    // 6 direct writers: the guard machinery, creation (via handleToolClick's guard), and
+  it('every setDocumentModalDestination( call in CanvasClient sits inside a guarded context, plus the one deliberate unconditional writer', () => {
+    // 6 guarded writers: the guard machinery, creation (via handleToolClick's guard), and
     // executePadletTypeEditor -- reachable only once the guard has authorized (§36).
-    expect((canvasClientSrc.match(/setDocumentModalDestination\(/g) || []).length).toBe(6);
+    // A 7th, UNGUARDED writer was added inside closeAllToolbarLaunchedUi() (the
+    // ghosting-bug lifecycle patch): opening any mutually-exclusive post editor
+    // now unconditionally clears documentModalDestination too, so a stale
+    // Document editor can never survive underneath a newly-opened editor. This
+    // is a deliberate, scoped exception -- for this development phase, unsaved
+    // Document content may be discarded on switch (sample/dev data only); it
+    // does NOT route through resolveDocumentSwitch/the dirty guard. If dirty-
+    // draft preservation on cross-editor switch becomes a real requirement,
+    // this writer is where that guard would need to be added.
+    expect((canvasClientSrc.match(/setDocumentModalDestination\(/g) || []).length).toBe(7);
+    const cleanupStart = canvasClientSrc.indexOf('const closeAllToolbarLaunchedUi = useCallback(() => {');
+    const cleanupBody = canvasClientSrc.slice(cleanupStart, canvasClientSrc.indexOf('}, [', cleanupStart));
+    expect(cleanupBody).toContain('setDocumentModalDestination(null);');
   });
 });
 

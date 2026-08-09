@@ -3264,6 +3264,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   }, [canUseFreeformEditButton]);
 
   const handleAddPostToSection = useCallback((sectionId: number) => {
+    closeAllToolbarLaunchedUi();
     setPadletToEdit({
       id: 'new',  // Mark as new so handleSaveNote does INSERT not UPDATE
       board_id: canvasId!,
@@ -3780,6 +3781,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     if (!padlet || padlet.type !== 'todo') return;
 
     // Open the Todo Editor to allow renaming
+    closeAllToolbarLaunchedUi();
     setPadletToEdit(padlet);
     setIsTodoEditorOpen(true);
   };
@@ -3790,6 +3792,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     if (!padlet || padlet.type !== 'container') return;
 
     // Open the Container Editor to allow renaming
+    closeAllToolbarLaunchedUi();
     setPadletToEdit(padlet);
     setIsContainerEditorOpen(true);
   };
@@ -3800,6 +3803,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     if (!padlet || padlet.type !== 'comment') return;
 
     // Open the Comment Editor
+    closeAllToolbarLaunchedUi();
     setPadletToEdit(padlet);
     setIsCommentEditorOpen(true);
   };
@@ -3807,7 +3811,12 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   const openImagePostEditor = (padlet: Padlet) => {
     if (padlet.type !== 'image') return;
     closeDrawingSelectedShapePanel();
-    closeAllToolbars({ imageToolbar: true });
+    // Full canonical cleanup (was closeAllToolbars({ imageToolbar: true }))
+    // so a stale Note/Todo/Link/etc. editor or Document destination never
+    // survives underneath the toolbar this function is about to open. This
+    // clears imageToolbarPadletId too, but the next line immediately sets
+    // it back to the correct id, so the net effect on it is unchanged.
+    closeAllToolbarLaunchedUi();
     setPadletToEdit(null);
     setIsImageEditorOpen(false);
     setImageToolbarPadletId(padlet.id);
@@ -4023,6 +4032,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
 
       fetchData();
       toast.success('Post added');
+      closeAllToolbarLaunchedUi();
       setPadletToEdit(newPadlet);
       setIsNoteEditorOpen(true);
     } catch (err) {
@@ -5082,6 +5092,16 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         viewDrawingPadlet: null,
       },
     });
+    // Document lives outside the EDITORS_PATCH reducer (its own useState,
+    // guarded separately by the dirty-switch mechanism for IN-Document
+    // navigation) -- clear it here too so opening any other mutually-
+    // exclusive post editor never leaves a stale Document mounted
+    // underneath it. Unconditional: this patch treats all post editors as
+    // strictly mutually exclusive, so no separate dirty-preservation path
+    // is threaded through this cleanup call.
+    setDocumentModalDestination(null);
+    setDocumentIsDirty(false);
+    setQueuedDocumentAction(null);
     setIsCanvasShareModalOpen(false);
     setIsCanvasSettingsModalOpen(false);
     setIsImportBrowserOpen(false);
@@ -6631,6 +6651,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                 onOpenPost={(post: Padlet) => {
                   const destination = selectDocumentModalDestination(post, canUseFreeformEditButton);
                   if (destination) { requestOpenDocument(post, destination); return; }
+                  closeAllToolbarLaunchedUi();
                   setPadletToEdit(post);
                   setIsNoteEditorOpen(true);
                 }}
@@ -6724,6 +6745,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                     onOpenPost={(post) => {
                       const destination = selectDocumentModalDestination(post, canUseFreeformEditButton);
                       if (destination) { requestOpenDocument(post, destination); return; }
+                      closeAllToolbarLaunchedUi();
                       setPadletToEdit(post);
                       setIsNoteEditorOpen(true);
                     }}
@@ -6815,7 +6837,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                   }
                 }}
                 onPadletEdit={(padlet) => {
-                  closeAllToolbars();
+                  // wallOrderedPadlets is filtered to root containers only,
+                  // so padlet.type === 'container' is guaranteed here.
+                  closeAllToolbarLaunchedUi();
                   setPadletToEdit(padlet);
                   setIsContainerEditorOpen(true);
                 }}
@@ -6887,7 +6911,13 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                   openPadletInTypeEditor(padlet);
                 }}
                 onEditPadletAsPost={(padlet) => {
-                  closeAllToolbars();
+                  // Deliberately opens the Note editor for a container padlet
+                  // (CanvasContextMenu only routes here when isContainerType
+                  // is true) -- a Drawing-layout-specific "Edit Post" action
+                  // distinct from the full ContainerEditor. Do not reroute
+                  // this through executePadletTypeEditor, which would open
+                  // ContainerEditor instead and change what this does.
+                  closeAllToolbarLaunchedUi();
                   setPadletToEdit(padlet);
                   setIsNoteEditorOpen(true);
                 }}
@@ -7029,6 +7059,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                   onOpenDocument={openDocumentFromPreview}
                   onEditPinContainer={canUseFreeformEditButton ? ((post) => {
                     if (post.type !== 'container') return;
+                    closeAllToolbarLaunchedUi();
                     setPadletToEdit(post);
                     setIsContainerEditorOpen(true);
                   }) : undefined}
@@ -7751,7 +7782,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
               isOpen={isImportBrowserOpen}
               onClose={() => setIsImportBrowserOpen(false)}
               onImportResolved={(resolved) => {
-                setIsImportBrowserOpen(false);
+                closeAllToolbarLaunchedUi();
                 setPadletToEdit({
                   id: 'new',
                   board_id: canvasId,
@@ -7843,6 +7874,12 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                               }}
                               onEditContainer={(p) => {
                                 if (!canUseFreeformEditButton) return;
+                                // Uses the same shared isContainerEditorOpen/
+                                // padletToEdit state (and ContainerEditor
+                                // instance) as every other layout, so it needs
+                                // the same canonical cleanup to preserve the
+                                // global mutual-exclusivity invariant.
+                                closeAllToolbarLaunchedUi();
                                 setSchedulerPopoverPadletId(null);
                                 setPadletToEdit(p);
                                 setIsContainerEditorOpen(true);
