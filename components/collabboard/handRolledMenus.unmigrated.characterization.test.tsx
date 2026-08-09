@@ -1,25 +1,27 @@
 // @vitest-environment jsdom
 //
-// Characterization + hard-stop documentation for the three hand-rolled
-// context menus that PATCH 4 deliberately did NOT migrate onto the shared
-// shell in components/ui/context-menu.tsx:
+// Characterization + hard-stop documentation for the hand-rolled context
+// menus that PATCH 4 deliberately did NOT migrate onto the shared shell in
+// components/ui/context-menu.tsx:
 //
-//   - components/collabboard/menus/LineContextMenu.tsx
 //   - components/collabboard/menus/TableCellContextMenu.tsx
 //   - components/collabboard/canvas/ui/FreeformCanvasBoardMenu.tsx
 //
-// All three are opened via externally-computed, raw {x,y} screen coordinates
+// Both are opened via externally-computed, raw {x,y} screen coordinates
 // captured from a native contextmenu handler that lives in a DIFFERENT
-// component/file than the menu itself (SimpleLineRenderer for lines, a table
-// cell's own onContextMenu in TableEditor, and the Freeform canvas
-// background in CanvasClient/FreeformPadletCards). None of them wrap a real
-// trigger element the shared Radix-based shell could attach to; adopting it
-// would require either a synthetic right-click on a hidden fake trigger, or
-// restructuring the owning host component -- both explicitly forbidden by
-// this patch's brief. See the PATCH 4 report for the full rationale.
+// component/file than the menu itself (a table cell's own onContextMenu in
+// TableEditor, and the Freeform canvas background in
+// CanvasClient/FreeformPadletCards). Neither wraps a real trigger element the
+// Radix-based shell could attach to. See the PATCH 4 report for the rationale.
 //
-// These tests freeze each menu's CURRENT (unmigrated) behavior so any future
-// accidental edit to these files is caught, and prove they still use their
+// LineContextMenu was the third member of this group. PATCH 4B added the
+// positioned shared primitive that removes the blocker, and PATCH 4C migrated
+// it; its far richer coverage now lives in
+// components/collabboard/lineContextMenu.characterization.test.tsx, so its
+// block was removed from here rather than duplicated.
+//
+// These tests freeze each remaining menu's CURRENT (unmigrated) behavior so
+// any future accidental edit is caught, and prove they still use their
 // original hand-rolled raw-div/button markup, not the shared shell.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -27,8 +29,6 @@ import React from 'react';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { CanvasLine } from '@/types/collabboard';
-import { LineContextMenu } from './menus/LineContextMenu';
 import { TableCellContextMenu } from './menus/TableCellContextMenu';
 import FreeformCanvasBoardMenu, { FREEFORM_BOARD_TOOL_ITEMS } from './canvas/ui/FreeformCanvasBoardMenu';
 
@@ -66,89 +66,6 @@ function menuItemLabels(container: HTMLElement): string[] {
 function hover(target: HTMLElement) {
   target.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true, relatedTarget: document.body }));
 }
-
-function line(overrides: Partial<CanvasLine> = {}): CanvasLine {
-  return { id: 'line-1', start_arrow: false, end_arrow: false, color: '#3b82f6', ...overrides } as CanvasLine;
-}
-
-// ── LineContextMenu ──────────────────────────────────────────────────────
-describe('LineContextMenu (unmigrated -- hard stop)', () => {
-  it('preserves its action set and order', () => {
-    const dom = mount(
-      <LineContextMenu isOpen position={{ x: 40, y: 60 }} line={line()} onClose={vi.fn()} />,
-    );
-    expect(buttonLabels(dom)).toEqual([
-      'Cut',
-      'Duplicate',
-      'Delete',
-      'Add Start Arrow',
-      'Add End Arrow',
-      'Bring to Front',
-      'Send to Back',
-      // 10 color-preset swatch buttons carry no text.
-      '', '', '', '', '', '', '', '', '', '',
-      'Choose Custom Color...',
-    ]);
-  });
-
-  it('flips arrow-toggle labels from the line\'s current state', () => {
-    const dom = mount(
-      <LineContextMenu isOpen position={{ x: 0, y: 0 }} line={line({ start_arrow: true, end_arrow: true })} onClose={vi.fn()} />,
-    );
-    expect(buttonLabels(dom)).toContain('Remove Start Arrow');
-    expect(buttonLabels(dom)).toContain('Remove End Arrow');
-  });
-
-  it('renders at the exact requested screen coordinates', () => {
-    const dom = mount(
-      <LineContextMenu isOpen position={{ x: 123, y: 456 }} line={line()} onClose={vi.fn()} />,
-    );
-    const menu = dom.firstElementChild as HTMLElement;
-    expect(menu.style.left).toBe('123px');
-    expect(menu.style.top).toBe('456px');
-  });
-
-  it('highlights the swatch matching the line\'s current color', () => {
-    const dom = mount(
-      <LineContextMenu isOpen position={{ x: 0, y: 0 }} line={line({ color: '#ef4444' })} onClose={vi.fn()} />,
-    );
-    const selected = dom.querySelector('button[title="#ef4444"]')!;
-    const unselected = dom.querySelector('button[title="#3b82f6"]')!;
-    expect(selected.className).toContain('ring-1');
-    expect(unselected.className).not.toContain('ring-1');
-  });
-
-  it('invokes the matching callback and closes on action click', () => {
-    const onDelete = vi.fn();
-    const onClose = vi.fn();
-    const dom = mount(
-      <LineContextMenu isOpen position={{ x: 0, y: 0 }} line={line()} onClose={onClose} onDelete={onDelete} />,
-    );
-    act(() => {
-      Array.from(dom.querySelectorAll('button')).find((b) => b.textContent === 'Delete')!
-        .dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-    });
-    expect(onDelete).toHaveBeenCalledTimes(1);
-    expect(onClose).toHaveBeenCalledTimes(1);
-  });
-
-  it('renders nothing when closed or when there is no line', () => {
-    const dom1 = mount(<LineContextMenu isOpen={false} position={{ x: 0, y: 0 }} line={line()} onClose={vi.fn()} />);
-    expect(dom1.firstChild).toBeNull();
-    const dom2 = mount(<LineContextMenu isOpen position={{ x: 0, y: 0 }} line={null} onClose={vi.fn()} />);
-    expect(dom2.firstChild).toBeNull();
-  });
-
-  it('remains hand-rolled: no shared-shell import, no trigger-based Radix usage', () => {
-    const source = fs.readFileSync(
-      path.join(process.cwd(), 'components/collabboard/menus/LineContextMenu.tsx'),
-      'utf8',
-    );
-    expect(source).not.toContain("from '@/components/ui/context-menu'");
-    expect(source).toMatch(/isOpen:\s*boolean/);
-    expect(source).toMatch(/position:\s*\{\s*x:\s*number;\s*y:\s*number\s*\}/);
-  });
-});
 
 // ── TableCellContextMenu ─────────────────────────────────────────────────
 describe('TableCellContextMenu (unmigrated -- hard stop)', () => {
