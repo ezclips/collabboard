@@ -707,12 +707,12 @@ describe('container menu prop signatures are frozen', () => {
   });
 
   it('no caller was touched to accommodate the new presentation', () => {
-    // Including the tracked historical copies, which must keep compiling.
+    // The two historical copies this list also covered (brocken_WallCanvas,
+    // 1stnewRowCanvas) were deleted as dead in PATCH 7C; the live callers below
+    // are the whole caller set now.
     for (const relative of [
       'components/canvas/WallCanvas.tsx',
       'components/canvas/RowCanvas.tsx',
-      'components/canvas/brocken_WallCanvas.tsx',
-      'components/canvas/1stnewRowCanvas.tsx',
     ]) {
       const src = fs.readFileSync(path.join(process.cwd(), relative), 'utf8');
       expect(src, `${relative} must not know about swatch primitives`)
