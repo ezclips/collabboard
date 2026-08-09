@@ -1,35 +1,35 @@
 // @vitest-environment jsdom
 //
-// Characterization + hard-stop documentation for the hand-rolled context
-// menus that PATCH 4 deliberately did NOT migrate onto the shared shell in
+// Characterization + hard-stop documentation for the one hand-rolled context
+// menu still not migrated onto the shared shell in
 // components/ui/context-menu.tsx:
 //
-//   - components/collabboard/menus/TableCellContextMenu.tsx
 //   - components/collabboard/canvas/ui/FreeformCanvasBoardMenu.tsx
 //
-// Both are opened via externally-computed, raw {x,y} screen coordinates
-// captured from a native contextmenu handler that lives in a DIFFERENT
-// component/file than the menu itself (a table cell's own onContextMenu in
-// TableEditor, and the Freeform canvas background in
-// CanvasClient/FreeformPadletCards). Neither wraps a real trigger element the
-// Radix-based shell could attach to. See the PATCH 4 report for the rationale.
+// It is opened via externally-computed, raw {x,y} screen coordinates captured
+// from a native contextmenu handler on the Freeform canvas background, which
+// lives in CanvasClient/FreeformPadletCards rather than in the menu itself.
+// See the PATCH 4 report for the full rationale.
 //
-// LineContextMenu was the third member of this group. PATCH 4B added the
-// positioned shared primitive that removes the blocker, and PATCH 4C migrated
-// it; its far richer coverage now lives in
-// components/collabboard/lineContextMenu.characterization.test.tsx, so its
-// block was removed from here rather than duplicated.
+// LineContextMenu and TableCellContextMenu were the other two members of this
+// group. PATCH 4B added the positioned shared primitive that removed the
+// blocker; PATCH 4C migrated the line menu and PATCH 4D the table cell menu.
+// Their deferral assertions here are therefore obsolete -- keeping them would
+// assert the opposite of the shipped behavior -- and their far richer coverage
+// now lives in dedicated suites rather than being duplicated here:
 //
-// These tests freeze each remaining menu's CURRENT (unmigrated) behavior so
-// any future accidental edit is caught, and prove they still use their
-// original hand-rolled raw-div/button markup, not the shared shell.
+//   - components/collabboard/lineContextMenu.characterization.test.tsx
+//   - components/collabboard/tableCellContextMenu.characterization.test.tsx
+//
+// These tests freeze the remaining menu's CURRENT (unmigrated) behavior so any
+// future accidental edit is caught, and prove it still uses its original
+// hand-rolled raw-div/button markup, not the shared shell.
 import fs from 'node:fs';
 import path from 'node:path';
 import React from 'react';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { TableCellContextMenu } from './menus/TableCellContextMenu';
 import FreeformCanvasBoardMenu, { FREEFORM_BOARD_TOOL_ITEMS } from './canvas/ui/FreeformCanvasBoardMenu';
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
@@ -52,105 +52,6 @@ afterEach(() => {
 function buttonLabels(container: HTMLElement): string[] {
   return Array.from(container.querySelectorAll('button')).map((b) => b.textContent?.trim() ?? '');
 }
-
-/** MenuItem-style buttons in TableCellContextMenu bake their shortcut text
- *  into the same button; this extracts just the label span's own text. */
-function menuItemLabels(container: HTMLElement): string[] {
-  return Array.from(container.querySelectorAll('button')).map((b) => {
-    const labelSpan = b.querySelector('span.flex.items-center.gap-2');
-    return (labelSpan?.textContent ?? b.textContent ?? '').trim();
-  });
-}
-
-/** React 17+ synthesizes onMouseEnter/onMouseLeave from native mouseover/mouseout. */
-function hover(target: HTMLElement) {
-  target.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true, relatedTarget: document.body }));
-}
-
-// ── TableCellContextMenu ─────────────────────────────────────────────────
-describe('TableCellContextMenu (unmigrated -- hard stop)', () => {
-  it('preserves its action set and order', () => {
-    const dom = mount(
-      <TableCellContextMenu isOpen position={{ x: 0, y: 0 }} onClose={vi.fn()} />,
-    );
-    expect(menuItemLabels(dom)).toEqual([
-      'Cut',
-      'Copy',
-      'Paste',
-      'Add Row Above',
-      'Add Row Below',
-      'Add Column Left',
-      'Add Column Right',
-      'Delete Row',
-      'Delete Column',
-      'Change Alignment...',
-    ]);
-    // Shortcuts remain attached, just rendered in the same button as the label.
-    const cut = Array.from(dom.querySelectorAll('button')).find((b) => b.textContent?.startsWith('Cut'))!;
-    expect(cut.textContent).toBe('CutCtrl+X');
-  });
-
-  it('renders destructive styling on Delete Row / Delete Column only', () => {
-    const dom = mount(<TableCellContextMenu isOpen position={{ x: 0, y: 0 }} onClose={vi.fn()} />);
-    const buttons = Array.from(dom.querySelectorAll('button'));
-    const destructive = buttons.filter((b) => b.className.includes('text-red-600'));
-    expect(destructive.map((b) => b.textContent?.trim())).toEqual(['Delete Row', 'Delete Column']);
-  });
-
-  it('renders at the exact requested screen coordinates', () => {
-    const dom = mount(<TableCellContextMenu isOpen position={{ x: 77, y: 88 }} onClose={vi.fn()} />);
-    const menu = dom.firstElementChild as HTMLElement;
-    expect(menu.style.left).toBe('77px');
-    expect(menu.style.top).toBe('88px');
-  });
-
-  it('opens the alignment submenu on hover, with default-state checkmarks', () => {
-    const dom = mount(<TableCellContextMenu isOpen position={{ x: 0, y: 0 }} onClose={vi.fn()} />);
-    const trigger = Array.from(dom.querySelectorAll('button'))
-      .find((b) => b.textContent?.includes('Change Alignment'))!.parentElement!;
-    expect(menuItemLabels(dom)).not.toContain('Left');
-    act(() => {
-      hover(trigger);
-    });
-    expect(menuItemLabels(dom)).toEqual(
-      expect.arrayContaining(['Left', 'Center', 'Right', 'Top', 'Middle', 'Bottom']),
-    );
-    const left = Array.from(dom.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'Left')!;
-    expect(left.querySelector('svg')).not.toBeNull(); // checked by default (no currentAlign set)
-  });
-
-  it('invokes onAlignChange with the clicked alignment and closes', () => {
-    const onAlignChange = vi.fn();
-    const onClose = vi.fn();
-    const dom = mount(
-      <TableCellContextMenu isOpen position={{ x: 0, y: 0 }} onClose={onClose} onAlignChange={onAlignChange} currentVerticalAlign="middle" />,
-    );
-    const trigger = Array.from(dom.querySelectorAll('button'))
-      .find((b) => b.textContent?.includes('Change Alignment'))!.parentElement!;
-    act(() => { hover(trigger); });
-    act(() => {
-      Array.from(dom.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'Right')!
-        .dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-    });
-    expect(onAlignChange).toHaveBeenCalledWith('right', 'middle');
-    expect(onClose).toHaveBeenCalledTimes(1);
-  });
-
-  it('renders nothing when closed', () => {
-    const dom = mount(<TableCellContextMenu isOpen={false} position={{ x: 0, y: 0 }} onClose={vi.fn()} />);
-    expect(dom.firstChild).toBeNull();
-  });
-
-  it('remains hand-rolled: no shared-shell import, raw isOpen/position contract', () => {
-    const source = fs.readFileSync(
-      path.join(process.cwd(), 'components/collabboard/menus/TableCellContextMenu.tsx'),
-      'utf8',
-    );
-    expect(source).not.toContain("from '@/components/ui/context-menu'");
-    expect(source).toMatch(/isOpen:\s*boolean/);
-    expect(source).toMatch(/position:\s*\{\s*x:\s*number;\s*y:\s*number\s*\}/);
-  });
-});
 
 // ── FreeformCanvasBoardMenu ──────────────────────────────────────────────
 describe('FreeformCanvasBoardMenu (unmigrated -- hard stop)', () => {

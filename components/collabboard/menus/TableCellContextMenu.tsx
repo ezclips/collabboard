@@ -1,13 +1,16 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState } from 'react';
 import {
     Check,
-    ChevronRight,
-    AlignLeft,
-    AlignCenter,
-    AlignRight
+    ChevronRight
 } from "lucide-react";
+import {
+    ContextMenuShortcut,
+    PositionedContextMenu,
+    PositionedContextMenuItem,
+    PositionedContextMenuSeparator,
+} from '@/components/ui/context-menu';
 
 interface TableCellContextMenuProps {
     isOpen: boolean;
@@ -50,55 +53,72 @@ export function TableCellContextMenu({
     onAlignChange
 }: TableCellContextMenuProps) {
     const [activeSubmenu, setActiveSubmenu] = useState<string | null>(null);
-    const menuRef = useRef<HTMLDivElement>(null);
-
-    // Close on click outside
-    useEffect(() => {
-        if (!isOpen) return;
-
-        const handleClickOutside = (e: MouseEvent) => {
-            if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-                onClose();
-            }
-        };
-
-        // Use capture to ensuring we catch it before other handlers if needed, 
-        // but standard bubble is usually fine.
-        document.addEventListener('mousedown', handleClickOutside);
-        return () => document.removeEventListener('mousedown', handleClickOutside);
-    }, [isOpen, onClose]);
 
     if (!isOpen) return null;
 
-    const handleAction = (action?: () => void) => {
-        if (action) action();
-        onClose();
-    };
+    /** Trailing checkmark, matching the original right-aligned indicator. */
+    const checkmark = (
+        <span className="ml-auto pl-4 flex items-center text-gray-600">
+            <Check className="w-3.5 h-3.5" />
+        </span>
+    );
 
     return (
-        <div
-            ref={menuRef}
-            className="fixed z-[9999] bg-white rounded-lg shadow-xl border border-gray-200 py-1 min-w-[200px]"
-            style={{ top: position.y, left: position.x }}
+        <PositionedContextMenu
+            open
+            x={position.x}
+            y={position.y}
+            onOpenChange={(nextOpen) => {
+                if (!nextOpen) onClose();
+            }}
+            // The table editor floats above canvas chrome, so this menu keeps its
+            // high stacking order. `overflow-visible` lets the hover-disclosed
+            // alignment submenu escape the menu box.
+            className="z-[9999] min-w-[200px] overflow-visible"
             onClick={(e) => e.stopPropagation()}
         >
-            <MenuItem label="Cut" shortcut="Ctrl+X" onClick={() => handleAction(onCut)} />
-            <MenuItem label="Copy" shortcut="Ctrl+C" onClick={() => handleAction(onCopy)} />
-            <MenuItem label="Paste" shortcut="Ctrl+V" onClick={() => handleAction(onPaste)} />
+            <PositionedContextMenuItem onSelect={() => onCut?.()}>
+                Cut
+                <ContextMenuShortcut>Ctrl+X</ContextMenuShortcut>
+            </PositionedContextMenuItem>
+            <PositionedContextMenuItem onSelect={() => onCopy?.()}>
+                Copy
+                <ContextMenuShortcut>Ctrl+C</ContextMenuShortcut>
+            </PositionedContextMenuItem>
+            <PositionedContextMenuItem onSelect={() => onPaste?.()}>
+                Paste
+                <ContextMenuShortcut>Ctrl+V</ContextMenuShortcut>
+            </PositionedContextMenuItem>
 
-            <div className="my-1 border-t border-gray-200" />
+            <PositionedContextMenuSeparator />
 
-            <MenuItem label="Add Row Above" shortcut="Alt+↑" onClick={() => handleAction(onAddRowAbove)} />
-            <MenuItem label="Add Row Below" shortcut="Alt+↓" onClick={() => handleAction(onAddRowBelow)} />
-            <MenuItem label="Add Column Left" shortcut="Alt+←" onClick={() => handleAction(onAddColumnLeft)} />
-            <MenuItem label="Add Column Right" shortcut="Alt+→" onClick={() => handleAction(onAddColumnRight)} />
+            <PositionedContextMenuItem onSelect={() => onAddRowAbove?.()}>
+                Add Row Above
+                <ContextMenuShortcut>Alt+↑</ContextMenuShortcut>
+            </PositionedContextMenuItem>
+            <PositionedContextMenuItem onSelect={() => onAddRowBelow?.()}>
+                Add Row Below
+                <ContextMenuShortcut>Alt+↓</ContextMenuShortcut>
+            </PositionedContextMenuItem>
+            <PositionedContextMenuItem onSelect={() => onAddColumnLeft?.()}>
+                Add Column Left
+                <ContextMenuShortcut>Alt+←</ContextMenuShortcut>
+            </PositionedContextMenuItem>
+            <PositionedContextMenuItem onSelect={() => onAddColumnRight?.()}>
+                Add Column Right
+                <ContextMenuShortcut>Alt+→</ContextMenuShortcut>
+            </PositionedContextMenuItem>
 
-            <div className="my-1 border-t border-gray-200" />
+            <PositionedContextMenuSeparator />
 
-            <MenuItem label="Delete Row" textColor="text-red-600" onClick={() => handleAction(onDeleteRow)} />
-            <MenuItem label="Delete Column" textColor="text-red-600" onClick={() => handleAction(onDeleteColumn)} />
+            <PositionedContextMenuItem variant="destructive" onSelect={() => onDeleteRow?.()}>
+                Delete Row
+            </PositionedContextMenuItem>
+            <PositionedContextMenuItem variant="destructive" onSelect={() => onDeleteColumn?.()}>
+                Delete Column
+            </PositionedContextMenuItem>
 
-            <div className="my-1 border-t border-gray-200" />
+            <PositionedContextMenuSeparator />
 
             {/* Change Alignment Submenu Trigger */}
             <div
@@ -106,12 +126,15 @@ export function TableCellContextMenu({
                 onMouseEnter={() => setActiveSubmenu("alignment")}
                 onMouseLeave={() => setActiveSubmenu(null)}
             >
-                <button
-                    className="w-full px-4 py-1.5 text-left text-sm hover:bg-gray-100 text-gray-700 flex justify-between items-center"
+                <PositionedContextMenuItem
+                    // A pure hover disclosure: clicking it neither acts nor closes.
+                    onSelect={(event) => event.preventDefault()}
                 >
                     Change Alignment...
-                    <ChevronRight className="w-4 h-4 text-gray-400" />
-                </button>
+                    <span className="ml-auto pl-4 flex items-center">
+                        <ChevronRight className="w-4 h-4 text-gray-400" />
+                    </span>
+                </PositionedContextMenuItem>
 
                 {/* Submenu */}
                 {activeSubmenu === "alignment" && (
@@ -119,71 +142,48 @@ export function TableCellContextMenu({
                         className="absolute left-full top-0 ml-0.5 bg-white rounded-lg shadow-xl border border-gray-200 py-1 min-w-[150px]"
                         style={{ marginTop: '-4px' }} // Align top nicely
                     >
-                        <MenuItem
-                            label="Left"
-                            onClick={() => handleAction(() => onAlignChange?.("left", currentVerticalAlign))}
-                            icon={currentAlign === "left" || !currentAlign ? <Check className="w-3.5 h-3.5" /> : undefined}
-                        />
-                        <MenuItem
-                            label="Center"
-                            onClick={() => handleAction(() => onAlignChange?.("center", currentVerticalAlign))}
-                            icon={currentAlign === "center" ? <Check className="w-3.5 h-3.5" /> : undefined}
-                        />
-                        <MenuItem
-                            label="Right"
-                            onClick={() => handleAction(() => onAlignChange?.("right", currentVerticalAlign))}
-                            icon={currentAlign === "right" ? <Check className="w-3.5 h-3.5" /> : undefined}
-                        />
+                        <PositionedContextMenuItem
+                            onSelect={() => onAlignChange?.("left", currentVerticalAlign)}
+                        >
+                            Left
+                            {(currentAlign === "left" || !currentAlign) && checkmark}
+                        </PositionedContextMenuItem>
+                        <PositionedContextMenuItem
+                            onSelect={() => onAlignChange?.("center", currentVerticalAlign)}
+                        >
+                            Center
+                            {currentAlign === "center" && checkmark}
+                        </PositionedContextMenuItem>
+                        <PositionedContextMenuItem
+                            onSelect={() => onAlignChange?.("right", currentVerticalAlign)}
+                        >
+                            Right
+                            {currentAlign === "right" && checkmark}
+                        </PositionedContextMenuItem>
 
-                        <div className="my-1 border-t border-gray-200" />
+                        <PositionedContextMenuSeparator />
 
-                        <MenuItem
-                            label="Top"
-                            onClick={() => handleAction(() => onAlignChange?.(currentAlign, "top"))}
-                            icon={currentVerticalAlign === "top" || !currentVerticalAlign ? <Check className="w-3.5 h-3.5" /> : undefined}
-                        />
-                        <MenuItem
-                            label="Middle"
-                            onClick={() => handleAction(() => onAlignChange?.(currentAlign, "middle"))}
-                            icon={currentVerticalAlign === "middle" ? <Check className="w-3.5 h-3.5" /> : undefined}
-                        />
-                        <MenuItem
-                            label="Bottom"
-                            onClick={() => handleAction(() => onAlignChange?.(currentAlign, "bottom"))}
-                            icon={currentVerticalAlign === "bottom" ? <Check className="w-3.5 h-3.5" /> : undefined}
-                        />
+                        <PositionedContextMenuItem
+                            onSelect={() => onAlignChange?.(currentAlign, "top")}
+                        >
+                            Top
+                            {(currentVerticalAlign === "top" || !currentVerticalAlign) && checkmark}
+                        </PositionedContextMenuItem>
+                        <PositionedContextMenuItem
+                            onSelect={() => onAlignChange?.(currentAlign, "middle")}
+                        >
+                            Middle
+                            {currentVerticalAlign === "middle" && checkmark}
+                        </PositionedContextMenuItem>
+                        <PositionedContextMenuItem
+                            onSelect={() => onAlignChange?.(currentAlign, "bottom")}
+                        >
+                            Bottom
+                            {currentVerticalAlign === "bottom" && checkmark}
+                        </PositionedContextMenuItem>
                     </div>
                 )}
             </div>
-        </div>
-    );
-}
-
-function MenuItem({
-    label,
-    shortcut,
-    onClick,
-    textColor = "text-gray-700",
-    icon
-}: {
-    label: string;
-    shortcut?: string;
-    onClick: () => void;
-    textColor?: string;
-    icon?: React.ReactNode;
-}) {
-    return (
-        <button
-            className={`w-full px-4 py-1.5 text-left text-sm hover:bg-gray-100 ${textColor} flex justify-between items-center group`}
-            onClick={onClick}
-        >
-            <span className="flex items-center gap-2">
-                {label}
-            </span>
-            <div className="flex items-center">
-                {shortcut && <span className="text-xs text-gray-400 ml-3">{shortcut}</span>}
-                {icon && <span className="text-gray-600 ml-2">{icon}</span>}
-            </div>
-        </button>
+        </PositionedContextMenu>
     );
 }
