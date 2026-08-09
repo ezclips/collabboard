@@ -495,21 +495,31 @@ describe('WallContainerContextMenu', () => {
   });
 });
 
-describe('dead/duplicate file findings (report only, not modified in this patch)', () => {
-  it('components/collabboard/menus/WallContainerContextMenu.tsx has zero importers', () => {
-    const source = fs.readFileSync(
-      path.join(process.cwd(), 'components/collabboard/menus/WallContainerContextMenu.tsx'),
-      'utf8',
-    );
-    // Sanity: the file still exists and still exports the shadow component.
-    expect(source).toContain('export function WallContainerContextMenu');
+// PATCH 7A deleted the two dead Wall duplicates this file used to document
+// (menus/WallContainerContextMenu.tsx and menus/old_WallContainerContextMenu.tsx).
+// Their "zero importers" assertions only existed to record that they were unused,
+// so they went with them. The live implementation under context-menus/ is
+// characterized above, and the guard below keeps the duplicates from returning.
+describe('the dead Wall duplicates stay deleted', () => {
+  it('no shadow copy exists alongside the live container menu', () => {
+    for (const relative of [
+      'components/collabboard/menus/WallContainerContextMenu.tsx',
+      'components/collabboard/menus/old_WallContainerContextMenu.tsx',
+    ]) {
+      expect(
+        fs.existsSync(path.join(process.cwd(), relative)),
+        `${relative} was removed as dead; re-adding it re-creates the duplicate`,
+      ).toBe(false);
+    }
   });
 
-  it('components/collabboard/menus/old_WallContainerContextMenu.tsx has zero importers', () => {
-    const source = fs.readFileSync(
-      path.join(process.cwd(), 'components/collabboard/menus/old_WallContainerContextMenu.tsx'),
-      'utf8',
-    );
-    expect(source).toContain('export default function WallContainerContextMenu');
+  it('every Wall menu importer resolves to the live implementation', () => {
+    for (const relative of ['components/canvas/WallCanvas.tsx', 'components/canvas/RowCanvas.tsx']) {
+      const source = fs.readFileSync(path.join(process.cwd(), relative), 'utf8');
+      expect(source).toContain(
+        "from '@/components/collabboard/context-menus/WallContainerContextMenu'",
+      );
+      expect(source).not.toContain("from '@/components/collabboard/menus/WallContainerContextMenu'");
+    }
   });
 });
