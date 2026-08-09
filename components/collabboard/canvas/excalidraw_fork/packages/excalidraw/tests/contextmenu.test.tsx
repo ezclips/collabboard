@@ -12,6 +12,7 @@ import * as StaticScene from "../renderer/staticScene";
 import { API } from "./helpers/api";
 import { UI, Pointer, Keyboard } from "./helpers/ui";
 import {
+  act,
   render,
   fireEvent,
   mockBoundingClientRect,
@@ -627,5 +628,230 @@ describe("contextMenu element", () => {
       expect.objectContaining({ id: rectangle1.id }),
       expect.objectContaining({ id: rectangle2.id }),
     ]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// PATCH 6A foundation: the optional customContextMenuRenderer hook.
+//
+// These render for real, so they cover what the root-side resolver unit tests
+// cannot: that the native menu is still what renders by default, that
+// right-click selection happens before presentation, and that an opted-in
+// custom renderer receives exactly the menu Excalidraw itself would have shown.
+//
+// No production consumer supplies this prop; only these tests do.
+// ─────────────────────────────────────────────────────────────────────────
+describe("contextMenu custom renderer (PATCH 6A foundation)", () => {
+  beforeEach(async () => {
+    localStorage.clear();
+    renderStaticScene.mockClear();
+    reseed(7);
+    setDateTimeForTests("201933152653");
+  });
+
+  beforeAll(() => {
+    mockBoundingClientRect();
+  });
+
+  afterAll(() => {
+    restoreOriginalGetBoundingClientRect();
+  });
+
+  /** Labels of the natively rendered menu, in DOM order. */
+  const nativeMenuLabels = () => {
+    const menu = UI.queryContextMenu();
+    return Array.from(menu?.querySelectorAll(".context-menu li") ?? []).map(
+      (li) =>
+        li.querySelector(".context-menu-item__label")?.textContent?.trim() ?? "",
+    );
+  };
+
+  const rightClickCanvas = (x = 1, y = 1) => {
+    fireEvent.contextMenu(GlobalTestState.interactiveCanvas, {
+      button: 2,
+      clientX: x,
+      clientY: y,
+    });
+  };
+
+  it("renders the native menu when no custom renderer is supplied", async () => {
+    await render(<Excalidraw handleKeyboardGlobally={true} />);
+    rightClickCanvas();
+    expect(UI.queryContextMenu()).not.toBeNull();
+    expect(nativeMenuLabels().length).toBeGreaterThan(0);
+  });
+
+  it("keeps displaying its own shortcut hints while the native menu is active", async () => {
+    // 4H's no-shortcut rule applies to CollabBoard menus; native Excalidraw is
+    // unchanged until 6B replaces the surface.
+    await render(<Excalidraw handleKeyboardGlobally={true} />);
+    rightClickCanvas();
+    const menu = UI.queryContextMenu();
+    const shortcuts = menu?.querySelectorAll(".context-menu-item__shortcut");
+    expect(shortcuts?.length).toBeGreaterThan(0);
+  });
+
+  it("marks Delete dangerous and a toggled action checked, natively", async () => {
+    await render(<Excalidraw handleKeyboardGlobally={true} />);
+    UI.clickTool("rectangle");
+    mouse.down(0, 0);
+    mouse.up(10, 10);
+    mouse.rightClickAt(5, 5);
+
+    const menu = UI.queryContextMenu();
+    const del = menu?.querySelector('li[data-testid="deleteSelectedElements"]');
+    expect(del?.querySelector("button")?.className).toContain("dangerous");
+    // Nothing else is destructive.
+    expect(menu?.querySelectorAll("button.dangerous")?.length).toBe(1);
+  });
+
+  it("reflects a checked action's state in the native menu", async () => {
+    // Toggled through the menu itself: passing gridModeEnabled as a prop makes
+    // the host own grid mode and removes the item from the menu entirely.
+    await render(<Excalidraw handleKeyboardGlobally={true} />);
+    rightClickCanvas();
+    const snapItem = () =>
+      UI.queryContextMenu()?.querySelector(
+        'li[data-testid="objectsSnapMode"] button',
+      );
+    expect(snapItem()?.className).not.toContain("checkmark");
+
+    act(() => {
+      fireEvent.click(
+        UI.queryContextMenu()!.querySelector('li[data-testid="objectsSnapMode"]')!,
+      );
+    });
+
+    rightClickCanvas();
+    expect(snapItem()?.className).toContain("checkmark");
+  });
+
+  it("shows the read-only inventory in view mode, natively", async () => {
+    await render(<Excalidraw handleKeyboardGlobally={true} viewModeEnabled />);
+    rightClickCanvas();
+    const items = Array.from(
+      UI.queryContextMenu()?.querySelectorAll(".context-menu li") ?? [],
+    ).map((li) => li.getAttribute("data-testid"));
+    // View mode drops editing actions such as paste and selectAll.
+    expect(items).not.toContain("paste");
+    expect(items).not.toContain("selectAll");
+    expect(items).toContain("gridMode");
+    expect(items).toContain("zenMode");
+    expect(items).toContain("stats");
+  });
+
+  it("hands the custom renderer the same menu, and suppresses the native surface", async () => {
+    const seen: any[] = [];
+    await render(
+      <Excalidraw
+        handleKeyboardGlobally={true}
+        customContextMenuRenderer={(props) => {
+          seen.push(props);
+          return null;
+        }}
+      />,
+    );
+    rightClickCanvas(7, 9);
+
+    // Native presentation must not also render.
+    expect(UI.queryContextMenu()).toBeNull();
+    expect(seen.length).toBeGreaterThan(0);
+
+    const last = seen[seen.length - 1];
+    expect(last.items.length).toBeGreaterThan(0);
+    // Labels are display-ready, not translation keys.
+    const labels = last.items
+      .filter((i: any) => i.type === "item")
+      .map((i: any) => i.label);
+    expect(labels.every((l: string) => l.length > 0)).toBe(true);
+    expect(labels.some((l: string) => l.includes("."))).toBe(false);
+    // Descriptors carry presentation only: no action identity, no shortcut.
+    for (const item of last.items) {
+      expect(item).not.toHaveProperty("name");
+      expect(item).not.toHaveProperty("shortcut");
+      expect(item).not.toHaveProperty("predicate");
+    }
+    // Viewport coordinates derived from the right-click.
+    expect(typeof last.x).toBe("number");
+    expect(typeof last.y).toBe("number");
+  });
+
+  it("gives the custom renderer the same item order the native menu shows", async () => {
+    // Native pass.
+    await render(<Excalidraw handleKeyboardGlobally={true} />);
+    rightClickCanvas();
+    const native = nativeMenuLabels();
+    expect(native.length).toBeGreaterThan(0);
+
+    // Custom pass, same state.
+    reseed(7);
+    const seen: any[] = [];
+    await render(
+      <Excalidraw
+        handleKeyboardGlobally={true}
+        customContextMenuRenderer={(props) => {
+          seen.push(props);
+          return null;
+        }}
+      />,
+    );
+    rightClickCanvas();
+    const custom = seen[seen.length - 1].items
+      .filter((i: any) => i.type === "item")
+      .map((i: any) => i.label);
+
+    expect(custom).toEqual(native);
+  });
+
+  it("executes through the existing action path and closes via the native lifecycle", async () => {
+    const seen: any[] = [];
+    await render(
+      <Excalidraw
+        handleKeyboardGlobally={true}
+        customContextMenuRenderer={(props) => {
+          seen.push(props);
+          return null;
+        }}
+      />,
+    );
+    UI.clickTool("rectangle");
+    mouse.down(0, 0);
+    mouse.up(10, 10);
+    mouse.rightClickAt(5, 5);
+
+    // Right-click selection happened before presentation reached the renderer.
+    expect(API.getSelectedElements().length).toBe(1);
+
+    const items = seen[seen.length - 1].items;
+    const deleteIdx = items.findIndex((i: any) => i.dangerous);
+    expect(deleteIdx).toBeGreaterThan(-1);
+
+    act(() => {
+      items[deleteIdx].onSelect();
+    });
+
+    // The real action ran, and Excalidraw's own menu state was cleared.
+    expect(API.getSelectedElements().length).toBe(0);
+    expect(h.state.contextMenu).toBeNull();
+  });
+
+  it("closes Excalidraw's menu state when the renderer calls onClose", async () => {
+    const seen: any[] = [];
+    await render(
+      <Excalidraw
+        handleKeyboardGlobally={true}
+        customContextMenuRenderer={(props) => {
+          seen.push(props);
+          return null;
+        }}
+      />,
+    );
+    rightClickCanvas();
+    expect(h.state.contextMenu).not.toBeNull();
+
+    act(() => {
+      seen[seen.length - 1].onClose();
+    });
+    expect(h.state.contextMenu).toBeNull();
   });
 });

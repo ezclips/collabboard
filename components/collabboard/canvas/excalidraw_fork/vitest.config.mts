@@ -47,6 +47,17 @@ export default defineConfig({
       },
     ],
   },
+  // This fork is vendored inside a Next.js app whose root postcss.config.mjs
+  // targets Tailwind v4 (`plugins: ["@tailwindcss/postcss"]`). Without an
+  // explicit config here, Vite searches upward from this directory, finds it,
+  // and fails to collect any test with:
+  //   "Failed to load PostCSS config: Invalid PostCSS Plugin found at: plugins[0]"
+  // The fork's tests assert on markup and behavior, never on compiled CSS, so
+  // an empty PostCSS config is both sufficient and the narrowest fix. It only
+  // stops the upward search; it changes nothing the app builds.
+  css: {
+    postcss: {},
+  },
   //@ts-ignore
   test: {
     // Since hooks are running in stack in v2, which means all hooks run serially whereas
