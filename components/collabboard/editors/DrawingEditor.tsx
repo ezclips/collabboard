@@ -652,6 +652,7 @@ export default function DrawingEditor({
                                 onChange={handleChange}
                                 readOnly={readOnly}
                                 onShowHelp={() => setShowHelp(true)}
+                                useCollabBoardContextMenu
                             />
                         </div>
                     </div>

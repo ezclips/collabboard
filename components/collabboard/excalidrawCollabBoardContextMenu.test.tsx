@@ -497,9 +497,32 @@ describe('Excalidraw CollabBoard menu — production activation', () => {
     expect(source).toMatch(/useCollabBoardContextMenu\?:\s*boolean/);
   });
 
-  it('no other Excalidraw consumer opts in', () => {
-    const others = [
+  it('the drawing-post editor opts in too', () => {
+    // PATCH 6C. Both real Drawing surfaces now share one menu appearance; the
+    // editor opts in through the same wrapper prop, never through Excalidraw's.
+    const source = read('components/collabboard/editors/DrawingEditor.tsx');
+    expect(source).toContain('useCollabBoardContextMenu');
+    expect(source).not.toContain('customContextMenuRenderer');
+  });
+
+  it('opting in is the surface\'s only involvement — it implements no menu logic', () => {
+    for (const relative of [
       'components/collabboard/editors/DrawingEditor.tsx',
+      'components/collabboard/canvas/layouts/DrawingLayout.tsx',
+    ]) {
+      const source = read(relative);
+      // No renderer, no adapter, no descriptor handling: the wrapper owns all of it.
+      expect(source, `${relative} must not render the adapter`)
+        .not.toContain('ExcalidrawCollabBoardContextMenu');
+      for (const token of ['item.onSelect', 'item.dangerous', 'item.checked', 'ResolvedContextMenuItem']) {
+        expect(source, `${relative} must not handle menu descriptors (${token})`)
+          .not.toContain(token);
+      }
+    }
+  });
+
+  it('non-Drawing Excalidraw consumers still do not opt in', () => {
+    const others = [
       'components/collabboard/canvas/layouts/CustomMermaidModal.tsx',
       'components/presentation/slide-renderer/renderExcalidrawSlideBase.ts',
     ];
@@ -508,6 +531,25 @@ describe('Excalidraw CollabBoard menu — production activation', () => {
       expect(source, `${relative} must not opt in`).not.toContain('useCollabBoardContextMenu');
       expect(source, `${relative} must not pass the renderer`)
         .not.toContain('customContextMenuRenderer');
+    }
+  });
+
+  it('the wrapper stays opt-in, so sharing it never activates the menu implicitly', () => {
+    const wrapper = read('components/collabboard/editors/ExcalidrawWrapper.tsx');
+    expect(wrapper).toContain('useCollabBoardContextMenu = false');
+    // Still exactly one activation seam, and still the shared adapter behind it.
+    expect((wrapper.match(/customContextMenuRenderer/g) ?? [])).toHaveLength(1);
+    expect(wrapper).toContain('<ExcalidrawCollabBoardContextMenu');
+  });
+
+  it('neither Drawing surface introduces shortcut-hint markup', () => {
+    for (const relative of [
+      'components/collabboard/editors/DrawingEditor.tsx',
+      'components/collabboard/canvas/layouts/DrawingLayout.tsx',
+    ]) {
+      const source = read(relative);
+      expect(source, `${relative} must not add a shortcut slot`)
+        .not.toContain('ContextMenuShortcut');
     }
   });
 
