@@ -5,7 +5,10 @@
   "scripts": {
     "check:boundaries": "eslint --no-warn-ignored --no-inline-config -c eslint.boundaries.config.mjs \"components/**/*.{ts,tsx}\" \"app/**/*.{ts,tsx}\" \"lib/domain/**/*.ts\"",
     "dev": "next dev",
+    "build:fork": "node scripts/build-excalidraw-fork.mjs",
+    "prebuild": "npm run build:fork",
     "build": "next build",
+    "prebuild:e2e": "npm run build:fork",
     "build:e2e": "set E2E_BRIDGE_BUILD=1&& next build",
     "start": "next start",
     "lint": "next lint",
