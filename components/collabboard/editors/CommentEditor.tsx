@@ -534,9 +534,28 @@ export default function CommentEditor({
       className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/30"
       onClick={handleOverlayClick}
     >
-      <div className="flex items-start gap-3" onClick={(e) => e.stopPropagation()}>
+      {/* Three-column grid, not a centered flex row (see PostEditorShell.tsx
+          for the same fix and rationale): the two flanking columns are both
+          `1fr`, always equal width to each other regardless of what (or
+          whether anything) is open in them, so the main card's on-screen
+          position never shifts when Text Style opens/closes. (The other
+          popups here -- card color, emoji, link -- are already absolute
+          overlays anchored to the card and never affected the row's width.)
+          Grid tracks are pointer-events: none (pure layout, often wider than
+          their visible content) with pointer events re-enabled only on the
+          actual toolbar/card/panel boxes, so empty grid space still counts
+          as a genuine backdrop click. */}
+      <div
+        className="grid items-start gap-3"
+        style={{ gridTemplateColumns: '1fr auto 1fr', width: '100%', pointerEvents: 'none' }}
+      >
+        <div className="flex items-start justify-end" style={{ pointerEvents: 'none' }}>
         {/* Left Toolbar - visually hidden when comment color popup is open, but keeps width to prevent layout shift */}
-        <div className={commentColorPopupId ? "invisible pointer-events-none" : ""}>
+        <div
+          className={commentColorPopupId ? "invisible pointer-events-none" : ""}
+          style={{ pointerEvents: commentColorPopupId ? 'none' : 'auto' }}
+          onClick={(e) => e.stopPropagation()}
+        >
           <CommentEditorToolbar
             mode={toolbarMode}
             onModeChange={setToolbarMode}
@@ -567,11 +586,12 @@ export default function CommentEditor({
             linkEnabled={linkEnabled}
           />
         </div>
+        </div>
 
         {/* Main Card */}
         <div
           className="relative rounded-xl shadow-2xl border border-gray-200 overflow-visible"
-          style={{ width: "320px", backgroundColor: cardColor }}
+          style={{ width: "320px", backgroundColor: cardColor, pointerEvents: 'auto' }}
         >
           {/* Top strip -- Title lives inside it, same as the canvas card's
               own top strip, matching every other post type's edit window.
@@ -947,11 +967,12 @@ export default function CommentEditor({
           {/* Save/Close is handled by clicking outside or ESC */}
         </div>
 
-        {/* Text Style Popup -- a real flex sibling (like Note/Document's
-            sharedPanel), not an absolutely-positioned overlay, so a tall
-            panel grows the row's height and the overlay's vertical
-            centering compensates instead of letting the panel run off
-            the bottom of a short window. */}
+        {/* Text Style Popup -- right-side grid column (same architecture as
+            Note/Document's sharedPanel slot in PostEditorShell.tsx): this
+            column is `1fr`, always equal width to the toolbar's `1fr`
+            column, so opening it no longer drags the main card sideways. */}
+        <div className="flex items-start justify-start" style={{ pointerEvents: 'none' }}>
+        <div style={{ pointerEvents: 'auto' }} onClick={(e) => e.stopPropagation()}>
         {textStyleOpen && (
           <div className="relative z-[60] w-[300px]">
             <button
@@ -993,6 +1014,8 @@ export default function CommentEditor({
             </div>
           </div>
         )}
+        </div>
+        </div>
       </div>
     </div>
   );

@@ -186,11 +186,29 @@ export default function ClipartCardDraftModal({
         aria-label="Save clipart card"
       />
 
+      {/* Three-column grid, not a centered flex row (see PostEditorShell.tsx
+          for the same fix and rationale): the two flanking columns are both
+          `1fr`, always equal width to each other regardless of what (or
+          whether anything) is open in them, so the card's on-screen position
+          never shifts when a side panel opens/closes/changes width. Width is
+          fixed at the original max-w bound (rather than shrink-to-content)
+          because the flanking `1fr` columns need a definite container width
+          to distribute against. Grid tracks are pointer-events: none (pure
+          layout, often wider than their visible content) with pointer
+          events re-enabled only on the actual toolbar/card/panel boxes, so
+          empty grid space still counts as a genuine backdrop click. */}
       <div
         data-testid="clipart-composition-row"
-        className="relative m-auto flex max-w-[calc(100vw-80px)] items-start gap-6"
+        className="relative m-auto grid items-start gap-6"
+        style={{ gridTemplateColumns: '1fr auto 1fr', width: 'calc(100vw - 80px)', pointerEvents: 'none' }}
       >
-        <div data-testid="clipart-toolbar-wrapper" onMouseDownCapture={keepToolbarClickFromBlurringCaption}>
+        <div className="flex items-start justify-end" style={{ pointerEvents: 'none' }}>
+        <div
+          data-testid="clipart-toolbar-wrapper"
+          onMouseDownCapture={keepToolbarClickFromBlurringCaption}
+          style={{ pointerEvents: 'auto' }}
+          onClick={(e) => e.stopPropagation()}
+        >
           <CardActionsToolbar
             padlet={previewPadlet}
             isColorPickerOpen={isColorPanelOpen}
@@ -219,10 +237,13 @@ export default function ClipartCardDraftModal({
             onDelete={onDiscard}
           />
         </div>
+        </div>
 
         <div
           data-testid="clipart-main-panel"
           className="flex w-[220px] flex-col items-stretch"
+          style={{ pointerEvents: 'auto' }}
+          onClick={(e) => e.stopPropagation()}
         >
           <div
             data-testid="clipart-card-preview-anchor"
@@ -297,6 +318,13 @@ export default function ClipartCardDraftModal({
 
         </div>
 
+        {/* Right-side grid column (same architecture as Note/Document's
+            sharedPanel slot in PostEditorShell.tsx): this column is `1fr`,
+            always equal width to the toolbar's `1fr` column regardless of
+            which panel (if any) is open, so opening one no longer drags the
+            card sideways. */}
+        <div className="flex items-start justify-start" style={{ pointerEvents: 'none' }}>
+        <div style={{ pointerEvents: 'auto' }} onClick={(e) => e.stopPropagation()}>
         {isCaptionEditing ? (
           <div className="relative">
             <button
@@ -465,25 +493,31 @@ export default function ClipartCardDraftModal({
             />
           </div>
         ) : null}
-
-        <CardEditor
-          isOpen={isCardViewOpen}
-          onClose={() => setIsCardViewOpen(false)}
-          title={previewPadlet.title || ''}
-          initialContent={previewPadlet.content || ''}
-          initialMetadata={previewPadlet.metadata || {}}
-          onSave={(data) => {
-            onChange({
-              ...previewPadlet,
-              title: data.title,
-              content: data.content,
-              metadata: data.metadata,
-            });
-            setIsCardViewOpen(false);
-          }}
-          readOnly={false}
-        />
+        </div>
+        </div>
       </div>
+
+      {/* Not part of the composition row's grid: CardEditor renders its own
+          independent fixed-position overlay when open (and nothing at all
+          when closed), so it never needs to participate in the row's
+          column layout. */}
+      <CardEditor
+        isOpen={isCardViewOpen}
+        onClose={() => setIsCardViewOpen(false)}
+        title={previewPadlet.title || ''}
+        initialContent={previewPadlet.content || ''}
+        initialMetadata={previewPadlet.metadata || {}}
+        onSave={(data) => {
+          onChange({
+            ...previewPadlet,
+            title: data.title,
+            content: data.content,
+            metadata: data.metadata,
+          });
+          setIsCardViewOpen(false);
+        }}
+        readOnly={false}
+      />
     </div>
   );
 }

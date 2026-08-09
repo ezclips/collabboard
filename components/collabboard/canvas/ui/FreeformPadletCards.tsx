@@ -5647,10 +5647,29 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
           className="fixed inset-0 z-[60000] flex items-center justify-center bg-black/35 backdrop-blur-sm"
           onClick={() => setImageToolbarPadletId(null)}
         >
+          {/* Three-column grid, not a centered flex row (see PostEditorShell.tsx
+              for the same fix and rationale): the two flanking columns are
+              both `1fr`, always equal width to each other regardless of
+              what (or whether anything) is open in them, so the card's
+              on-screen position never shifts when a side panel opens,
+              closes, or changes width. Width is fixed at the original max-w
+              bound (rather than shrink-to-content) because the flanking
+              `1fr` columns need a definite container width to distribute
+              against. Grid tracks are pointer-events: none (pure layout,
+              often wider than their visible content) with pointer events
+              re-enabled only on the actual toolbar/card/panel boxes, so
+              empty grid space still counts as a genuine backdrop click. */}
           <div
-            className="relative flex max-h-[calc(100vh-80px)] max-w-[calc(100vw-80px)] items-start gap-6"
-            onClick={(e) => e.stopPropagation()}
+            className="relative grid items-start gap-6"
+            style={{
+              gridTemplateColumns: '1fr auto 1fr',
+              width: 'calc(100vw - 80px)',
+              maxHeight: 'calc(100vh - 80px)',
+              pointerEvents: 'none',
+            }}
           >
+            <div className="flex items-start justify-end" style={{ pointerEvents: 'none' }}>
+            <div style={{ pointerEvents: 'auto' }} onClick={(e) => e.stopPropagation()}>
             {activeImageToolbarPadlet && (
               <ImageActionsToolbar
                 currentCardColor={activeImageToolbarPadlet.metadata?.cardColor || '#ffffff'}
@@ -5818,10 +5837,12 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                 }}
               />
             )}
+            </div>
+            </div>
             {activeImageToolbarPadlet && activeImageToolbarSrc && (
               <div
                 className="overflow-hidden flex flex-col border border-gray-200 shadow-2xl"
-                style={{ width: '360px', backgroundColor: activeImageToolbarPadlet.metadata?.cardColor || '#ffffff' }}
+                style={{ width: '360px', backgroundColor: activeImageToolbarPadlet.metadata?.cardColor || '#ffffff', pointerEvents: 'auto' }}
                 onClick={(e) => e.stopPropagation()}
                 onMouseDown={(e) => e.stopPropagation()}
               >
@@ -5942,6 +5963,13 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                 </div>
               </div>
             )}
+            {/* Right-side grid column (same architecture as Note/Document's
+                sharedPanel slot in PostEditorShell.tsx): this column is
+                `1fr`, always equal width to the toolbar's `1fr` column
+                regardless of which panel (if any) is open, so opening one
+                no longer drags the card sideways. */}
+            <div className="flex items-start justify-start" style={{ pointerEvents: 'none' }}>
+            <div style={{ pointerEvents: 'auto' }} onClick={(e) => e.stopPropagation()}>
             {activeImageToolbarPadlet && textStylePadletId === activeImageToolbarPadlet.id && (
               <div
                 className="relative animate-in fade-in zoom-in duration-200 bg-white rounded-lg shadow-xl border border-gray-200 px-3 pb-3 pt-3 min-w-[240px]"
@@ -6333,6 +6361,8 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                 </div>
               </div>
             )}
+            </div>
+            </div>
           </div>
         </div>
       )}
@@ -6350,27 +6380,30 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
             setIsLibraryOpen(false);
           }}
         >
+          {/* Three-column grid, not a centered flex row (see PostEditorShell.tsx
+              for the same fix and rationale): the two flanking columns are
+              both `1fr`, always equal width to each other regardless of
+              what (or whether anything) is open in them, so the card's
+              on-screen position never shifts when a side panel opens,
+              closes, or changes width. Width is fixed at the original max-w
+              bound (rather than shrink-to-content) because the flanking
+              `1fr` columns need a definite container width to distribute
+              against. Grid tracks are pointer-events: none (pure layout,
+              often wider than their visible content) with pointer events
+              re-enabled only on the actual toolbar/card/panel boxes, so
+              empty grid space still counts as a genuine backdrop click. */}
           <div
-            className="relative flex max-h-[calc(100vh-80px)] max-w-[calc(100vw-80px)] items-start gap-6"
-            onClick={(e) => e.stopPropagation()}
+            className="relative grid items-start gap-6"
+            style={{
+              gridTemplateColumns: '1fr auto 1fr',
+              width: 'calc(100vw - 80px)',
+              maxHeight: 'calc(100vh - 80px)',
+              pointerEvents: 'none',
+            }}
           >
-            <button
-              type="button"
-              className="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700"
-              onClick={() => {
-                setCardToolbarPadletId(null);
-                setIsCardColorPickerOpen(false);
-                setIsImageEmojiOpen(false);
-                setCardCommentPopupPadletId(null);
-                setCommentColorPopupId(null);
-                setIsLibraryOpen(false);
-              }}
-              title="Close"
-            >
-              <X className="h-4 w-4" />
-            </button>
-
+            <div className="flex items-start justify-end" style={{ pointerEvents: 'none' }}>
             {/* Left: CardActionsToolbar */}
+            <div style={{ pointerEvents: 'auto' }} onClick={(e) => e.stopPropagation()}>
             <CardActionsToolbar
               padlet={activeCardToolbarPadlet}
               isCardView={activeCardToolbarPadlet.metadata?.showCardView}
@@ -6417,20 +6450,47 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                 setIsCardColorPickerOpen(false);
               }}
             />
+            </div>
+            </div>
 
-            {/* Middle: CardPreview */}
+            {/* Middle: CardPreview. Close button anchored to the card itself
+                (not the row) so it stays at the card's own corner instead of
+                drifting to the row's now much wider right edge once the row
+                became a fixed-width grid (PATCH: centre stays screen-centered). */}
             <div
-              className="overflow-hidden flex flex-col border border-gray-200 shadow-2xl"
-              style={{ width: '220px', minHeight: '200px', backgroundColor: activeCardToolbarPadlet.metadata?.backgroundColor || '#ffffff' }}
+              className="relative"
+              style={{ pointerEvents: 'auto' }}
               onClick={(e) => e.stopPropagation()}
               onMouseDown={(e) => e.stopPropagation()}
             >
-              <CardPreview
-                padlet={activeCardToolbarPadlet}
-                isSelected={false}
-              />
+              <button
+                type="button"
+                className="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700"
+                onClick={() => {
+                  setCardToolbarPadletId(null);
+                  setIsCardColorPickerOpen(false);
+                  setIsImageEmojiOpen(false);
+                  setCardCommentPopupPadletId(null);
+                  setCommentColorPopupId(null);
+                  setIsLibraryOpen(false);
+                }}
+                title="Close"
+              >
+                <X className="h-4 w-4" />
+              </button>
+              <div
+                className="overflow-hidden flex flex-col border border-gray-200 shadow-2xl"
+                style={{ width: '220px', minHeight: '200px', backgroundColor: activeCardToolbarPadlet.metadata?.backgroundColor || '#ffffff' }}
+              >
+                <CardPreview
+                  padlet={activeCardToolbarPadlet}
+                  isSelected={false}
+                />
+              </div>
             </div>
 
+            <div className="flex items-start justify-start" style={{ pointerEvents: 'none' }}>
+            <div style={{ pointerEvents: 'auto' }} onClick={(e) => e.stopPropagation()}>
             {/* Color panel */}
             {isCardColorPickerOpen && padletToEdit?.id === activeCardToolbarPadlet.id && (
               <div
@@ -6717,6 +6777,8 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                 </div>
               </div>
             )}
+            </div>
+            </div>
           </div>
         </div>
       )}

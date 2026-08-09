@@ -459,12 +459,30 @@ export default function TodoEditor({
                 className="fixed inset-0 bg-black/50 flex items-center justify-center z-[1000] p-4"
                 onClick={handleSave}
             >
-                {/* Main container - uses flexbox to center all three columns */}
-                <div className="flex items-start gap-3" onClick={(e) => e.stopPropagation()}>
+                {/* Three-column grid, not a centered flex row (see
+                    PostEditorShell.tsx for the same fix and rationale): the
+                    two flanking columns are both `1fr`, always equal width
+                    to each other regardless of what (or whether anything) is
+                    open in them, so the main card's on-screen position never
+                    shifts when a side panel opens/closes/changes width.
+                    Grid tracks are pointer-events: none (pure layout, often
+                    wider than their visible content) with pointer events
+                    re-enabled only on the actual toolbar/card/panel boxes,
+                    so empty grid space still counts as a genuine backdrop
+                    click. */}
+                <div
+                    className="grid items-start gap-3"
+                    style={{ gridTemplateColumns: '1fr auto 1fr', width: '100%', pointerEvents: 'none' }}
+                >
+                    <div className="flex items-start justify-end" style={{ pointerEvents: 'none' }}>
                     {/* Left Toolbar - top-aligned with the card and side panels
                         (self-center previously made it sit below their top
                         edge whenever the card/panel were taller). */}
-                    <div className={`flex flex-col items-center bg-white rounded-lg shadow-lg p-2 gap-1 self-start flex-shrink-0 ${commentColorPopupId ? "opacity-0 pointer-events-none" : ""}`}>
+                    <div
+                        className={`flex flex-col items-center bg-white rounded-lg shadow-lg p-2 gap-1 self-start flex-shrink-0 ${commentColorPopupId ? "opacity-0 pointer-events-none" : ""}`}
+                        style={{ pointerEvents: commentColorPopupId ? 'none' : 'auto' }}
+                        onClick={(e) => e.stopPropagation()}
+                    >
                         {/* Text style */}
                         <div className="flex flex-col items-center">
                             <button
@@ -593,11 +611,13 @@ export default function TodoEditor({
                             <span className="text-[9px] text-gray-500 text-center">Comment</span>
                         </div>
                     </div>
+                    </div>
 
                     {/* Main Card - scrollable content, limited max height */}
                     <div
                         className="rounded-lg shadow-lg border border-gray-200 overflow-visible relative bg-white flex-shrink-0"
                         style={{
+                            pointerEvents: 'auto',
                             backgroundColor: cardColor,
                             width: '320px',
                             minHeight: '280px',
@@ -1016,12 +1036,14 @@ export default function TodoEditor({
                             )}
                     </div>
 
-                    {/* Text style / Color / Comment panels -- real flex
-                        siblings of the toolbar/card row (same architecture
-                        as Note/Document's shared panel slot), so a tall
-                        panel grows the row and the outer items-center
-                        recentres the whole row upward instead of the panel
-                        running off the bottom of the screen. */}
+                    {/* Text style / Color / Comment panels -- right-side grid
+                        column (same architecture as Note/Document's shared
+                        panel slot in PostEditorShell.tsx): this column is
+                        `1fr`, always equal width to the toolbar's `1fr`
+                        column regardless of which panel (if any) is open, so
+                        opening one no longer drags the main card sideways. */}
+                    <div className="flex items-start justify-start" style={{ pointerEvents: 'none' }}>
+                    <div style={{ pointerEvents: 'auto' }} onClick={(e) => e.stopPropagation()}>
                     {showTextStylePanel && (
                         <div
                             className="relative bg-white rounded-lg shadow-lg border border-gray-200 p-3 w-64 flex-shrink-0"
@@ -1335,6 +1357,8 @@ export default function TodoEditor({
                             </div>
                         </div>
                     )}
+                    </div>
+                    </div>
                 </div>
             </div>
 

@@ -333,8 +333,13 @@ describe('C3-A shell additions stay opt-in and unused by Note (§24.16)', () => 
 // PATCH-152 targeted correction: selected-text CommentPopup must follow the
 // documented .agent/skills/row_canvas_development/SKILL.md layout -- sub-panels
 // (TextStylePopup, EmojiPicker, comment popup, colour picker) appear to the
-// right as extra flex items, never inside the card/toolbar and never via
-// fixed/absolute escape. This governs both Note and Document.
+// right, in the shell's own right-side grid column, never inside the
+// card/toolbar and never via fixed/absolute escape of their own. (The shell
+// row itself moved from a centered flex row to a 3-column grid so the centre
+// column's screen position stays fixed regardless of which side panel is
+// open -- see PostEditorShell.tsx -- but panels remain ordinary in-flow
+// children, just one level deeper inside that column's wrapper.) This
+// governs both Note and Document.
 describe('Selected-text CommentPopup follows the documented right-side layout', () => {
   function openDoc(overrides: Partial<React.ComponentProps<typeof DocumentEditor>> = {}) {
     return mount(
@@ -401,7 +406,7 @@ describe('Selected-text CommentPopup follows the documented right-side layout', 
     expect(wrapper.className).not.toMatch(/\babsolute\b|\bfixed\b/);
   });
 
-  it('Note and Document place the panel in the same structural position: last flex child of the shell row', () => {
+  it('Note and Document place the panel in the same structural position: last (right-side grid column) child of the shell row', () => {
     const noteC = openNote();
     selectText(noteC, 'world');
     click(btn(noteC, 'Add comment to selected text')!);
@@ -450,7 +455,7 @@ describe('Note: Link and selected-text Comment share the same right-side slot an
     expect(panelIdx).toBeGreaterThan(centreIdx);
   });
 
-  it('2: selected-text Comment opens at the same right-side position as Link (last flex child)', () => {
+  it('2: selected-text Comment opens at the same right-side position as Link (last child of the shell row)', () => {
     const c = openNote();
     selectText(c, 'world');
     click(btn(c, 'Add comment to selected text')!);
@@ -459,7 +464,17 @@ describe('Note: Link and selected-text Comment share the same right-side slot an
     expect(panelIdx).toBe(row.children.length - 1);
   });
 
-  it('3: Link and Comment wrappers have identical width and occupy the same flex-slot index', () => {
+  // The panel wrapper itself sits one level inside the row's direct child
+  // (the shell's own grid-column + pointer-events wrapper, PATCH: centre
+  // stays screen-centered) -- walk up to that direct child before comparing
+  // slot index, rather than requiring the panel wrapper to be the row child.
+  function directChildOf(row: HTMLElement, el: HTMLElement): HTMLElement {
+    let node: HTMLElement | null = el;
+    while (node && node.parentElement !== row) node = node.parentElement;
+    return node as HTMLElement;
+  }
+
+  it('3: Link and Comment wrappers have identical width and occupy the same right-side grid column', () => {
     const linkC = openNote();
     selectText(linkC, 'world');
     click(btn(linkC, 'Add link to selected text')!);
@@ -467,7 +482,7 @@ describe('Note: Link and selected-text Comment share the same right-side slot an
     expect(lw).not.toBeNull();
     expect(lw.getAttribute('style')).toContain('width: 300px');
     const linkRow = shellRow(linkC);
-    const linkIdx = Array.from(linkRow.children).indexOf(lw);
+    const linkIdx = Array.from(linkRow.children).indexOf(directChildOf(linkRow, lw));
 
     const commentC = openNote();
     selectText(commentC, 'world');
@@ -476,7 +491,7 @@ describe('Note: Link and selected-text Comment share the same right-side slot an
     expect(cw).not.toBeNull();
     expect(cw.getAttribute('style')).toContain('width: 300px');
     const commentRow = shellRow(commentC);
-    const commentIdx = Array.from(commentRow.children).indexOf(cw);
+    const commentIdx = Array.from(commentRow.children).indexOf(directChildOf(commentRow, cw));
 
     expect(linkIdx).toBe(commentIdx);
     expect(linkIdx).toBe(linkRow.children.length - 1);

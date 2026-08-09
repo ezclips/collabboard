@@ -220,20 +220,48 @@ export default function PostEditorShell({
       aria-modal={ariaModal}
       aria-label={ariaLabel}
     >
-      <div ref={rowRef} className="flex items-start gap-3" onClick={(e) => e.stopPropagation()}>
-        {showToolbar && (
-          <div className="relative flex items-start gap-3">
-            <div className="min-w-[72px]">
-              <div className={toolbarHidden ? 'opacity-0 pointer-events-none' : ''}>
-                <NoteEditorToolbar {...toolbar} mode={mode} onModeChange={setMode} hasSelection={hasSelection} />
+      {/* Three-column grid, not a centered flex row: the two flanking columns
+          are both `1fr`, so they are always equal width to each other no
+          matter what (or whether anything) renders in them -- the centre
+          column's on-screen position is therefore fixed at the true middle
+          of the screen regardless of which side panel is open. A centered
+          flex row instead re-centers the WHOLE group on the group's total
+          width, so a side panel appearing/disappearing/changing width
+          visibly drags the centre (and the toolbar) sideways with it. The
+          grid tracks themselves are pointer-events: none (they're pure
+          layout, often wider than their visible content) with pointer
+          events re-enabled only on the actual toolbar/centre/panel boxes,
+          so empty grid space still counts as a genuine backdrop click. */}
+      <div
+        ref={rowRef}
+        className="grid items-start gap-3"
+        style={{ gridTemplateColumns: '1fr auto 1fr', width: '100%', pointerEvents: 'none' }}
+      >
+        <div className="flex items-start justify-end" style={{ pointerEvents: 'none' }}>
+          {showToolbar && (
+            <div
+              className="relative flex items-start gap-3"
+              style={{ pointerEvents: 'auto' }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="min-w-[72px]">
+                <div className={toolbarHidden ? 'opacity-0 pointer-events-none' : ''}>
+                  <NoteEditorToolbar {...toolbar} mode={mode} onModeChange={setMode} hasSelection={hasSelection} />
+                </div>
               </div>
             </div>
+          )}
+        </div>
+
+        <div style={{ pointerEvents: 'auto' }} onClick={(e) => e.stopPropagation()}>
+          {centre}
+        </div>
+
+        <div className="flex items-start justify-start" style={{ pointerEvents: 'none' }}>
+          <div style={{ pointerEvents: 'auto' }} onClick={(e) => e.stopPropagation()}>
+            {sharedPanel}
           </div>
-        )}
-
-        {centre}
-
-        {sharedPanel}
+        </div>
       </div>
 
       {selectionIndicator && overlayRect && (

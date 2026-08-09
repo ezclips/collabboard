@@ -767,7 +767,15 @@ describe('ClipartCardDraftModal reaction and comment metadata', () => {
     expect(String(commentsPanel!.props.className)).not.toContain('pt-6');
     expect(String(commentsPanel!.props.className)).toContain('relative');
     expect((commentsPanel!.props.style as { minWidth?: string }).minWidth).toBe('320px');
-    expect(source).toContain('relative m-auto flex max-w-[calc(100vw-80px)] items-start gap-6');
+    // The composition row is a 3-column grid (1fr auto 1fr), not a centered
+    // flex row, so the card's on-screen position stays fixed regardless of
+    // which side panel is open -- see ClipartCardDraftModal.tsx and
+    // PostEditorShell.tsx for the same fix and rationale. The row's width is
+    // pinned at the original max-w bound (now a definite width, needed for
+    // the flanking 1fr columns to distribute against) rather than shrinking
+    // to content.
+    expect(source).toContain("gridTemplateColumns: '1fr auto 1fr'");
+    expect(source).toContain("width: 'calc(100vw - 80px)'");
     expect(source).not.toContain('max-h-[calc(100vh-80px)]');
     expect(source).toContain('flex items-start justify-center overflow-auto p-4');
     expect(source).not.toContain('items-center justify-center p-4');
