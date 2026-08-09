@@ -21,6 +21,7 @@ const DELETED_CONFUSABLE_COPIES = [
   'components/canvas/brocken_WallCanvas.tsx',
   'components/canvas/1stnewRowCanvas.tsx',
   'components/canvas/layouts/broken_WallLayout.tsx',
+  'components/collabboard/canvas/last workingCanvasSetupPage.tsx',
 ];
 
 /** The live files those copies shadowed. */
@@ -28,6 +29,7 @@ const LIVE_COUNTERPARTS = [
   'components/canvas/WallCanvas.tsx',
   'components/canvas/RowCanvas.tsx',
   'components/canvas/layouts/WallLayout.tsx',
+  'components/collabboard/canvas/CanvasSetupPage.tsx',
 ];
 
 /**
@@ -79,5 +81,55 @@ describe('repository hygiene: historical source copies', () => {
     };
     walk(path.join(process.cwd(), FORK));
     expect(offenders).toEqual([]);
+  });
+});
+
+describe('repository hygiene: configuration follows the deletions', () => {
+  /**
+   * Narrow on purpose — not a general tsconfig linter. It only proves the
+   * excludes that existed *because* these historical files existed went away
+   * with them, so the cleanup did not simply move litter from the file tree
+   * into the configuration.
+   */
+  const REMOVED_EXCLUDES = [
+    'app/dashboard/create-canvas/also no goodpage.tsx',
+    'app/dashboard/create-canvas/long_but works_page.tsx',
+    'app/dashboard/create-canvas/samepage.tsx',
+    'components/canvas/layouts/broken_WallLayout.tsx',
+    'components/canvas/1stnewRowCanvas.tsx',
+    'components/collabboard/canvas/last workingCanvasSetupPage.tsx',
+  ];
+
+  const tsconfig = () =>
+    JSON.parse(fs.readFileSync(path.join(process.cwd(), 'tsconfig.json'), 'utf8')) as {
+      exclude: string[];
+    };
+
+  it.each(REMOVED_EXCLUDES)('tsconfig no longer excludes the deleted %s', (relative) => {
+    expect(tsconfig().exclude).not.toContain(relative);
+  });
+
+  it('every removed exclude pointed at a path that no longer exists', () => {
+    // This is what makes the tsconfig edit semantically inert: excluding a
+    // nonexistent path and not excluding it produce the same program.
+    for (const relative of REMOVED_EXCLUDES) {
+      expect(exists(relative), `${relative} must stay deleted`).toBe(false);
+    }
+  });
+});
+
+describe('repository hygiene: routing is unaffected', () => {
+  it('create-canvas still has exactly one page.tsx route file', () => {
+    const segment = path.join(process.cwd(), 'app/dashboard/create-canvas');
+    const routeFiles = fs
+      .readdirSync(segment)
+      .filter((name) => /^page\.(tsx|ts|jsx|js)$/.test(name));
+    expect(routeFiles).toEqual(['page.tsx']);
+  });
+
+  it('the deleted create-canvas copies were never routes and are gone', () => {
+    for (const name of ['also no goodpage.tsx', 'long_but works_page.tsx', 'samepage.tsx']) {
+      expect(exists(`app/dashboard/create-canvas/${name}`)).toBe(false);
+    }
   });
 });
