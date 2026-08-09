@@ -1,15 +1,15 @@
 "use client";
 
-import React, { useState } from 'react';
-import {
-    Check,
-    ChevronRight
-} from "lucide-react";
+import React from 'react';
+import { Check } from "lucide-react";
 import {
     ContextMenuShortcut,
     PositionedContextMenu,
     PositionedContextMenuItem,
     PositionedContextMenuSeparator,
+    PositionedContextMenuSub,
+    PositionedContextMenuSubContent,
+    PositionedContextMenuSubTrigger,
 } from '@/components/ui/context-menu';
 
 interface TableCellContextMenuProps {
@@ -52,8 +52,6 @@ export function TableCellContextMenu({
     currentVerticalAlign,
     onAlignChange
 }: TableCellContextMenuProps) {
-    const [activeSubmenu, setActiveSubmenu] = useState<string | null>(null);
-
     if (!isOpen) return null;
 
     /** Trailing checkmark, matching the original right-aligned indicator. */
@@ -72,9 +70,9 @@ export function TableCellContextMenu({
                 if (!nextOpen) onClose();
             }}
             // The table editor floats above canvas chrome, so this menu keeps its
-            // high stacking order. `overflow-visible` lets the hover-disclosed
-            // alignment submenu escape the menu box.
-            className="z-[9999] min-w-[200px] overflow-visible"
+            // high stacking order. The alignment submenu is portaled by the shared
+            // primitive, so the surface no longer has to opt out of clipping.
+            className="z-[9999] min-w-[200px]"
             onClick={(e) => e.stopPropagation()}
         >
             <PositionedContextMenuItem onSelect={() => onCut?.()}>
@@ -120,70 +118,59 @@ export function TableCellContextMenu({
 
             <PositionedContextMenuSeparator />
 
-            {/* Change Alignment Submenu Trigger */}
-            <div
-                className="relative"
-                onMouseEnter={() => setActiveSubmenu("alignment")}
-                onMouseLeave={() => setActiveSubmenu(null)}
-            >
-                <PositionedContextMenuItem
-                    // A pure hover disclosure: clicking it neither acts nor closes.
-                    onSelect={(event) => event.preventDefault()}
-                >
+            {/*
+              * Alignment submenu. Each choice forwards the pair it was given,
+              * changing only its own axis and passing the counterpart through
+              * verbatim -- including `undefined`, so an unset axis is never
+              * silently defaulted to the value the checkmark happens to show.
+              */}
+            <PositionedContextMenuSub>
+                <PositionedContextMenuSubTrigger>
                     Change Alignment...
-                    <span className="ml-auto pl-4 flex items-center">
-                        <ChevronRight className="w-4 h-4 text-gray-400" />
-                    </span>
-                </PositionedContextMenuItem>
+                </PositionedContextMenuSubTrigger>
 
-                {/* Submenu */}
-                {activeSubmenu === "alignment" && (
-                    <div
-                        className="absolute left-full top-0 ml-0.5 bg-white rounded-lg shadow-xl border border-gray-200 py-1 min-w-[150px]"
-                        style={{ marginTop: '-4px' }} // Align top nicely
+                <PositionedContextMenuSubContent className="min-w-[150px]">
+                    <PositionedContextMenuItem
+                        onSelect={() => onAlignChange?.("left", currentVerticalAlign)}
                     >
-                        <PositionedContextMenuItem
-                            onSelect={() => onAlignChange?.("left", currentVerticalAlign)}
-                        >
-                            Left
-                            {(currentAlign === "left" || !currentAlign) && checkmark}
-                        </PositionedContextMenuItem>
-                        <PositionedContextMenuItem
-                            onSelect={() => onAlignChange?.("center", currentVerticalAlign)}
-                        >
-                            Center
-                            {currentAlign === "center" && checkmark}
-                        </PositionedContextMenuItem>
-                        <PositionedContextMenuItem
-                            onSelect={() => onAlignChange?.("right", currentVerticalAlign)}
-                        >
-                            Right
-                            {currentAlign === "right" && checkmark}
-                        </PositionedContextMenuItem>
+                        Left
+                        {(currentAlign === "left" || !currentAlign) && checkmark}
+                    </PositionedContextMenuItem>
+                    <PositionedContextMenuItem
+                        onSelect={() => onAlignChange?.("center", currentVerticalAlign)}
+                    >
+                        Center
+                        {currentAlign === "center" && checkmark}
+                    </PositionedContextMenuItem>
+                    <PositionedContextMenuItem
+                        onSelect={() => onAlignChange?.("right", currentVerticalAlign)}
+                    >
+                        Right
+                        {currentAlign === "right" && checkmark}
+                    </PositionedContextMenuItem>
 
-                        <PositionedContextMenuSeparator />
+                    <PositionedContextMenuSeparator />
 
-                        <PositionedContextMenuItem
-                            onSelect={() => onAlignChange?.(currentAlign, "top")}
-                        >
-                            Top
-                            {(currentVerticalAlign === "top" || !currentVerticalAlign) && checkmark}
-                        </PositionedContextMenuItem>
-                        <PositionedContextMenuItem
-                            onSelect={() => onAlignChange?.(currentAlign, "middle")}
-                        >
-                            Middle
-                            {currentVerticalAlign === "middle" && checkmark}
-                        </PositionedContextMenuItem>
-                        <PositionedContextMenuItem
-                            onSelect={() => onAlignChange?.(currentAlign, "bottom")}
-                        >
-                            Bottom
-                            {currentVerticalAlign === "bottom" && checkmark}
-                        </PositionedContextMenuItem>
-                    </div>
-                )}
-            </div>
+                    <PositionedContextMenuItem
+                        onSelect={() => onAlignChange?.(currentAlign, "top")}
+                    >
+                        Top
+                        {(currentVerticalAlign === "top" || !currentVerticalAlign) && checkmark}
+                    </PositionedContextMenuItem>
+                    <PositionedContextMenuItem
+                        onSelect={() => onAlignChange?.(currentAlign, "middle")}
+                    >
+                        Middle
+                        {currentVerticalAlign === "middle" && checkmark}
+                    </PositionedContextMenuItem>
+                    <PositionedContextMenuItem
+                        onSelect={() => onAlignChange?.(currentAlign, "bottom")}
+                    >
+                        Bottom
+                        {currentVerticalAlign === "bottom" && checkmark}
+                    </PositionedContextMenuItem>
+                </PositionedContextMenuSubContent>
+            </PositionedContextMenuSub>
         </PositionedContextMenu>
     );
 }

@@ -74,8 +74,25 @@ function surface(): HTMLElement {
   return el!;
 }
 
+/**
+ * The alignment submenu is portaled by the shared primitive, so it is a sibling
+ * of the root surface rather than a descendant. Rows are collected across both
+ * levels, root first, matching reading order.
+ */
+function subSurface(): HTMLElement | null {
+  return document.querySelector<HTMLElement>('[data-slot="positioned-context-menu-sub-content"]');
+}
+
+function openSubSurface(): HTMLElement {
+  const el = subSurface();
+  expect(el, 'alignment submenu is not open').not.toBeNull();
+  return el!;
+}
+
 function rows(): HTMLElement[] {
-  return Array.from(surface().querySelectorAll<HTMLElement>('button, [role="menuitem"]'));
+  return [surface(), subSurface()]
+    .filter((el): el is HTMLElement => el !== null)
+    .flatMap((el) => Array.from(el.querySelectorAll<HTMLElement>('button, [role="menuitem"]')));
 }
 
 /**
@@ -120,13 +137,17 @@ function click(el: HTMLElement) {
   });
 }
 
+function alignmentTrigger(): HTMLElement {
+  return rowByLabel('Change Alignment...');
+}
+
 function openAlignmentSubmenu() {
-  // The submenu opens on hover of the trigger's wrapper in the old build and
-  // of the row itself in the migrated build; hovering both covers each.
-  const trigger = rowByLabel('Change Alignment...');
+  act(() => { hover(alignmentTrigger()); });
+}
+
+function key(target: HTMLElement, k: string) {
   act(() => {
-    if (trigger.parentElement) hover(trigger.parentElement);
-    hover(trigger);
+    target.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }));
   });
 }
 
@@ -197,11 +218,22 @@ describe('TableCellContextMenu', () => {
     expect(surface().className).toContain('min-w-[200px]');
   });
 
-  it('keeps the surface able to overflow so the alignment submenu can escape', () => {
+  it('returns the surface to the canonical clipping behavior', () => {
+    // PATCH 4D needed `overflow-visible` because the old alignment submenu was
+    // an absolutely positioned child that a clipping surface would have hidden.
+    // The shared submenu is portaled, so that workaround is obsolete and the
+    // surface keeps the shared default.
     renderMenu();
-    // The submenu is absolutely positioned at left-full; a clipping surface
-    // would hide it entirely.
-    expect(surface().className).not.toContain('overflow-hidden');
+    expect(surface().className).not.toContain('overflow-visible');
+    expect(surface().className).toContain('overflow-hidden');
+  });
+
+  it('pins the full root surface class contract', () => {
+    renderMenu();
+    const className = surface().className;
+    expect(className).toContain('z-[9999]');
+    expect(className).toContain('min-w-[200px]');
+    expect(className).not.toContain('overflow-visible');
   });
 
   it('renders nothing when closed', () => {
@@ -286,18 +318,28 @@ describe('TableCellContextMenu', () => {
     ]);
   });
 
-  it('clicking the alignment trigger itself does nothing and keeps the menu open', () => {
+  it('the alignment trigger changes no alignment and dismisses nothing when activated', () => {
     const onClose = vi.fn();
     const onAlignChange = vi.fn();
     renderMenu({ onClose, onAlignChange });
-    click(rowByLabel('Change Alignment...'));
-    // The trigger is a pure hover-disclosure: no callback, no dismissal.
+    click(alignmentTrigger());
+    // It opens a level rather than performing an action. PATCH 4G adopted the
+    // canonical trigger, so clicking now discloses the submenu where the old
+    // hand-built trigger ignored clicks entirely -- but it still must not
+    // mutate alignment or tear down the menu.
     expect(onAlignChange).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
+    expect(subSurface()).not.toBeNull();
   });
 
-  it('hides the alignment submenu until hovered', () => {
+  it('keeps Change Alignment... last in the root menu', () => {
     renderMenu();
+    expect(rowLabels()[rowLabels().length - 1]).toBe('Change Alignment...');
+  });
+
+  it('hides the alignment submenu until it is opened', () => {
+    renderMenu();
+    expect(subSurface()).toBeNull();
     for (const label of ALIGNMENT_ITEMS) {
       expect(rowLabels()).not.toContain(label);
     }
@@ -308,6 +350,16 @@ describe('TableCellContextMenu', () => {
     openAlignmentSubmenu();
     const labels = rowLabels();
     expect(labels.filter((l) => ALIGNMENT_ITEMS.includes(l))).toEqual(ALIGNMENT_ITEMS);
+  });
+
+  it('separates the horizontal and vertical alignment groups', () => {
+    renderMenu();
+    openAlignmentSubmenu();
+    expect(
+      openSubSurface().querySelectorAll('[data-slot="context-menu-separator"]'),
+    ).toHaveLength(1);
+    // The root keeps exactly its own three; the submenu's is portaled away.
+    expect(surface().querySelectorAll('[data-slot="context-menu-separator"]')).toHaveLength(3);
   });
 
   it('checkmarks Left and Top by default when no alignment is set', () => {
@@ -364,6 +416,71 @@ describe('TableCellContextMenu', () => {
     openAlignmentSubmenu();
     click(rowByLabel('Center'));
     expect(onAlignChange).toHaveBeenCalledWith('center', undefined);
+  });
+
+  it('lets the pointer travel from the trigger into the submenu without it closing', () => {
+    vi.useFakeTimers();
+    try {
+      renderMenu();
+      openAlignmentSubmenu();
+      const content = openSubSurface();
+
+      // Pointer leaves the trigger heading for the submenu.
+      act(() => {
+        alignmentTrigger().dispatchEvent(
+          new MouseEvent('mouseout', { bubbles: true, cancelable: true, relatedTarget: document.body }),
+        );
+      });
+      act(() => { vi.advanceTimersByTime(50); });
+      expect(subSurface(), 'closed before the pointer could arrive').not.toBeNull();
+
+      act(() => { hover(content); });
+      act(() => { vi.advanceTimersByTime(500); });
+      expect(subSurface(), 'closed even though the pointer is inside it').not.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('opens the submenu with ArrowRight and lands focus on an enabled item', () => {
+    renderMenu();
+    key(alignmentTrigger(), 'ArrowRight');
+    expect(document.activeElement).toBe(rowByLabel('Left'));
+  });
+
+  it('navigates the submenu with ArrowDown and ArrowUp', () => {
+    renderMenu();
+    key(alignmentTrigger(), 'ArrowRight');
+    key(document.activeElement as HTMLElement, 'ArrowDown');
+    expect(document.activeElement).toBe(rowByLabel('Center'));
+    key(document.activeElement as HTMLElement, 'ArrowUp');
+    expect(document.activeElement).toBe(rowByLabel('Left'));
+  });
+
+  it('closes the submenu on ArrowLeft and returns focus to Change Alignment...', () => {
+    renderMenu();
+    key(alignmentTrigger(), 'ArrowRight');
+    openSubSurface();
+    key(document.activeElement as HTMLElement, 'ArrowLeft');
+    expect(subSurface()).toBeNull();
+    expect(document.activeElement).toBe(alignmentTrigger());
+  });
+
+  it('Escape inside the submenu dismisses the whole menu, matching the root contract', () => {
+    const onClose = vi.fn();
+    renderMenu({ onClose });
+    key(alignmentTrigger(), 'ArrowRight');
+    key(document.activeElement as HTMLElement, 'Escape');
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('activates an alignment choice from the keyboard', () => {
+    const onAlignChange = vi.fn();
+    renderMenu({ onAlignChange, currentVerticalAlign: 'bottom' });
+    key(alignmentTrigger(), 'ArrowRight');
+    key(document.activeElement as HTMLElement, 'ArrowDown');
+    key(document.activeElement as HTMLElement, 'Enter');
+    expect(onAlignChange).toHaveBeenCalledWith('center', 'bottom');
   });
 
   it('no action is ever disabled; editability gating lives in TableEditor', () => {
@@ -471,7 +588,79 @@ describe('TableCellContextMenu shared-shell adoption', () => {
   it('uses no Radix trigger and synthesizes no contextmenu event', () => {
     expect(source()).not.toContain('@radix-ui/react-context-menu');
     expect(source()).not.toContain('ContextMenuTrigger');
+    expect(source()).not.toContain('dispatchEvent');
     renderMenu();
-    expect(document.querySelectorAll('[aria-haspopup="menu"]')).toHaveLength(0);
+    // The only aria-haspopup is the genuine submenu trigger, not a fake root
+    // trigger standing in for a right-click target.
+    const haspopup = Array.from(document.querySelectorAll('[aria-haspopup="menu"]'));
+    expect(haspopup).toHaveLength(1);
+    expect(haspopup[0].getAttribute('data-slot')).toBe('context-menu-sub-trigger');
+    expect(document.querySelector('[data-radix-context-menu-trigger]')).toBeNull();
+  });
+
+  it('renders the alignment submenu through the shared positioned submenu', () => {
+    renderMenu();
+    openAlignmentSubmenu();
+    const content = openSubSurface();
+    expect(content.getAttribute('role')).toBe('menu');
+    // Same shared surface constants as every other CollabBoard menu.
+    expect(content.className).toContain('bg-gray-50');
+    expect(content.className).toContain('rounded-lg');
+    expect(content.className).toContain('fixed');
+    // Submenu rows are the shared item primitive, not bespoke markup.
+    expect(
+      Array.from(content.querySelectorAll('[role="menuitem"]'))
+        .every((el) => el.getAttribute('data-slot') === 'context-menu-item'),
+    ).toBe(true);
+  });
+
+  it('exposes canonical submenu ARIA on the alignment trigger', () => {
+    renderMenu();
+    const trigger = alignmentTrigger();
+    expect(trigger.getAttribute('role')).toBe('menuitem');
+    expect(trigger.getAttribute('aria-haspopup')).toBe('menu');
+    expect(trigger.getAttribute('aria-expanded')).toBe('false');
+
+    openAlignmentSubmenu();
+    expect(alignmentTrigger().getAttribute('aria-expanded')).toBe('true');
+    expect(alignmentTrigger().getAttribute('aria-controls')).toBe(openSubSurface().id);
+  });
+
+  it('gets its submenu chevron from the shared trigger rather than local markup', () => {
+    renderMenu();
+    const chevron = alignmentTrigger().lastElementChild!;
+    expect(chevron.tagName.toLowerCase()).toBe('svg');
+    expect(chevron.getAttribute('class')).toContain('ml-auto');
+    // The old local chevron span is gone.
+    expect(source()).not.toContain('ChevronRight');
+  });
+
+  it('imports the shared submenu primitives from the public barrel only', () => {
+    const src = source();
+    for (const name of [
+      'PositionedContextMenuSub',
+      'PositionedContextMenuSubTrigger',
+      'PositionedContextMenuSubContent',
+    ]) {
+      expect(src, `missing import of ${name}`).toContain(name);
+    }
+    expect(src).toContain("from '@/components/ui/context-menu'");
+    // Internal implementation modules are off limits to consumers.
+    expect(src).not.toContain('positioned-context-menu');
+    expect(src).not.toContain('context-menu-styles');
+  });
+
+  it('no longer hand-builds the alignment submenu', () => {
+    const src = source();
+    // The old absolute surface, its local styling and its hover state.
+    expect(src).not.toContain('absolute left-full');
+    expect(src).not.toContain('shadow-xl');
+    expect(src).not.toContain('activeSubmenu');
+    expect(src).not.toContain('setActiveSubmenu');
+    expect(src).not.toContain('onMouseEnter');
+    expect(src).not.toContain('onMouseLeave');
+    expect(src).not.toContain('useState');
+    // No local suppression of the shared trigger's canonical behavior.
+    expect(src).not.toContain('event.preventDefault()');
   });
 });
