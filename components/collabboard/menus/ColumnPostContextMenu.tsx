@@ -15,6 +15,8 @@ import {
     ContextMenuSub,
     ContextMenuSubContent,
     ContextMenuSubTrigger,
+    ContextMenuSwatch,
+    ContextMenuSwatchRow,
     ContextMenuTrigger,
 } from '@/components/ui/context-menu';
 import { ActionId, actionRegistry } from '@/lib/collabboard/ActionRegistry';
@@ -253,17 +255,22 @@ export function ColumnPostContextMenu({
                 )}
                 {/* Color picker */}
                 {onChangeColor && (
-                    <div className="flex items-center gap-1 px-2 py-1">
+                    <ContextMenuSwatchRow>
                         {["#fff", "#f87171", "#fbbf24", "#34d399", "#60a5fa", "#a78bfa"].map((color) => (
-                            <button
+                            <ContextMenuSwatch
                                 key={color}
-                                className="w-5 h-5 rounded-full border-2 border-white shadow-sm hover:scale-110 transition-transform"
-                                style={{ backgroundColor: color }}
-                                onClick={() => onChangeColor(color)}
-                                title={color}
+                                color={color}
+                                label={color}
+                                onSelect={(event) => {
+                                    // Preserved from the hand-rolled row: picking a
+                                    // color leaves the menu open so several can be
+                                    // tried in a row.
+                                    event.preventDefault();
+                                    onChangeColor(color);
+                                }}
                             />
                         ))}
-                    </div>
+                    </ContextMenuSwatchRow>
                 )}
                 {onEditPosition && (
                     <ContextMenuItem icon={<Edit2 size={16} />} onClick={onEditPosition}>

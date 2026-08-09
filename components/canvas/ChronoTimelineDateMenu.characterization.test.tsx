@@ -194,15 +194,90 @@ describe('Timeline date-badge context menu', () => {
     expect(input?.value).toBe('Launch day');
   });
 
-  it('color swatches carry no selected-state styling, matching the pre-migration markup', () => {
+  // ───────────────────────────────────────────────────────────────────────
+  // Color swatches (PATCH 7B). Written against the pre-7B local `<button>`
+  // row and kept green through the migration onto the shared swatch
+  // primitives, so they pin FUNCTION independently of presentation.
+  // ───────────────────────────────────────────────────────────────────────
+  const TIMELINE_COLORS = [
+    '#3b82f6', '#06b6d4', '#10b981', '#84cc16', '#eab308',
+    '#f97316', '#ef4444', '#ec4899', '#8b5cf6', '#6b7280',
+  ];
+
+  const dateSwatches = (menu: HTMLElement) =>
+    Array.from(menu.querySelectorAll<HTMLElement>('[title^="#"]'));
+
+  it('offers exactly the ten date-color presets, in order', () => {
+    const menu = openDateMenu(mount(
+      <ChronoTimelineCanvas {...baseProps({ padlets: [containerPadlet('c1')] })} />,
+    ));
+    expect(dateSwatches(menu).map((el) => el.getAttribute('title'))).toEqual(TIMELINE_COLORS);
+  });
+
+  it.each(TIMELINE_COLORS)('writes timelineBadgeColor %s for that swatch', (color) => {
+    const onUpdateContainerMetadata = vi.fn();
+    const menu = openDateMenu(mount(
+      <ChronoTimelineCanvas
+        {...baseProps({ padlets: [containerPadlet('c1')], onUpdateContainerMetadata })}
+      />,
+    ));
+    const swatch = dateSwatches(menu).find((el) => el.getAttribute('title') === color)!;
+    expect(swatch, `no swatch for ${color}`).toBeTruthy();
+    act(() => {
+      swatch.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+    expect(onUpdateContainerMetadata).toHaveBeenCalledTimes(1);
+    expect(onUpdateContainerMetadata).toHaveBeenCalledWith('c1', { timelineBadgeColor: color });
+  });
+
+  it('keeps the menu open after a date color is chosen', () => {
+    const menu = openDateMenu(mount(
+      <ChronoTimelineCanvas {...baseProps({ padlets: [containerPadlet('c1')] })} />,
+    ));
+    act(() => {
+      dateSwatches(menu)[0].dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+    expect(document.querySelector('[role="menu"]')).not.toBeNull();
+  });
+
+  it('renders the shared swatch row and one shared swatch per preset', () => {
+    const menu = openDateMenu(mount(
+      <ChronoTimelineCanvas {...baseProps({ padlets: [containerPadlet('c1')] })} />,
+    ));
+    const row = menu.querySelector('[data-slot="context-menu-swatch-row"]');
+    expect(row).not.toBeNull();
+    expect(row!.getAttribute('role')).toBe('group');
+    const rendered = Array.from(menu.querySelectorAll<HTMLElement>('[data-slot="context-menu-swatch"]'));
+    expect(rendered).toHaveLength(TIMELINE_COLORS.length);
+    rendered.forEach((el, index) => {
+      expect(el.getAttribute('aria-label')).toBe(TIMELINE_COLORS[index]);
+      expect(el.getAttribute('role')).toBe('menuitem');
+    });
+  });
+
+  it('hand-rolls no date swatch button or sizing any more', () => {
+    const src = fs.readFileSync(
+      path.join(process.cwd(), 'components/canvas/ChronoTimelineCanvas.tsx'),
+      'utf8',
+    );
+    expect(src).toContain('ContextMenuSwatchRow');
+    expect(src).toContain('ContextMenuSwatch');
+    // The old row's exact markup is gone; the custom-picker flyout stays.
+    expect(src).not.toContain('w-5 h-5 rounded border transition-all');
+    expect(src).toContain('ColorPickerContent');
+  });
+
+  it('marks no swatch as selected, even when the badge already uses that color', () => {
+    // Pre-7B this was asserted against the hand-rolled button's classes; the
+    // shared primitive expresses the same absence via `data-selected`. The
+    // behavior is unchanged: this menu highlights no current color.
     const menu = openDateMenu(mount(
       <ChronoTimelineCanvas {...baseProps({ padlets: [containerPadlet('c1', { timelineBadgeColor: '#3b82f6' })] })} />,
     ));
-    const swatches = Array.from(menu.querySelectorAll<HTMLElement>('button[title="#3b82f6"]'));
-    expect(swatches.length).toBeGreaterThan(0);
-    for (const swatch of swatches) {
-      expect(swatch.className).not.toContain('ring-1');
-      expect(swatch.className).toContain('border-gray-300');
+    const all = dateSwatches(menu);
+    expect(all.length).toBe(TIMELINE_COLORS.length);
+    for (const swatch of all) {
+      expect(swatch.hasAttribute('data-selected')).toBe(false);
     }
   });
 
@@ -220,7 +295,11 @@ describe('Timeline date-badge context menu', () => {
     expect(document.querySelector('[role="menu"]')).toBeNull();
 
     const reopened = openDateMenu(dom);
-    expect(reopened.querySelector('[data-slot="context-menu-swatch-row"], .rounded-lg.shadow-2xl')).toBeNull();
+    // Only the custom-picker FLYOUT must be gone. (Pre-7B this selector also
+    // listed the swatch-row slot, which nothing rendered then; the preset row
+    // is a permanent part of the menu and is asserted separately above.)
+    expect(reopened.querySelector('.rounded-lg.shadow-2xl')).toBeNull();
+    expect(reopened.textContent).not.toMatch(/Hex|Opacity/i);
   });
 
   it('does not open a menu, and leaves the native context menu unblocked, when not editable', () => {

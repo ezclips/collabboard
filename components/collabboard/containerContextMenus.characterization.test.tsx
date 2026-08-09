@@ -500,6 +500,227 @@ describe('WallContainerContextMenu', () => {
 // Their "zero importers" assertions only existed to record that they were unused,
 // so they went with them. The live implementation under context-menus/ is
 // characterized above, and the guard below keeps the duplicates from returning.
+// ─────────────────────────────────────────────────────────────────────────
+// Color swatches (PATCH 7B)
+//
+// Written against the pre-7B local `<button>` rows and kept green through the
+// migration onto the shared swatch primitives, so they characterize FUNCTION
+// (which colors, in what order, what payload, whether the menu stays open)
+// independently of the presentation that renders them.
+// ─────────────────────────────────────────────────────────────────────────
+const CONTAINER_COLORS = ['#fff', '#f87171', '#fbbf24', '#34d399', '#60a5fa', '#a78bfa'];
+
+/** Swatches in DOM order, in either implementation (both label by color). */
+function swatches(menu: HTMLElement): HTMLElement[] {
+  return Array.from(menu.querySelectorAll<HTMLElement>('[title^="#"]'));
+}
+
+function swatchColors(menu: HTMLElement): string[] {
+  return swatches(menu).map((el) => el.getAttribute('title') ?? '');
+}
+
+describe.each([
+  ['ColumnPostContextMenu', ColumnPostContextMenu as any],
+  ['WallContainerContextMenu', WallContainerContextMenu as any],
+])('%s color swatches', (_name, Menu) => {
+  const mountMenu = (onChangeColor: (color: string) => void) =>
+    openMenu(
+      mount(
+        <Menu padlet={padlet()} onSelect={vi.fn()} onChangeColor={onChangeColor}>
+          <div data-testid="trigger">t</div>
+        </Menu>,
+      ),
+    );
+
+  it('offers exactly the six predefined colors, in order', () => {
+    expect(swatchColors(mountMenu(vi.fn()))).toEqual(CONTAINER_COLORS);
+  });
+
+  // One test per color: each needs its own mount, and cleanup runs per test.
+  it.each(CONTAINER_COLORS)('dispatches exactly %s when that swatch is chosen', (color) => {
+    const onChangeColor = vi.fn();
+    const menu = mountMenu(onChangeColor);
+    const swatch = swatches(menu).find((el) => el.getAttribute('title') === color)!;
+    expect(swatch, `no swatch for ${color}`).toBeTruthy();
+    act(() => {
+      swatch.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+    expect(onChangeColor).toHaveBeenCalledTimes(1);
+    expect(onChangeColor).toHaveBeenCalledWith(color);
+  });
+
+  it('keeps the menu open after a color is chosen', () => {
+    const menu = mountMenu(vi.fn());
+    act(() => {
+      swatches(menu)[1].dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+    expect(document.querySelector('[role="menu"]')).not.toBeNull();
+  });
+
+  it('renders no swatch row at all when no color callback is supplied', () => {
+    const menu = openMenu(
+      mount(
+        <Menu padlet={padlet()} onSelect={vi.fn()}>
+          <div data-testid="trigger">t</div>
+        </Menu>,
+      ),
+    );
+    expect(swatches(menu)).toHaveLength(0);
+  });
+
+  it('marks no swatch as selected — these menus track no current color', () => {
+    const menu = mountMenu(vi.fn());
+    for (const swatch of swatches(menu)) {
+      expect(swatch.hasAttribute('data-selected')).toBe(false);
+    }
+  });
+});
+
+// PATCH 7B: presentation is now the shared swatch primitive, so these menus
+// look like every other CollabBoard menu. Function is pinned above.
+describe.each([
+  ['ColumnPostContextMenu', 'components/collabboard/menus/ColumnPostContextMenu.tsx', ColumnPostContextMenu as any],
+  ['WallContainerContextMenu', 'components/collabboard/context-menus/WallContainerContextMenu.tsx', WallContainerContextMenu as any],
+])('%s swatch presentation', (_name, relativePath, Menu) => {
+  const source = () => fs.readFileSync(path.join(process.cwd(), relativePath), 'utf8');
+
+  const openWithColors = () =>
+    openMenu(
+      mount(
+        <Menu padlet={padlet()} onSelect={vi.fn()} onChangeColor={vi.fn()}>
+          <div data-testid="trigger">t</div>
+        </Menu>,
+      ),
+    );
+
+  it('renders the shared swatch row', () => {
+    const row = openWithColors().querySelector('[data-slot="context-menu-swatch-row"]');
+    expect(row).not.toBeNull();
+    expect(row!.getAttribute('role')).toBe('group');
+  });
+
+  it('renders one shared swatch per predefined color', () => {
+    const menu = openWithColors();
+    const rendered = menu.querySelectorAll('[data-slot="context-menu-swatch"]');
+    expect(rendered).toHaveLength(CONTAINER_COLORS.length);
+  });
+
+  it('paints each swatch with its own color and keeps it keyboard-reachable', () => {
+    const menu = openWithColors();
+    const rendered = Array.from(menu.querySelectorAll<HTMLElement>('[data-slot="context-menu-swatch"]'));
+    rendered.forEach((el, index) => {
+      expect(el.style.backgroundColor).not.toBe('');
+      expect(el.getAttribute('aria-label')).toBe(CONTAINER_COLORS[index]);
+      // Radix Items, so arrow-key navigation and disabled handling come free.
+      expect(el.getAttribute('role')).toBe('menuitem');
+    });
+  });
+
+  it('hand-rolls no swatch button, sizing or hover styling any more', () => {
+    const src = source();
+    expect(src).toContain('ContextMenuSwatchRow');
+    expect(src).toContain('ContextMenuSwatch');
+    expect(src).not.toMatch(/<button/);
+    expect(src).not.toContain('rounded-full border-2 border-white');
+    expect(src).not.toContain('hover:scale-110');
+  });
+
+  it('imports the swatch primitives only from the public barrel', () => {
+    const src = source();
+    expect(src).toContain("from '@/components/ui/context-menu'");
+    expect(src).not.toContain('positioned-context-menu');
+    expect(src).not.toContain('context-menu-styles');
+  });
+
+  it('branches on no canvas/layout name for styling', () => {
+    const src = source();
+    expect(src).not.toMatch(/layout\s*===/);
+    for (const name of ['"map"', "'map'", '"timeline"', "'timeline'", '"grid"', "'grid'"]) {
+      expect(src, `no layout-specific branch for ${name}`).not.toContain(name);
+    }
+  });
+});
+
+// Delete's wiring, not just its appearance. Added in 7B after a negative
+// control showed the suites verified the destructive *styling* of the Delete
+// row without ever proving it calls `onDelete`.
+describe.each([
+  ['ColumnPostContextMenu', ColumnPostContextMenu as any],
+  ['WallContainerContextMenu', WallContainerContextMenu as any],
+])('%s delete wiring', (_name, Menu) => {
+  it('invokes onDelete, and nothing else, when the delete row is chosen', () => {
+    const onDelete = vi.fn();
+    const onEdit = vi.fn();
+    const onChangeColor = vi.fn();
+    const menu = openMenu(
+      mount(
+        <Menu
+          padlet={padlet()}
+          onSelect={vi.fn()}
+          onEdit={onEdit}
+          onChangeColor={onChangeColor}
+          onDelete={onDelete}
+        >
+          <div data-testid="trigger">t</div>
+        </Menu>,
+      ),
+    );
+    act(() => {
+      itemByText(menu, 'Delete post').dispatchEvent(
+        new MouseEvent('click', { bubbles: true, cancelable: true }),
+      );
+    });
+    expect(onDelete).toHaveBeenCalledTimes(1);
+    expect(onEdit).not.toHaveBeenCalled();
+    expect(onChangeColor).not.toHaveBeenCalled();
+  });
+
+  it('honours a custom delete label without changing the callback', () => {
+    const onDelete = vi.fn();
+    const menu = openMenu(
+      mount(
+        <Menu padlet={padlet()} onSelect={vi.fn()} onDelete={onDelete} deleteLabel="Delete container">
+          <div data-testid="trigger">t</div>
+        </Menu>,
+      ),
+    );
+    const row = itemByText(menu, 'Delete container');
+    expect(row.getAttribute('data-variant')).toBe('destructive');
+    act(() => {
+      row.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+    expect(onDelete).toHaveBeenCalledTimes(1);
+  });
+});
+
+// The public prop contracts are frozen: tracked historical canvases still
+// import the live Wall menu, so 7B had to require zero caller changes.
+describe('container menu prop signatures are frozen', () => {
+  it.each([
+    ['ColumnPostContextMenu', 'components/collabboard/menus/ColumnPostContextMenu.tsx', 'onChangeColor?: (color: string) => void'],
+    ['WallContainerContextMenu', 'components/collabboard/context-menus/WallContainerContextMenu.tsx', 'onChangeColor?: (color: string) => void'],
+  ])('%s still declares the same color callback', (_name, relativePath, signature) => {
+    const src = fs.readFileSync(path.join(process.cwd(), relativePath), 'utf8');
+    expect(src).toContain(signature);
+    expect(src).toContain('deleteLabel');
+    expect(src).toContain('onDelete?: () => void');
+  });
+
+  it('no caller was touched to accommodate the new presentation', () => {
+    // Including the tracked historical copies, which must keep compiling.
+    for (const relative of [
+      'components/canvas/WallCanvas.tsx',
+      'components/canvas/RowCanvas.tsx',
+      'components/canvas/brocken_WallCanvas.tsx',
+      'components/canvas/1stnewRowCanvas.tsx',
+    ]) {
+      const src = fs.readFileSync(path.join(process.cwd(), relative), 'utf8');
+      expect(src, `${relative} must not know about swatch primitives`)
+        .not.toContain('ContextMenuSwatch');
+    }
+  });
+});
+
 describe('the dead Wall duplicates stay deleted', () => {
   it('no shadow copy exists alongside the live container menu', () => {
     for (const relative of [

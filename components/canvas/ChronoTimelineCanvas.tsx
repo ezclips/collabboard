@@ -12,6 +12,8 @@ import {
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
+  ContextMenuSwatch,
+  ContextMenuSwatchRow,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
 import { getContainerEditTargetLabel } from '@/lib/infra/collabboard/containerEditTargetLabel';
@@ -555,17 +557,21 @@ export default function ChronoTimelineCanvas({
 
           <ContextMenuSeparator />
 
-          <div className="flex gap-1 px-2 py-1.5">
+          <ContextMenuSwatchRow>
             {DATE_COLOR_PRESETS.map((color) => (
-              <button
+              <ContextMenuSwatch
                 key={color}
-                onClick={() => handleSetDateColor(container.id, color)}
-                className="w-5 h-5 rounded border transition-all hover:scale-110 border-gray-300 hover:border-gray-400"
-                style={{ backgroundColor: color }}
-                title={color}
+                color={color}
+                label={color}
+                onSelect={(event) => {
+                  // Preserved from the hand-rolled row: picking a color leaves
+                  // the menu open so several can be tried in a row.
+                  event.preventDefault();
+                  handleSetDateColor(container.id, color);
+                }}
               />
             ))}
-          </div>
+          </ContextMenuSwatchRow>
 
           <ContextMenuItem
             onSelect={(event) => event.preventDefault()}
