@@ -176,6 +176,25 @@ describe('Drawing remains Document-unreachable', () => {
     // Scoped proof, not a production change: onEditPadletAsPost stays behind
     // the pre-existing container-type guard, so no Document (a non-container
     // card) can reach NoteEditor through that path (PATCH-149 §22.1 row 8).
-    expect(contextMenuSrc).toContain('isContainerType && onEditPadletAsPost ? onEditPadletAsPost(padlet) : onEdit(padlet)');
+    //
+    // PATCH 5 migrated CanvasContextMenu onto the shared positioned menu and
+    // rewrote that inline ternary as an early-return branch. The behavioral
+    // property is unchanged, so this asserts the property directly rather than
+    // the old expression's exact text -- and more strictly than before: there
+    // must be exactly one invocation, and it must sit inside the guard.
+    expect(contextMenuSrc).toContain('isContainerType && onEditPadletAsPost');
+
+    const guard = contextMenuSrc.indexOf('if (isContainerType && onEditPadletAsPost) {');
+    expect(guard, 'the container-type guard must still exist').toBeGreaterThan(-1);
+
+    const invocations = contextMenuSrc.match(/onEditPadletAsPost\(/g) ?? [];
+    expect(invocations, 'onEditPadletAsPost must be called exactly once').toHaveLength(1);
+    expect(
+      contextMenuSrc.indexOf('onEditPadletAsPost(padlet)'),
+      'the only invocation must sit inside the container-type guard',
+    ).toBeGreaterThan(guard);
+
+    // A non-container card still falls through to the ordinary editor.
+    expect(contextMenuSrc).toContain('onEdit(padlet);');
   });
 });

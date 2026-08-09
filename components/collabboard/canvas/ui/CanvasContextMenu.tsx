@@ -1,50 +1,16 @@
 "use client";
 
-import React, { useRef, useLayoutEffect, useMemo, useState } from "react";
+import React, { useMemo } from "react";
 import { Pencil } from "lucide-react";
+import {
+  PositionedContextMenu,
+  PositionedContextMenuItem,
+  PositionedContextMenuSeparator,
+  PositionedContextMenuSub,
+  PositionedContextMenuSubContent,
+  PositionedContextMenuSubTrigger,
+} from "@/components/ui/context-menu";
 import type { Padlet } from "@/types/collabboard";
-
-const UI_FONT =
-  '"Assistant", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
-
-function MenuItem({
-  label,
-  shortcut,
-  danger,
-  disabled,
-  onClick,
-}: {
-  label: string;
-  shortcut?: string;
-  danger?: boolean;
-  disabled?: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      disabled={disabled}
-      style={{ fontFamily: UI_FONT }}
-      className={`w-full flex items-center justify-between text-left text-[13px]
-        py-[4px] pl-5 pr-4 transition-colors
-        ${
-          danger
-            ? "text-[#f03e3e] hover:bg-[#fa5252] hover:text-white disabled:opacity-40"
-            : "text-[#000] hover:bg-[#339af0] hover:text-white disabled:text-[#adb5bd]"
-        }
-        disabled:cursor-default`}
-      onClick={onClick}
-    >
-      <span>{label}</span>
-      {shortcut && (
-        <span className="text-[0.7rem] ml-4 shrink-0 opacity-60">{shortcut}</span>
-      )}
-    </button>
-  );
-}
-
-function Sep() {
-  return <div className="my-1 border-t border-[#adb5bd]" />;
-}
 
 const getMetadataObject = (padlet: Padlet): Record<string, unknown> => {
   if (padlet.metadata && typeof padlet.metadata === "object") {
@@ -103,10 +69,6 @@ export function CanvasContextMenu({
   const isComment = padlet.type === "comment";
   const metadata = getMetadataObject(padlet);
   const isContainerType = padlet.type === "container" || metadata.isContainer === true;
-  const menuRef = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState({ x, y });
-  const [visible, setVisible] = useState(false);
-  const [showEditSubmenu, setShowEditSubmenu] = useState(false);
   const orderedOpenTargets = useMemo(() => openTargets ?? [], [openTargets]);
   const hasOpenTargets = Boolean(isContainerType && orderedOpenTargets.length > 0 && onOpenTarget);
   const singleOpenTarget = hasOpenTargets && orderedOpenTargets.length === 1 ? orderedOpenTargets[0] : null;
@@ -121,112 +83,116 @@ export function CanvasContextMenu({
     return `${type.replace(/_/g, " ")} ${idx + 1}`;
   };
 
-  useLayoutEffect(() => {
-    const el = menuRef.current;
-    if (!el) return;
-    const h = el.offsetHeight;
-    const w = el.offsetWidth;
-    const fx = Math.min(x, window.innerWidth - w - 4);
-    const fy = y + h > window.innerHeight ? Math.max(4, y - h) : y;
-    setPos({ x: fx, y: fy });
-    setVisible(true);
-  }, [x, y]);
+  /** Multiple edit targets are the only case that discloses a submenu. */
+  const hasEditSubmenu = hasOpenTargets && !singleOpenTarget;
 
-  const run = (fn: () => void) => {
-    fn();
-    onClose();
+  const editLabel = isComment
+    ? "View comment"
+    : singleOpenTarget
+      ? `Edit ${resolveOpenTargetLabel(singleOpenTarget, 0)}`
+      : hasOpenTargets
+        ? "Edit post"
+        : isContainerType && onEditPadletAsPost
+          ? "Edit Post"
+          : "Edit";
+
+  /**
+   * The direct-edit path, used for every case except the multi-target submenu.
+   * A comment has no dedicated callback -- "View comment" routes to `onEdit`,
+   * exactly as the pre-migration menu did.
+   */
+  const runEdit = () => {
+    if (singleOpenTarget) {
+      onOpenTarget?.(singleOpenTarget);
+      return;
+    }
+    if (isContainerType && onEditPadletAsPost) {
+      onEditPadletAsPost(padlet);
+      return;
+    }
+    onEdit(padlet);
   };
 
   return (
-    <div
-      ref={menuRef}
-      style={{
-        left: pos.x,
-        top: pos.y,
-        visibility: visible ? "visible" : "hidden",
-        fontFamily: UI_FONT,
-        background: "#f1f3f5",
-        border: "1px solid #adb5bd",
-        boxShadow: "0 3px 10px rgba(0,0,0,0.2)",
-        borderRadius: "4px",
+    <PositionedContextMenu
+      open
+      x={x}
+      y={y}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) onClose();
       }}
-      className="fixed z-[9999] py-2 w-[272px] select-none"
+      // Drawing floats this menu above the Excalidraw overlay, so it keeps its
+      // high stacking order and its fixed column width.
+      className="z-[9999] w-[272px] select-none"
       onMouseDown={(e) => e.stopPropagation()}
       onClick={(e) => e.stopPropagation()}
-      onContextMenu={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-      }}
+      onContextMenu={(e) => e.stopPropagation()}
     >
-      <MenuItem
-        label={isComment ? "View comment" : singleOpenTarget ? `Edit ${resolveOpenTargetLabel(singleOpenTarget, 0)}` : hasOpenTargets ? "Edit post" : isContainerType && onEditPadletAsPost ? "Edit Post" : "Edit"}
-        onClick={() => {
-          if (singleOpenTarget) {
-            run(() => onOpenTarget?.(singleOpenTarget));
-            return;
-          }
-          if (hasOpenTargets) {
-            setShowEditSubmenu((v) => !v);
-            return;
-          }
-          run(() => isContainerType && onEditPadletAsPost ? onEditPadletAsPost(padlet) : onEdit(padlet));
-        }}
-      />
-      {hasOpenTargets && !singleOpenTarget && showEditSubmenu && (
-        <div
-          className="absolute left-[calc(100%-10px)] top-[10px] py-2 w-[220px] select-none"
-          style={{
-            fontFamily: UI_FONT,
-            background: "#f1f3f5",
-            border: "1px solid #adb5bd",
-            boxShadow: "0 3px 10px rgba(0,0,0,0.2)",
-            borderRadius: "4px",
-          }}
-          onMouseDown={(e) => e.stopPropagation()}
-          onClick={(e) => e.stopPropagation()}
-        >
-          {orderedOpenTargets.map((target, idx) => (
-            <button
-              key={target.id}
-              style={{ fontFamily: UI_FONT }}
-              className="w-full flex items-center justify-between text-left text-[13px] py-[4px] pl-5 pr-4 transition-colors text-[#000] hover:bg-[#339af0] hover:text-white"
-              onClick={() => run(() => onOpenTarget?.(target))}
-            >
-              <span className="truncate pr-3">{resolveOpenTargetLabel(target, idx)}</span>
-              <Pencil size={13} />
-            </button>
-          ))}
-        </div>
+      {hasEditSubmenu ? (
+        <PositionedContextMenuSub>
+          <PositionedContextMenuSubTrigger>{editLabel}</PositionedContextMenuSubTrigger>
+          <PositionedContextMenuSubContent className="w-[220px]">
+            {orderedOpenTargets.map((target, idx) => (
+              <PositionedContextMenuItem
+                key={target.id}
+                icon={<Pencil size={13} />}
+                onSelect={() => onOpenTarget?.(target)}
+              >
+                <span className="truncate">{resolveOpenTargetLabel(target, idx)}</span>
+              </PositionedContextMenuItem>
+            ))}
+          </PositionedContextMenuSubContent>
+        </PositionedContextMenuSub>
+      ) : (
+        <PositionedContextMenuItem onSelect={runEdit}>{editLabel}</PositionedContextMenuItem>
       )}
 
-      <Sep />
-      <MenuItem label="Cut" shortcut="Ctrl+X" onClick={() => run(() => onCut(padlet))} />
-      <MenuItem label="Copy" shortcut="Ctrl+C" onClick={() => run(() => onCopy(padlet))} />
-      <MenuItem label="Paste" shortcut="Ctrl+V" disabled={!hasPaste} onClick={() => run(() => onPaste(x, y))} />
+      <PositionedContextMenuSeparator />
+      <PositionedContextMenuItem onSelect={() => onCut(padlet)}>Cut</PositionedContextMenuItem>
+      <PositionedContextMenuItem onSelect={() => onCopy(padlet)}>Copy</PositionedContextMenuItem>
+      <PositionedContextMenuItem disabled={!hasPaste} onSelect={() => onPaste(x, y)}>
+        Paste
+      </PositionedContextMenuItem>
 
       {!isComment && (
         <>
-          <Sep />
-          <MenuItem label="Send to back" shortcut="Ctrl+Shift+[" onClick={() => run(() => onSendToBack(padlet))} />
-          <MenuItem label="Send backward" shortcut="Ctrl+[" onClick={() => run(() => onSendBackward(padlet))} />
-          <MenuItem label="Bring forward" shortcut="Ctrl+]" onClick={() => run(() => onBringForward(padlet))} />
-          <MenuItem label="Bring to front" shortcut="Ctrl+Shift+]" onClick={() => run(() => onBringToFront(padlet))} />
+          <PositionedContextMenuSeparator />
+          <PositionedContextMenuItem onSelect={() => onSendToBack(padlet)}>
+            Send to back
+          </PositionedContextMenuItem>
+          <PositionedContextMenuItem onSelect={() => onSendBackward(padlet)}>
+            Send backward
+          </PositionedContextMenuItem>
+          <PositionedContextMenuItem onSelect={() => onBringForward(padlet)}>
+            Bring forward
+          </PositionedContextMenuItem>
+          <PositionedContextMenuItem onSelect={() => onBringToFront(padlet)}>
+            Bring to front
+          </PositionedContextMenuItem>
 
-          <Sep />
-          <MenuItem label="Copy to clipboard as PNG" shortcut="Shift+Alt+C" onClick={() => run(() => onCopyAsPNG(padlet))} />
-          <MenuItem label="Export as PNG" onClick={() => run(() => onExportAsPNG(padlet))} />
+          <PositionedContextMenuSeparator />
+          <PositionedContextMenuItem onSelect={() => onCopyAsPNG(padlet)}>
+            Copy to clipboard as PNG
+          </PositionedContextMenuItem>
+          <PositionedContextMenuItem onSelect={() => onExportAsPNG(padlet)}>
+            Export as PNG
+          </PositionedContextMenuItem>
 
-          <Sep />
-          <MenuItem label="Duplicate" shortcut="Ctrl+D" onClick={() => run(() => onDuplicate(padlet))} />
+          <PositionedContextMenuSeparator />
+          <PositionedContextMenuItem onSelect={() => onDuplicate(padlet)}>
+            Duplicate
+          </PositionedContextMenuItem>
         </>
       )}
 
       {onDelete && (
         <>
-          <Sep />
-          <MenuItem label="Delete" shortcut="Del" danger onClick={() => run(() => onDelete(padlet))} />
+          <PositionedContextMenuSeparator />
+          <PositionedContextMenuItem variant="destructive" onSelect={() => onDelete(padlet)}>
+            Delete
+          </PositionedContextMenuItem>
         </>
       )}
-    </div>
+    </PositionedContextMenu>
   );
 }
