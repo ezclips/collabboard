@@ -8,6 +8,9 @@ import {
     parseImportedDrawingText,
     type ImportedDrawingScene,
 } from '@/lib/infra/drawing/importScene';
+import ExcalidrawCollabBoardContextMenu from '@/components/collabboard/menus/ExcalidrawCollabBoardContextMenu';
+
+import type { ExcalidrawContextMenuRendererProps } from "@excalidraw/excalidraw/types";
 
 interface ExcalidrawWrapperProps {
     excalidrawKey: number;
@@ -27,6 +30,15 @@ interface ExcalidrawWrapperProps {
     validateEmbeddable?: boolean | string[] | RegExp | RegExp[] | ((link: string) => boolean | undefined);
     renderEmbeddable?: (element: any, appState: any) => React.ReactElement | null;
     onImportScene?: (scene: ImportedDrawingScene) => void | Promise<void>;
+    /**
+     * Opt in to rendering Excalidraw's own right-click menu on the shared
+     * CollabBoard menu surface instead of Excalidraw's native one.
+     *
+     * Off by default so surfaces that share this wrapper (the drawing-post
+     * editor) keep their current menu until they deliberately opt in. Purely a
+     * presentation switch: Excalidraw still owns every menu action.
+     */
+    useCollabBoardContextMenu?: boolean;
 }
 
 export default function ExcalidrawWrapper({
@@ -41,6 +53,7 @@ export default function ExcalidrawWrapper({
     validateEmbeddable,
     renderEmbeddable,
     onImportScene,
+    useCollabBoardContextMenu = false,
 }: ExcalidrawWrapperProps) {
     // API kept in a ref to avoid triggering renders when Excalidraw fires the callback
     const apiRef = React.useRef<any>(null);
@@ -105,6 +118,15 @@ export default function ExcalidrawWrapper({
             saveAsImage: !readOnly,
         }
     }), [readOnly]);
+
+    // Stable reference: Excalidraw is memoized on a shallow prop compare, so an
+    // inline arrow here would defeat that memoization on every wrapper render.
+    const renderCollabBoardContextMenu = React.useCallback(
+        (menuProps: ExcalidrawContextMenuRendererProps) => (
+            <ExcalidrawCollabBoardContextMenu {...menuProps} />
+        ),
+        []
+    );
 
     const resolvedValidateEmbeddable = React.useCallback((link: string) => {
         if (typeof link === "string" && link.startsWith("padlet://")) return true;
@@ -247,6 +269,9 @@ export default function ExcalidrawWrapper({
                 UIOptions={uiOptions}
                 validateEmbeddable={resolvedValidateEmbeddable}
                 renderEmbeddable={renderEmbeddable}
+                customContextMenuRenderer={
+                    useCollabBoardContextMenu ? renderCollabBoardContextMenu : undefined
+                }
             >
                 {renderMenu(MainMenu)}
                 <WelcomeScreen>

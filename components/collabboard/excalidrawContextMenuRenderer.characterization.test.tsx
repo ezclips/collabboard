@@ -414,23 +414,38 @@ describe('Excalidraw context-menu — render seam and coordinates', () => {
   });
 });
 
-describe('Excalidraw context-menu — no production activation', () => {
-  it('no CollabBoard consumer passes customContextMenuRenderer', () => {
-    const consumers = [
-      'components/collabboard/editors/ExcalidrawWrapper.tsx',
-      'components/collabboard/canvas/layouts/DrawingLayout.tsx',
-    ];
-    for (const relative of consumers) {
-      const source = fs.readFileSync(path.join(process.cwd(), relative), 'utf8');
-      expect(source, `${relative} must not activate the renderer`)
-        .not.toContain('customContextMenuRenderer');
-    }
+// PATCH 6B activated this hook for the Drawing canvas. These tests originally
+// asserted that nothing in production supplied the prop; that premise was 6A's
+// "foundation only" scope, and 6B deliberately ends it. They are kept — and made
+// stricter — as an inventory of exactly WHERE activation happens, so a second,
+// unreviewed activation still fails the suite.
+describe('Excalidraw context-menu — production activation is exactly one place', () => {
+  it('only the shared Excalidraw wrapper passes customContextMenuRenderer', () => {
+    const wrapper = fs.readFileSync(
+      path.join(process.cwd(), 'components/collabboard/editors/ExcalidrawWrapper.tsx'),
+      'utf8',
+    );
+    // Supplied once, and gated behind an explicit opt-in rather than always on.
+    expect((wrapper.match(/customContextMenuRenderer/g) ?? [])).toHaveLength(1);
+    expect(wrapper).toContain(
+      'useCollabBoardContextMenu ? renderCollabBoardContextMenu : undefined',
+    );
+    expect(wrapper).toContain('useCollabBoardContextMenu = false');
   });
 
-  it('nothing outside the fork mentions the prop at all', () => {
-    // Broader than the named consumers above: a sweep of every tracked source
-    // outside the vendored fork, so a future activation cannot slip in via a
-    // file this suite did not think to list.
+  it('the layout opts in without touching the renderer hook itself', () => {
+    const layout = fs.readFileSync(
+      path.join(process.cwd(), 'components/collabboard/canvas/layouts/DrawingLayout.tsx'),
+      'utf8',
+    );
+    expect(layout).toContain('useCollabBoardContextMenu');
+    // The layout knows only about the wrapper's opt-in, never Excalidraw's prop.
+    expect(layout).not.toContain('customContextMenuRenderer');
+  });
+
+  it('only the wrapper mentions the prop outside the fork', () => {
+    // A sweep of every tracked source outside the vendored fork, so a second
+    // activation cannot slip in via a file this suite did not think to list.
     const roots = ['components', 'app', 'lib'];
     const offenders: string[] = [];
     const walk = (dir: string) => {
@@ -443,13 +458,14 @@ describe('Excalidraw context-menu — no production activation', () => {
         }
         if (!/\.(ts|tsx)$/.test(entry.name)) continue;
         if (full.includes('excalidrawContextMenuRenderer.characterization')) continue;
+        if (full.includes('excalidrawCollabBoardContextMenu.test')) continue;
         if (fs.readFileSync(full, 'utf8').includes('customContextMenuRenderer')) {
-          offenders.push(path.relative(process.cwd(), full));
+          offenders.push(path.relative(process.cwd(), full).replace(/\\/g, '/'));
         }
       }
     };
     for (const root of roots) walk(path.join(process.cwd(), root));
-    expect(offenders).toEqual([]);
+    expect(offenders).toEqual(['components/collabboard/editors/ExcalidrawWrapper.tsx']);
   });
 
   it('the prop is optional, so omitting it is the supported default', () => {

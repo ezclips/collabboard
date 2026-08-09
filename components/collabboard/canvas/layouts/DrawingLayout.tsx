@@ -3217,6 +3217,7 @@ export default function DrawingLayout({
           onImportScene={readOnly ? undefined : handleImportedSceneReady}
           renderEmbeddable={renderEmbeddable}
           validateEmbeddable={(link: string) => link.startsWith('padlet://')}
+          useCollabBoardContextMenu
         />
       </div>
 
