@@ -994,6 +994,157 @@ describe('positioned context menu submenu', () => {
     }
   });
 
+  it('keeps the whole public surface on @/components/ui/context-menu', async () => {
+    // Frozen at the 4F.1 internal split. The implementation lives in three
+    // modules now; consumers must still see exactly one import path with
+    // exactly these names. Adding a name here is a deliberate API change.
+    const mod = await import('./context-menu');
+    expect(Object.keys(mod).sort()).toEqual([
+      'ContextMenu',
+      'ContextMenuCheckboxItem',
+      'ContextMenuContent',
+      'ContextMenuGroup',
+      'ContextMenuItem',
+      'ContextMenuLabel',
+      'ContextMenuPortal',
+      'ContextMenuRadioGroup',
+      'ContextMenuRadioItem',
+      'ContextMenuSeparator',
+      'ContextMenuShortcut',
+      'ContextMenuSub',
+      'ContextMenuSubContent',
+      'ContextMenuSubTrigger',
+      'ContextMenuSwatch',
+      'ContextMenuSwatchRow',
+      'ContextMenuTrigger',
+      'PositionedContextMenu',
+      'PositionedContextMenuItem',
+      'PositionedContextMenuLabel',
+      'PositionedContextMenuSeparator',
+      'PositionedContextMenuSub',
+      'PositionedContextMenuSubContent',
+      'PositionedContextMenuSubTrigger',
+      'PositionedContextMenuSwatch',
+    ]);
+  });
+
+  it('forwards the positioned root components unchanged, not as copies', async () => {
+    // Proves the barrel forwards the real implementations rather than
+    // shadowing them, so behavior cannot drift between import paths.
+    const barrel = await import('./context-menu');
+    const rootModule = await import('./positioned-context-menu');
+    for (const name of [
+      'PositionedContextMenu', 'PositionedContextMenuItem',
+      'PositionedContextMenuSeparator', 'PositionedContextMenuLabel',
+      'PositionedContextMenuSwatch',
+    ] as const) {
+      expect((barrel as any)[name], `${name} is not the same reference`)
+        .toBe((rootModule as any)[name]);
+    }
+  });
+
+  it('forwards the positioned submenu components unchanged, not as copies', async () => {
+    const barrel = await import('./context-menu');
+    const subModule = await import('./positioned-context-menu-submenu');
+    for (const name of [
+      'PositionedContextMenuSub', 'PositionedContextMenuSubTrigger',
+      'PositionedContextMenuSubContent',
+    ] as const) {
+      expect((barrel as any)[name], `${name} is not the same reference`)
+        .toBe((subModule as any)[name]);
+    }
+  });
+
+  it('keeps root-to-submenu internals out of the public barrel', async () => {
+    // The submenu reaches into the root for these; consumers must not see them.
+    const barrel = await import('./context-menu');
+    for (const internal of [
+      'POSITIONED_MENU_VIEWPORT_MARGIN', 'usePositionedContextMenu',
+      'focusableRows', 'moveFocus',
+    ]) {
+      expect(barrel, `${internal} leaked into the public surface`)
+        .not.toHaveProperty(internal);
+    }
+    // They are genuinely available to the submenu module, though.
+    const rootModule = await import('./positioned-context-menu');
+    expect(typeof (rootModule as any).focusableRows).toBe('function');
+    expect(typeof (rootModule as any).moveFocus).toBe('function');
+  });
+
+  it('draws both families from one style source', async () => {
+    // The Radix surface and the positioned surface must render byte-identical
+    // class strings; a forked constant in either module breaks this.
+    const styles = await import('./context-menu-styles');
+    const radixMenu = openMenu(mount(<Fixture />));
+    mount(
+      <PositionedContextMenu open x={10} y={10} onOpenChange={vi.fn()}>
+        <PositionedContextMenuItem>Only</PositionedContextMenuItem>
+      </PositionedContextMenu>,
+    );
+    const positioned = document.querySelector<HTMLElement>(
+      '[data-slot="positioned-context-menu-content"]',
+    )!;
+
+    for (const cls of styles.menuSurfaceClassName.split(' ')) {
+      expect(radixMenu.className, `radix surface missing ${cls}`).toContain(cls);
+      expect(positioned.className, `positioned surface missing ${cls}`).toContain(cls);
+    }
+    const radixRow = itemByText(radixMenu, 'Duplicate');
+    const positionedRow = positioned.querySelector<HTMLElement>('[role="menuitem"]')!;
+    for (const cls of styles.menuRowClassName.split(' ')) {
+      expect(radixRow.className, `radix row missing ${cls}`).toContain(cls);
+      expect(positionedRow.className, `positioned row missing ${cls}`).toContain(cls);
+    }
+
+    // The submenu module is the third consumer of that same source.
+    mount(<SubFixture />);
+    enter(trigger());
+    for (const cls of styles.menuSurfaceClassName.split(' ')) {
+      expect(openSubContent().className, `submenu surface missing ${cls}`).toContain(cls);
+    }
+    for (const cls of styles.menuRowClassName.split(' ')) {
+      expect(trigger().className, `submenu trigger missing ${cls}`).toContain(cls);
+    }
+  });
+
+  it('has no cycle between the four context-menu modules', async () => {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const read = (file: string) =>
+      fs.readFileSync(path.join(process.cwd(), 'components/ui', file), 'utf8');
+    /** Local module specifiers this file imports from. */
+    const importsOf = (source: string) =>
+      Array.from(source.matchAll(/from "(\.\/[^"]+)"/g)).map((m) => m[1]);
+
+    // Required direction:  styles <- root <- submenu,  barrel -> all three.
+    expect(importsOf(read('context-menu-styles.tsx'))).toEqual([]);
+    expect(importsOf(read('positioned-context-menu.tsx'))).toEqual(['./context-menu-styles']);
+    expect(importsOf(read('positioned-context-menu-submenu.tsx')).sort()).toEqual([
+      './context-menu-styles', './positioned-context-menu',
+    ]);
+    expect(importsOf(read('context-menu.tsx')).sort()).toEqual([
+      './context-menu-styles',
+      './positioned-context-menu',
+      './positioned-context-menu',
+      './positioned-context-menu-submenu',
+      './positioned-context-menu-submenu',
+    ]);
+
+    // The two rules that would create a cycle, stated directly. Checked against
+    // imports rather than raw text, since prose may name a sibling module.
+    expect(
+      importsOf(read('positioned-context-menu.tsx')),
+      'the root module must not depend on its submenu',
+    ).not.toContain('./positioned-context-menu-submenu');
+    for (const file of [
+      'context-menu-styles.tsx', 'positioned-context-menu.tsx',
+      'positioned-context-menu-submenu.tsx',
+    ]) {
+      expect(importsOf(read(file)), `${file} must not import the public barrel`)
+        .not.toContain('./context-menu');
+    }
+  });
+
   it('leaves a positioned menu without a submenu completely unchanged', () => {
     // No submenu means no haspopup, no satellite surface, no extra portal.
     mount(
