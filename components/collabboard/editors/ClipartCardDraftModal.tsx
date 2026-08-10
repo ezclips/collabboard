@@ -11,7 +11,7 @@ import CommentPopup from '@/components/collabboard/editors/CommentPopup';
 import TextStylePopup from '@/components/collabboard/editors/TextStylePopup';
 import InlineCaption from '@/components/collabboard/editors/InlineCaption';
 import { CAPTION_STYLE_PRESETS, resolveCaptionStyle, type CaptionHeading } from '@/lib/domain/canvas/captionStyle';
-import { nextTextAlign } from '@/components/collabboard/editors/textAlignCycle';
+import { nextTextAlign, type TextAlignValue } from '@/components/collabboard/editors/textAlignCycle';
 import EmojiReactionPicker from '@/components/collabboard/editors/EmojiReactionPicker';
 import { getMeaningfulTitle } from '@/lib/infra/collabboard/postTitle';
 
@@ -63,7 +63,11 @@ export default function ClipartCardDraftModal({
   const [isReactionPickerOpen, setIsReactionPickerOpen] = useState(false);
   const [isCommentPanelOpen, setIsCommentPanelOpen] = useState(false);
   const [isBadgeColorPaletteOpen, setIsBadgeColorPaletteOpen] = useState(false);
-  const [isCaptionEditing, setIsCaptionEditing] = useState(false);
+  // Which of title/caption the shared Text style panel currently targets --
+  // null means the panel is closed. Two separate toolbar buttons (Text
+  // style, Caption) each open it aimed at their own field, same pattern as
+  // DrawingEditor's activeStyleTarget.
+  const [activeStyleTarget, setActiveStyleTarget] = useState<'title' | 'caption' | null>(null);
 
   const previewPadlet = useMemo(() => {
     if (!padlet) return null;
@@ -120,7 +124,7 @@ export default function ClipartCardDraftModal({
     setIsCommentPanelOpen(false);
     setIsColorPanelOpen(false);
     setIsBadgeColorPaletteOpen(false);
-    setIsCaptionEditing(false);
+    setActiveStyleTarget(null);
   };
 
   const openCommentPanel = () => {
@@ -128,11 +132,11 @@ export default function ClipartCardDraftModal({
     setIsReactionPickerOpen(false);
     setIsColorPanelOpen(false);
     setIsBadgeColorPaletteOpen(false);
-    setIsCaptionEditing(false);
+    setActiveStyleTarget(null);
   };
 
-  const openCaptionPanel = () => {
-    setIsCaptionEditing(true);
+  const openStylePanel = (target: 'title' | 'caption') => {
+    setActiveStyleTarget(target);
     setIsColorPanelOpen(false);
     setIsReactionPickerOpen(false);
     setIsCommentPanelOpen(false);
@@ -140,42 +144,99 @@ export default function ClipartCardDraftModal({
   };
 
   const keepToolbarClickFromBlurringCaption = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!isCaptionEditing) return;
+    if (activeStyleTarget !== 'caption') return;
     const target = e.target as { closest?: (selector: string) => Element | null };
     if (typeof target.closest === 'function' && target.closest('button')) {
       e.preventDefault();
     }
   };
 
-  const writeCaptionStyle = (captionStyle: Record<string, unknown>) => {
-    updateMetadata({ captionStyle });
+  const writeTitleStyle = (nextTitleStyle: Record<string, unknown>) => {
+    updateMetadata({ titleStyle: nextTitleStyle });
   };
 
-  const applyCaptionPreset = (level: CaptionHeading) => {
-    const baseStyle = previewPadlet.metadata?.captionStyle || {};
+  const writeCaptionStyle = (nextCaptionStyle: Record<string, unknown>) => {
+    updateMetadata({ captionStyle: nextCaptionStyle });
+  };
+
+  const applyPreset = (writer: (style: Record<string, unknown>) => void, baseStyle: Record<string, unknown>) => (level: CaptionHeading) => {
     const selectedPreset = level === 'callout' && baseStyle.backgroundColor
       ? { ...CAPTION_STYLE_PRESETS.callout, backgroundColor: baseStyle.backgroundColor }
       : CAPTION_STYLE_PRESETS[level];
 
-    writeCaptionStyle({
-      ...baseStyle,
-      ...selectedPreset,
-    });
+    writer({ ...baseStyle, ...selectedPreset });
   };
 
-  // Bold/Italic/Underline/Strikethrough (TextFormattingButtons, shared
-  // across every Text style panel) toggle on top of whichever heading
-  // preset is active, same layering as a TipTap mark over a paragraph.
-  const captionStyle = previewPadlet.metadata?.captionStyle || {};
-  const titleInputStyle = resolveCaptionStyle(captionStyle, previewPadlet.metadata?.textColor);
+  // Title and caption each get their own style, stored under their own
+  // metadata key (metadata.titleStyle / metadata.captionStyle) so changing
+  // one's color/heading/weight never affects the other -- previously both
+  // read and wrote the single metadata.captionStyle field (a legacy quirk
+  // from before the caption field existed, when this same field styled the
+  // title), which coupled their colors. Same split DrawingEditor.tsx already
+  // uses. Bold/Italic/Underline/Strikethrough (TextFormattingButtons, shared
+  // across every Text style panel) toggle on top of whichever heading preset
+  // is active, same layering as a TipTap mark over a paragraph.
+  const titleStyle = (previewPadlet.metadata?.titleStyle as Record<string, unknown>) || {};
+  const titleInputStyle = resolveCaptionStyle(titleStyle, previewPadlet.metadata?.textColor);
+  const applyTitlePreset = applyPreset(writeTitleStyle, titleStyle);
+  const isTitleBold = titleStyle.fontWeight === '700' || titleStyle.fontWeight === 'bold';
+  const isTitleItalic = titleStyle.fontStyle === 'italic';
+  const toggleTitleBold = () => writeTitleStyle({ ...titleStyle, fontWeight: isTitleBold ? '400' : '700' });
+  const toggleTitleItalic = () => writeTitleStyle({ ...titleStyle, fontStyle: isTitleItalic ? 'normal' : 'italic' });
+  const toggleTitleUnderline = () => writeTitleStyle({ ...titleStyle, underline: !titleStyle.underline });
+  const toggleTitleStrikethrough = () => writeTitleStyle({ ...titleStyle, strikethrough: !titleStyle.strikethrough });
+  const cycleTitleAlign = () => writeTitleStyle({ ...titleStyle, textAlign: nextTextAlign((titleStyle.textAlign as TextAlignValue) || 'left') });
+
+  const captionStyle = (previewPadlet.metadata?.captionStyle as Record<string, unknown>) || {};
+  const captionInputStyle = resolveCaptionStyle(captionStyle, previewPadlet.metadata?.textColor);
   const caption = typeof previewPadlet.metadata?.caption === 'string' ? previewPadlet.metadata.caption : '';
+  const applyCaptionPreset = applyPreset(writeCaptionStyle, captionStyle);
   const isCaptionBold = captionStyle.fontWeight === '700' || captionStyle.fontWeight === 'bold';
   const isCaptionItalic = captionStyle.fontStyle === 'italic';
   const toggleCaptionBold = () => writeCaptionStyle({ ...captionStyle, fontWeight: isCaptionBold ? '400' : '700' });
   const toggleCaptionItalic = () => writeCaptionStyle({ ...captionStyle, fontStyle: isCaptionItalic ? 'normal' : 'italic' });
   const toggleCaptionUnderline = () => writeCaptionStyle({ ...captionStyle, underline: !captionStyle.underline });
   const toggleCaptionStrikethrough = () => writeCaptionStyle({ ...captionStyle, strikethrough: !captionStyle.strikethrough });
-  const cycleCaptionAlign = () => writeCaptionStyle({ ...captionStyle, textAlign: nextTextAlign(captionStyle.textAlign || 'left') });
+  const cycleCaptionAlign = () => writeCaptionStyle({ ...captionStyle, textAlign: nextTextAlign((captionStyle.textAlign as TextAlignValue) || 'left') });
+
+  // Whichever field the Text style panel currently targets -- resolved once
+  // so the popup's props below stay a simple pass-through, same pattern as
+  // DrawingEditor's textStylePopupProps.
+  const textStylePopupProps = activeStyleTarget === 'title'
+    ? {
+        onSelectHeading: applyTitlePreset,
+        onSelectColor: (color: string) => writeTitleStyle({ ...titleStyle, color }),
+        onSelectHighlight: (color: string) => writeTitleStyle({ ...titleStyle, backgroundColor: color }),
+        currentHeading: (titleStyle.heading as string) || 'normal',
+        currentColor: titleStyle.color as string | undefined,
+        currentHighlight: titleStyle.backgroundColor as string | undefined,
+        onBold: toggleTitleBold,
+        onItalic: toggleTitleItalic,
+        onUnderline: toggleTitleUnderline,
+        onStrikethrough: toggleTitleStrikethrough,
+        onAlign: cycleTitleAlign,
+        isBold: isTitleBold,
+        isItalic: isTitleItalic,
+        isUnderline: !!titleStyle.underline,
+        isStrikethrough: !!titleStyle.strikethrough,
+      }
+    : {
+        onSelectHeading: applyCaptionPreset,
+        onSelectColor: (color: string) => writeCaptionStyle({ ...captionStyle, color }),
+        onSelectHighlight: (color: string) => writeCaptionStyle({ ...captionStyle, backgroundColor: color }),
+        currentHeading: (captionStyle.heading as string) || 'normal',
+        currentColor: captionStyle.color as string | undefined,
+        currentHighlight: captionStyle.backgroundColor as string | undefined,
+        onBold: toggleCaptionBold,
+        onItalic: toggleCaptionItalic,
+        onUnderline: toggleCaptionUnderline,
+        onStrikethrough: toggleCaptionStrikethrough,
+        onAlign: cycleCaptionAlign,
+        isBold: isCaptionBold,
+        isItalic: isCaptionItalic,
+        isUnderline: !!captionStyle.underline,
+        isStrikethrough: !!captionStyle.strikethrough,
+      };
 
   return (
     <div className="fixed inset-0 z-[160] flex items-start justify-center overflow-auto p-4">
@@ -221,11 +282,13 @@ export default function ClipartCardDraftModal({
               setIsReactionPickerOpen(false);
               setIsCommentPanelOpen(false);
               setIsBadgeColorPaletteOpen(false);
-              setIsCaptionEditing(false);
+              setActiveStyleTarget(null);
             }}
             onReplaceIcon={onReplaceIcon}
-            onCaption={openCaptionPanel}
-            isCaptionActive={isCaptionEditing}
+            onTextStyle={() => openStylePanel('title')}
+            isTextStyleActive={activeStyleTarget === 'title'}
+            onCaption={() => openStylePanel('caption')}
+            isCaptionActive={activeStyleTarget === 'caption'}
             onToggleCardView={() => {
               setIsCardViewOpen(true);
             }}
@@ -273,6 +336,10 @@ export default function ClipartCardDraftModal({
                     className="w-full min-w-0 truncate bg-transparent text-center text-xs font-semibold outline-none placeholder:opacity-40"
                     style={titleInputStyle}
                     onMouseDown={(e) => e.stopPropagation()}
+                    onSelect={(e) => {
+                      const el = e.currentTarget;
+                      if (el.selectionStart !== el.selectionEnd) openStylePanel('title');
+                    }}
                   />
                 }
                 reactions={reactions}
@@ -290,11 +357,12 @@ export default function ClipartCardDraftModal({
                 captionEditor={
                   <InlineCaption
                     value={caption}
-                    isEditing={isCaptionEditing}
+                    isEditing={activeStyleTarget === 'caption'}
                     onChange={(next) => updateMetadata({ caption: next })}
+                    onTextSelect={() => openStylePanel('caption')}
                     placeholder="Add a caption..."
-                    color={titleInputStyle.color}
-                    textStyle={titleInputStyle}
+                    color={captionInputStyle.color}
+                    textStyle={captionInputStyle}
                   />
                 }
               />
@@ -325,10 +393,10 @@ export default function ClipartCardDraftModal({
             card sideways. */}
         <div className="flex items-start justify-start" style={{ pointerEvents: 'none' }}>
         <div style={{ pointerEvents: 'auto' }} onClick={(e) => e.stopPropagation()}>
-        {isCaptionEditing ? (
+        {activeStyleTarget ? (
           <div className="relative">
             <button
-              onClick={() => setIsCaptionEditing(false)}
+              onClick={() => setActiveStyleTarget(null)}
               className="absolute -right-3 -top-3 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-400 shadow-md transition-all hover:text-gray-600"
               title="Close"
             >
@@ -341,34 +409,10 @@ export default function ClipartCardDraftModal({
               onMouseDown={(e) => e.stopPropagation()}
             >
             <TextStylePopup
-              isOpen={isCaptionEditing}
-              onOpenChange={(open) => setIsCaptionEditing(open)}
-              onSelectHeading={applyCaptionPreset}
+              isOpen
+              onOpenChange={(open) => { if (!open) setActiveStyleTarget(null); }}
               hideCloseButton
-              onSelectColor={(color) => {
-                writeCaptionStyle({
-                  ...(previewPadlet.metadata?.captionStyle || {}),
-                  color,
-                });
-              }}
-              onSelectHighlight={(color) => {
-                writeCaptionStyle({
-                  ...(previewPadlet.metadata?.captionStyle || {}),
-                  backgroundColor: color,
-                });
-              }}
-              currentHeading={previewPadlet.metadata?.captionStyle?.heading || 'normal'}
-              currentColor={previewPadlet.metadata?.captionStyle?.color}
-              currentHighlight={previewPadlet.metadata?.captionStyle?.backgroundColor}
-              onBold={toggleCaptionBold}
-              onItalic={toggleCaptionItalic}
-              onUnderline={toggleCaptionUnderline}
-              onStrikethrough={toggleCaptionStrikethrough}
-              onAlign={cycleCaptionAlign}
-              isBold={isCaptionBold}
-              isItalic={isCaptionItalic}
-              isUnderline={!!captionStyle.underline}
-              isStrikethrough={!!captionStyle.strikethrough}
+              {...textStylePopupProps}
             />
             </div>
           </div>
@@ -419,7 +463,7 @@ export default function ClipartCardDraftModal({
             onClick={(e) => e.stopPropagation()}
             onMouseDown={(e) => e.stopPropagation()}
           >
-            <div className="absolute right-10 top-8 z-10">
+            <div className="absolute right-4 top-3 z-10">
               <button
                 type="button"
                 onClick={(e) => {
@@ -486,6 +530,28 @@ export default function ClipartCardDraftModal({
                   timestamp: Date.now(),
                 };
                 updateMetadata({ detachedComments: [...detachedComments, newComment] });
+              }}
+              onEditComment={(commentId, newText) => {
+                const updated = detachedComments.map((comment) =>
+                  comment.id === commentId ? { ...comment, text: newText } : comment
+                );
+                updateMetadata({ detachedComments: updated });
+              }}
+              onRemoveComment={(commentId) => {
+                const updated = detachedComments.filter((comment) => comment.id !== commentId);
+                updateMetadata({ detachedComments: updated });
+              }}
+              onToggleCommentStrikethrough={(commentId) => {
+                const updated = detachedComments.map((comment) =>
+                  comment.id === commentId ? { ...comment, isStrikethrough: !comment.isStrikethrough } : comment
+                );
+                updateMetadata({ detachedComments: updated });
+              }}
+              onCommentColor={(commentId, textColor, backgroundColor) => {
+                const updated = detachedComments.map((comment) =>
+                  comment.id === commentId ? { ...comment, textColor, backgroundColor } : comment
+                );
+                updateMetadata({ detachedComments: updated });
               }}
               comments={detachedComments}
               currentUserId={draftCommentUserId}

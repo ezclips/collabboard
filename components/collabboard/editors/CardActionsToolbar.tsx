@@ -4,6 +4,7 @@ import React from 'react';
 import {
     Palette,
     Image as ImageIcon,
+    Type,
     TextCursor,
     Smile,
     MessageSquare,
@@ -18,10 +19,16 @@ interface CardActionsToolbarProps {
     onAddReaction: (e: React.MouseEvent) => void;
     onComment: () => void;
     onCaption?: () => void;
+    // Opens the Text style panel manually, targeting the post's own title --
+    // same icon/label/position pattern as NoteEditorToolbar's "Text style"
+    // button, distinct from Caption (which styles the caption text below
+    // the icon instead).
+    onTextStyle?: () => void;
     onDelete?: () => void;
     isColorPickerOpen?: boolean;
     isCardView?: boolean;
     isCaptionActive?: boolean;
+    isTextStyleActive?: boolean;
     commentCount?: number;
     commentBadgeColor?: string;
 }
@@ -43,9 +50,11 @@ export default function CardActionsToolbar({
     onAddReaction,
     onComment,
     onCaption,
+    onTextStyle,
     isColorPickerOpen = false,
     isCardView = false,
     isCaptionActive = false,
+    isTextStyleActive = false,
     commentCount = 0,
     commentBadgeColor = '#facc15',
 }: CardActionsToolbarProps) {
@@ -55,6 +64,12 @@ export default function CardActionsToolbar({
         ? commentBadgeColor
         : '#facc15';
     const tools: CardActionTool[] = [
+        ...(onTextStyle ? [{
+            icon: Type,
+            label: 'Text style',
+            onClick: () => onTextStyle(),
+            active: isTextStyleActive,
+        }] : []),
         {
             icon: Palette,
             label: 'Color',

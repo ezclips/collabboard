@@ -17,6 +17,9 @@ interface LinkPostContextMenuProps {
     children: React.ReactNode;
     padlet: Padlet;
     onSelect: () => void;
+    // Opens the same modal/editor this post's own pencil button opens --
+    // the "adding" editor reused for editing (openFreeformPadletModal).
+    onEdit?: () => void;
     // Actions passed as props for easy wiring to existing state
     onDuplicate?: () => void;
     onDelete?: () => void;
@@ -39,6 +42,7 @@ export function LinkPostContextMenu({
     children,
     padlet,
     onSelect,
+    onEdit,
     onDuplicate,
     onDelete,
     onCut,
@@ -92,6 +96,14 @@ export function LinkPostContextMenu({
             </ContextMenuTrigger>
 
             <ContextMenuContent className="min-w-[220px]" style={{ zIndex: 9999 }}>
+                {onEdit && (
+                    <>
+                        <ContextMenuItem onClick={onEdit}>
+                            Edit Post
+                        </ContextMenuItem>
+                        <ContextMenuSeparator />
+                    </>
+                )}
                 <ContextMenuItem onClick={() => handleAction('edit.cut')}>
                     Cut
                 </ContextMenuItem>

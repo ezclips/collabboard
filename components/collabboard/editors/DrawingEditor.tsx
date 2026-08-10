@@ -124,6 +124,17 @@ export default function DrawingEditor({
         }
     };
 
+    // Highlighting text in the title or caption should open the Text style
+    // panel targeting whichever field was highlighted, without toggling an
+    // already-open panel closed (openDetachedPanel toggles on `!prev`, so
+    // calling it while already open would close it instead of just
+    // retargeting -- only call it to OPEN, and only update the target when
+    // it's already open).
+    const openTextStyleFor = (target: 'title' | 'caption') => {
+        setActiveStyleTarget(target);
+        if (!isTextStyleOpen) openDetachedPanel('text', isTextStyleOpen);
+    };
+
     const isTitleBold = titleStyle.fontWeight === '700' || titleStyle.fontWeight === 'bold';
     const isTitleItalic = titleStyle.fontStyle === 'italic';
     const toggleTitleBold = () => setTitleStyle((prev) => ({ ...prev, fontWeight: isTitleBold ? '400' : '700' }));
@@ -557,6 +568,10 @@ export default function DrawingEditor({
                                     value={title}
                                     onChange={(e) => setTitle(e.target.value)}
                                     onFocus={() => setActiveStyleTarget('title')}
+                                    onSelect={(e) => {
+                                        const el = e.currentTarget;
+                                        if (el.selectionStart !== el.selectionEnd) openTextStyleFor('title');
+                                    }}
                                     placeholder="Title"
                                     className="flex-1 min-w-0 truncate bg-transparent text-lg font-semibold text-gray-800 outline-none border-none placeholder:text-gray-400 placeholder:font-normal"
                                     style={titleInputStyle}
@@ -684,6 +699,7 @@ export default function DrawingEditor({
                                     onChange={setCaption}
                                     onCommit={() => setIsCaptionEditing(false)}
                                     onFocus={() => setActiveStyleTarget('caption')}
+                                    onTextSelect={() => openTextStyleFor('caption')}
                                     placeholder="Add a caption..."
                                     color={captionInputStyle.color}
                                     backgroundColor={captionInputStyle.backgroundColor}

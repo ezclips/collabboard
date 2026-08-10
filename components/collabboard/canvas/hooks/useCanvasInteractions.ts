@@ -8,7 +8,10 @@ import {
 import { createPostsRepository } from '@/lib/infra/canvas/postsRepository';
 import type { NewPostDragState, Padlet } from '@/types/collabboard';
 import { debugCanvasLogger } from '@/lib/collabboard/debugCanvasLogger';
-import { isContainerPadlet } from '@/components/collabboard/canvas/engine/utils';
+import { findContainerOverlappingRect } from '@/components/collabboard/canvas/engine/utils';
+
+const DEFAULT_DRAG_RECT_WIDTH = 180;
+const DEFAULT_DRAG_RECT_HEIGHT = 220;
 
 interface UseCanvasInteractionsParams {
   containerRef: React.RefObject<HTMLDivElement | null>;
@@ -59,6 +62,11 @@ export function useCanvasInteractions({
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const [draggingPadletId, setDraggingPadletId] = useState<string | null>(null);
   const [lastMousePosition, setLastMousePosition] = useState({ x: 0, y: 0 });
+  // Which container the cursor is currently over while dragging a single
+  // padlet -- drives the live "drop here" highlight. Null for group drags
+  // (dropping a multi-select into a container isn't supported, same as the
+  // drop handler below).
+  const [dragOverContainerId, setDragOverContainerId] = useState<string | null>(null);
 
   const dragEndInFlightRef = useRef(false);
   const isDraggingRef = useRef(false);
@@ -273,6 +281,8 @@ export function useCanvasInteractions({
     const draggedPadletIds = draggingPadletIdsRef.current;
 
     if (draggedPadletIds.length > 1) {
+      setDragOverContainerId((prev) => (prev === null ? prev : null));
+
       const startPositions = dragSelectionStartPositionsRef.current;
       const anchorStart = startPositions[draggingPadletId];
       if (!anchorStart) return;
@@ -293,6 +303,19 @@ export function useCanvasInteractions({
       return;
     }
 
+    const draggedPadlet = padlets.find((p) => p.id === draggingPadletId);
+    const draggedRect = {
+      x: clampedX,
+      y: clampedY,
+      width: Number(draggedPadlet?.width) || DEFAULT_DRAG_RECT_WIDTH,
+      height: Number(draggedPadlet?.height) || DEFAULT_DRAG_RECT_HEIGHT,
+    };
+    const hoveredContainer = findContainerOverlappingRect(padlets, draggedRect, draggingPadletId);
+    setDragOverContainerId((prev) => {
+      const nextId = hoveredContainer?.id ?? null;
+      return prev === nextId ? prev : nextId;
+    });
+
     lastDragPositionRef.current = { x: clampedX, y: clampedY };
 
     setPadlets(prev => prev.map(p =>
@@ -306,6 +329,7 @@ export function useCanvasInteractions({
     debugCanvasLogger('pointerUp', {});
     if (dragEndInFlightRef.current) return;
     dragEndInFlightRef.current = true;
+    setDragOverContainerId(null);
     try {
       if (!canEditCanvas) {
         pendingDragRef.current = null;
@@ -367,25 +391,17 @@ export function useCanvasInteractions({
           return;
         }
 
-        const containers = padlets.filter(p => p.type === 'container' && p.id !== currentDraggingId && !p.metadata?.parentId);
-        let droppedOnContainer: typeof containers[0] | null = null;
-
-        for (const container of containers) {
-          const containerLeft = container.position_x || 0;
-          const containerTop = container.position_y || 0;
-          const containerWidth = 280;
-          const containerHeight = 200;
-
-          if (
-            lastMousePosition.x >= containerLeft &&
-            lastMousePosition.x <= containerLeft + containerWidth &&
-            lastMousePosition.y >= containerTop &&
-            lastMousePosition.y <= containerTop + containerHeight
-          ) {
-            droppedOnContainer = container;
-            break;
-          }
-        }
+        const finalDragPosition = lastDragPositionRef.current ?? {
+          x: draggedPadlet.position_x || 0,
+          y: draggedPadlet.position_y || 0,
+        };
+        const finalDragRect = {
+          x: finalDragPosition.x,
+          y: finalDragPosition.y,
+          width: Number(draggedPadlet.width) || DEFAULT_DRAG_RECT_WIDTH,
+          height: Number(draggedPadlet.height) || DEFAULT_DRAG_RECT_HEIGHT,
+        };
+        const droppedOnContainer = findContainerOverlappingRect(padlets, finalDragRect, currentDraggingId);
 
         if (droppedOnContainer) {
           lastDragPositionRef.current = null;
@@ -481,6 +497,7 @@ export function useCanvasInteractions({
     setDraggingPadletId,
     lastMousePosition,
     setLastMousePosition,
+    dragOverContainerId,
     handlePadletMouseDown,
     handleImagePadletDrag,
     handleCanvasMouseMove,

@@ -113,6 +113,7 @@ export type SaveTableData = {
 
 export type SaveContainerData = {
   title: string;
+  titleStyle?: Record<string, unknown>;
   backgroundColor: string;
   topStrip?: string;
   detachedComments?: Array<{
@@ -818,6 +819,7 @@ export function usePadletSave(params: UsePadletSaveParams) {
       ...(currentPadlet?.metadata || padletToEdit.metadata || {}),
       cardColor: data.backgroundColor,
       topStrip: data.topStrip,
+      titleStyle: data.titleStyle,
       childPadletIds: existingChildIds,
       detachedComments: data.detachedComments,
     };
@@ -830,7 +832,7 @@ export function usePadletSave(params: UsePadletSaveParams) {
           .from('padlets')
           .insert({
             board_id: canvasId,
-            title: data.title || 'New Container',
+            title: data.title,
             content: '',
             type: 'container',
             position_x,
@@ -847,7 +849,7 @@ export function usePadletSave(params: UsePadletSaveParams) {
         const { error } = await supabase
           .from('padlets')
           .update({
-            title: data.title || 'New Container',
+            title: data.title,
             metadata,
             updated_at: new Date().toISOString(),
           })
@@ -863,7 +865,7 @@ export function usePadletSave(params: UsePadletSaveParams) {
       } else {
         setPadlets(prev => prev.map(p =>
           p.id === padletToEdit!.id
-            ? { ...p, title: data.title || 'New Container', metadata }
+            ? { ...p, title: data.title, metadata }
             : p
         ));
       }

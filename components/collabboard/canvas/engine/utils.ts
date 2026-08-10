@@ -34,6 +34,55 @@ export function isContainerPadlet(p: Padlet): boolean {
   return p.type === 'container' || meta?.kind === 'container' || meta?.isContainer === true;
 }
 
+export interface CanvasRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * Which root container (if any) overlaps a given canvas-space rectangle,
+ * using each container's real width/height. Shared by the live drag-over
+ * indicator and the actual drop handler in useCanvasInteractions so they
+ * always agree on the same target -- a hover highlight that doesn't match
+ * where the drop actually lands would be worse than no highlight at all.
+ *
+ * Keyed off the dragged post's own rectangle touching the container, not
+ * the mouse cursor position: the cursor can sit anywhere within (or even
+ * outside, mid-fling) the card being dragged, so a large card's edge can
+ * already be over the container while the point the user grabbed it by
+ * still isn't.
+ */
+export function findContainerOverlappingRect(
+  padlets: Padlet[],
+  rect: CanvasRect,
+  excludePadletId: string,
+): Padlet | null {
+  const containers = padlets.filter(
+    (p) => isContainerPadlet(p) && p.id !== excludePadletId && !(p.metadata as any)?.parentId
+  );
+
+  for (const container of containers) {
+    const left = container.position_x || 0;
+    const top = container.position_y || 0;
+    const width = container.width || 280;
+    const height = container.height || 200;
+
+    const overlaps =
+      rect.x < left + width &&
+      rect.x + rect.width > left &&
+      rect.y < top + height &&
+      rect.y + rect.height > top;
+
+    if (overlaps) {
+      return container;
+    }
+  }
+
+  return null;
+}
+
 export function formatRelativeTime(timestamp: number): string {
   const now = Date.now();
   const diff = now - timestamp;

@@ -16,6 +16,9 @@ interface CommentPostContextMenuProps {
     children: React.ReactNode;
     padlet: Padlet;
     onSelect: () => void;
+    // Opens the same modal/editor this post's own pencil button opens --
+    // the "adding" editor reused for editing (openFreeformPadletModal).
+    onEdit?: () => void;
     onDuplicate?: () => void;
     onDelete?: () => void;
     onCut?: () => void;
@@ -35,6 +38,7 @@ export function CommentPostContextMenu({
     children,
     padlet,
     onSelect,
+    onEdit,
     onDuplicate,
     onDelete,
     onCut,
@@ -84,6 +88,14 @@ export function CommentPostContextMenu({
             </ContextMenuTrigger>
 
             <ContextMenuContent className="min-w-[220px]" style={{ zIndex: 9999 }}>
+                {onEdit && (
+                    <>
+                        <ContextMenuItem onClick={onEdit}>
+                            Edit Post
+                        </ContextMenuItem>
+                        <ContextMenuSeparator />
+                    </>
+                )}
                 <ContextMenuItem onClick={() => handleAction('edit.paste')}>
                     Paste
                 </ContextMenuItem>

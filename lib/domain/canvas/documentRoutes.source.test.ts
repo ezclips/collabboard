@@ -104,11 +104,21 @@ describe('Freeform: openFreeformPadletModal card branch', () => {
     expect(cardBranch).not.toContain('setIsNoteEditorOpen');
   });
 
-  it('clipart preserves its existing CardEditor destination unchanged (C7)', () => {
-    // PATCH-149B2-ii: the guard's early return leaves clipart (destination null)
-    // to fall through to the original per-type dispatch further down.
+  it('clipart opens ClipartDraftModal/CardViewer via selectCardModalRoute, matching executePadletTypeEditor', () => {
+    // Previously (PATCH-149B2-ii, "C7") the guard's early return left clipart
+    // (destination null) falling through to setIsCardEditorOpen -- the legacy
+    // CardEditor (plain title/body/description text fields only, no icon,
+    // color, caption, or reaction controls), the same editor Document posts
+    // use. That made "Edit Post" open the wrong editor for real clipart
+    // cards, unlike CardPreview.onOpenToolbar's pencil button and
+    // executePadletTypeEditor above, both of which already route clipart
+    // through selectCardModalRoute -> ClipartCardDraftModal/CardViewer.
+    // Fixed to match those two.
     const secondCardBranch = body.slice(body.indexOf("padletType === 'card') {", body.indexOf("padletType === 'card') {") + 1));
-    expect(secondCardBranch.slice(0, 60)).toContain('setIsCardEditorOpen(true);');
+    expect(secondCardBranch).not.toContain('setIsCardEditorOpen(true);');
+    expect(secondCardBranch.slice(0, 800)).toContain('selectCardModalRoute(canUseFreeformEditButton)');
+    expect(secondCardBranch.slice(0, 800)).toContain('setIsClipartDraftModalOpen(true);');
+    expect(secondCardBranch.slice(0, 800)).toContain('setIsCardViewerOpen(true);');
   });
 });
 

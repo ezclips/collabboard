@@ -143,37 +143,41 @@ describe('CardPreview captionStyle reader legacy compatibility', () => {
   it('does not change legacy card dimensions, wrappers, spacing, or title source', () => {
     const legacy = renderCard(padlet());
 
-    expect(legacy).toContain('class="group relative h-full border overflow-hidden transition-colors border-gray-200"');
+    // flex flex-col (outer) / flex-1 min-h-0 (icon block), not the old fixed
+    // h-[calc(100%-22px)] -- so reactions/caption below the icon claim their
+    // own space instead of the icon block always consuming the entire
+    // remaining card height regardless of what else needs to render there.
+    expect(legacy).toContain('class="group relative h-full flex flex-col border overflow-hidden transition-colors border-gray-200"');
     expect(legacy).toContain('style="background-color:#ffffff"');
-    expect(legacy).toContain('class="pointer-events-none select-none flex h-[calc(100%-22px)] flex-col items-center justify-center gap-2 px-4 py-3"');
+    expect(legacy).toContain('class="pointer-events-none select-none flex flex-1 min-h-0 flex-col items-center justify-center gap-2 px-4 py-3"');
     expect(legacy).toContain('class="flex h-32 w-32 items-center justify-center rounded-2xl"');
     expect(legacy).toContain('Clipart caption');
     expect(legacy).not.toContain('Stored metadata caption');
   });
 });
 
-describe('CardPreview captionStyle reader rendering', () => {
+describe('CardPreview titleStyle reader rendering', () => {
   it.each([
     ['#RRGGBB', '#dc2626', 'color:#dc2626'],
     ['#RRGGBBAA', '#dc262680', 'color:#dc262680'],
     ['transparent', 'transparent', 'color:transparent'],
-  ])('accepts %s captionStyle.color and lets it override metadata.textColor', (_label, colorValue, expected) => {
-    const rendered = renderCard(padlet({ metadata: { textColor: '#334155', captionStyle: { color: colorValue } } }));
+  ])('accepts %s titleStyle.color and lets it override metadata.textColor', (_label, colorValue, expected) => {
+    const rendered = renderCard(padlet({ metadata: { textColor: '#334155', titleStyle: { color: colorValue } } }));
 
     expect(style(rendered)).toBe(expected);
   });
 
-  it('falls back from invalid captionStyle.color to metadata.textColor, then default color', () => {
-    expect(style(renderCard(padlet({ metadata: { textColor: '#334155', captionStyle: { color: 'red' } } })))).toBe('color:#334155');
-    expect(style(renderCard(padlet({ metadata: { textColor: undefined, captionStyle: { color: 'red' } } })))).toBe('color:#1F2937');
+  it('falls back from invalid titleStyle.color to metadata.textColor, then default color', () => {
+    expect(style(renderCard(padlet({ metadata: { textColor: '#334155', titleStyle: { color: 'red' } } })))).toBe('color:#334155');
+    expect(style(renderCard(padlet({ metadata: { textColor: undefined, titleStyle: { color: 'red' } } })))).toBe('color:#1F2937');
   });
 
-  it('renders only valid supplied captionStyle fields, without writing metadata, and renders the real caption text below reactions', () => {
+  it('renders only valid supplied titleStyle fields, without writing metadata, and renders the real caption text below reactions', () => {
     const source = padlet({
       metadata: metadata({
         caption: 'Stored metadata caption',
         captionText: 'Wrong source',
-        captionStyle: {
+        titleStyle: {
           heading: 'quote',
           fontSize: '18px',
           fontWeight: '700',
@@ -193,16 +197,16 @@ describe('CardPreview captionStyle reader rendering', () => {
     );
     expect(rendered).toContain('Clipart caption');
     // metadata.caption is the real caption text field (below reactions) --
-    // distinct from metadata.captionStyle, which styles the title span.
+    // distinct from metadata.titleStyle, which styles the title span.
     expect(rendered).toContain('Stored metadata caption');
     expect(rendered).not.toContain('Wrong source');
     expect(JSON.stringify(source)).toBe(before);
   });
 
-  it('keeps reaction rendering unchanged while applying captionStyle', () => {
+  it('keeps reaction rendering unchanged while applying titleStyle', () => {
     const rendered = renderToStaticMarkup(
       <CardPreview
-        padlet={padlet({ metadata: { svgUrl: undefined, reactions: ['👍', '👍'], captionStyle: { color: '#111827' } } })}
+        padlet={padlet({ metadata: { svgUrl: undefined, reactions: ['👍', '👍'], titleStyle: { color: '#111827' } } })}
         isSelected={false}
         reactions={['👍', '👍']}
         onAddReaction={() => {}}
@@ -220,6 +224,57 @@ describe('CardPreview captionStyle reader rendering', () => {
   });
 });
 
+describe('CardPreview captionStyle is independent of titleStyle (regression coverage)', () => {
+  function captionParagraph(markup: string): string {
+    const match = markup.match(/<p class="px-4 text-xs text-gray-600 break-words" style="([^"]*)">([^<]*)<\/p>/);
+    expect(match, 'caption <p> should render').toBeTruthy();
+    return match?.[1] ?? '';
+  }
+
+  it('titleStyle.color no longer changes the caption text color (the coupling bug)', () => {
+    const rendered = renderCard(padlet({
+      metadata: {
+        textColor: '#334155',
+        caption: 'A real caption',
+        titleStyle: { color: '#dc2626' },
+      },
+    }));
+
+    expect(style(rendered)).toBe('color:#dc2626');
+    // Caption has no captionStyle of its own here, so it falls back to
+    // metadata.textColor -- NOT the title's #dc2626.
+    expect(captionParagraph(rendered)).toBe('color:#334155');
+  });
+
+  it('captionStyle.color no longer changes the title color (the coupling bug, other direction)', () => {
+    const rendered = renderCard(padlet({
+      metadata: {
+        textColor: '#334155',
+        caption: 'A real caption',
+        captionStyle: { color: '#16a34a' },
+      },
+    }));
+
+    // Title has no titleStyle of its own here, so it falls back to
+    // metadata.textColor -- NOT the caption's #16a34a.
+    expect(style(rendered)).toBe('color:#334155');
+    expect(captionParagraph(rendered)).toBe('color:#16a34a');
+  });
+
+  it('title and caption can each carry a fully independent style at the same time', () => {
+    const rendered = renderCard(padlet({
+      metadata: {
+        caption: 'A real caption',
+        titleStyle: { color: '#dc2626', fontWeight: '700' },
+        captionStyle: { color: '#16a34a', fontStyle: 'italic' },
+      },
+    }));
+
+    expect(style(rendered)).toBe('color:#dc2626;font-weight:700');
+    expect(captionParagraph(rendered)).toBe('color:#16a34a;font-style:italic');
+  });
+});
+
 describe('captionStyle preset table and resolver', () => {
   it('matches the authoritative Image-post writer preset table value-for-value', () => {
     expect(CAPTION_STYLE_PRESETS).toEqual(expectedPresetTable);
@@ -228,7 +283,7 @@ describe('captionStyle preset table and resolver', () => {
   it.each(Object.entries(expectedPresetTable) as Array<[CaptionHeading, CaptionStyle]>)(
     'resolves the %s preset to expected rendered CSS',
     (_heading, preset) => {
-      const rendered = renderCard(padlet({ metadata: { captionStyle: preset } }));
+      const rendered = renderCard(padlet({ metadata: { titleStyle: preset } }));
       const resolved = resolveCaptionStyle(preset, '#334155');
 
       expect(style(rendered)).toBe(

@@ -22,7 +22,11 @@ import {
 } from "lucide-react";
 import { ColorPickerContent } from "../ColorPicker";
 import PostCardContent from "@/components/collabboard/PostCardContent";
+import CardPreview from "@/components/collabboard/CardPreview";
 import CommentPopup from "./CommentPopup";
+import TextStylePopup from "./TextStylePopup";
+import { CAPTION_STYLE_PRESETS, resolveCaptionStyle, type CaptionHeading } from "@/lib/domain/canvas/captionStyle";
+import { nextTextAlign, type TextAlignValue } from "./textAlignCycle";
 import {
     DndContext,
     closestCenter,
@@ -91,6 +95,7 @@ interface DetachedComment {
 
 interface ContainerEditorProps {
     initialTitle?: string;
+    initialTitleStyle?: Record<string, unknown>;
     initialBackgroundColor?: string;
     initialTopStrip?: string | null;
     initialDetachedComments?: DetachedComment[];
@@ -99,6 +104,7 @@ interface ContainerEditorProps {
 
     onSave: (data: {
         title: string;
+        titleStyle: Record<string, unknown>;
         backgroundColor: string;
         topStrip?: string;
         detachedComments?: DetachedComment[];
@@ -392,7 +398,22 @@ function SortableChildItem({
                             className="cursor-pointer"
                             title={child.type === "link" ? "Open link" : "Open editor"}
                         >
-                            <PostCardContent padlet={child as any} />
+                            {child.type === "card" && (child.metadata as any)?.svgUrl ? (
+                                // Same CardPreview component the standalone card and
+                                // its editor use -- the legacy ClipartCardContent path
+                                // (via PostCardContent) never grew reactions/caption
+                                // support. hideTitle: this row already has its own
+                                // title button above, so CardPreview shouldn't render
+                                // a second one.
+                                <CardPreview
+                                    padlet={child as any}
+                                    isSelected={false}
+                                    hideTitle
+                                    reactions={Array.isArray(child.metadata?.reactions) ? (child.metadata as any).reactions : []}
+                                />
+                            ) : (
+                                <PostCardContent padlet={child as any} />
+                            )}
                         </div>
                     )}
                 </div>
@@ -402,7 +423,8 @@ function SortableChildItem({
 }
 
 export default function ContainerEditor({
-    initialTitle = "New Container",
+    initialTitle = "",
+    initialTitleStyle,
     initialBackgroundColor = "#ffffff",
     initialTopStrip = null,
     initialDetachedComments = [],
@@ -425,10 +447,31 @@ export default function ContainerEditor({
     isOpen,
 }: ContainerEditorProps) {
     const [title, setTitle] = useState(initialTitle);
+    const [titleStyle, setTitleStyle] = useState<Record<string, unknown>>(initialTitleStyle || {});
     const [backgroundColor, setBackgroundColor] = useState(initialBackgroundColor);
     const [topStrip, setTopStrip] = useState<string | null>(initialTopStrip);
     const containerTextColor = getContrastTextColor(backgroundColor);
     const mutedContainerTextColor = containerTextColor === '#f8fafc' ? 'rgba(248,250,252,0.82)' : 'rgba(15,23,42,0.68)';
+
+    // Title's own font/size/color/orientation, same metadata.titleStyle
+    // convention every other editor's Text style panel writes to (see
+    // resolvePadletTitleStyle). Bold/Italic/Underline/Strikethrough toggle on
+    // top of whichever heading preset is active, same layering as a TipTap
+    // mark over a paragraph.
+    const titleInputStyle = resolveCaptionStyle(titleStyle, containerTextColor);
+    const isTitleBold = titleStyle.fontWeight === '700' || titleStyle.fontWeight === 'bold';
+    const isTitleItalic = titleStyle.fontStyle === 'italic';
+    const applyTitlePreset = (level: CaptionHeading) => {
+        const selectedPreset = level === 'callout' && titleStyle.backgroundColor
+            ? { ...CAPTION_STYLE_PRESETS.callout, backgroundColor: titleStyle.backgroundColor }
+            : CAPTION_STYLE_PRESETS[level];
+        setTitleStyle({ ...titleStyle, ...selectedPreset });
+    };
+    const toggleTitleBold = () => setTitleStyle({ ...titleStyle, fontWeight: isTitleBold ? '400' : '700' });
+    const toggleTitleItalic = () => setTitleStyle({ ...titleStyle, fontStyle: isTitleItalic ? 'normal' : 'italic' });
+    const toggleTitleUnderline = () => setTitleStyle({ ...titleStyle, underline: !titleStyle.underline });
+    const toggleTitleStrikethrough = () => setTitleStyle({ ...titleStyle, strikethrough: !titleStyle.strikethrough });
+    const cycleTitleAlign = () => setTitleStyle({ ...titleStyle, textAlign: nextTextAlign((titleStyle.textAlign as TextAlignValue) || 'left') });
 
     const sensors = useSensors(
         useSensor(PointerSensor, { activationConstraint: { distance: 15 } }),
@@ -491,9 +534,9 @@ export default function ContainerEditor({
         wasOpenRef.current = isOpen;
     }, [isOpen]);
 
-    // Update picker position when color popup opens or modal moves
+    // Update side-panel position when the color or title panel opens, or the modal moves
     useEffect(() => {
-        if (!showColorPopup || !containerCardRef.current) {
+        if ((!showColorPopup && !showTitleEdit) || !containerCardRef.current) {
             setPickerPosition(null);
             return;
         }
@@ -502,7 +545,7 @@ export default function ContainerEditor({
             top: rect.top,
             left: rect.right + 12, // 12px gap
         });
-    }, [showColorPopup, modalPosition]);
+    }, [showColorPopup, showTitleEdit, modalPosition]);
 
     // Modal drag handlers
     const handleModalMouseDown = (e: React.MouseEvent) => {
@@ -549,11 +592,12 @@ export default function ContainerEditor({
         window.addEventListener("keydown", onKeyDown);
         return () => window.removeEventListener("keydown", onKeyDown);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [isOpen, title, backgroundColor, topStrip]);
+    }, [isOpen, title, titleStyle, backgroundColor, topStrip]);
 
     const handleSaveAndClose = () => {
         onSave({
-            title,
+            title: title.trim(),
+            titleStyle,
             backgroundColor,
             topStrip: topStrip && topStrip !== "transparent" ? topStrip : undefined,
             detachedComments: detachedComments.length > 0 ? detachedComments : undefined,
@@ -671,6 +715,12 @@ export default function ContainerEditor({
                 onMouseLeave={handleModalMouseUp}
                 style={{ pointerEvents: isDraggingModal ? 'auto' : 'none' }}
             >
+                {/* Dims the canvas behind, same as every other post editor's
+                    backdrop -- kept pointer-events-none (unlike those editors'
+                    click-to-close backdrop) so dragging an existing canvas
+                    post into this container while it's open still works. */}
+                <div className="fixed inset-0 bg-black/40 backdrop-blur-sm pointer-events-none" />
+
                 <div
                     className="pointer-events-auto flex items-start gap-2"
                     style={{
@@ -698,7 +748,10 @@ export default function ContainerEditor({
                             <div className="relative flex flex-col items-center shrink-0">
                                 <button
                                     onMouseDown={preventFocusLoss}
-                                    onClick={() => setShowColorPopup((v) => !v)}
+                                    onClick={() => {
+                                        setShowTitleEdit(false);
+                                        setShowColorPopup((v) => !v);
+                                    }}
                                     className={`w-10 h-10 flex items-center justify-center rounded-lg transition-colors ${showColorPopup ? "bg-gray-200 text-gray-800" : "hover:bg-gray-200 text-gray-600"
                                         }`}
                                     title="Color"
@@ -711,7 +764,10 @@ export default function ContainerEditor({
                             <div className="relative flex flex-col items-center shrink-0">
                                 <button
                                     onMouseDown={preventFocusLoss}
-                                    onClick={() => setShowTitleEdit(true)}
+                                    onClick={() => {
+                                        setShowColorPopup(false);
+                                        setShowTitleEdit((v) => !v);
+                                    }}
                                     className={`w-10 h-10 flex items-center justify-center rounded-lg transition-colors ${showTitleEdit ? "bg-gray-200 text-gray-800" : "hover:bg-gray-200 text-gray-600"
                                         }`}
                                     title="Title"
@@ -738,74 +794,65 @@ export default function ContainerEditor({
                                     onMouseDown={handleModalMouseDown}
                                     title="Drag to move editor"
                                 >
-                                    {showTitleEdit ? (
-                                        <input
-                                            type="text"
-                                            value={title}
-                                            onChange={(e) => setTitle(e.target.value)}
-                                            onBlur={() => setShowTitleEdit(false)}
-                                            onKeyDown={(e) => {
-                                                if (e.key === "Enter") setShowTitleEdit(false);
-                                            }}
-                                            className="w-full text-lg font-bold text-center border-b-2 border-blue-500 outline-none bg-transparent"
-                                            style={{ color: containerTextColor }}
-                                            autoFocus
-                                        />
-                                    ) : (
-                                        <h3 className="text-lg font-bold" style={{ color: containerTextColor }}>{title}</h3>
-                                    )}
+                                    <input
+                                        type="text"
+                                        value={title}
+                                        onChange={(e) => setTitle(e.target.value)}
+                                        placeholder="Container title"
+                                        className="w-full text-lg font-bold text-center bg-transparent outline-none placeholder:opacity-40"
+                                        style={titleInputStyle}
+                                        onMouseDown={(e) => e.stopPropagation()}
+                                        onSelect={(e) => {
+                                            const el = e.currentTarget;
+                                            if (el.selectionStart !== el.selectionEnd) {
+                                                setShowColorPopup(false);
+                                                setShowTitleEdit(true);
+                                            }
+                                        }}
+                                    />
                                     <p className="text-sm mt-1" style={{ color: mutedContainerTextColor }}>{countLabel}</p>
                                     <p className="text-[11px] mt-1" style={{ color: mutedContainerTextColor }}>
                                         Link cards open the URL. Other cards open the editor. Drag to reorder. (ESC to close)
                                     </p>
                                 </div>
 
-                                <div className="px-4 pb-4">
-                                    <div
-                                        className={`border-2 border-dashed rounded-lg min-h-[240px] transition-all ${isDragOver ? "border-gray-400 bg-gray-50/60" : "border-gray-300"}`}
-                                        onDragEnter={(e) => {
-                                            if (!onDropPadlet) return;
-                                            e.preventDefault();
-                                            e.stopPropagation();
-                                            setDragDepth((d) => d + 1);
-                                            setIsDragOver(true);
-                                        }}
-                                        onDragOver={(e) => {
-                                            if (!onDropPadlet) return;
-                                            e.preventDefault();
-                                            e.stopPropagation();
-                                            if (!isDragOver) setIsDragOver(true);
-                                        }}
-                                        onDragLeave={(e) => {
-                                            if (!onDropPadlet) return;
-                                            e.preventDefault();
-                                            e.stopPropagation();
-                                            setDragDepth((d) => {
-                                                const next = Math.max(0, d - 1);
-                                                if (next === 0) setIsDragOver(false);
-                                                return next;
-                                            });
-                                        }}
-                                        onDrop={(e) => {
-                                            if (!onDropPadlet) return;
-                                            e.preventDefault();
-                                            e.stopPropagation();
-                                            setDragDepth(0);
-                                            setIsDragOver(false);
+                                <div
+                                    className={`px-4 pb-4 rounded-lg transition-colors ${isDragOver ? "bg-gray-50/60" : ""}`}
+                                    onDragEnter={(e) => {
+                                        if (!onDropPadlet) return;
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        setDragDepth((d) => d + 1);
+                                        setIsDragOver(true);
+                                    }}
+                                    onDragOver={(e) => {
+                                        if (!onDropPadlet) return;
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        if (!isDragOver) setIsDragOver(true);
+                                    }}
+                                    onDragLeave={(e) => {
+                                        if (!onDropPadlet) return;
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        setDragDepth((d) => {
+                                            const next = Math.max(0, d - 1);
+                                            if (next === 0) setIsDragOver(false);
+                                            return next;
+                                        });
+                                    }}
+                                    onDrop={(e) => {
+                                        if (!onDropPadlet) return;
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        setDragDepth(0);
+                                        setIsDragOver(false);
 
-                                            const droppedId = readPadletIdFromDrop(e);
-                                            if (droppedId) onDropPadlet(droppedId);
-                                        }}
-                                    >
-                                        {/* Always show the drop hint area */}
-                                        <div className="flex flex-col items-center justify-center gap-2 h-[88px] border-b border-dashed border-gray-200">
-                                            <p className="text-xs" style={{ color: mutedContainerTextColor }}>
-                                                Drag posts here to add them
-                                            </p>
-                                        </div>
-                                    </div>
-
-                                    {/* Children list with dnd-kit sortable (outside the HTML5 drop zone) */}
+                                        const droppedId = readPadletIdFromDrop(e);
+                                        if (droppedId) onDropPadlet(droppedId);
+                                    }}
+                                >
+                                    {/* Children list with dnd-kit sortable */}
                                     {orderedChildren.length === 0 ? (
                                         <div className="flex items-center justify-center min-h-[180px]">
                                             <p className="text-sm" style={{ color: mutedContainerTextColor }}>No posts yet</p>
@@ -849,16 +896,66 @@ export default function ContainerEditor({
                     </div>
                 </div>
 
-                {/* Color Picker Panel - RIGHT side of container (fixed position) */}
-                {showColorPopup && pickerPosition && (
+                {/* Text Style Panel - RIGHT side of container (fixed position), same slot as Color */}
+                {showTitleEdit && pickerPosition && (
                     <div
-                        className="pointer-events-auto bg-white rounded-lg shadow-lg overflow-hidden animate-in fade-in slide-in-from-left-2 duration-200 z-[110]"
+                        className="pointer-events-auto relative animate-in fade-in slide-in-from-left-2 duration-200 z-[110]"
                         style={{
                             position: 'fixed',
                             top: pickerPosition.top,
                             left: pickerPosition.left,
                         }}
                     >
+                        <button
+                            onClick={() => setShowTitleEdit(false)}
+                            className="absolute -right-3 -top-3 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-400 shadow-md transition-all hover:text-gray-600"
+                            title="Close"
+                        >
+                            <X className="h-3.5 w-3.5" />
+                        </button>
+                        <div className="bg-white rounded-lg shadow-xl border border-gray-200 p-3 min-w-[240px] max-h-[calc(100vh-2rem)] overflow-y-auto">
+                            <TextStylePopup
+                                isOpen
+                                onOpenChange={(open) => { if (!open) setShowTitleEdit(false); }}
+                                hideCloseButton
+                                onSelectHeading={applyTitlePreset}
+                                onSelectColor={(color) => setTitleStyle({ ...titleStyle, color })}
+                                onSelectHighlight={(color) => setTitleStyle({ ...titleStyle, backgroundColor: color })}
+                                currentHeading={(titleStyle.heading as string) || 'normal'}
+                                currentColor={titleStyle.color as string | undefined}
+                                currentHighlight={titleStyle.backgroundColor as string | undefined}
+                                onBold={toggleTitleBold}
+                                onItalic={toggleTitleItalic}
+                                onUnderline={toggleTitleUnderline}
+                                onStrikethrough={toggleTitleStrikethrough}
+                                onAlign={cycleTitleAlign}
+                                isBold={isTitleBold}
+                                isItalic={isTitleItalic}
+                                isUnderline={!!titleStyle.underline}
+                                isStrikethrough={!!titleStyle.strikethrough}
+                            />
+                        </div>
+                    </div>
+                )}
+
+                {/* Color Picker Panel - RIGHT side of container (fixed position) */}
+                {showColorPopup && pickerPosition && (
+                    <div
+                        className="pointer-events-auto relative animate-in fade-in slide-in-from-left-2 duration-200 z-[110]"
+                        style={{
+                            position: 'fixed',
+                            top: pickerPosition.top,
+                            left: pickerPosition.left,
+                        }}
+                    >
+                        <button
+                            onClick={() => setShowColorPopup(false)}
+                            className="absolute -right-3 -top-3 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-400 shadow-md transition-all hover:text-gray-600"
+                            title="Close"
+                        >
+                            <X className="h-3.5 w-3.5" />
+                        </button>
+                        <div className="bg-white rounded-lg shadow-lg overflow-hidden">
                         <div className="w-[240px] p-4 flex flex-col gap-4">
                             {/* Mode Toggle */}
                             <div className="flex items-center justify-between mb-2">
@@ -894,6 +991,7 @@ export default function ContainerEditor({
                                 hasOpacity={true}
                                 presets={colorTab === "background" ? BACKGROUND_COLORS : TOP_STRIP_COLORS}
                             />
+                        </div>
                         </div>
                     </div>
                 )}

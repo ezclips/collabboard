@@ -11,12 +11,15 @@ import {
 } from '@/components/ui/context-menu';
 import { ActionId, actionRegistry } from '@/lib/collabboard/ActionRegistry';
 import { Padlet } from '@/types/collabboard';
-import { Lock, LockOpen } from 'lucide-react';
+import { Check, Lock, LockOpen } from 'lucide-react';
 
 interface NotePostContextMenuProps {
     children: React.ReactNode;
     padlet: Padlet;
     onSelect: () => void;
+    // Opens the same modal/editor this post's own pencil button opens --
+    // the "adding" editor reused for editing (openFreeformPadletModal).
+    onEdit?: () => void;
     // Actions passed as props for easy wiring to existing state
     onDuplicate?: () => void;
     onDelete?: () => void;
@@ -30,6 +33,10 @@ interface NotePostContextMenuProps {
     onCreateSyncedCopy?: () => void;
     onGroupIntoColumn?: () => void;
     onAddToLibrary?: () => void;
+    // Only passed for types where a frameless, title-less display makes
+    // sense (Drawing, Card/Clipart, AI Component) -- undefined for plain
+    // Note/Text, so the menu item below never shows there.
+    onToggleFullView?: () => void;
     disabled?: boolean;
 }
 
@@ -37,6 +44,7 @@ export function NotePostContextMenu({
     children,
     padlet,
     onSelect,
+    onEdit,
     onDuplicate,
     onDelete,
     onCut,
@@ -49,6 +57,7 @@ export function NotePostContextMenu({
     onCreateSyncedCopy,
     onGroupIntoColumn,
     onAddToLibrary,
+    onToggleFullView,
     disabled = false,
 }: NotePostContextMenuProps) {
     if (disabled) {
@@ -70,6 +79,7 @@ export function NotePostContextMenu({
             case 'post.createSyncedCopy': onCreateSyncedCopy?.(); break;
             case 'post.groupIntoColumn': onGroupIntoColumn?.(); break;
             case 'post.addToLibrary': onAddToLibrary?.(); break;
+            case 'post.toggleFullView': onToggleFullView?.(); break;
         }
 
         // Also trigger via registry for extensibility
@@ -80,6 +90,7 @@ export function NotePostContextMenu({
     };
 
     const isLocked = (padlet.metadata as any)?.isLocked;
+    const isFullView = (padlet.metadata as any)?.fullView === true;
 
     return (
         <ContextMenu onOpenChange={(open) => { if (open) onSelect(); }}>
@@ -88,6 +99,14 @@ export function NotePostContextMenu({
             </ContextMenuTrigger>
 
             <ContextMenuContent className="min-w-[220px]" style={{ zIndex: 9999 }}>
+                {onEdit && (
+                    <>
+                        <ContextMenuItem onClick={onEdit}>
+                            Edit Post
+                        </ContextMenuItem>
+                        <ContextMenuSeparator />
+                    </>
+                )}
                 <ContextMenuItem onClick={() => handleAction('edit.cut')}>
                     Cut
                 </ContextMenuItem>
@@ -112,6 +131,20 @@ export function NotePostContextMenu({
                 <ContextMenuItem onClick={() => handleAction('post.groupIntoColumn')}>
                     Group into Column
                 </ContextMenuItem>
+
+                {onToggleFullView && (
+                    <>
+                        <ContextMenuSeparator />
+                        <ContextMenuItem onClick={() => handleAction('post.toggleFullView')}>
+                            Full View
+                            {isFullView && (
+                                <span className="ml-auto pl-4 flex items-center">
+                                    <Check className="text-gray-500" />
+                                </span>
+                            )}
+                        </ContextMenuItem>
+                    </>
+                )}
 
                 <ContextMenuSeparator />
 

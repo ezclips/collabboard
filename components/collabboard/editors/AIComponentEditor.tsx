@@ -254,6 +254,14 @@ export default function AIComponentEditor({
     }
   };
 
+  // Highlighting title text should open the Text style panel, without
+  // toggling an already-open panel closed (openDetachedPanel toggles on
+  // `!prev`, so calling it while already open would close it).
+  const openTextStyleForTitle = () => {
+    setActiveStyleTarget('title');
+    if (!isTextStyleOpen) openDetachedPanel('text', isTextStyleOpen);
+  };
+
   const isTitleBold = titleStyle.fontWeight === '700' || titleStyle.fontWeight === 'bold';
   const isTitleItalic = titleStyle.fontStyle === 'italic';
   const toggleTitleBold = () => setTitleStyle((prev) => ({ ...prev, fontWeight: isTitleBold ? '400' : '700' }));
@@ -747,6 +755,10 @@ export default function AIComponentEditor({
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             onFocus={() => setActiveStyleTarget('title')}
+            onSelect={(e) => {
+              const el = e.currentTarget;
+              if (el.selectionStart !== el.selectionEnd) openTextStyleForTitle();
+            }}
             placeholder="Post name"
             className="w-full text-sm font-semibold text-gray-800 bg-transparent outline-none border-b border-transparent focus:border-blue-400 placeholder:opacity-40 placeholder:font-normal rounded px-1 -mx-1"
             style={titleInputStyle}

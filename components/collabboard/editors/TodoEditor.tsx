@@ -658,6 +658,17 @@ export default function TodoEditor({
                                 value={todoTitle}
                                 onChange={(e) => setTodoTitle(e.target.value)}
                                 onFocus={() => setActiveStyleTargetId('title')}
+                                onSelect={(e) => {
+                                    const el = e.currentTarget;
+                                    if (el.selectionStart !== el.selectionEnd) {
+                                        setActiveStyleTargetId('title');
+                                        if (!showTextStylePanel) {
+                                            setShowTextStylePanel(true);
+                                            setShowColorPicker(false);
+                                            setShowReactionPicker(false);
+                                        }
+                                    }
+                                }}
                                 className={`w-full text-sm font-semibold bg-transparent outline-none border-b placeholder:opacity-40 placeholder:font-normal rounded px-1 -mx-1 ${
                                     activeStyleTargetId === 'title' ? 'border-blue-400 bg-blue-50/40' : 'border-transparent focus:border-blue-400'
                                 }`}

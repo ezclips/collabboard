@@ -183,6 +183,7 @@ const IMAGE_INVENTORY = [
   'Replace Image',
   'Download Original Image',
   'Crop Image to Fit Dot Grid',
+  'Full View',
   '---',
   'Group into Column',
   '---',

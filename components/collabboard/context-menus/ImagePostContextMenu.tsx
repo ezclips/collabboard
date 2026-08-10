@@ -16,6 +16,9 @@ interface ImagePostContextMenuProps {
     children: React.ReactNode;
     padlet: Padlet;
     onSelect: () => void;
+    // Opens the same modal/editor this post's own pencil button opens --
+    // the "adding" editor reused for editing (openFreeformPadletModal).
+    onEdit?: () => void;
     // Standard Actions
     onDuplicate?: () => void;
     onDelete?: () => void;
@@ -31,6 +34,7 @@ interface ImagePostContextMenuProps {
     onReplaceImage?: () => void;
     onDownloadImage?: () => void;
     onToggleCropToGrid?: () => void;
+    onToggleFullView?: () => void;
     onAddToLibrary?: () => void;
     disabled?: boolean;
 }
@@ -39,6 +43,7 @@ export function ImagePostContextMenu({
     children,
     padlet,
     onSelect,
+    onEdit,
     onDuplicate,
     onDelete,
     onCut,
@@ -52,6 +57,7 @@ export function ImagePostContextMenu({
     onReplaceImage,
     onDownloadImage,
     onToggleCropToGrid,
+    onToggleFullView,
     onAddToLibrary,
     disabled = false,
 }: ImagePostContextMenuProps) {
@@ -74,6 +80,7 @@ export function ImagePostContextMenu({
             case 'image.replace': onReplaceImage?.(); break;
             case 'image.download': onDownloadImage?.(); break;
             case 'image.cropToGrid': onToggleCropToGrid?.(); break;
+            case 'post.toggleFullView': onToggleFullView?.(); break;
             case 'post.addToLibrary': onAddToLibrary?.(); break;
         }
 
@@ -84,6 +91,7 @@ export function ImagePostContextMenu({
     };
 
     const isCropToGrid = (padlet.metadata as any)?.cropToGrid === true;
+    const isFullView = (padlet.metadata as any)?.fullView === true;
     const isLocked = (padlet.metadata as any)?.isLocked;
 
     return (
@@ -93,6 +101,14 @@ export function ImagePostContextMenu({
             </ContextMenuTrigger>
 
             <ContextMenuContent className="min-w-[220px]" style={{ zIndex: 9999 }}>
+                {onEdit && (
+                    <>
+                        <ContextMenuItem onClick={onEdit}>
+                            Edit Post
+                        </ContextMenuItem>
+                        <ContextMenuSeparator />
+                    </>
+                )}
                 <ContextMenuItem onClick={() => handleAction('edit.cut')}>
                     Cut
                 </ContextMenuItem>
@@ -120,6 +136,14 @@ export function ImagePostContextMenu({
                 <ContextMenuItem onClick={() => handleAction('image.cropToGrid')}>
                     Crop Image to Fit Dot Grid
                     {isCropToGrid && (
+                        <span className="ml-auto pl-4 flex items-center">
+                            <Check className="text-gray-500" />
+                        </span>
+                    )}
+                </ContextMenuItem>
+                <ContextMenuItem onClick={() => handleAction('post.toggleFullView')}>
+                    Full View
+                    {isFullView && (
                         <span className="ml-auto pl-4 flex items-center">
                             <Check className="text-gray-500" />
                         </span>

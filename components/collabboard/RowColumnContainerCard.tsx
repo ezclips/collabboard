@@ -5,6 +5,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { MessageCircle } from "lucide-react";
 
 import PostCardContent from "./PostCardContent";
+import CardPreview from "./CardPreview";
 import EmbeddedCommentList from "./EmbeddedCommentList";
 import type { Padlet } from "@/types/collabboard";
 
@@ -406,18 +407,34 @@ export default function RowColumnContainerCard({
                         <div className="h-1.5 w-full" style={{ backgroundColor: childTopStrip }} />
                       )}
                       <div className={isImageChild && !isDocThumbnail ? "p-0" : isCardChild ? "p-0" : isDocThumbnail ? "p-1 bg-gray-50" : "p-1.5"}>
-                        <PostCardContent
-                          padlet={child}
-                          allPadlets={allPadlets}
-                          onView={() => onViewDrawing?.(child)}
-                          onScan={onScanChild}
-                          canvasContext={canvasContext}
-                          currentUserId={currentUserId}
-                          currentUserName={currentUserName}
-                          currentUserAvatar={currentUserAvatar}
-                          onUpdateChildComments={onUpdateChildComments}
-                          onOpenDocument={onOpenDocument ? () => onOpenDocument(child) : undefined}
-                        />
+                        {isCardChild ? (
+                          // Same CardPreview component standalone Clipart cards and
+                          // the editor use, instead of the older, separate
+                          // ClipartCardContent (via PostCardContent) this used to
+                          // render through -- that legacy path never grew reactions
+                          // or caption support, so a card lost both the moment it
+                          // was dropped into a container. Read-only here (no
+                          // titleEditor/captionEditor/reaction handlers): this is a
+                          // preview, not the live editor.
+                          <CardPreview
+                            padlet={child}
+                            isSelected={false}
+                            reactions={Array.isArray((child.metadata as any)?.reactions) ? (child.metadata as any).reactions : []}
+                          />
+                        ) : (
+                          <PostCardContent
+                            padlet={child}
+                            allPadlets={allPadlets}
+                            onView={() => onViewDrawing?.(child)}
+                            onScan={onScanChild}
+                            canvasContext={canvasContext}
+                            currentUserId={currentUserId}
+                            currentUserName={currentUserName}
+                            currentUserAvatar={currentUserAvatar}
+                            onUpdateChildComments={onUpdateChildComments}
+                            onOpenDocument={onOpenDocument ? () => onOpenDocument(child) : undefined}
+                          />
+                        )}
                       </div>
                       {showChildCommentToggle && (
                         <div

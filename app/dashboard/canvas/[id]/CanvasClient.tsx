@@ -102,7 +102,7 @@ import { collectDrawingOverlayDeletionIds } from '@/lib/infra/drawing/importScen
 import { debounce, sanitizeLibraryMetadata } from '@/components/collabboard/canvas/engine/utils';
 import { segmentsIntersect } from '@/components/collabboard/canvas/engine/geometry';
 import { computeClickedSide } from '@/components/collabboard/canvas/engine/hitTest';
-import { computeNormalizedZIndexes } from '@/components/collabboard/canvas/engine/zIndex';
+import { computeNormalizedZIndexes, nextZIndex } from '@/components/collabboard/canvas/engine/zIndex';
 import { canvasReducer } from '@/components/collabboard/canvas/store/canvasReducer';
 import { initialCanvasState } from '@/components/collabboard/canvas/store/types';
 import { useCanvasData } from '@/components/collabboard/canvas/hooks/useCanvasData';
@@ -461,7 +461,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     collapsedCommentColorPopupId,
     setCollapsedCommentColorPopupId,
     imageToolbarPadletId,
-    setImageToolbarPadletId,
+    setImageToolbarPadletId: _setImageToolbarPadletId,
     isDrawingMode,
     setIsDrawingMode,
     drawingPadlet,
@@ -493,6 +493,28 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     iconReplaceTargetPadlet,
     setIconReplaceTargetPadlet,
   } = useCanvasOverlays();
+  // Guards against a same-click race: selecting "Edit Post"/"Edit <type>"
+  // for an image from a container's context-menu submenu calls this with
+  // the padlet id, mounting the image toolbar's full-screen overlay right
+  // where the (now-closing) menu item was. The browser's trailing `click`
+  // for that same physical press then bubbles past the vanished menu all
+  // the way to the freeform canvas background's own click-to-deselect
+  // handler (which resets imageToolbarPadletId to null and isn't covered by
+  // the isAnyEditorOpen guard those other editors use), immediately closing
+  // an overlay that had just opened -- confirmed via instrumentation
+  // (stack trace pointed at that exact onClick). Centralizing the guard
+  // here, in the one real setter, protects every caller (that handler, the
+  // overlay's own backdrop, etc.) instead of chasing each one individually.
+  const imageToolbarJustOpenedAtRef = useRef(0);
+  const IMAGE_TOOLBAR_OPEN_GUARD_MS = 300;
+  const setImageToolbarPadletId = (v: string | null) => {
+    if (v) {
+      imageToolbarJustOpenedAtRef.current = Date.now();
+    } else if (Date.now() - imageToolbarJustOpenedAtRef.current < IMAGE_TOOLBAR_OPEN_GUARD_MS) {
+      return;
+    }
+    _setImageToolbarPadletId(v);
+  };
   const isCommentEditorOpen = canvasState.editors.isCommentEditorOpen; // SHARED: overlays + editors
   const setIsCommentEditorOpen = (v: boolean) => dispatch({ type: 'EDITORS_PATCH', payload: { isCommentEditorOpen: v } });
   const isImageEditorOpen = canvasState.editors.isImageEditorOpen; // SHARED: overlays + editors
@@ -555,7 +577,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         kind: 'container',
         isContainer: true,
         cardColor: '#ffffff',
-        zIndex: Date.now(),
+        zIndex: nextZIndex(padlets),
       }
     };
 
@@ -607,7 +629,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         kind: 'container',
         isContainer: true,
         cardColor: '#ffffff',
-        zIndex: Date.now(),
+        zIndex: nextZIndex(padlets),
       },
     };
     setPadlets(prev => [...prev, newContainer]);
@@ -1988,7 +2010,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           wallPosition: nextPos,
           kind: 'container',
           isContainer: true,
-          zIndex: Date.now(),
+          zIndex: nextZIndex(padlets),
         }
       };
 
@@ -2026,7 +2048,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     const containerPayload: Padlet = {
       id: containerId,
       board_id: canvasId,
-      title: 'New Column',
+      title: '',
       content: '',
       type: 'container',
       position_x: positionX,
@@ -2040,7 +2062,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         childPadletIds: [],
         kind: 'container',
         isContainer: true,
-        zIndex: Date.now(),
+        zIndex: nextZIndex(padlets),
       } as any,
     };
 
@@ -2073,7 +2095,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     }
 
     toast.success('Empty column created');
-  }, [canvasId, isFreeformLayout, canvasZoom, insertPostPreservingFailureChannels, fetchData]);
+  }, [canvasId, isFreeformLayout, canvasZoom, padlets, insertPostPreservingFailureChannels, fetchData]);
 
   // Handle "Add to Existing" from Column Placement Prompt
   const handleStartDragToExisting = () => {
@@ -2289,6 +2311,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   const {
     isDragging,
     draggingPadletId,
+    dragOverContainerId,
     handlePadletMouseDown,
     handleCanvasMouseMove,
     handleCanvasMouseUp,
@@ -4322,7 +4345,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         kind: 'container',
         isContainer: true,
         position_in_timeline: containerCount,
-        zIndex: Date.now(),
+        zIndex: nextZIndex(padlets),
       },
     };
     setPadlets((prev) => [...prev, newContainer]);
@@ -7232,6 +7255,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                     containerRef={containerRef}
                     isDragging={isDragging}
                     draggingPadletId={draggingPadletId}
+                    dragOverContainerId={dragOverContainerId}
                     isGraphConnectMode={isGraphConnectMode}
                     isLineMode={isLineMode}
                     isDrawingMode={isDrawingMode}

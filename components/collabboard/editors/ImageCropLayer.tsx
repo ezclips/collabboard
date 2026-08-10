@@ -27,11 +27,25 @@ export default function ImageCropLayer({
     const [completedCrop, setCompletedCrop] = useState<PixelCrop>();
     const [rotation, setRotation] = useState(0);
     const [aspect, setAspect] = useState<number | undefined>(undefined);
+    const [loadError, setLoadError] = useState(false);
     const imgRef = useRef<HTMLImageElement>(null);
 
-    // Initial centering of crop
+    useEffect(() => {
+        setLoadError(false);
+    }, [imageUrl]);
+
+    // Initial centering of crop. Uses naturalWidth/naturalHeight, not the
+    // rendered width/height off the load event's currentTarget -- those
+    // reflect the CSS layout box, which for a cached image can still read 0
+    // (or some pre-layout size) at the instant `load` fires, before the
+    // browser has run a layout pass. That produced a degenerate crop
+    // selection computed against a near-zero aspect ratio (a few px wide),
+    // stuck that way since nothing re-triggers the calculation afterward.
+    // naturalWidth/naturalHeight are the image's intrinsic pixel dimensions
+    // and are correct the instant `load` fires, independent of layout timing.
     const onImageLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
-        const { width, height } = e.currentTarget;
+        const { naturalWidth: width, naturalHeight: height } = e.currentTarget;
+        if (!width || !height) return;
         const initialCrop = centerCrop(
             makeAspectCrop(
                 {
@@ -112,23 +126,43 @@ export default function ImageCropLayer({
 
             {/* Cropping Area */}
             <div className="relative max-w-[90vw] max-h-[75vh] flex items-center justify-center">
-                <ReactCrop
-                    crop={crop}
-                    onChange={(c) => setCrop(c)}
-                    onComplete={(c) => setCompletedCrop(c)}
-                    aspect={aspect}
-                    className="shadow-2xl rounded-lg overflow-hidden ring-1 ring-white/10"
-                >
-                    <img
-                        ref={imgRef}
-                        src={imageUrl}
-                        crossOrigin="anonymous"
-                        alt="Crop preview"
-                        style={{ transform: `rotate(${rotation}deg)`, transition: 'transform 0.3s ease' }}
-                        className="max-h-[70vh] object-contain"
-                        onLoad={onImageLoad}
-                    />
-                </ReactCrop>
+                {loadError ? (
+                    // crossOrigin="anonymous" below is required so the Apply
+                    // step can read the image back off a <canvas> without a
+                    // tainted-canvas SecurityError -- but that means the
+                    // image source must actually serve permissive CORS
+                    // headers. When it doesn't, the browser fires `error`
+                    // instead of `load` and this dialog would otherwise be
+                    // left showing a silent, broken, empty crop tool.
+                    <div className="flex flex-col items-center gap-3 text-center text-white/80 max-w-sm">
+                        <p className="text-sm">This image couldn&apos;t be loaded for editing. Its source may not allow the cross-origin access cropping needs.</p>
+                        <button
+                            onClick={onCancel}
+                            className="px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-sm font-semibold transition-all"
+                        >
+                            Close
+                        </button>
+                    </div>
+                ) : (
+                    <ReactCrop
+                        crop={crop}
+                        onChange={(c) => setCrop(c)}
+                        onComplete={(c) => setCompletedCrop(c)}
+                        aspect={aspect}
+                        className="shadow-2xl rounded-lg overflow-hidden ring-1 ring-white/10"
+                    >
+                        <img
+                            ref={imgRef}
+                            src={imageUrl}
+                            crossOrigin="anonymous"
+                            alt="Crop preview"
+                            style={{ transform: `rotate(${rotation}deg)`, transition: 'transform 0.3s ease' }}
+                            className="max-h-[70vh] object-contain"
+                            onLoad={onImageLoad}
+                            onError={() => setLoadError(true)}
+                        />
+                    </ReactCrop>
+                )}
             </div>
 
             {/* Floating Toolbar */}
@@ -176,7 +210,8 @@ export default function ImageCropLayer({
                     </button>
                     <button
                         onClick={handleSave}
-                        className="flex items-center gap-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white px-8 py-2.5 rounded-2xl font-bold shadow-xl transition-all active:scale-95"
+                        disabled={loadError}
+                        className="flex items-center gap-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white px-8 py-2.5 rounded-2xl font-bold shadow-xl transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:from-purple-600 disabled:hover:to-indigo-600"
                     >
                         <Check className="w-4 h-4" />
                         Apply

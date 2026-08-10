@@ -54,7 +54,7 @@ export default function SidebarToolbox({
       <div
         className="flex flex-col items-center space-y-1 rounded p-1 cursor-pointer hover:bg-gray-100"
         onClick={() => router.push('/dashboard')}
-        title="Back to Dashboard"
+        aria-label="Back to Dashboard"
       >
         <div className="w-10 h-10 bg-gray-900 rounded-lg flex items-center justify-center shadow-sm hover:bg-gray-800 transition-colors">
           <ArrowLeft className="w-5 h-5 text-white" />

@@ -40,8 +40,9 @@ import { ColumnPostContextMenu } from '@/components/collabboard/menus/ColumnPost
 import { CommentPostContextMenu } from '@/components/collabboard/menus/CommentPostContextMenu';
 import { ImagePostContextMenu } from '@/components/collabboard/context-menus/ImagePostContextMenu';
 import { isStripVisible, formatRelativeTime, htmlToText } from '@/components/collabboard/canvas/engine/utils';
+import { getContainerEditTargetLabel } from '@/lib/infra/collabboard/containerEditTargetLabel';
 import {
-  Bell, X, Edit2, PenTool, Trash2, Palette, Strikethrough, ChevronDown, ChevronUp, RefreshCw, Pencil, ArrowLeftRight,
+  Bell, X, Edit2, PenTool, Trash2, Palette, Strikethrough, ChevronDown, ChevronUp, RefreshCw, Pencil, ArrowLeftRight, Plus,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -157,6 +158,7 @@ export interface FreeformPadletCardsProps {
   // Flags
   isDragging: boolean;
   draggingPadletId: string | null;
+  dragOverContainerId: string | null;
   isGraphConnectMode: boolean;
   isLineMode: boolean;
   isDrawingMode: boolean;
@@ -183,7 +185,7 @@ export interface FreeformPadletCardsProps {
 function FreeformPadletCards(props: FreeformPadletCardsProps) {
   const {
     rootPadlets, padlets, setPadlets, user, containerRef,
-    isDragging, draggingPadletId, isGraphConnectMode,
+    isDragging, draggingPadletId, dragOverContainerId, isGraphConnectMode,
     isLineMode, isDrawingMode,
     selectedPadletId, selectedPadletIds, setSelectedPadletId, setGraphConnectSelection, graphRefreshToken,
     closeAllToolbars, handlePadletMouseDown, getClickedSide,
@@ -379,6 +381,15 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
     commitPadletMeta,
   } = stableActions;
 
+  // "Full view" -- per-post toggle for a frameless, title-less display,
+  // right-click menu only (Image/Card-Clipart/Drawing/AI Component). Stored
+  // in metadata like every other display preference (cropToGrid, showCardView).
+  const toggleFullView = React.useCallback((id: string) => {
+    const padlet = padlets.find((p) => p.id === id);
+    if (!padlet) return;
+    updatePadletMetadata(id, { fullView: !(padlet.metadata as any)?.fullView });
+  }, [padlets, updatePadletMetadata]);
+
   const [expandedContainers, setExpandedContainers] = React.useState<Record<string, boolean>>({});
   const [expandableContainers, setExpandableContainers] = React.useState<Record<string, boolean>>({});
   const [expandedAIPosts, setExpandedAIPosts] = React.useState<Record<string, boolean>>({});
@@ -436,6 +447,15 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
     : null;
 
   const openFreeformImageEditModal = React.useCallback((padlet: Padlet) => {
+    // imageToolbarPadletId drives a self-contained `fixed inset-0` overlay
+    // (its own centered card preview + ImageActionsToolbar, further down in
+    // this file) that looks the padlet up directly from the `padlets` array
+    // -- it is NOT anchored to that padlet's own on-canvas DOM element, so
+    // it works the same whether the padlet is a top-level card or a
+    // container child. Do not special-case container children here again:
+    // an earlier attempt assumed this needed a real on-canvas anchor and
+    // routed container children to the legacy ImageEditor modal instead --
+    // wrong, and the wrong editor (no crop/color/caption/reaction controls).
     closeAllToolbars({ imageToolbar: true });
     setPadletToEdit(null);
     setIsImageEditorOpen(false);
@@ -471,7 +491,19 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
     } else if (padletType === 'drawing') {
       setIsDrawingEditorOpen(true);
     } else if (padletType === 'card') {
-      setIsCardEditorOpen(true);
+      // Reaching here means selectDocumentModalDestination above returned
+      // null -- a real (svgUrl-bearing) clipart card, not a Document. The
+      // modern clipart editor is ClipartCardDraftModal; setIsCardEditorOpen
+      // opens the legacy CardEditor (plain title/body/description text
+      // fields, no icon/color/caption/reaction controls at all) that
+      // predates it -- mirror onOpenToolbar's pencil-button routing here
+      // instead of the stale editor-selection this had drifted out of sync
+      // with.
+      if (selectCardModalRoute(canUseFreeformEditButton) === 'editor') {
+        setIsClipartDraftModalOpen(true);
+      } else {
+        setIsCardViewerOpen(true);
+      }
     } else if (padletType === 'container') {
       setIsContainerEditorOpen(true);
     } else if (padletType === 'ai-component') {
@@ -487,7 +519,8 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
     setIsTodoEditorOpen,
     setIsCommentEditorOpen,
     setIsDrawingEditorOpen,
-    setIsCardEditorOpen,
+    setIsClipartDraftModalOpen,
+    setIsCardViewerOpen,
     requestOpenDocument,
     canUseFreeformEditButton,
     setIsContainerEditorOpen,
@@ -708,7 +741,12 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
         cursor: canUseFreeformEditButton
           ? (isDragging && draggingPadletId === padlet.id ? 'grabbing' : 'grab')
           : 'default',
-        zIndex: draggingPadletId === padlet.id ? 10000 : ((padlet.metadata as any)?.zIndex || 1),
+        // Containers (and anything else "brought to front" on click/create)
+        // store zIndex as Date.now() -- an epoch-ms number in the trillions --
+        // so a fixed bump like 10000 can never actually win against one.
+        // MAX_SAFE_INTEGER guarantees whatever's being dragged renders above
+        // every other stored zIndex, no matter which convention set it.
+        zIndex: draggingPadletId === padlet.id ? Number.MAX_SAFE_INTEGER : ((padlet.metadata as any)?.zIndex || 1),
       }}
     >                {/* Comment Badge - positioned on outer container so not clipped */}
       {(() => {
@@ -816,6 +854,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
           padlet={padlet}
           onSelect={() => setSelectedPadletId(padlet.id)}
           disabled={!canUseFreeformEditButton}
+          onEdit={() => openFreeformPadletModal(padlet)}
           onDuplicate={() => duplicatePadlet(padlet.id)}
           onAddToLibrary={() => addPadletToLibrary(padlet.id)}
           onDelete={() => requestDeletePadlet(padlet.id)}
@@ -830,6 +869,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
           onReplaceImage={() => replaceImage(padlet.id)}
           onDownloadImage={() => downloadImage(padlet.id)}
           onToggleCropToGrid={() => toggleCropToGrid(padlet.id)}
+          onToggleFullView={() => toggleFullView(padlet.id)}
         >
           <div className="relative group/image-container">
             {/* Side Toolbar - Only shown when toolbar is explicitly opened via â‹® button */}
@@ -900,7 +940,10 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                     setCaptionPopupPadletId(isOpening ? padlet.id : null);
                     // Removing the automatic closure of text style popup
                     if (isOpening) {
-                      const initialValue = padlet.metadata?.caption || (padlet.metadata?.photographer ? `Photo by ${padlet.metadata.photographer}` : '');
+                      // ?? not || -- an explicitly cleared caption is "" (falsy
+                      // but not unset), and must stay blank rather than
+                      // resurrecting the photographer attribution default.
+                      const initialValue = padlet.metadata?.caption ?? (padlet.metadata?.photographer ? `Photo by ${padlet.metadata.photographer}` : '');
                       setEditingCaption(initialValue);
                     }
                     if (isOpening) {
@@ -919,7 +962,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                     // Ensure caption editor is also open if opening style menu
                     if (isOpening && captionPopupPadletId !== padlet.id) {
                       setCaptionPopupPadletId(padlet.id);
-                      const initialValue = padlet.metadata?.caption || (padlet.metadata?.photographer ? `Photo by ${padlet.metadata.photographer}` : '');
+                      const initialValue = padlet.metadata?.caption ?? (padlet.metadata?.photographer ? `Photo by ${padlet.metadata.photographer}` : '');
                       setEditingCaption(initialValue);
                     }
                     if (isOpening) {
@@ -1125,7 +1168,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                   >
                     <X className="h-3.5 w-3.5" />
                   </button>
-                  <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center justify-between mb-3 pb-2 border-b border-gray-100">
                     <h4 className="text-sm font-semibold text-gray-700">Comments</h4>
                     <button
                       onClick={() => {
@@ -1388,7 +1431,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
 
             <div
               key={padlet.id}
-              className={`overflow-hidden flex flex-col bg-white border border-gray-200 group relative transition-all ${isPadletSelected(padlet.id) ? 'ring-2 ring-blue-500' : ''
+              className={`overflow-hidden flex flex-col bg-white group relative transition-all ${(padlet.metadata as any)?.fullView ? '' : 'border border-gray-200'} ${isPadletSelected(padlet.id) ? 'ring-2 ring-blue-500' : ''
                 }`}
               style={{
                 width: '360px',
@@ -1416,7 +1459,9 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
             >
               {/* Top Strip — title centered, pencil right (same layout as
                   the Note/Todo/Table strip below: nothing shown until a
-                  real title is set, editable in place via double-click). */}
+                  real title is set, editable in place via double-click).
+                  Hidden entirely in Full view -- no frame, no title. */}
+              {!(padlet.metadata as any)?.fullView && (
               <div
                 className="w-full flex-shrink-0 grid items-center px-1.5"
                 style={{
@@ -1491,6 +1536,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                   </button>
                 )}
               </div>
+              )}
 
               {/* Lock indicator - bottom-right, visible on hover only when locked */}
               {(padlet.metadata as any)?.isLocked && (
@@ -1570,7 +1616,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
               <InlineCaption
                 value={(captionPopupPadletId === padlet.id || textStylePadletId === padlet.id) && !imageToolbarPadletId
                   ? editingCaption
-                  : (padlet.metadata?.caption || (padlet.metadata?.photographer ? `Photo by ${padlet.metadata.photographer}` : ""))}
+                  : (padlet.metadata?.caption ?? (padlet.metadata?.photographer ? `Photo by ${padlet.metadata.photographer}` : ""))}
                 isEditing={(captionPopupPadletId === padlet.id || textStylePadletId === padlet.id) && !imageToolbarPadletId}
                 color={padlet.metadata?.captionStyle?.color}
                 backgroundColor={padlet.metadata?.captionStyle?.backgroundColor}
@@ -1831,6 +1877,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
           padlet={padlet}
           onSelect={() => setSelectedPadletId(padlet.id)}
           disabled={!canUseFreeformEditButton}
+          onEdit={() => openFreeformPadletModal(padlet)}
           onDelete={() => requestDeletePadlet(padlet.id)}
           onBringToFront={() => movePadletLayer(padlet.id, 'bringToFront')}
           onBringForward={() => movePadletLayer(padlet.id, 'bringForward')}
@@ -1839,6 +1886,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
           onLock={() => lockPadlet(padlet.id)}
           onCreateSyncedCopy={() => createSyncedCopy(padlet.id)}
           onAddToLibrary={() => addPadletToLibrary(padlet.id)}
+          onToggleFullView={(padlet.metadata as any)?.svgUrl ? () => toggleFullView(padlet.id) : undefined}
         >
           <div
             key={padlet.id}
@@ -1878,6 +1926,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
           >
             <CardPreview
               padlet={padlet}
+              hideFrame={!!(padlet.metadata as any)?.fullView}
               onClick={() => {
                 // Handled by parent div
               }}
@@ -2155,7 +2204,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                   >
                     <X className="h-3.5 w-3.5" />
                   </button>
-                  <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center justify-between mb-3 pb-2 border-b border-gray-100">
                     <h4 className="text-sm font-semibold text-gray-700">Comments</h4>
                   </div>
                   {cardCommentList.length === 0 ? (
@@ -2390,6 +2439,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
           padlet={padlet}
           onSelect={() => setSelectedPadletId(padlet.id)}
           disabled={!canUseFreeformEditButton}
+          onEdit={() => openFreeformPadletModal(padlet)}
           onDuplicate={() => duplicatePadlet(padlet.id)}
           onAddToLibrary={() => addPadletToLibrary(padlet.id)}
           onDelete={() => requestDeletePadlet(padlet.id)}
@@ -2463,7 +2513,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                     <X className="h-3.5 w-3.5" />
                   </button>
                   <div className="relative">
-                    <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center justify-between mb-3 pb-2 border-b border-gray-100">
                       <h4 className="text-sm font-semibold text-gray-700">{padlet.metadata?.commentTitle || 'Comments'}</h4>
                       <button
                         onClick={() => setCollapsedBadgeColorOpen(!collapsedBadgeColorOpen)}
@@ -2964,7 +3014,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                       >
                         <X className="h-3.5 w-3.5" />
                       </button>
-                      <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center justify-between mb-3 pb-2 border-b border-gray-100">
                         <h4 className="text-sm font-semibold text-gray-700">Comments</h4>
                         <button
                           onClick={() => {
@@ -3201,9 +3251,15 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
       {/* Render Generic Post */}
       {(!['image', 'card', 'comment', 'Comment'].includes(padlet.type)) && (() => {
         const isNote = padlet.type === 'text';
+        // Full view: frameless display for Drawing/AI Component (no title
+        // bar, no border) -- toggled per-post from the right-click menu, see
+        // "Full view" in NotePostContextMenu. Not offered for types where
+        // the title bar carries real information (Note/Todo/Table/etc).
+        const isFullViewEligibleType = padlet.type === 'drawing' || padlet.type === 'ai-component';
+        const isFullView = isFullViewEligibleType && !!(padlet.metadata as any)?.fullView;
         const content = (
           <div
-            className={`group group/image-container overflow-hidden flex flex-col cursor-pointer ${isPadletSelected(padlet.id)
+            className={`group group/image-container relative overflow-hidden flex flex-col cursor-pointer ${isPadletSelected(padlet.id)
                 ? 'ring-2 ring-blue-500 ring-offset-2'
               : ''
               }`}
@@ -3215,15 +3271,26 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                   : padlet.type === 'ai-component'
                     ? `${Math.max(Number(padlet.width) || 500, 200)}px`
                     : '180px',
-              minHeight: padlet.type === 'container' ? '150px' 
+              minHeight: padlet.type === 'container' ? '150px'
                 : padlet.type === 'ai-component' ? `${Math.max(Number(padlet.height) || 400, 150)}px`
                 : '80px',
-              border: '1px solid #e5e7eb',
-              backgroundColor: padlet.metadata?.cardColor || '#ffffff',
+              border: isFullView ? 'none' : '1px solid #e5e7eb',
+              backgroundColor: isFullView ? 'transparent' : (padlet.metadata?.cardColor || '#ffffff'),
             }}
           >
+            {/* Drop-target indicator: shown over a container while another
+                post is being dragged over it, so the user sees they *can*
+                drop it in -- without implying they have to (they may just be
+                passing over on the way somewhere else). */}
+            {padlet.type === 'container' && dragOverContainerId === padlet.id && (
+              <div className="absolute inset-0 z-[500] flex items-center justify-center bg-white/60 pointer-events-none">
+                <Plus className="w-12 h-12 text-gray-400" strokeWidth={2.5} />
+              </div>
+            )}
+
             {/* Top strip — 3-column grid: [pencil | title centered | mirror] */}
             {(() => {
+              if (isFullView) return null;
               const freeformStripBg = isStripVisible(padlet.metadata?.topStrip)
                 ? (padlet.metadata?.topStrip as string)
                 : 'rgba(0,0,0,0.04)';
@@ -3360,14 +3427,17 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                       text here -- that's the modal editor's own input hint. */}
                   <div className="flex items-center justify-center px-1 min-w-0">
                     {isContainer ? (
-                      padlet.title && (
-                        <span
-                          className="text-xs font-semibold text-center break-words leading-snug py-1"
-                          style={{ color: freeformTitleColor }}
-                        >
-                          {padlet.title}
-                        </span>
-                      )
+                      padlet.title && (() => {
+                        const containerTitleStyle = resolvePadletTitleStyle(padlet, freeformTitleColor);
+                        return (
+                          <span
+                            className="text-xs font-semibold text-center break-words leading-snug py-1"
+                            style={containerTitleStyle}
+                          >
+                            {padlet.title}
+                          </span>
+                        );
+                      })()
                     ) : (padlet.type === 'text' || (padlet.type as string) === 'note' || padlet.type === 'todo' || padlet.type === 'table' || padlet.type === 'image' || padlet.type === 'link' || padlet.type === 'ai-component' || padlet.type === 'drawing') ? (() => {
                       // Resolve the title's FULL style (heading/size, bold,
                       // italic, underline, strikethrough, align, color) the
@@ -3516,6 +3586,17 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
             <div
               className={`p-3 ${(padlet.type === 'link' || (padlet.type === 'ai-component' && (expandedAIPosts[padlet.id] ?? false))) ? '' : 'overflow-hidden'}`}
               style={{ maxWidth: '100%' }}
+              // AI-generated content (and link thumbnails) can contain plain
+              // <img> tags, which browsers make natively drag-and-droppable.
+              // Pressing down on one and moving the mouse starts the
+              // browser's own native image drag instead of this canvas's
+              // mousedown/mousemove system, which then never sees the
+              // gesture continue -- the card silently refuses to move
+              // (working fine from the surrounding margin, which isn't an
+              // <img>). preventDefault on dragstart, caught here for every
+              // descendant, cancels that native drag so it falls through to
+              // the normal drag-to-move handling instead.
+              onDragStart={(e) => e.preventDefault()}
             >
               {/* Link Card Display */}
               {padlet.type === 'link' && padlet.metadata?.linkUrl && (
@@ -3855,18 +3936,8 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                 <PostCardContent
                   padlet={padlet}
                   onView={() => setViewDrawingPadlet(padlet)}
+                  isDragging={isDragging && draggingPadletId === padlet.id}
                 />
-              )}
-
-              {/* Caption -- same "room below the post" every Image/AI post
-                  gets, driven by the Drawing editor's own Caption button. */}
-              {padlet.type === 'drawing' && !!padlet.metadata?.caption && (
-                <p
-                  className="text-xs mt-1.5 pt-1.5 border-t border-gray-100 break-words"
-                  style={resolveCaptionStyle(padlet.metadata?.captionStyle)}
-                >
-                  {padlet.metadata.caption}
-                </p>
               )}
 
               {/* Image as Link Display */}
@@ -3922,17 +3993,6 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                   />
                 );
               })()}
-
-              {/* Caption -- same "room below the post" every Image post
-                  gets, driven by the AI editor's own Caption button. */}
-              {padlet.type === 'ai-component' && !!padlet.metadata?.caption && (
-                <p
-                  className="text-xs mt-1.5 pt-1.5 border-t border-gray-100 break-words"
-                  style={resolveCaptionStyle(padlet.metadata?.captionStyle)}
-                >
-                  {padlet.metadata.caption}
-                </p>
-              )}
 
               {/* Generic / Note Display (Default) */}
               {(!['link', 'todo', 'table', 'container', 'drawing', 'ai-component'].includes(padlet.type) && !padlet.file_url?.includes('https://')) && (
@@ -4062,6 +4122,33 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                   />
                 </div>
               )}
+
+              {/* Caption -- moved below the Reactions row (was above it) to
+                  match Clipart/Image's order: reactions first, caption last.
+                  No border-t here (unlike the divider above the Reactions
+                  row): Clipart/Image's own caption has no dividing line
+                  between it and the reactions above it, so this drops the
+                  line too instead of just relocating it. */}
+              {padlet.type === 'drawing' && !!padlet.metadata?.caption && (
+                <p
+                  className="text-xs mt-1.5 break-words"
+                  style={resolveCaptionStyle(padlet.metadata?.captionStyle)}
+                >
+                  {padlet.metadata.caption}
+                </p>
+              )}
+
+              {/* Caption -- moved below the Reactions row (was above it) to
+                  match Clipart/Image's order: reactions first, caption last.
+                  No border-t here -- see the Drawing caption above. */}
+              {padlet.type === 'ai-component' && !!padlet.metadata?.caption && (
+                <p
+                  className="text-xs mt-1.5 break-words"
+                  style={resolveCaptionStyle(padlet.metadata?.captionStyle)}
+                >
+                  {padlet.metadata.caption}
+                </p>
+              )}
             </div>
           </div>
         );
@@ -4073,6 +4160,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
               padlet={padlet}
               onSelect={() => setSelectedPadletId(padlet.id)}
               disabled={!canUseFreeformEditButton}
+              onEdit={() => openFreeformPadletModal(padlet)}
               onDuplicate={() => duplicatePadlet(padlet.id)}
               onAddToLibrary={() => addPadletToLibrary(padlet.id)}
               onDelete={() => requestDeletePadlet(padlet.id)}
@@ -4204,7 +4292,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                       >
                         <X className="h-3.5 w-3.5" />
                       </button>
-                      <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center justify-between mb-3 pb-2 border-b border-gray-100">
                         <h4 className="text-sm font-semibold text-gray-700">Comments</h4>
                         <button
                           onClick={() => {
@@ -4467,6 +4555,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
               padlet={padlet}
               onSelect={() => setSelectedPadletId(padlet.id)}
               disabled={!canUseFreeformEditButton}
+              onEdit={() => openFreeformPadletModal(padlet)}
               onDuplicate={() => duplicatePadlet(padlet.id)}
               onAddToLibrary={() => addPadletToLibrary(padlet.id)}
               onDelete={() => requestDeletePadlet(padlet.id)}
@@ -4596,7 +4685,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                       >
                         <X className="h-3.5 w-3.5" />
                       </button>
-                      <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center justify-between mb-3 pb-2 border-b border-gray-100">
                         <h4 className="text-sm font-semibold text-gray-700">Comments</h4>
                         <button
                           onClick={async () => {
@@ -4850,6 +4939,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
               padlet={padlet}
               onSelect={() => setSelectedPadletId(padlet.id)}
               disabled={!canUseFreeformEditButton}
+              onEdit={() => openFreeformPadletModal(padlet)}
               onDuplicate={() => duplicatePadlet(padlet.id)}
               onAddToLibrary={() => addPadletToLibrary(padlet.id)}
               onDelete={() => requestDeletePadlet(padlet.id)}
@@ -4980,7 +5070,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                       >
                         <X className="h-3.5 w-3.5" />
                       </button>
-                      <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center justify-between mb-3 pb-2 border-b border-gray-100">
                         <h4 className="text-sm font-semibold text-gray-700">Comments</h4>
                         <button
                           onClick={() => {
@@ -5234,6 +5324,20 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
               padlet={padlet}
               onSelect={() => setSelectedPadletId(padlet.id)}
               disabled={!canUseFreeformEditButton}
+              // "Edit post" for a container becomes a submenu of its
+              // children (same as Wall/Column/Grid, via openTargets) rather
+              // than the plain single-item form (onEdit is the fallback
+              // ColumnPostContextMenu uses when openTargets is empty --
+              // e.g. an empty container -- so ContainerEditor stays reachable
+              // for that case).
+              openTargets={canUseFreeformEditButton
+                ? ((padlet.metadata as any)?.childPadletIds || [])
+                    .map((id: string) => padlets.find((p) => p.id === id))
+                    .filter((child: Padlet | undefined): child is Padlet => !!child)
+                : undefined}
+              onOpenTarget={canUseFreeformEditButton ? (child: Padlet) => openFreeformPadletModal(child) : undefined}
+              getOpenTargetLabel={getContainerEditTargetLabel}
+              onEdit={canUseFreeformEditButton ? () => openFreeformPadletModal(padlet) : undefined}
               onDuplicate={canUseFreeformEditButton ? () => duplicatePadlet(padlet.id) : undefined}
               onDelete={canUseFreeformEditButton ? () => requestDeletePadlet(padlet.id) : undefined}
               onCut={canUseFreeformEditButton ? () => cutPadlet(padlet.id) : undefined}
@@ -5255,6 +5359,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
             padlet={padlet}
             onSelect={() => setSelectedPadletId(padlet.id)}
             disabled={!canUseFreeformEditButton}
+            onEdit={() => openFreeformPadletModal(padlet)}
             onDuplicate={() => duplicatePadlet(padlet.id)}
             onAddToLibrary={() => addPadletToLibrary(padlet.id)}
             onDelete={() => requestDeletePadlet(padlet.id)}
@@ -5265,6 +5370,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
             onSendToBack={() => movePadletLayer(padlet.id, 'sendToBack')}
             onCreateSyncedCopy={() => createSyncedCopy(padlet.id)}
             onGroupIntoColumn={() => groupIntoColumn(padlet.id)}
+            onToggleFullView={padlet.type === 'drawing' || padlet.type === 'ai-component' ? () => toggleFullView(padlet.id) : undefined}
           >
             <div className="relative">
               {content}
@@ -5385,7 +5491,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                     >
                       <X className="h-3.5 w-3.5" />
                     </button>
-                    <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center justify-between mb-3 pb-2 border-b border-gray-100">
                       <h4 className="text-sm font-semibold text-gray-700">Comments</h4>
                       <button
                         onClick={() => {
@@ -5734,7 +5840,10 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                   const isOpening = captionPopupPadletId !== activeImageToolbarPadlet.id;
                   setCaptionPopupPadletId(isOpening ? activeImageToolbarPadlet.id : null);
                   if (isOpening) {
-                    const initialValue = activeImageToolbarPadlet.metadata?.caption || (
+                    // ?? not || -- an explicitly cleared caption is "" (falsy
+                    // but not unset), and must stay blank rather than
+                    // resurrecting the photographer attribution default.
+                    const initialValue = activeImageToolbarPadlet.metadata?.caption ?? (
                       activeImageToolbarPadlet.metadata?.photographer
                         ? `Photo by ${activeImageToolbarPadlet.metadata.photographer}`
                         : ''
@@ -5754,7 +5863,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                   setTextStylePadletId(isOpening ? activeImageToolbarPadlet.id : null);
                   if (isOpening && captionPopupPadletId !== activeImageToolbarPadlet.id) {
                     setCaptionPopupPadletId(activeImageToolbarPadlet.id);
-                    const initialValue = activeImageToolbarPadlet.metadata?.caption || (
+                    const initialValue = activeImageToolbarPadlet.metadata?.caption ?? (
                       activeImageToolbarPadlet.metadata?.photographer
                         ? `Photo by ${activeImageToolbarPadlet.metadata.photographer}`
                         : ''
@@ -5932,7 +6041,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                   <InlineCaption
                     value={(captionPopupPadletId === activeImageToolbarPadlet.id || (textStylePadletId === activeImageToolbarPadlet.id && activeImageStyleTarget === 'caption'))
                       ? editingCaption
-                      : (activeImageToolbarPadlet.metadata?.caption || (activeImageToolbarPadlet.metadata?.photographer ? `Photo by ${activeImageToolbarPadlet.metadata.photographer}` : ''))}
+                      : (activeImageToolbarPadlet.metadata?.caption ?? (activeImageToolbarPadlet.metadata?.photographer ? `Photo by ${activeImageToolbarPadlet.metadata.photographer}` : ''))}
                     isEditing={captionPopupPadletId === activeImageToolbarPadlet.id || (textStylePadletId === activeImageToolbarPadlet.id && activeImageStyleTarget === 'caption')}
                     color={activeImageToolbarPadlet.metadata?.captionStyle?.color}
                     backgroundColor={activeImageToolbarPadlet.metadata?.captionStyle?.backgroundColor}
@@ -5948,6 +6057,32 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                       lineHeight: activeImageToolbarPadlet.metadata?.captionStyle?.lineHeight,
                     }}
                     onChange={(next) => setEditingCaption(next)}
+                    onTextSelect={() => {
+                      // Mirrors the Text style toolbar button's own opening
+                      // logic (onTextStyle above) -- highlighting caption
+                      // text should reach the same state the button reaches,
+                      // not a partial version of it.
+                      const isOpening = textStylePadletId !== activeImageToolbarPadlet.id || activeImageStyleTarget !== 'caption';
+                      setTextStylePadletId(activeImageToolbarPadlet.id);
+                      setActiveImageStyleTarget('caption');
+                      if (isOpening && captionPopupPadletId !== activeImageToolbarPadlet.id) {
+                        setCaptionPopupPadletId(activeImageToolbarPadlet.id);
+                        const initialValue = activeImageToolbarPadlet.metadata?.caption ?? (
+                          activeImageToolbarPadlet.metadata?.photographer
+                            ? `Photo by ${activeImageToolbarPadlet.metadata.photographer}`
+                            : ''
+                        );
+                        setEditingCaption(initialValue);
+                      }
+                      if (isOpening) {
+                        setIsImageColorPickerOpen(false);
+                        setIsImageEmojiOpen(false);
+                        if (cardCommentPopupPadletId === activeImageToolbarPadlet.id) {
+                          setCardCommentPopupPadletId(null);
+                          setCommentColorPopupId(null);
+                        }
+                      }
+                    }}
                     onCommit={async () => {
                       try {
                         await updatePostFieldsPreservingFailureChannels(activeImageToolbarPadlet.id, {
@@ -6090,7 +6225,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                   >
                     <X className="h-3.5 w-3.5" />
                   </button>
-                  <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center justify-between mb-3 pb-2 border-b border-gray-100">
                     <h4 className="text-sm font-semibold text-gray-700">Comments</h4>
                     <button
                       onClick={() => {
@@ -6561,7 +6696,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                   >
                     <X className="h-3.5 w-3.5" />
                   </button>
-                  <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center justify-between mb-3 pb-2 border-b border-gray-100">
                     <h4 className="text-sm font-semibold text-gray-700">Comments</h4>
                     <button
                       onClick={() => {

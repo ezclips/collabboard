@@ -151,6 +151,8 @@ function toolbarProps(element: ReactNode) {
     onComment: () => void;
     onCaption?: () => void;
     isCaptionActive?: boolean;
+    onTextStyle?: () => void;
+    isTextStyleActive?: boolean;
   };
 }
 
@@ -413,6 +415,62 @@ describe('ClipartCardDraftModal reaction and comment metadata', () => {
     expect(toolbarLabels(withCaption)).toEqual(['Color', 'Icon', 'Caption', 'Reaction', 'Comment']);
   });
 
+  it('adds Text style to CardActionsToolbar only when supplied, as the first tool', () => {
+    const omittedMarkup = renderToolbar({ onTextStyle: undefined, isTextStyleActive: undefined });
+    expect(omittedMarkup).not.toContain('title="Text style"');
+
+    const withTextStyle = renderToolbar({ onTextStyle: vi.fn(), onCaption: vi.fn() });
+    expect(withTextStyle).toContain('title="Text style"');
+    // Note's own Text style button uses the same lucide `Type` icon and sits
+    // first in its own toolbar -- matching design/position here too.
+    expect(withTextStyle).toContain('lucide-type');
+    expect(toolbarLabels(withTextStyle)).toEqual(['Text style', 'Color', 'Icon', 'Caption', 'Reaction', 'Comment']);
+  });
+
+  it('invokes Text style from the toolbar and reflects active state, independent of Caption', () => {
+    const onTextStyle = vi.fn();
+    const inactive = renderToolbar({ onTextStyle, isTextStyleActive: false });
+    const active = renderToolbar({ onTextStyle, isTextStyleActive: true });
+    expect(inactive).toContain('title="Text style"');
+    expect(inactive).not.toMatch(/bg-blue-100 text-blue-600" title="Text style"/);
+    expect(active).toMatch(/bg-blue-100 text-blue-600" title="Text style"/);
+
+    const { element } = renderModal();
+    const toolbar = findByComponentName(element, 'CardActionsToolbar');
+    expect(toolbar.props.isTextStyleActive).toBe(false);
+    expect(toolbar.props.isCaptionActive).toBe(false);
+    (toolbar.props.onTextStyle as () => void)();
+    expect(state.calls).toContainEqual({ index: 5, value: 'title' });
+  });
+
+  it('highlighting text in the post-name input auto-opens the Text style panel targeting the title', () => {
+    const { element } = renderModal();
+    const titleInput = titleEditorInput(element);
+    const onSelect = titleInput.props.onSelect as (event: { currentTarget: { selectionStart: number; selectionEnd: number } }) => void;
+
+    onSelect({ currentTarget: { selectionStart: 0, selectionEnd: 4 } });
+    expect(state.calls).toContainEqual({ index: 5, value: 'title' });
+  });
+
+  it('placing a collapsed cursor (no highlight) in the post-name input does not open any panel', () => {
+    const { element } = renderModal();
+    const titleInput = titleEditorInput(element);
+    const onSelect = titleInput.props.onSelect as (event: { currentTarget: { selectionStart: number; selectionEnd: number } }) => void;
+
+    onSelect({ currentTarget: { selectionStart: 3, selectionEnd: 3 } });
+    expect(state.calls).toHaveLength(0);
+  });
+
+  it('highlighting text in the caption auto-opens the Text style panel targeting the caption', () => {
+    const { element } = renderModal({ metadata: { caption: 'A real caption' } });
+    const cardPreview = findByComponentName(element, 'CardPreview');
+    const captionEditor = cardPreview.props.captionEditor as ReactNode;
+    const onTextSelect = captionEditor.props.onTextSelect as () => void;
+
+    onTextSelect();
+    expect(state.calls).toContainEqual({ index: 5, value: 'caption' });
+  });
+
   it('invokes Caption from the toolbar and reflects active state', () => {
     const onCaption = vi.fn();
     const inactive = renderToolbar({ onCaption, isCaptionActive: false });
@@ -424,11 +482,11 @@ describe('ClipartCardDraftModal reaction and comment metadata', () => {
     const { element } = renderModal();
     const toolbar = findByComponentName(element, 'CardActionsToolbar');
     (toolbar.props.onCaption as () => void)();
-    expect(state.calls).toContainEqual({ index: 5, value: true });
+    expect(state.calls).toContainEqual({ index: 5, value: 'caption' });
   });
 
   it('keeps toolbar panel-switch clicks from stealing focus away from the post-name input', () => {
-    const { element: captionOpen } = renderModal({ stateValues: [false, false, false, false, false, true] });
+    const { element: captionOpen } = renderModal({ stateValues: [false, false, false, false, false, 'caption'] });
     const toolbarWrapper = testIdNode(captionOpen, 'clipart-toolbar-wrapper');
     const preventDefault = vi.fn();
     expect(typeof toolbarWrapper!.props.onMouseDownCapture).toBe('function');
@@ -439,7 +497,7 @@ describe('ClipartCardDraftModal reaction and comment metadata', () => {
     });
     expect(preventDefault).toHaveBeenCalledTimes(1);
 
-    const { element: captionClosed } = renderModal({ stateValues: [false, false, false, false, false, false] });
+    const { element: captionClosed } = renderModal({ stateValues: [false, false, false, false, false, null] });
     const closedToolbarWrapper = testIdNode(captionClosed, 'clipart-toolbar-wrapper');
     const closedPreventDefault = vi.fn();
     (closedToolbarWrapper!.props.onMouseDownCapture as (event: { target: HTMLElement; preventDefault: () => void }) => void)({
@@ -453,7 +511,7 @@ describe('ClipartCardDraftModal reaction and comment metadata', () => {
     const onChange = vi.fn();
     const { element } = renderModal({
       metadata: { captionStyle: { color: '#dc2626', backgroundColor: '#fef3c7', heading: 'quote' } },
-      stateValues: [false, false, false, false, false, true],
+      stateValues: [false, false, false, false, false, 'caption'],
       onChange,
     });
     const panel = testIdNode(element, 'clipart-caption-style-panel');
@@ -468,6 +526,36 @@ describe('ClipartCardDraftModal reaction and comment metadata', () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
+  it('opens Text style TextStylePopup targeting titleStyle, independent of captionStyle', () => {
+    const onChange = vi.fn();
+    const { element } = renderModal({
+      metadata: {
+        titleStyle: { color: '#2563eb', backgroundColor: '#dbeafe', heading: 'h1' },
+        captionStyle: { color: '#dc2626', backgroundColor: '#fef3c7', heading: 'quote' },
+      },
+      stateValues: [false, false, false, false, false, 'title'],
+      onChange,
+    });
+    const popup = textStylePopupProps(element);
+
+    expect(popup.isOpen).toBe(true);
+    expect(popup.currentHeading).toBe('h1');
+    expect(popup.currentColor).toBe('#2563eb');
+    expect(popup.currentHighlight).toBe('#dbeafe');
+    expect(onChange).not.toHaveBeenCalled();
+
+    popup.onSelectColor('#16a34a');
+    expect(onChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          titleStyle: expect.objectContaining({ color: '#16a34a', heading: 'h1' }),
+          // The caption's own style must survive untouched by a title edit.
+          captionStyle: { color: '#dc2626', backgroundColor: '#fef3c7', heading: 'quote' },
+        }),
+      }),
+    );
+  });
+
   it('writes caption presets by merging over the existing base style', () => {
     const onChange = vi.fn();
     const { element } = renderModal({
@@ -480,7 +568,7 @@ describe('ClipartCardDraftModal reaction and comment metadata', () => {
         },
         other: 'preserved',
       },
-      stateValues: [false, false, false, false, false, true],
+      stateValues: [false, false, false, false, false, 'caption'],
       onChange,
     });
     const popup = textStylePopupProps(element);
@@ -529,7 +617,7 @@ describe('ClipartCardDraftModal reaction and comment metadata', () => {
 
     for (const heading of Object.keys(CAPTION_STYLE_PRESETS) as Array<keyof typeof CAPTION_STYLE_PRESETS>) {
       const onChange = vi.fn();
-      const { element } = renderModal({ stateValues: [false, false, false, false, false, true], onChange });
+      const { element } = renderModal({ stateValues: [false, false, false, false, false, 'caption'], onChange });
       textStylePopupProps(element).onSelectHeading(heading);
       expect(onChange.mock.calls[0][0].metadata.captionStyle).toEqual(CAPTION_STYLE_PRESETS[heading]);
     }
@@ -537,7 +625,7 @@ describe('ClipartCardDraftModal reaction and comment metadata', () => {
     const onChange = vi.fn();
     const { element } = renderModal({
       metadata: { captionStyle: { color: '#111827' } },
-      stateValues: [false, false, false, false, false, true],
+      stateValues: [false, false, false, false, false, 'caption'],
       onChange,
     });
     textStylePopupProps(element).onSelectHeading('callout');
@@ -551,7 +639,7 @@ describe('ClipartCardDraftModal reaction and comment metadata', () => {
     const onChange = vi.fn();
     const { element } = renderModal({
       metadata: { captionStyle: { fontSize: '18px' } },
-      stateValues: [false, false, false, false, false, true],
+      stateValues: [false, false, false, false, false, 'caption'],
       onChange,
     });
     const popup = textStylePopupProps(element);
@@ -579,10 +667,10 @@ describe('ClipartCardDraftModal reaction and comment metadata', () => {
     );
   });
 
-  it('passes saved caption style to the post-name input and CardPreview', () => {
+  it('passes saved title style to the post-name input and CardPreview', () => {
     const { element, markup } = renderModal({
       metadata: {
-        captionStyle: {
+        titleStyle: {
           color: '#111827cc',
           backgroundColor: '#fef3c7',
           fontSize: '18px',
@@ -605,9 +693,37 @@ describe('ClipartCardDraftModal reaction and comment metadata', () => {
       lineHeight: '1.45',
     });
     // The titleEditor override replaces CardPreview's own static title
-    // heading, so this caption style shows exactly once, on the editable
+    // heading, so this title style shows exactly once, on the editable
     // input -- not duplicated in a second, non-interactive title element.
     expect(markup).toContain('color:#111827cc;font-size:18px;font-weight:700;font-style:italic;font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;line-height:1.45;background-color:#fef3c7');
+  });
+
+  it('a saved captionStyle no longer leaks into the post-name input (regression: title/caption color coupling)', () => {
+    const { element } = renderModal({
+      metadata: {
+        captionStyle: { color: '#16a34a', fontWeight: '700' },
+      },
+    });
+    const titleInput = titleEditorInput(element);
+
+    expect(titleInput.props.style).not.toMatchObject({ color: '#16a34a' });
+  });
+
+  it('passes saved caption style to the InlineCaption, independent of the post-name input', () => {
+    const { element } = renderModal({
+      metadata: {
+        caption: 'A real caption',
+        titleStyle: { color: '#dc2626' },
+        captionStyle: { color: '#16a34a', fontStyle: 'italic' },
+      },
+    });
+    const cardPreview = findByComponentName(element, 'CardPreview');
+    const captionEditor = cardPreview.props.captionEditor as ReactNode;
+    const titleInput = titleEditorInput(element);
+
+    expect(titleInput.props.style).toMatchObject({ color: '#dc2626' });
+    expect(captionEditor.props.color).toBe('#16a34a');
+    expect(captionEditor.props.textStyle).toMatchObject({ color: '#16a34a', fontStyle: 'italic' });
   });
 
   it('renders the post-name input inside the compact card and edits previewPadlet.title only', () => {
@@ -721,7 +837,7 @@ describe('ClipartCardDraftModal reaction and comment metadata', () => {
   });
 
   it('centres the whole composition row with m-auto and no governed pt-6 offsets', () => {
-    const { element } = renderModal({ stateValues: [true, false, true, true, false, true] });
+    const { element } = renderModal({ stateValues: [true, false, true, true, false, 'caption'] });
     const source = sourceFor('components/collabboard/editors/ClipartCardDraftModal.tsx');
     const row = compositionRowNode(element);
     const toolbarWrapper = testIdNode(element, 'clipart-toolbar-wrapper');
@@ -1006,7 +1122,7 @@ describe('ClipartCardDraftModal reaction and comment metadata', () => {
     const toolbar = toolbarProps(element);
 
     toolbar.onCaption?.();
-    expect(state.calls).toContainEqual({ index: 5, value: true });
+    expect(state.calls).toContainEqual({ index: 5, value: 'caption' });
     expect(state.calls).toContainEqual({ index: 0, value: false });
     expect(state.calls).toContainEqual({ index: 2, value: false });
     expect(state.calls).toContainEqual({ index: 3, value: false });
@@ -1018,7 +1134,7 @@ describe('ClipartCardDraftModal reaction and comment metadata', () => {
     expect(state.calls).toContainEqual({ index: 3, value: false });
     expect(state.calls).toContainEqual({ index: 0, value: false });
     expect(state.calls).toContainEqual({ index: 4, value: false });
-    expect(state.calls).toContainEqual({ index: 5, value: false });
+    expect(state.calls).toContainEqual({ index: 5, value: null });
 
     resetState();
     toolbar.onComment();
@@ -1026,7 +1142,7 @@ describe('ClipartCardDraftModal reaction and comment metadata', () => {
     expect(state.calls).toContainEqual({ index: 2, value: false });
     expect(state.calls).toContainEqual({ index: 0, value: false });
     expect(state.calls).toContainEqual({ index: 4, value: false });
-    expect(state.calls).toContainEqual({ index: 5, value: false });
+    expect(state.calls).toContainEqual({ index: 5, value: null });
 
     resetState();
     toolbar.onColorClick({ stopPropagation: vi.fn() }, 'background');
@@ -1034,39 +1150,39 @@ describe('ClipartCardDraftModal reaction and comment metadata', () => {
     expect(state.calls).toContainEqual({ index: 2, value: false });
     expect(state.calls).toContainEqual({ index: 3, value: false });
     expect(state.calls).toContainEqual({ index: 4, value: false });
-    expect(state.calls).toContainEqual({ index: 5, value: false });
+    expect(state.calls).toContainEqual({ index: 5, value: null });
   });
 
   it('switches directly from open sibling panels to the requested toolbar panel in one handler call', () => {
-    const captionOpen = renderModal({ stateValues: [false, false, false, false, false, true] });
+    const captionOpen = renderModal({ stateValues: [false, false, false, false, false, 'caption'] });
     toolbarProps(captionOpen.element).onAddReaction({ stopPropagation: vi.fn() });
     expect(state.calls).toContainEqual({ index: 2, value: true });
-    expect(state.calls).toContainEqual({ index: 5, value: false });
+    expect(state.calls).toContainEqual({ index: 5, value: null });
 
     resetState();
     toolbarProps(captionOpen.element).onComment();
     expect(state.calls).toContainEqual({ index: 3, value: true });
-    expect(state.calls).toContainEqual({ index: 5, value: false });
+    expect(state.calls).toContainEqual({ index: 5, value: null });
 
     resetState();
     toolbarProps(captionOpen.element).onColorClick({ stopPropagation: vi.fn() }, 'background');
     expect(state.calls).toContainEqual({ index: 0, value: true });
-    expect(state.calls).toContainEqual({ index: 5, value: false });
+    expect(state.calls).toContainEqual({ index: 5, value: null });
 
-    const reactionOpen = renderModal({ stateValues: [false, false, true, false, false, false] });
+    const reactionOpen = renderModal({ stateValues: [false, false, true, false, false, null] });
     toolbarProps(reactionOpen.element).onCaption?.();
-    expect(state.calls).toContainEqual({ index: 5, value: true });
+    expect(state.calls).toContainEqual({ index: 5, value: 'caption' });
     expect(state.calls).toContainEqual({ index: 2, value: false });
 
     resetState();
-    const commentsOpen = renderModal({ stateValues: [false, false, false, true, false, false] });
+    const commentsOpen = renderModal({ stateValues: [false, false, false, true, false, null] });
     toolbarProps(commentsOpen.element).onAddReaction({ stopPropagation: vi.fn() });
     expect(state.calls).toContainEqual({ index: 2, value: true });
     expect(state.calls).toContainEqual({ index: 3, value: false });
 
     resetState();
     toolbarProps(commentsOpen.element).onCaption?.();
-    expect(state.calls).toContainEqual({ index: 5, value: true });
+    expect(state.calls).toContainEqual({ index: 5, value: 'caption' });
     expect(state.calls).toContainEqual({ index: 3, value: false });
 
     resetState();
@@ -1077,7 +1193,7 @@ describe('ClipartCardDraftModal reaction and comment metadata', () => {
 
     resetState();
     toolbarProps(colorOpen.element).onCaption?.();
-    expect(state.calls).toContainEqual({ index: 5, value: true });
+    expect(state.calls).toContainEqual({ index: 5, value: 'caption' });
     expect(state.calls).toContainEqual({ index: 0, value: false });
   });
 });

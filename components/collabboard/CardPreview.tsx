@@ -20,6 +20,10 @@ interface CardPreviewProps {
     onAddReaction?: () => void;
     onReactionClick?: (emoji: string) => void;
     hideTitle?: boolean;
+    // "Full view": drops the entire top strip (title, edit buttons) and the
+    // outer border -- not just the title text hideTitle alone would leave
+    // the strip's background/buttons in place. Right-click "Full View".
+    hideFrame?: boolean;
     // Overrides the strip's title slot with a live editable control --
     // ClipartCardDraftModal uses this to put a real "Post name" input
     // directly in the gray strip, the same place every other post type's
@@ -44,6 +48,7 @@ export default function CardPreview({
     onAddReaction,
     onReactionClick,
     hideTitle = false,
+    hideFrame = false,
     titleEditor,
     captionEditor
 }: CardPreviewProps) {
@@ -52,7 +57,14 @@ export default function CardPreview({
     const cardBgColor = metadata?.backgroundColor || '#ffffff'; // Outer card background (Tab 2: "Icon BG")
     const svgUrl = metadata?.svgUrl;
     const topStripColor = metadata?.topStripColor || '#4f46e5'; // Top strip (Tab 3: "Icon Strip")
-    const titleStyle = resolveCaptionStyle(metadata?.captionStyle, metadata?.textColor);
+    const titleStyle = resolveCaptionStyle(metadata?.titleStyle, metadata?.textColor);
+    // The Clipart branch's caption (the text below reactions, metadata.caption)
+    // has always been a field distinct from the title -- but until this fix it
+    // was rendered with the SAME titleStyle object, so changing the title's
+    // color/weight via the editor's Text style panel silently changed the
+    // caption's too. metadata.captionStyle is now the caption's own style,
+    // independent of metadata.titleStyle (see ClipartCardDraftModal.tsx).
+    const captionStyle = resolveCaptionStyle(metadata?.captionStyle, metadata?.textColor);
     const showTopStrip = !!topStripColor && topStripColor !== 'transparent';
     const isClipartCard = !!svgUrl;
     const stripBg = showTopStrip ? topStripColor : 'rgba(0,0,0,0.04)';
@@ -71,9 +83,16 @@ export default function CardPreview({
         return (
             <div
                 onClick={onClick}
-                className={`group relative h-full border overflow-hidden transition-colors ${isSelected ? 'border-blue-500 ring-2 ring-blue-100 shadow-md' : 'border-gray-200'}`}
-                style={{ backgroundColor: cardBgColor }}
+                className={`group relative h-full flex flex-col ${hideFrame ? '' : 'border'} overflow-hidden transition-colors ${hideFrame ? '' : (isSelected ? 'border-blue-500 ring-2 ring-blue-100 shadow-md' : 'border-gray-200')}`}
+                style={{ backgroundColor: hideFrame ? 'transparent' : cardBgColor }}
+                // The icon <img> below inherits pointer-events-none from its
+                // wrapper, but preventDefault on dragstart here too so a
+                // press-and-drag anywhere on this card can never be hijacked
+                // by the browser's native image drag (see the same guard in
+                // FreeformPadletCards' shared content wrapper).
+                onDragStart={(e) => e.preventDefault()}
             >
+                {!hideFrame && (
                 <div
                     className="w-full flex-shrink-0 grid"
                     style={{ gridTemplateColumns: 'auto 1fr auto', minHeight: '22px', backgroundColor: stripBg }}
@@ -119,8 +138,16 @@ export default function CardPreview({
                         )}
                     </div>
                 </div>
+                )}
 
-                <div className="pointer-events-none select-none flex h-[calc(100%-22px)] flex-col items-center justify-center gap-2 px-4 py-3">
+                {/* flex-1 min-h-0 (not the old fixed h-[calc(100%-22px)]), so
+                    this icon block only claims whatever height is left over
+                    after the title strip, reactions, and caption -- it used
+                    to claim the ENTIRE remaining card height by itself,
+                    pushing reactions/caption below the card's visible,
+                    overflow-hidden bounds regardless of whether they had
+                    any content to show. */}
+                <div className="pointer-events-none select-none flex flex-1 min-h-0 flex-col items-center justify-center gap-2 px-4 py-3">
                     <div
                         className="flex h-32 w-32 items-center justify-center rounded-2xl"
                         style={{ backgroundColor: iconBgColor }}
@@ -130,7 +157,7 @@ export default function CardPreview({
                 </div>
 
                 {reactions.length > 0 && (
-                    <div className="flex flex-wrap items-center gap-1 px-4 pt-1">
+                    <div className="flex flex-shrink-0 flex-wrap items-center gap-1 px-4 pt-1">
                         <ReactionDisplay
                             reactions={reactions}
                             onAddClick={onAddReaction}
@@ -140,9 +167,9 @@ export default function CardPreview({
                 )}
 
                 {(captionEditor || padlet.metadata?.caption) && (
-                    <div className="pb-2 pt-1">
+                    <div className="flex-shrink-0 pb-2 pt-1">
                         {captionEditor ? captionEditor : (
-                            <p className="px-4 text-xs text-gray-600 break-words" style={titleStyle}>
+                            <p className="px-4 text-xs text-gray-600 break-words" style={captionStyle}>
                                 {padlet.metadata?.caption}
                             </p>
                         )}

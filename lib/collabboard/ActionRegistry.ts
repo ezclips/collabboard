@@ -33,6 +33,7 @@ export type ActionId =
     | 'post.addImage'
     | 'post.copyLinkAddress'
     | 'post.rename'
+    | 'post.toggleFullView'
     | 'image.replace'
     | 'image.download'
     | 'image.cropToGrid'

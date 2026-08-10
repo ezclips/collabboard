@@ -276,7 +276,8 @@ export default function CanvasModals({
               setIsContainerEditorOpen(false);
               setPadletToEdit(null);
             }}
-            initialTitle={liveContainer?.title || 'New Container'}
+            initialTitle={liveContainer?.title || ''}
+            initialTitleStyle={liveContainer?.metadata?.titleStyle as Record<string, unknown> | undefined}
             initialBackgroundColor={liveContainer?.metadata?.cardColor || '#ffffff'}
             initialTopStrip={liveContainer?.metadata?.topStrip || 'transparent'}
             initialDetachedComments={liveContainer?.metadata?.detachedComments || EMPTY_COMMENTS}

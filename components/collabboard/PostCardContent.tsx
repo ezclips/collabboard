@@ -43,6 +43,10 @@ interface PostCardContentProps {
     // (e.g. CardShell's strip, styled via resolvePadletTitleStyle) so the
     // todo/table branches below don't render a second, unstyled title.
     hideOwnTitle?: boolean;
+    // The freeform canvas's own mouse-drag state -- the Drawing preview's
+    // onClick must not fire (opening the viewer) when the click is really
+    // the tail end of a drag the user just performed on this card.
+    isDragging?: boolean;
 }
 
 // Decode HTML entities that may have been escaped
@@ -247,6 +251,7 @@ export default function PostCardContent({
     onUpdateChildComments,
     onOpenDocument,
     hideOwnTitle = false,
+    isDragging = false,
 }: PostCardContentProps) {
 
     const type = normalizeType(padlet.type);
@@ -578,6 +583,13 @@ export default function PostCardContent({
                             const filtered = existingComments.filter((c: any) => c.id !== commentId);
                             onUpdateChildComments(padlet.id, filtered);
                         }}
+                        onToggleStrikethrough={(commentId) => {
+                            const existingComments = (padlet.metadata as any)?.comments || [];
+                            const updated = existingComments.map((c: any) =>
+                                c.id === commentId ? { ...c, isStrikethrough: !c.isStrikethrough } : c
+                            );
+                            onUpdateChildComments(padlet.id, updated);
+                        }}
                         showComposer={true}
                     />
                 </div>
@@ -631,11 +643,18 @@ export default function PostCardContent({
 
     // --- IMAGE TYPE --- (skip card/clipart posts – handled below)
     const isCardClipart = type === "card" && !!padlet.metadata?.svgUrl;
+    // metadata.imageUrl must win over file_url in every context: file_url is
+    // only ever set once, as a snapshot copy of metadata.imageUrl at post
+    // creation (see CanvasClient's 'image' create payload) -- edits like
+    // cropping only ever update metadata.imageUrl afterward, never file_url.
+    // Reading file_url first (as this used to, outside canvasContext ===
+    // "drawing") meant a post rendered here -- e.g. a container child, via
+    // RowColumnContainerCard -- silently reverted to the pre-crop original
+    // the moment it was dropped into a container, even though the crop was
+    // saved correctly and displayed fine on the open canvas (which reads
+    // metadata.imageUrl directly, with no file_url fallback at all).
     const imageSrc = isCardClipart ? null :
-        (canvasContext === "drawing"
-            ? padlet.metadata?.imageUrl || padlet.file_url
-            : padlet.file_url || padlet.metadata?.imageUrl
-        ) ||
+        (padlet.metadata?.imageUrl || padlet.file_url) ||
         padlet.metadata?.fileUrl ||
         (typeof padlet.content === "string" && padlet.content.startsWith("http") ? padlet.content : null);
     if (imageSrc) {
@@ -769,12 +788,26 @@ export default function PostCardContent({
                 className="flex flex-col items-center justify-center gap-2 text-red-600 bg-red-50/50 border border-red-100 border-dashed overflow-hidden min-h-[100px] cursor-zoom-in group/drawing-preview"
                 onClick={(e) => {
                     e.stopPropagation();
+                    // A drag that ends back over this element still fires a
+                    // native click afterward -- without this guard, moving
+                    // the card would also pop the viewer open right after.
+                    if (isDragging) return;
                     onView?.();
                 }}
                 title="Click to view full size"
             >
                 {previewUrl ? (
-                    <img src={previewUrl} alt="Drawing preview" className="w-full h-auto object-contain max-h-[300px]" />
+                    // draggable=false -- <img> is natively drag-and-drop-able
+                    // in every browser. Without this, pressing down on the
+                    // preview and moving the mouse starts the browser's own
+                    // native image drag (a ghost thumbnail follows the
+                    // cursor) instead of this canvas's own mousedown/
+                    // mousemove drag system, which never sees the
+                    // continuation of the gesture -- the card silently fails
+                    // to move. Only reachable by clicking the drawing's own
+                    // preview area; the surrounding card margin was never
+                    // affected since it isn't an <img>.
+                    <img src={previewUrl} alt="Drawing preview" className="w-full h-auto object-contain max-h-[300px]" draggable={false} />
                 ) : (
                     <>
                         <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center mt-4">
@@ -855,6 +888,13 @@ export default function PostCardContent({
                                                     const existingComments = (child.metadata as any)?.comments || [];
                                                     const filtered = existingComments.filter((c: any) => c.id !== commentId);
                                                     onUpdateChildComments(child.id, filtered);
+                                                }}
+                                                onToggleStrikethrough={(commentId) => {
+                                                    const existingComments = (child.metadata as any)?.comments || [];
+                                                    const updated = existingComments.map((c: any) =>
+                                                        c.id === commentId ? { ...c, isStrikethrough: !c.isStrikethrough } : c
+                                                    );
+                                                    onUpdateChildComments(child.id, updated);
                                                 }}
                                                 showComposer={true}
                                             />
