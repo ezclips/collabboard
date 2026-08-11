@@ -212,10 +212,11 @@ export default function CommentPopup({
     const [colorTriggerRect, setColorTriggerRect] = useState<AnchorRect | null>(null);
     const [linkTriggerRect, setLinkTriggerRect] = useState<AnchorRect | null>(null);
     const colorAnchorRef = useRef<Element | null>(null);
+    const linkAnchorRef = useRef<Element | null>(null);
     const panelRef = useRef<HTMLDivElement>(null);
-    const colorPanelAnchorRect = useCallback(() => {
+    const panelEdgeAnchorRect = useCallback((anchorRef: React.RefObject<Element | null>) => {
         const panel = panelRef.current?.getBoundingClientRect();
-        const action = colorAnchorRef.current?.getBoundingClientRect();
+        const action = anchorRef.current?.getBoundingClientRect();
         if (!panel || !action) return null;
         return {
             top: action.top,
@@ -224,13 +225,20 @@ export default function CommentPopup({
             height: action.height,
         };
     }, []);
+    const colorPanelAnchorRect = useCallback(() => panelEdgeAnchorRect(colorAnchorRef), [panelEdgeAnchorRect]);
+    const linkPanelAnchorRect = useCallback(() => panelEdgeAnchorRect(linkAnchorRef), [panelEdgeAnchorRect]);
     const { popoverRef: colorPopoverRef, position: colorPosition } = useAnchoredPopover(
         !!commentColorPopupId,
         colorTriggerRect,
         enableCanonicalSelectionStyling ? colorAnchorRef : undefined,
         enableCanonicalSelectionStyling ? colorPanelAnchorRect : undefined
     );
-    const { popoverRef: linkPopoverRef, position: linkPosition } = useAnchoredPopover(!!linkPopoverCommentId, linkTriggerRect);
+    const { popoverRef: linkPopoverRef, position: linkPosition } = useAnchoredPopover(
+        !!linkPopoverCommentId,
+        linkTriggerRect,
+        enableCanonicalSelectionStyling ? linkAnchorRef : undefined,
+        enableCanonicalSelectionStyling ? linkPanelAnchorRect : undefined
+    );
     const inputRef = useRef<HTMLInputElement>(null);
     const scrollContainerRef = useRef<HTMLDivElement>(null);
 
@@ -875,6 +883,7 @@ export default function CommentPopup({
                                                             setLinkPopoverCommentId(null);
                                                             refocusCommentEditor();
                                                         } else {
+                                                            linkAnchorRef.current = event.currentTarget;
                                                             setLinkTriggerRect(rectFromElement(event.currentTarget));
                                                             openLinkPopover(comment.id);
                                                         }
@@ -920,6 +929,7 @@ export default function CommentPopup({
                                                             setLinkPopoverCommentId(null);
                                                             refocusCommentEditor();
                                                         } else {
+                                                            linkAnchorRef.current = event.currentTarget;
                                                             setLinkTriggerRect(rectFromElement(event.currentTarget));
                                                             openLinkPopover(comment.id);
                                                         }
