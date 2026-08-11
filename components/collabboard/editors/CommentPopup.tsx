@@ -555,6 +555,7 @@ export default function CommentPopup({
     const panel = (
         <div
             ref={panelRef}
+            data-comment-panel="true"
             className={`relative border border-gray-200 p-4 rounded-lg ${
                 embedded
                     ? 'shadow-none border-0 p-0 w-full max-w-none'

@@ -726,6 +726,12 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
       data-padlet-id={padlet.id}
       className="absolute"
       onMouseDownCapture={(e) => {
+        // CommentPopup is an interaction island. The padlet drag handler runs
+        // in capture phase, so the panel must be excluded here before the
+        // drag system sees typing, selection, or button interaction.
+        if ((e.target as HTMLElement).closest('[data-comment-panel="true"]')) {
+          return;
+        }
         if (isFreeformGraphMode && isGraphConnectMode) {
           const side = getClickedSide(e);
           setSelectedPadletId(padlet.id);
