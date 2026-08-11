@@ -1,16 +1,8 @@
 "use client";
 
-import React, { useState } from 'react';
+import React from 'react';
 import { Edit2, Palette, PenTool, Strikethrough, Trash2 } from 'lucide-react';
-import TextStylePopup from '@/components/collabboard/editors/TextStylePopup';
-import {
-  type Comment,
-  editCommentText,
-  removeComment,
-  toggleCommentStrikethrough,
-  setCommentTextColor,
-  setCommentBackgroundColor,
-} from '@/lib/domain/canvas/comments';
+import { type Comment, editCommentText, removeComment, toggleCommentStrikethrough } from '@/lib/domain/canvas/comments';
 import FreeformCommentRow from './FreeformCommentRow';
 
 // A comment surface's action-cluster identity: which Edit icon it shows and
@@ -18,7 +10,9 @@ import FreeformCommentRow from './FreeformCommentRow';
 // frozen drift exists between sites (COMMENT_UI_CONTRACT_V1.md) -- a single
 // typed profile object carries that variation instead of a growing list of
 // boolean enable* props, and callers must pick one explicitly rather than
-// getting a silently-chosen default policy for color writes.
+// getting a silently-chosen default policy for color writes. mirrorLegacyColor
+// documents the write policy a caller's own color-popup handler must apply
+// (see `colorPopupCommentId` below -- CommentList doesn't write colors itself).
 export interface CommentSurfaceProfile {
   editIcon: 'PenTool' | 'Edit2';
   mirrorLegacyColor: boolean;
@@ -35,41 +29,72 @@ export interface CommentListProps {
   comments: Comment[];
   onCommentsChange: (next: Comment[]) => void;
   profile?: CommentSurfaceProfile;
+  // Active/editing/color-popup identity is a CONTROLLED prop, not internal
+  // state (PATCH 8C correction to the 8B design): Site A's real production
+  // state (activeCardCommentId/editingCardCommentId/commentColorPopupId) is
+  // the SAME state family site D's separate toolbar-open comment panel reads
+  // (COMMENT_UI_CONTRACT_V1.md: "shared with A"). Owning this internally
+  // would desync D from A the moment a toolbar opens/closes mid-edit.
+  activeCommentId: string | null;
+  onActiveCommentIdChange: (id: string | null) => void;
+  editingCommentId: string | null;
+  editingText: string;
+  onEditingCommentIdChange: (id: string | null) => void;
+  onEditingTextChange: (text: string) => void;
+  // Which comment's color popup is requested, mirroring production's
+  // `commentColorPopupId` (a comment id, not a boolean). CommentList only
+  // toggles this and reads it for the Color/Edit button slot and the
+  // textarea's blur-suppression guard -- it does NOT render the popup
+  // itself. In Site A's actual DOM the color popup is a SIBLING of the
+  // whole comment panel (anchored to the padlet, not the comment list), not
+  // nested inside it, so the caller keeps owning that render (shell/chrome,
+  // PATCH 8B spec section 4) to avoid silently moving its anchor point.
+  colorPopupCommentId: string | null;
+  onColorPopupCommentIdChange: (id: string | null) => void;
 }
 
 // Owns only shared list concerns for the Site A profile: ordered rendering,
-// which comment is "active"/"editing" (that identity lives at the list
-// level because Site A's action rail is itself list-level, not per-row),
-// and forwarding comment operations to the domain layer. Deliberately does
-// NOT own modal/floating/panel chrome -- that stays with each site's own
-// shell (see PATCH 8B spec, section 4).
-export default function CommentList({ comments, onCommentsChange, profile = SITE_A_PROFILE }: CommentListProps) {
-  const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
-  const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
-  const [editingText, setEditingText] = useState('');
-  const [colorPopupOpen, setColorPopupOpen] = useState(false);
-
+// the row list, and the shared action rail (Color/Edit toggle, Strikethrough,
+// Delete -- Site A's action rail is list-level, not per-row), forwarding
+// comment text/strikethrough/delete operations to the domain layer.
+// Deliberately does NOT own modal/floating/panel chrome, the color popup's
+// own rendering, or the add-comment composer -- those stay with each site's
+// own shell (PATCH 8B spec, section 4; PATCH 8C spec, step 2).
+export default function CommentList({
+  comments,
+  onCommentsChange,
+  profile = SITE_A_PROFILE,
+  activeCommentId,
+  onActiveCommentIdChange,
+  editingCommentId,
+  editingText,
+  onEditingCommentIdChange,
+  onEditingTextChange,
+  colorPopupCommentId,
+  onColorPopupCommentIdChange,
+}: CommentListProps) {
   const activeComment = comments.find((c) => c.id === activeCommentId) ?? null;
 
   const commitEdit = () => {
     const trimmed = editingText.trim();
-    setEditingCommentId(null);
-    setEditingText('');
-    setColorPopupOpen(false);
-    if (!trimmed || !editingCommentId) return;
-    onCommentsChange(editCommentText(comments, editingCommentId, trimmed));
+    const targetId = editingCommentId;
+    onEditingCommentIdChange(null);
+    onEditingTextChange('');
+    onColorPopupCommentIdChange(null);
+    if (!trimmed || !targetId) return;
+    onCommentsChange(editCommentText(comments, targetId, trimmed));
   };
 
   const cancelEdit = () => {
-    setEditingCommentId(null);
-    setEditingText('');
-    setColorPopupOpen(false);
+    onEditingCommentIdChange(null);
+    onEditingTextChange('');
+    onColorPopupCommentIdChange(null);
   };
 
   const startEdit = (comment: Comment) => {
-    setEditingCommentId(comment.id);
-    setEditingText(comment.text || '');
-    setColorPopupOpen(false);
+    onEditingCommentIdChange(comment.id);
+    onEditingTextChange(comment.text || '');
+    onColorPopupCommentIdChange(null);
   };
 
   if (comments.length === 0) {
@@ -86,12 +111,12 @@ export default function CommentList({ comments, onCommentsChange, profile = SITE
             isActive={activeCommentId === comment.id}
             isEditing={editingCommentId === comment.id}
             editingText={editingCommentId === comment.id ? editingText : ''}
-            onEditingTextChange={setEditingText}
-            onSelect={() => setActiveCommentId(comment.id)}
+            onEditingTextChange={onEditingTextChange}
+            onSelect={() => onActiveCommentIdChange(comment.id)}
             onStartEdit={() => startEdit(comment)}
             onCommitEdit={commitEdit}
             onCancelEdit={cancelEdit}
-            suppressBlurCommit={colorPopupOpen && editingCommentId === comment.id}
+            suppressBlurCommit={colorPopupCommentId === comment.id}
           />
         ))}
       </div>
@@ -106,7 +131,7 @@ export default function CommentList({ comments, onCommentsChange, profile = SITE
             onClick={(e) => {
               e.preventDefault();
               e.stopPropagation();
-              setColorPopupOpen((open) => !open);
+              onColorPopupCommentIdChange(colorPopupCommentId === activeComment.id ? null : activeComment.id);
             }}
             className="p-1 rounded transition-colors text-gray-300 hover:text-blue-500"
             title="Color"
@@ -145,10 +170,10 @@ export default function CommentList({ comments, onCommentsChange, profile = SITE
             if (!activeComment) return;
             const next = removeComment(comments, activeComment.id);
             onCommentsChange(next);
-            setActiveCommentId(next[next.length - 1]?.id ?? null);
-            setEditingCommentId(null);
-            setEditingText('');
-            setColorPopupOpen(false);
+            onActiveCommentIdChange(next[next.length - 1]?.id ?? null);
+            onEditingCommentIdChange(null);
+            onEditingTextChange('');
+            onColorPopupCommentIdChange(null);
           }}
           className="p-1 text-gray-300 hover:text-red-500 transition-colors disabled:opacity-40 disabled:hover:text-gray-300"
           title="Delete"
@@ -157,37 +182,6 @@ export default function CommentList({ comments, onCommentsChange, profile = SITE
           <Trash2 className="w-3 h-3" />
         </button>
       </div>
-
-      {colorPopupOpen && activeComment && (
-        <div
-          className="absolute right-full top-0 mr-3 z-[1200] bg-white rounded-lg shadow-xl border border-gray-200 p-3 min-w-[240px]"
-          onClick={(e) => e.stopPropagation()}
-          onMouseDown={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-          }}
-        >
-          <TextStylePopup
-            isOpen={true}
-            onOpenChange={(open) => {
-              if (!open) setColorPopupOpen(false);
-            }}
-            onSelectHeading={() => {}}
-            hideHeadingSelect={true}
-            onSelectColor={(color) =>
-              onCommentsChange(
-                setCommentTextColor(comments, activeComment.id, color, { mirrorLegacyColor: profile.mirrorLegacyColor })
-              )
-            }
-            onSelectHighlight={(color) =>
-              onCommentsChange(setCommentBackgroundColor(comments, activeComment.id, color === 'transparent' ? undefined : color))
-            }
-            currentHeading="normal"
-            currentColor={activeComment.textColor || activeComment.color}
-            currentHighlight={activeComment.backgroundColor}
-          />
-        </div>
-      )}
     </div>
   );
 }

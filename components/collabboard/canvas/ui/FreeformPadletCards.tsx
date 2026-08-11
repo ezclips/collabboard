@@ -19,6 +19,7 @@ import CardEditor from '@/components/collabboard/CardEditor';
 import CommentPost from '@/components/collabboard/CommentPost';
 import { handleSafeCommentLinkClick } from '@/components/collabboard/commentLinkSafety';
 import TextStylePopup from '@/components/collabboard/editors/TextStylePopup';
+import CommentList, { SITE_A_PROFILE } from '@/components/collabboard/comments/CommentList';
 import { nextTextAlign } from '@/components/collabboard/editors/textAlignCycle';
 import { resolveCaptionStyle, resolvePadletTitleStyle } from '@/lib/domain/canvas/captionStyle';
 import { CardColorPanel } from '@/components/collabboard/editors/CardColorPanel';
@@ -1208,197 +1209,29 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                       </div>
                     </div>
                   )}
-                  {cardCommentList.length === 0 ? (
-                    <p className="text-xs text-gray-400 text-center py-4">No comments yet</p>
-                  ) : (
-                    <div className="flex gap-2 relative">
-                      <div className="flex-1 space-y-2 max-h-[360px] overflow-y-auto overflow-x-hidden pr-0 scrollbar-ultrathin">
-                        {cardCommentList.map((c, i) => {
-                          const isEditing = editingCardCommentId === c.id;
-                          const isActive = activeCardCommentId === c.id;
-                          const commitEdit = async () => {
-                            const trimmed = editingCardCommentText.trim();
-                            if (!trimmed) {
-                              setEditingCardCommentId(null);
-                              setEditingCardCommentText('');
-                              setCommentColorPopupId(null);
-                              return;
-                            }
-                            const currentComments = padlet.metadata?.detachedComments || [];
-                            const nextComments = currentComments.map((comment: any) =>
-                              comment.id === c.id
-                                ? { ...comment, text: trimmed }
-                                : comment
-                            );
-                            await updatePadletMetadata(padlet.id, { detachedComments: nextComments });
-                            setCardCommentList(nextComments);
-                            setEditingCardCommentId(null);
-                            setEditingCardCommentText('');
-                            setCommentColorPopupId(null);
-                          };
-
-                          const startEdit = () => {
-                            setEditingCardCommentId(c.id || null);
-                            setEditingCardCommentText(c.text || '');
-                            setCommentColorPopupId(null);
-                          };
-
-                          return (
-                            <div
-                              key={c.id || i}
-                              className={`flex gap-2 rounded py-0.5 px-0.5 cursor-pointer ${isActive ? 'bg-blue-50' : 'hover:bg-gray-50'}`}
-                              onClick={() => setActiveCardCommentId(c.id || null)}
-                              onDoubleClick={(e) => {
-                                e.stopPropagation();
-                                startEdit();
-                              }}
-                            >
-                              <div className="flex flex-col items-center gap-0.5 shrink-0 w-[22px]">
-                                <div className="w-[22px] h-[22px] rounded-full bg-blue-500 flex items-center justify-center text-white text-[9px] font-bold shrink-0">
-                                  {c.userName?.charAt(0).toUpperCase() || 'U'}
-                                </div>
-                                <span className="text-[9px] text-gray-400 leading-none text-center">
-                                  {(() => {
-                                    const diff = Date.now() - c.timestamp;
-                                    const minutes = Math.floor(diff / 60000);
-                                    const hours = Math.floor(minutes / 60);
-                                    const days = Math.floor(hours / 24);
-                                    const years = Math.floor(days / 365);
-                                    if (minutes < 60) return `${Math.max(1, minutes)}m`;
-                                    if (hours < 24) return `${hours}h`;
-                                    if (days < 365) return `${days}d`;
-                                    return `${years}y`;
-                                  })()}
-                                </span>
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-2 mb-0.5">
-                                  <span className="text-xs font-medium text-gray-700 truncate">{c.userName || 'User'}</span>
-                                </div>
-                                {isEditing ? (
-                                  <textarea
-                                    value={editingCardCommentText}
-                                    onChange={(e) => setEditingCardCommentText(e.target.value)}
-                                    onKeyDown={async (e) => {
-                                      if (e.key === 'Enter' && !e.shiftKey) {
-                                        e.preventDefault();
-                                        await commitEdit();
-                                      }
-                                      if (e.key === 'Escape') {
-                                        setEditingCardCommentId(null);
-                                        setEditingCardCommentText('');
-                                        setCommentColorPopupId(null);
-                                      }
-                                    }}
-                                    onBlur={() => {
-                                      if (commentColorPopupId === c.id) return;
-                                      commitEdit();
-                                    }}
-                                    className="w-full text-xs text-gray-600 bg-gray-50 rounded px-2 py-1 outline-none border border-gray-200 focus:border-blue-400 resize-none overflow-hidden break-words whitespace-pre-wrap"
-                                    style={{
-                                      color: c.textColor || c.color || '#4b5563',
-                                      backgroundColor: c.backgroundColor || undefined,
-                                    }}
-                                    rows={1}
-                                    autoFocus
-                                  />
-                                ) : (
-                                  <div
-                                    className={`text-xs text-gray-600 mt-0.5 whitespace-pre-wrap break-words [&_a]:text-blue-500 [&_a]:underline [&_a]:cursor-pointer ${c.isStrikethrough ? 'line-through' : ''}`}
-                                    style={{
-                                      color: c.textColor || c.color,
-                                      backgroundColor: c.backgroundColor || undefined,
-                                    }}
-                                    onMouseDown={(e) => e.stopPropagation()}
-                                    onClick={(e) => {
-                                      if (handleSafeCommentLinkClick(e)) return;
-                                      e.stopPropagation();
-                                    }}
-                                    onDoubleClick={(e) => {
-                                      e.stopPropagation();
-                                      startEdit();
-                                    }}
-                                    dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(c.text) }}
-                                  />
-                                )}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-
-                      <div className="flex flex-col gap-1 flex-shrink-0 pt-1">
-                        {editingCardCommentId && activeCardComment && editingCardCommentId === activeCardComment.id ? (
-                          <button
-                            onMouseDown={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                            }}
-                            onClick={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              setCommentColorPopupId(commentColorPopupId === activeCardComment.id ? null : (activeCardComment.id || null));
-                            }}
-                            className="p-1 rounded transition-colors text-gray-300 hover:text-blue-500"
-                            title="Color"
-                            disabled={!activeCardComment}
-                          >
-                            <Palette className="w-3 h-3" />
-                          </button>
-                        ) : (
-                          <button
-                            onClick={() => {
-                              if (!activeCardComment) return;
-                              setEditingCardCommentId(activeCardComment.id || null);
-                              setEditingCardCommentText(activeCardComment.text || '');
-                              setCommentColorPopupId(null);
-                            }}
-                            className="p-1 rounded transition-colors text-gray-300 hover:text-blue-500 disabled:opacity-40 disabled:hover:text-gray-300"
-                            title="Edit"
-                            disabled={!activeCardComment}
-                          >
-                            <PenTool className="w-3 h-3" />
-                          </button>
-                        )}
-                        <button
-                          onClick={async () => {
-                            if (!activeCardComment) return;
-                            const currentComments = padlet.metadata?.detachedComments || [];
-                            const nextComments = currentComments.map((comment: any) =>
-                              comment.id === activeCardComment.id
-                                ? { ...comment, isStrikethrough: !comment.isStrikethrough }
-                                : comment
-                            );
-                            await updatePadletMetadata(padlet.id, { detachedComments: nextComments });
-                            setCardCommentList(nextComments);
-                          }}
-                          className={`p-1 rounded transition-colors ${activeCardComment?.isStrikethrough ? 'text-blue-500 bg-blue-50' : 'text-gray-300 hover:text-blue-500'} disabled:opacity-40 disabled:hover:text-gray-300`}
-                          title="Strikethrough"
-                          disabled={!activeCardComment}
-                        >
-                          <Strikethrough className="w-3 h-3" />
-                        </button>
-                        <button
-                          onClick={async () => {
-                            if (!activeCardComment) return;
-                            const currentComments = padlet.metadata?.detachedComments || [];
-                            const nextComments = currentComments.filter((comment: any) => comment.id !== activeCardComment.id);
-                            await updatePadletMetadata(padlet.id, { detachedComments: nextComments });
-                            setCardCommentList(nextComments);
-                            setActiveCardCommentId(nextComments[nextComments.length - 1]?.id || null);
-                            setEditingCardCommentId(null);
-                            setEditingCardCommentText('');
-                            setCommentColorPopupId(null);
-                          }}
-                          className="p-1 text-gray-300 hover:text-red-500 transition-colors disabled:opacity-40 disabled:hover:text-gray-300"
-                          title="Delete"
-                          disabled={!activeCardComment}
-                        >
-                          <Trash2 className="w-3 h-3" />
-                        </button>
-                      </div>
-                    </div>
-                  )}
+                  {/* PATCH 8C: Site A pilot -- migrated to the shared comment
+                      foundation (components/collabboard/comments/CommentList.tsx).
+                      Comments/state/storage wiring below is unchanged; only the
+                      duplicated inline row+action-rail JSX moved. State stays
+                      controlled through the SAME setters Site D (the toolbar-open
+                      sibling of this exact image) reads, per
+                      COMMENT_UI_CONTRACT_V1.md ("shared with A"). */}
+                  <CommentList
+                    comments={cardCommentList}
+                    onCommentsChange={async (next) => {
+                      await updatePadletMetadata(padlet.id, { detachedComments: next });
+                      setCardCommentList(next);
+                    }}
+                    profile={SITE_A_PROFILE}
+                    activeCommentId={activeCardCommentId}
+                    onActiveCommentIdChange={setActiveCardCommentId}
+                    editingCommentId={editingCardCommentId}
+                    editingText={editingCardCommentText}
+                    onEditingCommentIdChange={setEditingCardCommentId}
+                    onEditingTextChange={setEditingCardCommentText}
+                    colorPopupCommentId={commentColorPopupId}
+                    onColorPopupCommentIdChange={setCommentColorPopupId}
+                  />
                   {/* Add comment input */}
                   <div className="mt-3 pt-3 border-t border-gray-100">
                     <input

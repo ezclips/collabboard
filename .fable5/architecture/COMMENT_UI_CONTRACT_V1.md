@@ -2,8 +2,18 @@
 
 ## Status
 
-FROZEN
-CHARACTERIZATION ONLY -- NO PRODUCTION BEHAVIOR CHANGED IN THIS PATCH
+FROZEN, behavior unchanged throughout PATCHES 8A-8C.
+
+- **SITE A: FROZEN -- shared implementation pilot completed (PATCH 8C).**
+  Its inline row/action-rail JSX is gone from `FreeformPadletCards.tsx`;
+  the same frozen behavior is now produced by
+  `components/collabboard/comments/CommentList.tsx` +
+  `FreeformCommentRow.tsx` (`SITE_A_PROFILE`), proven equivalent by
+  `components/collabboard/comments/siteA.pilotParity.test.tsx`. No
+  `COMMENT UI CONTRACT UNLOCK` was used -- this is implementation
+  consolidation, not a behavior change.
+- Sites B, C, D, E, F: unchanged, still inline, exactly as PATCH 8A froze
+  them below.
 
 Established by PATCH 8A, against baseline commit `8a19325c9fbe163e5d9760fc558c74dace39b98d`
 (itself created by committing the color/link feature work that was sitting
@@ -206,3 +216,43 @@ control's result. Visual-regression coverage was not added: no Playwright
 screenshot/visual-snapshot infrastructure exists in this repository
 (confirmed via search of `e2e/` and `package.json`), and this patch was
 scoped not to introduce one.
+
+---
+
+## PATCH 8B/8C -- shared foundation and Site A pilot
+
+**Foundation (8B):** `lib/domain/canvas/comments.ts` (pure, immutable comment
+operations -- `editCommentText`, `removeComment`, `toggleCommentStrikethrough`,
+`setCommentTextColor`/`setCommentBackgroundColor`, the latter with an explicit
+`mirrorLegacyColor` policy so the A/C-vs-B color-write-shape drift documented
+above is carried as typed config, not silently unified) plus
+`components/collabboard/comments/{CommentList,FreeformCommentRow}.tsx`.
+
+**Pilot (8C):** Site A now renders through this foundation
+(`<CommentList profile={SITE_A_PROFILE} .../>` inside its unchanged shell).
+Two corrections were made to the 8B design once Site A's real source was
+traced (PATCH 8C spec step 1), both driven by observed behavior, not
+speculative generalization:
+
+- `CommentList`'s active/editing/color-popup identity became a **controlled**
+  prop (lifted to the caller) instead of internal `useState`. Site A's state
+  (`activeCardCommentId`/`editingCardCommentId`/`editingCardCommentText`/
+  `commentColorPopupId`/`cardCommentList`) is the exact same state family Site
+  D's separate toolbar-open comment panel reads (see "shared with A" in the
+  site table above) -- owning it internally would have desynced D from A the
+  moment an image's toolbar opened or closed mid-edit.
+- `CommentList` stopped rendering the `TextStylePopup` color popup itself.
+  In Site A's real DOM that popup is a **sibling** of the whole comment
+  panel (anchored to the padlet via `absolute right-full top-0 mr-3`), not
+  nested inside the row list -- nesting it inside `CommentList` would have
+  silently moved its anchor point. The popup stays shell-owned, unchanged,
+  in `FreeformPadletCards.tsx`; `CommentList` only exposes
+  `colorPopupCommentId`/`onColorPopupCommentIdChange` so its Color button can
+  toggle the same state the shell's popup reads.
+
+Sites B, C, D, E, F are untouched inline implementations; only Site A moved.
+See `components/collabboard/comments/siteA.pilotParity.test.tsx` for the
+mounted BEFORE/AFTER contract proof, and the "PATCH 8C -- Site A migration
+wiring" block in the characterization suite for the source-level migration
+proof. **No `COMMENT UI CONTRACT UNLOCK` was used or required** -- 8B/8C are
+implementation consolidation, not a behavior change.
