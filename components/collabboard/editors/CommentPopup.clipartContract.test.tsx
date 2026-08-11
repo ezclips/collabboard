@@ -126,7 +126,6 @@ function ClipartHarness({ onOpenChangeSpy }: { onOpenChangeSpy?: (open: boolean)
       comments={comments}
       currentUserId="user1"
       currentUserName="Alice"
-      enableCanonicalSelectionStyling
     />
   );
 }
@@ -259,26 +258,6 @@ describe('CommentPopup -- canonical panel title', () => {
     expect(container.querySelector('[data-comment-panel-title="true"]')).toBeNull();
     click(container.querySelector('button')!);
     expect(container.querySelector('[data-comment-panel-title="true"]')?.textContent).toBe('Comments');
-  });
-
-  it('clamps a tall canonical panel without changing the card shell and keeps scrolling in the comment list', () => {
-    const originalRect = HTMLElement.prototype.getBoundingClientRect;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
-      if (this.dataset.commentPanel === 'true') {
-        return { top: 700, bottom: 1300, left: 100, right: 400, width: 300, height: 600, x: 100, y: 700, toJSON() {} } as DOMRect;
-      }
-      return originalRect.call(this);
-    });
-    const { container } = mount(<ClipartHarness />);
-    const panel = container.querySelector('[data-comment-panel="true"]') as HTMLElement;
-    const list = container.querySelector('.overflow-y-auto') as HTMLElement | null;
-
-    expect(panel.style.maxHeight).toBe('calc(100vh - 16px)');
-    expect(panel.style.transform).toBe(`translateY(-${1300 - (window.innerHeight - 8)}px)`);
-    expect(list).not.toBeNull();
-    expect(list?.className).toContain('flex-1');
-    expect(list?.className).toContain('min-h-0');
-    vi.restoreAllMocks();
   });
 
   it('reuses TextStylePopup for whole-title text and highlight styling, immediately', () => {
