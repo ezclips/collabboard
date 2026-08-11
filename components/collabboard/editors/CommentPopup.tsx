@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import DOMPurify from 'dompurify';
 import { createPortal } from 'react-dom';
 import { Link as LinkIcon, Palette, Send, Strikethrough, Trash2, X } from 'lucide-react';
@@ -207,6 +207,7 @@ export default function CommentPopup({
     const [titleDraft, setTitleDraft] = useState('Comments');
     const [titleStyleOpen, setTitleStyleOpen] = useState(false);
     const [titleStyleTriggerRect, setTitleStyleTriggerRect] = useState<AnchorRect | null>(null);
+    const [viewportOffsetY, setViewportOffsetY] = useState(0);
     const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
     const [colorPickerCoords, setColorPickerCoords] = useState<{ left: number; top: number } | null>(null);
     const [textareaSelection, setTextareaSelection] = useState<{ start: number; end: number } | null>(null);
@@ -289,7 +290,7 @@ export default function CommentPopup({
         if (isOpen) {
             if (!hideComposer) {
                 setTimeout(() => {
-                    inputRef.current?.focus();
+                    inputRef.current?.focus({ preventScroll: true });
                 }, 50);
             }
         } else {
@@ -390,6 +391,38 @@ export default function CommentPopup({
         setTitleDraft(resolvedCommentTitle);
         setTitleEditing(false);
     };
+
+    useLayoutEffect(() => {
+        if (!isOpen || embedded || !enableCanonicalSelectionStyling) return;
+
+        const recalculate = () => {
+            const panel = panelRef.current;
+            if (!panel) return;
+            const previousTransform = panel.style.transform;
+            panel.style.transform = '';
+            const rect = panel.getBoundingClientRect();
+            panel.style.transform = previousTransform;
+
+            const margin = 8;
+            let offset = 0;
+            if (rect.bottom > window.innerHeight - margin) {
+                offset = -(rect.bottom - (window.innerHeight - margin));
+            }
+            if (rect.top + offset < margin) {
+                offset += margin - (rect.top + offset);
+            }
+            setViewportOffsetY(Math.round(offset));
+        };
+
+        recalculate();
+        window.addEventListener('resize', recalculate);
+        window.addEventListener('scroll', recalculate, true);
+        return () => {
+            window.removeEventListener('resize', recalculate);
+            window.removeEventListener('scroll', recalculate, true);
+        };
+    }, [isOpen, embedded, enableCanonicalSelectionStyling, effectiveComments.length, titleEditing, hideComposer, badgeColorPickerOpen]);
+
     const handleSubmit = () => {
         const trimmed = newCommentText.trim();
         if (!trimmed) return;
@@ -645,13 +678,20 @@ export default function CommentPopup({
             ref={panelRef}
             data-comment-panel="true"
             className={`relative border border-gray-200 p-4 rounded-lg ${
+                enableCanonicalSelectionStyling ? 'flex flex-col overflow-hidden' : ''
+            } ${
                 embedded
                     ? 'shadow-none border-0 p-0 w-full max-w-none'
                     : fullWidth
                         ? 'shadow-2xl min-w-[280px] w-full max-w-none overflow-visible'
                         : 'shadow-2xl min-w-[280px] max-w-[360px] overflow-visible'
             }`}
-            style={{ backgroundColor: '#fff', width: '100%' }}
+            style={{
+                backgroundColor: '#fff',
+                width: '100%',
+                ...(enableCanonicalSelectionStyling ? { maxHeight: 'calc(100vh - 16px)' } : {}),
+                ...(viewportOffsetY ? { transform: `translateY(${viewportOffsetY}px)` } : {}),
+            }}
             onMouseDown={(e) => e.stopPropagation()}
             onPointerDown={enableCanonicalSelectionStyling ? (e) => e.stopPropagation() : undefined}
             onClick={enableCanonicalSelectionStyling ? (e) => e.stopPropagation() : undefined}
@@ -861,7 +901,7 @@ export default function CommentPopup({
                 <div
                     ref={scrollContainerRef}
                     className={`w-full space-y-3 overflow-y-auto pr-1 scrollbar-ultrathin ${
-                        embedded ? 'max-h-[240px]' : 'max-h-[400px]'
+                        enableCanonicalSelectionStyling ? 'flex-1 min-h-0 max-h-none' : embedded ? 'max-h-[240px]' : 'max-h-[400px]'
                     }`}
                     style={{ scrollbarGutter: 'stable' }}
                 >
@@ -1132,7 +1172,7 @@ export default function CommentPopup({
 
             {/* Add comment input at bottom */}
             {!hideComposer && (
-                <div className="mt-3 pt-3 border-t border-gray-100 flex items-center gap-2">
+                <div className="mt-3 pt-3 border-t border-gray-100 flex-shrink-0 flex items-center gap-2">
                     <input
                         ref={inputRef}
                         type="text"
