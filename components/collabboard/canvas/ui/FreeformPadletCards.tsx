@@ -2046,6 +2046,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                     await updatePadletMetadata(padlet.id, { detachedComments: nextComments });
                     setCardCommentList(nextComments);
                   }}
+                  enableCanonicalSelectionStyling
                   comments={cardCommentList}
                   currentUserId={user?.id || 'anon'}
                   currentUserName={user?.email?.split('@')[0] || 'You'}

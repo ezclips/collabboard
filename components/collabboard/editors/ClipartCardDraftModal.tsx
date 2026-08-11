@@ -553,6 +553,7 @@ export default function ClipartCardDraftModal({
                 );
                 updateMetadata({ detachedComments: updated });
               }}
+              enableCanonicalSelectionStyling
               comments={detachedComments}
               currentUserId={draftCommentUserId}
               currentUserName={draftCommentUserName}

@@ -57,6 +57,62 @@ interface CommentData {
     isStrikethrough?: boolean;
 }
 
+interface ReadOnlySelection {
+    commentId: string;
+    from: number;
+    to: number;
+}
+
+interface ReadOnlyCommentContentProps {
+    comment: CommentData;
+    onEditorReady: (commentId: string, editor: ReturnType<typeof useEditor> | null) => void;
+    onSelectionChange: (commentId: string, from: number, to: number) => void;
+    onSelectionClear: (commentId: string) => void;
+}
+
+function ReadOnlyCommentContent({ comment, onEditorReady, onSelectionChange, onSelectionClear }: ReadOnlyCommentContentProps) {
+    const editor = useEditor({
+        immediatelyRender: false,
+        editable: false,
+        extensions: COMMENT_POPUP_EXTENSIONS,
+        content: DOMPurify.sanitize(comment.text),
+        onSelectionUpdate: ({ editor: updated }) => {
+            const { from, to } = updated.state.selection;
+            if (from === to) onSelectionClear(comment.id);
+            else onSelectionChange(comment.id, from, to);
+        },
+        editorProps: {
+            attributes: {
+                class: 'text-xs text-gray-600 whitespace-pre-wrap break-words leading-relaxed text-left [&_a]:text-blue-500 [&_a]:underline [&_a]:cursor-pointer select-text cursor-text',
+                'data-comment-readonly-editor': comment.id,
+            },
+        },
+    });
+
+    const lastPropText = useRef(comment.text);
+    useEffect(() => {
+        onEditorReady(comment.id, editor);
+        return () => onEditorReady(comment.id, null);
+    }, [comment.id, editor, onEditorReady]);
+
+    useEffect(() => {
+        if (!editor || editor.isDestroyed || lastPropText.current === comment.text) return;
+        const incoming = DOMPurify.sanitize(comment.text);
+        if (editor.getHTML() !== incoming) {
+            const previousSelection = editor.state.selection;
+            editor.commands.setContent(incoming, { emitUpdate: false });
+            const maxPosition = editor.state.doc.content.size;
+            const from = Math.min(previousSelection.from, maxPosition);
+            const to = Math.min(previousSelection.to, maxPosition);
+            if (from < to) editor.commands.setTextSelection({ from, to });
+        }
+        lastPropText.current = comment.text;
+    }, [comment.text, editor]);
+
+    if (!editor) return <div data-comment-readonly-editor={comment.id}>{comment.text}</div>;
+    return <EditorContent editor={editor} data-comment-readonly-editor={comment.id} />;
+}
+
 interface CommentPopupProps {
     isOpen: boolean;
     onOpenChange: (open: boolean) => void;
@@ -98,6 +154,10 @@ interface CommentPopupProps {
     // Suppresses the panel's own built-in close button, for callers that
     // render their own close control instead.
     hideCloseButton?: boolean;
+    // PATCH 8G is intentionally enabled only by the two Clipart entry points.
+    // Other CommentPopup consumers keep their existing read-only behavior until
+    // they are explicitly migrated.
+    enableCanonicalSelectionStyling?: boolean;
 }
 
 export default function CommentPopup({
@@ -128,6 +188,7 @@ export default function CommentPopup({
     badgeColor,
     onBadgeColorChange,
     hideCloseButton = false,
+    enableCanonicalSelectionStyling = false,
 }: CommentPopupProps) {
     const [newCommentText, setNewCommentText] = useState('');
     const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
@@ -143,7 +204,10 @@ export default function CommentPopup({
     // Per-row link popover for the comment currently being edited.
     const [linkPopoverCommentId, setLinkPopoverCommentId] = useState<string | null>(null);
     const [linkUrl, setLinkUrl] = useState('');
+    const [readOnlySelection, setReadOnlySelection] = useState<ReadOnlySelection | null>(null);
     const savedLinkSelectionRef = useRef<{ from: number; to: number } | null>(null);
+    const readOnlyEditorsRef = useRef(new Map<string, ReturnType<typeof useEditor>>());
+    const readOnlySelectionRef = useRef<ReadOnlySelection | null>(null);
     const [colorTriggerRect, setColorTriggerRect] = useState<AnchorRect | null>(null);
     const [linkTriggerRect, setLinkTriggerRect] = useState<AnchorRect | null>(null);
     const { popoverRef: colorPopoverRef, position: colorPosition } = useAnchoredPopover(!!commentColorPopupId, colorTriggerRect);
@@ -151,6 +215,17 @@ export default function CommentPopup({
     const inputRef = useRef<HTMLInputElement>(null);
     const panelRef = useRef<HTMLDivElement>(null);
     const scrollContainerRef = useRef<HTMLDivElement>(null);
+
+    const setSelection = useCallback((selection: ReadOnlySelection | null) => {
+        readOnlySelectionRef.current = selection;
+        setReadOnlySelection(selection);
+        if (selection) setActiveCommentId(selection.commentId);
+    }, []);
+
+    const registerReadOnlyEditor = useCallback((commentId: string, editor: ReturnType<typeof useEditor> | null) => {
+        if (editor) readOnlyEditorsRef.current.set(commentId, editor);
+        else readOnlyEditorsRef.current.delete(commentId);
+    }, []);
 
     // TipTap editor for editing comments with rich text support
     const editEditor = useEditor({
@@ -186,8 +261,30 @@ export default function CommentPopup({
             setCommentColorPopupId(null);
             setLinkPopoverCommentId(null);
             setLinkUrl('');
+            setSelection(null);
         }
-    }, [isOpen, hideComposer]);
+    }, [isOpen, hideComposer, setSelection]);
+
+    useEffect(() => {
+        if (!isOpen || !enableCanonicalSelectionStyling) return;
+        const handleSelectionChange = () => {
+            const selection = window.getSelection();
+            const current = readOnlySelectionRef.current;
+            if (!selection || selection.isCollapsed || !current || !panelRef.current) {
+                if (current && (!selection || selection.isCollapsed)) setSelection(null);
+                return;
+            }
+            const anchor = selection.anchorNode instanceof Element ? selection.anchorNode : selection.anchorNode?.parentElement;
+            const focus = selection.focusNode instanceof Element ? selection.focusNode : selection.focusNode?.parentElement;
+            const anchorEditor = anchor?.closest('[data-comment-readonly-editor]');
+            const focusEditor = focus?.closest('[data-comment-readonly-editor]');
+            if (!anchorEditor || anchorEditor !== focusEditor || anchorEditor.getAttribute('data-comment-readonly-editor') !== current.commentId) {
+                setSelection(null);
+            }
+        };
+        document.addEventListener('selectionchange', handleSelectionChange);
+        return () => document.removeEventListener('selectionchange', handleSelectionChange);
+    }, [isOpen, enableCanonicalSelectionStyling, setSelection]);
 
     // Update edit editor content when editing a comment
     useEffect(() => {
@@ -281,6 +378,22 @@ export default function CommentPopup({
             editEditor.chain().focus().setHighlight({ color }).run();
         }
     }, [editEditor]);
+
+    const applySelectedStyle = useCallback((type: 'color' | 'highlight', color: string) => {
+        const selection = readOnlySelectionRef.current;
+        if (!selection) return;
+        const editor = readOnlyEditorsRef.current.get(selection.commentId);
+        if (!editor || editor.isDestroyed) return;
+        const chain = editor.chain().setTextSelection({ from: selection.from, to: selection.to });
+        if (type === 'color') chain.setColor(color).run();
+        else if (color === 'transparent') chain.unsetHighlight().run();
+        else chain.setHighlight({ color }).run();
+        onEditComment?.(selection.commentId, editor.getHTML());
+        // Keep the same comment/range active while the parent round-trips the
+        // new HTML. This permits repeated foreground/highlight changes without
+        // forcing the user to reselect the text.
+        setSelection(selection);
+    }, [onEditComment, setSelection]);
 
     // Re-focuses the comment editor after closing the color/link popover
     // without applying anything, so a later genuine click-away still fires
@@ -402,15 +515,11 @@ export default function CommentPopup({
                         : 'shadow-2xl min-w-[280px] max-w-[360px] overflow-visible'
             }`}
             style={{ backgroundColor: '#fff', width: '100%' }}
-            onMouseDown={(e) => {
-                // Only prevent default for non-interactive areas
-                const target = e.target as HTMLElement;
-                const isInteractive = target.closest('input, textarea, button, [contenteditable="true"]');
-                if (!isInteractive && !target.closest('.ProseMirror')) {
-                    e.preventDefault();
-                }
-                e.stopPropagation();
-            }}
+            onMouseDown={(e) => e.stopPropagation()}
+            onPointerDown={enableCanonicalSelectionStyling ? (e) => e.stopPropagation() : undefined}
+            onClick={enableCanonicalSelectionStyling ? (e) => e.stopPropagation() : undefined}
+            onDoubleClick={enableCanonicalSelectionStyling ? (e) => e.stopPropagation() : undefined}
+            onWheel={enableCanonicalSelectionStyling ? (e) => e.stopPropagation() : undefined}
         >
             {!embedded && !hideCloseButton && (
                 <button
@@ -499,8 +608,14 @@ export default function CommentPopup({
                             }}
                             onSelectHeading={() => {}}
                             hideHeadingSelect={true}
-                            onSelectColor={(color) => onCommentColor(target.id, color, target.backgroundColor)}
-                            onSelectHighlight={(color) => onCommentColor(target.id, target.textColor, color === 'transparent' ? undefined : color)}
+                            onSelectColor={(color) => {
+                                if (!editingCommentId && readOnlySelectionRef.current?.commentId === target.id) applySelectedStyle('color', color);
+                                else onCommentColor(target.id, color, target.backgroundColor);
+                            }}
+                            onSelectHighlight={(color) => {
+                                if (!editingCommentId && readOnlySelectionRef.current?.commentId === target.id) applySelectedStyle('highlight', color);
+                                else onCommentColor(target.id, target.textColor, color === 'transparent' ? undefined : color);
+                            }}
                             currentHeading="normal"
                             currentColor={target.textColor || target.color}
                             currentHighlight={target.backgroundColor}
@@ -646,8 +761,20 @@ export default function CommentPopup({
                                             onClick={(e) => {
                                                 if (handleSafeCommentLinkClick(e)) return;
                                             }}
-                                            dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(comment.text) }}
-                                        />
+                                        >
+                                            {enableCanonicalSelectionStyling ? (
+                                                <ReadOnlyCommentContent
+                                                    comment={comment}
+                                                    onEditorReady={registerReadOnlyEditor}
+                                                    onSelectionChange={(commentId, from, to) => setSelection({ commentId, from, to })}
+                                                    onSelectionClear={(commentId) => {
+                                                        if (readOnlySelectionRef.current?.commentId === commentId) setSelection(null);
+                                                    }}
+                                                />
+                                            ) : (
+                                                <span dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(comment.text) }} />
+                                            )}
+                                        </div>
                                     )}
                                 </div>
 
@@ -702,6 +829,27 @@ export default function CommentPopup({
                                                     <LinkIcon className="w-3 h-3" />
                                                 </button>
                                             </>
+                                        ) : enableCanonicalSelectionStyling && readOnlySelection?.commentId === comment.id ? (
+                                            <button
+                                                onMouseDown={(event) => {
+                                                    event.preventDefault();
+                                                    event.stopPropagation();
+                                                }}
+                                                onClick={(event) => {
+                                                    event.preventDefault();
+                                                    event.stopPropagation();
+                                                    setLinkPopoverCommentId(null);
+                                                    if (isColorOpen) setCommentColorPopupId(null);
+                                                    else {
+                                                        setColorTriggerRect(rectFromElement(event.currentTarget));
+                                                        setCommentColorPopupId(comment.id);
+                                                    }
+                                                }}
+                                                className="p-1 rounded transition-colors text-gray-300 hover:text-blue-500"
+                                                title="Color / Text Style"
+                                            >
+                                                <Palette className="w-3 h-3" />
+                                            </button>
                                         ) : (
                                             <button
                                                 onClick={(e) => {
@@ -798,7 +946,7 @@ export default function CommentPopup({
             <div
                 className="fixed z-[3000] flex items-start gap-2"
                 style={{ left: position.x, top: position.y }}
-                onMouseDown={preventFocusLoss}
+                onMouseDown={(e) => e.stopPropagation()}
             >
                 {panel}
             </div>
@@ -808,7 +956,7 @@ export default function CommentPopup({
     // When no position prop, just render the panel directly
     // Parent component handles positioning
     return (
-        <div onMouseDown={preventFocusLoss}>
+        <div onMouseDown={(e) => e.stopPropagation()}>
             {panel}
         </div>
     );

@@ -82,7 +82,7 @@ function textTab() {
   return Array.from(document.body.querySelectorAll('button')).find((b) => b.title === 'Text Color') as HTMLButtonElement | undefined;
 }
 function editWrapperOf(container: HTMLElement) {
-  return container.querySelector('.ProseMirror')!.closest('.relative') as HTMLElement;
+  return container.querySelector('.ProseMirror[contenteditable="true"]')!.closest('.relative') as HTMLElement;
 }
 function selectText(container: HTMLElement, text: string) {
   const pm = container.querySelector('.ProseMirror') as HTMLElement;
@@ -162,6 +162,7 @@ function Harness({
       onCommentColor={(commentId, textColor, backgroundColor) => {
         setComments((prev) => prev.map((c) => (c.id === commentId ? { ...c, textColor, backgroundColor } : c)));
       }}
+      enableCanonicalSelectionStyling
       comments={comments}
       currentUserId="user1"
       currentUserName="Alice"
@@ -356,7 +357,7 @@ describe('PATCH 8F -- persistence', () => {
       pm.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
     });
 
-    expect(container.querySelector('.ProseMirror')).toBeNull(); // edit mode exited
+    expect(container.querySelector('.ProseMirror[contenteditable="true"]')).toBeNull(); // edit mode exited
     const readOnlyDiv = Array.from(rowWithText(container, 'Hello world').querySelectorAll('div')).find(
       (d) => d.className.includes('text-xs') && d.className.includes('text-gray-600')
     ) as HTMLElement;
@@ -435,5 +436,55 @@ describe('PATCH 8F -- both Clipart entry points share the fix automatically', ()
     // Exactly one CommentPopup implementation exists in the repo for both to import.
     const popupFiles = ['components/collabboard/editors/CommentPopup.tsx'];
     expect(fs.existsSync(popupFiles[0])).toBe(true);
+  });
+});
+
+describe('PATCH 8G -- read-only selection styling', () => {
+  function selectText(root: HTMLElement, start: number, end: number) {
+    const textNode = root.querySelector('p')?.firstChild;
+    expect(textNode).not.toBeNull();
+    const range = document.createRange();
+    range.setStart(textNode!, start);
+    range.setEnd(textNode!, end);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    act(() => document.dispatchEvent(new Event('selectionchange')));
+  }
+
+  it('selects and styles a read-only range without entering edit mode', () => {
+    const { container } = mount(<Harness />);
+    const row = rowWithText(container, 'Hello world');
+    const readonly = row.querySelector('[data-comment-readonly-editor]') as HTMLElement;
+    selectText(readonly, 0, 5);
+
+    expect(btn(row, 'Edit')).toBeNull();
+    expect(btn(row, 'Color / Text Style')).not.toBeNull();
+    expect(container.querySelector('.ProseMirror[contenteditable="true"]')).toBeNull();
+
+    click(btn(row, 'Color / Text Style')!);
+    click(swatch('#fa5252')!);
+
+    const saved = document.body.querySelector('[data-comment-readonly-editor]')?.innerHTML || '';
+    expect(saved).toContain('color: rgb(250, 82, 82)');
+    expect(saved).toContain('Hello');
+    expect(saved).toContain('world');
+  });
+
+  it('applies highlight independently and preserves the foreground mark', () => {
+    const { container } = mount(<Harness />);
+    const row = rowWithText(container, 'Hello world');
+    const readonly = row.querySelector('[data-comment-readonly-editor]') as HTMLElement;
+    selectText(readonly, 0, 5);
+    click(btn(row, 'Color / Text Style')!);
+    click(swatch('#fa5252')!);
+
+    // The selection remains owned by the same comment while the popup stays open.
+    click(highlightTab()!);
+    click(swatch('#40c057')!);
+
+    const saved = document.body.querySelector('[data-comment-readonly-editor]')?.innerHTML || '';
+    expect(saved).toContain('color: rgb(250, 82, 82)');
+    expect(saved).toContain('background-color: rgb(64, 192, 87)');
   });
 });
