@@ -208,6 +208,7 @@ export default function CommentPopup({
     const savedLinkSelectionRef = useRef<{ from: number; to: number } | null>(null);
     const readOnlyEditorsRef = useRef(new Map<string, ReturnType<typeof useEditor>>());
     const readOnlySelectionRef = useRef<ReadOnlySelection | null>(null);
+    const savedLinkEditorRef = useRef<ReturnType<typeof useEditor>>(null);
     const [colorTriggerRect, setColorTriggerRect] = useState<AnchorRect | null>(null);
     const [linkTriggerRect, setLinkTriggerRect] = useState<AnchorRect | null>(null);
     const colorAnchorRef = useRef<Element | null>(null);
@@ -278,6 +279,8 @@ export default function CommentPopup({
             setCommentColorPopupId(null);
             setLinkPopoverCommentId(null);
             setLinkUrl('');
+            savedLinkSelectionRef.current = null;
+            savedLinkEditorRef.current = null;
             setSelection(null);
         }
     }, [isOpen, hideComposer, setSelection]);
@@ -452,6 +455,7 @@ export default function CommentPopup({
             ? readOnlySelection
             : editor.state.selection;
         savedLinkSelectionRef.current = { from, to };
+        savedLinkEditorRef.current = editor;
         setLinkUrl(editor.getAttributes('link').href || '');
         setCommentColorPopupId(null);
         setLinkPopoverCommentId(commentId);
@@ -462,7 +466,7 @@ export default function CommentPopup({
         const selectedReadOnly = readOnlySelectionRef.current?.commentId === linkPopoverCommentId
             ? readOnlyEditorsRef.current.get(linkPopoverCommentId)
             : null;
-        const editor = selectedReadOnly || editEditor;
+        const editor = savedLinkEditorRef.current || selectedReadOnly || editEditor;
         if (!editor || editor.isDestroyed) return;
         const saved = savedLinkSelectionRef.current;
         const trimmed = linkUrl.trim();
@@ -507,6 +511,7 @@ export default function CommentPopup({
         setLinkPopoverCommentId(null);
         setLinkUrl('');
         savedLinkSelectionRef.current = null;
+        savedLinkEditorRef.current = null;
     }, [editEditor, linkUrl, linkPopoverCommentId, onEditComment, onEdit]);
 
     if (!isOpen) return null;
