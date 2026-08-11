@@ -151,6 +151,10 @@ interface CommentPopupProps {
     // panel (Note, Clipart, Todo, Table, Link) already has.
     badgeColor?: string;
     onBadgeColorChange?: (color: string) => void;
+    commentTitle?: string;
+    commentTitleStyle?: { color?: string; backgroundColor?: string };
+    onCommentTitleChange?: (title: string) => void;
+    onCommentTitleStyleChange?: (style: { color?: string; backgroundColor?: string }) => void;
     // Suppresses the panel's own built-in close button, for callers that
     // render their own close control instead.
     hideCloseButton?: boolean;
@@ -187,6 +191,10 @@ export default function CommentPopup({
     embedded = false,
     badgeColor,
     onBadgeColorChange,
+    commentTitle,
+    commentTitleStyle,
+    onCommentTitleChange,
+    onCommentTitleStyleChange,
     hideCloseButton = false,
     enableCanonicalSelectionStyling = false,
 }: CommentPopupProps) {
@@ -195,6 +203,10 @@ export default function CommentPopup({
     const [editingCommentText, setEditingCommentText] = useState('');
     const [colorPickerOpen, setColorPickerOpen] = useState(false);
     const [badgeColorPickerOpen, setBadgeColorPickerOpen] = useState(false);
+    const [titleEditing, setTitleEditing] = useState(false);
+    const [titleDraft, setTitleDraft] = useState('Comments');
+    const [titleStyleOpen, setTitleStyleOpen] = useState(false);
+    const [titleStyleTriggerRect, setTitleStyleTriggerRect] = useState<AnchorRect | null>(null);
     const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
     const [colorPickerCoords, setColorPickerCoords] = useState<{ left: number; top: number } | null>(null);
     const [textareaSelection, setTextareaSelection] = useState<{ start: number; end: number } | null>(null);
@@ -213,6 +225,7 @@ export default function CommentPopup({
     const [linkTriggerRect, setLinkTriggerRect] = useState<AnchorRect | null>(null);
     const colorAnchorRef = useRef<Element | null>(null);
     const linkAnchorRef = useRef<Element | null>(null);
+    const titleStyleAnchorRef = useRef<Element | null>(null);
     const panelRef = useRef<HTMLDivElement>(null);
     const panelEdgeAnchorRect = useCallback((anchorRef: React.RefObject<Element | null>) => {
         const panel = panelRef.current?.getBoundingClientRect();
@@ -222,6 +235,7 @@ export default function CommentPopup({
     }, []);
     const colorPanelAnchorRect = useCallback(() => panelEdgeAnchorRect(colorAnchorRef), [panelEdgeAnchorRect]);
     const linkPanelAnchorRect = useCallback(() => panelEdgeAnchorRect(linkAnchorRef), [panelEdgeAnchorRect]);
+    const titleStylePanelAnchorRect = useCallback(() => panelEdgeAnchorRect(titleStyleAnchorRef), [panelEdgeAnchorRect]);
     const { popoverRef: colorPopoverRef, position: colorPosition } = useAnchoredPopover(
         !!commentColorPopupId,
         colorTriggerRect,
@@ -233,6 +247,12 @@ export default function CommentPopup({
         linkTriggerRect,
         enableCanonicalSelectionStyling ? linkAnchorRef : undefined,
         enableCanonicalSelectionStyling ? linkPanelAnchorRect : undefined
+    );
+    const { popoverRef: titleStylePopoverRef, position: titleStylePosition } = useAnchoredPopover(
+        titleStyleOpen,
+        titleStyleTriggerRect,
+        titleStyleAnchorRef,
+        titleStylePanelAnchorRect
     );
     const inputRef = useRef<HTMLInputElement>(null);
     const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -279,6 +299,9 @@ export default function CommentPopup({
             setColorPickerOpen(false);
             setColorPickerCoords(null);
             setBadgeColorPickerOpen(false);
+            setTitleEditing(false);
+            setTitleStyleOpen(false);
+            setTitleStyleTriggerRect(null);
             setCommentColorPopupId(null);
             setLinkPopoverCommentId(null);
             setLinkUrl('');
@@ -352,6 +375,21 @@ export default function CommentPopup({
 
     const effectiveComments = comments.length > 0 ? comments : (existingComment ? [existingComment] : []);
     const resolvedHighlightColor = highlightColor || existingComment?.color;
+    const resolvedCommentTitle = commentTitle?.trim() || 'Comments';
+    const startTitleEditing = () => {
+        setTitleDraft(resolvedCommentTitle);
+        setTitleEditing(true);
+    };
+    const commitTitle = () => {
+        const nextTitle = titleDraft.trim() || 'Comments';
+        onCommentTitleChange?.(nextTitle);
+        setTitleDraft(nextTitle);
+        setTitleEditing(false);
+    };
+    const cancelTitle = () => {
+        setTitleDraft(resolvedCommentTitle);
+        setTitleEditing(false);
+    };
     const handleSubmit = () => {
         const trimmed = newCommentText.trim();
         if (!trimmed) return;
@@ -469,6 +507,7 @@ export default function CommentPopup({
         const selectedReadOnly = readOnlySelectionRef.current?.commentId === linkPopoverCommentId
             ? readOnlyEditorsRef.current.get(linkPopoverCommentId)
             : null;
+
         const editor = savedLinkEditorRef.current || selectedReadOnly || editEditor;
         if (!editor || editor.isDestroyed) return;
         const saved = savedLinkSelectionRef.current;
@@ -560,6 +599,47 @@ export default function CommentPopup({
             )
             : null;
 
+    const titleStylePortal = titleStyleOpen && onCommentTitleStyleChange
+        ? createPortal(
+            <div
+                ref={titleStylePopoverRef}
+                data-comment-title-style-popover="true"
+                className="fixed z-[1200] bg-white rounded-lg shadow-xl border border-gray-200 p-3 min-w-[240px]"
+                style={{
+                    left: titleStylePosition?.left ?? -9999,
+                    top: titleStylePosition?.top ?? -9999,
+                    opacity: titleStylePosition ? 1 : 0,
+                    pointerEvents: titleStylePosition ? 'auto' : 'none',
+                }}
+                onClick={(e) => e.stopPropagation()}
+                onMouseDown={preventPopoverFocusLoss}
+            >
+                <TextStylePopup
+                    isOpen={true}
+                    onOpenChange={(open) => {
+                        if (!open) {
+                            setTitleStyleOpen(false);
+                            setTitleStyleTriggerRect(null);
+                        }
+                    }}
+                    onSelectHeading={() => {}}
+                    hideHeadingSelect={true}
+                    onSelectColor={(color) => onCommentTitleStyleChange({ ...(commentTitleStyle || {}), color })}
+                    onSelectHighlight={(color) => {
+                        const nextStyle = { ...(commentTitleStyle || {}) };
+                        if (color === 'transparent') delete nextStyle.backgroundColor;
+                        else nextStyle.backgroundColor = color;
+                        onCommentTitleStyleChange(nextStyle);
+                    }}
+                    currentHeading="normal"
+                    currentColor={commentTitleStyle?.color}
+                    currentHighlight={commentTitleStyle?.backgroundColor}
+                />
+            </div>,
+            document.body
+        )
+        : null;
+
     const panel = (
         <div
             ref={panelRef}
@@ -588,7 +668,55 @@ export default function CommentPopup({
                 </button>
             )}
             <div className="flex items-center justify-between mb-3 pb-2 border-b border-gray-100">
-                <h4 className="text-sm font-semibold text-gray-700">Comments</h4>
+                <div className="flex min-w-0 items-center gap-1">
+                    {titleEditing ? (
+                        <input
+                            autoFocus
+                            data-comment-panel-title="true"
+                            aria-label="Comment panel title"
+                            type="text"
+                            value={titleDraft}
+                            onChange={(e) => setTitleDraft(e.target.value)}
+                            onBlur={commitTitle}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    commitTitle();
+                                } else if (e.key === 'Escape') {
+                                    e.preventDefault();
+                                    cancelTitle();
+                                }
+                            }}
+                            className="min-w-0 w-full text-sm font-semibold text-gray-700 bg-transparent outline-none border-b border-blue-400 rounded px-1 -mx-1"
+                            style={{ color: commentTitleStyle?.color || '#374151', backgroundColor: commentTitleStyle?.backgroundColor }}
+                        />
+                    ) : (
+                        <h4
+                            data-comment-panel-title="true"
+                            className="text-sm font-semibold rounded px-1 -mx-1 cursor-text"
+                            style={{ color: commentTitleStyle?.color || '#374151', backgroundColor: commentTitleStyle?.backgroundColor }}
+                            onClick={onCommentTitleChange ? startTitleEditing : undefined}
+                        >
+                            {resolvedCommentTitle}
+                        </h4>
+                    )}
+                    {titleEditing && onCommentTitleStyleChange && (
+                        <button
+                            ref={titleStyleAnchorRef as React.RefObject<HTMLButtonElement>}
+                            type="button"
+                            aria-label="Style comment title"
+                            title="Title color and highlight"
+                            onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                            onClick={() => {
+                                setTitleStyleTriggerRect(rectFromElement(titleStyleAnchorRef.current!));
+                                setTitleStyleOpen((open) => !open);
+                            }}
+                            className="shrink-0 p-1 rounded text-gray-400 hover:text-blue-500 hover:bg-gray-100"
+                        >
+                            <Palette className="w-3.5 h-3.5" />
+                        </button>
+                    )}
+                </div>
                 <div className="flex items-center gap-2">
                     {onBadgeColorChange && (
                         <button
@@ -630,6 +758,7 @@ export default function CommentPopup({
             )}
 
             {colorPickerPortal}
+            {titleStylePortal}
 
             {/* Per-comment color and link popups -- portaled to document.body
                 with viewport-measured fixed coordinates (useAnchoredPopover)

@@ -258,6 +258,10 @@ export interface Padlet {
     isContainer?: boolean;
     zIndex?: number;
     commentTitle?: string;
+    commentTitleStyle?: {
+      color?: string;
+      backgroundColor?: string;
+    };
     // Cloud Import specific
     importProvider?: 'google-drive' | 'microsoft-onedrive';
     importItemId?: string;

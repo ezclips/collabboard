@@ -521,6 +521,10 @@ export default function ClipartCardDraftModal({
                 setIsCommentPanelOpen(open);
                 if (!open) setIsBadgeColorPaletteOpen(false);
               }}
+              commentTitle={typeof previewPadlet.metadata?.commentTitle === 'string' ? previewPadlet.metadata.commentTitle : undefined}
+              commentTitleStyle={previewPadlet.metadata?.commentTitleStyle}
+              onCommentTitleChange={(title) => updateMetadata({ commentTitle: title === 'Comments' ? undefined : title })}
+              onCommentTitleStyleChange={(style) => updateMetadata({ commentTitleStyle: style })}
               onSubmit={(commentText) => {
                 const newComment: CommentData = {
                   id: `comment-${Date.now()}`,

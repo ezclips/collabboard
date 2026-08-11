@@ -130,6 +130,31 @@ function ClipartHarness({ onOpenChangeSpy }: { onOpenChangeSpy?: (open: boolean)
   );
 }
 
+function TitleHarness() {
+  const [isOpen, setIsOpen] = useState(true);
+  const [title, setTitle] = useState<string | undefined>(undefined);
+  const [titleStyle, setTitleStyle] = useState<{ color?: string; backgroundColor?: string }>({});
+  return (
+    <div onMouseDown={() => { throw new Error('title interaction leaked to parent'); }}>
+      <button type="button" onClick={() => setIsOpen(true)}>Reopen</button>
+      {isOpen && (
+        <CommentPopup
+          isOpen={isOpen}
+          onOpenChange={setIsOpen}
+          onSubmit={() => {}}
+          comments={[]}
+          commentTitle={title}
+          commentTitleStyle={titleStyle}
+          onCommentTitleChange={(next) => setTitle(next === 'Comments' ? undefined : next)}
+          onCommentTitleStyleChange={setTitleStyle}
+          hideComposer
+          enableCanonicalSelectionStyling
+        />
+      )}
+    </div>
+  );
+}
+
 describe('CommentPopup -- Clipart contract: ADD COMMENT keeps the panel open', () => {
   it('submitting via Enter never calls onOpenChange(false), and the panel stays mounted with the new comment visible', () => {
     const onOpenChangeSpy = vi.fn();
@@ -185,6 +210,72 @@ describe('CommentPopup -- Clipart contract: ADD COMMENT keeps the panel open', (
     pressEnter(composer);
     expect(composer.value).toBe('   ');
     expect(container.querySelector('input[placeholder="Add a comment..."]')).not.toBeNull();
+  });
+});
+
+describe('CommentPopup -- canonical panel title', () => {
+  it('defaults to Comments, edits inline, commits with Enter, and keeps the title single-line', () => {
+    const { container } = mount(<TitleHarness />);
+    const title = container.querySelector('[data-comment-panel-title="true"]') as HTMLElement;
+    expect(title.textContent).toBe('Comments');
+
+    click(title);
+    const input = container.querySelector('input[aria-label="Comment panel title"]') as HTMLInputElement;
+    expect(input).not.toBeNull();
+    expect(input.type).toBe('text');
+    typeInto(input, 'Feedback');
+    pressEnter(input);
+    expect(container.querySelector('[data-comment-panel-title="true"]')?.textContent).toBe('Feedback');
+  });
+
+  it('commits on blur and cancels with Escape', () => {
+    const { container } = mount(<TitleHarness />);
+    click(container.querySelector('[data-comment-panel-title="true"]')!);
+    let input = container.querySelector('input[aria-label="Comment panel title"]') as HTMLInputElement;
+    typeInto(input, 'Discussion');
+    act(() => {
+      input.focus();
+      input.blur();
+    });
+    expect(container.querySelector('[data-comment-panel-title="true"]')?.textContent).toBe('Discussion');
+
+    click(container.querySelector('[data-comment-panel-title="true"]')!);
+    input = container.querySelector('input[aria-label="Comment panel title"]') as HTMLInputElement;
+    typeInto(input, 'Discarded');
+    act(() => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+    expect(container.querySelector('[data-comment-panel-title="true"]')?.textContent).toBe('Discussion');
+  });
+
+  it('falls back to Comments for an empty title and preserves title data after close/reopen', () => {
+    const { container } = mount(<TitleHarness />);
+    click(container.querySelector('[data-comment-panel-title="true"]')!);
+    const input = container.querySelector('input[aria-label="Comment panel title"]') as HTMLInputElement;
+    typeInto(input, '   ');
+    pressEnter(input);
+    expect(container.querySelector('[data-comment-panel-title="true"]')?.textContent).toBe('Comments');
+
+    click(container.querySelector('button[title="Close"]')!);
+    expect(container.querySelector('[data-comment-panel-title="true"]')).toBeNull();
+    click(container.querySelector('button')!);
+    expect(container.querySelector('[data-comment-panel-title="true"]')?.textContent).toBe('Comments');
+  });
+
+  it('reuses TextStylePopup for whole-title text and highlight styling, immediately', () => {
+    const { container } = mount(<TitleHarness />);
+    click(container.querySelector('[data-comment-panel-title="true"]')!);
+    expect(container.querySelector('input[aria-label="Comment panel title"]')).not.toBeNull();
+    click(container.querySelector('button[aria-label="Style comment title"]')!);
+    const popup = document.querySelector('[data-comment-title-style-popover="true"]') as HTMLElement;
+    expect(popup).not.toBeNull();
+    expect(popup.querySelector('button[title="Text Color"]')).not.toBeNull();
+    expect(popup.querySelector('button[title="Highlight Color"]')).not.toBeNull();
+
+    click(popup.querySelector('button[title="#4c6ef5"]')!);
+    expect(container.querySelector('[data-comment-panel-title="true"]')?.getAttribute('style')).toContain('color: rgb(76, 110, 245)');
+    click(popup.querySelector('button[title="Highlight Color"]')!);
+    click(popup.querySelector('button[title="#fab005"]')!);
+    expect(container.querySelector('[data-comment-panel-title="true"]')?.getAttribute('style')).toContain('background-color: rgb(250, 176, 5)');
+    expect(container.querySelector('[data-comment-panel-title="true"]')?.querySelector('mark')).toBeNull();
   });
 });
 

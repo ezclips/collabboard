@@ -2014,6 +2014,10 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                   onOpenChange={(open) => {
                     if (!open) setCardCommentPopupPadletId(null);
                   }}
+                  commentTitle={typeof padlet.metadata?.commentTitle === 'string' ? padlet.metadata.commentTitle : undefined}
+                  commentTitleStyle={padlet.metadata?.commentTitleStyle}
+                  onCommentTitleChange={(title) => updatePadletMetadata(padlet.id, { commentTitle: title === 'Comments' ? undefined : title })}
+                  onCommentTitleStyleChange={(style) => updatePadletMetadata(padlet.id, { commentTitleStyle: style })}
                   onSubmit={async (commentText) => {
                     const newComment = {
                       id: `comment-${Date.now()}`,
