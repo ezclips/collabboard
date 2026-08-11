@@ -210,7 +210,12 @@ export default function CommentPopup({
     const readOnlySelectionRef = useRef<ReadOnlySelection | null>(null);
     const [colorTriggerRect, setColorTriggerRect] = useState<AnchorRect | null>(null);
     const [linkTriggerRect, setLinkTriggerRect] = useState<AnchorRect | null>(null);
-    const { popoverRef: colorPopoverRef, position: colorPosition } = useAnchoredPopover(!!commentColorPopupId, colorTriggerRect);
+    const colorAnchorRef = useRef<Element | null>(null);
+    const { popoverRef: colorPopoverRef, position: colorPosition } = useAnchoredPopover(
+        !!commentColorPopupId,
+        colorTriggerRect,
+        enableCanonicalSelectionStyling ? colorAnchorRef : undefined
+    );
     const { popoverRef: linkPopoverRef, position: linkPosition } = useAnchoredPopover(!!linkPopoverCommentId, linkTriggerRect);
     const inputRef = useRef<HTMLInputElement>(null);
     const panelRef = useRef<HTMLDivElement>(null);
@@ -285,6 +290,16 @@ export default function CommentPopup({
         document.addEventListener('selectionchange', handleSelectionChange);
         return () => document.removeEventListener('selectionchange', handleSelectionChange);
     }, [isOpen, enableCanonicalSelectionStyling, setSelection]);
+
+    useEffect(() => {
+        if (!enableCanonicalSelectionStyling) return;
+        if (editingCommentId) return;
+        if (!readOnlySelection || readOnlySelection.commentId !== commentColorPopupId) {
+            setCommentColorPopupId(null);
+            setColorTriggerRect(null);
+            colorAnchorRef.current = null;
+        }
+    }, [enableCanonicalSelectionStyling, editingCommentId, readOnlySelection, commentColorPopupId]);
 
     // Update edit editor content when editing a comment
     useEffect(() => {
@@ -797,6 +812,7 @@ export default function CommentPopup({
                                                                 setCommentColorPopupId(null);
                                                                 refocusCommentEditor();
                                                             } else {
+                                                                colorAnchorRef.current = event.currentTarget;
                                                                 setColorTriggerRect(rectFromElement(event.currentTarget));
                                                                 setCommentColorPopupId(comment.id);
                                                             }
@@ -841,6 +857,7 @@ export default function CommentPopup({
                                                     setLinkPopoverCommentId(null);
                                                     if (isColorOpen) setCommentColorPopupId(null);
                                                     else {
+                                                        colorAnchorRef.current = event.currentTarget;
                                                         setColorTriggerRect(rectFromElement(event.currentTarget));
                                                         setCommentColorPopupId(comment.id);
                                                     }

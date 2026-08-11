@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 
 export interface AnchorRect {
     top: number;
@@ -52,12 +52,20 @@ export function computePopoverPlacement(
 // transform ancestors, unlike CSS-relative positioning) and recomputes on
 // resize/scroll while open. Consumers portal the popover to document.body
 // with `position: fixed` using the returned coordinates.
-export function useAnchoredPopover(isOpen: boolean, triggerRect: AnchorRect | null) {
+export function useAnchoredPopover(
+    isOpen: boolean,
+    triggerRect: AnchorRect | null,
+    liveAnchorRef?: RefObject<Element | null>
+) {
     const popoverRef = useRef<HTMLDivElement | null>(null);
     const [position, setPosition] = useState<PopoverPlacement | null>(null);
 
     const recalculate = useCallback(() => {
-        if (!triggerRect) {
+        const liveRect = liveAnchorRef?.current?.getBoundingClientRect();
+        const resolvedRect = liveRect
+            ? { top: liveRect.top, left: liveRect.left, width: liveRect.width, height: liveRect.height }
+            : triggerRect;
+        if (!resolvedRect) {
             setPosition(null);
             return;
         }
@@ -66,12 +74,12 @@ export function useAnchoredPopover(isOpen: boolean, triggerRect: AnchorRect | nu
         const popoverRect = popover.getBoundingClientRect();
         setPosition(
             computePopoverPlacement(
-                triggerRect,
+                resolvedRect,
                 { width: popoverRect.width, height: popoverRect.height },
                 { width: window.innerWidth, height: window.innerHeight }
             )
         );
-    }, [triggerRect]);
+    }, [liveAnchorRef, triggerRect]);
 
     useLayoutEffect(() => {
         if (!isOpen || !triggerRect) {
@@ -81,11 +89,20 @@ export function useAnchoredPopover(isOpen: boolean, triggerRect: AnchorRect | nu
         recalculate();
         window.addEventListener('resize', recalculate);
         window.addEventListener('scroll', recalculate, true);
+        let frame = 0;
+        if (liveAnchorRef) {
+            const trackAnchor = () => {
+                recalculate();
+                frame = window.requestAnimationFrame(trackAnchor);
+            };
+            frame = window.requestAnimationFrame(trackAnchor);
+        }
         return () => {
             window.removeEventListener('resize', recalculate);
             window.removeEventListener('scroll', recalculate, true);
+            if (frame) window.cancelAnimationFrame(frame);
         };
-    }, [isOpen, triggerRect, recalculate]);
+    }, [isOpen, triggerRect, liveAnchorRef, recalculate]);
 
     return { popoverRef, position };
 }
