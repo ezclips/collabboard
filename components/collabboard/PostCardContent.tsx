@@ -590,6 +590,13 @@ export default function PostCardContent({
                             );
                             onUpdateChildComments(padlet.id, updated);
                         }}
+                        onColorChange={(commentId, textColor, backgroundColor) => {
+                            const existingComments = (padlet.metadata as any)?.comments || [];
+                            const updated = existingComments.map((c: any) =>
+                                c.id === commentId ? { ...c, textColor, backgroundColor } : c
+                            );
+                            onUpdateChildComments(padlet.id, updated);
+                        }}
                         showComposer={true}
                     />
                 </div>
@@ -771,6 +778,12 @@ export default function PostCardContent({
                                 );
                                 onUpdateChildComments(padlet.id, updated, { field: "detachedComments" });
                             }}
+                            onColorChange={(commentId, textColor, backgroundColor) => {
+                                const updated = detachedComments.map((comment: any) =>
+                                    comment.id === commentId ? { ...comment, textColor, backgroundColor } : comment
+                                );
+                                onUpdateChildComments(padlet.id, updated, { field: "detachedComments" });
+                            }}
                             showComposer={true}
                         />
                     </div>
@@ -893,6 +906,13 @@ export default function PostCardContent({
                                                     const existingComments = (child.metadata as any)?.comments || [];
                                                     const updated = existingComments.map((c: any) =>
                                                         c.id === commentId ? { ...c, isStrikethrough: !c.isStrikethrough } : c
+                                                    );
+                                                    onUpdateChildComments(child.id, updated);
+                                                }}
+                                                onColorChange={(commentId, textColor, backgroundColor) => {
+                                                    const existingComments = (child.metadata as any)?.comments || [];
+                                                    const updated = existingComments.map((c: any) =>
+                                                        c.id === commentId ? { ...c, textColor, backgroundColor } : c
                                                     );
                                                     onUpdateChildComments(child.id, updated);
                                                 }}

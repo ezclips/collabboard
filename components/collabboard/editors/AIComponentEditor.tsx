@@ -75,6 +75,8 @@ type CommentDraft = {
   userId: string;
   userName: string;
   timestamp: number;
+  textColor?: string;
+  backgroundColor?: string;
 };
 
 function isQuotaExceededMessage(message: string) {
@@ -706,6 +708,11 @@ export default function AIComponentEditor({
                       userName: 'You',
                       timestamp: Date.now(),
                     }]);
+                  }}
+                  onCommentColor={(commentId, textColor, backgroundColor) => {
+                    setDetachedComments((prev) =>
+                      prev.map((c) => (c.id === commentId ? { ...c, textColor, backgroundColor } : c))
+                    );
                   }}
                   comments={detachedComments}
                   currentUserId="anon"

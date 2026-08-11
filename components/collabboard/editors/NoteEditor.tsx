@@ -42,6 +42,7 @@ interface InlineComment {
   timestamp: number;
   color?: string;
   textColor?: string;
+  backgroundColor?: string;
   isStrikethrough?: boolean;
 }
 
@@ -526,6 +527,18 @@ export default function NoteEditor({
     const nextColor = color || null;
     updateCommentThreadInDoc(activeThread.id, activeThread.comments, { color: nextColor });
     setActiveThread({ ...activeThread, color: color || undefined });
+  };
+
+  // Per-comment text/highlight color -- distinct from handleColorComment
+  // above, which colors the highlighted document text span the whole
+  // thread is anchored to.
+  const handleCommentColor = (commentId: string, textColor?: string, backgroundColor?: string) => {
+    if (!editor || !activeThread) return;
+    const nextComments = activeThread.comments.map((comment) =>
+      comment.id === commentId ? { ...comment, textColor, backgroundColor } : comment
+    );
+    updateCommentThreadInDoc(activeThread.id, nextComments);
+    setActiveThread({ ...activeThread, comments: nextComments });
   };
 
   const getTimeAgo = (timestamp: number) => {
@@ -1139,6 +1152,7 @@ export default function NoteEditor({
               onRemoveThread={handleRemoveThread}
               onToggleCommentStrikethrough={handleToggleCommentStrikethrough}
               onColor={handleColorComment}
+              onCommentColor={handleCommentColor}
               comments={activeThread?.comments || []}
               highlightColor={activeThread?.color}
               currentUserId="user1"

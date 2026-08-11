@@ -205,6 +205,30 @@ export default function OverlayLayer({
             setCommentPopupComments(nextComments);
           }
         }}
+        onCommentColor={async (commentId, textColor, backgroundColor) => {
+          // Per-comment text/highlight color -- distinct from the onColor
+          // handler above, which colors the highlighted document text span
+          // the whole thread is anchored to (the `data-color` attribute).
+          if (!commentPopupPadletId || !commentPopupCommentId) return;
+          const padlet = padlets.find((p) => p.id === commentPopupPadletId);
+          if (!padlet) return;
+          const nextComments = commentPopupComments.map((comment) =>
+            comment.id === commentId ? { ...comment, textColor, backgroundColor } : comment
+          );
+          const parser = new DOMParser();
+          const doc = parser.parseFromString(padlet.content || '', 'text/html');
+          const target = doc.querySelector(`[data-comment-id="${commentPopupCommentId}"]`);
+          if (target) {
+            const last = nextComments[nextComments.length - 1];
+            target.setAttribute('data-comment-thread', JSON.stringify(nextComments));
+            target.setAttribute('data-comment-text', last?.text || '');
+            target.setAttribute('data-user-id', last?.userId || 'user1');
+            target.setAttribute('data-user-name', last?.userName || 'User');
+            target.setAttribute('data-timestamp', (last?.timestamp || Date.now()).toString());
+            await updatePadletContent(commentPopupPadletId, doc.body.innerHTML);
+            setCommentPopupComments(nextComments);
+          }
+        }}
         comments={commentPopupComments}
         highlightColor={commentPopupHighlightColor}
         currentUserId={user?.id || 'user1'}

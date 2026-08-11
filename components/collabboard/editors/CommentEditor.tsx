@@ -17,6 +17,7 @@ import CommentEditorToolbar, { ToolbarMode } from "./CommentEditorToolbar";
 import TextStylePopup from "./TextStylePopup";
 import { cycleEditorTextAlign } from "./textAlignCycle";
 import { getMeaningfulTitle } from "@/lib/infra/collabboard/postTitle";
+import { handleSafeCommentLinkClick } from "../commentLinkSafety";
 
 // Module-level constant -- stable reference, never recreated on render
 const COMMENT_EXTENSIONS = [
@@ -858,6 +859,9 @@ export default function CommentEditor({
                             style={{
                               color: comment.textColor || comment.color,
                               backgroundColor: comment.backgroundColor || undefined,
+                            }}
+                            onClick={(e) => {
+                              if (handleSafeCommentLinkClick(e)) return;
                             }}
                             dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(comment.text) }}
                           />

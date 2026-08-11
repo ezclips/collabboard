@@ -11,6 +11,8 @@ import { TextStyle as TipTapTextStyle } from '@tiptap/extension-text-style';
 import { Highlight } from '@tiptap/extension-highlight';
 import Link from '@tiptap/extension-link';
 import TextStylePopup from './TextStylePopup';
+import { useAnchoredPopover, rectFromElement, preventPopoverFocusLoss, type AnchorRect } from './useAnchoredPopover';
+import { handleSafeCommentLinkClick } from '../commentLinkSafety';
 
 // Same 48-color badge palette every other post's Comments panel (Note,
 // Clipart, Todo, Table, Link) uses for its badge-color swatch.
@@ -142,6 +144,10 @@ export default function CommentPopup({
     const [linkPopoverCommentId, setLinkPopoverCommentId] = useState<string | null>(null);
     const [linkUrl, setLinkUrl] = useState('');
     const savedLinkSelectionRef = useRef<{ from: number; to: number } | null>(null);
+    const [colorTriggerRect, setColorTriggerRect] = useState<AnchorRect | null>(null);
+    const [linkTriggerRect, setLinkTriggerRect] = useState<AnchorRect | null>(null);
+    const { popoverRef: colorPopoverRef, position: colorPosition } = useAnchoredPopover(!!commentColorPopupId, colorTriggerRect);
+    const { popoverRef: linkPopoverRef, position: linkPosition } = useAnchoredPopover(!!linkPopoverCommentId, linkTriggerRect);
     const inputRef = useRef<HTMLInputElement>(null);
     const panelRef = useRef<HTMLDivElement>(null);
     const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -276,6 +282,16 @@ export default function CommentPopup({
         }
     }, [editEditor]);
 
+    // Re-focuses the comment editor after closing the color/link popover
+    // without applying anything, so a later genuine click-away still fires
+    // the blur that commits the edit (the popovers live outside the row's
+    // blur-watched wrapper, so once focus leaves it it doesn't come back on
+    // its own).
+    const refocusCommentEditor = useCallback(() => {
+        if (!editEditor || editEditor.isDestroyed) return;
+        editEditor.commands.focus('end');
+    }, [editEditor]);
+
     const openLinkPopover = useCallback((commentId: string) => {
         if (!editEditor || editEditor.isDestroyed) return;
         const { from, to } = editEditor.state.selection;
@@ -286,22 +302,51 @@ export default function CommentPopup({
     }, [editEditor]);
 
     const handleApplyLink = useCallback(() => {
-        if (!editEditor || editEditor.isDestroyed) return;
-        if (savedLinkSelectionRef.current) {
-            const { from, to } = savedLinkSelectionRef.current;
-            editEditor.chain().focus().setTextSelection({ from, to }).run();
-        }
-        if (linkUrl.trim() === '') {
-            editEditor.chain().focus().unsetLink().run();
+        if (!editEditor || editEditor.isDestroyed || !linkPopoverCommentId) return;
+        const saved = savedLinkSelectionRef.current;
+        const trimmed = linkUrl.trim();
+
+        if (trimmed === '') {
+            const chain = editEditor.chain().focus();
+            if (saved) chain.setTextSelection(saved);
+            chain.unsetLink().run();
         } else {
-            let finalUrl = linkUrl.trim();
-            if (!/^https?:\/\//i.test(finalUrl)) finalUrl = `https://${finalUrl}`;
-            editEditor.chain().focus().setLink({ href: finalUrl }).run();
+            const finalUrl = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+            if (saved && saved.from !== saved.to) {
+                // Text was selected -- link exactly that range.
+                editEditor.chain().focus().setTextSelection(saved).setLink({ href: finalUrl }).run();
+            } else {
+                // Nothing selected: setLink() would mark an empty range and
+                // silently produce no anchor at all. Insert the URL as linked
+                // text at the cursor instead (what Docs/Notion/Slack do), then
+                // clear the stored mark so typing afterwards isn't linked too.
+                const chain = editEditor.chain().focus();
+                if (saved) chain.setTextSelection(saved.from);
+                chain
+                    .insertContent({
+                        type: 'text',
+                        text: trimmed,
+                        marks: [{ type: 'link', attrs: { href: finalUrl } }],
+                    })
+                    .unsetMark('link')
+                    .run();
+            }
+        }
+
+        // Persist immediately rather than waiting for a later blur -- Escape,
+        // Delete, or the panel closing would otherwise discard the link
+        // silently. A later real blur still calls handleEditCommit with the
+        // same (or further-edited) HTML, which is a harmless no-op re-save.
+        const htmlContent = editEditor.getHTML();
+        if (onEditComment) {
+            onEditComment(linkPopoverCommentId, htmlContent);
+        } else if (onEdit) {
+            onEdit(htmlContent);
         }
         setLinkPopoverCommentId(null);
         setLinkUrl('');
         savedLinkSelectionRef.current = null;
-    }, [editEditor, linkUrl]);
+    }, [editEditor, linkUrl, linkPopoverCommentId, onEditComment, onEdit]);
 
     if (!isOpen) return null;
 
@@ -420,6 +465,95 @@ export default function CommentPopup({
 
             {colorPickerPortal}
 
+            {/* Per-comment color and link popups -- portaled to document.body
+                with viewport-measured fixed coordinates (useAnchoredPopover)
+                so they can never be clipped by the comment list's own
+                overflow or a transformed canvas ancestor, and flip side near
+                a viewport edge instead of rendering off-screen. */}
+            {commentColorPopupId && onCommentColor && (() => {
+                const target = effectiveComments.find((comment) => comment.id === commentColorPopupId);
+                if (!target) return null;
+                return createPortal(
+                    <div
+                        ref={colorPopoverRef}
+                        className="fixed z-[1200] bg-white rounded-lg shadow-xl border border-gray-200 p-3 min-w-[240px]"
+                        style={{
+                            left: colorPosition?.left ?? -9999,
+                            top: colorPosition?.top ?? -9999,
+                            // opacity, not visibility: a visibility:hidden
+                            // subtree is not focusable, which would break
+                            // click-to-focus on the hex input inside.
+                            opacity: colorPosition ? 1 : 0,
+                            pointerEvents: colorPosition ? 'auto' : 'none',
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                        onMouseDown={preventPopoverFocusLoss}
+                    >
+                        <TextStylePopup
+                            isOpen={true}
+                            onOpenChange={(open) => {
+                                if (!open) {
+                                    setCommentColorPopupId(null);
+                                    refocusCommentEditor();
+                                }
+                            }}
+                            onSelectHeading={() => {}}
+                            hideHeadingSelect={true}
+                            onSelectColor={(color) => onCommentColor(target.id, color, target.backgroundColor)}
+                            onSelectHighlight={(color) => onCommentColor(target.id, target.textColor, color === 'transparent' ? undefined : color)}
+                            currentHeading="normal"
+                            currentColor={target.textColor || target.color}
+                            currentHighlight={target.backgroundColor}
+                        />
+                    </div>,
+                    document.body
+                );
+            })()}
+
+            {linkPopoverCommentId && createPortal(
+                <div
+                    ref={linkPopoverRef}
+                    className="fixed z-[1200] bg-white rounded-lg shadow-lg p-3 border border-gray-200"
+                    style={{
+                        left: linkPosition?.left ?? -9999,
+                        top: linkPosition?.top ?? -9999,
+                        // opacity, not visibility: autoFocus below cannot
+                        // focus a visibility:hidden input, which left the URL
+                        // field unfocusable AND (with the old blanket
+                        // preventDefault) unclickable -- i.e. untypable.
+                        opacity: linkPosition ? 1 : 0,
+                        pointerEvents: linkPosition ? 'auto' : 'none',
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                    onMouseDown={preventPopoverFocusLoss}
+                >
+                    <div className="flex items-center gap-2">
+                        <input
+                            type="url"
+                            value={linkUrl}
+                            onChange={(e) => setLinkUrl(e.target.value)}
+                            placeholder="google.com"
+                            className="px-3 py-1.5 border border-blue-400 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-200 text-xs w-56"
+                            autoFocus
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter') handleApplyLink();
+                                if (e.key === 'Escape') {
+                                    setLinkPopoverCommentId(null);
+                                    refocusCommentEditor();
+                                }
+                            }}
+                        />
+                        <button
+                            onClick={handleApplyLink}
+                            className="px-3 py-1.5 text-gray-600 hover:text-gray-900 text-xs font-medium border border-gray-300 rounded-lg hover:bg-gray-50"
+                        >
+                            Add
+                        </button>
+                    </div>
+                </div>,
+                document.body
+            )}
+
             {effectiveComments.length === 0 ? (
                 <p className="text-xs text-gray-400 text-center py-4">No comments yet</p>
             ) : (
@@ -446,56 +580,6 @@ export default function CommentPopup({
                                     setEditingCommentText(comment.text);
                                 }}
                             >
-                                {isColorOpen && onCommentColor && (
-                                    <div
-                                        className="absolute right-full top-0 mr-3 z-[1200] bg-white rounded-lg shadow-xl border border-gray-200 p-3 min-w-[240px]"
-                                        onClick={(e) => e.stopPropagation()}
-                                        onMouseDown={(e) => {
-                                            e.preventDefault();
-                                            e.stopPropagation();
-                                        }}
-                                    >
-                                        <TextStylePopup
-                                            isOpen={true}
-                                            onOpenChange={(open) => !open && setCommentColorPopupId(null)}
-                                            onSelectHeading={() => {}}
-                                            hideHeadingSelect={true}
-                                            onSelectColor={(color) => onCommentColor(comment.id, color, comment.backgroundColor)}
-                                            onSelectHighlight={(color) => onCommentColor(comment.id, comment.textColor, color === 'transparent' ? undefined : color)}
-                                            currentHeading="normal"
-                                            currentColor={comment.textColor || comment.color}
-                                            currentHighlight={comment.backgroundColor}
-                                        />
-                                    </div>
-                                )}
-                                {isLinkOpen && (
-                                    <div
-                                        className="absolute right-full top-0 mr-3 z-[1200] bg-white rounded-lg shadow-lg p-3 border border-gray-200"
-                                        onClick={(e) => e.stopPropagation()}
-                                        onMouseDown={(e) => e.preventDefault()}
-                                    >
-                                        <div className="flex items-center gap-2">
-                                            <input
-                                                type="url"
-                                                value={linkUrl}
-                                                onChange={(e) => setLinkUrl(e.target.value)}
-                                                placeholder="google.com"
-                                                className="px-3 py-1.5 border border-blue-400 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-200 text-xs w-56"
-                                                autoFocus
-                                                onKeyDown={(e) => {
-                                                    if (e.key === 'Enter') handleApplyLink();
-                                                    if (e.key === 'Escape') setLinkPopoverCommentId(null);
-                                                }}
-                                            />
-                                            <button
-                                                onClick={handleApplyLink}
-                                                className="px-3 py-1.5 text-gray-600 hover:text-gray-900 text-xs font-medium border border-gray-300 rounded-lg hover:bg-gray-50"
-                                            >
-                                                Add
-                                            </button>
-                                        </div>
-                                    </div>
-                                )}
                                 <div className="w-6 h-6 rounded-full bg-blue-500 flex items-center justify-center text-white text-[10px] font-bold shrink-0">
                                     {comment.userAvatar ? (
                                         <img src={comment.userAvatar} alt="" className="w-full h-full rounded-full" />
@@ -512,11 +596,21 @@ export default function CommentPopup({
                                         <div className="mt-1 w-full">
                                             <div
                                                 className="relative"
+                                                style={{
+                                                    color: comment.textColor || comment.color || undefined,
+                                                    backgroundColor: comment.backgroundColor || undefined,
+                                                }}
                                                 onMouseDown={(e) => {
                                                     // Allow text selection in editor
                                                     e.stopPropagation();
                                                 }}
                                                 onBlur={(e) => {
+                                                    // The color/link popovers render outside this wrapper
+                                                    // (so they aren't clipped by the scroll list) and
+                                                    // auto-focus their own input on open -- that's a
+                                                    // genuine blur of the editor, but not the user
+                                                    // clicking away, so don't commit/exit-edit for it.
+                                                    if (isColorOpen || isLinkOpen) return;
                                                     // Save when clicking outside editor
                                                     if (!e.currentTarget.contains(e.relatedTarget as Node)) {
                                                         handleEditCommit();
@@ -549,6 +643,9 @@ export default function CommentPopup({
                                                 color: comment.textColor || comment.color,
                                                 backgroundColor: comment.backgroundColor || undefined,
                                             }}
+                                            onClick={(e) => {
+                                                if (handleSafeCommentLinkClick(e)) return;
+                                            }}
                                             dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(comment.text) }}
                                         />
                                     )}
@@ -569,7 +666,13 @@ export default function CommentPopup({
                                                             event.preventDefault();
                                                             event.stopPropagation();
                                                             setLinkPopoverCommentId(null);
-                                                            setCommentColorPopupId((prev) => (prev === comment.id ? null : comment.id));
+                                                            if (isColorOpen) {
+                                                                setCommentColorPopupId(null);
+                                                                refocusCommentEditor();
+                                                            } else {
+                                                                setColorTriggerRect(rectFromElement(event.currentTarget));
+                                                                setCommentColorPopupId(comment.id);
+                                                            }
                                                         }}
                                                         className="p-1 rounded transition-colors text-gray-300 hover:text-blue-500"
                                                         title="Color"
@@ -587,7 +690,9 @@ export default function CommentPopup({
                                                         event.stopPropagation();
                                                         if (isLinkOpen) {
                                                             setLinkPopoverCommentId(null);
+                                                            refocusCommentEditor();
                                                         } else {
+                                                            setLinkTriggerRect(rectFromElement(event.currentTarget));
                                                             openLinkPopover(comment.id);
                                                         }
                                                     }}

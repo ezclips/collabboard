@@ -300,6 +300,13 @@ const SortablePadletCard: React.FC<SortablePadletProps> = ({
                                                     );
                                                     onUpdateChildComments(child.id, updated);
                                                 }}
+                                                onColorChange={(commentId, textColor, backgroundColor) => {
+                                                    const existingComments = (child.metadata as any)?.comments || [];
+                                                    const updated = existingComments.map((c: any) =>
+                                                        c.id === commentId ? { ...c, textColor, backgroundColor } : c
+                                                    );
+                                                    onUpdateChildComments(child.id, updated);
+                                                }}
                                             />
                                         ) : (
                                             <PostCardContent

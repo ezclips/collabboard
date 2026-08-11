@@ -49,6 +49,8 @@ type CommentDraft = {
     userId: string;
     userName: string;
     timestamp: number;
+    textColor?: string;
+    backgroundColor?: string;
 };
 
 export default function DrawingEditor({
@@ -500,6 +502,11 @@ export default function DrawingEditor({
                                                 userName: 'You',
                                                 timestamp: Date.now(),
                                             }]);
+                                        }}
+                                        onCommentColor={(commentId, textColor, backgroundColor) => {
+                                            setDetachedComments((prev) =>
+                                                prev.map((c) => (c.id === commentId ? { ...c, textColor, backgroundColor } : c))
+                                            );
                                         }}
                                         comments={detachedComments}
                                         currentUserId="anon"

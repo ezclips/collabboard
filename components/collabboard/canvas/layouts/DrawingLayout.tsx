@@ -662,6 +662,12 @@ function DrawingEmbeddableCard({
                     c.id === commentId ? { ...c, isStrikethrough: !c.isStrikethrough } : c
                   ), { field: 'comments' });
                 }}
+                onColorChange={(commentId, textColor, backgroundColor) => {
+                  const existing = (padlet.metadata as any)?.comments || [];
+                  onUpdateChildComments(padlet.id, existing.map((c: any) =>
+                    c.id === commentId ? { ...c, textColor, backgroundColor } : c
+                  ), { field: 'comments' });
+                }}
               />
             );
           }

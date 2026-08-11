@@ -148,11 +148,7 @@ export default function EmbeddedCommentList({
                     setActiveCommentId(null);
                   }
                 }}
-                onOpenColorPicker={() => {
-                  // Color picker integration - can be extended
-                  onColorChange?.(comment.id, undefined, undefined);
-                }}
-                showColorButton={!!onColorChange}
+                onColorChange={onColorChange}
               />
             ))}
           </div>

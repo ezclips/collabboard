@@ -17,6 +17,7 @@ import CardActionsToolbar from '@/components/collabboard/editors/CardActionsTool
 import CardPreview from '@/components/collabboard/CardPreview';
 import CardEditor from '@/components/collabboard/CardEditor';
 import CommentPost from '@/components/collabboard/CommentPost';
+import { handleSafeCommentLinkClick } from '@/components/collabboard/commentLinkSafety';
 import TextStylePopup from '@/components/collabboard/editors/TextStylePopup';
 import { nextTextAlign } from '@/components/collabboard/editors/textAlignCycle';
 import { resolveCaptionStyle, resolvePadletTitleStyle } from '@/lib/domain/canvas/captionStyle';
@@ -1303,13 +1304,16 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                                   />
                                 ) : (
                                   <div
-                                    className={`text-xs text-gray-600 mt-0.5 whitespace-pre-wrap break-words ${c.isStrikethrough ? 'line-through' : ''}`}
+                                    className={`text-xs text-gray-600 mt-0.5 whitespace-pre-wrap break-words [&_a]:text-blue-500 [&_a]:underline [&_a]:cursor-pointer ${c.isStrikethrough ? 'line-through' : ''}`}
                                     style={{
                                       color: c.textColor || c.color,
                                       backgroundColor: c.backgroundColor || undefined,
                                     }}
                                     onMouseDown={(e) => e.stopPropagation()}
-                                    onClick={(e) => e.stopPropagation()}
+                                    onClick={(e) => {
+                                      if (handleSafeCommentLinkClick(e)) return;
+                                      e.stopPropagation();
+                                    }}
                                     onDoubleClick={(e) => {
                                       e.stopPropagation();
                                       startEdit();
@@ -2303,13 +2307,16 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                                   />
                                 ) : (
                                   <div
-                                    className={`text-xs text-gray-600 mt-0.5 whitespace-pre-wrap break-words ${c.isStrikethrough ? 'line-through' : ''}`}
+                                    className={`text-xs text-gray-600 mt-0.5 whitespace-pre-wrap break-words [&_a]:text-blue-500 [&_a]:underline [&_a]:cursor-pointer ${c.isStrikethrough ? 'line-through' : ''}`}
                                     style={{
                                       color: c.textColor || c.color,
                                       backgroundColor: c.backgroundColor || undefined,
                                     }}
                                     onMouseDown={(e) => e.stopPropagation()}
-                                    onClick={(e) => e.stopPropagation()}
+                                    onClick={(e) => {
+                                      if (handleSafeCommentLinkClick(e)) return;
+                                      e.stopPropagation();
+                                    }}
                                     onDoubleClick={(e) => {
                                       e.stopPropagation();
                                       startEdit();
@@ -2678,13 +2685,16 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                                     />
                                   ) : (
                                     <div
-                                      className={`text-xs text-gray-600 mt-0.5 whitespace-pre-wrap break-words ${comment.isStrikethrough ? 'line-through' : ''}`}
+                                      className={`text-xs text-gray-600 mt-0.5 whitespace-pre-wrap break-words [&_a]:text-blue-500 [&_a]:underline [&_a]:cursor-pointer ${comment.isStrikethrough ? 'line-through' : ''}`}
                                       style={{
                                         color: comment.textColor || comment.color,
                                         backgroundColor: comment.backgroundColor || undefined,
                                       }}
                                       onMouseDown={(e) => e.stopPropagation()}
-                                      onClick={(e) => e.stopPropagation()}
+                                      onClick={(e) => {
+                                        if (handleSafeCommentLinkClick(e)) return;
+                                        e.stopPropagation();
+                                      }}
                                       onDoubleClick={(e) => {
                                         e.stopPropagation();
                                         startEdit();
@@ -6340,10 +6350,13 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                                   />
                                 ) : (
                                   <div
-                                    className={`text-xs text-gray-600 mt-0.5 whitespace-pre-wrap break-words ${c.isStrikethrough ? 'line-through' : ''}`}
+                                    className={`text-xs text-gray-600 mt-0.5 whitespace-pre-wrap break-words [&_a]:text-blue-500 [&_a]:underline [&_a]:cursor-pointer ${c.isStrikethrough ? 'line-through' : ''}`}
                                     style={{ color: c.textColor || c.color, backgroundColor: c.backgroundColor || undefined }}
                                     onMouseDown={(e) => e.stopPropagation()}
-                                    onClick={(e) => e.stopPropagation()}
+                                    onClick={(e) => {
+                                      if (handleSafeCommentLinkClick(e)) return;
+                                      e.stopPropagation();
+                                    }}
                                     onDoubleClick={(e) => { e.stopPropagation(); startEdit(); }}
                                     dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(c.text) }}
                                   />
@@ -6811,10 +6824,13 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                                   />
                                 ) : (
                                   <div
-                                    className={`text-xs text-gray-600 mt-0.5 whitespace-pre-wrap break-words ${c.isStrikethrough ? 'line-through' : ''}`}
+                                    className={`text-xs text-gray-600 mt-0.5 whitespace-pre-wrap break-words [&_a]:text-blue-500 [&_a]:underline [&_a]:cursor-pointer ${c.isStrikethrough ? 'line-through' : ''}`}
                                     style={{ color: c.textColor || c.color, backgroundColor: c.backgroundColor || undefined }}
                                     onMouseDown={(e) => e.stopPropagation()}
-                                    onClick={(e) => e.stopPropagation()}
+                                    onClick={(e) => {
+                                      if (handleSafeCommentLinkClick(e)) return;
+                                      e.stopPropagation();
+                                    }}
                                     onDoubleClick={(e) => { e.stopPropagation(); startEdit(); }}
                                     dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(c.text) }}
                                   />

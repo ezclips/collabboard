@@ -5,6 +5,7 @@ import DOMPurify from 'dompurify';
 import { Edit2, MessageSquare, Palette, Send, Strikethrough, Trash2 } from 'lucide-react';
 import TextStylePopup from './editors/TextStylePopup';
 import { contrastIconColor } from './shells/CardShell';
+import { handleSafeCommentLinkClick } from './commentLinkSafety';
 import { getMeaningfulTitle } from '@/lib/infra/collabboard/postTitle';
 
 interface CommentData {
@@ -393,13 +394,9 @@ export default function CommentPost({
                                                     e.stopPropagation();
                                                 }}
                                                 onClick={(e) => {
-                                                    // Check if clicked on a link - let it work
-                                                    const target = e.target as HTMLElement;
-                                                    if (target.tagName === 'A') {
-                                                        e.stopPropagation();
-                                                        // Let the link work normally
-                                                        return;
-                                                    }
+                                                    // Clicked on a link -- open it safely instead of
+                                                    // letting the browser navigate away same-tab.
+                                                    if (handleSafeCommentLinkClick(e)) return;
                                                     // Check if user is selecting text (has selection)
                                                     const selection = window.getSelection();
                                                     if (selection && selection.toString().length > 0) {

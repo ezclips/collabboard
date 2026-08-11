@@ -388,6 +388,13 @@ function SortableChildItem({
                                 const filtered = existingComments.filter((c: any) => c.id !== commentId);
                                 onUpdateChildComments(child.id, filtered);
                             }}
+                            onCommentColor={(commentId, textColor, backgroundColor) => {
+                                const existingComments = child.metadata?.comments || [];
+                                const updated = existingComments.map((c: any) =>
+                                    c.id === commentId ? { ...c, textColor, backgroundColor } : c
+                                );
+                                onUpdateChildComments(child.id, updated);
+                            }}
                             comments={child.metadata?.comments || []}
                             currentUserId={currentUserId}
                             currentUserName={currentUserName}

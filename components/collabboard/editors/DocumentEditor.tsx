@@ -13,7 +13,7 @@ import { contrastIconColor } from '../shells/CardShell';
 import { toEditorHtml, fromEditorHtml } from '@/lib/domain/canvas/documentContentAdapter';
 import type { SaveCardData, SaveCardResult } from '@/hooks/canvas/usePadletSave';
 
-type Comment152 = { id: string; text: string; userId: string; userName: string; timestamp: number };
+type Comment152 = { id: string; text: string; userId: string; userName: string; timestamp: number; textColor?: string; backgroundColor?: string };
 
 // Same palette Note's own Card Color picker uses (NoteEditor.tsx) -- kept as
 // a local copy, matching this codebase's existing convention of each editor
@@ -274,6 +274,22 @@ export default function DocumentEditor({
     setActiveThread({ ...activeThread, comments: nextComments });
   };
 
+  // Per-comment text/highlight color -- distinct from any text-span
+  // highlight color; persisted into the same commentThread mark payload as
+  // handleAddComment above so it survives alongside the rest of the thread.
+  const handleCommentColor = (commentId: string, textColor?: string, backgroundColor?: string) => {
+    if (!editor || !activeThread || !savedSelection) return;
+    const nextComments = activeThread.comments.map((comment) =>
+      comment.id === commentId ? { ...comment, textColor, backgroundColor } : comment
+    );
+    const lastComment = nextComments[nextComments.length - 1];
+    editor.chain().focus().setTextSelection(savedSelection).setComment({
+      commentId: activeThread.id, commentText: lastComment?.text || '', commentThread: JSON.stringify(nextComments),
+      userId: lastComment?.userId, userName: lastComment?.userName, timestamp: lastComment?.timestamp,
+    }).run();
+    setActiveThread({ ...activeThread, comments: nextComments });
+  };
+
   if (!isOpen || !editor) return null;
 
   const toolbarProps = {
@@ -418,6 +434,7 @@ export default function DocumentEditor({
                   isOpen={panels.open.comment}
                   onOpenChange={(open) => (open ? panels.openPanel('comment') : panels.closePanel('comment'))}
                   onSubmit={handleAddComment}
+                  onCommentColor={handleCommentColor}
                   comments={activeThread?.comments || []}
                   currentUserId={currentUserId}
                   currentUserName={currentUserName}

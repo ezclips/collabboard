@@ -382,6 +382,13 @@ export default function RowColumnContainerCard({
                             );
                             onUpdateChildComments(child.id, updated, { field: 'comments' });
                           }}
+                          onColorChange={(commentId, textColor, backgroundColor) => {
+                            const existingComments = (child.metadata as any)?.comments || [];
+                            const updated = existingComments.map((c: any) =>
+                              c.id === commentId ? { ...c, textColor, backgroundColor } : c
+                            );
+                            onUpdateChildComments(child.id, updated, { field: 'comments' });
+                          }}
                         />
                       </div>
                     );
@@ -492,6 +499,12 @@ export default function RowColumnContainerCard({
                               onToggleStrikethrough={(commentId) => {
                                 const updated = childDetachedComments.map((c: any) =>
                                   c.id === commentId ? { ...c, isStrikethrough: !c.isStrikethrough } : c
+                                );
+                                onUpdateChildComments(child.id, updated, { field: 'detachedComments' });
+                              }}
+                              onColorChange={(commentId, textColor, backgroundColor) => {
+                                const updated = childDetachedComments.map((c: any) =>
+                                  c.id === commentId ? { ...c, textColor, backgroundColor } : c
                                 );
                                 onUpdateChildComments(child.id, updated, { field: 'detachedComments' });
                               }}

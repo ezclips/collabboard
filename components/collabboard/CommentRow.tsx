@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import DOMPurify from 'dompurify';
 import { Palette, Strikethrough, Trash2 } from 'lucide-react';
 import { useEditor, EditorContent } from '@tiptap/react';
@@ -8,6 +9,9 @@ import StarterKit from '@tiptap/starter-kit';
 import { Color } from '@tiptap/extension-color';
 import { TextStyle as TipTapTextStyle } from '@tiptap/extension-text-style';
 import { Highlight } from '@tiptap/extension-highlight';
+import TextStylePopup from './editors/TextStylePopup';
+import { useAnchoredPopover, rectFromElement, preventPopoverFocusLoss, type AnchorRect } from './editors/useAnchoredPopover';
+import { handleSafeCommentLinkClick } from './commentLinkSafety';
 
 interface CommentData {
   id: string;
@@ -33,8 +37,9 @@ interface CommentRowProps {
   onCancelEdit: () => void;
   onToggleStrikethrough: () => void;
   onDelete: () => void;
-  onOpenColorPicker?: () => void;
-  showColorButton?: boolean;
+  // Per-comment text/highlight color. Replaces the old onOpenColorPicker
+  // stub (which just cleared the color) with a real inline picker.
+  onColorChange?: (commentId: string, textColor?: string, backgroundColor?: string) => void;
 }
 
 export default function CommentRow({
@@ -48,12 +53,14 @@ export default function CommentRow({
   onCancelEdit,
   onToggleStrikethrough,
   onDelete,
-  onOpenColorPicker,
-  showColorButton = false,
+  onColorChange,
 }: CommentRowProps) {
   const [localEditText, setLocalEditText] = useState('');
   const [shouldSelectText, setShouldSelectText] = useState(false);
   const editEditorRef = useRef<ReturnType<typeof useEditor> | null>(null);
+  const [colorPopupOpen, setColorPopupOpen] = useState(false);
+  const [colorTriggerRect, setColorTriggerRect] = useState<AnchorRect | null>(null);
+  const { popoverRef: colorPopoverRef, position: colorPosition } = useAnchoredPopover(colorPopupOpen, colorTriggerRect);
 
   // TipTap editor for editing
   const editEditor = useEditor({
@@ -97,6 +104,17 @@ export default function CommentRow({
       return () => clearTimeout(timer);
     }
   }, [shouldSelectText, isEditing, editEditor]);
+
+  // Close the color popup if editing ends without it (save/cancel), so it
+  // doesn't linger orphaned pointing at a row that's no longer editable.
+  useEffect(() => {
+    if (!isEditing) setColorPopupOpen(false);
+  }, [isEditing]);
+
+  const refocusEditor = () => {
+    if (!editEditor || editEditor.isDestroyed) return;
+    editEditor.commands.focus('end');
+  };
 
   const getTimeAgo = (timestamp: number) => {
     const now = Date.now();
@@ -165,9 +183,18 @@ export default function CommentRow({
         {isEditing ? (
           <div
             className="relative"
+            style={{
+              color: comment.textColor || comment.color || undefined,
+              backgroundColor: comment.backgroundColor || undefined,
+            }}
             onMouseDown={(e) => e.stopPropagation()}
             onPointerDown={(e) => e.stopPropagation()}
             onBlur={(e) => {
+              // The color popup renders outside this wrapper (portaled to
+              // document.body) and its hex input auto-steals focus on
+              // interaction -- that's a genuine blur, but not the user
+              // clicking away, so don't save/exit-edit for it.
+              if (colorPopupOpen) return;
               if (!e.currentTarget.contains(e.relatedTarget as Node)) {
                 handleSaveEdit();
               }
@@ -181,11 +208,14 @@ export default function CommentRow({
           </div>
         ) : (
           <div
-            className={`text-xs text-gray-600 whitespace-pre-wrap break-words leading-relaxed text-left ${comment.isStrikethrough ? 'line-through opacity-60' : ''
+            className={`text-xs text-gray-600 whitespace-pre-wrap break-words leading-relaxed text-left [&_a]:text-blue-500 [&_a]:underline [&_a]:cursor-pointer ${comment.isStrikethrough ? 'line-through opacity-60' : ''
               }`}
             style={{
               color: comment.textColor || comment.color,
               backgroundColor: comment.backgroundColor || undefined,
+            }}
+            onClick={(e) => {
+              if (handleSafeCommentLinkClick(e)) return;
             }}
             dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(comment.text) }}
           />
@@ -196,15 +226,22 @@ export default function CommentRow({
       <div className="flex flex-col gap-0.5 w-5 shrink-0">
         {/* Buttons only visible when active or hovering */}
         <div className={`flex flex-col gap-0.5 ${isActive ? 'visible' : 'invisible group-hover/row:visible'}`}>
-          {isEditing && showColorButton ? (
+          {isEditing && onColorChange ? (
             <button
               onMouseDown={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
               }}
               onClick={(e) => {
+                e.preventDefault();
                 e.stopPropagation();
-                onOpenColorPicker?.();
+                if (colorPopupOpen) {
+                  setColorPopupOpen(false);
+                  refocusEditor();
+                } else {
+                  setColorTriggerRect(rectFromElement(e.currentTarget));
+                  setColorPopupOpen(true);
+                }
               }}
               className="p-0.5 rounded transition-colors text-gray-400 hover:text-blue-500 hover:bg-blue-50"
               title="Color"
@@ -255,6 +292,41 @@ export default function CommentRow({
           </button>
         </div>
       </div>
+
+      {colorPopupOpen && onColorChange && createPortal(
+        <div
+          ref={colorPopoverRef}
+          className="fixed z-[1200] bg-white rounded-lg shadow-xl border border-gray-200 p-3 min-w-[240px]"
+          style={{
+            left: colorPosition?.left ?? -9999,
+            top: colorPosition?.top ?? -9999,
+            // opacity, not visibility: a visibility:hidden subtree is not
+            // focusable, which would break click-to-focus on the hex input.
+            opacity: colorPosition ? 1 : 0,
+            pointerEvents: colorPosition ? 'auto' : 'none',
+          }}
+          onClick={(e) => e.stopPropagation()}
+          onMouseDown={preventPopoverFocusLoss}
+        >
+          <TextStylePopup
+            isOpen={true}
+            onOpenChange={(open) => {
+              if (!open) {
+                setColorPopupOpen(false);
+                refocusEditor();
+              }
+            }}
+            onSelectHeading={() => {}}
+            hideHeadingSelect={true}
+            onSelectColor={(color) => onColorChange(comment.id, color, comment.backgroundColor)}
+            onSelectHighlight={(color) => onColorChange(comment.id, comment.textColor, color === 'transparent' ? undefined : color)}
+            currentHeading="normal"
+            currentColor={comment.textColor || comment.color}
+            currentHighlight={comment.backgroundColor}
+          />
+        </div>,
+        document.body
+      )}
     </div>
   );
 }
