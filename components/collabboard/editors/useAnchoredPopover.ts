@@ -47,6 +47,26 @@ export function computePopoverPlacement(
     return { left, top, placement };
 }
 
+// Builds the virtual anchor for popovers that must clear an ENTIRE panel
+// rather than just the small button that opened them: vertically aligned to
+// the action button, horizontally spanning the whole panel.
+//
+// The spanning is the load-bearing part. An anchor pinned as a sliver at
+// panel.right positions correctly only while the popover opens rightwards --
+// computePopoverPlacement's left flip subtracts from the anchor's LEFT, which
+// for such a sliver sits at the panel's right edge, landing the popover back
+// on top of the panel. Spanning the panel makes 'right' resolve to
+// panel.right + gap and 'left' resolve to panel.left - gap - popoverWidth, so
+// both placements clear the panel's outer edges.
+export function panelSpanAnchorRect(panel: AnchorRect, action: AnchorRect): AnchorRect {
+    return {
+        top: action.top,
+        left: panel.left,
+        width: panel.width,
+        height: action.height,
+    };
+}
+
 // Measures a popover against a trigger rect (captured via
 // getBoundingClientRect at click time -- robust to any canvas zoom/pan
 // transform ancestors, unlike CSS-relative positioning) and recomputes on

@@ -11,7 +11,7 @@ import { TextStyle as TipTapTextStyle } from '@tiptap/extension-text-style';
 import { Highlight } from '@tiptap/extension-highlight';
 import Link from '@tiptap/extension-link';
 import TextStylePopup from './TextStylePopup';
-import { useAnchoredPopover, rectFromElement, preventPopoverFocusLoss, type AnchorRect } from './useAnchoredPopover';
+import { useAnchoredPopover, rectFromElement, preventPopoverFocusLoss, panelSpanAnchorRect, type AnchorRect } from './useAnchoredPopover';
 import { handleSafeCommentLinkClick } from '../commentLinkSafety';
 
 // Same 48-color badge palette every other post's Comments panel (Note,
@@ -218,12 +218,7 @@ export default function CommentPopup({
         const panel = panelRef.current?.getBoundingClientRect();
         const action = anchorRef.current?.getBoundingClientRect();
         if (!panel || !action) return null;
-        return {
-            top: action.top,
-            left: panel.right - action.width,
-            width: action.width,
-            height: action.height,
-        };
+        return panelSpanAnchorRect(panel, action);
     }, []);
     const colorPanelAnchorRect = useCallback(() => panelEdgeAnchorRect(colorAnchorRef), [panelEdgeAnchorRect]);
     const linkPanelAnchorRect = useCallback(() => panelEdgeAnchorRect(linkAnchorRef), [panelEdgeAnchorRect]);
