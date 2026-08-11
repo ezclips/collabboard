@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import DOMPurify from 'dompurify';
 import { createPortal } from 'react-dom';
-import { Link as LinkIcon, Palette, Strikethrough, Trash2, X } from 'lucide-react';
+import { Link as LinkIcon, Palette, Send, Strikethrough, Trash2, X } from 'lucide-react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import { Color } from '@tiptap/extension-color';
@@ -1003,24 +1003,30 @@ export default function CommentPopup({
 
             {/* Add comment input at bottom */}
             {!hideComposer && (
-                <div className="mt-3 pt-3 border-t border-gray-100">
+                <div className="mt-3 pt-3 border-t border-gray-100 flex items-center gap-2">
                     <input
                         ref={inputRef}
                         type="text"
                         value={newCommentText}
                         onChange={(e) => setNewCommentText(e.target.value)}
                         onKeyDown={(e) => {
-                            if (e.key === 'Enter' && e.currentTarget.value.trim()) {
+                            if (e.key === 'Enter') {
                                 e.preventDefault();
-                                const text = e.currentTarget.value.trim();
-                                onSubmit(text);
-                                setNewCommentText('');
-                                e.currentTarget.value = '';
+                                handleSubmit();
                             }
                         }}
-                        className="w-full text-xs px-3 py-2 rounded-lg border border-gray-200 focus:border-blue-400 focus:ring-1 focus:ring-blue-100 outline-none"
+                        className="min-w-0 flex-1 text-xs px-3 py-2 rounded-lg border border-gray-200 focus:border-blue-400 focus:ring-1 focus:ring-blue-100 outline-none"
                         placeholder="Add a comment..."
                     />
+                    <button
+                        type="button"
+                        aria-label="Send"
+                        title="Send"
+                        onClick={handleSubmit}
+                        className="shrink-0 w-8 h-8 inline-flex items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:text-blue-600 hover:border-blue-300 transition-colors"
+                    >
+                        <Send className="w-4 h-4" />
+                    </button>
                 </div>
             )}
         </div>

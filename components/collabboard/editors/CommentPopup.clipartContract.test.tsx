@@ -76,6 +76,12 @@ function pressEnter(el: Element) {
   });
 }
 
+function clickSend(root: ParentNode) {
+  const send = root.querySelector('button[aria-label="Send"]') as HTMLButtonElement | null;
+  expect(send).not.toBeNull();
+  click(send!);
+}
+
 const baseComment: CommentData = {
   id: 'c1',
   text: 'Hello <a href="https://example.com">world</a>',
@@ -138,6 +144,47 @@ describe('CommentPopup -- Clipart contract: ADD COMMENT keeps the panel open', (
     // The panel must still be in the DOM (not unmounted) and show the new comment.
     expect(container.querySelector('input[placeholder="Add a comment..."]')).not.toBeNull();
     expect(container.textContent).toContain('a real new comment');
+  });
+
+  it('provides an accessible Send button beside the composer and uses the same submit behavior as Enter', () => {
+    const onOpenChangeSpy = vi.fn();
+    const { container } = mount(<ClipartHarness onOpenChangeSpy={onOpenChangeSpy} />);
+    const composer = container.querySelector('input[placeholder="Add a comment..."]') as HTMLInputElement;
+    const send = container.querySelector('button[aria-label="Send"]') as HTMLButtonElement;
+
+    expect(send).not.toBeNull();
+    expect(send.type).toBe('button');
+    expect(send.title).toBe('Send');
+    expect(send.parentElement?.className).toContain('flex');
+    expect(send.parentElement?.className).toContain('gap-2');
+    expect(composer.className).toContain('flex-1');
+    expect(composer.className).toContain('min-w-0');
+
+    typeInto(composer, 'sent by button');
+    clickSend(container);
+    expect(container.textContent).toContain('sent by button');
+    expect(composer.value).toBe('');
+    expect(onOpenChangeSpy).not.toHaveBeenCalledWith(false);
+
+    typeInto(composer, 'sent by enter');
+    pressEnter(composer);
+    expect(container.textContent).toContain('sent by enter');
+    expect(composer.value).toBe('');
+    expect(onOpenChangeSpy).not.toHaveBeenCalledWith(false);
+  });
+
+  it('does not submit whitespace through either Send or Enter', () => {
+    const { container } = mount(<ClipartHarness />);
+    const composer = container.querySelector('input[placeholder="Add a comment..."]') as HTMLInputElement;
+
+    typeInto(composer, '   ');
+    clickSend(container);
+    expect(container.textContent).not.toContain('   ');
+    expect(composer.value).toBe('   ');
+
+    pressEnter(composer);
+    expect(composer.value).toBe('   ');
+    expect(container.querySelector('input[placeholder="Add a comment..."]')).not.toBeNull();
   });
 });
 
