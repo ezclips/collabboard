@@ -746,7 +746,10 @@ export default function CommentPopup({
                         const isActive = activeCommentId === comment.id;
                         const isColorOpen = commentColorPopupId === comment.id;
                         const isLinkOpen = linkPopoverCommentId === comment.id;
-                        const hasReadOnlySelection = enableCanonicalSelectionStyling && readOnlySelection?.commentId === comment.id;
+                        const hasReadOnlySelection = enableCanonicalSelectionStyling && (
+                            readOnlySelection?.commentId === comment.id ||
+                            (isLinkOpen && savedLinkEditorRef.current !== null)
+                        );
                         return (
                             <div
                                 key={comment.id}

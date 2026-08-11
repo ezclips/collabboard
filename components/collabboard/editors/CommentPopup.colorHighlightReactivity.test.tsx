@@ -508,7 +508,13 @@ describe('PATCH 8G -- read-only selection styling', () => {
 
     expect(btn(row, 'Link')).not.toBeNull();
     click(btn(row, 'Link')!);
+    act(() => {
+      window.getSelection()?.removeAllRanges();
+      document.dispatchEvent(new Event('selectionchange'));
+    });
+    expect(btn(row, 'Link')).not.toBeNull();
     const linkInput = document.body.querySelector('input[type="url"]') as HTMLInputElement;
+    expect(linkInput).not.toBeNull();
     act(() => {
       const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
       setter?.call(linkInput, 'example.com');
