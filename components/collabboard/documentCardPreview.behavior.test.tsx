@@ -228,18 +228,19 @@ describe('follow-up correction: Document Freeform card has square corners and a 
     expect(src).toContain("'ring-2 ring-blue-500 rounded-lg shadow-xl'");
   });
 
-  it('the Card Comments popup (reachable for both Clipart and Document card posts) has square corners and a real pencil icon, not the old rounded-xl box or the PenTool smudge', () => {
+  it('the Card Comments popup (reachable for both Clipart and Document card posts) has square corners and a real pencil icon, not the old rounded-xl box or the PenTool smudge -- PATCH 8E: this shell now delegates entirely to the canonical CommentPopup component (its own square-corner box and pencil icon are asserted below, in the "shared CommentPopup" test), so Site B\'s own block in FreeformPadletCards.tsx no longer carries this chrome locally', () => {
     const src = fs.readFileSync('components/collabboard/canvas/ui/FreeformPadletCards.tsx', 'utf8');
-    const start = src.indexOf('{/* Card Comments Popup - Right side */}');
+    const start = src.indexOf('{/* Card Comments Popup - Right side.');
     const end = src.indexOf('{/* Render Standalone Comment Marker */}');
     expect(start).toBeGreaterThan(-1);
     expect(end).toBeGreaterThan(start);
     const block = src.slice(start, end);
+    // No local box chrome (rounded or square) or pencil icon left to assert
+    // on here -- Site B renders through CommentPopup now.
     expect(block).not.toContain('rounded-xl shadow-2xl border border-gray-200 p-4 min-w-[280px] max-w-[320px]');
-    expect(block).toContain('shadow-2xl border border-gray-200 p-4 min-w-[280px] max-w-[320px]');
     expect(block).not.toContain('<PenTool');
-    expect(block).toContain('title="Edit"');
-    expect(block).toContain('<Edit2 className="w-3 h-3" />');
+    expect(block).not.toContain('<Edit2');
+    expect(block).toContain('<CommentPopup');
   });
 
   it('the shared CommentPopup (rendered via OverlayLayer for canvas comment markers on Note/Document/Clipart alike) has square corners, not rounded-xl', () => {

@@ -2,7 +2,8 @@
 
 ## Status
 
-FROZEN, behavior unchanged throughout PATCHES 8A-8C.
+FROZEN, behavior unchanged throughout PATCHES 8A-8C, with one deliberate,
+labeled behavior change in PATCH 8E (Site B only).
 
 - **SITE A: FROZEN -- shared implementation pilot completed (PATCH 8C).**
   Its inline row/action-rail JSX is gone from `FreeformPadletCards.tsx`;
@@ -12,8 +13,26 @@ FROZEN, behavior unchanged throughout PATCHES 8A-8C.
   `components/collabboard/comments/siteA.pilotParity.test.tsx`. No
   `COMMENT UI CONTRACT UNLOCK` was used -- this is implementation
   consolidation, not a behavior change.
-- Sites B, C, D, E, F: unchanged, still inline, exactly as PATCH 8A froze
-  them below.
+- **SITE B: COMMENT UI CONTRACT UNLOCK -- CLIPART SITE B (PATCH 8E).**
+  Its old, frozen-as-of-8A shared-action-rail behavior (documented in the
+  "v1 frozen behavior" section below, left intact as historical record) is
+  **deliberately superseded**. Site B's inline row/action-rail JSX is gone
+  from `FreeformPadletCards.tsx`; it now renders through
+  `components/collabboard/editors/CommentPopup.tsx` -- the exact same
+  canonical component the Clipart edit modal (`ClipartCardDraftModal.tsx`)
+  already used, closing the two-Clipart-comment-UX duality PATCH 8D's audit
+  surfaced. See "PATCH 8E -- Clipart entry-point unification" below for the
+  full before/after and the specific frozen items this unlock changes.
+- Sites C, D, F: unchanged, still inline, exactly as PATCH 8A froze them
+  below.
+- **Site E is dead code**, confirmed by PATCH 8E's trace: `cardToolbarPadletId`
+  is never set to a non-null value anywhere in the codebase (`grep -rn
+  "setCardToolbarPadletId(" components/ app/` finds only `null` calls), so
+  `activeCardToolbarPadlet` (`cardToolbarPadletId ? padlets.find(...) : null`)
+  is always `null` and Site E's entire gated block
+  (`{cardToolbarPadletId && activeCardToolbarPadlet && (...)}`) never
+  renders. It is characterized below exactly as PATCH 8A found it (frozen
+  source, not touched by 8E), not because a user can reach it today.
 
 Established by PATCH 8A, against baseline commit `8a19325c9fbe163e5d9760fc558c74dace39b98d`
 (itself created by committing the color/link feature work that was sitting
@@ -256,3 +275,137 @@ mounted BEFORE/AFTER contract proof, and the "PATCH 8C -- Site A migration
 wiring" block in the characterization suite for the source-level migration
 proof. **No `COMMENT UI CONTRACT UNLOCK` was used or required** -- 8B/8C are
 implementation consolidation, not a behavior change.
+
+---
+
+## PATCH 8E -- Clipart entry-point unification (Site B, `COMMENT UI CONTRACT UNLOCK`)
+
+**Problem.** PATCH 8D's January-recovery audit found the SAME Clipart post
+had two different comment experiences: the edit modal
+(`ClipartCardDraftModal.tsx` -> `CommentPopup.tsx`, per-comment
+Edit/Color/Link/Strikethrough/Delete) and the on-canvas badge (Site B,
+frozen since 8A: a single shared action column, no Color, no Link). Product
+decision: the modal's richer per-comment design is canonical; the on-canvas
+badge must be unified onto it, not the other way around, and not onto Site
+A's `CommentList`/`FreeformCommentRow` foundation either (that foundation's
+shared-action-rail shape is exactly what the product decision rejects for
+Clipart).
+
+**Trace (before changing anything).** Both entry points were read in full
+before any edit:
+
+- Canonical: `ClipartCardDraftModal.tsx`'s `<CommentPopup isOpen
+  onOpenChange={...} onSubmit={...} onEditComment={...}
+  onRemoveComment={...} onToggleCommentStrikethrough={...}
+  onCommentColor={...} comments={detachedComments}
+  currentUserId={draftCommentUserId} currentUserName={draftCommentUserName}
+  />`, each callback reading/writing `previewPadlet.metadata.detachedComments`
+  through the modal's own local `updateMetadata`/`onChange` (the modal owns
+  no network call itself; persistence happens wherever the caller's
+  `onChange` eventually lands).
+- Old Site B (`FreeformPadletCards.tsx`, `padlet.type === 'card'` block,
+  badge `onClick` -> `cardCommentPopupPadletId === padlet.id &&
+  !cardToolbarPadletId`): a duplicated inline row list with its own
+  Edit2/Palette(absent)/Strikethrough/Delete buttons, a plain `<textarea>`
+  editor (no TipTap, no Link), and its own gated `TextStylePopup` color
+  popup, persisting via `updatePadletMetadata(padlet.id, {
+  detachedComments: nextComments })` (the real async Supabase write) plus an
+  optimistic `cardCommentList` local-mirror `setState` -- the same
+  `cardComment*`/`activeCardComment` state family Sites A, D, E, F all read
+  from a single `useCanvasEditor()` context instance.
+
+**Callback/storage mapping.**
+
+| Canonical (`CommentPopup` prop) | Old Site B (inline) | New Site B | Same semantics? |
+|---|---|---|---|
+| `onSubmit` | inline `<input>` Enter-key handler appending to `detachedComments` | `CommentPopup`'s own composer, same `onSubmit` prop | Yes -- same field, same append shape |
+| `onEditComment(id, html)` | `<textarea>` blur/Enter committing plain trimmed text | `onEditComment(id, html)` via TipTap `getHTML()` | Storage field same; **content is now rich HTML, not plain text** (labeled change, see below) |
+| `onRemoveComment(id)` | Delete button, filter by `activeCardComment.id` | Delete button, filter by exact row `comment.id` | Yes, and now targets the clicked row directly instead of indirecting through a separately-tracked "active" id |
+| `onToggleCommentStrikethrough(id)` | Strikethrough button on shared action column | Strikethrough button per row | Yes, same `isStrikethrough` boolean field |
+| `onCommentColor(id, textColor, bg)` | Two `onSelectColor`/`onSelectHighlight` handlers writing `textColor` only (no legacy `color` mirror) | `onCommentColor` writing `{textColor, backgroundColor}` together | **Shape changed** (see below) |
+| *(none -- Link did not exist)* | -- | `openLinkPopover`/`handleApplyLink` (TipTap Link mark) | **New capability** |
+
+**Reuse, not copy.** `FreeformPadletCards.tsx` now imports and renders
+`CommentPopup` directly (`import CommentPopup from
+'@/components/collabboard/editors/CommentPopup';`) -- the identical
+component instance type `ClipartCardDraftModal.tsx` renders, not a fork, not
+a new `ClipartCanvasCommentPopup`/`ClipartCommentRow2`. `CommentPopup.tsx`
+itself was **not modified**: its `isOpen`/`onOpenChange` + per-comment
+callback props already worked for a non-modal caller with no changes
+needed, so no extraction into a smaller shared sub-component was necessary
+(the "if the whole component owns modal-specific chrome" branch in the
+patch spec did not apply -- `CommentPopup` already renders bare when given
+no `position` prop, which is exactly what a caller-positioned canvas popup
+needs).
+
+**Storage: unchanged.** Same `metadata.detachedComments` field, same
+comment record shape (`id`/`text`/`userId`/`userName`/`timestamp`/
+`textColor`/`backgroundColor`/`isStrikethrough`), same
+`updatePadletMetadata` + optimistic `cardCommentList` mirror pattern PATCH
+8C already established for Site A. No schema migration, no ID/timestamp
+changes, no dropped fields.
+
+**Explicitly unlocked items (frozen v1 behavior this patch deliberately
+changes, Site B only):**
+
+- **Edit icon.** Was `Edit2` (site B's own frozen drift item). Now
+  `CommentPopup`'s own hardcoded pencil `<svg>` -- neither `Edit2` nor
+  `PenTool`. Site E (the only site that still shares this post type) is
+  dead code, so this does not reintroduce cross-post-type drift in
+  practice.
+- **Color-write shape.** Was `{ ...comment, textColor: color }` (textColor
+  only, two separate handlers for text vs. highlight color). Now
+  `{ ...comment, textColor, backgroundColor }` written together by
+  `CommentPopup`'s single `onCommentColor` callback -- matching the shape
+  the canonical modal already used, not matching A/C's legacy
+  `{ textColor, color }` mirror shape either (that mirror is a Site
+  A/C-specific historical quirk `CommentList`'s `mirrorLegacyColor: true`
+  config also intentionally preserves only for A; Site B was never part of
+  that mirror and still isn't).
+- **Editing engine.** Was a plain `<textarea>`, plain-text commit. Now
+  TipTap (`useEditor`), HTML commit -- required for Link authoring, and
+  matching what the canonical modal already did.
+- **Link.** Was entirely absent (no button, no extension). Now full Link
+  authoring/rendering/safe-click-open, identical to the canonical modal,
+  because it now IS the canonical modal's own component.
+- **Color popup gating.** Old Site B rendered its own `TextStylePopup`,
+  explicitly gated off while `cardToolbarPadletId` was set (a gate that,
+  per the dead-code finding above, could never actually fire). New Site B
+  has no such gate at all -- `CommentPopup`'s per-row color popover is a
+  viewport-anchored portal (`useAnchoredPopover`), independent of
+  `cardToolbarPadletId`/`imageToolbarPadletId` entirely.
+- **Row selection state.** Old Site B wrote the shared
+  `activeCardCommentId`/`editingCardCommentId`/`editingCardCommentText`
+  context state on every open/select/edit (the same family Sites A, D, E, F
+  read). New Site B does not touch these at all -- `CommentPopup` manages
+  its own internal `activeCommentId`/`editingCommentId` state, scoped to
+  itself. This is safe specifically because Site E, the only other
+  consumer of that shared state for the Clipart post type, is confirmed
+  dead code (see Status above): there is no live sibling panel left that
+  could desync from Site B no longer writing that shared state. (This is
+  the inverse of PATCH 8C's reasoning for Site A, where the state HAD to
+  stay lifted/controlled because Site D is real and reachable.)
+- **Badge Color button.** Deliberately left absent, matching Site B's
+  pre-8E state and the canonical modal's own Comments panel (which also
+  does not pass `badgeColor`/`onBadgeColorChange` into `CommentPopup` --
+  its own Badge Color button is separate modal chrome, not part of
+  `CommentPopup` itself). Out of scope for the per-comment-controls duality
+  this patch fixes; the contract already listed Badge Color presence as
+  "already inconsistent," not frozen.
+
+**Not changed:** shell/chrome (Site B's popup is still an absolutely
+positioned canvas overlay, `left-full top-0 ml-3`, not a modal panel); the
+open/close trigger (still the on-canvas comment-count badge, still
+`cardCommentPopupPadletId`); Sites A, C, D, F (untouched); Site E source
+(untouched, still dead).
+
+**Proof.** See `components/collabboard/freeformCommentUIContract.
+characterization.test.tsx`, "PATCH 8E -- Site B migration wiring" (migration
+correctness, storage/callback wiring, each explicitly-unlocked item) and
+"PATCH 8E -- architectural anti-duplication guard" (fails if a second local
+Clipart comment-action implementation is reintroduced). Both entry points'
+shared behavior (Add/Edit/Color/Link/Strikethrough/Delete, real DOM events)
+is additionally covered by the pre-existing
+`components/collabboard/editors/CommentPopup.clipartContract.test.tsx` and
+`CommentPopup.colorAndLink.test.tsx` (unchanged by this patch -- they
+already exercised the exact component Site B now also renders).
