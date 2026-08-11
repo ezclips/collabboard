@@ -211,14 +211,26 @@ export default function CommentPopup({
     const [colorTriggerRect, setColorTriggerRect] = useState<AnchorRect | null>(null);
     const [linkTriggerRect, setLinkTriggerRect] = useState<AnchorRect | null>(null);
     const colorAnchorRef = useRef<Element | null>(null);
+    const panelRef = useRef<HTMLDivElement>(null);
+    const colorPanelAnchorRect = useCallback(() => {
+        const panel = panelRef.current?.getBoundingClientRect();
+        const action = colorAnchorRef.current?.getBoundingClientRect();
+        if (!panel || !action) return null;
+        return {
+            top: action.top,
+            left: panel.right - action.width,
+            width: action.width,
+            height: action.height,
+        };
+    }, []);
     const { popoverRef: colorPopoverRef, position: colorPosition } = useAnchoredPopover(
         !!commentColorPopupId,
         colorTriggerRect,
-        enableCanonicalSelectionStyling ? colorAnchorRef : undefined
+        enableCanonicalSelectionStyling ? colorAnchorRef : undefined,
+        enableCanonicalSelectionStyling ? colorPanelAnchorRect : undefined
     );
     const { popoverRef: linkPopoverRef, position: linkPosition } = useAnchoredPopover(!!linkPopoverCommentId, linkTriggerRect);
     const inputRef = useRef<HTMLInputElement>(null);
-    const panelRef = useRef<HTMLDivElement>(null);
     const scrollContainerRef = useRef<HTMLDivElement>(null);
 
     const setSelection = useCallback((selection: ReadOnlySelection | null) => {

@@ -55,13 +55,14 @@ export function computePopoverPlacement(
 export function useAnchoredPopover(
     isOpen: boolean,
     triggerRect: AnchorRect | null,
-    liveAnchorRef?: RefObject<Element | null>
+    liveAnchorRef?: RefObject<Element | null>,
+    liveAnchorRect?: () => AnchorRect | null
 ) {
     const popoverRef = useRef<HTMLDivElement | null>(null);
     const [position, setPosition] = useState<PopoverPlacement | null>(null);
 
     const recalculate = useCallback(() => {
-        const liveRect = liveAnchorRef?.current?.getBoundingClientRect();
+        const liveRect = liveAnchorRect?.() || liveAnchorRef?.current?.getBoundingClientRect();
         const resolvedRect = liveRect
             ? { top: liveRect.top, left: liveRect.left, width: liveRect.width, height: liveRect.height }
             : triggerRect;
@@ -79,7 +80,7 @@ export function useAnchoredPopover(
                 { width: window.innerWidth, height: window.innerHeight }
             )
         );
-    }, [liveAnchorRef, triggerRect]);
+    }, [liveAnchorRect, liveAnchorRef, triggerRect]);
 
     useLayoutEffect(() => {
         if (!isOpen || !triggerRect) {
@@ -90,7 +91,7 @@ export function useAnchoredPopover(
         window.addEventListener('resize', recalculate);
         window.addEventListener('scroll', recalculate, true);
         let frame = 0;
-        if (liveAnchorRef) {
+        if (liveAnchorRef || liveAnchorRect) {
             const trackAnchor = () => {
                 recalculate();
                 frame = window.requestAnimationFrame(trackAnchor);
@@ -102,7 +103,7 @@ export function useAnchoredPopover(
             window.removeEventListener('scroll', recalculate, true);
             if (frame) window.cancelAnimationFrame(frame);
         };
-    }, [isOpen, triggerRect, liveAnchorRef, recalculate]);
+    }, [isOpen, triggerRect, liveAnchorRect, liveAnchorRef, recalculate]);
 
     return { popoverRef, position };
 }
