@@ -487,4 +487,56 @@ describe('PATCH 8G -- read-only selection styling', () => {
     expect(saved).toContain('color: rgb(250, 82, 82)');
     expect(saved).toContain('background-color: rgb(64, 192, 87)');
   });
+
+  it('keeps Link available and applies Strikethrough only to the selected range', () => {
+    const onEditComment = vi.fn();
+    const { container } = mount(
+      <CommentPopup
+        isOpen
+        onOpenChange={vi.fn()}
+        onSubmit={vi.fn()}
+        onEditComment={onEditComment}
+        onCommentColor={vi.fn()}
+        enableCanonicalSelectionStyling
+        comments={[commentA]}
+        currentUserId="user1"
+        currentUserName="Alice"
+      />
+    );
+    const row = rowWithText(container, 'Hello world');
+    selectText(row.querySelector('[data-comment-readonly-editor]') as HTMLElement, 0, 5);
+
+    expect(btn(row, 'Link')).not.toBeNull();
+    click(btn(row, 'Link')!);
+    const linkInput = document.body.querySelector('input[type="url"]') as HTMLInputElement;
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+      setter?.call(linkInput, 'example.com');
+      linkInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const addButton = Array.from(document.body.querySelectorAll('button')).find((button) => button.textContent === 'Add');
+    expect(addButton).not.toBeUndefined();
+    click(addButton!);
+    expect(onEditComment.mock.calls.at(-1)?.[1]).toContain('<a');
+
+    const strikeMount = mount(
+      <CommentPopup
+        isOpen
+        onOpenChange={vi.fn()}
+        onSubmit={vi.fn()}
+        onEditComment={onEditComment}
+        onCommentColor={vi.fn()}
+        enableCanonicalSelectionStyling
+        comments={[commentA]}
+        currentUserId="user1"
+        currentUserName="Alice"
+      />
+    );
+    const strikeRow = rowWithText(strikeMount.container, 'Hello world');
+    selectText(strikeRow.querySelector('[data-comment-readonly-editor]') as HTMLElement, 6, 11);
+    click(btn(strikeRow, 'Strikethrough')!);
+    const saved = onEditComment.mock.calls.at(-1)?.[1] as string;
+    expect(saved).toContain('<s>world</s>');
+    expect(saved).not.toContain('<s>Hello</s>');
+  });
 });

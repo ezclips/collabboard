@@ -356,13 +356,15 @@ describe('COMMENT UI CONTRACT v1 -- action cluster (order, count, icon identity)
     const clTitles = titlesInOrder(clBlock).filter((t) => ['Color', 'Edit', 'Strikethrough', 'Delete'].includes(t));
     expect(clTitles, 'Site A (CommentList) action order').toEqual(['Color', 'Edit', 'Strikethrough', 'Delete']);
 
-    // Site B's canonical action set -- Edit/Color/Link/Strikethrough/Delete,
+    // Site B's canonical action set -- Edit/Color/Link/Strikethrough/Delete.
+    // Link appears in both edit mode and the selected-range styling mode,
+    // which intentionally produces two source occurrences here.
     // per comment row -- lives in CommentPopup.tsx, checked directly rather
     // than sliced from FreeformPadletCards.tsx (see PATCH 8E section above).
     const popupSrc = readCommentPopup();
     const popupBlock = sliceThrough(popupSrc, 'effectiveComments.map((comment)', 'title="Delete"', '</button>');
     const popupTitles = titlesInOrder(popupBlock).filter((t) => ['Color', 'Link', 'Edit', 'Strikethrough', 'Delete'].includes(t));
-    expect(popupTitles, 'Site B (CommentPopup) action order').toEqual(['Color', 'Link', 'Edit', 'Strikethrough', 'Delete']);
+    expect(popupTitles, 'Site B (CommentPopup) action order').toEqual(['Color', 'Link', 'Link', 'Edit', 'Strikethrough', 'Delete']);
   });
 
   it('remaining inline sites\' (C, D, E, F) action buttons are individually disabled when nothing is active; Site A\'s CommentList also disables all three -- Site B\'s canonical per-row buttons act on their OWN row\'s comment, so a disabled/nothing-active state does not apply (there is no shared "active comment" precondition)', () => {

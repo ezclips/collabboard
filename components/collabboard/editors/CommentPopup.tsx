@@ -422,6 +422,16 @@ export default function CommentPopup({
         setSelection(selection);
     }, [onEditComment, setSelection]);
 
+    const applySelectedStrikethrough = useCallback(() => {
+        const selection = readOnlySelectionRef.current;
+        if (!selection) return;
+        const editor = readOnlyEditorsRef.current.get(selection.commentId);
+        if (!editor || editor.isDestroyed) return;
+        editor.chain().setTextSelection({ from: selection.from, to: selection.to }).toggleStrike().run();
+        onEditComment?.(selection.commentId, editor.getHTML());
+        setSelection(selection);
+    }, [onEditComment, setSelection]);
+
     // Re-focuses the comment editor after closing the color/link popover
     // without applying anything, so a later genuine click-away still fires
     // the blur that commits the edit (the popovers live outside the row's
@@ -433,34 +443,45 @@ export default function CommentPopup({
     }, [editEditor]);
 
     const openLinkPopover = useCallback((commentId: string) => {
-        if (!editEditor || editEditor.isDestroyed) return;
-        const { from, to } = editEditor.state.selection;
+        const readOnlySelection = readOnlySelectionRef.current;
+        const editor = readOnlySelection?.commentId === commentId
+            ? readOnlyEditorsRef.current.get(commentId)
+            : editEditor;
+        if (!editor || editor.isDestroyed) return;
+        const { from, to } = readOnlySelection?.commentId === commentId
+            ? readOnlySelection
+            : editor.state.selection;
         savedLinkSelectionRef.current = { from, to };
-        setLinkUrl(editEditor.getAttributes('link').href || '');
+        setLinkUrl(editor.getAttributes('link').href || '');
         setCommentColorPopupId(null);
         setLinkPopoverCommentId(commentId);
     }, [editEditor]);
 
     const handleApplyLink = useCallback(() => {
-        if (!editEditor || editEditor.isDestroyed || !linkPopoverCommentId) return;
+        if (!linkPopoverCommentId) return;
+        const selectedReadOnly = readOnlySelectionRef.current?.commentId === linkPopoverCommentId
+            ? readOnlyEditorsRef.current.get(linkPopoverCommentId)
+            : null;
+        const editor = selectedReadOnly || editEditor;
+        if (!editor || editor.isDestroyed) return;
         const saved = savedLinkSelectionRef.current;
         const trimmed = linkUrl.trim();
 
         if (trimmed === '') {
-            const chain = editEditor.chain().focus();
+            const chain = editor.chain().focus();
             if (saved) chain.setTextSelection(saved);
             chain.unsetLink().run();
         } else {
             const finalUrl = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
             if (saved && saved.from !== saved.to) {
                 // Text was selected -- link exactly that range.
-                editEditor.chain().focus().setTextSelection(saved).setLink({ href: finalUrl }).run();
+                editor.chain().focus().setTextSelection(saved).setLink({ href: finalUrl }).run();
             } else {
                 // Nothing selected: setLink() would mark an empty range and
                 // silently produce no anchor at all. Insert the URL as linked
                 // text at the cursor instead (what Docs/Notion/Slack do), then
                 // clear the stored mark so typing afterwards isn't linked too.
-                const chain = editEditor.chain().focus();
+                const chain = editor.chain().focus();
                 if (saved) chain.setTextSelection(saved.from);
                 chain
                     .insertContent({
@@ -477,7 +498,7 @@ export default function CommentPopup({
         // Delete, or the panel closing would otherwise discard the link
         // silently. A later real blur still calls handleEditCommit with the
         // same (or further-edited) HTML, which is a harmless no-op re-save.
-        const htmlContent = editEditor.getHTML();
+        const htmlContent = editor.getHTML();
         if (onEditComment) {
             onEditComment(linkPopoverCommentId, htmlContent);
         } else if (onEdit) {
@@ -711,6 +732,7 @@ export default function CommentPopup({
                         const isActive = activeCommentId === comment.id;
                         const isColorOpen = commentColorPopupId === comment.id;
                         const isLinkOpen = linkPopoverCommentId === comment.id;
+                        const hasReadOnlySelection = enableCanonicalSelectionStyling && readOnlySelection?.commentId === comment.id;
                         return (
                             <div
                                 key={comment.id}
@@ -857,28 +879,51 @@ export default function CommentPopup({
                                                     <LinkIcon className="w-3 h-3" />
                                                 </button>
                                             </>
-                                        ) : enableCanonicalSelectionStyling && readOnlySelection?.commentId === comment.id ? (
-                                            <button
-                                                onMouseDown={(event) => {
-                                                    event.preventDefault();
-                                                    event.stopPropagation();
-                                                }}
-                                                onClick={(event) => {
-                                                    event.preventDefault();
-                                                    event.stopPropagation();
-                                                    setLinkPopoverCommentId(null);
-                                                    if (isColorOpen) setCommentColorPopupId(null);
-                                                    else {
-                                                        colorAnchorRef.current = event.currentTarget;
-                                                        setColorTriggerRect(rectFromElement(event.currentTarget));
-                                                        setCommentColorPopupId(comment.id);
-                                                    }
-                                                }}
-                                                className="p-1 rounded transition-colors text-gray-300 hover:text-blue-500"
-                                                title="Color / Text Style"
-                                            >
-                                                <Palette className="w-3 h-3" />
-                                            </button>
+                                        ) : hasReadOnlySelection ? (
+                                            <>
+                                                <button
+                                                    onMouseDown={(event) => {
+                                                        event.preventDefault();
+                                                        event.stopPropagation();
+                                                    }}
+                                                    onClick={(event) => {
+                                                        event.preventDefault();
+                                                        event.stopPropagation();
+                                                        setLinkPopoverCommentId(null);
+                                                        if (isColorOpen) setCommentColorPopupId(null);
+                                                        else {
+                                                            colorAnchorRef.current = event.currentTarget;
+                                                            setColorTriggerRect(rectFromElement(event.currentTarget));
+                                                            setCommentColorPopupId(comment.id);
+                                                        }
+                                                    }}
+                                                    className="p-1 rounded transition-colors text-gray-300 hover:text-blue-500"
+                                                    title="Color / Text Style"
+                                                >
+                                                    <Palette className="w-3 h-3" />
+                                                </button>
+                                                <button
+                                                    onMouseDown={(event) => {
+                                                        event.preventDefault();
+                                                        event.stopPropagation();
+                                                    }}
+                                                    onClick={(event) => {
+                                                        event.preventDefault();
+                                                        event.stopPropagation();
+                                                        if (isLinkOpen) {
+                                                            setLinkPopoverCommentId(null);
+                                                            refocusCommentEditor();
+                                                        } else {
+                                                            setLinkTriggerRect(rectFromElement(event.currentTarget));
+                                                            openLinkPopover(comment.id);
+                                                        }
+                                                    }}
+                                                    className="p-1 rounded transition-colors text-gray-300 hover:text-blue-500"
+                                                    title="Link"
+                                                >
+                                                    <LinkIcon className="w-3 h-3" />
+                                                </button>
+                                            </>
                                         ) : (
                                             <button
                                                 onClick={(e) => {
@@ -900,7 +945,9 @@ export default function CommentPopup({
                                         <button
                                             onClick={(e) => {
                                                 e.stopPropagation();
-                                                if (onToggleCommentStrikethrough) {
+                                                if (hasReadOnlySelection) {
+                                                    applySelectedStrikethrough();
+                                                } else if (onToggleCommentStrikethrough) {
                                                     onToggleCommentStrikethrough(comment.id);
                                                 } else {
                                                     onStrikethrough?.();
