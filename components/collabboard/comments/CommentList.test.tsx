@@ -249,19 +249,14 @@ describe('CommentList -- Site A old/new contract parity', () => {
   const FREEFORM_PATH = 'components/collabboard/canvas/ui/FreeformPadletCards.tsx';
   const src = fs.readFileSync(FREEFORM_PATH, 'utf8');
 
-  it('SITE_A_PROFILE matches the frozen icon and color-mirroring policy documented for Site D (Site A\'s own inline block is now CommentList; D remains source-of-truth for the shared policy)', () => {
-    // Site D shares Site A's exact action-cluster/color-policy family
-    // (COMMENT_UI_CONTRACT_V1.md), and D's inline source is intentionally
-    // untouched by this patch -- so it's the correct place to verify the
-    // policy is still what SITE_A_PROFILE claims.
+  it('the migrated Image entry point uses the canonical CommentPopup instead of local actions', () => {
     const dAnchor = 'activeImageToolbarPadlet && cardCommentPopupPadletId === activeImageToolbarPadlet.id';
     const dStart = src.indexOf(dAnchor);
     expect(dStart).toBeGreaterThan(-1);
-    const editBlockStart = src.indexOf('title="Edit"', dStart);
-    const editBlockEnd = src.indexOf('</button>', editBlockStart);
-    expect(src.slice(editBlockStart, editBlockEnd)).toContain('<PenTool');
-    expect(SITE_A_PROFILE.editIcon).toBe('PenTool');
-    expect(SITE_A_PROFILE.mirrorLegacyColor).toBe(true);
+    const imageBlock = src.slice(dStart, dStart + 14000);
+    expect(imageBlock).toContain('<CommentPopup');
+    expect(imageBlock).not.toContain('<textarea');
+    expect(imageBlock).not.toContain('title="Delete"');
   });
 
   it('the frozen Site A action order (Color|Edit, Strikethrough, Delete) matches the new CommentList order', () => {

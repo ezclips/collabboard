@@ -468,7 +468,7 @@ describe('C1/10: known defects characterized as-is (NOT future requirements)', (
 // Scope to the detached wrapper's "z-[100]" class -- its input shares a
 // placeholder with CommentPopup's (NoteEditor.tsx:848, :1046, CommentPopup.tsx:483).
 function detachedPanel(c: HTMLElement): HTMLElement {
-  return Array.from(c.querySelectorAll('div')).find((d) => d.className.includes('z-[100]')) as HTMLElement;
+  return c.querySelector('[data-comment-panel="true"]') as HTMLElement;
 }
 
 describe('C1/11: Link removal through the real LinkPopup (not just Cancel)', () => {
@@ -519,7 +519,7 @@ describe('C1/13: Box mode - detached Comment submission (not just opening)', () 
     });
     act(() => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
     expect(c.textContent).toContain('nice note');
-    expect(btn(c, 'View 1 comment')).not.toBeNull();
+    expect(c.querySelector('button[title="1 comment"]')).not.toBeNull();
     expect(c.querySelector('.ProseMirror span[data-comment-id]')).toBeNull();
   });
 });

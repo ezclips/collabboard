@@ -79,10 +79,11 @@ CANONICAL:
 
 - Clipart
 - Image
+- Note — normal/detached comments
 
 NOT YET MIGRATED:
 
-- Note
+- Note — anchored/highlighted threads (special storage adapter required)
 - Document
 - Drawing
 - AI Component
@@ -97,6 +98,13 @@ comment badge, the Freeform Image toolbar, and the non-Freeform Image toolbar
 in `app/dashboard/canvas/[id]/CanvasClient.tsx`. All three retain the existing
 `metadata.detachedComments` storage through thin callbacks and use the
 canonical component for comment content and controls.
+
+Normal Note detached comments are now canonical at the Note editor popup, the
+Freeform Note badge popup, and the Freeform Note toolbar popup. They retain
+`metadata.detachedComments` through thin callbacks and use `CommentPopup` for
+all normal comment rows, editing, composer, styling, links, and deletion.
+Highlighted/anchored Note threads remain on their TipTap mark/thread storage
+and controller path and are intentionally not part of this migration.
 
 Other non-Clipart surfaces are intentionally not made to comply by this patch.
 A migration moves a post from the second list to the first only after all of
@@ -138,11 +146,11 @@ picker/link anchoring, and height/position discipline:
 - `components/collabboard/editors/useAnchoredPopover.test.tsx`
 - `components/collabboard/commentLinkSafety.test.tsx`
 
-The migration characterization suite is:
-`components/collabboard/freeformCommentUIContract.characterization.test.tsx`.
-It guards all three Image entry points and preserves the remaining
-pre-migration surfaces as an explicit allowlist rather than silently claiming
-they migrated.
+The migration characterization suites are:
+`components/collabboard/freeformCommentUIContract.characterization.test.tsx`
+for Image and `components/collabboard/noteDetachedCommentUIContract.test.tsx`
+for normal/detached Note comments. The Note suite explicitly guards the
+anchored/highlighted thread boundary.
 
 ## Historical notes
 
@@ -155,8 +163,9 @@ Clipart implementations. Subsequent accepted fixes through PATCH 8M corrected
 anchoring, viewport-space positioning, panel height discipline, title,
 composer, picker, link, and interaction-isolation behavior. This freeze
 preserves those historical notes and records Clipart as the reference. Image's
-PATCH 8O migration is recorded above; Note, Document, Drawing, AI Component,
-Link, Todo, Comment post, and Container remain unmigrated.
+PATCH 8O migration and normal Note detached-comment PATCH 8P migration are
+recorded above; Note anchored/highlighted threads, Document, Drawing, AI
+Component, Link, Todo, Comment post, and Container remain unmigrated.
 
 ## Negative controls
 

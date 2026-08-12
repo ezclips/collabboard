@@ -809,217 +809,55 @@ export default function NoteEditor({
           </div>
         </div>
 
-        {/* Detached Comments Popup - Canvas style */}
         {panels.open.detached && (
-          <div
-            className="fixed z-[100]"
-            style={{
-              left: detachedPopupPosition.x,
-              top: detachedPopupPosition.y,
+          <CommentPopup
+            isOpen={panels.open.detached}
+            onOpenChange={(open) => {
+              if (!open) {
+                panels.closePanel('detached');
+                setActiveDetachedId(null);
+              }
             }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="relative bg-white rounded-xl shadow-2xl border border-gray-200 p-4 min-w-[280px] max-w-[320px]">
-              <button
-                onClick={() => {
-                  panels.closePanel('detached');
-                  setActiveDetachedId(null);
-                  setDetachedColorPickerOpen(false);
-                  setEditingDetachedId(null);
-                  setCommentColorPopupId(null);
-                }}
-                className="absolute -right-3 -top-3 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-400 shadow-md transition-all hover:text-gray-600"
-                title="Close"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
-              {/* Header with badge color button */}
-              <div className="flex items-center justify-between mb-3">
-                <h4 className="text-sm font-semibold text-gray-700">Comments</h4>
-                <button
-                  onClick={() => setDetachedColorPickerOpen(!detachedColorPickerOpen)}
-                  className="w-7 h-7 flex items-center justify-center rounded hover:bg-gray-100"
-                  title="Badge Color"
-                >
-                  <div
-                    className="w-4 h-4 rounded border border-gray-300"
-                    style={{ backgroundColor: badgeColor }}
-                  />
-                </button>
-              </div>
-
-              {/* Badge color picker popup */}
-              {detachedColorPickerOpen && (
-                <div className="absolute right-3 top-12 z-10 bg-white rounded-lg shadow-lg border border-gray-200 p-2">
-                  <div className="grid grid-cols-6 gap-1.5">
-                    {BADGE_COLORS.map((color) => (
-                      <button
-                        key={color}
-                        onClick={() => {
-                          setBadgeColor(color);
-                          setDetachedColorPickerOpen(false);
-                        }}
-                        className={`rounded transition-transform hover:scale-110 ${badgeColor === color ? 'ring-2 ring-blue-500' : ''}`}
-                        style={{
-                          width: '20px',
-                          height: '20px',
-                          backgroundColor: color,
-                          border: ['#f3f4f6', '#e5e7eb', '#fef9c3', '#fef08a'].includes(color) ? '1px solid #d1d5db' : 'none',
-                        }}
-                        title={color}
-                      />
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Comments list or empty state */}
-              {detachedComments.length === 0 ? (
-                <p className="text-xs text-gray-400 text-center py-4">No comments yet</p>
-              ) : (
-                <div className="flex gap-2 relative">
-                  <div className="flex-1 space-y-2 max-h-[360px] overflow-y-auto overflow-x-hidden pr-0 scrollbar-ultrathin">
-                    {detachedComments.map((comment) => {
-                      const isActive = activeDetachedId === comment.id;
-                      const isEditing = editingDetachedId === comment.id;
-
-                      return (
-                        <div
-                          key={comment.id}
-                          className={`flex gap-2 rounded py-0.5 px-0.5 cursor-pointer ${isActive ? 'bg-blue-50' : 'hover:bg-gray-50'}`}
-                          onClick={() => setActiveDetachedId(comment.id)}
-                          onDoubleClick={(e) => {
-                            e.stopPropagation();
-                            setEditingDetachedId(comment.id);
-                            setEditingDetachedText(comment.text || '');
-                          }}
-                        >
-                          <div className="flex flex-col items-center gap-0.5 shrink-0 w-[22px]">
-                            <div className="w-[22px] h-[22px] rounded-full bg-blue-500 flex items-center justify-center text-white text-[9px] font-bold shrink-0">
-                              {comment.userName?.charAt(0).toUpperCase() || 'U'}
-                            </div>
-                            <span className="text-[9px] text-gray-400 leading-none text-center">
-                              {getTimeAgo(comment.timestamp)}
-                            </span>
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 mb-0.5">
-                              <span className="text-xs font-medium text-gray-700 truncate">{comment.userName || 'User'}</span>
-                            </div>
-                            {isEditing ? (
-                              <textarea
-                                value={editingDetachedText}
-                                onChange={(e) => setEditingDetachedText(e.target.value)}
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter' && !e.shiftKey) {
-                                    e.preventDefault();
-                                    if (editingDetachedText.trim()) {
-                                      setDetachedComments((prev) =>
-                                        prev.map((c) =>
-                                          c.id === comment.id ? { ...c, text: editingDetachedText.trim() } : c
-                                        )
-                                      );
-                                      setEditingDetachedId(null);
-                                      setEditingDetachedText('');
-                                    }
-                                  }
-                                  if (e.key === 'Escape') {
-                                    setEditingDetachedId(null);
-                                    setEditingDetachedText('');
-                                  }
-                                }}
-                                onClick={(e) => e.stopPropagation()}
-                                className="w-full text-xs text-gray-600 bg-gray-50 rounded px-2 py-1 outline-none border border-gray-200 focus:border-blue-400 resize-none overflow-hidden break-words whitespace-pre-wrap"
-                                style={{
-                                  color: comment.textColor || '#4b5563',
-                                }}
-                                rows={1}
-                                autoFocus
-                              />
-                            ) : (
-                              <div
-                                className={`text-xs text-gray-600 mt-0.5 whitespace-pre-wrap break-words ${comment.isStrikethrough ? 'line-through' : ''}`}
-                                style={{ color: comment.textColor }}
-                              >
-                                {comment.text}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  {/* Action buttons on the right */}
-                  <div className="flex flex-col gap-1 flex-shrink-0 pt-1">
-                    <button
-                      onClick={() => {
-                        const active = detachedComments.find((c) => c.id === activeDetachedId);
-                        if (!active) return;
-                        setEditingDetachedId(active.id);
-                        setEditingDetachedText(active.text || '');
-                      }}
-                      className="p-1 rounded transition-colors text-gray-300 hover:text-blue-500 disabled:opacity-40 disabled:hover:text-gray-300"
-                      title="Edit"
-                      disabled={!activeDetachedId}
-                    >
-                      <PenTool className="w-3 h-3" />
-                    </button>
-                    <button
-                      onClick={() => {
-                        if (!activeDetachedId) return;
-                        setDetachedComments((prev) =>
-                          prev.map((c) =>
-                            c.id === activeDetachedId ? { ...c, isStrikethrough: !c.isStrikethrough } : c
-                          )
-                        );
-                      }}
-                      className={`p-1 rounded transition-colors ${
-                        detachedComments.find((c) => c.id === activeDetachedId)?.isStrikethrough
-                          ? 'text-blue-500 bg-blue-50'
-                          : 'text-gray-300 hover:text-blue-500'
-                      } disabled:opacity-40 disabled:hover:text-gray-300`}
-                      title="Strikethrough"
-                      disabled={!activeDetachedId}
-                    >
-                      <Strikethrough className="w-3 h-3" />
-                    </button>
-                    <button
-                      onClick={() => {
-                        if (!activeDetachedId) return;
-                        const next = detachedComments.filter((c) => c.id !== activeDetachedId);
-                        setDetachedComments(next);
-                        setActiveDetachedId(next[next.length - 1]?.id || null);
-                        setEditingDetachedId(null);
-                        setEditingDetachedText('');
-                      }}
-                      className="p-1 text-gray-300 hover:text-red-500 transition-colors disabled:opacity-40 disabled:hover:text-gray-300"
-                      title="Delete"
-                      disabled={!activeDetachedId}
-                    >
-                      <Trash2 className="w-3 h-3" />
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* Add comment input */}
-              <div className="mt-3 pt-3 border-t border-gray-100">
-                <input
-                  type="text"
-                  value={newDetachedText}
-                  onChange={(e) => setNewDetachedText(e.target.value)}
-                  placeholder="Add a comment..."
-                  className="w-full text-xs px-3 py-2 rounded-lg border border-gray-200 focus:border-blue-400 focus:ring-1 focus:ring-blue-100 outline-none"
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && newDetachedText.trim()) {
-                      handleAddDetachedComment();
-                    }
-                  }}
-                />
-              </div>
-            </div>
-          </div>
+            onSubmit={(text) => {
+              const newComment: DetachedCommentData = {
+                id: `comment-${Date.now()}`,
+                text,
+                userId: 'user1',
+                userName: 'R',
+                timestamp: Date.now(),
+              };
+              setDetachedComments((prev) => [...prev, newComment]);
+            }}
+            onEditComment={(commentId, text) => {
+              setDetachedComments((prev) => prev.map((comment) =>
+                comment.id === commentId ? { ...comment, text } : comment
+              ));
+            }}
+            onRemoveComment={(commentId) => {
+              setDetachedComments((prev) => prev.filter((comment) => comment.id !== commentId));
+            }}
+            onToggleCommentStrikethrough={(commentId) => {
+              setDetachedComments((prev) => prev.map((comment) =>
+                comment.id === commentId
+                  ? { ...comment, isStrikethrough: !comment.isStrikethrough }
+                  : comment
+              ));
+            }}
+            onCommentColor={(commentId, textColor, backgroundColor) => {
+              setDetachedComments((prev) => prev.map((comment) =>
+                comment.id === commentId ? { ...comment, textColor, backgroundColor } : comment
+              ));
+            }}
+            comments={detachedComments}
+            badgeColor={badgeColor}
+            onBadgeColorChange={setBadgeColor}
+            commentTitle={undefined}
+            onCommentTitleChange={() => undefined}
+            currentUserId="user1"
+            currentUserName="R"
+            position={detachedPopupPosition}
+            enableCanonicalSelectionStyling
+          />
         )}
         </>
       }

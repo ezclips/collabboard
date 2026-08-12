@@ -178,7 +178,7 @@ function card(c: HTMLElement) {
   return c.querySelector('.rounded-lg.shadow-2xl.overflow-visible') as HTMLElement;
 }
 function detachedPanel(c: HTMLElement): HTMLElement {
-  return Array.from(c.querySelectorAll('div')).find((d) => d.className.includes('z-[100]')) as HTMLElement;
+  return c.querySelector('[data-comment-panel="true"]') as HTMLElement;
 }
 
 describe('NoteEditor via PostEditorShell: single shell, no local composition', () => {
@@ -225,14 +225,14 @@ describe('Detached comment persists across a shell rerender (§22.10/15-17)', ()
     const c = mount(<NoteEditor isOpen initialContent="<p>hello</p>" initialDetachedComments={[]} onSave={vi.fn()} onClose={vi.fn()} />);
     await addAndRerender(c);
     expect(c.textContent).toContain('persists');
-    expect(btn(c, 'View 1 comment')).not.toBeNull();
+    expect(c.querySelector('button[title="1 comment"]')).not.toBeNull();
   });
 
   it('survives when the prop is omitted entirely', async () => {
     const c = openNote();
     await addAndRerender(c);
     expect(c.textContent).toContain('persists');
-    expect(btn(c, 'View 1 comment')).not.toBeNull();
+    expect(c.querySelector('button[title="1 comment"]')).not.toBeNull();
   });
 
   it('CanvasModals still supplies a stable initial reference (unreachable-default guard, §22.6)', () => {

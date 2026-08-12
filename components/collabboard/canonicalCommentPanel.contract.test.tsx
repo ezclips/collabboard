@@ -45,15 +45,18 @@ describe('canonical normal comment UI v1', () => {
     expect(popup).toContain('data-comment-panel="true"');
   });
 
-  it('keeps the migration status explicit and points to focused executable coverage', () => {
+  it('keeps the migration status explicit and distinguishes Note storage systems', () => {
     const contract = read(CONTRACT_PATH);
     expect(contract).toContain('CANONICAL NORMAL COMMENT UI: **FROZEN**');
     expect(contract).toContain('CANONICAL:');
     expect(contract).toContain('- Clipart');
     expect(contract).toContain('- Image');
+    expect(contract).toContain('- Note — normal/detached comments');
+    expect(contract).toContain('- Note — anchored/highlighted threads');
     expect(contract).toContain('NOT YET MIGRATED:');
     expect(contract).toContain('COMMENT UI CONTRACT UNLOCK');
     for (const path of [
+      'noteDetachedCommentUIContract.test.tsx',
       'CommentPopup.clipartContract.test.tsx',
       'CommentPopup.colorAndLink.test.tsx',
       'CommentPopup.colorHighlightReactivity.test.tsx',
