@@ -14,6 +14,7 @@ import InlineCaption from './InlineCaption';
 import { resolveCaptionStyle, CAPTION_STYLE_PRESETS, type CaptionHeading } from '@/lib/domain/canvas/captionStyle';
 import { nextTextAlign } from './textAlignCycle';
 import { getMeaningfulTitle } from '@/lib/infra/collabboard/postTitle';
+import { guardCommentMutation, type CommentAccessMode } from '@/lib/domain/canvas/comments';
 
 // Dynamically import the wrapper that contains all Excalidraw-specific code
 // This is necessary to prevent "window is not defined" errors during SSR
@@ -41,6 +42,14 @@ interface DrawingEditorProps {
     initialTitle?: string;
     initialMetadata?: Record<string, unknown>;
     readOnly?: boolean;
+    // PATCH 8R: canonical comment permission/identity, independent of the
+    // drawing-content readOnly flag above -- a writable-workspace user
+    // previewing a Drawing through the read-only lightbox still has full
+    // comment rights; only WorkspaceRole === 'readonly' should resolve here
+    // to 'read'. Matches NoteEditor's accessMode/currentUserId convention.
+    accessMode?: CommentAccessMode;
+    currentUserId?: string;
+    currentUserName?: string;
 }
 
 type CommentDraft = {
@@ -51,7 +60,10 @@ type CommentDraft = {
     timestamp: number;
     textColor?: string;
     backgroundColor?: string;
+    isStrikethrough?: boolean;
 };
+
+type CommentTitleStyle = { color?: string; backgroundColor?: string };
 
 export default function DrawingEditor({
     isOpen,
@@ -61,6 +73,9 @@ export default function DrawingEditor({
     initialTitle = '',
     initialMetadata,
     readOnly = false,
+    accessMode = 'manage',
+    currentUserId = 'anon',
+    currentUserName = 'You',
 }: DrawingEditorProps) {
     // Use refs to store current state without causing re-renders
     const elementsRef = useRef<any[]>([]);
@@ -87,6 +102,8 @@ export default function DrawingEditor({
     const [reactions, setReactions] = useState<string[]>([]);
     const [detachedComments, setDetachedComments] = useState<CommentDraft[]>([]);
     const [badgeColor, setBadgeColor] = useState('#facc15');
+    const [commentTitle, setCommentTitle] = useState<string | undefined>(undefined);
+    const [commentTitleStyle, setCommentTitleStyle] = useState<CommentTitleStyle>({});
     const [caption, setCaption] = useState('');
     const [captionStyle, setCaptionStyle] = useState<Record<string, any>>({});
     // The single Text style button doubles up: it either styles the post's
@@ -268,6 +285,8 @@ export default function DrawingEditor({
             setReactions(Array.isArray(initialMetadata?.reactions) ? initialMetadata.reactions as string[] : []);
             setDetachedComments(Array.isArray(initialMetadata?.detachedComments) ? initialMetadata.detachedComments as CommentDraft[] : []);
             setBadgeColor(typeof initialMetadata?.badgeColor === 'string' ? initialMetadata.badgeColor : '#facc15');
+            setCommentTitle(typeof initialMetadata?.commentTitle === 'string' ? initialMetadata.commentTitle : undefined);
+            setCommentTitleStyle((initialMetadata?.commentTitleStyle as CommentTitleStyle) || {});
             setCaption(typeof initialMetadata?.caption === 'string' ? initialMetadata.caption : '');
             setCaptionStyle((initialMetadata?.captionStyle as Record<string, unknown>) || {});
             setIsTextStyleOpen(false);
@@ -329,6 +348,8 @@ export default function DrawingEditor({
                 reactions,
                 detachedComments,
                 badgeColor,
+                commentTitle,
+                commentTitleStyle: Object.keys(commentTitleStyle).length > 0 ? commentTitleStyle : undefined,
                 caption,
                 captionStyle,
             },
@@ -369,9 +390,16 @@ export default function DrawingEditor({
                 {/* Left toolbar -- Text style/Color/Reaction/Comment/Caption, same
                     detached-vertical-icon-strip placement every other post type
                     (Note, Image, AI Component) uses, instead of buttons crowded
-                    into the header row. */}
-                {!readOnly && (
-                    <div className="flex shrink-0 flex-col items-center gap-1 rounded-lg border border-gray-200 bg-white p-2 shadow-xl">
+                    into the header row. PATCH 8R: the container itself is no
+                    longer readOnly-gated so the Comment button/badge/panel
+                    remain reachable in the read-only lightbox (canonical READ
+                    contract requires seeing the count and reading comments);
+                    Text style/Color/Reaction/Caption -- unrelated to comments,
+                    out of this patch's scope -- keep their original
+                    readOnly-hidden behavior via the inner fragment below. */}
+                <div className="flex shrink-0 flex-col items-center gap-1 rounded-lg border border-gray-200 bg-white p-2 shadow-xl">
+                    {!readOnly && (
+                        <>
                         <div className="flex shrink-0 flex-col items-center">
                             <button
                                 type="button"
@@ -466,8 +494,10 @@ export default function DrawingEditor({
                                 document.body,
                             )}
                         </div>
+                        </>
+                    )}
 
-                        <div className="relative flex shrink-0 flex-col items-center">
+                    <div className="relative flex shrink-0 flex-col items-center">
                             <button
                                 type="button"
                                 onClick={() => openDetachedPanel('comment', isCommentPanelOpen)}
@@ -494,31 +524,50 @@ export default function DrawingEditor({
                                     <CommentPopup
                                         isOpen={isCommentPanelOpen}
                                         onOpenChange={setIsCommentPanelOpen}
-                                        onSubmit={(commentText) => {
+                                        accessMode={accessMode}
+                                        onSubmit={guardCommentMutation(accessMode, (commentText) => {
                                             setDetachedComments((prev) => [...prev, {
                                                 id: `comment-${Date.now()}`,
                                                 text: commentText,
-                                                userId: 'anon',
-                                                userName: 'You',
+                                                userId: currentUserId,
+                                                userName: currentUserName,
                                                 timestamp: Date.now(),
                                             }]);
-                                        }}
-                                        onCommentColor={(commentId, textColor, backgroundColor) => {
+                                        })}
+                                        onEditComment={guardCommentMutation(accessMode, (commentId, text) => {
+                                            setDetachedComments((prev) =>
+                                                prev.map((c) => (c.id === commentId ? { ...c, text } : c))
+                                            );
+                                        })}
+                                        onRemoveComment={guardCommentMutation(accessMode, (commentId) => {
+                                            setDetachedComments((prev) => prev.filter((c) => c.id !== commentId));
+                                        })}
+                                        onToggleCommentStrikethrough={guardCommentMutation(accessMode, (commentId) => {
+                                            setDetachedComments((prev) =>
+                                                prev.map((c) => (c.id === commentId ? { ...c, isStrikethrough: !c.isStrikethrough } : c))
+                                            );
+                                        })}
+                                        onCommentColor={guardCommentMutation(accessMode, (commentId, textColor, backgroundColor) => {
                                             setDetachedComments((prev) =>
                                                 prev.map((c) => (c.id === commentId ? { ...c, textColor, backgroundColor } : c))
                                             );
-                                        }}
+                                        })}
                                         comments={detachedComments}
-                                        currentUserId="anon"
-                                        currentUserName="You"
+                                        currentUserId={currentUserId}
+                                        currentUserName={currentUserName}
                                         badgeColor={badgeColor}
-                                        onBadgeColorChange={setBadgeColor}
+                                        onBadgeColorChange={guardCommentMutation(accessMode, setBadgeColor)}
+                                        commentTitle={commentTitle}
+                                        commentTitleStyle={Object.keys(commentTitleStyle).length > 0 ? commentTitleStyle : undefined}
+                                        onCommentTitleChange={guardCommentMutation(accessMode, (nextTitle: string) => setCommentTitle(nextTitle === 'Comments' ? undefined : nextTitle))}
+                                        onCommentTitleStyleChange={guardCommentMutation(accessMode, (style: CommentTitleStyle) => setCommentTitleStyle(style))}
                                     />
                                 </div>,
                                 document.body,
                             )}
-                        </div>
+                    </div>
 
+                    {!readOnly && (
                         <div className="flex shrink-0 flex-col items-center">
                             <button
                                 type="button"
@@ -530,8 +579,8 @@ export default function DrawingEditor({
                             </button>
                             <span className="mt-1 text-center text-[9px] leading-none text-gray-500">Caption</span>
                         </div>
-                    </div>
-                )}
+                    )}
+                </div>
 
                 <div className="relative flex h-[90vh] min-w-0 flex-1 flex-col">
                     <button

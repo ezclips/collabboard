@@ -463,10 +463,17 @@ export default function CanvasModals({
           initialTitle={getMeaningfulTitle(padletToEdit?.title, padletToEdit?.type)}
           initialMetadata={padletToEdit?.metadata || {}}
           readOnly={false}
+          accessMode={commentAccessMode}
+          currentUserId={user?.id || 'anon'}
+          currentUserName={user?.email?.split('@')[0] || 'You'}
         />
       </div>
 
-      {/* Read-only Drawing Viewer (Lightbox) */}
+      {/* Read-only Drawing Viewer (Lightbox). PATCH 8R: now also passes
+          initialMetadata/accessMode/identity -- previously omitted because
+          the Comment button was unreachable here (whole toolbar hidden when
+          readOnly); now that Comment is visible in this view too, its
+          comments/title/badge must actually load. */}
       <DrawingEditor
         isOpen={!!viewDrawingPadlet}
         onClose={() => setViewDrawingPadlet(null)}
@@ -481,7 +488,11 @@ export default function CanvasModals({
             : undefined
         }
         initialTitle={getMeaningfulTitle(viewDrawingPadlet?.title, viewDrawingPadlet?.type)}
+        initialMetadata={viewDrawingPadlet?.metadata || {}}
         readOnly={true}
+        accessMode={commentAccessMode}
+        currentUserId={user?.id || 'anon'}
+        currentUserName={user?.email?.split('@')[0] || 'You'}
       />
 
       {/* AI Component Generator / Regenerate Modal */}

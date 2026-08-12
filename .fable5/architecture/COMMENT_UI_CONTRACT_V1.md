@@ -80,12 +80,12 @@ CANONICAL:
 - Clipart
 - Image
 - Note — normal/detached comments
+- Drawing — normal/detached comments
 
 NOT YET MIGRATED:
 
 - Note — anchored/highlighted threads (special storage adapter required)
 - Document — **has no normal/detached comment tier at all** (see below)
-- Drawing
 - AI Component
 - Link
 - Todo
@@ -469,6 +469,36 @@ inoperable against the live product (see "Live status" above and
 documented is currently moot in practice -- but the domain/UI/persistence
 design that will close it once a real commenter signal exists remains fully
 built, tested, and now clearly quarantined rather than silently stale.
+
+**Drawing normal/detached comments were wired in PATCH 8R** (2026-08-12) --
+unlike Document, Drawing's inventory found a genuine, incomplete Category-A
+tier: `DrawingEditor.tsx`'s own left-toolbar Comment button/badge/panel is
+the ONLY live normal/detached comment entry point (no on-canvas badge/
+toolbar CommentPopup exists for Drawing in `FreeformPadletCards.tsx` or
+`CanvasClient.tsx`, unlike Note/Clipart/Image), and it was missing
+`accessMode`, `onEditComment`/`onRemoveComment`/`onToggleCommentStrikethrough`,
+`commentTitle`/`commentTitleStyle`, and real identity (hardcoded
+`userId: 'anon', userName: 'You'`) -- all now wired the same way as Note's
+own-editor site: `guardCommentMutation(accessMode, ...)` directly at every
+prop (COMMENT mode stays dormant for Drawing too), `accessMode`/
+`currentUserId`/`currentUserName` threaded from `CanvasModals.tsx`'s existing
+`user`/`commentAccessMode` props into both live `DrawingEditor` instances
+(the edit modal and the read-only lightbox). The Comment button/badge/panel
+were also pulled out of the `{!readOnly && (...)}` gate that previously hid
+the ENTIRE left toolbar in the read-only lightbox -- previously a reader
+could not even see that a Drawing had comments; Text style/Color/Reaction/
+Caption remain hidden in read-only, unaffected, since they are unrelated to
+comments. `accessMode` is intentionally independent of the modal's own
+`readOnly` prop: a writable-workspace user previewing a Drawing through the
+read-only lightbox still has full comment rights (`commentAccessMode` is
+resolved from workspace role, not from which modal route opened the
+Drawing). Drawing has no anchored/highlighted (Category B) comment system at
+all -- `ExcalidrawWrapper.tsx` and the wider Excalidraw fork contain zero
+comment-related code -- so there is no freeze guard required for this
+migration. See `canonicalCommentPermission.contract.test.tsx`'s "Drawing --
+DrawingEditor.tsx own detached-comment CommentPopup" block for the
+permission-wiring proof and `DrawingEditor.commentCanonicalization.test.tsx`
+for the mounted MANAGE/READ/identity/persistence behavioral proof.
 
 ## Historical notes
 

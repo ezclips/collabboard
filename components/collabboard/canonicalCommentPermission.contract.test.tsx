@@ -589,6 +589,97 @@ describe('PATCH 8O.1/8O.2 -- canonical comment permission wiring', () => {
     });
   });
 
+  describe('Drawing -- DrawingEditor.tsx own detached-comment CommentPopup, threaded via CanvasModals.tsx (PATCH 8R)', () => {
+    it('DrawingEditor.tsx accepts an accessMode prop and wires its single CommentPopup with it', () => {
+      const drawingEditor = read('components/collabboard/editors/DrawingEditor.tsx');
+      expect(drawingEditor).toContain("import { guardCommentMutation, type CommentAccessMode } from '@/lib/domain/canvas/comments';");
+      expect(drawingEditor).toContain('accessMode?: CommentAccessMode;');
+      expect(drawingEditor).toContain("accessMode = 'manage',");
+      const block = commentPopupBlockAfter(drawingEditor, '<CommentPopup');
+      expect(block).toContain('accessMode={accessMode}');
+      expectManageOnlyWiredCallSite(block, true);
+    });
+
+    it('uses real currentUserId/currentUserName props, not the historical "anon"/"You" literal', () => {
+      const drawingEditor = read('components/collabboard/editors/DrawingEditor.tsx');
+      expect(drawingEditor).toContain('currentUserId?: string;');
+      expect(drawingEditor).toContain('currentUserName?: string;');
+      expect(drawingEditor).toContain("currentUserId = 'anon',");
+      expect(drawingEditor).toContain("currentUserName = 'You',");
+      const block = commentPopupBlockAfter(drawingEditor, '<CommentPopup');
+      expect(block).toContain('userId: currentUserId,');
+      expect(block).toContain('userName: currentUserName,');
+      expect(block).toContain('currentUserId={currentUserId}');
+      expect(block).toContain('currentUserName={currentUserName}');
+      expect(block).not.toContain('userId: \'anon\'');
+      expect(block).not.toContain('currentUserId="anon"');
+    });
+
+    it('wires commentTitle/commentTitleStyle to real state, guarded', () => {
+      const drawingEditor = read('components/collabboard/editors/DrawingEditor.tsx');
+      const block = commentPopupBlockAfter(drawingEditor, '<CommentPopup');
+      expect(block).toContain('commentTitle={commentTitle}');
+      expect(block).toContain('commentTitleStyle={');
+      const titleChangeStart = block.indexOf('onCommentTitleChange=');
+      expect(titleChangeStart).toBeGreaterThan(-1);
+      const titleChangeNext = block.slice(titleChangeStart + 'onCommentTitleChange='.length).match(/^\s*\{?\s*(\S+)/);
+      expect(titleChangeNext?.[1]?.startsWith('guardCommentMutation(')).toBe(true);
+    });
+
+    // The Comment button/badge/panel used to live inside the same
+    // `{!readOnly && (...)}` block as Text style/Color/Reaction/Caption,
+    // which made it (and the ability to even see a comment count) entirely
+    // unreachable in the read-only lightbox. PATCH 8R pulled it out so READ
+    // can see the count and read comments; the other four stay hidden in
+    // read-only since they are unrelated to comments and out of this
+    // patch's scope.
+    it('the Comment toolbar entry is reachable regardless of readOnly; Text/Color/Reaction/Caption remain readOnly-gated', () => {
+      const drawingEditor = read('components/collabboard/editors/DrawingEditor.tsx');
+      const toolbarStart = drawingEditor.indexOf('Left toolbar -- Text style/Color/Reaction/Comment/Caption');
+      expect(toolbarStart).toBeGreaterThan(-1);
+      const commentBlockStart = drawingEditor.indexOf("onClick={() => openDetachedPanel('comment', isCommentPanelOpen)}", toolbarStart);
+      expect(commentBlockStart).toBeGreaterThan(-1);
+      const captionBlockStart = drawingEditor.indexOf("onClick={() => togglePanel('caption')}", commentBlockStart);
+      expect(captionBlockStart).toBeGreaterThan(-1);
+      // The Text/Color/Reaction fragment opened by {!readOnly && ( must
+      // already be closed (</> then a bare `)}`) before the Comment button
+      // -- i.e. the gate does not wrap the Comment block.
+      const betweenToolbarAndComment = drawingEditor.slice(toolbarStart, commentBlockStart);
+      expect(betweenToolbarAndComment, 'the {!readOnly && ( fragment wrapping Text/Color/Reaction must close before the Comment button').toContain('</>\n                    )}');
+      // Caption stays individually gated.
+      const betweenCommentAndCaption = drawingEditor.slice(commentBlockStart, captionBlockStart);
+      expect(betweenCommentAndCaption).toContain('{!readOnly && (');
+    });
+
+    it('DrawingEditor.tsx has exactly 1 <CommentPopup usage (no duplicate/local comment implementation)', () => {
+      const drawingEditor = read('components/collabboard/editors/DrawingEditor.tsx');
+      const total = (drawingEditor.match(/<CommentPopup/g) ?? []).length;
+      expect(total).toBe(1);
+    });
+
+    it('the Comment panel portal wrapper stops click propagation (interaction isolation, unchanged by this patch)', () => {
+      const drawingEditor = read('components/collabboard/editors/DrawingEditor.tsx');
+      const block = commentPopupBlockAfter(drawingEditor, '<CommentPopup');
+      const wrapperStart = drawingEditor.lastIndexOf('<div', drawingEditor.indexOf(block));
+      const wrapperSlice = drawingEditor.slice(wrapperStart, drawingEditor.indexOf(block));
+      expect(wrapperSlice).toContain('onClick={(e) => e.stopPropagation()}');
+    });
+
+    it('CanvasModals.tsx threads commentAccessMode + real identity into both DrawingEditor instances (edit modal and read-only lightbox)', () => {
+      const canvasModals = read('components/collabboard/canvas/ui/CanvasModals.tsx');
+      const occurrences = [...canvasModals.matchAll(/<DrawingEditor/g)].map((m) => m.index!);
+      expect(occurrences.length).toBe(2);
+      for (const start of occurrences) {
+        const end = canvasModals.indexOf('/>', canvasModals.indexOf('readOnly=', start));
+        const block = canvasModals.slice(start, end);
+        expect(block, 'each DrawingEditor instance must pass accessMode={commentAccessMode}').toContain('accessMode={commentAccessMode}');
+        expect(block, 'each DrawingEditor instance must pass real currentUserId').toContain("currentUserId={user?.id || 'anon'}");
+        expect(block, 'each DrawingEditor instance must pass real currentUserName').toContain("currentUserName={user?.email?.split('@')[0] || 'You'}");
+        expect(block, 'each DrawingEditor instance must pass initialMetadata so comments/title actually load').toContain('initialMetadata=');
+      }
+    });
+  });
+
   describe('architecture guard -- every <CommentPopup usage in these three files is accounted for', () => {
     it('FreeformPadletCards.tsx has exactly 5 <CommentPopup usages, all 5 wired (Clipart Site B, Image x2, Note x2)', () => {
       const freeform = read(FREEFORM_PATH);
