@@ -1,11 +1,13 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Palette, Type, Calendar, User, Smile, MessageSquare, Trash2, ChevronLeft, ChevronRight, Clock, Bell, X, Share2, GripVertical, PenTool } from 'lucide-react';
+import { Palette, Type, Calendar, User, Smile, MessageSquare, Trash2, ChevronLeft, ChevronRight, Clock, Bell, X, Share2, GripVertical } from 'lucide-react';
 import ShareModal from './ShareModal';
 import { ColorPickerContent } from '../ColorPicker';
 import TextStylePopup from './TextStylePopup';
 import EmojiReactionPicker from './EmojiReactionPicker';
+import CommentPopup from './CommentPopup';
+import { guardCommentMutation, type CommentAccessMode } from '@/lib/domain/canvas/comments';
 import { CAPTION_STYLE_PRESETS, resolveCaptionStyle, type CaptionHeading, type CaptionStyle } from '@/lib/domain/canvas/captionStyle';
 import { nextTextAlign } from './textAlignCycle';
 import { contrastIconColor } from '../shells/CardShell';
@@ -38,6 +40,8 @@ interface PadletComment {
     isStrikethrough?: boolean;
 }
 
+type CommentTitleStyle = { color?: string; backgroundColor?: string };
+
 interface TodoEditorProps {
     isOpen: boolean;
     onClose: () => void;
@@ -51,6 +55,8 @@ interface TodoEditorProps {
         detachedComments?: PadletComment[];
         comments?: PadletComment[];
         badgeColor?: string;
+        commentTitle?: string;
+        commentTitleStyle?: CommentTitleStyle;
         captionStyle?: CaptionStyle;
     }) => void;
     initialData?: {
@@ -63,10 +69,17 @@ interface TodoEditorProps {
         detachedComments?: PadletComment[];
         comments?: PadletComment[];
         badgeColor?: string;
+        commentTitle?: string;
+        commentTitleStyle?: CommentTitleStyle;
         captionStyle?: CaptionStyle;
     };
     padletId?: string; // For share functionality
     boardId?: string; // For share functionality (fallback when no padletId)
+    // PATCH 8S: canonical comment permission/identity, matching Note/Drawing's
+    // own-editor-site convention -- COMMENT mode stays dormant here too.
+    accessMode?: CommentAccessMode;
+    currentUserId?: string;
+    currentUserName?: string;
 }
 
 const BACKGROUND_COLORS = [
@@ -95,17 +108,6 @@ const TOP_STRIP_COLORS = [
     "#1f2937",
 ];
 
-const BADGE_COLORS = [
-    "#fef9c3", "#fef08a", "#fde047", "#facc15", "#eab308", "#ca8a04",
-    "#f3f4f6", "#e5e7eb", "#d1d5db", "#9ca3af", "#6b7280", "#4b5563",
-    "#ffedd5", "#fed7aa", "#fdba74", "#fb923c", "#f97316", "#ea580c",
-    "#fce7f3", "#fbcfe8", "#f9a8d4", "#f472b6", "#ec4899", "#db2777",
-    "#dbeafe", "#bfdbfe", "#93c5fd", "#60a5fa", "#3b82f6", "#2563eb",
-    "#dcfce7", "#bbf7d0", "#86efac", "#4ade80", "#22c55e", "#16a34a",
-    "#f3e8ff", "#e9d5ff", "#d8b4fe", "#c084fc", "#a855f7", "#9333ea",
-    "#ccfbf1", "#99f6e4", "#5eead4", "#2dd4bf", "#14b8a6", "#0d9488",
-];
-
 const REMINDER_OPTIONS = [
     { value: '', label: 'No reminder' },
     { value: '0', label: 'At time of due date' },
@@ -121,6 +123,9 @@ export default function TodoEditor({
     initialData,
     padletId,
     boardId,
+    accessMode = 'manage',
+    currentUserId = 'anon',
+    currentUserName = 'You',
 }: TodoEditorProps) {
     const [todoTitle, setTodoTitle] = useState('');
     const [tasks, setTasks] = useState<Task[]>([]);
@@ -145,16 +150,14 @@ export default function TodoEditor({
     // a task id. Whichever was last clicked is where the color swatch writes.
     const [activeStyleTargetId, setActiveStyleTargetId] = useState<string>('title');
 
-    // Comments state
+    // Comments state -- row/composer/edit/color/title state now lives inside
+    // the canonical CommentPopup itself (PATCH 8S); this editor only owns the
+    // persisted data and the panel's open/closed state.
     const [comments, setComments] = useState<PadletComment[]>([]);
     const [showCommentPopup, setShowCommentPopup] = useState(false);
-    const [newCommentText, setNewCommentText] = useState('');
-    const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
-    const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
-    const [editingCommentText, setEditingCommentText] = useState('');
-    const [commentColorPopupId, setCommentColorPopupId] = useState<string | null>(null);
     const [badgeColor, setBadgeColor] = useState('#facc15');
-    const [showBadgeColorPicker, setShowBadgeColorPicker] = useState(false);
+    const [commentTitle, setCommentTitle] = useState<string | undefined>(undefined);
+    const [commentTitleStyle, setCommentTitleStyle] = useState<CommentTitleStyle>({});
 
     // Date picker state
     const [showDatePicker, setShowDatePicker] = useState(false);
@@ -188,6 +191,8 @@ export default function TodoEditor({
                     isStrikethrough: comment.isStrikethrough,
                 })));
                 setBadgeColor(initialData.badgeColor || '#facc15');
+                setCommentTitle(initialData.commentTitle);
+                setCommentTitleStyle(initialData.commentTitleStyle || {});
                 setCaptionStyle(initialData.captionStyle || {});
                 setActiveStyleTargetId('title');
             } else {
@@ -201,6 +206,8 @@ export default function TodoEditor({
                 setReactions([]);
                 setComments([]);
                 setBadgeColor('#facc15');
+                setCommentTitle(undefined);
+                setCommentTitleStyle({});
                 setCaptionStyle({});
                 setActiveStyleTargetId('title');
             }
@@ -219,6 +226,8 @@ export default function TodoEditor({
             detachedComments: comments,
             comments,
             badgeColor: badgeColor || '#facc15',
+            commentTitle,
+            commentTitleStyle: Object.keys(commentTitleStyle).length > 0 ? commentTitleStyle : undefined,
             captionStyle: Object.keys(captionStyle).length > 0 ? captionStyle : undefined,
         });
         onClose();
@@ -320,43 +329,6 @@ export default function TodoEditor({
     const cycleActiveTargetAlign = () => writeActiveTargetStyle({ textAlign: nextTextAlign(activeTargetStyle.textAlign || 'left') });
 
     const resolvedTitleStyle = resolveCaptionStyle(captionStyle, topStrip ? contrastIconColor(topStrip) : undefined);
-
-    const activeComment = comments.find((comment) => comment.id === activeCommentId) || null;
-
-    const getTimeAgo = (ts: number) => {
-        const now = Date.now();
-        const diff = now - ts;
-        const minutes = Math.floor(diff / 60000);
-        const hours = Math.floor(minutes / 60);
-        const days = Math.floor(hours / 24);
-        if (minutes < 1) return 'just now';
-        if (minutes < 60) return `${minutes}m ago`;
-        if (hours < 24) return `${hours}h ago`;
-        return `${days}d ago`;
-    };
-
-    const renderTextWithLinks = (text: string) => {
-        const urlRegex = /(https?:\/\/[^\s]+)/g;
-        const parts = text.split(urlRegex);
-        return parts.map((part, i) => {
-            if (part.match(urlRegex)) {
-                return (
-                    <a
-                        key={i}
-                        href={part}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-blue-500 hover:underline break-all"
-                    >
-                        {part}
-                    </a>
-                );
-            }
-            return <span key={i}>{part}</span>;
-        });
-    };
-
-    const getInitial = (name: string) => name.charAt(0).toUpperCase();
 
     const openDatePicker = (taskId: string, event?: React.MouseEvent) => {
         const task = tasks.find(t => t.id === taskId);
@@ -479,8 +451,8 @@ export default function TodoEditor({
                         (self-center previously made it sit below their top
                         edge whenever the card/panel were taller). */}
                     <div
-                        className={`flex flex-col items-center bg-white rounded-lg shadow-lg p-2 gap-1 self-start flex-shrink-0 ${commentColorPopupId ? "opacity-0 pointer-events-none" : ""}`}
-                        style={{ pointerEvents: commentColorPopupId ? 'none' : 'auto' }}
+                        className="flex flex-col items-center bg-white rounded-lg shadow-lg p-2 gap-1 self-start flex-shrink-0"
+                        style={{ pointerEvents: 'auto' }}
                         onClick={(e) => e.stopPropagation()}
                     >
                         {/* Text style */}
@@ -561,11 +533,6 @@ export default function TodoEditor({
                                     setShowTextStylePanel(false);
                                     if (isOpening) {
                                         setShowCommentPopup(false);
-                                        setActiveCommentId(null);
-                                        setEditingCommentId(null);
-                                        setEditingCommentText('');
-                                        setCommentColorPopupId(null);
-                                        setShowBadgeColorPicker(false);
                                     }
                                 }}
                                 className={`w-10 h-10 flex items-center justify-center rounded-lg transition-colors ${showReactionPicker ? 'bg-blue-100 text-blue-600' : 'hover:bg-gray-200 text-gray-600'
@@ -581,18 +548,10 @@ export default function TodoEditor({
                         <div className="relative flex flex-col items-center">
                             <button
                                 onClick={() => {
-                                    const isOpening = !showCommentPopup;
-                                    setShowCommentPopup(isOpening);
+                                    setShowCommentPopup((prev) => !prev);
                                     setShowColorPicker(false);
                                     setShowReactionPicker(false);
                                     setShowTextStylePanel(false);
-                                    if (isOpening) {
-                                        setActiveCommentId(comments[comments.length - 1]?.id || null);
-                                        setEditingCommentId(null);
-                                        setEditingCommentText('');
-                                        setCommentColorPopupId(null);
-                                        setShowBadgeColorPicker(false);
-                                    }
                                 }}
                                 className={`w-10 h-10 flex items-center justify-center rounded-lg transition-colors ${showCommentPopup ? 'bg-blue-100 text-blue-600' : 'hover:bg-gray-200 text-gray-600'
                                     }`}
@@ -676,41 +635,6 @@ export default function TodoEditor({
                                 style={resolvedTitleStyle}
                             />
                         </div>
-
-                        {showCommentPopup && commentColorPopupId && (
-                            <div
-                                className="absolute right-full top-0 mr-3 z-[1200] bg-white rounded-lg shadow-xl border border-gray-200 p-3 min-w-[240px]"
-                                onClick={(e) => e.stopPropagation()}
-                                onMouseDown={(e) => {
-                                    e.preventDefault();
-                                    e.stopPropagation();
-                                }}
-                            >
-                                <TextStylePopup
-                                    isOpen={true}
-                                    onOpenChange={(open) => !open && setCommentColorPopupId(null)}
-                                    onSelectHeading={() => { }}
-                                    hideHeadingSelect={true}
-                                    onSelectColor={(color) => {
-                                        setComments((prev) => prev.map((comment) =>
-                                            comment.id === commentColorPopupId
-                                                ? { ...comment, textColor: color }
-                                                : comment
-                                        ));
-                                    }}
-                                    onSelectHighlight={(color) => {
-                                        setComments((prev) => prev.map((comment) =>
-                                            comment.id === commentColorPopupId
-                                                ? { ...comment, backgroundColor: color }
-                                                : comment
-                                        ));
-                                    }}
-                                    currentHeading="normal"
-                                    currentColor={comments.find(c => c.id === commentColorPopupId)?.textColor || comments.find(c => c.id === commentColorPopupId)?.color}
-                                    currentHighlight={comments.find(c => c.id === commentColorPopupId)?.backgroundColor}
-                                />
-                            </div>
-                        )}
 
                         <div className="p-4 overflow-y-auto flex-1" ref={taskListRef}>
                             {/* Task list */}
@@ -1134,238 +1058,54 @@ export default function TodoEditor({
                     )}
 
                     {showCommentPopup && (
-                        <div className="relative bg-white rounded-xl shadow-2xl border border-gray-200 p-4 min-w-[280px] max-w-[320px] flex-shrink-0 animate-in fade-in slide-in-from-left-2 duration-200">
-                            <button
-                                onClick={() => {
-                                    setShowCommentPopup(false);
-                                    setActiveCommentId(null);
-                                    setEditingCommentId(null);
-                                    setEditingCommentText('');
-                                    setCommentColorPopupId(null);
-                                    setShowBadgeColorPicker(false);
+                        <div className="flex-shrink-0">
+                            <CommentPopup
+                                isOpen={showCommentPopup}
+                                accessMode={accessMode}
+                                onOpenChange={(open) => {
+                                    if (!open) setShowCommentPopup(false);
                                 }}
-                                className="absolute -right-3 -top-3 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-400 shadow-md transition-all hover:text-gray-600"
-                                title="Close"
-                            >
-                                <X className="h-3.5 w-3.5" />
-                            </button>
-                            <div className="flex items-center justify-between mb-3">
-                                <h4 className="text-sm font-semibold text-gray-700">Comments</h4>
-                                <button
-                                    onClick={() => {
-                                        setShowBadgeColorPicker((prev) => !prev);
-                                        setCommentColorPopupId(null);
-                                    }}
-                                    className="w-7 h-7 flex items-center justify-center rounded hover:bg-gray-100"
-                                    title="Badge Color"
-                                >
-                                    <div
-                                        className="w-4 h-4 rounded border border-gray-300"
-                                        style={{ backgroundColor: badgeColor }}
-                                    />
-                                </button>
-                            </div>
-                            {showBadgeColorPicker && (
-                                <div className="absolute right-3 top-12 z-10 bg-white rounded-lg shadow-lg border border-gray-200 p-2">
-                                    <div className="grid grid-cols-6 gap-1.5">
-                                        {BADGE_COLORS.map((color) => (
-                                            <button
-                                                key={color}
-                                                onClick={() => {
-                                                    setBadgeColor(color);
-                                                    setShowBadgeColorPicker(false);
-                                                }}
-                                                className={`rounded transition-transform hover:scale-110 ${badgeColor === color ? 'ring-2 ring-blue-500' : ''}`}
-                                                style={{
-                                                    width: '20px',
-                                                    height: '20px',
-                                                    backgroundColor: color,
-                                                    border: ['#f3f4f6', '#e5e7eb', '#fef9c3', '#fef08a'].includes(color) ? '1px solid #d1d5db' : 'none',
-                                                }}
-                                                title={color}
-                                            />
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
-                            {comments.length === 0 ? (
-                                <p className="text-xs text-gray-400 text-center py-4">No comments yet</p>
-                            ) : (
-                                <div className="flex gap-3">
-                                    <div className="flex-1 space-y-3 max-h-[300px] overflow-y-auto pr-1 scrollbar-ultrathin">
-                                        {comments.map((comment) => {
-                                            const isEditing = editingCommentId === comment.id;
-                                            const isActive = activeCommentId === comment.id;
-                                            const commitEdit = () => {
-                                                const trimmed = editingCommentText.trim();
-                                                if (!trimmed) {
-                                                    setEditingCommentId(null);
-                                                    setEditingCommentText('');
-                                                    setCommentColorPopupId(null);
-                                                    return;
-                                                }
-                                                setComments((prev) => prev.map((c) =>
-                                                    c.id === comment.id ? { ...c, text: trimmed } : c
-                                                ));
-                                                setEditingCommentId(null);
-                                                setEditingCommentText('');
-                                                setCommentColorPopupId(null);
-                                            };
-
-                                            return (
-                                                <div
-                                                    key={comment.id}
-                                                    className={`flex gap-2 rounded p-1 -m-1 cursor-pointer ${isActive ? 'bg-blue-50' : 'hover:bg-gray-50'}`}
-                                                    onClick={() => setActiveCommentId(comment.id)}
-                                                >
-                                                    <div className="w-6 h-6 rounded-full bg-blue-500 flex items-center justify-center text-white text-[10px] font-bold shrink-0">
-                                                        {getInitial(comment.userName)}
-                                                    </div>
-                                                    <div className="flex-1">
-                                                        <div className="flex items-center gap-2">
-                                                            <span className="text-xs font-medium text-gray-700">{comment.userName || 'User'}</span>
-                                                            <span className="text-[10px] text-gray-400">{getTimeAgo(comment.timestamp)}</span>
-                                                        </div>
-                                                        {isEditing ? (
-                                                            <textarea
-                                                                value={editingCommentText}
-                                                                onChange={(e) => setEditingCommentText(e.target.value)}
-                                                                onInput={(e) => {
-                                                                    const el = e.currentTarget;
-                                                                    el.style.height = 'auto';
-                                                                    el.style.height = `${el.scrollHeight}px`;
-                                                                }}
-                                                                onKeyDown={(e) => {
-                                                                    if (e.key === 'Enter' && !e.shiftKey) {
-                                                                        e.preventDefault();
-                                                                        commitEdit();
-                                                                    }
-                                                                    if (e.key === 'Escape') {
-                                                                        setEditingCommentId(null);
-                                                                        setEditingCommentText('');
-                                                                        setCommentColorPopupId(null);
-                                                                    }
-                                                                }}
-                                                                onBlur={() => {
-                                                                    if (commentColorPopupId === comment.id) return;
-                                                                    commitEdit();
-                                                                }}
-                                                                className="w-full text-xs mt-0.5 bg-gray-50 rounded px-2 py-1 outline-none border border-gray-200 focus:border-blue-400 resize-none overflow-hidden break-words whitespace-pre-wrap"
-                                                                style={{
-                                                                    wordBreak: 'break-word',
-                                                                    color: comment.textColor || comment.color,
-                                                                    backgroundColor: comment.backgroundColor || undefined,
-                                                                }}
-                                                                rows={1}
-                                                                autoFocus
-                                                            />
-                                                        ) : (
-                                                            <p
-                                                                className={`text-xs text-gray-600 mt-0.5 break-words whitespace-pre-wrap ${comment.isStrikethrough ? 'line-through' : ''}`}
-                                                                style={{
-                                                                    wordBreak: 'break-word',
-                                                                    color: comment.textColor || comment.color,
-                                                                    backgroundColor: comment.backgroundColor || undefined,
-                                                                }}
-                                                            >
-                                                                {renderTextWithLinks(comment.text)}
-                                                            </p>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-                                    <div className="flex flex-col gap-1 flex-shrink-0 pt-1">
-                                        {editingCommentId && activeComment && editingCommentId === activeComment.id ? (
-                                            <button
-                                                onMouseDown={(e) => {
-                                                    e.preventDefault();
-                                                    e.stopPropagation();
-                                                    setCommentColorPopupId((prev) => (prev === activeComment.id ? null : activeComment.id));
-                                                }}
-                                                className="p-1 rounded transition-colors text-gray-300 hover:text-blue-500"
-                                                title="Color"
-                                                disabled={!activeComment}
-                                            >
-                                                <Palette className="w-3 h-3" />
-                                            </button>
-                                        ) : (
-                                            <button
-                                                onClick={() => {
-                                                    if (!activeComment) return;
-                                                    setEditingCommentId(activeComment.id);
-                                                    setEditingCommentText(activeComment.text || '');
-                                                    setCommentColorPopupId(null);
-                                                }}
-                                                className="p-1 rounded transition-colors text-gray-300 hover:text-blue-500 disabled:opacity-40 disabled:hover:text-gray-300"
-                                                title="Edit"
-                                                disabled={!activeComment}
-                                            >
-                                                <PenTool className="w-3 h-3" />
-                                            </button>
-                                        )}
-                                        <button
-                                            onClick={() => {
-                                                if (!activeComment) return;
-                                                setComments((prev) => prev.map((comment) =>
-                                                    comment.id === activeComment.id
-                                                        ? { ...comment, isStrikethrough: !comment.isStrikethrough }
-                                                        : comment
-                                                ));
-                                            }}
-                                            className={`p-1 rounded transition-colors ${activeComment?.isStrikethrough ? 'text-blue-500 bg-blue-50' : 'text-gray-300 hover:text-blue-500'} disabled:opacity-40 disabled:hover:text-gray-300`}
-                                            title="Strikethrough"
-                                            disabled={!activeComment}
-                                        >
-                                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                                <path d="M16 4H9a3 3 0 0 0-2.83 4" />
-                                                <path d="M14 12a4 4 0 0 1 0 8H6" />
-                                                <line x1="4" y1="12" x2="20" y2="12" />
-                                            </svg>
-                                        </button>
-                                        <button
-                                            onClick={() => {
-                                                if (!activeComment) return;
-                                                setComments((prev) => prev.filter((comment) => comment.id !== activeComment.id));
-                                                setActiveCommentId(null);
-                                                setEditingCommentId(null);
-                                                setEditingCommentText('');
-                                                setCommentColorPopupId(null);
-                                            }}
-                                            className="p-1 text-gray-300 hover:text-red-500 transition-colors disabled:opacity-40 disabled:hover:text-gray-300"
-                                            title="Delete"
-                                            disabled={!activeComment}
-                                        >
-                                            <Trash2 className="w-3 h-3" />
-                                        </button>
-                                    </div>
-                                </div>
-                            )}
-                            <div className="mt-3 pt-3 border-t border-gray-100">
-                                <input
-                                    type="text"
-                                    value={newCommentText}
-                                    onChange={(e) => setNewCommentText(e.target.value)}
-                                    placeholder="Add a comment..."
-                                    className="w-full text-xs px-3 py-2 rounded-lg border border-gray-200 focus:border-blue-400 focus:ring-1 focus:ring-blue-100 outline-none"
-                                    onKeyDown={(e) => {
-                                        if (e.key === 'Enter' && newCommentText.trim()) {
-                                            const commentText = newCommentText.trim();
-                                            const newComment = {
-                                                id: `comment-${Date.now()}`,
-                                                text: commentText,
-                                                userId: 'user1',
-                                                userName: 'You',
-                                                timestamp: Date.now(),
-                                            };
-                                            setComments((prev) => [...prev, newComment]);
-                                            setNewCommentText('');
-                                            setActiveCommentId(newComment.id);
-                                        }
-                                    }}
-                                />
-                            </div>
+                                onSubmit={guardCommentMutation(accessMode, (text) => {
+                                    const newComment: PadletComment = {
+                                        id: `comment-${Date.now()}`,
+                                        text,
+                                        userId: currentUserId,
+                                        userName: currentUserName,
+                                        timestamp: Date.now(),
+                                    };
+                                    setComments((prev) => [...prev, newComment]);
+                                })}
+                                onEditComment={guardCommentMutation(accessMode, (commentId, text) => {
+                                    setComments((prev) => prev.map((comment) =>
+                                        comment.id === commentId ? { ...comment, text } : comment
+                                    ));
+                                })}
+                                onRemoveComment={guardCommentMutation(accessMode, (commentId) => {
+                                    setComments((prev) => prev.filter((comment) => comment.id !== commentId));
+                                })}
+                                onToggleCommentStrikethrough={guardCommentMutation(accessMode, (commentId) => {
+                                    setComments((prev) => prev.map((comment) =>
+                                        comment.id === commentId
+                                            ? { ...comment, isStrikethrough: !comment.isStrikethrough }
+                                            : comment
+                                    ));
+                                })}
+                                onCommentColor={guardCommentMutation(accessMode, (commentId, textColor, backgroundColor) => {
+                                    setComments((prev) => prev.map((comment) =>
+                                        comment.id === commentId ? { ...comment, textColor, backgroundColor } : comment
+                                    ));
+                                })}
+                                comments={comments}
+                                currentUserId={currentUserId}
+                                currentUserName={currentUserName}
+                                badgeColor={badgeColor}
+                                onBadgeColorChange={guardCommentMutation(accessMode, setBadgeColor)}
+                                commentTitle={commentTitle}
+                                commentTitleStyle={Object.keys(commentTitleStyle).length > 0 ? commentTitleStyle : undefined}
+                                onCommentTitleChange={guardCommentMutation(accessMode, (nextTitle: string) => setCommentTitle(nextTitle === 'Comments' ? undefined : nextTitle))}
+                                onCommentTitleStyleChange={guardCommentMutation(accessMode, (style: CommentTitleStyle) => setCommentTitleStyle(style))}
+                                enableCanonicalSelectionStyling
+                            />
                         </div>
                     )}
                     </div>

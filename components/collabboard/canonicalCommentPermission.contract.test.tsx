@@ -413,8 +413,10 @@ describe('PATCH 8O.1/8O.2 -- canonical comment permission wiring', () => {
       // unchanged from 8O.1 -- the manage-mode fallback body is untouched,
       // just now reached via a ternary instead of directly. PATCH 8P adds
       // Note's 2 sites x 8 (all 8 props direct-wrapped, no ternary since
-      // COMMENT stays dormant for Note) = 16. 23 + 16 = 39.
-      expect((freeform.match(/guardCommentMutation\(/g) ?? []).length).toBe(39);
+      // COMMENT stays dormant for Note) = 16. 23 + 16 = 39. PATCH 8S adds
+      // Todo's 1 on-canvas site x 8 (same direct-wrap pattern, COMMENT stays
+      // dormant for Todo too) = 8. 39 + 8 = 47.
+      expect((freeform.match(/guardCommentMutation\(/g) ?? []).length).toBe(47);
       // 4 ownership-gated callbacks (edit/remove/toggle/color) x 3
       // COMMENT-capable sites (Clipart Site B, Image x2) = 12 -- Note does
       // NOT use this guard (COMMENT stays dormant there), so unchanged by 8P.
@@ -589,6 +591,107 @@ describe('PATCH 8O.1/8O.2 -- canonical comment permission wiring', () => {
     });
   });
 
+  describe('Todo -- on-canvas entry point in FreeformPadletCards.tsx (PATCH 8S)', () => {
+    it('is wired with accessMode and guarded callbacks (manage-only, no COMMENT-mode branch), migrated off the local hand-rolled implementation', () => {
+      const freeform = read(FREEFORM_PATH);
+      const anchor = 'Todo detached comments use the canonical panel; this shell only owns placement and close state (PATCH 8S';
+      const block = commentPopupBlockAfter(freeform, anchor);
+      expect(block).toContain('accessMode={commentAccessMode}');
+      expect(block).not.toContain('guardOwnCommentMutation(');
+      expect(block).not.toContain('guardCommentComposition(');
+      expect(block).not.toContain('commentModeMutations');
+      expectManageOnlyWiredCallSite(block, true);
+    });
+
+    it('the panel wrapper stops click/mousedown propagation so a comment-row click cannot bubble to the Todo card (checkbox toggle / closeAllToolbars)', () => {
+      const freeform = read(FREEFORM_PATH);
+      const anchor = 'Todo detached comments use the canonical panel; this shell only owns placement and close state (PATCH 8S';
+      const anchorStart = freeform.indexOf(anchor);
+      const popupStart = freeform.indexOf('<CommentPopup', anchorStart);
+      const wrapperStart = freeform.lastIndexOf('<div', popupStart);
+      const wrapperSlice = freeform.slice(wrapperStart, popupStart);
+      expect(wrapperSlice).toContain('onClick={(e) => e.stopPropagation()}');
+      expect(wrapperSlice).toContain('onMouseDown={(e) => e.stopPropagation()}');
+    });
+
+    it('the padlet.type === "todo" branch no longer contains the local hand-rolled comment row/composer JSX', () => {
+      const freeform = read(FREEFORM_PATH);
+      // Scoped to the Todo branch specifically: a copy-pasted, MISLABELED
+      // "Todo Comments Popup - Right side" comment also exists (unchanged,
+      // out of scope) inside the actual "Comment" post family's own branch
+      // elsewhere in this file, so a whole-file substring check would give a
+      // false negative here -- narrow to padlet.type === 'todo' ... padlet.type === 'container'.
+      const todoStart = freeform.indexOf("if (padlet.type === 'todo') {");
+      const todoEnd = freeform.indexOf("if (padlet.type === 'container') {", todoStart);
+      expect(todoStart).toBeGreaterThan(-1);
+      expect(todoEnd).toBeGreaterThan(todoStart);
+      const todoBranch = freeform.slice(todoStart, todoEnd);
+      expect(todoBranch).not.toContain('Todo Comments Popup - Right side');
+      expect(todoBranch).not.toContain('editingCardCommentText');
+      expect(todoBranch).not.toContain('No comments yet');
+    });
+  });
+
+  describe('Todo -- TodoEditor.tsx own detached-comment CommentPopup, threaded via CanvasModals.tsx (PATCH 8S)', () => {
+    it('TodoEditor.tsx accepts an accessMode prop and wires its single CommentPopup with it, migrated off the local hand-rolled implementation', () => {
+      const todoEditor = read('components/collabboard/editors/TodoEditor.tsx');
+      expect(todoEditor).toContain("import { guardCommentMutation, type CommentAccessMode } from '@/lib/domain/canvas/comments';");
+      expect(todoEditor).toContain("import CommentPopup from './CommentPopup';");
+      expect(todoEditor).toContain('accessMode?: CommentAccessMode;');
+      expect(todoEditor).toContain("accessMode = 'manage',");
+      const total = (todoEditor.match(/<CommentPopup/g) ?? []).length;
+      expect(total, 'TodoEditor.tsx must have exactly one CommentPopup usage').toBe(1);
+      const block = commentPopupBlockAfter(todoEditor, '<CommentPopup');
+      expect(block).toContain('accessMode={accessMode}');
+      expectManageOnlyWiredCallSite(block, true);
+    });
+
+    it('uses real currentUserId/currentUserName props, not the historical "user1"/"You" literal', () => {
+      const todoEditor = read('components/collabboard/editors/TodoEditor.tsx');
+      expect(todoEditor).toContain('currentUserId?: string;');
+      expect(todoEditor).toContain('currentUserName?: string;');
+      expect(todoEditor).toContain("currentUserId = 'anon',");
+      expect(todoEditor).toContain("currentUserName = 'You',");
+      const block = commentPopupBlockAfter(todoEditor, '<CommentPopup');
+      expect(block).toContain('userId: currentUserId,');
+      expect(block).toContain('userName: currentUserName,');
+      expect(block).toContain('currentUserId={currentUserId}');
+      expect(block).toContain('currentUserName={currentUserName}');
+      expect(block).not.toContain("userId: 'user1'");
+    });
+
+    it('wires commentTitle/commentTitleStyle to real state, guarded', () => {
+      const todoEditor = read('components/collabboard/editors/TodoEditor.tsx');
+      const block = commentPopupBlockAfter(todoEditor, '<CommentPopup');
+      expect(block).toContain('commentTitle={commentTitle}');
+      expect(block).toContain('commentTitleStyle={');
+      const titleChangeStart = block.indexOf('onCommentTitleChange=');
+      expect(titleChangeStart).toBeGreaterThan(-1);
+      const titleChangeNext = block.slice(titleChangeStart + 'onCommentTitleChange='.length).match(/^\s*\{?\s*(\S+)/);
+      expect(titleChangeNext?.[1]?.startsWith('guardCommentMutation(')).toBe(true);
+    });
+
+    it('no local hand-rolled Todo comment row/composer/color-popup JSX remains in TodoEditor.tsx', () => {
+      const todoEditor = read('components/collabboard/editors/TodoEditor.tsx');
+      expect(todoEditor).not.toContain('getTimeAgo');
+      expect(todoEditor).not.toContain('renderTextWithLinks');
+      expect(todoEditor).not.toContain('commentColorPopupId');
+      expect(todoEditor).not.toContain('editingCommentId');
+    });
+
+    it('CanvasModals.tsx threads commentAccessMode + real identity + persisted commentTitle/commentTitleStyle into TodoEditor', () => {
+      const canvasModals = read('components/collabboard/canvas/ui/CanvasModals.tsx');
+      const todoEditorStart = canvasModals.indexOf('<TodoEditor');
+      const todoEditorEnd = canvasModals.indexOf('/>', canvasModals.indexOf('boardId=', todoEditorStart));
+      const todoEditorBlock = canvasModals.slice(todoEditorStart, todoEditorEnd);
+      expect(todoEditorBlock).toContain('accessMode={commentAccessMode}');
+      expect(todoEditorBlock).toContain("currentUserId={user?.id || 'anon'}");
+      expect(todoEditorBlock).toContain("currentUserName={user?.email?.split('@')[0] || 'You'}");
+      expect(canvasModals).toContain('commentTitle: typeof padletToEdit.metadata.commentTitle');
+      expect(canvasModals).toContain('commentTitleStyle: padletToEdit.metadata.commentTitleStyle');
+    });
+  });
+
   describe('Drawing -- DrawingEditor.tsx own detached-comment CommentPopup, threaded via CanvasModals.tsx (PATCH 8R)', () => {
     it('DrawingEditor.tsx accepts an accessMode prop and wires its single CommentPopup with it', () => {
       const drawingEditor = read('components/collabboard/editors/DrawingEditor.tsx');
@@ -681,12 +784,12 @@ describe('PATCH 8O.1/8O.2 -- canonical comment permission wiring', () => {
   });
 
   describe('architecture guard -- every <CommentPopup usage in these three files is accounted for', () => {
-    it('FreeformPadletCards.tsx has exactly 5 <CommentPopup usages, all 5 wired (Clipart Site B, Image x2, Note x2)', () => {
+    it('FreeformPadletCards.tsx has exactly 6 <CommentPopup usages, all 6 wired (Clipart Site B, Image x2, Note x2, Todo x1)', () => {
       const freeform = read(FREEFORM_PATH);
       const total = (freeform.match(/<CommentPopup/g) ?? []).length;
       const wired = (freeform.match(/accessMode=\{commentAccessMode\}/g) ?? []).length;
-      expect(total).toBe(5);
-      expect(wired).toBe(5);
+      expect(total).toBe(6);
+      expect(wired).toBe(6);
     });
 
     it('CanvasClient.tsx has exactly 1 <CommentPopup usage and it is wired', () => {

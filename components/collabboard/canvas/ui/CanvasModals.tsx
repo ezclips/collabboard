@@ -265,11 +265,16 @@ export default function CanvasModals({
             detachedComments: padletToEdit.metadata.detachedComments || padletToEdit.metadata.comments,
             comments: padletToEdit.metadata.comments,
             badgeColor: padletToEdit.metadata.badgeColor,
+            commentTitle: typeof padletToEdit.metadata.commentTitle === 'string' ? padletToEdit.metadata.commentTitle : undefined,
+            commentTitleStyle: padletToEdit.metadata.commentTitleStyle as any,
             captionStyle: padletToEdit.metadata.captionStyle as CaptionStyle | undefined,
           } : undefined}
           onSave={saveTodo}
           padletId={padletToEdit?.id !== 'new' ? padletToEdit?.id : undefined}
           boardId={canvasId}
+          accessMode={commentAccessMode}
+          currentUserId={user?.id || 'anon'}
+          currentUserName={user?.email?.split('@')[0] || 'You'}
         />
       </div>
 

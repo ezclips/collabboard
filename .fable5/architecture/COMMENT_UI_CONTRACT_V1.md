@@ -81,6 +81,7 @@ CANONICAL:
 - Image
 - Note — normal/detached comments
 - Drawing — normal/detached comments
+- Todo — normal/detached comments
 
 NOT YET MIGRATED:
 
@@ -88,7 +89,6 @@ NOT YET MIGRATED:
 - Document — **has no normal/detached comment tier at all** (see below)
 - AI Component
 - Link
-- Todo
 - Comment post
 - Container
 - other normal-comment surfaces identified by future audits
@@ -123,9 +123,35 @@ all normal comment rows, editing, composer, styling, links, and deletion.
 Highlighted/anchored Note threads remain on their TipTap mark/thread storage
 and controller path and are intentionally not part of this migration.
 
-Other non-Clipart surfaces are intentionally not made to comply by this patch.
-A migration moves a post from the second list to the first only after all of
-its live entry points, adapters, and contract tests are added.
+**Todo normal/detached comments were migrated in PATCH 8S** (2026-08-12) --
+unlike Drawing (PATCH 8R, wiring-only) and Document (PATCH 8Q, N/A), Todo's
+inventory found TWO live entry points that were each a fully local,
+hand-rolled comment implementation (row JSX, composer, per-comment color
+popup, badge-color picker) with no relationship to `CommentPopup` at all:
+`TodoEditor.tsx`'s own left-toolbar Comment panel, and
+`FreeformPadletCards.tsx`'s single on-canvas badge popup (Todo has no
+separate toolbar-triggered popup the way Note/Image do). Both were rewritten
+to delegate entirely to canonical `CommentPopup`, wired the same way as
+Note's own-editor and on-canvas sites: `guardCommentMutation(accessMode, ...)`
+directly at every prop (COMMENT stays dormant for Todo too), real identity
+threaded from `CanvasModals.tsx`'s existing `commentAccessMode`/`user` props
+into `TodoEditor.tsx` (the on-canvas site already used real `user?.id ||
+'anon'` identity pre-migration; `TodoEditor.tsx`'s own site previously
+hardcoded `userId: 'user1', userName: 'You'` and now uses real identity too).
+`commentTitle`/`commentTitleStyle` were newly added to both sites (previously
+a fixed, non-editable "Comments" header). All local state that is now owned
+internally by `CommentPopup` (per-comment edit/color-popup state, badge-color
+picker open state, composer text) was deleted from both callers rather than
+kept as an unused duplicate. A `padlet.type === 'comment'` (the standalone
+"Comment" post family, out of scope) branch elsewhere in
+`FreeformPadletCards.tsx` contains a copy-pasted, MISLABELED "Todo Comments
+Popup - Right side" comment above its own unrelated local implementation --
+noted so a future patch does not mistake it for a second live Todo site.
+
+Other non-Clipart/Image/Note/Drawing/Todo surfaces are intentionally not made
+to comply by this patch. A migration moves a post from the second list to the
+first only after all of its live entry points, adapters, and contract tests
+are added.
 
 ## Governance unlock rule
 

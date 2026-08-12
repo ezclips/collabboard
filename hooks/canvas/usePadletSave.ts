@@ -107,6 +107,8 @@ export type SaveTodoData = {
     isStrikethrough?: boolean;
   }>;
   badgeColor?: string;
+  commentTitle?: string;
+  commentTitleStyle?: { color?: string; backgroundColor?: string };
   captionStyle?: CaptionStyle;
 };
 
@@ -641,6 +643,8 @@ export function usePadletSave(params: UsePadletSaveParams) {
       detachedComments: data.detachedComments,
       comments: data.detachedComments,
       badgeColor: data.badgeColor || padletToEdit?.metadata?.badgeColor,
+      commentTitle: data.commentTitle,
+      commentTitleStyle: data.commentTitleStyle,
       captionStyle: data.captionStyle,
     };
 
