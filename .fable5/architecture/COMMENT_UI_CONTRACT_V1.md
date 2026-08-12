@@ -90,7 +90,8 @@ NOT YET MIGRATED:
 
 - Note — anchored/highlighted threads (special storage adapter required)
 - Document — **has no normal/detached comment tier at all** (see below)
-- Comment post
+- Comment post — **primary-thread comment UI, classified SPECIAL; not a
+  CommentPopup migration candidate** (see below)
 - Container — **has no live normal/detached comment tier at all** (see below)
 - other normal-comment surfaces identified by future audits
 
@@ -329,6 +330,86 @@ Wall/Column/Grid container context-menu files. Because Category A is empty,
 none of the frozen foundation files were touched and no negative controls
 apply beyond confirming the dead code stayed byte-identical (verified via
 `git diff` showing zero changes to any `.tsx`/`.ts` production file).
+
+**Comment post was classified SPECIAL / PRIMARY THREAD in PATCH 8X**
+(2026-08-13) — no production code was changed. Phase 1 inventory confirmed
+the standalone Comment post has no separate "body" at all: `metadata.comments`
+IS its entire primary content (`usePadletSave.ts`'s `saveComment`/
+`SaveCommentData` has no `detachedComments` field whatsoever — there is
+nothing for a secondary/Category-A comment tier to attach to). This rules out
+Decision Gate 1 (no Category A exists) and puts the whole family under
+Decision Gate 2: is the primary-thread UI safely canonicalizable (B1), or is
+it a genuinely different product surface that CommentPopup would regress
+(B2)?
+
+Three live standalone entry points were found, all Category B (primary
+thread, not child-post rendering):
+
+1. `CommentPost.tsx` — the on-canvas card body when `metadata.isCollapsed` is
+   falsy. The comment list, its composer, and its title/badge chrome ARE the
+   entire card.
+2. `FreeformPadletCards.tsx`'s inline "Collapsed Marker" popup (~line 2070-2417,
+   inside the `padlet.type === 'comment' || 'Comment'` branch) — a second,
+   independently hand-rolled implementation of the same row/composer/color-popup
+   pattern, used only when `metadata.isCollapsed` is true (the post renders as a
+   numbered pin/marker instead of a card).
+3. `CommentEditor.tsx` — the double-click/Edit modal (`isCommentEditorOpen` in
+   `CanvasModals.tsx`), a full rich editor: per-row Edit/Color/Strikethrough/
+   Delete (same conceptual shape as `CommentPopup`), PLUS a composer with a
+   complete TipTap toolbar CommentPopup does not have at all — Bold, Italic,
+   Underline, Bullet List, Ordered List, Code Block, Text Align, and an emoji
+   picker (`CommentEditorToolbar.tsx`) — plus card background/top-strip color
+   and badge color pickers. `CommentPopup.tsx`'s own `COMMENT_POPUP_EXTENSIONS`
+   is confirmed to carry none of Underline/BulletList/OrderedList/CodeBlock/
+   TextAlign/emoji (`StarterKit.configure({ heading: false, codeBlock: false,
+   link: false })` plus `TextStyle`/`Color`/`Highlight`/`Link` only) — routing
+   Comment post through `CommentPopup` as-is would be a real product capability
+   regression, not a like-for-like UI swap.
+
+A fourth block exists inside the same `padlet.type === 'comment'` branch,
+copy-pasted from Todo's pre-migration on-canvas popup and still carrying the
+stale, MISLABELED "Todo Comments Popup - Right side" comment first flagged in
+PATCH 8S/8U — confirmed this patch to be genuinely **dead** (Category D), not
+a fourth live entry point: it renders only when `cardCommentPopupPadletId ===
+padlet.id`, and every live call site that ever sets `cardCommentPopupPadletId`
+to a truthy id (grep-verified across the whole file) lives inside other post
+types' branches (Image, Link, Todo, Table, and the generic Note/Clipart-style
+fallback badge) — none of them, and nothing inside the Comment-post branch
+itself, ever sets it to a Comment post's own id. It was left untouched, same
+disposition as the Container investigation's dead `detachedComments` skeleton
+(PATCH 8W) and the "cardToolbarPadletId has no live non-null setter" Clipart
+note above.
+
+Given CommentEditor's composer is a strictly richer authoring surface than
+canonical `CommentPopup` today, and `metadata.comments` is this post type's
+entire reason to exist rather than a bolted-on panel, this is **B2**: forcing
+canonical `CommentPopup` here would change the Comment post's product model,
+not just its implementation. Per this patch's own decision gate, no migration
+was performed and no production code was touched — **COMMENT POST = SPECIAL
+/ PRIMARY THREAD**, recorded for a future dedicated adapter patch rather than
+folded into the normal-comment rollout. None of the three live surfaces has
+`accessMode`/`guardCommentMutation` wiring today (every mutation is
+unconditionally reachable regardless of workspace role) — real identity IS
+already threaded correctly (`CanvasModals.tsx` passes `user?.id`/a resolved
+display name into `CommentEditor.tsx`; `FreeformPadletCards.tsx`'s two
+on-canvas sites already use `user?.id || 'anon'`), so this is a real
+permission-wiring gap but, like Document's anchored `CommentPopup`, a
+separate Category-B-shaped follow-up from a UI migration, not something to
+retrofit into a classification-only patch.
+
+Two Category-C embedded child-renderer surfaces were re-examined (first
+identified in PATCH 8W): `RowColumnContainerCard.tsx` and `PostCardContent.tsx`
+both render a comment-type child's `metadata.comments` through
+`EmbeddedCommentList.tsx` — a fourth, independent, genuinely editable comment
+UI (own header/counter, own `CommentRow.tsx` per-row Edit/Color/Strikethrough/
+Delete, own composer/Send), intentionally compact for embedding inside a
+container card rather than a truncated read-only preview. Per this patch's
+own instruction not to replace `EmbeddedCommentList` without justification,
+it was characterized, not touched. Separately, `ContainerEditor.tsx`'s own
+`SortableChildItem` (PATCH 8W) already renders a comment-type child directly
+through canonical `CommentPopup` instead of `EmbeddedCommentList` — an
+existing inconsistency between the two embedded-child code paths, noted here
+as a fact for a future patch but out of scope to reconcile in PATCH 8X.
 
 Other non-Clipart/Image/Note/Drawing/Todo/AI-Component/Link/Table surfaces
 are intentionally not made to comply by this patch. A migration moves a post
@@ -720,9 +801,12 @@ anchoring, viewport-space positioning, panel height discipline, title,
 composer, picker, link, and interaction-isolation behavior. This freeze
 preserves those historical notes and records Clipart as the reference. Image's
 PATCH 8O migration and normal Note detached-comment PATCH 8P migration are
-recorded above; Note anchored/highlighted threads and Comment post remain
-unmigrated. Document (PATCH 8Q) and Container (PATCH 8W) were classified N/A
--- neither has a live Category-A comment tier to migrate.
+recorded above; Note anchored/highlighted threads remain unmigrated. Document
+(PATCH 8Q) and Container (PATCH 8W) were classified N/A -- neither has a live
+Category-A comment tier to migrate. Comment post (PATCH 8X) was classified
+SPECIAL / PRIMARY THREAD -- its comment list is the post's entire primary
+content, and its own editor UI is strictly richer than canonical CommentPopup
+today, so it is deliberately not folded into this rollout.
 
 ## Negative controls
 
