@@ -15,7 +15,17 @@
 // and the actual RESOLUTION logic (resolveCommentAccessMode) already has
 // full mounted-equivalent unit coverage in lib/domain/canvas/comments.test.ts.
 // This file's job is narrower and different: prove the WIRING reaches every
-// site it must, and stops at every site it must not (Note).
+// site it must.
+//
+// PATCH 8P (2026-08-12): normal/detached Note comments (FreeformPadletCards.tsx's
+// two Note sites, plus NoteEditor.tsx's own detached-comment CommentPopup,
+// reached via CanvasModals.tsx -> CanvasClient.tsx) are now wired too, using
+// guardCommentMutation(...) directly at every prop -- simpler than Clipart/
+// Image's ternary, because COMMENT mode stays dormant for Note (no
+// commentModeMutations branch to route through; see COMMENT_UI_CONTRACT_V1.md's
+// "Live status"). NoteEditor.tsx's OTHER CommentPopup (the selected-text/
+// anchored-thread popup) is explicitly out of scope and stays unwired --
+// see the "Note anchored-thread comments stay out of scope" block below.
 import fs from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
@@ -104,6 +114,45 @@ function expectDraftModalWired(block: string) {
   }
 
   expectPanelOnlyPropsGuarded(block, false);
+}
+
+// PATCH 8P: Note's normal/detached CommentPopup sites -- onSubmit and the 4
+// OWN_COMMENT_PROPS are wrapped directly with guardCommentMutation(...), NOT
+// a ternary and NOT guardOwnCommentMutation/guardCommentComposition. This is
+// deliberate, not a shortcut: COMMENT mode stays dormant for Note (no
+// commentModeMutations wiring), so the only two reachable modes are 'read'
+// and 'manage' -- guardCommentMutation alone (reject read, allow manage) is
+// the complete, correct contract, matching the spec's explicit instruction
+// to reuse guardCommentMutation and not invent Note-specific permission logic.
+function expectManageOnlyWiredCallSite(block: string, expectTitleStyle: boolean) {
+  const submitStart = block.indexOf('onSubmit=');
+  expect(submitStart, 'onSubmit= must be present').toBeGreaterThan(-1);
+  const submitNext = block.slice(submitStart + 'onSubmit='.length).match(/^\s*\{?\s*(\S+)/);
+  expect(submitNext?.[1]?.startsWith('guardCommentMutation('), `onSubmit= must be wrapped with guardCommentMutation(...), found: ${submitNext?.[0]}`).toBe(true);
+
+  for (const prop of OWN_COMMENT_PROPS) {
+    const propStart = block.indexOf(prop);
+    expect(propStart, `${prop} must be present`).toBeGreaterThan(-1);
+    const nextNonSpace = block.slice(propStart + prop.length).match(/^\s*\{?\s*(\S+)/);
+    expect(nextNonSpace?.[1]?.startsWith('guardCommentMutation('), `${prop} must be wrapped with guardCommentMutation(...), found: ${nextNonSpace?.[0]}`).toBe(true);
+  }
+
+  const titleStart = block.indexOf('onCommentTitleChange=');
+  expect(titleStart, 'onCommentTitleChange= must be present').toBeGreaterThan(-1);
+  const titleNext = block.slice(titleStart + 'onCommentTitleChange='.length).match(/^\s*\{?\s*(\S+)/);
+  expect(titleNext?.[1]?.startsWith('guardCommentMutation('), `onCommentTitleChange= must be wrapped with guardCommentMutation(...), found: ${titleNext?.[0]}`).toBe(true);
+
+  if (expectTitleStyle) {
+    const styleStart = block.indexOf('onCommentTitleStyleChange=');
+    expect(styleStart, 'onCommentTitleStyleChange= must be present').toBeGreaterThan(-1);
+    const styleNext = block.slice(styleStart + 'onCommentTitleStyleChange='.length).match(/^\s*\{?\s*(\S+)/);
+    expect(styleNext?.[1]?.startsWith('guardCommentMutation('), `onCommentTitleStyleChange= must be wrapped with guardCommentMutation(...), found: ${styleNext?.[0]}`).toBe(true);
+  }
+
+  const badgeStart = block.indexOf('onBadgeColorChange=');
+  expect(badgeStart, 'onBadgeColorChange= must be present').toBeGreaterThan(-1);
+  const badgeNext = block.slice(badgeStart + 'onBadgeColorChange='.length).match(/^\s*\{?\s*(\S+)/);
+  expect(badgeNext?.[1]?.startsWith('guardCommentMutation('), `onBadgeColorChange= must be wrapped with guardCommentMutation(...), found: ${badgeNext?.[0]}`).toBe(true);
 }
 
 describe('PATCH 8O.1/8O.2 -- canonical comment permission wiring', () => {
@@ -356,17 +405,22 @@ describe('PATCH 8O.1/8O.2 -- canonical comment permission wiring', () => {
       expect(freeform).toContain('commentModeMutations?: CommentModeMutations;');
     });
 
-    it('usage counts of the three guard functions match exactly the 3 in-scope sites', () => {
+    it('usage counts of the four guard functions match exactly the in-scope sites', () => {
       const freeform = read(FREEFORM_PATH);
       // Image on-canvas (8 guardCommentMutation: title, titleStyle, badge, +
       // 5 manage-branch fallbacks for submit/edit/remove/toggle/color) +
-      // Clipart Site B (7: same minus badge) + Image toolbar (8) = 23.
-      // Unchanged from 8O.1 -- the manage-mode fallback body is untouched,
-      // just now reached via a ternary instead of directly.
-      expect((freeform.match(/guardCommentMutation\(/g) ?? []).length).toBe(23);
-      // 4 ownership-gated callbacks (edit/remove/toggle/color) x 3 sites = 12.
+      // Clipart Site B (7: same minus badge) + Image toolbar (8) = 23,
+      // unchanged from 8O.1 -- the manage-mode fallback body is untouched,
+      // just now reached via a ternary instead of directly. PATCH 8P adds
+      // Note's 2 sites x 8 (all 8 props direct-wrapped, no ternary since
+      // COMMENT stays dormant for Note) = 16. 23 + 16 = 39.
+      expect((freeform.match(/guardCommentMutation\(/g) ?? []).length).toBe(39);
+      // 4 ownership-gated callbacks (edit/remove/toggle/color) x 3
+      // COMMENT-capable sites (Clipart Site B, Image x2) = 12 -- Note does
+      // NOT use this guard (COMMENT stays dormant there), so unchanged by 8P.
       expect((freeform.match(/guardOwnCommentMutation\(/g) ?? []).length).toBe(12);
-      // 1 composition-gated callback (submit) x 3 sites = 3.
+      // 1 composition-gated callback (submit) x 3 COMMENT-capable sites = 3 --
+      // unchanged by 8P for the same reason.
       expect((freeform.match(/guardCommentComposition\(/g) ?? []).length).toBe(3);
     });
   });
@@ -417,30 +471,86 @@ describe('PATCH 8O.1/8O.2 -- canonical comment permission wiring', () => {
     });
   });
 
-  describe('Note detached comments are explicitly NOT wired by this patch (scope boundary)', () => {
-    it('both Note CommentPopup call sites in FreeformPadletCards.tsx have no accessMode and no comment-permission guards', () => {
+  describe('Note -- two detached-comment entry points in FreeformPadletCards.tsx (PATCH 8P)', () => {
+    it('on-canvas badge popup is wired with accessMode and guarded callbacks (manage-only, no COMMENT-mode branch)', () => {
       const freeform = read(FREEFORM_PATH);
       const firstNoteAnchor = 'Note detached comments use the canonical panel; this shell only owns placement and close state.';
+      const block = commentPopupBlockAfter(freeform, firstNoteAnchor);
+      expect(block).toContain('accessMode={commentAccessMode}');
+      expect(block).not.toContain('guardOwnCommentMutation(');
+      expect(block).not.toContain('guardCommentComposition(');
+      expect(block).not.toContain('commentModeMutations');
+      expectManageOnlyWiredCallSite(block, true);
+    });
+
+    it('toolbar popup is wired with accessMode and guarded callbacks (manage-only, no COMMENT-mode branch)', () => {
+      const freeform = read(FREEFORM_PATH);
       const secondNoteAnchor = 'Note detached comments use the canonical panel; this toolbar shell owns placement only.';
-      const firstBlock = commentPopupBlockAfter(freeform, firstNoteAnchor);
-      const secondBlock = commentPopupBlockAfter(freeform, secondNoteAnchor);
-      for (const block of [firstBlock, secondBlock]) {
-        expect(block).not.toContain('accessMode=');
-        expect(block).not.toContain('guardCommentMutation(');
-        expect(block).not.toContain('guardOwnCommentMutation(');
-        expect(block).not.toContain('guardCommentComposition(');
-        expect(block).not.toContain('commentModeMutations');
+      const block = commentPopupBlockAfter(freeform, secondNoteAnchor);
+      expect(block).toContain('accessMode={commentAccessMode}');
+      expect(block).not.toContain('guardOwnCommentMutation(');
+      expect(block).not.toContain('guardCommentComposition(');
+      expect(block).not.toContain('commentModeMutations');
+      expectManageOnlyWiredCallSite(block, true);
+    });
+  });
+
+  describe('Note -- NoteEditor.tsx own detached-comment CommentPopup, threaded via CanvasModals.tsx (PATCH 8P)', () => {
+    it('NoteEditor.tsx accepts an accessMode prop and wires only the detached/Category-A CommentPopup with it', () => {
+      const noteEditor = read('components/collabboard/editors/NoteEditor.tsx');
+      expect(noteEditor).toContain("import { guardCommentMutation, type CommentAccessMode } from '@/lib/domain/canvas/comments';");
+      expect(noteEditor).toContain('accessMode?: CommentAccessMode;');
+      expect(noteEditor).toContain("accessMode = 'manage',");
+      const block = commentPopupBlockAfter(noteEditor, '{panels.open.detached && (');
+      expect(block).toContain('accessMode={accessMode}');
+      const submitStart = block.indexOf('onSubmit=');
+      expect(submitStart).toBeGreaterThan(-1);
+      const submitNext = block.slice(submitStart + 'onSubmit='.length).match(/^\s*\{?\s*(\S+)/);
+      expect(submitNext?.[1]?.startsWith('guardCommentMutation(')).toBe(true);
+      for (const prop of OWN_COMMENT_PROPS) {
+        const propStart = block.indexOf(prop);
+        expect(propStart, `${prop} must be present`).toBeGreaterThan(-1);
+        const nextNonSpace = block.slice(propStart + prop.length).match(/^\s*\{?\s*(\S+)/);
+        expect(nextNonSpace?.[1]?.startsWith('guardCommentMutation(')).toBe(true);
       }
+    });
+
+    it('the OTHER CommentPopup in NoteEditor.tsx (selected-text/anchored-thread popup) is untouched -- no accessMode, no guards', () => {
+      const noteEditor = read('components/collabboard/editors/NoteEditor.tsx');
+      const block = commentPopupBlockAfter(noteEditor, '{panels.open.comment && (');
+      expect(block).not.toContain('accessMode=');
+      expect(block).not.toContain('guardCommentMutation(');
+      expect(block).toContain('onRemoveThread');
+      expect(block).toContain('highlightColor={activeThread?.color}');
+    });
+
+    it('CanvasModals.tsx threads commentAccessMode from CanvasClient.tsx into NoteEditor as accessMode', () => {
+      const canvasModals = read('components/collabboard/canvas/ui/CanvasModals.tsx');
+      expect(canvasModals).toContain("import type { CommentAccessMode } from '@/lib/domain/canvas/comments';");
+      expect(canvasModals).toContain('commentAccessMode?: CommentAccessMode;');
+      expect(canvasModals).toContain("commentAccessMode = 'manage',");
+      // No <CommentPopup lives inline in CanvasModals.tsx (NoteEditor owns its
+      // own internally) -- slice the <NoteEditor element itself instead of
+      // reusing commentPopupBlockAfter, which looks for a <CommentPopup anchor.
+      const noteEditorStart = canvasModals.indexOf('<NoteEditor');
+      const noteEditorEnd = canvasModals.indexOf('/>', canvasModals.indexOf('initialTitle=', noteEditorStart));
+      const noteEditorBlock = canvasModals.slice(noteEditorStart, noteEditorEnd);
+      expect(noteEditorBlock).toContain('accessMode={commentAccessMode}');
+    });
+
+    it('CanvasClient.tsx passes commentAccessMode into CanvasModals', () => {
+      const canvas = read(CANVAS_PATH);
+      expect(canvas).toContain('commentAccessMode={commentAccessMode}');
     });
   });
 
   describe('architecture guard -- every <CommentPopup usage in these three files is accounted for', () => {
-    it('FreeformPadletCards.tsx has exactly 5 <CommentPopup usages: 3 wired (Clipart Site B, Image x2), 2 unwired (Note x2)', () => {
+    it('FreeformPadletCards.tsx has exactly 5 <CommentPopup usages, all 5 wired (Clipart Site B, Image x2, Note x2)', () => {
       const freeform = read(FREEFORM_PATH);
       const total = (freeform.match(/<CommentPopup/g) ?? []).length;
       const wired = (freeform.match(/accessMode=\{commentAccessMode\}/g) ?? []).length;
       expect(total).toBe(5);
-      expect(wired).toBe(3);
+      expect(wired).toBe(5);
     });
 
     it('CanvasClient.tsx has exactly 1 <CommentPopup usage and it is wired', () => {

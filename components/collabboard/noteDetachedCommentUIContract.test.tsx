@@ -73,6 +73,27 @@ describe('normal/detached Note comments — canonical Comment UI v1 migration', 
     }
   });
 
+  // PATCH 8P: structural, not mounted -- FreeformPadletCards.tsx is too
+  // large to mount (established convention, see this file's own header).
+  // Proves the pre-existing interaction-isolation wrappers around both Note
+  // CommentPopup sites are still present, so a click/mousedown inside the
+  // comment panel cannot leak through to the card/canvas underneath (drag,
+  // selection, parent-card click). These wrappers predate PATCH 8P; this
+  // test simply closes the gap that nothing previously guarded them.
+  it('both Note CommentPopup sites are wrapped in click/mousedown isolation containers', () => {
+    const freeform = read(FREEFORM);
+    const firstNoteAnchor = 'Note detached comments use the canonical panel; this shell only owns placement and close state.';
+    const secondNoteAnchor = 'Note detached comments use the canonical panel; this toolbar shell owns placement only.';
+    for (const anchor of [firstNoteAnchor, secondNoteAnchor]) {
+      const anchorIdx = freeform.indexOf(anchor);
+      expect(anchorIdx, `anchor not found: ${anchor}`).toBeGreaterThan(-1);
+      const popupIdx = freeform.indexOf('<CommentPopup', anchorIdx);
+      const wrapperSlice = freeform.slice(anchorIdx, popupIdx);
+      expect(wrapperSlice, `${anchor} wrapper must stop click propagation`).toContain('onClick={(e) => e.stopPropagation()}');
+      expect(wrapperSlice, `${anchor} wrapper must stop mousedown propagation`).toContain('onMouseDown={(e) => e.stopPropagation()}');
+    }
+  });
+
   it('proves highlighted/anchored Note threads remain on their frozen path', () => {
     const currentNote = read(NOTE_EDITOR);
     const oldNote = baseline(NOTE_EDITOR);

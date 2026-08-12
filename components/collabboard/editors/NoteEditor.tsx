@@ -8,6 +8,7 @@ import TextStylePopup from './TextStylePopup';
 import EmojiReactionPicker from './EmojiReactionPicker';
 import LinkPopup from './LinkPopup';
 import CommentPopup from './CommentPopup';
+import { guardCommentMutation, type CommentAccessMode } from '@/lib/domain/canvas/comments';
 import { Palette, PenTool, X, Strikethrough, Trash2 } from 'lucide-react';
 import { ColorPickerContent } from '../ColorPicker';
 import { CAPTION_STYLE_PRESETS, resolveCaptionStyle, type CaptionHeading, type CaptionStyle } from '@/lib/domain/canvas/captionStyle';
@@ -77,6 +78,14 @@ interface NoteEditorProps {
   }) => void;
   onClose: () => void;
   isOpen: boolean;
+  // PATCH 8P -- access mode for the normal/detached post-comment panel only
+  // (Category A). The selected-text/anchored comment thread popup below is
+  // explicitly out of scope for this patch and stays unwired -- see that
+  // popup's own call site further down. Defaults to 'manage' so every
+  // existing caller that has not been updated keeps its exact current
+  // (fully writable) behavior, same convention as every other canonical
+  // caller (ClipartCardDraftModal.tsx, FreeformPadletCards.tsx).
+  accessMode?: CommentAccessMode;
 }
 
 // PATCH-152 §22.6 (Route D2): a stable module-level reference so an omitted
@@ -95,6 +104,7 @@ export default function NoteEditor({
   onSave,
   onClose,
   isOpen,
+  accessMode = 'manage',
 }: NoteEditorProps) {
   const panels = useShellPanels();
   const [title, setTitle] = useState(initialTitle);
@@ -812,13 +822,14 @@ export default function NoteEditor({
         {panels.open.detached && (
           <CommentPopup
             isOpen={panels.open.detached}
+            accessMode={accessMode}
             onOpenChange={(open) => {
               if (!open) {
                 panels.closePanel('detached');
                 setActiveDetachedId(null);
               }
             }}
-            onSubmit={(text) => {
+            onSubmit={guardCommentMutation(accessMode, (text) => {
               const newComment: DetachedCommentData = {
                 id: `comment-${Date.now()}`,
                 text,
@@ -827,32 +838,32 @@ export default function NoteEditor({
                 timestamp: Date.now(),
               };
               setDetachedComments((prev) => [...prev, newComment]);
-            }}
-            onEditComment={(commentId, text) => {
+            })}
+            onEditComment={guardCommentMutation(accessMode, (commentId, text) => {
               setDetachedComments((prev) => prev.map((comment) =>
                 comment.id === commentId ? { ...comment, text } : comment
               ));
-            }}
-            onRemoveComment={(commentId) => {
+            })}
+            onRemoveComment={guardCommentMutation(accessMode, (commentId) => {
               setDetachedComments((prev) => prev.filter((comment) => comment.id !== commentId));
-            }}
-            onToggleCommentStrikethrough={(commentId) => {
+            })}
+            onToggleCommentStrikethrough={guardCommentMutation(accessMode, (commentId) => {
               setDetachedComments((prev) => prev.map((comment) =>
                 comment.id === commentId
                   ? { ...comment, isStrikethrough: !comment.isStrikethrough }
                   : comment
               ));
-            }}
-            onCommentColor={(commentId, textColor, backgroundColor) => {
+            })}
+            onCommentColor={guardCommentMutation(accessMode, (commentId, textColor, backgroundColor) => {
               setDetachedComments((prev) => prev.map((comment) =>
                 comment.id === commentId ? { ...comment, textColor, backgroundColor } : comment
               ));
-            }}
+            })}
             comments={detachedComments}
             badgeColor={badgeColor}
-            onBadgeColorChange={setBadgeColor}
+            onBadgeColorChange={guardCommentMutation(accessMode, setBadgeColor)}
             commentTitle={undefined}
-            onCommentTitleChange={() => undefined}
+            onCommentTitleChange={guardCommentMutation(accessMode, () => undefined)}
             currentUserId="user1"
             currentUserName="R"
             position={detachedPopupPosition}

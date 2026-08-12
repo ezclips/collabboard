@@ -6060,6 +6060,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           user={user}
           canvasLayout={canvas?.layout}
           canvasId={canvasId}
+          commentAccessMode={commentAccessMode}
           saveNote={saveNote}
           saveLink={saveLink}
           saveTable={saveTable}

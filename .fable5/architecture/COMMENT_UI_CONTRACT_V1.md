@@ -373,9 +373,30 @@ every comment added through that modal used to get), saved Clipart comments
 (Site B in `FreeformPadletCards.tsx`), and all three live canonical Image
 entry points (the Freeform Image comment badge and Freeform Image toolbar in
 `FreeformPadletCards.tsx`, and the non-Freeform Image toolbar in
-`CanvasClient.tsx`). Canonical Note detached comments are explicitly **not**
-wired by this patch -- they remain fully writable regardless of role,
-deferred to a dedicated follow-up.
+`CanvasClient.tsx`).
+
+**Note normal/detached comments were wired in PATCH 8P** (2026-08-12) --
+the UI migration to canonical `CommentPopup` happened earlier (pre-8O.1), but
+permission wiring was explicitly deferred at the time. All three normal/
+detached Note entry points now receive an explicit `accessMode`: the two
+`FreeformPadletCards.tsx` sites (on-canvas badge popup, toolbar popup) receive
+`commentAccessMode` directly like every other canonical caller there; the
+Note editor modal's own detached-comment popup (`NoteEditor.tsx`) receives a
+new `accessMode` prop threaded from `CanvasClient.tsx` -> `CanvasModals.tsx`
+-> `NoteEditor.tsx`. Every mutation callback at all three sites is wrapped
+with `guardCommentMutation(accessMode, ...)` directly -- simpler than
+Clipart/Image's ternary (`guardCommentComposition`/`guardOwnCommentMutation`
+routed through `commentModeMutations`), because COMMENT mode stays dormant
+for Note: with only 'read' and 'manage' ever reachable in practice,
+`guardCommentMutation` alone (reject read, allow manage) is the complete
+contract, matching the "Live status" table above and the explicit rule
+against wiring any live caller to COMMENT mode. Note's OTHER `CommentPopup`
+(the selected-text/anchored-thread popup, `panels.open.comment` in
+`NoteEditor.tsx`) is explicitly out of scope for PATCH 8P and remains
+completely unwired -- it stays on its pre-existing, always-writable path,
+same as before this patch. See `noteDetachedCommentUIContract.test.tsx` for
+the anchored-thread freeze proof and `canonicalCommentPermission.contract.test.tsx`
+for the permission-wiring proof at all three Category-A sites.
 
 ### Commenter persistence architecture (PATCH 8O.2, quarantined PATCH 8O.3)
 

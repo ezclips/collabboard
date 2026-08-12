@@ -5,6 +5,7 @@ import type { AuthUser } from '@/lib/domain/auth/user';
 import type { Padlet } from '@/types/collabboard';
 import { getMeaningfulTitle } from '@/lib/infra/collabboard/postTitle';
 import type { CaptionStyle } from '@/lib/domain/canvas/captionStyle';
+import type { CommentAccessMode } from '@/lib/domain/canvas/comments';
 
 // Stable empty array to avoid creating a new [] reference on every render
 // (which would cause infinite useEffect loops in child editors)
@@ -74,6 +75,10 @@ export interface CanvasModalsProps {
   user: AuthUser | null;
   canvasLayout: string | undefined;
   canvasId: string | undefined;
+  // PATCH 8P -- threaded through to NoteEditor's normal/detached comment
+  // panel only. Optional/defaulted so every other editor this shell renders
+  // is unaffected.
+  commentAccessMode?: CommentAccessMode;
 
   // Save callbacks (signatures determined by editor components)
   saveNote: (...args: any[]) => any;
@@ -119,6 +124,7 @@ export default function CanvasModals({
   imageEditorTab,
   user,
   canvasLayout, canvasId,
+  commentAccessMode = 'manage',
   saveNote, saveLink, saveTable, saveTodo, saveContainer,
   saveComment, saveImage, saveDrawing,
   saveAIComponent,
@@ -180,6 +186,7 @@ export default function CanvasModals({
       <div key={isNoteEditorOpen ? `note-${padletToEdit?.id === 'new' ? 'new' : padletToEdit?.id || 'new'}` : 'note-closed'}>
         <NoteEditor
           isOpen={isNoteEditorOpen}
+          accessMode={commentAccessMode}
           onClose={() => {
             setIsNoteEditorOpen(false);
             setPadletToEdit(null);

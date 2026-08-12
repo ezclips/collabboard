@@ -523,3 +523,82 @@ describe('C1/13: Box mode - detached Comment submission (not just opening)', () 
     expect(c.querySelector('.ProseMirror span[data-comment-id]')).toBeNull();
   });
 });
+
+// PATCH 8P: the detached/Category-A post-comment panel now inherits the
+// canonical CommentAccessMode contract via a new `accessMode` prop (default
+// 'manage', so C1/8 and C1/13 above stay green unchanged). These tests prove
+// the INTEGRATION -- that passing accessMode="read" into NoteEditor actually
+// reaches CommentPopup and produces the same read-only rendering CommentPopup
+// itself already proves generically in CommentPopup.accessMode.test.tsx.
+// They deliberately do not re-derive CommentPopup's own internal contract.
+const ONE_DETACHED_COMMENT = [
+  { id: 'c1', text: 'existing note comment', userId: 'u1', userName: 'A', timestamp: 1 },
+];
+
+describe('PATCH 8P: Box mode - detached Comment panel inherits the canonical READ contract', () => {
+  it('read mode: existing comments are visible but composer/Send/Edit/Strikethrough/Delete are all absent', () => {
+    const c = mount(<NoteEditor isOpen accessMode="read" initialContent="<p>hello world again</p>"
+      initialDetachedComments={ONE_DETACHED_COMMENT} onSave={vi.fn()} onClose={vi.fn()} />);
+    click(btn(c, 'Switch to Box Design')!);
+    // The toolbar hint reads "View N comment(s)" once any comment exists,
+    // rather than "Add a comment to this post" (NoteEditorToolbar.tsx:111)
+    // -- unrelated to accessMode, a pre-existing characterization.
+    click(btn(c, 'View 1 comment')!);
+    expect(c.textContent).toContain('existing note comment');
+    expect(detachedPanel(c).querySelector('input[placeholder="Add a comment..."]')).toBeNull();
+    expect(detachedPanel(c).querySelector('button[aria-label="Send"]')).toBeNull();
+    expect(detachedPanel(c).querySelector('button[title="Edit"]')).toBeNull();
+    expect(detachedPanel(c).querySelector('button[title="Color"]')).toBeNull();
+    expect(detachedPanel(c).querySelector('button[title="Strikethrough"]')).toBeNull();
+    expect(detachedPanel(c).querySelector('button[title="Delete"]')).toBeNull();
+  });
+
+  it('manage mode (explicit or default/omitted) keeps the composer and Send available, unchanged', () => {
+    const explicit = mount(<NoteEditor isOpen accessMode="manage" initialContent="<p>hello world again</p>"
+      initialDetachedComments={STABLE_EMPTY_DETACHED} onSave={vi.fn()} onClose={vi.fn()} />);
+    click(btn(explicit, 'Switch to Box Design')!);
+    click(btn(explicit, 'Add a comment to this post')!);
+    expect(detachedPanel(explicit).querySelector('input[placeholder="Add a comment..."]')).not.toBeNull();
+    expect(detachedPanel(explicit).querySelector('button[aria-label="Send"]')).not.toBeNull();
+
+    const omitted = mount(<NoteEditor isOpen initialContent="<p>hello world again</p>"
+      initialDetachedComments={STABLE_EMPTY_DETACHED} onSave={vi.fn()} onClose={vi.fn()} />);
+    click(btn(omitted, 'Switch to Box Design')!);
+    click(btn(omitted, 'Add a comment to this post')!);
+    expect(detachedPanel(omitted).querySelector('input[placeholder="Add a comment..."]')).not.toBeNull();
+  });
+
+  it('read mode does not affect the OTHER (selected-text/anchored) comment popup -- out of scope, stays fully writable', () => {
+    const c = mount(<NoteEditor isOpen accessMode="read" initialContent="<p>hello world again</p>" onSave={vi.fn()} onClose={vi.fn()} />);
+    selectText(c, 'world');
+    click(btn(c, 'Add comment to selected text')!);
+    const input = c.querySelector('[style*="width: 300px"] input[placeholder="Add a comment..."]') as HTMLInputElement | null;
+    expect(input).not.toBeNull();
+  });
+});
+
+const TWO_DETACHED_COMMENTS = [
+  { id: 'keep-me', text: 'sibling comment', userId: 'u1', userName: 'A', timestamp: 1 },
+  { id: 'delete-me', text: 'comment to remove', userId: 'u1', userName: 'A', timestamp: 2 },
+];
+
+describe('PATCH 8P: Box mode - detached Comment Delete targets the correct row (row isolation)', () => {
+  it('deleting one comment removes only that comment; its sibling is untouched', () => {
+    const c = mount(<NoteEditor isOpen accessMode="manage" initialContent="<p>hello world again</p>"
+      initialDetachedComments={TWO_DETACHED_COMMENTS} onSave={vi.fn()} onClose={vi.fn()} />);
+    click(btn(c, 'Switch to Box Design')!);
+    click(btn(c, 'View 2 comments')!);
+    expect(c.textContent).toContain('sibling comment');
+    expect(c.textContent).toContain('comment to remove');
+
+    const rows = Array.from(detachedPanel(c).querySelectorAll('button[title="Delete"]'));
+    // Two comments -> two Delete buttons, one per row; click the one whose
+    // row contains 'comment to remove', not merely the first/last in the DOM.
+    const target = rows.find((btn) => btn.closest('[class*="group"]')?.textContent?.includes('comment to remove'));
+    expect(target).toBeTruthy();
+    click(target!);
+
+    expect(c.textContent).toContain('sibling comment');
+    expect(c.textContent).not.toContain('comment to remove');
+  });
+});

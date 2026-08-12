@@ -53,7 +53,14 @@ describe('Image comments — canonical Comment UI v1 migration', () => {
     expect(source).toContain('onCommentTitleChange');
     expect(source).toContain('onCommentTitleStyleChange');
     expect(source).toContain('onBadgeColorChange');
-    expect(source).toContain('onSubmit={async (commentText)');
+    // PATCH 8P note: this previously checked the literal unwrapped substring
+    // 'onSubmit={async (commentText)' -- that string only ever matched by
+    // coincidence, via Note's THEN-unwrapped onSubmit callback in the same
+    // file (Image's own onSubmit has been guarded via a ternary since 8O.1
+    // and never contained that literal substring). PATCH 8P wrapped Note's
+    // onSubmit too, so the coincidental match disappeared; this now checks
+    // Image/Clipart's actual current wiring shape instead.
+    expect(source).toContain('guardCommentComposition(commentAccessMode,');
     expect(source).toContain('onOpenChange={(open)');
     expect(source).toContain('onClick={(e) => e.stopPropagation()}');
     expect(source).toContain('onMouseDown={(e) => e.stopPropagation()}');
