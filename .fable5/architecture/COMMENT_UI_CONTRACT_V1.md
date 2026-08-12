@@ -82,12 +82,12 @@ CANONICAL:
 - Note — normal/detached comments
 - Drawing — normal/detached comments
 - Todo — normal/detached comments
+- AI Component — normal/detached comments
 
 NOT YET MIGRATED:
 
 - Note — anchored/highlighted threads (special storage adapter required)
 - Document — **has no normal/detached comment tier at all** (see below)
-- AI Component
 - Link
 - Comment post
 - Container
@@ -148,10 +148,37 @@ kept as an unused duplicate. A `padlet.type === 'comment'` (the standalone
 Popup - Right side" comment above its own unrelated local implementation --
 noted so a future patch does not mistake it for a second live Todo site.
 
-Other non-Clipart/Image/Note/Drawing/Todo surfaces are intentionally not made
-to comply by this patch. A migration moves a post from the second list to the
-first only after all of its live entry points, adapters, and contract tests
-are added.
+**AI Component normal/detached comments were migrated in PATCH 8T**
+(2026-08-12) — like Drawing (PATCH 8R), this was a wiring-only migration, not
+a UI replacement: `AIComponentEditor.tsx`'s single left-toolbar Comment
+button/badge/panel already delegated to canonical `CommentPopup` before this
+patch, it was just under-wired (no `accessMode`, no `onEditComment`/
+`onRemoveComment`/`onToggleCommentStrikethrough`/`onCommentTitleChange`/
+`onCommentTitleStyleChange`, hardcoded `userId: 'anon', userName: 'You'`
+identity, `onSubmit`/`onCommentColor`/`onBadgeColorChange` unguarded, and no
+`commentTitle`/`commentTitleStyle` metadata fields at all). Phase 1 inventory
+confirmed AI Component has exactly one live entry point — `FreeformPadletCards.tsx`
+has no `if (padlet.type === 'ai-component')` `CommentPopup` branch the way
+Note/Clipart/Image/Todo do, and unlike Drawing there is no separate read-only
+lightbox route either; a single modal (`CanvasModals.tsx` → `CanvasClient.tsx`)
+serves both MANAGE and READ workspace roles, with `accessMode` alone
+governing which controls are reachable — the same shape as Note/Todo's
+own-editor sites. Wired the same way: `guardCommentMutation(accessMode, ...)`
+directly at every prop (COMMENT stays dormant here too), real identity and
+`commentTitle`/`commentTitleStyle` threaded from `CanvasModals.tsx`'s existing
+`commentAccessMode`/`user` props. `usePadletSave.ts`'s `saveAIComponent`
+already spreads `data.metadata` wholesale into the persisted row, so — unlike
+the Note/Todo `usePadletSave.ts` gaps found in PATCH 8P.1/8S — no separate
+persistence-layer fix was needed for `commentTitle`/`commentTitleStyle` to
+reach the database. AI Component has no anchored/highlighted (Category B)
+comment system; the AI generation/regeneration lifecycle (`generate`/`cancel`/
+`stage`/`abortRef`) is untouched and structurally isolated from the Comments
+panel (portaled to `document.body`, own `stopPropagation` wrapper).
+
+Other non-Clipart/Image/Note/Drawing/Todo/AI-Component surfaces are
+intentionally not made to comply by this patch. A migration moves a post from
+the second list to the first only after all of its live entry points,
+adapters, and contract tests are added.
 
 ## Governance unlock rule
 

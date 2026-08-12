@@ -515,6 +515,9 @@ export default function CanvasModals({
           initialMetadata={padletToEdit?.metadata || {}}
           lockedMode={lockedMode}
           lockedSubtype={lockedSubtype}
+          accessMode={commentAccessMode}
+          currentUserId={user?.id || 'anon'}
+          currentUserName={user?.email?.split('@')[0] || 'You'}
         />
       </div>
 

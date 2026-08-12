@@ -783,6 +783,79 @@ describe('PATCH 8O.1/8O.2 -- canonical comment permission wiring', () => {
     });
   });
 
+  describe('AI Component -- AIComponentEditor.tsx own detached-comment CommentPopup, threaded via CanvasModals.tsx (PATCH 8T)', () => {
+    it('AIComponentEditor.tsx accepts an accessMode prop and wires its single CommentPopup with it, migrated off placeholder identity', () => {
+      const aiEditor = read('components/collabboard/editors/AIComponentEditor.tsx');
+      expect(aiEditor).toContain("import { guardCommentMutation, type CommentAccessMode } from '@/lib/domain/canvas/comments';");
+      expect(aiEditor).toContain('accessMode?: CommentAccessMode;');
+      expect(aiEditor).toContain("accessMode = 'manage',");
+      const total = (aiEditor.match(/<CommentPopup/g) ?? []).length;
+      expect(total, 'AIComponentEditor.tsx must have exactly one CommentPopup usage').toBe(1);
+      const block = commentPopupBlockAfter(aiEditor, '<CommentPopup');
+      expect(block).toContain('accessMode={accessMode}');
+      expectManageOnlyWiredCallSite(block, true);
+    });
+
+    it('uses real currentUserId/currentUserName props, not the historical "anon"/"You" literal', () => {
+      const aiEditor = read('components/collabboard/editors/AIComponentEditor.tsx');
+      expect(aiEditor).toContain('currentUserId?: string;');
+      expect(aiEditor).toContain('currentUserName?: string;');
+      expect(aiEditor).toContain("currentUserId = 'anon',");
+      expect(aiEditor).toContain("currentUserName = 'You',");
+      const block = commentPopupBlockAfter(aiEditor, '<CommentPopup');
+      expect(block).toContain('userId: currentUserId,');
+      expect(block).toContain('userName: currentUserName,');
+      expect(block).toContain('currentUserId={currentUserId}');
+      expect(block).toContain('currentUserName={currentUserName}');
+      expect(block).not.toContain("userId: 'anon'");
+      expect(block).not.toContain('currentUserId="anon"');
+    });
+
+    it('wires commentTitle/commentTitleStyle to real state, guarded', () => {
+      const aiEditor = read('components/collabboard/editors/AIComponentEditor.tsx');
+      const block = commentPopupBlockAfter(aiEditor, '<CommentPopup');
+      expect(block).toContain('commentTitle={commentTitle}');
+      expect(block).toContain('commentTitleStyle={');
+      const titleChangeStart = block.indexOf('onCommentTitleChange=');
+      expect(titleChangeStart).toBeGreaterThan(-1);
+      const titleChangeNext = block.slice(titleChangeStart + 'onCommentTitleChange='.length).match(/^\s*\{?\s*(\S+)/);
+      expect(titleChangeNext?.[1]?.startsWith('guardCommentMutation(')).toBe(true);
+    });
+
+    it('AIComponentEditor.tsx has exactly 1 <CommentPopup usage (no duplicate/local comment implementation)', () => {
+      const aiEditor = read('components/collabboard/editors/AIComponentEditor.tsx');
+      const total = (aiEditor.match(/<CommentPopup/g) ?? []).length;
+      expect(total).toBe(1);
+    });
+
+    // AI-specific interaction boundary: comment interactions must never
+    // reach the generation lifecycle (generate/cancel/setStage/abortRef),
+    // and the portal wrapper must stop propagation so a click inside the
+    // Comments panel cannot bubble to the modal's own onClick handlers.
+    it('comment interactions are isolated from AI generation/regeneration (interaction isolation)', () => {
+      const aiEditor = read('components/collabboard/editors/AIComponentEditor.tsx');
+      const block = commentPopupBlockAfter(aiEditor, '<CommentPopup');
+      expect(block).not.toContain('generate(');
+      expect(block).not.toContain('cancel(');
+      expect(block).not.toContain('setStage(');
+      expect(block).not.toContain('abortRef');
+      const wrapperStart = aiEditor.lastIndexOf('<div', aiEditor.indexOf(block));
+      const wrapperSlice = aiEditor.slice(wrapperStart, aiEditor.indexOf(block));
+      expect(wrapperSlice).toContain('onClick={(e) => e.stopPropagation()}');
+    });
+
+    it('CanvasModals.tsx threads commentAccessMode + real identity into AIComponentEditor', () => {
+      const canvasModals = read('components/collabboard/canvas/ui/CanvasModals.tsx');
+      const start = canvasModals.indexOf('<AIComponentEditor');
+      const end = canvasModals.indexOf('/>', canvasModals.indexOf('lockedSubtype=', start));
+      const block = canvasModals.slice(start, end);
+      expect(block, 'AIComponentEditor instance must pass accessMode={commentAccessMode}').toContain('accessMode={commentAccessMode}');
+      expect(block, 'AIComponentEditor instance must pass real currentUserId').toContain("currentUserId={user?.id || 'anon'}");
+      expect(block, 'AIComponentEditor instance must pass real currentUserName').toContain("currentUserName={user?.email?.split('@')[0] || 'You'}");
+      expect(block, 'AIComponentEditor instance must pass initialMetadata so comments/title actually load').toContain('initialMetadata=');
+    });
+  });
+
   describe('architecture guard -- every <CommentPopup usage in these three files is accounted for', () => {
     it('FreeformPadletCards.tsx has exactly 6 <CommentPopup usages, all 6 wired (Clipart Site B, Image x2, Note x2, Todo x1)', () => {
       const freeform = read(FREEFORM_PATH);

@@ -37,6 +37,7 @@ import ReactionDisplay from './ReactionDisplay';
 import InlineCaption from './InlineCaption';
 import { resolveCaptionStyle, CAPTION_STYLE_PRESETS, type CaptionHeading } from '@/lib/domain/canvas/captionStyle';
 import { nextTextAlign } from './textAlignCycle';
+import { guardCommentMutation, type CommentAccessMode } from '@/lib/domain/canvas/comments';
 
 type Stage = 'idle' | 'classifying' | 'generating' | 'rendering' | 'done' | 'error';
 
@@ -67,6 +68,13 @@ interface AIComponentEditorProps {
   // When set, mode and subtype selectors are locked (regenerate flow)
   lockedMode?: AIMode;
   lockedSubtype?: DiagramSubtype;
+  // PATCH 8T -- accessMode/currentUserId/currentUserName. Matches
+  // NoteEditor/DrawingEditor/TodoEditor's own-editor-site convention:
+  // defaults to 'manage'/'anon'/'You' so existing callers that don't yet
+  // pass these keep their current fully-writable behavior.
+  accessMode?: CommentAccessMode;
+  currentUserId?: string;
+  currentUserName?: string;
 }
 
 type CommentDraft = {
@@ -77,7 +85,10 @@ type CommentDraft = {
   timestamp: number;
   textColor?: string;
   backgroundColor?: string;
+  isStrikethrough?: boolean;
 };
+
+type CommentTitleStyle = { color?: string; backgroundColor?: string };
 
 function isQuotaExceededMessage(message: string) {
   return /quota|exceeded.*quota|rate.?limit/i.test(message);
@@ -206,6 +217,9 @@ export default function AIComponentEditor({
   initialMetadata,
   lockedMode,
   lockedSubtype,
+  accessMode = 'manage',
+  currentUserId = 'anon',
+  currentUserName = 'You',
 }: AIComponentEditorProps) {
   const isLocked = Boolean(lockedMode);
   const [title, setTitle] = useState(initialTitle);
@@ -220,6 +234,8 @@ export default function AIComponentEditor({
   const [reactions, setReactions] = useState<string[]>([]);
   const [detachedComments, setDetachedComments] = useState<CommentDraft[]>([]);
   const [badgeColor, setBadgeColor] = useState('#facc15');
+  const [commentTitle, setCommentTitle] = useState<string | undefined>(undefined);
+  const [commentTitleStyle, setCommentTitleStyle] = useState<CommentTitleStyle>({});
   const [caption, setCaption] = useState('');
 
   const [isTextStyleOpen, setIsTextStyleOpen] = useState(false);
@@ -325,6 +341,8 @@ export default function AIComponentEditor({
     setReactions(Array.isArray(initialMetadata?.reactions) ? initialMetadata.reactions as string[] : []);
     setDetachedComments(Array.isArray(initialMetadata?.detachedComments) ? initialMetadata.detachedComments as CommentDraft[] : []);
     setBadgeColor(typeof initialMetadata?.badgeColor === 'string' ? initialMetadata.badgeColor : '#facc15');
+    setCommentTitle(typeof initialMetadata?.commentTitle === 'string' ? initialMetadata.commentTitle : undefined);
+    setCommentTitleStyle((initialMetadata?.commentTitleStyle as CommentTitleStyle) || {});
     setCaption(typeof initialMetadata?.caption === 'string' ? initialMetadata.caption : '');
     setIsTextStyleOpen(false);
     setIsColorPanelOpen(false);
@@ -562,6 +580,8 @@ export default function AIComponentEditor({
         reactions,
         detachedComments,
         badgeColor,
+        commentTitle,
+        commentTitleStyle: Object.keys(commentTitleStyle).length > 0 ? commentTitleStyle : undefined,
         caption,
       },
     });
@@ -699,26 +719,45 @@ export default function AIComponentEditor({
               >
                 <CommentPopup
                   isOpen={isCommentPanelOpen}
+                  accessMode={accessMode}
                   onOpenChange={setIsCommentPanelOpen}
-                  onSubmit={(commentText) => {
+                  onSubmit={guardCommentMutation(accessMode, (commentText) => {
                     setDetachedComments((prev) => [...prev, {
                       id: `comment-${Date.now()}`,
                       text: commentText,
-                      userId: 'anon',
-                      userName: 'You',
+                      userId: currentUserId,
+                      userName: currentUserName,
                       timestamp: Date.now(),
                     }]);
-                  }}
-                  onCommentColor={(commentId, textColor, backgroundColor) => {
+                  })}
+                  onEditComment={guardCommentMutation(accessMode, (commentId, text) => {
+                    setDetachedComments((prev) =>
+                      prev.map((c) => (c.id === commentId ? { ...c, text } : c))
+                    );
+                  })}
+                  onRemoveComment={guardCommentMutation(accessMode, (commentId) => {
+                    setDetachedComments((prev) => prev.filter((c) => c.id !== commentId));
+                  })}
+                  onToggleCommentStrikethrough={guardCommentMutation(accessMode, (commentId) => {
+                    setDetachedComments((prev) =>
+                      prev.map((c) => (c.id === commentId ? { ...c, isStrikethrough: !c.isStrikethrough } : c))
+                    );
+                  })}
+                  onCommentColor={guardCommentMutation(accessMode, (commentId, textColor, backgroundColor) => {
                     setDetachedComments((prev) =>
                       prev.map((c) => (c.id === commentId ? { ...c, textColor, backgroundColor } : c))
                     );
-                  }}
+                  })}
                   comments={detachedComments}
-                  currentUserId="anon"
-                  currentUserName="You"
+                  currentUserId={currentUserId}
+                  currentUserName={currentUserName}
                   badgeColor={badgeColor}
-                  onBadgeColorChange={setBadgeColor}
+                  onBadgeColorChange={guardCommentMutation(accessMode, setBadgeColor)}
+                  commentTitle={commentTitle}
+                  commentTitleStyle={Object.keys(commentTitleStyle).length > 0 ? commentTitleStyle : undefined}
+                  onCommentTitleChange={guardCommentMutation(accessMode, (nextTitle: string) => setCommentTitle(nextTitle === 'Comments' ? undefined : nextTitle))}
+                  onCommentTitleStyleChange={guardCommentMutation(accessMode, (style: CommentTitleStyle) => setCommentTitleStyle(style))}
+                  enableCanonicalSelectionStyling
                 />
               </div>,
               document.body,
