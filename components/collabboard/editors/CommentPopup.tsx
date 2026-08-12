@@ -640,6 +640,21 @@ export default function CommentPopup({
         )
         : null;
 
+    // Height discipline (PATCH 8L-A), canonical Clipart entry points only.
+    //
+    // The panel's preferred size is unchanged: the comment list keeps its
+    // max-h-[400px], so with room to spare the panel renders at exactly the
+    // dimensions it always has. This only adds a CEILING for the case where
+    // the viewport cannot accommodate that preferred size.
+    //
+    // Deliberately NOT flex-1 on the list. A previous attempt (e782852,
+    // reverted in c7113b0) made the list `flex-1`, which GROWS to fill the
+    // container -- that is what produced the rejected near-full-height panel.
+    // Shrink-only is the whole point: bounded above by 400px as today, allowed
+    // to shrink below it when the viewport is short, never allowed to exceed
+    // it just because space happens to be available.
+    const boundedHeight = enableCanonicalSelectionStyling && !embedded;
+
     const panel = (
         <div
             ref={panelRef}
@@ -650,8 +665,15 @@ export default function CommentPopup({
                     : fullWidth
                         ? 'shadow-2xl min-w-[280px] w-full max-w-none overflow-visible'
                         : 'shadow-2xl min-w-[280px] max-w-[360px] overflow-visible'
-            }`}
-            style={{ backgroundColor: '#fff', width: '100%' }}
+            }${boundedHeight ? ' flex flex-col' : ''}`}
+            style={{
+                backgroundColor: '#fff',
+                width: '100%',
+                // 16px = the 8px viewport margin useAnchoredPopover already
+                // uses, top and bottom, so a clamped panel and its nested
+                // popovers agree on what "inside the viewport" means.
+                ...(boundedHeight ? { maxHeight: 'calc(100vh - 16px)' } : {}),
+            }}
             onMouseDown={(e) => e.stopPropagation()}
             onPointerDown={enableCanonicalSelectionStyling ? (e) => e.stopPropagation() : undefined}
             onClick={enableCanonicalSelectionStyling ? (e) => e.stopPropagation() : undefined}
@@ -667,7 +689,7 @@ export default function CommentPopup({
                     <X className="h-3.5 w-3.5" />
                 </button>
             )}
-            <div className="flex items-center justify-between mb-3 pb-2 border-b border-gray-100">
+            <div className={`flex items-center justify-between mb-3 pb-2 border-b border-gray-100${boundedHeight ? ' flex-shrink-0' : ''}`}>
                 <div className="flex min-w-0 items-center gap-1">
                     {titleEditing ? (
                         <input
@@ -862,7 +884,7 @@ export default function CommentPopup({
                     ref={scrollContainerRef}
                     className={`w-full space-y-3 overflow-y-auto pr-1 scrollbar-ultrathin ${
                         embedded ? 'max-h-[240px]' : 'max-h-[400px]'
-                    }`}
+                    }${boundedHeight ? ' min-h-0' : ''}`}
                     style={{ scrollbarGutter: 'stable' }}
                 >
                     {effectiveComments.map((comment) => {
@@ -1132,7 +1154,7 @@ export default function CommentPopup({
 
             {/* Add comment input at bottom */}
             {!hideComposer && (
-                <div className="mt-3 pt-3 border-t border-gray-100 flex items-center gap-2">
+                <div className={`mt-3 pt-3 border-t border-gray-100 flex items-center gap-2${boundedHeight ? ' flex-shrink-0' : ''}`}>
                     <input
                         ref={inputRef}
                         type="text"
