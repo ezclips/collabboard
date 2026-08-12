@@ -2,6 +2,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars, @next/next/no-img-element */
 
 import React from 'react';
+import { createPortal } from 'react-dom';
 import DOMPurify from 'dompurify';
 import type { AuthUser } from '@/lib/domain/auth/user';
 import type { Padlet } from '@/types/collabboard';
@@ -21,6 +22,7 @@ import { handleSafeCommentLinkClick } from '@/components/collabboard/commentLink
 import TextStylePopup from '@/components/collabboard/editors/TextStylePopup';
 import CommentList, { SITE_A_PROFILE } from '@/components/collabboard/comments/CommentList';
 import CommentPopup from '@/components/collabboard/editors/CommentPopup';
+import { useAnchoredPopover, rectFromElement, type AnchorRect } from '@/components/collabboard/editors/useAnchoredPopover';
 import { nextTextAlign } from '@/components/collabboard/editors/textAlignCycle';
 import { resolveCaptionStyle, resolvePadletTitleStyle } from '@/lib/domain/canvas/captionStyle';
 import { CardColorPanel } from '@/components/collabboard/editors/CardColorPanel';
@@ -184,7 +186,74 @@ export interface FreeformPadletCardsProps {
 
 
 
-// -- Component ----------------------------------------------------------------- 
+// -- Viewport-anchored comment shell (PATCH 8L-B) -------------------------------
+//
+// The on-canvas comment panel used to be `absolute left-full top-0` inside the
+// card, i.e. positioned in CANVAS space: its coordinates were multiplied by
+// canvasZoom and it had no idea the viewport existed, so a card low or far
+// right on screen pushed the panel off-screen.
+//
+// This shell moves it to VIEWPORT space, the same coordinate system the post
+// editor modal uses -- while staying visually card-associated (no backdrop, no
+// centering, no modal semantics). Two details make that safe:
+//
+//  1. It PORTALS to document.body. `position: fixed` is NOT enough on its own:
+//     the padlet stage carries `transform: scale(canvasZoom)`, and a transform
+//     makes its element the containing block for fixed descendants, so a fixed
+//     panel left inside the stage would still be scaled and offset by zoom.
+//     Escaping the stage is what actually buys viewport coordinates.
+//  2. Placement comes from the already-tested computePopoverPlacement via
+//     useAnchoredPopover -- prefer right of the card, flip left when there is
+//     no room, clamp both axes inside the viewport. No second clamp algorithm,
+//     and critically no translate applied inside the scaled stage (that mixing
+//     of coordinate systems is what sank e782852, reverted in c7113b0).
+//
+// The anchor is a zero-cost `absolute inset-0` sentinel that exactly overlays
+// the card box, so its getBoundingClientRect() IS the card's on-screen rect at
+// the current zoom/pan. useAnchoredPopover re-reads it on a rAF while open, so
+// zoom, pan and card movement all track without bespoke event wiring.
+//
+// The card is never measured for anything but reading; nothing here writes
+// padlet x/y or touches the canvas transform.
+function ViewportAnchoredCommentShell({ children }: { children: React.ReactNode }) {
+  const anchorRef = React.useRef<HTMLSpanElement | null>(null);
+  const [triggerRect, setTriggerRect] = React.useState<AnchorRect | null>(null);
+
+  React.useLayoutEffect(() => {
+    if (anchorRef.current) setTriggerRect(rectFromElement(anchorRef.current));
+  }, []);
+
+  // Panel size is measured AFTER 8L-A's height ceiling applies, so placement
+  // resolves against the final bounded height rather than an unbounded one.
+  const { popoverRef, position } = useAnchoredPopover(true, triggerRect, anchorRef);
+
+  return (
+    <>
+      <span ref={anchorRef} className="absolute inset-0 pointer-events-none" aria-hidden />
+      {createPortal(
+        <div
+          ref={popoverRef}
+          data-comment-panel-shell="true"
+          className="fixed z-[1100] pointer-events-auto animate-in fade-in duration-200"
+          style={{
+            left: position?.left ?? -9999,
+            top: position?.top ?? -9999,
+            // opacity rather than visibility, so the panel is still measurable
+            // on the first layout pass before placement resolves.
+            opacity: position ? 1 : 0,
+          }}
+          onClick={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          {children}
+        </div>,
+        document.body
+      )}
+    </>
+  );
+}
+
+// -- Component -----------------------------------------------------------------
 function FreeformPadletCards(props: FreeformPadletCardsProps) {
   const {
     rootPadlets, padlets, setPadlets, user, containerRef,
@@ -1994,11 +2063,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                 optimistic cardCommentList mirror + updatePadletMetadata
                 persistence pattern PATCH 8C already established for Site A. */}
             {cardCommentPopupPadletId === padlet.id && !cardToolbarPadletId && (
-              <div
-                className="absolute left-full top-0 ml-3 z-[1100] animate-in fade-in slide-in-from-left-2 duration-200 pointer-events-auto"
-                onClick={(e) => e.stopPropagation()}
-                onMouseDown={(e) => e.stopPropagation()}
-              >
+              <ViewportAnchoredCommentShell>
                 {/* CommentPopup's own row onClick (setActiveCommentId) does
                     not stop propagation -- inside the Clipart edit modal
                     that's harmless because the modal's own comments-panel
@@ -2061,7 +2126,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                   currentUserId={user?.id || 'anon'}
                   currentUserName={user?.email?.split('@')[0] || 'You'}
                 />
-              </div>
+              </ViewportAnchoredCommentShell>
             )}
 
           </div>

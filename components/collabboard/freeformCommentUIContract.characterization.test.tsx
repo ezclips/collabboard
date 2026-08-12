@@ -278,9 +278,19 @@ describe('PATCH 8E -- Site B migration wiring (COMMENT UI CONTRACT UNLOCK: CLIPA
 
   it('Site B\'s shell wrapper stops click/mousedown propagation, same guard the Clipart edit modal\'s comments-panel wrapper already has -- without it, a row click (setActiveCommentId, no stopPropagation of its own inside CommentPopup) bubbles to the card\'s own onClick, which calls closeAllToolbars() and unconditionally resets cardCommentPopupPadletId, closing the panel on every row click (caught live during PATCH 8E browser testing)', () => {
     const src = readFreeform();
-    const shellBlock = windowAround(src, '<CommentPopup', 1200, 0);
+    // PATCH 8L-B moved Site B's shell out of the card's JSX and into the
+    // ViewportAnchoredCommentShell component (the panel is now portaled to
+    // document.body and positioned in viewport space). The guard itself is
+    // unchanged and still required: React portals propagate through the REACT
+    // tree, so a row click still reaches the card's onClick -> closeAllToolbars
+    // without it. Assert it where it now lives.
+    const shellStart = src.indexOf('function ViewportAnchoredCommentShell');
+    expect(shellStart, 'ViewportAnchoredCommentShell must exist').toBeGreaterThan(-1);
+    const shellBlock = src.slice(shellStart, src.indexOf('\nfunction FreeformPadletCards', shellStart));
     expect(shellBlock).toMatch(/onClick=\{\(e\) => e\.stopPropagation\(\)\}/);
     expect(shellBlock).toMatch(/onMouseDown=\{\(e\) => e\.stopPropagation\(\)\}/);
+    // ...and Site B must actually route through that shell.
+    expect(src).toContain('<ViewportAnchoredCommentShell>');
   });
 
   it('entry-point parity: Site B and the Clipart edit modal (ClipartCardDraftModal.tsx) pass the exact same CommentPopup capability prop set -- isOpen/onOpenChange/onSubmit/onEditComment/onRemoveComment/onToggleCommentStrikethrough/onCommentColor/comments/currentUserId/currentUserName -- so neither entry point can silently drift to offer fewer comment actions than the other', () => {
