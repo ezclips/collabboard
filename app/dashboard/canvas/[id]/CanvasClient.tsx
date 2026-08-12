@@ -33,7 +33,6 @@ import { createFreeformGraphRepo } from '@/lib/graph/graphRepo';
 import { canEditWorkspace, canManageWorkspace, type WorkspaceRole } from '@/lib/workspace/context';
 import { resolveCommentAccessMode, guardCommentMutation, guardCommentComposition, guardOwnCommentMutation } from '@/lib/domain/canvas/comments';
 import { createCommentModeMutations } from '@/lib/infra/canvas/commentMutations';
-import type { BoardPermission } from '@/types/permissions';
 import { selectCardModalRoute } from '@/lib/domain/canvas/cardModalRoute';
 import { selectDocumentModalDestination, type DocumentModalDestination } from '@/lib/domain/canvas/documentModalRoute';
 import { decideDocumentSwitch, type QueuedDocumentAction } from '@/lib/domain/canvas/documentSwitchGuard';
@@ -199,16 +198,6 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   const [hasMounted, setHasMounted] = useState(false);
   const [user, setUser] = useState<AuthUser | null>(null);
   const [currentWorkspaceRole, setCurrentWorkspaceRole] = useState<WorkspaceRole | null>(null);
-  // PATCH 8O.2 -- board-level permission for the current canvas, resolved
-  // client-side via the existing get_board_permission RPC (already
-  // GRANT EXECUTE TO authenticated, already used server-side in
-  // lib/auth/permissions.ts's helper of the same name; its user_uuid
-  // argument defaults to auth.uid(), so it is safe to call from the browser
-  // client naming only board_uuid). Nothing resolved this client-side before
-  // this patch -- resolveCommentAccessMode's boardPermission parameter was
-  // accepted but never actually passed by any caller (see 8O.1's own note,
-  // now stale).
-  const [currentBoardPermission, setCurrentBoardPermission] = useState<BoardPermission | null>(null);
   const [isToolbarCollapsed, setIsToolbarCollapsed] = useState(false);
   const [isMapToolbarCollapsed, setIsMapToolbarCollapsed] = useState(false);
   const [isFreeformPanning, setIsFreeformPanning] = useState(false);
@@ -269,54 +258,33 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     };
   }, [user]);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    const loadBoardPermission = async () => {
-      if (!user?.id || !canvasId) {
-        setCurrentBoardPermission(null);
-        return;
-      }
-
-      try {
-        const { data, error } = await supabase.rpc('get_board_permission', { board_uuid: canvasId });
-        if (error) throw error;
-        if (!cancelled) {
-          setCurrentBoardPermission((data as BoardPermission | null) ?? null);
-        }
-      } catch (error) {
-        console.error('Error resolving board permission:', error);
-        // Fail closed: no boardPermission signal means resolveCommentAccessMode
-        // falls back to WorkspaceRole alone, same as every pre-8O.2 caller --
-        // never fail OPEN into a permission the RPC couldn't actually confirm.
-        if (!cancelled) {
-          setCurrentBoardPermission(null);
-        }
-      }
-    };
-
-    loadBoardPermission();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [user, canvasId, supabase]);
-
   const canUseFreeformEditButton = canEditWorkspace(currentWorkspaceRole);
   // Keep the canvas creation toolbar aligned with board editability.
   // Otherwise editable member accounts can open and modify a board but lose the
   // left toolbar entirely because they are not workspace admins.
   const canUseCanvasToolbar = canUseFreeformEditButton;
   const canManageCanvasShare = canManageWorkspace(currentWorkspaceRole);
-  // PATCH 8O.1/8O.2 -- resolved once at the controller boundary from the two
-  // existing permission signals (WorkspaceRole is the outer bound;
-  // BoardPermission, resolved above via get_board_permission, now supplies
-  // the 'comment' tier for BoardPermission 'commenter'). Threaded straight
-  // through to every canonical Clipart/Image CommentPopup instance;
-  // CommentPopup itself never queries permission state.
+  // PATCH 8O.1/8O.2 -- resolved once at the controller boundary from
+  // WorkspaceRole, the only permission signal with any live wiring today.
+  // BoardPermission resolution was attempted in 8O.2 via the pre-existing
+  // get_board_permission RPC, but that RPC is scoped to the `canvases` /
+  // `canvas_collaborators` schema -- a nav-orphaned, zero-live-data vertical
+  // documented in .fable5/docs/CURRENT_TASK.md's PATCH-022 census (its own
+  // `canvases` table doesn't even have the `workspace_id` column its own
+  // migrations describe, confirmed live 2026-08-12: PostgREST 42703). The
+  // live board system (CanvasClient/FreeformPadletCards, `boards`/`padlets`)
+  // has no per-board collaborator-role feature wired to any reachable UI --
+  // `board_collaborators` has zero live writers either. Calling
+  // get_board_permission from here therefore always fails and never
+  // resolves anything real; it was removed rather than kept as silent dead
+  // weight (no hypothetical-future scaffolding -- see coding-style.md).
+  // 'comment' tier and the drafted comment_mutate RPC remain fully built
+  // and tested for whenever a real board-level sharing feature exists;
+  // resolveCommentAccessMode's boardPermission parameter stays optional and
+  // simply isn't passed a value by any live caller right now.
   const commentAccessMode = useMemo(
-    () => resolveCommentAccessMode(currentWorkspaceRole, currentBoardPermission),
-    [currentWorkspaceRole, currentBoardPermission]
+    () => resolveCommentAccessMode(currentWorkspaceRole),
+    [currentWorkspaceRole]
   );
   const handleToggleMapToolbarCollapsed = useCallback(() => {
     setIsMapToolbarCollapsed((prev) => !prev);

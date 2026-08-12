@@ -372,15 +372,27 @@ describe('PATCH 8O.1/8O.2 -- canonical comment permission wiring', () => {
   });
 
   describe('CanvasClient.tsx is the controller boundary -- resolves the mode once and threads it down', () => {
-    it('computes commentAccessMode via resolveCommentAccessMode(currentWorkspaceRole, currentBoardPermission)', () => {
+    it('computes commentAccessMode via resolveCommentAccessMode(currentWorkspaceRole)', () => {
       const canvas = read(CANVAS_PATH);
       expect(canvas).toContain("import { resolveCommentAccessMode, guardCommentMutation, guardCommentComposition, guardOwnCommentMutation } from '@/lib/domain/canvas/comments';");
-      expect(canvas).toContain('resolveCommentAccessMode(currentWorkspaceRole, currentBoardPermission)');
+      expect(canvas).toContain('resolveCommentAccessMode(currentWorkspaceRole)');
     });
 
-    it('resolves currentBoardPermission client-side via the existing get_board_permission RPC (no new database object)', () => {
+    // PATCH 8O.2a follow-up (2026-08-12): CanvasClient no longer calls
+    // get_board_permission. That RPC is scoped to the nav-orphaned
+    // `canvases`/`canvas_collaborators` schema (zero live rows, see
+    // .fable5/docs/CURRENT_TASK.md's PATCH-022 census and
+    // LESSONS_LEARNED.md) and always errored against the live `boards`
+    // system -- confirmed live via a real authenticated request returning
+    // PostgREST 42703 "column canvases.workspace_id does not exist".
+    // Calling it provided zero real signal (currentBoardPermission always
+    // resolved to null) while spamming console.error on every canvas load,
+    // so the dead call was removed rather than kept as silent scaffolding.
+    it('does NOT call the dead-schema get_board_permission RPC', () => {
       const canvas = read(CANVAS_PATH);
-      expect(canvas).toContain("supabase.rpc('get_board_permission', { board_uuid: canvasId })");
+      expect(canvas).not.toContain("supabase.rpc('get_board_permission'");
+      expect(canvas).not.toContain('currentBoardPermission');
+      expect(canvas).not.toContain('setCurrentBoardPermission');
     });
 
     it('creates commentModeMutations once via lib/infra/canvas/commentMutations.ts and threads it to FreeformPadletCards', () => {

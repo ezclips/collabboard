@@ -299,13 +299,33 @@ Resolved once at the controller boundary (`CanvasClient.tsx`) and passed down
 as a single prop -- `CommentPopup` never queries auth or database state
 itself.
 
-**BoardPermission is now wired (PATCH 8O.2).** `CanvasClient.tsx` resolves
-`currentBoardPermission` client-side via the existing `get_board_permission`
-RPC (already `GRANT EXECUTE TO authenticated`, already used server-side in
-`lib/auth/permissions.ts`'s helper of the same name; its `user_uuid` argument
-defaults to `auth.uid()`, so it is safe to call from the browser client naming
-only `board_uuid`). No new database object was needed for this half of the
-gap PATCH 8O.1 left open.
+**BoardPermission wiring was attempted in PATCH 8O.2 and REVERTED in PATCH
+8O.2a.** `CanvasClient.tsx` briefly resolved `currentBoardPermission`
+client-side via the existing `get_board_permission` RPC (already `GRANT
+EXECUTE TO authenticated`, already used server-side in
+`lib/auth/permissions.ts`'s helper of the same name). Live testing
+(2026-08-12, authenticated Playwright session against a real board)
+found this RPC always fails against the live product: it queries the
+`canvases` table, which belongs to the nav-orphaned, zero-live-data
+`app/collabboard/**` vertical documented in
+`.fable5/docs/CURRENT_TASK.md`'s PATCH-022 census -- confirmed live via
+PostgREST returning `42703 column "canvases.workspace_id" does not exist`.
+The actual live board system (`boards`/`padlets`, everything CanvasClient
+and FreeformPadletCards touch) has no per-board collaborator-role feature
+wired to any reachable UI; `board_collaborators` has zero live writers
+either. Calling `get_board_permission` from the canonical comment surfaces
+therefore never resolved a real permission (`currentBoardPermission` was
+always `null`, failing closed to `'manage'` -- no security regression) while
+spamming `console.error` on every canvas load. The call was removed rather
+than kept as silent, permanently-failing scaffolding. See
+`LESSONS_LEARNED.md`'s "get_board_permission is scoped to a dead schema"
+entry. `resolveCommentAccessMode`'s `boardPermission` parameter remains and
+is fully tested (`comments.test.ts`) -- it is simply not passed a value by
+any live caller today. Re-wiring it is a real, separate follow-up gated on
+an actual board-level sharing feature being built against the live
+`boards` table (or an equivalent live-schema-aware permission source),
+not on fixing `get_board_permission` itself, which is scoped to a vertical
+tracked for deletion.
 
 **Wired at every current canonical caller**: the Clipart editor modal
 (`ClipartCardDraftModal.tsx`, now also receiving real `currentUserId`/
