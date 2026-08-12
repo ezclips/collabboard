@@ -84,7 +84,7 @@ CANONICAL:
 NOT YET MIGRATED:
 
 - Note — anchored/highlighted threads (special storage adapter required)
-- Document
+- Document — **has no normal/detached comment tier at all** (see below)
 - Drawing
 - AI Component
 - Link
@@ -92,6 +92,23 @@ NOT YET MIGRATED:
 - Comment post
 - Container
 - other normal-comment surfaces identified by future audits
+
+**Document is not a pending Category-A migration.** PATCH 8Q's inventory
+(2026-08-12) confirmed, and `.fable5/patches/PATCH-152.md` §20.4 row 14
+independently records ("Post-level comment | Note only | ... | none for
+Document"), that `DocumentEditor.tsx` was never given a
+`detachedComments`/badge-style normal comment tier — Note is the only post
+type that has one. Document's sole comment mechanism is its anchored/
+highlighted text-selection `CommentPopup` (`DocumentEditor.tsx:431-443`,
+triggered only with an active text selection, backed by the shared TipTap
+`comment` mark in `extensions/Comment.ts`), which is Category B and
+therefore out of scope for a Category-A canonical migration by definition.
+Note as a fact for any future patch: that anchored `CommentPopup` call is
+also the one live canonical caller with **no `accessMode`/
+`guardCommentMutation` wiring at all** (every mutation is unconditionally
+reachable regardless of workspace role) — a real gap, but a Category-B
+permission-wiring task, not a UI migration, and it is a separate,
+independently-scoped patch from this list.
 
 Image is now canonical at all three live entry points: the Freeform Image
 comment badge, the Freeform Image toolbar, and the non-Freeform Image toolbar
