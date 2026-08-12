@@ -515,13 +515,47 @@ describe('PATCH 8O.1/8O.2 -- canonical comment permission wiring', () => {
       }
     });
 
-    it('the OTHER CommentPopup in NoteEditor.tsx (selected-text/anchored-thread popup) is untouched -- no accessMode, no guards', () => {
+    // PATCH 8P.1: real identity + canonical title wiring, Category A only.
+    it('uses real currentUserId/currentUserName props at the Category A site, not the historical "user1"/"R" placeholder', () => {
+      const noteEditor = read('components/collabboard/editors/NoteEditor.tsx');
+      expect(noteEditor).toContain('currentUserId?: string;');
+      expect(noteEditor).toContain('currentUserName?: string;');
+      expect(noteEditor).toContain("currentUserId = 'anon',");
+      expect(noteEditor).toContain("currentUserName = 'You',");
+      const block = commentPopupBlockAfter(noteEditor, '{panels.open.detached && (');
+      expect(block).toContain('userId: currentUserId,');
+      expect(block).toContain('userName: currentUserName,');
+      expect(block).toContain('currentUserId={currentUserId}');
+      expect(block).toContain('currentUserName={currentUserName}');
+      expect(block).not.toContain('userId: \'user1\'');
+      expect(block).not.toContain('currentUserId="user1"');
+    });
+
+    it('wires commentTitle/commentTitleStyle to real state, guarded, at the Category A site', () => {
+      const noteEditor = read('components/collabboard/editors/NoteEditor.tsx');
+      const block = commentPopupBlockAfter(noteEditor, '{panels.open.detached && (');
+      expect(block).toContain('commentTitle={commentTitle}');
+      expect(block).toContain('commentTitleStyle={');
+      expect(block).not.toContain('commentTitle={undefined}');
+      const titleChangeStart = block.indexOf('onCommentTitleChange=');
+      expect(titleChangeStart).toBeGreaterThan(-1);
+      const titleChangeNext = block.slice(titleChangeStart + 'onCommentTitleChange='.length).match(/^\s*\{?\s*(\S+)/);
+      expect(titleChangeNext?.[1]?.startsWith('guardCommentMutation(')).toBe(true);
+      const titleStyleChangeStart = block.indexOf('onCommentTitleStyleChange=');
+      expect(titleStyleChangeStart).toBeGreaterThan(-1);
+      const titleStyleChangeNext = block.slice(titleStyleChangeStart + 'onCommentTitleStyleChange='.length).match(/^\s*\{?\s*(\S+)/);
+      expect(titleStyleChangeNext?.[1]?.startsWith('guardCommentMutation(')).toBe(true);
+    });
+
+    it('the OTHER CommentPopup in NoteEditor.tsx (selected-text/anchored-thread popup) is untouched -- no accessMode, no guards, still the historical hardcoded identity', () => {
       const noteEditor = read('components/collabboard/editors/NoteEditor.tsx');
       const block = commentPopupBlockAfter(noteEditor, '{panels.open.comment && (');
       expect(block).not.toContain('accessMode=');
       expect(block).not.toContain('guardCommentMutation(');
       expect(block).toContain('onRemoveThread');
       expect(block).toContain('highlightColor={activeThread?.color}');
+      expect(block).toContain('currentUserId="user1"');
+      expect(block).toContain('currentUserName="R"');
     });
 
     it('CanvasModals.tsx threads commentAccessMode from CanvasClient.tsx into NoteEditor as accessMode', () => {
@@ -536,6 +570,17 @@ describe('PATCH 8O.1/8O.2 -- canonical comment permission wiring', () => {
       const noteEditorEnd = canvasModals.indexOf('/>', canvasModals.indexOf('initialTitle=', noteEditorStart));
       const noteEditorBlock = canvasModals.slice(noteEditorStart, noteEditorEnd);
       expect(noteEditorBlock).toContain('accessMode={commentAccessMode}');
+    });
+
+    it('CanvasModals.tsx passes real user identity and persisted commentTitle/commentTitleStyle into NoteEditor', () => {
+      const canvasModals = read('components/collabboard/canvas/ui/CanvasModals.tsx');
+      const noteEditorStart = canvasModals.indexOf('<NoteEditor');
+      const noteEditorEnd = canvasModals.indexOf('/>', canvasModals.indexOf('initialTitle=', noteEditorStart));
+      const noteEditorBlock = canvasModals.slice(noteEditorStart, noteEditorEnd);
+      expect(noteEditorBlock).toContain("currentUserId={user?.id || 'anon'}");
+      expect(noteEditorBlock).toContain("currentUserName={user?.email?.split('@')[0] || 'You'}");
+      expect(noteEditorBlock).toContain('initialCommentTitle=');
+      expect(noteEditorBlock).toContain('initialCommentTitleStyle=');
     });
 
     it('CanvasClient.tsx passes commentAccessMode into CanvasModals', () => {

@@ -97,7 +97,7 @@ describe('NoteEditor current save-on-close lifecycle (characterized, not correct
     });
     const keys = Object.keys(onSave.mock.calls[0][0]).sort();
     expect(keys).toEqual(
-      ['badgeColor', 'cardColor', 'content', 'detachedComments', 'reactions', 'textColor', 'title', 'titleStyle', 'topStrip'].sort(),
+      ['badgeColor', 'cardColor', 'commentTitle', 'commentTitleStyle', 'content', 'detachedComments', 'reactions', 'textColor', 'title', 'titleStyle', 'topStrip'].sort(),
     );
     expect(keys).not.toContain('metadata');
   });
@@ -600,5 +600,193 @@ describe('PATCH 8P: Box mode - detached Comment Delete targets the correct row (
 
     expect(c.textContent).toContain('sibling comment');
     expect(c.textContent).not.toContain('comment to remove');
+  });
+});
+
+// PATCH 8P.1: real identity for newly created detached comments (Category A
+// only), and canonical Comments-panel title/style wiring. Neither touches
+// the selected-text/anchored-thread CommentPopup, which keeps its own
+// pre-existing hardcoded "user1"/"R" identity (see C1/5 above).
+const HISTORICAL_USER1_COMMENT = [
+  { id: 'legacy-1', text: 'an old comment', userId: 'user1', userName: 'R', timestamp: 1 },
+];
+
+describe('PATCH 8P.1: real authenticated identity for new detached comments', () => {
+  it('a newly submitted comment uses the real currentUserId/currentUserName props, not "user1"/"R"', () => {
+    const c = mount(<NoteEditor isOpen accessMode="manage" initialContent="<p>hello world again</p>"
+      initialDetachedComments={STABLE_EMPTY_DETACHED} currentUserId="real-user-123" currentUserName="Real Name"
+      onSave={vi.fn()} onClose={vi.fn()} />);
+    click(btn(c, 'Switch to Box Design')!);
+    click(btn(c, 'Add a comment to this post')!);
+    const input = detachedPanel(c).querySelector('input[placeholder="Add a comment..."]') as HTMLInputElement;
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+      setter.call(input, 'identity check');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    act(() => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
+
+    // The canonical CommentPopup row renders the author's userName directly.
+    expect(c.textContent).toContain('identity check');
+    expect(c.textContent).toContain('Real Name');
+  });
+
+  it('the onSave payload for a new comment carries the real currentUserId, never the "user1" placeholder', () => {
+    const onSave = vi.fn();
+    const c = mount(<NoteEditor isOpen accessMode="manage" initialContent="<p>hello world again</p>"
+      initialDetachedComments={STABLE_EMPTY_DETACHED} currentUserId="real-user-123" currentUserName="Real Name"
+      onSave={onSave} onClose={vi.fn()} />);
+    click(btn(c, 'Switch to Box Design')!);
+    click(btn(c, 'Add a comment to this post')!);
+    const input = detachedPanel(c).querySelector('input[placeholder="Add a comment..."]') as HTMLInputElement;
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+      setter.call(input, 'identity check');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    act(() => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
+
+    const overlay = c.firstElementChild as HTMLElement;
+    act(() => { overlay.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    const saved = onSave.mock.calls[0][0];
+    const newComment = saved.detachedComments.find((cm: any) => cm.text === 'identity check');
+    expect(newComment.userId).toBe('real-user-123');
+    expect(newComment.userId).not.toBe('user1');
+    expect(newComment.userName).toBe('Real Name');
+  });
+
+  it('historical comments already persisted with userId "user1" are left completely untouched', () => {
+    const onSave = vi.fn();
+    const c = mount(<NoteEditor isOpen accessMode="manage" initialContent="<p>hello world again</p>"
+      initialDetachedComments={HISTORICAL_USER1_COMMENT} currentUserId="real-user-123" currentUserName="Real Name"
+      onSave={onSave} onClose={vi.fn()} />);
+    // Open and close without editing -- no mutation should occur.
+    click(btn(c, 'Switch to Box Design')!);
+    click(btn(c, 'View 1 comment')!);
+    expect(c.textContent).toContain('an old comment');
+    const overlay = c.firstElementChild as HTMLElement;
+    act(() => { overlay.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    const saved = onSave.mock.calls[0][0];
+    expect(saved.detachedComments).toEqual(HISTORICAL_USER1_COMMENT);
+  });
+});
+
+describe('PATCH 8P.1: canonical Comments-panel title/style wiring (MANAGE)', () => {
+  it('editing the title via the canonical h4 trigger updates the displayed title', () => {
+    const c = mount(<NoteEditor isOpen accessMode="manage" initialContent="<p>hello world again</p>"
+      initialDetachedComments={STABLE_EMPTY_DETACHED} onSave={vi.fn()} onClose={vi.fn()} />);
+    click(btn(c, 'Switch to Box Design')!);
+    click(btn(c, 'Add a comment to this post')!);
+    const titleEl = detachedPanel(c).querySelector('[data-comment-panel-title="true"]') as HTMLElement;
+    expect(titleEl.tagName).toBe('H4');
+    expect(titleEl.textContent).toBe('Comments');
+    click(titleEl);
+    const titleInput = detachedPanel(c).querySelector('input[aria-label="Comment panel title"]') as HTMLInputElement;
+    expect(titleInput).not.toBeNull();
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+      setter.call(titleInput, 'Feedback');
+      titleInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    act(() => { titleInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
+    const committedTitle = detachedPanel(c).querySelector('[data-comment-panel-title="true"]') as HTMLElement;
+    expect(committedTitle.tagName).toBe('H4');
+    expect(committedTitle.textContent).toBe('Feedback');
+  });
+
+  it('styling the title via the canonical Palette trigger updates its inline color', () => {
+    const c = mount(<NoteEditor isOpen accessMode="manage" initialContent="<p>hello world again</p>"
+      initialDetachedComments={STABLE_EMPTY_DETACHED} onSave={vi.fn()} onClose={vi.fn()} />);
+    click(btn(c, 'Switch to Box Design')!);
+    click(btn(c, 'Add a comment to this post')!);
+    click(detachedPanel(c).querySelector('[data-comment-panel-title="true"]') as HTMLElement);
+    const styleTrigger = detachedPanel(c).querySelector('button[aria-label="Style comment title"]') as HTMLButtonElement;
+    expect(styleTrigger).not.toBeNull();
+    click(styleTrigger);
+    // The style popup is portaled to document.body, not inside the mounted container.
+    const swatch = document.body.querySelector('button[title="#4c6ef5"]') as HTMLButtonElement;
+    expect(swatch).not.toBeNull();
+    click(swatch);
+    const titleInput = detachedPanel(c).querySelector('input[aria-label="Comment panel title"]') as HTMLInputElement;
+    expect(titleInput.style.color).toBe('rgb(76, 110, 245)');
+  });
+
+  it('title and title-style persist through close/reopen (survive the onSave payload)', () => {
+    const onSave = vi.fn();
+    const c = mount(<NoteEditor isOpen accessMode="manage" initialContent="<p>hello world again</p>"
+      initialDetachedComments={STABLE_EMPTY_DETACHED} onSave={onSave} onClose={vi.fn()} />);
+    click(btn(c, 'Switch to Box Design')!);
+    click(btn(c, 'Add a comment to this post')!);
+    click(detachedPanel(c).querySelector('[data-comment-panel-title="true"]') as HTMLElement);
+    const titleInput = detachedPanel(c).querySelector('input[aria-label="Comment panel title"]') as HTMLInputElement;
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+      setter.call(titleInput, 'Feedback');
+      titleInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const styleTrigger = detachedPanel(c).querySelector('button[aria-label="Style comment title"]') as HTMLButtonElement;
+    click(styleTrigger);
+    const swatch = document.body.querySelector('button[title="#4c6ef5"]') as HTMLButtonElement;
+    click(swatch);
+    act(() => { titleInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
+
+    const overlay = c.firstElementChild as HTMLElement;
+    act(() => { overlay.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    const saved = onSave.mock.calls[0][0];
+    expect(saved.commentTitle).toBe('Feedback');
+    expect(saved.commentTitleStyle).toEqual({ color: '#4c6ef5' });
+
+    // Reopen with the persisted values as initial props -- same round trip
+    // CanvasModals.tsx performs when reopening an existing padlet.
+    const reopened = mount(<NoteEditor isOpen accessMode="manage" initialContent="<p>hello world again</p>"
+      initialDetachedComments={STABLE_EMPTY_DETACHED} initialCommentTitle={saved.commentTitle}
+      initialCommentTitleStyle={saved.commentTitleStyle} onSave={vi.fn()} onClose={vi.fn()} />);
+    click(btn(reopened, 'Switch to Box Design')!);
+    click(btn(reopened, 'Add a comment to this post')!);
+    const reopenedTitle = detachedPanel(reopened).querySelector('[data-comment-panel-title="true"]') as HTMLElement;
+    expect(reopenedTitle.textContent).toBe('Feedback');
+    expect(reopenedTitle.style.color).toBe('rgb(76, 110, 245)');
+  });
+
+  it('opening and closing without any edit produces an unchanged commentTitle/commentTitleStyle in the onSave payload', () => {
+    const onSave = vi.fn();
+    const c = mount(<NoteEditor isOpen accessMode="manage" initialContent="<p>hello world again</p>"
+      initialDetachedComments={STABLE_EMPTY_DETACHED} initialCommentTitle="Feedback"
+      initialCommentTitleStyle={{ color: '#4c6ef5' }} onSave={onSave} onClose={vi.fn()} />);
+    click(btn(c, 'Switch to Box Design')!);
+    click(btn(c, 'Add a comment to this post')!);
+    const overlay = c.firstElementChild as HTMLElement;
+    act(() => { overlay.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const saved = onSave.mock.calls[0][0];
+    expect(saved.commentTitle).toBe('Feedback');
+    expect(saved.commentTitleStyle).toEqual({ color: '#4c6ef5' });
+  });
+});
+
+describe('PATCH 8P.1: canonical Comments-panel title/style wiring (READ)', () => {
+  it('READ mode displays a persisted custom title and its style, read-only', () => {
+    const c = mount(<NoteEditor isOpen accessMode="read" initialContent="<p>hello world again</p>"
+      initialDetachedComments={STABLE_EMPTY_DETACHED} initialCommentTitle="Feedback"
+      initialCommentTitleStyle={{ color: '#4c6ef5' }} onSave={vi.fn()} onClose={vi.fn()} />);
+    click(btn(c, 'Switch to Box Design')!);
+    click(btn(c, 'Add a comment to this post')!);
+    const titleEl = detachedPanel(c).querySelector('[data-comment-panel-title="true"]') as HTMLElement;
+    expect(titleEl.tagName).toBe('H4');
+    expect(titleEl.textContent).toBe('Feedback');
+    expect(titleEl.style.color).toBe('rgb(76, 110, 245)');
+  });
+
+  it('READ mode cannot open title editing (h4 click is inert) or title styling (no Palette trigger)', () => {
+    const c = mount(<NoteEditor isOpen accessMode="read" initialContent="<p>hello world again</p>"
+      initialDetachedComments={STABLE_EMPTY_DETACHED} initialCommentTitle="Feedback" onSave={vi.fn()} onClose={vi.fn()} />);
+    click(btn(c, 'Switch to Box Design')!);
+    click(btn(c, 'Add a comment to this post')!);
+    const titleEl = detachedPanel(c).querySelector('[data-comment-panel-title="true"]') as HTMLElement;
+    click(titleEl);
+    expect(detachedPanel(c).querySelector('input[aria-label="Comment panel title"]')).toBeNull();
+    expect(detachedPanel(c).querySelector('button[aria-label="Style comment title"]')).toBeNull();
   });
 });

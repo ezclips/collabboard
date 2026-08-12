@@ -43,6 +43,10 @@ export type SaveNoteData = {
   badgeColor?: string;
   textColor?: string;
   titleStyle?: Record<string, unknown>;
+  // PATCH 8P.1 -- the Comments panel's own title/style, distinct from the
+  // post's own title/titleStyle above.
+  commentTitle?: string;
+  commentTitleStyle?: { color?: string; backgroundColor?: string };
   detachedComments?: Array<{
     id: string;
     text: string;
@@ -384,6 +388,8 @@ export function usePadletSave(params: UsePadletSaveParams) {
       badgeColor: data.badgeColor,
       textColor: data.textColor,
       titleStyle: data.titleStyle,
+      commentTitle: data.commentTitle,
+      commentTitleStyle: data.commentTitleStyle,
       detachedComments: data.detachedComments,
     });
     // Check if placement prompt is needed (grid/columns/wall layouts)

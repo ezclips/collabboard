@@ -197,6 +197,10 @@ export default function CanvasModals({
           initialBadgeColor={padletToEdit?.metadata?.badgeColor || '#facc15'}
           initialTextColor={padletToEdit?.metadata?.textColor}
           initialTitleStyle={padletToEdit?.metadata?.titleStyle as any}
+          initialCommentTitle={typeof padletToEdit?.metadata?.commentTitle === 'string' ? padletToEdit.metadata.commentTitle : undefined}
+          initialCommentTitleStyle={padletToEdit?.metadata?.commentTitleStyle as any}
+          currentUserId={user?.id || 'anon'}
+          currentUserName={user?.email?.split('@')[0] || 'You'}
           onSave={saveNote}
         />
       </div>

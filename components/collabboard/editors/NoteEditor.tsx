@@ -58,6 +58,11 @@ interface DetachedCommentData {
   backgroundColor?: string;
 }
 
+// Shape matches CommentPopup.tsx's own commentTitleStyle/onCommentTitleStyleChange
+// prop types exactly (color/backgroundColor only) -- distinct from CaptionStyle
+// (which covers the POST title's own styling, a different metadata field).
+type CommentTitleStyle = { color?: string; backgroundColor?: string };
+
 interface NoteEditorProps {
   initialTitle?: string;
   initialContent?: string;
@@ -65,6 +70,19 @@ interface NoteEditorProps {
   initialBadgeColor?: string;
   initialTextColor?: string;
   initialTitleStyle?: CaptionStyle;
+  // PATCH 8P.1 -- the Comments PANEL's own title/style (metadata.commentTitle /
+  // metadata.commentTitleStyle), distinct from the Note POST's own title
+  // (initialTitle/initialTitleStyle above). Matches the field names already
+  // used by every other canonical caller (FreeformPadletCards.tsx's Note
+  // sites, Clipart, Image).
+  initialCommentTitle?: string;
+  initialCommentTitleStyle?: CommentTitleStyle;
+  // PATCH 8P.1 -- real authenticated identity for newly created detached
+  // comments (Category A only). Defaults preserve prior behavior for any
+  // caller that hasn't been updated, same convention as
+  // ClipartCardDraftModal.tsx's currentUserId/currentUserName.
+  currentUserId?: string;
+  currentUserName?: string;
   onSave: (data: {
     title?: string;
     content: string;
@@ -75,6 +93,8 @@ interface NoteEditorProps {
     badgeColor?: string;
     detachedComments?: DetachedCommentData[];
     titleStyle?: CaptionStyle;
+    commentTitle?: string;
+    commentTitleStyle?: CommentTitleStyle;
   }) => void;
   onClose: () => void;
   isOpen: boolean;
@@ -101,6 +121,10 @@ export default function NoteEditor({
   initialBadgeColor = '#facc15',
   initialTextColor = '#1F2937',
   initialTitleStyle,
+  initialCommentTitle,
+  initialCommentTitleStyle,
+  currentUserId = 'anon',
+  currentUserName = 'You',
   onSave,
   onClose,
   isOpen,
@@ -119,6 +143,15 @@ export default function NoteEditor({
   useEffect(() => {
     setTitleStyle(initialTitleStyle || {});
   }, [initialTitleStyle]);
+  // PATCH 8P.1 -- the Comments PANEL's own title/style (Category A only).
+  const [commentTitle, setCommentTitle] = useState(initialCommentTitle);
+  const [commentTitleStyle, setCommentTitleStyle] = useState<CommentTitleStyle>(initialCommentTitleStyle || {});
+  useEffect(() => {
+    setCommentTitle(initialCommentTitle);
+  }, [initialCommentTitle]);
+  useEffect(() => {
+    setCommentTitleStyle(initialCommentTitleStyle || {});
+  }, [initialCommentTitleStyle]);
   const [cardColor, setCardColor] = useState('#FFFFFF');
   const [topStrip, setTopStrip] = useState<string | null>(null);
   const [textColor, setTextColor] = useState(initialTextColor);
@@ -648,6 +681,8 @@ export default function NoteEditor({
       badgeColor,
       detachedComments: detachedComments.length > 0 ? detachedComments : undefined,
       titleStyle: Object.keys(titleStyle).length > 0 ? titleStyle : undefined,
+      commentTitle,
+      commentTitleStyle: Object.keys(commentTitleStyle).length > 0 ? commentTitleStyle : undefined,
     });
     onClose();
   };
@@ -833,8 +868,8 @@ export default function NoteEditor({
               const newComment: DetachedCommentData = {
                 id: `comment-${Date.now()}`,
                 text,
-                userId: 'user1',
-                userName: 'R',
+                userId: currentUserId,
+                userName: currentUserName,
                 timestamp: Date.now(),
               };
               setDetachedComments((prev) => [...prev, newComment]);
@@ -862,10 +897,12 @@ export default function NoteEditor({
             comments={detachedComments}
             badgeColor={badgeColor}
             onBadgeColorChange={guardCommentMutation(accessMode, setBadgeColor)}
-            commentTitle={undefined}
-            onCommentTitleChange={guardCommentMutation(accessMode, () => undefined)}
-            currentUserId="user1"
-            currentUserName="R"
+            commentTitle={commentTitle}
+            commentTitleStyle={Object.keys(commentTitleStyle).length > 0 ? commentTitleStyle : undefined}
+            onCommentTitleChange={guardCommentMutation(accessMode, (nextTitle: string) => setCommentTitle(nextTitle === 'Comments' ? undefined : nextTitle))}
+            onCommentTitleStyleChange={guardCommentMutation(accessMode, (style: CommentTitleStyle) => setCommentTitleStyle(style))}
+            currentUserId={currentUserId}
+            currentUserName={currentUserName}
             position={detachedPopupPosition}
             enableCanonicalSelectionStyling
           />
