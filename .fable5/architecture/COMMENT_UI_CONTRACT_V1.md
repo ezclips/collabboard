@@ -91,7 +91,7 @@ NOT YET MIGRATED:
 - Note — anchored/highlighted threads (special storage adapter required)
 - Document — **has no normal/detached comment tier at all** (see below)
 - Comment post
-- Container
+- Container — **has no live normal/detached comment tier at all** (see below)
 - other normal-comment surfaces identified by future audits
 
 **Document is not a pending Category-A migration.** PATCH 8Q's inventory
@@ -276,6 +276,59 @@ composer, and pressing Enter to submit a comment never selects a table cell
 cell's value — Enter submits the comment only, exactly as canonical
 behavior requires, and never commits/advances a table cell the way Enter
 does inside the grid itself.
+
+**Container was classified N/A in PATCH 8W** (2026-08-13) — no production
+code was changed. Phase 1 inventory found that `ContainerEditor.tsx` carries
+a complete but entirely dead Category-A skeleton for the Container's own
+whole-post comments: `detachedComments` state, an `initialDetachedComments`
+prop threaded from `CanvasModals.tsx` (`liveContainer?.metadata?.
+detachedComments`), a `handleComment`/`handleAddComment` pair, and
+`commentPopupOpen`/`commentPopupPosition` state, with `detachedComments`
+correctly round-tripped through `onSave` → `usePadletSave.ts`'s
+`saveContainer` (`metadata.detachedComments: data.detachedComments`). None of
+it is reachable: `ContainerEditor.tsx`'s left toolbar has exactly three
+buttons (Close, Color, Title) and no Comment trigger; `commentPopupOpen` is
+never read by any `<CommentPopup isOpen=...>` render anywhere in the file (no
+such JSX exists at all); and the on-canvas site
+(`FreeformPadletCards.tsx`'s `if (padlet.type === 'container') { ... }`
+branch, line ~4250) returns its own `<ColumnPostContextMenu>` shell before
+reaching the generic comment-badge/`CommentPopup` block that every
+fallback-branch post type (Note, Clipart, Image, etc.) gets for free — so
+Container padlets never render a comment badge on canvas either. There is no
+button, menu item, keyboard shortcut, or badge anywhere in the live product
+that opens, reads, or writes a Container's own comment. This is Category D
+(dead/orphaned), not Category A, and per this patch's own decision gate nothing
+was migrated, wired, or deleted — the dead state/props/save-mapping were left
+exactly as found, since removing them was out of scope for a
+classification-only patch.
+
+Two genuinely live comment systems exist for content placed *inside* a
+Container, and both are Category B (child-post comments), explicitly out of
+scope: (1) `ContainerEditor.tsx`'s `SortableChildItem` renders a canonical
+`CommentPopup` directly for a child padlet whose `type === "comment"`,
+reading/writing that child's own `metadata.comments` via
+`onUpdateChildComments` — this is the standalone Comment-post family
+rendered inline inside the container editor's list, not a Container comment.
+(2) `RowColumnContainerCard.tsx` (used by the on-canvas Row/Column container
+layout) and `PostCardContent.tsx` (the Drawing-in-container image-binding
+case) both render `EmbeddedCommentList` — a third, distinct hand-rolled
+comment UI, never `CommentPopup` — against `metadata.comments` (for
+comment-type children) or `metadata.detachedComments` (for any other child's
+own comments), via the same `onUpdateChildComments(childId, comments, {
+field })` callback contract. In every case the mutation target is provably
+the *child's* padlet id and metadata field, never the Container's own row —
+`onUpdateChildComments` in `FreeformPadletCards.tsx` calls
+`updatePostFieldsPreservingFailureChannels(childId, { metadata: {
+...childPadlet.metadata, comments } })`, keyed off the child's id looked up
+by `padlets.find(p => p.id === childId)`, with no code path that substitutes
+the container's own id or metadata. No Category C (header-bound/object-bound/
+selection-bound) comment tier exists for Container at all — there is nothing
+resembling Note's anchored threads or Document's text-selection comments
+anywhere in `ContainerEditor.tsx`, `RowColumnContainerCard.tsx`, or the
+Wall/Column/Grid container context-menu files. Because Category A is empty,
+none of the frozen foundation files were touched and no negative controls
+apply beyond confirming the dead code stayed byte-identical (verified via
+`git diff` showing zero changes to any `.tsx`/`.ts` production file).
 
 Other non-Clipart/Image/Note/Drawing/Todo/AI-Component/Link/Table surfaces
 are intentionally not made to comply by this patch. A migration moves a post
@@ -667,8 +720,9 @@ anchoring, viewport-space positioning, panel height discipline, title,
 composer, picker, link, and interaction-isolation behavior. This freeze
 preserves those historical notes and records Clipart as the reference. Image's
 PATCH 8O migration and normal Note detached-comment PATCH 8P migration are
-recorded above; Note anchored/highlighted threads, Document, Drawing, AI
-Component, Link, Todo, Comment post, and Container remain unmigrated.
+recorded above; Note anchored/highlighted threads and Comment post remain
+unmigrated. Document (PATCH 8Q) and Container (PATCH 8W) were classified N/A
+-- neither has a live Category-A comment tier to migrate.
 
 ## Negative controls
 
