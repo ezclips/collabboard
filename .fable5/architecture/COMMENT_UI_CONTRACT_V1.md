@@ -152,28 +152,40 @@ for Image and `components/collabboard/noteDetachedCommentUIContract.test.tsx`
 for normal/detached Note comments. The Note suite explicitly guards the
 anchored/highlighted thread boundary.
 
-The permission suites (PATCH 8O.1) are:
+The permission suites (PATCH 8O.1 / 8O.2) are:
 
-- `lib/domain/canvas/comments.test.ts` -- `resolveCommentAccessMode` and
-  `guardCommentMutation` unit coverage.
+- `lib/domain/canvas/comments.test.ts` -- `resolveCommentAccessMode`,
+  `isOwnComment`, `canMutateComment`, `guardCommentMutation`,
+  `guardCommentComposition`, and `guardOwnCommentMutation` unit coverage.
 - `components/collabboard/editors/CommentPopup.accessMode.test.tsx` -- the
   read/manage mode mounted contract (25 items: 17 read-mode, 8 manage-mode).
+- `components/collabboard/editors/CommentPopup.commentMode.test.tsx` -- the
+  'comment'-mode mounted contract (23 items: own-comment capabilities,
+  other-user restrictions, panel-level restrictions, legacy/forged-call
+  safety).
+- `lib/infra/canvas/commentMutations.test.ts` -- the RPC-backed persistence
+  path for 'comment'-mode mutations: correct payload shape, fail-safe
+  behavior (no optimistic mutation before the RPC resolves, `toast.error` on
+  failure, server-truth application on success).
 - `components/collabboard/canonicalCommentPermission.contract.test.tsx` --
   every canonical caller passes an explicit `accessMode`/`commentAccessMode`
-  prop and wraps its comment mutation callbacks with `guardCommentMutation`;
-  fails if any canonical caller silently omits the access contract.
+  prop and wraps its comment mutation callbacks with the correct guard
+  (`guardCommentMutation` for manage-only panel props,
+  `guardCommentComposition` for composing a new comment,
+  `guardOwnCommentMutation` for mutating an existing one); fails if any
+  canonical caller silently omits the access contract.
 
 ## Canonical comment permission contract
 
-`COMMENT UI CONTRACT UNLOCK — PERMISSIONS ONLY` (PATCH 8O.1). Permission
-gating only; no visual redesign. The frozen behavior matrix above still
-describes the writable ("manage") experience byte-for-byte -- this section is
-additive.
+`COMMENT UI CONTRACT UNLOCK — PERMISSIONS ONLY` (PATCH 8O.1, extended by
+PATCH 8O.2). Permission gating only; no visual redesign. The frozen behavior
+matrix above still describes the writable ("manage") experience byte-for-byte
+-- this section is additive.
 
 `CommentPopup` accepts an explicit `accessMode?: CommentAccessMode` prop
-(`'read' | 'manage'`, defined in `lib/domain/canvas/comments.ts`), defaulted
-to `'manage'` so every existing consumer that has not been updated keeps its
-exact current behavior.
+(`'read' | 'comment' | 'manage'`, defined in `lib/domain/canvas/comments.ts`),
+defaulted to `'manage'` so every existing consumer that has not been updated
+keeps its exact current behavior.
 
 READ:
 
@@ -186,71 +198,186 @@ READ:
   Color/Highlight, no Link authoring, no Strikethrough, no Delete, no title
   editing or title styling, no Badge Color
 
+COMMENT (PATCH 8O.2):
+
+- everything READ allows, for every comment regardless of author
+- composer and Send are visible; a new comment can be added
+- for a comment this user themselves authored ("own"): Edit, Color/Highlight,
+  Link authoring, Strikethrough, and Delete are all available
+- for another user's comment: none of the above are reachable -- the entire
+  per-row actions rail does not render for that row (same "not rendered, not
+  merely disabled" principle as READ mode), and every internal mutation path
+  independently re-checks ownership too (see Defense in depth below)
+- title editing, title styling, and Badge Color remain unavailable (MANAGE-only)
+
 MANAGE:
 
-- the current frozen canonical Comment UI v1 capabilities, unchanged
+- the current frozen canonical Comment UI v1 capabilities, unchanged: full
+  authoring rights over every comment regardless of author, plus title
+  editing/styling and Badge Color
+
+### Ownership semantics
+
+Ownership is decided by `canMutateComment(accessMode, comment, currentUserId)`
+(`lib/domain/canvas/comments.ts`), which in turn calls `isOwnComment`. The
+rule is based ONLY on persisted identity:
+
+```text
+comment.userId === currentUserId
+```
+
+Never inferred from displayed user name, avatar, comment index/position, or
+any other browser-observable state. A legacy comment with a missing or
+empty-string `userId` can be read by a COMMENT-mode user but never mutated,
+even if `currentUserId` also happens to be falsy -- two absent ids are never
+treated as a match. `canMutateComment('manage', ...)` is unconditionally
+`true` regardless of ownership (frozen management rights); `canMutateComment
+('read', ...)` is unconditionally `false`.
 
 **Authorization state must be explicit. Callback presence is never
-authorization.** `CommentPopup` does not infer read-only from whether a
-mutation prop (`onEditComment`, `onCommentColor`, etc.) was supplied --
-several existing non-canonical consumers omit props for reasons unrelated to
-permission. The explicit `accessMode` prop is the only accepted signal.
+authorization.** `CommentPopup` does not infer read-only (or comment-only, or
+ownership) from whether a mutation prop (`onEditComment`, `onCommentColor`,
+etc.) was supplied -- several existing non-canonical consumers omit props for
+reasons unrelated to permission. The explicit `accessMode` prop (plus
+`currentUserId`, already an existing prop, now load-bearing for ownership) is
+the only accepted signal. **COMMENT mode cannot manage panel-level
+presentation** -- title/title-style/Badge Color stay MANAGE-only regardless
+of ownership; there is no "own the panel" concept.
 
 Defense in depth, in order:
 
-1. `CommentPopup` itself refuses to render mutation-affording UI in read mode
-   (not disabled/hidden -- not rendered, so not keyboard/tab reachable) and
-   every internal mutation function (`handleSubmit`, `handleEditCommit`,
-   `applySelectedStyle`, `applySelectedStrikethrough`, `handleApplyLink`,
-   `openLinkPopover`, `startTitleEditing`, `commitTitle`) independently
-   returns immediately when `accessMode === 'read'`, regardless of how it was
-   invoked.
+1. `CommentPopup` itself refuses to render mutation-affording UI outside the
+   mode/ownership that allows it (not disabled/hidden -- not rendered, so not
+   keyboard/tab reachable):
+   - `canManagePanel` (`accessMode === 'manage'`) gates title
+     editing/styling and Badge Color.
+   - `canManageThisRow` (`!isReadOnly && (accessMode !== 'comment' ||
+     canMutateCommentById(comment.id))`) gates the entire per-row actions
+     rail, per row.
+   - Every internal mutation function (`handleSubmit`, `handleEditCommit`,
+     `applySelectedStyle`, `applySelectedStrikethrough`, `handleApplyLink`,
+     `openLinkPopover`, `startTitleEditing`, `commitTitle`) independently
+     re-checks `isReadOnly`/`canManagePanel`/ownership as its own first
+     statement(s), regardless of how it was invoked.
 2. Every canonical caller wraps each comment mutation callback passed to
-   `CommentPopup` with `guardCommentMutation(accessMode, handler)`
-   (`lib/domain/canvas/comments.ts`) before it reaches the caller's own
-   optimistic-local-state-plus-persistence body. A read-only caller's handler
-   body is therefore provably unreachable, not merely conditionally skipped
-   inside it -- no optimistic local mutation, no stale UI, no later RLS
-   failure surfacing to the user.
-3. Supabase RLS remains the final, unweakened persistence boundary. This
-   patch does not touch RLS.
+   `CommentPopup` with the guard matching that prop's mode reach
+   (`lib/domain/canvas/comments.ts`):
+   - `guardCommentMutation(accessMode, handler)` -- MANAGE-only props
+     (`onCommentTitleChange`, `onCommentTitleStyleChange`,
+     `onBadgeColorChange`). Unchanged from PATCH 8O.1, now also rejects
+     `'comment'` (only `'manage'` passes).
+   - `guardCommentComposition(accessMode, handler)` -- composing a new
+     comment (`onSubmit`). Allowed in `'comment'` and `'manage'`, rejected
+     only in `'read'`.
+   - `guardOwnCommentMutation(accessMode, currentUserId, findComment,
+     handler)` -- mutating an EXISTING comment (`onEditComment`,
+     `onRemoveComment`, `onToggleCommentStrikethrough`, `onCommentColor`).
+     `'manage'` passes through unconditionally; `'comment'` passes through
+     only when `findComment(commentId)` resolves to a comment this caller
+     owns; `'read'` is always a no-op.
+   Whichever guard applies, the caller's own handler body (and its optimistic
+   local-state update) is therefore provably unreachable when not authorized,
+   not merely conditionally skipped inside it -- no optimistic local
+   mutation, no stale UI, no later RLS failure surfacing to the user.
+3. Supabase RLS remains the final, unweakened persistence boundary for
+   MANAGE-mode writes (the existing `updatePadletMetadata`/bulk-metadata-write
+   path, untouched). COMMENT-mode writes route through a SEPARATE, narrowly
+   scoped path -- see Commenter persistence architecture below.
 
 `resolveCommentAccessMode(workspaceRole, boardPermission?)` resolves the mode
 from the existing role/permission types (`types/permissions.ts`,
-`lib/workspace/context.ts`) -- no parallel role system. `WorkspaceRole ===
-'readonly'` or `BoardPermission === 'reader'` resolves to `'read'`; everything
-else resolves to `'manage'`. Resolved once at the controller boundary
-(`CanvasClient.tsx`, from its existing `currentWorkspaceRole` state) and
-passed down as a single prop -- `CommentPopup` never queries auth or database
-state itself.
+`lib/workspace/context.ts`) -- no parallel role system. Workspace-level
+restriction is the OUTER bound: `WorkspaceRole === 'readonly'` always resolves
+to `'read'` regardless of `boardPermission`. Otherwise, `BoardPermission ===
+'reader'` resolves to `'read'`, `BoardPermission === 'commenter'` resolves to
+`'comment'`, and everything else (including no `boardPermission` supplied --
+e.g. workspace owner/admin/member with no explicit board-level signal)
+resolves to `'manage'`, the pre-8O.1 default every existing caller already
+depended on.
+
+Resolved once at the controller boundary (`CanvasClient.tsx`) and passed down
+as a single prop -- `CommentPopup` never queries auth or database state
+itself.
+
+**BoardPermission is now wired (PATCH 8O.2).** `CanvasClient.tsx` resolves
+`currentBoardPermission` client-side via the existing `get_board_permission`
+RPC (already `GRANT EXECUTE TO authenticated`, already used server-side in
+`lib/auth/permissions.ts`'s helper of the same name; its `user_uuid` argument
+defaults to `auth.uid()`, so it is safe to call from the browser client naming
+only `board_uuid`). No new database object was needed for this half of the
+gap PATCH 8O.1 left open.
 
 **Wired at every current canonical caller**: the Clipart editor modal
-(`ClipartCardDraftModal.tsx`), saved Clipart comments (Site B in
-`FreeformPadletCards.tsx`), and all three live canonical Image entry points
-(the Freeform Image comment badge and Freeform Image toolbar in
+(`ClipartCardDraftModal.tsx`, now also receiving real `currentUserId`/
+`currentUserName` instead of the pre-8O.2 hardcoded `'anon'`/`'You'` literal
+every comment added through that modal used to get), saved Clipart comments
+(Site B in `FreeformPadletCards.tsx`), and all three live canonical Image
+entry points (the Freeform Image comment badge and Freeform Image toolbar in
 `FreeformPadletCards.tsx`, and the non-Freeform Image toolbar in
 `CanvasClient.tsx`). Canonical Note detached comments are explicitly **not**
 wired by this patch -- they remain fully writable regardless of role,
 deferred to a dedicated follow-up.
 
-**BoardPermission is not fully wired.** No client component in this canvas
-view currently resolves board-level permission -- only `WorkspaceRole` is
-loaded client-side. `resolveCommentAccessMode` accepts `boardPermission` for
-completeness with the product's permission model and composes it correctly
-the moment a caller resolves one; today it is simply never passed, so the
-only live read-only trigger is `WorkspaceRole === 'readonly'`.
+### Commenter persistence architecture (PATCH 8O.2)
 
-**COMMENTER PERSISTENCE — SEPARATE FOLLOW-UP REQUIRED.** `BoardPermission ===
-'commenter'` is product-intended to permit commenting, but the padlets
-`UPDATE` RLS policy requires editor-level access -- a commenter's comment
-writes would resolve to `'manage'` (commenter ranks above reader) yet be
-rejected by the database. This patch does not paper over that mismatch: it
-does not downgrade commenter to `'read'` (product-incorrect -- commenter is
-supposed to write) and does not weaken RLS to grant commenter-level padlet
-metadata writes (out of scope, and risks accidentally granting post-edit
-capability). The gap is real, documented, and unresolved until a dedicated
-patch either grants commenter-scoped RLS for comment-only metadata writes or
-introduces a distinct persistence path.
+PATCH 8O.1 identified but did not solve: `BoardPermission === 'commenter'`
+writes would be accepted by the UI/domain layer yet rejected by the padlets
+`UPDATE` RLS policy (editor-level access required). PATCH 8O.2 solves the
+UI/ownership half of this in full (above) and designs -- but does **not
+apply** -- the persistence half:
+
+- **Why not `GRANT commenter UPDATE ON padlets`:** `padlets.metadata` is one
+  jsonb column holding the whole post's metadata. A client UPDATE necessarily
+  replaces the entire value it sends -- there is no column- or key-level RLS
+  for jsonb in Postgres. Granting blanket UPDATE would let a commenter submit
+  ANY replacement metadata: rewrite another user's comment, delete another
+  user's comment, forge `comment.userId`, or edit unrelated fields entirely
+  (cardColor, container membership, ...).
+- **The actual design**: a narrowly scoped `comment_mutate` SECURITY DEFINER
+  RPC (drafted at
+  `supabase/migrations/20260812_000000_add_comment_mutate_rpc.sql`) that
+  resolves the authenticated user, the effective board permission, and the
+  target comment server-side, and permits exactly four operations --
+  `ADD_COMMENT`, `EDIT_OWN_COMMENT`, `STYLE_OWN_COMMENT`,
+  `DELETE_OWN_COMMENT` -- each of which touches only
+  `metadata.detachedComments`, never arbitrary metadata, and never trusts a
+  client-supplied identity for `comment.userId`. The padlets `UPDATE` RLS
+  policy itself is not modified or weakened.
+- **Client wiring**: `lib/infra/canvas/commentMutations.ts` calls this RPC
+  and is already wired into every 'comment'-mode caller
+  (`CanvasClient.tsx`'s `commentModeMutations`, threaded to
+  `FreeformPadletCards.tsx`'s three canonical sites). It deliberately does
+  NOT reuse the existing `updatePadletMetadata`/`commitPadletMeta` path: that
+  path applies its optimistic local update synchronously and swallows every
+  persistence error silently by design (a pre-existing, deliberate,
+  whole-app pattern -- see `commitPadletMeta`'s own comment in
+  `CanvasClient.tsx`), which combined would show a commenter FAKE local
+  success for a write the database silently discarded. The RPC-backed path
+  never optimistically mutates local state before the call resolves, and
+  surfaces a failure via the existing `toast.error` mechanism (no new
+  notification system).
+- **STATUS: the migration is DRAFTED, NOT APPLIED.** There is no local
+  Supabase instance or db-test harness in this repository to validate it
+  against -- the only way to test it is against the live project. Until a
+  human reviews and applies it (see the migration file's own header for the
+  required review checklist), every COMMENT-mode write attempt fails
+  immediately with a clean "function comment_mutate(...) does not exist"
+  error, caught by `commentMutations.ts` and surfaced via `toast.error` --
+  fail-safe (no fake success), not fake-fixed. `ClipartCardDraftModal.tsx`'s
+  draft-then-batch-save architecture is a separate case: its own-comment
+  mutations stay on its existing `updateMetadata`-then-`saveCard` draft path
+  (now ownership-gated via `guardOwnCommentMutation`), since persistence
+  there already only happens on modal close through the same RLS boundary as
+  every other draft field -- wiring the RPC into a mid-draft mutation would
+  fight that architecture rather than fit it. A commenter opening this ONE
+  entry point specifically will still see the pre-existing RLS rejection
+  (silently, per that path's existing error handling) until either this RPC
+  ships and the modal is re-wired to use it, or RLS is otherwise addressed.
+
+`BoardPermission === 'commenter'` no longer risks resolving to `'manage'` UI
+with rejected writes (PATCH 8O.1's exact documented gap) -- it now resolves
+to the correct `'comment'` UI, and writes either succeed through the RPC (once
+applied) or fail loudly and safely (until then).
 
 ## Historical notes
 
@@ -294,6 +421,30 @@ N. Remove a control from manage mode (e.g. drop Send or Color) → canonical
    manage contract fails.
 O. Omit `accessMode` from a canonical caller's `<CommentPopup>` → the
    architecture guard requiring every canonical caller to pass the prop fails.
+P. COMMENT edits/deletes/styles/link-authors another user's comment → the
+   comment-mode ownership contract fails (mounted) and the caller-guard
+   forged-call test fails (structural).
+Q. Client submits a forged `userId` on ADD_COMMENT → `comment_mutate` uses
+   `auth.uid()` only, never a client-supplied argument, so a forged value is
+   never even read (proof lives in the migration's own `ADD_COMMENT` branch
+   and its header comment, not a mounted test -- the RPC is not applied).
+R. COMMENT changes arbitrary padlet metadata via the commenter path →
+   `comment_mutate` only ever touches `metadata.detachedComments` (proof: its
+   own `UPDATE padlets SET metadata = jsonb_set(..., '{detachedComments}',
+   ...)` statement, the only mutation the function performs).
+S. COMMENT changes the Comments title → panel-level `canManagePanel` contract
+   fails (mounted, item 17 in `CommentPopup.commentMode.test.tsx`).
+T. COMMENT changes Badge Color → panel-level `canManagePanel` contract fails
+   (mounted, item 19).
+U. READ submits a comment → PATCH 8O.1's read-mode contract fails (unchanged
+   by this patch).
+V. A COMMENT-mode persistence rejection leaves a fake optimistic comment in
+   local state → `lib/infra/canvas/commentMutations.test.ts`'s fail-safe-path
+   tests fail (no `setPadlets` call before the RPC resolves; state
+   byte-identical after a rejected call).
+W. A legacy comment with no reliable `userId` is mutated by a COMMENT-mode
+   user → `canMutateComment`/`isOwnComment` unit tests fail, and
+   `CommentPopup.commentMode.test.tsx` item 20 fails.
 
 These controls are diagnostic procedures, not changes included in the freeze.
 

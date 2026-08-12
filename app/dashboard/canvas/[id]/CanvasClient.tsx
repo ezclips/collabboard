@@ -31,7 +31,9 @@ import RowCanvasDnD from '@/components/collabboard/row/RowCanvasDnD';
 import { routeEdge, type GraphSide } from '@/lib/graph/edgeRouting';
 import { createFreeformGraphRepo } from '@/lib/graph/graphRepo';
 import { canEditWorkspace, canManageWorkspace, type WorkspaceRole } from '@/lib/workspace/context';
-import { resolveCommentAccessMode, guardCommentMutation } from '@/lib/domain/canvas/comments';
+import { resolveCommentAccessMode, guardCommentMutation, guardCommentComposition, guardOwnCommentMutation } from '@/lib/domain/canvas/comments';
+import { createCommentModeMutations } from '@/lib/infra/canvas/commentMutations';
+import type { BoardPermission } from '@/types/permissions';
 import { selectCardModalRoute } from '@/lib/domain/canvas/cardModalRoute';
 import { selectDocumentModalDestination, type DocumentModalDestination } from '@/lib/domain/canvas/documentModalRoute';
 import { decideDocumentSwitch, type QueuedDocumentAction } from '@/lib/domain/canvas/documentSwitchGuard';
@@ -197,6 +199,16 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   const [hasMounted, setHasMounted] = useState(false);
   const [user, setUser] = useState<AuthUser | null>(null);
   const [currentWorkspaceRole, setCurrentWorkspaceRole] = useState<WorkspaceRole | null>(null);
+  // PATCH 8O.2 -- board-level permission for the current canvas, resolved
+  // client-side via the existing get_board_permission RPC (already
+  // GRANT EXECUTE TO authenticated, already used server-side in
+  // lib/auth/permissions.ts's helper of the same name; its user_uuid
+  // argument defaults to auth.uid(), so it is safe to call from the browser
+  // client naming only board_uuid). Nothing resolved this client-side before
+  // this patch -- resolveCommentAccessMode's boardPermission parameter was
+  // accepted but never actually passed by any caller (see 8O.1's own note,
+  // now stale).
+  const [currentBoardPermission, setCurrentBoardPermission] = useState<BoardPermission | null>(null);
   const [isToolbarCollapsed, setIsToolbarCollapsed] = useState(false);
   const [isMapToolbarCollapsed, setIsMapToolbarCollapsed] = useState(false);
   const [isFreeformPanning, setIsFreeformPanning] = useState(false);
@@ -257,21 +269,54 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     };
   }, [user]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadBoardPermission = async () => {
+      if (!user?.id || !canvasId) {
+        setCurrentBoardPermission(null);
+        return;
+      }
+
+      try {
+        const { data, error } = await supabase.rpc('get_board_permission', { board_uuid: canvasId });
+        if (error) throw error;
+        if (!cancelled) {
+          setCurrentBoardPermission((data as BoardPermission | null) ?? null);
+        }
+      } catch (error) {
+        console.error('Error resolving board permission:', error);
+        // Fail closed: no boardPermission signal means resolveCommentAccessMode
+        // falls back to WorkspaceRole alone, same as every pre-8O.2 caller --
+        // never fail OPEN into a permission the RPC couldn't actually confirm.
+        if (!cancelled) {
+          setCurrentBoardPermission(null);
+        }
+      }
+    };
+
+    loadBoardPermission();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user, canvasId, supabase]);
+
   const canUseFreeformEditButton = canEditWorkspace(currentWorkspaceRole);
   // Keep the canvas creation toolbar aligned with board editability.
   // Otherwise editable member accounts can open and modify a board but lose the
   // left toolbar entirely because they are not workspace admins.
   const canUseCanvasToolbar = canUseFreeformEditButton;
   const canManageCanvasShare = canManageWorkspace(currentWorkspaceRole);
-  // PATCH 8O.1 -- resolved once at the controller boundary from the existing
-  // WorkspaceRole signal (the only effective comment-permission source this
-  // canvas view currently resolves client-side; no board-level BoardPermission
-  // resolution exists here to reuse -- see resolveCommentAccessMode's own
-  // doc comment). Threaded straight through to every canonical Clipart/Image
-  // CommentPopup instance; CommentPopup itself never queries permission state.
+  // PATCH 8O.1/8O.2 -- resolved once at the controller boundary from the two
+  // existing permission signals (WorkspaceRole is the outer bound;
+  // BoardPermission, resolved above via get_board_permission, now supplies
+  // the 'comment' tier for BoardPermission 'commenter'). Threaded straight
+  // through to every canonical Clipart/Image CommentPopup instance;
+  // CommentPopup itself never queries permission state.
   const commentAccessMode = useMemo(
-    () => resolveCommentAccessMode(currentWorkspaceRole),
-    [currentWorkspaceRole]
+    () => resolveCommentAccessMode(currentWorkspaceRole, currentBoardPermission),
+    [currentWorkspaceRole, currentBoardPermission]
   );
   const handleToggleMapToolbarCollapsed = useCallback(() => {
     setIsMapToolbarCollapsed((prev) => !prev);
@@ -353,6 +398,16 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     addPadletFromLibraryItem, addFreeformCardPadlet, addDrawingLayoutPadlet, updateDrawingLayoutPadlet,
     insertPostOrThrow, insertPostPreservingFailureChannels, insertPostAndSelectOrThrow, createContainerOrThrow, dropDraftIntoContainerOrThrow, updatePostFieldsSwallowResolved, updatePostFieldsOrThrow, updatePostFieldsPreservingFailureChannels, deletePostSwallowResolved, deletePostOrThrow,
   } = useCanvasData({ canvasId, dispatch });
+
+  // PATCH 8O.2 -- persistence path for 'comment'-mode mutations (own-comment
+  // add/edit/style/delete), kept separate from the existing
+  // updatePadletMetadata/commitPadletMeta bulk-write path every 'manage'-mode
+  // comment callback still uses unchanged -- see
+  // lib/infra/canvas/commentMutations.ts's own header for why.
+  const commentModeMutations = useMemo(
+    () => createCommentModeMutations({ supabase, setPadlets }),
+    [supabase, setPadlets]
+  );
 
   // Auto-open a specific padlet from a share link (?openPadlet=id).
   // These hooks must be here — before the loading/canvas early returns below.
@@ -7282,6 +7337,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                     stableActions={stableActions}
                     requestOpenDocument={requestOpenDocument}
                     commentAccessMode={commentAccessMode}
+                    commentModeMutations={commentModeMutations}
                   />
                 </CanvasEditorProvider>
               </CanvasConfigProvider>
@@ -7667,6 +7723,8 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                 setIsLibraryOpen(true);
               }}
               commentAccessMode={commentAccessMode}
+              currentUserId={user?.id || 'anon'}
+              currentUserName={user?.email?.split('@')[0] || 'You'}
             />
 
             {/* Column Layout Placement Prompt */}
@@ -8340,7 +8398,12 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                   onCommentTitleStyleChange={guardCommentMutation(commentAccessMode, (style) => updatePadletMetadata(activeImageToolbarPadlet.id, { commentTitleStyle: style }))}
                   onBadgeColorChange={guardCommentMutation(commentAccessMode, (color) => updatePadletMetadata(activeImageToolbarPadlet.id, { badgeColor: color }))}
                   badgeColor={activeImageToolbarPadlet.metadata?.badgeColor || '#facc15'}
-                  onSubmit={guardCommentMutation(commentAccessMode, async (commentText) => {
+                  onSubmit={
+                    commentAccessMode === 'comment'
+                      ? guardCommentComposition(commentAccessMode, (commentText: string) =>
+                          commentModeMutations.submitOwnComment(activeImageToolbarPadlet.id, commentText)
+                        )
+                      : guardCommentMutation(commentAccessMode, async (commentText) => {
                     const currentComments = activeImageToolbarPadlet.metadata?.detachedComments || [];
                     const newComment = {
                       id: `comment-${Date.now()}`,
@@ -8353,26 +8416,47 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                     await updatePadletMetadata(activeImageToolbarPadlet.id, { detachedComments: nextComments });
                     setCardCommentList(nextComments);
                   })}
-                  onEditComment={guardCommentMutation(commentAccessMode, async (commentId, text) => {
+                  onEditComment={
+                    commentAccessMode === 'comment'
+                      ? guardOwnCommentMutation(commentAccessMode, user?.id, (id) => cardCommentList.find((c: any) => c.id === id), (commentId: string, text: string) =>
+                          commentModeMutations.editOwnComment(activeImageToolbarPadlet.id, commentId, text)
+                        )
+                      : guardCommentMutation(commentAccessMode, async (commentId, text) => {
                     const nextComments = cardCommentList.map((comment: any) =>
                       comment.id === commentId ? { ...comment, text } : comment
                     );
                     await updatePadletMetadata(activeImageToolbarPadlet.id, { detachedComments: nextComments });
                     setCardCommentList(nextComments);
                   })}
-                  onRemoveComment={guardCommentMutation(commentAccessMode, async (commentId) => {
+                  onRemoveComment={
+                    commentAccessMode === 'comment'
+                      ? guardOwnCommentMutation(commentAccessMode, user?.id, (id) => cardCommentList.find((c: any) => c.id === id), (commentId: string) =>
+                          commentModeMutations.removeOwnComment(activeImageToolbarPadlet.id, commentId)
+                        )
+                      : guardCommentMutation(commentAccessMode, async (commentId) => {
                     const nextComments = cardCommentList.filter((comment: any) => comment.id !== commentId);
                     await updatePadletMetadata(activeImageToolbarPadlet.id, { detachedComments: nextComments });
                     setCardCommentList(nextComments);
                   })}
-                  onToggleCommentStrikethrough={guardCommentMutation(commentAccessMode, async (commentId) => {
+                  onToggleCommentStrikethrough={
+                    commentAccessMode === 'comment'
+                      ? guardOwnCommentMutation(commentAccessMode, user?.id, (id) => cardCommentList.find((c: any) => c.id === id), (commentId: string) => {
+                          const target = cardCommentList.find((c: any) => c.id === commentId);
+                          commentModeMutations.toggleOwnCommentStrikethrough(activeImageToolbarPadlet.id, commentId, !target?.isStrikethrough);
+                        })
+                      : guardCommentMutation(commentAccessMode, async (commentId) => {
                     const nextComments = cardCommentList.map((comment: any) =>
                       comment.id === commentId ? { ...comment, isStrikethrough: !comment.isStrikethrough } : comment
                     );
                     await updatePadletMetadata(activeImageToolbarPadlet.id, { detachedComments: nextComments });
                     setCardCommentList(nextComments);
                   })}
-                  onCommentColor={guardCommentMutation(commentAccessMode, async (commentId, textColor, backgroundColor) => {
+                  onCommentColor={
+                    commentAccessMode === 'comment'
+                      ? guardOwnCommentMutation(commentAccessMode, user?.id, (id) => cardCommentList.find((c: any) => c.id === id), (commentId: string, textColor?: string, backgroundColor?: string) =>
+                          commentModeMutations.setOwnCommentColor(activeImageToolbarPadlet.id, commentId, textColor, backgroundColor)
+                        )
+                      : guardCommentMutation(commentAccessMode, async (commentId, textColor, backgroundColor) => {
                     const nextComments = cardCommentList.map((comment: any) =>
                       comment.id === commentId ? { ...comment, textColor, backgroundColor } : comment
                     );

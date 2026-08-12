@@ -8,6 +8,10 @@ import {
   setCommentBackgroundColor,
   resolveCommentAccessMode,
   guardCommentMutation,
+  isOwnComment,
+  canMutateComment,
+  guardCommentComposition,
+  guardOwnCommentMutation,
 } from './comments';
 
 function makeComments(): Comment[] {
@@ -157,11 +161,12 @@ describe('comment domain -- resolveCommentAccessMode (PATCH 8O.1)', () => {
     expect(resolveCommentAccessMode('member')).toBe('manage');
   });
 
-  it('resolves manage when neither signal is read-only, including null/undefined role', () => {
+  it('resolves manage when neither signal is read-only or commenter, including null/undefined role', () => {
     expect(resolveCommentAccessMode(null)).toBe('manage');
     expect(resolveCommentAccessMode(undefined)).toBe('manage');
     expect(resolveCommentAccessMode('member', 'editor')).toBe('manage');
-    expect(resolveCommentAccessMode('member', 'commenter')).toBe('manage');
+    expect(resolveCommentAccessMode('member', 'moderator')).toBe('manage');
+    expect(resolveCommentAccessMode('member', 'admin')).toBe('manage');
   });
 
   it('readonly workspace role wins even if boardPermission looks writable', () => {
@@ -170,8 +175,64 @@ describe('comment domain -- resolveCommentAccessMode (PATCH 8O.1)', () => {
     expect(resolveCommentAccessMode('readonly', 'admin')).toBe('read');
   });
 
-  it('does not treat commenter as read-only (product-intended to permit commenting -- see COMMENTER PERSISTENCE note)', () => {
-    expect(resolveCommentAccessMode('member', 'commenter')).toBe('manage');
+  it('resolves comment for BoardPermission commenter (PATCH 8O.2)', () => {
+    expect(resolveCommentAccessMode('member', 'commenter')).toBe('comment');
+    expect(resolveCommentAccessMode('owner', 'commenter')).toBe('comment');
+    expect(resolveCommentAccessMode(null, 'commenter')).toBe('comment');
+  });
+
+  it('readonly workspace role wins over commenter board permission too', () => {
+    expect(resolveCommentAccessMode('readonly', 'commenter')).toBe('read');
+  });
+
+  it('reader board permission wins over commenter-or-higher default', () => {
+    expect(resolveCommentAccessMode('member', 'reader')).toBe('read');
+  });
+});
+
+describe('comment domain -- isOwnComment (PATCH 8O.2)', () => {
+  it('is true when comment.userId matches currentUserId', () => {
+    expect(isOwnComment({ userId: 'u1' }, 'u1')).toBe(true);
+  });
+
+  it('is false when userIds differ', () => {
+    expect(isOwnComment({ userId: 'u1' }, 'u2')).toBe(false);
+  });
+
+  it('is false for a legacy comment with no userId, even if currentUserId is also falsy', () => {
+    expect(isOwnComment({ userId: '' }, '')).toBe(false);
+    expect(isOwnComment({ userId: '' }, undefined)).toBe(false);
+    expect(isOwnComment(undefined, undefined)).toBe(false);
+  });
+
+  it('is false when currentUserId is missing, even with a valid comment userId', () => {
+    expect(isOwnComment({ userId: 'u1' }, null)).toBe(false);
+    expect(isOwnComment({ userId: 'u1' }, undefined)).toBe(false);
+  });
+
+  it('is false when the comment itself is missing', () => {
+    expect(isOwnComment(null, 'u1')).toBe(false);
+  });
+});
+
+describe('comment domain -- canMutateComment (PATCH 8O.2)', () => {
+  it('manage can always mutate, regardless of ownership', () => {
+    expect(canMutateComment('manage', { userId: 'u1' }, 'u2')).toBe(true);
+    expect(canMutateComment('manage', { userId: '' }, '')).toBe(true);
+    expect(canMutateComment('manage', undefined, undefined)).toBe(true);
+  });
+
+  it('comment can mutate only its own comment', () => {
+    expect(canMutateComment('comment', { userId: 'u1' }, 'u1')).toBe(true);
+    expect(canMutateComment('comment', { userId: 'u1' }, 'u2')).toBe(false);
+  });
+
+  it('comment can never mutate a legacy comment with no reliable userId', () => {
+    expect(canMutateComment('comment', { userId: '' }, 'u1')).toBe(false);
+  });
+
+  it('read can never mutate, even its own comment', () => {
+    expect(canMutateComment('read', { userId: 'u1' }, 'u1')).toBe(false);
   });
 });
 
@@ -204,5 +265,83 @@ describe('comment domain -- guardCommentMutation (PATCH 8O.1)', () => {
     const guarded = guardCommentMutation('read', asyncHandler);
     expect(() => guarded()).not.toThrow();
     expect(asyncHandler).not.toHaveBeenCalled();
+  });
+
+  it('PATCH 8O.2: is now a no-op for comment mode too -- reserved for manage-only props (title/badge)', () => {
+    const handler = vi.fn();
+    const guarded = guardCommentMutation('comment', handler);
+    guarded();
+    expect(handler).not.toHaveBeenCalled();
+  });
+});
+
+describe('comment domain -- guardCommentComposition (PATCH 8O.2)', () => {
+  it('invokes the wrapped handler in manage mode', () => {
+    const handler = vi.fn();
+    guardCommentComposition('manage', handler)('hello');
+    expect(handler).toHaveBeenCalledWith('hello');
+  });
+
+  it('invokes the wrapped handler in comment mode -- composing a new comment is allowed', () => {
+    const handler = vi.fn();
+    guardCommentComposition('comment', handler)('hello');
+    expect(handler).toHaveBeenCalledWith('hello');
+  });
+
+  it('never invokes the wrapped handler in read mode', () => {
+    const handler = vi.fn();
+    guardCommentComposition('read', handler)('hello');
+    expect(handler).not.toHaveBeenCalled();
+  });
+});
+
+describe('comment domain -- guardOwnCommentMutation (PATCH 8O.2)', () => {
+  const comments: Comment[] = [
+    { id: 'own', text: 'mine', userId: 'me', userName: 'Me', timestamp: 1 },
+    { id: 'other', text: 'theirs', userId: 'them', userName: 'Them', timestamp: 2 },
+    { id: 'legacy', text: 'ancient', userId: '', userName: '?', timestamp: 3 },
+  ];
+  const findComment = (id: string) => comments.find((c) => c.id === id);
+
+  it('manage mutates any comment id, including ones the current user does not own', () => {
+    const handler = vi.fn();
+    const guarded = guardOwnCommentMutation('manage', 'me', findComment, handler);
+    guarded('other', 'new text');
+    expect(handler).toHaveBeenCalledWith('other', 'new text');
+  });
+
+  it('comment mutates its own comment id', () => {
+    const handler = vi.fn();
+    const guarded = guardOwnCommentMutation('comment', 'me', findComment, handler);
+    guarded('own', 'new text');
+    expect(handler).toHaveBeenCalledWith('own', 'new text');
+  });
+
+  it('comment rejects a forged call targeting another user\'s comment id -- handler body never runs', () => {
+    const handler = vi.fn();
+    const guarded = guardOwnCommentMutation('comment', 'me', findComment, handler);
+    guarded('other', 'hijacked text');
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('comment rejects a legacy comment with no reliable userId', () => {
+    const handler = vi.fn();
+    const guarded = guardOwnCommentMutation('comment', 'me', findComment, handler);
+    guarded('legacy', 'hijacked text');
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('comment rejects an unknown comment id (not found by findComment)', () => {
+    const handler = vi.fn();
+    const guarded = guardOwnCommentMutation('comment', 'me', findComment, handler);
+    guarded('does-not-exist', 'text');
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('read never invokes the handler, even for the caller\'s own comment id', () => {
+    const handler = vi.fn();
+    const guarded = guardOwnCommentMutation('read', 'me', findComment, handler);
+    guarded('own', 'text');
+    expect(handler).not.toHaveBeenCalled();
   });
 });

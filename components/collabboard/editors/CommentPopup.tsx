@@ -13,7 +13,7 @@ import Link from '@tiptap/extension-link';
 import TextStylePopup from './TextStylePopup';
 import { useAnchoredPopover, rectFromElement, preventPopoverFocusLoss, panelSpanAnchorRect, type AnchorRect } from './useAnchoredPopover';
 import { handleSafeCommentLinkClick } from '../commentLinkSafety';
-import type { CommentAccessMode } from '@/lib/domain/canvas/comments';
+import { canMutateComment, type CommentAccessMode } from '@/lib/domain/canvas/comments';
 
 // Same 48-color badge palette every other post's Comments panel (Note,
 // Clipart, Todo, Table, Link) uses for its badge-color swatch.
@@ -211,6 +211,15 @@ export default function CommentPopup({
     // mutation-affording UI element checks. Kept as a plain derived boolean
     // (not stored in state) so it can never drift from the accessMode prop.
     const isReadOnly = accessMode === 'read';
+    // PATCH 8O.2 -- panel-level affordances (title editing/styling, Badge
+    // Color) stay 'manage'-only under the three-tier model: 'comment' is
+    // scoped to composing/mutating one's OWN comments, never the panel
+    // chrome. Every render gate and internal guard that used to read
+    // `!isReadOnly` for these specific affordances now reads
+    // `canManagePanel` instead so 'comment' mode is rejected identically to
+    // 'read' for them, without touching the (unchanged) composer/per-comment
+    // gates that still key off `isReadOnly` alone.
+    const canManagePanel = accessMode === 'manage';
     const [newCommentText, setNewCommentText] = useState('');
     const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
     const [editingCommentText, setEditingCommentText] = useState('');
@@ -396,13 +405,27 @@ export default function CommentPopup({
     const effectiveComments = comments.length > 0 ? comments : (existingComment ? [existingComment] : []);
     const resolvedHighlightColor = highlightColor || existingComment?.color;
     const resolvedCommentTitle = commentTitle?.trim() || 'Comments';
+    // PATCH 8O.2 -- single per-comment authorization check every action
+    // (render gate AND internal function guard alike) routes through, rather
+    // than re-deriving ownership inline at each site. 'manage' always true;
+    // 'comment' true only for a comment this user authored (see
+    // canMutateComment's ownership rule); 'read' always false. Looks the
+    // target up in `effectiveComments` -- the same list the row UI itself
+    // renders from -- so a stale/forged commentId simply resolves to "not
+    // found" (falsy `comment.userId`) and is rejected, same as a legacy
+    // comment with no reliable author.
+    const canMutateCommentById = useCallback((commentId: string | null | undefined): boolean => {
+        if (!commentId) return false;
+        const target = effectiveComments.find((c) => c.id === commentId);
+        return canMutateComment(accessMode, target, currentUserId);
+    }, [accessMode, currentUserId, effectiveComments]);
     const startTitleEditing = () => {
-        if (isReadOnly) return;
+        if (!canManagePanel) return;
         setTitleDraft(resolvedCommentTitle);
         setTitleEditing(true);
     };
     const commitTitle = () => {
-        if (isReadOnly) return;
+        if (!canManagePanel) return;
         const nextTitle = titleDraft.trim() || 'Comments';
         onCommentTitleChange?.(nextTitle);
         setTitleDraft(nextTitle);
@@ -426,6 +449,7 @@ export default function CommentPopup({
         if (!editingCommentId || !editEditor || editEditor.isDestroyed) {
             return;
         }
+        if (!canMutateCommentById(editingCommentId)) return;
         
         const htmlContent = editEditor.getHTML();
         const textContent = editEditor.getText().trim();
@@ -478,6 +502,7 @@ export default function CommentPopup({
         if (isReadOnly) return;
         const selection = readOnlySelectionRef.current;
         if (!selection) return;
+        if (!canMutateCommentById(selection.commentId)) return;
         const editor = readOnlyEditorsRef.current.get(selection.commentId);
         if (!editor || editor.isDestroyed) return;
         const chain = editor.chain().setTextSelection({ from: selection.from, to: selection.to });
@@ -489,18 +514,19 @@ export default function CommentPopup({
         // new HTML. This permits repeated foreground/highlight changes without
         // forcing the user to reselect the text.
         setSelection(selection);
-    }, [isReadOnly, onEditComment, setSelection]);
+    }, [isReadOnly, canMutateCommentById, onEditComment, setSelection]);
 
     const applySelectedStrikethrough = useCallback(() => {
         if (isReadOnly) return;
         const selection = readOnlySelectionRef.current;
         if (!selection) return;
+        if (!canMutateCommentById(selection.commentId)) return;
         const editor = readOnlyEditorsRef.current.get(selection.commentId);
         if (!editor || editor.isDestroyed) return;
         editor.chain().setTextSelection({ from: selection.from, to: selection.to }).toggleStrike().run();
         onEditComment?.(selection.commentId, editor.getHTML());
         setSelection(selection);
-    }, [isReadOnly, onEditComment, setSelection]);
+    }, [isReadOnly, canMutateCommentById, onEditComment, setSelection]);
 
     // Re-focuses the comment editor after closing the color/link popover
     // without applying anything, so a later genuine click-away still fires
@@ -514,6 +540,7 @@ export default function CommentPopup({
 
     const openLinkPopover = useCallback((commentId: string) => {
         if (isReadOnly) return;
+        if (!canMutateCommentById(commentId)) return;
         const readOnlySelection = readOnlySelectionRef.current;
         const editor = readOnlySelection?.commentId === commentId
             ? readOnlyEditorsRef.current.get(commentId)
@@ -527,11 +554,12 @@ export default function CommentPopup({
         setLinkUrl(editor.getAttributes('link').href || '');
         setCommentColorPopupId(null);
         setLinkPopoverCommentId(commentId);
-    }, [isReadOnly, editEditor]);
+    }, [isReadOnly, canMutateCommentById, editEditor]);
 
     const handleApplyLink = useCallback(() => {
         if (isReadOnly) return;
         if (!linkPopoverCommentId) return;
+        if (!canMutateCommentById(linkPopoverCommentId)) return;
         const selectedReadOnly = readOnlySelectionRef.current?.commentId === linkPopoverCommentId
             ? readOnlyEditorsRef.current.get(linkPopoverCommentId)
             : null;
@@ -582,7 +610,7 @@ export default function CommentPopup({
         setLinkUrl('');
         savedLinkSelectionRef.current = null;
         savedLinkEditorRef.current = null;
-    }, [isReadOnly, editEditor, linkUrl, linkPopoverCommentId, onEditComment, onEdit]);
+    }, [isReadOnly, canMutateCommentById, editEditor, linkUrl, linkPopoverCommentId, onEditComment, onEdit]);
 
     if (!isOpen) return null;
 
@@ -627,7 +655,7 @@ export default function CommentPopup({
             )
             : null;
 
-    const titleStylePortal = !isReadOnly && titleStyleOpen && onCommentTitleStyleChange
+    const titleStylePortal = canManagePanel && titleStyleOpen && onCommentTitleStyleChange
         ? createPortal(
             <div
                 ref={titleStylePopoverRef}
@@ -719,7 +747,7 @@ export default function CommentPopup({
             )}
             <div className={`flex items-center justify-between mb-3 pb-2 border-b border-gray-100${boundedHeight ? ' flex-shrink-0' : ''}`}>
                 <div className="flex min-w-0 items-center gap-1">
-                    {!isReadOnly && titleEditing ? (
+                    {canManagePanel && titleEditing ? (
                         <input
                             autoFocus
                             data-comment-panel-title="true"
@@ -745,12 +773,12 @@ export default function CommentPopup({
                             data-comment-panel-title="true"
                             className="text-sm font-semibold rounded px-1 -mx-1 cursor-text"
                             style={{ color: commentTitleStyle?.color || '#374151', backgroundColor: commentTitleStyle?.backgroundColor }}
-                            onClick={!isReadOnly && onCommentTitleChange ? startTitleEditing : undefined}
+                            onClick={canManagePanel && onCommentTitleChange ? startTitleEditing : undefined}
                         >
                             {resolvedCommentTitle}
                         </h4>
                     )}
-                    {!isReadOnly && titleEditing && onCommentTitleStyleChange && (
+                    {canManagePanel && titleEditing && onCommentTitleStyleChange && (
                         <button
                             ref={titleStyleAnchorRef as React.RefObject<HTMLButtonElement>}
                             type="button"
@@ -768,7 +796,7 @@ export default function CommentPopup({
                     )}
                 </div>
                 <div className="flex items-center gap-2">
-                    {!isReadOnly && onBadgeColorChange && (
+                    {canManagePanel && onBadgeColorChange && (
                         <button
                             onClick={() => setBadgeColorPickerOpen((open) => !open)}
                             className="w-7 h-7 flex items-center justify-center rounded hover:bg-gray-100"
@@ -783,7 +811,7 @@ export default function CommentPopup({
                 </div>
             </div>
 
-            {!isReadOnly && badgeColorPickerOpen && onBadgeColorChange && (
+            {canManagePanel && badgeColorPickerOpen && onBadgeColorChange && (
                 <div className="absolute right-3 top-12 z-10 bg-white rounded-lg shadow-lg border border-gray-200 p-2">
                     <div className="grid grid-cols-6 gap-1.5">
                         {BADGE_COLORS.map((color) => (
@@ -846,11 +874,13 @@ export default function CommentPopup({
                             hideHeadingSelect={true}
                             onSelectColor={(color) => {
                                 if (isReadOnly) return;
+                                if (!canMutateCommentById(target.id)) return;
                                 if (!editingCommentId && readOnlySelectionRef.current?.commentId === target.id) applySelectedStyle('color', color);
                                 else onCommentColor(target.id, color, target.backgroundColor);
                             }}
                             onSelectHighlight={(color) => {
                                 if (isReadOnly) return;
+                                if (!canMutateCommentById(target.id)) return;
                                 if (!editingCommentId && readOnlySelectionRef.current?.commentId === target.id) applySelectedStyle('highlight', color);
                                 else onCommentColor(target.id, target.textColor, color === 'transparent' ? undefined : color);
                             }}
@@ -932,6 +962,14 @@ export default function CommentPopup({
                             readOnlySelection?.commentId === comment.id ||
                             (isLinkOpen && savedLinkEditorRef.current !== null)
                         );
+                        // PATCH 8O.2: in 'comment' mode the entire per-row actions
+                        // column (Edit/Color/Link/Strikethrough/Delete) is only
+                        // reachable for a comment this user themselves authored --
+                        // for another user's comment it does not render at all
+                        // (not merely disabled), same "render gate, not disable"
+                        // principle 8O.1 established for read mode. 'manage' is
+                        // unaffected (canMutateCommentById is unconditionally true).
+                        const canManageThisRow = !isReadOnly && (accessMode !== 'comment' || canMutateCommentById(comment.id));
                         return (
                             <div
                                 key={comment.id}
@@ -1029,7 +1067,7 @@ export default function CommentPopup({
 
                                 {/* Actions Column - per comment, fixed width, always reserves space */}
                                 <div className="flex flex-col gap-0.5 w-5 shrink-0">
-                                    {!isReadOnly && (
+                                    {canManageThisRow && (
                                     <div className={`flex flex-col gap-0.5 ${isActive ? 'visible' : 'invisible group-hover/row:visible'}`}>
                                         {isEditing ? (
                                             <>
@@ -1042,6 +1080,7 @@ export default function CommentPopup({
                                                         onClick={(event) => {
                                                             event.preventDefault();
                                                             event.stopPropagation();
+                                                            if (!canMutateCommentById(comment.id)) return;
                                                             setLinkPopoverCommentId(null);
                                                             if (isColorOpen) {
                                                                 setCommentColorPopupId(null);
@@ -1066,6 +1105,7 @@ export default function CommentPopup({
                                                     onClick={(event) => {
                                                         event.preventDefault();
                                                         event.stopPropagation();
+                                                        if (!canMutateCommentById(comment.id)) return;
                                                         if (isLinkOpen) {
                                                             setLinkPopoverCommentId(null);
                                                             refocusCommentEditor();
@@ -1091,6 +1131,7 @@ export default function CommentPopup({
                                                     onClick={(event) => {
                                                         event.preventDefault();
                                                         event.stopPropagation();
+                                                        if (!canMutateCommentById(comment.id)) return;
                                                         setLinkPopoverCommentId(null);
                                                         if (isColorOpen) setCommentColorPopupId(null);
                                                         else {
@@ -1112,6 +1153,7 @@ export default function CommentPopup({
                                                     onClick={(event) => {
                                                         event.preventDefault();
                                                         event.stopPropagation();
+                                                        if (!canMutateCommentById(comment.id)) return;
                                                         if (isLinkOpen) {
                                                             setLinkPopoverCommentId(null);
                                                             refocusCommentEditor();
@@ -1132,6 +1174,7 @@ export default function CommentPopup({
                                                 onClick={(e) => {
                                                     e.stopPropagation();
                                                     if (isReadOnly) return;
+                                                    if (!canMutateCommentById(comment.id)) return;
                                                     setEditingCommentId(comment.id);
                                                     setEditingCommentText(comment.text);
                                                 }}
@@ -1150,6 +1193,7 @@ export default function CommentPopup({
                                             onClick={(e) => {
                                                 e.stopPropagation();
                                                 if (isReadOnly) return;
+                                                if (!canMutateCommentById(comment.id)) return;
                                                 if (hasReadOnlySelection) {
                                                     applySelectedStrikethrough();
                                                 } else if (onToggleCommentStrikethrough) {
@@ -1167,6 +1211,7 @@ export default function CommentPopup({
                                             onClick={(e) => {
                                                 e.stopPropagation();
                                                 if (isReadOnly) return;
+                                                if (!canMutateCommentById(comment.id)) return;
                                                 if (onRemoveComment) {
                                                     onRemoveComment(comment.id);
                                                 } else if (onRemove) {

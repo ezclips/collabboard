@@ -20,7 +20,8 @@ import CommentPost from '@/components/collabboard/CommentPost';
 import { handleSafeCommentLinkClick } from '@/components/collabboard/commentLinkSafety';
 import TextStylePopup from '@/components/collabboard/editors/TextStylePopup';
 import CommentPopup from '@/components/collabboard/editors/CommentPopup';
-import { guardCommentMutation, type CommentAccessMode } from '@/lib/domain/canvas/comments';
+import { guardCommentMutation, guardCommentComposition, guardOwnCommentMutation, type CommentAccessMode } from '@/lib/domain/canvas/comments';
+import type { CommentModeMutations } from '@/lib/infra/canvas/commentMutations';
 import { nextTextAlign } from '@/components/collabboard/editors/textAlignCycle';
 import { resolveCaptionStyle, resolvePadletTitleStyle } from '@/lib/domain/canvas/captionStyle';
 import { CardColorPanel } from '@/components/collabboard/editors/CardColorPanel';
@@ -187,6 +188,12 @@ export interface FreeformPadletCardsProps {
   // Optional/defaulted so any existing test harness that mounts this
   // component without the prop keeps today's fully writable behavior.
   commentAccessMode?: CommentAccessMode;
+  // PATCH 8O.2 -- persistence path for 'comment'-mode own-comment mutations
+  // at the three canonical call sites below (Image on-canvas, Clipart Site
+  // B, Image toolbar). Optional so any existing test harness that mounts
+  // this component without it keeps working -- 'comment' mode simply cannot
+  // persist without it (see each call site's own branch).
+  commentModeMutations?: CommentModeMutations;
 }
 
 
@@ -202,6 +209,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
     stableActions,
     requestOpenDocument,
     commentAccessMode = 'manage',
+    commentModeMutations,
   } = props;
   /**
    * PATCH-053: image-reaction writes already ignore a resolved Supabase error
@@ -1143,7 +1151,12 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                   onCommentTitleStyleChange={guardCommentMutation(commentAccessMode, (style) => updatePadletMetadata(padlet.id, { commentTitleStyle: style }))}
                   onBadgeColorChange={guardCommentMutation(commentAccessMode, (color) => updatePadletMetadata(padlet.id, { badgeColor: color }))}
                   badgeColor={padlet.metadata?.badgeColor || '#facc15'}
-                  onSubmit={guardCommentMutation(commentAccessMode, async (commentText) => {
+                  onSubmit={
+                    commentAccessMode === 'comment' && commentModeMutations
+                      ? guardCommentComposition(commentAccessMode, (commentText: string) =>
+                          commentModeMutations.submitOwnComment(padlet.id, commentText)
+                        )
+                      : guardCommentMutation(commentAccessMode, async (commentText) => {
                     const currentComments = padlet.metadata?.detachedComments || [];
                     const newComment = {
                       id: `comment-${Date.now()}`,
@@ -1156,26 +1169,47 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                     await updatePadletMetadata(padlet.id, { detachedComments: nextComments });
                     setCardCommentList(nextComments);
                   })}
-                  onEditComment={guardCommentMutation(commentAccessMode, async (commentId, text) => {
+                  onEditComment={
+                    commentAccessMode === 'comment' && commentModeMutations
+                      ? guardOwnCommentMutation(commentAccessMode, user?.id, (id) => cardCommentList.find((c: any) => c.id === id), (commentId: string, text: string) =>
+                          commentModeMutations.editOwnComment(padlet.id, commentId, text)
+                        )
+                      : guardCommentMutation(commentAccessMode, async (commentId, text) => {
                     const nextComments = cardCommentList.map((comment: any) =>
                       comment.id === commentId ? { ...comment, text } : comment
                     );
                     await updatePadletMetadata(padlet.id, { detachedComments: nextComments });
                     setCardCommentList(nextComments);
                   })}
-                  onRemoveComment={guardCommentMutation(commentAccessMode, async (commentId) => {
+                  onRemoveComment={
+                    commentAccessMode === 'comment' && commentModeMutations
+                      ? guardOwnCommentMutation(commentAccessMode, user?.id, (id) => cardCommentList.find((c: any) => c.id === id), (commentId: string) =>
+                          commentModeMutations.removeOwnComment(padlet.id, commentId)
+                        )
+                      : guardCommentMutation(commentAccessMode, async (commentId) => {
                     const nextComments = cardCommentList.filter((comment: any) => comment.id !== commentId);
                     await updatePadletMetadata(padlet.id, { detachedComments: nextComments });
                     setCardCommentList(nextComments);
                   })}
-                  onToggleCommentStrikethrough={guardCommentMutation(commentAccessMode, async (commentId) => {
+                  onToggleCommentStrikethrough={
+                    commentAccessMode === 'comment' && commentModeMutations
+                      ? guardOwnCommentMutation(commentAccessMode, user?.id, (id) => cardCommentList.find((c: any) => c.id === id), (commentId: string) => {
+                          const target = cardCommentList.find((c: any) => c.id === commentId);
+                          commentModeMutations.toggleOwnCommentStrikethrough(padlet.id, commentId, !target?.isStrikethrough);
+                        })
+                      : guardCommentMutation(commentAccessMode, async (commentId) => {
                     const nextComments = cardCommentList.map((comment: any) =>
                       comment.id === commentId ? { ...comment, isStrikethrough: !comment.isStrikethrough } : comment
                     );
                     await updatePadletMetadata(padlet.id, { detachedComments: nextComments });
                     setCardCommentList(nextComments);
                   })}
-                  onCommentColor={guardCommentMutation(commentAccessMode, async (commentId, textColor, backgroundColor) => {
+                  onCommentColor={
+                    commentAccessMode === 'comment' && commentModeMutations
+                      ? guardOwnCommentMutation(commentAccessMode, user?.id, (id) => cardCommentList.find((c: any) => c.id === id), (commentId: string, textColor?: string, backgroundColor?: string) =>
+                          commentModeMutations.setOwnCommentColor(padlet.id, commentId, textColor, backgroundColor)
+                        )
+                      : guardCommentMutation(commentAccessMode, async (commentId, textColor, backgroundColor) => {
                     const nextComments = cardCommentList.map((comment: any) =>
                       comment.id === commentId ? { ...comment, textColor, backgroundColor } : comment
                     );
@@ -1936,7 +1970,12 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                   commentTitleStyle={padlet.metadata?.commentTitleStyle}
                   onCommentTitleChange={guardCommentMutation(commentAccessMode, (title) => updatePadletMetadata(padlet.id, { commentTitle: title === 'Comments' ? undefined : title }))}
                   onCommentTitleStyleChange={guardCommentMutation(commentAccessMode, (style) => updatePadletMetadata(padlet.id, { commentTitleStyle: style }))}
-                  onSubmit={guardCommentMutation(commentAccessMode, async (commentText) => {
+                  onSubmit={
+                    commentAccessMode === 'comment' && commentModeMutations
+                      ? guardCommentComposition(commentAccessMode, (commentText: string) =>
+                          commentModeMutations.submitOwnComment(padlet.id, commentText)
+                        )
+                      : guardCommentMutation(commentAccessMode, async (commentText) => {
                     const newComment = {
                       id: `comment-${Date.now()}`,
                       text: commentText,
@@ -1948,26 +1987,47 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                     await updatePadletMetadata(padlet.id, { detachedComments: nextComments });
                     setCardCommentList(nextComments);
                   })}
-                  onEditComment={guardCommentMutation(commentAccessMode, async (commentId, text) => {
+                  onEditComment={
+                    commentAccessMode === 'comment' && commentModeMutations
+                      ? guardOwnCommentMutation(commentAccessMode, user?.id, (id) => cardCommentList.find((c: any) => c.id === id), (commentId: string, text: string) =>
+                          commentModeMutations.editOwnComment(padlet.id, commentId, text)
+                        )
+                      : guardCommentMutation(commentAccessMode, async (commentId, text) => {
                     const nextComments = cardCommentList.map((comment: any) =>
                       comment.id === commentId ? { ...comment, text } : comment
                     );
                     await updatePadletMetadata(padlet.id, { detachedComments: nextComments });
                     setCardCommentList(nextComments);
                   })}
-                  onRemoveComment={guardCommentMutation(commentAccessMode, async (commentId) => {
+                  onRemoveComment={
+                    commentAccessMode === 'comment' && commentModeMutations
+                      ? guardOwnCommentMutation(commentAccessMode, user?.id, (id) => cardCommentList.find((c: any) => c.id === id), (commentId: string) =>
+                          commentModeMutations.removeOwnComment(padlet.id, commentId)
+                        )
+                      : guardCommentMutation(commentAccessMode, async (commentId) => {
                     const nextComments = cardCommentList.filter((comment: any) => comment.id !== commentId);
                     await updatePadletMetadata(padlet.id, { detachedComments: nextComments });
                     setCardCommentList(nextComments);
                   })}
-                  onToggleCommentStrikethrough={guardCommentMutation(commentAccessMode, async (commentId) => {
+                  onToggleCommentStrikethrough={
+                    commentAccessMode === 'comment' && commentModeMutations
+                      ? guardOwnCommentMutation(commentAccessMode, user?.id, (id) => cardCommentList.find((c: any) => c.id === id), (commentId: string) => {
+                          const target = cardCommentList.find((c: any) => c.id === commentId);
+                          commentModeMutations.toggleOwnCommentStrikethrough(padlet.id, commentId, !target?.isStrikethrough);
+                        })
+                      : guardCommentMutation(commentAccessMode, async (commentId) => {
                     const nextComments = cardCommentList.map((comment: any) =>
                       comment.id === commentId ? { ...comment, isStrikethrough: !comment.isStrikethrough } : comment
                     );
                     await updatePadletMetadata(padlet.id, { detachedComments: nextComments });
                     setCardCommentList(nextComments);
                   })}
-                  onCommentColor={guardCommentMutation(commentAccessMode, async (commentId, textColor, backgroundColor) => {
+                  onCommentColor={
+                    commentAccessMode === 'comment' && commentModeMutations
+                      ? guardOwnCommentMutation(commentAccessMode, user?.id, (id) => cardCommentList.find((c: any) => c.id === id), (commentId: string, textColor?: string, backgroundColor?: string) =>
+                          commentModeMutations.setOwnCommentColor(padlet.id, commentId, textColor, backgroundColor)
+                        )
+                      : guardCommentMutation(commentAccessMode, async (commentId, textColor, backgroundColor) => {
                     const nextComments = cardCommentList.map((comment: any) =>
                       comment.id === commentId ? { ...comment, textColor, backgroundColor } : comment
                     );
@@ -5587,7 +5647,12 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                   onCommentTitleStyleChange={guardCommentMutation(commentAccessMode, (style) => updatePadletMetadata(activeImageToolbarPadlet.id, { commentTitleStyle: style }))}
                   onBadgeColorChange={guardCommentMutation(commentAccessMode, (color) => updatePadletMetadata(activeImageToolbarPadlet.id, { badgeColor: color }))}
                   badgeColor={activeImageToolbarPadlet.metadata?.badgeColor || '#facc15'}
-                  onSubmit={guardCommentMutation(commentAccessMode, async (commentText) => {
+                  onSubmit={
+                    commentAccessMode === 'comment' && commentModeMutations
+                      ? guardCommentComposition(commentAccessMode, (commentText: string) =>
+                          commentModeMutations.submitOwnComment(activeImageToolbarPadlet.id, commentText)
+                        )
+                      : guardCommentMutation(commentAccessMode, async (commentText) => {
                     const currentComments = activeImageToolbarPadlet.metadata?.detachedComments || [];
                     const newComment = {
                       id: `comment-${Date.now()}`,
@@ -5600,26 +5665,47 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                     await updatePadletMetadata(activeImageToolbarPadlet.id, { detachedComments: nextComments });
                     setCardCommentList(nextComments);
                   })}
-                  onEditComment={guardCommentMutation(commentAccessMode, async (commentId, text) => {
+                  onEditComment={
+                    commentAccessMode === 'comment' && commentModeMutations
+                      ? guardOwnCommentMutation(commentAccessMode, user?.id, (id) => cardCommentList.find((c: any) => c.id === id), (commentId: string, text: string) =>
+                          commentModeMutations.editOwnComment(activeImageToolbarPadlet.id, commentId, text)
+                        )
+                      : guardCommentMutation(commentAccessMode, async (commentId, text) => {
                     const nextComments = cardCommentList.map((comment: any) =>
                       comment.id === commentId ? { ...comment, text } : comment
                     );
                     await updatePadletMetadata(activeImageToolbarPadlet.id, { detachedComments: nextComments });
                     setCardCommentList(nextComments);
                   })}
-                  onRemoveComment={guardCommentMutation(commentAccessMode, async (commentId) => {
+                  onRemoveComment={
+                    commentAccessMode === 'comment' && commentModeMutations
+                      ? guardOwnCommentMutation(commentAccessMode, user?.id, (id) => cardCommentList.find((c: any) => c.id === id), (commentId: string) =>
+                          commentModeMutations.removeOwnComment(activeImageToolbarPadlet.id, commentId)
+                        )
+                      : guardCommentMutation(commentAccessMode, async (commentId) => {
                     const nextComments = cardCommentList.filter((comment: any) => comment.id !== commentId);
                     await updatePadletMetadata(activeImageToolbarPadlet.id, { detachedComments: nextComments });
                     setCardCommentList(nextComments);
                   })}
-                  onToggleCommentStrikethrough={guardCommentMutation(commentAccessMode, async (commentId) => {
+                  onToggleCommentStrikethrough={
+                    commentAccessMode === 'comment' && commentModeMutations
+                      ? guardOwnCommentMutation(commentAccessMode, user?.id, (id) => cardCommentList.find((c: any) => c.id === id), (commentId: string) => {
+                          const target = cardCommentList.find((c: any) => c.id === commentId);
+                          commentModeMutations.toggleOwnCommentStrikethrough(activeImageToolbarPadlet.id, commentId, !target?.isStrikethrough);
+                        })
+                      : guardCommentMutation(commentAccessMode, async (commentId) => {
                     const nextComments = cardCommentList.map((comment: any) =>
                       comment.id === commentId ? { ...comment, isStrikethrough: !comment.isStrikethrough } : comment
                     );
                     await updatePadletMetadata(activeImageToolbarPadlet.id, { detachedComments: nextComments });
                     setCardCommentList(nextComments);
                   })}
-                  onCommentColor={guardCommentMutation(commentAccessMode, async (commentId, textColor, backgroundColor) => {
+                  onCommentColor={
+                    commentAccessMode === 'comment' && commentModeMutations
+                      ? guardOwnCommentMutation(commentAccessMode, user?.id, (id) => cardCommentList.find((c: any) => c.id === id), (commentId: string, textColor?: string, backgroundColor?: string) =>
+                          commentModeMutations.setOwnCommentColor(activeImageToolbarPadlet.id, commentId, textColor, backgroundColor)
+                        )
+                      : guardCommentMutation(commentAccessMode, async (commentId, textColor, backgroundColor) => {
                     const nextComments = cardCommentList.map((comment: any) =>
                       comment.id === commentId ? { ...comment, textColor, backgroundColor } : comment
                     );

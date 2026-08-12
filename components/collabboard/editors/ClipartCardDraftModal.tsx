@@ -14,7 +14,7 @@ import { CAPTION_STYLE_PRESETS, resolveCaptionStyle, type CaptionHeading } from 
 import { nextTextAlign, type TextAlignValue } from '@/components/collabboard/editors/textAlignCycle';
 import EmojiReactionPicker from '@/components/collabboard/editors/EmojiReactionPicker';
 import { getMeaningfulTitle } from '@/lib/infra/collabboard/postTitle';
-import { guardCommentMutation, type CommentAccessMode } from '@/lib/domain/canvas/comments';
+import { guardCommentMutation, guardCommentComposition, guardOwnCommentMutation, type CommentAccessMode } from '@/lib/domain/canvas/comments';
 
 const BADGE_COLORS = [
   '#fef9c3', '#fef08a', '#fde047', '#facc15', '#eab308', '#ca8a04',
@@ -54,6 +54,15 @@ interface ClipartCardDraftModalProps {
   // to 'manage' so this modal's writable behavior is unchanged for every
   // caller that has not yet been updated to pass it.
   commentAccessMode?: CommentAccessMode;
+  // PATCH 8O.2 -- real authenticated identity, needed so a 'comment'-mode
+  // user's own newly-added comment is attributable to THEM (not the
+  // pre-8O.2 hardcoded 'anon' every comment added through this modal used
+  // to get -- see the removed draftCommentUserId literal below). Optional/
+  // defaulted so any caller that hasn't been updated keeps today's exact
+  // ('anon'/'You') behavior; 'manage' mode's visible UI is unaffected either
+  // way -- only the userId/userName stored on a NEW comment changes.
+  currentUserId?: string;
+  currentUserName?: string;
 }
 
 export default function ClipartCardDraftModal({
@@ -64,6 +73,8 @@ export default function ClipartCardDraftModal({
   onChange,
   onReplaceIcon,
   commentAccessMode = 'manage',
+  currentUserId = 'anon',
+  currentUserName = 'You',
 }: ClipartCardDraftModalProps) {
   const [isColorPanelOpen, setIsColorPanelOpen] = useState(false);
   const [isCardViewOpen, setIsCardViewOpen] = useState(false);
@@ -114,8 +125,8 @@ export default function ClipartCardDraftModal({
           typeof candidate.timestamp === 'number';
       })
     : [];
-  const draftCommentUserId = 'anon';
-  const draftCommentUserName = 'You';
+  const draftCommentUserId = currentUserId;
+  const draftCommentUserName = currentUserName;
   const commentCountSource = Array.isArray(previewPadlet.metadata?.detachedComments)
     ? previewPadlet.metadata.detachedComments
     : Array.isArray(previewPadlet.metadata?.comments)
@@ -532,7 +543,7 @@ export default function ClipartCardDraftModal({
               commentTitleStyle={previewPadlet.metadata?.commentTitleStyle}
               onCommentTitleChange={guardCommentMutation(commentAccessMode, (title) => updateMetadata({ commentTitle: title === 'Comments' ? undefined : title }))}
               onCommentTitleStyleChange={guardCommentMutation(commentAccessMode, (style) => updateMetadata({ commentTitleStyle: style }))}
-              onSubmit={guardCommentMutation(commentAccessMode, (commentText) => {
+              onSubmit={guardCommentComposition(commentAccessMode, (commentText) => {
                 const newComment: CommentData = {
                   id: `comment-${Date.now()}`,
                   text: commentText,
@@ -542,23 +553,23 @@ export default function ClipartCardDraftModal({
                 };
                 updateMetadata({ detachedComments: [...detachedComments, newComment] });
               })}
-              onEditComment={guardCommentMutation(commentAccessMode, (commentId, newText) => {
+              onEditComment={guardOwnCommentMutation(commentAccessMode, currentUserId, (id) => detachedComments.find((c) => c.id === id), (commentId, newText) => {
                 const updated = detachedComments.map((comment) =>
                   comment.id === commentId ? { ...comment, text: newText } : comment
                 );
                 updateMetadata({ detachedComments: updated });
               })}
-              onRemoveComment={guardCommentMutation(commentAccessMode, (commentId) => {
+              onRemoveComment={guardOwnCommentMutation(commentAccessMode, currentUserId, (id) => detachedComments.find((c) => c.id === id), (commentId) => {
                 const updated = detachedComments.filter((comment) => comment.id !== commentId);
                 updateMetadata({ detachedComments: updated });
               })}
-              onToggleCommentStrikethrough={guardCommentMutation(commentAccessMode, (commentId) => {
+              onToggleCommentStrikethrough={guardOwnCommentMutation(commentAccessMode, currentUserId, (id) => detachedComments.find((c) => c.id === id), (commentId) => {
                 const updated = detachedComments.map((comment) =>
                   comment.id === commentId ? { ...comment, isStrikethrough: !comment.isStrikethrough } : comment
                 );
                 updateMetadata({ detachedComments: updated });
               })}
-              onCommentColor={guardCommentMutation(commentAccessMode, (commentId, textColor, backgroundColor) => {
+              onCommentColor={guardOwnCommentMutation(commentAccessMode, currentUserId, (id) => detachedComments.find((c) => c.id === id), (commentId, textColor, backgroundColor) => {
                 const updated = detachedComments.map((comment) =>
                   comment.id === commentId ? { ...comment, textColor, backgroundColor } : comment
                 );
