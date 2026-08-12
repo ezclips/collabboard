@@ -17,9 +17,11 @@
 //
 // Every handler below instead:
 //   1. Never optimistically mutates local state before persistence resolves.
-//   2. Calls the narrowly-scoped `comment_mutate` RPC (drafted in
-//      supabase/migrations/20260812_000000_add_comment_mutate_rpc.sql --
-//      NOT YET APPLIED to the live database as of this patch, see that
+//   2. Calls the narrowly-scoped `comment_mutate` RPC (design preserved,
+//      DORMANT / NOT DEPLOYABLE, at
+//      .fable5/drafts/comment_mutate_rpc_20260812.sql -- quarantined out of
+//      supabase/migrations/ in PATCH 8O.3 because its permission-resolution
+//      logic is known-wrong for the live boards/padlets model, see that
 //      file's own header) instead of the whole-metadata-object update path,
 //      so a commenter's write can only ever affect the ONE comment
 //      operation it names, never arbitrary padlet metadata.
@@ -30,9 +32,12 @@
 //      this codebase (deletePadletById, handleChronoModeChange) -- no new
 //      notification system introduced.
 //
-// Until the migration is reviewed and applied, every call here fails
-// immediately with a clean "function comment_mutate(...) does not exist"
-// Postgres error -- exactly the fail-SAFE, fail-LOUD behavior this module is
+// The `comment_mutate` function does not exist in the live database and is
+// not currently reachable anyway -- the COMMENT access tier has no live
+// permission producer today (see COMMENT_UI_CONTRACT_V1.md's "Live status").
+// Every call here still fails immediately with a clean "function
+// comment_mutate(...) does not exist" Postgres error if it were ever somehow
+// invoked -- exactly the fail-SAFE, fail-LOUD behavior this module is
 // designed to produce instead of commitPadletMeta's silent swallow. The
 // per-comment OWNERSHIP check itself is not duplicated here: callers wrap
 // these functions with `guardOwnCommentMutation` (lib/domain/canvas/

@@ -214,7 +214,7 @@ describe('structural proof -- negative controls C/D (server-side enforcement, RP
   });
 
   it('D: the drafted migration performs exactly one UPDATE, touching only metadata.detachedComments', () => {
-    const sql = fs.readFileSync('supabase/migrations/20260812_000000_add_comment_mutate_rpc.sql', 'utf8');
+    const sql = fs.readFileSync('.fable5/drafts/comment_mutate_rpc_20260812.sql', 'utf8');
     const updateStatements = sql.match(/UPDATE public\.padlets/g) ?? [];
     expect(updateStatements).toHaveLength(1);
     expect(sql).toContain("SET metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), '{detachedComments}', v_new_comments)");
@@ -224,7 +224,7 @@ describe('structural proof -- negative controls C/D (server-side enforcement, RP
   });
 
   it('the function signature itself has no p_user_id / p_userid parameter -- identity can only come from auth.uid()', () => {
-    const sql = fs.readFileSync('supabase/migrations/20260812_000000_add_comment_mutate_rpc.sql', 'utf8');
+    const sql = fs.readFileSync('.fable5/drafts/comment_mutate_rpc_20260812.sql', 'utf8');
     const signatureStart = sql.indexOf('CREATE OR REPLACE FUNCTION public.comment_mutate(');
     const signatureEnd = sql.indexOf(')', sql.indexOf('RETURNS', signatureStart));
     const signature = sql.slice(signatureStart, signatureEnd).toLowerCase();
@@ -242,7 +242,7 @@ describe('structural proof -- negative controls C/D (server-side enforcement, RP
 // only be confirmed after the migration is reviewed and applied (see the
 // migration's own "REQUIRED HUMAN REVIEW BEFORE APPLYING" checklist).
 describe('structural proof -- 8O.2a hardening (EXECUTE privilege + search_path)', () => {
-  const sqlPath = 'supabase/migrations/20260812_000000_add_comment_mutate_rpc.sql';
+  const sqlPath = '.fable5/drafts/comment_mutate_rpc_20260812.sql';
   const sql = fs.readFileSync(sqlPath, 'utf8');
   const signature = 'public.comment_mutate(uuid, text, uuid, text, text, text, boolean)';
 
@@ -304,5 +304,38 @@ describe('structural proof -- 8O.2a hardening (EXECUTE privilege + search_path)'
     expect(sql).toContain('FROM public.profiles');
     expect(sql).toContain('v_permission public.board_permission_level;');
     expect(sql).toContain("'admin'::public.board_permission_level");
+  });
+});
+
+// PATCH 8O.3 -- deployment guard. The COMMENT tier has no live permission
+// producer (see COMMENT_UI_CONTRACT_V1.md's "Live status"), and the drafted
+// comment_mutate RPC's permission-resolution logic is known-wrong for the
+// live boards/padlets model (it targets the dead `canvases` vertical / a
+// board_collaborators fallback that live workspace-authorized users
+// routinely lack rows for) -- see the preserved file's own DORMANT banner.
+// It must never live under supabase/migrations/, where migration tooling
+// could apply it automatically. This test is the tripwire: it fails loudly
+// if anyone (human or model) ever copies/reintroduces the file there without
+// an intentional governance decision to reverse the quarantine.
+describe('deployment guard -- comment_mutate must stay quarantined (PATCH 8O.3)', () => {
+  it('does NOT exist under supabase/migrations/ (would be auto-deployable)', () => {
+    expect(fs.existsSync('supabase/migrations/20260812_000000_add_comment_mutate_rpc.sql')).toBe(false);
+  });
+
+  it('the preserved dormant draft DOES exist at its quarantine location', () => {
+    expect(fs.existsSync('.fable5/drafts/comment_mutate_rpc_20260812.sql')).toBe(true);
+  });
+
+  it('the quarantined draft is marked DORMANT / NOT DEPLOYABLE at its own top', () => {
+    const sql = fs.readFileSync('.fable5/drafts/comment_mutate_rpc_20260812.sql', 'utf8');
+    expect(sql.slice(0, 500)).toContain('DORMANT / NOT DEPLOYABLE');
+  });
+
+  it('no other file under supabase/migrations/ defines comment_mutate', () => {
+    const migrationFiles = fs.readdirSync('supabase/migrations').filter((f) => f.endsWith('.sql'));
+    for (const file of migrationFiles) {
+      const content = fs.readFileSync(`supabase/migrations/${file}`, 'utf8');
+      expect(content).not.toMatch(/CREATE (OR REPLACE )?FUNCTION\s+(public\.)?comment_mutate\(/i);
+    }
   });
 });

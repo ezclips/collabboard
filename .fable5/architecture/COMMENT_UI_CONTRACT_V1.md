@@ -187,6 +187,45 @@ matrix above still describes the writable ("manage") experience byte-for-byte
 defaulted to `'manage'` so every existing consumer that has not been updated
 keeps its exact current behavior.
 
+**Live status (PATCH 8O.3, 2026-08-12):**
+
+| Tier | Status |
+|---|---|
+| READ | live -- `WorkspaceRole === 'readonly'` resolves to `'read'` today |
+| MANAGE | live -- every normal writable workspace user resolves to `'manage'` today (unchanged default) |
+| COMMENT | **implemented in domain/UI but DORMANT** -- fully built and tested (`comments.ts`, `CommentPopup.commentMode.test.tsx`, `commentMutations.ts`), but has no live permission producer and cannot currently be reached by any real user |
+
+`resolveCommentAccessMode(currentWorkspaceRole)` is the only call live in
+`CanvasClient.tsx` today (its optional `boardPermission` parameter is never
+passed a value by any live caller -- see "Commenter persistence architecture"
+below for why the PATCH 8O.2 attempt to wire it was reverted).
+
+**Activation requirements for COMMENT** -- all of the following must be true
+before COMMENT can be wired to a live permission source again, in order:
+
+1. a real, live board-level "commenter" permission signal exists (i.e. an
+   actual board-sharing feature, built against the live `boards`/`padlets`
+   model, not the dead `canvases` vertical);
+2. that signal is resolved authoritatively server-side against
+   `boards`/`padlets`, not client-guessed;
+3. a secure, reviewed persistence path exists for commenter-tier writes
+   (the drafted `comment_mutate` design in `.fable5/drafts/` is a starting
+   point, not a finished answer -- its permission-resolution steps are
+   known-wrong for the live schema and must be rebuilt, see that file's own
+   DORMANT banner);
+4. that persistence path has been through a real database/security review
+   against the live schema (not the `canvases` schema it was originally
+   written against);
+5. commenter-role behavior has been end-to-end validated with a real
+   'commenter'-permission test account against the live product.
+
+**Explicit rule: COMMENT must never be activated merely by passing a
+synthetic/hand-constructed `BoardPermission` value into
+`resolveCommentAccessMode`.** Wiring a fake or convenience signal in to make
+the tier "work" without satisfying all five requirements above would silently
+reintroduce the exact failure PATCH 8O.2a found and reverted -- a permission
+tier with no authoritative, live-schema-backed producer behind it.
+
 READ:
 
 - view the panel, title, and comment count
@@ -338,66 +377,60 @@ entry points (the Freeform Image comment badge and Freeform Image toolbar in
 wired by this patch -- they remain fully writable regardless of role,
 deferred to a dedicated follow-up.
 
-### Commenter persistence architecture (PATCH 8O.2)
+### Commenter persistence architecture (PATCH 8O.2, quarantined PATCH 8O.3)
 
 PATCH 8O.1 identified but did not solve: `BoardPermission === 'commenter'`
 writes would be accepted by the UI/domain layer yet rejected by the padlets
-`UPDATE` RLS policy (editor-level access required). PATCH 8O.2 solves the
-UI/ownership half of this in full (above) and designs -- but does **not
-apply** -- the persistence half:
+`UPDATE` RLS policy (editor-level access required). PATCH 8O.2 solved the
+UI/ownership half of this in full (above) and designed -- but never applied --
+a persistence half. PATCH 8O.2a live-tested the permission-resolution
+approach that design depended on (`get_board_permission`) and found it
+inoperable against the live product (see "Live status" above and
+`LESSONS_LEARNED.md`). PATCH 8O.3 formally quarantined the design as
+**DORMANT / NOT DEPLOYABLE**:
 
-- **Why not `GRANT commenter UPDATE ON padlets`:** `padlets.metadata` is one
-  jsonb column holding the whole post's metadata. A client UPDATE necessarily
-  replaces the entire value it sends -- there is no column- or key-level RLS
-  for jsonb in Postgres. Granting blanket UPDATE would let a commenter submit
-  ANY replacement metadata: rewrite another user's comment, delete another
-  user's comment, forge `comment.userId`, or edit unrelated fields entirely
-  (cardColor, container membership, ...).
-- **The actual design**: a narrowly scoped `comment_mutate` SECURITY DEFINER
-  RPC (drafted at
-  `supabase/migrations/20260812_000000_add_comment_mutate_rpc.sql`) that
-  resolves the authenticated user, the effective board permission, and the
-  target comment server-side, and permits exactly four operations --
-  `ADD_COMMENT`, `EDIT_OWN_COMMENT`, `STYLE_OWN_COMMENT`,
-  `DELETE_OWN_COMMENT` -- each of which touches only
-  `metadata.detachedComments`, never arbitrary metadata, and never trusts a
-  client-supplied identity for `comment.userId`. The padlets `UPDATE` RLS
-  policy itself is not modified or weakened.
-- **Client wiring**: `lib/infra/canvas/commentMutations.ts` calls this RPC
-  and is already wired into every 'comment'-mode caller
-  (`CanvasClient.tsx`'s `commentModeMutations`, threaded to
-  `FreeformPadletCards.tsx`'s three canonical sites). It deliberately does
-  NOT reuse the existing `updatePadletMetadata`/`commitPadletMeta` path: that
-  path applies its optimistic local update synchronously and swallows every
-  persistence error silently by design (a pre-existing, deliberate,
-  whole-app pattern -- see `commitPadletMeta`'s own comment in
-  `CanvasClient.tsx`), which combined would show a commenter FAKE local
-  success for a write the database silently discarded. The RPC-backed path
-  never optimistically mutates local state before the call resolves, and
-  surfaces a failure via the existing `toast.error` mechanism (no new
-  notification system).
-- **STATUS: the migration is DRAFTED, NOT APPLIED.** There is no local
-  Supabase instance or db-test harness in this repository to validate it
-  against -- the only way to test it is against the live project. Until a
-  human reviews and applies it (see the migration file's own header for the
-  required review checklist), every COMMENT-mode write attempt fails
-  immediately with a clean "function comment_mutate(...) does not exist"
-  error, caught by `commentMutations.ts` and surfaced via `toast.error` --
-  fail-safe (no fake success), not fake-fixed. `ClipartCardDraftModal.tsx`'s
-  draft-then-batch-save architecture is a separate case: its own-comment
-  mutations stay on its existing `updateMetadata`-then-`saveCard` draft path
-  (now ownership-gated via `guardOwnCommentMutation`), since persistence
-  there already only happens on modal close through the same RLS boundary as
-  every other draft field -- wiring the RPC into a mid-draft mutation would
-  fight that architecture rather than fit it. A commenter opening this ONE
-  entry point specifically will still see the pre-existing RLS rejection
-  (silently, per that path's existing error handling) until either this RPC
-  ships and the modal is re-wired to use it, or RLS is otherwise addressed.
+- **Where it lives now**: `.fable5/drafts/comment_mutate_rpc_20260812.sql`
+  (moved out of `supabase/migrations/` so migration tooling cannot apply it;
+  see that file's own DORMANT banner for the full reasoning). It is design
+  reference for a future board-sharing feature, not a pending deployment.
+- **Why not `GRANT commenter UPDATE ON padlets`** (still valid reasoning,
+  preserved): `padlets.metadata` is one jsonb column holding the whole post's
+  metadata. A client UPDATE necessarily replaces the entire value it sends --
+  there is no column- or key-level RLS for jsonb in Postgres. Granting
+  blanket UPDATE would let a commenter submit ANY replacement metadata:
+  rewrite another user's comment, delete another user's comment, forge
+  `comment.userId`, or edit unrelated fields entirely (cardColor, container
+  membership, ...). This principle still holds for whenever persistence is
+  rebuilt.
+- **What's still valid in the dormant design**: the narrow-operation shape
+  (`ADD_COMMENT`, `EDIT_OWN_COMMENT`, `STYLE_OWN_COMMENT`,
+  `DELETE_OWN_COMMENT`), touching only `metadata.detachedComments`, never
+  trusting a client-supplied identity for `comment.userId`, and the
+  REVOKE/GRANT EXECUTE privilege hardening from PATCH 8O.2a.
+- **What's known-wrong and must be rebuilt**: the PERMISSION-RESOLUTION steps
+  -- `get_board_permission(v_padlet.canvas_id, ...)` targets the dead
+  `canvases` vertical, and the `board_collaborators` legacy-path fallback
+  assumes rows that live workspace-authorized users routinely don't have
+  (their access comes from workspace membership, not per-board collaborator
+  rows). Any future revival must resolve permission against the live
+  `boards`/`padlets`/workspace-membership model instead, satisfying the five
+  "Activation requirements" listed under "Live status" above.
+- **Client wiring stays in place, still inert**: `lib/infra/canvas/
+  commentMutations.ts` still calls a `comment_mutate` RPC that does not exist
+  in the live database -- every call fails immediately and safely with
+  "function comment_mutate(...) does not exist", caught and surfaced via
+  `toast.error` (no fake success). This is intentional and unchanged by
+  PATCH 8O.3: quarantining the SQL file doesn't require touching the client
+  module, since it was already designed to fail safe against an absent
+  function. `ClipartCardDraftModal.tsx`'s own-comment mutations similarly
+  stay on their pre-existing `updateMetadata`-then-`saveCard` draft path
+  (ownership-gated via `guardOwnCommentMutation`), unaffected by this patch.
 
-`BoardPermission === 'commenter'` no longer risks resolving to `'manage'` UI
-with rejected writes (PATCH 8O.1's exact documented gap) -- it now resolves
-to the correct `'comment'` UI, and writes either succeed through the RPC (once
-applied) or fail loudly and safely (until then).
+`BoardPermission === 'commenter'` is not reachable by any live user today
+(see "Live status" above), so the RLS-rejection gap PATCH 8O.1 originally
+documented is currently moot in practice -- but the domain/UI/persistence
+design that will close it once a real commenter signal exists remains fully
+built, tested, and now clearly quarantined rather than silently stale.
 
 ## Historical notes
 

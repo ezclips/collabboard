@@ -1,4 +1,51 @@
 -- ============================================================================
+-- DORMANT / NOT DEPLOYABLE  (PATCH 8O.3, 2026-08-12)
+-- ============================================================================
+--
+-- This file is NOT a migration. It has been moved out of supabase/migrations/
+-- on purpose so that migration tooling cannot apply it. Do not move it back
+-- without an intentional governance decision (see ACTION 6's deployment-guard
+-- test in components/collabboard/canonicalCommentPermission.contract.test.tsx,
+-- which asserts this file does NOT exist under supabase/migrations/).
+--
+-- Reason this is dormant, not merely "unreviewed":
+--   1. The COMMENT tier (BoardPermission 'commenter') currently has NO LIVE
+--      permission producer. PATCH 8O.2 wired CanvasClient.tsx to
+--      get_board_permission() to supply it; PATCH 8O.2a live-tested that RPC
+--      against a real account and found it queries the `canvases` table --
+--      a nav-orphaned, zero-live-data schema unrelated to the live
+--      boards/padlets system (see .fable5/docs/LESSONS_LEARNED.md's
+--      "get_board_permission() is scoped to a dead schema" entry and
+--      .fable5/docs/CURRENT_TASK.md's PATCH-022 census). That wiring was
+--      reverted in PATCH 8O.2a.
+--   2. This function's own authorization logic (below) inherits that same
+--      broken assumption: it resolves permission via
+--      `get_board_permission(v_padlet.canvas_id, ...)` on the canvas_id
+--      path, and a legacy `board_collaborators` lookup on the board_id path
+--      -- but live workspace-authorized users on the live boards/padlets
+--      model routinely have NO `board_collaborators` row at all (access
+--      comes from workspace membership, not per-board collaborator rows).
+--      Applying this function as-is would silently deny comment writes to
+--      legitimate, currently-fully-authorized ('manage'-mode) users on any
+--      board where they aren't also an explicit board_collaborators row --
+--      a correctness regression, not merely a missing feature.
+--   3. Authorization for this RPC must be REBUILT against the live
+--      boards/padlets model (boards.user_id ownership, workspace role/
+--      membership, and whatever real board-level sharing mechanism is
+--      eventually built) before this can ever be deployed.
+--      get_board_permission()/`canvases` must not be used for live
+--      dashboard boards under any circumstances.
+--
+-- Preserved below, byte-identical to its last drafted state, purely as
+-- design reference for the future board-sharing feature -- the ownership
+-- model (auth.uid()-only identity, single narrow UPDATE touching only
+-- metadata.detachedComments, four-operation whitelist, REVOKE/GRANT
+-- privilege hardening) remains valid design; only the PERMISSION-RESOLUTION
+-- steps (2-3 below) are known-wrong for the live schema and must be redone.
+-- Do not redesign it here -- this file is quarantine, not a rewrite.
+-- ============================================================================
+
+-- ============================================================================
 -- PATCH 8O.2 -- comment_mutate RPC (DRAFTED, NOT YET APPLIED)
 -- PATCH 8O.2a -- hardened per DeepSeek security review (DRAFTED, NOT YET APPLIED)
 -- ============================================================================
