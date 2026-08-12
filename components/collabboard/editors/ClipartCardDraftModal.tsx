@@ -14,6 +14,7 @@ import { CAPTION_STYLE_PRESETS, resolveCaptionStyle, type CaptionHeading } from 
 import { nextTextAlign, type TextAlignValue } from '@/components/collabboard/editors/textAlignCycle';
 import EmojiReactionPicker from '@/components/collabboard/editors/EmojiReactionPicker';
 import { getMeaningfulTitle } from '@/lib/infra/collabboard/postTitle';
+import { guardCommentMutation, type CommentAccessMode } from '@/lib/domain/canvas/comments';
 
 const BADGE_COLORS = [
   '#fef9c3', '#fef08a', '#fde047', '#facc15', '#eab308', '#ca8a04',
@@ -48,6 +49,11 @@ interface ClipartCardDraftModalProps {
   onDiscard: () => void;
   onChange: (nextPadlet: Padlet) => void;
   onReplaceIcon: () => void;
+  // PATCH 8O.1 -- explicit comment access contract, resolved by the caller
+  // (CanvasClient.tsx) from the effective workspace/board permission. Defaults
+  // to 'manage' so this modal's writable behavior is unchanged for every
+  // caller that has not yet been updated to pass it.
+  commentAccessMode?: CommentAccessMode;
 }
 
 export default function ClipartCardDraftModal({
@@ -57,6 +63,7 @@ export default function ClipartCardDraftModal({
   onDiscard,
   onChange,
   onReplaceIcon,
+  commentAccessMode = 'manage',
 }: ClipartCardDraftModalProps) {
   const [isColorPanelOpen, setIsColorPanelOpen] = useState(false);
   const [isCardViewOpen, setIsCardViewOpen] = useState(false);
@@ -523,9 +530,9 @@ export default function ClipartCardDraftModal({
               }}
               commentTitle={typeof previewPadlet.metadata?.commentTitle === 'string' ? previewPadlet.metadata.commentTitle : undefined}
               commentTitleStyle={previewPadlet.metadata?.commentTitleStyle}
-              onCommentTitleChange={(title) => updateMetadata({ commentTitle: title === 'Comments' ? undefined : title })}
-              onCommentTitleStyleChange={(style) => updateMetadata({ commentTitleStyle: style })}
-              onSubmit={(commentText) => {
+              onCommentTitleChange={guardCommentMutation(commentAccessMode, (title) => updateMetadata({ commentTitle: title === 'Comments' ? undefined : title }))}
+              onCommentTitleStyleChange={guardCommentMutation(commentAccessMode, (style) => updateMetadata({ commentTitleStyle: style }))}
+              onSubmit={guardCommentMutation(commentAccessMode, (commentText) => {
                 const newComment: CommentData = {
                   id: `comment-${Date.now()}`,
                   text: commentText,
@@ -534,30 +541,31 @@ export default function ClipartCardDraftModal({
                   timestamp: Date.now(),
                 };
                 updateMetadata({ detachedComments: [...detachedComments, newComment] });
-              }}
-              onEditComment={(commentId, newText) => {
+              })}
+              onEditComment={guardCommentMutation(commentAccessMode, (commentId, newText) => {
                 const updated = detachedComments.map((comment) =>
                   comment.id === commentId ? { ...comment, text: newText } : comment
                 );
                 updateMetadata({ detachedComments: updated });
-              }}
-              onRemoveComment={(commentId) => {
+              })}
+              onRemoveComment={guardCommentMutation(commentAccessMode, (commentId) => {
                 const updated = detachedComments.filter((comment) => comment.id !== commentId);
                 updateMetadata({ detachedComments: updated });
-              }}
-              onToggleCommentStrikethrough={(commentId) => {
+              })}
+              onToggleCommentStrikethrough={guardCommentMutation(commentAccessMode, (commentId) => {
                 const updated = detachedComments.map((comment) =>
                   comment.id === commentId ? { ...comment, isStrikethrough: !comment.isStrikethrough } : comment
                 );
                 updateMetadata({ detachedComments: updated });
-              }}
-              onCommentColor={(commentId, textColor, backgroundColor) => {
+              })}
+              onCommentColor={guardCommentMutation(commentAccessMode, (commentId, textColor, backgroundColor) => {
                 const updated = detachedComments.map((comment) =>
                   comment.id === commentId ? { ...comment, textColor, backgroundColor } : comment
                 );
                 updateMetadata({ detachedComments: updated });
-              }}
+              })}
               enableCanonicalSelectionStyling
+              accessMode={commentAccessMode}
               comments={detachedComments}
               currentUserId={draftCommentUserId}
               currentUserName={draftCommentUserName}

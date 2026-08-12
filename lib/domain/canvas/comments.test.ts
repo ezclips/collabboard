@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   type Comment,
   editCommentText,
@@ -6,6 +6,8 @@ import {
   toggleCommentStrikethrough,
   setCommentTextColor,
   setCommentBackgroundColor,
+  resolveCommentAccessMode,
+  guardCommentMutation,
 } from './comments';
 
 function makeComments(): Comment[] {
@@ -136,5 +138,71 @@ describe('comment domain -- setCommentBackgroundColor', () => {
     const originalC = input[2];
     setCommentBackgroundColor(input, 'c', '#fef08a');
     expect(originalC.backgroundColor).toBeUndefined();
+  });
+});
+
+describe('comment domain -- resolveCommentAccessMode (PATCH 8O.1)', () => {
+  it('resolves read when WorkspaceRole is readonly', () => {
+    expect(resolveCommentAccessMode('readonly')).toBe('read');
+  });
+
+  it('resolves read when effective BoardPermission is reader, regardless of workspace role', () => {
+    expect(resolveCommentAccessMode('member', 'reader')).toBe('read');
+    expect(resolveCommentAccessMode(null, 'reader')).toBe('read');
+  });
+
+  it('resolves manage for owner/admin/member workspace roles with no board permission override', () => {
+    expect(resolveCommentAccessMode('owner')).toBe('manage');
+    expect(resolveCommentAccessMode('admin')).toBe('manage');
+    expect(resolveCommentAccessMode('member')).toBe('manage');
+  });
+
+  it('resolves manage when neither signal is read-only, including null/undefined role', () => {
+    expect(resolveCommentAccessMode(null)).toBe('manage');
+    expect(resolveCommentAccessMode(undefined)).toBe('manage');
+    expect(resolveCommentAccessMode('member', 'editor')).toBe('manage');
+    expect(resolveCommentAccessMode('member', 'commenter')).toBe('manage');
+  });
+
+  it('readonly workspace role wins even if boardPermission looks writable', () => {
+    // A workspace-level read-only restriction must not be overridable by any
+    // board-level permission value -- readonly is the stricter, outer bound.
+    expect(resolveCommentAccessMode('readonly', 'admin')).toBe('read');
+  });
+
+  it('does not treat commenter as read-only (product-intended to permit commenting -- see COMMENTER PERSISTENCE note)', () => {
+    expect(resolveCommentAccessMode('member', 'commenter')).toBe('manage');
+  });
+});
+
+describe('comment domain -- guardCommentMutation (PATCH 8O.1)', () => {
+  it('invokes the wrapped handler when accessMode is manage', () => {
+    const handler = vi.fn();
+    const guarded = guardCommentMutation('manage', handler);
+    guarded('a', 1);
+    expect(handler).toHaveBeenCalledWith('a', 1);
+  });
+
+  it('never invokes the wrapped handler when accessMode is read', () => {
+    const handler = vi.fn();
+    const guarded = guardCommentMutation('read', handler);
+    guarded('a', 1);
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('swallows the call silently in read mode -- no throw, no return value leak', () => {
+    const handler = vi.fn(() => 'should never run');
+    const guarded = guardCommentMutation('read', handler as unknown as () => void);
+    expect(() => guarded()).not.toThrow();
+    expect(guarded()).toBeUndefined();
+  });
+
+  it('supports async handlers -- the promise is not awaited by the caller but the handler still never runs in read mode', async () => {
+    const asyncHandler = vi.fn(async () => {
+      throw new Error('must not run in read mode');
+    });
+    const guarded = guardCommentMutation('read', asyncHandler);
+    expect(() => guarded()).not.toThrow();
+    expect(asyncHandler).not.toHaveBeenCalled();
   });
 });

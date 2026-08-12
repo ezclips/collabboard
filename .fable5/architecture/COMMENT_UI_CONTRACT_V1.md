@@ -152,6 +152,106 @@ for Image and `components/collabboard/noteDetachedCommentUIContract.test.tsx`
 for normal/detached Note comments. The Note suite explicitly guards the
 anchored/highlighted thread boundary.
 
+The permission suites (PATCH 8O.1) are:
+
+- `lib/domain/canvas/comments.test.ts` -- `resolveCommentAccessMode` and
+  `guardCommentMutation` unit coverage.
+- `components/collabboard/editors/CommentPopup.accessMode.test.tsx` -- the
+  read/manage mode mounted contract (25 items: 17 read-mode, 8 manage-mode).
+- `components/collabboard/canonicalCommentPermission.contract.test.tsx` --
+  every canonical caller passes an explicit `accessMode`/`commentAccessMode`
+  prop and wraps its comment mutation callbacks with `guardCommentMutation`;
+  fails if any canonical caller silently omits the access contract.
+
+## Canonical comment permission contract
+
+`COMMENT UI CONTRACT UNLOCK — PERMISSIONS ONLY` (PATCH 8O.1). Permission
+gating only; no visual redesign. The frozen behavior matrix above still
+describes the writable ("manage") experience byte-for-byte -- this section is
+additive.
+
+`CommentPopup` accepts an explicit `accessMode?: CommentAccessMode` prop
+(`'read' | 'manage'`, defined in `lib/domain/canvas/comments.ts`), defaulted
+to `'manage'` so every existing consumer that has not been updated keeps its
+exact current behavior.
+
+READ:
+
+- view the panel, title, and comment count
+- read existing comments (avatar/name/timestamp/formatted text)
+- select and copy comment text
+- open existing safe links (`_blank`, `noopener,noreferrer`)
+- Close
+- zero mutation: no composer, no Send, no Enter-to-submit, no Edit, no
+  Color/Highlight, no Link authoring, no Strikethrough, no Delete, no title
+  editing or title styling, no Badge Color
+
+MANAGE:
+
+- the current frozen canonical Comment UI v1 capabilities, unchanged
+
+**Authorization state must be explicit. Callback presence is never
+authorization.** `CommentPopup` does not infer read-only from whether a
+mutation prop (`onEditComment`, `onCommentColor`, etc.) was supplied --
+several existing non-canonical consumers omit props for reasons unrelated to
+permission. The explicit `accessMode` prop is the only accepted signal.
+
+Defense in depth, in order:
+
+1. `CommentPopup` itself refuses to render mutation-affording UI in read mode
+   (not disabled/hidden -- not rendered, so not keyboard/tab reachable) and
+   every internal mutation function (`handleSubmit`, `handleEditCommit`,
+   `applySelectedStyle`, `applySelectedStrikethrough`, `handleApplyLink`,
+   `openLinkPopover`, `startTitleEditing`, `commitTitle`) independently
+   returns immediately when `accessMode === 'read'`, regardless of how it was
+   invoked.
+2. Every canonical caller wraps each comment mutation callback passed to
+   `CommentPopup` with `guardCommentMutation(accessMode, handler)`
+   (`lib/domain/canvas/comments.ts`) before it reaches the caller's own
+   optimistic-local-state-plus-persistence body. A read-only caller's handler
+   body is therefore provably unreachable, not merely conditionally skipped
+   inside it -- no optimistic local mutation, no stale UI, no later RLS
+   failure surfacing to the user.
+3. Supabase RLS remains the final, unweakened persistence boundary. This
+   patch does not touch RLS.
+
+`resolveCommentAccessMode(workspaceRole, boardPermission?)` resolves the mode
+from the existing role/permission types (`types/permissions.ts`,
+`lib/workspace/context.ts`) -- no parallel role system. `WorkspaceRole ===
+'readonly'` or `BoardPermission === 'reader'` resolves to `'read'`; everything
+else resolves to `'manage'`. Resolved once at the controller boundary
+(`CanvasClient.tsx`, from its existing `currentWorkspaceRole` state) and
+passed down as a single prop -- `CommentPopup` never queries auth or database
+state itself.
+
+**Wired at every current canonical caller**: the Clipart editor modal
+(`ClipartCardDraftModal.tsx`), saved Clipart comments (Site B in
+`FreeformPadletCards.tsx`), and all three live canonical Image entry points
+(the Freeform Image comment badge and Freeform Image toolbar in
+`FreeformPadletCards.tsx`, and the non-Freeform Image toolbar in
+`CanvasClient.tsx`). Canonical Note detached comments are explicitly **not**
+wired by this patch -- they remain fully writable regardless of role,
+deferred to a dedicated follow-up.
+
+**BoardPermission is not fully wired.** No client component in this canvas
+view currently resolves board-level permission -- only `WorkspaceRole` is
+loaded client-side. `resolveCommentAccessMode` accepts `boardPermission` for
+completeness with the product's permission model and composes it correctly
+the moment a caller resolves one; today it is simply never passed, so the
+only live read-only trigger is `WorkspaceRole === 'readonly'`.
+
+**COMMENTER PERSISTENCE — SEPARATE FOLLOW-UP REQUIRED.** `BoardPermission ===
+'commenter'` is product-intended to permit commenting, but the padlets
+`UPDATE` RLS policy requires editor-level access -- a commenter's comment
+writes would resolve to `'manage'` (commenter ranks above reader) yet be
+rejected by the database. This patch does not paper over that mismatch: it
+does not downgrade commenter to `'read'` (product-incorrect -- commenter is
+supposed to write) and does not weaken RLS to grant commenter-level padlet
+metadata writes (out of scope, and risks accidentally granting post-edit
+capability). The gap is real, documented, and unresolved until a dedicated
+patch either grants commenter-scoped RLS for comment-only metadata writes or
+introduces a distinct persistence path.
+
 ## Historical notes
 
 PATCH 8A recorded that normal comment surfaces differed in storage fields,
@@ -180,6 +280,20 @@ E. Let Comments pointerdown reach the post → isolation test fails.
 F. Change post y while opening Comments → position invariant fails.
 G. Detach the picker coordinates → anchoring test fails.
 H. Route one Clipart entry point away from `CommentPopup` → parity guard fails.
+I. Show Send/Edit/Color/Link/Strikethrough/Delete/title-editing to a reader →
+   read-mode contract fails.
+J. Invoke a mutation callback directly while accessMode is 'read' (bypassing
+   the UI entirely) → zero-callback-fires assertion fails if the internal
+   guard is removed.
+K. Let a caller's optimistic local-state update run before its permission
+   check (unwrap `guardCommentMutation`) → caller-guard test fails.
+L. Allow title editing/styling for a reader → read-mode title test fails.
+M. Disable safe-link opening in read mode → read-link test fails (existing
+   links must stay openable).
+N. Remove a control from manage mode (e.g. drop Send or Color) → canonical
+   manage contract fails.
+O. Omit `accessMode` from a canonical caller's `<CommentPopup>` → the
+   architecture guard requiring every canonical caller to pass the prop fails.
 
 These controls are diagnostic procedures, not changes included in the freeze.
 

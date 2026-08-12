@@ -31,6 +31,7 @@ import RowCanvasDnD from '@/components/collabboard/row/RowCanvasDnD';
 import { routeEdge, type GraphSide } from '@/lib/graph/edgeRouting';
 import { createFreeformGraphRepo } from '@/lib/graph/graphRepo';
 import { canEditWorkspace, canManageWorkspace, type WorkspaceRole } from '@/lib/workspace/context';
+import { resolveCommentAccessMode, guardCommentMutation } from '@/lib/domain/canvas/comments';
 import { selectCardModalRoute } from '@/lib/domain/canvas/cardModalRoute';
 import { selectDocumentModalDestination, type DocumentModalDestination } from '@/lib/domain/canvas/documentModalRoute';
 import { decideDocumentSwitch, type QueuedDocumentAction } from '@/lib/domain/canvas/documentSwitchGuard';
@@ -262,6 +263,16 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   // left toolbar entirely because they are not workspace admins.
   const canUseCanvasToolbar = canUseFreeformEditButton;
   const canManageCanvasShare = canManageWorkspace(currentWorkspaceRole);
+  // PATCH 8O.1 -- resolved once at the controller boundary from the existing
+  // WorkspaceRole signal (the only effective comment-permission source this
+  // canvas view currently resolves client-side; no board-level BoardPermission
+  // resolution exists here to reuse -- see resolveCommentAccessMode's own
+  // doc comment). Threaded straight through to every canonical Clipart/Image
+  // CommentPopup instance; CommentPopup itself never queries permission state.
+  const commentAccessMode = useMemo(
+    () => resolveCommentAccessMode(currentWorkspaceRole),
+    [currentWorkspaceRole]
+  );
   const handleToggleMapToolbarCollapsed = useCallback(() => {
     setIsMapToolbarCollapsed((prev) => !prev);
   }, []);
@@ -7270,6 +7281,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                     getClickedSide={(e: React.MouseEvent) => getClickedSide(e as React.MouseEvent<HTMLElement>)}
                     stableActions={stableActions}
                     requestOpenDocument={requestOpenDocument}
+                    commentAccessMode={commentAccessMode}
                   />
                 </CanvasEditorProvider>
               </CanvasConfigProvider>
@@ -7654,6 +7666,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                 }
                 setIsLibraryOpen(true);
               }}
+              commentAccessMode={commentAccessMode}
             />
 
             {/* Column Layout Placement Prompt */}
@@ -8323,11 +8336,11 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                   }}
                   commentTitle={typeof activeImageToolbarPadlet.metadata?.commentTitle === 'string' ? activeImageToolbarPadlet.metadata.commentTitle : undefined}
                   commentTitleStyle={activeImageToolbarPadlet.metadata?.commentTitleStyle}
-                  onCommentTitleChange={(title) => updatePadletMetadata(activeImageToolbarPadlet.id, { commentTitle: title === 'Comments' ? undefined : title })}
-                  onCommentTitleStyleChange={(style) => updatePadletMetadata(activeImageToolbarPadlet.id, { commentTitleStyle: style })}
-                  onBadgeColorChange={(color) => updatePadletMetadata(activeImageToolbarPadlet.id, { badgeColor: color })}
+                  onCommentTitleChange={guardCommentMutation(commentAccessMode, (title) => updatePadletMetadata(activeImageToolbarPadlet.id, { commentTitle: title === 'Comments' ? undefined : title }))}
+                  onCommentTitleStyleChange={guardCommentMutation(commentAccessMode, (style) => updatePadletMetadata(activeImageToolbarPadlet.id, { commentTitleStyle: style }))}
+                  onBadgeColorChange={guardCommentMutation(commentAccessMode, (color) => updatePadletMetadata(activeImageToolbarPadlet.id, { badgeColor: color }))}
                   badgeColor={activeImageToolbarPadlet.metadata?.badgeColor || '#facc15'}
-                  onSubmit={async (commentText) => {
+                  onSubmit={guardCommentMutation(commentAccessMode, async (commentText) => {
                     const currentComments = activeImageToolbarPadlet.metadata?.detachedComments || [];
                     const newComment = {
                       id: `comment-${Date.now()}`,
@@ -8339,34 +8352,35 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                     const nextComments = [...currentComments, newComment];
                     await updatePadletMetadata(activeImageToolbarPadlet.id, { detachedComments: nextComments });
                     setCardCommentList(nextComments);
-                  }}
-                  onEditComment={async (commentId, text) => {
+                  })}
+                  onEditComment={guardCommentMutation(commentAccessMode, async (commentId, text) => {
                     const nextComments = cardCommentList.map((comment: any) =>
                       comment.id === commentId ? { ...comment, text } : comment
                     );
                     await updatePadletMetadata(activeImageToolbarPadlet.id, { detachedComments: nextComments });
                     setCardCommentList(nextComments);
-                  }}
-                  onRemoveComment={async (commentId) => {
+                  })}
+                  onRemoveComment={guardCommentMutation(commentAccessMode, async (commentId) => {
                     const nextComments = cardCommentList.filter((comment: any) => comment.id !== commentId);
                     await updatePadletMetadata(activeImageToolbarPadlet.id, { detachedComments: nextComments });
                     setCardCommentList(nextComments);
-                  }}
-                  onToggleCommentStrikethrough={async (commentId) => {
+                  })}
+                  onToggleCommentStrikethrough={guardCommentMutation(commentAccessMode, async (commentId) => {
                     const nextComments = cardCommentList.map((comment: any) =>
                       comment.id === commentId ? { ...comment, isStrikethrough: !comment.isStrikethrough } : comment
                     );
                     await updatePadletMetadata(activeImageToolbarPadlet.id, { detachedComments: nextComments });
                     setCardCommentList(nextComments);
-                  }}
-                  onCommentColor={async (commentId, textColor, backgroundColor) => {
+                  })}
+                  onCommentColor={guardCommentMutation(commentAccessMode, async (commentId, textColor, backgroundColor) => {
                     const nextComments = cardCommentList.map((comment: any) =>
                       comment.id === commentId ? { ...comment, textColor, backgroundColor } : comment
                     );
                     await updatePadletMetadata(activeImageToolbarPadlet.id, { detachedComments: nextComments });
                     setCardCommentList(nextComments);
-                  }}
+                  })}
                   enableCanonicalSelectionStyling
+                  accessMode={commentAccessMode}
                   comments={cardCommentList}
                   currentUserId={user?.id || 'anon'}
                   currentUserName={user?.email?.split('@')[0] || 'You'}
