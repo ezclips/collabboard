@@ -244,13 +244,13 @@ describe('SITE A -- PRE/POST CONSOLIDATION CONTRACT PARITY', () => {
   });
 });
 
-describe('SITE A -- migration scope guard (exactly one site moved)', () => {
-  it('FreeformPadletCards.tsx references CommentList exactly once, and only from Site A\'s block', () => {
+describe('SITE A -- migration scope guard (Image moved to CommentPopup)', () => {
+  it('FreeformPadletCards.tsx no longer owns the migrated Image CommentList foundation', () => {
     const src = fs.readFileSync('components/collabboard/canvas/ui/FreeformPadletCards.tsx', 'utf8');
     const usageCount = (src.match(/<CommentList\b/g) || []).length;
-    expect(usageCount).toBe(1);
+    expect(usageCount).toBe(0);
     const importCount = (src.match(/from '@\/components\/collabboard\/comments\/CommentList'/g) || []).length;
-    expect(importCount).toBe(1);
+    expect(importCount).toBe(0);
   });
 
   it('no other production file imports the shared comment foundation', () => {

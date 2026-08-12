@@ -78,10 +78,10 @@ comments by this freeze and are a later adapter migration.
 CANONICAL:
 
 - Clipart
+- Image
 
 NOT YET MIGRATED:
 
-- Image
 - Note
 - Document
 - Drawing
@@ -92,9 +92,15 @@ NOT YET MIGRATED:
 - Container
 - other normal-comment surfaces identified by future audits
 
-Existing non-Clipart surfaces are intentionally not made to comply by this
-patch. A migration moves a post from the second list to the first only after
-its adapter and contract tests are added.
+Image is now canonical at all three live entry points: the Freeform Image
+comment badge, the Freeform Image toolbar, and the non-Freeform Image toolbar
+in `app/dashboard/canvas/[id]/CanvasClient.tsx`. All three retain the existing
+`metadata.detachedComments` storage through thin callbacks and use the
+canonical component for comment content and controls.
+
+Other non-Clipart surfaces are intentionally not made to comply by this patch.
+A migration moves a post from the second list to the first only after all of
+its live entry points, adapters, and contract tests are added.
 
 ## Governance unlock rule
 
@@ -132,11 +138,11 @@ picker/link anchoring, and height/position discipline:
 - `components/collabboard/editors/useAnchoredPopover.test.tsx`
 - `components/collabboard/commentLinkSafety.test.tsx`
 
-The older characterization suite remains historical coverage for the other
-freeform comment sites and their pre-migration differences:
+The migration characterization suite is:
 `components/collabboard/freeformCommentUIContract.characterization.test.tsx`.
-Those differences are preserved as history, not silently promoted to the
-canonical Clipart contract.
+It guards all three Image entry points and preserves the remaining
+pre-migration surfaces as an explicit allowlist rather than silently claiming
+they migrated.
 
 ## Historical notes
 
@@ -148,9 +154,9 @@ unified the saved Clipart badge onto `CommentPopup`, closing the two live
 Clipart implementations. Subsequent accepted fixes through PATCH 8M corrected
 anchoring, viewport-space positioning, panel height discipline, title,
 composer, picker, link, and interaction-isolation behavior. This freeze
-preserves those historical notes and records Clipart as the reference; it does
-not claim that Image, Note, Document, Drawing, AI Component, Link, Todo,
-Comment post, or Container have already migrated.
+preserves those historical notes and records Clipart as the reference. Image's
+PATCH 8O migration is recorded above; Note, Document, Drawing, AI Component,
+Link, Todo, Comment post, and Container remain unmigrated.
 
 ## Negative controls
 

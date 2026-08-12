@@ -50,6 +50,7 @@ describe('canonical normal comment UI v1', () => {
     expect(contract).toContain('CANONICAL NORMAL COMMENT UI: **FROZEN**');
     expect(contract).toContain('CANONICAL:');
     expect(contract).toContain('- Clipart');
+    expect(contract).toContain('- Image');
     expect(contract).toContain('NOT YET MIGRATED:');
     expect(contract).toContain('COMMENT UI CONTRACT UNLOCK');
     for (const path of [
@@ -64,4 +65,3 @@ describe('canonical normal comment UI v1', () => {
     }
   });
 });
-
