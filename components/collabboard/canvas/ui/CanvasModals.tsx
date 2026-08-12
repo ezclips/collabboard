@@ -250,6 +250,9 @@ export default function CanvasModals({
           initialTitle={padletToEdit?.title || ''}
           initialContent={padletToEdit?.content || ''}
           onSave={saveTable}
+          accessMode={commentAccessMode}
+          currentUserId={user?.id || 'anon'}
+          currentUserName={user?.email?.split('@')[0] || 'You'}
         />
       </div>
 

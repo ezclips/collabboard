@@ -84,6 +84,7 @@ CANONICAL:
 - Todo — normal/detached comments
 - AI Component — normal/detached comments
 - Link — normal/detached comments
+- Table — normal/detached comments
 
 NOT YET MIGRATED:
 
@@ -91,10 +92,6 @@ NOT YET MIGRATED:
 - Document — **has no normal/detached comment tier at all** (see below)
 - Comment post
 - Container
-- Table — has its own local hand-rolled "Table Comments Popup - Right side"
-  implementation in `FreeformPadletCards.tsx`, structurally identical to
-  Link's pre-8U implementation; discovered during PATCH 8U's inventory but
-  explicitly out of scope for that patch (not requested) and left untouched
 - other normal-comment surfaces identified by future audits
 
 **Document is not a pending Category-A migration.** PATCH 8Q's inventory
@@ -226,16 +223,63 @@ behavior before this patch (added for Clipart's `enableCanonicalSelectionStyling
 rollout) — Link post migration required no changes to that shared
 infrastructure, only wiring the two entry points onto it.
 
-Phase 1 inventory also surfaced a **Table** post local comment implementation
-(`FreeformPadletCards.tsx`'s "Table Comments Popup - Right side", inside the
-`padlet.type === 'table'` branch) structurally identical to Link's pre-8U
-implementation. This was NOT requested by PATCH 8U and was left untouched —
-recorded above under NOT YET MIGRATED as a discovered candidate for a future
-patch, per this contract's own audit-discovery convention.
+**Table normal/detached comments were migrated in PATCH 8V** (2026-08-12) —
+PATCH 8U's discovery was confirmed independently: Table had exactly two live
+entry points, each a fully local, hand-rolled comment implementation
+(row JSX, composer, per-comment color popup, badge-color picker) with no
+relationship to `CommentPopup` — `TableEditor.tsx`'s own left-toolbar
+Comment panel, and `FreeformPadletCards.tsx`'s single on-canvas badge popup
+inside the `padlet.type === 'table'` branch. No Category B (row/cell/
+selection-bound) comment system exists for Table at all —
+`TableCellContextMenu.tsx` contains zero comment-related code — so there was
+nothing to freeze.
 
-Other non-Clipart/Image/Note/Drawing/Todo/AI-Component/Link surfaces are
-intentionally not made to comply by this patch. A migration moves a post from
-the second list to the first only after all of its live entry points,
+Table's storage architecture is unique among every post type migrated so
+far: `comments`/`badgeColor` (and now `commentTitle`/`commentTitleStyle`)
+live inside `padlet.content` — a single JSON blob shared with `rows`/
+`columns`/`cellStyles`/`caption`/`titleStyle` — not `padlet.metadata`. Both
+sites were rewritten to delegate to canonical `CommentPopup` while
+preserving this exact storage shape: the on-canvas site persists via
+`updatePadletContent(padlet.id, JSON.stringify({ ...tableData, comments:
+nextComments, ... }))` (never `updatePadletMetadata`), and
+`TableEditor.tsx`'s `handleSaveAndClose` includes `commentTitle`/
+`commentTitleStyle` in the same `JSON.stringify(...)` payload as `rows`/
+`columns`/`comments`. Because `TableEditor`'s `onSave` already passes the
+whole serialized JSON string through as an opaque `content` field (unlike
+every other migrated editor, which passes individual named fields),
+`usePadletSave.ts`'s `saveTable` needed no equivalent fix to the
+Note/Todo/Link `commentTitle`/`commentTitleStyle`-dropped-silently bug —
+there is no field-by-field mapping for it to omit.
+
+Both sites wired the same way as Todo/Link: `guardCommentMutation(accessMode,
+...)` directly at every prop (COMMENT stays dormant for Table too), real
+identity threaded from `CanvasModals.tsx`'s existing `commentAccessMode`/
+`user` props into `TableEditor.tsx` (previously hardcoded `userId:
+"current-user", userName: "You"`; the on-canvas site already used real
+`user?.id || 'anon'` identity pre-migration). While removing
+`TableEditor.tsx`'s local per-comment color-popup state, the left toolbar's
+own wrapper `className` was found to still conditionally apply
+`"opacity-0 pointer-events-none"` keyed on that now-deleted state — the
+exact same latent bug pattern caught live during Todo's migration (PATCH
+8S) that made its entire toolbar unclickable. Caught and fixed here
+structurally before any live check was needed, with a dedicated regression
+test guarding against its reintroduction.
+
+Interaction isolation for Table carried extra risk relative to every prior
+migration: Table has rich in-editor keyboard/mouse interaction (cell
+selection, cell editing, row/column selection) that a naive comment
+composer could bleed into. Both entry points' `CommentPopup` wrapper stops
+`click`/`mousedown` propagation before it can reach any table-cell/row
+handler, and dedicated mounted tests prove opening Comments, typing in the
+composer, and pressing Enter to submit a comment never selects a table cell
+(`.ring-purple-500` count stays zero) and never adds a row or changes a
+cell's value — Enter submits the comment only, exactly as canonical
+behavior requires, and never commits/advances a table cell the way Enter
+does inside the grid itself.
+
+Other non-Clipart/Image/Note/Drawing/Todo/AI-Component/Link/Table surfaces
+are intentionally not made to comply by this patch. A migration moves a post
+from the second list to the first only after all of its live entry points,
 adapters, and contract tests are added.
 
 ## Governance unlock rule

@@ -4012,305 +4012,80 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                   </div>
                 )}
 
-                {cardCommentPopupPadletId === padlet.id && commentColorPopupId && (
-                  <div
-                    className="absolute right-full top-0 mr-3 z-[1200] bg-white rounded-lg shadow-xl border border-gray-200 p-3 min-w-[240px]"
-                    onClick={(e) => e.stopPropagation()}
-                    onMouseDown={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                    }}
-                  >
-                    <TextStylePopup
-                      isOpen={true}
-                      onOpenChange={(open) => !open && setCommentColorPopupId(null)}
-                      onSelectHeading={() => { }}
-                      hideHeadingSelect={true}
-                      onSelectColor={async (color) => {
-                        const currentComments = tableData.comments || [];
-                        const nextComments = currentComments.map((comment: any) =>
-                          comment.id === commentColorPopupId
-                            ? { ...comment, textColor: color }
-                            : comment
-                        );
-                        await updatePadletContent(padlet.id, JSON.stringify({ ...tableData, comments: nextComments, badgeColor: tableBadgeColor }));
-                        setCardCommentList(nextComments);
-                      }}
-                      onSelectHighlight={async (color) => {
-                        const currentComments = tableData.comments || [];
-                        const nextComments = currentComments.map((comment: any) =>
-                          comment.id === commentColorPopupId
-                            ? { ...comment, backgroundColor: color }
-                            : comment
-                        );
-                        await updatePadletContent(padlet.id, JSON.stringify({ ...tableData, comments: nextComments, badgeColor: tableBadgeColor }));
-                        setCardCommentList(nextComments);
-                      }}
-                      currentHeading="normal"
-                      currentColor={cardCommentList.find(c => c.id === commentColorPopupId)?.textColor || cardCommentList.find(c => c.id === commentColorPopupId)?.color}
-                      currentHighlight={cardCommentList.find(c => c.id === commentColorPopupId)?.backgroundColor}
-                    />
-                  </div>
-                )}
-
-                {/* Table Comments Popup - Right side */}
+                {/* Table detached comments use the canonical panel; this shell only owns placement and close state (PATCH 8V -- migrated off the local hand-rolled implementation, same pattern as Link's on-canvas badge site). Table's own comment/badge/title storage lives inside padlet.content (a JSON blob), not padlet.metadata, so persistence goes through updatePadletContent rather than updatePadletMetadata. */}
                 {cardCommentPopupPadletId === padlet.id && (
-                  <div className="absolute left-full top-0 ml-3 z-[1100] animate-in fade-in slide-in-from-left-2 duration-200 pointer-events-auto">
-                    <div className="relative bg-white rounded-xl shadow-2xl border border-gray-200 p-4 min-w-[280px] max-w-[320px]">
-                      <button
-                        onClick={() => {
+                  <div
+                    className="absolute left-full top-0 ml-3 z-[1100] animate-in fade-in slide-in-from-left-2 duration-200 pointer-events-auto"
+                    onClick={(e) => e.stopPropagation()}
+                    onMouseDown={(e) => e.stopPropagation()}
+                  >
+                    <CommentPopup
+                      isOpen={true}
+                      accessMode={commentAccessMode}
+                      onOpenChange={(open) => {
+                        if (!open) {
                           setCardCommentPopupPadletId(null);
                           setActiveCardCommentId(null);
-                          setEditingCardCommentId(null);
-                          setEditingCardCommentText('');
-                          setCommentColorPopupId(null);
-                          setNoteBadgeColorPadletId(null);
-                        }}
-                        className="absolute -right-3 -top-3 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-400 shadow-md transition-all hover:text-gray-600"
-                        title="Close"
-                      >
-                        <X className="h-3.5 w-3.5" />
-                      </button>
-                      <div className="flex items-center justify-between mb-3 pb-2 border-b border-gray-100">
-                        <h4 className="text-sm font-semibold text-gray-700">Comments</h4>
-                        <button
-                          onClick={async () => {
-                            const nextOpen = noteBadgeColorPadletId === padlet.id ? null : padlet.id;
-                            setNoteBadgeColorPadletId(nextOpen);
-                            setCommentColorPopupId(null);
-                          }}
-                          className="w-7 h-7 flex items-center justify-center rounded hover:bg-gray-100"
-                          title="Badge Color"
-                        >
-                          <div
-                            className="w-4 h-4 rounded border border-gray-300"
-                            style={{ backgroundColor: tableBadgeColor }}
-                          />
-                        </button>
-                      </div>
-                      {noteBadgeColorPadletId === padlet.id && (
-                        <div className="absolute right-3 top-12 z-10 bg-white rounded-lg shadow-lg border border-gray-200 p-2">
-                          <div className="grid grid-cols-6 gap-1.5">
-                            {BADGE_COLORS.map((color) => (
-                              <button
-                                key={color}
-                                onClick={async () => {
-                                  await updatePadletContent(padlet.id, JSON.stringify({ ...tableData, comments: tableComments, badgeColor: color }));
-                                  setNoteBadgeColorPadletId(null);
-                                }}
-                                className={`rounded transition-transform hover:scale-110 ${tableBadgeColor === color ? 'ring-2 ring-blue-500' : ''}`}
-                                style={{
-                                  width: '20px',
-                                  height: '20px',
-                                  backgroundColor: color,
-                                  border: ['#f3f4f6', '#e5e7eb', '#fef9c3', '#fef08a'].includes(color) ? '1px solid #d1d5db' : 'none',
-                                }}
-                                title={color}
-                              />
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                      {cardCommentList.length === 0 ? (
-                        <p className="text-xs text-gray-400 text-center py-4">No comments yet</p>
-                      ) : (
-                        <div className="flex gap-3">
-                          <div className="flex-1 space-y-3 max-h-[300px] overflow-y-auto overflow-x-hidden pr-0 mr-2 scrollbar-ultrathin">
-                            {cardCommentList.map((c, i) => {
-                              const isEditing = editingCardCommentId === c.id;
-                              const isActive = activeCardCommentId === c.id;
-                              const commitEdit = async () => {
-                                const trimmed = editingCardCommentText.trim();
-                                if (!trimmed) {
-                                  setEditingCardCommentId(null);
-                                  setEditingCardCommentText('');
-                                  setCommentColorPopupId(null);
-                                  return;
-                                }
-                                const currentComments = tableData.comments || [];
-                                const nextComments = currentComments.map((comment: any) =>
-                                  comment.id === c.id
-                                    ? { ...comment, text: trimmed }
-                                    : comment
-                                );
-                                await updatePadletContent(padlet.id, JSON.stringify({ ...tableData, comments: nextComments, badgeColor: tableBadgeColor }));
-                                setCardCommentList(nextComments);
-                                setEditingCardCommentId(null);
-                                setEditingCardCommentText('');
-                                setCommentColorPopupId(null);
-                              };
-
-                              return (
-                                <div
-                                  key={c.id || i}
-                                  className={`flex gap-2 rounded p-1 -m-1 cursor-pointer ${isActive ? 'bg-blue-50' : 'hover:bg-gray-50'}`}
-                                  onClick={() => setActiveCardCommentId(c.id || null)}
-                                >
-                                  <div className="w-6 h-6 rounded-full bg-blue-500 flex items-center justify-center text-white text-[10px] font-bold shrink-0">
-                                    {c.userName?.charAt(0) || 'U'}
-                                  </div>
-                                  <div className="flex-1">
-                                    <div className="flex items-center gap-2">
-                                      <span className="text-xs font-medium text-gray-700">{c.userName || 'User'}</span>
-                                      <span className="text-[10px] text-gray-400">{formatRelativeTime(c.timestamp)}</span>
-                                    </div>
-                                    {isEditing ? (
-                                      <textarea
-                                        value={editingCardCommentText}
-                                        onChange={(e) => setEditingCardCommentText(e.target.value)}
-                                        onInput={(e) => {
-                                          const el = e.currentTarget;
-                                          el.style.height = 'auto';
-                                          el.style.height = `${el.scrollHeight}px`;
-                                        }}
-                                        onKeyDown={async (e) => {
-                                          if (e.key === 'Enter' && !e.shiftKey) {
-                                            e.preventDefault();
-                                            await commitEdit();
-                                          }
-                                          if (e.key === 'Escape') {
-                                            setEditingCardCommentId(null);
-                                            setEditingCardCommentText('');
-                                            setCommentColorPopupId(null);
-                                          }
-                                        }}
-                                        onBlur={() => {
-                                          if (commentColorPopupId === c.id) return;
-                                          commitEdit();
-                                        }}
-                                        className="w-full text-xs mt-0.5 bg-gray-50 rounded px-2 py-1 outline-none border border-gray-200 focus:border-blue-400 resize-none overflow-hidden break-words whitespace-pre-wrap"
-                                        style={{
-                                          wordBreak: 'break-word',
-                                          color: c.textColor || c.color,
-                                          backgroundColor: c.backgroundColor || undefined,
-                                        }}
-                                        rows={1}
-                                        autoFocus
-                                      />
-                                    ) : (
-                                      <p
-                                        className={`text-xs text-gray-600 mt-0.5 break-words whitespace-pre-wrap ${c.isStrikethrough ? 'line-through' : ''}`}
-                                        style={{
-                                          wordBreak: 'break-word',
-                                          color: c.textColor || c.color,
-                                          backgroundColor: c.backgroundColor || undefined,
-                                        }}
-                                      >
-                                        {c.text}
-                                      </p>
-                                    )}
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                          <div className="flex flex-col gap-1 flex-shrink-0 pt-1">
-                            {editingCardCommentId && activeCardComment && editingCardCommentId === activeCardComment.id ? (
-                              <button
-                                onMouseDown={(e) => {
-                                  e.preventDefault();
-                                  e.stopPropagation();
-                                  setCommentColorPopupId(commentColorPopupId === activeCardComment.id ? null : (activeCardComment.id || null));
-                                  setImageToolbarPadletId(null);
-                                }}
-                                className="p-1 rounded transition-colors text-gray-300 hover:text-blue-500"
-                                title="Color"
-                                disabled={!activeCardComment}
-                              >
-                                <Palette className="w-3 h-3" />
-                              </button>
-                            ) : (
-                              <button
-                                onClick={() => {
-                                  if (!activeCardComment) return;
-                                  setEditingCardCommentId(activeCardComment.id || null);
-                                  setEditingCardCommentText(activeCardComment.text || '');
-                                  setCommentColorPopupId(null);
-                                }}
-                                className="p-1 rounded transition-colors text-gray-300 hover:text-blue-500 disabled:opacity-40 disabled:hover:text-gray-300"
-                                title="Edit"
-                                disabled={!activeCardComment}
-                              >
-                                <PenTool className="w-3 h-3" />
-                              </button>
-                            )}
-                            <button
-                              onClick={async () => {
-                                if (!activeCardComment) return;
-                                const currentComments = tableData.comments || [];
-                                const nextComments = currentComments.map((comment: any) =>
-                                  comment.id === activeCardComment.id
-                                    ? { ...comment, isStrikethrough: !comment.isStrikethrough }
-                                    : comment
-                                );
-                                await updatePadletContent(padlet.id, JSON.stringify({ ...tableData, comments: nextComments, badgeColor: tableBadgeColor }));
-                                setCardCommentList(nextComments);
-                              }}
-                              className={`p-1 rounded transition-colors ${activeCardComment?.isStrikethrough ? 'text-blue-500 bg-blue-50' : 'text-gray-300 hover:text-blue-500'} disabled:opacity-40 disabled:hover:text-gray-300`}
-                              title="Strikethrough"
-                              disabled={!activeCardComment}
-                            >
-                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <path d="M16 4H9a3 3 0 0 0-2.83 4" />
-                                <path d="M14 12a4 4 0 0 1 0 8H6" />
-                                <line x1="4" y1="12" x2="20" y2="12" />
-                              </svg>
-                            </button>
-                            <button
-                              onClick={async () => {
-                                if (!activeCardComment) return;
-                                const currentComments = tableData.comments || [];
-                                const nextComments = currentComments.filter((comment: any) => comment.id !== activeCardComment.id);
-                                await updatePadletContent(padlet.id, JSON.stringify({ ...tableData, comments: nextComments, badgeColor: tableBadgeColor }));
-                                setCardCommentList(nextComments);
-                                setActiveCardCommentId(nextComments[nextComments.length - 1]?.id || null);
-                                setEditingCardCommentId(null);
-                                setEditingCardCommentText('');
-                                setCommentColorPopupId(null);
-                              }}
-                              className="p-1 text-gray-300 hover:text-red-500 transition-colors disabled:opacity-40 disabled:hover:text-gray-300"
-                              title="Delete"
-                              disabled={!activeCardComment}
-                            >
-                              <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <path d="M3 6h18" />
-                                <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
-                                <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
-                                <line x1="10" x2="10" y1="11" y2="17" />
-                                <line x1="14" x2="14" y1="11" y2="17" />
-                              </svg>
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                      {/* Add comment input */}
-                      <div className="mt-3 pt-3 border-t border-gray-100">
-                        <input
-                          type="text"
-                          placeholder="Add a comment..."
-                          className="w-full text-xs px-3 py-2 rounded-lg border border-gray-200 focus:border-blue-400 focus:ring-1 focus:ring-blue-100 outline-none"
-                          onKeyDown={async (e) => {
-                            if (e.key === 'Enter' && e.currentTarget.value.trim()) {
-                              const inputElement = e.currentTarget;
-                              const commentText = inputElement.value.trim();
-                              const newComment = {
-                                id: `comment-${Date.now()}`,
-                                text: commentText,
-                                userId: user?.id || 'anon',
-                                userName: user?.email?.split('@')[0] || 'You',
-                                timestamp: Date.now()
-                              };
-                              const currentComments = tableData.comments || [];
-                              inputElement.value = '';
-                              const nextComments = [...currentComments, newComment];
-                              await updatePadletContent(padlet.id, JSON.stringify({ ...tableData, comments: nextComments, badgeColor: tableBadgeColor }));
-                              setCardCommentList(nextComments);
-                              setActiveCardCommentId(newComment.id);
-                            }
-                          }}
-                        />
-                      </div>
-                    </div>
+                        }
+                      }}
+                      onSubmit={guardCommentMutation(commentAccessMode, async (commentText) => {
+                        const currentComments = tableData.comments || [];
+                        const newComment = {
+                          id: `comment-${Date.now()}`,
+                          text: commentText,
+                          userId: user?.id || 'anon',
+                          userName: user?.email?.split('@')[0] || 'You',
+                          timestamp: Date.now(),
+                        };
+                        const nextComments = [...currentComments, newComment];
+                        await updatePadletContent(padlet.id, JSON.stringify({ ...tableData, comments: nextComments, badgeColor: tableBadgeColor }));
+                        setCardCommentList(nextComments);
+                      })}
+                      onEditComment={guardCommentMutation(commentAccessMode, async (commentId, text) => {
+                        const nextComments = (tableData.comments || []).map((comment: any) =>
+                          comment.id === commentId ? { ...comment, text } : comment
+                        );
+                        await updatePadletContent(padlet.id, JSON.stringify({ ...tableData, comments: nextComments, badgeColor: tableBadgeColor }));
+                        setCardCommentList(nextComments);
+                      })}
+                      onRemoveComment={guardCommentMutation(commentAccessMode, async (commentId) => {
+                        const nextComments = (tableData.comments || []).filter((comment: any) => comment.id !== commentId);
+                        await updatePadletContent(padlet.id, JSON.stringify({ ...tableData, comments: nextComments, badgeColor: tableBadgeColor }));
+                        setCardCommentList(nextComments);
+                      })}
+                      onToggleCommentStrikethrough={guardCommentMutation(commentAccessMode, async (commentId) => {
+                        const nextComments = (tableData.comments || []).map((comment: any) =>
+                          comment.id === commentId
+                            ? { ...comment, isStrikethrough: !comment.isStrikethrough }
+                            : comment
+                        );
+                        await updatePadletContent(padlet.id, JSON.stringify({ ...tableData, comments: nextComments, badgeColor: tableBadgeColor }));
+                        setCardCommentList(nextComments);
+                      })}
+                      onCommentColor={guardCommentMutation(commentAccessMode, async (commentId, textColor, backgroundColor) => {
+                        const nextComments = (tableData.comments || []).map((comment: any) =>
+                          comment.id === commentId ? { ...comment, textColor, backgroundColor } : comment
+                        );
+                        await updatePadletContent(padlet.id, JSON.stringify({ ...tableData, comments: nextComments, badgeColor: tableBadgeColor }));
+                        setCardCommentList(nextComments);
+                      })}
+                      comments={cardCommentList}
+                      badgeColor={tableBadgeColor}
+                      onBadgeColorChange={guardCommentMutation(commentAccessMode, async (color) => {
+                        await updatePadletContent(padlet.id, JSON.stringify({ ...tableData, comments: tableComments, badgeColor: color }));
+                      })}
+                      commentTitle={typeof tableData.commentTitle === 'string' ? tableData.commentTitle : undefined}
+                      commentTitleStyle={tableData.commentTitleStyle}
+                      onCommentTitleChange={guardCommentMutation(commentAccessMode, async (title: string) => {
+                        await updatePadletContent(padlet.id, JSON.stringify({ ...tableData, comments: tableComments, badgeColor: tableBadgeColor, commentTitle: title === 'Comments' ? undefined : title }));
+                      })}
+                      onCommentTitleStyleChange={guardCommentMutation(commentAccessMode, async (style) => {
+                        await updatePadletContent(padlet.id, JSON.stringify({ ...tableData, comments: tableComments, badgeColor: tableBadgeColor, commentTitleStyle: style }));
+                      })}
+                      currentUserId={user?.id || 'anon'}
+                      currentUserName={user?.email?.split('@')[0] || 'You'}
+                      enableCanonicalSelectionStyling
+                    />
                   </div>
                 )}
               </div>

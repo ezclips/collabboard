@@ -417,8 +417,10 @@ describe('PATCH 8O.1/8O.2 -- canonical comment permission wiring', () => {
       // Todo's 1 on-canvas site x 8 (same direct-wrap pattern, COMMENT stays
       // dormant for Todo too) = 8. 39 + 8 = 47. PATCH 8U adds Link's 1
       // on-canvas site x 8 (same direct-wrap pattern, COMMENT stays dormant
-      // for Link too) = 8. 47 + 8 = 55.
-      expect((freeform.match(/guardCommentMutation\(/g) ?? []).length).toBe(55);
+      // for Link too) = 8. 47 + 8 = 55. PATCH 8V adds Table's 1 on-canvas
+      // site x 8 (same direct-wrap pattern, COMMENT stays dormant for Table
+      // too) = 8. 55 + 8 = 63.
+      expect((freeform.match(/guardCommentMutation\(/g) ?? []).length).toBe(63);
       // 4 ownership-gated callbacks (edit/remove/toggle/color) x 3
       // COMMENT-capable sites (Clipart Site B, Image x2) = 12 -- Note does
       // NOT use this guard (COMMENT stays dormant there), so unchanged by 8P.
@@ -980,13 +982,145 @@ describe('PATCH 8O.1/8O.2 -- canonical comment permission wiring', () => {
     });
   });
 
+  describe('Table -- on-canvas entry point in FreeformPadletCards.tsx (PATCH 8V)', () => {
+    it('is wired with accessMode and guarded callbacks (manage-only, no COMMENT-mode branch), migrated off the local hand-rolled implementation', () => {
+      const freeform = read(FREEFORM_PATH);
+      const anchor = 'Table detached comments use the canonical panel; this shell only owns placement and close state (PATCH 8V';
+      const block = commentPopupBlockAfter(freeform, anchor);
+      expect(block).toContain('accessMode={commentAccessMode}');
+      expect(block).not.toContain('guardOwnCommentMutation(');
+      expect(block).not.toContain('guardCommentComposition(');
+      expect(block).not.toContain('commentModeMutations');
+      expectManageOnlyWiredCallSite(block, true);
+    });
+
+    it('persists through updatePadletContent (Table stores comments/badgeColor/commentTitle inside padlet.content, not padlet.metadata), never through updatePadletMetadata', () => {
+      const freeform = read(FREEFORM_PATH);
+      const anchor = 'Table detached comments use the canonical panel; this shell only owns placement and close state (PATCH 8V';
+      const block = commentPopupBlockAfter(freeform, anchor);
+      expect(block).toContain('updatePadletContent(');
+      expect(block).not.toContain('updatePadletMetadata(');
+    });
+
+    it('the panel wrapper stops click/mousedown propagation so a comment-row click cannot bubble to the Table card (cell selection / row toggle / drag / canvas pan)', () => {
+      const freeform = read(FREEFORM_PATH);
+      const anchor = 'Table detached comments use the canonical panel; this shell only owns placement and close state (PATCH 8V';
+      const anchorStart = freeform.indexOf(anchor);
+      const popupStart = freeform.indexOf('<CommentPopup', anchorStart);
+      const wrapperStart = freeform.lastIndexOf('<div', popupStart);
+      const wrapperSlice = freeform.slice(wrapperStart, popupStart);
+      expect(wrapperSlice).toContain('onClick={(e) => e.stopPropagation()}');
+      expect(wrapperSlice).toContain('onMouseDown={(e) => e.stopPropagation()}');
+    });
+
+    it('the padlet.type === "table" branch no longer contains the local hand-rolled comment row/composer JSX', () => {
+      const freeform = read(FREEFORM_PATH);
+      const tableStart = freeform.indexOf("if (padlet.type === 'table') {");
+      const tableEnd = freeform.indexOf("if (padlet.type === 'todo') {", tableStart);
+      expect(tableStart).toBeGreaterThan(-1);
+      expect(tableEnd).toBeGreaterThan(tableStart);
+      const tableBranch = freeform.slice(tableStart, tableEnd);
+      expect(tableBranch).not.toContain('Table Comments Popup - Right side');
+      expect(tableBranch).not.toContain('editingCardCommentText');
+      expect(tableBranch).not.toContain('No comments yet');
+    });
+
+    it('does not touch Table content fields (rows/columns/cellStyles/caption/titleStyle) -- only spreads ...tableData and overrides comments/badgeColor/commentTitle/commentTitleStyle', () => {
+      const freeform = read(FREEFORM_PATH);
+      const anchor = 'Table detached comments use the canonical panel; this shell only owns placement and close state (PATCH 8V';
+      const block = commentPopupBlockAfter(freeform, anchor);
+      for (const field of ['rows:', 'columns:', 'cellStyles:', 'caption:', 'titleStyle:']) {
+        expect(block, `Table comment site must never directly set ${field}`).not.toContain(field);
+      }
+    });
+  });
+
+  describe('Table -- TableEditor.tsx own detached-comment CommentPopup, threaded via CanvasModals.tsx (PATCH 8V)', () => {
+    it('TableEditor.tsx accepts an accessMode prop and wires its single CommentPopup with it, migrated off the local hand-rolled implementation', () => {
+      const tableEditor = read('components/collabboard/editors/TableEditor.tsx');
+      expect(tableEditor).toContain('import CommentPopup from "./CommentPopup";');
+      expect(tableEditor).toContain('accessMode?: CommentAccessMode;');
+      expect(tableEditor).toContain("accessMode = 'manage',");
+      const total = (tableEditor.match(/<CommentPopup/g) ?? []).length;
+      expect(total, 'TableEditor.tsx must have exactly one CommentPopup usage').toBe(1);
+      const block = commentPopupBlockAfter(tableEditor, '<CommentPopup');
+      expect(block).toContain('accessMode={accessMode}');
+      expectManageOnlyWiredCallSite(block, true);
+    });
+
+    it('uses real currentUserId/currentUserName props, not the historical "current-user"/"You" literal', () => {
+      const tableEditor = read('components/collabboard/editors/TableEditor.tsx');
+      expect(tableEditor).toContain('currentUserId?: string;');
+      expect(tableEditor).toContain('currentUserName?: string;');
+      expect(tableEditor).toContain("currentUserId = 'anon',");
+      expect(tableEditor).toContain("currentUserName = 'You',");
+      const block = commentPopupBlockAfter(tableEditor, '<CommentPopup');
+      expect(block).toContain('userId: currentUserId,');
+      expect(block).toContain('userName: currentUserName,');
+      expect(block).toContain('currentUserId={currentUserId}');
+      expect(block).toContain('currentUserName={currentUserName}');
+      expect(block).not.toContain('userId: "current-user"');
+    });
+
+    it('wires commentTitle/commentTitleStyle to real state, guarded, seeded from and persisted into the same content JSON blob as rows/columns/comments', () => {
+      const tableEditor = read('components/collabboard/editors/TableEditor.tsx');
+      const block = commentPopupBlockAfter(tableEditor, '<CommentPopup');
+      expect(block).toContain('commentTitle={commentTitle}');
+      expect(block).toContain('commentTitleStyle={');
+      const titleChangeStart = block.indexOf('onCommentTitleChange=');
+      expect(titleChangeStart).toBeGreaterThan(-1);
+      const titleChangeNext = block.slice(titleChangeStart + 'onCommentTitleChange='.length).match(/^\s*\{?\s*(\S+)/);
+      expect(titleChangeNext?.[1]?.startsWith('guardCommentMutation(')).toBe(true);
+      // handleSaveAndClose must include commentTitle/commentTitleStyle in the
+      // same JSON.stringify(...) payload as comments/rows/columns -- Table
+      // has no separate metadata object, so this is the only persistence path.
+      const saveStart = tableEditor.indexOf('const handleSaveAndClose');
+      const saveBlock = tableEditor.slice(saveStart, saveStart + 600);
+      expect(saveBlock).toContain('commentTitle,');
+      expect(saveBlock).toContain('commentTitleStyle:');
+    });
+
+    it('no local hand-rolled Table comment row/composer/color-popup JSX remains in TableEditor.tsx', () => {
+      const tableEditor = read('components/collabboard/editors/TableEditor.tsx');
+      expect(tableEditor).not.toContain('activeCommentId');
+      expect(tableEditor).not.toContain('editingCommentId');
+      expect(tableEditor).not.toContain('newCommentText');
+      expect(tableEditor).not.toContain('commentColorPopupId');
+      expect(tableEditor).not.toContain('showBadgeColorPicker');
+      expect(tableEditor).not.toContain('BADGE_COLORS');
+    });
+
+    it('the left toolbar wrapper does not conditionally disable pointer-events based on any removed comment-color-popup state (regression guard for the exact bug found in TodoEditor.tsx during PATCH 8S)', () => {
+      const tableEditor = read('components/collabboard/editors/TableEditor.tsx');
+      expect(tableEditor).not.toContain('opacity-0 pointer-events-none');
+    });
+
+    it('the comment panel does not read or write Table content state directly (rows/columns/cellStyles/caption/titleStyle) -- only comments/badgeColor/commentTitle/commentTitleStyle', () => {
+      const tableEditor = read('components/collabboard/editors/TableEditor.tsx');
+      const block = commentPopupBlockAfter(tableEditor, '<CommentPopup');
+      for (const field of ['setRows(', 'setColumns(', 'setCellStyles(', 'setCaption(', 'setTitleStyle(']) {
+        expect(block, `Table comment panel must never call ${field}`).not.toContain(field);
+      }
+    });
+
+    it('CanvasModals.tsx threads commentAccessMode + real identity into TableEditor', () => {
+      const canvasModals = read('components/collabboard/canvas/ui/CanvasModals.tsx');
+      const start = canvasModals.indexOf('<TableEditor');
+      const end = canvasModals.indexOf('/>', canvasModals.indexOf('onSave={saveTable}', start));
+      const block = canvasModals.slice(start, end);
+      expect(block, 'TableEditor instance must pass accessMode={commentAccessMode}').toContain('accessMode={commentAccessMode}');
+      expect(block, 'TableEditor instance must pass real currentUserId').toContain("currentUserId={user?.id || 'anon'}");
+      expect(block, 'TableEditor instance must pass real currentUserName').toContain("currentUserName={user?.email?.split('@')[0] || 'You'}");
+    });
+  });
+
   describe('architecture guard -- every <CommentPopup usage in these three files is accounted for', () => {
-    it('FreeformPadletCards.tsx has exactly 7 <CommentPopup usages, all 7 wired (Clipart Site B, Image x2, Note x2, Todo x1, Link x1)', () => {
+    it('FreeformPadletCards.tsx has exactly 8 <CommentPopup usages, all 8 wired (Clipart Site B, Image x2, Note x2, Todo x1, Link x1, Table x1)', () => {
       const freeform = read(FREEFORM_PATH);
       const total = (freeform.match(/<CommentPopup/g) ?? []).length;
       const wired = (freeform.match(/accessMode=\{commentAccessMode\}/g) ?? []).length;
-      expect(total).toBe(7);
-      expect(wired).toBe(7);
+      expect(total).toBe(8);
+      expect(wired).toBe(8);
     });
 
     it('CanvasClient.tsx has exactly 1 <CommentPopup usage and it is wired', () => {
