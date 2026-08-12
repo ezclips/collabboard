@@ -289,7 +289,14 @@ export default function CommentPopup({
         if (isOpen) {
             if (!hideComposer) {
                 setTimeout(() => {
-                    inputRef.current?.focus();
+                    // preventScroll: without it, focusing an input that is
+                    // partially or fully outside the nearest scrollable
+                    // ancestor's visible area makes the browser auto-scroll
+                    // that ancestor to reveal it -- for the canvas's own
+                    // scroll container, that is a canvas pan the user never
+                    // asked for, triggered merely by opening Comments near a
+                    // viewport edge (PATCH 8M).
+                    inputRef.current?.focus({ preventScroll: true });
                 }, 50);
             }
         } else {
