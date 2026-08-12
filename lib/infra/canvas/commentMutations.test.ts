@@ -215,11 +215,11 @@ describe('structural proof -- negative controls C/D (server-side enforcement, RP
 
   it('D: the drafted migration performs exactly one UPDATE, touching only metadata.detachedComments', () => {
     const sql = fs.readFileSync('supabase/migrations/20260812_000000_add_comment_mutate_rpc.sql', 'utf8');
-    const updateStatements = sql.match(/UPDATE padlets/g) ?? [];
+    const updateStatements = sql.match(/UPDATE public\.padlets/g) ?? [];
     expect(updateStatements).toHaveLength(1);
     expect(sql).toContain("SET metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), '{detachedComments}', v_new_comments)");
     // No other column is ever assigned in that UPDATE.
-    const updateBlock = sql.slice(sql.indexOf('UPDATE padlets'), sql.indexOf('WHERE id = p_padlet_id'));
+    const updateBlock = sql.slice(sql.indexOf('UPDATE public.padlets'), sql.indexOf('WHERE id = p_padlet_id'));
     expect(updateBlock).not.toMatch(/SET\s+(title|content|type|position_x|position_y|width|height|file_url|board_id|canvas_id)\b/);
   });
 
@@ -231,5 +231,78 @@ describe('structural proof -- negative controls C/D (server-side enforcement, RP
     expect(signature).not.toContain('p_user_id');
     expect(sql).toContain("v_user_id uuid := auth.uid();");
     expect(sql).toContain("'userId', v_user_id::text,");
+  });
+});
+
+// PATCH 8O.2a -- DeepSeek security review hardening. These are structural/
+// source-level proofs only (see the file header on why: no local Supabase/
+// db-test harness exists to run a live grant/revoke check against) -- they
+// prove the DRAFT text has the intended privilege/hardening properties, not
+// that a deployed database actually enforces them. Runtime enforcement can
+// only be confirmed after the migration is reviewed and applied (see the
+// migration's own "REQUIRED HUMAN REVIEW BEFORE APPLYING" checklist).
+describe('structural proof -- 8O.2a hardening (EXECUTE privilege + search_path)', () => {
+  const sqlPath = 'supabase/migrations/20260812_000000_add_comment_mutate_rpc.sql';
+  const sql = fs.readFileSync(sqlPath, 'utf8');
+  const signature = 'public.comment_mutate(uuid, text, uuid, text, text, text, boolean)';
+
+  it('1: REVOKE EXECUTE ... FROM PUBLIC exists for the exact function signature', () => {
+    expect(sql).toContain(`REVOKE EXECUTE ON FUNCTION ${signature} FROM PUBLIC;`);
+  });
+
+  it('2: GRANT EXECUTE ... TO authenticated exists for the exact function signature', () => {
+    expect(sql).toContain(`GRANT EXECUTE ON FUNCTION ${signature} TO authenticated;`);
+  });
+
+  it('3: no GRANT EXECUTE to anon exists anywhere in the file', () => {
+    expect(sql).not.toMatch(/GRANT\s+EXECUTE[\s\S]*?TO\s+anon\b/i);
+  });
+
+  it('4: SECURITY DEFINER remains on the function', () => {
+    expect(sql).toContain('SECURITY DEFINER');
+  });
+
+  it('5: search_path is hardened to the empty string, not merely set to public', () => {
+    expect(sql).toContain("SET search_path = ''");
+    expect(sql).not.toMatch(/SET search_path = 'public'/);
+  });
+
+  it('6: auth.uid() remains the sole identity source', () => {
+    expect(sql).toContain('v_user_id uuid := auth.uid();');
+  });
+
+  it("7: the only metadata key ever written is detachedComments (jsonb_set targets '{detachedComments}' only)", () => {
+    const jsonbSetCalls = sql.match(/jsonb_set\(/g) ?? [];
+    expect(jsonbSetCalls.length).toBeGreaterThan(0);
+    // Every jsonb_set call in the file must target the same single key path.
+    const otherKeyTargets = sql.match(/jsonb_set\([^)]*'\{(?!detachedComments)[a-zA-Z]+\}'/g) ?? [];
+    expect(otherKeyTargets).toEqual([]);
+  });
+
+  it('8: exactly the intended single padlet UPDATE remains (public.padlets, WHERE id = p_padlet_id)', () => {
+    const updateStatements = sql.match(/UPDATE public\.padlets/g) ?? [];
+    expect(updateStatements).toHaveLength(1);
+    expect(sql).toContain('WHERE id = p_padlet_id;');
+  });
+
+  it('9: FOR UPDATE row-locking remains on the padlet read', () => {
+    expect(sql).toContain('FOR UPDATE');
+  });
+
+  it('10: the four-operation whitelist remains unchanged', () => {
+    expect(sql).toContain("IF p_operation NOT IN ('ADD_COMMENT', 'EDIT_OWN_COMMENT', 'STYLE_OWN_COMMENT', 'DELETE_OWN_COMMENT') THEN");
+  });
+
+  it('every non-built-in object reference is schema-qualified under the hardened search_path', () => {
+    // With search_path = '', only pg_catalog is implicitly searched -- every
+    // application table/function/type this function touches must be
+    // schema-qualified, or it would fail to resolve at CREATE/EXECUTE time.
+    expect(sql).toContain('FROM public.padlets');
+    expect(sql).toContain('public.get_board_permission(');
+    expect(sql).toContain('FROM public.boards');
+    expect(sql).toContain('FROM public.board_collaborators');
+    expect(sql).toContain('FROM public.profiles');
+    expect(sql).toContain('v_permission public.board_permission_level;');
+    expect(sql).toContain("'admin'::public.board_permission_level");
   });
 });

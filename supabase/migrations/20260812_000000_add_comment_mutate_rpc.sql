@@ -1,5 +1,6 @@
 -- ============================================================================
 -- PATCH 8O.2 -- comment_mutate RPC (DRAFTED, NOT YET APPLIED)
+-- PATCH 8O.2a -- hardened per DeepSeek security review (DRAFTED, NOT YET APPLIED)
 -- ============================================================================
 --
 -- STATUS: This migration has been reviewed and written as part of PATCH 8O.2
@@ -8,7 +9,8 @@
 -- pgTAP/db-test harness in this repository to validate it against (verified
 -- via exhaustive search -- no supabase/config.toml, no db test scripts), so
 -- the only way to test it would be to apply it to the real project. The user
--- explicitly chose "draft only, don't apply" for this patch.
+-- explicitly chose "draft only, don't apply" for this patch, and again for
+-- the 8O.2a hardening pass below.
 --
 -- WHAT THIS UNBLOCKS: until this (or an equivalent) migration is reviewed
 -- and applied, a BoardPermission 'commenter' user sees the correct
@@ -33,9 +35,14 @@
 --      their own comment via a named operation; commenter cannot rewrite
 --      comment.userId, delete/edit another user's comment, or touch any
 --      padlet field outside metadata.detachedComments).
---   4. Only after that, apply via the project's normal migration process and
---      remove this "DRAFTED, NOT YET APPLIED" banner (and the matching note
---      in COMMENT_UI_CONTRACT_V1.md) in the commit that does so.
+--   4. Confirm EXECUTE privilege intent once more just before applying:
+--      PUBLIC must have NO EXECUTE, anon must have NO EXECUTE (it never had
+--      an explicit grant and does not inherit one from authenticated), and
+--      authenticated must have EXECUTE. See the REVOKE/GRANT statements at
+--      the bottom of this file.
+--   5. Only after all of the above, apply via the project's normal migration
+--      process and remove this "DRAFTED, NOT YET APPLIED" banner (and the
+--      matching note in COMMENT_UI_CONTRACT_V1.md) in the commit that does so.
 --
 -- WHY A DEDICATED RPC AND NOT "GRANT commenter UPDATE ON padlets":
 -- padlets.metadata is a single jsonb column holding the WHOLE post's
@@ -50,6 +57,36 @@
 -- auth.uid() (never a client-supplied identity), and patches only the
 -- specific comment/field the operation names -- the padlets_update RLS
 -- policy itself is NOT modified or weakened by this migration.
+--
+-- PERMISSION MODEL FOLLOW-UP -- WORKSPACE READONLY VS BOARD/CANVAS ROLE
+-- (identified during the 8O.2a DeepSeek review, deliberately NOT solved
+-- here): the CLIENT-side access contract (lib/domain/canvas/comments.ts's
+-- resolveCommentAccessMode) treats a workspace member whose WorkspaceRole is
+-- 'readonly' as forced to 'read' no matter what board/canvas permission they
+-- hold -- this is the client's own outer bound. This RPC's server-side
+-- permission resolution, however, mirrors get_board_permission() /
+-- padlets_update RLS as they exist TODAY, and neither of those currently
+-- re-checks workspace_role once a canvas_collaborators or board_collaborators
+-- row grants a board-level permission. In other words: it is possible for a
+-- workspace-readonly user who also holds an explicit 'commenter' (or higher)
+-- canvas_collaborators row to be blocked by the CLIENT UI (which forces
+-- 'read') while this RPC, if called directly (bypassing the UI), would still
+-- honor the board-level grant. This is a pre-existing inconsistency in the
+-- permission model, broader than comments (it would affect any future
+-- server-side authorization that keys off get_board_permission() alone), and
+-- is NOT introduced or worsened by this migration -- comment_mutate simply
+-- inherits the same resolution get_board_permission() already uses
+-- everywhere else. Fixing it (e.g. having get_board_permission() itself
+-- clamp to 'reader' when workspace_role is 'readonly') is out of scope for
+-- 8O.2/8O.2a and must not be bundled into a comments-only patch. Tracked here
+-- as a named follow-up, not fixed.
+--
+-- COMMENT LENGTH: p_text is unbounded (matches DeepSeek's low-severity
+-- row-growth finding). No canonical maximum comment length exists anywhere
+-- in the current UI (CommentPopup.tsx, CommentEditor.tsx, CommentPost.tsx --
+-- verified by search, none of them impose one), so no limit has been
+-- invented here. Adding one is a product decision, not something to guess
+-- at inside a security-hardening migration.
 -- ============================================================================
 
 CREATE OR REPLACE FUNCTION public.comment_mutate(
@@ -64,12 +101,12 @@ CREATE OR REPLACE FUNCTION public.comment_mutate(
 RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public
+SET search_path = ''
 AS $$
 DECLARE
     v_user_id uuid := auth.uid();
     v_padlet RECORD;
-    v_permission board_permission_level;
+    v_permission public.board_permission_level;
     v_is_manager boolean;
     v_user_name text;
     v_user_avatar text;
@@ -91,7 +128,7 @@ BEGIN
     -- silently drop one write (the classic read-modify-write jsonb hazard).
     SELECT id, canvas_id, board_id, metadata
     INTO v_padlet
-    FROM padlets
+    FROM public.padlets
     WHERE id = p_padlet_id
     FOR UPDATE;
 
@@ -104,20 +141,24 @@ BEGIN
     -- supabase/baseline/schema_snapshot_2026-07-05.sql's padlets_update
     -- policy). get_board_permission already handles the canvas_id path
     -- (owner, workspace role, canvas_collaborators) via SECURITY DEFINER.
+    -- See the "PERMISSION MODEL FOLLOW-UP" note above the header banner:
+    -- this deliberately mirrors get_board_permission()'s existing behavior
+    -- as-is, including its known workspace-readonly inconsistency, rather
+    -- than attempting to fix that broader issue inside a comments-only RPC.
     IF v_padlet.canvas_id IS NOT NULL THEN
-        v_permission := get_board_permission(v_padlet.canvas_id, v_user_id);
+        v_permission := public.get_board_permission(v_padlet.canvas_id, v_user_id);
     ELSIF v_padlet.board_id IS NOT NULL THEN
-        IF EXISTS (SELECT 1 FROM boards WHERE id = v_padlet.board_id AND user_id = v_user_id) THEN
-            v_permission := 'admin'::board_permission_level;
+        IF EXISTS (SELECT 1 FROM public.boards WHERE id = v_padlet.board_id AND user_id = v_user_id) THEN
+            v_permission := 'admin'::public.board_permission_level;
         ELSE
             SELECT CASE role
-                WHEN 'editor' THEN 'editor'::board_permission_level
-                WHEN 'commenter' THEN 'commenter'::board_permission_level
-                WHEN 'viewer' THEN 'reader'::board_permission_level
+                WHEN 'editor' THEN 'editor'::public.board_permission_level
+                WHEN 'commenter' THEN 'commenter'::public.board_permission_level
+                WHEN 'viewer' THEN 'reader'::public.board_permission_level
                 ELSE NULL
             END
             INTO v_permission
-            FROM board_collaborators
+            FROM public.board_collaborators
             WHERE board_id = v_padlet.board_id AND user_id = v_user_id
             ORDER BY added_at DESC
             LIMIT 1;
@@ -137,7 +178,7 @@ BEGIN
 
     SELECT COALESCE(display_name, name, split_part(email, '@', 1), 'User'), avatar_url
     INTO v_user_name, v_user_avatar
-    FROM profiles
+    FROM public.profiles
     WHERE id = v_user_id;
 
     v_comments := COALESCE(v_padlet.metadata -> 'detachedComments', '[]'::jsonb);
@@ -237,7 +278,7 @@ BEGIN
     -- metadata (cardColor, badgeColor, captionStyle, container membership,
     -- ...) is left byte-identical. This is the property that makes
     -- "arbitrary padlet metadata cannot be changed through this path" true.
-    UPDATE padlets
+    UPDATE public.padlets
     SET metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), '{detachedComments}', v_new_comments),
         updated_at = now()
     WHERE id = p_padlet_id;
@@ -247,7 +288,14 @@ END;
 $$;
 
 COMMENT ON FUNCTION public.comment_mutate(uuid, text, uuid, text, text, text, boolean) IS
-'PATCH 8O.2 -- narrowly-scoped, ownership-checked comment mutation for BoardPermission commenter (and above). See its own header banner: DRAFTED, NOT YET APPLIED as of this migration file''s creation -- do not assume this function exists in the live database without independently confirming it was actually run.';
+'PATCH 8O.2/8O.2a -- narrowly-scoped, ownership-checked comment mutation for BoardPermission commenter (and above). See its own header banner: DRAFTED, NOT YET APPLIED as of this migration file''s creation -- do not assume this function exists in the live database without independently confirming it was actually run.';
 
--- Deliberately NOT granted to anon -- comments require authentication.
+-- EXECUTE privilege intent (8O.2a hardening -- SECURITY DEFINER functions are
+-- PUBLIC-executable by default in Postgres unless explicitly revoked, which
+-- the original 8O.2 draft missed):
+--   PUBLIC:         NO EXECUTE (explicitly revoked below)
+--   anon:           NO EXECUTE (never granted; does not inherit from
+--                    authenticated or from the now-revoked PUBLIC grant)
+--   authenticated:  EXECUTE (explicitly granted below)
+REVOKE EXECUTE ON FUNCTION public.comment_mutate(uuid, text, uuid, text, text, text, boolean) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.comment_mutate(uuid, text, uuid, text, text, text, boolean) TO authenticated;
