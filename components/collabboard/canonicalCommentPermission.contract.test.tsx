@@ -415,8 +415,10 @@ describe('PATCH 8O.1/8O.2 -- canonical comment permission wiring', () => {
       // Note's 2 sites x 8 (all 8 props direct-wrapped, no ternary since
       // COMMENT stays dormant for Note) = 16. 23 + 16 = 39. PATCH 8S adds
       // Todo's 1 on-canvas site x 8 (same direct-wrap pattern, COMMENT stays
-      // dormant for Todo too) = 8. 39 + 8 = 47.
-      expect((freeform.match(/guardCommentMutation\(/g) ?? []).length).toBe(47);
+      // dormant for Todo too) = 8. 39 + 8 = 47. PATCH 8U adds Link's 1
+      // on-canvas site x 8 (same direct-wrap pattern, COMMENT stays dormant
+      // for Link too) = 8. 47 + 8 = 55.
+      expect((freeform.match(/guardCommentMutation\(/g) ?? []).length).toBe(55);
       // 4 ownership-gated callbacks (edit/remove/toggle/color) x 3
       // COMMENT-capable sites (Clipart Site B, Image x2) = 12 -- Note does
       // NOT use this guard (COMMENT stays dormant there), so unchanged by 8P.
@@ -856,13 +858,135 @@ describe('PATCH 8O.1/8O.2 -- canonical comment permission wiring', () => {
     });
   });
 
+  describe('Link -- on-canvas entry point in FreeformPadletCards.tsx (PATCH 8U)', () => {
+    it('is wired with accessMode and guarded callbacks (manage-only, no COMMENT-mode branch), migrated off the local hand-rolled implementation', () => {
+      const freeform = read(FREEFORM_PATH);
+      const anchor = 'Link detached comments use the canonical panel; this shell only owns placement and close state (PATCH 8U';
+      const block = commentPopupBlockAfter(freeform, anchor);
+      expect(block).toContain('accessMode={commentAccessMode}');
+      expect(block).not.toContain('guardOwnCommentMutation(');
+      expect(block).not.toContain('guardCommentComposition(');
+      expect(block).not.toContain('commentModeMutations');
+      expectManageOnlyWiredCallSite(block, true);
+    });
+
+    it('the panel wrapper stops click/mousedown propagation so a comment-row click cannot bubble to the Link card (navigation / post selection / context-menu open)', () => {
+      const freeform = read(FREEFORM_PATH);
+      const anchor = 'Link detached comments use the canonical panel; this shell only owns placement and close state (PATCH 8U';
+      const anchorStart = freeform.indexOf(anchor);
+      const popupStart = freeform.indexOf('<CommentPopup', anchorStart);
+      const wrapperStart = freeform.lastIndexOf('<div', popupStart);
+      const wrapperSlice = freeform.slice(wrapperStart, popupStart);
+      expect(wrapperSlice).toContain('onClick={(e) => e.stopPropagation()}');
+      expect(wrapperSlice).toContain('onMouseDown={(e) => e.stopPropagation()}');
+    });
+
+    it('the padlet.type === "link" branch no longer contains the local hand-rolled comment row/composer JSX', () => {
+      const freeform = read(FREEFORM_PATH);
+      // Scoped to the Link branch specifically: a copy-pasted, MISLABELED
+      // "Todo Comments Popup - Right side" comment exists (unchanged, out of
+      // scope) inside the actual "Comment" post family's own branch
+      // elsewhere in this file, and a genuine "Table Comments Popup" local
+      // implementation exists in the Table branch (also unchanged, out of
+      // scope) -- a whole-file check would give a false negative/positive
+      // here, so narrow to padlet.type === 'link' ... padlet.type === 'table'.
+      const linkStart = freeform.indexOf("if (padlet.type === 'link') {");
+      const linkEnd = freeform.indexOf("if (padlet.type === 'table') {", linkStart);
+      expect(linkStart).toBeGreaterThan(-1);
+      expect(linkEnd).toBeGreaterThan(linkStart);
+      const linkBranch = freeform.slice(linkStart, linkEnd);
+      expect(linkBranch).not.toContain('Link Comments Popup - Right side');
+      expect(linkBranch).not.toContain('editingCardCommentText');
+      expect(linkBranch).not.toContain('No comments yet');
+    });
+
+    it('does not touch Link-post URL/title/preview metadata fields (linkUrl/linkTitle/linkImage/linkFavicon/linkDomain)', () => {
+      const freeform = read(FREEFORM_PATH);
+      const anchor = 'Link detached comments use the canonical panel; this shell only owns placement and close state (PATCH 8U';
+      const block = commentPopupBlockAfter(freeform, anchor);
+      for (const field of ['linkUrl', 'linkTitle', 'linkImage', 'linkFavicon', 'linkDomain']) {
+        expect(block, `Link comment site must never reference ${field}`).not.toContain(field);
+      }
+    });
+  });
+
+  describe('Link -- LinkEditor.tsx own detached-comment CommentPopup, threaded via CanvasModals.tsx (PATCH 8U)', () => {
+    it('LinkEditor.tsx accepts an accessMode prop and wires its single CommentPopup with it, migrated off the local hand-rolled implementation', () => {
+      const linkEditor = read('components/collabboard/editors/LinkEditor.tsx');
+      expect(linkEditor).toContain("import { guardCommentMutation, type CommentAccessMode } from '@/lib/domain/canvas/comments';");
+      expect(linkEditor).toContain("import CommentPopup from './CommentPopup';");
+      expect(linkEditor).toContain('accessMode?: CommentAccessMode;');
+      expect(linkEditor).toContain("accessMode = 'manage',");
+      const total = (linkEditor.match(/<CommentPopup/g) ?? []).length;
+      expect(total, 'LinkEditor.tsx must have exactly one CommentPopup usage').toBe(1);
+      const block = commentPopupBlockAfter(linkEditor, '<CommentPopup');
+      expect(block).toContain('accessMode={accessMode}');
+      expectManageOnlyWiredCallSite(block, true);
+    });
+
+    it('uses real currentUserId/currentUserName props, not the historical "current-user"/"You" literal', () => {
+      const linkEditor = read('components/collabboard/editors/LinkEditor.tsx');
+      expect(linkEditor).toContain('currentUserId?: string;');
+      expect(linkEditor).toContain('currentUserName?: string;');
+      expect(linkEditor).toContain("currentUserId = 'anon',");
+      expect(linkEditor).toContain("currentUserName = 'You',");
+      const block = commentPopupBlockAfter(linkEditor, '<CommentPopup');
+      expect(block).toContain('userId: currentUserId,');
+      expect(block).toContain('userName: currentUserName,');
+      expect(block).toContain('currentUserId={currentUserId}');
+      expect(block).toContain('currentUserName={currentUserName}');
+      expect(block).not.toContain("userId: 'current-user'");
+    });
+
+    it('wires commentTitle/commentTitleStyle to real state, guarded', () => {
+      const linkEditor = read('components/collabboard/editors/LinkEditor.tsx');
+      const block = commentPopupBlockAfter(linkEditor, '<CommentPopup');
+      expect(block).toContain('commentTitle={commentTitle}');
+      expect(block).toContain('commentTitleStyle={');
+      const titleChangeStart = block.indexOf('onCommentTitleChange=');
+      expect(titleChangeStart).toBeGreaterThan(-1);
+      const titleChangeNext = block.slice(titleChangeStart + 'onCommentTitleChange='.length).match(/^\s*\{?\s*(\S+)/);
+      expect(titleChangeNext?.[1]?.startsWith('guardCommentMutation(')).toBe(true);
+    });
+
+    it('no local hand-rolled Link comment row/composer/color-popup JSX remains in LinkEditor.tsx', () => {
+      const linkEditor = read('components/collabboard/editors/LinkEditor.tsx');
+      expect(linkEditor).not.toContain('activeCommentId');
+      expect(linkEditor).not.toContain('editingCommentId');
+      expect(linkEditor).not.toContain('newCommentText');
+      expect(linkEditor).not.toContain('commentColorPopupId');
+      expect(linkEditor).not.toContain('showBadgeColorPicker');
+      expect(linkEditor).not.toContain('BADGE_COLORS');
+    });
+
+    it('the comment panel does not read or write Link-post URL/title/preview metadata state (linkUrl/linkTitle/linkImage/linkFavicon/linkDomain)', () => {
+      const linkEditor = read('components/collabboard/editors/LinkEditor.tsx');
+      const block = commentPopupBlockAfter(linkEditor, '<CommentPopup');
+      for (const field of ['linkUrl', 'linkTitle', 'linkImage', 'linkFavicon', 'linkDomain']) {
+        expect(block, `Link comment panel must never reference ${field}`).not.toContain(field);
+      }
+    });
+
+    it('CanvasModals.tsx threads commentAccessMode + real identity + persisted commentTitle/commentTitleStyle into LinkEditor', () => {
+      const canvasModals = read('components/collabboard/canvas/ui/CanvasModals.tsx');
+      const start = canvasModals.indexOf('<LinkEditor');
+      const end = canvasModals.indexOf('/>', canvasModals.indexOf('onSave={saveLink}', start));
+      const block = canvasModals.slice(start, end);
+      expect(block, 'LinkEditor instance must pass accessMode={commentAccessMode}').toContain('accessMode={commentAccessMode}');
+      expect(block, 'LinkEditor instance must pass real currentUserId').toContain("currentUserId={user?.id || 'anon'}");
+      expect(block, 'LinkEditor instance must pass real currentUserName').toContain("currentUserName={user?.email?.split('@')[0] || 'You'}");
+      expect(canvasModals).toContain('commentTitle: typeof padletToEdit.metadata.commentTitle');
+      expect(canvasModals).toContain('commentTitleStyle: padletToEdit.metadata.commentTitleStyle');
+    });
+  });
+
   describe('architecture guard -- every <CommentPopup usage in these three files is accounted for', () => {
-    it('FreeformPadletCards.tsx has exactly 6 <CommentPopup usages, all 6 wired (Clipart Site B, Image x2, Note x2, Todo x1)', () => {
+    it('FreeformPadletCards.tsx has exactly 7 <CommentPopup usages, all 7 wired (Clipart Site B, Image x2, Note x2, Todo x1, Link x1)', () => {
       const freeform = read(FREEFORM_PATH);
       const total = (freeform.match(/<CommentPopup/g) ?? []).length;
       const wired = (freeform.match(/accessMode=\{commentAccessMode\}/g) ?? []).length;
-      expect(total).toBe(6);
-      expect(wired).toBe(6);
+      expect(total).toBe(7);
+      expect(wired).toBe(7);
     });
 
     it('CanvasClient.tsx has exactly 1 <CommentPopup usage and it is wired', () => {

@@ -229,8 +229,13 @@ export default function CanvasModals({
             detachedComments: padletToEdit.metadata.detachedComments || padletToEdit.metadata.comments,
             comments: padletToEdit.metadata.comments,
             badgeColor: padletToEdit.metadata.badgeColor,
+            commentTitle: typeof padletToEdit.metadata.commentTitle === 'string' ? padletToEdit.metadata.commentTitle : undefined,
+            commentTitleStyle: padletToEdit.metadata.commentTitleStyle as any,
           } : undefined}
           onSave={saveLink}
+          accessMode={commentAccessMode}
+          currentUserId={user?.id || 'anon'}
+          currentUserName={user?.email?.split('@')[0] || 'You'}
         />
       </div>
 

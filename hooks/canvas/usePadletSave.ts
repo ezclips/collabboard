@@ -81,6 +81,8 @@ export type SaveLinkData = {
     isStrikethrough?: boolean;
   }>;
   badgeColor?: string;
+  commentTitle?: string;
+  commentTitleStyle?: { color?: string; backgroundColor?: string };
 };
 
 export type SaveTodoData = {
@@ -545,6 +547,8 @@ export function usePadletSave(params: UsePadletSaveParams) {
       detachedComments: data.detachedComments,
       comments: data.detachedComments,
       badgeColor: data.badgeColor || padletToEdit?.metadata?.badgeColor,
+      commentTitle: data.commentTitle,
+      commentTitleStyle: data.commentTitleStyle,
     };
 
     // Check if placement prompt is needed (grid/columns/wall layouts)

@@ -83,14 +83,18 @@ CANONICAL:
 - Drawing — normal/detached comments
 - Todo — normal/detached comments
 - AI Component — normal/detached comments
+- Link — normal/detached comments
 
 NOT YET MIGRATED:
 
 - Note — anchored/highlighted threads (special storage adapter required)
 - Document — **has no normal/detached comment tier at all** (see below)
-- Link
 - Comment post
 - Container
+- Table — has its own local hand-rolled "Table Comments Popup - Right side"
+  implementation in `FreeformPadletCards.tsx`, structurally identical to
+  Link's pre-8U implementation; discovered during PATCH 8U's inventory but
+  explicitly out of scope for that patch (not requested) and left untouched
 - other normal-comment surfaces identified by future audits
 
 **Document is not a pending Category-A migration.** PATCH 8Q's inventory
@@ -175,7 +179,61 @@ comment system; the AI generation/regeneration lifecycle (`generate`/`cancel`/
 `stage`/`abortRef`) is untouched and structurally isolated from the Comments
 panel (portaled to `document.body`, own `stopPropagation` wrapper).
 
-Other non-Clipart/Image/Note/Drawing/Todo/AI-Component surfaces are
+**Link normal/detached comments were migrated in PATCH 8U** (2026-08-12) —
+like Todo (PATCH 8S), this was a genuine UI migration off local hand-rolled
+JSX, not a wiring-only fix: Phase 1 inventory found TWO live entry points,
+each a fully local implementation (row JSX, composer, per-comment color
+popup, badge-color picker) with no relationship to `CommentPopup` at all —
+`LinkEditor.tsx`'s own left-toolbar Comments panel, and
+`FreeformPadletCards.tsx`'s single on-canvas badge popup (Link has no
+separate toolbar-triggered popup, same shape as Todo). Both were rewritten to
+delegate entirely to canonical `CommentPopup`, wired the same way as Todo's
+sites: `guardCommentMutation(accessMode, ...)` directly at every prop
+(COMMENT stays dormant for Link too), real identity threaded from
+`CanvasModals.tsx`'s existing `commentAccessMode`/`user` props into
+`LinkEditor.tsx` (previously hardcoded `userId: 'current-user', userName:
+'You'`; the on-canvas site already used real `user?.id || 'anon'` identity
+pre-migration). `commentTitle`/`commentTitleStyle` were newly added to both
+sites. `usePadletSave.ts`'s `saveLink`/`SaveLinkData` had the same
+persistence-layer gap found for Note (PATCH 8P.1) and Todo (PATCH 8S) —
+`commentTitle`/`commentTitleStyle` were silently dropped before the Supabase
+write despite both editor sites sending them correctly — and were fixed the
+same way. All local state now owned internally by `CommentPopup` (per-comment
+edit/color-popup state, badge-color picker open state, composer text) was
+deleted from both callers rather than kept as an unused duplicate, along with
+the now-dead `BADGE_COLORS`/`TextStylePopup`/`PenTool` imports in
+`LinkEditor.tsx`.
+
+This patch carried an explicit high-risk requirement not present in prior
+migrations: Comments must be a complete interaction island relative to the
+Link post's own destination-URL behavior (click-to-navigate). This is proven
+two ways. First, structurally: both entry points' `CommentPopup` wrapper
+stops `click`/`mousedown` propagation before it can reach the post's own
+click/select/navigate handlers, and neither comment site's source references
+any of the Link post's own URL/title/preview metadata fields (`linkUrl`,
+`linkTitle`, `linkImage`, `linkFavicon`, `linkDomain`) — asserted directly in
+the contract test suite. Second, behaviorally: the frozen, pre-existing
+`commentLinkSafety.ts` (`handleSafeCommentLinkClick`) already calls
+`event.preventDefault()`/`event.stopPropagation()` before opening a clicked
+comment-authored link via `window.open(url, '_blank', 'noopener,noreferrer')`
+— a mounted `LinkEditor.commentCanonicalization.test.tsx` test proves that
+clicking a comment's own authored link (e.g. `https://docs.example.com`)
+opens exactly that URL and never the Link post's own destination (e.g.
+`https://example.com/product`), and that doing so does not mutate any of the
+post's own URL/title/preview fields on save. Comment Link *authoring*
+(TipTap's `Link` extension) was already part of `CommentPopup`'s canonical
+behavior before this patch (added for Clipart's `enableCanonicalSelectionStyling`
+rollout) — Link post migration required no changes to that shared
+infrastructure, only wiring the two entry points onto it.
+
+Phase 1 inventory also surfaced a **Table** post local comment implementation
+(`FreeformPadletCards.tsx`'s "Table Comments Popup - Right side", inside the
+`padlet.type === 'table'` branch) structurally identical to Link's pre-8U
+implementation. This was NOT requested by PATCH 8U and was left untouched —
+recorded above under NOT YET MIGRATED as a discovered candidate for a future
+patch, per this contract's own audit-discovery convention.
+
+Other non-Clipart/Image/Note/Drawing/Todo/AI-Component/Link surfaces are
 intentionally not made to comply by this patch. A migration moves a post from
 the second list to the first only after all of its live entry points,
 adapters, and contract tests are added.
