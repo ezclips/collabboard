@@ -868,3 +868,193 @@ The freeze portion changes tests and architecture/governance documentation
 only. No production behavior is changed here. The canonical restore point is
 the annotated local tag `comment-ui-canonical-v1`, created on the final freeze
 commit and not pushed.
+
+## NORMAL COMMENT ROLLOUT — CLOSED
+
+**PATCH 8Y (2026-08-13)** performed a repository-wide closure audit,
+independently re-deriving the live post-type registry and comment-surface
+inventory from source rather than trusting this document, and added
+`components/collabboard/normalCommentRolloutClosure.contract.test.tsx` as the
+permanent enumeration guard. Result: **the normal/detached comment UI
+rollout for the padlets/collabboard canvas is CLOSED.** Every live post type
+is classified below; no unaccounted-for live `<CommentPopup>` usage exists;
+the closure guard passes.
+
+### Live post-type registry (independently re-derived)
+
+`Padlet['type']` (`types/collabboard.ts`) is `'text' | 'image' | 'file' |
+'table' | 'link' | 'todo' | 'container' | 'comment' | 'drawing' | 'card' |
+'note' | 'ai-component'`. Of these, `'file'` is dead -- it appears only
+inside `lib/PadletTemplates.ts`'s `getPadletTemplate()`, which is itself
+never imported or called anywhere in the app (confirmed via a repo-wide
+`getPadletTemplate` reference search returning only its own definition
+file) -- and is not a live post family. `'text'` and `'note'` are two
+literal type values for the SAME live Note family: `useCanvasActions.ts`'s
+`handleAddPostAtViewportCenter` creates new posts with `type: "note"` by
+default, while `FreeformPadletCards.tsx:3058` explicitly treats
+`padlet.type === 'text'` and `(padlet.type as string) === 'note'`
+identically for editor dispatch -- both routed through the same, already-
+canonical `NoteEditor.tsx`. `'card'` covers two distinct product-facing
+families disambiguated by metadata, per `lib/domain/canvas/documentPost.ts`:
+`isDocumentPost = post.type === 'card' && !post.metadata?.svgUrl` (Document);
+a `'card'` post WITH `metadata.svgUrl` is Clipart. This yields 11 live
+product-facing post families for 10 live type literals (`'file'` excluded).
+
+### Closure matrix
+
+| Post type | Live type value(s) | Normal/detached? | Status | Special system | Permission note |
+| --- | --- | --- | --- | --- | --- |
+| Clipart | `card` (+ `svgUrl`) | yes | CANONICAL | none | guarded |
+| Image | `image` | yes | CANONICAL | none | guarded (3 entry points) |
+| Note | `text` / `note` | yes | CANONICAL | anchored/highlighted threads | normal tier guarded; anchored tier UNGATED |
+| Drawing | `drawing` | yes | CANONICAL | none | guarded |
+| Todo | `todo` | yes | CANONICAL | none | guarded |
+| AI Component | `ai-component` | yes | CANONICAL | none | guarded |
+| Link | `link` | yes | CANONICAL | none | guarded |
+| Table | `table` | yes | CANONICAL | none | guarded (storage: `padlet.content` JSON, not `metadata`) |
+| Document | `card` (no `svgUrl`) | no | N/A (PATCH 8Q) | anchored/highlighted threads | N/A normal; anchored tier UNGATED |
+| Container | `container` | no | N/A (PATCH 8W) | embedded child `CommentPopup` renderer | N/A normal; child renderer UNGATED |
+| Comment post | `comment` | no (its entire body IS the comment thread) | SPECIAL / PRIMARY THREAD (PATCH 8X) | is itself the special system | all 3 live surfaces UNGATED |
+
+### Special-system matrix
+
+| Special system | Live surfaces | Permission status |
+| --- | --- | --- |
+| Note anchored/highlighted threads | `NoteEditor.tsx` (in-modal), `OverlayLayer.tsx` (on-canvas) | PERMISSION UNGATED |
+| Document anchored/highlighted threads | `DocumentEditor.tsx` (in-modal), `OverlayLayer.tsx` (on-canvas, shared with Note) | PERMISSION UNGATED |
+| Comment post primary thread | `CommentPost.tsx`, `FreeformPadletCards.tsx`'s collapsed-marker inline block, `CommentEditor.tsx` | PERMISSION UNGATED |
+| Container embedded child `CommentPopup` renderer | `ContainerEditor.tsx`'s `SortableChildItem` | PERMISSION UNGATED |
+| `EmbeddedCommentList` (compact child renderer) | `RowColumnContainerCard.tsx`, `PostCardContent.tsx` | PERMISSION UNGATED (component has no `accessMode` concept at all) |
+
+None of these is fixed by PATCH 8Y -- verification only, per the patch's own
+instruction not to redesign permissions. Every one of them shares the same
+underlying gap: real identity is generally present, but no caller wraps its
+mutation callbacks in `guardCommentMutation`/checks `accessMode`, so a
+workspace-readonly user can mutate any of these five surfaces today. This is
+the single largest remaining permission gap in the whole comment system.
+
+### Embedded-renderer matrix
+
+| Host component | Child post types served | Read/write | Storage field | Permission | Why not full `CommentPopup` |
+| --- | --- | --- | --- | --- | --- |
+| `RowColumnContainerCard.tsx` | any child (via `detachedComments`) + comment-type children (via `comments`) | both | child's own `metadata.comments` / `metadata.detachedComments` | UNGATED | intentionally compact, narrow-width embedded presentation (own header/counter/composer sized for a container card slot) -- full `CommentPopup` would change the embedded layout model, not just its implementation |
+| `PostCardContent.tsx` (Drawing-in-container image binding) | any child (via `detachedComments`) | both | child's own `metadata.detachedComments` | UNGATED | same reasoning as above |
+| `ContainerEditor.tsx`'s `SortableChildItem` | comment-type children only | both | child's own `metadata.comments` | UNGATED | already uses canonical `CommentPopup` directly (`embedded`/`fullWidth` props), unlike the two hosts above -- a pre-existing inconsistency between the two embedded-child code paths, noted here as a fact, not reconciled in PATCH 8Y |
+
+None of these was migrated or touched. `EmbeddedCommentList`/`CommentRow.tsx`
+remain a fourth, independent, genuinely-editable comment UI implementation,
+intentionally distinct from `CommentPopup` -- legitimate per this rollout's
+own architecture rule (storage differences belong below the UI boundary; UI
+*presentation* differences for a deliberately compact embedded context are a
+separate, accepted exception, not a duplicate to eliminate).
+
+### Dead/orphaned comment code inventory
+
+1. Container's own `detachedComments`/`commentPopupOpen`/`commentPopupPosition`/
+   `handleComment`/`handleAddComment` skeleton in `ContainerEditor.tsx`
+   (found PATCH 8W) -- round-tripped through `onSave`/`saveContainer` but
+   never reachable from any live UI trigger.
+2. The "Todo Comments Popup - Right side" mislabeled block inside
+   `FreeformPadletCards.tsx`'s `padlet.type === 'comment'` branch (first
+   flagged PATCH 8S/8U, confirmed genuinely dead PATCH 8X via a grep-complete
+   audit of every `setCardCommentPopupPadletId(padlet.id)` call site).
+3. The toolbar-open Clipart block in `FreeformPadletCards.tsx` --
+   `cardToolbarPadletId` has no live non-null setter (documented in this
+   contract's original freeze, restated here for a single dead-code index).
+
+None of these was deleted. Recorded for a later dedicated cleanup patch, per
+this patch's own instruction not to delete dead code during an audit.
+
+### Storage ownership audit
+
+| Storage location | Owner post type(s) | Normal or special | Write path | Read path |
+| --- | --- | --- | --- | --- |
+| `metadata.detachedComments` | Note, Drawing, Todo, AI Component, Link | normal (Category A) | `updatePadletMetadata` / editor `onSave` | same |
+| `metadata.comments` (primary) | Comment post; a Container child of type `comment`; read/written generically by `EmbeddedCommentList` for any comment-type child | special (Category B primary thread) / embedded child | `updatePadletMetadata`, `saveComment`, `onUpdateChildComments` | same |
+| `padlet.content` JSON blob fields (`comments`/`badgeColor`/`commentTitle`/`commentTitleStyle`) | Table | normal (Category A), uniquely NOT in `metadata` | `updatePadletContent` / `TableEditor`'s own `JSON.stringify` payload | same |
+| TipTap `comment` mark (`extensions/Comment.ts`) + associated thread data | Note anchored threads, Document anchored threads | special (Category B anchored) | `NoteEditor.tsx`/`DocumentEditor.tsx`/`OverlayLayer.tsx`'s anchored `CommentPopup` sites | same |
+| `kanban_comments` (separate Supabase table) | kanban-canvas cards | **not part of this system at all** (see below) | `lib/kanban/supabaseAdapter.ts` | same |
+
+No canonical normal migration (Note/Drawing/Todo/AI Component/Link/Table)
+changed its pre-existing authoritative storage field -- each migration's own
+patch report explicitly proved this (most rigorously for Table, whose
+`padlet.content`-based storage is unique among all migrated types).
+
+### A system found outside this rollout's frame: kanban-canvas
+
+The PATCH 8Y full-repo sweep (`components/kanban-canvas`) found a complete,
+independent, live normal-comment feature: `Editor.tsx`'s inline comment
+list/composer and `Card.tsx`'s count badge, against the `kanban_comments`
+Supabase table via `lib/kanban/supabaseAdapter.ts` -- not `padlets.metadata`,
+not `CommentPopup`, not `EmbeddedCommentList`. Its own permission model is a
+simple boolean (`readOnly` disables `addComment`/`deleteComment` entirely),
+structurally unrelated to `CommentAccessMode`/`guardCommentMutation`.
+
+**This does not block "NORMAL COMMENT ROLLOUT -- CLOSED" above and was not
+treated as PATCH 8Y's "unexpected live normal/detached implementation" stop
+condition.** That stop condition, and every patch in the 8-series before it,
+is scoped to `Padlet['type']` -- the padlets/collabboard canvas post-type
+registry enumerated above. Kanban cards are not `Padlet` rows; they live in
+an entirely separate vertical (`kanban_*` tables, `components/kanban-canvas`,
+per `.fable5/CLAUDE.md`'s own architecture notes) with a different board
+model (columns/swimlanes, not the freeform canvas) that has never been in
+scope for this rollout at any point. Treating it as an in-scope gap would be
+exactly the kind of scope creep this whole series has consistently avoided
+(compare: Link's migration deliberately left the post's own URL fields
+untouched; Container's investigation deliberately left child-post ownership
+untouched). `normalCommentRolloutClosure.contract.test.tsx` records the
+finding permanently (two structural tests proving the two verticals import
+neither module) so it is not silently lost, without pretending it was ever
+this rollout's job to fix. Whether to unify kanban's comment UX with
+`CommentPopup` someday is a real, separate product decision for a
+differently-scoped future initiative -- not a numbered follow-up in the
+8-series, since it was never a member of the post-type registry this series
+migrates.
+
+### Next-phase backlog (priority order, not implemented)
+
+1. **Permission wiring for the five UNGATED special surfaces** (Comment post
+   primary thread, Document anchored threads, Note anchored threads,
+   Container's embedded child `CommentPopup`, `EmbeddedCommentList`) -- the
+   single largest concentration of real gaps found by this audit; every one
+   of them lets a workspace-readonly user mutate comments today. Highest
+   priority because it's a genuine permission hole, not a UI/architecture
+   preference.
+2. **Comment post primary-thread dedicated adapter patch** (per PATCH 8X) --
+   whether to bring its rich TipTap composer capability (Bold/Italic/
+   Underline/lists/code/align/emoji) INTO `CommentPopup` as an opt-in
+   richer mode, or to formally document it as a permanently separate
+   surface with its own frozen contract, is a real product decision this
+   audit surfaces but does not make.
+3. **Dead/orphaned comment code cleanup** (the three items above) -- low
+   risk, no live behavior change, but currently dead code that could
+   confuse a future patch (as the "Todo Comments Popup" mislabel already
+   did twice).
+4. **Reconcile the two embedded-child-renderer code paths** (`ContainerEditor.tsx`'s
+   direct `CommentPopup` usage vs. `RowColumnContainerCard.tsx`/`PostCardContent.tsx`'s
+   `EmbeddedCommentList`) -- an existing inconsistency, not a regression;
+   worth a deliberate decision (standardize on one) rather than leaving two
+   patterns to diverge further.
+5. **kanban-canvas comment system** -- out of this rollout's frame entirely
+   (see above); listed last because it requires its own scoping decision
+   (does the product want unified comment UX across both verticals at all?)
+   before any implementation planning is meaningful.
+
+### Closure architecture guard
+
+`components/collabboard/normalCommentRolloutClosure.contract.test.tsx`
+enumerates every live `<CommentPopup>` usage across `components/collabboard`
+(excluding the vendored Excalidraw fork) and
+`app/dashboard/canvas/[id]/CanvasClient.tsx`, and asserts the total (20) and
+per-file breakdown against the classified inventory above -- structurally,
+via string counts, not line numbers. It fails if: a known canonical post
+regains a local comment implementation or drops `accessMode=`; an N/A post
+type (Document, Container) gains a second `<CommentPopup>` usage; a live
+Container on-canvas comment badge appears (the `padlet.type === 'container'`
+branch is asserted to contain zero `<CommentPopup>` usages); the single live
+`resolveCommentAccessMode(` call site gains a `boardPermission` argument
+(which would silently end the dormant-COMMENT-tier characterization); or an
+entirely new file gains a `<CommentPopup>` usage the map doesn't know about.
+Verified by two negative controls during PATCH 8Y (a fake `<CommentPopup`
+string injected into the Container branch; `accessMode={accessMode}` deleted
+from `DrawingEditor.tsx`) -- both caught, both restored exactly.
