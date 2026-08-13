@@ -917,7 +917,7 @@ product-facing post families for 10 live type literals (`'file'` excluded).
 | Link | `link` | yes | CANONICAL | none | guarded |
 | Table | `table` | yes | CANONICAL | none | guarded (storage: `padlet.content` JSON, not `metadata`) |
 | Document | `card` (no `svgUrl`) | no | N/A (PATCH 8Q) | anchored/highlighted threads | N/A normal; anchored tier **PERMISSION SAFE -- READ / MANAGE** (PATCH 8AA) |
-| Container | `container` | no | N/A (PATCH 8W) | embedded child `CommentPopup` renderer | N/A normal; child renderer UNGATED |
+| Container | `container` | no | N/A (PATCH 8W) | embedded child `CommentPopup` renderer | N/A normal; child renderer **PERMISSION SAFE -- READ / MANAGE** (PATCH 8AC) |
 | Comment post | `comment` | no (its entire body IS the comment thread) | SPECIAL / PRIMARY THREAD (PATCH 8X) | is itself the special system | all 3 live surfaces UNGATED |
 
 ### Special-system matrix
@@ -927,15 +927,20 @@ product-facing post families for 10 live type literals (`'file'` excluded).
 | Note anchored/highlighted threads | `NoteEditor.tsx` (in-modal), `OverlayLayer.tsx` (on-canvas, shared with Document) | **PERMISSION SAFE -- READ / MANAGE** (PATCH 8AB, 2026-08-13) |
 | Document anchored/highlighted threads | `DocumentEditor.tsx` (in-modal), `OverlayLayer.tsx` (on-canvas, shared with Note) | **PERMISSION SAFE -- READ / MANAGE** (PATCH 8AA, 2026-08-13) |
 | Comment post primary thread | `CommentPost.tsx`, `FreeformPadletCards.tsx`'s collapsed-marker inline block, `CommentEditor.tsx` | **PERMISSION SAFE -- READ / MANAGE** (PATCH 8Z, 2026-08-13) |
-| Container embedded child `CommentPopup` renderer | `ContainerEditor.tsx`'s `SortableChildItem` | PERMISSION UNGATED |
-| `EmbeddedCommentList` (compact child renderer) | `RowColumnContainerCard.tsx`, `PostCardContent.tsx` | PERMISSION UNGATED (component has no `accessMode` concept at all) |
+| Container embedded child `CommentPopup` renderer | `ContainerEditor.tsx`'s `SortableChildItem` | **PERMISSION SAFE -- READ / MANAGE** (PATCH 8AC, 2026-08-13) |
+| `EmbeddedCommentList` (compact child renderer) | `RowColumnContainerCard.tsx`, `PostCardContent.tsx` | PERMISSION UNGATED (component has no `accessMode` concept at all) -- PATCH 8AD |
 
-None of these is fixed by PATCH 8Y -- verification only, per the patch's own
-instruction not to redesign permissions. Every one of them shares the same
-underlying gap: real identity is generally present, but no caller wraps its
-mutation callbacks in `guardCommentMutation`/checks `accessMode`, so a
-workspace-readonly user can mutate any of these five surfaces today. This is
-the single largest remaining permission gap in the whole comment system.
+None of these was fixed by PATCH 8Y itself -- verification only, per that
+patch's own instruction not to redesign permissions. At the time PATCH 8Y
+closed, all five surfaces shared the same underlying gap: real identity was
+generally present, but no caller wrapped its mutation callbacks in
+`guardCommentMutation`/checked `accessMode`, so a workspace-readonly user
+could mutate any of them. Each has since been closed by its own dedicated
+patch -- Note (PATCH 8AB), Document (PATCH 8AA), Comment post (PATCH 8Z), and
+Container's embedded child `CommentPopup` renderer (PATCH 8AC) are all now
+**PERMISSION SAFE -- READ / MANAGE**. `EmbeddedCommentList` remains the one
+open item (PATCH 8AD, not yet implemented) -- see the special-system matrix
+above for current status.
 
 ### Embedded-renderer matrix
 
@@ -1231,3 +1236,34 @@ READ users may open and read existing Note anchored threads (via either
 surface); they cannot create a new thread, add/edit/delete a reply, delete a
 whole thread, remove the source-text mark, or invoke the text-span highlight
 picker. MANAGE keeps every existing capability, unchanged.
+
+**Container's embedded child `CommentPopup` renderer was permission-wired in
+PATCH 8AC** (2026-08-13). This surface concerns comments belonging to CHILD
+POSTS, not the Container itself -- Container's own N/A normal/detached
+classification (PATCH 8W) is unchanged, and this patch does not create any
+Container-owned comment tier. Live surface: `ContainerEditor.tsx`'s
+`SortableChildItem`, which renders a `CommentPopup` (embedded, no
+portal/position) for any `comment`-type child padlet, reading/writing that
+child's own `metadata.comments` -- never `detachedComments`, never a
+Container-level field. `ContainerEditor` now accepts an `accessMode` prop
+(defaulting to `'manage'`), threaded from `CanvasModals.tsx`'s existing
+`commentAccessMode` (no new signal, same convention as every other canonical
+caller) down through `SortableChildItem` into the embedded `CommentPopup`'s
+own `accessMode` prop. All four live mutation props at that call site
+(`onSubmit`, `onEditComment`, `onRemoveComment`, `onCommentColor`) are wrapped
+with `guardCommentMutation(accessMode, ...)`; every mutation inside that block
+targets `child.id` exclusively (never a Container id, never a sibling child,
+never Container metadata/order) -- verified structurally and by mounted
+child-ownership/sibling-isolation/Container-isolation tests. Real identity
+(`currentUserId`/`currentUserName`) was already threaded correctly from
+`CanvasModals.tsx` before this patch (`user?.id` /
+`user?.user_metadata?.full_name || user?.email`) -- unchanged, verified.
+`EmbeddedCommentList.tsx`, `RowColumnContainerCard.tsx`, and
+`PostCardContent.tsx` are explicitly out of scope for PATCH 8AC (their own
+patch is PATCH 8AD) and were not modified.
+
+READ users may see and read a child post's existing comments; they cannot
+Add/Send, Edit, Color, Strikethrough-toggle, or Delete a child comment (Link
+authoring, handled internally by `CommentPopup`'s own per-row action rail,
+is likewise gated by the same `accessMode`). MANAGE keeps every existing
+capability, unchanged.

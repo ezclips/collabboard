@@ -25,6 +25,7 @@ import PostCardContent from "@/components/collabboard/PostCardContent";
 import CardPreview from "@/components/collabboard/CardPreview";
 import CommentPopup from "./CommentPopup";
 import TextStylePopup from "./TextStylePopup";
+import { guardCommentMutation, type CommentAccessMode } from "@/lib/domain/canvas/comments";
 import { CAPTION_STYLE_PRESETS, resolveCaptionStyle, type CaptionHeading } from "@/lib/domain/canvas/captionStyle";
 import { nextTextAlign, type TextAlignValue } from "./textAlignCycle";
 import {
@@ -134,6 +135,13 @@ interface ContainerEditorProps {
     currentUserName?: string;
     currentUserAvatar?: string;
 
+    // PATCH 8AC -- gates the embedded child comment renderer below
+    // (SortableChildItem's `comment`-type children). Defaults to 'manage' so
+    // every existing caller that has not been updated keeps its exact
+    // current (fully writable) behavior, same convention as every other
+    // canonical caller.
+    accessMode?: CommentAccessMode;
+
     isOpen: boolean;
 }
 
@@ -234,6 +242,7 @@ interface SortableChildItemProps {
     currentUserId?: string;
     currentUserName?: string;
     currentUserAvatar?: string;
+    accessMode?: CommentAccessMode;
 }
 
 function SortableChildItem({
@@ -249,7 +258,8 @@ function SortableChildItem({
     onUpdateChildComments,
     currentUserId,
     currentUserName,
-    currentUserAvatar
+    currentUserAvatar,
+    accessMode = 'manage',
 }: SortableChildItemProps) {
     const {
         attributes,
@@ -364,7 +374,7 @@ function SortableChildItem({
                             onOpenChange={() => { }}
                             fullWidth={true}
                             embedded={true}
-                            onSubmit={(text) => {
+                            onSubmit={guardCommentMutation(accessMode, (text) => {
                                 const newComment = {
                                     id: `comment-${Date.now()}`,
                                     text,
@@ -375,29 +385,30 @@ function SortableChildItem({
                                 };
                                 const existingComments = child.metadata?.comments || [];
                                 onUpdateChildComments(child.id, [...existingComments, newComment]);
-                            }}
-                            onEditComment={(commentId, newText) => {
+                            })}
+                            onEditComment={guardCommentMutation(accessMode, (commentId, newText) => {
                                 const existingComments = child.metadata?.comments || [];
                                 const updated = existingComments.map((c: any) =>
                                     c.id === commentId ? { ...c, text: newText } : c
                                 );
                                 onUpdateChildComments(child.id, updated);
-                            }}
-                            onRemoveComment={(commentId) => {
+                            })}
+                            onRemoveComment={guardCommentMutation(accessMode, (commentId) => {
                                 const existingComments = child.metadata?.comments || [];
                                 const filtered = existingComments.filter((c: any) => c.id !== commentId);
                                 onUpdateChildComments(child.id, filtered);
-                            }}
-                            onCommentColor={(commentId, textColor, backgroundColor) => {
+                            })}
+                            onCommentColor={guardCommentMutation(accessMode, (commentId, textColor, backgroundColor) => {
                                 const existingComments = child.metadata?.comments || [];
                                 const updated = existingComments.map((c: any) =>
                                     c.id === commentId ? { ...c, textColor, backgroundColor } : c
                                 );
                                 onUpdateChildComments(child.id, updated);
-                            }}
+                            })}
                             comments={child.metadata?.comments || []}
                             currentUserId={currentUserId}
                             currentUserName={currentUserName}
+                            accessMode={accessMode}
                         />
                     ) : (
                         <div
@@ -451,6 +462,7 @@ export default function ContainerEditor({
     currentUserId,
     currentUserName,
     currentUserAvatar,
+    accessMode = 'manage',
     isOpen,
 }: ContainerEditorProps) {
     const [title, setTitle] = useState(initialTitle);
@@ -891,6 +903,7 @@ export default function ContainerEditor({
                                                             currentUserId={currentUserId}
                                                             currentUserName={currentUserName}
                                                             currentUserAvatar={currentUserAvatar}
+                                                            accessMode={accessMode}
                                                         />
                                                     ))}
                                                 </div>

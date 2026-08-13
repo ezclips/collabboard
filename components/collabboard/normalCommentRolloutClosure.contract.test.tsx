@@ -106,8 +106,8 @@ const EXPECTED: Record<string, { usages: number; guarded: number; note: string }
   },
   'components/collabboard/editors/ContainerEditor.tsx': {
     usages: 1,
-    guarded: 0,
-    note: 'SortableChildItem renders a comment-type CHILD padlet\'s own metadata.comments -- Category B/C child-post rendering, not a Container-owned comment; intentionally unguarded (real gap, out of scope per PATCH 8X/8Y)',
+    guarded: 1,
+    note: 'SortableChildItem renders a comment-type CHILD padlet\'s own metadata.comments -- Category B/C child-post rendering, not a Container-owned comment; permission-safe READ/MANAGE as of PATCH 8AC',
   },
 };
 
@@ -115,12 +115,12 @@ const TOTAL_EXPECTED_USAGES = Object.values(EXPECTED).reduce((sum, e) => sum + e
 const TOTAL_EXPECTED_GUARDED = Object.values(EXPECTED).reduce((sum, e) => sum + e.guarded, 0);
 
 describe('PATCH 8Y -- normal comment rollout closure', () => {
-  it('TOTAL_EXPECTED_USAGES/GUARDED constants match the PATCH 8Y+8AA+8AB inventory (20 usages, 19 guarded)', () => {
+  it('TOTAL_EXPECTED_USAGES/GUARDED constants match the PATCH 8Y+8AA+8AB+8AC inventory (20 usages, 20 guarded)', () => {
     // Pins the inventory numbers themselves, independent of the file walk,
     // so a future editor of EXPECTED can see at a glance if their edit
     // changed the totals.
     expect(TOTAL_EXPECTED_USAGES).toBe(20);
-    expect(TOTAL_EXPECTED_GUARDED).toBe(19);
+    expect(TOTAL_EXPECTED_GUARDED).toBe(20);
   });
 
   it('every file with a live <CommentPopup usage is accounted for in EXPECTED, with no unaccounted file', () => {

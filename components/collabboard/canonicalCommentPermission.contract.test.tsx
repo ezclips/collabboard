@@ -1385,6 +1385,69 @@ describe('PATCH 8O.1/8O.2 -- canonical comment permission wiring', () => {
     });
   });
 
+  describe('ContainerEditor embedded child CommentPopup -- permission wiring (PATCH 8AC)', () => {
+    it('ContainerEditor.tsx accepts accessMode and threads it into SortableChildItem', () => {
+      const containerEditor = read('components/collabboard/editors/ContainerEditor.tsx');
+      expect(containerEditor).toContain("import { guardCommentMutation, type CommentAccessMode } from \"@/lib/domain/canvas/comments\";");
+      expect(containerEditor).toContain('accessMode?: CommentAccessMode;');
+      expect(containerEditor).toContain("accessMode = 'manage',");
+      const sortableCallStart = containerEditor.indexOf('<SortableChildItem');
+      const sortableCallEnd = containerEditor.indexOf('/>', sortableCallStart);
+      expect(containerEditor.slice(sortableCallStart, sortableCallEnd)).toContain('accessMode={accessMode}');
+    });
+
+    it('the embedded CommentPopup call site receives accessMode and every mutation callback is guarded', () => {
+      const containerEditor = read('components/collabboard/editors/ContainerEditor.tsx');
+      const start = containerEditor.indexOf('{child.type === "comment" && onUpdateChildComments ? (');
+      const block = commentPopupBlockAfter(containerEditor, '{child.type === "comment" && onUpdateChildComments ? (');
+      expect(start).toBeGreaterThan(-1);
+      expect(block).toContain('accessMode={accessMode}');
+      for (const prop of ['onSubmit=', 'onEditComment=', 'onRemoveComment=', 'onCommentColor=']) {
+        const propStart = block.indexOf(prop);
+        expect(propStart, `${prop} must be present`).toBeGreaterThan(-1);
+        const nextNonSpace = block.slice(propStart + prop.length).match(/^\s*\{?\s*(\S+)/);
+        expect(nextNonSpace?.[1]?.startsWith('guardCommentMutation(accessMode,'), `${prop} must be wrapped with guardCommentMutation(accessMode, ...), found: ${nextNonSpace?.[0]}`).toBe(true);
+      }
+    });
+
+    it('every mutation inside the embedded block targets child.id, never a Container id or a hardcoded id', () => {
+      const containerEditor = read('components/collabboard/editors/ContainerEditor.tsx');
+      const block = commentPopupBlockAfter(containerEditor, '{child.type === "comment" && onUpdateChildComments ? (');
+      const targetCalls = block.match(/onUpdateChildComments\(([^,]+),/g) ?? [];
+      expect(targetCalls.length).toBeGreaterThanOrEqual(4);
+      for (const call of targetCalls) {
+        expect(call, `expected child.id as the mutation target, found: ${call}`).toContain('child.id');
+      }
+      expect(block).not.toContain('containerId');
+    });
+
+    it('storage ownership: only child.metadata.comments is used in the embedded block, never detachedComments', () => {
+      const containerEditor = read('components/collabboard/editors/ContainerEditor.tsx');
+      const block = commentPopupBlockAfter(containerEditor, '{child.type === "comment" && onUpdateChildComments ? (');
+      expect(block).toContain('child.metadata?.comments');
+      expect(block).not.toContain('detachedComments');
+    });
+
+    it('CanvasModals.tsx threads commentAccessMode into ContainerEditor as accessMode', () => {
+      const canvasModals = read('components/collabboard/canvas/ui/CanvasModals.tsx');
+      const start = canvasModals.indexOf('<ContainerEditor');
+      expect(start).toBeGreaterThan(-1);
+      const end = canvasModals.indexOf('/>', canvasModals.indexOf('currentUserAvatar={user?.user_metadata?.avatar_url}', start));
+      const block = canvasModals.slice(start, end);
+      expect(block).toContain('accessMode={commentAccessMode}');
+      // Identity was already real before this patch -- unchanged, verified.
+      expect(block).toContain('currentUserId={user?.id}');
+    });
+
+    it('EmbeddedCommentList.tsx / RowColumnContainerCard.tsx / PostCardContent.tsx are explicitly out of scope and untouched by this patch', () => {
+      // PATCH 8AC only wires the CommentPopup-based embedded child surface;
+      // the compact renderers are PATCH 8AD's scope (see contract doc).
+      const embeddedList = read('components/collabboard/EmbeddedCommentList.tsx');
+      expect(embeddedList).not.toContain('guardCommentMutation');
+      expect(embeddedList).not.toContain("from '@/lib/domain/canvas/comments'");
+    });
+  });
+
   describe('architecture guard -- every <CommentPopup usage in these three files is accounted for', () => {
     it('FreeformPadletCards.tsx has exactly 8 <CommentPopup usages, all 8 wired (Clipart Site B, Image x2, Note x2, Todo x1, Link x1, Table x1)', () => {
       const freeform = read(FREEFORM_PATH);

@@ -393,6 +393,7 @@ export default function CanvasModals({
             currentUserId={user?.id}
             currentUserName={user?.user_metadata?.full_name || user?.email || 'Anonymous'}
             currentUserAvatar={user?.user_metadata?.avatar_url}
+            accessMode={commentAccessMode}
           />
         );
       })()}
