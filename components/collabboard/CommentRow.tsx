@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import DOMPurify from 'dompurify';
-import { Palette, Strikethrough, Trash2 } from 'lucide-react';
+import { Link as LinkIcon, Palette, Strikethrough, Trash2 } from 'lucide-react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import { Color } from '@tiptap/extension-color';
@@ -12,6 +12,8 @@ import { Highlight } from '@tiptap/extension-highlight';
 import TextStylePopup from './editors/TextStylePopup';
 import { useAnchoredPopover, rectFromElement, preventPopoverFocusLoss, type AnchorRect } from './editors/useAnchoredPopover';
 import { handleSafeCommentLinkClick } from './commentLinkSafety';
+import { createCommentLinkExtension, applyCommentLink } from './commentLinkAuthoring';
+import { CommentLinkPopover } from './CommentLinkPopover';
 import { canMutateComment, type CommentAccessMode } from '@/lib/domain/canvas/comments';
 
 interface CommentData {
@@ -68,6 +70,14 @@ export default function CommentRow({
   const [colorPopupOpen, setColorPopupOpen] = useState(false);
   const [colorTriggerRect, setColorTriggerRect] = useState<AnchorRect | null>(null);
   const { popoverRef: colorPopoverRef, position: colorPosition } = useAnchoredPopover(colorPopupOpen, colorTriggerRect);
+  // Per-row Link popover (PATCH 8AS) -- mutually exclusive with the color
+  // popup above, same local-ref-based selection capture CommentPopup/
+  // CommentEditor already established in PATCH 8AR.
+  const [linkPopupOpen, setLinkPopupOpen] = useState(false);
+  const [linkUrl, setLinkUrl] = useState('');
+  const [linkTriggerRect, setLinkTriggerRect] = useState<AnchorRect | null>(null);
+  const savedLinkSelectionRef = useRef<{ from: number; to: number } | null>(null);
+  const { popoverRef: linkPopoverRef, position: linkPosition } = useAnchoredPopover(linkPopupOpen, linkTriggerRect);
 
   // TipTap editor for editing
   const editEditor = useEditor({
@@ -76,10 +86,12 @@ export default function CommentRow({
       StarterKit.configure({
         heading: false,
         codeBlock: false,
+        link: false,
       }),
       TipTapTextStyle,
       Color,
       Highlight.configure({ multicolor: true }),
+      createCommentLinkExtension(),
     ],
     content: '',
     editorProps: {
@@ -112,15 +124,50 @@ export default function CommentRow({
     }
   }, [shouldSelectText, isEditing, editEditor]);
 
-  // Close the color popup if editing ends without it (save/cancel), so it
-  // doesn't linger orphaned pointing at a row that's no longer editable.
+  // Close the color/link popups if editing ends without them (save/cancel),
+  // so neither lingers orphaned pointing at a row that's no longer editable.
   useEffect(() => {
-    if (!isEditing) setColorPopupOpen(false);
+    if (!isEditing) {
+      setColorPopupOpen(false);
+      setLinkPopupOpen(false);
+    }
   }, [isEditing]);
 
   const refocusEditor = () => {
     if (!editEditor || editEditor.isDestroyed) return;
     editEditor.commands.focus('end');
+  };
+
+  // Captures the edit editor's current selection before the popover steals
+  // focus (the trigger button's own onMouseDown preventDefault/stopPropagation
+  // keeps that selection intact through the click) -- same pattern
+  // CommentPopup's openLinkPopover uses. Independent permission check: the
+  // shared primitive is not an authorization boundary, so this handler must
+  // verify canMutateThisComment itself rather than relying solely on the
+  // trigger button being hidden.
+  const openLinkPopover = (triggerEl: Element) => {
+    if (!canMutateThisComment) return;
+    if (!editEditor || editEditor.isDestroyed) return;
+    const { from, to } = editEditor.state.selection;
+    savedLinkSelectionRef.current = { from, to };
+    setLinkUrl(editEditor.getAttributes('link').href || '');
+    setColorPopupOpen(false);
+    setLinkTriggerRect(rectFromElement(triggerEl));
+    setLinkPopupOpen(true);
+  };
+
+  const handleApplyLink = () => {
+    if (!canMutateThisComment) return;
+    if (!editEditor || editEditor.isDestroyed) return;
+    applyCommentLink(editEditor, linkUrl.trim(), savedLinkSelectionRef.current);
+    setLinkPopupOpen(false);
+    setLinkUrl('');
+    savedLinkSelectionRef.current = null;
+    // Refocus so a later genuine click-away still fires the blur that
+    // commits the edit (onSaveEdit) -- CommentRow persists on blur/Enter,
+    // not immediately on Add, matching how a plain text edit already works
+    // here (unlike CommentPopup, which persists Link immediately).
+    refocusEditor();
   };
 
   const getTimeAgo = (timestamp: number) => {
@@ -206,11 +253,11 @@ export default function CommentRow({
             onMouseDown={(e) => e.stopPropagation()}
             onPointerDown={(e) => e.stopPropagation()}
             onBlur={(e) => {
-              // The color popup renders outside this wrapper (portaled to
-              // document.body) and its hex input auto-steals focus on
+              // The color/link popups render outside this wrapper (portaled
+              // to document.body) and their inputs auto-steal focus on
               // interaction -- that's a genuine blur, but not the user
               // clicking away, so don't save/exit-edit for it.
-              if (colorPopupOpen) return;
+              if (colorPopupOpen || linkPopupOpen) return;
               if (!e.currentTarget.contains(e.relatedTarget as Node)) {
                 handleSaveEdit();
               }
@@ -261,6 +308,7 @@ export default function CommentRow({
                   setColorPopupOpen(false);
                   refocusEditor();
                 } else {
+                  setLinkPopupOpen(false);
                   setColorTriggerRect(rectFromElement(e.currentTarget));
                   setColorPopupOpen(true);
                 }
@@ -287,6 +335,29 @@ export default function CommentRow({
                 <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"></path>
                 <path d="m15 5 4 4"></path>
               </svg>
+            </button>
+          )}
+          {isEditing && (
+            <button
+              onMouseDown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+              }}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (!canMutateThisComment) return;
+                if (linkPopupOpen) {
+                  setLinkPopupOpen(false);
+                  refocusEditor();
+                } else {
+                  openLinkPopover(e.currentTarget);
+                }
+              }}
+              className="p-0.5 rounded transition-colors text-gray-400 hover:text-blue-500 hover:bg-blue-50"
+              title="Link"
+            >
+              <LinkIcon className="w-3 h-3" />
             </button>
           )}
           <button
@@ -348,6 +419,34 @@ export default function CommentRow({
             currentHeading="normal"
             currentColor={comment.textColor || comment.color}
             currentHighlight={comment.backgroundColor}
+          />
+        </div>,
+        document.body
+      )}
+
+      {linkPopupOpen && createPortal(
+        <div
+          ref={linkPopoverRef}
+          className="fixed z-[1200] bg-white rounded-lg shadow-lg p-3 border border-gray-200"
+          style={{
+            left: linkPosition?.left ?? -9999,
+            top: linkPosition?.top ?? -9999,
+            opacity: linkPosition ? 1 : 0,
+            pointerEvents: linkPosition ? 'auto' : 'none',
+          }}
+          onClick={(e) => e.stopPropagation()}
+          onMouseDown={preventPopoverFocusLoss}
+        >
+          <CommentLinkPopover
+            url={linkUrl}
+            onUrlChange={setLinkUrl}
+            onApply={handleApplyLink}
+            onCancel={() => {
+              setLinkPopupOpen(false);
+              refocusEditor();
+            }}
+            inputClassName="px-3 py-1.5 border border-blue-400 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-200 text-xs w-56"
+            applyButtonClassName="px-3 py-1.5 text-gray-600 hover:text-gray-900 text-xs font-medium border border-gray-300 rounded-lg hover:bg-gray-50"
           />
         </div>,
         document.body

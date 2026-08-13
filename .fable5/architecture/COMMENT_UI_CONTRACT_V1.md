@@ -1487,6 +1487,43 @@ CommentEditor's Link flow. `CommentRow.tsx`/`EmbeddedCommentList.tsx` do
 **not** consume this primitive yet -- embedded Link authoring remains
 pending PATCH 8AS.
 
+**EmbeddedCommentList / CommentRow gained Link authoring in PATCH 8AS**
+(2026-08-13), closing the capability gap PATCH 8AQ's audit found (the same
+comment data could author Links through `CommentPopup` -- including
+ContainerEditor's embedded `CommentPopup` -- but not through the compact
+`EmbeddedCommentList` renderer). Disposition is unchanged from PATCH 8AN:
+**COMPACT EMBEDDED SPECIAL PRESENTATION -> SHARE LOWER-LEVEL PRIMITIVES**, not
+a `CommentPopup embedded` consolidation. `CommentRow.tsx` now consumes the
+PATCH 8AR primitives as-is (`createCommentLinkExtension()` added to its edit
+editor's extensions, with `link: false` added to its `StarterKit.configure`
+call to avoid a duplicate mark; `applyCommentLink(...)` backs its own
+`handleApplyLink`; `CommentLinkPopover` renders its Link popover, portaled via
+the same `useAnchoredPopover` + `createPortal(document.body)` pattern already
+used for its Color popup). The Link button appears only while editing,
+immediately after Color and before Strikethrough, and is mutually exclusive
+with the Color popup (opening one closes the other). Selection capture
+(`savedLinkSelectionRef`) and permission checks (`canMutateThisComment`,
+independently re-verified in both `openLinkPopover` and `handleApplyLink`)
+stayed local to `CommentRow.tsx`, per PATCH 8AR's own selection-ownership
+boundary. Unlike `CommentPopup` (which persists a Link immediately on Add),
+`CommentRow` persists through its existing blur/Enter-commit path -- Add only
+updates the live edit editor; `onSaveEdit` (already CommentRow's sole
+persistence callback) fires on the next blur or Enter exactly as a plain text
+edit already does, so no new callback (`onAddLink`/`onUpdateLink`) was
+introduced. No storage change: Link persistence remains
+`comment.text = HTML string`. Verified end-to-end through
+`RowColumnContainerCard`, `PostCardContent` (nested-container child), and the
+Map `PostPopup` host with zero host production changes. `DrawingLayout.tsx`
+was not independently negative-control-tested (no existing test harness for
+its Excalidraw-canvas code path, matching the precedent already set by
+`PostPopup.commentPermission.test.tsx` mounting `PostPopup` directly rather
+than `MapCanvas`/Mapbox) -- its safety is structural: the Link trigger reuses
+byte-for-byte the same `onMouseDown` preventDefault/stopPropagation pattern
+the Color button already relies on successfully inside it, and zero
+`DrawingLayout.tsx` changes were made. `CommentPopup.tsx`, `CommentEditor.tsx`,
+and `commentLinkAuthoring.ts`/`CommentLinkPopover.tsx` themselves were not
+modified.
+
 **Note anchored/highlighted comments were permission-wired in PATCH 8AB**
 (2026-08-13). Same SPECIAL / ANCHORED / HIGHLIGHTED classification, same
 TipTap `comment` mark storage (`NoteEditor.tsx`'s own extension registry,

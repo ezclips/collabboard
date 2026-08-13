@@ -144,6 +144,49 @@ describe('Map pin PostPopup -- embedded child comment permission wiring (PATCH 8
       expect(childId).not.toBe('child-b');
     });
 
+    it('PATCH 8AS: Link authoring targets only the owning child, keeps the popup open, and never touches Map/container callbacks', () => {
+      const onUpdateChildComments = vi.fn();
+      const onClose = vi.fn();
+      const c = mountPopup({ onUpdateChildComments, accessMode: 'manage', onClose });
+      const editButtons = c.querySelectorAll('button[title="Edit"]');
+      click(editButtons[0]);
+      const pm = c.querySelector('.ProseMirror') as HTMLElement;
+      act(() => {
+        pm.focus();
+        const walker = document.createTreeWalker(pm, NodeFilter.SHOW_TEXT);
+        const node = walker.nextNode() as Text;
+        const idx = node.textContent!.indexOf('child A comment');
+        const range = document.createRange();
+        range.setStart(node, idx);
+        range.setEnd(node, idx + 'child A comment'.length);
+        const sel = window.getSelection();
+        sel?.removeAllRanges();
+        sel?.addRange(range);
+        document.dispatchEvent(new Event('selectionchange'));
+      });
+      click(c.querySelector('button[title="Link"]')!);
+      const urlInput = document.body.querySelector('input[type="url"]') as HTMLInputElement;
+      expect(urlInput, 'Link popup did not open inside the Map PostPopup host').not.toBeNull();
+      act(() => {
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+        setter.call(urlInput, 'google.com');
+        urlInput.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      const addButton = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'Add');
+      click(addButton!);
+      // Opening/using the Link popup must not have dismissed the popup.
+      expect(onClose).not.toHaveBeenCalled();
+      act(() => {
+        pm.closest('.relative')!.dispatchEvent(new FocusEvent('focusout', { bubbles: true, relatedTarget: document.body }));
+      });
+      expect(onUpdateChildComments).toHaveBeenCalled();
+      const [childId, comments] = onUpdateChildComments.mock.calls[onUpdateChildComments.mock.calls.length - 1];
+      expect(childId).toBe('child-a');
+      expect(childId).not.toBe('child-b');
+      expect(comments.some((cm: any) => (cm.text as string).includes('href="https://google.com"'))).toBe(true);
+      expect(onClose).not.toHaveBeenCalled();
+    });
+
     it('a child comment mutation never touches pin/container-level callbacks (Map/container data isolation)', () => {
       const onUpdateChildComments = vi.fn();
       const onEditContainer = vi.fn();

@@ -1496,6 +1496,33 @@ describe('PATCH 8O.1/8O.2 -- canonical comment permission wiring', () => {
       expect(src).not.toContain('const canEdit = canManage && comment.userId === currentUserId;');
     });
 
+    it('CommentRow.tsx (PATCH 8AS) consumes the shared PATCH 8AR Link primitives rather than duplicating them', () => {
+      const src = read('components/collabboard/CommentRow.tsx');
+      expect(src).toContain("import { createCommentLinkExtension, applyCommentLink } from './commentLinkAuthoring';");
+      expect(src).toContain("import { CommentLinkPopover } from './CommentLinkPopover';");
+      expect(src).toContain('createCommentLinkExtension()');
+      expect(src).toContain('applyCommentLink(editEditor, linkUrl.trim(), savedLinkSelectionRef.current)');
+      expect(src).toContain('<CommentLinkPopover');
+      // No local Link.configure(...) duplication.
+      expect(src).not.toContain('Link.configure(');
+      // No local URL-normalization duplication (the shared helper owns this).
+      expect(src).not.toContain('.test(trimmed)');
+      expect(src).not.toContain('`https://${');
+      // StarterKit's own bundled Link extension must be disabled to avoid a
+      // duplicate mark registration alongside the shared extension.
+      expect(src).toContain('StarterKit.configure({\n        heading: false,\n        codeBlock: false,\n        link: false,\n      })');
+    });
+
+    it('CommentRow.tsx independently verifies canMutateThisComment before applying or opening a Link (callback defense)', () => {
+      const src = read('components/collabboard/CommentRow.tsx');
+      const openStart = src.indexOf('const openLinkPopover');
+      const openEnd = src.indexOf('};', openStart);
+      expect(src.slice(openStart, openEnd)).toContain('if (!canMutateThisComment) return;');
+      const applyStart = src.indexOf('const handleApplyLink');
+      const applyEnd = src.indexOf('};', applyStart);
+      expect(src.slice(applyStart, applyEnd)).toContain('if (!canMutateThisComment) return;');
+    });
+
     it('CommentRow.tsx has exactly one caller in production code (EmbeddedCommentList.tsx)', () => {
       // Confirms the "smallest safe design" premise this patch relied on --
       // gating CommentRow directly (rather than a second indirection) is

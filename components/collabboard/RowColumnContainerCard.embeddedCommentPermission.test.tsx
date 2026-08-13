@@ -150,6 +150,56 @@ describe('RowColumnContainerCard embedded child EmbeddedCommentList -- permissio
       expect(childId).not.toBe('child-b');
     });
 
+    it('PATCH 8AS: Link authoring targets only the owning child and never touches Container-level callbacks', () => {
+      const onUpdateChildComments = vi.fn();
+      const onEditContainer = vi.fn();
+      const onDropExistingPadlet = vi.fn();
+      const onScanChild = vi.fn();
+      const c = mountCard({ onUpdateChildComments, onEditContainer, onDropExistingPadlet, onScanChild });
+      const editButtons = c.querySelectorAll('button[title="Edit"]');
+      click(editButtons[0]);
+      const pm = c.querySelector('.ProseMirror') as HTMLElement;
+      act(() => {
+        pm.focus();
+        const walker = document.createTreeWalker(pm, NodeFilter.SHOW_TEXT);
+        const node = walker.nextNode() as Text;
+        const idx = node.textContent!.indexOf('child A comment');
+        const range = document.createRange();
+        range.setStart(node, idx);
+        range.setEnd(node, idx + 'child A comment'.length);
+        const sel = window.getSelection();
+        sel?.removeAllRanges();
+        sel?.addRange(range);
+        document.dispatchEvent(new Event('selectionchange'));
+      });
+      click(c.querySelector('button[title="Link"]')!);
+      const urlInput = document.body.querySelector('input[type="url"]') as HTMLInputElement;
+      expect(urlInput, 'Link popup did not open inside RowColumnContainerCard host').not.toBeNull();
+      act(() => {
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+        setter.call(urlInput, 'google.com');
+        urlInput.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      const addButton = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'Add');
+      click(addButton!);
+      // Blur to commit (CommentRow persists on blur, not immediately on Add).
+      act(() => {
+        pm.closest('.relative')!.dispatchEvent(new FocusEvent('focusout', { bubbles: true, relatedTarget: document.body }));
+      });
+      expect(onUpdateChildComments).toHaveBeenCalled();
+      const [childId, comments] = onUpdateChildComments.mock.calls[onUpdateChildComments.mock.calls.length - 1];
+      expect(childId).toBe('child-a');
+      expect(childId).not.toBe('child-b');
+      expect(comments.some((cm: any) => (cm.text as string).includes('href="https://google.com"'))).toBe(true);
+      expect(onEditContainer).not.toHaveBeenCalled();
+      expect(onDropExistingPadlet).not.toHaveBeenCalled();
+      expect(onScanChild).not.toHaveBeenCalled();
+      // Card-level drag/reorder never fires from a Link interaction -- no
+      // such callback was invoked with anything other than the owning child's
+      // comment mutation.
+      expect(c.textContent).toContain('child B comment');
+    });
+
     it('a child comment mutation never touches Container-level callbacks (onEditContainer, onDropExistingPadlet, onScanChild)', () => {
       const onUpdateChildComments = vi.fn();
       const onEditContainer = vi.fn();

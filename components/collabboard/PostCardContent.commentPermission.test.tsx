@@ -135,6 +135,45 @@ describe('PostCardContent EmbeddedCommentList call sites -- permission wiring (P
       expect(onUpdateChildComments).toHaveBeenCalledWith('inner-comment-child', []);
     });
 
+    it('PATCH 8AS: Link authoring on the nested comment-type child persists through the correct owning callback', () => {
+      const onUpdateChildComments = vi.fn();
+      const c = mount(
+        <PostCardContent padlet={nestedContainerPadlet} allPadlets={allPadlets as any} onUpdateChildComments={onUpdateChildComments} />
+      );
+      click(c.querySelector('button[title="Edit"]')!);
+      const pm = c.querySelector('.ProseMirror') as HTMLElement;
+      act(() => {
+        pm.focus();
+        const walker = document.createTreeWalker(pm, NodeFilter.SHOW_TEXT);
+        const node = walker.nextNode() as Text;
+        const idx = node.textContent!.indexOf('nested child comment');
+        const range = document.createRange();
+        range.setStart(node, idx);
+        range.setEnd(node, idx + 'nested child comment'.length);
+        const sel = window.getSelection();
+        sel?.removeAllRanges();
+        sel?.addRange(range);
+        document.dispatchEvent(new Event('selectionchange'));
+      });
+      click(c.querySelector('button[title="Link"]')!);
+      const urlInput = document.body.querySelector('input[type="url"]') as HTMLInputElement;
+      expect(urlInput).not.toBeNull();
+      act(() => {
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+        setter.call(urlInput, 'google.com');
+        urlInput.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      const addButton = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'Add');
+      click(addButton!);
+      act(() => {
+        pm.closest('.relative')!.dispatchEvent(new FocusEvent('focusout', { bubbles: true, relatedTarget: document.body }));
+      });
+      expect(onUpdateChildComments).toHaveBeenCalled();
+      const [childId, comments] = onUpdateChildComments.mock.calls[onUpdateChildComments.mock.calls.length - 1];
+      expect(childId).toBe('inner-comment-child');
+      expect(comments.some((cm: any) => (cm.text as string).includes('href="https://google.com"'))).toBe(true);
+    });
+
     it('READ: nested comment-type child comment visible but not mutable', () => {
       const onUpdateChildComments = vi.fn();
       const c = mount(
