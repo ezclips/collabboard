@@ -15,7 +15,7 @@ import { asUserId } from "@/lib/domain/core/ids";
 import { createPostsRepository } from "@/lib/infra/canvas/postsRepository";
 import { getMeaningfulTitle } from "@/lib/infra/collabboard/postTitle";
 import { getEffectiveVisibleChildTitleIds, resolveVisibleChildTitle } from "@/lib/infra/collabboard/containerChildTitleVisibility";
-import { isDocumentPost } from "@/lib/domain/canvas/documentPost";
+import { isDocumentPost, resolveChildCardChrome } from "@/lib/domain/canvas/documentPost";
 import { resolvePadletTitleStyle } from "@/lib/domain/canvas/captionStyle";
 import DocumentCardContent from "./DocumentCardContent";
 import { guardCommentMutation, type CommentAccessMode } from "@/lib/domain/canvas/comments";
@@ -959,15 +959,15 @@ export default function PostCardContent({
                                 }
 
                                 // Default: render other children using PostCardContent
-                                const childTopStrip = (child.metadata as any)?.topStrip;
+                                const childCardChrome = resolveChildCardChrome(child);
                                 return (
                                     <div
                                         key={child.id}
                                         className="relative border border-gray-100 shadow-sm overflow-hidden"
-                                        style={{ backgroundColor: (child.metadata as any)?.cardColor || "#ffffff" }}
+                                        style={{ backgroundColor: childCardChrome.backgroundColor }}
                                     >
-                                        {childTopStrip && childTopStrip !== "transparent" && (
-                                            <div className="h-1.5 w-full" style={{ backgroundColor: childTopStrip }} />
+                                        {childCardChrome.topStripColor && (
+                                            <div className="h-1.5 w-full" style={{ backgroundColor: childCardChrome.topStripColor }} />
                                         )}
                                         {renderChildTitle(child)}
                                         <div className="p-3">

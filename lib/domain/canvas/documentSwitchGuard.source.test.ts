@@ -9,11 +9,14 @@ const usePadletSaveSrc = read('hooks/canvas/usePadletSave.ts');
 const fnBody = (marker: string) =>
   canvasClientSrc.slice(canvasClientSrc.indexOf(marker), canvasClientSrc.indexOf('\n  };', canvasClientSrc.indexOf(marker)));
 
-describe('PATCH-149B2-ii §32.14: all eight entry points use the shared guard', () => {
-  it('exactly seven requestOpenDocument call sites exist (entries 2-8; entry 1 is guarded via handleToolClick)', () => {
+describe('PATCH-149B2-ii §32.14: all nine entry points use the shared guard', () => {
+  it('exactly eight requestOpenDocument call sites exist (entries 2-9; entry 1 is guarded via handleToolClick)', () => {
     const count = (src: string) => (src.match(/requestOpenDocument\(/g) || []).length;
     expect(count(canvasClientSrc)).toBe(4); // openPadletInTypeEditor, openDocumentFromPreview, Columns, Rows
-    expect(count(freeformSrc)).toBe(3); // openFreeformPadletModal, onEditContent, onReadDocument
+    // PATCH 9D added entry 9: a Document rendered as a Container child's own
+    // "Read" action (RowColumnContainerCard's onOpenDocument prop), reusing
+    // this exact same guarded function -- not a new modal/bypass.
+    expect(count(freeformSrc)).toBe(4); // openFreeformPadletModal, onEditContent, onReadDocument, Container child onOpenDocument
   });
 
   it('no unguarded setDocumentModalDestination writer survives in FreeformPadletCards (source suite fails if 6-8 bypass)', () => {

@@ -3239,6 +3239,14 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                       toast.error('Failed to update comments');
                     }
                   }}
+                  // Same "Read" routing the root Document card uses (see
+                  // onReadDocument below) -- never gated by
+                  // canUseFreeformEditButton beyond choosing editor vs viewer
+                  // destination, so readonly users can still Read.
+                  onOpenDocument={(child) => {
+                    const destination = selectDocumentModalDestination(child, canUseFreeformEditButton);
+                    if (destination) requestOpenDocument(child, destination);
+                  }}
                   accessMode={commentAccessMode}
                 />
               )}

@@ -10,6 +10,7 @@ import EmbeddedCommentList from "./EmbeddedCommentList";
 import type { Padlet } from "@/types/collabboard";
 import { guardCommentMutation, type CommentAccessMode } from "@/lib/domain/canvas/comments";
 import { getEffectiveVisibleChildTitleIds, resolveVisibleChildTitle } from "@/lib/infra/collabboard/containerChildTitleVisibility";
+import { resolveChildCardChrome } from "@/lib/domain/canvas/documentPost";
 
 const DEFAULT_IGNORE_KINDS = new Set(["columns-container-move"]);
 
@@ -423,7 +424,7 @@ export default function RowColumnContainerCard({
                     );
                   }
 
-                  const childTopStrip = (child.metadata as any)?.topStrip;
+                  const childCardChrome = resolveChildCardChrome(child);
                   const isImageChild = child.type === 'image' || child.file_url || (child.metadata as any)?.imageUrl || (child.metadata as any)?.fileUrl;
                   const isCardChild = child.type === 'card' && !!(child.metadata as any)?.svgUrl;
                   const isDocThumbnail = (child.metadata as any)?.importKind === 'document';
@@ -437,10 +438,10 @@ export default function RowColumnContainerCard({
                     <div
                       key={child.id}
                       className={`relative border border-gray-200 overflow-hidden shadow-sm ${isImport ? 'pointer-events-auto' : ''}`}
-                      style={{ backgroundColor: (child.metadata as any)?.cardColor || "#ffffff" }}
+                      style={{ backgroundColor: childCardChrome.backgroundColor }}
                     >
-                      {childTopStrip && childTopStrip !== "transparent" && (
-                        <div className="h-1.5 w-full" style={{ backgroundColor: childTopStrip }} />
+                      {childCardChrome.topStripColor && (
+                        <div className="h-1.5 w-full" style={{ backgroundColor: childCardChrome.topStripColor }} />
                       )}
                       {renderChildTitle(child)}
                       <div className={isImageChild && !isDocThumbnail ? "p-0" : isCardChild ? "p-0" : isDocThumbnail ? "p-1 bg-gray-50" : "p-1.5"}>
