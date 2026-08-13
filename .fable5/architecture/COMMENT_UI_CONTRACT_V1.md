@@ -1,5 +1,25 @@
 # Canonical Comment UI Contract v1
 
+## Rollout status (updated PATCH 8AE.2, 2026-08-13)
+
+NORMAL UI CANONICALIZATION = **CLOSED**
+COMMENT PERMISSION SAFETY = **CLOSED**
+SPECIAL UI CONSOLIDATION = **NOT CLOSED / NOT YET DECIDED**
+DEAD CODE CLEANUP = **PENDING**
+KANBAN COMMENT SYSTEM = **OUTSIDE CURRENT COLLABBOARD CONTRACT**
+
+"COMMENT PERMISSION SAFETY = CLOSED" means: every live CollabBoard/Padlet
+comment surface (normal/detached, special/primary-thread, special/anchored,
+and both embedded-child renderer families, including the Map layout closed
+by PATCH 8AE.1) enforces the same READ/MANAGE model, the dormant COMMENT
+tier has exactly one producer and it is never fed a live `boardPermission`,
+and no live hardcoded identity write remains. It does **not** mean every
+comment UI shares one implementation -- see "SPECIAL UI CONSOLIDATION" below,
+and the "Embedded-renderer matrix"/"Next-phase backlog" sections for the
+architectural (not security) decisions still open. See the "Map layout
+permission gap" and the closing PATCH 8AE.2 section near the end of this
+document for the full closure audit trail.
+
 ## Freeze status
 
 CANONICAL NORMAL COMMENT UI: **FROZEN**
@@ -961,11 +981,29 @@ other layout: `CanvasClient.tsx` -> `MapCanvas.tsx` (`commentAccessMode` prop)
 was introduced -- `resolveCommentAccessMode(currentWorkspaceRole)` remains the
 sole live call site.
 
-Every special-system surface in this table is now closed. A repeat of the
-"Special Comment Permission Closure Audit" (PATCH 8AE.2) is still required
-before declaring **SPECIAL COMMENT PERMISSION ROLLOUT -- CLOSED**, since
-PATCH 8AE's own audit is the one that missed this surface on its first pass
-and a second independent sweep is the agreed closure gate.
+Every special-system surface in this table is now closed. **PATCH 8AE.2
+(2026-08-13)** performed the agreed second, independent closure audit: a
+fresh repo-wide surface search (not derived from this document), a durable
+`components/collabboard/commentPermissionClosure.contract.test.tsx` closure
+guard (completeness search over every live `<CommentPopup>`/
+`<EmbeddedCommentList>` JSX usage, per-block `accessMode` gating, the full
+Map chain, single-producer/dormant-COMMENT proof, dead-surface
+re-verification, and a child-id ownership proof covering all five mutation
+types across all three `EmbeddedCommentList` host files), and 20 negative
+controls (A-T) -- each run for real (backup/mutate/observe-failure/restore),
+not merely source-inspected. Two controls (R: a hand-rolled duplicate
+composer added next to an already-gated `EmbeddedCommentList` block; S: one
+mutation handler, `onColorChange`, retargeted to the parent Container's id)
+were not caught by the guard as first written -- both were genuine gaps in
+guard *coverage*, not live production defects (production code was correct
+in both cases; the negative control revealed what a regression there would
+have looked like), and both were closed by strengthening the guard in the
+same session before re-running the control to confirm it now fails
+correctly. No unexpected live surface and no unexpected permission gap were
+found. Full validation (2251 tests, typecheck, boundaries, `git diff
+--check`) passed clean with zero production code changes. **SPECIAL COMMENT
+PERMISSION ROLLOUT is now declared CLOSED** -- see the status block at the
+top of this document.
 
 ### Embedded-renderer matrix
 
@@ -1054,39 +1092,55 @@ migrates.
 ### Next-phase backlog (priority order, not implemented)
 
 1. ~~**Permission wiring for the remaining UNGATED special surfaces**~~ --
-   **CLOSED, pending a second independent audit pass.** Note anchored threads
-   (PATCH 8AB), Document anchored threads (PATCH 8AA), Comment post primary
-   thread (PATCH 8Z), Container's embedded child `CommentPopup` renderer
-   (PATCH 8AC), `EmbeddedCommentList` at its `RowColumnContainerCard.tsx`/
-   `PostCardContent.tsx`/`DrawingLayout.tsx` hosts (PATCH 8AD), and
-   `EmbeddedCommentList` at its `components/map/PostPopup.tsx` host --
-   discovered missing by PATCH 8AE's own closure audit, closed by PATCH 8AE.1
-   -- are all now **PERMISSION SAFE -- READ / MANAGE**. PATCH 8AE's audit is
-   itself proof that a single inventory pass can miss a live layout (Map was
-   never traced by PATCH 8AD). Next candidate: **PATCH 8AE.2, a repeat
-   Special Comment Permission Closure Audit**, before **SPECIAL COMMENT
-   PERMISSION ROLLOUT** can be declared closed.
+   **CLOSED.** Note anchored threads (PATCH 8AB), Document anchored threads
+   (PATCH 8AA), Comment post primary thread (PATCH 8Z), Container's embedded
+   child `CommentPopup` renderer (PATCH 8AC), `EmbeddedCommentList` at its
+   `RowColumnContainerCard.tsx`/`PostCardContent.tsx`/`DrawingLayout.tsx`
+   hosts (PATCH 8AD), and `EmbeddedCommentList` at its
+   `components/map/PostPopup.tsx` host (discovered missing by PATCH 8AE,
+   closed by PATCH 8AE.1) are all **PERMISSION SAFE -- READ / MANAGE**.
+   **PATCH 8AE.2 (2026-08-13)** ran the agreed second, independent closure
+   audit -- fresh inventory, a durable closure guard, and 20 real (not
+   source-inspected) negative controls -- found no further gap, and declared
+   **SPECIAL COMMENT PERMISSION ROLLOUT -- CLOSED**. This item is fully
+   closed; there is no further permission-wiring patch pending.
 2. **Comment post primary-thread dedicated adapter patch** (per PATCH 8X) --
    whether to bring its rich TipTap composer capability (Bold/Italic/
    Underline/lists/code/align/emoji) INTO `CommentPopup` as an opt-in
    richer mode, or to formally document it as a permanently separate
    surface with its own frozen contract, is a real product decision this
    audit surfaces but does not make.
-3. **Dead/orphaned comment code cleanup** (now four items -- the three below
-   plus `components/collabboard/editors/CommentViewPopup.tsx`, found by
-   PATCH 8AE to have zero importers anywhere, including its own tests) --
-   low risk, no live behavior change, but currently dead code that could
-   confuse a future patch (as the "Todo Comments Popup" mislabel already
-   did twice).
+3. **Dead/orphaned comment code cleanup** (four items -- see the "Dead/orphaned
+   comment code inventory" section above, including
+   `components/collabboard/editors/CommentViewPopup.tsx`, found by PATCH 8AE
+   to have zero importers anywhere, including its own tests) -- low risk, no
+   live behavior change, but currently dead code that could confuse a future
+   patch (as the "Todo Comments Popup" mislabel already did twice). The
+   dormant `CommentList`/`FreeformCommentRow` pilot foundation and the
+   dormant `commentMutations.ts`/COMMENT-tier RPC path are related but
+   separate decisions (item 3b/3c below), since deleting a pilot or a
+   fully-built-but-dormant tier is a different call than deleting truly dead
+   code.
+   - 3b. **`CommentList`/`FreeformCommentRow` pilot foundation** -- built,
+     parity-tested against Site A, but never actually swapped into
+     `FreeformPadletCards.tsx`'s live rendering. Decide: adopt it (swap the
+     live render), or delete the pilot.
+   - 3c. **Dormant COMMENT tier** (`comments.ts`'s `'comment'` mode,
+     `commentMutations.ts`, `CommentPopup.commentMode.test.tsx`) -- fully
+     built and tested but unreachable (no live `boardPermission` producer).
+     Decide: wire up a real board-level commenter role, or formally shelve/
+     remove the dormant tier.
 4. **Reconcile the embedded-child-renderer code paths** (`ContainerEditor.tsx`'s
    direct `CommentPopup` usage vs. `RowColumnContainerCard.tsx`/`PostCardContent.tsx`/
    `DrawingLayout.tsx`/`components/map/PostPopup.tsx`'s shared `EmbeddedCommentList`
    usage) -- an existing inconsistency, not a regression, and NOT resolved by
-   PATCH 8AC, 8AD, or 8AE.1 (all explicitly permissions-only; PATCH 8AD's own
-   spec named this exact question -- "should EmbeddedCommentList eventually be
-   consolidated with CommentPopup" -- as deliberately out of scope). All paths
-   are now equally permission-safe, so this item is purely an
-   architecture/consistency decision, no longer a security question.
+   PATCH 8AC, 8AD, 8AE.1, or 8AE.2 (all explicitly permissions-only; PATCH
+   8AD's own spec named this exact question -- "should EmbeddedCommentList
+   eventually be consolidated with CommentPopup" -- as deliberately out of
+   scope). All paths are now equally permission-safe, so this item is purely
+   an architecture/consistency decision, no longer a security question. This
+   is "SPECIAL UI CONSOLIDATION" in the rollout-status block at the top of
+   this document -- explicitly NOT closed by the permission rollout.
 5. **kanban-canvas comment system** -- out of this rollout's frame entirely
    (see above); listed last because it requires its own scoping decision
    (does the product want unified comment UX across both verticals at all?)
@@ -1538,3 +1592,120 @@ by itself authorize declaring **SPECIAL COMMENT PERMISSION ROLLOUT --
 CLOSED** -- PATCH 8AE's own audit is proof that a single inventory pass can
 miss a live surface, so a second, independent **PATCH 8AE.2 Special Comment
 Permission Closure Audit** is the agreed gate before that declaration.
+
+## PATCH 8AE.2 -- second independent closure audit -- SPECIAL COMMENT PERMISSION ROLLOUT CLOSED
+
+PATCH 8AE.2 (2026-08-13) performed the agreed second, independent audit --
+re-deriving the live post-type/layout registry from `types/collabboard.ts`
+and `CanvasClient.tsx`'s own `isXLayout` flags rather than trusting this
+document, then a fresh repo-wide `<CommentPopup>`/`<EmbeddedCommentList>`
+search -- before authorizing the closure declaration at the top of this
+document.
+
+**Findings.** No new live surface and no new live permission gap. The
+complete live surface list matches this document's existing matrices exactly
+(12 `<CommentPopup>` production callers, 4 `<EmbeddedCommentList>` production
+callers of which 1 -- `components/canvas/RowCanvas.tsx` -- is confirmed dead).
+Scheduler, Gantt, and kanban layouts render no CollabBoard comment UI at all
+(a product gap, not a permission gap -- "not every surface supports every
+capability"). `resolveCommentAccessMode(` re-confirmed as exactly one live
+call site (`CanvasClient.tsx`, `currentWorkspaceRole` only). The Map route
+PATCH 8AE.1 fixed was re-verified independently, link by link. A new dead
+surface was confirmed beyond PATCH 8AE's own list:
+`components/collabboard/editors/CommentViewPopup.tsx` has zero references
+anywhere in the repo, including its own tests -- a "Comment-post right-side
+popup" superseded by `CommentPopup`/`CommentEditor`, never deleted.
+
+**Durable closure guard.** Added
+`components/collabboard/commentPermissionClosure.contract.test.tsx` (37
+tests) -- the single file intended to catch the *next* PATCH-8Y/8AD/8AE-style
+miss automatically instead of waiting for a fourth audit patch:
+- **Completeness**: `git grep`-enumerates every live `<CommentPopup>`/
+  `<EmbeddedCommentList>` JSX usage and asserts the file set matches a
+  reviewed allowlist exactly -- a comment renderer added to any new file
+  fails this test until classified.
+- **Per-block gating**: for every allowlisted file, extracts every
+  self-closing `<CommentPopup .../>`/`<EmbeddedCommentList .../>` block
+  (not just "the file contains accessMode somewhere") and asserts each one
+  carries an explicit `accessMode`.
+- **Map route**: the exact four-link chain (`CanvasClient` ->`MapCanvas`
+  ->`PostPopup` ->`RowColumnContainerCard`/`PostCardContent`) asserted both
+  per-link and as one combined chain proof.
+- **COMMENT dormancy**: single live `resolveCommentAccessMode(` producer, no
+  `boardPermission` argument, no second producer anywhere else in the repo.
+- **Dead/dormant surfaces**: `RowCanvas.tsx`, `CommentViewPopup.tsx`, and the
+  `CommentList`/`FreeformCommentRow` pilot foundation re-verified non-live.
+- **Composer-duplication guard**: no allowlisted file may hand-roll the
+  literal `placeholder="Add a comment..."` string -- that affordance exists
+  in exactly one place in the whole codebase (`EmbeddedCommentList.tsx`'s own
+  composer), so any other occurrence proves an un-vetted duplicate composer
+  was added outside the shared, gated component.
+- **Child-id ownership**: for each of the three live `EmbeddedCommentList`
+  host files, counts every `onUpdateChildComments(...)` call and asserts the
+  count of calls targeting the correct identifier (`child.id` for
+  `RowColumnContainerCard.tsx`; `padlet.id`/`child.id` split for
+  `PostCardContent.tsx`'s three blocks; `padlet.id` for `DrawingLayout.tsx`)
+  equals the total call count -- a single mutation handler silently
+  retargeted to the wrong id (sibling or parent Container) fails this test
+  even though every other handler in the same block is correct.
+
+**Negative controls -- 20 run for real (A-T), not source-inspected.** Each
+was applied via backup/mutate/observe-failure/restore-and-diff-verify:
+
+- A-L (remove `accessMode` from: a canonical normal caller `TableEditor.tsx`;
+  `CommentPost.tsx`'s own READ guard; Document anchored; Note anchored;
+  ContainerEditor embedded; `RowColumnContainerCard.tsx`;
+  `PostCardContent.tsx`; `DrawingLayout.tsx`; and all four Map-route links)
+  -- all caught by the closure guard and/or the relevant existing permission
+  suite.
+- M (restored `CommentRow.tsx`'s ownership-only double-click-to-edit bypass)
+  -- caught by `EmbeddedCommentList.permission.test.tsx`.
+- N (a second live `resolveCommentAccessMode(...)` call, added to
+  `MapCanvas.tsx`) and O (a live `boardPermission` argument added to the one
+  legitimate producer) -- both caught by the dormancy tests.
+- P (a live hardcoded `userId: 'user1'` in `ClipartCardDraftModal.tsx`'s own
+  comment-submit path) -- caught by real behavioral assertions in
+  `canonicalCommentPermission.contract.test.tsx` and
+  `ClipartCardDraftModal.test.tsx` (not merely a source-string check).
+- Q (a fake `<EmbeddedCommentList` mention added to `ChronoTimelineCanvas.tsx`,
+  a live layout not in the allowlist) -- caught by the completeness guard.
+- **R and S were not caught on first attempt** -- both were genuine gaps in
+  the *guard's own coverage*, discovered and closed within this same audit
+  session, not live production defects (production code was correct in both
+  cases before and after):
+  - R: a hand-rolled `<input placeholder="Add a comment...">` added directly
+    inside `PostCardContent.tsx`'s COMMENT TYPE branch, alongside its
+    already-gated `EmbeddedCommentList`, was invisible to every existing
+    test (that branch is provably unreachable in production today, so no
+    behavioral test exercises it). Closed by adding the composer-duplication
+    guard described above, which is a pure source-text check and does not
+    depend on the branch being reachable.
+  - S: `RowColumnContainerCard.tsx`'s `onColorChange` handler retargeted from
+    `child.id` to `padlet.id` (the parent Container's own id) passed the
+    full existing test suite, because no existing test specifically checked
+    ownership for the Color mutation -- only Add/Edit/Delete were covered.
+    Closed by adding the child-id ownership guard described above, which
+    counts ALL five mutation handlers uniformly instead of spot-checking a
+    subset.
+- T (appended a line to `CommentPopup.tsx`) -- hash changed as expected,
+  confirming the frozen-foundation proof mechanism works; the file was
+  restored and reconfirmed byte-identical to the recorded hash immediately.
+
+Every mutation was restored and diff-verified byte-identical; `git status`
+and `git diff --check` confirmed zero residue before validation.
+
+**Frozen foundation:** `CommentPopup.tsx`, `useAnchoredPopover.ts`,
+`TextStylePopup.tsx`, `commentLinkSafety.ts`, `extensions/Comment.ts` --
+all five byte-identical to PATCH 8AE/8AE.1's recorded hashes.
+
+**Full validation:** 135 test files / 2251 tests passing, `npx tsc --noEmit`
+clean, `npm run check:boundaries` clean, `git diff --check` clean. Zero
+production code changes this patch -- only the new closure guard test file
+was added (production files were mutated and restored during negative
+controls, each diff-verified byte-identical).
+
+**Declaration: SPECIAL COMMENT PERMISSION ROLLOUT -- CLOSED.** See the
+rollout-status block at the top of this document. This declaration covers
+comment *permission safety* specifically -- it does not close SPECIAL UI
+CONSOLIDATION (next-phase backlog item 4) or DEAD CODE CLEANUP (item 3),
+both of which remain open, ranked, architecture/product decisions.
