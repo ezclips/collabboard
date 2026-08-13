@@ -14,6 +14,7 @@ import { createToggleTaskCommand } from "@/lib/domain/canvas/posts";
 import { asUserId } from "@/lib/domain/core/ids";
 import { createPostsRepository } from "@/lib/infra/canvas/postsRepository";
 import { getMeaningfulTitle } from "@/lib/infra/collabboard/postTitle";
+import { getEffectiveVisibleChildTitleIds, resolveVisibleChildTitle } from "@/lib/infra/collabboard/containerChildTitleVisibility";
 import { isDocumentPost } from "@/lib/domain/canvas/documentPost";
 import { resolvePadletTitleStyle } from "@/lib/domain/canvas/captionStyle";
 import DocumentCardContent from "./DocumentCardContent";
@@ -870,14 +871,14 @@ export default function PostCardContent({
     if (type === "container") {
         const childIds = padlet.metadata?.childPadletIds || [];
         const children = allPadlets.filter((p) => childIds.includes(p.id));
-        // This Container's OWN child-title setting -- independent of any
-        // outer Container this Container might itself be nested inside (see
-        // RowColumnContainerCard's renderChildTitle, which controls whether
-        // THIS container's own title is shown as a child of that outer one).
-        const showChildPostTitles = (padlet.metadata as any)?.showChildPostTitles === true;
+        // This Container's OWN per-child title settings -- independent of
+        // any outer Container this Container might itself be nested inside
+        // (see RowColumnContainerCard's renderChildTitle, which controls
+        // whether THIS container's own title is shown as a child of that
+        // outer one).
+        const visibleChildTitleIds = getEffectiveVisibleChildTitleIds(padlet.metadata as any, children);
         const renderChildTitle = (child: Padlet) => {
-            if (!showChildPostTitles) return null;
-            const childTitle = typeof child.title === 'string' ? child.title.trim() : '';
+            const childTitle = resolveVisibleChildTitle(visibleChildTitleIds, child);
             if (!childTitle) return null;
             return (
                 <div data-child-title-header="true" className="px-1.5 pt-1.5 pb-1 border-b border-gray-100">

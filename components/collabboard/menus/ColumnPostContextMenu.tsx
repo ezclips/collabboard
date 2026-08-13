@@ -2,6 +2,7 @@
 
 import React from 'react';
 import {
+    Check,
     Edit2,
     Plus,
     Repeat,
@@ -61,11 +62,13 @@ interface ColumnPostContextMenuProps {
     onBringForward?: () => void;
     onSendBackward?: () => void;
     onSendToBack?: () => void;
-    // Container-only: toggles whether this Container's own child posts show
-    // their titles when rendered on-canvas (RowColumnContainerCard). Present
-    // only when this menu instance is for a Container padlet.
-    onToggleChildTitles?: () => void;
-    childTitlesVisible?: boolean;
+    // Container-only: "Post titles >" submenu -- one independently
+    // toggleable entry per child, reusing the same child inventory
+    // (openTargets) and label convention (getOpenTargetLabel) as the
+    // "Edit post >" submenu above. Present only when this menu instance is
+    // for a Container padlet.
+    onTogglePostTitleVisibility?: (childId: string) => void;
+    postTitleVisibleIds?: string[];
     onAddContainerAt?: (position: number) => void;
     enableInsertActions?: boolean;
     onEditPosition?: () => void;
@@ -116,8 +119,8 @@ export function ColumnPostContextMenu({
     onBringForward,
     onSendBackward,
     onSendToBack,
-    onToggleChildTitles,
-    childTitlesVisible = false,
+    onTogglePostTitleVisibility,
+    postTitleVisibleIds,
     onAddContainerAt,
     enableInsertActions = false,
     onEditPosition,
@@ -260,10 +263,28 @@ export function ColumnPostContextMenu({
                         </ContextMenuItem>
                     )
                 )}
-                {onToggleChildTitles && (
-                    <ContextMenuItem onClick={onToggleChildTitles}>
-                        {childTitlesVisible ? 'Hide post titles' : 'Show post titles'}
-                    </ContextMenuItem>
+                {hasOpenTargets && onTogglePostTitleVisibility && (
+                    <ContextMenuSub>
+                        <ContextMenuSubTrigger>Post titles</ContextMenuSubTrigger>
+                        <ContextMenuSubContent className="min-w-[160px]" style={{ zIndex: 10000 }}>
+                            {openTargets!.map((target) => {
+                                const isVisible = postTitleVisibleIds?.includes(target.id) ?? false;
+                                return (
+                                    <ContextMenuItem
+                                        key={target.id}
+                                        onClick={() => onTogglePostTitleVisibility(target.id)}
+                                    >
+                                        {resolveOpenTargetLabel(target)}
+                                        {isVisible && (
+                                            <span className="ml-auto pl-4 flex items-center">
+                                                <Check size={14} className="text-gray-500" />
+                                            </span>
+                                        )}
+                                    </ContextMenuItem>
+                                );
+                            })}
+                        </ContextMenuSubContent>
+                    </ContextMenuSub>
                 )}
                 {/* Color picker */}
                 {onChangeColor && (

@@ -44,6 +44,7 @@ import { CommentPostContextMenu } from '@/components/collabboard/menus/CommentPo
 import { ImagePostContextMenu } from '@/components/collabboard/context-menus/ImagePostContextMenu';
 import { isStripVisible, htmlToText, getEligibleContainerDestinations, IMAGE_CROP_TO_GRID_HEIGHT_PX } from '@/components/collabboard/canvas/engine/utils';
 import { getContainerEditTargetLabel } from '@/lib/infra/collabboard/containerEditTargetLabel';
+import { getEffectiveVisibleChildTitleIds, toggleChildPostTitleVisibility } from '@/lib/infra/collabboard/containerChildTitleVisibility';
 import {
   Bell, X, Edit2, PenTool, Trash2, Palette, Strikethrough, ChevronDown, ChevronUp, RefreshCw, Pencil, ArrowLeftRight, Plus,
 } from 'lucide-react';
@@ -3945,6 +3946,12 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
         }
 
         if (padlet.type === 'container') {
+          // Shared by openTargets (Edit post >), the Post titles > submenu,
+          // and its click handler -- one child inventory, not rediscovered
+          // per feature.
+          const containerChildPadlets: Padlet[] = ((padlet.metadata as any)?.childPadletIds || [])
+            .map((id: string) => padlets.find((p) => p.id === id))
+            .filter((child: Padlet | undefined): child is Padlet => !!child);
           return (
             <ColumnPostContextMenu
               key={padlet.id}
@@ -3957,11 +3964,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
               // ColumnPostContextMenu uses when openTargets is empty --
               // e.g. an empty container -- so ContainerEditor stays reachable
               // for that case).
-              openTargets={canUseFreeformEditButton
-                ? ((padlet.metadata as any)?.childPadletIds || [])
-                    .map((id: string) => padlets.find((p) => p.id === id))
-                    .filter((child: Padlet | undefined): child is Padlet => !!child)
-                : undefined}
+              openTargets={canUseFreeformEditButton ? containerChildPadlets : undefined}
               onOpenTarget={canUseFreeformEditButton ? (child: Padlet) => openFreeformPadletModal(child) : undefined}
               getOpenTargetLabel={getContainerEditTargetLabel}
               onEdit={canUseFreeformEditButton ? () => openFreeformPadletModal(padlet) : undefined}
@@ -3974,10 +3977,13 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
               onLock={canUseFreeformEditButton ? () => lockPadlet(padlet.id) : undefined}
               onBringToFront={canUseFreeformEditButton ? () => movePadletLayer(padlet.id, 'bringToFront') : undefined}
               onSendToBack={canUseFreeformEditButton ? () => movePadletLayer(padlet.id, 'sendToBack') : undefined}
-              onToggleChildTitles={canUseFreeformEditButton
-                ? () => updatePadletMetadata(padlet.id, { showChildPostTitles: !(padlet.metadata as any)?.showChildPostTitles })
+              onTogglePostTitleVisibility={canUseFreeformEditButton
+                ? (childId: string) => {
+                    const nextIds = toggleChildPostTitleVisibility(padlet.metadata as any, containerChildPadlets, childId);
+                    updatePadletMetadata(padlet.id, { visibleChildPostTitleIds: nextIds, showChildPostTitles: false });
+                  }
                 : undefined}
-              childTitlesVisible={(padlet.metadata as any)?.showChildPostTitles === true}
+              postTitleVisibleIds={Array.from(getEffectiveVisibleChildTitleIds(padlet.metadata as any, containerChildPadlets))}
             >
               {content}
             </ColumnPostContextMenu>
