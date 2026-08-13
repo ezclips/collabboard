@@ -1,13 +1,26 @@
 # Canonical Comment UI Contract v1
 
-## Rollout status (updated PATCH 8AL, 2026-08-13)
+## COMMENT ARCHITECTURE = CLOSED / FROZEN (PATCH 8AT, 2026-08-13)
+
+The 22-phase closure audit (PATCH 8AT) re-derived the live comment-surface
+inventory, production-component classification, permission/ownership/Link/
+storage/identity invariants, and test-contract health independently from
+source rather than trusting prior labels, and found all 13 closure criteria
+satisfied. See this document's own PATCH 8AT section (bottom) for the full
+audit trail and the two non-blocking findings it recorded (an orphaned
+`CommentActionsToolbar.tsx` with zero importers; an unreachable
+`handleAddDetachedComment` function in `NoteEditor.tsx`) -- neither gates
+closure. Reopening this freeze requires a new numbered patch with its own
+starting-HEAD baseline, exactly like every patch in the 8A-series before it.
+
+## Rollout status (updated PATCH 8AT, 2026-08-13)
 
 NORMAL UI CANONICALIZATION = **CLOSED**
 COMMENT PERMISSION SAFETY = **CLOSED**
-SPECIAL UI CONSOLIDATION = **NOT CLOSED / NOT YET DECIDED**
-DEAD CODE CLEANUP = **PARTIAL -- proven-unreachable comment surfaces removed (PATCH 8AF); the dead Card Post Modal wrapper's non-comment remainder removed (PATCH 8AG); RowCanvas.tsx (whole file) and the "Left Toolbar" false block removed (PATCH 8AI); the superseded CommentList/FreeformCommentRow pilot removed (PATCH 8AK); the dormant COMMENT tier's "shelve vs activate" decision was resolved as SHELVE/RETAIN DORMANT (PATCH 8AL, not a deletion) -- no comment-related cleanup items remain open**
+SPECIAL UI CONSOLIDATION = **RESOLVED -- SHARE LOWER-LEVEL PRIMITIVES** (not full shell unification; PATCH 8AQ audited, PATCH 8AR extracted `commentLinkAuthoring.ts`/`CommentLinkPopover.tsx`, PATCH 8AS adopted them in `CommentRow.tsx`). This corrects "NOT CLOSED / NOT YET DECIDED" below, which predates PATCH 8AQ-8AS and was left stale until this PATCH 8AT correction.
+DEAD CODE CLEANUP = **PARTIAL -- proven-unreachable comment surfaces removed (PATCH 8AF); the dead Card Post Modal wrapper's non-comment remainder removed (PATCH 8AG); RowCanvas.tsx (whole file) and the "Left Toolbar" false block removed (PATCH 8AI); the superseded CommentList/FreeformCommentRow pilot removed (PATCH 8AK); the dormant COMMENT tier's "shelve vs activate" decision was resolved as SHELVE/RETAIN DORMANT (PATCH 8AL, not a deletion); PATCH 8AT additionally found (audit only, not removed) an orphaned `CommentActionsToolbar.tsx` and a dead in-file `handleAddDetachedComment` in `NoteEditor.tsx` -- see PATCH 8AT section**
 KANBAN COMMENT SYSTEM = **OUTSIDE CURRENT COLLABBOARD CONTRACT**
-COMMENTER-ONLY / COMMENT TIER = **SHELVED -- NOT LIVE** (PATCH 8AL)
+COMMENTER-ONLY / COMMENT TIER = **SHELVED -- NOT LIVE** (PATCH 8AL, reconfirmed PATCH 8AT)
 COMMENT TIER SECURITY READINESS = **NOT READY** (PATCH 8AL)
 COMMENT TIER ACTIVATION = **PROJECT-SCALE FUTURE PRODUCT/AUTHORIZATION WORK** (PATCH 8AL)
 
@@ -1269,17 +1282,29 @@ migrates.
      built and tested but unreachable (no live `boardPermission` producer).
      Decide: wire up a real board-level commenter role, or formally shelve/
      remove the dormant tier.
-4. **Reconcile the embedded-child-renderer code paths** (`ContainerEditor.tsx`'s
-   direct `CommentPopup` usage vs. `RowColumnContainerCard.tsx`/`PostCardContent.tsx`/
-   `DrawingLayout.tsx`/`components/map/PostPopup.tsx`'s shared `EmbeddedCommentList`
-   usage) -- an existing inconsistency, not a regression, and NOT resolved by
+4. ~~**Reconcile the embedded-child-renderer code paths**~~ -- **RESOLVED
+   (PATCH 8AQ/8AR/8AS, 2026-08-13).** PATCH 8AQ audited the question this
+   item posed and answered it: `EmbeddedCommentList`/`CommentRow` remains a
+   deliberately separate compact renderer (not consolidated into
+   `CommentPopup`'s shell), but shares `CommentPopup`/`CommentEditor`'s
+   lower-level Link-authoring logic. PATCH 8AR extracted that shared logic
+   into `commentLinkAuthoring.ts`/`CommentLinkPopover.tsx`; PATCH 8AS adopted
+   it in `CommentRow.tsx`, closing the one concrete capability gap the
+   inconsistency had produced (Link authoring). `ContainerEditor.tsx`'s
+   direct `CommentPopup` usage remains architecturally distinct from
+   `RowColumnContainerCard.tsx`/`PostCardContent.tsx`/`DrawingLayout.tsx`/
+   `components/map/PostPopup.tsx`'s shared `EmbeddedCommentList` usage by
+   design, not oversight -- both are now equally permission-safe AND equally
+   Link-capable. (Historical text below, preserved for context.)
+
+   ~~an existing inconsistency, not a regression, and NOT resolved by
    PATCH 8AC, 8AD, 8AE.1, or 8AE.2 (all explicitly permissions-only; PATCH
    8AD's own spec named this exact question -- "should EmbeddedCommentList
    eventually be consolidated with CommentPopup" -- as deliberately out of
    scope). All paths are now equally permission-safe, so this item is purely
    an architecture/consistency decision, no longer a security question. This
    is "SPECIAL UI CONSOLIDATION" in the rollout-status block at the top of
-   this document -- explicitly NOT closed by the permission rollout.
+   this document -- explicitly NOT closed by the permission rollout.~~
 5. **kanban-canvas comment system** -- out of this rollout's frame entirely
    (see above); listed last because it requires its own scoping decision
    (does the product want unified comment UX across both verticals at all?)
@@ -2186,3 +2211,75 @@ not modified, moved, or executed by this patch.
 --noEmit`, `npm run check:boundaries`, and `git diff --check` all clean.
 Zero production files changed; zero migration/RLS/RPC changes; zero
 live-data actions.
+
+## PATCH 8AT -- final comment architecture closure audit (2026-08-13)
+
+**Purpose**: a pure, no-implementation audit determining whether the
+CollabBoard comment architecture, after the full PATCH 8A-series remediation/
+consolidation sequence, is mature enough to declare CLOSED / FROZEN, re-
+deriving every claim from source rather than trusting prior labels. Starting
+HEAD `98da575` (PATCH 8AS's own commit), worktree clean.
+
+**Verdict: A -- COMMENT ARCHITECTURE CLOSED / FREEZE.** All 13 closure
+criteria independently re-verified true; see this patch's own 38-point RETURN
+report (delivered to the requester, not duplicated here) for the full phase-
+by-phase evidence. Two non-blocking findings recorded, neither gating
+closure:
+
+1. `components/collabboard/editors/CommentActionsToolbar.tsx` -- an orphaned
+   comment-actions component (own local color palette, own `onColor`/
+   `onRemove`/`onStrikethrough` shape distinct from every canonical caller,
+   a stray `console.log`) with **zero importers anywhere in the repository**
+   (grep-confirmed, self-match only). Not previously listed in this
+   document's "Dead/orphaned comment code inventory" -- a genuinely new
+   finding, not a re-citation. Not deleted (audit-only patch); a candidate
+   for a future narrow dead-code cleanup patch, same category as PATCH
+   8AF/8AG/8AI/8AK's prior removals.
+2. `components/collabboard/editors/NoteEditor.tsx`'s `handleAddDetachedComment`
+   function (and its dedicated `newDetachedText`/`setNewDetachedText` state
+   pair) -- defined once, invoked nowhere (grep-confirmed: no `onClick`, no
+   other reference), and hardcodes `userId: 'user1', userName: 'R'` internally.
+   Because the function is unreachable, this is dead code containing a
+   moot identity literal, not a live hardcoded-identity mutation defect --
+   the actual live detached-comment-add path (elsewhere in the same file)
+   correctly uses `currentUserId`/`currentUserName` props. Not deleted.
+
+**Frozen architecture boundaries** (per this audit's verdict A):
+
+- NORMAL/DETACHED -> `CommentPopup.tsx`, the single canonical implementation
+  for every normal post type (Clipart, Image, Note, Todo, Link, Table).
+- EMBEDDED COMPACT -> `EmbeddedCommentList.tsx`/`CommentRow.tsx`, a
+  deliberately separate compact renderer sharing `CommentPopup`/
+  `CommentEditor`'s lower-level Link primitives (`commentLinkAuthoring.ts`/
+  `CommentLinkPopover.tsx`), not consolidated into `CommentPopup`'s shell.
+- COMMENT POST -> `CommentPost.tsx` (card)/`CommentEditor.tsx` (modal), a
+  legitimate special primary-thread system with its own rich TipTap tooling;
+  not migrated into `CommentPopup`.
+- ANCHORED NOTE/DOCUMENT -> special anchor lifecycle (`NoteEditor.tsx`/
+  `DocumentEditor.tsx`/`OverlayLayer.tsx`) + canonical `CommentPopup` thread
+  UI, existing-thread MANAGE independent of `savedSelection`.
+- PERMISSION -> READ/MANAGE live via the single `resolveCommentAccessMode(
+  currentWorkspaceRole)` producer in `CanvasClient.tsx`; COMMENT shelved,
+  not live, RPC quarantined.
+- LINK AUTHORING -> shared across every authoring renderer
+  (`CommentPopup`/`CommentEditor`/`CommentRow`) via the PATCH 8AR primitives;
+  zero accidental fourth implementation.
+- KANBAN -> outside this contract entirely (`kanban_comments`,
+  `components/kanban-canvas`, a structurally separate vertical).
+
+**Reopening this freeze** requires a new numbered patch with its own
+starting-HEAD baseline and its own scoped spec -- exactly the discipline
+every patch in this series has already followed. A change to any of the
+frozen boundaries above (e.g. actually consolidating `EmbeddedCommentList`
+into `CommentPopup`'s shell, activating the COMMENT tier, migrating Comment-
+post into `CommentPopup`) is exactly the kind of decision this freeze exists
+to gate, not something a future patch should do incidentally while fixing
+something else.
+
+**Validation**: focused suite (21 files, 477 tests) and full suite (137
+files, 2319 tests) both green, identical counts to the PATCH 8AS baseline
+(zero drift). `npx tsc --noEmit`, `npm run check:boundaries`, and
+`git diff --check` all clean. Production files changed: **NONE** -- this
+document is the only file touched by PATCH 8AT, and only after the audit
+concluded with verdict A, per that verdict's own explicitly-authorized
+"trivial factual closure note" allowance.
