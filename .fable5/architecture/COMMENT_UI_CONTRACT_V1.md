@@ -1029,6 +1029,23 @@ to `EmbeddedCommentList.tsx` and its sole caller `CommentRow.tsx`, and to
 `RowColumnContainerCard.tsx`/`PostCardContent.tsx`/`DrawingLayout.tsx` --
 permission wiring only, this compact presentation itself is unchanged.
 
+**PATCH 8AO (2026-08-13) fixed a permission-semantics bug in `CommentRow.tsx`
+found by PATCH 8AN's consolidation audit**: Edit had derived its ownership
+check from an ad hoc `canManage && comment.userId === currentUserId` rule --
+STRICTER than canonical semantics, since it blocked a MANAGE-mode user from
+editing another user's comment through this compact renderer (every other
+canonical comment surface lets MANAGE edit any comment). Replaced with the
+same domain authority every other surface already uses,
+`canMutateComment(accessMode, comment, currentUserId)` (`lib/domain/canvas/
+comments.ts`), applied uniformly to Edit, Color (transitively, via the same
+edit-entry gate), Strikethrough, and Delete. The row's outer render gate
+changed from `accessMode === 'manage'` to `accessMode !== 'read'` so the
+already-existing (but still dormant-live) COMMENT tier is representable here
+too, matching every other canonical surface -- this does not make COMMENT
+live; `resolveCommentAccessMode` still has exactly one call site and it is
+still never passed a `boardPermission`. No storage, chrome, or embedded-vs-
+canonical shell decision changed.
+
 ### Dead/orphaned comment code inventory
 
 **REMOVED DEAD CODE (PATCH 8AF, 2026-08-13)** -- all three items below were

@@ -10,6 +10,7 @@
 // for the sibling suite this file sits alongside.
 import React from 'react';
 import { act } from 'react';
+import fs from 'node:fs';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import EmbeddedCommentList from './EmbeddedCommentList';
@@ -115,6 +116,15 @@ describe('EmbeddedCommentList / CommentRow -- READ/MANAGE permission wiring (PAT
       click(btn(c, 'Delete')!);
       expect(onRemoveComment).toHaveBeenCalledWith('c1');
     });
+
+    it('Strikethrough calls onToggleStrikethrough with the comment id (PATCH 8AO regression proof)', () => {
+      const onToggleStrikethrough = vi.fn();
+      const c = mount(
+        <EmbeddedCommentList comments={[OWN_COMMENT]} currentUserId="me" onToggleStrikethrough={onToggleStrikethrough} />
+      );
+      click(btn(c, 'Strikethrough')!);
+      expect(onToggleStrikethrough).toHaveBeenCalledWith('c1');
+    });
   });
 
   describe('READ -- render gate, not disable', () => {
@@ -193,6 +203,122 @@ describe('EmbeddedCommentList / CommentRow -- READ/MANAGE permission wiring (PAT
       expect(onRemoveComment).not.toHaveBeenCalled();
       expect(onToggleStrikethrough).not.toHaveBeenCalled();
       expect(onColorChange).not.toHaveBeenCalled();
+    });
+  });
+});
+
+// PATCH 8AO -- CommentRow previously derived Edit's ownership from an ad hoc
+// `canManage && comment.userId === currentUserId` rule, which was STRICTER
+// than canonical MANAGE semantics (a MANAGE user could not edit another
+// user's comment through this renderer, unlike every other canonical
+// comment surface). Fixed by routing through the same domain authority every
+// other surface already uses: canMutateComment(accessMode, comment,
+// currentUserId). This block proves the fix directly; COMMENT-mode cases are
+// exercised here only as the shelved domain contract (lib/domain/canvas/
+// comments.ts) -- never made reachable through CanvasClient/
+// resolveCommentAccessMode.
+describe('EmbeddedCommentList / CommentRow -- PATCH 8AO: canMutateComment-aligned ownership', () => {
+  describe('MANAGE -- regression: can mutate ANY comment, not just the current user\'s own', () => {
+    it('Edit is available (enabled) for another user\'s comment, and clicking it enters editing state', () => {
+      const c = mount(
+        <EmbeddedCommentList
+          comments={[{ id: 'c-mgr', text: 'not mine', userId: 'other-user', userName: 'Other', timestamp: Date.now() }]}
+          currentUserId="manager-user"
+          accessMode="manage"
+          onEditComment={vi.fn()}
+        />
+      );
+      const editBtn = btn(c, 'Edit');
+      expect(editBtn).not.toBeNull();
+      expect(editBtn!.disabled).toBe(false);
+      click(editBtn!);
+      expect(c.querySelector('.ProseMirror')).not.toBeNull();
+    });
+  });
+
+  describe('COMMENT (dormant live) -- own-comment-only mutation, exercised directly per the shelved domain contract', () => {
+    it('Edit is available for the current user\'s OWN comment', () => {
+      const c = mount(
+        <EmbeddedCommentList
+          comments={[{ id: 'c-own', text: 'mine', userId: 'commenter-a', userName: 'A', timestamp: Date.now() }]}
+          currentUserId="commenter-a"
+          accessMode="comment"
+          onEditComment={vi.fn()}
+        />
+      );
+      const editBtn = btn(c, 'Edit');
+      expect(editBtn).not.toBeNull();
+      expect(editBtn!.disabled).toBe(false);
+      click(editBtn!);
+      expect(c.querySelector('.ProseMirror')).not.toBeNull();
+    });
+
+    it('Edit is UNAVAILABLE for another user\'s comment -- disabled, and the callback guard also blocks a direct click', () => {
+      const c = mount(
+        <EmbeddedCommentList
+          comments={[{ id: 'c-other', text: 'not mine', userId: 'commenter-b', userName: 'B', timestamp: Date.now() }]}
+          currentUserId="commenter-a"
+          accessMode="comment"
+          onEditComment={vi.fn()}
+        />
+      );
+      const editBtn = btn(c, 'Edit');
+      expect(editBtn).not.toBeNull();
+      expect(editBtn!.disabled).toBe(true);
+      click(editBtn!);
+      expect(c.querySelector('.ProseMirror')).toBeNull();
+    });
+
+    it('the double-click-to-edit path independently re-checks ownership (direct interaction bypass, no disabled-button semantics to rely on)', () => {
+      // The Edit BUTTON's own `disabled` attribute would already suppress a
+      // browser/jsdom click before it reaches React's handler, so a test
+      // that only clicks that button can never prove the handler's OWN
+      // `canMutateThisComment` check is independently load-bearing (React
+      // itself already blocks the dispatch once `disabled` is true,
+      // regardless of what the handler body does). The row's own
+      // onDoubleClick, in contrast, is a plain, un-disabled <div> -- nothing
+      // but the handler's internal `if (canMutateThisComment)` check can
+      // stop it. Double-clicking the row for a comment this user does NOT
+      // own, in COMMENT mode, is therefore the genuine "direct interaction"
+      // bypass target -- mirrors the existing READ-mode dblclick test below.
+      const onEditComment = vi.fn();
+      const c = mount(
+        <EmbeddedCommentList
+          comments={[{ id: 'c-other2', text: 'not mine', userId: 'commenter-b', userName: 'B', timestamp: Date.now() }]}
+          currentUserId="commenter-a"
+          accessMode="comment"
+          onEditComment={onEditComment}
+        />
+      );
+      const row = c.getElementsByClassName('group/row')[0];
+      expect(row).toBeTruthy();
+      dblclick(row);
+      expect(c.querySelector('.ProseMirror')).toBeNull();
+      expect(onEditComment).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('READ -- Edit unavailable regardless of ownership', () => {
+    it('Edit is unavailable for both an owned and a non-owned comment', () => {
+      const c = mount(
+        <EmbeddedCommentList
+          comments={[OWN_COMMENT, OTHER_COMMENT]}
+          currentUserId="me"
+          accessMode="read"
+          onEditComment={vi.fn()}
+        />
+      );
+      expect(btn(c, 'Edit')).toBeNull();
+    });
+  });
+
+  describe('architecture characterization -- ownership must be derived from canMutateComment', () => {
+    it('CommentRow.tsx imports and calls the canonical canMutateComment authority, and no longer contains the old ad hoc predicate', () => {
+      const source = fs.readFileSync('components/collabboard/CommentRow.tsx', 'utf8');
+      expect(source).toMatch(/canMutateComment\(/);
+      expect(source).toMatch(/from ['"]@\/lib\/domain\/canvas\/comments['"]/);
+      // The old, stricter-than-canonical predicate must not be reintroduced.
+      expect(source).not.toMatch(/canManage\s*&&\s*comment\.userId\s*===\s*currentUserId/);
     });
   });
 });

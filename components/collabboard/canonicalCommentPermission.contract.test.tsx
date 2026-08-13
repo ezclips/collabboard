@@ -1466,14 +1466,18 @@ describe('PATCH 8O.1/8O.2 -- canonical comment permission wiring', () => {
       expect(src).toContain('accessMode={accessMode}');
     });
 
-    it('CommentRow.tsx (EmbeddedCommentList\'s only caller) accepts accessMode and folds it into canEdit', () => {
+    it('CommentRow.tsx (EmbeddedCommentList\'s only caller) accepts accessMode and derives ownership from canMutateComment (PATCH 8AO)', () => {
       const src = read('components/collabboard/CommentRow.tsx');
-      expect(src).toContain("import type { CommentAccessMode } from '@/lib/domain/canvas/comments';");
+      expect(src).toContain("import { canMutateComment, type CommentAccessMode } from '@/lib/domain/canvas/comments';");
       expect(src).toContain('accessMode?: CommentAccessMode;');
       expect(src).toContain("accessMode = 'manage',");
-      expect(src).toContain('const canManage = accessMode === \'manage\';');
-      expect(src).toContain('const canEdit = canManage && comment.userId === currentUserId;');
-      expect(src).toContain('{canManage && (');
+      expect(src).toContain("const isReadOnly = accessMode === 'read';");
+      expect(src).toContain('const canMutateThisComment = canMutateComment(accessMode, comment, currentUserId);');
+      expect(src).toContain('{!isReadOnly && (');
+      // PATCH 8AO: the old ad hoc rule was STRICTER than canonical MANAGE
+      // semantics (it blocked a MANAGE user from editing another user's
+      // comment) -- it must not be reintroduced.
+      expect(src).not.toContain('const canEdit = canManage && comment.userId === currentUserId;');
     });
 
     it('CommentRow.tsx has exactly one caller in production code (EmbeddedCommentList.tsx)', () => {

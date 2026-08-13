@@ -12,7 +12,7 @@ import { Highlight } from '@tiptap/extension-highlight';
 import TextStylePopup from './editors/TextStylePopup';
 import { useAnchoredPopover, rectFromElement, preventPopoverFocusLoss, type AnchorRect } from './editors/useAnchoredPopover';
 import { handleSafeCommentLinkClick } from './commentLinkSafety';
-import type { CommentAccessMode } from '@/lib/domain/canvas/comments';
+import { canMutateComment, type CommentAccessMode } from '@/lib/domain/canvas/comments';
 
 interface CommentData {
   id: string;
@@ -159,12 +159,16 @@ export default function CommentRow({
     }
   };
 
-  // READ users can never edit -- regardless of comment ownership. Folding
-  // the access check into canEdit (rather than a separate check at each call
-  // site) means the double-click-to-edit path and the Edit button's own
-  // click handler share one gate instead of two that could drift apart.
-  const canManage = accessMode === 'manage';
-  const canEdit = canManage && comment.userId === currentUserId;
+  // PATCH 8AO -- READ never mutates; MANAGE mutates any comment; COMMENT
+  // (dormant live, see lib/domain/canvas/comments.ts) mutates only its own.
+  // canMutateComment is the single authority for that rule -- previously
+  // this row derived its own ad hoc `canManage && own` predicate, which was
+  // STRICTER than canonical MANAGE semantics (it blocked a MANAGE user from
+  // editing another user's comment). isReadOnly replaces the old
+  // manage-only render gate so the dormant COMMENT contract is representable
+  // here too, matching every other canonical comment surface.
+  const isReadOnly = accessMode === 'read';
+  const canMutateThisComment = canMutateComment(accessMode, comment, currentUserId);
 
   return (
     <div
@@ -172,7 +176,7 @@ export default function CommentRow({
         }`}
       onClick={onSelect}
       onDoubleClick={() => {
-        if (canEdit) onStartEdit();
+        if (canMutateThisComment) onStartEdit();
       }}
     >
       {/* Avatar */}
@@ -234,9 +238,13 @@ export default function CommentRow({
         )}
       </div>
 
-      {/* Actions - Fixed width column, always reserves space (MANAGE only --
-          READ omits the whole column rather than disabling its buttons). */}
-      {canManage && (
+      {/* Actions - Fixed width column, always reserves space. Rendered for
+          MANAGE and COMMENT (COMMENT is dormant live -- see
+          lib/domain/canvas/comments.ts) -- READ omits the whole column
+          rather than disabling its buttons; per-comment ownership within
+          MANAGE/COMMENT is enforced per-button below via
+          canMutateThisComment. */}
+      {!isReadOnly && (
       <div className="flex flex-col gap-0.5 w-5 shrink-0">
         {/* Buttons only visible when active or hovering */}
         <div className={`flex flex-col gap-0.5 ${isActive ? 'visible' : 'invisible group-hover/row:visible'}`}>
@@ -266,14 +274,14 @@ export default function CommentRow({
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                if (canEdit) {
+                if (canMutateThisComment) {
                   setShouldSelectText(true);
                   onStartEdit();
                 }
               }}
               className="p-0.5 rounded transition-colors text-gray-400 hover:text-blue-500 hover:bg-blue-50 disabled:opacity-30"
               title="Edit"
-              disabled={!canEdit}
+              disabled={!canMutateThisComment}
             >
               <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"></path>
@@ -284,6 +292,7 @@ export default function CommentRow({
           <button
             onClick={(e) => {
               e.stopPropagation();
+              if (!canMutateThisComment) return;
               onToggleStrikethrough();
             }}
             className={`p-0.5 rounded transition-colors ${comment.isStrikethrough
@@ -297,6 +306,7 @@ export default function CommentRow({
           <button
             onClick={(e) => {
               e.stopPropagation();
+              if (!canMutateThisComment) return;
               onDelete();
             }}
             className="p-0.5 rounded transition-colors text-gray-400 hover:text-red-500 hover:bg-red-50"
