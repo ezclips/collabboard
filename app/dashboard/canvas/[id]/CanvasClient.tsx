@@ -3965,10 +3965,22 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
 
   const downloadImage = async (id: string) => {
     const padlet = padlets.find(p => p.id === id);
-    if (!padlet || padlet.type !== 'image' || !padlet.metadata?.imageUrl) return;
+    if (!padlet || padlet.type !== 'image') return;
+
+    // Same source-resolution order as the on-canvas renderers (see
+    // PostCardContent.tsx's imageSrc chain): metadata.imageUrl is
+    // authoritative when present, but older/legacy image posts can have
+    // only file_url or metadata.fileUrl -- and still render fine on
+    // screen -- so Download must find the same asset the user sees rather
+    // than silently doing nothing for those posts.
+    const sourceUrl = padlet.metadata?.imageUrl || padlet.file_url || (padlet.metadata as any)?.fileUrl;
+    if (!sourceUrl) {
+      toast.error('This image has no downloadable source');
+      return;
+    }
 
     try {
-      const response = await fetch(padlet.metadata.imageUrl);
+      const response = await fetch(sourceUrl);
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
 

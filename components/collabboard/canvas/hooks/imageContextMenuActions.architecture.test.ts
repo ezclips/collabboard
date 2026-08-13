@@ -67,15 +67,19 @@ describe('PATCH 9B: Download Original Image performs zero post mutations', () =>
   const downloadImageBody = extractFunctionBody(src, 'const downloadImage = async (id: string) => {', '\n  const toggleCropToGrid');
 
   it('uses the canonical fetch -> Blob -> object URL -> <a download> -> revoke mechanism', () => {
-    expect(downloadImageBody).toContain('await fetch(padlet.metadata.imageUrl)');
+    expect(downloadImageBody).toContain('await fetch(sourceUrl)');
     expect(downloadImageBody).toContain('await response.blob()');
     expect(downloadImageBody).toContain('window.URL.createObjectURL(blob)');
     expect(downloadImageBody).toContain('window.URL.revokeObjectURL(url)');
   });
 
-  it('reads the original asset URL (metadata.imageUrl), not a cropped/display-only field', () => {
-    expect(downloadImageBody).toContain('padlet.metadata.imageUrl');
+  it('reads the original asset URL -- metadata.imageUrl first, falling back to file_url/metadata.fileUrl for legacy posts -- never a cropped/display-only field', () => {
+    expect(downloadImageBody).toContain('padlet.metadata?.imageUrl || padlet.file_url');
     expect(downloadImageBody).not.toContain('cropToGrid');
+  });
+
+  it('shows a visible error instead of silently doing nothing when no source URL exists at all', () => {
+    expect(downloadImageBody).toContain("toast.error('This image has no downloadable source')");
   });
 
   it('performs zero board mutations: no metadata update command, no fetchData refresh call, no setPadlets', () => {
