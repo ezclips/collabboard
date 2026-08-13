@@ -140,6 +140,23 @@ export default function RowColumnContainerCard({
   const mutedTextColor = textColor === '#f8fafc' ? 'rgba(248,250,252,0.82)' : 'rgba(15,23,42,0.68)';
   const badgeBg = textColor === '#f8fafc' ? 'rgba(255,255,255,0.22)' : 'rgba(15,23,42,0.08)';
   const containerMetadata = (padlet.metadata ?? {}) as Record<string, unknown>;
+  // Per-Container display setting (default OFF, preserving today's
+  // appearance for every existing Container): when on, each child's own
+  // title renders above its content here. This is the single, shared
+  // Container-child renderer reused by every layout (Freeform, Wall,
+  // Row/Column, Drawing, Map, Chrono), so the flag lives on the Container's
+  // own metadata rather than duplicated per layout or per child.
+  const showChildPostTitles = containerMetadata.showChildPostTitles === true;
+  const renderChildTitle = (child: Padlet) => {
+    if (!showChildPostTitles) return null;
+    const title = typeof child.title === 'string' ? child.title.trim() : '';
+    if (!title) return null;
+    return (
+      <div data-child-title-header="true" className="px-1.5 pt-1.5 pb-1 border-b border-gray-100">
+        <span className="text-xs font-semibold text-gray-800 truncate block">{title}</span>
+      </div>
+    );
+  };
   const childIds = Array.isArray(containerMetadata.childPadletIds)
     ? containerMetadata.childPadletIds.filter((id): id is string => typeof id === "string")
     : [];
@@ -350,6 +367,7 @@ export default function RowColumnContainerCard({
                   if (isCommentType && onUpdateChildComments) {
                     return (
                       <div key={child.id} className="w-full max-w-full overflow-hidden pointer-events-auto">
+                        {renderChildTitle(child)}
                         <EmbeddedCommentList
                           comments={(child.metadata as any)?.comments || []}
                           badgeColor={(child.metadata as any)?.badgeColor}
@@ -420,6 +438,7 @@ export default function RowColumnContainerCard({
                       {childTopStrip && childTopStrip !== "transparent" && (
                         <div className="h-1.5 w-full" style={{ backgroundColor: childTopStrip }} />
                       )}
+                      {renderChildTitle(child)}
                       <div className={isImageChild && !isDocThumbnail ? "p-0" : isCardChild ? "p-0" : isDocThumbnail ? "p-1 bg-gray-50" : "p-1.5"}>
                         {isCardChild ? (
                           // Same CardPreview component standalone Clipart cards and

@@ -3974,6 +3974,10 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
               onLock={canUseFreeformEditButton ? () => lockPadlet(padlet.id) : undefined}
               onBringToFront={canUseFreeformEditButton ? () => movePadletLayer(padlet.id, 'bringToFront') : undefined}
               onSendToBack={canUseFreeformEditButton ? () => movePadletLayer(padlet.id, 'sendToBack') : undefined}
+              onToggleChildTitles={canUseFreeformEditButton
+                ? () => updatePadletMetadata(padlet.id, { showChildPostTitles: !(padlet.metadata as any)?.showChildPostTitles })
+                : undefined}
+              childTitlesVisible={(padlet.metadata as any)?.showChildPostTitles === true}
             >
               {content}
             </ColumnPostContextMenu>

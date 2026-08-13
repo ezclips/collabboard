@@ -870,6 +870,21 @@ export default function PostCardContent({
     if (type === "container") {
         const childIds = padlet.metadata?.childPadletIds || [];
         const children = allPadlets.filter((p) => childIds.includes(p.id));
+        // This Container's OWN child-title setting -- independent of any
+        // outer Container this Container might itself be nested inside (see
+        // RowColumnContainerCard's renderChildTitle, which controls whether
+        // THIS container's own title is shown as a child of that outer one).
+        const showChildPostTitles = (padlet.metadata as any)?.showChildPostTitles === true;
+        const renderChildTitle = (child: Padlet) => {
+            if (!showChildPostTitles) return null;
+            const childTitle = typeof child.title === 'string' ? child.title.trim() : '';
+            if (!childTitle) return null;
+            return (
+                <div data-child-title-header="true" className="px-1.5 pt-1.5 pb-1 border-b border-gray-100">
+                    <span className="text-xs font-semibold text-gray-800 truncate block">{childTitle}</span>
+                </div>
+            );
+        };
 
         return (
             <div className="space-y-3 pointer-events-none select-none">
@@ -890,6 +905,7 @@ export default function PostCardContent({
                                 if (isCommentType && onUpdateChildComments) {
                                     return (
                                         <div key={child.id} className="w-full max-w-full overflow-hidden pointer-events-auto">
+                                            {renderChildTitle(child)}
                                             <EmbeddedCommentList
                                                 comments={(child.metadata as any)?.comments || []}
                                                 badgeColor={(child.metadata as any)?.badgeColor}
@@ -952,6 +968,7 @@ export default function PostCardContent({
                                         {childTopStrip && childTopStrip !== "transparent" && (
                                             <div className="h-1.5 w-full" style={{ backgroundColor: childTopStrip }} />
                                         )}
+                                        {renderChildTitle(child)}
                                         <div className="p-3">
                                             <PostCardContent
                                                 padlet={child}

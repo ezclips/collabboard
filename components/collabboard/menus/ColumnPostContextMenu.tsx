@@ -61,6 +61,11 @@ interface ColumnPostContextMenuProps {
     onBringForward?: () => void;
     onSendBackward?: () => void;
     onSendToBack?: () => void;
+    // Container-only: toggles whether this Container's own child posts show
+    // their titles when rendered on-canvas (RowColumnContainerCard). Present
+    // only when this menu instance is for a Container padlet.
+    onToggleChildTitles?: () => void;
+    childTitlesVisible?: boolean;
     onAddContainerAt?: (position: number) => void;
     enableInsertActions?: boolean;
     onEditPosition?: () => void;
@@ -111,6 +116,8 @@ export function ColumnPostContextMenu({
     onBringForward,
     onSendBackward,
     onSendToBack,
+    onToggleChildTitles,
+    childTitlesVisible = false,
     onAddContainerAt,
     enableInsertActions = false,
     onEditPosition,
@@ -252,6 +259,11 @@ export function ColumnPostContextMenu({
                             Edit post
                         </ContextMenuItem>
                     )
+                )}
+                {onToggleChildTitles && (
+                    <ContextMenuItem onClick={onToggleChildTitles}>
+                        {childTitlesVisible ? 'Hide post titles' : 'Show post titles'}
+                    </ContextMenuItem>
                 )}
                 {/* Color picker */}
                 {onChangeColor && (
