@@ -562,15 +562,22 @@ describe('PATCH 8O.1/8O.2 -- canonical comment permission wiring', () => {
       expect(titleStyleChangeNext?.[1]?.startsWith('guardCommentMutation(')).toBe(true);
     });
 
-    it('the OTHER CommentPopup in NoteEditor.tsx (selected-text/anchored-thread popup) is untouched -- no accessMode, no guards, still the historical hardcoded identity', () => {
+    it('PATCH 8AB: the OTHER CommentPopup in NoteEditor.tsx (selected-text/anchored-thread popup) is now wired with accessMode, guards, and real identity', () => {
       const noteEditor = read('components/collabboard/editors/NoteEditor.tsx');
       const block = commentPopupBlockAfter(noteEditor, '{panels.open.comment && (');
-      expect(block).not.toContain('accessMode=');
-      expect(block).not.toContain('guardCommentMutation(');
+      expect(block).toContain('accessMode={anchoredAccessMode}');
       expect(block).toContain('onRemoveThread');
       expect(block).toContain('highlightColor={activeThread?.color}');
-      expect(block).toContain('currentUserId="user1"');
-      expect(block).toContain('currentUserName="R"');
+      expect(block).toContain('currentUserId={currentUserId}');
+      expect(block).toContain('currentUserName={currentUserName}');
+      expect(block).not.toContain('currentUserId="user1"');
+      expect(block).not.toContain('currentUserName="R"');
+      for (const prop of ['onSubmit=', 'onEditComment=', 'onRemoveComment=', 'onRemoveThread=', 'onToggleCommentStrikethrough=', 'onColor=', 'onCommentColor=']) {
+        const propStart = block.indexOf(prop);
+        expect(propStart, `${prop} must be present`).toBeGreaterThan(-1);
+        const nextNonSpace = block.slice(propStart + prop.length).match(/^\s*\{?\s*(\S+)/);
+        expect(nextNonSpace?.[1]?.startsWith('guardCommentMutation(anchoredAccessMode,'), `${prop} must be wrapped with guardCommentMutation(anchoredAccessMode, ...), found: ${nextNonSpace?.[0]}`).toBe(true);
+      }
     });
 
     it('CanvasModals.tsx threads commentAccessMode from CanvasClient.tsx into NoteEditor as accessMode', () => {
@@ -1277,7 +1284,7 @@ describe('PATCH 8O.1/8O.2 -- canonical comment permission wiring', () => {
       expect(overlay).toContain('accessMode?: CommentAccessMode;');
       expect(overlay).toContain("import { isDocumentPost } from '@/lib/domain/canvas/documentPost';");
       expect(overlay).toContain("const requestedDocumentAccessMode: CommentAccessMode = accessMode === 'manage' ? 'manage' : 'read';");
-      expect(overlay).toContain('activeCommentPadlet && isDocumentPost(activeCommentPadlet)');
+      expect(overlay).toContain('activeCommentPadlet && (isDocumentPost(activeCommentPadlet) || isNoteAnchoredPost(activeCommentPadlet))');
       expect(block).toContain('accessMode={anchoredAccessMode}');
       for (const prop of ['onSubmit=', 'onEditComment=', 'onRemoveComment=', 'onRemoveThread=', 'onColor=', 'onToggleCommentStrikethrough=', 'onCommentColor=']) {
         const propStart = block.indexOf(prop);
@@ -1299,6 +1306,82 @@ describe('PATCH 8O.1/8O.2 -- canonical comment permission wiring', () => {
       const end = canvas.indexOf('/>', start);
       const block = canvas.slice(start, end);
       expect(block).toContain('accessMode={commentAccessMode}');
+    });
+  });
+
+  describe('Note anchored/highlighted comments -- permission + identity wiring (PATCH 8AB)', () => {
+    it('NoteEditor derives one shared anchoredAccessMode from the same accessMode prop as the detached panel, and every anchored handler self-guards', () => {
+      const noteEditor = read('components/collabboard/editors/NoteEditor.tsx');
+      expect(noteEditor).toContain("const anchoredAccessMode: CommentAccessMode = accessMode === 'manage' ? 'manage' : 'read';");
+      expect(noteEditor).toContain('const canManageAnchoredComments = anchoredAccessMode === \'manage\';');
+      expect(noteEditor).toContain('const handleTextComment = () => {');
+      expect(noteEditor).toContain('if (!editor || !canManageAnchoredComments) return;');
+      expect(noteEditor).toContain('if (!editor || !canManageAnchoredComments || !commentText || !activeThread) return;');
+      expect(noteEditor).toContain('if (!editor || !canManageAnchoredComments || !newText || !activeThread) return;');
+      expect(noteEditor).toContain('const handleRemoveComment = (commentId: string) => {');
+      expect(noteEditor).toContain('const handleRemoveThread = () => {');
+      expect(noteEditor).toContain('const handleToggleCommentStrikethrough = (commentId: string) => {');
+      expect(noteEditor).toContain('const handleColorComment = (color: string) => {');
+      expect(noteEditor).toContain('const handleCommentColor = (commentId: string, textColor?: string, backgroundColor?: string) => {');
+      // handleRemoveComment, handleRemoveThread, handleToggleCommentStrikethrough,
+      // handleColorComment, and handleCommentColor all share this exact guard
+      // body -- counted rather than pinned to each own multi-line
+      // (CRLF-fragile) block.
+      const activeThreadGuardCount = (noteEditor.match(/if \(!editor \|\| !canManageAnchoredComments \|\| !activeThread\) return;/g) ?? []).length;
+      expect(activeThreadGuardCount).toBe(5);
+    });
+
+    it('the anchored thread-creation handler uses real currentUserId/currentUserName, not the historical "user1"/"R" placeholder', () => {
+      const noteEditor = read('components/collabboard/editors/NoteEditor.tsx');
+      const start = noteEditor.indexOf('const handleAddComment = ');
+      expect(start).toBeGreaterThan(-1);
+      const end = noteEditor.indexOf('const handleEditComment = ', start);
+      const block = noteEditor.slice(start, end);
+      expect(block).toContain('userId: currentUserId,');
+      expect(block).toContain('userName: currentUserName,');
+      expect(block).not.toContain("userId: 'user1'");
+      expect(block).not.toContain("userName: 'R'");
+    });
+
+    it('buildThreadFromAttrs keeps its historical-data READ fallback untouched (parsing legacy marks, not a write path)', () => {
+      const noteEditor = read('components/collabboard/editors/NoteEditor.tsx');
+      // Deliberately unchanged -- this only labels legacy marks that predate
+      // the userId attribute when displaying them, it never persists a new
+      // comment. See "HISTORICAL IDENTITY" in the PATCH 8AB spec.
+      expect(noteEditor).toContain("userId: attrs.userId || 'user1',");
+    });
+
+    it('the toolbar creation affordance is omitted (not merely disabled) when the anchored system is read-only', () => {
+      const noteEditor = read('components/collabboard/editors/NoteEditor.tsx');
+      expect(noteEditor).toContain('onTextComment: canManageAnchoredComments ? handleTextComment : undefined,');
+      const toolbar = read('components/collabboard/editors/NoteEditorToolbar.tsx');
+      expect(toolbar).toContain('disabled: !hasSelection || !onTextComment,');
+    });
+
+    it('NoteEditor.tsx accepts accessMode + real currentUserId/currentUserName and forwards them to both CommentPopup usages', () => {
+      const noteEditor = read('components/collabboard/editors/NoteEditor.tsx');
+      expect(noteEditor).toContain('currentUserId?: string;');
+      expect(noteEditor).toContain('currentUserName?: string;');
+      expect(noteEditor).toContain('accessMode?: CommentAccessMode;');
+      const canvasModals = read('components/collabboard/canvas/ui/CanvasModals.tsx');
+      const noteEditorStart = canvasModals.indexOf('<NoteEditor');
+      const noteEditorEnd = canvasModals.indexOf('/>', canvasModals.indexOf('initialTitle=', noteEditorStart));
+      const noteEditorBlock = canvasModals.slice(noteEditorStart, noteEditorEnd);
+      expect(noteEditorBlock).toContain('currentUserId={user?.id || \'anon\'}');
+      expect(noteEditorBlock).toContain('currentUserName={user?.email?.split(\'@\')[0] || \'You\'}');
+    });
+
+    it('OverlayLayer extends the same READ/MANAGE gate to Note padlets, distinguishable from the Document branch', () => {
+      const overlay = read('components/collabboard/canvas/ui/OverlayLayer.tsx');
+      expect(overlay).toContain('const isNoteAnchoredPost = (post: Pick<Padlet, \'type\'>): boolean =>');
+      expect(overlay).toContain("post.type === 'text' || (post.type as string) === 'note';");
+      expect(overlay).toContain('activeCommentPadlet && (isDocumentPost(activeCommentPadlet) || isNoteAnchoredPost(activeCommentPadlet))');
+      // Regression proof the two branches remain distinguishable rather than
+      // collapsed into one always-true check: isDocumentPost and
+      // isNoteAnchoredPost are two separate, independently named predicates,
+      // each still individually referenced in the combined condition above.
+      expect(overlay.match(/isDocumentPost\(activeCommentPadlet\)/g)?.length).toBeGreaterThanOrEqual(1);
+      expect(overlay.match(/isNoteAnchoredPost\(activeCommentPadlet\)/g)?.length).toBeGreaterThanOrEqual(1);
     });
   });
 

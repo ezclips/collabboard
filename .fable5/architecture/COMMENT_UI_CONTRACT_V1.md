@@ -702,7 +702,11 @@ against wiring any live caller to COMMENT mode. Note's OTHER `CommentPopup`
 completely unwired -- it stays on its pre-existing, always-writable path,
 same as before this patch. See `noteDetachedCommentUIContract.test.tsx` for
 the anchored-thread freeze proof and `canonicalCommentPermission.contract.test.tsx`
-for the permission-wiring proof at all three Category-A sites.
+for the permission-wiring proof at all three Category-A sites. Note's OTHER
+`CommentPopup` (the selected-text/anchored-thread popup) was later
+permission-wired too, in PATCH 8AB (2026-08-13, see "Note anchored/highlighted
+comments were permission-wired in PATCH 8AB" further below) -- it is no
+longer unwired or unconditionally writable.
 
 ### Commenter persistence architecture (PATCH 8O.2, quarantined PATCH 8O.3)
 
@@ -906,7 +910,7 @@ product-facing post families for 10 live type literals (`'file'` excluded).
 | --- | --- | --- | --- | --- | --- |
 | Clipart | `card` (+ `svgUrl`) | yes | CANONICAL | none | guarded |
 | Image | `image` | yes | CANONICAL | none | guarded (3 entry points) |
-| Note | `text` / `note` | yes | CANONICAL | anchored/highlighted threads | normal tier guarded; anchored tier UNGATED |
+| Note | `text` / `note` | yes | CANONICAL | anchored/highlighted threads | normal tier guarded; anchored tier **PERMISSION SAFE -- READ / MANAGE** (PATCH 8AB) |
 | Drawing | `drawing` | yes | CANONICAL | none | guarded |
 | Todo | `todo` | yes | CANONICAL | none | guarded |
 | AI Component | `ai-component` | yes | CANONICAL | none | guarded |
@@ -920,7 +924,7 @@ product-facing post families for 10 live type literals (`'file'` excluded).
 
 | Special system | Live surfaces | Permission status |
 | --- | --- | --- |
-| Note anchored/highlighted threads | `NoteEditor.tsx` (in-modal), `OverlayLayer.tsx` (on-canvas) | PERMISSION UNGATED |
+| Note anchored/highlighted threads | `NoteEditor.tsx` (in-modal), `OverlayLayer.tsx` (on-canvas, shared with Document) | **PERMISSION SAFE -- READ / MANAGE** (PATCH 8AB, 2026-08-13) |
 | Document anchored/highlighted threads | `DocumentEditor.tsx` (in-modal), `OverlayLayer.tsx` (on-canvas, shared with Note) | **PERMISSION SAFE -- READ / MANAGE** (PATCH 8AA, 2026-08-13) |
 | Comment post primary thread | `CommentPost.tsx`, `FreeformPadletCards.tsx`'s collapsed-marker inline block, `CommentEditor.tsx` | **PERMISSION SAFE -- READ / MANAGE** (PATCH 8Z, 2026-08-13) |
 | Container embedded child `CommentPopup` renderer | `ContainerEditor.tsx`'s `SortableChildItem` | PERMISSION UNGATED |
@@ -1160,9 +1164,9 @@ inside `<CommentPopup ... />` blocks specifically
 (`countGuardedCommentPopupUsages`), which is a strictly more correct
 signal than before this patch, not a weakened one.
 
-Remaining PERMISSION UNGATED special surfaces after PATCH 8Z and PATCH 8AA:
-Note anchored/highlighted threads, Container's embedded child `CommentPopup`
-renderer, and `EmbeddedCommentList` -- each a candidate for its own dedicated
+Remaining PERMISSION UNGATED special surfaces after PATCH 8Z, PATCH 8AA, and
+PATCH 8AB: Container's embedded child `CommentPopup` renderer and
+`EmbeddedCommentList` -- each a candidate for its own dedicated
 permission-wiring patch, per PATCH 8Y's next-phase backlog.
 
 **Document anchored/highlighted comments were permission-wired in PATCH 8AA**
@@ -1175,8 +1179,55 @@ only threads the existing `CommentAccessMode` from `CanvasClient.tsx` into
 `CanvasModals.tsx -> DocumentEditor.tsx` and into `OverlayLayer.tsx`, normalizes
 the dormant COMMENT tier to READ for this surface, and wraps every Document
 anchored write path in `guardCommentMutation(...)`. `OverlayLayer.tsx` is shared
-with Note anchored threads, so PATCH 8AA gates it only when the active padlet
-matches `isDocumentPost(...)`; Note anchored threads remain outside this
-Document-only permission patch. READ users may open and read existing Document
-anchored threads; they cannot create, submit, edit, delete, color, highlight,
-strikethrough, or invoke the separate anchored highlight picker.
+with Note anchored threads, so PATCH 8AA gated it only when the active padlet
+matched `isDocumentPost(...)`; Note anchored threads were explicitly left
+outside that Document-only permission patch, to be closed separately.
+
+**Note anchored/highlighted comments were permission-wired in PATCH 8AB**
+(2026-08-13). Same SPECIAL / ANCHORED / HIGHLIGHTED classification, same
+TipTap `comment` mark storage (`NoteEditor.tsx`'s own extension registry,
+unchanged), no migration to `detachedComments`. Two live surfaces:
+
+- `NoteEditor.tsx`'s own in-modal anchored `CommentPopup` (selected-text
+  thread popup, distinct from its already-canonical detached-comment popup).
+  Derives `anchoredAccessMode`/`canManageAnchoredComments` from the same
+  `accessMode` prop already threaded in for the detached tier (no new signal).
+  Every anchored handler (`handleTextComment`, `handleAddComment`,
+  `handleEditComment`, `handleRemoveComment`, `handleRemoveThread`,
+  `handleToggleCommentStrikethrough`, `handleColorComment`,
+  `handleCommentColor`) self-guards with `canManageAnchoredComments`, and the
+  `<CommentPopup>` call site wraps every mutation prop in
+  `guardCommentMutation(anchoredAccessMode, ...)` plus passes
+  `accessMode={anchoredAccessMode}` -- the same two-layer defense pattern
+  used throughout this rollout. The toolbar's "Comment" (new-thread) button is
+  omitted (`onTextComment: canManageAnchoredComments ? handleTextComment :
+  undefined`), not merely disabled, matching Document's own pattern; clicking
+  an EXISTING highlighted mark to open/read its thread remains unconditional
+  (the `editorProps.handleClick` DOM-click-to-open path carries no accessMode
+  gate at all -- reading an existing thread is always allowed).
+- `OverlayLayer.tsx` (on-canvas, shared with Document): the existing PATCH 8AA
+  `isDocumentPost(...)` branch is extended with a sibling `isNoteAnchoredPost(...)`
+  check (`post.type === 'text' || (post.type as string) === 'note'`, matching
+  the established Note-family discriminator used elsewhere), so
+  `anchoredAccessMode` now resolves to the real board-level accessMode for
+  BOTH Document and Note padlets, and stays `'manage'` for anything else
+  (unchanged fallback). No other OverlayLayer logic changed -- broadening this
+  one condition automatically extended every already-existing
+  `guardCommentMutation`/`canManageAnchoredComments` gate in the file to Note.
+
+**Identity correction (PATCH 8AB):** `NoteEditor.tsx`'s anchored `CommentPopup`
+call site previously hardcoded `currentUserId="user1"` / `currentUserName="R"`
+regardless of the real authenticated user already available via its own
+`currentUserId`/`currentUserName` props (used correctly by the detached tier
+since PATCH 8P.1). New anchored threads/replies now persist the real
+authenticated identity. Historical anchored comments already persisted with
+the placeholder identity are left untouched (`buildThreadFromAttrs`'s
+`attrs.userId || 'user1'` fallback is a read-time label for legacy marks
+lacking the attribute, not a write path, and is unchanged). `OverlayLayer.tsx`
+already used real identity (`user?.id`/`user?.email`) before this patch --
+no change needed there.
+
+READ users may open and read existing Note anchored threads (via either
+surface); they cannot create a new thread, add/edit/delete a reply, delete a
+whole thread, remove the source-text mark, or invoke the text-span highlight
+picker. MANAGE keeps every existing capability, unchanged.

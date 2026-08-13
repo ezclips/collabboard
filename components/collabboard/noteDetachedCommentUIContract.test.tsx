@@ -1,15 +1,12 @@
 import fs from 'node:fs';
-import { execFileSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
 
 const NOTE_EDITOR = 'components/collabboard/editors/NoteEditor.tsx';
 const FREEFORM = 'components/collabboard/canvas/ui/FreeformPadletCards.tsx';
 const OVERLAY = 'components/collabboard/canvas/ui/OverlayLayer.tsx';
 const POPUP = 'components/collabboard/editors/CommentPopup.tsx';
-const START = 'cd35d76b74b3f81ddccbe39e6e5a16ef9aa0dabb';
 
 const read = (path: string) => fs.readFileSync(path, 'utf8').replace(/\r\n/g, '\n');
-const baseline = (path: string) => execFileSync('git', ['show', `${START}:${path}`], { encoding: 'utf8' }).replace(/\r\n/g, '\n');
 
 describe('normal/detached Note comments — canonical Comment UI v1 migration', () => {
   it('routes all three live detached Note entry points through CommentPopup', () => {
@@ -94,21 +91,49 @@ describe('normal/detached Note comments — canonical Comment UI v1 migration', 
     }
   });
 
-  it('proves in-modal highlighted/anchored Note threads remain on their frozen path while the shared overlay may be permission-wired', () => {
+  // PATCH 8AB permission-wired in-modal highlighted/anchored Note threads --
+  // this test previously proved the anchored block stayed byte-identical to
+  // the pre-PATCH-8P baseline (fully unwired). It is no longer frozen: it now
+  // carries accessMode gating and real identity. What remains frozen is the
+  // STORAGE/UI model -- still the TipTap `comment` mark, never migrated to
+  // `detachedComments`, never redesigned into the canonical CommentPopup's
+  // own UI beyond the accessMode prop it has always accepted.
+  it('proves in-modal highlighted/anchored Note threads keep their TipTap-mark storage/UI model while now carrying real permission + identity wiring', () => {
     const currentNote = read(NOTE_EDITOR);
-    const oldNote = baseline(NOTE_EDITOR);
     const anchoredStart = '  const parseCommentThread =';
     const anchoredEnd = '  const handlePostComment =';
     const currentStart = currentNote.indexOf(anchoredStart);
-    const oldStart = oldNote.indexOf(anchoredStart);
     const currentEnd = currentNote.indexOf(anchoredEnd, currentStart);
-    const oldEnd = oldNote.indexOf(anchoredEnd, oldStart);
     expect(currentStart).toBeGreaterThanOrEqual(0);
     expect(currentEnd).toBeGreaterThan(currentStart);
-    expect(currentNote.slice(currentStart, currentEnd)).toBe(oldNote.slice(oldStart, oldEnd));
+    const anchoredBlock = currentNote.slice(currentStart, currentEnd);
+    // Storage/UI model unchanged -- still TipTap mark based, not migrated.
+    expect(anchoredBlock).toContain('buildThreadFromAttrs');
+    expect(anchoredBlock).not.toContain('detachedComments');
+    // Permission + identity wiring is new as of PATCH 8AB (handleTextComment
+    // is the creation-trigger inside this slice; the mutation handlers
+    // further down the file -- handleAddComment et al -- are checked below).
+    expect(anchoredBlock).toContain('canManageAnchoredComments');
+    const handleAddCommentStart = currentNote.indexOf('const handleAddComment = ');
+    const handleAddCommentEnd = currentNote.indexOf('const handleEditComment = ', handleAddCommentStart);
+    const handleAddCommentBlock = currentNote.slice(handleAddCommentStart, handleAddCommentEnd);
+    expect(handleAddCommentBlock).toContain('.setComment(');
+    expect(handleAddCommentBlock).toContain('userId: currentUserId,');
+    expect(handleAddCommentBlock).not.toContain("userId: 'user1'");
+    expect(currentNote).toContain("const anchoredAccessMode: CommentAccessMode = accessMode === 'manage' ? 'manage' : 'read';");
+    const popupSite = currentNote.slice(currentNote.indexOf('{panels.open.comment && ('));
+    expect(popupSite).toContain('accessMode={anchoredAccessMode}');
+    expect(popupSite).toContain('guardCommentMutation(anchoredAccessMode,');
+    expect(popupSite).toContain('currentUserId={currentUserId}');
+    expect(popupSite).toContain('currentUserName={currentUserName}');
+    expect(popupSite).not.toContain('currentUserId="user1"');
+
     const overlay = read(OVERLAY);
     expect(overlay).toContain('accessMode?: CommentAccessMode;');
     expect(overlay).toContain('accessMode={anchoredAccessMode}');
     expect(overlay).not.toContain('detachedComments');
+    // PATCH 8AB: OverlayLayer's shared anchored gate now also covers Note,
+    // not just Document.
+    expect(overlay).toContain('isNoteAnchoredPost');
   });
 });

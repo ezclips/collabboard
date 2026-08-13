@@ -91,13 +91,13 @@ const EXPECTED: Record<string, { usages: number; guarded: number; note: string }
   'components/collabboard/editors/TodoEditor.tsx': { usages: 1, guarded: 1, note: 'Todo own editor -- canonical (PATCH 8S)' },
   'components/collabboard/editors/NoteEditor.tsx': {
     usages: 2,
-    guarded: 1,
-    note: 'ONE canonical detached-comment popup (guarded) + ONE anchored/highlighted selected-text popup (Category B, intentionally unguarded, out of scope)',
+    guarded: 2,
+    note: 'ONE canonical detached-comment popup (Category A) + ONE anchored/highlighted selected-text popup (Category B, permission-safe READ/MANAGE as of PATCH 8AB) -- both guarded',
   },
   'components/collabboard/canvas/ui/OverlayLayer.tsx': {
     usages: 1,
     guarded: 1,
-    note: 'on-canvas anchored/highlighted thread controller (Document permission-safe READ/MANAGE; shared Note opener remains special/out of normal scope)',
+    note: 'on-canvas anchored/highlighted thread controller (Document AND Note permission-safe READ/MANAGE as of PATCH 8AA/8AB)',
   },
   'components/collabboard/editors/DocumentEditor.tsx': {
     usages: 1,
@@ -115,12 +115,12 @@ const TOTAL_EXPECTED_USAGES = Object.values(EXPECTED).reduce((sum, e) => sum + e
 const TOTAL_EXPECTED_GUARDED = Object.values(EXPECTED).reduce((sum, e) => sum + e.guarded, 0);
 
 describe('PATCH 8Y -- normal comment rollout closure', () => {
-  it('TOTAL_EXPECTED_USAGES/GUARDED constants match the PATCH 8Y+8AA inventory (20 usages, 18 guarded)', () => {
+  it('TOTAL_EXPECTED_USAGES/GUARDED constants match the PATCH 8Y+8AA+8AB inventory (20 usages, 19 guarded)', () => {
     // Pins the inventory numbers themselves, independent of the file walk,
     // so a future editor of EXPECTED can see at a glance if their edit
     // changed the totals.
     expect(TOTAL_EXPECTED_USAGES).toBe(20);
-    expect(TOTAL_EXPECTED_GUARDED).toBe(18);
+    expect(TOTAL_EXPECTED_GUARDED).toBe(19);
   });
 
   it('every file with a live <CommentPopup usage is accounted for in EXPECTED, with no unaccounted file', () => {

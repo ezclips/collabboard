@@ -80,10 +80,13 @@ export default function NoteEditorToolbar({
         {
             icon: MessageSquare,
             label: 'Comment',
-            hint: hasSelection ? 'Add comment to selected text' : 'Highlight text first!',
+            hint: onTextComment ? (hasSelection ? 'Add comment to selected text' : 'Highlight text first!') : 'Read-only',
             onClick: onTextComment,
             active: isComment,
-            disabled: !hasSelection,
+            // onTextComment is omitted entirely by the caller in read-only
+            // mode (NoteEditor.tsx's PATCH 8AB gate), so its absence -- not a
+            // separate readOnly prop -- is the single source of truth here.
+            disabled: !hasSelection || !onTextComment,
         },
     ];
 

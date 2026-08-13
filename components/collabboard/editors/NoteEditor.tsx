@@ -98,13 +98,15 @@ interface NoteEditorProps {
   }) => void;
   onClose: () => void;
   isOpen: boolean;
-  // PATCH 8P -- access mode for the normal/detached post-comment panel only
-  // (Category A). The selected-text/anchored comment thread popup below is
-  // explicitly out of scope for this patch and stays unwired -- see that
-  // popup's own call site further down. Defaults to 'manage' so every
-  // existing caller that has not been updated keeps its exact current
-  // (fully writable) behavior, same convention as every other canonical
-  // caller (ClipartCardDraftModal.tsx, FreeformPadletCards.tsx).
+  // PATCH 8P -- access mode for the normal/detached post-comment panel
+  // (Category A). PATCH 8AB extends this same prop to also gate the
+  // selected-text/anchored comment thread popup further down (via the
+  // derived `anchoredAccessMode`/`canManageAnchoredComments` below) -- both
+  // systems share one board-level mode, there is no separate anchored-only
+  // signal. Defaults to 'manage' so every existing caller that has not been
+  // updated keeps its exact current (fully writable) behavior, same
+  // convention as every other canonical caller (ClipartCardDraftModal.tsx,
+  // FreeformPadletCards.tsx).
   accessMode?: CommentAccessMode;
 }
 
@@ -189,6 +191,14 @@ export default function NoteEditor({
   }, [initialDetachedComments]);
 
   const [badgeColor, setBadgeColor] = useState(initialBadgeColor);
+
+  // PATCH 8AB -- the selected-text/anchored comment thread system reuses the
+  // same live READ/MANAGE model already threaded into `accessMode` for the
+  // normal/detached panel above (CanvasModals.tsx passes one board-level
+  // commentAccessMode into both). The dormant COMMENT tier is intentionally
+  // collapsed into 'read' here, same as DocumentEditor.tsx's anchoredAccessMode.
+  const anchoredAccessMode: CommentAccessMode = accessMode === 'manage' ? 'manage' : 'read';
+  const canManageAnchoredComments = anchoredAccessMode === 'manage';
 
   // Update textColor when initialTextColor changes
   useEffect(() => {
@@ -354,7 +364,7 @@ export default function NoteEditor({
 
   // Comment handlers
   const handleTextComment = () => {
-    if (!editor) return;
+    if (!editor || !canManageAnchoredComments) return;
 
     const { from, to } = editor.state.selection;
     let selection = { from, to };
@@ -489,13 +499,13 @@ export default function NoteEditor({
   };
 
   const handleAddComment = (commentText: string) => {
-    if (!editor || !commentText || !activeThread) return;
+    if (!editor || !canManageAnchoredComments || !commentText || !activeThread) return;
 
     const newComment: InlineComment = {
       id: `comment-${Date.now()}`,
       text: commentText,
-      userId: 'user1',
-      userName: 'R',
+      userId: currentUserId,
+      userName: currentUserName,
       timestamp: Date.now(),
     };
     const nextComments = [...activeThread.comments, newComment];
@@ -523,7 +533,7 @@ export default function NoteEditor({
   };
 
   const handleEditComment = (commentId: string, newText: string) => {
-    if (!editor || !newText || !activeThread) return;
+    if (!editor || !canManageAnchoredComments || !newText || !activeThread) return;
 
     const nextComments = activeThread.comments.map((comment) =>
       comment.id === commentId ? { ...comment, text: newText } : comment
@@ -534,7 +544,7 @@ export default function NoteEditor({
   };
 
   const handleRemoveComment = (commentId: string) => {
-    if (!editor || !activeThread) return;
+    if (!editor || !canManageAnchoredComments || !activeThread) return;
 
     const nextComments = activeThread.comments.filter((comment) => comment.id !== commentId);
     if (nextComments.length === 0) {
@@ -548,14 +558,14 @@ export default function NoteEditor({
   };
 
   const handleRemoveThread = () => {
-    if (!editor || !activeThread) return;
+    if (!editor || !canManageAnchoredComments || !activeThread) return;
     removeCommentThreadFromDoc(activeThread.id);
     setActiveThread(null);
     panels.closePanel('comment');
   };
 
   const handleToggleCommentStrikethrough = (commentId: string) => {
-    if (!editor || !activeThread) return;
+    if (!editor || !canManageAnchoredComments || !activeThread) return;
     const nextComments = activeThread.comments.map((comment) =>
       comment.id === commentId
         ? { ...comment, isStrikethrough: !comment.isStrikethrough }
@@ -566,7 +576,7 @@ export default function NoteEditor({
   };
 
   const handleColorComment = (color: string) => {
-    if (!editor || !activeThread) return;
+    if (!editor || !canManageAnchoredComments || !activeThread) return;
     const nextColor = color || null;
     updateCommentThreadInDoc(activeThread.id, activeThread.comments, { color: nextColor });
     setActiveThread({ ...activeThread, color: color || undefined });
@@ -576,7 +586,7 @@ export default function NoteEditor({
   // above, which colors the highlighted document text span the whole
   // thread is anchored to.
   const handleCommentColor = (commentId: string, textColor?: string, backgroundColor?: string) => {
-    if (!editor || !activeThread) return;
+    if (!editor || !canManageAnchoredComments || !activeThread) return;
     const nextComments = activeThread.comments.map((comment) =>
       comment.id === commentId ? { ...comment, textColor, backgroundColor } : comment
     );
@@ -708,7 +718,7 @@ export default function NoteEditor({
     onCardColor: () => panels.openPanel('cardColor'),
     onAddReaction: () => panels.openPanel('reaction'),
     onPostComment: handlePostComment,
-    onTextComment: handleTextComment,
+    onTextComment: canManageAnchoredComments ? handleTextComment : undefined,
     postCommentCount: detachedComments.length,
     postCommentBadgeColor: badgeColor,
     isLink: editor.isActive('link'),
@@ -1032,18 +1042,19 @@ export default function NoteEditor({
             <CommentPopup
               isOpen={panels.open.comment}
               onOpenChange={handleCommentPopupOpenChange}
-              onSubmit={handleAddComment}
-              onEditComment={handleEditComment}
-              onRemoveComment={handleRemoveComment}
-              onRemoveThread={handleRemoveThread}
-              onToggleCommentStrikethrough={handleToggleCommentStrikethrough}
-              onColor={handleColorComment}
-              onCommentColor={handleCommentColor}
+              onSubmit={guardCommentMutation(anchoredAccessMode, handleAddComment)}
+              onEditComment={guardCommentMutation(anchoredAccessMode, handleEditComment)}
+              onRemoveComment={guardCommentMutation(anchoredAccessMode, handleRemoveComment)}
+              onRemoveThread={guardCommentMutation(anchoredAccessMode, handleRemoveThread)}
+              onToggleCommentStrikethrough={guardCommentMutation(anchoredAccessMode, handleToggleCommentStrikethrough)}
+              onColor={guardCommentMutation(anchoredAccessMode, handleColorComment)}
+              onCommentColor={guardCommentMutation(anchoredAccessMode, handleCommentColor)}
               comments={activeThread?.comments || []}
               highlightColor={activeThread?.color}
-              currentUserId="user1"
-              currentUserName="R"
+              currentUserId={currentUserId}
+              currentUserName={currentUserName}
               position={commentPopupPosition}
+              accessMode={anchoredAccessMode}
             />
           </div>
         )}

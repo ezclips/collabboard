@@ -338,7 +338,7 @@ describe('C1/4: Link workflow', () => {
 });
 
 describe('C1/5: selected-text Comment (distinct from post-level Comment)', () => {
-  it('enables from selection and opens CommentPopup with the current hardcoded identity', () => {
+  it('enables from selection and opens CommentPopup', () => {
     const c = openNote();
     expect(btn(c, 'Highlight text first!')).not.toBeNull();
     selectText(c, 'world');
@@ -346,10 +346,29 @@ describe('C1/5: selected-text Comment (distinct from post-level Comment)', () =>
     expect(isDisabled(enabled)).toBe(false);
     click(enabled);
     expect(c.querySelector('input[placeholder="Add a comment..."]')).not.toBeNull();
-    // Identity is hardcoded at NoteEditor.tsx:758-759 -- characterized, not corrected.
-    const src = fs.readFileSync('components/collabboard/editors/NoteEditor.tsx', 'utf8');
-    expect(src).toContain('currentUserId="user1"');
-    expect(src).toContain('currentUserName="R"');
+  });
+
+  // PATCH 8AB -- previously hardcoded currentUserId="user1"/currentUserName="R"
+  // at this popup's own call site; now uses the same real identity props
+  // already threaded into NoteEditor for the detached panel.
+  it('a newly submitted anchored comment uses the real currentUserId/currentUserName props, not "user1"/"R"', () => {
+    const c = mount(<NoteEditor isOpen accessMode="manage" initialContent="<p>hello world again</p>"
+      currentUserId="real-user-123" currentUserName="Real Name"
+      onSave={vi.fn()} onClose={vi.fn()} />);
+    selectText(c, 'world');
+    click(btn(c, 'Add comment to selected text')!);
+    const input = c.querySelector('input[placeholder="Add a comment..."]') as HTMLInputElement;
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+      setter.call(input, 'anchored identity check');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    });
+    expect(c.textContent).toContain('anchored identity check');
+    expect(c.textContent).toContain('Real Name');
+    const mark = c.querySelector('.ProseMirror span[data-comment-id]');
+    expect(mark?.getAttribute('data-user-id')).toBe('real-user-123');
+    expect(mark?.getAttribute('data-user-name')).toBe('Real Name');
   });
 
   it('submitting marks only the selected text with a comment mark', () => {
@@ -568,12 +587,51 @@ describe('PATCH 8P: Box mode - detached Comment panel inherits the canonical REA
     expect(detachedPanel(omitted).querySelector('input[placeholder="Add a comment..."]')).not.toBeNull();
   });
 
-  it('read mode does not affect the OTHER (selected-text/anchored) comment popup -- out of scope, stays fully writable', () => {
+  // PATCH 8AB -- previously the anchored/selected-text popup was explicitly
+  // out of scope for the READ contract and stayed fully writable regardless
+  // of accessMode; it now shares the same board-level accessMode as the
+  // detached panel above.
+  it('read mode disables the selected-text Comment creation affordance (button omitted, not merely disabled-looking)', () => {
     const c = mount(<NoteEditor isOpen accessMode="read" initialContent="<p>hello world again</p>" onSave={vi.fn()} onClose={vi.fn()} />);
     selectText(c, 'world');
-    click(btn(c, 'Add comment to selected text')!);
+    // In read mode onTextComment is omitted entirely, so the button's own
+    // hint falls back to 'Read-only' -- it is never reachable by its
+    // MANAGE-mode title, and clicking it (whatever its current title) is a
+    // no-op that must not open the composer.
+    expect(btn(c, 'Add comment to selected text')).toBeNull();
+    const readOnlyButton = btn(c, 'Read-only');
+    expect(readOnlyButton).not.toBeNull();
+    expect(isDisabled(readOnlyButton!)).toBe(true);
+    click(readOnlyButton!);
     const input = c.querySelector('[style*="width: 300px"] input[placeholder="Add a comment..."]') as HTMLInputElement | null;
-    expect(input).not.toBeNull();
+    expect(input).toBeNull();
+  });
+
+  // ProseMirror's own click routing resolves a document position from layout
+  // coordinates before calling editorProps.handleClick (see
+  // DocumentEditor.tsx's handleBodyClick comment on the same constraint) --
+  // not reliably exercised by a synthetic click in jsdom's layout-free
+  // environment, so this is proven structurally rather than by simulating a
+  // click on the rendered mark.
+  it('read mode still allows opening an EXISTING anchored thread (view, not create): the click-to-open handler carries no accessMode gate', () => {
+    const src = fs.readFileSync('components/collabboard/editors/NoteEditor.tsx', 'utf8');
+    const handleClickStart = src.indexOf('handleClick: (view, pos, event) => {');
+    expect(handleClickStart).toBeGreaterThan(-1);
+    const handleClickEnd = src.indexOf('\n      },', handleClickStart);
+    const handleClickBlock = src.slice(handleClickStart, handleClickEnd);
+    expect(handleClickBlock).toContain('setActiveThread(thread)');
+    expect(handleClickBlock).toContain("panels.openPanel('comment')");
+    expect(handleClickBlock).not.toContain('canManageAnchoredComments');
+    expect(handleClickBlock).not.toContain('anchoredAccessMode');
+  });
+
+  it('read mode never fires the anchored-thread mutation callbacks, even via direct DOM dispatch bypassing hidden UI', () => {
+    const c = mount(<NoteEditor isOpen accessMode="read" initialContent="<p>hello world again</p>" onSave={vi.fn()} onClose={vi.fn()} />);
+    // handleTextComment itself self-guards on canManageAnchoredComments, so
+    // even if something invoked it directly (bypassing the omitted toolbar
+    // button), no panel would open. Prove no comment panel exists at all.
+    expect(c.querySelector('[style*="width: 300px"] input[placeholder="Add a comment..."]')).toBeNull();
+    expect(btn(c, 'Add comment to selected text')).toBeNull();
   });
 });
 

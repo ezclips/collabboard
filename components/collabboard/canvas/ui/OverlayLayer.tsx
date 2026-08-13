@@ -63,14 +63,26 @@ export default function OverlayLayer({
   accessMode = 'manage',
   updatePadletContent, duplicateLine, deleteLine, updateLine, handleChangeLineLayer,
 }: OverlayLayerProps) {
-  // PATCH 8AA -- this anchored/highlighted document display controller uses
-  // only the live READ/MANAGE model. COMMENT remains dormant for this surface.
-  // OverlayLayer is shared with Note anchored threads, so only a Document
-  // padlet receives this new permission gate; non-Document anchored surfaces
-  // keep their pre-existing behavior for this Document-only patch.
+  // PATCH 8AA -- this anchored/highlighted comment-thread display controller
+  // uses only the live READ/MANAGE model. COMMENT remains dormant for this
+  // surface. Originally scoped to Document padlets only (isDocumentPost);
+  // PATCH 8AB extends the same gate to Note padlets below (isNoteAnchoredPost)
+  // -- the other live consumer of this shared popup, reached when a
+  // highlighted comment mark is clicked directly on the canvas card rather
+  // than inside NoteEditor's own modal (see FreeformPadletCards.tsx's
+  // "Generic / Note Display" click handler). Any other padlet type that
+  // might reach this popup keeps the pre-existing 'manage' behavior, same as
+  // before PATCH 8AA.
   const requestedDocumentAccessMode: CommentAccessMode = accessMode === 'manage' ? 'manage' : 'read';
   const activeCommentPadlet = commentPopupPadletId ? padlets.find((p) => p.id === commentPopupPadletId) : null;
-  const anchoredAccessMode: CommentAccessMode = activeCommentPadlet && isDocumentPost(activeCommentPadlet)
+  // Matches the established `padlet.type === 'text' || (padlet.type as
+  // string) === 'note'` check used at FreeformPadletCards.tsx:3070 -- 'text'
+  // and 'note' are aliases for the same Note family (see PATCH 8AB
+  // inventory), kept local here since no other Note-vs-other-type
+  // discriminator is needed outside this comment-permission gate.
+  const isNoteAnchoredPost = (post: Pick<Padlet, 'type'>): boolean =>
+    post.type === 'text' || (post.type as string) === 'note';
+  const anchoredAccessMode: CommentAccessMode = activeCommentPadlet && (isDocumentPost(activeCommentPadlet) || isNoteAnchoredPost(activeCommentPadlet))
     ? requestedDocumentAccessMode
     : 'manage';
   const canManageAnchoredComments = anchoredAccessMode === 'manage';
