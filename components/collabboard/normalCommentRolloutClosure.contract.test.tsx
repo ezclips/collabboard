@@ -43,6 +43,27 @@ function countOccurrences(haystack: string, needle: string): number {
   return (haystack.match(new RegExp(needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')) ?? []).length;
 }
 
+// Counts accessMode= only WITHIN <CommentPopup ... /> blocks, not a raw
+// whole-file count -- PATCH 8Z gave FreeformPadletCards.tsx a 9th, entirely
+// legitimate accessMode={commentAccessMode} occurrence on the NON-CommentPopup
+// <CommentPost> call site (Comment post is Category B/SPECIAL, not a
+// CommentPopup caller), which a raw count would conflate with CommentPopup
+// wiring.
+function countGuardedCommentPopupUsages(src: string): number {
+  let count = 0;
+  let cursor = 0;
+  while (true) {
+    const start = src.indexOf('<CommentPopup', cursor);
+    if (start === -1) break;
+    const end = src.indexOf('/>', start);
+    if (end === -1) break;
+    const block = src.slice(start, end + 2);
+    if (block.includes('accessMode=')) count++;
+    cursor = end + 2;
+  }
+  return count;
+}
+
 // PATCH 8Y's own inventory (Phase 1-4). Every file that has ever contained a
 // live <CommentPopup> usage, with its exact usage count and how many of
 // those usages carry an explicit accessMode= prop (the canonical permission
@@ -121,7 +142,7 @@ describe('PATCH 8Y -- normal comment rollout closure', () => {
     (file, expected) => {
       const src = fs.readFileSync(path.join(process.cwd(), file), 'utf8');
       const usages = countOccurrences(src, '<CommentPopup');
-      const guarded = countOccurrences(src, 'accessMode=');
+      const guarded = countGuardedCommentPopupUsages(src);
       expect(usages, `${file}: expected ${expected.usages} <CommentPopup usage(s) (${expected.note}), found ${usages}`).toBe(expected.usages);
       expect(guarded, `${file}: expected ${expected.guarded} accessMode= occurrence(s) (${expected.note}), found ${guarded}`).toBe(expected.guarded);
     },

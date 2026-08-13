@@ -7,6 +7,7 @@ import TextStylePopup from './editors/TextStylePopup';
 import { contrastIconColor } from './shells/CardShell';
 import { handleSafeCommentLinkClick } from './commentLinkSafety';
 import { getMeaningfulTitle } from '@/lib/infra/collabboard/postTitle';
+import { type CommentAccessMode } from '@/lib/domain/canvas/comments';
 
 interface CommentData {
     id: string;
@@ -43,6 +44,11 @@ interface CommentPostProps {
     onBadgeClick?: (e: React.MouseEvent) => void;
     width?: number;
     height?: number;
+    // PATCH 8Z: canonical comment permission signal, threaded from
+    // FreeformPadletCards.tsx's existing commentAccessMode -- no new
+    // authorization lookup inside this component. Defaults to 'manage' so
+    // any caller that hasn't been updated keeps its exact current behavior.
+    accessMode?: CommentAccessMode;
 }
 
 export default function CommentPost({
@@ -67,7 +73,13 @@ export default function CommentPost({
     onUpdateCommentColor,
     width = 300,
     height = 'auto' as any,
+    accessMode = 'manage',
 }: CommentPostProps) {
+    // COMMENT mode stays dormant everywhere in this rollout (see
+    // COMMENT_UI_CONTRACT_V1.md's "Live status") -- only 'read' and 'manage'
+    // are ever live, so treating anything short of 'manage' as read-only
+    // matches guardCommentMutation's own semantics exactly.
+    const isReadOnly = accessMode !== 'manage';
     const [draftComment, setDraftComment] = useState('');
     const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
     const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
@@ -232,14 +244,14 @@ export default function CommentPost({
                         />
                     ) : (
                         <span
-                            className={`text-xs font-semibold text-center truncate cursor-pointer ${meaningfulTitle ? '' : 'opacity-40 select-none'}`}
+                            className={`text-xs font-semibold text-center truncate ${isReadOnly ? '' : 'cursor-pointer'} ${meaningfulTitle ? '' : 'opacity-40 select-none'}`}
                             style={{ color: stripTitleColor }}
-                            onDoubleClick={(e) => {
+                            onDoubleClick={isReadOnly ? undefined : (e) => {
                                 e.stopPropagation();
                                 setIsEditingTitle(true);
                                 setLocalTitle(meaningfulTitle);
                             }}
-                            title="Double-click to edit title"
+                            title={isReadOnly ? undefined : "Double-click to edit title"}
                         >
                             {meaningfulTitle || 'Title'}
                         </span>
@@ -301,6 +313,7 @@ export default function CommentPost({
                             const isActive = activeCommentId === comment.id;
                             const isEditing = editingCommentId === comment.id;
                             const commitEdit = () => {
+                                if (isReadOnly) return;
                                 const trimmed = editingText.trim();
                                 if (!trimmed) {
                                     setEditingCommentId(null);
@@ -315,6 +328,7 @@ export default function CommentPost({
                             };
 
                             const startEdit = () => {
+                                if (isReadOnly) return;
                                 if (!comment.id) return;
                                 // If comment has links/rich content, open full editor to preserve HTML
                                 if (hasRichContent(comment.text || '')) {
@@ -413,7 +427,11 @@ export default function CommentPost({
                                         )}
                                     </div>
 
-                                    {/* Actions Column - Fixed width, always reserves space */}
+                                    {/* Actions Column - Fixed width, always reserves space. Not
+                                        rendered at all in read-only -- matches the "not rendered,
+                                        not merely disabled" principle used everywhere else in the
+                                        canonical comment system. */}
+                                    {!isReadOnly && (
                                     <div className="flex flex-col gap-0.5 w-5 shrink-0">
                                         <div className={`flex flex-col gap-0.5 ${isActive ? 'visible' : 'invisible group-hover/row:visible'}`}>
                                             {/* Edit/Palette Button */}
@@ -480,12 +498,13 @@ export default function CommentPost({
                                             </button>
                                         </div>
                                     </div>
+                                    )}
                                 </div>
                             );
                         })}
                     </div>
                 )}
-                {onAddComment ? (
+                {!isReadOnly && onAddComment ? (
                     <div className="mt-3 pt-3 border-t border-gray-100">
                         <div className="flex items-center gap-2">
                             <div className="w-7 h-7 rounded-full bg-gray-100 flex items-center justify-center text-gray-400 text-xs">

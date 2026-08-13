@@ -416,6 +416,7 @@ export default function CanvasModals({
           initialTopStrip={padletToEdit?.metadata?.topStrip || 'transparent'}
           initialCommentTitle={padletToEdit?.metadata?.commentTitle || ''}
           onSave={saveComment}
+          accessMode={commentAccessMode}
           currentUserId={user?.id}
           currentUserName={user?.user_metadata?.name || user?.email?.split('@')[0] || 'Anonymous'}
           currentUserAvatar={user?.user_metadata?.avatar_url}

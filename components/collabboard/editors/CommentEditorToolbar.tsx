@@ -27,6 +27,11 @@ interface CommentEditorToolbarProps {
     onEmoji?: () => void;
     emojiOpen?: boolean;
     linkEnabled?: boolean;
+    // PATCH 8Z: disables only the comment-content tools (Text style, Link,
+    // React/emoji-insert) via the existing disabled-styling mechanism below --
+    // Card Color and Collapse are post presentation/view state, not comment
+    // mutations, and stay available regardless.
+    readOnly?: boolean;
 }
 
 export default function CommentEditorToolbar({
@@ -40,6 +45,7 @@ export default function CommentEditorToolbar({
     onEmoji,
     emojiOpen = false,
     linkEnabled = false,
+    readOnly = false,
 }: CommentEditorToolbarProps) {
 
     // Toggle between text and box modes
@@ -51,11 +57,13 @@ export default function CommentEditorToolbar({
     // title bar (double-click, ghost placeholder) rather than through a
     // separate toggle+input flow here.
     const textModeTools = [
-        { icon: Type, label: 'Text style', onClick: onTextStyle, active: textStyleOpen },
-        { icon: Link, label: 'Link', onClick: onLink, active: false, disabled: !linkEnabled, disabledHint: 'Select text to add a link' },
+        { icon: Type, label: 'Text style', onClick: onTextStyle, active: textStyleOpen, disabled: readOnly, disabledHint: readOnly ? 'Read-only' : undefined },
+        { icon: Link, label: 'Link', onClick: onLink, active: false, disabled: readOnly || !linkEnabled, disabledHint: readOnly ? 'Read-only' : 'Select text to add a link' },
     ];
 
-    // Box mode tools
+    // Box mode tools -- Card Color and Collapse are post presentation/view
+    // state (not comment mutations) and stay active in read-only; React
+    // inserts into the comment draft (handleEmojiClick), so it's gated.
     const boxModeTools = [
         {
             icon: Palette,
@@ -69,7 +77,9 @@ export default function CommentEditorToolbar({
             label: 'React',
             onClick: onEmoji,
             hasPopup: true,
-            active: emojiOpen
+            active: emojiOpen,
+            disabled: readOnly,
+            disabledHint: readOnly ? 'Read-only' : undefined,
         },
         {
             icon: MapPin,

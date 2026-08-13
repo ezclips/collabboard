@@ -922,7 +922,7 @@ product-facing post families for 10 live type literals (`'file'` excluded).
 | --- | --- | --- |
 | Note anchored/highlighted threads | `NoteEditor.tsx` (in-modal), `OverlayLayer.tsx` (on-canvas) | PERMISSION UNGATED |
 | Document anchored/highlighted threads | `DocumentEditor.tsx` (in-modal), `OverlayLayer.tsx` (on-canvas, shared with Note) | PERMISSION UNGATED |
-| Comment post primary thread | `CommentPost.tsx`, `FreeformPadletCards.tsx`'s collapsed-marker inline block, `CommentEditor.tsx` | PERMISSION UNGATED |
+| Comment post primary thread | `CommentPost.tsx`, `FreeformPadletCards.tsx`'s collapsed-marker inline block, `CommentEditor.tsx` | **PERMISSION SAFE -- READ / MANAGE** (PATCH 8Z, 2026-08-13) |
 | Container embedded child `CommentPopup` renderer | `ContainerEditor.tsx`'s `SortableChildItem` | PERMISSION UNGATED |
 | `EmbeddedCommentList` (compact child renderer) | `RowColumnContainerCard.tsx`, `PostCardContent.tsx` | PERMISSION UNGATED (component has no `accessMode` concept at all) |
 
@@ -1058,3 +1058,110 @@ entirely new file gains a `<CommentPopup>` usage the map doesn't know about.
 Verified by two negative controls during PATCH 8Y (a fake `<CommentPopup`
 string injected into the Container branch; `accessMode={accessMode}` deleted
 from `DrawingEditor.tsx`) -- both caught, both restored exactly.
+
+## Comment post primary thread -- PERMISSION SAFE (PATCH 8Z)
+
+**PATCH 8Z (2026-08-13)** wired the READ/MANAGE permission contract into all
+three live Comment-post primary-thread surfaces identified as PERMISSION
+UNGATED by PATCH 8Y's audit -- closing item 1 of that audit's next-phase
+backlog for this specific surface. This is a permissions-only patch: Comment
+post remains classified **SPECIAL / PRIMARY THREAD** (PATCH 8X) and was not
+migrated to canonical `CommentPopup`, its `metadata.comments` storage
+ownership is unchanged, and `CommentEditor.tsx`'s TipTap extension set
+(Bold/Italic/Underline/lists/CodeBlock/TextAlign/emoji, strictly richer than
+canonical `CommentPopup`) is byte-for-byte unchanged.
+
+All three surfaces gained an `accessMode?: CommentAccessMode` prop (default
+`'manage'`), threaded from the same existing `commentAccessMode` signal every
+canonical caller already uses (`FreeformPadletCards.tsx` for the two
+on-canvas surfaces, `CanvasModals.tsx` for `CommentEditor.tsx` -- no new
+authorization lookup was added anywhere). COMMENT mode stays dormant here
+too: each surface treats any `accessMode !== 'manage'` as read-only, matching
+`guardCommentMutation`'s own semantics, since only `'read'` and `'manage'`
+are ever live.
+
+Two-layer defense at every mutation entry point, matching the pattern
+established for every canonical `CommentPopup` caller:
+
+1. **UI affordance unavailable in READ** -- the composer, per-row Edit/
+   Color/Strikethrough/Delete actions, badge-color trigger, and title-edit
+   entry point are none of them *rendered* in read-only (not merely
+   disabled), at all three surfaces. `CommentEditorToolbar.tsx` gained a
+   `readOnly` prop that disables (via its existing disabled-styling
+   mechanism) only the Text-style/Link/React tools that mutate comment
+   content -- Card Color and Collapse remain available in READ, since
+   they are post presentation/view-state, not comment mutations, and this
+   patch deliberately does not gate controls outside the comment-thread
+   capability (see "Scope note" below).
+2. **Handler cannot execute in READ** -- every internal handler that
+   mutates `comments`/`commentTitle`/`badgeColor` (`startEdit`, `commitEdit`,
+   `handleAddComment`, `handleEditComment`, `handleSaveEdit`,
+   `handleRemoveComment`, `handleLink`, `handleApplyLink`, `handleTextColor`,
+   `handleHighlight`, the strikethrough/color/badge inline handlers) checks
+   `isReadOnly`/`accessMode` as its own first statement, independent of
+   whether the UI path that would normally reach it is rendered. At the two
+   `FreeformPadletCards.tsx` call sites (the `<CommentPost>` instance and the
+   collapsed-marker's inline handlers), every caller-defined mutation
+   callback is additionally wrapped with `guardCommentMutation(commentAccessMode,
+   ...)` at the JSX boundary, the same call-boundary pattern used by every
+   canonical caller elsewhere in this contract.
+
+**Scope note (post-presentation vs. comment mutation):** `cardColor`/
+`topStrip` (card background/top-strip color) and `isCollapsed`
+(expanded-card vs. pin-marker view state) are classified POST PRESENTATION /
+NAVIGATION, not comment mutations, per this patch's own instruction not to
+gate controls outside the comment-thread capability. They remain reachable
+by any role through `CommentEditor.tsx`'s Card Color/Collapse toolbar tools
+exactly as before this patch -- unchanged, not a new gap introduced here.
+`FreeformPadletCards.tsx`'s `onMenuClick` (the pencil icon that opens
+`CommentEditor.tsx`) is also unguarded by the general `canUseFreeformEditButton`
+workspace-edit gate that blocks the card's `onDoubleClick` -- a pre-existing
+navigation inconsistency, not introduced by this patch and not a security
+gap, since `CommentEditor.tsx` itself now gates every actual mutation
+regardless of how it was opened.
+
+A dead code path was found and defensively guarded rather than left as a
+gap-in-waiting: `CommentPost.tsx` accepts an `onBadgeClick` prop but never
+attaches it to any element in its own render body, and grep-confirmed no
+other code path ever sets `internalBadgeColorPopupId`/`internalBadgePopupPosition`
+to a truthy value either -- the badge-color swatch handler in
+`FreeformPadletCards.tsx` this feeds is genuinely unreachable today. It was
+still wrapped in `guardCommentMutation(commentAccessMode, ...)` for
+consistency and to prevent a future re-wire from accidentally landing
+ungated.
+
+Real identity was independently re-verified (not merely trusted from PATCH
+8Y's finding): all three surfaces already receive real `user?.id`/resolved
+display names from their callers; `CommentEditor.tsx`'s own prop defaults
+(`"user1"`/`"R"`) are unreachable placeholders, never supplied by the live
+`CanvasModals.tsx` caller.
+
+Storage ownership proof: `metadata.comments` remains the sole authoritative
+field at all three surfaces -- a structural guard in
+`canonicalCommentPermission.contract.test.tsx` asserts `CommentPost.tsx`,
+`CommentEditor.tsx`, and the collapsed-marker block never reference
+`detachedComments`.
+
+Ten negative controls (A-J) were run and restored exactly: removing
+`accessMode` from each of the three surfaces (A, F, and the collapsed-marker
+gate count), exposing a READ composer (B), bypassing a handler guard while
+its UI stayed hidden to prove the callback-layer defense is independent of
+DOM state (C, G), exposing collapsed-marker READ row actions (D/E),
+introducing a `detachedComments` reference (H), removing an extension from
+`CommentEditor.tsx`'s TipTap configuration (I), and dropping `accessMode`
+from an unrelated canonical caller (`TableEditor.tsx`) to prove the PATCH 8Y
+closure guard still catches real regressions in canonical callers, unaffected
+by this patch's changes (J). Control J also required a genuine fix to the
+PATCH 8Y closure guard itself: its per-file `accessMode=` count was a raw
+whole-file string count, which `<CommentPost>`'s new, legitimate
+`accessMode={commentAccessMode}` occurrence would have silently inflated
+against a non-`CommentPopup` site. The guard now scopes that count to text
+inside `<CommentPopup ... />` blocks specifically
+(`countGuardedCommentPopupUsages`), which is a strictly more correct
+signal than before this patch, not a weakened one.
+
+Remaining PERMISSION UNGATED special surfaces after this patch: Document
+anchored/highlighted threads, Note anchored/highlighted threads, Container's
+embedded child `CommentPopup` renderer, and `EmbeddedCommentList` -- each a
+candidate for its own dedicated permission-wiring patch, per PATCH 8Y's
+next-phase backlog.

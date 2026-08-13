@@ -419,8 +419,17 @@ describe('PATCH 8O.1/8O.2 -- canonical comment permission wiring', () => {
       // on-canvas site x 8 (same direct-wrap pattern, COMMENT stays dormant
       // for Link too) = 8. 47 + 8 = 55. PATCH 8V adds Table's 1 on-canvas
       // site x 8 (same direct-wrap pattern, COMMENT stays dormant for Table
-      // too) = 8. 55 + 8 = 63.
-      expect((freeform.match(/guardCommentMutation\(/g) ?? []).length).toBe(63);
+      // too) = 8. 55 + 8 = 63. PATCH 8Z adds Comment post's two LIVE
+      // on-canvas primary-thread surfaces (CommentPost is Category B/SPECIAL,
+      // not a CommentPopup site, but every mutation callback is still
+      // guardCommentMutation-wrapped the same way): the CommentPost call
+      // site (6: onTitleChange/onAddComment/onEditComment/
+      // onToggleCommentStrikethrough/onDeleteComment/onUpdateCommentColor)
+      // + the dead internal badge-color swatch (1, defensively guarded even
+      // though unreachable) + the collapsed-marker block (9: badge trigger,
+      // badge swatch, per-comment color/highlight x2, Color/Edit/
+      // Strikethrough/Delete row actions x4, composer) = 16. 63 + 16 = 79.
+      expect((freeform.match(/guardCommentMutation\(/g) ?? []).length).toBe(79);
       // 4 ownership-gated callbacks (edit/remove/toggle/color) x 3
       // COMMENT-capable sites (Clipart Site B, Image x2) = 12 -- Note does
       // NOT use this guard (COMMENT stays dormant there), so unchanged by 8P.
@@ -1114,12 +1123,138 @@ describe('PATCH 8O.1/8O.2 -- canonical comment permission wiring', () => {
     });
   });
 
+  describe('Comment post -- primary-thread permission wiring (PATCH 8Z)', () => {
+    // Comment post is SPECIAL / PRIMARY THREAD (PATCH 8X), not a canonical
+    // CommentPopup caller -- its three live surfaces (CommentPost.tsx,
+    // FreeformPadletCards.tsx's collapsed-marker block, CommentEditor.tsx)
+    // are hand-rolled and stay that way (no CommentPopup migration in
+    // PATCH 8Z). These checks prove the READ/MANAGE permission contract at
+    // the source level, the same "every canonical caller passes an explicit
+    // accessMode" spirit as every describe block above, adapted to a
+    // non-CommentPopup surface.
+    it('CommentPost.tsx accepts an accessMode prop and gates its composer/row-actions/title-edit on it', () => {
+      const commentPost = read('components/collabboard/CommentPost.tsx');
+      expect(commentPost).toContain("import { type CommentAccessMode } from '@/lib/domain/canvas/comments';");
+      expect(commentPost).toContain('accessMode?: CommentAccessMode;');
+      expect(commentPost).toContain("accessMode = 'manage',");
+      expect(commentPost).toContain("const isReadOnly = accessMode !== 'manage';");
+      expect(commentPost).toContain('{!isReadOnly && onAddComment ?');
+      expect(commentPost).toContain('{!isReadOnly && (');
+      expect(commentPost).toContain('if (isReadOnly) return;');
+    });
+
+    it('FreeformPadletCards.tsx passes accessMode={commentAccessMode} to the CommentPost call site and guards every mutation callback', () => {
+      const freeform = read(FREEFORM_PATH);
+      const start = freeform.indexOf('<CommentPost');
+      expect(start).toBeGreaterThan(-1);
+      const end = freeform.indexOf('/>', freeform.indexOf('onUpdateCommentColor=', start));
+      const block = freeform.slice(start, end);
+      expect(block, 'CommentPost instance must pass accessMode={commentAccessMode}').toContain('accessMode={commentAccessMode}');
+      for (const prop of ['onTitleChange=', 'onAddComment=', 'onEditComment=', 'onToggleCommentStrikethrough=', 'onDeleteComment=', 'onUpdateCommentColor=']) {
+        const propStart = block.indexOf(prop);
+        expect(propStart, `${prop} not found on CommentPost call site`).toBeGreaterThan(-1);
+        const nextNonSpace = block.slice(propStart + prop.length).match(/^\s*\{?\s*(\S+)/);
+        expect(nextNonSpace?.[1]?.startsWith('guardCommentMutation('), `${prop} must be wrapped with guardCommentMutation(...), found: ${nextNonSpace?.[0]}`).toBe(true);
+      }
+    });
+
+    it('the collapsed-marker primary-thread block in FreeformPadletCards.tsx (the LIVE surface, distinct from the dead mislabeled block) gates its badge/row-action/composer mutations on commentAccessMode', () => {
+      const freeform = read(FREEFORM_PATH);
+      const markerStart = freeform.indexOf('// Collapsed Marker - Pin with number inside');
+      expect(markerStart, 'collapsed-marker anchor not found -- FreeformPadletCards.tsx structure changed, update this guard').toBeGreaterThan(-1);
+      const markerEnd = freeform.indexOf('// Expanded Post', markerStart);
+      expect(markerEnd).toBeGreaterThan(markerStart);
+      const block = freeform.slice(markerStart, markerEnd);
+      // Distinguishes this LIVE block from the dead "Todo Comments Popup -
+      // Right side" block elsewhere in the same padlet.type === 'comment'
+      // branch (PATCH 8X confirmed that one is unreachable) -- this guard
+      // targets only the collapsed-marker's own comments.map(...) region.
+      expect(block).toContain('collapsedActiveCommentId');
+      const gateCount = (block.match(/\{commentAccessMode === 'manage' && \(/g) ?? []).length;
+      expect(gateCount, 'badge color trigger, row actions column, and composer must each be gated (3 gates)').toBe(3);
+      expect(block, 'composer anchor must be gated').toContain('Add comment input -- not rendered at all outside \'manage\'');
+      expect(block, 'startEdit must no-op outside manage').toContain("if (commentAccessMode !== 'manage') return;");
+      expect(block, 'commitEdit must no-op outside manage').toContain("if (commentAccessMode !== 'manage') return;");
+      const guardedCount = (block.match(/guardCommentMutation\(commentAccessMode,/g) ?? []).length;
+      expect(guardedCount, 'every badge/color/strikethrough/delete/add handler in the collapsed-marker block must be guardCommentMutation-wrapped').toBeGreaterThanOrEqual(6);
+    });
+
+    it('the dead "Todo Comments Popup - Right side" block remains classified dead (still gated only by the unreachable cardCommentPopupPadletId, not touched by PATCH 8Z)', () => {
+      const freeform = read(FREEFORM_PATH);
+      expect(freeform).toContain('{/* Todo Comments Popup - Right side */}');
+      expect(freeform).toContain("{cardCommentPopupPadletId === padlet.id && (");
+    });
+
+    it('CommentEditor.tsx accepts an accessMode prop, gates every comment mutation, and leaves its TipTap extension set untouched', () => {
+      const commentEditor = read('components/collabboard/editors/CommentEditor.tsx');
+      expect(commentEditor).toContain('import { type CommentAccessMode } from "@/lib/domain/canvas/comments";');
+      expect(commentEditor).toContain('accessMode?: CommentAccessMode;');
+      expect(commentEditor).toContain('accessMode = "manage",');
+      expect(commentEditor).toContain('const isReadOnly = accessMode !== "manage";');
+      for (const handler of ['handleAddComment', 'handleEditComment', 'handleSaveEdit', 'handleRemoveComment', 'handleLink', 'handleApplyLink', 'handleTextColor', 'handleHighlight']) {
+        const handlerStart = commentEditor.indexOf(`const ${handler} = `);
+        expect(handlerStart, `${handler} not found`).toBeGreaterThan(-1);
+        const handlerBody = commentEditor.slice(handlerStart, handlerStart + 400);
+        expect(handlerBody, `${handler} must guard on isReadOnly as its own first check`).toContain('if (isReadOnly) return;');
+      }
+      // Extension set frozen -- same six capabilities as before this patch.
+      expect(commentEditor).toContain('StarterKit.configure({ link: false, underline: false })');
+      expect(commentEditor).toContain('Underline,');
+      expect(commentEditor).toContain('TextStyle,');
+      expect(commentEditor).toContain('Highlight.configure({ multicolor: true })');
+      expect(commentEditor).toContain('TextAlign.configure({ types: ["heading", "paragraph"] })');
+    });
+
+    it('CommentEditor.tsx renders its composer, badge-color trigger, and per-row actions only outside read-only', () => {
+      const commentEditor = read('components/collabboard/editors/CommentEditor.tsx');
+      expect(commentEditor).toContain('{!isReadOnly && (\n            <div className="mt-3 pt-3 border-t border-gray-100">');
+      expect(commentEditor).toContain('{!isReadOnly && (\n              <button\n                onClick={() => {\n                  setBadgeColorOpen');
+      expect(commentEditor).toContain('{!isReadOnly && (\n                      <div className="flex flex-col gap-0.5 w-5 shrink-0">');
+      expect(commentEditor).toContain('readOnly={isReadOnly}');
+    });
+
+    it('CanvasModals.tsx threads accessMode={commentAccessMode} into the CommentEditor instance', () => {
+      const canvasModals = read('components/collabboard/canvas/ui/CanvasModals.tsx');
+      const start = canvasModals.indexOf('<CommentEditor');
+      expect(start).toBeGreaterThan(-1);
+      const end = canvasModals.indexOf('/>', canvasModals.indexOf('onSave={saveComment}', start));
+      const block = canvasModals.slice(start, end);
+      expect(block, 'CommentEditor instance must pass accessMode={commentAccessMode}').toContain('accessMode={commentAccessMode}');
+      expect(block, 'CommentEditor instance must pass real currentUserId').toContain('currentUserId={user?.id}');
+    });
+
+    it('metadata.comments remains the sole authoritative Comment-post storage field -- no detachedComments introduced anywhere in this patch\'s three surfaces', () => {
+      for (const path of [
+        'components/collabboard/CommentPost.tsx',
+        'components/collabboard/editors/CommentEditor.tsx',
+      ]) {
+        const src = read(path);
+        expect(src, `${path} must not reference detachedComments`).not.toContain('detachedComments');
+      }
+      const freeform = read(FREEFORM_PATH);
+      const markerStart = freeform.indexOf('// Collapsed Marker - Pin with number inside');
+      const markerEnd = freeform.indexOf('// Expanded Post', markerStart);
+      const block = freeform.slice(markerStart, markerEnd);
+      expect(block).not.toContain('detachedComments');
+    });
+  });
+
   describe('architecture guard -- every <CommentPopup usage in these three files is accounted for', () => {
     it('FreeformPadletCards.tsx has exactly 8 <CommentPopup usages, all 8 wired (Clipart Site B, Image x2, Note x2, Todo x1, Link x1, Table x1)', () => {
       const freeform = read(FREEFORM_PATH);
       const total = (freeform.match(/<CommentPopup/g) ?? []).length;
-      const wired = (freeform.match(/accessMode=\{commentAccessMode\}/g) ?? []).length;
       expect(total).toBe(8);
+      // Scoped per-usage (not a raw file-wide accessMode={commentAccessMode}
+      // count) since PATCH 8Z added a 9th, legitimate occurrence of that
+      // same string on the non-CommentPopup <CommentPost> call site -- a
+      // whole-file count would conflate the two.
+      let cursor = 0;
+      let wired = 0;
+      for (let i = 0; i < total; i++) {
+        const block = commentPopupBlockAfter(freeform, '<CommentPopup', cursor);
+        if (block.includes('accessMode={commentAccessMode}')) wired++;
+        cursor = freeform.indexOf(block, cursor) + block.length;
+      }
       expect(wired).toBe(8);
     });
 

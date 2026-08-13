@@ -2129,8 +2129,9 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                   <div className="relative">
                     <div className="flex items-center justify-between mb-3 pb-2 border-b border-gray-100">
                       <h4 className="text-sm font-semibold text-gray-700">{padlet.metadata?.commentTitle || 'Comments'}</h4>
+                      {commentAccessMode === 'manage' && (
                       <button
-                        onClick={() => setCollapsedBadgeColorOpen(!collapsedBadgeColorOpen)}
+                        onClick={guardCommentMutation(commentAccessMode, () => setCollapsedBadgeColorOpen(!collapsedBadgeColorOpen))}
                         className="w-7 h-7 flex items-center justify-center rounded hover:bg-gray-100"
                         title="Badge Color"
                       >
@@ -2139,6 +2140,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                           style={{ backgroundColor: padlet.metadata?.badgeColor || '#facc15' }}
                         />
                       </button>
+                      )}
                     </div>
 
                     {collapsedBadgeColorOpen && (
@@ -2147,10 +2149,10 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                           {BADGE_COLORS.map((color) => (
                             <button
                               key={color}
-                              onClick={async () => {
+                              onClick={guardCommentMutation(commentAccessMode, async () => {
                                 await updatePadletMetadata(padlet.id, { badgeColor: color });
                                 setCollapsedBadgeColorOpen(false);
-                              }}
+                              })}
                               className={`rounded transition-transform hover:scale-110 ${(padlet.metadata?.badgeColor || '#facc15') === color ? 'ring-2 ring-blue-500' : ''}`}
                               style={{
                                 width: '20px',
@@ -2183,20 +2185,20 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                               onOpenChange={(open) => !open && setCollapsedCommentColorPopupId(null)}
                               onSelectHeading={() => { }}
                               hideHeadingSelect={true}
-                              onSelectColor={async (color) => {
+                              onSelectColor={guardCommentMutation(commentAccessMode, async (color) => {
                                 const currentComments = padlet.metadata?.comments || [];
                                 const nextComments = currentComments.map((c: any) =>
                                   c.id === collapsedCommentColorPopupId ? { ...c, textColor: color, color } : c
                                 );
                                 await updatePadletMetadata(padlet.id, { comments: nextComments });
-                              }}
-                              onSelectHighlight={async (color) => {
+                              })}
+                              onSelectHighlight={guardCommentMutation(commentAccessMode, async (color) => {
                                 const currentComments = padlet.metadata?.comments || [];
                                 const nextComments = currentComments.map((c: any) =>
                                   c.id === collapsedCommentColorPopupId ? { ...c, backgroundColor: color } : c
                                 );
                                 await updatePadletMetadata(padlet.id, { comments: nextComments });
-                              }}
+                              })}
                               currentHeading="normal"
                               currentColor={padlet.metadata?.comments?.find((c: any) => c.id === collapsedCommentColorPopupId)?.textColor || padlet.metadata?.comments?.find((c: any) => c.id === collapsedCommentColorPopupId)?.color}
                               currentHighlight={padlet.metadata?.comments?.find((c: any) => c.id === collapsedCommentColorPopupId)?.backgroundColor}
@@ -2208,6 +2210,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                             const isActive = collapsedActiveCommentId === comment.id;
                             const isEditing = collapsedEditingCommentId === comment.id;
                             const commitEdit = async () => {
+                              if (commentAccessMode !== 'manage') return;
                               const trimmed = collapsedEditingText.trim();
                               if (!trimmed) {
                                 setCollapsedEditingCommentId(null);
@@ -2226,6 +2229,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                             };
 
                             const startEdit = () => {
+                              if (commentAccessMode !== 'manage') return;
                               setCollapsedEditingCommentId(comment.id);
                               setCollapsedEditingText(htmlToText(comment.text || ''));
                               setCollapsedCommentColorPopupId(null);
@@ -2315,6 +2319,10 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                           })}
                         </div>
 
+                        {/* Row actions -- not rendered at all outside 'manage', same
+                            "not rendered, not merely disabled" principle as the
+                            expanded card (CommentPost.tsx). */}
+                        {commentAccessMode === 'manage' && (
                         <div className="flex flex-col gap-1 flex-shrink-0 pt-1">
                           {collapsedEditingCommentId && collapsedActiveCommentId && collapsedEditingCommentId === collapsedActiveCommentId ? (
                             <button
@@ -2322,11 +2330,11 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                                 event.preventDefault();
                                 event.stopPropagation();
                               }}
-                              onClick={(event) => {
+                              onClick={guardCommentMutation(commentAccessMode, (event: React.MouseEvent) => {
                                 event.preventDefault();
                                 event.stopPropagation();
                                 setCollapsedCommentColorPopupId(collapsedCommentColorPopupId === collapsedActiveCommentId ? null : collapsedActiveCommentId);
-                              }}
+                              })}
                               className="p-1 rounded transition-colors text-gray-300 hover:text-blue-500"
                               title="Color"
                               disabled={!collapsedActiveCommentId}
@@ -2335,13 +2343,13 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                             </button>
                           ) : (
                             <button
-                              onClick={() => {
+                              onClick={guardCommentMutation(commentAccessMode, () => {
                                 if (!collapsedActiveCommentId) return;
                                 const current = padlet.metadata?.comments?.find((c: any) => c.id === collapsedActiveCommentId);
                                 setCollapsedEditingCommentId(collapsedActiveCommentId);
                                 setCollapsedEditingText(htmlToText(current?.text || ''));
                                 setCollapsedCommentColorPopupId(null);
-                              }}
+                              })}
                               className="p-1 rounded transition-colors text-gray-300 hover:text-blue-500 disabled:opacity-40 disabled:hover:text-gray-300"
                               title="Edit"
                               disabled={!collapsedActiveCommentId}
@@ -2350,14 +2358,14 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                             </button>
                           )}
                           <button
-                            onClick={async () => {
+                            onClick={guardCommentMutation(commentAccessMode, async () => {
                               if (!collapsedActiveCommentId) return;
                               const currentComments = padlet.metadata?.comments || [];
                               const nextComments = currentComments.map((c: any) =>
                                 c.id === collapsedActiveCommentId ? { ...c, isStrikethrough: !c.isStrikethrough } : c
                               );
                               await updatePadletMetadata(padlet.id, { comments: nextComments });
-                            }}
+                            })}
                             className={`p-1 rounded transition-colors ${padlet.metadata?.comments?.find((c: any) => c.id === collapsedActiveCommentId)?.isStrikethrough ? 'text-blue-500 bg-blue-50' : 'text-gray-300 hover:text-blue-500'} disabled:opacity-40 disabled:hover:text-gray-300`}
                             title="Strikethrough"
                             disabled={!collapsedActiveCommentId}
@@ -2365,7 +2373,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                             <Strikethrough className="w-3 h-3" />
                           </button>
                           <button
-                            onClick={async () => {
+                            onClick={guardCommentMutation(commentAccessMode, async () => {
                               if (!collapsedActiveCommentId) return;
                               const currentComments = padlet.metadata?.comments || [];
                               const nextComments = currentComments.filter((c: any) => c.id !== collapsedActiveCommentId);
@@ -2374,7 +2382,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                               setCollapsedEditingCommentId(null);
                               setCollapsedEditingText('');
                               setCollapsedCommentColorPopupId(null);
-                            }}
+                            })}
                             className="p-1 text-gray-300 hover:text-red-500 transition-colors disabled:opacity-40 disabled:hover:text-gray-300"
                             title="Delete"
                             disabled={!collapsedActiveCommentId}
@@ -2382,16 +2390,18 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                             <Trash2 className="w-3 h-3" />
                           </button>
                         </div>
+                        )}
                       </div>
                     )}
 
-                    {/* Add comment input */}
+                    {/* Add comment input -- not rendered at all outside 'manage'. */}
+                    {commentAccessMode === 'manage' && (
                     <div className="mt-3 pt-3 border-t border-gray-100">
                       <input
                         type="text"
                         placeholder="Add a comment..."
                         className="w-full text-xs px-3 py-2 rounded-lg border border-gray-200 focus:border-blue-400 focus:ring-1 focus:ring-blue-100 outline-none"
-                        onKeyDown={async (e) => {
+                        onKeyDown={guardCommentMutation(commentAccessMode, async (e: React.KeyboardEvent<HTMLInputElement>) => {
                           if (e.key === 'Enter' && e.currentTarget.value.trim()) {
                             const inputElement = e.currentTarget;
                             const commentText = inputElement.value.trim();
@@ -2409,9 +2419,10 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                             });
                             setCollapsedActiveCommentId(newComment.id);
                           }
-                        }}
+                        })}
                       />
                     </div>
+                    )}
                   </div>
                 </div>
               )}
@@ -2432,9 +2443,10 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                   badgeColor={padlet.metadata?.badgeColor || '#facc15'}
                   topStrip={padlet.metadata?.topStrip || 'transparent'}
                   commentTitle={padlet.metadata?.commentTitle || ''}
-                  onTitleChange={(title) => {
+                  accessMode={commentAccessMode}
+                  onTitleChange={guardCommentMutation(commentAccessMode, (title) => {
                     updatePadletMetadata(padlet.id, { commentTitle: title || undefined });
-                  }}
+                  })}
                   selected={isPadletSelected(padlet.id)}
                   showMenu={true}
                   onMenuClick={() => {
@@ -2442,7 +2454,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                     setPadletToEdit(padlet);
                     setIsCommentEditorOpen(true);
                   }}
-                  onAddComment={async (text) => {
+                  onAddComment={guardCommentMutation(commentAccessMode, async (text) => {
                     const newComment = {
                       id: `comment-${Date.now()}`,
                       text,
@@ -2455,15 +2467,15 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                     await updatePadletMetadata(padlet.id, {
                       comments: [...currentComments, newComment],
                     });
-                  }}
-                  onEditComment={async (commentId, text) => {
+                  })}
+                  onEditComment={guardCommentMutation(commentAccessMode, async (commentId, text) => {
                     const currentComments = padlet.metadata?.comments || [];
                     const nextComments = currentComments.map((comment: any) =>
                       comment.id === commentId ? { ...comment, text } : comment
                     );
                     await updatePadletMetadata(padlet.id, { comments: nextComments });
-                  }}
-                  onToggleCommentStrikethrough={async (commentId) => {
+                  })}
+                  onToggleCommentStrikethrough={guardCommentMutation(commentAccessMode, async (commentId) => {
                     const currentComments = padlet.metadata?.comments || [];
                     const nextComments = currentComments.map((comment: any) =>
                       comment.id === commentId
@@ -2471,13 +2483,13 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                         : comment
                     );
                     await updatePadletMetadata(padlet.id, { comments: nextComments });
-                  }}
-                  onDeleteComment={async (commentId) => {
+                  })}
+                  onDeleteComment={guardCommentMutation(commentAccessMode, async (commentId) => {
                     const currentComments = padlet.metadata?.comments || [];
                     const nextComments = currentComments.filter((comment: any) => comment.id !== commentId);
                     await updatePadletMetadata(padlet.id, { comments: nextComments });
-                  }}
-                  onUpdateCommentColor={async (commentId, textColor, backgroundColor) => {
+                  })}
+                  onUpdateCommentColor={guardCommentMutation(commentAccessMode, async (commentId, textColor, backgroundColor) => {
                     const currentComments = padlet.metadata?.comments || [];
                     const nextComments = currentComments.map((comment: any) =>
                       comment.id === commentId
@@ -2489,7 +2501,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                         : comment
                     );
                     await updatePadletMetadata(padlet.id, { comments: nextComments });
-                  }}
+                  })}
                   onClick={(e) => {
                     e.stopPropagation();
                     if (!isDragging) {
@@ -2552,11 +2564,11 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                       {BADGE_COLORS.map((color) => (
                         <button
                           key={color}
-                          onClick={async () => {
+                          onClick={guardCommentMutation(commentAccessMode, async () => {
                             await updatePadletMetadata(padlet.id, { badgeColor: color });
                             setInternalBadgeColorPopupId(null);
                             setInternalBadgePopupPosition(null);
-                          }}
+                          })}
                           className={`rounded transition-transform hover:scale-110 ${(padlet.metadata?.badgeColor || '#facc15') === color ? 'ring-2 ring-blue-500' : ''}`}
                           style={{
                             width: '20px',

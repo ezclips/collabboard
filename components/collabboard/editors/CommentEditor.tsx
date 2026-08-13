@@ -18,6 +18,7 @@ import TextStylePopup from "./TextStylePopup";
 import { cycleEditorTextAlign } from "./textAlignCycle";
 import { getMeaningfulTitle } from "@/lib/infra/collabboard/postTitle";
 import { handleSafeCommentLinkClick } from "../commentLinkSafety";
+import { type CommentAccessMode } from "@/lib/domain/canvas/comments";
 
 // Module-level constant -- stable reference, never recreated on render
 const COMMENT_EXTENSIONS = [
@@ -112,6 +113,12 @@ interface CommentEditorProps {
    * pass the parent post/padlet id so we can hard-reset when switching targets.
    */
   targetId?: string;
+
+  // PATCH 8Z: canonical comment permission signal, threaded from
+  // CanvasModals.tsx's existing commentAccessMode -- no new authorization
+  // lookup inside this component. Defaults to 'manage' so any caller that
+  // hasn't been updated keeps its exact current behavior.
+  accessMode?: CommentAccessMode;
 }
 
 export default function CommentEditor({
@@ -127,7 +134,12 @@ export default function CommentEditor({
   currentUserName = "R",
   currentUserAvatar,
   targetId,
+  accessMode = "manage",
 }: CommentEditorProps) {
+  // COMMENT mode stays dormant everywhere in this rollout -- only 'read' and
+  // 'manage' are ever live, so treating anything short of 'manage' as
+  // read-only matches guardCommentMutation's own semantics exactly.
+  const isReadOnly = accessMode !== "manage";
   const [comments, setComments] = useState<CommentData[]>(initialComments);
   const [cardColor, setCardColor] = useState(initialCardColor);
   const [badgeColor, setBadgeColor] = useState(initialBadgeColor);
@@ -308,6 +320,7 @@ export default function CommentEditor({
   };
 
   const handleAddComment = () => {
+    if (isReadOnly) return;
     if (!editor) return;
     const htmlContent = editor.getHTML();
     const textContent = editor.getText().trim();
@@ -338,6 +351,7 @@ export default function CommentEditor({
   };
 
   const handleEditComment = (commentId: string) => {
+    if (isReadOnly) return;
     const comment = comments.find((c) => c.id === commentId);
     if (comment && editEditor) {
       setActiveCommentId(commentId);
@@ -352,6 +366,7 @@ export default function CommentEditor({
   };
 
   const handleSaveEdit = () => {
+    if (isReadOnly) return;
     if (!editingCommentId || !editEditor) return;
     const htmlContent = editEditor.getHTML();
     const textContent = editEditor.getText().trim();
@@ -366,6 +381,7 @@ export default function CommentEditor({
   };
 
   const handleRemoveComment = (commentId: string) => {
+    if (isReadOnly) return;
     setComments((prev) => {
       const next = prev.filter((comment) => comment.id !== commentId);
       if (activeCommentId === commentId) {
@@ -446,6 +462,7 @@ export default function CommentEditor({
   const getActiveEditor = () => (editingCommentId ? editEditor : editor);
 
   const handleLink = () => {
+    if (isReadOnly) return;
     const activeEditor = getActiveEditor();
     if (!activeEditor) return;
     if (activeEditor.state.selection.empty) return;
@@ -468,12 +485,14 @@ export default function CommentEditor({
   };
 
   const handleTextColor = (color: string) => {
+    if (isReadOnly) return;
     if (!editor) return;
     editor.chain().focus().setColor(color).run();
     setCurrentTextColor(color);
   };
 
   const handleHighlight = (color: string) => {
+    if (isReadOnly) return;
     if (!editor) return;
     if (color === "transparent") {
       editor.chain().focus().unsetHighlight().run();
@@ -484,6 +503,7 @@ export default function CommentEditor({
   };
 
   const handleApplyLink = () => {
+    if (isReadOnly) return;
     const activeEditor = getActiveEditor();
     if (!activeEditor) return;
     
@@ -585,6 +605,7 @@ export default function CommentEditor({
             }}
             emojiOpen={emojiOpen}
             linkEnabled={linkEnabled}
+            readOnly={isReadOnly}
           />
         </div>
         </div>
@@ -608,10 +629,11 @@ export default function CommentEditor({
             <input
               type="text"
               value={commentTitle}
-              onChange={(e) => setCommentTitle(e.target.value)}
+              onChange={(e) => { if (!isReadOnly) setCommentTitle(e.target.value); }}
               placeholder="Post name"
+              readOnly={isReadOnly}
               className="w-full text-sm font-semibold bg-transparent outline-none border-b border-transparent focus:border-blue-400 placeholder:opacity-40 placeholder:font-normal rounded px-1 -mx-1"
-              style={{ color: topStrip && topStrip !== 'transparent' ? contrastIconColor(topStrip) : '#374151' }}
+              style={{ color: topStrip && topStrip !== 'transparent' ? contrastIconColor(topStrip) : '#374151', cursor: isReadOnly ? 'default' : undefined }}
             />
           </div>
           {/* Card Color Popup - New style matching NoteEditor */}
@@ -724,6 +746,7 @@ export default function CommentEditor({
                   onSelectHeading={() => {}}
                   hideHeadingSelect={true}
                   onSelectColor={(color) => {
+                    if (isReadOnly) return;
                     setComments((prev) =>
                       prev.map((comment) =>
                         comment.id === commentColorPopupId
@@ -733,6 +756,7 @@ export default function CommentEditor({
                     );
                   }}
                   onSelectHighlight={(color) => {
+                    if (isReadOnly) return;
                     setComments((prev) =>
                       prev.map((comment) =>
                         comment.id === commentColorPopupId
@@ -751,7 +775,11 @@ export default function CommentEditor({
             <div className="flex items-center justify-end mb-3">
               {/* Close button removed -- redundant with the backdrop click
                   (handleOverlayClick) which already saves and closes, same
-                  as every other editor. */}
+                  as every other editor. Badge Color trigger not rendered at
+                  all in read-only -- matches the "not rendered, not merely
+                  disabled" principle used everywhere else in the canonical
+                  comment system. */}
+              {!isReadOnly && (
               <button
                 onClick={() => {
                   setBadgeColorOpen((prev) => !prev);
@@ -765,6 +793,7 @@ export default function CommentEditor({
                   style={{ backgroundColor: badgeColor }}
                 />
               </button>
+              )}
             </div>
 
             {badgeColorOpen && (
@@ -774,6 +803,7 @@ export default function CommentEditor({
                     <button
                       key={color}
                       onClick={() => {
+                        if (isReadOnly) return;
                         setBadgeColor(color);
                         setBadgeColorOpen(false);
                       }}
@@ -868,7 +898,11 @@ export default function CommentEditor({
                         )}
                       </div>
 
-                      {/* Actions Column - Fixed width, always reserves space */}
+                      {/* Actions Column - Fixed width, always reserves space.
+                          Not rendered at all in read-only -- matches the "not
+                          rendered, not merely disabled" principle used
+                          everywhere else in the canonical comment system. */}
+                      {!isReadOnly && (
                       <div className="flex flex-col gap-0.5 w-5 shrink-0">
                         <div className={`flex flex-col gap-0.5 ${isActive ? 'visible' : 'invisible group-hover/row:visible'}`}>
                           {/* Edit/Palette Button */}
@@ -906,6 +940,7 @@ export default function CommentEditor({
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
+                              if (isReadOnly) return;
                               setComments((prev) =>
                                 prev.map((c) =>
                                   c.id === comment.id
@@ -940,12 +975,14 @@ export default function CommentEditor({
                           </button>
                         </div>
                       </div>
+                      )}
                     </div>
                   );
                 })}
               </div>
             )}
 
+            {!isReadOnly && (
             <div className="mt-3 pt-3 border-t border-gray-100">
               <div className="flex items-center gap-2">
                 <div className="w-7 h-7 rounded-full bg-gray-100 flex items-center justify-center text-gray-400 text-xs">
@@ -966,6 +1003,7 @@ export default function CommentEditor({
                 </button>
               </div>
             </div>
+            )}
           </div>
 
           {/* Save/Close is handled by clicking outside or ESC */}
