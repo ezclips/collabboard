@@ -928,7 +928,7 @@ product-facing post families for 10 live type literals (`'file'` excluded).
 | Document anchored/highlighted threads | `DocumentEditor.tsx` (in-modal), `OverlayLayer.tsx` (on-canvas, shared with Note) | **PERMISSION SAFE -- READ / MANAGE** (PATCH 8AA, 2026-08-13) |
 | Comment post primary thread | `CommentPost.tsx`, `FreeformPadletCards.tsx`'s collapsed-marker inline block, `CommentEditor.tsx` | **PERMISSION SAFE -- READ / MANAGE** (PATCH 8Z, 2026-08-13) |
 | Container embedded child `CommentPopup` renderer | `ContainerEditor.tsx`'s `SortableChildItem` | **PERMISSION SAFE -- READ / MANAGE** (PATCH 8AC, 2026-08-13) |
-| `EmbeddedCommentList` (compact child renderer) | `RowColumnContainerCard.tsx`, `PostCardContent.tsx` | PERMISSION UNGATED (component has no `accessMode` concept at all) -- PATCH 8AD |
+| `EmbeddedCommentList` (compact child renderer) | `RowColumnContainerCard.tsx`, `PostCardContent.tsx`, `DrawingLayout.tsx` (standalone comment posts on the Drawing canvas -- a 3rd host discovered during PATCH 8AD's inventory, not previously listed here) | **PERMISSION SAFE -- READ / MANAGE** (PATCH 8AD, 2026-08-13) |
 
 None of these was fixed by PATCH 8Y itself -- verification only, per that
 patch's own instruction not to redesign permissions. At the time PATCH 8Y
@@ -936,26 +936,32 @@ closed, all five surfaces shared the same underlying gap: real identity was
 generally present, but no caller wrapped its mutation callbacks in
 `guardCommentMutation`/checked `accessMode`, so a workspace-readonly user
 could mutate any of them. Each has since been closed by its own dedicated
-patch -- Note (PATCH 8AB), Document (PATCH 8AA), Comment post (PATCH 8Z), and
-Container's embedded child `CommentPopup` renderer (PATCH 8AC) are all now
-**PERMISSION SAFE -- READ / MANAGE**. `EmbeddedCommentList` remains the one
-open item (PATCH 8AD, not yet implemented) -- see the special-system matrix
-above for current status.
+patch -- Note (PATCH 8AB), Document (PATCH 8AA), Comment post (PATCH 8Z),
+Container's embedded child `CommentPopup` renderer (PATCH 8AC), and
+`EmbeddedCommentList` (PATCH 8AD) are all now **PERMISSION SAFE -- READ /
+MANAGE**. Every special-system surface in this table is now closed -- see
+the "Special Comment Permission Closure Audit" this patch's own RETURN
+report names as the next candidate.
 
 ### Embedded-renderer matrix
 
 | Host component | Child post types served | Read/write | Storage field | Permission | Why not full `CommentPopup` |
 | --- | --- | --- | --- | --- | --- |
-| `RowColumnContainerCard.tsx` | any child (via `detachedComments`) + comment-type children (via `comments`) | both | child's own `metadata.comments` / `metadata.detachedComments` | UNGATED | intentionally compact, narrow-width embedded presentation (own header/counter/composer sized for a container card slot) -- full `CommentPopup` would change the embedded layout model, not just its implementation |
-| `PostCardContent.tsx` (Drawing-in-container image binding) | any child (via `detachedComments`) | both | child's own `metadata.detachedComments` | UNGATED | same reasoning as above |
-| `ContainerEditor.tsx`'s `SortableChildItem` | comment-type children only | both | child's own `metadata.comments` | UNGATED | already uses canonical `CommentPopup` directly (`embedded`/`fullWidth` props), unlike the two hosts above -- a pre-existing inconsistency between the two embedded-child code paths, noted here as a fact, not reconciled in PATCH 8Y |
+| `RowColumnContainerCard.tsx` | any child (via `detachedComments`) + comment-type children (via `comments`) | both | child's own `metadata.comments` / `metadata.detachedComments` | **PERMISSION SAFE -- READ / MANAGE** (PATCH 8AD) | intentionally compact, narrow-width embedded presentation (own header/counter/composer sized for a container card slot) -- full `CommentPopup` would change the embedded layout model, not just its implementation |
+| `PostCardContent.tsx` (Drawing-in-container image binding, plus a comment-type-child rendering path reused for nested containers) | any child (via `detachedComments`) | both | child's own `metadata.detachedComments` / `metadata.comments` | **PERMISSION SAFE -- READ / MANAGE** (PATCH 8AD) | same reasoning as above |
+| `DrawingLayout.tsx` (standalone comment posts on the Drawing canvas, not a container child at all) | N/A -- root-level comment post | both | the post's own `metadata.comments` | **PERMISSION SAFE -- READ / MANAGE** (PATCH 8AD) | Drawing layout renders standalone Comment-type posts through this compact embeddable renderer rather than the canonical `CommentPost.tsx`/`CommentEditor.tsx` pair every other layout uses -- an existing architectural inconsistency, not something PATCH 8AD's permissions-only scope corrects |
+| `ContainerEditor.tsx`'s `SortableChildItem` | comment-type children only | both | child's own `metadata.comments` | **PERMISSION SAFE -- READ / MANAGE** (PATCH 8AC) | already uses canonical `CommentPopup` directly (`embedded`/`fullWidth` props), unlike the three hosts above -- a pre-existing inconsistency between the two embedded-child code paths, noted here as a fact, not reconciled by either PATCH 8AC or PATCH 8AD (see next-phase backlog item 4) |
 
-None of these was migrated or touched. `EmbeddedCommentList`/`CommentRow.tsx`
-remain a fourth, independent, genuinely-editable comment UI implementation,
-intentionally distinct from `CommentPopup` -- legitimate per this rollout's
-own architecture rule (storage differences belong below the UI boundary; UI
-*presentation* differences for a deliberately compact embedded context are a
-separate, accepted exception, not a duplicate to eliminate).
+None of these was migrated to canonical `CommentPopup`. `EmbeddedCommentList`/
+`CommentRow.tsx` remain a fourth, independent, genuinely-editable comment UI
+implementation, intentionally distinct from `CommentPopup` -- legitimate per
+this rollout's own architecture rule (storage differences belong below the UI
+boundary; UI *presentation* differences for a deliberately compact embedded
+context are a separate, accepted exception, not a duplicate to eliminate).
+PATCH 8AD added an `accessMode?: CommentAccessMode` prop (default `'manage'`)
+to `EmbeddedCommentList.tsx` and its sole caller `CommentRow.tsx`, and to
+`RowColumnContainerCard.tsx`/`PostCardContent.tsx`/`DrawingLayout.tsx` --
+permission wiring only, this compact presentation itself is unchanged.
 
 ### Dead/orphaned comment code inventory
 
@@ -1022,13 +1028,14 @@ migrates.
 
 ### Next-phase backlog (priority order, not implemented)
 
-1. **Permission wiring for the remaining UNGATED special surfaces** (Note
-   anchored threads, Container's embedded child `CommentPopup`,
-   `EmbeddedCommentList`) -- the largest remaining concentration of real gaps
-   found by this audit. Comment post primary thread was closed by PATCH 8Z;
-   Document anchored/highlighted threads were closed by PATCH 8AA. Highest
-   priority because the remaining items are genuine permission holes, not
-   UI/architecture preferences.
+1. ~~**Permission wiring for the remaining UNGATED special surfaces**~~ --
+   **CLOSED.** Note anchored threads (PATCH 8AB), Document anchored threads
+   (PATCH 8AA), Comment post primary thread (PATCH 8Z), Container's embedded
+   child `CommentPopup` renderer (PATCH 8AC), and `EmbeddedCommentList`
+   (PATCH 8AD) are all now **PERMISSION SAFE -- READ / MANAGE**. Every
+   special-system surface identified by this audit has a permission gate.
+   Next candidate per PATCH 8AD's own RETURN report: a repo-wide **Special
+   Comment Permission Closure Audit**, confirming no surface was missed.
 2. **Comment post primary-thread dedicated adapter patch** (per PATCH 8X) --
    whether to bring its rich TipTap composer capability (Bold/Italic/
    Underline/lists/code/align/emoji) INTO `CommentPopup` as an opt-in
@@ -1040,10 +1047,14 @@ migrates.
    confuse a future patch (as the "Todo Comments Popup" mislabel already
    did twice).
 4. **Reconcile the two embedded-child-renderer code paths** (`ContainerEditor.tsx`'s
-   direct `CommentPopup` usage vs. `RowColumnContainerCard.tsx`/`PostCardContent.tsx`'s
-   `EmbeddedCommentList`) -- an existing inconsistency, not a regression;
-   worth a deliberate decision (standardize on one) rather than leaving two
-   patterns to diverge further.
+   direct `CommentPopup` usage vs. `RowColumnContainerCard.tsx`/`PostCardContent.tsx`/
+   `DrawingLayout.tsx`'s `EmbeddedCommentList`) -- an existing inconsistency,
+   not a regression, and NOT resolved by either PATCH 8AC or PATCH 8AD (both were
+   explicitly permissions-only; PATCH 8AD's own spec named this exact question
+   -- "should EmbeddedCommentList eventually be consolidated with CommentPopup"
+   -- as deliberately out of scope). Both paths are now equally permission-safe,
+   so this item is purely an architecture/consistency decision, no longer a
+   security question.
 5. **kanban-canvas comment system** -- out of this rollout's frame entirely
    (see above); listed last because it requires its own scoping decision
    (does the product want unified comment UX across both verticals at all?)
@@ -1170,9 +1181,12 @@ inside `<CommentPopup ... />` blocks specifically
 signal than before this patch, not a weakened one.
 
 Remaining PERMISSION UNGATED special surfaces after PATCH 8Z, PATCH 8AA, and
-PATCH 8AB: Container's embedded child `CommentPopup` renderer and
-`EmbeddedCommentList` -- each a candidate for its own dedicated
-permission-wiring patch, per PATCH 8Y's next-phase backlog.
+PATCH 8AB (at the time this paragraph was written): Container's embedded
+child `CommentPopup` renderer and `EmbeddedCommentList` -- each a candidate
+for its own dedicated permission-wiring patch, per PATCH 8Y's next-phase
+backlog. Both have since been closed: Container's embedded child
+`CommentPopup` renderer by PATCH 8AC (below), `EmbeddedCommentList` by
+PATCH 8AD (see the dedicated section at the end of this document).
 
 **Document anchored/highlighted comments were permission-wired in PATCH 8AA**
 (2026-08-13). This remains a SPECIAL / ANCHORED / HIGHLIGHTED controller, not
@@ -1267,3 +1281,127 @@ Add/Send, Edit, Color, Strikethrough-toggle, or Delete a child comment (Link
 authoring, handled internally by `CommentPopup`'s own per-row action rail,
 is likewise gated by the same `accessMode`). MANAGE keeps every existing
 capability, unchanged.
+
+## EmbeddedCommentList permission wiring -- PERMISSION SAFE (PATCH 8AD)
+
+**PATCH 8AD (2026-08-13)** wired the READ/MANAGE permission contract into
+every live `EmbeddedCommentList` caller -- closing the last item on the
+special-system matrix's PERMISSION UNGATED list. Permissions-only: this
+compact, intentionally-different-from-`CommentPopup` embedded presentation
+(own header/counter, own `CommentRow.tsx` per-row Edit/Color/Strikethrough/
+Delete, own composer/Send) was NOT replaced, redesigned, or migrated to
+`CommentPopup`, and no storage field changed ownership.
+
+**Live callers (7 JSX call sites across 4 files), classified:**
+
+- `RowColumnContainerCard.tsx` -- two call sites. Comment-type children
+  (`child.type === "comment"`) store `metadata.comments`; any other child's
+  detached-comment toggle stores `metadata.detachedComments`. Both are
+  reachable from every live top-level layout that renders a Container
+  (`WallCanvas.tsx`, `ColumnsCanvasRow.tsx`, `RowLane.tsx`,
+  `ChronoTimelineCanvas.tsx`, `DrawingLayout.tsx`'s `AutoHeightContainer`,
+  `FreeformPadletCards.tsx`).
+- `PostCardContent.tsx` -- three call sites, one theoretically-reachable,
+  one live-but-narrow, one dead:
+  - COMMENT TYPE (`padlet.type === 'comment' && onUpdateChildComments`) --
+    confirmed **unreachable** in the live app: `RowColumnContainerCard.tsx`
+    always intercepts comment-type children itself before ever delegating to
+    `PostCardContent`, and no top-level layout passes `onUpdateChildComments`
+    to its own top-level (non-container) `PostCardContent` call. Wired
+    anyway, uniformly, since the gate costs nothing and the branch is one
+    routing change away from becoming live.
+  - IMAGE TYPE / drawing-container image binding
+    (`useDrawingContainerImageBinding = canvasContext === 'drawing' &&
+    isInContainer`) storing `metadata.detachedComments` -- **live**, reached
+    only via `DrawingLayout.tsx`'s `AutoHeightContainer ->
+    RowColumnContainerCard -> PostCardContent` chain (no other layout ever
+    sets `canvasContext="drawing"`).
+  - CONTAINER TYPE's own `children.map` (a container padlet's children,
+    rendered when `PostCardContent` itself is given a `type === 'container'`
+    padlet) -- reachable only if a container child is itself a container
+    (nested container-in-container); no live creation flow builds this today,
+    but the render path forwards `onUpdateChildComments` unconditionally, so
+    it is wired rather than left as a silent, unverified exception.
+- `DrawingLayout.tsx`'s own direct `<EmbeddedCommentList>` call (inside
+  `DrawingEmbeddableCard`, the non-container branch) -- a **newly discovered
+  root-level surface**, not a container child at all: standalone Comment-type
+  posts placed on the Drawing canvas render through this compact embeddable
+  renderer, not the canonical `CommentPost.tsx`/`CommentEditor.tsx` pair
+  every other layout uses for a standalone comment post. Storage:
+  `metadata.comments`. `onUpdateChildComments` here is
+  `DrawingLayout.tsx`'s own local `handleUpdateChildComments` (persists via
+  `onUpdatePadletStrict`), unconditionally supplied -- not the optional prop
+  other layouts thread from `CanvasClient.tsx`.
+- `components/canvas/RowCanvas.tsx`'s own `<EmbeddedCommentList>` call --
+  confirmed **dead/orphaned**: this file has zero importers anywhere in
+  production code (the live Grid-layout component is `components/collabboard/row/RowCanvasDnD.tsx`,
+  an entirely different file). Left untouched -- gating unreachable code
+  provides no live security benefit and this patch's own scope is
+  permissions for LIVE callers.
+
+**accessMode flow:** `EmbeddedCommentList.tsx` and its sole caller
+`CommentRow.tsx` each gained an `accessMode?: CommentAccessMode` prop
+(default `'manage'`). `RowColumnContainerCard.tsx` and `PostCardContent.tsx`
+gained the same prop and forward it to every `EmbeddedCommentList` they
+render (including `RowColumnContainerCard`'s own recursive `PostCardContent`
+child-rendering call, and `PostCardContent`'s own recursive
+container-children call). `DrawingLayout.tsx` gained a `commentAccessMode`
+prop threaded into `AutoHeightContainer -> RowColumnContainerCard` (as
+`accessMode`) and into its own direct `EmbeddedCommentList`/`PostCardContent`
+calls. The existing `commentAccessMode` signal from `CanvasClient.tsx` (no
+new authorization lookup) is now threaded into all six top-level layout
+components (`ColumnsLayout.tsx`, `RowCanvasDnD.tsx`, `WallCanvas.tsx`,
+`DrawingLayout.tsx`, `ChronoTimelineCanvas.tsx`, and `FreeformPadletCards.tsx`,
+which already received it from PATCH 8Z and only needed forwarding into its
+own `RowColumnContainerCard`/`PostCardContent` calls), each of which forwards
+it to `RowColumnContainerCard` as `accessMode={commentAccessMode}`.
+
+**Two-layer defense, same pattern as every prior patch in this series:**
+
+1. **Render gate (layer 1):** `EmbeddedCommentList.tsx` omits its composer
+   entirely outside `'manage'` (`showComposer && onSubmit && canManage`).
+   `CommentRow.tsx` omits its ENTIRE per-row actions column (Edit/Color/
+   Strikethrough/Delete) outside `'manage'`, and folds the access check into
+   `canEdit` (`canManage && comment.userId === currentUserId`) so the
+   double-click-to-edit path (which does not go through the actions column at
+   all -- it is the row wrapper's own `onDoubleClick`) cannot bypass the
+   gate. This closes a genuine bypass this patch found: before the fix,
+   `canEdit` checked ownership only, so a READ-mode user who happened to
+   "own" a legacy comment (or any comment authored under their own id) could
+   double-click it open and edit inline, entirely independent of the hidden
+   actions column.
+2. **Callback defense (layer 2):** every mutation callback
+   (`onSubmit`/`onEditComment`/`onRemoveComment`/`onToggleStrikethrough`/
+   `onColorChange`) passed into `EmbeddedCommentList` at all five live/wired
+   caller sites is wrapped with `guardCommentMutation(accessMode, ...)` at
+   the JSX boundary -- independent of whatever `EmbeddedCommentList`/
+   `CommentRow` do internally.
+
+**Identity:** already real at every live mutation site before this patch
+(`currentUserId`/`currentUserName` sourced from the authenticated `user`
+object at `CanvasClient.tsx`'s top of the prop chain) -- unchanged, verified.
+No placeholder identity (`'user1'`, `'anon'`, `'You'`) was found or persisted
+by any of the wired call sites.
+
+**Storage ownership:** unchanged and NOT normalized -- comment-type children
+keep `metadata.comments`, detached-comment children keep
+`metadata.detachedComments`, verified structurally (each call site's block
+contains its own field literal and never the other).
+
+**Child-id ownership:** every mutation targets the owning child's id
+exclusively -- verified structurally (regex over `onUpdateChildComments(`
+calls) and by mounted two-sibling isolation tests (`RowColumnContainerCard.embeddedCommentPermission.test.tsx`).
+Container-level state (`onEditContainer`, `onDropExistingPadlet`,
+`onScanChild`) is never touched by a child comment mutation, proven by a
+dedicated isolation test.
+
+READ users may see and read existing comments at every wired surface; they
+cannot Add/Send, Edit (including via double-click), Color, Strikethrough-toggle,
+or Delete a comment, and no hidden callback can be reached by interacting with
+the row directly. MANAGE keeps every existing capability, unchanged.
+
+**Not answered by this patch** (explicitly out of scope, per its own spec):
+whether `EmbeddedCommentList` should eventually be consolidated with
+`CommentPopup`. Both are now equally permission-safe; which presentation the
+product keeps is a separate architecture decision -- see next-phase backlog
+item 4.

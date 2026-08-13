@@ -17,6 +17,7 @@ import { getMeaningfulTitle } from "@/lib/infra/collabboard/postTitle";
 import { isDocumentPost } from "@/lib/domain/canvas/documentPost";
 import { resolvePadletTitleStyle } from "@/lib/domain/canvas/captionStyle";
 import DocumentCardContent from "./DocumentCardContent";
+import { guardCommentMutation, type CommentAccessMode } from "@/lib/domain/canvas/comments";
 
 type CellStyle = {
     bg?: string;
@@ -38,6 +39,11 @@ interface PostCardContentProps {
     currentUserName?: string;
     currentUserAvatar?: string;
     onUpdateChildComments?: (childId: string, comments: any[], options?: { field?: "comments" | "detachedComments" }) => void;
+    // PATCH 8AD: gates every EmbeddedCommentList mutation this component renders
+    // (comment-type posts, drawing/image-binding detached comments, and comment-type
+    // children of a container preview). Defaults to 'manage' so every pre-existing
+    // caller (tests, slide renderer, presentation mode) keeps today's behavior.
+    accessMode?: CommentAccessMode;
     onOpenDocument?: () => void; // PATCH-149B1b-iii §27.4: opt-in Read affordance
     // Set by callers that already render this padlet's title themselves
     // (e.g. CardShell's strip, styled via resolvePadletTitleStyle) so the
@@ -249,6 +255,7 @@ export default function PostCardContent({
     currentUserName,
     currentUserAvatar,
     onUpdateChildComments,
+    accessMode = 'manage',
     onOpenDocument,
     hideOwnTitle = false,
     isDragging = false,
@@ -559,7 +566,7 @@ export default function PostCardContent({
                         currentUserId={currentUserId}
                         currentUserName={currentUserName}
                         currentUserAvatar={currentUserAvatar}
-                        onSubmit={(text) => {
+                        onSubmit={guardCommentMutation(accessMode, (text) => {
                             const newComment = {
                                 id: `comment-${Date.now()}`,
                                 text,
@@ -570,34 +577,35 @@ export default function PostCardContent({
                             };
                             const existingComments = (padlet.metadata as any)?.comments || [];
                             onUpdateChildComments(padlet.id, [...existingComments, newComment]);
-                        }}
-                        onEditComment={(commentId, newText) => {
+                        })}
+                        onEditComment={guardCommentMutation(accessMode, (commentId, newText) => {
                             const existingComments = (padlet.metadata as any)?.comments || [];
                             const updated = existingComments.map((c: any) =>
                                 c.id === commentId ? { ...c, text: newText } : c
                             );
                             onUpdateChildComments(padlet.id, updated);
-                        }}
-                        onRemoveComment={(commentId) => {
+                        })}
+                        onRemoveComment={guardCommentMutation(accessMode, (commentId) => {
                             const existingComments = (padlet.metadata as any)?.comments || [];
                             const filtered = existingComments.filter((c: any) => c.id !== commentId);
                             onUpdateChildComments(padlet.id, filtered);
-                        }}
-                        onToggleStrikethrough={(commentId) => {
+                        })}
+                        onToggleStrikethrough={guardCommentMutation(accessMode, (commentId) => {
                             const existingComments = (padlet.metadata as any)?.comments || [];
                             const updated = existingComments.map((c: any) =>
                                 c.id === commentId ? { ...c, isStrikethrough: !c.isStrikethrough } : c
                             );
                             onUpdateChildComments(padlet.id, updated);
-                        }}
-                        onColorChange={(commentId, textColor, backgroundColor) => {
+                        })}
+                        onColorChange={guardCommentMutation(accessMode, (commentId, textColor, backgroundColor) => {
                             const existingComments = (padlet.metadata as any)?.comments || [];
                             const updated = existingComments.map((c: any) =>
                                 c.id === commentId ? { ...c, textColor, backgroundColor } : c
                             );
                             onUpdateChildComments(padlet.id, updated);
-                        }}
+                        })}
                         showComposer={true}
+                        accessMode={accessMode}
                     />
                 </div>
             );
@@ -751,7 +759,7 @@ export default function PostCardContent({
                             currentUserId={currentUserId}
                             currentUserName={currentUserName}
                             currentUserAvatar={currentUserAvatar}
-                            onSubmit={(text) => {
+                            onSubmit={guardCommentMutation(accessMode, (text) => {
                                 const newComment = {
                                     id: `comment-${Date.now()}`,
                                     text,
@@ -761,30 +769,31 @@ export default function PostCardContent({
                                     timestamp: Date.now(),
                                 };
                                 onUpdateChildComments(padlet.id, [...detachedComments, newComment], { field: "detachedComments" });
-                            }}
-                            onEditComment={(commentId, newText) => {
+                            })}
+                            onEditComment={guardCommentMutation(accessMode, (commentId, newText) => {
                                 const updated = detachedComments.map((comment: any) =>
                                     comment.id === commentId ? { ...comment, text: newText } : comment
                                 );
                                 onUpdateChildComments(padlet.id, updated, { field: "detachedComments" });
-                            }}
-                            onRemoveComment={(commentId) => {
+                            })}
+                            onRemoveComment={guardCommentMutation(accessMode, (commentId) => {
                                 const updated = detachedComments.filter((comment: any) => comment.id !== commentId);
                                 onUpdateChildComments(padlet.id, updated, { field: "detachedComments" });
-                            }}
-                            onToggleStrikethrough={(commentId) => {
+                            })}
+                            onToggleStrikethrough={guardCommentMutation(accessMode, (commentId) => {
                                 const updated = detachedComments.map((comment: any) =>
                                     comment.id === commentId ? { ...comment, isStrikethrough: !comment.isStrikethrough } : comment
                                 );
                                 onUpdateChildComments(padlet.id, updated, { field: "detachedComments" });
-                            }}
-                            onColorChange={(commentId, textColor, backgroundColor) => {
+                            })}
+                            onColorChange={guardCommentMutation(accessMode, (commentId, textColor, backgroundColor) => {
                                 const updated = detachedComments.map((comment: any) =>
                                     comment.id === commentId ? { ...comment, textColor, backgroundColor } : comment
                                 );
                                 onUpdateChildComments(padlet.id, updated, { field: "detachedComments" });
-                            }}
+                            })}
                             showComposer={true}
+                            accessMode={accessMode}
                         />
                     </div>
                 )}
@@ -878,7 +887,7 @@ export default function PostCardContent({
                                                 currentUserId={currentUserId}
                                                 currentUserName={currentUserName}
                                                 currentUserAvatar={currentUserAvatar}
-                                                onSubmit={(text) => {
+                                                onSubmit={guardCommentMutation(accessMode, (text) => {
                                                     const newComment = {
                                                         id: `comment-${Date.now()}`,
                                                         text,
@@ -889,34 +898,35 @@ export default function PostCardContent({
                                                     };
                                                     const existingComments = (child.metadata as any)?.comments || [];
                                                     onUpdateChildComments(child.id, [...existingComments, newComment]);
-                                                }}
-                                                onEditComment={(commentId, newText) => {
+                                                })}
+                                                onEditComment={guardCommentMutation(accessMode, (commentId, newText) => {
                                                     const existingComments = (child.metadata as any)?.comments || [];
                                                     const updated = existingComments.map((c: any) =>
                                                         c.id === commentId ? { ...c, text: newText } : c
                                                     );
                                                     onUpdateChildComments(child.id, updated);
-                                                }}
-                                                onRemoveComment={(commentId) => {
+                                                })}
+                                                onRemoveComment={guardCommentMutation(accessMode, (commentId) => {
                                                     const existingComments = (child.metadata as any)?.comments || [];
                                                     const filtered = existingComments.filter((c: any) => c.id !== commentId);
                                                     onUpdateChildComments(child.id, filtered);
-                                                }}
-                                                onToggleStrikethrough={(commentId) => {
+                                                })}
+                                                onToggleStrikethrough={guardCommentMutation(accessMode, (commentId) => {
                                                     const existingComments = (child.metadata as any)?.comments || [];
                                                     const updated = existingComments.map((c: any) =>
                                                         c.id === commentId ? { ...c, isStrikethrough: !c.isStrikethrough } : c
                                                     );
                                                     onUpdateChildComments(child.id, updated);
-                                                }}
-                                                onColorChange={(commentId, textColor, backgroundColor) => {
+                                                })}
+                                                onColorChange={guardCommentMutation(accessMode, (commentId, textColor, backgroundColor) => {
                                                     const existingComments = (child.metadata as any)?.comments || [];
                                                     const updated = existingComments.map((c: any) =>
                                                         c.id === commentId ? { ...c, textColor, backgroundColor } : c
                                                     );
                                                     onUpdateChildComments(child.id, updated);
-                                                }}
+                                                })}
                                                 showComposer={true}
+                                                accessMode={accessMode}
                                             />
                                         </div>
                                     );
@@ -944,6 +954,7 @@ export default function PostCardContent({
                                                 currentUserName={currentUserName}
                                                 currentUserAvatar={currentUserAvatar}
                                                 onUpdateChildComments={onUpdateChildComments}
+                                                accessMode={accessMode}
                                                 onOpenDocument={onOpenDocument}
                                             />
                                         </div>

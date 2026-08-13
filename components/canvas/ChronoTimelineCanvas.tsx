@@ -18,6 +18,7 @@ import {
 } from '@/components/ui/context-menu';
 import { getContainerEditTargetLabel } from '@/lib/infra/collabboard/containerEditTargetLabel';
 import type { Padlet, ChronoMode } from '@/types/collabboard';
+import type { CommentAccessMode } from '@/lib/domain/canvas/comments';
 
 interface TimelineCanvasProps {
   padlets: Padlet[];
@@ -38,6 +39,7 @@ interface TimelineCanvasProps {
   currentUserName?: string;
   currentUserAvatar?: string;
   onUpdateChildComments?: (childId: string, comments: any[], options?: { field?: 'comments' | 'detachedComments' }) => void;
+  commentAccessMode?: CommentAccessMode;
   onUpdateContainerMetadata?: (containerId: string, metadataUpdates: any) => void;
   onDuplicateContainer?: (containerId: string) => void;
   onRenameContainer?: (containerId: string, title: string) => void;
@@ -65,6 +67,7 @@ export default function ChronoTimelineCanvas({
   currentUserName,
   currentUserAvatar,
   onUpdateChildComments,
+  commentAccessMode,
   onUpdateContainerMetadata,
   onDuplicateContainer,
   onRenameContainer,
@@ -527,6 +530,7 @@ export default function ChronoTimelineCanvas({
               currentUserName={currentUserName}
               currentUserAvatar={currentUserAvatar}
               onUpdateChildComments={onUpdateChildComments}
+              accessMode={commentAccessMode}
               isExpanded={expandedContainers[container.id] ?? false}
               onExpandAvailabilityChange={(available) => setExpandableContainers(prev => prev[container.id] === available ? prev : { ...prev, [container.id]: available })}
               canvasContext="timeline"

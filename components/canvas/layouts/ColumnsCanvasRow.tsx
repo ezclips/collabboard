@@ -18,6 +18,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { BoardSection, Padlet, DropIndicatorState } from "@/types/collabboard";
+import type { CommentAccessMode } from "@/lib/domain/canvas/comments";
 import PostCardContent from "@/components/collabboard/PostCardContent";
 import RowColumnContainerCard from "@/components/collabboard/RowColumnContainerCard";
 import { ColumnPostContextMenu } from "@/components/collabboard/menus/ColumnPostContextMenu";
@@ -90,6 +91,7 @@ type ColumnsLayoutProps = {
   currentUserName?: string;
   currentUserAvatar?: string;
   onUpdateChildComments?: (childId: string, comments: any[], options?: { field?: 'comments' | 'detachedComments' }) => void;
+  commentAccessMode?: CommentAccessMode;
 };
 
 function DraggablePostItem({
@@ -178,6 +180,7 @@ export default function ColumnsCanvasRow({
   currentUserName,
   currentUserAvatar,
   onUpdateChildComments,
+  commentAccessMode,
 }: ColumnsLayoutProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editingTitle, setEditingTitle] = useState(section?.title ?? "");
@@ -397,6 +400,7 @@ export default function ColumnsCanvasRow({
                     currentUserName={currentUserName}
                     currentUserAvatar={currentUserAvatar}
                     onUpdateChildComments={onUpdateChildComments}
+                    accessMode={commentAccessMode}
                     isExpanded={expandedContainers[post.id] ?? false}
                     onExpandAvailabilityChange={(available) => setExpandableContainers(prev => prev[post.id] === available ? prev : { ...prev, [post.id]: available })}
                     isContentOnly

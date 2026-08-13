@@ -36,6 +36,7 @@ import RowColumnContainerCard from '@/components/collabboard/RowColumnContainerC
 
 import { Padlet } from "@/types/collabboard";
 import { getContainerEditTargetLabel } from "@/lib/infra/collabboard/containerEditTargetLabel";
+import type { CommentAccessMode } from "@/lib/domain/canvas/comments";
 
 // Removed local Padlet interface to use shared type
 
@@ -63,6 +64,7 @@ interface WallCanvasProps {
   currentUserName?: string;
   currentUserAvatar?: string;
   onUpdateChildComments?: (childId: string, comments: any[], options?: { field?: 'comments' | 'detachedComments' }) => void;
+  commentAccessMode?: CommentAccessMode;
 }
 
 interface SortablePadletProps {
@@ -87,6 +89,7 @@ interface SortablePadletProps {
   currentUserName?: string;
   currentUserAvatar?: string;
   onUpdateChildComments?: (childId: string, comments: any[], options?: { field?: 'comments' | 'detachedComments' }) => void;
+  commentAccessMode?: CommentAccessMode;
   onOpenDocument?: (padlet: Padlet) => void;
 }
 
@@ -112,6 +115,7 @@ const SortablePadletCard: React.FC<SortablePadletProps> = ({
   currentUserName,
   currentUserAvatar,
   onUpdateChildComments,
+  commentAccessMode,
   onOpenDocument,
 }) => {
   // Label for the open-target submenu -- prefers the child's own title (set
@@ -196,6 +200,7 @@ const SortablePadletCard: React.FC<SortablePadletProps> = ({
                 currentUserName={currentUserName}
                 currentUserAvatar={currentUserAvatar}
                 onUpdateChildComments={onUpdateChildComments}
+                accessMode={commentAccessMode}
                 onOpenDocument={onOpenDocument ? () => onOpenDocument(padlet) : undefined}
               />
             </CardShell>
@@ -232,6 +237,7 @@ const WallCanvas: React.FC<WallCanvasProps> = ({
   currentUserName,
   currentUserAvatar,
   onUpdateChildComments,
+  commentAccessMode,
   onOpenDocument,
 }) => {
   // Cookie-authenticated client — see useCanvasData.ts for why this must match
@@ -715,6 +721,7 @@ const WallCanvas: React.FC<WallCanvasProps> = ({
                                 currentUserName={currentUserName}
                                 currentUserAvatar={currentUserAvatar}
                                 onUpdateChildComments={onUpdateChildComments}
+                                commentAccessMode={commentAccessMode}
                                 onOpenDocument={onOpenDocument}
                               />
                             )}

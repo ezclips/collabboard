@@ -8,6 +8,7 @@ import PostCardContent from "./PostCardContent";
 import CardPreview from "./CardPreview";
 import EmbeddedCommentList from "./EmbeddedCommentList";
 import type { Padlet } from "@/types/collabboard";
+import { guardCommentMutation, type CommentAccessMode } from "@/lib/domain/canvas/comments";
 
 const DEFAULT_IGNORE_KINDS = new Set(["columns-container-move"]);
 
@@ -94,6 +95,10 @@ type RowColumnContainerCardProps = {
   // Content-only mode: parent CardShell provides the outer shell styling
   isContentOnly?: boolean;
   onOpenDocument?: (post: Padlet) => void;
+  // PATCH 8AD: gates every embedded child CommentPopup/EmbeddedCommentList
+  // mutation reachable from this card. Defaults to 'manage' so every
+  // pre-existing caller (tests, previews) keeps today's behavior unchanged.
+  accessMode?: CommentAccessMode;
 };
 
 export default function RowColumnContainerCard({
@@ -119,6 +124,7 @@ export default function RowColumnContainerCard({
   isExpanded: controlledIsExpanded,
   isContentOnly = false,
   onOpenDocument,
+  accessMode = 'manage',
 }: RowColumnContainerCardProps) {
   const COLLAPSED_SCROLL_MAX_HEIGHT = 300;
   const [localIsExpanded, setLocalIsExpanded] = useState(false);
@@ -351,7 +357,7 @@ export default function RowColumnContainerCard({
                           currentUserId={currentUserId}
                           currentUserName={currentUserName}
                           currentUserAvatar={currentUserAvatar}
-                          onSubmit={(text) => {
+                          onSubmit={guardCommentMutation(accessMode, (text) => {
                             const newComment = {
                               id: `comment-${Date.now()}`,
                               text,
@@ -362,33 +368,34 @@ export default function RowColumnContainerCard({
                             };
                             const existingComments = (child.metadata as any)?.comments || [];
                             onUpdateChildComments(child.id, [...existingComments, newComment], { field: 'comments' });
-                          }}
-                          onEditComment={(commentId, newText) => {
+                          })}
+                          onEditComment={guardCommentMutation(accessMode, (commentId, newText) => {
                             const existingComments = (child.metadata as any)?.comments || [];
                             const updated = existingComments.map((c: any) =>
                               c.id === commentId ? { ...c, text: newText } : c
                             );
                             onUpdateChildComments(child.id, updated, { field: 'comments' });
-                          }}
-                          onRemoveComment={(commentId) => {
+                          })}
+                          onRemoveComment={guardCommentMutation(accessMode, (commentId) => {
                             const existingComments = (child.metadata as any)?.comments || [];
                             const filtered = existingComments.filter((c: any) => c.id !== commentId);
                             onUpdateChildComments(child.id, filtered, { field: 'comments' });
-                          }}
-                          onToggleStrikethrough={(commentId) => {
+                          })}
+                          onToggleStrikethrough={guardCommentMutation(accessMode, (commentId) => {
                             const existingComments = (child.metadata as any)?.comments || [];
                             const updated = existingComments.map((c: any) =>
                               c.id === commentId ? { ...c, isStrikethrough: !c.isStrikethrough } : c
                             );
                             onUpdateChildComments(child.id, updated, { field: 'comments' });
-                          }}
-                          onColorChange={(commentId, textColor, backgroundColor) => {
+                          })}
+                          onColorChange={guardCommentMutation(accessMode, (commentId, textColor, backgroundColor) => {
                             const existingComments = (child.metadata as any)?.comments || [];
                             const updated = existingComments.map((c: any) =>
                               c.id === commentId ? { ...c, textColor, backgroundColor } : c
                             );
                             onUpdateChildComments(child.id, updated, { field: 'comments' });
-                          }}
+                          })}
+                          accessMode={accessMode}
                         />
                       </div>
                     );
@@ -440,6 +447,7 @@ export default function RowColumnContainerCard({
                             currentUserAvatar={currentUserAvatar}
                             onUpdateChildComments={onUpdateChildComments}
                             onOpenDocument={onOpenDocument ? () => onOpenDocument(child) : undefined}
+                            accessMode={accessMode}
                           />
                         )}
                       </div>
@@ -475,7 +483,7 @@ export default function RowColumnContainerCard({
                               currentUserId={currentUserId}
                               currentUserName={currentUserName}
                               currentUserAvatar={currentUserAvatar}
-                              onSubmit={(text) => {
+                              onSubmit={guardCommentMutation(accessMode, (text) => {
                                 const newComment = {
                                   id: `comment-${Date.now()}`,
                                   text,
@@ -485,30 +493,31 @@ export default function RowColumnContainerCard({
                                   timestamp: Date.now(),
                                 };
                                 onUpdateChildComments(child.id, [...childDetachedComments, newComment], { field: 'detachedComments' });
-                              }}
-                              onEditComment={(commentId, newText) => {
+                              })}
+                              onEditComment={guardCommentMutation(accessMode, (commentId, newText) => {
                                 const updated = childDetachedComments.map((c: any) =>
                                   c.id === commentId ? { ...c, text: newText } : c
                                 );
                                 onUpdateChildComments(child.id, updated, { field: 'detachedComments' });
-                              }}
-                              onRemoveComment={(commentId) => {
+                              })}
+                              onRemoveComment={guardCommentMutation(accessMode, (commentId) => {
                                 const filtered = childDetachedComments.filter((c: any) => c.id !== commentId);
                                 onUpdateChildComments(child.id, filtered, { field: 'detachedComments' });
-                              }}
-                              onToggleStrikethrough={(commentId) => {
+                              })}
+                              onToggleStrikethrough={guardCommentMutation(accessMode, (commentId) => {
                                 const updated = childDetachedComments.map((c: any) =>
                                   c.id === commentId ? { ...c, isStrikethrough: !c.isStrikethrough } : c
                                 );
                                 onUpdateChildComments(child.id, updated, { field: 'detachedComments' });
-                              }}
-                              onColorChange={(commentId, textColor, backgroundColor) => {
+                              })}
+                              onColorChange={guardCommentMutation(accessMode, (commentId, textColor, backgroundColor) => {
                                 const updated = childDetachedComments.map((c: any) =>
                                   c.id === commentId ? { ...c, textColor, backgroundColor } : c
                                 );
                                 onUpdateChildComments(child.id, updated, { field: 'detachedComments' });
-                              }}
+                              })}
                               showComposer={true}
+                              accessMode={accessMode}
                             />
                           )}
                         </div>

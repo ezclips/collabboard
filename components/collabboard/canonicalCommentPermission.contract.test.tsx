@@ -1439,12 +1439,162 @@ describe('PATCH 8O.1/8O.2 -- canonical comment permission wiring', () => {
       expect(block).toContain('currentUserId={user?.id}');
     });
 
-    it('EmbeddedCommentList.tsx / RowColumnContainerCard.tsx / PostCardContent.tsx are explicitly out of scope and untouched by this patch', () => {
-      // PATCH 8AC only wires the CommentPopup-based embedded child surface;
-      // the compact renderers are PATCH 8AD's scope (see contract doc).
+    it('EmbeddedCommentList.tsx / RowColumnContainerCard.tsx / PostCardContent.tsx are now wired too (PATCH 8AD) -- this describe block itself stays unchanged', () => {
+      // PATCH 8AC only wired the CommentPopup-based embedded child surface;
+      // the compact renderers (EmbeddedCommentList and its RowColumnContainerCard/
+      // PostCardContent callers) were PATCH 8AD's scope, now closed -- see the
+      // "EmbeddedCommentList permission wiring (PATCH 8AD)" describe block below.
+      // This test now proves the opposite of its PATCH 8AC-era assertion: these
+      // three files DO import the comment domain guard.
       const embeddedList = read('components/collabboard/EmbeddedCommentList.tsx');
-      expect(embeddedList).not.toContain('guardCommentMutation');
-      expect(embeddedList).not.toContain("from '@/lib/domain/canvas/comments'");
+      expect(embeddedList).toContain("from '@/lib/domain/canvas/comments'");
+      const rowColumn = read('components/collabboard/RowColumnContainerCard.tsx');
+      expect(rowColumn).toContain('guardCommentMutation');
+      const postCardContent = read('components/collabboard/PostCardContent.tsx');
+      expect(postCardContent).toContain('guardCommentMutation');
+    });
+  });
+
+  describe('EmbeddedCommentList permission wiring (PATCH 8AD)', () => {
+    it('EmbeddedCommentList.tsx accepts accessMode, defaults to manage, and gates its composer', () => {
+      const src = read('components/collabboard/EmbeddedCommentList.tsx');
+      expect(src).toContain("import type { CommentAccessMode } from '@/lib/domain/canvas/comments';");
+      expect(src).toContain('accessMode?: CommentAccessMode;');
+      expect(src).toContain("accessMode = 'manage',");
+      expect(src).toContain('const canManage = accessMode === \'manage\';');
+      expect(src).toContain('{showComposer && onSubmit && canManage && (');
+      expect(src).toContain('accessMode={accessMode}');
+    });
+
+    it('CommentRow.tsx (EmbeddedCommentList\'s only caller) accepts accessMode and folds it into canEdit', () => {
+      const src = read('components/collabboard/CommentRow.tsx');
+      expect(src).toContain("import type { CommentAccessMode } from '@/lib/domain/canvas/comments';");
+      expect(src).toContain('accessMode?: CommentAccessMode;');
+      expect(src).toContain("accessMode = 'manage',");
+      expect(src).toContain('const canManage = accessMode === \'manage\';');
+      expect(src).toContain('const canEdit = canManage && comment.userId === currentUserId;');
+      expect(src).toContain('{canManage && (');
+    });
+
+    it('CommentRow.tsx has exactly one caller in production code (EmbeddedCommentList.tsx)', () => {
+      // Confirms the "smallest safe design" premise this patch relied on --
+      // gating CommentRow directly (rather than a second indirection) is
+      // safe precisely because no other component renders it. A relative
+      // `./CommentRow` import can only resolve from within
+      // components/collabboard/ itself (CommentRow.tsx's own directory), so
+      // that single directory (non-recursive) is the complete search space.
+      const dir = 'components/collabboard';
+      const callers = fs.readdirSync(dir)
+        .filter((name) => /\.tsx?$/.test(name) && !name.includes('.test.'))
+        .filter((name) => {
+          const src = fs.readFileSync(`${dir}/${name}`, 'utf8');
+          return /from ['"]\.\/CommentRow['"]/.test(src);
+        })
+        .map((name) => `${dir}/${name}`);
+      expect(callers).toEqual(['components/collabboard/EmbeddedCommentList.tsx']);
+    });
+
+    it('RowColumnContainerCard.tsx and PostCardContent.tsx both accept accessMode and default to manage', () => {
+      const rowColumn = read('components/collabboard/RowColumnContainerCard.tsx');
+      const postCard = read('components/collabboard/PostCardContent.tsx');
+      for (const src of [rowColumn, postCard]) {
+        expect(src).toContain('accessMode?: CommentAccessMode;');
+        expect(src).toContain("accessMode = 'manage',");
+      }
+    });
+
+    it('DrawingLayout.tsx threads commentAccessMode into AutoHeightContainer/RowColumnContainerCard and guards its own direct EmbeddedCommentList + PostCardContent calls', () => {
+      const src = read('components/collabboard/canvas/layouts/DrawingLayout.tsx');
+      expect(src).toContain("import { guardCommentMutation, type CommentAccessMode } from '@/lib/domain/canvas/comments';");
+      expect(src).toContain('commentAccessMode?: CommentAccessMode;');
+      // AutoHeightContainer -> RowColumnContainerCard.
+      const autoHeightStart = src.indexOf('<RowColumnContainerCard');
+      const autoHeightEnd = src.indexOf('/>', autoHeightStart);
+      expect(src.slice(autoHeightStart, autoHeightEnd)).toContain('accessMode={commentAccessMode}');
+      // Direct standalone-comment-post EmbeddedCommentList (the newly
+      // discovered root-level surface -- Drawing layout's own comment posts
+      // render through this compact renderer, not the canonical CommentPost.tsx).
+      const embeddedStart = src.indexOf('<EmbeddedCommentList');
+      const embeddedEnd = src.indexOf('/>', embeddedStart);
+      const embeddedBlock = src.slice(embeddedStart, embeddedEnd);
+      expect(embeddedBlock).toContain('accessMode={commentAccessMode}');
+      for (const prop of ['onSubmit=', 'onEditComment=', 'onRemoveComment=', 'onToggleStrikethrough=', 'onColorChange=']) {
+        expect(embeddedBlock, `${prop} must be present`).toContain(prop);
+      }
+      const guardedCount = (embeddedBlock.match(/guardCommentMutation\(commentAccessMode \?\? 'manage',/g) ?? []).length;
+      expect(guardedCount).toBe(5);
+      // The non-container PostCardContent fallback also forwards accessMode
+      // (inert today since it never receives onUpdateChildComments, but wired
+      // uniformly rather than left as a silent exception).
+      expect(src).toContain('<PostCardContent padlet={padlet} onScan={fetchData} canvasContext="drawing" onOpenDocument={onOpenDocument ? () => onOpenDocument(padlet) : undefined} accessMode={commentAccessMode} />');
+    });
+
+    it('CanvasClient.tsx threads commentAccessMode into all 6 top-level layout components', () => {
+      const src = read(CANVAS_PATH);
+      const occurrences = (src.match(/commentAccessMode=\{commentAccessMode\}/g) ?? []).length;
+      // ColumnsLayout, RowCanvasDnD, WallCanvas, DrawingLayout, ChronoTimelineCanvas,
+      // FreeformPadletCards (pre-existing from PATCH 8Z) -- plus the 2 pre-existing
+      // occurrences at CanvasModals.tsx's own commentAccessMode source (line 6063)
+      // and the image toolbar (line 7694), which are untouched by this patch.
+      expect(occurrences).toBeGreaterThanOrEqual(8);
+    });
+
+    it('WallCanvas.tsx, ColumnsLayout.tsx/ColumnsCanvasRow.tsx, RowCanvasDnD.tsx/RowLane.tsx, and ChronoTimelineCanvas.tsx each accept and forward commentAccessMode to their RowColumnContainerCard call as accessMode', () => {
+      const files = [
+        'components/canvas/WallCanvas.tsx',
+        'components/canvas/layouts/ColumnsLayout.tsx',
+        'components/canvas/layouts/ColumnsCanvasRow.tsx',
+        'components/collabboard/row/RowCanvasDnD.tsx',
+        'components/collabboard/row/RowLane.tsx',
+        'components/canvas/ChronoTimelineCanvas.tsx',
+      ];
+      for (const file of files) {
+        const src = read(file);
+        expect(src, `${file} missing commentAccessMode?: CommentAccessMode`).toContain('commentAccessMode?: CommentAccessMode');
+      }
+      // The two files with a DIRECT RowColumnContainerCard/CommentAccessMode
+      // forward (ColumnsLayout/RowCanvasDnD are pass-through only, one level
+      // removed from RowColumnContainerCard itself).
+      const wall = read('components/canvas/WallCanvas.tsx');
+      const rowColumnStart = wall.indexOf('<RowColumnContainerCard');
+      const rowColumnEnd = wall.indexOf('/>', rowColumnStart);
+      expect(wall.slice(rowColumnStart, rowColumnEnd)).toContain('accessMode={commentAccessMode}');
+
+      const columnsRow = read('components/canvas/layouts/ColumnsCanvasRow.tsx');
+      const columnsRowStart = columnsRow.indexOf('<RowColumnContainerCard');
+      const columnsRowEnd = columnsRow.indexOf('/>', columnsRowStart);
+      expect(columnsRow.slice(columnsRowStart, columnsRowEnd)).toContain('accessMode={commentAccessMode}');
+
+      const rowLane = read('components/collabboard/row/RowLane.tsx');
+      const rowLaneStart = rowLane.indexOf('<RowColumnContainerCard');
+      const rowLaneEnd = rowLane.indexOf('/>', rowLaneStart);
+      expect(rowLane.slice(rowLaneStart, rowLaneEnd)).toContain('accessMode={commentAccessMode}');
+
+      const chrono = read('components/canvas/ChronoTimelineCanvas.tsx');
+      const chronoStart = chrono.indexOf('<RowColumnContainerCard');
+      const chronoEnd = chrono.indexOf('/>', chronoStart);
+      expect(chrono.slice(chronoStart, chronoEnd)).toContain('accessMode={commentAccessMode}');
+    });
+
+    it('FreeformPadletCards.tsx forwards its existing commentAccessMode prop into its own RowColumnContainerCard call', () => {
+      const src = read(FREEFORM_PATH);
+      const start = src.indexOf('<RowColumnContainerCard');
+      const end = src.indexOf('/>', start);
+      expect(src.slice(start, end)).toContain('accessMode={commentAccessMode}');
+    });
+
+    it('components/canvas/RowCanvas.tsx (the dead/orphaned EmbeddedCommentList caller) is not imported anywhere in production code and was intentionally left unwired', () => {
+      const { execSync } = require('node:child_process');
+      const grepOutput: string = execSync(
+        `git grep -l "from '@/components/canvas/RowCanvas'" -- '*.tsx' '*.ts' || echo NONE`,
+        { cwd: process.cwd() },
+      ).toString().trim();
+      expect(grepOutput === 'NONE' || grepOutput === '').toBe(true);
+      const src = read('components/canvas/RowCanvas.tsx');
+      // Its own EmbeddedCommentList call site was NOT touched by this patch.
+      const start = src.indexOf('<EmbeddedCommentList');
+      const end = src.indexOf('/>', start);
+      expect(src.slice(start, end)).not.toContain('accessMode');
     });
   });
 

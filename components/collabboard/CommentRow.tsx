@@ -12,6 +12,7 @@ import { Highlight } from '@tiptap/extension-highlight';
 import TextStylePopup from './editors/TextStylePopup';
 import { useAnchoredPopover, rectFromElement, preventPopoverFocusLoss, type AnchorRect } from './editors/useAnchoredPopover';
 import { handleSafeCommentLinkClick } from './commentLinkSafety';
+import type { CommentAccessMode } from '@/lib/domain/canvas/comments';
 
 interface CommentData {
   id: string;
@@ -40,6 +41,11 @@ interface CommentRowProps {
   // Per-comment text/highlight color. Replaces the old onOpenColorPicker
   // stub (which just cleared the color) with a real inline picker.
   onColorChange?: (commentId: string, textColor?: string, backgroundColor?: string) => void;
+  // PATCH 8AD: this component has exactly one caller (EmbeddedCommentList),
+  // so the permission gate lives directly here rather than behind a second
+  // indirection. Defaults to 'manage' so every pre-existing caller (tests,
+  // storybook-style mounts) keeps today's behavior unchanged.
+  accessMode?: CommentAccessMode;
 }
 
 export default function CommentRow({
@@ -54,6 +60,7 @@ export default function CommentRow({
   onToggleStrikethrough,
   onDelete,
   onColorChange,
+  accessMode = 'manage',
 }: CommentRowProps) {
   const [localEditText, setLocalEditText] = useState('');
   const [shouldSelectText, setShouldSelectText] = useState(false);
@@ -152,7 +159,12 @@ export default function CommentRow({
     }
   };
 
-  const canEdit = comment.userId === currentUserId;
+  // READ users can never edit -- regardless of comment ownership. Folding
+  // the access check into canEdit (rather than a separate check at each call
+  // site) means the double-click-to-edit path and the Edit button's own
+  // click handler share one gate instead of two that could drift apart.
+  const canManage = accessMode === 'manage';
+  const canEdit = canManage && comment.userId === currentUserId;
 
   return (
     <div
@@ -222,7 +234,9 @@ export default function CommentRow({
         )}
       </div>
 
-      {/* Actions - Fixed width column, always reserves space */}
+      {/* Actions - Fixed width column, always reserves space (MANAGE only --
+          READ omits the whole column rather than disabling its buttons). */}
+      {canManage && (
       <div className="flex flex-col gap-0.5 w-5 shrink-0">
         {/* Buttons only visible when active or hovering */}
         <div className={`flex flex-col gap-0.5 ${isActive ? 'visible' : 'invisible group-hover/row:visible'}`}>
@@ -292,6 +306,7 @@ export default function CommentRow({
           </button>
         </div>
       </div>
+      )}
 
       {colorPopupOpen && onColorChange && createPortal(
         <div

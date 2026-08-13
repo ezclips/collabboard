@@ -6763,6 +6763,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                       : p
                   ));
                 }}
+                commentAccessMode={commentAccessMode}
               />
             )}
 
@@ -6849,6 +6850,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                           : p
                       ));
                     }}
+                    commentAccessMode={commentAccessMode}
                   />
                 </div>
               </div>
@@ -6932,6 +6934,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                       : p
                   ));
                 }}
+                commentAccessMode={commentAccessMode}
               />
             )}
 
@@ -6982,6 +6985,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                 }}
                 readOnly={currentWorkspaceRole === 'readonly'}
                 fetchData={fetchData}
+                commentAccessMode={commentAccessMode}
               />
             )}
 
@@ -7070,6 +7074,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                   onInsertContainerAt={canUseFreeformEditButton ? ((position) => insertTimelineContainerAt(position)) : undefined}
                   onDropLibraryCreateContainer={canUseFreeformEditButton ? handleDropLibraryCreateContainer : undefined}
                   onDropDraftIntoContainer={canUseFreeformEditButton ? handleDropDraftIntoContainer : undefined}
+                  commentAccessMode={commentAccessMode}
                 />
               </div>
             )}

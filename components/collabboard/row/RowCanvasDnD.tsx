@@ -16,6 +16,7 @@ import {
 import { BoardSection, Padlet, DropIndicatorState } from "@/types/collabboard";
 import RowLane from "./RowLane";
 import PostCardContent from "../PostCardContent";
+import type { CommentAccessMode } from "@/lib/domain/canvas/comments";
 
 // Helper to determine index based on pointer position relative to card center
 function getInsertIndex(pointerX: number, cardRect: DOMRect): 'before' | 'after' {
@@ -70,6 +71,7 @@ export interface RowCanvasDnDProps {
     currentUserName?: string;
     currentUserAvatar?: string;
     onUpdateChildComments?: (childId: string, comments: any[], options?: { field?: 'comments' | 'detachedComments' }) => void;
+    commentAccessMode?: CommentAccessMode;
     onDropDraftIntoContainer?: (containerId: string, draftPayload: any) => void | Promise<void>;
 }
 
@@ -111,6 +113,7 @@ export default function RowCanvasDnD({
     currentUserName,
     currentUserAvatar,
     onUpdateChildComments,
+    commentAccessMode,
     onDropDraftIntoContainer,
 }: RowCanvasDnDProps) {
     const [activeId, setActiveId] = useState<string | null>(null);
@@ -372,6 +375,7 @@ export default function RowCanvasDnD({
                             currentUserName={currentUserName}
                             currentUserAvatar={currentUserAvatar}
                     onUpdateChildComments={onUpdateChildComments}
+                    commentAccessMode={commentAccessMode}
                     onDropDraftIntoContainer={onDropDraftIntoContainer}
                 />
                     </DroppableLaneWrapper>

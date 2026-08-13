@@ -18,6 +18,7 @@ import ColumnsLane from "@/components/canvas/layouts/ColumnsCanvasRow";
 import PostCardContent from "@/components/collabboard/PostCardContent";
 import PostPreviewCard from "@/components/collabboard/PostPreviewCard";
 import { BoardSection, Padlet, DropIndicatorState } from "@/types/collabboard";
+import type { CommentAccessMode } from "@/lib/domain/canvas/comments";
 
 type SectionWithPosts = {
     section: BoardSection;
@@ -78,6 +79,7 @@ interface ColumnsLayoutProps {
     currentUserName?: string;
     currentUserAvatar?: string;
     onUpdateChildComments?: (childId: string, comments: any[], options?: { field?: 'comments' | 'detachedComments' }) => void;
+    commentAccessMode?: CommentAccessMode;
 }
 
 const customDropAnimation: DropAnimation = {
@@ -140,6 +142,7 @@ export default function ColumnsLayout({
     currentUserName,
     currentUserAvatar,
     onUpdateChildComments,
+    commentAccessMode,
 }: ColumnsLayoutProps) {
     const [activeDragId, setActiveDragId] = useState<string | null>(null);
     const [dropIndicator, setDropIndicator] = useState<DropIndicatorState>({
@@ -468,6 +471,7 @@ export default function ColumnsLayout({
                                     currentUserName={currentUserName}
                                     currentUserAvatar={currentUserAvatar}
                                     onUpdateChildComments={onUpdateChildComments}
+                                    commentAccessMode={commentAccessMode}
                                 />
                             </div>
                         ))}

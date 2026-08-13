@@ -3,6 +3,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { MessageSquare, Send } from 'lucide-react';
 import CommentRow from './CommentRow';
+import type { CommentAccessMode } from '@/lib/domain/canvas/comments';
 
 interface CommentData {
   id: string;
@@ -31,6 +32,10 @@ interface EmbeddedCommentListProps {
   onColorChange?: (commentId: string, textColor?: string, bgColor?: string) => void;
   maxHeight?: number;
   showComposer?: boolean;
+  // PATCH 8AD: defaults to 'manage' so every pre-existing caller (RowColumnContainerCard,
+  // PostCardContent, DrawingLayout, and every test that mounts this directly)
+  // keeps today's behavior unchanged unless it opts into a stricter mode.
+  accessMode?: CommentAccessMode;
 }
 
 export default function EmbeddedCommentList({
@@ -45,7 +50,9 @@ export default function EmbeddedCommentList({
   onColorChange,
   maxHeight = 240,
   showComposer = true,
+  accessMode = 'manage',
 }: EmbeddedCommentListProps) {
+  const canManage = accessMode === 'manage';
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [newCommentText, setNewCommentText] = useState('');
@@ -149,14 +156,15 @@ export default function EmbeddedCommentList({
                   }
                 }}
                 onColorChange={onColorChange}
+                accessMode={accessMode}
               />
             ))}
           </div>
         )}
       </div>
 
-      {/* Input Area */}
-      {showComposer && onSubmit && (
+      {/* Input Area -- render gate, not disable: absent entirely outside MANAGE. */}
+      {showComposer && onSubmit && canManage && (
         <div className="px-2 py-1.5 border-t border-gray-100 bg-gray-50/50">
           <div className="flex gap-1 items-center">
             <input

@@ -3557,6 +3557,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                       toast.error('Failed to update comments');
                     }
                   }}
+                  accessMode={commentAccessMode}
                 />
               )}
 

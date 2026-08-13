@@ -37,6 +37,7 @@ import { resolveFrameMembership } from '@/lib/infra/drawing/frameMembership';
 import type { DrawingViewport } from '@/lib/infra/drawing/canvasLineCoordinates';
 import { registerE2EBridge } from '@/lib/e2e/bridgeRegistration';
 import { isElementBeingLaidOut } from '@/lib/infra/drawing/isElementBeingLaidOut';
+import { guardCommentMutation, type CommentAccessMode } from '@/lib/domain/canvas/comments';
 
 const ExcalidrawWrapper = dynamic(
   () => import('@/components/collabboard/editors/ExcalidrawWrapper'),
@@ -55,12 +56,13 @@ type AutoHeightContainerProps = {
   currentUserName?: string;
   currentUserAvatar?: string;
   onUpdateChildComments?: (childId: string, comments: any[], options?: { field?: 'comments' | 'detachedComments' }) => void;
+  commentAccessMode?: CommentAccessMode;
   onScanChild?: () => void;
   isExpanded?: boolean;
   onExpandAvailabilityChange?: (available: boolean) => void;
   onOpenDocument?: (post: Padlet) => void;
 };
-function AutoHeightContainer({ padlet, allPadlets, onNaturalHeight, onDropExistingPadlet, onDropDraftIntoContainer, currentUserId, currentUserName, currentUserAvatar, onUpdateChildComments, onScanChild, isExpanded, onExpandAvailabilityChange, onOpenDocument }: AutoHeightContainerProps) {
+function AutoHeightContainer({ padlet, allPadlets, onNaturalHeight, onDropExistingPadlet, onDropDraftIntoContainer, currentUserId, currentUserName, currentUserAvatar, onUpdateChildComments, commentAccessMode, onScanChild, isExpanded, onExpandAvailabilityChange, onOpenDocument }: AutoHeightContainerProps) {
   const ref = useRef<HTMLDivElement>(null);
   const cbRef = useRef(onNaturalHeight);
   cbRef.current = onNaturalHeight;
@@ -89,6 +91,7 @@ function AutoHeightContainer({ padlet, allPadlets, onNaturalHeight, onDropExisti
         currentUserName={currentUserName}
         currentUserAvatar={currentUserAvatar}
         onUpdateChildComments={onUpdateChildComments}
+        accessMode={commentAccessMode}
         onScanChild={onScanChild}
         onExpandAvailabilityChange={onExpandAvailabilityChange}
         onOpenDocument={onOpenDocument}
@@ -251,6 +254,7 @@ type DrawingEmbeddableCardProps = {
   currentUserName?: string;
   currentUserAvatar?: string;
   onUpdateChildComments: (childId: string, comments: any[], options?: { field?: 'comments' | 'detachedComments' }) => void;
+  commentAccessMode?: CommentAccessMode;
   fetchData?: () => void;
   onContextMenu: (e: React.MouseEvent, padlet: Padlet) => void;
   onPadletEditRef: React.RefObject<((padlet: Padlet) => void) | undefined>;
@@ -275,6 +279,7 @@ function DrawingEmbeddableCard({
   currentUserName,
   currentUserAvatar,
   onUpdateChildComments,
+  commentAccessMode,
   fetchData,
   onContextMenu,
   onPadletEditRef,
@@ -556,6 +561,7 @@ function DrawingEmbeddableCard({
             currentUserName={currentUserName}
             currentUserAvatar={currentUserAvatar}
             onUpdateChildComments={onUpdateChildComments}
+            commentAccessMode={commentAccessMode}
             onScanChild={fetchData}
             onExpandAvailabilityChange={setCanExpand}
             onOpenDocument={onOpenDocument}
@@ -634,7 +640,7 @@ function DrawingEmbeddableCard({
                 currentUserId={currentUserId}
                 currentUserName={currentUserName}
                 currentUserAvatar={currentUserAvatar}
-                onSubmit={(text) => {
+                onSubmit={guardCommentMutation(commentAccessMode ?? 'manage', (text) => {
                   const newComment = {
                     id: `comment-${Date.now()}`,
                     text,
@@ -645,33 +651,34 @@ function DrawingEmbeddableCard({
                   };
                   const existing = (padlet.metadata as any)?.comments || [];
                   onUpdateChildComments(padlet.id, [...existing, newComment], { field: 'comments' });
-                }}
-                onEditComment={(commentId, newText) => {
+                })}
+                onEditComment={guardCommentMutation(commentAccessMode ?? 'manage', (commentId, newText) => {
                   const existing = (padlet.metadata as any)?.comments || [];
                   onUpdateChildComments(padlet.id, existing.map((c: any) =>
                     c.id === commentId ? { ...c, text: newText } : c
                   ), { field: 'comments' });
-                }}
-                onRemoveComment={(commentId) => {
+                })}
+                onRemoveComment={guardCommentMutation(commentAccessMode ?? 'manage', (commentId) => {
                   const existing = (padlet.metadata as any)?.comments || [];
                   onUpdateChildComments(padlet.id, existing.filter((c: any) => c.id !== commentId), { field: 'comments' });
-                }}
-                onToggleStrikethrough={(commentId) => {
+                })}
+                onToggleStrikethrough={guardCommentMutation(commentAccessMode ?? 'manage', (commentId) => {
                   const existing = (padlet.metadata as any)?.comments || [];
                   onUpdateChildComments(padlet.id, existing.map((c: any) =>
                     c.id === commentId ? { ...c, isStrikethrough: !c.isStrikethrough } : c
                   ), { field: 'comments' });
-                }}
-                onColorChange={(commentId, textColor, backgroundColor) => {
+                })}
+                onColorChange={guardCommentMutation(commentAccessMode ?? 'manage', (commentId, textColor, backgroundColor) => {
                   const existing = (padlet.metadata as any)?.comments || [];
                   onUpdateChildComments(padlet.id, existing.map((c: any) =>
                     c.id === commentId ? { ...c, textColor, backgroundColor } : c
                   ), { field: 'comments' });
-                }}
+                })}
+                accessMode={commentAccessMode}
               />
             );
           }
-          return <PostCardContent padlet={padlet} onScan={fetchData} canvasContext="drawing" onOpenDocument={onOpenDocument ? () => onOpenDocument(padlet) : undefined} />;
+          return <PostCardContent padlet={padlet} onScan={fetchData} canvasContext="drawing" onOpenDocument={onOpenDocument ? () => onOpenDocument(padlet) : undefined} accessMode={commentAccessMode} />;
         })()}
       </div>
     </div>
@@ -698,6 +705,11 @@ interface DrawingLayoutProps {
   currentUserId?: string;
   currentUserName?: string;
   currentUserAvatar?: string;
+  // PATCH 8AD: gates every EmbeddedCommentList mutation reachable from this
+  // layout (standalone Drawing-canvas comment posts, and container children
+  // via AutoHeightContainer -> RowColumnContainerCard). Defaults to 'manage'
+  // so every pre-existing caller keeps today's behavior unchanged.
+  commentAccessMode?: CommentAccessMode;
   viewportContainerRef?: React.RefObject<HTMLDivElement | null>;
   drawingAppStateRef?: React.RefObject<any>;
   drawingExcalidrawAPIRef?: React.RefObject<any>;
@@ -724,6 +736,7 @@ export default function DrawingLayout({
   currentUserId,
   currentUserName,
   currentUserAvatar,
+  commentAccessMode,
   viewportContainerRef,
   drawingAppStateRef,
   drawingExcalidrawAPIRef,
@@ -2247,6 +2260,7 @@ export default function DrawingLayout({
         currentUserName={currentUserName}
         currentUserAvatar={currentUserAvatar}
         onUpdateChildComments={handleUpdateChildComments}
+        commentAccessMode={commentAccessMode}
         fetchData={fetchData}
         onContextMenu={handleContextMenu}
         onPadletEditRef={onPadletEditRef}
@@ -2261,7 +2275,7 @@ export default function DrawingLayout({
         onOpenDocument={onOpenDocument}
       />
     );
-  }, [canvasId, currentUserAvatar, currentUserId, currentUserName, fetchData, handleContextMenu, handleUpdateChildComments, onAddPadlet, onDeletePadlet, onUpdatePadletStrict, readOnly, savePadletPositionWithLock, onOpenDocument]);
+  }, [canvasId, commentAccessMode, currentUserAvatar, currentUserId, currentUserName, fetchData, handleContextMenu, handleUpdateChildComments, onAddPadlet, onDeletePadlet, onUpdatePadletStrict, readOnly, savePadletPositionWithLock, onOpenDocument]);
 
   // Stable viewport accessor for useCanvasActions -- reads appStateRef at call time so
   // callbacks never stale-close over scroll/zoom and never recreate on pan.

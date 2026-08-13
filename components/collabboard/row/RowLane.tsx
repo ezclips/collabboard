@@ -26,6 +26,7 @@ import RowColumnContainerCard from "../RowColumnContainerCard";
 import { ColumnPostContextMenu } from "../menus/ColumnPostContextMenu";
 import CardShell from "@/components/collabboard/shells/CardShell";
 import { getContainerEditTargetLabel } from "@/lib/infra/collabboard/containerEditTargetLabel";
+import type { CommentAccessMode } from "@/lib/domain/canvas/comments";
 
 const TITLED_POST_TYPES = new Set(["text", "note", "todo", "table", "image", "card"]);
 
@@ -110,6 +111,7 @@ interface RowLaneProps {
     currentUserName?: string;
     currentUserAvatar?: string;
     onUpdateChildComments?: (childId: string, comments: any[], options?: { field?: 'comments' | 'detachedComments' }) => void;
+    commentAccessMode?: CommentAccessMode;
     onDropDraftIntoContainer?: (containerId: string, draftPayload: any) => void | Promise<void>;
     onAddEmptyContainerAt?: (position: number) => void;
 }
@@ -151,6 +153,7 @@ export default function RowLane({
     currentUserName,
     currentUserAvatar,
     onUpdateChildComments,
+    commentAccessMode,
     onDropDraftIntoContainer,
     onAddEmptyContainerAt,
 }: RowLaneProps) {
@@ -459,6 +462,7 @@ export default function RowLane({
                                                         currentUserName={currentUserName}
                                                         currentUserAvatar={currentUserAvatar}
                                                         onUpdateChildComments={onUpdateChildComments}
+                                                        accessMode={commentAccessMode}
                                                         onDropDraftIntoContainer={isEditable ? onDropDraftIntoContainer : undefined}
                                                         isExpanded={expandedContainers[post.id] ?? false}
                                                         onExpandAvailabilityChange={(available) => setExpandableContainers(prev => prev[post.id] === available ? prev : { ...prev, [post.id]: available })}
