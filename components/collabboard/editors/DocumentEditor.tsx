@@ -14,7 +14,7 @@ import { toEditorHtml, fromEditorHtml } from '@/lib/domain/canvas/documentConten
 import { guardCommentMutation, type CommentAccessMode } from '@/lib/domain/canvas/comments';
 import type { SaveCardData, SaveCardResult } from '@/hooks/canvas/usePadletSave';
 
-type Comment152 = { id: string; text: string; userId: string; userName: string; timestamp: number; textColor?: string; backgroundColor?: string };
+type Comment152 = { id: string; text: string; userId: string; userName: string; timestamp: number; textColor?: string; backgroundColor?: string; isStrikethrough?: boolean };
 
 // Same palette Note's own Card Color picker uses (NoteEditor.tsx) -- kept as
 // a local copy, matching this codebase's existing convention of each editor
@@ -122,10 +122,14 @@ export default function DocumentEditor({
     });
     if (!thread.id && thread.comments.length === 0) return false;
     setActiveThread(thread);
-    // DOM-opened threads are read-only unless a real ProseMirror selection was
-    // captured by the toolbar flow; this prevents a forged submit from writing
-    // through a click-only read path.
-    setSavedSelection(null);
+    // PATCH 8AP -- authorization for an EXISTING thread comes from
+    // accessMode alone (see anchoredAccessMode below), never from
+    // savedSelection; leaving any prior savedSelection untouched here is
+    // safe because updateCommentThreadInDoc locates this thread's mark by
+    // commentId, so a stale savedSelection is never consulted for a mark
+    // that already exists in the document (only genuinely NEW anchor
+    // creation via handleTextComment falls back to savedSelection, and that
+    // path always sets it fresh in the same call that creates the new id).
     panels.openPanel('comment');
     return true;
   };
@@ -308,30 +312,123 @@ export default function DocumentEditor({
     setSavedSelection({ from, to });
     panels.openPanel('comment');
   };
+  // PATCH 8AP -- ported narrowly from NoteEditor.tsx's updateCommentThreadInDoc/
+  // removeCommentThreadFromDoc: locates an EXISTING mark by commentId via
+  // doc.descendants and rewrites/removes it in place, independent of any
+  // saved selection range. This is what lets existing-thread mutations
+  // (edit/delete/strikethrough/color) work whether the thread was opened via
+  // the toolbar (fresh selection) or by clicking an already-marked span
+  // (savedSelection absent) -- only genuinely NEW anchor creation (no mark
+  // yet exists for this id) needs a selection range, handled in
+  // handleAddComment's fallback branch below.
+  const updateCommentThreadInDoc = (
+    commentId: string,
+    nextComments: Comment152[],
+    overrides?: Record<string, any>
+  ): boolean => {
+    if (!editor) return false;
+    const { state, view } = editor;
+    const { doc, tr } = state;
+    let found = false;
+    const lastComment = nextComments[nextComments.length - 1];
+    doc.descendants((node, pos) => {
+      const commentMark = node.marks.find((mark) => mark.type.name === 'comment' && mark.attrs.commentId === commentId);
+      if (commentMark) {
+        const newMark = state.schema.marks.comment.create({
+          ...commentMark.attrs,
+          ...overrides,
+          commentThread: JSON.stringify(nextComments),
+          commentText: lastComment?.text || commentMark.attrs.commentText,
+          userId: lastComment?.userId || commentMark.attrs.userId,
+          userName: lastComment?.userName || commentMark.attrs.userName,
+          timestamp: lastComment?.timestamp || commentMark.attrs.timestamp,
+        });
+        tr.removeMark(pos, pos + node.nodeSize, commentMark.type);
+        tr.addMark(pos, pos + node.nodeSize, newMark);
+        found = true;
+      }
+    });
+    if (found) view.dispatch(tr);
+    return found;
+  };
+
+  const removeCommentThreadFromDoc = (commentId: string) => {
+    if (!editor) return;
+    const { state, view } = editor;
+    const { doc, tr } = state;
+    doc.descendants((node, pos) => {
+      const commentMark = node.marks.find((mark) => mark.type.name === 'comment' && mark.attrs.commentId === commentId);
+      if (commentMark) tr.removeMark(pos, pos + node.nodeSize, commentMark.type);
+    });
+    view.dispatch(tr);
+  };
+
   const handleAddComment = (commentText: string) => {
-    if (!editor || !canManageAnchoredComments || !commentText || !activeThread || !savedSelection) return;
+    if (!editor || !canManageAnchoredComments || !commentText || !activeThread) return;
     const newComment: Comment152 = { id: `comment-${Date.now()}`, text: commentText, userId: currentUserId || '', userName: currentUserName || 'Anonymous', timestamp: Date.now() };
     const nextComments = [...activeThread.comments, newComment];
-    editor.chain().focus().setTextSelection(savedSelection).setComment({
-      commentId: activeThread.id, commentText: newComment.text, commentThread: JSON.stringify(nextComments),
-      userId: newComment.userId, userName: newComment.userName, timestamp: newComment.timestamp,
-    }).run();
+    const updated = updateCommentThreadInDoc(activeThread.id, nextComments);
+    if (!updated) {
+      // No existing mark for this thread id -- genuinely new anchor, which
+      // requires the selection range captured by handleTextComment.
+      if (!savedSelection) return;
+      editor.chain().focus().setTextSelection(savedSelection).setComment({
+        commentId: activeThread.id, commentText: newComment.text, commentThread: JSON.stringify(nextComments),
+        userId: newComment.userId, userName: newComment.userName, timestamp: newComment.timestamp,
+      }).run();
+    }
+    setActiveThread({ ...activeThread, comments: nextComments });
+    setSavedSelection(null);
+  };
+
+  const handleEditComment = (commentId: string, newText: string) => {
+    if (!editor || !canManageAnchoredComments || !newText || !activeThread) return;
+    const nextComments = activeThread.comments.map((comment) =>
+      comment.id === commentId ? { ...comment, text: newText } : comment
+    );
+    updateCommentThreadInDoc(activeThread.id, nextComments);
+    setActiveThread({ ...activeThread, comments: nextComments });
+  };
+
+  const handleRemoveComment = (commentId: string) => {
+    if (!editor || !canManageAnchoredComments || !activeThread) return;
+    const nextComments = activeThread.comments.filter((comment) => comment.id !== commentId);
+    if (nextComments.length === 0) {
+      updateCommentThreadInDoc(activeThread.id, [], { commentText: '' });
+      setActiveThread({ ...activeThread, comments: [] });
+      return;
+    }
+    updateCommentThreadInDoc(activeThread.id, nextComments);
+    setActiveThread({ ...activeThread, comments: nextComments });
+  };
+
+  const handleRemoveThread = () => {
+    if (!editor || !canManageAnchoredComments || !activeThread) return;
+    removeCommentThreadFromDoc(activeThread.id);
+    setActiveThread(null);
+    panels.closePanel('comment');
+  };
+
+  const handleToggleCommentStrikethrough = (commentId: string) => {
+    if (!editor || !canManageAnchoredComments || !activeThread) return;
+    const nextComments = activeThread.comments.map((comment) =>
+      comment.id === commentId ? { ...comment, isStrikethrough: !comment.isStrikethrough } : comment
+    );
+    updateCommentThreadInDoc(activeThread.id, nextComments);
     setActiveThread({ ...activeThread, comments: nextComments });
   };
 
   // Per-comment text/highlight color -- distinct from any text-span
   // highlight color; persisted into the same commentThread mark payload as
   // handleAddComment above so it survives alongside the rest of the thread.
+  // PATCH 8AP -- no longer requires savedSelection: routes through
+  // updateCommentThreadInDoc like every other existing-thread mutation.
   const handleCommentColor = (commentId: string, textColor?: string, backgroundColor?: string) => {
-    if (!editor || !canManageAnchoredComments || !activeThread || !savedSelection) return;
+    if (!editor || !canManageAnchoredComments || !activeThread) return;
     const nextComments = activeThread.comments.map((comment) =>
       comment.id === commentId ? { ...comment, textColor, backgroundColor } : comment
     );
-    const lastComment = nextComments[nextComments.length - 1];
-    editor.chain().focus().setTextSelection(savedSelection).setComment({
-      commentId: activeThread.id, commentText: lastComment?.text || '', commentThread: JSON.stringify(nextComments),
-      userId: lastComment?.userId, userName: lastComment?.userName, timestamp: lastComment?.timestamp,
-    }).run();
+    updateCommentThreadInDoc(activeThread.id, nextComments);
     setActiveThread({ ...activeThread, comments: nextComments });
   };
 
@@ -478,11 +575,18 @@ export default function DocumentEditor({
                   isOpen={panels.open.comment}
                   onOpenChange={(open) => (open ? panels.openPanel('comment') : panels.closePanel('comment'))}
                   onSubmit={guardCommentMutation(anchoredAccessMode, handleAddComment)}
+                  onEditComment={guardCommentMutation(anchoredAccessMode, handleEditComment)}
+                  onRemoveComment={guardCommentMutation(anchoredAccessMode, handleRemoveComment)}
+                  onRemoveThread={guardCommentMutation(anchoredAccessMode, handleRemoveThread)}
+                  onToggleCommentStrikethrough={guardCommentMutation(anchoredAccessMode, handleToggleCommentStrikethrough)}
                   onCommentColor={guardCommentMutation(anchoredAccessMode, handleCommentColor)}
                   comments={activeThread?.comments || []}
                   currentUserId={currentUserId}
                   currentUserName={currentUserName}
-                  accessMode={canManageAnchoredComments && savedSelection ? 'manage' : 'read'}
+                  // PATCH 8AP -- authorization comes from accessMode alone now,
+                  // never from savedSelection (see openThreadFromCommentElement's
+                  // comment above for why that's safe for existing threads).
+                  accessMode={anchoredAccessMode}
                 />
               </div>
             )}

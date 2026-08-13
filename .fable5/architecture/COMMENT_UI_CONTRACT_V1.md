@@ -1427,6 +1427,33 @@ with Note anchored threads, so PATCH 8AA gated it only when the active padlet
 matched `isDocumentPost(...)`; Note anchored threads were explicitly left
 outside that Document-only permission patch, to be closed separately.
 
+**Document anchored/highlighted comment wiring was completed in PATCH 8AP**
+(2026-08-13). PATCH 8AN's consolidation audit found `DocumentEditor.tsx` only
+wired 2 of the mutation-capable `CommentPopup` props Note already wires
+(`onSubmit`, `onCommentColor`), and that the popup's `accessMode` was
+incorrectly coupled to `savedSelection` (`canManageAnchoredComments &&
+savedSelection ? 'manage' : 'read'`), so a MANAGE user opening an EXISTING
+thread by clicking its mark (which never sets `savedSelection`) incorrectly
+received READ. Both are fixed. `accessMode` is now the direct
+`anchoredAccessMode` value, matching Note and OverlayLayer exactly.
+`updateCommentThreadInDoc`/`removeCommentThreadFromDoc` (ported narrowly from
+`NoteEditor.tsx`, locating a mark by `commentId` via `doc.descendants`) now
+back `handleEditComment`, `handleRemoveComment`, `handleRemoveThread`,
+`handleToggleCommentStrikethrough`, and the existing-thread paths of
+`handleAddComment`/`handleCommentColor` -- `savedSelection` is consulted only
+in `handleAddComment`'s fallback branch, for genuinely NEW anchor creation,
+never as an authorization signal. Classification is unchanged: still SPECIAL
+/ ANCHORED / HIGHLIGHTED, still TipTap `comment`-mark storage, no
+`detachedComments` migration. Anchor-span color (`onColor`, the
+text-span-highlight analog of Note's `handleColorComment`) remains
+deliberately unwired -- `DocumentEditor.tsx` has no existing handler or state
+for it (unlike `OverlayLayer.tsx`, which independently supports it for the
+same padlet type via a separate on-canvas code path); inventing one was
+explicitly out of this patch's scope. `OverlayLayer.tsx` was re-audited and
+found to already supply correct, non-`savedSelection`-coupled `accessMode`
+and every mutation callback (including `onRemoveThread` and `onColor`) --
+no changes were needed there.
+
 **Note anchored/highlighted comments were permission-wired in PATCH 8AB**
 (2026-08-13). Same SPECIAL / ANCHORED / HIGHLIGHTED classification, same
 TipTap `comment` mark storage (`NoteEditor.tsx`'s own extension registry,

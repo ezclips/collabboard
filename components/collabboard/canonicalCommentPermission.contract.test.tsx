@@ -1257,11 +1257,27 @@ describe('PATCH 8O.1/8O.2 -- canonical comment permission wiring', () => {
       expect(documentEditor).toContain("onTextComment: canManageAnchoredComments ? handleTextComment : undefined");
       expect(documentEditor).toContain("closest?.('[data-comment-id]')");
       expect(documentEditor).toContain('openThreadFromCommentElement(commentTarget)');
-      expect(documentEditor).toContain('setSavedSelection(null);');
       expect(documentEditor).toContain('if (!editor || !canManageAnchoredComments) return;');
-      expect(documentEditor).toContain('if (!editor || !canManageAnchoredComments || !commentText || !activeThread || !savedSelection) return;');
-      expect(block).toContain('accessMode={canManageAnchoredComments && savedSelection ? \'manage\' : \'read\'}');
+      // PATCH 8AP: existing-thread mutations route through
+      // updateCommentThreadInDoc (locates the mark by commentId) -- the
+      // savedSelection dependency was removed from handleAddComment's guard
+      // (savedSelection is only consulted in its own fallback branch, for
+      // genuinely NEW anchor creation) and accessMode is derived directly
+      // from anchoredAccessMode, never gated by savedSelection presence.
+      expect(documentEditor).toContain('if (!editor || !canManageAnchoredComments || !commentText || !activeThread) return;');
+      // savedSelection is still legitimately consulted -- but only inside
+      // handleAddComment's fallback branch (genuinely new anchor creation),
+      // never as part of an existing-thread mutation's own guard.
+      expect(documentEditor).not.toContain('!activeThread || !savedSelection) return;');
+      expect(documentEditor).toContain('const updateCommentThreadInDoc = (');
+      expect(documentEditor).toContain('const removeCommentThreadFromDoc = (commentId: string) => {');
+      expect(block).toContain('accessMode={anchoredAccessMode}');
+      expect(block).not.toContain('accessMode={canManageAnchoredComments && savedSelection ? \'manage\' : \'read\'}');
       expect(block).toContain('onSubmit={guardCommentMutation(anchoredAccessMode, handleAddComment)}');
+      expect(block).toContain('onEditComment={guardCommentMutation(anchoredAccessMode, handleEditComment)}');
+      expect(block).toContain('onRemoveComment={guardCommentMutation(anchoredAccessMode, handleRemoveComment)}');
+      expect(block).toContain('onRemoveThread={guardCommentMutation(anchoredAccessMode, handleRemoveThread)}');
+      expect(block).toContain('onToggleCommentStrikethrough={guardCommentMutation(anchoredAccessMode, handleToggleCommentStrikethrough)}');
       expect(block).toContain('onCommentColor={guardCommentMutation(anchoredAccessMode, handleCommentColor)}');
       expect(documentEditor).not.toContain('detachedComments');
     });
