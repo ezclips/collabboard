@@ -42,6 +42,22 @@ export interface CanvasRect {
 }
 
 /**
+ * Root containers eligible as a drop/move destination for a given post:
+ * containers, excluding the post itself, excluding containers already
+ * nested inside another container. Shared by the live drag-over rect test
+ * below and the "Group into Column" menu's destination list so both agree
+ * on exactly the same set of valid targets (P6 - one validation rule set).
+ */
+export function getEligibleContainerDestinations(
+  padlets: Padlet[],
+  excludePadletId: string,
+): Padlet[] {
+  return padlets.filter(
+    (p) => isContainerPadlet(p) && p.id !== excludePadletId && !(p.metadata as any)?.parentId
+  );
+}
+
+/**
  * Which root container (if any) overlaps a given canvas-space rectangle,
  * using each container's real width/height. Shared by the live drag-over
  * indicator and the actual drop handler in useCanvasInteractions so they
@@ -59,9 +75,7 @@ export function findContainerOverlappingRect(
   rect: CanvasRect,
   excludePadletId: string,
 ): Padlet | null {
-  const containers = padlets.filter(
-    (p) => isContainerPadlet(p) && p.id !== excludePadletId && !(p.metadata as any)?.parentId
-  );
+  const containers = getEligibleContainerDestinations(padlets, excludePadletId);
 
   for (const container of containers) {
     const left = container.position_x || 0;

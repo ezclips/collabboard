@@ -1,14 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from 'react';
-import {
-  createUpdatePostMetadataBestEffortCommand,
-  createUpdatePostPositionCommand,
-} from '@/lib/domain/canvas/posts';
+import { createUpdatePostPositionCommand } from '@/lib/domain/canvas/posts';
 import { createPostsRepository } from '@/lib/infra/canvas/postsRepository';
 import type { NewPostDragState, Padlet } from '@/types/collabboard';
 import { debugCanvasLogger } from '@/lib/collabboard/debugCanvasLogger';
 import { findContainerOverlappingRect } from '@/components/collabboard/canvas/engine/utils';
+import { attachPostToContainer } from '@/components/collabboard/canvas/hooks/attachPostToContainer';
 
 const DEFAULT_DRAG_RECT_WIDTH = 180;
 const DEFAULT_DRAG_RECT_HEIGHT = 220;
@@ -405,36 +403,14 @@ export function useCanvasInteractions({
 
         if (droppedOnContainer) {
           lastDragPositionRef.current = null;
-          const childIds = droppedOnContainer.metadata?.childPadletIds || [];
-          if (!childIds.includes(currentDraggingId)) {
-            const newChildIds = [...childIds, currentDraggingId];
-            try {
-              markPadletLocallyModified(droppedOnContainer.id);
-              markPadletLocallyModified(currentDraggingId);
-
-              const updatePostMetadataBestEffort = createUpdatePostMetadataBestEffortCommand(createPostsRepository());
-              const containerResult = await updatePostMetadataBestEffort({ postId: droppedOnContainer.id, metadata: { ...droppedOnContainer.metadata, childPadletIds: newChildIds } }, { userId: null });
-              if (!containerResult.ok) throw containerResult.error.cause ?? containerResult.error;
-
-              const newMetadata = { ...draggedPadlet.metadata, parentId: droppedOnContainer.id };
-              const draggedResult = await updatePostMetadataBestEffort({ postId: currentDraggingId, metadata: newMetadata }, { userId: null });
-              if (!draggedResult.ok) throw draggedResult.error.cause ?? draggedResult.error;
-
-              setPadlets(prev => prev.map(p => {
-                if (p.id === droppedOnContainer!.id) {
-                  return { ...p, metadata: { ...p.metadata, childPadletIds: newChildIds } };
-                }
-                if (p.id === currentDraggingId) {
-                  return { ...p, metadata: newMetadata };
-                }
-                return p;
-              }));
-
-              fetchData();
-            } catch (err) {
-              console.error('Failed to add padlet to container:', err);
-            }
-          }
+          await attachPostToContainer({
+            padlets,
+            containerId: droppedOnContainer.id,
+            postId: currentDraggingId,
+            setPadlets,
+            fetchData,
+            markPadletLocallyModified,
+          });
         } else {
           const finalPos = lastDragPositionRef.current;
           lastDragPositionRef.current = null;

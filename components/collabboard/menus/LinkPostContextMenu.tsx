@@ -12,6 +12,7 @@ import {
 import { ActionId, actionRegistry } from '@/lib/collabboard/ActionRegistry';
 import { Padlet } from '@/types/collabboard';
 import { Lock, LockOpen } from 'lucide-react';
+import { GroupIntoColumnMenuItem } from './GroupIntoColumnMenuItem';
 
 interface LinkPostContextMenuProps {
     children: React.ReactNode;
@@ -30,7 +31,8 @@ interface LinkPostContextMenuProps {
     onBringForward?: () => void;
     onSendBackward?: () => void;
     onSendToBack?: () => void;
-    onGroupIntoColumn?: () => void;
+    onGroupIntoColumn?: (targetContainerId?: string) => void;
+    groupIntoColumnTargets?: Padlet[];
     // Link-specific actions
     onAddImage?: () => void;
     onCopyLinkAddress?: () => void;
@@ -53,6 +55,7 @@ export function LinkPostContextMenu({
     onSendBackward,
     onSendToBack,
     onGroupIntoColumn,
+    groupIntoColumnTargets,
     onAddImage,
     onCopyLinkAddress,
     onAddToLibrary,
@@ -131,9 +134,16 @@ export function LinkPostContextMenu({
 
                 <ContextMenuSeparator />
 
-                <ContextMenuItem onClick={() => handleAction('post.groupIntoColumn')}>
-                    Group into Column
-                </ContextMenuItem>
+                <GroupIntoColumnMenuItem
+                    targets={groupIntoColumnTargets ?? []}
+                    onGroupIntoColumn={(targetContainerId) => {
+                        if (targetContainerId) {
+                            onGroupIntoColumn?.(targetContainerId);
+                            return;
+                        }
+                        handleAction('post.groupIntoColumn');
+                    }}
+                />
 
                 <ContextMenuSeparator />
 

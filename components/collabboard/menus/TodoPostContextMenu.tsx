@@ -12,6 +12,7 @@ import {
 import { ActionId, actionRegistry } from '@/lib/collabboard/ActionRegistry';
 import { Padlet } from '@/types/collabboard';
 import { Lock, LockOpen } from 'lucide-react';
+import { GroupIntoColumnMenuItem } from './GroupIntoColumnMenuItem';
 
 interface TodoPostContextMenuProps {
     children: React.ReactNode;
@@ -30,7 +31,8 @@ interface TodoPostContextMenuProps {
     onBringForward?: () => void;
     onSendBackward?: () => void;
     onSendToBack?: () => void;
-    onGroupIntoColumn?: () => void;
+    onGroupIntoColumn?: (targetContainerId?: string) => void;
+    groupIntoColumnTargets?: Padlet[];
     // To-do specific action
     onRename?: () => void;
     onAddToLibrary?: () => void;
@@ -52,6 +54,7 @@ export function TodoPostContextMenu({
     onSendBackward,
     onSendToBack,
     onGroupIntoColumn,
+    groupIntoColumnTargets,
     onRename,
     onAddToLibrary,
     disabled = false,
@@ -125,9 +128,16 @@ export function TodoPostContextMenu({
 
                 <ContextMenuSeparator />
 
-                <ContextMenuItem onClick={() => handleAction('post.groupIntoColumn')}>
-                    Group into Column
-                </ContextMenuItem>
+                <GroupIntoColumnMenuItem
+                    targets={groupIntoColumnTargets ?? []}
+                    onGroupIntoColumn={(targetContainerId) => {
+                        if (targetContainerId) {
+                            onGroupIntoColumn?.(targetContainerId);
+                            return;
+                        }
+                        handleAction('post.groupIntoColumn');
+                    }}
+                />
 
                 <ContextMenuSeparator />
 

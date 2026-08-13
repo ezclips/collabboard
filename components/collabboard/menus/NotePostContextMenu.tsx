@@ -12,6 +12,7 @@ import {
 import { ActionId, actionRegistry } from '@/lib/collabboard/ActionRegistry';
 import { Padlet } from '@/types/collabboard';
 import { Check, Lock, LockOpen } from 'lucide-react';
+import { GroupIntoColumnMenuItem } from './GroupIntoColumnMenuItem';
 
 interface NotePostContextMenuProps {
     children: React.ReactNode;
@@ -31,7 +32,8 @@ interface NotePostContextMenuProps {
     onSendBackward?: () => void;
     onSendToBack?: () => void;
     onCreateSyncedCopy?: () => void;
-    onGroupIntoColumn?: () => void;
+    onGroupIntoColumn?: (targetContainerId?: string) => void;
+    groupIntoColumnTargets?: Padlet[];
     onAddToLibrary?: () => void;
     // Only passed for types where a frameless, title-less display makes
     // sense (Drawing, Card/Clipart, AI Component) -- undefined for plain
@@ -56,6 +58,7 @@ export function NotePostContextMenu({
     onSendToBack,
     onCreateSyncedCopy,
     onGroupIntoColumn,
+    groupIntoColumnTargets,
     onAddToLibrary,
     onToggleFullView,
     disabled = false,
@@ -128,9 +131,16 @@ export function NotePostContextMenu({
 
                 <ContextMenuSeparator />
 
-                <ContextMenuItem onClick={() => handleAction('post.groupIntoColumn')}>
-                    Group into Column
-                </ContextMenuItem>
+                <GroupIntoColumnMenuItem
+                    targets={groupIntoColumnTargets ?? []}
+                    onGroupIntoColumn={(targetContainerId) => {
+                        if (targetContainerId) {
+                            onGroupIntoColumn?.(targetContainerId);
+                            return;
+                        }
+                        handleAction('post.groupIntoColumn');
+                    }}
+                />
 
                 {onToggleFullView && (
                     <>

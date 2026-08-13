@@ -79,6 +79,7 @@ import {
 } from '@/lib/domain/canvas/posts';
 import { createCanvasBoardRepository } from '@/lib/infra/canvas/boardRepository';
 import { createPostsRepository } from '@/lib/infra/canvas/postsRepository';
+import { attachPostToContainer } from '@/components/collabboard/canvas/hooks/attachPostToContainer';
 import { createSectionsRepository } from '@/lib/infra/canvas/sectionsRepository';
 import { getVerifiedAuthUser, onAuthSessionChanged, updateCurrentUserMetadata } from '@/lib/infra/supabase/authState';
 import { createStorageGateway } from '@/lib/infra/supabase/storage';
@@ -3689,10 +3690,26 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     }
   };
 
-  // Group a post into a new Column/Container
-  const groupIntoColumn = async (id: string) => {
+  // Group a post into a Column/Container -- an existing one when
+  // targetContainerId is given (same reparenting mutation post -> Column
+  // drag-and-drop uses, see attachPostToContainer), otherwise a brand-new
+  // one wrapping just this post.
+  const groupIntoColumn = async (id: string, targetContainerId?: string) => {
     const padlet = padlets.find(p => p.id === id);
     if (!padlet || !canvasId) return;
+
+    if (targetContainerId) {
+      await attachPostToContainer({
+        padlets,
+        containerId: targetContainerId,
+        postId: id,
+        setPadlets,
+        fetchData,
+        markPadletLocallyModified,
+      });
+      setSelectedPadletId(targetContainerId);
+      return;
+    }
 
     try {
       // Create a new container at the padlet's position

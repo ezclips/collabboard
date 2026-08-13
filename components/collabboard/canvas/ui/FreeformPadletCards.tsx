@@ -42,7 +42,7 @@ import { TodoPostContextMenu } from '@/components/collabboard/menus/TodoPostCont
 import { ColumnPostContextMenu } from '@/components/collabboard/menus/ColumnPostContextMenu';
 import { CommentPostContextMenu } from '@/components/collabboard/menus/CommentPostContextMenu';
 import { ImagePostContextMenu } from '@/components/collabboard/context-menus/ImagePostContextMenu';
-import { isStripVisible, htmlToText } from '@/components/collabboard/canvas/engine/utils';
+import { isStripVisible, htmlToText, getEligibleContainerDestinations } from '@/components/collabboard/canvas/engine/utils';
 import { getContainerEditTargetLabel } from '@/lib/infra/collabboard/containerEditTargetLabel';
 import {
   Bell, X, Edit2, PenTool, Trash2, Palette, Strikethrough, ChevronDown, ChevronUp, RefreshCw, Pencil, ArrowLeftRight, Plus,
@@ -71,7 +71,7 @@ type FreeformPadletActionMap = {
   copyPadlet: (id: string) => void;
   lockPadlet: (id: string) => void;
   movePadletLayer: (id: string, action: string) => void;
-  groupIntoColumn: (id: string) => void;
+  groupIntoColumn: (id: string, targetContainerId?: string) => void;
   replaceImage: (id: string) => void;
   downloadImage: (id: string) => void;
   toggleCropToGrid: (id: string) => void;
@@ -880,7 +880,8 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
           onBringForward={() => movePadletLayer(padlet.id, 'bringForward')}
           onSendBackward={() => movePadletLayer(padlet.id, 'sendBackward')}
           onSendToBack={() => movePadletLayer(padlet.id, 'sendToBack')}
-          onGroupIntoColumn={() => groupIntoColumn(padlet.id)}
+          onGroupIntoColumn={(targetContainerId) => groupIntoColumn(padlet.id, targetContainerId)}
+          groupIntoColumnTargets={getEligibleContainerDestinations(padlets, padlet.id)}
           onReplaceImage={() => replaceImage(padlet.id)}
           onDownloadImage={() => downloadImage(padlet.id)}
           onToggleCropToGrid={() => toggleCropToGrid(padlet.id)}
@@ -3474,7 +3475,8 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
               onLock={() => lockPadlet(padlet.id)}
               onBringToFront={() => movePadletLayer(padlet.id, 'bringToFront')}
               onSendToBack={() => movePadletLayer(padlet.id, 'sendToBack')}
-              onGroupIntoColumn={() => groupIntoColumn(padlet.id)}
+              onGroupIntoColumn={(targetContainerId) => groupIntoColumn(padlet.id, targetContainerId)}
+              groupIntoColumnTargets={getEligibleContainerDestinations(padlets, padlet.id)}
               onAddImage={() => addImageToLink(padlet.id)}
               onCopyLinkAddress={() => copyLinkAddress(padlet.id)}
             >
@@ -3639,7 +3641,8 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
               onBringToFront={() => movePadletLayer(padlet.id, 'bringToFront')}
               onSendToBack={() => movePadletLayer(padlet.id, 'sendToBack')}
               onCreateSyncedCopy={() => createSyncedCopy(padlet.id)}
-              onGroupIntoColumn={() => groupIntoColumn(padlet.id)}
+              onGroupIntoColumn={(targetContainerId) => groupIntoColumn(padlet.id, targetContainerId)}
+              groupIntoColumnTargets={getEligibleContainerDestinations(padlets, padlet.id)}
             >
               <div className="relative">
                 {content}
@@ -3797,7 +3800,8 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
               onLock={() => lockPadlet(padlet.id)}
               onBringToFront={() => movePadletLayer(padlet.id, 'bringToFront')}
               onSendToBack={() => movePadletLayer(padlet.id, 'sendToBack')}
-              onGroupIntoColumn={() => groupIntoColumn(padlet.id)}
+              onGroupIntoColumn={(targetContainerId) => groupIntoColumn(padlet.id, targetContainerId)}
+              groupIntoColumnTargets={getEligibleContainerDestinations(padlets, padlet.id)}
               onRename={() => renameTodo(padlet.id)}
             >
               <div className="relative">
@@ -3987,7 +3991,8 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
             onBringToFront={() => movePadletLayer(padlet.id, 'bringToFront')}
             onSendToBack={() => movePadletLayer(padlet.id, 'sendToBack')}
             onCreateSyncedCopy={() => createSyncedCopy(padlet.id)}
-            onGroupIntoColumn={() => groupIntoColumn(padlet.id)}
+            onGroupIntoColumn={(targetContainerId) => groupIntoColumn(padlet.id, targetContainerId)}
+            groupIntoColumnTargets={getEligibleContainerDestinations(padlets, padlet.id)}
             onToggleFullView={padlet.type === 'drawing' || padlet.type === 'ai-component' ? () => toggleFullView(padlet.id) : undefined}
           >
             <div className="relative">
