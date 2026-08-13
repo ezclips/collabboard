@@ -107,7 +107,7 @@ describe('comment permission closure -- surface completeness (PATCH 8AE.2)', () 
 describe('comment permission closure -- every CommentPopup block is gated (PATCH 8AE.2)', () => {
   const expectedBlockCounts: Record<string, number> = {
     'app/dashboard/canvas/[id]/CanvasClient.tsx': 1,
-    'components/collabboard/canvas/ui/FreeformPadletCards.tsx': 8,
+    'components/collabboard/canvas/ui/FreeformPadletCards.tsx': 7, // PATCH 8AF removed the 8th, unreachable dead Card-toolbar instance
     'components/collabboard/canvas/ui/OverlayLayer.tsx': 1,
     'components/collabboard/editors/AIComponentEditor.tsx': 1,
     'components/collabboard/editors/ClipartCardDraftModal.tsx': 1,
@@ -283,13 +283,6 @@ describe('comment permission closure -- dead/dormant surfaces stay non-live (PAT
     expect(importers).toEqual([]);
   });
 
-  it('CommentViewPopup.tsx has zero importers anywhere, including tests', () => {
-    const mentions = gitGrepFiles('CommentViewPopup');
-    // Only its own source file may reference the identifier at all -- no
-    // import, mount, or reference exists anywhere else in the repo.
-    expect(mentions).toEqual(['components/collabboard/editors/CommentViewPopup.tsx']);
-  });
-
   it('the shared CommentList/FreeformCommentRow foundation has zero production importers outside its own pilot tests', () => {
     const importers = gitGrepFiles("from '@/components/collabboard/comments/CommentList'");
     const allowed = new Set([
@@ -297,7 +290,12 @@ describe('comment permission closure -- dead/dormant surfaces stay non-live (PAT
       'components/collabboard/freeformCommentUIContract.characterization.test.tsx',
       'components/collabboard/comments/siteA.pilotParity.test.tsx',
     ]);
-    const offenders = importers.filter((f) => !allowed.has(f));
+    // This guard file's OWN source contains the search pattern as a string
+    // literal (the line just above), which is a false-positive git-grep
+    // match on itself, not an import -- excluded explicitly rather than by
+    // a blanket .test. filter, since two of the genuinely allowed callers
+    // are themselves test files.
+    const offenders = importers.filter((f) => !allowed.has(f) && f !== 'components/collabboard/commentPermissionClosure.contract.test.tsx');
     expect(offenders).toEqual([]);
     // And FreeformPadletCards.tsx -- though allowed to import it -- must not
     // actually render it, per the same proof freeformCommentUIContract.characterization.test.tsx keeps current.
@@ -305,9 +303,92 @@ describe('comment permission closure -- dead/dormant surfaces stay non-live (PAT
     expect((freeform.match(/<CommentList\b/g) ?? []).length).toBe(0);
   });
 
-  it("ContainerEditor.tsx's own detachedComments/commentPopupOpen skeleton remains unreachable", () => {
+  it('lib/infra/canvas/commentMutations.ts remains wired but dormant, untouched by PATCH 8AF', () => {
+    // Explicit non-target (see PATCH 8AF spec): the dormant COMMENT access
+    // tier and its comment_mutate persistence path require a later
+    // "shelve vs activate" architectural decision, not a dead-code deletion.
+    // This only re-proves the file still exists and is still threaded the
+    // same way -- it does not re-litigate the dormancy finding itself,
+    // which canonicalCommentPermission.contract.test.tsx already covers.
+    expect(fs.existsSync('lib/infra/canvas/commentMutations.ts')).toBe(true);
+    const src = read('lib/infra/canvas/commentMutations.ts');
+    expect(src).toContain('export function createCommentModeMutations');
+    const canvas = read("app/dashboard/canvas/[id]/CanvasClient.tsx");
+    expect(canvas).toContain("from '@/lib/infra/canvas/commentMutations'");
+  });
+});
+
+describe('comment permission closure -- PATCH 8AF dead comment code cleanup', () => {
+  it('CommentViewPopup.tsx no longer exists, and zero production mentions remain anywhere', () => {
+    expect(fs.existsSync('components/collabboard/editors/CommentViewPopup.tsx')).toBe(false);
+    const mentions = gitGrepFiles('CommentViewPopup').filter((f) => !f.includes('.test.'));
+    expect(mentions).toEqual([]);
+  });
+
+  it("ContainerEditor.tsx's dead detachedComments-popup skeleton (commentPopupOpen/commentPopupPosition/handleComment/handleAddComment) is entirely removed", () => {
     const src = read('components/collabboard/editors/ContainerEditor.tsx');
-    // No <CommentPopup isOpen={commentPopupOpen} ...> render exists anywhere.
-    expect(src).not.toMatch(/<CommentPopup[\s\S]{0,400}isOpen=\{commentPopupOpen\}/);
+    expect(src).not.toMatch(/\bcommentPopupOpen\b/);
+    expect(src).not.toMatch(/\bcommentPopupPosition\b/);
+    expect(src).not.toMatch(/\bhandleComment\b/);
+    expect(src).not.toMatch(/\bhandleAddComment\b/);
+  });
+
+  it("ContainerEditor.tsx's live child CommentPopup (SortableChildItem, comment-type children) still renders, gated", () => {
+    const src = read('components/collabboard/editors/ContainerEditor.tsx');
+    const start = src.indexOf('child.type === "comment" && onUpdateChildComments');
+    expect(start, 'live child CommentPopup branch not found -- ContainerEditor.tsx structure changed').toBeGreaterThan(-1);
+    const popupStart = src.indexOf('<CommentPopup', start);
+    const popupEnd = src.indexOf('/>', popupStart);
+    expect(popupStart).toBeGreaterThan(-1);
+    expect(src.slice(popupStart, popupEnd)).toContain('accessMode={accessMode}');
+  });
+
+  it('FreeformPadletCards.tsx\'s dead "Todo Comments Popup - Right side" block (nested in the Comment-post branch) is removed', () => {
+    // Note: cardCommentPopupPadletId === padlet.id is NOT itself a useful
+    // absence check here -- that exact comparison is shared, live
+    // infrastructure for OTHER post types' (Note/Todo/Drawing/AI-component)
+    // own detached-comment popups elsewhere in this file. The literal label
+    // string is the only marker unique to the deleted dead block.
+    const src = read('components/collabboard/canvas/ui/FreeformPadletCards.tsx');
+    expect(src).not.toContain('Todo Comments Popup');
+  });
+
+  it("FreeformPadletCards.tsx's live Comment-post <CommentPost> rendering still exists, gated", () => {
+    const src = read('components/collabboard/canvas/ui/FreeformPadletCards.tsx');
+    // /<CommentPost(?![A-Za-z])/, not a bare substring search -- the bare
+    // substring also matches the unrelated, non-self-closing
+    // <CommentPostContextMenu> wrapper that appears earlier in the same branch.
+    const match = src.match(/<CommentPost(?![A-Za-z])/);
+    expect(match, 'live <CommentPost> usage not found -- FreeformPadletCards.tsx structure changed').not.toBeNull();
+    const start = match!.index!;
+    const propsEnd = src.indexOf('/>', start);
+    expect(src.slice(start, propsEnd)).toContain('accessMode={commentAccessMode}');
+  });
+
+  it("FreeformPadletCards.tsx's dead Card-toolbar CommentPopup block (gated on cardToolbarPadletId, which has no live non-null setter anywhere) is removed", () => {
+    const src = read('components/collabboard/canvas/ui/FreeformPadletCards.tsx');
+    // The CommentPopup render block itself (and its explanatory comment) is
+    // gone. Its sibling reset calls (e.g. inside the color/emoji handlers)
+    // are left untouched -- see below, out of this comment-only patch's scope.
+    expect(src).not.toContain('Note detached comments use the canonical panel; this toolbar shell owns placement only.');
+    const cardModalStart = src.indexOf('{/* Card Post Modal */}');
+    expect(cardModalStart, '{/* Card Post Modal */} wrapper not found -- FreeformPadletCards.tsx structure changed').toBeGreaterThan(-1);
+    // The Card Post Modal is the last major block in the file (nothing
+    // comment-bearing follows it), so checking to end-of-file is sufficient
+    // and avoids depending on exact line-ending/whitespace framing.
+    expect(src.slice(cardModalStart)).not.toContain('<CommentPopup');
+    // The rest of the (separately dead, out of this comment-only patch's
+    // scope) Card Post Modal wrapper -- CardActionsToolbar/CardColorPanel/
+    // EmojiReactionPicker -- is left untouched.
+    expect(src).toContain('{/* Card Post Modal */}');
+  });
+
+  it("the live canonical Clipart CommentPopup entry point (ClipartCardDraftModal.tsx) is unaffected by the dead Card-toolbar block's removal", () => {
+    const src = read('components/collabboard/editors/ClipartCardDraftModal.tsx');
+    const total = (src.match(/<CommentPopup/g) ?? []).length;
+    expect(total).toBe(1);
+    const start = src.indexOf('<CommentPopup');
+    const end = src.indexOf('/>', start);
+    expect(src.slice(start, end)).toContain('accessMode=');
   });
 });

@@ -281,7 +281,13 @@ describe('SITE A -- migration scope guard (Image moved to CommentPopup)', () => 
       'components/collabboard/freeformCommentUIContract.characterization.test.tsx',
       'components/collabboard/comments/siteA.pilotParity.test.tsx',
     ]);
-    const offenders = importers.filter((f) => !allowed.has(f));
+    // commentPermissionClosure.contract.test.tsx's OWN source contains this
+    // same search pattern as a string literal (for its own equivalent
+    // check), which is a false-positive git-grep match on itself, not an
+    // import -- excluded explicitly (pre-existing cross-file false positive,
+    // found and fixed incidentally during PATCH 8AF, unrelated to that
+    // patch's own comment-dead-code changes).
+    const offenders = importers.filter((f) => !allowed.has(f) && f !== 'components/collabboard/commentPermissionClosure.contract.test.tsx');
     expect(offenders).toEqual([]);
   });
 });

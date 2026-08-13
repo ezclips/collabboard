@@ -1,11 +1,11 @@
 # Canonical Comment UI Contract v1
 
-## Rollout status (updated PATCH 8AE.2, 2026-08-13)
+## Rollout status (updated PATCH 8AF, 2026-08-13)
 
 NORMAL UI CANONICALIZATION = **CLOSED**
 COMMENT PERMISSION SAFETY = **CLOSED**
 SPECIAL UI CONSOLIDATION = **NOT CLOSED / NOT YET DECIDED**
-DEAD CODE CLEANUP = **PENDING**
+DEAD CODE CLEANUP = **PARTIAL -- proven-unreachable comment surfaces removed (PATCH 8AF); non-comment dead code and the CommentList/FreeformCommentRow pilot / dormant COMMENT tier "shelve vs activate" decisions remain open**
 KANBAN COMMENT SYSTEM = **OUTSIDE CURRENT COLLABBOARD CONTRACT**
 
 "COMMENT PERMISSION SAFETY = CLOSED" means: every live CollabBoard/Padlet
@@ -1028,20 +1028,82 @@ permission wiring only, this compact presentation itself is unchanged.
 
 ### Dead/orphaned comment code inventory
 
-1. Container's own `detachedComments`/`commentPopupOpen`/`commentPopupPosition`/
+**REMOVED DEAD CODE (PATCH 8AF, 2026-08-13)** -- all three items below were
+independently re-proven unreachable (not merely re-cited from this
+document), then deleted:
+
+1. `CommentViewPopup.tsx` (`components/collabboard/editors/CommentViewPopup.tsx`)
+   -- zero production importers, zero test importers, zero dynamic/barrel
+   references anywhere in the repo. Deleted entirely.
+2. Container's own `detachedComments`/`commentPopupOpen`/`commentPopupPosition`/
    `handleComment`/`handleAddComment` skeleton in `ContainerEditor.tsx`
    (found PATCH 8W) -- round-tripped through `onSave`/`saveContainer` but
-   never reachable from any live UI trigger.
-2. The "Todo Comments Popup - Right side" mislabeled block inside
+   never reachable from any live UI trigger. `commentPopupOpen`/
+   `commentPopupPosition`/`handleComment`/`handleAddComment` were deleted;
+   `detachedComments`/`setDetachedComments`/`initialDetachedComments` were
+   kept as-is (unrelated to the dead trigger -- they exist to round-trip any
+   pre-existing `metadata.detachedComments` through `onSave` non-destructively,
+   and deleting them would have silently dropped that data on next save, a
+   storage change this patch's own scope forbids).
+3. The "Todo Comments Popup - Right side" mislabeled block inside
    `FreeformPadletCards.tsx`'s `padlet.type === 'comment'` branch (first
    flagged PATCH 8S/8U, confirmed genuinely dead PATCH 8X via a grep-complete
    audit of every `setCardCommentPopupPadletId(padlet.id)` call site).
-3. The toolbar-open Clipart block in `FreeformPadletCards.tsx` --
-   `cardToolbarPadletId` has no live non-null setter (documented in this
-   contract's original freeze, restated here for a single dead-code index).
+   Deleted, along with its directly-adjacent, equally-unreachable
+   `commentColorPopupId` color-popup companion block (same
+   `cardCommentPopupPadletId === padlet.id` guard). The live `<CommentPost>`
+   rendering and the live collapsed-marker popup in the same branch were
+   untouched.
+4. **Correction to this document's own prior classification**: the item
+   previously listed here as "the toolbar-open Clipart block... gated on
+   `cardToolbarPadletId`" was re-investigated in full during PATCH 8AF.
+   `cardToolbarPadletId` does have zero live non-null setters anywhere in the
+   codebase (independently re-confirmed), so the entire "Card Post Modal"
+   wrapper in `FreeformPadletCards.tsx` (`cardToolbarPadletId &&
+   activeCardToolbarPadlet && (...)`) is unreachable -- but its comment
+   sub-block is not, and never was, Clipart-specific. Its own anchor comment
+   ("Note detached comments use the canonical panel; this toolbar shell owns
+   placement only.") and `canonicalCommentPermission.contract.test.tsx`'s own
+   PATCH 8P-era test title ("Note -- two detached-comment entry points...
+   toolbar popup") both identify it as the *second* of Note's two
+   PATCH 8P detached-comment entry points -- a duplicate of the live
+   "on-canvas badge popup" that, it turns out, was never actually reachable
+   at runtime (its own test only ever checked prop-wiring correctness of the
+   JSX source, never reachability -- exactly the class of gap this cleanup
+   patch exists to close). The "Clipart" label in the original freeze
+   appears to have been an inference from `CardActionsToolbar`/
+   `CardColorPanel` also being used by the live, untouched
+   `ClipartCardDraftModal.tsx`, not from the block's own actual comment
+   content. Only the comment sub-block (the `<CommentPopup>` render, gated
+   on `cardCommentPopupPadletId === activeCardToolbarPadlet.id`) was
+   deleted, matching this patch's comment-only scope; the rest of the
+   Card Post Modal wrapper -- `CardActionsToolbar`/`CardColorPanel`/
+   `EmojiReactionPicker`, all non-comment, all also unreachable via the same
+   dead `cardToolbarPadletId` gate -- was deliberately left untouched and is
+   recorded below as a new, separate, **not-yet-actioned** finding.
 
-None of these was deleted. Recorded for a later dedicated cleanup patch, per
-this patch's own instruction not to delete dead code during an audit.
+**NOT REMOVED -- new finding, out of this patch's comment-only scope**: the
+rest of the "Card Post Modal" wrapper in `FreeformPadletCards.tsx` (roughly
+250 lines: the `cardToolbarPadletId`/`activeCardToolbarPadlet`-gated
+`CardActionsToolbar`/`CardColorPanel`/`EmojiReactionPicker`/`CardPreview`
+instantiation) is unreachable for the same reason as the comment sub-block
+above, but is non-comment UI (color picker, emoji reactions, a close
+button) and so is outside PATCH 8AF's "dead/orphaned **comment** code"
+mandate. `CardActionsToolbar`/`CardColorPanel` themselves are not dead --
+both remain live via `ClipartCardDraftModal.tsx` -- only this one
+FreeformPadletCards.tsx call site is unreachable. Left in place; a future,
+differently-scoped general dead-code patch should re-verify and remove it.
+
+**LEFT UNTOUCHED -- explicit decision, not a partial cleanup**: `RowCanvas.tsx`
+(`components/canvas/RowCanvas.tsx`, 979 lines) has zero production
+importers (re-confirmed PATCH 8AF) and its `<EmbeddedCommentList>` call site
+is therefore also dead, but the file is a complete, standalone alternate
+canvas rendering implementation with substantial non-comment product code
+(rendering, DnD, layout). Deleting it, or even just its comment renderer,
+would extend this patch beyond "dead comment code cleanup" into general
+obsolete-layout cleanup, which PATCH 8AF's own spec explicitly forbids.
+Left fully untouched; the closure guard's existing "RowCanvas.tsx stays
+dead" tests continue to hold it to that state.
 
 ### Storage ownership audit
 
@@ -1709,3 +1771,157 @@ rollout-status block at the top of this document. This declaration covers
 comment *permission safety* specifically -- it does not close SPECIAL UI
 CONSOLIDATION (next-phase backlog item 4) or DEAD CODE CLEANUP (item 3),
 both of which remain open, ranked, architecture/product decisions.
+
+## PATCH 8AF -- dead/orphaned comment code cleanup
+
+Starting HEAD `0536bd9`. Deletes comment-related production code proven
+unreachable by the 8Y/8AE/8AE.2 audits -- re-proven independently here, not
+merely re-cited -- while leaving both closed phases (NORMAL UI
+CANONICALIZATION, COMMENT PERMISSION SAFETY) untouched and green.
+
+### What was removed
+
+1. **`CommentViewPopup.tsx`** (`components/collabboard/editors/`) -- zero
+   production importers, zero test importers, zero dynamic/barrel
+   references anywhere. Deleted entirely.
+2. **`ContainerEditor.tsx`'s dead Container-own comment skeleton** --
+   `commentPopupOpen`/`commentPopupPosition`/`handleComment`/
+   `handleAddComment`. None had a live caller (`handleComment`/
+   `handleAddComment` were declared but never invoked from any button or
+   JSX anywhere in the file). `detachedComments`/`setDetachedComments`/
+   `initialDetachedComments` were deliberately kept -- they round-trip any
+   pre-existing `metadata.detachedComments` through `onSave` non-
+   destructively; deleting them would have silently dropped that data on
+   next save.
+3. **`FreeformPadletCards.tsx`'s dead "Todo Comments Popup - Right side"
+   block** (mislabeled, actually inside the Comment-post branch) and its
+   directly-adjacent, equally-dead `commentColorPopupId` color-popup
+   companion -- both gated on `cardCommentPopupPadletId === padlet.id`,
+   which is never set to a comment-type padlet's id anywhere in the file
+   (only ever reset to `null` within that branch). The live `<CommentPost>`
+   rendering and the live collapsed-marker popup in the same branch are
+   untouched.
+4. **`FreeformPadletCards.tsx`'s dead Card-toolbar `<CommentPopup>` block**
+   -- gated on `cardCommentPopupPadletId === activeCardToolbarPadlet.id`,
+   itself nested inside a wrapper gated on `cardToolbarPadletId`, which has
+   zero live non-null setters anywhere in the codebase (re-confirmed via an
+   exhaustive repo-wide search of every `setCardToolbarPadletId(` call
+   site -- all four, across `CanvasClient.tsx` and this file, set it only
+   to `null`). See "Correction to this document's own prior classification"
+   above: this block was previously (mis)labeled "Clipart" in this
+   document's original freeze; it is actually PATCH 8P's second, never-
+   reachable "Note toolbar popup" detached-comment entry point, discovered
+   via its own exact-match anchor comment and a pre-existing
+   `canonicalCommentPermission.contract.test.tsx` test title. Only this
+   `<CommentPopup>` sub-block was removed; the rest of the Card Post Modal
+   wrapper (`CardActionsToolbar`/`CardColorPanel`/`EmojiReactionPicker`,
+   also unreachable but non-comment) was left in place, per this patch's
+   comment-only scope -- recorded as a new, not-yet-actioned finding above.
+
+### What was explicitly NOT touched
+
+- `CommentList.tsx`/`FreeformCommentRow.tsx` (dormant pilot) and their
+  tests -- untouched.
+- `lib/infra/canvas/commentMutations.ts` and the dormant COMMENT access
+  tier -- untouched; both require a later "shelve vs activate" decision,
+  not a dead-code deletion.
+- `components/canvas/RowCanvas.tsx` -- zero production importers (re-
+  confirmed), and therefore its `<EmbeddedCommentList>` call site is also
+  dead, but the 979-line file is a complete standalone alternate canvas
+  implementation with substantial non-comment product code. Deleting it (or
+  even just its comment renderer) would broaden this patch into general
+  obsolete-layout cleanup, which this patch's own spec explicitly forbids.
+  Left fully untouched.
+- `CommentPost.tsx`/`CommentEditor.tsx` (Comment post primary thread),
+  `DocumentEditor.tsx`/`NoteEditor.tsx`/`OverlayLayer.tsx` anchored threads,
+  `ContainerEditor.tsx`'s live embedded child `CommentPopup`, `Row-
+  ColumnContainerCard.tsx`/`PostCardContent.tsx`/`DrawingLayout.tsx`'s
+  `EmbeddedCommentList` renderers, and every canonical normal-comment
+  editor -- all unchanged, all re-verified still green.
+
+### Incidental fixes (found during validation, unrelated to comment dead code)
+
+Two pre-existing, unrelated test bugs were found and fixed while getting to
+a fully green suite (both predate this patch -- reproduced against HEAD
+`0536bd9` unmodified before being attributed here): `commentPermissionClosure.
+contract.test.tsx` and `components/collabboard/comments/siteA.pilotParity.
+test.tsx` each search `git grep` for the literal import string
+`from '@/components/collabboard/comments/CommentList'` to prove no new
+production importer of the dormant pilot foundation exists -- but each
+file's own source contains that exact string as its own search-pattern
+literal, causing a false-positive self/cross match neither file's allowlist
+excluded. Fixed by explicitly excluding `commentPermissionClosure.contract.
+test.tsx` from both checks' offender lists (with an inline comment
+explaining why), rather than a blanket `.test.` filter, since some of the
+genuinely allowed importers are themselves test files.
+
+### Closure guard updates
+
+`commentPermissionClosure.contract.test.tsx` gained a new "PATCH 8AF dead
+comment code cleanup" describe block (7 tests) asserting the DELETED/ABSENT
+post-cleanup state for every item removed above, plus that every
+still-live surface (Container's child `CommentPopup`, `FreeformPadletCards.
+tsx`'s `<CommentPost>`, `ClipartCardDraftModal.tsx`'s canonical entry point)
+is unaffected. Its pre-existing dead-surface tests for `CommentViewPopup.tsx`
+and `ContainerEditor.tsx`'s skeleton were strengthened from "still present,
+still dead" to "no longer exists at all". `commentPermissionClosure.
+contract.test.tsx`'s `<CommentPopup>` block-count expectation for
+`FreeformPadletCards.tsx` dropped from 8 to 7; the parallel counts in
+`normalCommentRolloutClosure.contract.test.tsx` (usages/guarded 8->7, total
+20->19) and `canonicalCommentPermission.contract.test.tsx`
+(`guardCommentMutation(` raw count 79->71) were updated to match, each with
+an inline note explaining the delta. Three pre-existing tests that had
+explicitly asserted the now-deleted surfaces REMAIN dead (not merely
+present) were rewritten to assert their absence:
+`canonicalCommentPermission.contract.test.tsx`'s "Todo Comments Popup"
+and "toolbar popup" tests, and `noteDetachedCommentUIContract.test.tsx`'s
+three assertions that used to expect two live Note detached-comment entry
+points (now one).
+
+### Negative controls (A-K, all run for real: backup/mutate/observe/restore)
+
+All eleven controls confirmed caught by the expected guard, then restored
+byte-identical (`diff` confirmed): A (CommentViewPopup.tsx restored) and J
+(the same check deliberately weakened first, confirmed the restored file
+THEN slipped through undetected, proving the removed assertion was
+load-bearing, then both reverted) -- CommentViewPopup dead-surface guard. B
+(Container skeleton restored) and C (live child `CommentPopup`'s
+`accessMode` prop removed) -- ContainerEditor guards (4 tests failed for C,
+including the permission suite). D (dead Comment-post block restored) and F
+(dead Card-toolbar block restored) -- both the new PATCH 8AF closure-guard
+tests AND the pre-existing `canonicalCommentPermission.contract.test.tsx`
+tests caught each. E (`CommentPost.tsx`'s `isReadOnly` hardcoded to `false`)
+-- special permission test caught it. G (Clipart's live `accessMode` prop
+removed) -- three `normalCommentRolloutClosure.contract.test.tsx` tests
+caught it. H (`<CommentList` literal inserted into `FreeformPadletCards.
+tsx`) -- the CommentList scope guard caught it. I (`commentMutations.ts`'s
+export renamed) -- caught by both the strengthened closure-guard assertion
+and `tsc --noEmit`. K (`CommentPopup.tsx` appended) -- hash changed as
+expected, confirming the frozen-foundation mechanism works.
+
+### Validation
+
+**Full suite:** 135 test files / 2257 tests passing (up from the PATCH
+8AE.2 baseline of 135/2251 -- net +6 from this patch's own new/split tests,
+after the 8 raw test-count changes from combining/splitting existing ones).
+`npx tsc --noEmit` clean. `npm run check:boundaries` clean. `git diff
+--check` clean (only harmless CRLF-conversion warnings, zero actual
+whitespace errors).
+
+**Frozen foundation:** `CommentPopup.tsx`, `useAnchoredPopover.ts`,
+`TextStylePopup.tsx`, `commentLinkSafety.ts`, `extensions/Comment.ts` --
+all five byte-identical to the hashes recorded since PATCH 8AE/8AE.1/8AE.2.
+
+**Live-data actions:** none. Source-only changes; no storage migration, no
+`metadata.comments`/`metadata.detachedComments`/`padlet.content`/TipTap
+mark changes.
+
+**Declaration: DEAD/ORPHANED COMMENT CODE CLEANUP -- PARTIAL, not fully
+CLOSED.** Four proven-dead comment surfaces were removed. Three items
+remain deliberately open, each requiring a product/architecture decision
+this patch's own scope forbids making unilaterally: (1) the non-comment
+remainder of the dead Card Post Modal wrapper in `FreeformPadletCards.tsx`
+(a new finding from this patch), (2) `RowCanvas.tsx`'s whole-file
+disposition, (3) the `CommentList`/`FreeformCommentRow` pilot and dormant
+COMMENT-tier "shelve vs activate" decisions (pre-existing, unchanged by
+this patch). See the rollout-status block at the top of this document.

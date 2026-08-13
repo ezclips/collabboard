@@ -507,10 +507,12 @@ export default function ContainerEditor({
         persistOrder(newOrder);
     };
 
-    // Comment state
+    // Comment state -- Container's own detachedComments round-trips through
+    // onSave/saveContainer to avoid dropping any pre-existing
+    // metadata.detachedComments (PATCH 8W classified this feature N/A: no
+    // live UI trigger ever adds to it). See PATCH 8AF for the removal of the
+    // dead add-comment skeleton that used to sit alongside this state.
     const [detachedComments, setDetachedComments] = useState<DetachedComment[]>(initialDetachedComments);
-    const [commentPopupOpen, setCommentPopupOpen] = useState(false);
-    const [commentPopupPosition, setCommentPopupPosition] = useState<{ x: number; y: number } | null>(null);
 
     // Sync detachedComments when initialDetachedComments changes
     // Use functional update to bail out when contents match — prevents infinite loops
@@ -622,27 +624,6 @@ export default function ContainerEditor({
             detachedComments: detachedComments.length > 0 ? detachedComments : undefined,
         });
         onClose();
-    };
-
-    // Comment handlers
-    const handleComment = (e: React.MouseEvent) => {
-        const rect = (e.target as HTMLElement).getBoundingClientRect();
-        setCommentPopupPosition({
-            x: rect.right + 10,
-            y: rect.top,
-        });
-        setCommentPopupOpen(true);
-    };
-
-    const handleAddComment = (commentText: string) => {
-        const newComment: DetachedComment = {
-            id: `comment-${Date.now()}`,
-            text: commentText,
-            userId: 'user1', // TODO: Get from auth
-            userName: 'R', // TODO: Get from auth
-            timestamp: Date.now(),
-        };
-        setDetachedComments(prev => [...prev, newComment]);
     };
 
     const preventFocusLoss = (e: React.MouseEvent) => e.preventDefault();

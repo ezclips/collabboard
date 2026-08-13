@@ -429,7 +429,14 @@ describe('PATCH 8O.1/8O.2 -- canonical comment permission wiring', () => {
       // though unreachable) + the collapsed-marker block (9: badge trigger,
       // badge swatch, per-comment color/highlight x2, Color/Edit/
       // Strikethrough/Delete row actions x4, composer) = 16. 63 + 16 = 79.
-      expect((freeform.match(/guardCommentMutation\(/g) ?? []).length).toBe(79);
+      // PATCH 8AF removes 8 of those: the dead "toolbar popup" second Note
+      // detached-comment entry point (PATCH 8P), gated on cardToolbarPadletId,
+      // which turned out to have no live non-null setter anywhere in the
+      // codebase -- onSubmit/onEditComment/onRemoveComment/
+      // onToggleCommentStrikethrough/onCommentColor/onBadgeColorChange/
+      // onCommentTitleChange/onCommentTitleStyleChange, all guardCommentMutation-
+      // wrapped. 79 - 8 = 71.
+      expect((freeform.match(/guardCommentMutation\(/g) ?? []).length).toBe(71);
       // 4 ownership-gated callbacks (edit/remove/toggle/color) x 3
       // COMMENT-capable sites (Clipart Site B, Image x2) = 12 -- Note does
       // NOT use this guard (COMMENT stays dormant there), so unchanged by 8P.
@@ -498,15 +505,9 @@ describe('PATCH 8O.1/8O.2 -- canonical comment permission wiring', () => {
       expectManageOnlyWiredCallSite(block, true);
     });
 
-    it('toolbar popup is wired with accessMode and guarded callbacks (manage-only, no COMMENT-mode branch)', () => {
+    it('PATCH 8AF: the second ("toolbar popup") entry point is removed -- it was gated on cardToolbarPadletId, the same never-triggered state as the "Card Post Modal" wrapper, which no production code anywhere ever sets to a non-null value. Its own JSX source was always correctly wired (this describe block\'s sibling test proved that for years); it was never actually reachable at runtime -- a gap this prop-wiring-only test could not have caught, and exactly the kind PATCH 8AF exists to close.', () => {
       const freeform = read(FREEFORM_PATH);
-      const secondNoteAnchor = 'Note detached comments use the canonical panel; this toolbar shell owns placement only.';
-      const block = commentPopupBlockAfter(freeform, secondNoteAnchor);
-      expect(block).toContain('accessMode={commentAccessMode}');
-      expect(block).not.toContain('guardOwnCommentMutation(');
-      expect(block).not.toContain('guardCommentComposition(');
-      expect(block).not.toContain('commentModeMutations');
-      expectManageOnlyWiredCallSite(block, true);
+      expect(freeform).not.toContain('Note detached comments use the canonical panel; this toolbar shell owns placement only.');
     });
   });
 
@@ -1186,10 +1187,9 @@ describe('PATCH 8O.1/8O.2 -- canonical comment permission wiring', () => {
       expect(guardedCount, 'every badge/color/strikethrough/delete/add handler in the collapsed-marker block must be guardCommentMutation-wrapped').toBeGreaterThanOrEqual(6);
     });
 
-    it('the dead "Todo Comments Popup - Right side" block remains classified dead (still gated only by the unreachable cardCommentPopupPadletId, not touched by PATCH 8Z)', () => {
+    it('PATCH 8AF: the dead "Todo Comments Popup - Right side" block is removed (re-proven unreachable, then deleted -- see commentPermissionClosure.contract.test.tsx\'s PATCH 8AF describe block)', () => {
       const freeform = read(FREEFORM_PATH);
-      expect(freeform).toContain('{/* Todo Comments Popup - Right side */}');
-      expect(freeform).toContain("{cardCommentPopupPadletId === padlet.id && (");
+      expect(freeform).not.toContain('Todo Comments Popup');
     });
 
     it('CommentEditor.tsx accepts an accessMode prop, gates every comment mutation, and leaves its TipTap extension set untouched', () => {
@@ -1599,10 +1599,10 @@ describe('PATCH 8O.1/8O.2 -- canonical comment permission wiring', () => {
   });
 
   describe('architecture guard -- every <CommentPopup usage in these three files is accounted for', () => {
-    it('FreeformPadletCards.tsx has exactly 8 <CommentPopup usages, all 8 wired (Clipart Site B, Image x2, Note x2, Todo x1, Link x1, Table x1)', () => {
+    it('FreeformPadletCards.tsx has exactly 7 <CommentPopup usages, all 7 wired (Clipart Site B, Image x2, Note x2, Todo x1, Link x1, Table x1 -- PATCH 8AF removed the 8th, an unreachable dead Card-toolbar instance gated on cardToolbarPadletId, which had no live non-null setter anywhere in the codebase)', () => {
       const freeform = read(FREEFORM_PATH);
       const total = (freeform.match(/<CommentPopup/g) ?? []).length;
-      expect(total).toBe(8);
+      expect(total).toBe(7);
       // Scoped per-usage (not a raw file-wide accessMode={commentAccessMode}
       // count) since PATCH 8Z added a 9th, legitimate occurrence of that
       // same string on the non-CommentPopup <CommentPost> call site -- a
@@ -1614,7 +1614,7 @@ describe('PATCH 8O.1/8O.2 -- canonical comment permission wiring', () => {
         if (block.includes('accessMode={commentAccessMode}')) wired++;
         cursor = freeform.indexOf(block, cursor) + block.length;
       }
-      expect(wired).toBe(8);
+      expect(wired).toBe(7);
     });
 
     it('CanvasClient.tsx has exactly 1 <CommentPopup usage and it is wired', () => {
