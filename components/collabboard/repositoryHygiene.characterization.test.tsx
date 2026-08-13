@@ -24,10 +24,17 @@ const DELETED_CONFUSABLE_COPIES = [
   'components/collabboard/canvas/last workingCanvasSetupPage.tsx',
 ];
 
-/** The live files those copies shadowed. */
+/**
+ * The live files those copies shadowed.
+ *
+ * components/canvas/RowCanvas.tsx was listed here through PATCH 8AH: it was
+ * the counterpart 1stnewRowCanvas.tsx shadowed, but it was itself later
+ * proven to have zero production importers (superseded by RowCanvasDnD.tsx)
+ * and was deleted as dead code in PATCH 8AI -- a separate reason from this
+ * describe block's confusable-copy cleanup.
+ */
 const LIVE_COUNTERPARTS = [
   'components/canvas/WallCanvas.tsx',
-  'components/canvas/RowCanvas.tsx',
   'components/canvas/layouts/WallLayout.tsx',
   'components/collabboard/canvas/CanvasSetupPage.tsx',
 ];

@@ -1,11 +1,11 @@
 # Canonical Comment UI Contract v1
 
-## Rollout status (updated PATCH 8AG, 2026-08-13)
+## Rollout status (updated PATCH 8AI, 2026-08-13)
 
 NORMAL UI CANONICALIZATION = **CLOSED**
 COMMENT PERMISSION SAFETY = **CLOSED**
 SPECIAL UI CONSOLIDATION = **NOT CLOSED / NOT YET DECIDED**
-DEAD CODE CLEANUP = **PARTIAL -- proven-unreachable comment surfaces removed (PATCH 8AF); the dead Card Post Modal wrapper's non-comment remainder removed (PATCH 8AG); RowCanvas.tsx's whole-file disposition, a second dead "Left Toolbar" block found during PATCH 8AG's own audit, and the CommentList/FreeformCommentRow pilot / dormant COMMENT tier "shelve vs activate" decisions remain open**
+DEAD CODE CLEANUP = **PARTIAL -- proven-unreachable comment surfaces removed (PATCH 8AF); the dead Card Post Modal wrapper's non-comment remainder removed (PATCH 8AG); RowCanvas.tsx (whole file) and the "Left Toolbar" false block removed (PATCH 8AI); only the CommentList/FreeformCommentRow pilot / dormant COMMENT tier "shelve vs activate" decision remains open**
 KANBAN COMMENT SYSTEM = **OUTSIDE CURRENT COLLABBOARD CONTRACT**
 
 "COMMENT PERMISSION SAFETY = CLOSED" means: every live CollabBoard/Padlet
@@ -1104,27 +1104,30 @@ color picker, emoji picker, and comment-popup panels each check
 still called from `CanvasClient.tsx`'s own "close every overlay" reset
 functions regardless of this wrapper's existence.
 
-**NOT REMOVED -- new finding from PATCH 8AG, out of its own scope**: a
-second, separate dead block in `FreeformPadletCards.tsx`, the "Left
+**REMOVED in PATCH 8AI (2026-08-13)**: the second, separate dead block in
+`FreeformPadletCards.tsx` found during PATCH 8AG's own audit, the "Left
 Toolbar - moved to card modal" block (`{false && cardToolbarPadletId ===
 padlet.id && (...)}`), permanently unreachable via a hardcoded `false &&`
-short-circuit -- its own comment confirms it was superseded by the (now
-also deleted) Card Post Modal. Contains its own `<CardActionsToolbar>`
-instance. Discovered while auditing `cardToolbarPadletId`'s occurrences for
-this patch's reachability proof, but it is not "the Card Post Modal
-wrapper" this patch was scoped to remove, so it was left in place pending a
-dedicated future patch.
+short-circuit. It contained the file's last remaining `<CardActionsToolbar>`
+instance; that import is now removed from `FreeformPadletCards.tsx` too
+(the component itself stays live via `ClipartCardDraftModal.tsx`).
+`cardToolbarPadletId`/`setCardToolbarPadletId` were kept (still gate three
+live guards elsewhere in this file; `setCardToolbarPadletId` is still called
+from `CanvasClient.tsx`'s reset-all-overlays functions), per the same
+non-fully-unused reasoning as PATCH 8AG.
 
-**LEFT UNTOUCHED -- explicit decision, not a partial cleanup**: `RowCanvas.tsx`
-(`components/canvas/RowCanvas.tsx`, 979 lines) has zero production
-importers (re-confirmed PATCH 8AF) and its `<EmbeddedCommentList>` call site
-is therefore also dead, but the file is a complete, standalone alternate
-canvas rendering implementation with substantial non-comment product code
-(rendering, DnD, layout). Deleting it, or even just its comment renderer,
-would extend this patch beyond "dead comment code cleanup" into general
-obsolete-layout cleanup, which PATCH 8AF's own spec explicitly forbids.
-Left fully untouched; the closure guard's existing "RowCanvas.tsx stays
-dead" tests continue to hold it to that state.
+**REMOVED in PATCH 8AI (2026-08-13)**: `RowCanvas.tsx`
+(`components/canvas/RowCanvas.tsx`, 979 lines), left untouched through
+PATCH 8AF/8AG as an explicit scope decision (its comment renderer was dead,
+but the file was a complete standalone alternate canvas implementation --
+deleting it was ruled out-of-scope for a "dead comment code cleanup" patch).
+PATCH 8AI independently re-confirmed zero production importers, zero
+dynamic/lazy references, and zero route/layout registry entries, then
+deleted the file whole. Its five component dependencies
+(`WallContainerContextMenu`, `PostCardContent`, `PostPreviewCard`,
+`SafeHtmlContent`, `EmbeddedCommentList`) were re-audited and confirmed live
+via other callers -- none were touched. The live grid/row renderer remains
+`components/collabboard/row/RowCanvasDnD.tsx` → `RowLane.tsx`, unaffected.
 
 ### Storage ownership audit
 

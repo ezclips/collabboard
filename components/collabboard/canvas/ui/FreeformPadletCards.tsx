@@ -13,7 +13,6 @@ import { createPostsRepository } from '@/lib/infra/canvas/postsRepository';
 import ImageActionsToolbar from '@/components/collabboard/editors/ImageActionsToolbar';
 import ImageDrawingLayer from '@/components/collabboard/editors/ImageDrawingLayer';
 import ImageCropLayer from '@/components/collabboard/editors/ImageCropLayer';
-import CardActionsToolbar from '@/components/collabboard/editors/CardActionsToolbar';
 import CardPreview from '@/components/collabboard/CardPreview';
 import CardEditor from '@/components/collabboard/CardEditor';
 import CommentPost from '@/components/collabboard/CommentPost';
@@ -281,7 +280,6 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
     setIsCommentEditorOpen,
     setIsImageEditorOpen,
     setIsDrawingEditorOpen,
-    setIsCardEditorOpen,
     setIsCardViewerOpen,
     setIsClipartDraftModalOpen,
     setIsAIComponentEditorOpen,
@@ -309,12 +307,8 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
     setCardToolbarPadletId,
     isCardColorPickerOpen,
     setIsCardColorPickerOpen,
-    cardColorTab,
-    setCardColorTab,
     captionEditorPadletId,
     setCaptionEditorPadletId,
-    setIsLibraryOpen,
-    setIconReplaceTargetPadlet,
     editingNoteTitleId,
     setEditingNoteTitleId,
     noteTitleDraft,
@@ -359,7 +353,6 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
     setReminderPopupTasks,
     setReminderPopupPadletId,
     setReminderPopupOpen,
-    setShowDeleteConfirm,
     setViewDrawingPadlet,
     setCommentPopupPosition,
     setCommentPopupComments,
@@ -1766,48 +1759,6 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                 }
               }}
             />
-
-            {/* Left Toolbar - moved to card modal */}
-            {false && cardToolbarPadletId === padlet.id && (
-              <div className="absolute right-full top-0 mr-3 flex flex-col justify-start z-50 animate-in fade-in slide-in-from-right-2 duration-200">
-                <CardActionsToolbar
-                  padlet={padlet}
-                  isCardView={padlet.metadata?.showCardView}
-                  onColorClick={(e, type) => {
-                    e.stopPropagation();
-                    setCardColorTab(type);
-                    setIsCardColorPickerOpen(true);
-                    setPadletToEdit(padlet);
-                  }}
-                  onReplaceIcon={() => {
-                    closeAllToolbars();
-                    setIconReplaceTargetPadlet(padlet);
-                    setPadletToEdit(padlet);
-                    setIsLibraryOpen(true);
-                  }}
-                  onToggleCardView={() => {
-                    closeAllToolbars();
-                    setPadletToEdit(padlet);
-                    setIsCardEditorOpen(true);
-                  }}
-                  onAddReaction={(e) => {
-                    e.stopPropagation();
-                    setSelectedPadletId(padlet.id);
-                    setIsImageEmojiOpen(true);
-                  }}
-                  onComment={() => {
-                    // Open card-specific comments popup to the right
-                    const commentsToShow = padlet.metadata?.detachedComments || [];
-                    setCardCommentList(commentsToShow);
-                    setCardCommentPopupPadletId(padlet.id);
-                  }}
-                  onDelete={() => {
-                    setSelectedPadletId(padlet.id);
-                    setShowDeleteConfirm(true);
-                  }}
-                />
-              </div>
-            )}
 
             {captionEditorPadletId === padlet.id && (
               <div

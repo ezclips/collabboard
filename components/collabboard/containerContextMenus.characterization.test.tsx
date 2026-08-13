@@ -708,11 +708,11 @@ describe('container menu prop signatures are frozen', () => {
 
   it('no caller was touched to accommodate the new presentation', () => {
     // The two historical copies this list also covered (brocken_WallCanvas,
-    // 1stnewRowCanvas) were deleted as dead in PATCH 7C; the live callers below
-    // are the whole caller set now.
+    // 1stnewRowCanvas) were deleted as dead in PATCH 7C; components/canvas/RowCanvas.tsx
+    // (also dead, zero importers) was deleted in PATCH 8AI. WallCanvas.tsx is
+    // the sole live caller now.
     for (const relative of [
       'components/canvas/WallCanvas.tsx',
-      'components/canvas/RowCanvas.tsx',
     ]) {
       const src = fs.readFileSync(path.join(process.cwd(), relative), 'utf8');
       expect(src, `${relative} must not know about swatch primitives`)
@@ -735,7 +735,7 @@ describe('the dead Wall duplicates stay deleted', () => {
   });
 
   it('every Wall menu importer resolves to the live implementation', () => {
-    for (const relative of ['components/canvas/WallCanvas.tsx', 'components/canvas/RowCanvas.tsx']) {
+    for (const relative of ['components/canvas/WallCanvas.tsx']) {
       const source = fs.readFileSync(path.join(process.cwd(), relative), 'utf8');
       expect(source).toContain(
         "from '@/components/collabboard/context-menus/WallContainerContextMenu'",

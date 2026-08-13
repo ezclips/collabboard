@@ -1583,18 +1583,15 @@ describe('PATCH 8O.1/8O.2 -- canonical comment permission wiring', () => {
       expect(src.slice(start, end)).toContain('accessMode={commentAccessMode}');
     });
 
-    it('components/canvas/RowCanvas.tsx (the dead/orphaned EmbeddedCommentList caller) is not imported anywhere in production code and was intentionally left unwired', () => {
+    it('components/canvas/RowCanvas.tsx (the dead/orphaned EmbeddedCommentList caller) was deleted by PATCH 8AI and is not imported anywhere in production code', () => {
+      const fs = require('node:fs');
+      expect(fs.existsSync('components/canvas/RowCanvas.tsx')).toBe(false);
       const { execSync } = require('node:child_process');
       const grepOutput: string = execSync(
         `git grep -l "from '@/components/canvas/RowCanvas'" -- '*.tsx' '*.ts' || echo NONE`,
         { cwd: process.cwd() },
       ).toString().trim();
       expect(grepOutput === 'NONE' || grepOutput === '').toBe(true);
-      const src = read('components/canvas/RowCanvas.tsx');
-      // Its own EmbeddedCommentList call site was NOT touched by this patch.
-      const start = src.indexOf('<EmbeddedCommentList');
-      const end = src.indexOf('/>', start);
-      expect(src.slice(start, end)).not.toContain('accessMode');
     });
   });
 

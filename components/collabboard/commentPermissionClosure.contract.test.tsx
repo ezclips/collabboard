@@ -86,7 +86,8 @@ const KNOWN_COMMENT_POPUP_FILES = [
 ].sort();
 
 const KNOWN_EMBEDDED_COMMENT_LIST_FILES = [
-  'components/canvas/RowCanvas.tsx', // DEAD -- see dedicated dead-surface section below.
+  // components/canvas/RowCanvas.tsx (DEAD, zero importers) was deleted
+  // entirely by PATCH 8AI -- see dedicated dead-surface section below.
   'components/collabboard/PostCardContent.tsx',
   'components/collabboard/RowColumnContainerCard.tsx',
   'components/collabboard/canvas/layouts/DrawingLayout.tsx',
@@ -133,7 +134,7 @@ describe('comment permission closure -- every CommentPopup block is gated (PATCH
 });
 
 describe('comment permission closure -- every live EmbeddedCommentList block is gated (PATCH 8AE.2)', () => {
-  const LIVE_EMBEDDED_COMMENT_LIST_FILES = KNOWN_EMBEDDED_COMMENT_LIST_FILES.filter((f) => f !== 'components/canvas/RowCanvas.tsx');
+  const LIVE_EMBEDDED_COMMENT_LIST_FILES = KNOWN_EMBEDDED_COMMENT_LIST_FILES;
   const expectedBlockCounts: Record<string, number> = {
     'components/collabboard/PostCardContent.tsx': 3,
     'components/collabboard/RowColumnContainerCard.tsx': 2,
@@ -151,13 +152,9 @@ describe('comment permission closure -- every live EmbeddedCommentList block is 
     });
   }
 
-  it('RowCanvas.tsx (dead) is not counted as a live gated surface -- it stays dead, not silently "fixed"', () => {
-    const src = read('components/canvas/RowCanvas.tsx');
-    const blocks = extractSelfClosingBlocks(src, 'EmbeddedCommentList');
-    expect(blocks.length).toBe(1);
-    // Deliberately NOT asserting accessMode here -- this file must remain
-    // reachable-by-nobody, not quietly promoted to a live gated surface.
-    // Its dead status is proven by the importer check below instead.
+  it('RowCanvas.tsx (formerly dead) was deleted by PATCH 8AI, not silently "fixed" into a live gated surface', () => {
+    const fs = require('node:fs');
+    expect(fs.existsSync('components/canvas/RowCanvas.tsx')).toBe(false);
   });
 
   // A duplicate/unguarded composer added alongside an already-gated
@@ -278,7 +275,9 @@ describe('comment permission closure -- COMMENT tier dormancy (single producer)'
 });
 
 describe('comment permission closure -- dead/dormant surfaces stay non-live (PATCH 8AE.2)', () => {
-  it('components/canvas/RowCanvas.tsx has zero production importers', () => {
+  it('components/canvas/RowCanvas.tsx no longer exists (deleted PATCH 8AI) and has zero production importers', () => {
+    const fs = require('node:fs');
+    expect(fs.existsSync('components/canvas/RowCanvas.tsx')).toBe(false);
     const importers = gitGrepFiles("from '@/components/canvas/RowCanvas'").filter((f) => !f.includes('.test.'));
     expect(importers).toEqual([]);
   });
@@ -422,10 +421,14 @@ describe('comment permission closure -- PATCH 8AG dead Card Post Modal wrapper c
 
   it('CardActionsToolbar/CardColorPanel/EmojiReactionPicker remain live elsewhere -- not orphaned by this cleanup', () => {
     const freeform = read('components/collabboard/canvas/ui/FreeformPadletCards.tsx');
-    // CardActionsToolbar: the wrapper's own instance is gone; one remains --
-    // the separately dead ({false && ...}), out-of-scope "Left Toolbar"
-    // block (a PATCH 8AG finding, not touched -- see contract doc).
-    expect((freeform.match(/<CardActionsToolbar\b/g) ?? []).length).toBe(1);
+    // CardActionsToolbar: the wrapper's own instance was removed here in
+    // PATCH 8AG; the remaining instance was the separately dead
+    // ({false && ...}) "Left Toolbar" block this test used to expect --
+    // PATCH 8AI deleted that block (and the now-unused import) too, so zero
+    // remain in this file. See "PATCH 8AI dead RowCanvas + false Left
+    // Toolbar block cleanup" below for the dedicated assertions.
+    expect((freeform.match(/<CardActionsToolbar\b/g) ?? []).length).toBe(0);
+    expect(freeform).not.toContain("from '@/components/collabboard/editors/CardActionsToolbar'");
     // CardColorPanel: the wrapper's own instance is gone; one remains -- the
     // live "Right Color Picker - attached to card" block.
     expect((freeform.match(/<CardColorPanel\b/g) ?? []).length).toBe(1);
@@ -436,5 +439,89 @@ describe('comment permission closure -- PATCH 8AG dead Card Post Modal wrapper c
     expect(clipart).toContain('<CardActionsToolbar');
     expect(clipart).toContain('<CardColorPanel');
     expect(clipart).toContain('<EmojiReactionPicker');
+  });
+});
+
+describe('comment permission closure -- PATCH 8AI dead RowCanvas + false Left Toolbar block cleanup', () => {
+  const fs = require('node:fs');
+
+  it('1: components/canvas/RowCanvas.tsx does not exist', () => {
+    expect(fs.existsSync('components/canvas/RowCanvas.tsx')).toBe(false);
+  });
+
+  it('2: no production import references RowCanvas', () => {
+    const importers = gitGrepFiles("from '@/components/canvas/RowCanvas'").filter((f) => !f.includes('.test.'));
+    expect(importers).toEqual([]);
+  });
+
+  it('3: the literal-false Left Toolbar block is absent', () => {
+    const src = read('components/collabboard/canvas/ui/FreeformPadletCards.tsx');
+    expect(src).not.toContain('{false && cardToolbarPadletId === padlet.id && (');
+    expect(src).not.toMatch(/\{false\s*&&\s*cardToolbarPadletId/);
+  });
+
+  it('4: the "Left Toolbar - moved to card modal" dead marker is absent', () => {
+    const src = read('components/collabboard/canvas/ui/FreeformPadletCards.tsx');
+    expect(src).not.toContain('Left Toolbar - moved to card modal');
+  });
+
+  it('5: FreeformPadletCards.tsx no longer imports CardActionsToolbar (its only usage was the deleted block)', () => {
+    const src = read('components/collabboard/canvas/ui/FreeformPadletCards.tsx');
+    expect(src).not.toContain("from '@/components/collabboard/editors/CardActionsToolbar'");
+    expect((src.match(/<CardActionsToolbar\b/g) ?? []).length).toBe(0);
+  });
+
+  it('6: ClipartCardDraftModal.tsx still uses CardActionsToolbar (not orphaned by this cleanup)', () => {
+    const src = read('components/collabboard/editors/ClipartCardDraftModal.tsx');
+    expect(src).toContain("from '@/components/collabboard/editors/CardActionsToolbar'");
+    expect(src).toContain('<CardActionsToolbar');
+  });
+
+  it('7: RowCanvasDnD remains the live row/grid renderer in CanvasClient.tsx', () => {
+    const src = read('app/dashboard/canvas/[id]/CanvasClient.tsx');
+    expect(src).toContain("import RowCanvasDnD from '@/components/collabboard/row/RowCanvasDnD';");
+    expect(src).toContain('<RowCanvasDnD');
+  });
+
+  it('8: live EmbeddedCommentList callers remain (PostCardContent, RowColumnContainerCard, DrawingLayout)', () => {
+    for (const file of [
+      'components/collabboard/PostCardContent.tsx',
+      'components/collabboard/RowColumnContainerCard.tsx',
+      'components/collabboard/canvas/layouts/DrawingLayout.tsx',
+    ]) {
+      const src = read(file);
+      expect(src, `${file} no longer renders <EmbeddedCommentList>`).toMatch(/<EmbeddedCommentList\b/);
+    }
+  });
+
+  it('9: cardToolbarPadletId/setCardToolbarPadletId remain (kept, per PATCH 8AG/8AI scope) with their three live guards intact', () => {
+    const freeform = read('components/collabboard/canvas/ui/FreeformPadletCards.tsx');
+    expect(freeform).toContain('cardToolbarPadletId,');
+    expect(freeform).toContain('setCardToolbarPadletId,');
+    expect(freeform).toContain("padletToEdit?.id === padlet.id && !cardToolbarPadletId");
+    expect(freeform).toContain("isImageEmojiOpen && !cardToolbarPadletId");
+    expect(freeform).toContain("cardCommentPopupPadletId === padlet.id && !cardToolbarPadletId");
+  });
+
+  it('the five block-only overlay setters (setCardColorTab, setIconReplaceTargetPadlet, setIsLibraryOpen, setIsCardEditorOpen, setShowDeleteConfirm) are no longer destructured in FreeformPadletCards.tsx, but their shared underlying state is untouched', () => {
+    const freeform = read('components/collabboard/canvas/ui/FreeformPadletCards.tsx');
+    for (const name of ['setCardColorTab', 'setIconReplaceTargetPadlet', 'setIsLibraryOpen', 'setIsCardEditorOpen', 'setShowDeleteConfirm']) {
+      // Scoped to the destructure-line shape (`    name,`) rather than a bare
+      // word-boundary check -- setIsCardEditorOpen is still mentioned in a
+      // legitimate historical comment a few lines above its old destructure
+      // site, explaining why this file never called it even before PATCH 8AI.
+      expect(freeform, `${name} should no longer be destructured in FreeformPadletCards.tsx`).not.toMatch(new RegExp(`^\\s*${name},\\s*$`, 'm'));
+    }
+    // Four of the five live in the shared useCanvasOverlays.ts hook.
+    const overlays = read('components/collabboard/canvas/hooks/useCanvasOverlays.ts');
+    for (const name of ['setCardColorTab', 'setIconReplaceTargetPadlet', 'setIsLibraryOpen', 'setShowDeleteConfirm']) {
+      expect(overlays, `${name} must remain defined in the shared overlays hook -- other consumers still use it`).toContain(name);
+    }
+    // setIsCardEditorOpen is a CanvasClient.tsx-local reducer dispatch
+    // (canvasState.editors.isCardEditorOpen), not part of useCanvasOverlays.ts
+    // -- its live consumer is the CardEditor modal's isOpen prop.
+    const canvasClient = read('app/dashboard/canvas/[id]/CanvasClient.tsx');
+    expect(canvasClient).toContain('setIsCardEditorOpen');
+    expect(canvasClient).toContain('isOpen={isCardEditorOpen}');
   });
 });
