@@ -175,6 +175,7 @@ export default function CanvasModals({
           onDirtyChange={onDirtyChange}
           currentUserId={user?.id}
           currentUserName={user?.user_metadata?.name || user?.email?.split('@')[0] || 'Anonymous'}
+          accessMode={commentAccessMode}
           onClose={() => {
             setDocumentModalDestination(null);
             setPadletToEdit(null);

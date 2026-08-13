@@ -265,6 +265,36 @@ describe('Read-only Document: shell-level containment (28-33)', () => {
   });
 });
 
+describe('Document anchored comment permissions (PATCH 8AA)', () => {
+  it('READ mode can open an existing anchored thread but cannot compose or save', () => {
+    const save = vi.fn();
+    const thread = JSON.stringify([{ id: 'reply-1', text: 'existing reply', userId: 'author-1', userName: 'Author', timestamp: 1710000000000 }]);
+    const c = openDoc({
+      readOnly: true,
+      accessMode: 'read',
+      onSave: save,
+      initialContent: `<p>Hello <span data-comment-id="thread-1" data-comment-thread='${thread}' data-user-id="author-1" data-user-name="Author" data-timestamp="1710000000000">world</span></p>`,
+    });
+
+    const mark = c.querySelector('.ProseMirror span[data-comment-id="thread-1"]') as HTMLElement;
+    expect(mark).not.toBeNull();
+    click(mark);
+
+    expect(c.textContent).toContain('existing reply');
+    expect(c.querySelector('input[placeholder="Add a comment..."]')).toBeNull();
+    expect(btn(c, 'Send')).toBeNull();
+    expect(save).not.toHaveBeenCalled();
+    expect(c.querySelector('.ProseMirror span[data-comment-id="thread-1"]')?.textContent).toBe('world');
+  });
+
+  it('READ access mode omits the selected-text comment creation tool even when the document body itself is editable', () => {
+    const c = openDoc({ accessMode: 'read' });
+    selectText(c, 'world');
+    expect(btn(c, 'Add comment to selected text')).toBeNull();
+    expect(btn(c, 'Add link to selected text')).not.toBeNull();
+  });
+});
+
 describe('OQ-2: authenticated identity reaches CommentPopup through DocumentEditor -> PostEditorShell (38)', () => {
   it('carries real currentUserId/currentUserName (as CanvasModals.tsx:168-169 supplies them) through to the rendered comment', () => {
     const c = openDoc({ currentUserId: 'u1', currentUserName: 'Real User' });

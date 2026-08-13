@@ -11,6 +11,7 @@ import CommentPopup from './CommentPopup';
 import { ColorPickerContent } from '../ColorPicker';
 import { contrastIconColor } from '../shells/CardShell';
 import { toEditorHtml, fromEditorHtml } from '@/lib/domain/canvas/documentContentAdapter';
+import { guardCommentMutation, type CommentAccessMode } from '@/lib/domain/canvas/comments';
 import type { SaveCardData, SaveCardResult } from '@/hooks/canvas/usePadletSave';
 
 type Comment152 = { id: string; text: string; userId: string; userName: string; timestamp: number; textColor?: string; backgroundColor?: string };
@@ -43,6 +44,7 @@ interface DocumentEditorProps {
   // PATCH-152 §4.3 (OQ-2 Route B): real authenticated identity for Comment.
   currentUserId?: string;
   currentUserName?: string;
+  accessMode?: CommentAccessMode;
 }
 
 // PATCH-152 targeted correction: closing (backdrop/X/Escape) always saves a
@@ -59,6 +61,7 @@ export default function DocumentEditor({
   onDirtyChange,
   currentUserId,
   currentUserName,
+  accessMode = 'manage',
 }: DocumentEditorProps) {
   const [title, setTitle] = useState(initialTitle);
   const [description, setDescription] = useState(initialMetadata?.description || '');
@@ -84,12 +87,48 @@ export default function DocumentEditor({
   const [linkViewUrl, setLinkViewUrl] = useState('');
   const [activeThread, setActiveThread] = useState<{ id: string; comments: Comment152[] } | null>(null);
   const [savedSelection, setSavedSelection] = useState<{ from: number; to: number } | null>(null);
+  // PATCH 8AA -- Document anchored/highlighted comments are wired to today's
+  // live READ/MANAGE model only. The dormant COMMENT tier is intentionally
+  // treated as READ here until a real board-level comment role is deployed.
+  const anchoredAccessMode: CommentAccessMode = accessMode === 'manage' ? 'manage' : 'read';
+  const canManageAnchoredComments = anchoredAccessMode === 'manage';
 
   const editor = useSharedTipTapEditor({
     initialContent: toEditorHtml(initialContent),
     editable: !readOnly,
     onUpdate: readOnly ? undefined : () => forceBodyTick((c) => c + 1),
   });
+
+  // PATCH-152 §4.3/§4.4: thread semantics ported narrowly from NoteEditor.tsx:180-204/316-371/407-445.
+  const parseThreadFromAttrsForDomOpen = (attrs: { commentId?: string | null; commentThread?: string | null; commentText?: string | null; userId?: string | null; userName?: string | null; timestamp?: number | null }) => {
+    const commentId = attrs.commentId || '';
+    let comments: Comment152[] = [];
+    if (attrs.commentThread) {
+      try { const parsed = JSON.parse(attrs.commentThread); if (Array.isArray(parsed)) comments = parsed; } catch { /* ignore invalid thread payload */ }
+    } else if (attrs.commentText) {
+      comments = [{ id: commentId || `comment-${Date.now()}`, text: attrs.commentText, userId: attrs.userId || currentUserId || '', userName: attrs.userName || currentUserName || 'Anonymous', timestamp: attrs.timestamp || Date.now() }];
+    }
+    return { id: commentId, comments };
+  };
+
+  const openThreadFromCommentElement = (commentElement: HTMLElement): boolean => {
+    const thread = parseThreadFromAttrsForDomOpen({
+      commentId: commentElement.getAttribute('data-comment-id'),
+      commentThread: commentElement.getAttribute('data-comment-thread'),
+      commentText: commentElement.getAttribute('data-comment-text'),
+      userId: commentElement.getAttribute('data-user-id'),
+      userName: commentElement.getAttribute('data-user-name'),
+      timestamp: Number(commentElement.getAttribute('data-timestamp')) || null,
+    });
+    if (!thread.id && thread.comments.length === 0) return false;
+    setActiveThread(thread);
+    // DOM-opened threads are read-only unless a real ProseMirror selection was
+    // captured by the toolbar flow; this prevents a forged submit from writing
+    // through a click-only read path.
+    setSavedSelection(null);
+    panels.openPanel('comment');
+    return true;
+  };
 
   // PATCH-152 targeted correction: read-only links stay clickable (opened
   // safely in a new tab) even though the shared extension registry disables
@@ -104,7 +143,13 @@ export default function DocumentEditor({
   // browser. Read-only-only (not reactive) is safe here: readOnly is fixed
   // for the lifetime of a given open session (CanvasModals remounts the
   // editor via a key change whenever the destination differs).
-  const handleReadOnlyBodyClick = (event: React.MouseEvent) => {
+  const handleBodyClick = (event: React.MouseEvent) => {
+    const commentTarget = (event.target as HTMLElement).closest?.('[data-comment-id]') as HTMLElement | null;
+    if (commentTarget && openThreadFromCommentElement(commentTarget)) {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
     if (!readOnly) return;
     const anchor = (event.target as HTMLElement).closest?.('a[href]') as HTMLAnchorElement | null;
     if (!anchor) return;
@@ -254,7 +299,7 @@ export default function DocumentEditor({
     return { id: commentId, comments };
   };
   const handleTextComment = () => {
-    if (!editor) return;
+    if (!editor || !canManageAnchoredComments) return;
     const { from, to } = editor.state.selection;
     if (!editor.state.doc.textBetween(from, to, '').trim()) return;
     editor.chain().focus().setTextSelection({ from, to }).run();
@@ -264,7 +309,7 @@ export default function DocumentEditor({
     panels.openPanel('comment');
   };
   const handleAddComment = (commentText: string) => {
-    if (!editor || !commentText || !activeThread || !savedSelection) return;
+    if (!editor || !canManageAnchoredComments || !commentText || !activeThread || !savedSelection) return;
     const newComment: Comment152 = { id: `comment-${Date.now()}`, text: commentText, userId: currentUserId || '', userName: currentUserName || 'Anonymous', timestamp: Date.now() };
     const nextComments = [...activeThread.comments, newComment];
     editor.chain().focus().setTextSelection(savedSelection).setComment({
@@ -278,7 +323,7 @@ export default function DocumentEditor({
   // highlight color; persisted into the same commentThread mark payload as
   // handleAddComment above so it survives alongside the rest of the thread.
   const handleCommentColor = (commentId: string, textColor?: string, backgroundColor?: string) => {
-    if (!editor || !activeThread || !savedSelection) return;
+    if (!editor || !canManageAnchoredComments || !activeThread || !savedSelection) return;
     const nextComments = activeThread.comments.map((comment) =>
       comment.id === commentId ? { ...comment, textColor, backgroundColor } : comment
     );
@@ -296,7 +341,7 @@ export default function DocumentEditor({
     variant: 'document' as const,
     onTextStyle: () => panels.openPanel('textStyle'),
     onLink: handleLink,
-    onTextComment: handleTextComment,
+    onTextComment: canManageAnchoredComments ? handleTextComment : undefined,
     onCardColor: () => panels.openPanel('cardColor'),
     isLink: editor.isActive('link'),
     isComment: editor.isActive('comment'),
@@ -355,7 +400,7 @@ export default function DocumentEditor({
 
           {saveError && <div role="alert" className="px-6 py-2 text-sm text-red-700 bg-red-50 border-b border-red-100">{saveError}</div>}
 
-          <div className="flex-1 overflow-y-auto px-6 py-4" onClick={handleReadOnlyBodyClick}>
+          <div className="flex-1 overflow-y-auto px-6 py-4" onClick={handleBodyClick}>
             <EditorContent editor={editor} className="prose max-w-none" />
           </div>
 
@@ -373,9 +418,8 @@ export default function DocumentEditor({
         </div>
       }
       sharedPanel={
-        !readOnly && (
-          <>
-            {panels.open.textStyle && (
+        <>
+            {!readOnly && panels.open.textStyle && (
               <div className="relative" style={{ width: '300px' }}>
                 <button onClick={() => panels.closePanel('textStyle')} className="absolute -right-3 -top-3 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-400 shadow-md transition-all hover:text-gray-600" title="Close">
                   <X className="h-3.5 w-3.5" />
@@ -410,7 +454,7 @@ export default function DocumentEditor({
                 </div>
               </div>
             )}
-            {panels.open.link && (
+            {!readOnly && panels.open.link && (
               // Fixed width matches the textStyle/comment panels above and
               // below -- otherwise LinkPopup's own min-w-[280px] lets it
               // size to content, and switching to/from a differently-sized
@@ -433,15 +477,16 @@ export default function DocumentEditor({
                 <CommentPopup
                   isOpen={panels.open.comment}
                   onOpenChange={(open) => (open ? panels.openPanel('comment') : panels.closePanel('comment'))}
-                  onSubmit={handleAddComment}
-                  onCommentColor={handleCommentColor}
+                  onSubmit={guardCommentMutation(anchoredAccessMode, handleAddComment)}
+                  onCommentColor={guardCommentMutation(anchoredAccessMode, handleCommentColor)}
                   comments={activeThread?.comments || []}
                   currentUserId={currentUserId}
                   currentUserName={currentUserName}
+                  accessMode={canManageAnchoredComments && savedSelection ? 'manage' : 'read'}
                 />
               </div>
             )}
-            {panels.open.cardColor && (
+            {!readOnly && panels.open.cardColor && (
               <div className="relative h-fit self-start" style={{ width: '260px' }}>
                 <button
                   onClick={() => panels.closePanel('cardColor')}
@@ -490,8 +535,7 @@ export default function DocumentEditor({
                 </div>
               </div>
             )}
-          </>
-        )
+        </>
       }
     />
   );

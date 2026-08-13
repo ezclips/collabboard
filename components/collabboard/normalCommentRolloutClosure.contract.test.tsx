@@ -96,13 +96,13 @@ const EXPECTED: Record<string, { usages: number; guarded: number; note: string }
   },
   'components/collabboard/canvas/ui/OverlayLayer.tsx': {
     usages: 1,
-    guarded: 0,
-    note: 'on-canvas anchored/highlighted thread controller (Note + Document), Category B, intentionally unguarded',
+    guarded: 1,
+    note: 'on-canvas anchored/highlighted thread controller (Document permission-safe READ/MANAGE; shared Note opener remains special/out of normal scope)',
   },
   'components/collabboard/editors/DocumentEditor.tsx': {
     usages: 1,
-    guarded: 0,
-    note: 'Document anchored/highlighted selected-text popup, Category B, intentionally unguarded -- Document has no normal/detached tier at all (PATCH 8Q)',
+    guarded: 1,
+    note: 'Document anchored/highlighted selected-text popup, Category B permission-safe READ/MANAGE -- Document has no normal/detached tier at all (PATCH 8Q/8AA)',
   },
   'components/collabboard/editors/ContainerEditor.tsx': {
     usages: 1,
@@ -115,12 +115,12 @@ const TOTAL_EXPECTED_USAGES = Object.values(EXPECTED).reduce((sum, e) => sum + e
 const TOTAL_EXPECTED_GUARDED = Object.values(EXPECTED).reduce((sum, e) => sum + e.guarded, 0);
 
 describe('PATCH 8Y -- normal comment rollout closure', () => {
-  it('TOTAL_EXPECTED_USAGES/GUARDED constants match the PATCH 8Y inventory (20 usages, 16 guarded)', () => {
+  it('TOTAL_EXPECTED_USAGES/GUARDED constants match the PATCH 8Y+8AA inventory (20 usages, 18 guarded)', () => {
     // Pins the inventory numbers themselves, independent of the file walk,
     // so a future editor of EXPECTED can see at a glance if their edit
     // changed the totals.
     expect(TOTAL_EXPECTED_USAGES).toBe(20);
-    expect(TOTAL_EXPECTED_GUARDED).toBe(16);
+    expect(TOTAL_EXPECTED_GUARDED).toBe(18);
   });
 
   it('every file with a live <CommentPopup usage is accounted for in EXPECTED, with no unaccounted file', () => {

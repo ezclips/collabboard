@@ -6,6 +6,8 @@ import type { Padlet, CanvasLine } from '@/types/collabboard';
 import CommentPopup from '@/components/collabboard/editors/CommentPopup';
 import TextStylePopup from '@/components/collabboard/editors/TextStylePopup';
 import { LineContextMenu } from '@/components/collabboard/menus/LineContextMenu';
+import { guardCommentMutation, type CommentAccessMode } from '@/lib/domain/canvas/comments';
+import { isDocumentPost } from '@/lib/domain/canvas/documentPost';
 
 // ── Props ─────────────────────────────────────────────────────────────────────
 export interface OverlayLayerProps {
@@ -36,6 +38,7 @@ export interface OverlayLayerProps {
   padlets: Padlet[];
   lines: CanvasLine[];
   user: AuthUser | null;
+  accessMode?: CommentAccessMode;
 
   // Callbacks
   updatePadletContent: (id: string, content: string) => Promise<any>;
@@ -57,8 +60,21 @@ export default function OverlayLayer({
   textLinkColorPickerPosition, setTextLinkColorPickerPosition,
   lineContextMenuState, setLineContextMenuState,
   padlets, lines, user,
+  accessMode = 'manage',
   updatePadletContent, duplicateLine, deleteLine, updateLine, handleChangeLineLayer,
 }: OverlayLayerProps) {
+  // PATCH 8AA -- this anchored/highlighted document display controller uses
+  // only the live READ/MANAGE model. COMMENT remains dormant for this surface.
+  // OverlayLayer is shared with Note anchored threads, so only a Document
+  // padlet receives this new permission gate; non-Document anchored surfaces
+  // keep their pre-existing behavior for this Document-only patch.
+  const requestedDocumentAccessMode: CommentAccessMode = accessMode === 'manage' ? 'manage' : 'read';
+  const activeCommentPadlet = commentPopupPadletId ? padlets.find((p) => p.id === commentPopupPadletId) : null;
+  const anchoredAccessMode: CommentAccessMode = activeCommentPadlet && isDocumentPost(activeCommentPadlet)
+    ? requestedDocumentAccessMode
+    : 'manage';
+  const canManageAnchoredComments = anchoredAccessMode === 'manage';
+
   return (
     <>
       <CommentPopup
@@ -74,15 +90,15 @@ export default function OverlayLayer({
             setCommentPopupHighlightColor(undefined);
           }
         }}
-        onSubmit={async (commentText) => {
+        onSubmit={guardCommentMutation(anchoredAccessMode, async (commentText) => {
           if (!commentPopupPadletId || !commentPopupCommentId) return;
           const padlet = padlets.find((p) => p.id === commentPopupPadletId);
           if (!padlet) return;
           const newComment = {
             id: `comment-${Date.now()}`,
             text: commentText,
-            userId: user?.id || 'user1',
-            userName: user?.email?.split('@')[0] || 'User',
+            userId: user?.id || '',
+            userName: user?.email?.split('@')[0] || 'Anonymous',
             timestamp: Date.now(),
             isStrikethrough: false,
           };
@@ -99,8 +115,8 @@ export default function OverlayLayer({
             await updatePadletContent(commentPopupPadletId, doc.body.innerHTML);
             setCommentPopupComments(nextComments);
           }
-        }}
-        onEditComment={async (commentId, commentText) => {
+        })}
+        onEditComment={guardCommentMutation(anchoredAccessMode, async (commentId, commentText) => {
           if (!commentPopupPadletId || !commentPopupCommentId) return;
           const padlet = padlets.find((p) => p.id === commentPopupPadletId);
           if (!padlet) return;
@@ -114,14 +130,14 @@ export default function OverlayLayer({
             const last = nextComments[nextComments.length - 1];
             target.setAttribute('data-comment-thread', JSON.stringify(nextComments));
             target.setAttribute('data-comment-text', last?.text || '');
-            target.setAttribute('data-user-id', last?.userId || 'user1');
-            target.setAttribute('data-user-name', last?.userName || 'User');
+            target.setAttribute('data-user-id', last?.userId || '');
+            target.setAttribute('data-user-name', last?.userName || 'Anonymous');
             target.setAttribute('data-timestamp', (last?.timestamp || Date.now()).toString());
             await updatePadletContent(commentPopupPadletId, doc.body.innerHTML);
             setCommentPopupComments(nextComments);
           }
-        }}
-        onRemoveComment={async (commentId) => {
+        })}
+        onRemoveComment={guardCommentMutation(anchoredAccessMode, async (commentId) => {
           if (!commentPopupPadletId || !commentPopupCommentId) return;
           const padlet = padlets.find((p) => p.id === commentPopupPadletId);
           if (!padlet) return;
@@ -140,15 +156,15 @@ export default function OverlayLayer({
               const last = nextComments[nextComments.length - 1];
               target.setAttribute('data-comment-thread', JSON.stringify(nextComments));
               target.setAttribute('data-comment-text', last?.text || '');
-              target.setAttribute('data-user-id', last?.userId || 'user1');
-              target.setAttribute('data-user-name', last?.userName || 'User');
+              target.setAttribute('data-user-id', last?.userId || '');
+              target.setAttribute('data-user-name', last?.userName || 'Anonymous');
               target.setAttribute('data-timestamp', (last?.timestamp || Date.now()).toString());
             }
             await updatePadletContent(commentPopupPadletId, doc.body.innerHTML);
             setCommentPopupComments(nextComments);
           }
-        }}
-        onRemoveThread={async () => {
+        })}
+        onRemoveThread={guardCommentMutation(anchoredAccessMode, async () => {
           if (!commentPopupPadletId || !commentPopupCommentId) return;
           const padlet = padlets.find((p) => p.id === commentPopupPadletId);
           if (!padlet) return;
@@ -165,8 +181,8 @@ export default function OverlayLayer({
             await updatePadletContent(commentPopupPadletId, doc.body.innerHTML);
             setCommentPopupComments([]);
           }
-        }}
-        onColor={async (color) => {
+        })}
+        onColor={guardCommentMutation(anchoredAccessMode, async (color) => {
           if (!commentPopupPadletId || !commentPopupCommentId) return;
           const padlet = padlets.find((p) => p.id === commentPopupPadletId);
           if (!padlet) return;
@@ -181,8 +197,8 @@ export default function OverlayLayer({
             }
             await updatePadletContent(commentPopupPadletId, doc.body.innerHTML);
           }
-        }}
-        onToggleCommentStrikethrough={async (commentId) => {
+        })}
+        onToggleCommentStrikethrough={guardCommentMutation(anchoredAccessMode, async (commentId) => {
           if (!commentPopupPadletId || !commentPopupCommentId) return;
           const padlet = padlets.find((p) => p.id === commentPopupPadletId);
           if (!padlet) return;
@@ -198,14 +214,14 @@ export default function OverlayLayer({
             const last = nextComments[nextComments.length - 1];
             target.setAttribute('data-comment-thread', JSON.stringify(nextComments));
             target.setAttribute('data-comment-text', last?.text || '');
-            target.setAttribute('data-user-id', last?.userId || 'user1');
-            target.setAttribute('data-user-name', last?.userName || 'User');
+            target.setAttribute('data-user-id', last?.userId || '');
+            target.setAttribute('data-user-name', last?.userName || 'Anonymous');
             target.setAttribute('data-timestamp', (last?.timestamp || Date.now()).toString());
             await updatePadletContent(commentPopupPadletId, doc.body.innerHTML);
             setCommentPopupComments(nextComments);
           }
-        }}
-        onCommentColor={async (commentId, textColor, backgroundColor) => {
+        })}
+        onCommentColor={guardCommentMutation(anchoredAccessMode, async (commentId, textColor, backgroundColor) => {
           // Per-comment text/highlight color -- distinct from the onColor
           // handler above, which colors the highlighted document text span
           // the whole thread is anchored to (the `data-color` attribute).
@@ -222,23 +238,24 @@ export default function OverlayLayer({
             const last = nextComments[nextComments.length - 1];
             target.setAttribute('data-comment-thread', JSON.stringify(nextComments));
             target.setAttribute('data-comment-text', last?.text || '');
-            target.setAttribute('data-user-id', last?.userId || 'user1');
-            target.setAttribute('data-user-name', last?.userName || 'User');
+            target.setAttribute('data-user-id', last?.userId || '');
+            target.setAttribute('data-user-name', last?.userName || 'Anonymous');
             target.setAttribute('data-timestamp', (last?.timestamp || Date.now()).toString());
             await updatePadletContent(commentPopupPadletId, doc.body.innerHTML);
             setCommentPopupComments(nextComments);
           }
-        }}
+        })}
         comments={commentPopupComments}
         highlightColor={commentPopupHighlightColor}
-        currentUserId={user?.id || 'user1'}
-        currentUserName={user?.email?.split('@')[0] || 'User'}
+        currentUserId={user?.id}
+        currentUserName={user?.email?.split('@')[0] || 'Anonymous'}
         position={commentPopupPosition}
-        onColorPickerOpenChange={setTextLinkColorPickerOpen}
+        onColorPickerOpenChange={canManageAnchoredComments ? setTextLinkColorPickerOpen : () => {}}
+        accessMode={anchoredAccessMode}
       />
 
       {/* Text Link Comment Color Picker - positioned on LEFT of the card */}
-      {textLinkColorPickerOpen && commentPopupOpen && textLinkColorPickerPosition && (
+      {canManageAnchoredComments && textLinkColorPickerOpen && commentPopupOpen && textLinkColorPickerPosition && (
         <div
           className="fixed z-[9999] bg-white rounded-lg shadow-xl border border-gray-200 p-3 min-w-[240px]"
           style={{
@@ -261,7 +278,7 @@ export default function OverlayLayer({
             onSelectColor={() => {
               // Text color changes are handled by the CommentPopup's internal editor
             }}
-            onSelectHighlight={async (color) => {
+            onSelectHighlight={guardCommentMutation(anchoredAccessMode, async (color) => {
               // Update the highlight color on the comment mark
               if (!commentPopupPadletId || !commentPopupCommentId) return;
               const padlet = padlets.find((p) => p.id === commentPopupPadletId);
@@ -278,7 +295,7 @@ export default function OverlayLayer({
                 await updatePadletContent(commentPopupPadletId, doc.body.innerHTML);
                 setCommentPopupHighlightColor(color === 'transparent' ? undefined : color);
               }
-            }}
+            })}
             currentHeading="normal"
             currentColor={undefined}
             currentHighlight={commentPopupHighlightColor}

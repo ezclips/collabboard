@@ -1239,6 +1239,69 @@ describe('PATCH 8O.1/8O.2 -- canonical comment permission wiring', () => {
     });
   });
 
+  describe('Document anchored/highlighted comments -- permission wiring (PATCH 8AA)', () => {
+    it('DocumentEditor keeps anchored comments special, accepts accessMode, allows read-open, and guards write callbacks', () => {
+      const documentEditor = read('components/collabboard/editors/DocumentEditor.tsx');
+      const block = commentPopupBlockAfter(documentEditor, '<CommentPopup');
+
+      expect(documentEditor).toContain("import { guardCommentMutation, type CommentAccessMode } from '@/lib/domain/canvas/comments';");
+      expect(documentEditor).toContain('accessMode?: CommentAccessMode;');
+      expect(documentEditor).toContain("const anchoredAccessMode: CommentAccessMode = accessMode === 'manage' ? 'manage' : 'read';");
+      expect(documentEditor).toContain("onTextComment: canManageAnchoredComments ? handleTextComment : undefined");
+      expect(documentEditor).toContain("closest?.('[data-comment-id]')");
+      expect(documentEditor).toContain('openThreadFromCommentElement(commentTarget)');
+      expect(documentEditor).toContain('setSavedSelection(null);');
+      expect(documentEditor).toContain('if (!editor || !canManageAnchoredComments) return;');
+      expect(documentEditor).toContain('if (!editor || !canManageAnchoredComments || !commentText || !activeThread || !savedSelection) return;');
+      expect(block).toContain('accessMode={canManageAnchoredComments && savedSelection ? \'manage\' : \'read\'}');
+      expect(block).toContain('onSubmit={guardCommentMutation(anchoredAccessMode, handleAddComment)}');
+      expect(block).toContain('onCommentColor={guardCommentMutation(anchoredAccessMode, handleCommentColor)}');
+      expect(documentEditor).not.toContain('detachedComments');
+    });
+
+    it('CanvasModals threads the resolved access mode into DocumentEditor without creating a normal/detached tier', () => {
+      const canvasModals = read('components/collabboard/canvas/ui/CanvasModals.tsx');
+      const start = canvasModals.indexOf('<DocumentEditor');
+      expect(start).toBeGreaterThan(-1);
+      const end = canvasModals.indexOf('/>', start);
+      const block = canvasModals.slice(start, end);
+      expect(block).toContain('accessMode={commentAccessMode}');
+      expect(block).toContain('currentUserId={user?.id}');
+    });
+
+    it('OverlayLayer passes accessMode and guards every anchored updatePadletContent mutation path', () => {
+      const overlay = read('components/collabboard/canvas/ui/OverlayLayer.tsx');
+      const block = commentPopupBlockAfter(overlay, '<CommentPopup');
+
+      expect(overlay).toContain("import { guardCommentMutation, type CommentAccessMode } from '@/lib/domain/canvas/comments';");
+      expect(overlay).toContain('accessMode?: CommentAccessMode;');
+      expect(overlay).toContain("import { isDocumentPost } from '@/lib/domain/canvas/documentPost';");
+      expect(overlay).toContain("const requestedDocumentAccessMode: CommentAccessMode = accessMode === 'manage' ? 'manage' : 'read';");
+      expect(overlay).toContain('activeCommentPadlet && isDocumentPost(activeCommentPadlet)');
+      expect(block).toContain('accessMode={anchoredAccessMode}');
+      for (const prop of ['onSubmit=', 'onEditComment=', 'onRemoveComment=', 'onRemoveThread=', 'onColor=', 'onToggleCommentStrikethrough=', 'onCommentColor=']) {
+        const propStart = block.indexOf(prop);
+        expect(propStart, `${prop} must be present`).toBeGreaterThan(-1);
+        const nextNonSpace = block.slice(propStart + prop.length).match(/^\s*\{?\s*(\S+)/);
+        expect(nextNonSpace?.[1]?.startsWith('guardCommentMutation('), `${prop} must be wrapped with guardCommentMutation(...), found: ${nextNonSpace?.[0]}`).toBe(true);
+      }
+      expect(block).toContain('onColorPickerOpenChange={canManageAnchoredComments ? setTextLinkColorPickerOpen : () => {}}');
+      expect(overlay).toContain('{canManageAnchoredComments && textLinkColorPickerOpen && commentPopupOpen && textLinkColorPickerPosition && (');
+      expect(overlay).toContain('onSelectHighlight={guardCommentMutation(anchoredAccessMode, async (color) => {');
+      expect(overlay).not.toContain("|| 'user1'");
+      expect(overlay).not.toContain("|| 'User'");
+    });
+
+    it('CanvasClient threads the resolved access mode into OverlayLayer', () => {
+      const canvas = read(CANVAS_PATH);
+      const start = canvas.indexOf('<OverlayLayer');
+      expect(start).toBeGreaterThan(-1);
+      const end = canvas.indexOf('/>', start);
+      const block = canvas.slice(start, end);
+      expect(block).toContain('accessMode={commentAccessMode}');
+    });
+  });
+
   describe('architecture guard -- every <CommentPopup usage in these three files is accounted for', () => {
     it('FreeformPadletCards.tsx has exactly 8 <CommentPopup usages, all 8 wired (Clipart Site B, Image x2, Note x2, Todo x1, Link x1, Table x1)', () => {
       const freeform = read(FREEFORM_PATH);
@@ -1261,9 +1324,9 @@ describe('PATCH 8O.1/8O.2 -- canonical comment permission wiring', () => {
     it('CanvasClient.tsx has exactly 1 <CommentPopup usage and it is wired', () => {
       const canvas = read(CANVAS_PATH);
       const total = (canvas.match(/<CommentPopup/g) ?? []).length;
-      const wired = (canvas.match(/accessMode=\{commentAccessMode\}/g) ?? []).length;
       expect(total).toBe(1);
-      expect(wired).toBe(1);
+      const block = commentPopupBlockAfter(canvas, '<CommentPopup');
+      expect(block).toContain('accessMode={commentAccessMode}');
     });
 
     it('ClipartCardDraftModal.tsx has exactly 1 <CommentPopup usage and it is wired', () => {

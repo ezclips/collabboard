@@ -7997,6 +7997,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
             padlets={padlets}
             lines={lines}
             user={user}
+            accessMode={commentAccessMode}
             updatePadletContent={updatePadletContent}
             duplicateLine={duplicateLine}
             deleteLine={deleteLine}

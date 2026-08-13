@@ -912,7 +912,7 @@ product-facing post families for 10 live type literals (`'file'` excluded).
 | AI Component | `ai-component` | yes | CANONICAL | none | guarded |
 | Link | `link` | yes | CANONICAL | none | guarded |
 | Table | `table` | yes | CANONICAL | none | guarded (storage: `padlet.content` JSON, not `metadata`) |
-| Document | `card` (no `svgUrl`) | no | N/A (PATCH 8Q) | anchored/highlighted threads | N/A normal; anchored tier UNGATED |
+| Document | `card` (no `svgUrl`) | no | N/A (PATCH 8Q) | anchored/highlighted threads | N/A normal; anchored tier **PERMISSION SAFE -- READ / MANAGE** (PATCH 8AA) |
 | Container | `container` | no | N/A (PATCH 8W) | embedded child `CommentPopup` renderer | N/A normal; child renderer UNGATED |
 | Comment post | `comment` | no (its entire body IS the comment thread) | SPECIAL / PRIMARY THREAD (PATCH 8X) | is itself the special system | all 3 live surfaces UNGATED |
 
@@ -921,7 +921,7 @@ product-facing post families for 10 live type literals (`'file'` excluded).
 | Special system | Live surfaces | Permission status |
 | --- | --- | --- |
 | Note anchored/highlighted threads | `NoteEditor.tsx` (in-modal), `OverlayLayer.tsx` (on-canvas) | PERMISSION UNGATED |
-| Document anchored/highlighted threads | `DocumentEditor.tsx` (in-modal), `OverlayLayer.tsx` (on-canvas, shared with Note) | PERMISSION UNGATED |
+| Document anchored/highlighted threads | `DocumentEditor.tsx` (in-modal), `OverlayLayer.tsx` (on-canvas, shared with Note) | **PERMISSION SAFE -- READ / MANAGE** (PATCH 8AA, 2026-08-13) |
 | Comment post primary thread | `CommentPost.tsx`, `FreeformPadletCards.tsx`'s collapsed-marker inline block, `CommentEditor.tsx` | **PERMISSION SAFE -- READ / MANAGE** (PATCH 8Z, 2026-08-13) |
 | Container embedded child `CommentPopup` renderer | `ContainerEditor.tsx`'s `SortableChildItem` | PERMISSION UNGATED |
 | `EmbeddedCommentList` (compact child renderer) | `RowColumnContainerCard.tsx`, `PostCardContent.tsx` | PERMISSION UNGATED (component has no `accessMode` concept at all) |
@@ -1013,13 +1013,13 @@ migrates.
 
 ### Next-phase backlog (priority order, not implemented)
 
-1. **Permission wiring for the five UNGATED special surfaces** (Comment post
-   primary thread, Document anchored threads, Note anchored threads,
-   Container's embedded child `CommentPopup`, `EmbeddedCommentList`) -- the
-   single largest concentration of real gaps found by this audit; every one
-   of them lets a workspace-readonly user mutate comments today. Highest
-   priority because it's a genuine permission hole, not a UI/architecture
-   preference.
+1. **Permission wiring for the remaining UNGATED special surfaces** (Note
+   anchored threads, Container's embedded child `CommentPopup`,
+   `EmbeddedCommentList`) -- the largest remaining concentration of real gaps
+   found by this audit. Comment post primary thread was closed by PATCH 8Z;
+   Document anchored/highlighted threads were closed by PATCH 8AA. Highest
+   priority because the remaining items are genuine permission holes, not
+   UI/architecture preferences.
 2. **Comment post primary-thread dedicated adapter patch** (per PATCH 8X) --
    whether to bring its rich TipTap composer capability (Bold/Italic/
    Underline/lists/code/align/emoji) INTO `CommentPopup` as an opt-in
@@ -1160,8 +1160,23 @@ inside `<CommentPopup ... />` blocks specifically
 (`countGuardedCommentPopupUsages`), which is a strictly more correct
 signal than before this patch, not a weakened one.
 
-Remaining PERMISSION UNGATED special surfaces after this patch: Document
-anchored/highlighted threads, Note anchored/highlighted threads, Container's
-embedded child `CommentPopup` renderer, and `EmbeddedCommentList` -- each a
-candidate for its own dedicated permission-wiring patch, per PATCH 8Y's
-next-phase backlog.
+Remaining PERMISSION UNGATED special surfaces after PATCH 8Z and PATCH 8AA:
+Note anchored/highlighted threads, Container's embedded child `CommentPopup`
+renderer, and `EmbeddedCommentList` -- each a candidate for its own dedicated
+permission-wiring patch, per PATCH 8Y's next-phase backlog.
+
+**Document anchored/highlighted comments were permission-wired in PATCH 8AA**
+(2026-08-13). This remains a SPECIAL / ANCHORED / HIGHLIGHTED controller, not
+a normal/detached comment tier and not a `detachedComments` migration. The live
+source of truth is still the TipTap `comment` mark (`data-comment-id`,
+`data-comment-text`, `data-comment-thread`, `data-user-id`, `data-user-name`,
+`data-timestamp`, `data-color`) persisted through `padlet.content`. The patch
+only threads the existing `CommentAccessMode` from `CanvasClient.tsx` into
+`CanvasModals.tsx -> DocumentEditor.tsx` and into `OverlayLayer.tsx`, normalizes
+the dormant COMMENT tier to READ for this surface, and wraps every Document
+anchored write path in `guardCommentMutation(...)`. `OverlayLayer.tsx` is shared
+with Note anchored threads, so PATCH 8AA gates it only when the active padlet
+matches `isDocumentPost(...)`; Note anchored threads remain outside this
+Document-only permission patch. READ users may open and read existing Document
+anchored threads; they cannot create, submit, edit, delete, color, highlight,
+strikethrough, or invoke the separate anchored highlight picker.

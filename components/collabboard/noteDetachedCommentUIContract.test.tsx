@@ -94,7 +94,7 @@ describe('normal/detached Note comments — canonical Comment UI v1 migration', 
     }
   });
 
-  it('proves highlighted/anchored Note threads remain on their frozen path', () => {
+  it('proves in-modal highlighted/anchored Note threads remain on their frozen path while the shared overlay may be permission-wired', () => {
     const currentNote = read(NOTE_EDITOR);
     const oldNote = baseline(NOTE_EDITOR);
     const anchoredStart = '  const parseCommentThread =';
@@ -106,6 +106,9 @@ describe('normal/detached Note comments — canonical Comment UI v1 migration', 
     expect(currentStart).toBeGreaterThanOrEqual(0);
     expect(currentEnd).toBeGreaterThan(currentStart);
     expect(currentNote.slice(currentStart, currentEnd)).toBe(oldNote.slice(oldStart, oldEnd));
-    expect(read(OVERLAY)).toBe(baseline(OVERLAY));
+    const overlay = read(OVERLAY);
+    expect(overlay).toContain('accessMode?: CommentAccessMode;');
+    expect(overlay).toContain('accessMode={anchoredAccessMode}');
+    expect(overlay).not.toContain('detachedComments');
   });
 });
