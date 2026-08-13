@@ -1,12 +1,15 @@
 # Canonical Comment UI Contract v1
 
-## Rollout status (updated PATCH 8AK, 2026-08-13)
+## Rollout status (updated PATCH 8AL, 2026-08-13)
 
 NORMAL UI CANONICALIZATION = **CLOSED**
 COMMENT PERMISSION SAFETY = **CLOSED**
 SPECIAL UI CONSOLIDATION = **NOT CLOSED / NOT YET DECIDED**
-DEAD CODE CLEANUP = **PARTIAL -- proven-unreachable comment surfaces removed (PATCH 8AF); the dead Card Post Modal wrapper's non-comment remainder removed (PATCH 8AG); RowCanvas.tsx (whole file) and the "Left Toolbar" false block removed (PATCH 8AI); the superseded CommentList/FreeformCommentRow pilot removed (PATCH 8AK); only the dormant COMMENT tier "shelve vs activate" decision remains open**
+DEAD CODE CLEANUP = **PARTIAL -- proven-unreachable comment surfaces removed (PATCH 8AF); the dead Card Post Modal wrapper's non-comment remainder removed (PATCH 8AG); RowCanvas.tsx (whole file) and the "Left Toolbar" false block removed (PATCH 8AI); the superseded CommentList/FreeformCommentRow pilot removed (PATCH 8AK); the dormant COMMENT tier's "shelve vs activate" decision was resolved as SHELVE/RETAIN DORMANT (PATCH 8AL, not a deletion) -- no comment-related cleanup items remain open**
 KANBAN COMMENT SYSTEM = **OUTSIDE CURRENT COLLABBOARD CONTRACT**
+COMMENTER-ONLY / COMMENT TIER = **SHELVED -- NOT LIVE** (PATCH 8AL)
+COMMENT TIER SECURITY READINESS = **NOT READY** (PATCH 8AL)
+COMMENT TIER ACTIVATION = **PROJECT-SCALE FUTURE PRODUCT/AUTHORIZATION WORK** (PATCH 8AL)
 
 "COMMENT PERMISSION SAFETY = CLOSED" means: every live CollabBoard/Padlet
 comment surface (normal/detached, special/primary-thread, special/anchored,
@@ -1982,3 +1985,90 @@ remainder of the dead Card Post Modal wrapper in `FreeformPadletCards.tsx`
 disposition, (3) the `CommentList`/`FreeformCommentRow` pilot and dormant
 COMMENT-tier "shelve vs activate" decisions (pre-existing, unchanged by
 this patch). See the rollout-status block at the top of this document.
+
+## PATCH 8AL -- dormant COMMENT permission tier disposition audit -- SHELVE / RETAIN DORMANT
+
+PATCH 8AL (2026-08-13, starting HEAD `4a81cd2`) was a read-only audit -- zero
+production files changed -- answering the last open item from PATCH 8AF's
+list: whether the dormant `CommentAccessMode = 'comment'` tier should be
+Activated, Shelved, Removed, Redesigned, or left for a product decision.
+
+**Verdict: SHELVE / RETAIN DORMANT.** The client-side design (three-tier
+model, ownership semantics via `canMutateComment`/`isOwnComment`, fail-safe
+persistence in `lib/infra/canvas/commentMutations.ts`, ~76 dedicated tests) is
+coherent, well-isolated, and worth preserving as a documented dormant
+contract. It is not being removed. It is also not activation-ready, and
+nothing in this codebase should treat its existence as evidence that it can
+be safely turned on.
+
+**Why not activate.** Of the six criteria this audit judged activation
+against, five fail:
+
+- No current, explicit product requirement was found for a commenter-only
+  role (only historical intent, from the PATCH 8O.2 design/revert).
+- The live authorization model cannot represent a board-level commenter:
+  `get_board_permission()` targets the dead `canvases` schema vertical, not
+  the live `boards`/`padlets` tables (independently re-confirmed this patch;
+  see "BoardPermission wiring was attempted in PATCH 8O.2 and REVERTED in
+  PATCH 8O.2a" above and `LESSONS_LEARNED.md`).
+- No credible server-side enforcement exists: `padlets_insert`/`update`/
+  `delete` RLS excludes `'commenter'` from all writes, and the one RPC
+  designed to bypass that safely (`comment_mutate`) is quarantined and, per
+  its own header, has known-wrong permission-resolution logic.
+- Storage coverage is incomplete: the dormant persistence path only reaches
+  `metadata.detachedComments` -- not `metadata.comments` (primary thread),
+  `padlet.content` (Table), TipTap anchored marks, or Map-layer paths.
+- No live product flow can grant real commenter access: workspace-invite
+  acceptance (the only live writer of `canvas_collaborators.board_permission`)
+  can structurally never produce `'commenter'` (it derives from
+  `WorkspaceRole`, which has no commenter-equivalent tier), and share-link
+  redemption's `'comment'` option is a cosmetic UI label only, never wired to
+  `resolveCommentAccessMode` or any real grant.
+
+Only ownership semantics (own-comment-only mutation rights) are fully solid
+today.
+
+**Why not remove.** Removal cost is real but moderate, and would discard a
+genuinely reusable, already-tested ownership/fail-safe contract for no
+current benefit. The dormant branches are provably inert and well-isolated
+(this document's own closure guards -- `commentPermissionClosure.contract.
+test.tsx`'s "COMMENT dormancy" checks -- already prove exactly one live
+`resolveCommentAccessMode(` producer with no `boardPermission` argument), so
+retaining them costs ongoing patch-scope discipline, not runtime risk.
+
+**Explicit anti-reactivation warning.** The existence of
+`CommentAccessMode = 'comment'`, the comment-mode client tests,
+`commentMutations.ts`, `BoardPermission = 'commenter'`, and the quarantined
+`comment_mutate` draft must **not** be read as evidence that commenter access
+can be safely enabled by passing a `boardPermission` value into
+`resolveCommentAccessMode`. That exact wiring was attempted in PATCH 8O.2 and
+reverted in PATCH 8O.2a after live testing exposed the dead-schema
+dependency above -- see "Activation requirements for COMMENT" earlier in
+this document for the five conditions that must all hold before any future
+re-wiring, none of which hold today.
+
+**What future activation actually requires**, in order -- not "restore the
+second `resolveCommentAccessMode` argument" or "deploy the quarantined RPC":
+
+```text
+PRODUCT REQUIREMENT
+  -> AUTHORIZATION MODEL (board-level commenter, against live `boards`)
+  -> LIVE SCHEMA (a real collaborator-role table wired to `boards`, not `canvases`)
+  -> SERVER ENFORCEMENT (RLS/RPC rebuilt and reviewed against that schema)
+  -> STORAGE COVERAGE (every live comment surface, not just detachedComments)
+  -> UI GRANT FLOW (a real path that assigns commenter, not a cosmetic label)
+  -> CLIENT ACTIVATION (only then, resolveCommentAccessMode's second argument)
+```
+
+This is project-scale future product/authorization work, not a wiring patch.
+
+**Quarantined RPC status, unchanged**: `.fable5/drafts/
+comment_mutate_rpc_20260812.sql` remains design reference / quarantined --
+not an active migration, not a production RPC, not activation-ready. It was
+not modified, moved, or executed by this patch.
+
+**Validation:** focused suite (6 files, 293 tests) and full suite (132 files,
+2245 tests) both green, unchanged from the PATCH 8AK baseline. `npx tsc
+--noEmit`, `npm run check:boundaries`, and `git diff --check` all clean.
+Zero production files changed; zero migration/RLS/RPC changes; zero
+live-data actions.
