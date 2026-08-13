@@ -63,7 +63,11 @@ describe('CommentEditor -- TipTap/rich-editor configuration freeze (PATCH 8Z)', 
     const src = fs.readFileSync('components/collabboard/editors/CommentEditor.tsx', 'utf8');
     const block = src.slice(src.indexOf('const COMMENT_EXTENSIONS'), src.indexOf('import { ColorPickerContent'));
     expect(block).toContain('StarterKit.configure({ link: false, underline: false })');
-    expect(block).toContain('Link.configure(');
+    // PATCH 8AR -- Link config now comes from the shared
+    // createCommentLinkExtension() factory (components/collabboard/commentLinkAuthoring.ts),
+    // not an inline Link.configure(...) call. Same resulting extension/capability.
+    expect(block).toContain('createCommentLinkExtension()');
+    expect(block).not.toContain('Link.configure(');
     expect(block).toContain('Underline');
     expect(block).toContain('TextStyle');
     expect(block).toContain('Color');

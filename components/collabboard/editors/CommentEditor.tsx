@@ -3,7 +3,6 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
-import Link from "@tiptap/extension-link";
 import Underline from "@tiptap/extension-underline";
 import { Highlight } from "@tiptap/extension-highlight";
 import { Color } from "@tiptap/extension-color";
@@ -18,17 +17,14 @@ import TextStylePopup from "./TextStylePopup";
 import { cycleEditorTextAlign } from "./textAlignCycle";
 import { getMeaningfulTitle } from "@/lib/infra/collabboard/postTitle";
 import { handleSafeCommentLinkClick } from "../commentLinkSafety";
+import { createCommentLinkExtension, applyCommentLink } from "../commentLinkAuthoring";
+import { CommentLinkPopover } from "../CommentLinkPopover";
 import { type CommentAccessMode } from "@/lib/domain/canvas/comments";
 
 // Module-level constant -- stable reference, never recreated on render
 const COMMENT_EXTENSIONS = [
   StarterKit.configure({ link: false, underline: false }),
-  Link.configure({
-    openOnClick: false,
-    HTMLAttributes: {
-      class: "text-blue-500 underline cursor-pointer",
-    },
-  }),
+  createCommentLinkExtension(),
   Underline,
   TextStyle,
   Color,
@@ -506,21 +502,9 @@ export default function CommentEditor({
     if (isReadOnly) return;
     const activeEditor = getActiveEditor();
     if (!activeEditor) return;
-    
-    // Restore saved selection if available
-    if (savedSelectionRef.current) {
-      const { from, to } = savedSelectionRef.current;
-      activeEditor.chain().focus().setTextSelection({ from, to }).run();
-    }
-    
-    if (linkUrl === "") {
-      activeEditor.chain().focus().unsetLink().run();
-    } else {
-      let finalUrl = linkUrl;
-      if (!/^https?:\/\//i.test(finalUrl)) finalUrl = "https://" + finalUrl;
-      // Use setLink directly on the current selection instead of extendMarkRange
-      activeEditor.chain().focus().setLink({ href: finalUrl }).run();
-    }
+
+    applyCommentLink(activeEditor, linkUrl, savedSelectionRef.current);
+
     setLinkInputOpen(false);
     setLinkUrl("");
     savedSelectionRef.current = null;
@@ -707,26 +691,14 @@ export default function CommentEditor({
               className="absolute left-full top-0 ml-2 z-[60] bg-white rounded-lg shadow-lg p-3 border border-gray-200"
               onMouseDown={(e) => e.preventDefault()}
             >
-              <div className="flex items-center gap-2">
-                <input
-                  type="url"
-                  value={linkUrl}
-                  onChange={(e) => setLinkUrl(e.target.value)}
-                  placeholder="google.com"
-                  className="flex-1 px-3 py-2 border border-blue-400 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-200 text-sm w-64"
-                  autoFocus
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") handleApplyLink();
-                    if (e.key === "Escape") setLinkInputOpen(false);
-                  }}
-                />
-                <button
-                  onClick={handleApplyLink}
-                  className="px-4 py-2 text-gray-600 hover:text-gray-900 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50"
-                >
-                  Add
-                </button>
-              </div>
+              <CommentLinkPopover
+                url={linkUrl}
+                onUrlChange={setLinkUrl}
+                onApply={handleApplyLink}
+                onCancel={() => setLinkInputOpen(false)}
+                inputClassName="flex-1 px-3 py-2 border border-blue-400 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-200 text-sm w-64"
+                applyButtonClassName="px-4 py-2 text-gray-600 hover:text-gray-900 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50"
+              />
             </div>
           )}
 

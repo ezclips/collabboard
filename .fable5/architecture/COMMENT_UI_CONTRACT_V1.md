@@ -1454,6 +1454,39 @@ found to already supply correct, non-`savedSelection`-coupled `accessMode`
 and every mutation callback (including `onRemoveThread` and `onColor`) --
 no changes were needed there.
 
+**A shared Link-authoring primitive was extracted in PATCH 8AR** (2026-08-13),
+in response to PATCH 8AQ's audit finding that `CommentPopup.tsx` and
+`CommentEditor.tsx` independently duplicated their TipTap `Link` extension
+config, URL normalization (`example.com` -> `https://example.com`), and
+apply/update/remove-Link command logic. `components/collabboard/commentLinkAuthoring.ts`
+now exports `createCommentLinkExtension()` (a factory, not a shared instance,
+so each editor's own `useEditor` extensions array still declares its own
+Link extension exactly as it always has), `normalizeCommentLinkUrl(url)`
+(pure prefixer; does not trim or treat `''` specially -- CommentPopup's own
+pre-existing trim-before-call and CommentEditor's own pre-existing
+no-trim-before-call behaviors are both preserved unchanged, not unified),
+and `applyCommentLink(editor, rawUrl, selection)` (the full apply/unset/
+collapsed-selection-insert branching, now the single implementation both
+callers delegate to). `components/collabboard/CommentLinkPopover.tsx` shares
+the URL-input+Add-button JSX; each caller still supplies its own
+`inputClassName`/`applyButtonClassName` (sizes differ: CommentPopup's is
+`text-xs`/`w-56`, CommentEditor's is `text-sm`/`w-64`) and still owns its own
+positioned wrapper (CommentPopup: portaled fixed box via `useAnchoredPopover`;
+CommentEditor: static absolute box) -- only the inner input/button pair and
+Enter/Escape handling are shared. Selection ownership (`savedLinkSelectionRef`/
+`savedLinkEditorRef` in CommentPopup; `savedSelectionRef`/`getActiveEditor()`
+in CommentEditor) and all permission checks (`isReadOnly`,
+`canMutateCommentById` in CommentPopup; `isReadOnly` in CommentEditor)
+deliberately stayed local to each caller -- the shared primitive receives
+only an already-resolved editor instance, URL string, and selection range,
+and assumes the caller has already authorized the action. CommentPopup's and
+CommentEditor's user-visible Link behavior is unchanged (characterized
+before extraction, re-verified after); `CommentEditor.link.test.tsx` was
+added as new behavioral coverage since no such test previously existed for
+CommentEditor's Link flow. `CommentRow.tsx`/`EmbeddedCommentList.tsx` do
+**not** consume this primitive yet -- embedded Link authoring remains
+pending PATCH 8AS.
+
 **Note anchored/highlighted comments were permission-wired in PATCH 8AB**
 (2026-08-13). Same SPECIAL / ANCHORED / HIGHLIGHTED classification, same
 TipTap `comment` mark storage (`NoteEditor.tsx`'s own extension registry,

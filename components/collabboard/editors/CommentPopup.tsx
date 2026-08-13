@@ -9,10 +9,11 @@ import StarterKit from '@tiptap/starter-kit';
 import { Color } from '@tiptap/extension-color';
 import { TextStyle as TipTapTextStyle } from '@tiptap/extension-text-style';
 import { Highlight } from '@tiptap/extension-highlight';
-import Link from '@tiptap/extension-link';
 import TextStylePopup from './TextStylePopup';
 import { useAnchoredPopover, rectFromElement, preventPopoverFocusLoss, panelSpanAnchorRect, type AnchorRect } from './useAnchoredPopover';
 import { handleSafeCommentLinkClick } from '../commentLinkSafety';
+import { createCommentLinkExtension, applyCommentLink } from '../commentLinkAuthoring';
+import { CommentLinkPopover } from '../CommentLinkPopover';
 import { canMutateComment, type CommentAccessMode } from '@/lib/domain/canvas/comments';
 
 // Same 48-color badge palette every other post's Comments panel (Note,
@@ -37,12 +38,7 @@ const COMMENT_POPUP_EXTENSIONS = [
     TipTapTextStyle,
     Color,
     Highlight.configure({ multicolor: true }),
-    Link.configure({
-        openOnClick: false,
-        HTMLAttributes: {
-            class: 'text-blue-500 underline cursor-pointer',
-        },
-    }),
+    createCommentLinkExtension(),
 ];
 
 interface CommentData {
@@ -569,32 +565,7 @@ export default function CommentPopup({
         const saved = savedLinkSelectionRef.current;
         const trimmed = linkUrl.trim();
 
-        if (trimmed === '') {
-            const chain = editor.chain().focus();
-            if (saved) chain.setTextSelection(saved);
-            chain.unsetLink().run();
-        } else {
-            const finalUrl = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
-            if (saved && saved.from !== saved.to) {
-                // Text was selected -- link exactly that range.
-                editor.chain().focus().setTextSelection(saved).setLink({ href: finalUrl }).run();
-            } else {
-                // Nothing selected: setLink() would mark an empty range and
-                // silently produce no anchor at all. Insert the URL as linked
-                // text at the cursor instead (what Docs/Notion/Slack do), then
-                // clear the stored mark so typing afterwards isn't linked too.
-                const chain = editor.chain().focus();
-                if (saved) chain.setTextSelection(saved.from);
-                chain
-                    .insertContent({
-                        type: 'text',
-                        text: trimmed,
-                        marks: [{ type: 'link', attrs: { href: finalUrl } }],
-                    })
-                    .unsetMark('link')
-                    .run();
-            }
-        }
+        applyCommentLink(editor, trimmed, saved);
 
         // Persist immediately rather than waiting for a later blur -- Escape,
         // Delete, or the panel closing would otherwise discard the link
@@ -910,29 +881,17 @@ export default function CommentPopup({
                     onClick={(e) => e.stopPropagation()}
                     onMouseDown={preventPopoverFocusLoss}
                 >
-                    <div className="flex items-center gap-2">
-                        <input
-                            type="url"
-                            value={linkUrl}
-                            onChange={(e) => setLinkUrl(e.target.value)}
-                            placeholder="google.com"
-                            className="px-3 py-1.5 border border-blue-400 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-200 text-xs w-56"
-                            autoFocus
-                            onKeyDown={(e) => {
-                                if (e.key === 'Enter') handleApplyLink();
-                                if (e.key === 'Escape') {
-                                    setLinkPopoverCommentId(null);
-                                    refocusCommentEditor();
-                                }
-                            }}
-                        />
-                        <button
-                            onClick={handleApplyLink}
-                            className="px-3 py-1.5 text-gray-600 hover:text-gray-900 text-xs font-medium border border-gray-300 rounded-lg hover:bg-gray-50"
-                        >
-                            Add
-                        </button>
-                    </div>
+                    <CommentLinkPopover
+                        url={linkUrl}
+                        onUrlChange={setLinkUrl}
+                        onApply={handleApplyLink}
+                        onCancel={() => {
+                            setLinkPopoverCommentId(null);
+                            refocusCommentEditor();
+                        }}
+                        inputClassName="px-3 py-1.5 border border-blue-400 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-200 text-xs w-56"
+                        applyButtonClassName="px-3 py-1.5 text-gray-600 hover:text-gray-900 text-xs font-medium border border-gray-300 rounded-lg hover:bg-gray-50"
+                    />
                 </div>,
                 document.body
             )}
