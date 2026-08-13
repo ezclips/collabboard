@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { findContainerOverlappingRect, getEligibleContainerDestinations } from './utils';
+import { DOT_GRID_UNIT_PX, IMAGE_CROP_TO_GRID_HEIGHT_PX, findContainerOverlappingRect, getEligibleContainerDestinations } from './utils';
 import type { Padlet } from '@/types/collabboard';
 
 function padlet(overrides: Partial<Padlet> & { id: string }): Padlet {
@@ -93,5 +93,16 @@ describe('findContainerOverlappingRect (post-refactor regression)', () => {
     );
 
     expect(result).toBeNull();
+  });
+});
+
+describe('DOT_GRID_UNIT_PX / IMAGE_CROP_TO_GRID_HEIGHT_PX (PATCH 9B)', () => {
+  it('matches CanvasClient.tsx\'s canonical dot-grid background pattern spacing', () => {
+    expect(DOT_GRID_UNIT_PX).toBe(18);
+  });
+
+  it('the image crop-to-grid height is a whole multiple of the grid unit', () => {
+    expect(IMAGE_CROP_TO_GRID_HEIGHT_PX % DOT_GRID_UNIT_PX).toBe(0);
+    expect(IMAGE_CROP_TO_GRID_HEIGHT_PX).toBe(216);
   });
 });

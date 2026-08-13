@@ -18,6 +18,7 @@ import { isDocumentPost } from "@/lib/domain/canvas/documentPost";
 import { resolvePadletTitleStyle } from "@/lib/domain/canvas/captionStyle";
 import DocumentCardContent from "./DocumentCardContent";
 import { guardCommentMutation, type CommentAccessMode } from "@/lib/domain/canvas/comments";
+import { IMAGE_CROP_TO_GRID_HEIGHT_PX } from "@/components/collabboard/canvas/engine/utils";
 
 type CellStyle = {
     bg?: string;
@@ -686,6 +687,10 @@ export default function PostCardContent({
         const useDrawingContainerImageBinding = canvasContext === "drawing" && isInContainer;
         const isDocThumbnail = (padlet.metadata as any)?.importKind === 'document';
         const providerLabel = (padlet.metadata as any)?.importProvider === 'google-drive' ? 'Google Drive' : 'OneDrive';
+        // Same grid-crop treatment as the root-level Freeform card (see
+        // FreeformPadletCards.tsx) -- Container/Map/Drawing-nested Image
+        // posts must show the same effect, using the same shared constant.
+        const isCropToGrid = (padlet.metadata as any)?.cropToGrid === true;
         return (
             <div
                 className={`group/img relative flex flex-col ${isInContainer ? 'gap-0' : 'gap-2'} ${importOpenUrl ? 'cursor-pointer' : 'pointer-events-none'}`}
@@ -695,11 +700,15 @@ export default function PostCardContent({
                 <div className="relative">
                     <img
                         src={imageSrc}
-                        className={isInContainer && !isDocThumbnail
-                            ? "w-full h-auto object-contain bg-gray-50"
-                            : "w-full object-contain bg-gray-50"
+                        className={isCropToGrid
+                            ? "w-full object-cover bg-gray-50"
+                            : isInContainer && !isDocThumbnail
+                                ? "w-full h-auto object-contain bg-gray-50"
+                                : "w-full object-contain bg-gray-50"
                         }
-                        style={isInContainer ? (isDocThumbnail ? { maxHeight: "200px" } : undefined) : { maxHeight: "200px" }}
+                        style={isCropToGrid
+                            ? { height: `${IMAGE_CROP_TO_GRID_HEIGHT_PX}px` }
+                            : isInContainer ? (isDocThumbnail ? { maxHeight: "200px" } : undefined) : { maxHeight: "200px" }}
                         alt="preview"
                         onError={(e) => {
                             (e.target as HTMLImageElement).style.display = "none";

@@ -9,6 +9,21 @@ export const isStripVisible = (color?: string): boolean => {
   return !!color && color !== 'transparent';
 };
 
+/**
+ * The canonical dot-grid spacing: CanvasClient.tsx's board background
+ * pattern ('radial-gradient(...) <n>px <n>px', four identical occurrences).
+ * The single source of truth for anything that needs to align to the grid,
+ * so a second, arbitrary magic number never has to be invented.
+ */
+export const DOT_GRID_UNIT_PX = 18;
+
+/**
+ * "Crop Image to Fit Dot Grid" target height: a clean multiple of the
+ * dot-grid unit an image can object-fit: cover into, so its bottom edge
+ * lands on a grid line.
+ */
+export const IMAGE_CROP_TO_GRID_HEIGHT_PX = DOT_GRID_UNIT_PX * 12;
+
 export function debounce<T extends (...args: any[]) => void>(fn: T, ms: number) {
   let t: any;
   return (...args: Parameters<T>) => {

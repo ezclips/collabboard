@@ -42,7 +42,7 @@ import { TodoPostContextMenu } from '@/components/collabboard/menus/TodoPostCont
 import { ColumnPostContextMenu } from '@/components/collabboard/menus/ColumnPostContextMenu';
 import { CommentPostContextMenu } from '@/components/collabboard/menus/CommentPostContextMenu';
 import { ImagePostContextMenu } from '@/components/collabboard/context-menus/ImagePostContextMenu';
-import { isStripVisible, htmlToText, getEligibleContainerDestinations } from '@/components/collabboard/canvas/engine/utils';
+import { isStripVisible, htmlToText, getEligibleContainerDestinations, IMAGE_CROP_TO_GRID_HEIGHT_PX } from '@/components/collabboard/canvas/engine/utils';
 import { getContainerEditTargetLabel } from '@/lib/infra/collabboard/containerEditTargetLabel';
 import {
   Bell, X, Edit2, PenTool, Trash2, Palette, Strikethrough, ChevronDown, ChevronUp, RefreshCw, Pencil, ArrowLeftRight, Plus,
@@ -1353,7 +1353,12 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                 <img
                   src={padlet.metadata?.drawing || padlet.metadata?.imageUrl}
                   alt={padlet.metadata?.caption || 'Image'}
-                  className="w-full h-auto object-contain max-h-[500px] pointer-events-none select-none"
+                  className={(padlet.metadata as any)?.cropToGrid === true
+                    ? "w-full object-cover pointer-events-none select-none"
+                    : "w-full h-auto object-contain max-h-[500px] pointer-events-none select-none"}
+                  style={(padlet.metadata as any)?.cropToGrid === true
+                    ? { height: `${IMAGE_CROP_TO_GRID_HEIGHT_PX}px` }
+                    : undefined}
                 />
                 {padlet.metadata?.source === 'import' && (
                   <div className="absolute bottom-1 left-1 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">

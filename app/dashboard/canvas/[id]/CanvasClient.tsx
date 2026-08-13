@@ -3897,11 +3897,70 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     setImageToolbarPadletId(padlet.id);
   };
 
+  // Replace Image -- same post, new image asset. Reuses the real Supabase
+  // Storage upload pattern already proven by addImageToLink (createStorageGateway
+  // + 'padlet-files' bucket), not the "Add Image" modal's upload tab, which
+  // persists a base64 data URL instead of a real storage URL. Only
+  // metadata.imageUrl changes -- file_url is a creation-time snapshot that
+  // edits (including the pre-existing image-crop-layer feature) never touch,
+  // per PostCardContent.tsx's documented imageSrc precedence contract.
   const replaceImage = (id: string) => {
     const padlet = padlets.find(p => p.id === id);
     if (!padlet || padlet.type !== 'image') return;
 
-    openImagePostEditor(padlet);
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.onchange = async (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+      if (!file.type.startsWith('image/')) {
+        toast.error('Please choose an image file');
+        return;
+      }
+
+      try {
+        const fileName = `image-posts/${id}-${Date.now()}-${file.name}`;
+        const storageGateway = createStorageGateway();
+        const uploadResult = await storageGateway.upload('padlet-files', fileName, file);
+
+        if (!uploadResult.ok) throw uploadResult.error.cause ?? uploadResult.error;
+
+        const imageUrl = storageGateway.getPublicUrl('padlet-files', fileName);
+        const newMetadata = { ...padlet.metadata, imageUrl };
+
+        markPadletLocallyModified(id);
+        const updatePostMetadata = createUpdatePostMetadataCommand(createPostsRepository());
+        const updateResult = await updatePostMetadata({ postId: id, metadata: newMetadata }, { userId: null });
+
+        if (!updateResult.ok) throw updateResult.error.cause ?? updateResult.error;
+
+        setPadlets(prev => prev.map(p =>
+          p.id === id ? { ...p, metadata: newMetadata } : p
+        ));
+        toast.success('Image replaced');
+      } catch (err) {
+        console.error('Failed to replace image:', err);
+        toast.error('Failed to replace image');
+      }
+    };
+    input.click();
+  };
+
+  // Maps a fetched image Blob's MIME type to a safe download extension --
+  // more reliable than parsing the storage/Pexels URL, which often has no
+  // clean file extension (query strings, hashed object keys).
+  const imageExtensionFromMimeType = (mimeType: string): string => {
+    const map: Record<string, string> = {
+      'image/jpeg': 'jpg',
+      'image/png': 'png',
+      'image/gif': 'gif',
+      'image/webp': 'webp',
+      'image/svg+xml': 'svg',
+      'image/bmp': 'bmp',
+      'image/tiff': 'tiff',
+    };
+    return map[mimeType] || 'png';
   };
 
   const downloadImage = async (id: string) => {
@@ -3912,9 +3971,19 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       const response = await fetch(padlet.metadata.imageUrl);
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
+
+      // Prefer a stored original filename (import flows only); otherwise
+      // derive one from the post title and the fetched asset's real MIME
+      // type, per <post-title>.<extension> -- never expose the internal
+      // Supabase storage object key.
+      const importFileName = (padlet.metadata as any)?.importFileName;
+      const filename = typeof importFileName === 'string' && importFileName.trim()
+        ? importFileName
+        : `${(padlet.title || 'image').trim() || 'image'}.${imageExtensionFromMimeType(blob.type)}`;
+
       const link = document.createElement('a');
       link.href = url;
-      link.download = padlet.title || 'downloaded-image';
+      link.download = filename;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
