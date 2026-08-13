@@ -1,11 +1,11 @@
 # Canonical Comment UI Contract v1
 
-## Rollout status (updated PATCH 8AF, 2026-08-13)
+## Rollout status (updated PATCH 8AG, 2026-08-13)
 
 NORMAL UI CANONICALIZATION = **CLOSED**
 COMMENT PERMISSION SAFETY = **CLOSED**
 SPECIAL UI CONSOLIDATION = **NOT CLOSED / NOT YET DECIDED**
-DEAD CODE CLEANUP = **PARTIAL -- proven-unreachable comment surfaces removed (PATCH 8AF); non-comment dead code and the CommentList/FreeformCommentRow pilot / dormant COMMENT tier "shelve vs activate" decisions remain open**
+DEAD CODE CLEANUP = **PARTIAL -- proven-unreachable comment surfaces removed (PATCH 8AF); the dead Card Post Modal wrapper's non-comment remainder removed (PATCH 8AG); RowCanvas.tsx's whole-file disposition, a second dead "Left Toolbar" block found during PATCH 8AG's own audit, and the CommentList/FreeformCommentRow pilot / dormant COMMENT tier "shelve vs activate" decisions remain open**
 KANBAN COMMENT SYSTEM = **OUTSIDE CURRENT COLLABBOARD CONTRACT**
 
 "COMMENT PERMISSION SAFETY = CLOSED" means: every live CollabBoard/Padlet
@@ -1082,17 +1082,38 @@ document), then deleted:
    dead `cardToolbarPadletId` gate -- was deliberately left untouched and is
    recorded below as a new, separate, **not-yet-actioned** finding.
 
-**NOT REMOVED -- new finding, out of this patch's comment-only scope**: the
-rest of the "Card Post Modal" wrapper in `FreeformPadletCards.tsx` (roughly
-250 lines: the `cardToolbarPadletId`/`activeCardToolbarPadlet`-gated
-`CardActionsToolbar`/`CardColorPanel`/`EmojiReactionPicker`/`CardPreview`
-instantiation) is unreachable for the same reason as the comment sub-block
-above, but is non-comment UI (color picker, emoji reactions, a close
-button) and so is outside PATCH 8AF's "dead/orphaned **comment** code"
-mandate. `CardActionsToolbar`/`CardColorPanel` themselves are not dead --
-both remain live via `ClipartCardDraftModal.tsx` -- only this one
-FreeformPadletCards.tsx call site is unreachable. Left in place; a future,
-differently-scoped general dead-code patch should re-verify and remove it.
+**REMOVED in PATCH 8AG (2026-08-13)**: the rest of the "Card Post Modal"
+wrapper in `FreeformPadletCards.tsx` -- the `cardToolbarPadletId`/
+`activeCardToolbarPadlet`-gated `CardActionsToolbar`/`CardColorPanel`/
+`EmojiReactionPicker`/`CardPreview` instantiation left in place by PATCH
+8AF as an out-of-scope (non-comment) finding. PATCH 8AG independently
+re-confirmed `cardToolbarPadletId` has zero live non-null setters anywhere
+in the codebase (all four `setCardToolbarPadletId(` call sites, across
+`CanvasClient.tsx` and `FreeformPadletCards.tsx`, set it only to `null`),
+then deleted the entire wrapper (including the `activeCardToolbarPadlet`
+derived const, its sole remaining consumer) while leaving
+`CardActionsToolbar`/`CardColorPanel`/`EmojiReactionPicker` themselves
+untouched -- all three remain live via `ClipartCardDraftModal.tsx` (and
+`EmojiReactionPicker` additionally via `CanvasClient.tsx`/`NoteEditor.tsx`/
+`DrawingEditor.tsx`/`LinkEditor.tsx`/`TodoEditor.tsx`/`AIComponentEditor.tsx`),
+and `cardToolbarPadletId`/`setCardToolbarPadletId` themselves were kept --
+neither is "fully unused": `cardToolbarPadletId` still gates three live,
+pre-existing guards elsewhere in `FreeformPadletCards.tsx` (the on-canvas
+color picker, emoji picker, and comment-popup panels each check
+`!cardToolbarPadletId` before rendering), and `setCardToolbarPadletId` is
+still called from `CanvasClient.tsx`'s own "close every overlay" reset
+functions regardless of this wrapper's existence.
+
+**NOT REMOVED -- new finding from PATCH 8AG, out of its own scope**: a
+second, separate dead block in `FreeformPadletCards.tsx`, the "Left
+Toolbar - moved to card modal" block (`{false && cardToolbarPadletId ===
+padlet.id && (...)}`), permanently unreachable via a hardcoded `false &&`
+short-circuit -- its own comment confirms it was superseded by the (now
+also deleted) Card Post Modal. Contains its own `<CardActionsToolbar>`
+instance. Discovered while auditing `cardToolbarPadletId`'s occurrences for
+this patch's reachability proof, but it is not "the Card Post Modal
+wrapper" this patch was scoped to remove, so it was left in place pending a
+dedicated future patch.
 
 **LEFT UNTOUCHED -- explicit decision, not a partial cleanup**: `RowCanvas.tsx`
 (`components/canvas/RowCanvas.tsx`, 979 lines) has zero production

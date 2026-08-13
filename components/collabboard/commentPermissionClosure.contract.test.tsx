@@ -366,21 +366,14 @@ describe('comment permission closure -- PATCH 8AF dead comment code cleanup', ()
   });
 
   it("FreeformPadletCards.tsx's dead Card-toolbar CommentPopup block (gated on cardToolbarPadletId, which has no live non-null setter anywhere) is removed", () => {
+    // PATCH 8AF removed only the CommentPopup sub-block, leaving the rest of
+    // the (also dead, non-comment) Card Post Modal wrapper in place as an
+    // out-of-scope finding. PATCH 8AG then removed that entire wrapper --
+    // see the dedicated "PATCH 8AG dead Card Post Modal wrapper cleanup"
+    // describe block below for its own durable assertions.
     const src = read('components/collabboard/canvas/ui/FreeformPadletCards.tsx');
-    // The CommentPopup render block itself (and its explanatory comment) is
-    // gone. Its sibling reset calls (e.g. inside the color/emoji handlers)
-    // are left untouched -- see below, out of this comment-only patch's scope.
     expect(src).not.toContain('Note detached comments use the canonical panel; this toolbar shell owns placement only.');
-    const cardModalStart = src.indexOf('{/* Card Post Modal */}');
-    expect(cardModalStart, '{/* Card Post Modal */} wrapper not found -- FreeformPadletCards.tsx structure changed').toBeGreaterThan(-1);
-    // The Card Post Modal is the last major block in the file (nothing
-    // comment-bearing follows it), so checking to end-of-file is sufficient
-    // and avoids depending on exact line-ending/whitespace framing.
-    expect(src.slice(cardModalStart)).not.toContain('<CommentPopup');
-    // The rest of the (separately dead, out of this comment-only patch's
-    // scope) Card Post Modal wrapper -- CardActionsToolbar/CardColorPanel/
-    // EmojiReactionPicker -- is left untouched.
-    expect(src).toContain('{/* Card Post Modal */}');
+    expect(src).not.toContain('{/* Card Post Modal */}');
   });
 
   it("the live canonical Clipart CommentPopup entry point (ClipartCardDraftModal.tsx) is unaffected by the dead Card-toolbar block's removal", () => {
@@ -390,5 +383,58 @@ describe('comment permission closure -- PATCH 8AF dead comment code cleanup', ()
     const start = src.indexOf('<CommentPopup');
     const end = src.indexOf('/>', start);
     expect(src.slice(start, end)).toContain('accessMode=');
+  });
+});
+
+describe('comment permission closure -- PATCH 8AG dead Card Post Modal wrapper cleanup', () => {
+  it('the dead wrapper ({/* Card Post Modal */}, gated on cardToolbarPadletId && activeCardToolbarPadlet) is absent', () => {
+    const src = read('components/collabboard/canvas/ui/FreeformPadletCards.tsx');
+    expect(src).not.toContain('{/* Card Post Modal */}');
+    expect(src).not.toMatch(/cardToolbarPadletId\s*&&\s*activeCardToolbarPadlet/);
+    expect(src).not.toContain('activeCardToolbarPadlet');
+  });
+
+  it("the wrapper's former CommentPopup sub-block (removed PATCH 8AF) remains absent", () => {
+    const src = read('components/collabboard/canvas/ui/FreeformPadletCards.tsx');
+    expect(src).not.toContain('Note detached comments use the canonical panel; this toolbar shell owns placement only.');
+  });
+
+  it('cardToolbarPadletId/setCardToolbarPadletId are NOT fully unused, so the state itself correctly remains (CanvasClient.tsx still resets it; three live guards elsewhere in FreeformPadletCards.tsx still read it)', () => {
+    const overlays = read('components/collabboard/canvas/hooks/useCanvasOverlays.ts');
+    expect(overlays).toContain("const [cardToolbarPadletId, setCardToolbarPadletId] = useState<string | null>(null);");
+    const canvas = read("app/dashboard/canvas/[id]/CanvasClient.tsx");
+    expect((canvas.match(/setCardToolbarPadletId\(null\)/g) ?? []).length).toBeGreaterThanOrEqual(2);
+    const freeform = read('components/collabboard/canvas/ui/FreeformPadletCards.tsx');
+    // The three live guards this state still gates elsewhere in this file
+    // (all pre-existing, all unrelated to the deleted wrapper, all
+    // untouched by PATCH 8AG).
+    expect(freeform).toContain("padletToEdit?.id === padlet.id && !cardToolbarPadletId");
+    expect(freeform).toContain("isImageEmojiOpen && !cardToolbarPadletId");
+    expect(freeform).toContain("cardCommentPopupPadletId === padlet.id && !cardToolbarPadletId");
+  });
+
+  it('live canonical Note/Clipart comment paths are unaffected', () => {
+    const freeform = read('components/collabboard/canvas/ui/FreeformPadletCards.tsx');
+    expect(freeform).toContain('Note detached comments use the canonical panel; this shell only owns placement and close state.');
+    const clipart = read('components/collabboard/editors/ClipartCardDraftModal.tsx');
+    expect((clipart.match(/<CommentPopup/g) ?? []).length).toBe(1);
+  });
+
+  it('CardActionsToolbar/CardColorPanel/EmojiReactionPicker remain live elsewhere -- not orphaned by this cleanup', () => {
+    const freeform = read('components/collabboard/canvas/ui/FreeformPadletCards.tsx');
+    // CardActionsToolbar: the wrapper's own instance is gone; one remains --
+    // the separately dead ({false && ...}), out-of-scope "Left Toolbar"
+    // block (a PATCH 8AG finding, not touched -- see contract doc).
+    expect((freeform.match(/<CardActionsToolbar\b/g) ?? []).length).toBe(1);
+    // CardColorPanel: the wrapper's own instance is gone; one remains -- the
+    // live "Right Color Picker - attached to card" block.
+    expect((freeform.match(/<CardColorPanel\b/g) ?? []).length).toBe(1);
+    // EmojiReactionPicker: the wrapper's own instance is gone; seven remain,
+    // all live (Image/Todo/Link/Table/AI-component/Comment-post branches).
+    expect((freeform.match(/<EmojiReactionPicker\b/g) ?? []).length).toBe(7);
+    const clipart = read('components/collabboard/editors/ClipartCardDraftModal.tsx');
+    expect(clipart).toContain('<CardActionsToolbar');
+    expect(clipart).toContain('<CardColorPanel');
+    expect(clipart).toContain('<EmojiReactionPicker');
   });
 });

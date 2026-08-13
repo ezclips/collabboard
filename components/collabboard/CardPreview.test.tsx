@@ -329,7 +329,10 @@ describe('CardPreview consumer characterization and static guards', () => {
       import('node:fs/promises').then((fs) => fs.readFile('components/collabboard/ContainerCardPreview.tsx', 'utf8')),
     ]);
 
-    expect((freeform.match(/<CardPreview\b/g) || []).length).toBe(2);
+    // PATCH 8AG removed the dead "Card Post Modal" wrapper's own <CardPreview>
+    // instance (gated on cardToolbarPadletId, which had no live non-null
+    // setter anywhere in the codebase): 2 -> 1.
+    expect((freeform.match(/<CardPreview\b/g) || []).length).toBe(1);
     expect(clipart).toContain('<CardPreview');
     expect(clipart).toContain('padlet={previewPadlet}');
     expect(containerFull).not.toContain('import CardPreview');

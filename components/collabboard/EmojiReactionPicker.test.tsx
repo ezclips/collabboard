@@ -70,7 +70,10 @@ describe('EmojiReactionPicker PATCH-125 census', () => {
     );
 
     expect(counts).toEqual({
-      'components/collabboard/canvas/ui/FreeformPadletCards.tsx': 8,
+      // PATCH 8AG removed the dead "Card Post Modal" wrapper's own instance
+      // (gated on cardToolbarPadletId, which had no live non-null setter
+      // anywhere in the codebase): 8 -> 7.
+      'components/collabboard/canvas/ui/FreeformPadletCards.tsx': 7,
       'components/collabboard/editors/ClipartCardDraftModal.tsx': 1,
       'app/dashboard/canvas/[id]/CanvasClient.tsx': 1,
       'components/collabboard/editors/NoteEditor.tsx': 1,
@@ -145,16 +148,20 @@ describe('EmojiReactionPicker shared structure and search', () => {
 });
 
 describe('EmojiReactionPicker semantics and persistence source guards', () => {
-  it('preserves append semantics and routes for Image, Card Post Modal, Clipart, and CanvasClient', () => {
+  it('preserves append semantics and routes for Image, Clipart, and CanvasClient', () => {
     const freeform = source('components/collabboard/canvas/ui/FreeformPadletCards.tsx');
     const clipart = source('components/collabboard/editors/ClipartCardDraftModal.tsx');
     const canvasClient = source('app/dashboard/canvas/[id]/CanvasClient.tsx');
 
-    expect((freeform.match(/newReactions = \[\.\.\.currentReactions, emoji\]/g) ?? []).length).toBe(8);
+    // PATCH 8AG removed the dead "Card Post Modal" wrapper's own
+    // updatePadletMetadata(activeCardToolbarPadlet.id, ...) route (gated on
+    // cardToolbarPadletId, which had no live non-null setter anywhere in the
+    // codebase): 8 -> 7. activeCardToolbarPadlet no longer exists.
+    expect((freeform.match(/newReactions = \[\.\.\.currentReactions, emoji\]/g) ?? []).length).toBe(7);
     expect(freeform).toContain('updatePostFieldsPreservingFailureChannels(padlet.id');
     expect(freeform).toContain('updatePostFieldsPreservingFailureChannels(activeImageToolbarPadlet.id');
     expect((freeform.match(/await updatePadletMetadata\(padlet\.id, \{ reactions: newReactions \}\)/g) ?? []).length).toBeGreaterThanOrEqual(2);
-    expect(freeform).toContain('updatePadletMetadata(activeCardToolbarPadlet.id, { reactions: newReactions })');
+    expect(freeform).not.toContain('activeCardToolbarPadlet');
     expect(clipart).toContain('updateMetadata({ reactions: [...reactions, emoji] });');
     expect(canvasClient).toContain('updatePadletMetadata(activeImageToolbarPadlet.id, { reactions: newReactions })');
   });
