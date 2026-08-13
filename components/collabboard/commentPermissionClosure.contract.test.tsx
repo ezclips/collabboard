@@ -282,22 +282,15 @@ describe('comment permission closure -- dead/dormant surfaces stay non-live (PAT
     expect(importers).toEqual([]);
   });
 
-  it('the shared CommentList/FreeformCommentRow foundation has zero production importers outside its own pilot tests', () => {
-    const importers = gitGrepFiles("from '@/components/collabboard/comments/CommentList'");
-    const allowed = new Set([
-      'components/collabboard/canvas/ui/FreeformPadletCards.tsx',
-      'components/collabboard/freeformCommentUIContract.characterization.test.tsx',
-      'components/collabboard/comments/siteA.pilotParity.test.tsx',
-    ]);
-    // This guard file's OWN source contains the search pattern as a string
-    // literal (the line just above), which is a false-positive git-grep
-    // match on itself, not an import -- excluded explicitly rather than by
-    // a blanket .test. filter, since two of the genuinely allowed callers
-    // are themselves test files.
-    const offenders = importers.filter((f) => !allowed.has(f) && f !== 'components/collabboard/commentPermissionClosure.contract.test.tsx');
-    expect(offenders).toEqual([]);
-    // And FreeformPadletCards.tsx -- though allowed to import it -- must not
-    // actually render it, per the same proof freeformCommentUIContract.characterization.test.tsx keeps current.
+  it('the CommentList/FreeformCommentRow pilot (superseded by canonical CommentPopup, PATCH 8AJ) was deleted by PATCH 8AK -- neither file exists, and no production import of either path remains', () => {
+    expect(fs.existsSync('components/collabboard/comments/CommentList.tsx')).toBe(false);
+    expect(fs.existsSync('components/collabboard/comments/FreeformCommentRow.tsx')).toBe(false);
+    const importers = gitGrepFiles("from '@/components/collabboard/comments/CommentList'").filter((f) => !f.includes('.test.'));
+    expect(importers).toEqual([]);
+    const rowImporters = gitGrepFiles("from '@/components/collabboard/comments/FreeformCommentRow'").filter((f) => !f.includes('.test.'));
+    expect(rowImporters).toEqual([]);
+    // And FreeformPadletCards.tsx must not render any local/replacement
+    // duplicate under that name either.
     const freeform = read('components/collabboard/canvas/ui/FreeformPadletCards.tsx');
     expect((freeform.match(/<CommentList\b/g) ?? []).length).toBe(0);
   });
@@ -523,5 +516,73 @@ describe('comment permission closure -- PATCH 8AI dead RowCanvas + false Left To
     const canvasClient = read('app/dashboard/canvas/[id]/CanvasClient.tsx');
     expect(canvasClient).toContain('setIsCardEditorOpen');
     expect(canvasClient).toContain('isOpen={isCardEditorOpen}');
+  });
+});
+
+describe('comment permission closure -- PATCH 8AK removal of the superseded CommentList/FreeformCommentRow pilot', () => {
+  it('1: CommentList.tsx does not exist', () => {
+    expect(fs.existsSync('components/collabboard/comments/CommentList.tsx')).toBe(false);
+  });
+
+  it('2: FreeformCommentRow.tsx does not exist', () => {
+    expect(fs.existsSync('components/collabboard/comments/FreeformCommentRow.tsx')).toBe(false);
+  });
+
+  it('3: no production import of either path exists', () => {
+    const listImporters = gitGrepFiles("from '@/components/collabboard/comments/CommentList'").filter((f) => !f.includes('.test.'));
+    expect(listImporters).toEqual([]);
+    const rowImporters = gitGrepFiles("from '@/components/collabboard/comments/FreeformCommentRow'").filter((f) => !f.includes('.test.'));
+    expect(rowImporters).toEqual([]);
+  });
+
+  it('4: no replacement duplicate local CommentList implementation was added (the comments/ pilot directory itself is gone)', () => {
+    expect(fs.existsSync('components/collabboard/comments')).toBe(false);
+    const freeform = read('components/collabboard/canvas/ui/FreeformPadletCards.tsx');
+    expect((freeform.match(/<CommentList\b/g) ?? []).length).toBe(0);
+    expect((freeform.match(/<FreeformCommentRow\b/g) ?? []).length).toBe(0);
+  });
+
+  it('5: Image/Site A still uses canonical CommentPopup, with accessMode, identity, title/badge, and Link support intact', () => {
+    const freeform = read('components/collabboard/canvas/ui/FreeformPadletCards.tsx');
+    const anchor = 'activeImageToolbarPadlet && cardCommentPopupPadletId === activeImageToolbarPadlet.id';
+    const start = freeform.indexOf(anchor);
+    expect(start, 'live Image CommentPopup anchor not found -- Site A structure changed').toBeGreaterThan(-1);
+    const block = freeform.slice(start, start + 14000);
+    expect(block).toMatch(/<CommentPopup\b/);
+    expect(block).toContain('guardCommentMutation(commentAccessMode');
+    expect(block).toContain('onCommentTitleChange=');
+    expect(block).toContain('onBadgeColorChange=');
+    expect(block).not.toContain('<textarea');
+    const popup = read('components/collabboard/editors/CommentPopup.tsx');
+    expect(popup).toContain('setLink');
+  });
+
+  it('6: live EmbeddedCommentList/CommentRow still exist independently, untouched', () => {
+    expect(fs.existsSync('components/collabboard/EmbeddedCommentList.tsx')).toBe(true);
+    expect(fs.existsSync('components/collabboard/CommentRow.tsx')).toBe(true);
+    const embedded = read('components/collabboard/EmbeddedCommentList.tsx');
+    expect(embedded).toContain("import CommentRow from './CommentRow';");
+  });
+
+  it('7: lib/domain/canvas/comments.ts remains live, independent of the deleted pilot', () => {
+    expect(fs.existsSync('lib/domain/canvas/comments.ts')).toBe(true);
+    const src = read('lib/domain/canvas/comments.ts');
+    for (const symbol of ['editCommentText', 'removeComment', 'toggleCommentStrikethrough', 'setCommentTextColor', 'export interface Comment']) {
+      expect(src, `${symbol} must remain in lib/domain/canvas/comments.ts`).toContain(symbol);
+    }
+    const noteEditor = read('components/collabboard/editors/NoteEditor.tsx');
+    expect(noteEditor).toContain("from '@/lib/domain/canvas/comments'");
+  });
+
+  it('8: normal comment closure remains closed (no CommentList-pilot-related regression)', () => {
+    const freeform = read('components/collabboard/canvas/ui/FreeformPadletCards.tsx');
+    expect((freeform.match(/<CommentPopup\b/g) ?? []).length).toBe(7);
+  });
+
+  it('9: permission closure remains closed -- CommentAccessMode/guard exports untouched', () => {
+    const comments = read('lib/domain/canvas/comments.ts');
+    for (const symbol of ['CommentAccessMode', 'guardCommentMutation', 'guardOwnCommentMutation', 'guardCommentComposition', 'resolveCommentAccessMode']) {
+      expect(comments, `${symbol} must remain in lib/domain/canvas/comments.ts`).toContain(symbol);
+    }
   });
 });

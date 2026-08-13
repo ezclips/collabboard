@@ -1,11 +1,11 @@
 # Canonical Comment UI Contract v1
 
-## Rollout status (updated PATCH 8AI, 2026-08-13)
+## Rollout status (updated PATCH 8AK, 2026-08-13)
 
 NORMAL UI CANONICALIZATION = **CLOSED**
 COMMENT PERMISSION SAFETY = **CLOSED**
 SPECIAL UI CONSOLIDATION = **NOT CLOSED / NOT YET DECIDED**
-DEAD CODE CLEANUP = **PARTIAL -- proven-unreachable comment surfaces removed (PATCH 8AF); the dead Card Post Modal wrapper's non-comment remainder removed (PATCH 8AG); RowCanvas.tsx (whole file) and the "Left Toolbar" false block removed (PATCH 8AI); only the CommentList/FreeformCommentRow pilot / dormant COMMENT tier "shelve vs activate" decision remains open**
+DEAD CODE CLEANUP = **PARTIAL -- proven-unreachable comment surfaces removed (PATCH 8AF); the dead Card Post Modal wrapper's non-comment remainder removed (PATCH 8AG); RowCanvas.tsx (whole file) and the "Left Toolbar" false block removed (PATCH 8AI); the superseded CommentList/FreeformCommentRow pilot removed (PATCH 8AK); only the dormant COMMENT tier "shelve vs activate" decision remains open**
 KANBAN COMMENT SYSTEM = **OUTSIDE CURRENT COLLABBOARD CONTRACT**
 
 "COMMENT PERMISSION SAFETY = CLOSED" means: every live CollabBoard/Padlet
@@ -1129,6 +1129,19 @@ deleted the file whole. Its five component dependencies
 via other callers -- none were touched. The live grid/row renderer remains
 `components/collabboard/row/RowCanvasDnD.tsx` → `RowLane.tsx`, unaffected.
 
+**REMOVED in PATCH 8AK (2026-08-13)**: the `CommentList`/`FreeformCommentRow`
+pilot foundation (`components/collabboard/comments/{CommentList,
+FreeformCommentRow}.tsx` and their three pilot-only tests). Formerly listed
+here as DORMANT / PILOT -- PRESENT; PATCH 8AJ's disposition audit found it
+SUPERSEDED, not merely unadopted (git history shows it was genuinely live
+for Site A/Image for ~23 hours, commits `1ac73ac`→`cd35d76`, before Image
+migrated again onto canonical `CommentPopup`), predating the
+`CommentAccessMode` permission architecture entirely, and offering no
+capability not already duplicated or exceeded by `CommentPopup`/
+`CommentRow.tsx`. See "Next-phase backlog" item 3b below for the full
+corrected history. `lib/domain/canvas/comments.ts` (independently live via
+`NoteEditor.tsx` and other canonical callers) was not touched.
+
 ### Storage ownership audit
 
 | Storage location | Owner post type(s) | Normal or special | Write path | Read path |
@@ -1202,15 +1215,35 @@ migrates.
    to have zero importers anywhere, including its own tests) -- low risk, no
    live behavior change, but currently dead code that could confuse a future
    patch (as the "Todo Comments Popup" mislabel already did twice). The
-   dormant `CommentList`/`FreeformCommentRow` pilot foundation and the
-   dormant `commentMutations.ts`/COMMENT-tier RPC path are related but
-   separate decisions (item 3b/3c below), since deleting a pilot or a
-   fully-built-but-dormant tier is a different call than deleting truly dead
-   code.
-   - 3b. **`CommentList`/`FreeformCommentRow` pilot foundation** -- built,
-     parity-tested against Site A, but never actually swapped into
-     `FreeformPadletCards.tsx`'s live rendering. Decide: adopt it (swap the
-     live render), or delete the pilot.
+   dormant `commentMutations.ts`/COMMENT-tier RPC path is a related but
+   separate decision (item 3c below), since deleting a fully-built-but-
+   dormant tier is a different call than deleting truly dead code.
+   - 3b. **`CommentList`/`FreeformCommentRow` pilot foundation -- REMOVED /
+     SUPERSEDED (PATCH 8AK, 2026-08-13).** Corrected history (the prior
+     version of this document claimed the pilot was "never actually swapped
+     into live rendering" -- independently re-checked via git history for
+     PATCH 8AJ and found factually wrong): commit `227558d` built the shared
+     `CommentList`/`FreeformCommentRow` foundation to reproduce Site A
+     (image-post badge-triggered comments) 1:1; commit `1ac73ac`, ~1 hour
+     later, genuinely migrated Site A to live-consume it -- it was real,
+     wired production code for roughly 23 hours. Commit `cd35d76`
+     ("migrate image posts to canonical comments") then moved Site A again,
+     this time onto canonical `CommentPopup`, leaving the pilot with zero
+     production importers from that point on. PATCH 8AJ's audit found every
+     pilot capability now duplicated or exceeded by live foundations
+     (`CommentPopup`'s permission/identity/title/badge-color/per-row/Link
+     support; `CommentRow.tsx`'s per-row/anchored-popup/TipTap/ownership
+     model), no unique reusable abstraction, and that the pilot predates the
+     `CommentAccessMode` permission architecture entirely (its whole live
+     window, 2026-08-11, precedes the first permission-enforcement commits
+     on 2026-08-12). PATCH 8AK deleted `CommentList.tsx`,
+     `FreeformCommentRow.tsx`, and their three pilot-only tests
+     (`CommentList.test.tsx`, `FreeformCommentRow.test.tsx`,
+     `siteA.pilotParity.test.tsx` -- the last of these was itself a
+     deliberate historical BEFORE/AFTER record, preserved in git history
+     rather than converted into a new live contract). `lib/domain/canvas/
+     comments.ts` (independently live via `NoteEditor.tsx` and many other
+     canonical callers) was not touched.
    - 3c. **Dormant COMMENT tier** (`comments.ts`'s `'comment'` mode,
      `commentMutations.ts`, `CommentPopup.commentMode.test.tsx`) -- fully
      built and tested but unreachable (no live `boardPermission` producer).
