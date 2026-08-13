@@ -7166,6 +7166,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                   onSelectLine={handleLineSelect}
                   onLineContextMenu={handleLineContextMenu}
                   onToggleEditMode={handleToggleLineEditMode}
+                  commentAccessMode={commentAccessMode}
                   onUpdateChildComments={async (childId, comments, options) => {
                     const field = options?.field ?? 'comments';
                     const nowIso = new Date().toISOString();

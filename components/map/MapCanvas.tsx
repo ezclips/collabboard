@@ -16,6 +16,7 @@ import PostPopup from '@/components/map/PostPopup';
 import MapSidebar from '@/components/map/MapSidebar';
 import { ColumnPostContextMenu } from '@/components/collabboard/menus/ColumnPostContextMenu';
 import { FREEFORM_BOARD_TOOL_ITEMS } from '@/components/collabboard/canvas/ui/FreeformCanvasBoardMenu';
+import type { CommentAccessMode } from '@/lib/domain/canvas/comments';
 
 type CreateMode = 'idle' | 'search' | 'dropPin' | 'compose' | 'reposition';
 
@@ -123,6 +124,12 @@ type MapCanvasProps = {
   onSelectLine?: (lineId: string | null) => void;
   onLineContextMenu?: (lineId: string, x: number, y: number) => void;
   onToggleEditMode?: (lineId: string) => void;
+  // PATCH 8AE.1: transport only -- MapCanvas never derives permissions
+  // itself, it just forwards the real value CanvasClient.tsx already
+  // resolved from the current workspace role down to PostPopup. Defaults
+  // to 'manage' so any pre-existing caller (tests, previews) keeps today's
+  // behavior unchanged.
+  commentAccessMode?: CommentAccessMode;
 };
 
 function MapCanvas({
@@ -159,6 +166,7 @@ function MapCanvas({
   onSelectLine,
   onLineContextMenu,
   onToggleEditMode,
+  commentAccessMode = 'manage',
 }: MapCanvasProps) {
   const mapRef = useRef<MapRef | null>(null);
   // Timestamp-based double-click detector for passive map lines.
@@ -826,6 +834,7 @@ function MapCanvas({
                       currentUserAvatar={currentUserAvatar}
                       onUpdateChildComments={onUpdateChildComments}
                       onRefreshChildren={onRefreshChildren}
+                      accessMode={commentAccessMode}
                     />
                   </div>
                 ) : null}

@@ -8,6 +8,7 @@ import PostCardContent from '@/components/collabboard/PostCardContent';
 import { ColumnPostContextMenu } from '@/components/collabboard/menus/ColumnPostContextMenu';
 import { getContainerEditTargetLabel } from '@/lib/infra/collabboard/containerEditTargetLabel';
 import { getPadletMapLocation } from '@/lib/map/geojson';
+import type { CommentAccessMode } from '@/lib/domain/canvas/comments';
 
 type PostPopupProps = {
   post: Padlet;
@@ -27,6 +28,12 @@ type PostPopupProps = {
   currentUserAvatar?: string;
   onUpdateChildComments?: (childId: string, comments: unknown[], options?: { field?: 'comments' | 'detachedComments' }) => void;
   onRefreshChildren?: () => void;
+  // PATCH 8AE.1: gates every embedded child comment mutation reachable from
+  // this popup (RowColumnContainerCard/PostCardContent). Defaults to
+  // 'manage' so any pre-existing caller (tests, previews) keeps today's
+  // behavior unchanged -- the live caller (MapCanvas.tsx) always supplies
+  // the real value explicitly.
+  accessMode?: CommentAccessMode;
 };
 
 export default function PostPopup({
@@ -47,6 +54,7 @@ export default function PostPopup({
   currentUserAvatar,
   onUpdateChildComments,
   onRefreshChildren,
+  accessMode = 'manage',
 }: PostPopupProps) {
 
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -170,13 +178,14 @@ export default function PostPopup({
             onUpdateChildComments={onUpdateChildComments}
             onScanChild={onRefreshChildren}
             onOpenDocument={onOpenDocument ? () => onOpenDocument(post) : undefined}
+            accessMode={accessMode}
           />
           </div>
         </div>
       ) : (
         <div className="rounded-lg border border-slate-200 bg-white p-3">
           <div className="mt-2">
-            <PostCardContent padlet={post} allPadlets={allPadlets} onOpenDocument={onOpenDocument ? () => onOpenDocument(post) : undefined} />
+            <PostCardContent padlet={post} allPadlets={allPadlets} onOpenDocument={onOpenDocument ? () => onOpenDocument(post) : undefined} accessMode={accessMode} />
           </div>
         </div>
       )}

@@ -928,7 +928,7 @@ product-facing post families for 10 live type literals (`'file'` excluded).
 | Document anchored/highlighted threads | `DocumentEditor.tsx` (in-modal), `OverlayLayer.tsx` (on-canvas, shared with Note) | **PERMISSION SAFE -- READ / MANAGE** (PATCH 8AA, 2026-08-13) |
 | Comment post primary thread | `CommentPost.tsx`, `FreeformPadletCards.tsx`'s collapsed-marker inline block, `CommentEditor.tsx` | **PERMISSION SAFE -- READ / MANAGE** (PATCH 8Z, 2026-08-13) |
 | Container embedded child `CommentPopup` renderer | `ContainerEditor.tsx`'s `SortableChildItem` | **PERMISSION SAFE -- READ / MANAGE** (PATCH 8AC, 2026-08-13) |
-| `EmbeddedCommentList` (compact child renderer) | `RowColumnContainerCard.tsx`, `PostCardContent.tsx`, `DrawingLayout.tsx` (standalone comment posts on the Drawing canvas -- a 3rd host discovered during PATCH 8AD's inventory, not previously listed here) | **PERMISSION SAFE -- READ / MANAGE** (PATCH 8AD, 2026-08-13) |
+| `EmbeddedCommentList` (compact child renderer) | `RowColumnContainerCard.tsx`, `PostCardContent.tsx`, `DrawingLayout.tsx` (standalone comment posts on the Drawing canvas -- a 3rd host discovered during PATCH 8AD's inventory, not previously listed here), `components/map/PostPopup.tsx` (Map layout pin popup -- a 4th host discovered during PATCH 8AE's audit, missed by PATCH 8AD because Map was not among the layouts that patch traced) | **PERMISSION SAFE -- READ / MANAGE** (PATCH 8AD, 2026-08-13 for the first 3 hosts; PATCH 8AE.1, 2026-08-13 for the Map host) |
 
 None of these was fixed by PATCH 8Y itself -- verification only, per that
 patch's own instruction not to redesign permissions. At the time PATCH 8Y
@@ -939,9 +939,33 @@ could mutate any of them. Each has since been closed by its own dedicated
 patch -- Note (PATCH 8AB), Document (PATCH 8AA), Comment post (PATCH 8Z),
 Container's embedded child `CommentPopup` renderer (PATCH 8AC), and
 `EmbeddedCommentList` (PATCH 8AD) are all now **PERMISSION SAFE -- READ /
-MANAGE**. Every special-system surface in this table is now closed -- see
-the "Special Comment Permission Closure Audit" this patch's own RETURN
-report names as the next candidate.
+MANAGE**.
+
+**PATCH 8AE's own repo-wide closure audit (2026-08-13) found this table was
+still incomplete**: `EmbeddedCommentList` had a 4th live host --
+`components/map/PostPopup.tsx`, reached via `CanvasClient.tsx` ->
+`components/map/MapCanvas.tsx` -> `PostPopup.tsx` -> `RowColumnContainerCard.tsx`/
+`PostCardContent.tsx` -- that PATCH 8AD's own inventory never traced, because
+that patch's layout sweep did not include the Map layout. `MapCanvas.tsx`
+passed its (real, Supabase-backed) `onUpdateChildComments` callback down
+unconditionally, but neither `MapCanvas.tsx` nor `PostPopup.tsx` threaded an
+`accessMode`, so `RowColumnContainerCard`/`PostCardContent` silently fell back
+to their own `'manage'` default regardless of the viewer's actual
+`WorkspaceRole` -- a workspace-readonly user could mutate a Map container
+pin's child comments. PATCH 8AE did not fix this (audit-only, per its own
+STOP-condition instructions); **PATCH 8AE.1 (2026-08-13) closed it** by
+threading `commentAccessMode` through the same three-link chain used by every
+other layout: `CanvasClient.tsx` -> `MapCanvas.tsx` (`commentAccessMode` prop)
+-> `PostPopup.tsx` (`accessMode` prop, forwarded to both
+`RowColumnContainerCard` and `PostCardContent`). No new access-mode producer
+was introduced -- `resolveCommentAccessMode(currentWorkspaceRole)` remains the
+sole live call site.
+
+Every special-system surface in this table is now closed. A repeat of the
+"Special Comment Permission Closure Audit" (PATCH 8AE.2) is still required
+before declaring **SPECIAL COMMENT PERMISSION ROLLOUT -- CLOSED**, since
+PATCH 8AE's own audit is the one that missed this surface on its first pass
+and a second independent sweep is the agreed closure gate.
 
 ### Embedded-renderer matrix
 
@@ -950,6 +974,7 @@ report names as the next candidate.
 | `RowColumnContainerCard.tsx` | any child (via `detachedComments`) + comment-type children (via `comments`) | both | child's own `metadata.comments` / `metadata.detachedComments` | **PERMISSION SAFE -- READ / MANAGE** (PATCH 8AD) | intentionally compact, narrow-width embedded presentation (own header/counter/composer sized for a container card slot) -- full `CommentPopup` would change the embedded layout model, not just its implementation |
 | `PostCardContent.tsx` (Drawing-in-container image binding, plus a comment-type-child rendering path reused for nested containers) | any child (via `detachedComments`) | both | child's own `metadata.detachedComments` / `metadata.comments` | **PERMISSION SAFE -- READ / MANAGE** (PATCH 8AD) | same reasoning as above |
 | `DrawingLayout.tsx` (standalone comment posts on the Drawing canvas, not a container child at all) | N/A -- root-level comment post | both | the post's own `metadata.comments` | **PERMISSION SAFE -- READ / MANAGE** (PATCH 8AD) | Drawing layout renders standalone Comment-type posts through this compact embeddable renderer rather than the canonical `CommentPost.tsx`/`CommentEditor.tsx` pair every other layout uses -- an existing architectural inconsistency, not something PATCH 8AD's permissions-only scope corrects |
+| `components/map/PostPopup.tsx` (Map layout pin popup -- container branch renders `RowColumnContainerCard`, non-container branch renders `PostCardContent`) | any child (via `detachedComments`) + comment-type children (via `comments`) | both | child's own `metadata.comments` / `metadata.detachedComments` | **PERMISSION SAFE -- READ / MANAGE** (PATCH 8AE.1, 2026-08-13; PATCH 8AD missed this host entirely) | delegates to the same two hosts as the row above (`RowColumnContainerCard.tsx`/`PostCardContent.tsx`), just reached through the Map layout's own popup shell instead of an on-canvas card -- same compact-presentation reasoning applies |
 | `ContainerEditor.tsx`'s `SortableChildItem` | comment-type children only | both | child's own `metadata.comments` | **PERMISSION SAFE -- READ / MANAGE** (PATCH 8AC) | already uses canonical `CommentPopup` directly (`embedded`/`fullWidth` props), unlike the three hosts above -- a pre-existing inconsistency between the two embedded-child code paths, noted here as a fact, not reconciled by either PATCH 8AC or PATCH 8AD (see next-phase backlog item 4) |
 
 None of these was migrated to canonical `CommentPopup`. `EmbeddedCommentList`/
@@ -1029,32 +1054,39 @@ migrates.
 ### Next-phase backlog (priority order, not implemented)
 
 1. ~~**Permission wiring for the remaining UNGATED special surfaces**~~ --
-   **CLOSED.** Note anchored threads (PATCH 8AB), Document anchored threads
-   (PATCH 8AA), Comment post primary thread (PATCH 8Z), Container's embedded
-   child `CommentPopup` renderer (PATCH 8AC), and `EmbeddedCommentList`
-   (PATCH 8AD) are all now **PERMISSION SAFE -- READ / MANAGE**. Every
-   special-system surface identified by this audit has a permission gate.
-   Next candidate per PATCH 8AD's own RETURN report: a repo-wide **Special
-   Comment Permission Closure Audit**, confirming no surface was missed.
+   **CLOSED, pending a second independent audit pass.** Note anchored threads
+   (PATCH 8AB), Document anchored threads (PATCH 8AA), Comment post primary
+   thread (PATCH 8Z), Container's embedded child `CommentPopup` renderer
+   (PATCH 8AC), `EmbeddedCommentList` at its `RowColumnContainerCard.tsx`/
+   `PostCardContent.tsx`/`DrawingLayout.tsx` hosts (PATCH 8AD), and
+   `EmbeddedCommentList` at its `components/map/PostPopup.tsx` host --
+   discovered missing by PATCH 8AE's own closure audit, closed by PATCH 8AE.1
+   -- are all now **PERMISSION SAFE -- READ / MANAGE**. PATCH 8AE's audit is
+   itself proof that a single inventory pass can miss a live layout (Map was
+   never traced by PATCH 8AD). Next candidate: **PATCH 8AE.2, a repeat
+   Special Comment Permission Closure Audit**, before **SPECIAL COMMENT
+   PERMISSION ROLLOUT** can be declared closed.
 2. **Comment post primary-thread dedicated adapter patch** (per PATCH 8X) --
    whether to bring its rich TipTap composer capability (Bold/Italic/
    Underline/lists/code/align/emoji) INTO `CommentPopup` as an opt-in
    richer mode, or to formally document it as a permanently separate
    surface with its own frozen contract, is a real product decision this
    audit surfaces but does not make.
-3. **Dead/orphaned comment code cleanup** (the three items above) -- low
-   risk, no live behavior change, but currently dead code that could
+3. **Dead/orphaned comment code cleanup** (now four items -- the three below
+   plus `components/collabboard/editors/CommentViewPopup.tsx`, found by
+   PATCH 8AE to have zero importers anywhere, including its own tests) --
+   low risk, no live behavior change, but currently dead code that could
    confuse a future patch (as the "Todo Comments Popup" mislabel already
    did twice).
-4. **Reconcile the two embedded-child-renderer code paths** (`ContainerEditor.tsx`'s
+4. **Reconcile the embedded-child-renderer code paths** (`ContainerEditor.tsx`'s
    direct `CommentPopup` usage vs. `RowColumnContainerCard.tsx`/`PostCardContent.tsx`/
-   `DrawingLayout.tsx`'s `EmbeddedCommentList`) -- an existing inconsistency,
-   not a regression, and NOT resolved by either PATCH 8AC or PATCH 8AD (both were
-   explicitly permissions-only; PATCH 8AD's own spec named this exact question
-   -- "should EmbeddedCommentList eventually be consolidated with CommentPopup"
-   -- as deliberately out of scope). Both paths are now equally permission-safe,
-   so this item is purely an architecture/consistency decision, no longer a
-   security question.
+   `DrawingLayout.tsx`/`components/map/PostPopup.tsx`'s shared `EmbeddedCommentList`
+   usage) -- an existing inconsistency, not a regression, and NOT resolved by
+   PATCH 8AC, 8AD, or 8AE.1 (all explicitly permissions-only; PATCH 8AD's own
+   spec named this exact question -- "should EmbeddedCommentList eventually be
+   consolidated with CommentPopup" -- as deliberately out of scope). All paths
+   are now equally permission-safe, so this item is purely an
+   architecture/consistency decision, no longer a security question.
 5. **kanban-canvas comment system** -- out of this rollout's frame entirely
    (see above); listed last because it requires its own scoping decision
    (does the product want unified comment UX across both verticals at all?)
@@ -1405,3 +1437,104 @@ whether `EmbeddedCommentList` should eventually be consolidated with
 `CommentPopup`. Both are now equally permission-safe; which presentation the
 product keeps is a separate architecture decision -- see next-phase backlog
 item 4.
+
+## Map layout permission gap -- found by PATCH 8AE, closed by PATCH 8AE.1
+
+PATCH 8AE was a repo-wide, independent **Special Comment Permission Closure
+Audit** -- it re-derived the entire live comment surface inventory from
+source rather than trusting this document, specifically to catch anything
+PATCH 8AD's own inventory might have missed. It found one: the **Map layout**
+(`canvas.layout === 'map'`, a real, user-selectable layout) was never among
+the layouts PATCH 8AD traced when threading `commentAccessMode`.
+
+**The gap.** `CanvasClient.tsx` renders `components/map/MapCanvas.tsx`
+whenever `isMapLayout` is true. Clicking a container pin opens
+`components/map/PostPopup.tsx`, whose container branch renders
+`RowColumnContainerCard` (and whose non-container branch renders
+`PostCardContent`) for that pin's children -- the exact same two hosts PATCH
+8AD had already wired everywhere else. `MapCanvas.tsx` passed its
+`onUpdateChildComments` callback down **unconditionally** (unlike its sibling
+handlers `onEditPinPost`/`onDeletePinContainer`/etc., all of which were
+already gated behind `canUseFreeformEditButton`), and that callback was a
+genuine, live, Supabase-backed write (`createUpdatePostCommentsCommand`).
+But neither `MapCanvas.tsx` nor `PostPopup.tsx` accepted or threaded an
+`accessMode`/`commentAccessMode` prop, so `RowColumnContainerCard.tsx`/
+`PostCardContent.tsx` silently fell back to their own `'manage'` default --
+meaning a workspace-**readonly** user viewing the Map layout could still
+Add/Edit/Delete/Color/Strikethrough a container pin's child comments. This
+was a pure permission-propagation defect, not a storage or identity defect:
+`currentUserId`/`currentUserName` already reached the child renderer
+correctly, and comments were written to the correct child's
+`metadata.comments`/`metadata.detachedComments`.
+
+PATCH 8AE did not fix this itself, per its own explicit STOP-condition
+instruction not to silently patch a gap discovered mid-audit. It recommended
+a dedicated follow-up.
+
+**The fix (PATCH 8AE.1, 2026-08-13).** Threaded the same three-link chain
+every other layout already uses, with no new permission producer:
+
+```
+CanvasClient.tsx
+  commentAccessMode (already existed -- resolveCommentAccessMode(currentWorkspaceRole))
+    -> <MapCanvas commentAccessMode={commentAccessMode} ... />
+
+MapCanvas.tsx
+  commentAccessMode?: CommentAccessMode  (new prop, default 'manage', transport only)
+    -> <PostPopup accessMode={commentAccessMode} ... />
+
+PostPopup.tsx
+  accessMode?: CommentAccessMode  (new prop, default 'manage')
+    -> <RowColumnContainerCard accessMode={accessMode} ... />
+    -> <PostCardContent accessMode={accessMode} ... />
+```
+
+`MapCanvas.tsx` and `PostPopup.tsx` never call `resolveCommentAccessMode`
+themselves and never inspect `WorkspaceRole` -- both are pure transport, per
+the patch's own scope constraint. `resolveCommentAccessMode(currentWorkspaceRole)`
+remains the sole live call site in the entire codebase (verified structurally
+in `PostPopup.commentPermission.test.tsx`).
+
+Both `RowColumnContainerCard.tsx` and `PostCardContent.tsx` already had their
+own `guardCommentMutation(accessMode, ...)` wraps from PATCH 8AD -- they were
+never missing a guard, only a real `accessMode` value to guard with. No
+changes were made to either file, nor to `EmbeddedCommentList.tsx` or
+`CommentRow.tsx`; the fix is 100% permission-propagation plumbing in
+`CanvasClient.tsx`/`MapCanvas.tsx`/`PostPopup.tsx`.
+
+**Test coverage:** `components/map/PostPopup.commentPermission.test.tsx` (new,
+12 tests) mounts `PostPopup` directly (not `MapCanvas`, which pulls in
+Mapbox) -- MANAGE (comments visible, Add/Edit both target the owning child
+only, a child comment mutation never touches `onEditContainer`/
+`onDeleteContainer`/`onChangeContainerColor`/`onEditLocation` or the
+container/pin id); READ (composer/Edit/Delete/Color absent, no callback
+fires on row interaction, including for the non-container `PostCardContent`
+branch); and five structural "closure-blocker" tests asserting each of the
+three chain links independently plus the single-producer/dormant-COMMENT
+proof, so that removing any one link fails the suite without needing a full
+Mapbox-backed mount. `components/map/*.test.tsx` was also added to
+`vitest.config.ts`'s `include` list -- `components/map/` had no test
+coverage of any kind before this patch, so without this the new suite would
+have silently never run under `npx vitest run`.
+
+**Negative controls run:** A (removed `commentAccessMode` from
+`CanvasClient.tsx` -> `MapCanvas`), B (removed `accessMode` from `MapCanvas`
+-> `PostPopup`), C (removed `accessMode` from `PostPopup` -> `RowColumnContainerCard`),
+D (removed `accessMode` from `PostPopup` -> `PostCardContent`), E (forced
+`accessMode = 'manage'` inside `PostPopup` regardless of the prop), and I
+(introduced a second `resolveCommentAccessMode(...)` call inside `MapCanvas`)
+-- each caught by the new suite, each restored and diff-verified byte-identical.
+Controls F/G/H/J/K/L exercise pre-existing guards (`EmbeddedCommentList`'s own
+callback defense, ownership/sibling isolation, dormant-COMMENT proof, normal
+rollout closure, frozen `CommentPopup`) already covered by PATCH 8AD's and
+earlier patches' own suites, all of which stayed green throughout this patch.
+
+**Frozen foundation:** `CommentPopup.tsx`, `useAnchoredPopover.ts`,
+`TextStylePopup.tsx`, `commentLinkSafety.ts`, `extensions/Comment.ts` --
+byte-identical to PATCH 8AE's recorded hashes; none were touched.
+
+**Closure status:** this closes the one gap PATCH 8AE found. It does **not**
+by itself authorize declaring **SPECIAL COMMENT PERMISSION ROLLOUT --
+CLOSED** -- PATCH 8AE's own audit is proof that a single inventory pass can
+miss a live surface, so a second, independent **PATCH 8AE.2 Special Comment
+Permission Closure Audit** is the agreed gate before that declaration.
