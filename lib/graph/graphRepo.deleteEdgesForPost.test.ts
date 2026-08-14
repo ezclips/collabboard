@@ -73,4 +73,24 @@ describe('FreeformGraphRepo.deleteEdgesForPost', () => {
 
     expect(from).not.toHaveBeenCalled();
   });
+
+  it('PATCH 9Q [idempotence]: resolves cleanly when zero rows match -- .delete() is never called with a count option, so the method must not condition success on affected-row count', async () => {
+    // A Postgres/PostgREST delete matching zero rows still resolves with
+    // { error: null } (never a special "not found" error) -- the same
+    // { error: null } shape as a delete matching one or many rows, since
+    // this repo never requests { count: 'exact' }. This test's stub, like
+    // production's real response, carries no `count` field at all.
+    const { supabase } = makeSupabaseStub({ error: null });
+    const repo = new FreeformGraphRepo(supabase, 'board-1');
+
+    await expect(repo.deleteEdgesForPost('post-with-no-edges')).resolves.toBeUndefined();
+  });
+
+  it('PATCH 9Q [idempotence]: repeated calls for the same postId are each individually safe', async () => {
+    const { supabase } = makeSupabaseStub({ error: null });
+    const repo = new FreeformGraphRepo(supabase, 'board-1');
+
+    await expect(repo.deleteEdgesForPost('post-1')).resolves.toBeUndefined();
+    await expect(repo.deleteEdgesForPost('post-1')).resolves.toBeUndefined();
+  });
 });

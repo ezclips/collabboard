@@ -80,6 +80,7 @@ import {
 import { createCanvasBoardRepository } from '@/lib/infra/canvas/boardRepository';
 import { createPostsRepository } from '@/lib/infra/canvas/postsRepository';
 import { attachPostToContainer, cleanupGraphEdgesForContainerChild } from '@/components/collabboard/canvas/hooks/attachPostToContainer';
+import { cleanupGraphEdgesForDeletedPosts } from '@/components/collabboard/canvas/hooks/deletePostGraphCleanup';
 import { createSectionsRepository } from '@/lib/infra/canvas/sectionsRepository';
 import { getVerifiedAuthUser, onAuthSessionChanged, updateCurrentUserMetadata } from '@/lib/infra/supabase/authState';
 import { createStorageGateway } from '@/lib/infra/supabase/storage';
@@ -2714,6 +2715,11 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
 
       if (!result.ok) throw result.error.cause ?? result.error;
 
+      // PATCH 9Q: the post no longer exists, so it can no longer be a Graph
+      // endpoint -- remove any persisted edge touching it.
+      await cleanupGraphEdgesForDeletedPosts(canvasId, [id]);
+      setGraphRefreshToken((token) => token + 1);
+
       setPadlets(prev => prev.filter(p => p.id !== id));
       if (selectedPadletId === id) {
         setSelectedPadletId(null);
@@ -2776,6 +2782,11 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         if (!childResult.ok) console.error('Failed to delete children:', childResult.error.cause ?? childResult.error);
       }
 
+      // PATCH 9Q: the post (and any cascaded children) no longer exist --
+      // remove every Graph edge touching any of them.
+      await cleanupGraphEdgesForDeletedPosts(canvasId, [padletId, ...children.map((c) => c.id)]);
+      setGraphRefreshToken((token) => token + 1);
+
       // Clear selection if needed
       if (selectedPadletId === padletId) {
         setSelectedPadletId(null);
@@ -2821,13 +2832,18 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         }
       }
 
+      // PATCH 9Q: the pin container (and its children) no longer exist --
+      // remove every Graph edge touching any of them.
+      await cleanupGraphEdgesForDeletedPosts(canvasId, [containerId, ...childIds]);
+      setGraphRefreshToken((token) => token + 1);
+
       toast.success('Pin deleted');
     } catch (err) {
       console.error('Failed to delete map pin:', err);
       toast.error('Failed to delete pin');
       fetchData();
     }
-  }, [padlets, selectedPadletId, mapActiveContainerId, deletePostOrThrow, fetchData]);
+  }, [padlets, selectedPadletId, mapActiveContainerId, deletePostOrThrow, fetchData, canvasId, setGraphRefreshToken]);
 
   /* -------------------------------------------------------------------------- */
   /*                              Columns Layout Actions                           */
@@ -3597,12 +3613,18 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       const deletePosts = createDeletePostsCommand(createPostsRepository());
       const result = await deletePosts({ postIds: idsToDelete }, { userId: null });
       if (!result.ok) throw result.error.cause ?? result.error;
+
+      // PATCH 9Q: the pasted posts no longer exist -- remove any Graph
+      // edge touching them (a freshly pasted post is unlikely to already
+      // have one, but the cleanup is a safe no-op either way).
+      await cleanupGraphEdgesForDeletedPosts(canvasId, idsToDelete);
+      setGraphRefreshToken((token) => token + 1);
     } catch (error) {
       console.error('Failed to undo pasted padlets:', error);
       toast.error('Failed to undo paste');
       fetchData(false);
     }
-  }, [fetchData, lastPastedPadletIds, setSelectedPadletIds, supabase]);
+  }, [fetchData, lastPastedPadletIds, setSelectedPadletIds, supabase, canvasId, setGraphRefreshToken]);
 
   const handleSelectAllPadlets = useCallback(() => {
     const allPadletIds = rootPadlets.map((padlet) => padlet.id);
@@ -4418,13 +4440,19 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       );
       if (!result.ok) throw result.error.cause ?? result.error;
 
+      // PATCH 9Q: the child post no longer exists -- remove any Graph
+      // edge touching it (a child is already Graph-ineligible per PATCH 9P,
+      // but this defensively cleans any stale legacy row for its id).
+      await cleanupGraphEdgesForDeletedPosts(canvasId, [childId]);
+      setGraphRefreshToken((token) => token + 1);
+
       toast.success('Post deleted');
     } catch (err) {
       console.error('Failed to delete child:', err);
       toast.error('Failed to delete post');
       fetchData();
     }
-  }, [padlets, supabase, fetchData]);
+  }, [padlets, supabase, fetchData, canvasId, setGraphRefreshToken]);
 
   const updatePadletMetadata = async (padletId: string, metadataUpdates: any) => {
     const padlet = padlets.find(p => p.id === padletId);
@@ -5215,6 +5243,12 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         });
         throw new Error(`Imported scene was saved, but deleting drawing overlay containers failed for: ${[...affectedIds].join(', ')}`);
       }
+
+      // PATCH 9Q: the deleted overlay posts no longer exist -- remove any
+      // Graph edge touching any of them.
+      await cleanupGraphEdgesForDeletedPosts(canvasId, [...affectedIds]);
+      setGraphRefreshToken((token) => token + 1);
+
       await fetchData();
     } catch (error) {
       console.error('Failed to delete drawing overlay padlets:', {
@@ -5225,7 +5259,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       fetchData();
       throw error;
     }
-  }, [fetchData, padlets, selectedPadletId, selectedPadletIds, setSelectedPadletId, setSelectedPadletIds]);
+  }, [fetchData, padlets, selectedPadletId, selectedPadletIds, setSelectedPadletId, setSelectedPadletIds, canvasId, setGraphRefreshToken]);
 
   // --- Drawing Canvas image placement flow ---
   const [drawingPendingDraft, setDrawingPendingDraft] = useState<Partial<Padlet> | null>(null);
@@ -7002,6 +7036,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                   // Find padlet type for toast message
                   const padlet = padlets.find(p => p.id === padletId);
                   const isContainer = padlet?.type === 'container' || (padlet?.metadata as any)?.kind === 'container' || (padlet?.metadata as any)?.isContainer;
+                  const childIds = padlets.filter(p => p.metadata?.parentId === padletId).map(p => p.id);
 
                   // Direct delete logic for Wall
                   try {
@@ -7019,6 +7054,11 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                     const childResult = await deleteChildPosts({ parentId: padletId }, { userId: null });
 
                     if (!childResult.ok) console.error('Failed to delete children:', childResult.error.cause ?? childResult.error);
+
+                    // PATCH 9Q: the post (and any cascaded children) no
+                    // longer exist -- remove every Graph edge touching them.
+                    await cleanupGraphEdgesForDeletedPosts(canvasId, [padletId, ...childIds]);
+                    setGraphRefreshToken((token) => token + 1);
 
                     toast.success(isContainer ? 'Container deleted' : 'Post deleted');
                   } catch (err) {
