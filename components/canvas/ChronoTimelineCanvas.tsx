@@ -49,6 +49,7 @@ interface TimelineCanvasProps {
   // All padlets for RowColumnContainerCard
   allPadlets?: Padlet[];
   onOpenTarget?: (padlet: Padlet) => void;
+  onOpenDocument?: (padlet: Padlet) => void; // PATCH-149B1b-iii §27.4
 }
 
 export default function ChronoTimelineCanvas({
@@ -76,6 +77,7 @@ export default function ChronoTimelineCanvas({
   onInsertContainerAt,
   allPadlets,
   onOpenTarget,
+  onOpenDocument,
 }: TimelineCanvasProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const isDraggingRef = useRef(false);
@@ -535,6 +537,7 @@ export default function ChronoTimelineCanvas({
               onExpandAvailabilityChange={(available) => setExpandableContainers(prev => prev[container.id] === available ? prev : { ...prev, [container.id]: available })}
               canvasContext="timeline"
               isContentOnly
+              onOpenDocument={onOpenDocument}
             />
           </CardShell>
         </div>

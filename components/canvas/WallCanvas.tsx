@@ -201,7 +201,7 @@ const SortablePadletCard: React.FC<SortablePadletProps> = ({
                 currentUserAvatar={currentUserAvatar}
                 onUpdateChildComments={onUpdateChildComments}
                 accessMode={commentAccessMode}
-                onOpenDocument={onOpenDocument ? () => onOpenDocument(padlet) : undefined}
+                onOpenDocument={onOpenDocument}
               />
             </CardShell>
           </div>

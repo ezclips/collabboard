@@ -7109,6 +7109,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                   onDeleteContainer={canUseFreeformEditButton ? ((containerId) => requestDeletePadlet(containerId)) : undefined}
                   onCreateEmptyContainer={canUseFreeformEditButton ? handleCreateEmptyTimelineContainer : undefined}
                   onOpenTarget={canUseFreeformEditButton ? openPadletTargetFromContextMenu : undefined}
+                  onOpenDocument={openDocumentFromPreview}
                   allPadlets={padlets}
                   onDropExistingPadlet={canUseFreeformEditButton ? (async (containerId, droppedId) => {
                     const containerPadlet = padlets.find(p => p.id === containerId);
@@ -8053,6 +8054,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                                 setPadletToEdit(p);
                                 setIsContainerEditorOpen(true);
                               }}
+                              onOpenDocument={openDocumentFromPreview}
                               className="w-full bg-white p-4"
                             />
                           </div>

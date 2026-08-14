@@ -102,8 +102,8 @@ describe('23: CanvasClient supplies one Document-open callback, reused everywher
     expect(body).not.toMatch(/destination\s*!==?\s*['"]document-editor['"]/);
   });
 
-  it('the same callback instance is passed to all five interactive layout owners', () => {
-    expect((canvasClientSrc.match(/onOpenDocument=\{openDocumentFromPreview\}/g) || []).length).toBe(5);
+  it('the same callback instance is passed to every interactive layout owner, including the PATCH 9D.1 additions (Timeline, Scheduler popover)', () => {
+    expect((canvasClientSrc.match(/onOpenDocument=\{openDocumentFromPreview\}/g) || []).length).toBe(7);
   });
 });
 
@@ -117,9 +117,25 @@ describe('T3: CardPreview Document branch delegates to the shared component, no 
 });
 
 describe('39/40: layout owners -- real forwarding into RowColumnContainerCard, not mere token presence (closes the B1b-iii false positive)', () => {
-  it('each layout forwards onOpenDocument into its own RowColumnContainerCard JSX (all Wall/Drawing hops)', () => {
-    for (const [f, arg] of [['components/canvas/WallCanvas.tsx', 'padlet'], ['components/canvas/layouts/ColumnsCanvasRow.tsx', 'post'], ['components/collabboard/row/RowLane.tsx', 'post'], ['components/map/PostPopup.tsx', 'post']] as const) {
-      expect(read(f).slice(read(f).indexOf('<RowColumnContainerCard'), read(f).indexOf('/>', read(f).indexOf('<RowColumnContainerCard'))), f).toContain(`onOpenDocument={onOpenDocument ? () => onOpenDocument(${arg}) : undefined}`);
+  // PATCH 9D.1 correction: the wrapped closure form this describe block
+  // originally asserted here (`() => onOpenDocument(<container-scoped var>)`)
+  // is NOT real forwarding -- RowColumnContainerCard internally rebinds and
+  // calls its onOpenDocument prop with the actual clicked CHILD, but that
+  // wrapped closure ignores its own argument and always calls the outer
+  // onOpenDocument with the CONTAINER post captured in its closure instead.
+  // Since a Container is never itself a Document, this silently no-opped:
+  // Read rendered, clicking it did nothing. A direct pass-through
+  // (`onOpenDocument={onOpenDocument}`) is what actually threads the real
+  // clicked child through -- verified end-to-end for Map in
+  // components/map/PostPopup.documentReadRouting.test.tsx and at the source
+  // level for every host in
+  // components/collabboard/documentReadRoutingAllHosts.architecture.test.tsx.
+  it('each layout forwards onOpenDocument into its own RowColumnContainerCard JSX as a direct pass-through (all Wall/Drawing hops)', () => {
+    for (const f of ['components/canvas/WallCanvas.tsx', 'components/canvas/layouts/ColumnsCanvasRow.tsx', 'components/collabboard/row/RowLane.tsx', 'components/map/PostPopup.tsx'] as const) {
+      const src = read(f);
+      const block = src.slice(src.indexOf('<RowColumnContainerCard'), src.indexOf('/>', src.indexOf('<RowColumnContainerCard')));
+      expect(block, f).toContain('onOpenDocument={onOpenDocument}');
+      expect(block, f).not.toMatch(/onOpenDocument=\{onOpenDocument \? \(\) =>/);
     }
     const wall = read('components/canvas/WallCanvas.tsx');
     expect(wall.slice(wall.indexOf('<SortablePadletCard'), wall.indexOf('/>', wall.indexOf('<SortablePadletCard')))).toContain('onOpenDocument={onOpenDocument}');
