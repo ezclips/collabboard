@@ -1214,9 +1214,9 @@ describe('PATCH 8O.1/8O.2 -- canonical comment permission wiring', () => {
 
     it('CommentEditor.tsx renders its composer, badge-color trigger, and per-row actions only outside read-only', () => {
       const commentEditor = read('components/collabboard/editors/CommentEditor.tsx');
-      expect(commentEditor).toContain('{!isReadOnly && (\n            <div className="mt-3 pt-3 border-t border-gray-100">');
-      expect(commentEditor).toContain('{!isReadOnly && (\n              <button\n                onClick={() => {\n                  setBadgeColorOpen');
-      expect(commentEditor).toContain('{!isReadOnly && (\n                      <div className="flex flex-col gap-0.5 w-5 shrink-0">');
+      expect(commentEditor).toMatch(/\{\s*!isReadOnly\s*&&\s*\(\s*<div\s+className="mt-3 pt-3 border-t border-gray-100">/);
+      expect(commentEditor).toMatch(/\{\s*!isReadOnly\s*&&\s*\(\s*<button\s+onClick=\{\(\)\s*=>\s*\{\s*setBadgeColorOpen/);
+      expect(commentEditor).toMatch(/\{\s*!isReadOnly\s*&&\s*\(\s*<div\s+className="flex flex-col gap-0.5 w-5 shrink-0">/);
       expect(commentEditor).toContain('readOnly={isReadOnly}');
     });
 
