@@ -20,6 +20,7 @@ import { resolvePadletTitleStyle } from "@/lib/domain/canvas/captionStyle";
 import DocumentCardContent from "./DocumentCardContent";
 import { guardCommentMutation, type CommentAccessMode } from "@/lib/domain/canvas/comments";
 import { IMAGE_CROP_TO_GRID_HEIGHT_PX } from "@/components/collabboard/canvas/engine/utils";
+import { useScrollbarLane } from "./useScrollbarLane";
 
 type CellStyle = {
     bg?: string;
@@ -265,6 +266,13 @@ export default function PostCardContent({
 
     const type = normalizeType(padlet.type);
     const rawContent = asStringContent(padlet.content);
+    // PATCH 9E.1: called unconditionally (rules of hooks -- several early
+    // `return`s for other padlet types follow below) but only ever attached
+    // to an element when this padlet actually renders the nested-Container
+    // scroll viewport; measures that viewport's own real scrollbar/gutter
+    // reservation instead of PATCH 9E's guessed 6px constant.
+    const nestedContainerScrollRef = useRef<HTMLDivElement>(null);
+    const nestedContainerScrollbarLane = useScrollbarLane(nestedContainerScrollRef, type === "container");
 
     // --- LINK TYPE ---
     if (type === "link") {
@@ -897,19 +905,27 @@ export default function PostCardContent({
 
                 <div className="space-y-2 mt-2">
                     {children.length > 0 ? (
-                        // PATCH 9E: same scrollbar-lane fix as
+                        // PATCH 9E.1: same scrollbar-lane fix as
                         // RowColumnContainerCard's child list -- this nested
                         // "Container-as-child" preview is always in the
                         // `overflow-y-auto` state (no expand toggle here),
                         // so `scrollbar-gutter: stable` makes the reservation
                         // constant whether or not this instance's content
-                        // currently exceeds 260px, and the `calc(100% + 6px)`
-                        // /-6px margin overshoot pushes that reservation into
-                        // this preview's own right-edge padding instead of
+                        // currently exceeds 260px, and
+                        // `nestedContainerScrollbarLane` (measured by
+                        // useScrollbarLane -- replaces PATCH 9E's guessed 6px
+                        // constant) is this viewport's OWN real reservation in
+                        // pixels, pushed into an outside lane via
+                        // `calc(100% + Npx)` width / `-Npx` margin instead of
                         // shrinking the child cards. `pr-1` is unchanged.
                         <div
+                            ref={nestedContainerScrollRef}
                             className="max-h-[260px] overflow-y-auto overflow-x-hidden pr-1 space-y-2 scrollbar-ultrathin"
-                            style={{ scrollbarGutter: "stable", width: "calc(100% + 6px)", marginRight: "-6px" }}
+                            style={{
+                                scrollbarGutter: "stable",
+                                width: `calc(100% + ${nestedContainerScrollbarLane}px)`,
+                                marginRight: `-${nestedContainerScrollbarLane}px`,
+                            }}
                         >
                             {children.map((child) => {
                                 // Robust comment detection (type OR metadata.comments)

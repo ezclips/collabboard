@@ -23,10 +23,23 @@
 import React from 'react';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import PostCardContent from './PostCardContent';
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+
+// PATCH 9E.1: the CONTAINER TYPE branch now measures its own scrollbar lane
+// via useScrollbarLane (ResizeObserver-driven) instead of PATCH 9E's static
+// constant -- same stub this whole patch series uses elsewhere for jsdom.
+beforeAll(() => {
+  if (!('ResizeObserver' in globalThis)) {
+    (globalThis as any).ResizeObserver = class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    };
+  }
+});
 
 let mounted: Array<{ root: Root; container: HTMLElement }> = [];
 function mount(ui: React.ReactElement) {

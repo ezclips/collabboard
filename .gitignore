@@ -59,5 +59,6 @@ Sakai_Investments/
 test-results/
 playwright-report/
 e2e/.auth/
+e2e/.artifacts/
 .fable5/worktrees/
 .fable5/evidence/

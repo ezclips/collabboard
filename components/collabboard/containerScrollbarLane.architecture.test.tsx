@@ -8,28 +8,64 @@ function read(relPath: string): string {
 
 const rowColumnSrc = read('components/collabboard/RowColumnContainerCard.tsx');
 const postCardSrc = read('components/collabboard/PostCardContent.tsx');
+const hookSrc = read('components/collabboard/useScrollbarLane.ts');
 
-describe('PATCH 9E: the scrollbar-lane fix is present on the shared scroll viewport, with the pre-fix baseline classes preserved', () => {
-  it('RowColumnContainerCard scroll viewport: gutter reservation + width overshoot, existing pr-0.5 and max-height untouched', () => {
-    const anchor = rowColumnSrc.indexOf('shouldEnableInternalScroll ? "max-h-[300px]');
-    const block = rowColumnSrc.slice(anchor, rowColumnSrc.indexOf('>', rowColumnSrc.indexOf('scrollbarGutter', anchor)) + 1);
-    expect(block).toContain('max-h-[300px] overflow-y-auto overflow-x-hidden pr-0.5 space-y-2 scrollbar-ultrathin');
-    expect(block).toContain('"space-y-2 pr-0.5"');
-    expect(block).toContain('scrollbarGutter: "stable"');
-    expect(block).toContain('width: "calc(100% + 6px)"');
-    expect(block).toContain('marginRight: "-6px"');
+describe('PATCH 9E.1: no guessed constant remains -- the scrollbar lane is derived from measurement', () => {
+  it('no hardcoded pixel overshoot (6, or any other guessed value) remains in either Container renderer', () => {
+    for (const src of [rowColumnSrc, postCardSrc]) {
+      expect(src).not.toMatch(/calc\(100% \+ \d+px\)/);
+      expect(src).not.toMatch(/marginRight:\s*"-\d+px"/);
+      expect(src).not.toMatch(/"calc\(100% \+ 6px\)"/);
+    }
   });
 
-  it('PostCardContent nested-Container branch: same gutter+overshoot technique, existing pr-1 and max-height untouched', () => {
-    const anchor = postCardSrc.indexOf('max-h-[260px]');
-    const block = postCardSrc.slice(anchor, postCardSrc.indexOf('>', postCardSrc.indexOf('scrollbarGutter', anchor)) + 1);
-    expect(block).toContain('max-h-[260px] overflow-y-auto overflow-x-hidden pr-1 space-y-2 scrollbar-ultrathin');
-    expect(block).toContain('scrollbarGutter: "stable"');
-    expect(block).toContain('width: "calc(100% + 6px)"');
-    expect(block).toContain('marginRight: "-6px"');
+  it('RowColumnContainerCard derives its overshoot from useScrollbarLane, applied via a template literal keyed to the measured value', () => {
+    expect(rowColumnSrc).toContain('import { useScrollbarLane } from "./useScrollbarLane";');
+    expect(rowColumnSrc).toContain('const scrollbarLane = useScrollbarLane(contentMeasureRef, shouldEnableInternalScroll);');
+    expect(rowColumnSrc).toContain('width: `calc(100% + ${scrollbarLane}px)`');
+    expect(rowColumnSrc).toContain('marginRight: `-${scrollbarLane}px`');
   });
 
-  it('the overshoot/gutter styling is applied only to the scroll viewport itself -- no per-child-card width/margin/padding override was introduced', () => {
+  it('both viewports keep scrollbar-gutter: stable -- without it the reservation (and therefore the correct measured compensation) would only exist while a scrollbar is actually painting, reintroducing the width jump', () => {
+    expect(rowColumnSrc).toContain('scrollbarGutter: "stable"');
+    expect(postCardSrc).toContain('scrollbarGutter: "stable"');
+  });
+
+  it('PostCardContent nested-Container branch derives its overshoot from its OWN useScrollbarLane call, applied via a template literal', () => {
+    expect(postCardSrc).toContain('import { useScrollbarLane } from "./useScrollbarLane";');
+    expect(postCardSrc).toContain('const nestedContainerScrollbarLane = useScrollbarLane(nestedContainerScrollRef, type === "container");');
+    expect(postCardSrc).toContain('width: `calc(100% + ${nestedContainerScrollbarLane}px)`');
+    expect(postCardSrc).toContain('marginRight: `-${nestedContainerScrollbarLane}px`');
+  });
+
+  it('the shared hook measures real layout (offsetWidth - clientWidth), not an assumed browser/OS constant', () => {
+    expect(hookSrc).toContain('export function computeScrollbarLane(offsetWidth: number, clientWidth: number): number');
+    expect(hookSrc).toContain('const gutter = offsetWidth - clientWidth;');
+    expect(hookSrc).not.toMatch(/\b(15|16|17)\b/); // no native-scrollbar-width assumption baked in
+  });
+
+  it('zero measured gutter applies zero overshoot -- computeScrollbarLane never returns a negative or invented value', () => {
+    expect(hookSrc).toContain('return gutter > 0 ? gutter : 0;');
+  });
+});
+
+describe('PATCH 9E.1: measurement survives resize -- ResizeObserver drives recalculation, not a polling loop', () => {
+  it('useScrollbarLane wires a ResizeObserver on the measured element and disconnects it on cleanup', () => {
+    expect(hookSrc).toContain('new ResizeObserver(() => measure())');
+    expect(hookSrc).toContain('resizeObserver.observe(el)');
+    expect(hookSrc).toContain('resizeObserver.disconnect()');
+    expect(hookSrc).not.toMatch(/setInterval|setTimeout\(.*measure/);
+  });
+
+  it('the hook returns 0 (no compensation) while disabled, matching the non-scrolling CSS state', () => {
+    expect(hookSrc).toContain('if (!enabled) {');
+    expect(hookSrc).toContain('laneRef.current = 0;');
+    expect(hookSrc).toContain('setLane(0);');
+  });
+});
+
+describe('PATCH 9E.1: the overshoot/gutter styling is applied only to the scroll viewport itself -- no per-child-card override', () => {
+  it('no per-child-card width/margin/padding style override was introduced', () => {
     for (const src of [rowColumnSrc, postCardSrc]) {
       expect(src).not.toMatch(/relative border border-gray-(200|100)[^`]*style=\{\{[^}]*width/);
     }
@@ -37,19 +73,21 @@ describe('PATCH 9E: the scrollbar-lane fix is present on the shared scroll viewp
 
   it('no horizontal-scroll-inducing class was introduced on the Container child-list viewports (pre-existing, unrelated table overflow-x-auto elsewhere in PostCardContent.tsx is untouched)', () => {
     const rowAnchor = rowColumnSrc.indexOf('shouldEnableInternalScroll ? "max-h-[300px]');
-    const rowBlock = rowColumnSrc.slice(rowAnchor, rowColumnSrc.indexOf('>', rowColumnSrc.indexOf('scrollbarGutter', rowAnchor)) + 1);
+    const rowBlock = rowColumnSrc.slice(rowAnchor, rowColumnSrc.indexOf('>', rowColumnSrc.indexOf('scrollbarLane}px', rowAnchor)) + 1);
     expect(rowBlock).not.toMatch(/overflow-x-(auto|scroll)/);
+    expect(rowBlock).toContain('overflow-x-hidden');
 
     const postAnchor = postCardSrc.indexOf('max-h-[260px]');
-    const postBlock = postCardSrc.slice(postAnchor, postCardSrc.indexOf('>', postCardSrc.indexOf('scrollbarGutter', postAnchor)) + 1);
+    const postBlock = postCardSrc.slice(postAnchor, postCardSrc.indexOf('>', postCardSrc.indexOf('nestedContainerScrollbarLane}px', postAnchor)) + 1);
     expect(postBlock).not.toMatch(/overflow-x-(auto|scroll)/);
+    expect(postBlock).toContain('overflow-x-hidden');
 
     // The pre-existing, unrelated Table-post horizontal scroll remains exactly as before.
     expect(postCardSrc).toContain('overflow-x-auto rounded border border-gray-200 bg-white');
   });
 });
 
-describe('PATCH 9E: header, edit pencil, collapse toggle, and footer are outside the scroll viewport and untouched', () => {
+describe('PATCH 9E.1: header, edit pencil, collapse toggle, and footer are outside the scroll viewport and untouched', () => {
   it('RowColumnContainerCard: the header row (title / expand toggle / edit pencil) is rendered before, not inside, the scroll viewport', () => {
     const headerAt = rowColumnSrc.indexOf('{showHeader && !isContentOnly && (');
     const viewportAt = rowColumnSrc.indexOf('ref={contentMeasureRef}');
@@ -79,7 +117,7 @@ describe('PATCH 9E: header, edit pencil, collapse toggle, and footer are outside
   });
 });
 
-describe('PATCH 9E: shared component -- every live host inherits the fix automatically, no host duplicates its own scroll geometry', () => {
+describe('PATCH 9E.1: shared component -- every live host inherits the fix automatically, no host duplicates its own scroll geometry', () => {
   const HOST_FILES = [
     'components/collabboard/canvas/ui/FreeformPadletCards.tsx',
     'components/canvas/WallCanvas.tsx',
@@ -90,43 +128,48 @@ describe('PATCH 9E: shared component -- every live host inherits the fix automat
     'components/canvas/ChronoTimelineCanvas.tsx',
   ];
 
-  it('no host file reimplements its own max-h/overflow-y-auto child-scroll geometry for Container children', () => {
+  it('no host file reimplements its own max-h/overflow-y-auto child-scroll geometry, or its own scrollbar-lane measurement, for Container children', () => {
     for (const f of HOST_FILES) {
       const src = read(f);
-      // Each host renders RowColumnContainerCard (or wraps it) but does not
-      // itself declare a competing scrollbar-ultrathin child-list viewport.
       expect(src, f).not.toContain('max-h-[300px] overflow-y-auto');
+      expect(src, f).not.toContain('useScrollbarLane');
     }
   });
 
-  it('CanvasClient.tsx Scheduler popover reuses RowColumnContainerCard directly -- no separate scroll viewport of its own', () => {
+  it('CanvasClient.tsx Scheduler popover reuses RowColumnContainerCard directly -- no separate scroll viewport or measurement of its own', () => {
     const src = read('app/dashboard/canvas/[id]/CanvasClient.tsx');
     const popoverStart = src.indexOf('{isSchedulerLayout && schedulerPopoverPadletId && (');
     const popoverEnd = src.indexOf('className="w-full bg-white p-4"', popoverStart);
     const block = src.slice(popoverStart, popoverEnd);
     expect(block).not.toContain('max-h-[300px] overflow-y-auto');
+    expect(block).not.toContain('useScrollbarLane');
     expect(block).toContain('<RowColumnContainerCard');
   });
 });
 
-describe('PATCH 9E: nested Container geometry is independent of the outer scroll viewport', () => {
-  it('the outer (RowColumnContainerCard) and inner (PostCardContent nested-Container) scroll viewports use separate constants scoped to their own element, not a shared/global rule', () => {
-    // Each file declares its own literal 6px overshoot inline (not a shared
-    // CSS class applied globally) -- so fixing the outer Container's lane
-    // cannot accidentally widen or narrow an unrelated overflow region
-    // elsewhere on the page.
-    expect(rowColumnSrc.match(/width: "calc\(100% \+ 6px\)"/g)?.length).toBe(1);
-    expect(postCardSrc.match(/width: "calc\(100% \+ 6px\)"/g)?.length).toBe(1);
+describe('PATCH 9E.1: nested Container geometry is independent of the outer scroll viewport -- no shared/global measurement state', () => {
+  it('each renderer calls useScrollbarLane with its OWN ref -- RowColumnContainerCard measures contentMeasureRef, PostCardContent measures nestedContainerScrollRef', () => {
+    expect(rowColumnSrc).toContain('useScrollbarLane(contentMeasureRef, shouldEnableInternalScroll)');
+    expect(postCardSrc).toContain('useScrollbarLane(nestedContainerScrollRef, type === "container")');
+    // Exactly one call site per file -- not reused/shared across multiple viewports.
+    expect(rowColumnSrc.match(/useScrollbarLane\(/g)?.length).toBe(1);
+    expect(postCardSrc.match(/useScrollbarLane\(/g)?.length).toBe(1);
+  });
+
+  it('the hook itself holds no module-level/singleton state -- each call gets its own useState/useRef instance', () => {
+    expect(hookSrc).not.toMatch(/^(let|const)\s+\w+\s*=\s*(0|null);?\s*$/m);
+    expect(hookSrc).toContain('const [lane, setLane] = useState(0);');
+    expect(hookSrc).toContain('const laneRef = useRef(0);');
   });
 
   it('PostCardContent nested-Container branch resolves its own children independently of any outer RowColumnContainerCard scroll state', () => {
-    const block = postCardSrc.slice(postCardSrc.indexOf('if (type === "container") {'), postCardSrc.indexOf('// --- CONTAINER TYPE ---') + 5000 > postCardSrc.length ? postCardSrc.length : postCardSrc.indexOf('max-h-[260px]') + 400);
+    const block = postCardSrc.slice(postCardSrc.indexOf('if (type === "container") {'), postCardSrc.indexOf('max-h-[260px]') + 400);
     expect(block).toContain('const childIds = padlet.metadata?.childPadletIds || [];');
     expect(block).not.toContain('contentMeasureRef');
   });
 });
 
-describe('PATCH 9E: regression freezes hold (9D, 9D.1, 9C.1, 9B, 9A)', () => {
+describe('PATCH 9E.1: regression freezes hold (9D, 9D.1, 9C.1, 9B, 9A)', () => {
   it('resolveChildCardChrome (PATCH 9D) is untouched', () => {
     const src = read('lib/domain/canvas/documentPost.ts');
     expect(src).toContain('export function resolveChildCardChrome');
@@ -152,14 +195,15 @@ describe('PATCH 9E: regression freezes hold (9D, 9D.1, 9C.1, 9B, 9A)', () => {
   it('Container Editor has no scrollbar-lane wiring added -- this patch does not touch it', () => {
     const src = read('components/collabboard/editors/ContainerEditor.tsx');
     expect(src).not.toContain('scrollbarGutter');
+    expect(src).not.toContain('useScrollbarLane');
   });
 });
 
-describe('PATCH 9E: readonly is a pure rendering pass-through -- geometry is not coupled to edit permission', () => {
+describe('PATCH 9E.1: readonly is a pure rendering pass-through -- geometry is not coupled to edit permission', () => {
   it('the scroll-viewport style block does not reference any permission/role/accessMode variable', () => {
-    const rowBlock = rowColumnSrc.slice(rowColumnSrc.indexOf('scrollbarGutter: "stable"') - 50, rowColumnSrc.indexOf('scrollbarGutter: "stable"') + 150);
+    const rowBlock = rowColumnSrc.slice(rowColumnSrc.indexOf('scrollbarGutter: "stable"') - 50, rowColumnSrc.indexOf('scrollbarGutter: "stable"') + 200);
     expect(rowBlock).not.toMatch(/accessMode|canEdit|isReadonly/);
-    const postBlock = postCardSrc.slice(postCardSrc.indexOf('scrollbarGutter: "stable"') - 50, postCardSrc.indexOf('scrollbarGutter: "stable"') + 150);
+    const postBlock = postCardSrc.slice(postCardSrc.indexOf('scrollbarGutter: "stable"') - 50, postCardSrc.indexOf('scrollbarGutter: "stable"') + 200);
     expect(postBlock).not.toMatch(/accessMode|canEdit|isReadonly/);
   });
 });

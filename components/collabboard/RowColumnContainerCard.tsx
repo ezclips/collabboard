@@ -11,6 +11,7 @@ import type { Padlet } from "@/types/collabboard";
 import { guardCommentMutation, type CommentAccessMode } from "@/lib/domain/canvas/comments";
 import { getEffectiveVisibleChildTitleIds, resolveVisibleChildTitle } from "@/lib/infra/collabboard/containerChildTitleVisibility";
 import { resolveChildCardChrome } from "@/lib/domain/canvas/documentPost";
+import { useScrollbarLane } from "./useScrollbarLane";
 
 const DEFAULT_IGNORE_KINDS = new Set(["columns-container-move"]);
 
@@ -135,6 +136,11 @@ export default function RowColumnContainerCard({
   const contentMeasureRef = useRef<HTMLDivElement>(null);
   const isControlled = controlledIsExpanded !== undefined;
   const isExpanded = isControlled ? controlledIsExpanded : localIsExpanded;
+  const shouldEnableInternalScroll = !disableInternalScroll && !isExpanded;
+  // PATCH 9E.1: replaces PATCH 9E's guessed 6px constant -- measures this
+  // viewport's OWN real scrollbar/gutter reservation (0 on platforms whose
+  // scrollbar takes no layout space) instead of approximating it.
+  const scrollbarLane = useScrollbarLane(contentMeasureRef, shouldEnableInternalScroll);
   const backgroundColor = typeof (padlet.metadata as any)?.cardColor === 'string' && (padlet.metadata as any)?.cardColor
     ? (padlet.metadata as any).cardColor
     : '#ffffff';
@@ -359,28 +365,32 @@ export default function RowColumnContainerCard({
                   ...childPadlets.filter((child) => !isCommentPost(child)),
                 ]
               : childPadlets;
-            const shouldEnableInternalScroll = !disableInternalScroll && !isExpanded;
 
-            // PATCH 9E: when scrolling is active, the child-content lane must
-            // keep the SAME width it has when nothing overflows -- the
+            // PATCH 9E.1: when scrolling is active, the child-content lane
+            // must keep the SAME width it has when nothing overflows -- the
             // scrollbar must not eat into it. `overflow-y-auto` alone shrinks
             // the content box by the scrollbar's rendered width the moment a
             // scrollbar actually paints, and it does so INTRA-branch too
             // (short content within this same "scroll enabled" state renders
             // no real scrollbar at all). `scrollbarGutter: 'stable'` makes
-            // that reservation constant across both sub-states; the
-            // `calc(100% + 6px)` width + `-6px` margin then pushes that
-            // constant reservation into the 6px right-edge gutter this card
-            // already reserves via its own `p-1.5` padding (present in every
-            // host that renders this card, verified during PATCH 9E's host
-            // audit) instead of taking it out of the child cards' width.
+            // that reservation constant across both sub-states; `scrollbarLane`
+            // (measured by useScrollbarLane, PATCH 9E.1 -- replaces PATCH 9E's
+            // guessed 6px constant, which real-Chrome measurement proved did
+            // not match the browser's actual reservation) is the viewport's
+            // OWN real reservation in pixels, so `calc(100% + Npx)` width +
+            // `-Npx` margin pushes EXACTLY that reservation into an outside
+            // lane instead of taking it out of the child cards' width.
             // `pr-0.5` is left untouched so the un-widened, no-scroll case
             // (the width baseline everything else must match) is unchanged.
             return (
               <div
                 ref={contentMeasureRef}
                 className={shouldEnableInternalScroll ? "max-h-[300px] overflow-y-auto overflow-x-hidden pr-0.5 space-y-2 scrollbar-ultrathin" : "space-y-2 pr-0.5"}
-                style={shouldEnableInternalScroll ? { scrollbarGutter: "stable", width: "calc(100% + 6px)", marginRight: "-6px" } : undefined}
+                style={
+                  shouldEnableInternalScroll
+                    ? { scrollbarGutter: "stable", width: `calc(100% + ${scrollbarLane}px)`, marginRight: `-${scrollbarLane}px` }
+                    : undefined
+                }
               >
                 {orderedChildren.map((child) => {
                   const isCommentType = isCommentPost(child);
