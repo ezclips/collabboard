@@ -94,12 +94,20 @@ interface CommentEditorProps {
     isCollapsed?: boolean;
     topStrip?: string;
     commentTitle?: string;
+    // PATCH 9K.1: tells the caller's persistence path (saveComment) to skip
+    // its own unconditional editor-close -- set ONLY by the Collapse/Expand
+    // toggle, never by handleSave, so normal submit/close semantics are
+    // untouched.
+    keepEditorOpen?: boolean;
   }) => void;
   initialComments?: CommentData[];
   initialCardColor?: string;
   initialBadgeColor?: string;
   initialTopStrip?: string;
   initialCommentTitle?: string;
+  // PATCH 9K.1: current canvas presentation state (padlet.metadata.isCollapsed)
+  // so the toolbar toggle knows which direction to flip next.
+  initialIsCollapsed?: boolean;
   currentUserId?: string;
   currentUserName?: string;
   currentUserAvatar?: string;
@@ -126,6 +134,7 @@ export default function CommentEditor({
   initialBadgeColor = "#facc15",
   initialTopStrip = "transparent",
   initialCommentTitle = "",
+  initialIsCollapsed = false,
   currentUserId = "user1",
   currentUserName = "R",
   currentUserAvatar,
@@ -143,6 +152,10 @@ export default function CommentEditor({
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
   const [commentColorPopupId, setCommentColorPopupId] = useState<string | null>(null);
+  // PATCH 9K.1: single source of truth for the toolbar's Collapse/Expand
+  // toggle -- mirrors padlet.metadata.isCollapsed, reset from the same prop
+  // every time the editor opens (see the "Reset UI state on open" effect).
+  const [isCollapsed, setIsCollapsed] = useState(initialIsCollapsed);
 
   const [cardColorOpen, setCardColorOpen] = useState(false);
   const [textStyleOpen, setTextStyleOpen] = useState(false);
@@ -234,6 +247,7 @@ export default function CommentEditor({
     setEditingCommentId(null);
     setActiveCommentId(initialComments[initialComments.length - 1]?.id || null);
     setCommentColorPopupId(null);
+    setIsCollapsed(initialIsCollapsed);
 
     setTextStyleOpen(false);
     setCardColorOpen(false);
@@ -426,21 +440,37 @@ export default function CommentEditor({
   const strikeActiveClass = isDarkCard ? "text-white bg-white/20" : "text-blue-500 bg-blue-50";
   const deleteHoverClass = isDarkCard ? "hover:text-red-300" : "hover:text-red-500";
 
-  const handleCollapse = () => {
-    // Commit any pending edit before collapsing
+  // PATCH 9K.1: true two-way toggle -- flips metadata.isCollapsed in either
+  // direction and persists through the same onSave/saveComment path already
+  // used everywhere else, but with keepEditorOpen so saveComment does NOT
+  // close the modal. The canvas presentation (full post vs. pin marker)
+  // switches via the persisted padlets state; this editor stays open the
+  // whole time so the same toolbar button can be pressed again.
+  const handleToggleCollapse = () => {
+    // Commit any pending edit before toggling
     let finalComments = comments;
     if (editingCommentId && editEditor && !editEditor.isDestroyed) {
       const htmlContent = editEditor.getHTML();
       const textContent = editEditor.getText().trim();
       if (textContent) {
-        finalComments = comments.map((c) => 
+        finalComments = comments.map((c) =>
           c.id === editingCommentId ? { ...c, text: htmlContent } : c
         );
+        setComments(finalComments);
+        setEditingCommentId(null);
       }
     }
-    onSave({ comments: finalComments, cardColor, badgeColor, isCollapsed: true, topStrip: topStrip || undefined, commentTitle: commentTitle.trim() || undefined });
-    resetEditors();
-    onClose();
+    const nextIsCollapsed = !isCollapsed;
+    setIsCollapsed(nextIsCollapsed);
+    onSave({
+      comments: finalComments,
+      cardColor,
+      badgeColor,
+      isCollapsed: nextIsCollapsed,
+      topStrip: topStrip || undefined,
+      commentTitle: commentTitle.trim() || undefined,
+      keepEditorOpen: true,
+    });
   };
 
   const activeComment = comments.find((comment) => comment.id === activeCommentId) || null;
@@ -570,7 +600,8 @@ export default function CommentEditor({
               setBadgeColorOpen(false);
               setCardColorOpen(true);
             }}
-            onCollapse={handleCollapse}
+            onCollapse={handleToggleCollapse}
+            isCollapsed={isCollapsed}
             onLink={handleLink}
             onTextStyle={() => {
               setEmojiOpen(false);

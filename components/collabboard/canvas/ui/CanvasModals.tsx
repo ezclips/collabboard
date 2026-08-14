@@ -417,6 +417,7 @@ export default function CanvasModals({
           initialBadgeColor={padletToEdit?.metadata?.badgeColor || '#facc15'}
           initialTopStrip={padletToEdit?.metadata?.topStrip || 'transparent'}
           initialCommentTitle={padletToEdit?.metadata?.commentTitle || ''}
+          initialIsCollapsed={!!padletToEdit?.metadata?.isCollapsed}
           onSave={saveComment}
           accessMode={commentAccessMode}
           currentUserId={user?.id}

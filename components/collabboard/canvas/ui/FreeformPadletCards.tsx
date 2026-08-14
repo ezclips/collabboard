@@ -47,7 +47,7 @@ import { FREEFORM_WORLD_WIDTH_PX, FREEFORM_WORLD_HEIGHT_PX } from '@/components/
 import { getContainerEditTargetLabel } from '@/lib/infra/collabboard/containerEditTargetLabel';
 import { getEffectiveVisibleChildTitleIds, toggleChildPostTitleVisibility } from '@/lib/infra/collabboard/containerChildTitleVisibility';
 import {
-  Bell, X, Edit2, PenTool, Trash2, Palette, Strikethrough, ChevronDown, ChevronUp, RefreshCw, Pencil, ArrowLeftRight, Plus, Maximize,
+  Bell, X, Edit2, PenTool, Trash2, Palette, Strikethrough, ChevronDown, ChevronUp, RefreshCw, Pencil, ArrowLeftRight, Plus,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -2066,30 +2066,6 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                   </div>
                   {/* Pin pointer - triangle using CSS borders */}
                   <div className="absolute bottom-0 left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-[6px] border-r-[6px] border-t-[10px] border-l-transparent border-r-transparent border-t-gray-400" />
-
-                  {/* Expand control -- the reverse of CommentEditorToolbar's
-                      Collapse button (components/collabboard/editors/CommentEditorToolbar.tsx).
-                      Same underlying state transition (metadata.isCollapsed via
-                      updatePadletMetadata's merge), just flipped back to false --
-                      not a second collapse/expand mechanism. Presentation state,
-                      not a comment mutation, so it stays available regardless of
-                      commentAccessMode, matching Collapse's own precedent.
-                      stopPropagation on both handlers keeps this from also
-                      triggering the marker's own click-to-open-popup and
-                      mousedown-drag behavior. */}
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      updatePadletMetadata(padlet.id, { isCollapsed: false });
-                    }}
-                    onMouseDown={(e) => e.stopPropagation()}
-                    className="absolute -top-1.5 -right-1.5 z-10 flex h-5 w-5 items-center justify-center rounded-full border border-gray-300 bg-white text-gray-500 shadow-sm transition-colors hover:bg-gray-100 hover:text-gray-700"
-                    title="Expand comment post"
-                    aria-label="Expand comment post"
-                  >
-                    <Maximize className="h-3 w-3" />
-                  </button>
                 </div>
               </div>
 

@@ -147,6 +147,11 @@ export type SaveCommentData = {
   isCollapsed?: boolean;
   topStrip?: string;
   commentTitle?: string;
+  // PATCH 9K.1: set only by CommentEditor's Collapse/Expand toolbar toggle --
+  // skips this function's normal unconditional editor-close so the same
+  // toolbar session can flip the state back and forth without reopening.
+  // Never set by the regular Save/Enter/Escape submit path.
+  keepEditorOpen?: boolean;
 };
 
 export type SaveCardData = {
@@ -968,8 +973,16 @@ export function usePadletSave(params: UsePadletSaveParams) {
         if (error) throw error;
       }
 
-      setIsCommentEditorOpen(false);
-      setPadletToEdit(null);
+      // PATCH 9K.1: the Collapse/Expand toolbar toggle persists through this
+      // same path but asks to keep the editor open (padletToEdit.id === 'new'
+      // never reaches here with keepEditorOpen -- a not-yet-created post has
+      // no canvas presentation to toggle).
+      if (data.keepEditorOpen && padletToEdit.id !== 'new') {
+        setPadletToEdit({ ...padletToEdit, metadata });
+      } else {
+        setIsCommentEditorOpen(false);
+        setPadletToEdit(null);
+      }
       if (padletToEdit.id === 'new') {
         if (createdPadlet) setPadlets(prev => [...prev, createdPadlet]);
         else fetchData();

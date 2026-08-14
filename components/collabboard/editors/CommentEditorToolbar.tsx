@@ -19,6 +19,11 @@ interface CommentEditorToolbarProps {
     // Box mode handlers
     onCardColor?: () => void;
     onCollapse?: () => void;
+    // PATCH 9K.1: current canvas presentation state, so this single control
+    // can flip between "Collapse" (expanded -> pin) and "Expand" (pin ->
+    // expanded) -- the toolbar itself does not own the state, it only
+    // reflects it.
+    isCollapsed?: boolean;
     // Text mode handlers -- formatting (Bold/Italic/Strikethrough/...) now
     // lives in the Text style panel itself, not this toolbar.
     onLink?: () => void;
@@ -39,6 +44,7 @@ export default function CommentEditorToolbar({
     onModeChange,
     onCardColor,
     onCollapse,
+    isCollapsed = false,
     onLink,
     onTextStyle,
     textStyleOpen = false,
@@ -83,7 +89,7 @@ export default function CommentEditorToolbar({
         },
         {
             icon: MapPin,
-            label: 'Collapse',
+            label: isCollapsed ? 'Expand' : 'Collapse',
             onClick: onCollapse,
             hasPopup: false,
             active: false
