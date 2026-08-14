@@ -6198,6 +6198,17 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
             ...canvasBackgroundStyle,
             ...(sharedCanvasToolbarInsetPx > 0 ? { paddingLeft: `${sharedCanvasToolbarInsetPx}px` } : {}),
             ...(isWallLayout || isGridLayout ? { scrollbarGutter: 'stable' } : {}),
+            // PATCH 9M: contains every canvas-internal z-index (back/front
+            // Lines, posts, LineToolbar, the canvas Line context menu) inside
+            // its own stacking context, so none of them -- however high
+            // internally (front graph Line 2000, LineToolbar 2500, the Line
+            // context menu 9999) -- can ever paint above an application
+            // editor panel (ImageEditor/NoteEditor/etc, all ~z-1000-1001),
+            // which sits as an outside sibling, not a descendant, of this
+            // element. Internal canvas ordering (back < posts < front) is
+            // completely unaffected -- isolation only fixes this element's
+            // OWN position among ITS OWN siblings, not what happens inside it.
+            isolation: 'isolate',
           }}
           overlay={canUseCanvasToolbar && effectiveToolbarCollapsed ? (
             <button
