@@ -43,6 +43,7 @@ import { ColumnPostContextMenu } from '@/components/collabboard/menus/ColumnPost
 import { CommentPostContextMenu } from '@/components/collabboard/menus/CommentPostContextMenu';
 import { ImagePostContextMenu } from '@/components/collabboard/context-menus/ImagePostContextMenu';
 import { isStripVisible, htmlToText, getEligibleContainerDestinations, IMAGE_CROP_TO_GRID_HEIGHT_PX } from '@/components/collabboard/canvas/engine/utils';
+import { FREEFORM_WORLD_WIDTH_PX, FREEFORM_WORLD_HEIGHT_PX } from '@/components/collabboard/canvas/engine/freeformStageGeometry';
 import { getContainerEditTargetLabel } from '@/lib/infra/collabboard/containerEditTargetLabel';
 import { getEffectiveVisibleChildTitleIds, toggleChildPostTitleVisibility } from '@/lib/infra/collabboard/containerChildTitleVisibility';
 import {
@@ -717,8 +718,10 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
   return (
     <>
       <div
-        className="absolute inset-0 w-[10000px] h-[10000px] transform-origin-top-left"
+        className="absolute inset-0 transform-origin-top-left"
         style={{
+          width: FREEFORM_WORLD_WIDTH_PX,
+          height: FREEFORM_WORLD_HEIGHT_PX,
           transform: `scale(${canvasZoom})`,
           transformOrigin: '0 0'
         }}

@@ -43,11 +43,19 @@ export interface CanvasLinePersistenceOptions {
 }
 
 export interface CanvasLineCreationOptions {
+  /**
+   * Freeform/Map (non-Drawing) callers pass coordinates already divided by
+   * canvasZoom exactly once -- SimpleLineRenderer's own getMousePos performs
+   * that division before these ever reach this helper. This function must
+   * not divide by zoom again (PATCH 9J; previously did, doubling the
+   * division for every non-Drawing caller). Drawing callers pass layer
+   * coordinates in the same already-resolved sense: layerToScene converts
+   * them using the Excalidraw viewport's own zoom, never canvasZoom.
+   */
   readonly rawStartX: number;
   readonly rawStartY: number;
   readonly rawEndX: number;
   readonly rawEndY: number;
-  readonly canvasZoom: number;
   readonly drawingViewport?: DrawingViewport;
   readonly geoPoints?: {
     readonly startLng: number;
@@ -143,12 +151,10 @@ export function createCanvasLineGeometryFromLayerCoords(options: CanvasLineCreat
   CanvasLine,
   'start_x' | 'start_y' | 'control_x' | 'control_y' | 'end_x' | 'end_y' | 'points' | 'coord_space'
 > {
-  const legacyStart = { x: options.rawStartX / options.canvasZoom, y: options.rawStartY / options.canvasZoom };
-  const legacyEnd = { x: options.rawEndX / options.canvasZoom, y: options.rawEndY / options.canvasZoom };
-  const drawingStart = { x: options.rawStartX, y: options.rawStartY };
-  const drawingEnd = { x: options.rawEndX, y: options.rawEndY };
-  const start = options.drawingViewport ? layerToScene(drawingStart, options.drawingViewport) : legacyStart;
-  const end = options.drawingViewport ? layerToScene(drawingEnd, options.drawingViewport) : legacyEnd;
+  const rawStart = { x: options.rawStartX, y: options.rawStartY };
+  const rawEnd = { x: options.rawEndX, y: options.rawEndY };
+  const start = options.drawingViewport ? layerToScene(rawStart, options.drawingViewport) : rawStart;
+  const end = options.drawingViewport ? layerToScene(rawEnd, options.drawingViewport) : rawEnd;
   const controlX = (start.x + end.x) / 2;
   const controlY = Math.min(start.y, end.y) - 50;
 

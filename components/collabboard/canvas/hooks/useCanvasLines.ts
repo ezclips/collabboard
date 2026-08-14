@@ -12,7 +12,6 @@ import {
 
 interface UseCanvasLinesParams {
   canvasId?: string;
-  canvasZoom: number;
   setLines: React.Dispatch<React.SetStateAction<CanvasLine[]>>;
   setSelectedLineId: (v: string | null) => void;
   drawingViewport?: DrawingViewport;
@@ -20,7 +19,6 @@ interface UseCanvasLinesParams {
 
 export function useCanvasLines({
   canvasId,
-  canvasZoom,
   setLines,
   setSelectedLineId,
   drawingViewport,
@@ -92,7 +90,6 @@ export function useCanvasLines({
       rawStartY,
       rawEndX,
       rawEndY,
-      canvasZoom,
       drawingViewport,
       geoPoints,
     });
@@ -107,7 +104,7 @@ export function useCanvasLines({
       dashed: false,
       layer_plane: 'front',
     });
-  }, [canvasId, createLine, canvasZoom, drawingViewport]);
+  }, [canvasId, createLine, drawingViewport]);
 
   /** Reset all line-specific state (edit mode, dragging, context menu). */
   const clearLineState = useCallback(() => {

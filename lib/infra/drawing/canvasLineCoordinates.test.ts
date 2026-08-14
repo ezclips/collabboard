@@ -164,7 +164,6 @@ describe('canvas line Drawing legacy policy decisions', () => {
       rawStartY: 200,
       rawEndX: 300,
       rawEndY: 400,
-      canvasZoom: 1,
       geoPoints: { startLng: 7, startLat: 8, endLng: 9, endLat: 10 },
     });
     const geoPoints = [
@@ -194,7 +193,6 @@ describe('canvas line Drawing legacy policy decisions', () => {
       rawStartY: 480,
       rawEndX: 760,
       rawEndY: 540,
-      canvasZoom: 1,
       drawingViewport: viewport,
     });
     const expectedStart = layerToScene({ x: 640, y: 480 }, viewport);
@@ -215,21 +213,49 @@ describe('canvas line Drawing legacy policy decisions', () => {
     });
   });
 
-  it('does not double-divide Drawing pointer coordinates by canvasZoom', () => {
+  it('PATCH 9J: Drawing pointer coordinates depend only on the Drawing viewport, not on canvasZoom -- there is no canvasZoom field on CanvasLineCreationOptions to double-divide by anymore', () => {
     const viewport = viewports[0];
     const created = createCanvasLineGeometryFromLayerCoords({
       rawStartX: 640,
       rawStartY: 480,
       rawEndX: 760,
       rawEndY: 540,
-      canvasZoom: 2,
       drawingViewport: viewport,
     });
 
     expect(created.start_x).toBe(layerToScene({ x: 640, y: 480 }, viewport).x);
     expect(created.start_y).toBe(layerToScene({ x: 640, y: 480 }, viewport).y);
+    // A pre-halved input (as a stray extra division would have produced)
+    // must NOT match -- proves the Drawing branch consumes rawStartX/Y
+    // as-is, with no hidden zoom division anywhere in this helper.
     expect(created.start_x).not.toBe(layerToScene({ x: 320, y: 240 }, viewport).x);
     expect(created.start_y).not.toBe(layerToScene({ x: 320, y: 240 }, viewport).y);
+  });
+
+  it('PATCH 9J: the legacy (Freeform/Map, no drawingViewport) branch is a pure pass-through -- this helper no longer divides by canvasZoom at all, since SimpleLineRenderer.getMousePos already divides exactly once before calling it', () => {
+    const created = createCanvasLineGeometryFromLayerCoords({
+      rawStartX: 500,
+      rawStartY: 300,
+      rawEndX: 800,
+      rawEndY: 700,
+    });
+
+    expect(created.start_x).toBe(500);
+    expect(created.start_y).toBe(300);
+    expect(created.end_x).toBe(800);
+    expect(created.end_y).toBe(700);
+    expect(created.control_x).toBe((500 + 800) / 2);
+    expect(created.control_y).toBe(Math.min(300, 700) - 50);
+  });
+
+  it('PATCH 9J: CanvasLineCreationOptions no longer accepts a canvasZoom field (TypeScript proof via object shape, negative controls D/E anchor here)', () => {
+    const options: Parameters<typeof createCanvasLineGeometryFromLayerCoords>[0] = {
+      rawStartX: 1,
+      rawStartY: 2,
+      rawEndX: 3,
+      rawEndY: 4,
+    };
+    expect('canvasZoom' in options).toBe(false);
   });
 
   it.each([

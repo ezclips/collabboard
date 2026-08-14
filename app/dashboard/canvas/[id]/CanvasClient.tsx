@@ -140,6 +140,7 @@ import { CanvasEditorProvider, type CanvasEditorState } from '@/components/colla
 import { CanvasConfigProvider, type CanvasConfigState } from '@/components/collabboard/canvas/contexts/CanvasConfigContext';
 import { ColorPickerContent } from '@/components/collabboard/ColorPicker';
 import { isStripVisible } from '@/components/collabboard/canvas/engine/utils';
+import { FREEFORM_WORLD_WIDTH_PX, FREEFORM_WORLD_HEIGHT_PX } from '@/components/collabboard/canvas/engine/freeformStageGeometry';
 
 // === BEGIN TYPES + CONSTANTS REGION ===
 
@@ -781,7 +782,6 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     handleLineDragChange,
   } = useCanvasLines({
     canvasId,
-    canvasZoom,
     setLines,
     setSelectedLineId,
     drawingViewport: canvas?.layout === 'drawing' ? drawingViewport : undefined,
@@ -6553,13 +6553,25 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
               own `transform: scale(canvasZoom)` wrapper), so legacy-coord-space lines never
               inherited that scale — they rendered at a fixed 100% while every post around
               them zoomed. Mirroring the same transform here re-aligns it with the stage
-              without having to relocate it into FreeformPadletCards' JSX tree. */}
+              without having to relocate it into FreeformPadletCards' JSX tree. The unscaled
+              width/height must also match FreeformPadletCards' own world-stage size
+              (FREEFORM_WORLD_WIDTH_PX/HEIGHT_PX), not just its transform — a bare `inset-0`
+              sizes against the viewport instead of the world stage, which caps the Line
+              interaction surface at the viewport's own pixel size regardless of zoom
+              (PATCH 9I/9J). */}
           <div
             className="absolute inset-0"
             style={{
               zIndex: 0,
               pointerEvents: 'none',
-              ...(isFreeformLayout ? { transform: `scale(${canvasZoom})`, transformOrigin: '0 0' } : {}),
+              ...(isFreeformLayout
+                ? {
+                  width: FREEFORM_WORLD_WIDTH_PX,
+                  height: FREEFORM_WORLD_HEIGHT_PX,
+                  transform: `scale(${canvasZoom})`,
+                  transformOrigin: '0 0',
+                }
+                : {}),
             }}
           >
             <SimpleLineRenderer
@@ -7422,13 +7434,21 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           {/* Layer 3: Foreground Lines (On Top of most Padlets) - z-index 500 */}
           {/* See the matching note on Layer 1: on Freeform this div sits outside
               FreeformPadletCards' zoomed stage, so it needs the same canvasZoom
-              transform mirrored here to stay visually aligned with the posts. */}
+              transform AND the same world-stage width/height mirrored here to
+              stay visually and interactively aligned with the posts. */}
           <div
             className="absolute inset-0"
             style={{
               zIndex: isFreeformGraphMode ? 2000 : 500,
               pointerEvents: 'none',
-              ...(isFreeformLayout ? { transform: `scale(${canvasZoom})`, transformOrigin: '0 0' } : {}),
+              ...(isFreeformLayout
+                ? {
+                  width: FREEFORM_WORLD_WIDTH_PX,
+                  height: FREEFORM_WORLD_HEIGHT_PX,
+                  transform: `scale(${canvasZoom})`,
+                  transformOrigin: '0 0',
+                }
+                : {}),
             }}
           >
             <SimpleLineRenderer
