@@ -1,5 +1,6 @@
 import { createUpdatePostMetadataBestEffortCommand } from '@/lib/domain/canvas/posts';
 import { createPostsRepository } from '@/lib/infra/canvas/postsRepository';
+import { createFreeformGraphRepo } from '@/lib/graph/graphRepo';
 import type { Padlet } from '@/types/collabboard';
 
 export interface AttachPostToContainerParams {
@@ -9,6 +10,35 @@ export interface AttachPostToContainerParams {
   setPadlets: React.Dispatch<React.SetStateAction<Padlet[]>>;
   fetchData: (showLoading?: boolean) => Promise<void>;
   markPadletLocallyModified?: (padletId: string) => void;
+  /** PATCH 9P: called after Graph edge cleanup runs, so the caller can bump
+   * FreeformGraphLayer's refreshToken and refetch. Optional -- boards without
+   * Freeform Graph enabled simply never wire this. */
+  onGraphEdgesChanged?: () => void;
+}
+
+/**
+ * PATCH 9P: a root post that becomes a Container child is no longer a valid
+ * Graph endpoint -- Graph Line connects root posts only (PATCH 9N). Deletes
+ * every persisted edge touching this post so no stale/fallback Line survives
+ * the transition. This is the ONE place that logic lives: both
+ * attachPostToContainer below (drag-and-drop, and "Group into Column" onto an
+ * existing container) and CanvasClient's "Group into Column -> brand new
+ * container" branch call this same function, so the rule applies identically
+ * regardless of how or for which post type the post entered a Container.
+ * Best-effort and post-type agnostic: a failure here is reported but never
+ * rolls back the reparenting that already succeeded (no transaction exists
+ * across the two tables).
+ */
+export async function cleanupGraphEdgesForContainerChild(
+  boardId: string | undefined,
+  postId: string,
+): Promise<void> {
+  if (!boardId) return;
+  try {
+    await createFreeformGraphRepo(boardId).deleteEdgesForPost(postId);
+  } catch (err) {
+    console.error('Failed to clean up Graph edges for post entering a Container:', err);
+  }
 }
 
 /**
@@ -25,6 +55,7 @@ export async function attachPostToContainer({
   setPadlets,
   fetchData,
   markPadletLocallyModified,
+  onGraphEdgesChanged,
 }: AttachPostToContainerParams): Promise<void> {
   const container = padlets.find((p) => p.id === containerId);
   const post = padlets.find((p) => p.id === postId);
@@ -51,6 +82,12 @@ export async function attachPostToContainer({
       { userId: null },
     );
     if (!draggedResult.ok) throw draggedResult.error.cause ?? draggedResult.error;
+
+    // Post is now officially a child -- delete every Graph edge touching it
+    // before syncing local state, so the UI never has a tick where the post
+    // is a child but a stale edge is still considered valid.
+    await cleanupGraphEdgesForContainerChild(post.board_id, postId);
+    onGraphEdgesChanged?.();
 
     setPadlets((prev) => prev.map((p) => {
       if (p.id === containerId) return { ...p, metadata: { ...p.metadata, childPadletIds: newChildIds } };

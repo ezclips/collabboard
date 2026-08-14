@@ -79,7 +79,7 @@ import {
 } from '@/lib/domain/canvas/posts';
 import { createCanvasBoardRepository } from '@/lib/infra/canvas/boardRepository';
 import { createPostsRepository } from '@/lib/infra/canvas/postsRepository';
-import { attachPostToContainer } from '@/components/collabboard/canvas/hooks/attachPostToContainer';
+import { attachPostToContainer, cleanupGraphEdgesForContainerChild } from '@/components/collabboard/canvas/hooks/attachPostToContainer';
 import { createSectionsRepository } from '@/lib/infra/canvas/sectionsRepository';
 import { getVerifiedAuthUser, onAuthSessionChanged, updateCurrentUserMetadata } from '@/lib/infra/supabase/authState';
 import { createStorageGateway } from '@/lib/infra/supabase/storage';
@@ -2372,6 +2372,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     markPadletLocallyModified,
     fetchData,
     PADLET_DRAG_START_DISTANCE,
+    setGraphRefreshToken,
   });
 
   const stopFreeformPan = useCallback(() => {
@@ -3706,6 +3707,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         setPadlets,
         fetchData,
         markPadletLocallyModified,
+        onGraphEdgesChanged: () => setGraphRefreshToken((token) => token + 1),
       });
       setSelectedPadletId(targetContainerId);
       return;
@@ -3744,6 +3746,13 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
 
       if (!result.ok) throw result.error.cause ?? result.error;
       const containerData = result.value as any;
+
+      // Post is now officially a child -- same cleanup rule as the
+      // existing-container branch above (attachPostToContainer), so a Graph
+      // Line into this post is removed regardless of which "Group into
+      // Column" path was taken.
+      await cleanupGraphEdgesForContainerChild(padlet.board_id, id);
+      setGraphRefreshToken((token) => token + 1);
 
       // Update local state
       if (containerData) {

@@ -131,6 +131,27 @@ export class FreeformGraphRepo {
         if (error) throw error;
     }
 
+    /**
+     * PATCH 9P: deletes every edge where postId is either endpoint. Used when
+     * a root post becomes a Container child -- Graph Line supports root posts
+     * only, so both its incoming and outgoing edges become invalid at once.
+     */
+    async deleteEdgesForPost(postId: string): Promise<void> {
+        if (this.isTableUnavailable) return;
+
+        const { error } = await this.supabase
+            .from('freeform_graph_edges')
+            .delete()
+            .eq('board_id', this.boardId)
+            .or(`source_post_id.eq.${postId},target_post_id.eq.${postId}`);
+
+        if (error && this.isMissingRelationError(error)) {
+            this.isTableUnavailable = true;
+            return;
+        }
+        if (error) throw error;
+    }
+
     async updateSettings(settings: Partial<FreeformGraphSettings>): Promise<FreeformGraphSettings> {
         if (this.isTableUnavailable) {
             return {

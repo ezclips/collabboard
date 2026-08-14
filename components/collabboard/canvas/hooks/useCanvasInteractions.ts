@@ -32,6 +32,7 @@ interface UseCanvasInteractionsParams {
   markPadletLocallyModified: (padletId: string) => void;
   fetchData: (showLoading?: boolean) => Promise<void>;
   PADLET_DRAG_START_DISTANCE: number;
+  setGraphRefreshToken?: React.Dispatch<React.SetStateAction<number>>;
 }
 
 export function useCanvasInteractions({
@@ -55,6 +56,7 @@ export function useCanvasInteractions({
   markPadletLocallyModified,
   fetchData,
   PADLET_DRAG_START_DISTANCE,
+  setGraphRefreshToken,
 }: UseCanvasInteractionsParams) {
   const [isDragging, setIsDragging] = useState(false);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
@@ -410,6 +412,7 @@ export function useCanvasInteractions({
             setPadlets,
             fetchData,
             markPadletLocallyModified,
+            onGraphEdgesChanged: () => setGraphRefreshToken?.((token) => token + 1),
           });
         } else {
           const finalPos = lastDragPositionRef.current;

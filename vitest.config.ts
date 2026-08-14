@@ -9,7 +9,7 @@ export default defineConfig({
     },
   },
   test: {
-    include: ['lib/domain/**/*.test.ts', 'lib/infra/**/*.test.ts', 'scripts/harness/**/*.test.ts', 'scripts/*.test.ts', 'components/collabboard/*.test.tsx', 'components/collabboard/editors/*.test.tsx', 'components/collabboard/comments/*.test.tsx', 'components/collabboard/canvas/engine/*.test.ts', 'components/collabboard/canvas/hooks/*.test.ts','components/ui/*.test.tsx', 'components/canvas/*.test.tsx', 'components/map/*.test.tsx', 'components/graph/*.test.tsx'],
+    include: ['lib/domain/**/*.test.ts', 'lib/infra/**/*.test.ts', 'scripts/harness/**/*.test.ts', 'scripts/*.test.ts', 'components/collabboard/*.test.tsx', 'components/collabboard/editors/*.test.tsx', 'components/collabboard/comments/*.test.tsx', 'components/collabboard/canvas/engine/*.test.ts', 'components/collabboard/canvas/hooks/*.test.ts','components/ui/*.test.tsx', 'components/canvas/*.test.tsx', 'components/map/*.test.tsx', 'components/graph/*.test.tsx', 'lib/graph/*.test.ts'],
     environment: 'node',
   },
 });

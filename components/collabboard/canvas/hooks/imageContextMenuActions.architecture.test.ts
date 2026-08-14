@@ -130,7 +130,7 @@ describe('PATCH 9B: Crop Image to Fit Dot Grid has a real rendering consumer usi
 describe('PATCH 9B: Group into Column remains untouched', () => {
   it('groupIntoColumn still delegates to attachPostToContainer for an existing target (PATCH 9A regression)', () => {
     const src = read('app/dashboard/canvas/[id]/CanvasClient.tsx');
-    expect(src).toContain("import { attachPostToContainer } from '@/components/collabboard/canvas/hooks/attachPostToContainer';");
+    expect(src).toContain("import { attachPostToContainer, cleanupGraphEdgesForContainerChild } from '@/components/collabboard/canvas/hooks/attachPostToContainer';");
     expect(src).toContain('await attachPostToContainer({');
   });
 });

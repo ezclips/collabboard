@@ -33,7 +33,19 @@ vi.mock('@/lib/infra/canvas/postsRepository', () => ({
   }),
 }));
 
-const { attachPostToContainer } = await import('./attachPostToContainer');
+const deleteEdgesForPostCalls: Array<{ boardId: string; postId: string }> = [];
+let deleteEdgesForPostThrows: Error | null = null;
+
+vi.mock('@/lib/graph/graphRepo', () => ({
+  createFreeformGraphRepo: (boardId: string) => ({
+    deleteEdgesForPost: async (postId: string) => {
+      if (deleteEdgesForPostThrows) throw deleteEdgesForPostThrows;
+      deleteEdgesForPostCalls.push({ boardId, postId });
+    },
+  }),
+}));
+
+const { attachPostToContainer, cleanupGraphEdgesForContainerChild } = await import('./attachPostToContainer');
 
 interface PadletOverrides {
   id: string;
@@ -45,11 +57,13 @@ interface PadletOverrides {
   width?: number;
   height?: number;
   metadata?: Record<string, unknown>;
+  board_id?: string;
 }
 
 function padlet(overrides: PadletOverrides): Padlet {
   return {
     id: overrides.id,
+    board_id: overrides.board_id ?? 'board-1',
     type: overrides.type ?? 'note',
     title: overrides.title ?? '',
     content: overrides.content ?? '',
@@ -74,6 +88,8 @@ beforeEach(() => {
   updateMetadataCalls.length = 0;
   updateMetadataResult = ok(undefined);
   updateMetadataThrows = null;
+  deleteEdgesForPostCalls.length = 0;
+  deleteEdgesForPostThrows = null;
 });
 
 describe('attachPostToContainer', () => {
@@ -240,6 +256,108 @@ describe('attachPostToContainer', () => {
 
     expect(h.setPadlets).not.toHaveBeenCalled();
     expect(h.fetchData).not.toHaveBeenCalled();
+    expect(consoleErrorSpy).toHaveBeenCalled();
+    consoleErrorSpy.mockRestore();
+  });
+});
+
+describe('PATCH 9P: attachPostToContainer cleans up Graph edges for the newly-attached post', () => {
+  it('deletes edges for the post using its own board_id, after the parentId write succeeds', async () => {
+    const container = padlet({ id: 'c1', type: 'container', metadata: { childPadletIds: [] }, board_id: 'board-9' });
+    const post = padlet({ id: 'p1', board_id: 'board-9' });
+    const h = makeHarness([container, post]);
+
+    await attachPostToContainer({
+      padlets: h.padlets,
+      containerId: 'c1',
+      postId: 'p1',
+      setPadlets: h.setPadlets,
+      fetchData: h.fetchData,
+      markPadletLocallyModified: h.markPadletLocallyModified,
+    });
+
+    expect(deleteEdgesForPostCalls).toEqual([{ boardId: 'board-9', postId: 'p1' }]);
+  });
+
+  it('calls onGraphEdgesChanged exactly once after cleanup so the caller can refresh the Graph layer', async () => {
+    const container = padlet({ id: 'c1', type: 'container', metadata: { childPadletIds: [] } });
+    const post = padlet({ id: 'p1' });
+    const h = makeHarness([container, post]);
+    const onGraphEdgesChanged = vi.fn();
+
+    await attachPostToContainer({
+      padlets: h.padlets,
+      containerId: 'c1',
+      postId: 'p1',
+      setPadlets: h.setPadlets,
+      fetchData: h.fetchData,
+      markPadletLocallyModified: h.markPadletLocallyModified,
+      onGraphEdgesChanged,
+    });
+
+    expect(onGraphEdgesChanged).toHaveBeenCalledTimes(1);
+    expect(deleteEdgesForPostCalls).toHaveLength(1);
+  });
+
+  it('does not attempt cleanup on the already-a-member no-op path', async () => {
+    const container = padlet({ id: 'c1', type: 'container', metadata: { childPadletIds: ['p1'] } });
+    const post = padlet({ id: 'p1', metadata: { parentId: 'c1' } });
+    const h = makeHarness([container, post]);
+    const onGraphEdgesChanged = vi.fn();
+
+    await attachPostToContainer({
+      padlets: h.padlets,
+      containerId: 'c1',
+      postId: 'p1',
+      setPadlets: h.setPadlets,
+      fetchData: h.fetchData,
+      markPadletLocallyModified: h.markPadletLocallyModified,
+      onGraphEdgesChanged,
+    });
+
+    expect(deleteEdgesForPostCalls).toHaveLength(0);
+    expect(onGraphEdgesChanged).not.toHaveBeenCalled();
+  });
+
+  it('a thrown cleanup failure is reported but does not prevent local state sync or fetchData -- no transaction framework', async () => {
+    deleteEdgesForPostThrows = new Error('graph table unavailable');
+    const container = padlet({ id: 'c1', type: 'container', metadata: { childPadletIds: [] } });
+    const post = padlet({ id: 'p1' });
+    const h = makeHarness([container, post]);
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await attachPostToContainer({
+      padlets: h.padlets,
+      containerId: 'c1',
+      postId: 'p1',
+      setPadlets: h.setPadlets,
+      fetchData: h.fetchData,
+      markPadletLocallyModified: h.markPadletLocallyModified,
+    });
+
+    // The post still successfully becomes a child (reparenting is not rolled
+    // back by a Graph-cleanup failure) -- the failure is only reported.
+    expect(updateMetadataCalls).toHaveLength(2);
+    expect(h.setPadlets).toHaveBeenCalledTimes(1);
+    expect(h.fetchData).toHaveBeenCalledTimes(1);
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      'Failed to clean up Graph edges for post entering a Container:',
+      expect.any(Error),
+    );
+    consoleErrorSpy.mockRestore();
+  });
+
+  it('cleanupGraphEdgesForContainerChild is a no-op (no repo call) when boardId is undefined', async () => {
+    await cleanupGraphEdgesForContainerChild(undefined, 'p1');
+    expect(deleteEdgesForPostCalls).toHaveLength(0);
+  });
+
+  it('cleanupGraphEdgesForContainerChild reports (does not throw) when the repo call fails', async () => {
+    deleteEdgesForPostThrows = new Error('boom');
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await expect(cleanupGraphEdgesForContainerChild('board-1', 'p1')).resolves.toBeUndefined();
+
     expect(consoleErrorSpy).toHaveBeenCalled();
     consoleErrorSpy.mockRestore();
   });

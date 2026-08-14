@@ -147,7 +147,7 @@ describe('PATCH 9C.1: Container Editor is untouched -- its titles remain uncondi
 describe('PATCH 9C.1: prior patches remain untouched (regression guards)', () => {
   it('Group into Column (PATCH 9A) still delegates to attachPostToContainer [matrix 20, 37]', () => {
     const src = read('app/dashboard/canvas/[id]/CanvasClient.tsx');
-    expect(src).toContain("import { attachPostToContainer } from '@/components/collabboard/canvas/hooks/attachPostToContainer';");
+    expect(src).toContain("import { attachPostToContainer, cleanupGraphEdgesForContainerChild } from '@/components/collabboard/canvas/hooks/attachPostToContainer';");
     expect(src).toContain('await attachPostToContainer({');
   });
 

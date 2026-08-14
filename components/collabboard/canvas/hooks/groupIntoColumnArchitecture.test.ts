@@ -17,7 +17,9 @@ describe('PATCH 9A: post -> Column reparenting has exactly one shared implementa
 
   it("CanvasClient.tsx's groupIntoColumn menu handler calls the SAME shared helper for an existing-container target", () => {
     const src = read('app/dashboard/canvas/[id]/CanvasClient.tsx');
-    expect(src).toContain("import { attachPostToContainer } from '@/components/collabboard/canvas/hooks/attachPostToContainer'");
+    // PATCH 9P: import also brings in cleanupGraphEdgesForContainerChild --
+    // still the same attachPostToContainer module, same named export.
+    expect(src).toContain("import { attachPostToContainer, cleanupGraphEdgesForContainerChild } from '@/components/collabboard/canvas/hooks/attachPostToContainer'");
     expect(src).toContain('await attachPostToContainer({');
   });
 
