@@ -105,6 +105,51 @@ describe('attachPostToContainer', () => {
     expect(h.markPadletLocallyModified).toHaveBeenCalledWith('p1');
   });
 
+  it('PATCH 9F: a Document post (type "card") preserves its own ID, content, and Document-specific chrome/comment metadata -- menu grouping and drag grouping share this exact function, so they are provably equivalent', async () => {
+    const container = padlet({ id: 'c1', type: 'container', metadata: { childPadletIds: [] } });
+    const doc = padlet({
+      id: 'doc-1',
+      type: 'card',
+      title: 'My Report',
+      content: '<p>original document body</p>',
+      metadata: {
+        backgroundColor: '#fee2e2',
+        topStripColor: '#ef4444',
+        comments: [{ id: 'c-1', text: 'hello', userId: 'u1', userName: 'A', timestamp: 1 }],
+        detachedComments: [{ id: 'd-1', text: 'anchored', userId: 'u1', userName: 'A', timestamp: 2 }],
+      },
+    });
+    const h = makeHarness([container, doc]);
+
+    await attachPostToContainer({
+      padlets: h.padlets,
+      containerId: 'c1',
+      postId: 'doc-1',
+      setPadlets: h.setPadlets,
+      fetchData: h.fetchData,
+      markPadletLocallyModified: h.markPadletLocallyModified,
+    });
+
+    expect(updateMetadataCalls[1]).toEqual({
+      id: 'doc-1',
+      fields: {
+        metadata: {
+          backgroundColor: '#fee2e2',
+          topStripColor: '#ef4444',
+          comments: [{ id: 'c-1', text: 'hello', userId: 'u1', userName: 'A', timestamp: 1 }],
+          detachedComments: [{ id: 'd-1', text: 'anchored', userId: 'u1', userName: 'A', timestamp: 2 }],
+          parentId: 'c1',
+        },
+        updatedAt: expect.any(String),
+      },
+    });
+    // The post's own id/title/content fields are never touched by this
+    // command at all -- only metadata.parentId is added.
+    expect(doc.id).toBe('doc-1');
+    expect(doc.title).toBe('My Report');
+    expect(doc.content).toBe('<p>original document body</p>');
+  });
+
   it('is a safe no-op when the post is already a member of the target container', async () => {
     const container = padlet({ id: 'c1', type: 'container', metadata: { childPadletIds: ['p1'] } });
     const post = padlet({ id: 'p1', metadata: { parentId: 'c1' } });

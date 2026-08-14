@@ -1679,6 +1679,8 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
           onLock={() => lockPadlet(padlet.id)}
           onCreateSyncedCopy={() => createSyncedCopy(padlet.id)}
           onAddToLibrary={() => addPadletToLibrary(padlet.id)}
+          onGroupIntoColumn={(targetContainerId) => groupIntoColumn(padlet.id, targetContainerId)}
+          groupIntoColumnTargets={getEligibleContainerDestinations(padlets, padlet.id)}
           onToggleFullView={(padlet.metadata as any)?.svgUrl ? () => toggleFullView(padlet.id) : undefined}
         >
           <div
