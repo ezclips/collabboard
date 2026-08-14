@@ -3655,6 +3655,8 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
               onCopy={() => copyPadlet(padlet.id)}
               onLock={() => lockPadlet(padlet.id)}
               onBringToFront={() => movePadletLayer(padlet.id, 'bringToFront')}
+              onBringForward={() => movePadletLayer(padlet.id, 'bringForward')}
+              onSendBackward={() => movePadletLayer(padlet.id, 'sendBackward')}
               onSendToBack={() => movePadletLayer(padlet.id, 'sendToBack')}
               onCreateSyncedCopy={() => createSyncedCopy(padlet.id)}
               onGroupIntoColumn={(targetContainerId) => groupIntoColumn(padlet.id, targetContainerId)}
