@@ -12,6 +12,13 @@ interface FreeformGraphLayerProps {
     posts: Padlet[];
     refreshToken?: number;
     containerRef?: React.RefObject<HTMLDivElement | null>;
+    // PATCH 9S.2: canonical Freeform world-origin reference. Its live
+    // getBoundingClientRect() is the on-screen position of world (0,0),
+    // already including the camera gutter -- used by measuredRects instead
+    // of containerRef + manual scroll/padding math. Optional so existing
+    // test harnesses that mount this component without it keep working;
+    // measuredRects falls back to the pre-9S.2 containerRect-based formula.
+    worldOriginRef?: React.RefObject<HTMLDivElement | null>;
     zoom?: number;
 }
 
@@ -34,7 +41,7 @@ interface EdgeMenuState {
 /** Size of the SVG arrowhead polygon (in px). */
 const ARROW_SIZE = 8;
 
-export default function FreeformGraphLayer({ boardId, posts, refreshToken = 0, containerRef, zoom = 1 }: FreeformGraphLayerProps) {
+export default function FreeformGraphLayer({ boardId, posts, refreshToken = 0, containerRef, worldOriginRef, zoom = 1 }: FreeformGraphLayerProps) {
     const [edges, setEdges] = useState<FreeformGraphEdge[]>([]);
     const [measuredRects, setMeasuredRects] = useState<Record<string, Rect>>({});
     const [edgeMenu, setEdgeMenu] = useState<EdgeMenuState | null>(null);
@@ -77,12 +84,20 @@ export default function FreeformGraphLayer({ boardId, posts, refreshToken = 0, c
 
         const updateRects = () => {
             if (!mounted) return;
+            // PATCH 9S.2: worldOriginRef's live rect IS the on-screen
+            // position of world (0,0) -- already includes container
+            // padding, the camera gutter, and current scroll, so no manual
+            // arithmetic is needed. Falls back to the pre-9S.2 containerRect
+            // + padding formula when the caller doesn't supply it (e.g. an
+            // older/simpler test harness), which also predates the gutter
+            // and is only correct without one.
+            const originRect = worldOriginRef?.current?.getBoundingClientRect();
             const containerRect = container.getBoundingClientRect();
-            // Account for container padding — cards are positioned relative to
-            // the content area, not the padded outer edge.
             const cs = window.getComputedStyle(container);
             const padLeft = parseFloat(cs.paddingLeft) || 0;
             const padTop = parseFloat(cs.paddingTop) || 0;
+            const originLeft = originRect ? originRect.left : containerRect.left + padLeft - container.scrollLeft;
+            const originTop = originRect ? originRect.top : containerRect.top + padTop - container.scrollTop;
             const next: Record<string, Rect> = {};
 
             for (const post of posts) {
@@ -104,8 +119,8 @@ export default function FreeformGraphLayer({ boardId, posts, refreshToken = 0, c
                                 ? childRect ?? rect
                                 : rect;
                 next[post.id] = {
-                    x: (useRect.left - containerRect.left - padLeft + container.scrollLeft) / zoom,
-                    y: (useRect.top - containerRect.top - padTop + container.scrollTop) / zoom,
+                    x: (useRect.left - originLeft) / zoom,
+                    y: (useRect.top - originTop) / zoom,
                     width: useRect.width / zoom,
                     height: useRect.height / zoom,
                 };
@@ -145,7 +160,7 @@ export default function FreeformGraphLayer({ boardId, posts, refreshToken = 0, c
             resizeObserver.disconnect();
             mutationObserver.disconnect();
         };
-    }, [containerRef, posts, refreshToken, zoom]);
+    }, [containerRef, worldOriginRef, posts, refreshToken, zoom]);
 
     useEffect(() => {
         if (!edgeMenu) return;

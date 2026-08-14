@@ -159,6 +159,12 @@ export interface FreeformPadletCardsProps {
   setPadlets: React.Dispatch<React.SetStateAction<Padlet[]>>;
   user: AuthUser | null;
   containerRef: React.RefObject<HTMLDivElement | null>;
+  // PATCH 9S.2: forwarded straight through to FreeformGraphLayer below --
+  // the canonical Freeform world-origin reference (see CanvasClient's
+  // freeformWorldOriginRef doc comment). Optional so any existing test
+  // harness that mounts this component without it keeps working (Graph
+  // measuredRects falls back to its pre-9S.2 formula when absent).
+  worldOriginRef?: React.RefObject<HTMLDivElement | null>;
 
   // Flags
   isDragging: boolean;
@@ -202,7 +208,7 @@ export interface FreeformPadletCardsProps {
 // -- Component -----------------------------------------------------------------
 function FreeformPadletCards(props: FreeformPadletCardsProps) {
   const {
-    rootPadlets, padlets, setPadlets, user, containerRef,
+    rootPadlets, padlets, setPadlets, user, containerRef, worldOriginRef,
     isDragging, draggingPadletId, dragOverContainerId, isGraphConnectMode,
     isLineMode, isDrawingMode,
     selectedPadletId, selectedPadletIds, setSelectedPadletId, setGraphConnectSelection, graphRefreshToken,
@@ -269,6 +275,8 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
     isFreeformGraphMode,
     canUseFreeformEditButton,
     isColumnsLayout,
+    gutterX,
+    gutterY,
   } = useCanvasConfig();
 
   const {
@@ -720,6 +728,12 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
       <div
         className="absolute inset-0 transform-origin-top-left"
         style={{
+          // PATCH 9S.2: positioned at the camera gutter offset instead of
+          // (0,0) -- co-registered with CanvasClient's mirrored Line
+          // wrapper divs (freeformWorldOriginRef), which use the identical
+          // left/top so all Freeform world layers share one screen origin.
+          left: gutterX,
+          top: gutterY,
           width: FREEFORM_WORLD_WIDTH_PX,
           height: FREEFORM_WORLD_HEIGHT_PX,
           transform: `scale(${canvasZoom})`,
@@ -4208,7 +4222,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
       fixed layer above every post, so a line's Edge Settings panel can send
       it behind a specific post or bring it back in front. */}
                 {isFreeformGraphMode && canvasId && (
-      <FreeformGraphLayer boardId={canvasId.toString()} posts={padlets} refreshToken={graphRefreshToken} containerRef={containerRef} zoom={canvasZoom} />
+      <FreeformGraphLayer boardId={canvasId.toString()} posts={padlets} refreshToken={graphRefreshToken} containerRef={containerRef} worldOriginRef={worldOriginRef} zoom={canvasZoom} />
                 )}
                 </div>
       {imageToolbarPadletId && (

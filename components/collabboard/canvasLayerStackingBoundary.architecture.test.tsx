@@ -141,7 +141,10 @@ describe('PATCH 9M: internal canvas z-index values are byte-identical to PATCH 9
     const backLineStart = canvasClientSrc.indexOf('Layer 1: Background Lines');
     const backLineZIndexIdx = canvasClientSrc.indexOf('zIndex: 0,', backLineStart);
     expect(backLineZIndexIdx).toBeGreaterThan(backLineStart);
-    expect(backLineZIndexIdx - backLineStart).toBeLessThan(1500);
+    // PATCH 9S.2 added freeformWorldOriginRef's doc comment + `ref={...}`
+    // line right before the style object -- a legitimate, small growth in
+    // this proximity window, not a structural change to the z-index itself.
+    expect(backLineZIndexIdx - backLineStart).toBeLessThan(1800);
   });
 
   it('no new numeric z-index constant was introduced anywhere near the front/back Line wrappers -- the fix is purely the isolation property', () => {

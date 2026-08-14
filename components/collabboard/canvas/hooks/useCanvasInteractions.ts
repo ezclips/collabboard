@@ -13,6 +13,11 @@ const DEFAULT_DRAG_RECT_HEIGHT = 220;
 
 interface UseCanvasInteractionsParams {
   containerRef: React.RefObject<HTMLDivElement | null>;
+  // PATCH 9S.2: canonical Freeform world-origin reference (see CanvasClient's
+  // freeformWorldOriginRef doc comment). Its live getBoundingClientRect()
+  // gives the on-screen position of world (0,0), already including the
+  // camera gutter -- replaces manual containerRect+scrollLeft/scrollTop math.
+  freeformWorldOriginRef: React.RefObject<HTMLDivElement | null>;
   canvasZoom: number;
   canEditCanvas: boolean;
   padlets: Padlet[];
@@ -37,6 +42,7 @@ interface UseCanvasInteractionsParams {
 
 export function useCanvasInteractions({
   containerRef,
+  freeformWorldOriginRef,
   canvasZoom,
   canEditCanvas,
   padlets,
@@ -205,10 +211,11 @@ export function useCanvasInteractions({
     const containerRect = containerRef.current?.getBoundingClientRect();
     if (!containerRect) return;
 
-    const scrollLeft = containerRef.current?.scrollLeft || 0;
-    const scrollTop = containerRef.current?.scrollTop || 0;
-    const mouseX = (e.clientX - containerRect.left + scrollLeft) / canvasZoom;
-    const mouseY = (e.clientY - containerRect.top + scrollTop) / canvasZoom;
+    // PATCH 9S.2: freeformWorldOriginRef's live rect already includes the
+    // camera gutter + current scroll -- no manual scrollLeft/scrollTop math.
+    const origin = freeformWorldOriginRef.current?.getBoundingClientRect();
+    const mouseX = origin ? (e.clientX - origin.left) / canvasZoom : 0;
+    const mouseY = origin ? (e.clientY - origin.top) / canvasZoom : 0;
 
     if (!isDragging && pendingDragRef.current) {
       const pending = pendingDragRef.current;
@@ -266,11 +273,13 @@ export function useCanvasInteractions({
       }
     }
 
-    const updatedScrollLeft = containerRef.current?.scrollLeft || 0;
-    const updatedScrollTop = containerRef.current?.scrollTop || 0;
-
-    const newX = (e.clientX - containerRect.left + updatedScrollLeft) / canvasZoom - dragOffset.x;
-    const newY = (e.clientY - containerRect.top + updatedScrollTop) / canvasZoom - dragOffset.y;
+    // Re-read the origin AFTER the edge-scroll nudge above -- its live rect
+    // already reflects the just-applied scrollLeft/scrollTop change
+    // (getBoundingClientRect is always current), so no separate "updated
+    // scroll" bookkeeping is needed the way the old formula required.
+    const updatedOrigin = freeformWorldOriginRef.current?.getBoundingClientRect();
+    const newX = updatedOrigin ? (e.clientX - updatedOrigin.left) / canvasZoom - dragOffset.x : mouseX - dragOffset.x;
+    const newY = updatedOrigin ? (e.clientY - updatedOrigin.top) / canvasZoom - dragOffset.y : mouseY - dragOffset.y;
 
     setLastMousePosition({ x: mouseX, y: mouseY });
 

@@ -194,6 +194,15 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   const [sessionReady, setSessionReady] = useState(false);
 
   const containerRef = useRef<HTMLDivElement>(null);
+  // PATCH 9S.2: the canonical Freeform world-origin reference. Attached to
+  // the back-plane Line wrapper div below (its own transform:scale(zoom)
+  // stage, positioned at left:gutterX/top:gutterY) -- co-registered with
+  // FreeformPadletCards' own scaled wrapper and the front-plane Line wrapper
+  // by construction, so any ONE of the three gives the live on-screen
+  // position of world (0,0). getBoundingClientRect() on it naturally bakes
+  // in padding + gutter + scroll + zoom, replacing the old scattered
+  // `containerRect + scroll - padding` formulas at every pointer→world site.
+  const freeformWorldOriginRef = useRef<HTMLDivElement>(null);
   const freeformPanStartRef = useRef<{ clientX: number; clientY: number; scrollLeft: number; scrollTop: number } | null>(null);
   const router = useRouter();
 
@@ -213,10 +222,6 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     backgroundValue: '#f3f4f6',
     showDotGrid: false,
   });
-
-  // === BEGIN CAMERA REGION ===
-  const { canvasZoom, zoomAtViewportPoint, handleZoomIn, handleZoomOut, handleZoomReset } = useCanvasCamera(containerRef);
-  // === END CAMERA REGION ===
 
   useEffect(() => {
     setHasMounted(true);
@@ -788,16 +793,6 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     drawingViewport: canvas?.layout === 'drawing' ? drawingViewport : undefined,
   });
 
-  // PATCH 9S: the Line context menu caches its position as fixed screen
-  // pixels at open-time (event.clientX/clientY) and never recomputes it --
-  // once camera-anchored zoom can move the world underneath a fixed screen
-  // point, a stale menu would visually detach from the Line it targets.
-  // Closes on ANY zoom change (toolbar +/-, reset, or Ctrl+wheel all funnel
-  // through the same canvasZoom state), not a special case per entry point.
-  useEffect(() => {
-    setLineContextMenuState(null);
-  }, [canvasZoom]);
-
   // Helper to close all toolbars and popups when opening a new one
   const closeAllToolbars = useCallback((except?: {
     cardToolbar?: boolean;
@@ -1105,6 +1100,28 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   const isTimelineLayout = canvas?.layout === 'timeline';
   const isMapLayout = canvas?.layout === 'map';
   const isFreeformLayout = canvas?.layout === 'freeform' || (!isWallLayout && !isColumnsLayout && !isKanbanLayout && !isGanttLayout && !isSchedulerLayout && !isGridLayout && !isDrawingLayout && !isTimelineLayout && !isMapLayout);
+
+  // === BEGIN CAMERA REGION ===
+  // Relocated below isFreeformLayout (rather than declared near containerRef
+  // at the top of the component) because PATCH 9S.2's camera gutter/seeding/
+  // resize-compensation logic must be gated to Freeform-equivalent layouts
+  // only -- canvasZoom itself remains available to every layout as before.
+  const {
+    canvasZoom, zoomAtViewportPoint, handleZoomIn, handleZoomOut, handleZoomReset,
+    gutterX, gutterY,
+  } = useCanvasCamera(containerRef, isFreeformLayout);
+  // === END CAMERA REGION ===
+
+  // PATCH 9S: the Line context menu caches its position as fixed screen
+  // pixels at open-time (event.clientX/clientY) and never recomputes it --
+  // once camera-anchored zoom can move the world underneath a fixed screen
+  // point, a stale menu would visually detach from the Line it targets.
+  // Closes on ANY zoom change (toolbar +/-, reset, or Ctrl+wheel all funnel
+  // through the same canvasZoom state), not a special case per entry point.
+  useEffect(() => {
+    setLineContextMenuState(null);
+  }, [canvasZoom]);
+
   // Map boards keep a local collapse state so the button is available without
   // inheriting a saved global collapsed preference from other layouts.
   const effectiveToolbarCollapsed = isMapLayout ? isMapToolbarCollapsed : isToolbarCollapsed;
@@ -1162,31 +1179,37 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   const enableFreeformGraph = process.env.NEXT_PUBLIC_ENABLE_FREEFORM_GRAPH === 'true';
   const isFreeformGraphMode = isFreeformLayout && enableFreeformGraph;
 
-  const getNewPostPosition = useCallback((cardWidth: number, cardHeight: number) => {
-    const viewport = containerRef.current;
-    const viewportWidth = viewport?.clientWidth || 1200;
-    const viewportHeight = viewport?.clientHeight || 800;
-    const scrollLeft = viewport?.scrollLeft || 0;
-    const scrollTop = viewport?.scrollTop || 0;
-    return {
-      x: Math.max(0, Math.round((scrollLeft + viewportWidth / 2) / canvasZoom - cardWidth / 2)),
-      y: Math.max(0, Math.round((scrollTop + viewportHeight / 2) / canvasZoom - cardHeight / 2)),
-    };
-  }, [canvasZoom]);
-
+  // PATCH 9S.2: the ONE canonical pointer/viewport-point -> Freeform world
+  // conversion. freeformWorldOriginRef's live getBoundingClientRect() IS the
+  // on-screen position of world (0,0) -- it already bakes in container
+  // padding, the camera gutter, current scroll, and zoom, since it's the
+  // same scaled/positioned DOM element the world stage itself renders from.
+  // No manual scrollLeft/scrollTop/padding/gutter arithmetic needed here.
   const getCanvasPointFromClient = useCallback((clientX: number, clientY: number) => {
-    const rect = containerRef.current?.getBoundingClientRect();
-    const scrollLeft = containerRef.current?.scrollLeft || 0;
-    const scrollTop = containerRef.current?.scrollTop || 0;
-    if (!rect) {
+    const origin = freeformWorldOriginRef.current?.getBoundingClientRect();
+    if (!origin) {
       return { x: 0, y: 0 };
     }
 
     return {
-      x: Math.max(0, Math.round((clientX - rect.left + scrollLeft) / canvasZoom)),
-      y: Math.max(0, Math.round((clientY - rect.top + scrollTop) / canvasZoom)),
+      x: Math.max(0, Math.round((clientX - origin.left) / canvasZoom)),
+      y: Math.max(0, Math.round((clientY - origin.top) / canvasZoom)),
     };
   }, [canvasZoom]);
+
+  const getNewPostPosition = useCallback((cardWidth: number, cardHeight: number) => {
+    const viewport = containerRef.current;
+    const viewportRect = viewport?.getBoundingClientRect();
+    const viewportWidth = viewport?.clientWidth || 1200;
+    const viewportHeight = viewport?.clientHeight || 800;
+    const centerClientX = (viewportRect?.left ?? 0) + viewportWidth / 2;
+    const centerClientY = (viewportRect?.top ?? 0) + viewportHeight / 2;
+    const center = getCanvasPointFromClient(centerClientX, centerClientY);
+    return {
+      x: Math.max(0, Math.round(center.x - cardWidth / 2)),
+      y: Math.max(0, Math.round(center.y - cardHeight / 2)),
+    };
+  }, [getCanvasPointFromClient]);
 
   const openFreeformBoardMenuAt = useCallback((clientX: number, clientY: number) => {
     const point = getCanvasPointFromClient(clientX, clientY);
@@ -2082,15 +2105,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
 
     const containerId = crypto.randomUUID();
     const nowIso = new Date().toISOString();
-    const viewport = containerRef.current;
-    const viewportWidth = viewport?.clientWidth || 1200;
-    const viewportHeight = viewport?.clientHeight || 800;
-    const scrollLeft = viewport?.scrollLeft || 0;
-    const scrollTop = viewport?.scrollTop || 0;
     const width = 350;
     const height = 300;
-    const positionX = Math.max(0, Math.round((scrollLeft + viewportWidth / 2) / canvasZoom - width / 2));
-    const positionY = Math.max(0, Math.round((scrollTop + viewportHeight / 2) / canvasZoom - height / 2));
+    const { x: positionX, y: positionY } = getNewPostPosition(width, height);
 
     const containerPayload: Padlet = {
       id: containerId,
@@ -2142,7 +2159,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     }
 
     toast.success('Empty column created');
-  }, [canvasId, isFreeformLayout, canvasZoom, padlets, insertPostPreservingFailureChannels, fetchData]);
+  }, [canvasId, isFreeformLayout, getNewPostPosition, padlets, insertPostPreservingFailureChannels, fetchData]);
 
   // Handle "Add to Existing" from Column Placement Prompt
   const handleStartDragToExisting = () => {
@@ -2364,6 +2381,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     handleCanvasMouseUp,
   } = useCanvasInteractions({
     containerRef,
+    freeformWorldOriginRef,
     canvasZoom,
     canEditCanvas: canUseFreeformEditButton,
     padlets,
@@ -5116,12 +5134,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       const content: LibraryItemContent = JSON.parse(libraryContentStr);
       const cleanMetadata = sanitizeLibraryMetadata(content.metadata);
       // Calculate position
-      const containerRect = containerRef.current?.getBoundingClientRect();
-      if (!containerRect) return;
-      const scrollLeft = containerRef.current?.scrollLeft || 0;
-      const scrollTop = containerRef.current?.scrollTop || 0;
-      const x = (e.clientX - containerRect.left + scrollLeft) / canvasZoom - (content.width / 2);
-      const y = (e.clientY - containerRect.top + scrollTop) / canvasZoom - (content.height / 2);
+      const dropPoint = getCanvasPointFromClient(e.clientX, e.clientY);
+      const x = dropPoint.x - content.width / 2;
+      const y = dropPoint.y - content.height / 2;
       await addPadletFromLibraryItem({
         board_id: canvasId,
         title: content.title,
@@ -5140,7 +5155,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     } catch (err) {
       console.error('Failed to create padlet from library item:', err);
     }
-  }, [canvasId, canvasZoom, addPadletFromLibraryItem]);
+  }, [canvasId, getCanvasPointFromClient, addPadletFromLibraryItem]);
 
   const handleFreeformCardDrop = useCallback(async (svgDataStr: string, dropX: number, dropY: number) => {
     const { svgUrl, title } = JSON.parse(svgDataStr);
@@ -5503,7 +5518,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     isFreeformGraphMode,
     canUseFreeformEditButton,
     isColumnsLayout,
-  }), [canvasZoom, canvasId, isFreeformGraphMode, canUseFreeformEditButton, isColumnsLayout]);
+    gutterX,
+    gutterY,
+  }), [canvasZoom, canvasId, isFreeformGraphMode, canUseFreeformEditButton, isColumnsLayout, gutterX, gutterY]);
 
   const editorState: CanvasEditorState = {
     padletToEdit,
@@ -6333,15 +6350,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
             if (!padletId) return;
 
             // Calculate drop position relative to canvas container
-            // We need to account for scroll position of the container
-            const containerRect = containerRef.current?.getBoundingClientRect();
-            if (!containerRect) return;
-
-            const scrollLeft = containerRef.current?.scrollLeft || 0;
-            const scrollTop = containerRef.current?.scrollTop || 0;
-
-            const x = (e.clientX - containerRect.left + scrollLeft) / canvasZoom - 100; // Center offset approx
-            const y = (e.clientY - containerRect.top + scrollTop) / canvasZoom - 50;
+            const dropPoint = getCanvasPointFromClient(e.clientX, e.clientY);
+            const x = dropPoint.x - 100; // Center offset approx
+            const y = dropPoint.y - 50;
 
             const draggedPadlet = padlets.find(p => p.id === padletId);
             if (!draggedPadlet) return;
@@ -6625,14 +6636,20 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
               (FREEFORM_WORLD_WIDTH_PX/HEIGHT_PX), not just its transform — a bare `inset-0`
               sizes against the viewport instead of the world stage, which caps the Line
               interaction surface at the viewport's own pixel size regardless of zoom
-              (PATCH 9I/9J). */}
+              (PATCH 9I/9J). PATCH 9S.2: also carries freeformWorldOriginRef --
+              this div's own getBoundingClientRect() IS the canonical live
+              on-screen position of world (0,0), since left/top position it
+              at the camera gutter offset instead of inset-0's (0,0). */}
           <div
+            ref={freeformWorldOriginRef}
             className="absolute inset-0"
             style={{
               zIndex: 0,
               pointerEvents: 'none',
               ...(isFreeformLayout
                 ? {
+                  left: gutterX,
+                  top: gutterY,
                   width: FREEFORM_WORLD_WIDTH_PX,
                   height: FREEFORM_WORLD_HEIGHT_PX,
                   transform: `scale(${canvasZoom})`,
@@ -6672,7 +6689,18 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                 ? { width: '100%', maxWidth: '100%', minWidth: 0, minHeight: '100%' }
                 : isColumnsLayout || isTimelineLayout || isKanbanLayout || isSchedulerLayout || isMapLayout
                   ? { width: '100%', height: '100%', minWidth: 0, minHeight: 0, overflow: 'hidden' }
-                  : { minWidth: '2000px', minHeight: '1500px' }
+                  // PATCH 9S.2: PadletLayer is the sole normal-flow (non-
+                  // absolute) element in this subtree, so ITS size alone
+                  // deterministically defines CanvasViewport's scrollWidth/
+                  // scrollHeight -- gutter (leading+trailing) + the scaled
+                  // world, on each axis. The two Line wrapper divs and
+                  // FreeformPadletCards' own wrapper are absolutely
+                  // positioned at (gutterX, gutterY) within this same
+                  // footprint (see freeformWorldOriginRef), never exceeding
+                  // it, so they don't separately contribute to scroll size.
+                  : isFreeformLayout
+                    ? { width: gutterX * 2 + FREEFORM_WORLD_WIDTH_PX * canvasZoom, height: gutterY * 2 + FREEFORM_WORLD_HEIGHT_PX * canvasZoom }
+                    : { minWidth: '2000px', minHeight: '1500px' }
               ),
               userSelect: (isLineMode || selectedLineId || lineEditModeId) ? 'none' : 'auto',
               position: 'relative',
@@ -6719,11 +6747,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
               // fire. Guard here so the scheduler handles its own drops and we
               // don't double-create a freeform post on top.
               if ((e.target as HTMLElement).closest?.('.scheduler-wrapper, .rbc-calendar')) return;
-              const containerRect = e.currentTarget.getBoundingClientRect();
-              const scrollLeft = containerRef.current?.scrollLeft || 0;
-              const scrollTop = containerRef.current?.scrollTop || 0;
-              const dropX = (e.clientX - containerRect.left + scrollLeft) / canvasZoom;
-              const dropY = (e.clientY - containerRect.top + scrollTop) / canvasZoom;
+              const dropPoint = getCanvasPointFromClient(e.clientX, e.clientY);
+              const dropX = dropPoint.x;
+              const dropY = dropPoint.y;
 
               // 1. Check for SVG drop (External Clipart)
               let svgData = e.dataTransfer.getData('application/collabboard-svg');
@@ -7479,6 +7505,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                     setPadlets={setPadlets}
                     user={user}
                     containerRef={containerRef}
+                    worldOriginRef={freeformWorldOriginRef}
                     isDragging={isDragging}
                     draggingPadletId={draggingPadletId}
                     dragOverContainerId={dragOverContainerId}
@@ -7516,6 +7543,8 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
               pointerEvents: 'none',
               ...(isFreeformLayout
                 ? {
+                  left: gutterX,
+                  top: gutterY,
                   width: FREEFORM_WORLD_WIDTH_PX,
                   height: FREEFORM_WORLD_HEIGHT_PX,
                   transform: `scale(${canvasZoom})`,

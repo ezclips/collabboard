@@ -37,7 +37,10 @@ describe('PATCH 9J: post wrapper uses the shared stage dimensions [test 2, negat
   it('the post stage wrapper sets width/height from the imported constants, not a hardcoded literal', () => {
     const wrapperStart = freeformSrc.indexOf('className="absolute inset-0 transform-origin-top-left"');
     expect(wrapperStart).toBeGreaterThan(-1);
-    const wrapper = freeformSrc.slice(wrapperStart, wrapperStart + 300);
+    // PATCH 9S.2 added left:gutterX/top:gutterY (plus a doc comment) ahead of
+    // width/height in this same style object -- widened from 300 to 600 to
+    // still comfortably contain the whole wrapper's style block.
+    const wrapper = freeformSrc.slice(wrapperStart, wrapperStart + 600);
     expect(wrapper).toContain('width: FREEFORM_WORLD_WIDTH_PX,');
     expect(wrapper).toContain('height: FREEFORM_WORLD_HEIGHT_PX,');
   });
@@ -55,12 +58,21 @@ describe('PATCH 9J: Freeform Line wrappers use the same shared stage dimensions 
     );
   });
 
+  // PATCH 9S.2 inserted `left: gutterX,` / `top: gutterY,` immediately after
+  // the `? {` that opens each wrapper's Freeform-only branch, ahead of
+  // width/height -- both regexes below tolerate that (and only that)
+  // addition, via an optional non-capturing group, while still requiring
+  // width/height/transform/transformOrigin to appear in the original order
+  // directly after it.
+  const gutterPrefix = "(?:\\s*left:\\s*gutterX,\\s*\\r?\\n\\s*top:\\s*gutterY,\\s*\\r?\\n)?";
+
   it('the back-plane (Layer 1) Line wrapper sets world-stage width/height only for Freeform, mirroring FreeformPadletCards', () => {
     const layer1Comment = canvasClientSrc.indexOf('Layer 1: Background Lines');
     const layer1Svg = canvasClientSrc.indexOf('<SimpleLineRenderer', layer1Comment);
     const layer1Wrapper = canvasClientSrc.slice(layer1Comment, layer1Svg);
 
-    expect(layer1Wrapper).toMatch(/isFreeformLayout\s*\r?\n\s*\?\s*\{\s*\r?\n\s*width:\s*FREEFORM_WORLD_WIDTH_PX,\s*\r?\n\s*height:\s*FREEFORM_WORLD_HEIGHT_PX,\s*\r?\n\s*transform:\s*`scale\(\$\{canvasZoom\}\)`,\s*\r?\n\s*transformOrigin:\s*'0 0',/);
+    const re = new RegExp(`isFreeformLayout\\s*\\r?\\n\\s*\\?\\s*\\{${gutterPrefix}\\s*width:\\s*FREEFORM_WORLD_WIDTH_PX,\\s*\\r?\\n\\s*height:\\s*FREEFORM_WORLD_HEIGHT_PX,\\s*\\r?\\n\\s*transform:\\s*\`scale\\(\\$\\{canvasZoom\\}\\)\`,\\s*\\r?\\n\\s*transformOrigin:\\s*'0 0',`);
+    expect(layer1Wrapper).toMatch(re);
   });
 
   it('the front-plane (Layer 3) Line wrapper sets world-stage width/height only for Freeform, mirroring FreeformPadletCards', () => {
@@ -68,7 +80,8 @@ describe('PATCH 9J: Freeform Line wrappers use the same shared stage dimensions 
     const layer3Svg = canvasClientSrc.indexOf('<SimpleLineRenderer', layer3Comment);
     const layer3Wrapper = canvasClientSrc.slice(layer3Comment, layer3Svg);
 
-    expect(layer3Wrapper).toMatch(/isFreeformLayout\s*\r?\n\s*\?\s*\{\s*\r?\n\s*width:\s*FREEFORM_WORLD_WIDTH_PX,\s*\r?\n\s*height:\s*FREEFORM_WORLD_HEIGHT_PX,\s*\r?\n\s*transform:\s*`scale\(\$\{canvasZoom\}\)`,\s*\r?\n\s*transformOrigin:\s*'0 0',/);
+    const re = new RegExp(`isFreeformLayout\\s*\\r?\\n\\s*\\?\\s*\\{${gutterPrefix}\\s*width:\\s*FREEFORM_WORLD_WIDTH_PX,\\s*\\r?\\n\\s*height:\\s*FREEFORM_WORLD_HEIGHT_PX,\\s*\\r?\\n\\s*transform:\\s*\`scale\\(\\$\\{canvasZoom\\}\\)\`,\\s*\\r?\\n\\s*transformOrigin:\\s*'0 0',`);
+    expect(layer3Wrapper).toMatch(re);
   });
 
   it('both Line wrappers still fall back to an empty style object (no width/height/transform) outside Freeform', () => {
