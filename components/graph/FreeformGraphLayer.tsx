@@ -45,6 +45,15 @@ export default function FreeformGraphLayer({ boardId, posts, refreshToken = 0, c
     // PATCH-047 owner-authorized client-identity migration - see createFreeformGraphRepo's doc.
     const repo = useMemo(() => createFreeformGraphRepo(boardId), [boardId]);
 
+    // PATCH 9S: the edge context menu caches its position as fixed screen
+    // pixels at open-time and never recomputes it -- once camera-anchored
+    // zoom can move the world underneath a fixed screen point, a stale menu
+    // would visually detach from the edge it targets. Closes on ANY zoom
+    // prop change; a no-op on mount since edgeMenu starts null.
+    useEffect(() => {
+        setEdgeMenu(null);
+    }, [zoom]);
+
     useEffect(() => {
         if (!boardId) return;
         let isMounted = true;

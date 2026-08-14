@@ -215,7 +215,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   });
 
   // === BEGIN CAMERA REGION ===
-  const { canvasZoom, setCanvasZoom, handleZoomIn, handleZoomOut, handleZoomReset } = useCanvasCamera();
+  const { canvasZoom, zoomAtViewportPoint, handleZoomIn, handleZoomOut, handleZoomReset } = useCanvasCamera(containerRef);
   // === END CAMERA REGION ===
 
   useEffect(() => {
@@ -787,6 +787,16 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     setSelectedLineId,
     drawingViewport: canvas?.layout === 'drawing' ? drawingViewport : undefined,
   });
+
+  // PATCH 9S: the Line context menu caches its position as fixed screen
+  // pixels at open-time (event.clientX/clientY) and never recomputes it --
+  // once camera-anchored zoom can move the world underneath a fixed screen
+  // point, a stale menu would visually detach from the Line it targets.
+  // Closes on ANY zoom change (toolbar +/-, reset, or Ctrl+wheel all funnel
+  // through the same canvasZoom state), not a special case per entry point.
+  useEffect(() => {
+    setLineContextMenuState(null);
+  }, [canvasZoom]);
 
   // Helper to close all toolbars and popups when opening a new one
   const closeAllToolbars = useCallback((except?: {
@@ -6265,15 +6275,18 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           ) : undefined}
           containerRef={containerRef}
           onWheel={(e) => {
-            // Zoom with Ctrl + Wheel
-            if (e.ctrlKey) {
+            // Zoom with Ctrl + Wheel -- Freeform-equivalent layouts only.
+            // PATCH 9S: previously ungated, which let non-Freeform layouts
+            // (Map, Drawing, Wall, ...) silently mutate the shared Freeform
+            // canvasZoom out from under their own, unrelated camera systems.
+            if (e.ctrlKey && isFreeformLayout) {
               e.preventDefault();
               e.stopPropagation();
               const zoomDelta = e.deltaY > 0 ? -0.1 : 0.1;
-              setCanvasZoom(z => {
-                const newZoom = Math.max(0.1, Math.min(3, z + zoomDelta));
-                return newZoom;
-              });
+              const containerRect = containerRef.current?.getBoundingClientRect();
+              const anchorX = containerRect ? e.clientX - containerRect.left : 0;
+              const anchorY = containerRect ? e.clientY - containerRect.top : 0;
+              zoomAtViewportPoint((z) => z + zoomDelta, anchorX, anchorY);
             }
           }}
           onMouseDown={handleFreeformPanMouseDown}
@@ -7525,7 +7538,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
               draggingLineId={draggingLineId}
               onDragChange={handleLineDragChange}
               onContextMenu={handleLineContextMenu}
-              canvasZoom={canvasZoom}
+              canvasZoom={isFreeformLayout ? canvasZoom : undefined}
               forcePointerEvents={shouldEnableMapLinePointerEvents}
               excalidrawAPIRef={isDrawingLayout ? drawingExcalidrawAPIRef : undefined}
               drawingViewport={isDrawingLayout ? drawingViewport : undefined}
