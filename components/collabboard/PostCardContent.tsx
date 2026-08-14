@@ -897,7 +897,20 @@ export default function PostCardContent({
 
                 <div className="space-y-2 mt-2">
                     {children.length > 0 ? (
-                        <div className="max-h-[260px] overflow-y-auto pr-1 space-y-2 scrollbar-ultrathin">
+                        // PATCH 9E: same scrollbar-lane fix as
+                        // RowColumnContainerCard's child list -- this nested
+                        // "Container-as-child" preview is always in the
+                        // `overflow-y-auto` state (no expand toggle here),
+                        // so `scrollbar-gutter: stable` makes the reservation
+                        // constant whether or not this instance's content
+                        // currently exceeds 260px, and the `calc(100% + 6px)`
+                        // /-6px margin overshoot pushes that reservation into
+                        // this preview's own right-edge padding instead of
+                        // shrinking the child cards. `pr-1` is unchanged.
+                        <div
+                            className="max-h-[260px] overflow-y-auto overflow-x-hidden pr-1 space-y-2 scrollbar-ultrathin"
+                            style={{ scrollbarGutter: "stable", width: "calc(100% + 6px)", marginRight: "-6px" }}
+                        >
                             {children.map((child) => {
                                 // Robust comment detection (type OR metadata.comments)
                                 const isCommentType = isCommentPost(child);

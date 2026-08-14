@@ -361,10 +361,26 @@ export default function RowColumnContainerCard({
               : childPadlets;
             const shouldEnableInternalScroll = !disableInternalScroll && !isExpanded;
 
+            // PATCH 9E: when scrolling is active, the child-content lane must
+            // keep the SAME width it has when nothing overflows -- the
+            // scrollbar must not eat into it. `overflow-y-auto` alone shrinks
+            // the content box by the scrollbar's rendered width the moment a
+            // scrollbar actually paints, and it does so INTRA-branch too
+            // (short content within this same "scroll enabled" state renders
+            // no real scrollbar at all). `scrollbarGutter: 'stable'` makes
+            // that reservation constant across both sub-states; the
+            // `calc(100% + 6px)` width + `-6px` margin then pushes that
+            // constant reservation into the 6px right-edge gutter this card
+            // already reserves via its own `p-1.5` padding (present in every
+            // host that renders this card, verified during PATCH 9E's host
+            // audit) instead of taking it out of the child cards' width.
+            // `pr-0.5` is left untouched so the un-widened, no-scroll case
+            // (the width baseline everything else must match) is unchanged.
             return (
               <div
                 ref={contentMeasureRef}
-                className={shouldEnableInternalScroll ? "max-h-[300px] overflow-y-auto pr-0.5 space-y-2 scrollbar-ultrathin" : "space-y-2 pr-0.5"}
+                className={shouldEnableInternalScroll ? "max-h-[300px] overflow-y-auto overflow-x-hidden pr-0.5 space-y-2 scrollbar-ultrathin" : "space-y-2 pr-0.5"}
+                style={shouldEnableInternalScroll ? { scrollbarGutter: "stable", width: "calc(100% + 6px)", marginRight: "-6px" } : undefined}
               >
                 {orderedChildren.map((child) => {
                   const isCommentType = isCommentPost(child);
