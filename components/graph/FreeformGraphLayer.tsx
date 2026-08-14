@@ -195,6 +195,12 @@ export default function FreeformGraphLayer({ boardId, posts, refreshToken = 0, c
     const renderEdgesRef = useRef(renderEdges);
     renderEdgesRef.current = renderEdges;
 
+    // PATCH 9O: same ref pattern as renderEdgesRef -- read the latest zoom
+    // inside the drag handler without re-subscribing the effect below on
+    // every zoom change (e.g. Ctrl+wheel mid-drag).
+    const zoomRef = useRef(zoom);
+    zoomRef.current = zoom;
+
     // ── Label drag: project cursor onto the edge line and update label_position ─
     useEffect(() => {
         if (!draggingLabel) return;
@@ -204,12 +210,26 @@ export default function FreeformGraphLayer({ boardId, posts, refreshToken = 0, c
             if (!edgeData) return;
             const { sx, sy, ex, ey } = edgeData.route;
 
-            // Get mouse position in SVG coordinates
+            // Get mouse position in SVG coordinates. svgRef's <svg> lives
+            // inside FreeformPadletCards' `transform: scale(canvasZoom)`
+            // world stage, so getBoundingClientRect() returns its ON-SCREEN
+            // (post-transform, zoom-scaled) box -- but it already bakes in
+            // the scrollable container's current scroll offset natively
+            // (unlike measuredRects above, which uses a DIFFERENT, never-
+            // scrolled containerRect + manual scrollLeft/scrollTop, because
+            // that reference element doesn't move with scroll). Do not add
+            // scroll math here -- it would double-count an offset this rect
+            // already includes. sx/sy/ex/ey (the route) are WORLD units
+            // (measuredRects already divides by zoom to normalize out the
+            // screen scale), so the raw screen-pixel delta below must be
+            // divided by zoom exactly once to land in that same WORLD space
+            // before being compared/projected against them.
             const svg = svgRef.current;
             if (!svg) return;
             const svgRect = svg.getBoundingClientRect();
-            const mx = e.clientX - svgRect.left;
-            const my = e.clientY - svgRect.top;
+            const currentZoom = zoomRef.current;
+            const mx = (e.clientX - svgRect.left) / currentZoom;
+            const my = (e.clientY - svgRect.top) / currentZoom;
 
             // Project mouse onto the line segment (sx,sy)→(ex,ey)
             const dx = ex - sx;
