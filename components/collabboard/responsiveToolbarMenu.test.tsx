@@ -115,16 +115,21 @@ describe('PATCH 9V.2C: opaque menu surface [matrix 3, 12; control C]', () => {
     expect(sidebarCode).not.toMatch(/bg-white\/\d/);
   });
 
-  it('proves bg-popover would in fact have been transparent here [3]', () => {
-    // The whole reason for the override: this project's Tailwind v4 theme
-    // registers only --background/--foreground, so `bg-popover` generates no
-    // rule at all and the element keeps a transparent background.
+  it('keeps the explicit override even though PATCH 9V.2E later defined --color-popover [3]', () => {
+    // At the time this override was written (9V.2C), bg-popover generated no
+    // CSS at all here -- this project's Tailwind v4 theme registered only
+    // --background/--foreground. PATCH 9V.2E (9V.2D's follow-up) later
+    // defined the safe token subset, including --color-popover, but this
+    // call site deliberately keeps its own explicit bg-background rather
+    // than being refactored back onto the now-working default -- see
+    // PATCH 9V.2E's frozen-CanvasSidebar decision.
     const globals = read('app/globals.css');
     expect(globals).toContain('--color-background: var(--background);');
-    expect(globals).not.toContain('--color-popover');
-    expect(globals).not.toContain('--popover:');
+    expect(globals).toContain('--color-popover: var(--popover);');
+    expect(globals).toContain('--popover: var(--background);');
     // shadcn's shared primitive still asks for it, which is why the override
-    // has to live at this call site.
+    // still has to live at this call site (it isn't the only consumer of
+    // DropdownMenuContent, and other consumers now benefit from the fix).
     expect(dropdownSrc).toContain('bg-popover');
   });
 
