@@ -28,6 +28,8 @@ const component = read('components/collabboard/canvas/minimap/FreeformMinimap.ts
 const geometry = read('components/collabboard/canvas/minimap/freeformMinimapGeometry.ts');
 const geometryHook = read('components/collabboard/canvas/minimap/useFreeformMinimapGeometry.ts');
 const viewportHook = read('components/collabboard/canvas/minimap/useFreeformMinimapViewport.ts');
+const freeformCards = read('components/collabboard/canvas/ui/FreeformPadletCards.tsx');
+const simpleLineRenderer = read('components/collabboard/SimpleLineRenderer.tsx');
 const viewportStart = canvasClient.indexOf('<CanvasViewport');
 const viewportEnd = canvasClient.indexOf('</CanvasViewport>', viewportStart);
 const minimapStart = canvasClient.indexOf('<FreeformMinimap', viewportEnd);
@@ -114,7 +116,13 @@ describe('PATCH 9U render-only UI and stacking contract', () => {
     expect(component).not.toContain('bg-background/90');
     expect(component).not.toContain('shadow-md');
     expect(component).not.toContain('backdrop-blur-sm');
-    expect(component).toContain('className="fill-muted/40"');
+    expect(component).toContain('data-freeform-minimap-surface="true"');
+    expect(component).toContain("style={{ fill: '#e5e7eb' }}");
+    expect(component).not.toContain('fill-muted/40');
+    expect(component).not.toContain('fill-muted-foreground/45');
+    expect(component).not.toContain('fill-primary/10');
+    expect(component).toContain("fill: 'var(--foreground)', fillOpacity: 0.45");
+    expect(component).toContain("fill: 'var(--foreground)', fillOpacity: 0.1, stroke: 'var(--foreground)'");
     expect(component).toContain('aria-hidden="true"');
     expect(component).not.toContain('<button');
   });
@@ -126,6 +134,101 @@ describe('PATCH 9U render-only UI and stacking contract', () => {
     expect(component).not.toContain('<text');
     expect(component).not.toContain('<image');
     expect(component).not.toContain('<line');
+  });
+
+  it('the mounted inner SVG surface resolves to light gray rather than the SVG default black fill', () => {
+    host = document.createElement('div');
+    document.body.append(host);
+    root = createRoot(host);
+    act(() => root?.render(
+      <FreeformMinimap
+        rootPosts={[]}
+        containerRef={{ current: document.createElement('div') }}
+        worldOriginRef={{ current: document.createElement('div') }}
+        canvasZoom={1}
+      />,
+    ));
+    const surface = host.querySelector<SVGRectElement>('[data-freeform-minimap-surface="true"]')!;
+    const post = host.querySelector<SVGRectElement>('[data-minimap-item-id="post"]')!;
+    const container = host.querySelector<SVGRectElement>('[data-minimap-item-id="container"]')!;
+    const viewport = host.querySelector<SVGRectElement>('[data-freeform-minimap-viewport="true"]')!;
+    expect(surface.style.fill).toBe('rgb(229, 231, 235)');
+    expect(getComputedStyle(surface).fill).toBe('rgb(229, 231, 235)');
+    expect(post.style.fill).toBe('var(--foreground)');
+    expect(post.style.fillOpacity).toBe('0.45');
+    expect(container.style.fill).toBe('transparent');
+    expect(container.style.strokeOpacity).toBe('0.7');
+    expect(viewport.style.fill).toBe('var(--foreground)');
+    expect(viewport.style.fillOpacity).toBe('0.1');
+    expect(viewport.style.stroke).toBe('var(--foreground)');
+  });
+});
+
+describe('PATCH 9U.2 blank-world and camera-gutter pan ownership', () => {
+  const handlerStart = canvasClient.indexOf('const handleFreeformPanMouseDown = useCallback');
+  const handlerEnd = canvasClient.indexOf('const handleViewportMouseMove = useCallback', handlerStart);
+  const handler = canvasClient.slice(handlerStart, handlerEnd);
+  const blockingSelector = handler.match(/target\.closest\('([^']+)'\)/)?.[1] ?? '';
+  const canStartFrom = (target: Element) => !target.closest(blockingSelector);
+
+  it('1. the native scroll footprint retains leading and trailing gutter travel', () => {
+    expect(canvasClient).toContain("? { width: gutterX * 2 + FREEFORM_WORLD_WIDTH_PX * canvasZoom, height: gutterY * 2 + FREEFORM_WORLD_HEIGHT_PX * canvasZoom }");
+  });
+
+  it('2. CanvasViewport itself owns pan initiation, so blank world starts pan', () => {
+    expect(canvasClient.slice(viewportStart, viewportEnd)).toContain('onMouseDown={handleFreeformPanMouseDown}');
+    expect(canStartFrom(document.createElement('div'))).toBe(true);
+  });
+
+  it('3. a plain blank leading-gutter target passes the actual production target guard', () => {
+    const gutter = document.createElement('div');
+    gutter.dataset.testRegion = 'leading-gutter';
+    expect(canStartFrom(gutter)).toBe(true);
+  });
+
+  it('4. a plain blank top-gutter target passes the actual production target guard', () => {
+    const gutter = document.createElement('div');
+    gutter.dataset.testRegion = 'top-gutter';
+    expect(canStartFrom(gutter)).toBe(true);
+  });
+
+  it('5. active pan continues through window mousemove without rechecking the world boundary', () => {
+    const effectStart = canvasClient.indexOf("window.addEventListener('mousemove', handleWindowMouseMove)");
+    expect(effectStart).toBeGreaterThan(handlerEnd);
+    expect(canvasClient.slice(handlerEnd, effectStart)).not.toContain('freeformWorldOriginRef.current.contains');
+    expect(canvasClient).toContain('container.scrollLeft = panStart.scrollLeft - (event.clientX - panStart.clientX);');
+  });
+
+  it('6. an interactive post target does not start canvas pan', () => {
+    const post = document.createElement('div');
+    post.dataset.padletId = 'post-1';
+    expect(canStartFrom(post)).toBe(false);
+  });
+
+  it('7. Line targets stop propagation before the viewport pan owner', () => {
+    const bridgeStart = freeformCards.indexOf('const handleFreeformBackLineBridgeMouseDownCapture');
+    const bridgeEnd = freeformCards.indexOf('const handleFreeformBackLineBridgeClickCapture', bridgeStart);
+    expect(freeformCards.slice(bridgeStart, bridgeEnd)).toContain('event.stopPropagation()');
+    expect(simpleLineRenderer).toContain('e.stopPropagation()');
+  });
+
+  it('8. toolbar and form controls do not start canvas pan', () => {
+    for (const tag of ['button', 'input', 'textarea', 'select', 'a']) {
+      expect(canStartFrom(document.createElement(tag))).toBe(false);
+    }
+  });
+
+  it('9. a Container interactive child inherits the post exclusion', () => {
+    const container = document.createElement('div');
+    container.dataset.padletId = 'container-1';
+    const child = document.createElement('div');
+    container.append(child);
+    expect(canStartFrom(child)).toBe(false);
+  });
+
+  it('10. the minimap remains pointer-inert and cannot create an invisible pan boundary', () => {
+    expect(component).toContain('pointer-events-none');
+    expect(component).not.toContain('pointer-events-auto');
   });
 });
 

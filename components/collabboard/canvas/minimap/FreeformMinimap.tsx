@@ -81,12 +81,13 @@ export default function FreeformMinimap({
         </defs>
 
         <rect
+          data-freeform-minimap-surface="true"
           x={MINIMAP_INNER_RECT.left}
           y={MINIMAP_INNER_RECT.top}
           width={MINIMAP_INNER_RECT.width}
           height={MINIMAP_INNER_RECT.height}
           rx="3"
-          className="fill-muted/40"
+          style={{ fill: '#e5e7eb' }}
         />
 
         <g data-freeform-minimap-items="true">
@@ -101,7 +102,7 @@ export default function FreeformMinimap({
                   cx={rect.x + rect.width / 2}
                   cy={rect.y + rect.height / 2}
                   r={Math.max(2, Math.min(4, Math.max(rect.width, rect.height) / 2))}
-                  className="fill-accent-foreground/70"
+                  style={{ fill: 'var(--foreground)', fillOpacity: 0.7 }}
                 />
               );
             }
@@ -115,9 +116,9 @@ export default function FreeformMinimap({
                 width={rect.width}
                 height={rect.height}
                 rx="1"
-                className={item.kind === 'container'
-                  ? 'fill-transparent stroke-muted-foreground/70'
-                  : 'fill-muted-foreground/45'}
+                style={item.kind === 'container'
+                  ? { fill: 'transparent', stroke: 'var(--foreground)', strokeOpacity: 0.7 }
+                  : { fill: 'var(--foreground)', fillOpacity: 0.45 }}
                 strokeWidth={item.kind === 'container' ? 1.25 : undefined}
               />
             );
@@ -133,7 +134,7 @@ export default function FreeformMinimap({
               width={projectedViewport.width}
               height={projectedViewport.height}
               rx="1.5"
-              className="fill-primary/10 stroke-foreground"
+              style={{ fill: 'var(--foreground)', fillOpacity: 0.1, stroke: 'var(--foreground)' }}
               strokeWidth="1.5"
             />
           </g>
