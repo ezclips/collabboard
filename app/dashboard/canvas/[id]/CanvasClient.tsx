@@ -8101,112 +8101,6 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
 
 
 
-            {/* Library Panel */}
-            <LibraryPanel
-              isOpen={isLibraryOpen}
-              onClose={() => {
-                setIsLibraryOpen(false);
-                setIconReplaceTargetPadlet(null);
-                if (!isClipartDraftReplaceMode) {
-                  setPadletToEdit(null);
-                }
-                setIsClipartDraftReplaceMode(false);
-              }}
-              onClipartClick={(svgUrl, title) => {
-                // Build metadata for the new card
-                const meta: Record<string, unknown> = {
-                  svgUrl,
-                  iconColor: '#000000',
-                  iconBgColor: '#ec4899',
-                  counterType: 'words',
-                };
-                // Map canvas: auto-assign to active pin container
-                if (isMapLayout && mapActiveContainerId) {
-                  meta.parentId = mapActiveContainerId;
-                }
-                // Close library, open the clipart draft modal
-                setIsLibraryOpen(false);
-                setPadletToEdit({
-                  id: 'new',
-                  board_id: canvasId,
-                  title: title || '',
-                  content: '',
-                  type: 'card',
-                  position_x: 0,
-                  position_y: 0,
-                  width: 180,
-                  height: 220,
-                  metadata: meta,
-                  created_at: new Date().toISOString(),
-                  updated_at: new Date().toISOString(),
-                } as Padlet);
-                setIsClipartDraftReplaceMode(false);
-                setIsClipartDraftModalOpen(true);
-              }}
-              onSelectClipart={async (svgUrl, title) => {
-                if (isClipartDraftReplaceMode && padletToEdit?.id === 'new') {
-                  setPadletToEdit({
-                    ...padletToEdit,
-                    title: padletToEdit.title || title || '',
-                    metadata: {
-                      ...(padletToEdit.metadata || {}),
-                      svgUrl,
-                    },
-                  });
-                  setIsLibraryOpen(false);
-                  setIsClipartDraftReplaceMode(false);
-                  return;
-                }
-
-                if (iconReplaceTargetPadlet) {
-                  // Update metadata with new SVG
-                  await updatePadletMetadata(iconReplaceTargetPadlet.id, { svgUrl });
-
-                  // ALSO clear the title so it doesn't show the old icon name
-                  const updatePostTitleBestEffort = createUpdatePostTitleBestEffortCommand(createPostsRepository());
-                  const titleResult = await updatePostTitleBestEffort({ postId: iconReplaceTargetPadlet.id, title: '' }, { userId: null });
-                  if (!titleResult.ok) throw titleResult.error.cause ?? titleResult.error;
-
-                  // Optimistic local update
-                  setPadlets(prev => prev.map(p =>
-                    p.id === iconReplaceTargetPadlet.id
-                      ? { ...p, title: '', metadata: { ...p.metadata, svgUrl } }
-                      : p
-                  ));
-                }
-                setIsLibraryOpen(false);
-                setIconReplaceTargetPadlet(null);
-                setPadletToEdit(null);
-                setIsClipartDraftReplaceMode(false);
-              }}
-              isIconReplaceMode={!!iconReplaceTargetPadlet || isClipartDraftReplaceMode}
-              onSelect={(item) => {
-                if (padletToEdit && padletToEdit.type === 'card') {
-                  // If it's an external clipart/iconify selection, we get the SVG URL
-                  const svgUrl = item.content.metadata?.svgUrl || item.content.file_url;
-                  if (svgUrl) {
-                    if (isClipartDraftReplaceMode && padletToEdit.id === 'new') {
-                      setPadletToEdit({
-                        ...padletToEdit,
-                        metadata: {
-                          ...(padletToEdit.metadata || {}),
-                          svgUrl,
-                        },
-                      });
-                    } else {
-                      updatePadletMetadata(padletToEdit.id, { svgUrl });
-                    }
-                  }
-                  setIsLibraryOpen(false);
-                  if (!isClipartDraftReplaceMode) {
-                    setPadletToEdit(null);
-                  }
-                  setIconReplaceTargetPadlet(null);
-                  setIsClipartDraftReplaceMode(false);
-                }
-              }}
-            />
-
             {/* Imports Dialog */}
             <ImportsDialog
               isOpen={isImportBrowserOpen}
@@ -8371,6 +8265,125 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
             handleChangeLineLayer={handleChangeLineLayer}
           />
         </CanvasViewport>
+
+        {/* Library Panel. PATCH 9W.1: deliberately rendered as a sibling
+            OUTSIDE CanvasViewport rather than as one of its children. Root
+            cause of the defect this fixes: CanvasViewport sets
+            `isolation: 'isolate'` (PATCH 9M) to contain its own internal
+            z-index stack, which also traps any descendant's z-index --
+            including this panel's z-[70000] -- inside that boundary, so it
+            could never actually out-rank a sibling like
+            FreeformNavigationControl (z-40) no matter how high its own
+            z-index was set. Moving the call site here lets the existing
+            z-[70000] finally take effect with no numeric z-index changes
+            anywhere. position: fixed already ignored CanvasViewport's
+            overflow/scroll clipping and all callback props are plain
+            component-level closures, so this DOM relocation has no other
+            behavioral effect. */}
+        <LibraryPanel
+          isOpen={isLibraryOpen}
+          onClose={() => {
+            setIsLibraryOpen(false);
+            setIconReplaceTargetPadlet(null);
+            if (!isClipartDraftReplaceMode) {
+              setPadletToEdit(null);
+            }
+            setIsClipartDraftReplaceMode(false);
+          }}
+          onClipartClick={(svgUrl, title) => {
+            // Build metadata for the new card
+            const meta: Record<string, unknown> = {
+              svgUrl,
+              iconColor: '#000000',
+              iconBgColor: '#ec4899',
+              counterType: 'words',
+            };
+            // Map canvas: auto-assign to active pin container
+            if (isMapLayout && mapActiveContainerId) {
+              meta.parentId = mapActiveContainerId;
+            }
+            // Close library, open the clipart draft modal
+            setIsLibraryOpen(false);
+            setPadletToEdit({
+              id: 'new',
+              board_id: canvasId,
+              title: title || '',
+              content: '',
+              type: 'card',
+              position_x: 0,
+              position_y: 0,
+              width: 180,
+              height: 220,
+              metadata: meta,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            } as Padlet);
+            setIsClipartDraftReplaceMode(false);
+            setIsClipartDraftModalOpen(true);
+          }}
+          onSelectClipart={async (svgUrl, title) => {
+            if (isClipartDraftReplaceMode && padletToEdit?.id === 'new') {
+              setPadletToEdit({
+                ...padletToEdit,
+                title: padletToEdit.title || title || '',
+                metadata: {
+                  ...(padletToEdit.metadata || {}),
+                  svgUrl,
+                },
+              });
+              setIsLibraryOpen(false);
+              setIsClipartDraftReplaceMode(false);
+              return;
+            }
+
+            if (iconReplaceTargetPadlet) {
+              // Update metadata with new SVG
+              await updatePadletMetadata(iconReplaceTargetPadlet.id, { svgUrl });
+
+              // ALSO clear the title so it doesn't show the old icon name
+              const updatePostTitleBestEffort = createUpdatePostTitleBestEffortCommand(createPostsRepository());
+              const titleResult = await updatePostTitleBestEffort({ postId: iconReplaceTargetPadlet.id, title: '' }, { userId: null });
+              if (!titleResult.ok) throw titleResult.error.cause ?? titleResult.error;
+
+              // Optimistic local update
+              setPadlets(prev => prev.map(p =>
+                p.id === iconReplaceTargetPadlet.id
+                  ? { ...p, title: '', metadata: { ...p.metadata, svgUrl } }
+                  : p
+              ));
+            }
+            setIsLibraryOpen(false);
+            setIconReplaceTargetPadlet(null);
+            setPadletToEdit(null);
+            setIsClipartDraftReplaceMode(false);
+          }}
+          isIconReplaceMode={!!iconReplaceTargetPadlet || isClipartDraftReplaceMode}
+          onSelect={(item) => {
+            if (padletToEdit && padletToEdit.type === 'card') {
+              // If it's an external clipart/iconify selection, we get the SVG URL
+              const svgUrl = item.content.metadata?.svgUrl || item.content.file_url;
+              if (svgUrl) {
+                if (isClipartDraftReplaceMode && padletToEdit.id === 'new') {
+                  setPadletToEdit({
+                    ...padletToEdit,
+                    metadata: {
+                      ...(padletToEdit.metadata || {}),
+                      svgUrl,
+                    },
+                  });
+                } else {
+                  updatePadletMetadata(padletToEdit.id, { svgUrl });
+                }
+              }
+              setIsLibraryOpen(false);
+              if (!isClipartDraftReplaceMode) {
+                setPadletToEdit(null);
+              }
+              setIconReplaceTargetPadlet(null);
+              setIsClipartDraftReplaceMode(false);
+            }
+          }}
+        />
 
         {isFreeformLayout && (
           <FreeformNavigationControl

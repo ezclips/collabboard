@@ -529,7 +529,14 @@ export default function LibraryPanel({
 
     return (
         <>
-            <div className="fixed top-[64px] left-[56px] h-[calc(100vh-64px)] w-80 bg-white border-r shadow-2xl z-[70000] flex flex-col animate-in slide-in-from-left duration-300">
+            {/* PATCH 9W.1: z-[800] places this panel above the Freeform
+                navigation control (z-40) and below the editor-panel tier
+                (z-[1000], e.g. ImageEditor/NoteEditor/etc) and the toolbar's
+                overflow menu (z-[3001]) -- see CanvasClient.tsx for why this
+                panel now also renders outside CanvasViewport's isolated
+                stacking context, which is what makes this value finally
+                take effect against real page-level siblings. */}
+            <div className="fixed top-[64px] left-[56px] h-[calc(100vh-64px)] w-80 bg-white border-r shadow-2xl z-[800] flex flex-col animate-in slide-in-from-left duration-300">
                 {/* Header with Tabs */}
                 <div className="px-3 py-2 border-b flex items-center justify-between bg-white">
                     <div className="flex bg-gray-100 p-1 rounded-lg">
