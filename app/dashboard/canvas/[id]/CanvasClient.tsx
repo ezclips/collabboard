@@ -151,6 +151,12 @@ import {
   FREEFORM_WORLD_ORIGIN_OFFSET_Y,
   FREEFORM_WORLD_WIDTH_PX,
 } from '@/components/collabboard/canvas/engine/freeformStageGeometry';
+import {
+  SECTION_HEADING_DEFAULT_HEIGHT,
+  SECTION_HEADING_DEFAULT_LEVEL,
+  SECTION_HEADING_DEFAULT_TEXT,
+  SECTION_HEADING_DEFAULT_WIDTH,
+} from '@/components/collabboard/canvas/engine/sectionHeading';
 
 // === BEGIN TYPES + CONSTANTS REGION ===
 
@@ -2195,6 +2201,57 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     }
 
     toast.success('Empty column created');
+  }, [canvasId, isFreeformLayout, getNewPostPosition, padlets, insertPostPreservingFailureChannels, fetchData]);
+
+  /**
+   * PATCH SECTION-H1 -- create one root Section Heading on Freeform.
+   *
+   * Deliberately mirrors handleCreateEmptyFreeformContainer above rather than
+   * introducing a parallel path: same signed-world placement helper (so the
+   * heading can land at negative coordinates, PATCH 9V.2B), same canonical
+   * repository insert, same optimistic-then-rollback failure handling, same
+   * select-after-create convention.
+   */
+  const handleCreateSectionHeading = useCallback(async () => {
+    if (!canvasId || !isFreeformLayout) return;
+
+    const headingId = crypto.randomUUID();
+    const nowIso = new Date().toISOString();
+    const width = SECTION_HEADING_DEFAULT_WIDTH;
+    const height = SECTION_HEADING_DEFAULT_HEIGHT;
+    const { x: positionX, y: positionY } = getNewPostPosition(width, height);
+
+    const headingPayload: Padlet = {
+      id: headingId,
+      board_id: canvasId,
+      title: SECTION_HEADING_DEFAULT_TEXT,
+      content: '',
+      type: 'section_heading',
+      position_x: positionX,
+      position_y: positionY,
+      width,
+      height,
+      created_at: nowIso,
+      updated_at: nowIso,
+      metadata: {
+        headingLevel: SECTION_HEADING_DEFAULT_LEVEL,
+        zIndex: nextZIndex(padlets),
+      } as any,
+    };
+
+    setPadlets((prev) => [...prev, headingPayload]);
+    setSelectedPadletId(headingId);
+
+    const insertResult = await insertPostPreservingFailureChannels(headingPayload as any);
+    if (!insertResult.ok) {
+      const error = insertResult.error.cause ?? insertResult.error;
+      setPadlets((prev) => prev.filter((p) => p.id !== headingId));
+      setSelectedPadletId(null);
+      console.error('Failed to create section heading:', error);
+      toast.error('Failed to create section heading');
+      fetchData();
+      return;
+    }
   }, [canvasId, isFreeformLayout, getNewPostPosition, padlets, insertPostPreservingFailureChannels, fetchData]);
 
   // Handle "Add to Existing" from Column Placement Prompt
@@ -5908,6 +5965,12 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         } else if (selectedPadletId) {
           requestDeletePadlet(selectedPadletId);
         }
+        break;
+      case 'section-heading':
+        // Registry only offers this tool on Freeform (SECTION-H1); the guard
+        // inside handleCreateSectionHeading is the second line of defence.
+        closeAllToolbarLaunchedUi();
+        void handleCreateSectionHeading();
         break;
       case 'container':
         if (isFreeformLayout) {

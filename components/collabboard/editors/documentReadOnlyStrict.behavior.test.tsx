@@ -192,9 +192,14 @@ describe('PERMISSION RULE: one predicate governs Edit visibility, Read-modal edi
       freeformSrc.indexOf('onReadDocument={(() => {'),
     );
     expect(branch).toContain('onOpenToolbar={canUseFreeformEditButton ?');
+    // End marker searched from the start index, not 0 -- the canonical
+    // selection expression is legitimately reused by other renderers earlier
+    // in this file (SECTION-H1's Section Heading route), which would
+    // otherwise collapse this slice to an empty string.
+    const readBranchStart = freeformSrc.indexOf('onReadDocument={(() => {');
     const readBranch = freeformSrc.slice(
-      freeformSrc.indexOf('onReadDocument={(() => {'),
-      freeformSrc.indexOf('isSelected={isPadletSelected(padlet.id)}'),
+      readBranchStart,
+      freeformSrc.indexOf('isSelected={isPadletSelected(padlet.id)}', readBranchStart),
     );
     expect(readBranch).toContain('selectDocumentModalDestination(padlet, canUseFreeformEditButton)');
   });

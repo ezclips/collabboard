@@ -94,7 +94,7 @@ export interface Padlet {
   board_id: string;
   title: string;
   content: string;
-  type: 'text' | 'image' | 'file' | 'table' | 'link' | 'todo' | 'container' | 'comment' | 'drawing' | 'card' | 'note' | 'ai-component';
+  type: 'text' | 'image' | 'file' | 'table' | 'link' | 'todo' | 'container' | 'comment' | 'drawing' | 'card' | 'note' | 'ai-component' | 'section_heading';
   position_x: number;
   position_y: number;
   width: number;
@@ -235,6 +235,13 @@ export interface Padlet {
     // Freeform graph specific
     freeformLayer?: number;
     isFocusNode?: boolean;
+
+    // Section Heading specific (PATCH SECTION-H1). The heading's own text
+    // lives in the post's canonical `title`; only the semantic level needs
+    // its own field. Surface/accent/text COLOURS deliberately reuse the
+    // existing generic metadata above rather than adding new columns --
+    // SECTION-H2 wires the controls to them.
+    headingLevel?: 1 | 2 | 3 | 4;
 
     // AI Component specific
     aiComponentCode?: string;

@@ -73,9 +73,15 @@ describe('18-22: every interactive owner threads onOpenDocument', () => {
 });
 
 describe('16: Freeform/CardPreview owner', () => {
+  // The end marker must be searched for AFTER the start, not from index 0:
+  // `isSelected={isPadletSelected(padlet.id)}` is the canonical selection
+  // expression and other renderers in this file legitimately reuse it
+  // earlier (e.g. the SECTION-H1 Section Heading route), which would
+  // otherwise silently collapse this slice to an empty string.
+  const branchStart = freeformSrc.indexOf('onReadDocument={(() => {');
   const branch = freeformSrc.slice(
-    freeformSrc.indexOf('onReadDocument={(() => {'),
-    freeformSrc.indexOf('isSelected={isPadletSelected(padlet.id)}'),
+    branchStart,
+    freeformSrc.indexOf('isSelected={isPadletSelected(padlet.id)}', branchStart),
   );
 
   it('exact Document uses selectDocumentModalDestination and reuses the existing state/predicate; T1: never gated on document-editor (§30.5)', () => {

@@ -4,6 +4,7 @@
  */
 
 import type { Padlet } from '@/types/collabboard';
+import { canBeContainerChild } from './sectionHeading';
 
 export const isStripVisible = (color?: string): boolean => {
   return !!color && color !== 'transparent';
@@ -90,6 +91,14 @@ export function findContainerOverlappingRect(
   rect: CanvasRect,
   excludePadletId: string,
 ): Padlet | null {
+  // PATCH SECTION-H1 Phase 19: some post types organize board SPACE rather
+  // than card membership and can never become a Container child. Checked
+  // here, on the DRAGGED post, so the live drag-over highlight and the drop
+  // handler that both call this function stay in agreement -- exactly the
+  // single-validation-rule property documented above.
+  const dragged = padlets.find((p) => p.id === excludePadletId);
+  if (dragged && !canBeContainerChild(dragged)) return null;
+
   const containers = getEligibleContainerDestinations(padlets, excludePadletId);
 
   for (const container of containers) {

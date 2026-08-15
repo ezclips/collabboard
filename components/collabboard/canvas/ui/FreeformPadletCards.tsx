@@ -43,6 +43,8 @@ import { ColumnPostContextMenu } from '@/components/collabboard/menus/ColumnPost
 import { CommentPostContextMenu } from '@/components/collabboard/menus/CommentPostContextMenu';
 import { ImagePostContextMenu } from '@/components/collabboard/context-menus/ImagePostContextMenu';
 import { isStripVisible, htmlToText, getEligibleContainerDestinations, IMAGE_CROP_TO_GRID_HEIGHT_PX } from '@/components/collabboard/canvas/engine/utils';
+import { isSectionHeading } from '@/components/collabboard/canvas/engine/sectionHeading';
+import SectionHeadingPost from '@/components/collabboard/canvas/ui/SectionHeadingPost';
 import { FREEFORM_WORLD_WIDTH_PX, FREEFORM_WORLD_HEIGHT_PX } from '@/components/collabboard/canvas/engine/freeformStageGeometry';
 import { getContainerEditTargetLabel } from '@/lib/infra/collabboard/containerEditTargetLabel';
 import { getEffectiveVisibleChildTitleIds, toggleChildPostTitleVisibility } from '@/lib/infra/collabboard/containerChildTitleVisibility';
@@ -744,7 +746,26 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
         onDoubleClickCapture={handleFreeformBackLineBridgeDoubleClickCapture}
         onContextMenuCapture={handleFreeformBackLineBridgeContextMenuCapture}
       >
-      {rootPadlets.map(padlet => (
+      {/* PATCH SECTION-H1: Section Headings own their entire presentation,
+          so they are routed to their dedicated renderer INSTEAD of the
+          generic post card below -- not layered on top of it. Splitting the
+          list here (rather than branching inside the generic body) is what
+          keeps them free of Note chrome, comment badges, the graph-connect
+          mousedown branch, and Group-into-Column targets, without touching
+          any existing type's rendering. */}
+      {rootPadlets.filter(padlet => isSectionHeading(padlet)).map(padlet => (
+        <SectionHeadingPost
+          key={padlet.id}
+          padlet={padlet}
+          isSelected={isPadletSelected(padlet.id)}
+          canEdit={canUseFreeformEditButton}
+          isDraggingThis={draggingPadletId === padlet.id}
+          onMouseDownCapture={handlePadletMouseDown}
+          onCommitText={(padletId, nextText) => { void updatePadletTitle(padletId, nextText); }}
+        />
+      ))}
+
+      {rootPadlets.filter(padlet => !isSectionHeading(padlet)).map(padlet => (
     <div
       key={padlet.id}
       data-padlet-id={padlet.id}
