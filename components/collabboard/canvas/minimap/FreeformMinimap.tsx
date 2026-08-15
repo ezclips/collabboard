@@ -62,7 +62,7 @@ export default function FreeformMinimap({
     <div
       data-freeform-minimap="true"
       aria-hidden="true"
-      className="pointer-events-none absolute bottom-4 left-[72px] z-40 hidden h-[108px] w-[168px] overflow-hidden rounded-lg border border-border bg-background/90 shadow-md backdrop-blur-sm md:block"
+      className="pointer-events-none absolute bottom-4 left-[72px] z-40 hidden h-[108px] w-[168px] overflow-hidden md:block"
     >
       <svg
         data-freeform-minimap-map="true"

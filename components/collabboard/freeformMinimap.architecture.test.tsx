@@ -106,10 +106,15 @@ describe('PATCH 9U render-only UI and stacking contract', () => {
     expect(component).toContain('md:block');
   });
 
-  it('uses the required compact placement, semantic theme tokens, and decorative semantics', () => {
+  it('uses the required compact placement, frameless outer wrapper, subtle inner surface, and decorative semantics', () => {
     expect(component).toContain('bottom-4 left-[72px]');
     expect(component).toContain('h-[108px] w-[168px]');
-    expect(component).toContain('border-border bg-background/90');
+    expect(component).not.toContain('rounded-lg');
+    expect(component).not.toContain('border-border');
+    expect(component).not.toContain('bg-background/90');
+    expect(component).not.toContain('shadow-md');
+    expect(component).not.toContain('backdrop-blur-sm');
+    expect(component).toContain('className="fill-muted/40"');
     expect(component).toContain('aria-hidden="true"');
     expect(component).not.toContain('<button');
   });
