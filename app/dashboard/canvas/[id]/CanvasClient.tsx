@@ -6645,48 +6645,35 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
               this div's own getBoundingClientRect() IS the canonical live
               on-screen position of world (0,0), since left/top position it
               at the camera gutter offset instead of inset-0's (0,0). */}
-          <div
-            ref={freeformWorldOriginRef}
-            className="absolute inset-0"
-            style={{
-              zIndex: 0,
-              pointerEvents: 'none',
-              ...(isFreeformLayout
-                ? {
-                  left: gutterX,
-                  top: gutterY,
-                  width: FREEFORM_WORLD_WIDTH_PX,
-                  height: FREEFORM_WORLD_HEIGHT_PX,
-                  transform: `scale(${canvasZoom})`,
-                  transformOrigin: '0 0',
-                }
-                : {}),
-            }}
-          >
-            <SimpleLineRenderer
-              lines={isMapLayout ? [] : lines.filter(l => (l.layer_plane ?? 'front') === 'back')}
-              selectedLineId={selectedLineId}
-              onSelectLine={handleLineSelect}
-              onUpdateLine={updateLineLocal}
-              onSaveLine={saveLineToDbMapAware}
-              isLineMode={false}
-              onCreateLine={createLineForMap}
-              isEditMode={isMapLayout ? false : lineEditModeId !== null}
-              onToggleEditMode={handleToggleLineEditMode}
-              layer="back"
-              draggingLineId={draggingLineId}
-              onDragChange={handleLineDragChange}
-              onContextMenu={handleLineContextMenu}
-              canvasZoom={isFreeformLayout ? canvasZoom : undefined}
-              forcePointerEvents={true}
-              excalidrawAPIRef={isDrawingLayout ? drawingExcalidrawAPIRef : undefined}
-              drawingViewport={isDrawingLayout ? drawingViewport : undefined}
-            />
-          </div>
+          {!isFreeformLayout && (
+            <div className="absolute inset-0" style={{ zIndex: 0, pointerEvents: 'none' }}>
+              <SimpleLineRenderer
+                lines={isMapLayout ? [] : lines.filter(l => (l.layer_plane ?? 'front') === 'back')}
+                selectedLineId={selectedLineId}
+                onSelectLine={handleLineSelect}
+                onUpdateLine={updateLineLocal}
+                onSaveLine={saveLineToDbMapAware}
+                isLineMode={false}
+                onCreateLine={createLineForMap}
+                isEditMode={isMapLayout ? false : lineEditModeId !== null}
+                onToggleEditMode={handleToggleLineEditMode}
+                layer="back"
+                draggingLineId={draggingLineId}
+                onDragChange={handleLineDragChange}
+                onContextMenu={handleLineContextMenu}
+                canvasZoom={undefined}
+                forcePointerEvents={true}
+                excalidrawAPIRef={isDrawingLayout ? drawingExcalidrawAPIRef : undefined}
+                drawingViewport={isDrawingLayout ? drawingViewport : undefined}
+              />
+            </div>
+          )}
 
-          {/* Layer 2: Padlets - No container z-index so posts can interleave with lines */}
+          {/* PadletLayer stays the normal-flow scroll surface; on Freeform it is also
+              the shared world surface for the background Line, post/Graph, and front Line planes. */}
           <PadletLayer
             className={`relative ${(isLineMode || selectedLineId || lineEditModeId) ? 'select-none' : ''}`}
+            data-freeform-world-surface={isFreeformLayout ? 'true' : undefined}
             style={{
               // Wall/Grid layout: responsive sizing; Freeform: large stage for absolute positioning
               // Columns/Timeline/Kanban layout: needs to fit viewport exact height for internal scrolling
@@ -7500,6 +7487,42 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
               </div>
             )}
 
+            {isFreeformLayout && (
+              <div
+                ref={freeformWorldOriginRef}
+                data-freeform-world-layer="back"
+                className="absolute inset-0"
+                style={{
+                  zIndex: 0,
+                  pointerEvents: 'none',
+                  left: gutterX,
+                  top: gutterY,
+                  width: FREEFORM_WORLD_WIDTH_PX,
+                  height: FREEFORM_WORLD_HEIGHT_PX,
+                  transform: `scale(${canvasZoom})`,
+                  transformOrigin: '0 0',
+                }}
+              >
+                <SimpleLineRenderer
+                  lines={lines.filter(l => (l.layer_plane ?? 'front') === 'back')}
+                  selectedLineId={selectedLineId}
+                  onSelectLine={handleLineSelect}
+                  onUpdateLine={updateLineLocal}
+                  onSaveLine={saveLineToDbMapAware}
+                  isLineMode={false}
+                  onCreateLine={createLineForMap}
+                  isEditMode={lineEditModeId !== null}
+                  onToggleEditMode={handleToggleLineEditMode}
+                  layer="back"
+                  draggingLineId={draggingLineId}
+                  onDragChange={handleLineDragChange}
+                  onContextMenu={handleLineContextMenu}
+                  canvasZoom={isFreeformLayout ? canvasZoom : undefined}
+                  forcePointerEvents={true}
+                />
+              </div>
+            )}
+
             {/* Freeform Layout - Cards rendered via FreeformPadletCards component */}
             {isFreeformLayout && (
               <CanvasConfigProvider value={configState}>
@@ -7534,28 +7557,52 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
               </CanvasConfigProvider>
             )}
 
-          </PadletLayer>
-
-          {/* Layer 3: Foreground Lines (On Top of most Padlets) - z-index 500 */}
-          {/* See the matching note on Layer 1: on Freeform this div sits outside
-              FreeformPadletCards' zoomed stage, so it needs the same canvasZoom
-              transform AND the same world-stage width/height mirrored here to
-              stay visually and interactively aligned with the posts. */}
-          <div
-            className="absolute inset-0"
-            style={{
-              zIndex: isFreeformGraphMode ? 2000 : 500,
-              pointerEvents: 'none',
-              ...(isFreeformLayout
-                ? {
+            {isFreeformLayout && (
+              <div
+                data-freeform-world-layer="front"
+                className="absolute inset-0"
+                style={{
+                  zIndex: isFreeformGraphMode ? 2000 : 500,
+                  pointerEvents: 'none',
                   left: gutterX,
                   top: gutterY,
                   width: FREEFORM_WORLD_WIDTH_PX,
                   height: FREEFORM_WORLD_HEIGHT_PX,
                   transform: `scale(${canvasZoom})`,
                   transformOrigin: '0 0',
-                }
-                : {}),
+                }}
+              >
+                <SimpleLineRenderer
+                  lines={mapOverlayLines}
+                  selectedLineId={selectedLineId}
+                  onSelectLine={handleLineSelect}
+                  onUpdateLine={updateLineLocal}
+                  onSaveLine={saveLineToDbMapAware}
+                  isLineMode={isLineMode}
+                  onCreateLine={createLineForMap}
+                  isEditMode={lineEditModeId !== null}
+                  onToggleEditMode={handleToggleLineEditMode}
+                  layer="front"
+                  draggingLineId={draggingLineId}
+                  onDragChange={handleLineDragChange}
+                  onContextMenu={handleLineContextMenu}
+                  canvasZoom={isFreeformLayout ? canvasZoom : undefined}
+                  forcePointerEvents={shouldEnableMapLinePointerEvents}
+                />
+              </div>
+            )}
+
+          </PadletLayer>
+
+          {!isFreeformLayout && (
+            <>
+          {/* Non-Freeform foreground Line plane; Freeform's equivalent lives in the
+              shared PadletLayer world surface above. */}
+          <div
+            className="absolute inset-0"
+            style={{
+              zIndex: isFreeformGraphMode ? 2000 : 500,
+              pointerEvents: 'none',
             }}
           >
             <SimpleLineRenderer
@@ -7572,12 +7619,14 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
               draggingLineId={draggingLineId}
               onDragChange={handleLineDragChange}
               onContextMenu={handleLineContextMenu}
-              canvasZoom={isFreeformLayout ? canvasZoom : undefined}
+              canvasZoom={undefined}
               forcePointerEvents={shouldEnableMapLinePointerEvents}
               excalidrawAPIRef={isDrawingLayout ? drawingExcalidrawAPIRef : undefined}
               drawingViewport={isDrawingLayout ? drawingViewport : undefined}
             />
           </div>
+            </>
+          )}
 
 
 

@@ -726,6 +726,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
   return (
     <>
       <div
+        data-freeform-world-layer="posts"
         className="absolute inset-0 transform-origin-top-left"
         style={{
           // PATCH 9S.2: positioned at the camera gutter offset instead of

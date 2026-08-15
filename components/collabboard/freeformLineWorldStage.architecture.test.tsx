@@ -6,157 +6,82 @@ function read(relPath: string): string {
   return fs.readFileSync(path.join(process.cwd(), relPath), 'utf8');
 }
 
-// PATCH 9J -- closes PATCH 9I's confirmed root cause: the Freeform Line
-// interaction layers (CanvasClient.tsx's back/front SimpleLineRenderer
-// wrappers) sized their unscaled box against `inset-0` (the viewport-sized
-// CanvasViewport box) instead of the same world-stage size
-// FreeformPadletCards.tsx's own post wrapper uses -- so the reachable Line
-// world-coordinate range stayed capped at ~viewport CSS pixels regardless of
-// canvasZoom. Both wrappers must now derive their world-stage width/height
-// from ONE shared source (freeformStageGeometry.ts), not independently
-// typed literals that could drift apart again.
-
 const freeformSrc = read('components/collabboard/canvas/ui/FreeformPadletCards.tsx');
 const canvasClientSrc = read('app/dashboard/canvas/[id]/CanvasClient.tsx');
 const stageGeometrySrc = read('components/collabboard/canvas/engine/freeformStageGeometry.ts');
 
-describe('PATCH 9J: shared Freeform world-stage source of truth [test 1]', () => {
-  it('freeformStageGeometry.ts exports exactly one width and one height constant', () => {
+function sharedSurface(): string {
+  const start = canvasClientSrc.indexOf("data-freeform-world-surface={isFreeformLayout ? 'true' : undefined}");
+  const end = canvasClientSrc.indexOf('</PadletLayer>', start);
+  expect(start).toBeGreaterThan(-1);
+  expect(end).toBeGreaterThan(start);
+  return canvasClientSrc.slice(start, end);
+}
+
+describe('PATCH 9J/9S.7: shared Freeform world-stage source of truth', () => {
+  it('exports exactly one width and height constant', () => {
     expect(stageGeometrySrc.match(/export const FREEFORM_WORLD_WIDTH_PX/g)?.length).toBe(1);
     expect(stageGeometrySrc.match(/export const FREEFORM_WORLD_HEIGHT_PX/g)?.length).toBe(1);
   });
-});
 
-describe('PATCH 9J: post wrapper uses the shared stage dimensions [test 2, negative controls A/B/C anchor here]', () => {
-  it('FreeformPadletCards.tsx imports FREEFORM_WORLD_WIDTH_PX/HEIGHT_PX from the shared module', () => {
-    expect(freeformSrc).toContain(
-      "import { FREEFORM_WORLD_WIDTH_PX, FREEFORM_WORLD_HEIGHT_PX } from '@/components/collabboard/canvas/engine/freeformStageGeometry';",
-    );
-  });
-
-  it('the post stage wrapper sets width/height from the imported constants, not a hardcoded literal', () => {
-    const wrapperStart = freeformSrc.indexOf('className="absolute inset-0 transform-origin-top-left"');
-    expect(wrapperStart).toBeGreaterThan(-1);
-    // PATCH 9S.2 added left:gutterX/top:gutterY (plus a doc comment) ahead of
-    // width/height in this same style object -- widened from 300 to 600 to
-    // still comfortably contain the whole wrapper's style block.
-    const wrapper = freeformSrc.slice(wrapperStart, wrapperStart + 600);
-    expect(wrapper).toContain('width: FREEFORM_WORLD_WIDTH_PX,');
-    expect(wrapper).toContain('height: FREEFORM_WORLD_HEIGHT_PX,');
-  });
-
-  it('no hardcoded w-[10000px]/h-[10000px] literal remains in FreeformPadletCards.tsx (it must come from the shared constant, not be independently retyped)', () => {
+  it('keeps posts on the shared stage constants without hardcoded 10000px classes', () => {
+    expect(freeformSrc).toContain("import { FREEFORM_WORLD_WIDTH_PX, FREEFORM_WORLD_HEIGHT_PX } from '@/components/collabboard/canvas/engine/freeformStageGeometry';");
+    expect(freeformSrc).toContain('data-freeform-world-layer="posts"');
+    expect(freeformSrc).toContain('width: FREEFORM_WORLD_WIDTH_PX,');
+    expect(freeformSrc).toContain('height: FREEFORM_WORLD_HEIGHT_PX,');
     expect(freeformSrc).not.toContain('w-[10000px]');
     expect(freeformSrc).not.toContain('h-[10000px]');
   });
-});
 
-describe('PATCH 9J: Freeform Line wrappers use the same shared stage dimensions [tests 3, 4]', () => {
-  it('CanvasClient.tsx imports FREEFORM_WORLD_WIDTH_PX/HEIGHT_PX from the shared module', () => {
-    expect(canvasClientSrc).toContain(
-      "import { FREEFORM_WORLD_WIDTH_PX, FREEFORM_WORLD_HEIGHT_PX } from '@/components/collabboard/canvas/engine/freeformStageGeometry';",
-    );
+  it('places the back Line/ref, post/Graph stage, and front Line under one marked PadletLayer surface', () => {
+    const surface = sharedSurface();
+    expect(surface).toContain('ref={freeformWorldOriginRef}');
+    expect(surface).toContain('data-freeform-world-layer="back"');
+    expect(surface).toContain('<FreeformPadletCards');
+    expect(surface).toContain('data-freeform-world-layer="front"');
   });
 
-  // PATCH 9S.2 inserted `left: gutterX,` / `top: gutterY,` immediately after
-  // the `? {` that opens each wrapper's Freeform-only branch, ahead of
-  // width/height -- both regexes below tolerate that (and only that)
-  // addition, via an optional non-capturing group, while still requiring
-  // width/height/transform/transformOrigin to appear in the original order
-  // directly after it.
-  const gutterPrefix = "(?:\\s*left:\\s*gutterX,\\s*\\r?\\n\\s*top:\\s*gutterY,\\s*\\r?\\n)?";
-
-  it('the back-plane (Layer 1) Line wrapper sets world-stage width/height only for Freeform, mirroring FreeformPadletCards', () => {
-    const layer1Comment = canvasClientSrc.indexOf('Layer 1: Background Lines');
-    const layer1Svg = canvasClientSrc.indexOf('<SimpleLineRenderer', layer1Comment);
-    const layer1Wrapper = canvasClientSrc.slice(layer1Comment, layer1Svg);
-
-    const re = new RegExp(`isFreeformLayout\\s*\\r?\\n\\s*\\?\\s*\\{${gutterPrefix}\\s*width:\\s*FREEFORM_WORLD_WIDTH_PX,\\s*\\r?\\n\\s*height:\\s*FREEFORM_WORLD_HEIGHT_PX,\\s*\\r?\\n\\s*transform:\\s*\`scale\\(\\$\\{canvasZoom\\}\\)\`,\\s*\\r?\\n\\s*transformOrigin:\\s*'0 0',`);
-    expect(layer1Wrapper).toMatch(re);
-  });
-
-  it('the front-plane (Layer 3) Line wrapper sets world-stage width/height only for Freeform, mirroring FreeformPadletCards', () => {
-    const layer3Comment = canvasClientSrc.indexOf('Layer 3: Foreground Lines');
-    const layer3Svg = canvasClientSrc.indexOf('<SimpleLineRenderer', layer3Comment);
-    const layer3Wrapper = canvasClientSrc.slice(layer3Comment, layer3Svg);
-
-    const re = new RegExp(`isFreeformLayout\\s*\\r?\\n\\s*\\?\\s*\\{${gutterPrefix}\\s*width:\\s*FREEFORM_WORLD_WIDTH_PX,\\s*\\r?\\n\\s*height:\\s*FREEFORM_WORLD_HEIGHT_PX,\\s*\\r?\\n\\s*transform:\\s*\`scale\\(\\$\\{canvasZoom\\}\\)\`,\\s*\\r?\\n\\s*transformOrigin:\\s*'0 0',`);
-    expect(layer3Wrapper).toMatch(re);
-  });
-
-  it('both Line wrappers still fall back to an empty style object (no width/height/transform) outside Freeform', () => {
-    const layer1Comment = canvasClientSrc.indexOf('Layer 1: Background Lines');
-    const layer1Svg = canvasClientSrc.indexOf('<SimpleLineRenderer', layer1Comment);
-    const layer1Wrapper = canvasClientSrc.slice(layer1Comment, layer1Svg);
-    const layer3Comment = canvasClientSrc.indexOf('Layer 3: Foreground Lines');
-    const layer3Svg = canvasClientSrc.indexOf('<SimpleLineRenderer', layer3Comment);
-    const layer3Wrapper = canvasClientSrc.slice(layer3Comment, layer3Svg);
-
-    expect(layer1Wrapper).toMatch(/:\s*\{\}\)/);
-    expect(layer3Wrapper).toMatch(/:\s*\{\}\)/);
-  });
-});
-
-describe('PATCH 9J: host gating -- Drawing and Map do not inherit Freeform world-stage sizing [tests 5, 6; negative controls H, I]', () => {
-  it('the width/height override on both Line wrappers is nested strictly inside the pre-existing isFreeformLayout conditional -- not applied unconditionally', () => {
-    const layer1StyleStart = canvasClientSrc.indexOf('style={{', canvasClientSrc.indexOf('Layer 1: Background Lines'));
-    const layer1Svg = canvasClientSrc.indexOf('<SimpleLineRenderer', layer1StyleStart);
-    const layer1Style = canvasClientSrc.slice(layer1StyleStart, layer1Svg);
-    const layer3StyleStart = canvasClientSrc.indexOf('style={{', canvasClientSrc.indexOf('Layer 3: Foreground Lines'));
-    const layer3Svg = canvasClientSrc.indexOf('<SimpleLineRenderer', layer3StyleStart);
-    const layer3Style = canvasClientSrc.slice(layer3StyleStart, layer3Svg);
-
-    // Anchored on the style={{...}} block itself (past the explanatory JSX
-    // comment, which also mentions the constant names in prose) -- the
-    // width/height keys must appear strictly between "isFreeformLayout" and
-    // the "? {" that opens the Freeform-only branch, i.e. inside the
-    // ternary's true-branch, not hoisted out to the unconditional style object.
-    for (const style of [layer1Style, layer3Style]) {
-      const gateIdx = style.indexOf('isFreeformLayout');
-      const widthIdx = style.indexOf('FREEFORM_WORLD_WIDTH_PX');
-      expect(gateIdx).toBeGreaterThan(-1);
-      expect(widthIdx).toBeGreaterThan(gateIdx);
+  it('gives each Freeform Line plane the exact post-stage gutter, dimensions, scale, and transform origin', () => {
+    const surface = sharedSurface();
+    for (const layer of ['back', 'front']) {
+      const start = surface.indexOf(`data-freeform-world-layer="${layer}"`);
+      const wrapper = surface.slice(start, surface.indexOf('<SimpleLineRenderer', start));
+      expect(start).toBeGreaterThan(-1);
+      expect(wrapper).toContain('left: gutterX,');
+      expect(wrapper).toContain('top: gutterY,');
+      expect(wrapper).toContain('width: FREEFORM_WORLD_WIDTH_PX,');
+      expect(wrapper).toContain('height: FREEFORM_WORLD_HEIGHT_PX,');
+      expect(wrapper).toContain('transform: `scale(${canvasZoom})`,');
+      expect(wrapper).toContain("transformOrigin: '0 0',");
     }
   });
 
-  it('Drawing layout (isDrawingLayout) is never referenced by the world-stage sizing branch -- Drawing keeps its own drawingViewport/scene-space system untouched', () => {
-    const layer1Comment = canvasClientSrc.indexOf('Layer 1: Background Lines');
-    const layer1Svg = canvasClientSrc.indexOf('<SimpleLineRenderer', layer1Comment);
-    const layer1Wrapper = canvasClientSrc.slice(layer1Comment, layer1Svg);
-    expect(layer1Wrapper).not.toContain('isDrawingLayout');
+  it('gates the marked surface and both world planes to Freeform, leaving Drawing and Map outside this coordinate system', () => {
+    const surface = sharedSurface();
+    for (const layer of ['back', 'front']) {
+      const marker = surface.indexOf(`data-freeform-world-layer="${layer}"`);
+      const gate = surface.lastIndexOf('{isFreeformLayout && (', marker);
+      const wrapper = surface.slice(gate, surface.indexOf('<SimpleLineRenderer', marker));
+      expect(gate).toBeGreaterThan(-1);
+      expect(wrapper).not.toContain('isDrawingLayout');
+      expect(wrapper).not.toContain('isMapLayout');
+    }
   });
 
-  it('Map layout is never granted the Freeform world-stage size -- isMapLayout is not part of the sizing gate', () => {
-    const layer1Comment = canvasClientSrc.indexOf('Layer 1: Background Lines');
-    const layer1Svg = canvasClientSrc.indexOf('<SimpleLineRenderer', layer1Comment);
-    const layer1Wrapper = canvasClientSrc.slice(layer1Comment, layer1Svg);
-    expect(layer1Wrapper).not.toContain('isMapLayout');
-  });
-});
-
-describe('PATCH 9J: post and Line stages are provably equivalent, not independently drifting [stage-equivalence proof]', () => {
-  it('every FREEFORM_WORLD_WIDTH_PX/HEIGHT_PX reference across both files resolves to the same single import source', () => {
-    const freeformImportCount = (freeformSrc.match(/from '@\/components\/collabboard\/canvas\/engine\/freeformStageGeometry'/g) || []).length;
-    const canvasClientImportCount = (canvasClientSrc.match(/from '@\/components\/collabboard\/canvas\/engine\/freeformStageGeometry'/g) || []).length;
-    expect(freeformImportCount).toBe(1);
-    expect(canvasClientImportCount).toBe(1);
-  });
-
-  it('no file defines a second, independent FREEFORM_WORLD_WIDTH_PX/HEIGHT_PX constant', () => {
+  it('uses the same single shared geometry import in post and canvas hosts', () => {
+    expect((freeformSrc.match(/from '@\/components\/collabboard\/canvas\/engine\/freeformStageGeometry'/g) || []).length).toBe(1);
+    expect((canvasClientSrc.match(/from '@\/components\/collabboard\/canvas\/engine\/freeformStageGeometry'/g) || []).length).toBe(1);
     expect(freeformSrc).not.toMatch(/const FREEFORM_WORLD_WIDTH_PX\s*=/);
     expect(canvasClientSrc).not.toMatch(/const FREEFORM_WORLD_WIDTH_PX\s*=/);
   });
-});
 
-describe('PATCH 9J: scope guard -- no speculative scrollLeft/scrollTop compensation added to SimpleLineRenderer [negative control J]', () => {
-  it('getMousePos does not reference scrollLeft/scrollTop -- PATCH 9I/9J characterized but did not prove this is defective (the SVG measures its own, possibly-already-scroll-relative, getBoundingClientRect), so no speculative fix belongs in this patch', () => {
-    const simpleLineRendererSrc = read('components/collabboard/SimpleLineRenderer.tsx');
-    const getMousePosStart = simpleLineRendererSrc.indexOf('const getMousePos = useCallback');
-    const getMousePosEnd = simpleLineRendererSrc.indexOf('}, [canvasZoom]);', getMousePosStart);
-    const getMousePosBody = simpleLineRendererSrc.slice(getMousePosStart, getMousePosEnd);
-
-    expect(getMousePosStart).toBeGreaterThan(-1);
-    expect(getMousePosBody).not.toContain('scrollLeft');
-    expect(getMousePosBody).not.toContain('scrollTop');
+  it('does not add speculative scroll compensation to SimpleLineRenderer.getMousePos', () => {
+    const lineSrc = read('components/collabboard/SimpleLineRenderer.tsx');
+    const start = lineSrc.indexOf('const getMousePos = useCallback');
+    const end = lineSrc.indexOf('}, [canvasZoom]);', start);
+    const body = lineSrc.slice(start, end);
+    expect(start).toBeGreaterThan(-1);
+    expect(body).not.toContain('scrollLeft');
+    expect(body).not.toContain('scrollTop');
   });
 });

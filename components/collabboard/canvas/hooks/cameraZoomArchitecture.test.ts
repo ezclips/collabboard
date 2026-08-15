@@ -78,7 +78,7 @@ describe('PATCH 9S: cached-position Line context menu closes on any zoom change 
 });
 
 describe('PATCH 9S: front SimpleLineRenderer no longer leaks Freeform canvasZoom into non-Freeform hosts [Phase 11; negative control K]', () => {
-  it('both the back-plane and front-plane SimpleLineRenderer usages gate canvasZoom by isFreeformLayout', () => {
+  it('both Freeform world-plane renderers gate canvasZoom by isFreeformLayout', () => {
     const gatedOccurrences = (canvasClientSrc.match(/canvasZoom=\{isFreeformLayout \? canvasZoom : undefined\}/g) || []).length;
     expect(gatedOccurrences).toBe(2);
   });
@@ -191,15 +191,23 @@ describe('PATCH 9S: LineToolbar left unchanged [scope]', () => {
   });
 });
 
-describe('PATCH 9S.2: freeformWorldOriginRef is the ONE canonical origin reference [Phase: world-origin architecture]', () => {
+describe('PATCH 9S.7: freeformWorldOriginRef is the ONE canonical origin reference [Phase: world-origin architecture]', () => {
   it('CanvasClient declares freeformWorldOriginRef near containerRef', () => {
     expect(canvasClientSrc).toContain('const freeformWorldOriginRef = useRef<HTMLDivElement>(null);');
   });
 
-  it('the back-plane Line wrapper div carries the ref, and both back/front wrapper divs position at (gutterX, gutterY)', () => {
-    expect(canvasClientSrc).toContain('ref={freeformWorldOriginRef}');
-    const occurrences = (canvasClientSrc.match(/left: gutterX,\n\s*top: gutterY,/g) || []).length;
-    expect(occurrences).toBe(2);
+  it('the marked PadletLayer surface contains the back Line/ref, post/Graph stage, and front Line at the same gutter origin', () => {
+    const surfaceStart = canvasClientSrc.indexOf('data-freeform-world-surface={isFreeformLayout ? \'true\' : undefined}');
+    const surfaceEnd = canvasClientSrc.indexOf('</PadletLayer>', surfaceStart);
+    expect(surfaceStart).toBeGreaterThan(-1);
+    expect(surfaceEnd).toBeGreaterThan(surfaceStart);
+
+    const surface = canvasClientSrc.slice(surfaceStart, surfaceEnd);
+    expect(surface).toContain('ref={freeformWorldOriginRef}');
+    expect(surface).toContain('data-freeform-world-layer="back"');
+    expect(surface).toContain('<FreeformPadletCards');
+    expect(surface).toContain('data-freeform-world-layer="front"');
+    expect((surface.match(/left: gutterX,\n\s*top: gutterY,/g) || []).length).toBe(2);
   });
 
   it('getCanvasPointFromClient is the ONE canonical pointer->world conversion, using freeformWorldOriginRef and no manual scrollLeft/scrollTop/padding arithmetic', () => {
@@ -282,6 +290,8 @@ describe('PATCH 9S.2: FreeformGraphLayer forwards worldOriginRef, measuredRects 
   });
 
   it('FreeformPadletCards positions its own world-stage wrapper at (gutterX, gutterY), co-registering with CanvasClient\'s mirrored Line wrapper divs', () => {
+    const padletCardsSrc = read('components/collabboard/canvas/ui/FreeformPadletCards.tsx');
+    expect(padletCardsSrc).toContain('data-freeform-world-layer="posts"');
     expect(padletCardsSrcHasGutterOffset()).toBe(true);
   });
 
