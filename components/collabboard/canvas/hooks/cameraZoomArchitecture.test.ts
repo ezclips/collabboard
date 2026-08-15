@@ -18,10 +18,14 @@ const canvasClientSrc = read('app/dashboard/canvas/[id]/CanvasClient.tsx');
 const graphLayerSrc = read('components/graph/FreeformGraphLayer.tsx');
 
 describe('PATCH 9S: camera hook wiring [Phase 3]', () => {
-  it('CanvasClient calls useCanvasCamera with containerRef and isFreeformLayout, destructuring zoomAtViewportPoint and the gutter, not a raw setCanvasZoom', () => {
+  it('CanvasClient wires the camera hook through an explicit viewport-mount callback, not a raw setCanvasZoom', () => {
     expect(canvasClientSrc).toContain(
-      'const {\n    canvasZoom, zoomAtViewportPoint, handleZoomIn, handleZoomOut, handleZoomReset,\n    gutterX, gutterY,\n  } = useCanvasCamera(containerRef, isFreeformLayout);'
+      'const {\n    canvasZoom, zoomAtViewportPoint, handleZoomIn, handleZoomOut, handleZoomReset,\n    gutterX, gutterY,\n    setViewportElement,\n  } = useCanvasCamera(containerRef, isFreeformLayout);'
     );
+    expect(canvasClientSrc).toContain('const handleCanvasViewportRef = useCallback((node: HTMLDivElement | null) => {');
+    expect(canvasClientSrc).toContain('containerRef.current = node;');
+    expect(canvasClientSrc).toContain('setViewportElement(node);');
+    expect(canvasClientSrc).toContain('containerRef={handleCanvasViewportRef}');
   });
 
   it('the camera hook call is textually AFTER isFreeformLayout is defined [hook-order safety]', () => {

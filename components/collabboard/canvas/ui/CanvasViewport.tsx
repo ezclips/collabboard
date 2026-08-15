@@ -5,7 +5,7 @@ import type React from 'react';
 interface CanvasViewportProps {
   className: string;
   style: React.CSSProperties;
-  containerRef: React.RefObject<HTMLDivElement | null>;
+  containerRef: React.Ref<HTMLDivElement>;
   onWheel: (e: React.WheelEvent<HTMLDivElement>) => void;
   onMouseDown?: (e: React.MouseEvent<HTMLDivElement>) => void;
   onDragOver: (e: React.DragEvent<HTMLDivElement>) => void;

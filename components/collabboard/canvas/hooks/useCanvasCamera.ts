@@ -62,7 +62,16 @@ export function useCanvasCamera(containerRef: React.RefObject<HTMLDivElement | n
   const [gutterX, setGutterX] = useState(0);
   const [gutterY, setGutterY] = useState(0);
   const gutterRef = useRef({ x: 0, y: 0 });
-  const hasSeededRef = useRef(false);
+  const [viewportElement, setViewportElementState] = useState<HTMLDivElement | null>(null);
+  const seededViewportRef = useRef<HTMLDivElement | null>(null);
+
+  // Ref mutation is not reactive. CanvasViewport calls this stable callback
+  // when its real DOM node mounts or unmounts so camera setup can run only
+  // after dimensions are available.
+  const setViewportElement = useCallback((element: HTMLDivElement | null) => {
+    if (!element) seededViewportRef.current = null;
+    setViewportElementState((current) => current === element ? current : element);
+  }, []);
 
   useEffect(() => {
     zoomRef.current = canvasZoom;
@@ -79,21 +88,18 @@ export function useCanvasCamera(containerRef: React.RefObject<HTMLDivElement | n
   // per enabling; guarded so later re-renders (or later gutter changes,
   // handled separately below) never reseed and jump the user's camera back.
   useLayoutEffect(() => {
-    if (!enabled) return;
-    const container = containerRef.current;
-    if (!container) return;
+    if (!enabled || !viewportElement || seededViewportRef.current === viewportElement) return;
+    const container = viewportElement;
     const measuredX = Math.max(container.clientWidth, 1);
     const measuredY = Math.max(container.clientHeight, 1);
     gutterRef.current = { x: measuredX, y: measuredY };
     setGutterX(measuredX);
     setGutterY(measuredY);
-    if (!hasSeededRef.current) {
-      container.scrollLeft = measuredX;
-      container.scrollTop = measuredY;
-      hasSeededRef.current = true;
-    }
+    container.scrollLeft = measuredX;
+    container.scrollTop = measuredY;
+    seededViewportRef.current = viewportElement;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled]);
+  }, [enabled, viewportElement]);
 
   // Keeps the gutter tracking the viewport's LIVE size on resize (browser
   // resize, sidebar toggle, devtools opening). A gutter smaller than the
@@ -105,12 +111,11 @@ export function useCanvasCamera(containerRef: React.RefObject<HTMLDivElement | n
   // translation state; native scroll remains the only camera).
   useEffect(() => {
     if (!enabled) return;
-    const container = containerRef.current;
-    if (!container || typeof ResizeObserver === 'undefined') return;
+    if (!viewportElement || typeof ResizeObserver === 'undefined') return;
+    const container = viewportElement;
 
     const observer = new ResizeObserver(() => {
-      const el = containerRef.current;
-      if (!el) return;
+      const el = viewportElement;
       const nextX = Math.max(el.clientWidth, 1);
       const nextY = Math.max(el.clientHeight, 1);
       const prev = gutterRef.current;
@@ -127,7 +132,7 @@ export function useCanvasCamera(containerRef: React.RefObject<HTMLDivElement | n
     });
     observer.observe(container);
     return () => observer.disconnect();
-  }, [enabled, containerRef]);
+  }, [enabled, viewportElement]);
 
   /**
    * The single camera primitive every zoom entry point (toolbar +/-, reset,
@@ -214,5 +219,6 @@ export function useCanvasCamera(containerRef: React.RefObject<HTMLDivElement | n
     handleZoomReset,
     gutterX,
     gutterY,
+    setViewportElement,
   };
 }

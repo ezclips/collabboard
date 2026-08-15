@@ -80,11 +80,13 @@ function mountCamera(geometry: CameraGeometry | (() => CameraGeometry), enabled 
   function TestComponent() {
     const camera = useCanvasCamera(containerRefObj, enabled);
     latestCamera = camera;
+    const assignRef = React.useCallback((node: HTMLDivElement | null) => {
+      containerRefObj.current = node;
+      if (node) setGeometry(node, geometry);
+      camera.setViewportElement(node);
+    }, [camera.setViewportElement]);
     return React.createElement('div', {
-      ref: (node: HTMLDivElement | null) => {
-        containerRefObj.current = node;
-        if (node) setGeometry(node, geometry);
-      },
+      ref: assignRef,
     });
   }
 
@@ -146,6 +148,42 @@ describe('PATCH 9S.2: mount-time gutter seeding [Phase: initial camera]', () => 
     // simply left alone (nothing in the hook re-seeds without a fresh mount).
     expect(h.el.scrollLeft).toBe(4000);
     expect(h.el.scrollTop).toBe(3000);
+  });
+});
+
+describe('PATCH 9S.5: viewport availability lifecycle [load-bearing]', () => {
+  it('initializes when enabled is already true but CanvasViewport mounts after the hook first renders', () => {
+    const containerRefObj: React.RefObject<HTMLDivElement | null> = { current: null };
+    let latestCamera: ReturnType<typeof useCanvasCamera> | null = null;
+    let showViewport: React.Dispatch<React.SetStateAction<boolean>> | null = null;
+
+    function TestComponent() {
+      const [mountedViewport, setMountedViewport] = React.useState(false);
+      const camera = useCanvasCamera(containerRefObj, true);
+      latestCamera = camera;
+      showViewport = setMountedViewport;
+      const assignRef = React.useCallback((node: HTMLDivElement | null) => {
+        containerRefObj.current = node;
+        if (node) setGeometry(node, { ...VIEWPORT, ...HUGE_EXTENT });
+        camera.setViewportElement(node);
+      }, [camera.setViewportElement]);
+      return mountedViewport ? React.createElement('div', { ref: assignRef }) : null;
+    }
+
+    const domContainer = document.createElement('div');
+    document.body.appendChild(domContainer);
+    const root = createRoot(domContainer);
+    act(() => { root.render(React.createElement(TestComponent)); });
+    mounted.push({ root, container: domContainer });
+
+    expect(latestCamera!.gutterX).toBe(0);
+    expect(latestCamera!.gutterY).toBe(0);
+    act(() => { showViewport!(true); });
+
+    expect(latestCamera!.gutterX).toBe(VIEWPORT.clientWidth);
+    expect(latestCamera!.gutterY).toBe(VIEWPORT.clientHeight);
+    expect(containerRefObj.current!.scrollLeft).toBe(VIEWPORT.clientWidth);
+    expect(containerRefObj.current!.scrollTop).toBe(VIEWPORT.clientHeight);
   });
 });
 

@@ -1109,7 +1109,12 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   const {
     canvasZoom, zoomAtViewportPoint, handleZoomIn, handleZoomOut, handleZoomReset,
     gutterX, gutterY,
+    setViewportElement,
   } = useCanvasCamera(containerRef, isFreeformLayout);
+  const handleCanvasViewportRef = useCallback((node: HTMLDivElement | null) => {
+    containerRef.current = node;
+    setViewportElement(node);
+  }, [setViewportElement]);
   // === END CAMERA REGION ===
 
   // PATCH 9S: the Line context menu caches its position as fixed screen
@@ -6290,7 +6295,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
               <span className="text-sm leading-none" aria-hidden="true">{'>'}</span>
             </button>
           ) : undefined}
-          containerRef={containerRef}
+          containerRef={handleCanvasViewportRef}
           onWheel={(e) => {
             // Zoom with Ctrl + Wheel -- Freeform-equivalent layouts only.
             // PATCH 9S: previously ungated, which let non-Freeform layouts
