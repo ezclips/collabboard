@@ -189,3 +189,55 @@ describe('PATCH 9S.2: measuredRects fallback (no worldOriginRef supplied) remain
     expect(hitPath!.getAttribute('d')).toBe(expectedRoute.pathD);
   });
 });
+
+describe('PATCH 9V.2A: signed Graph routes are presented outside the old zero boundary', () => {
+  it.each([1, 0.4, 0.2, 0.1])('renders route, arrowhead, label, and hit path at zoom %s', async (zoom) => {
+    const postA = post('negative', { position_x: -1000, position_y: -500, width: 200, height: 150 });
+    const postB = post('positive', { position_x: 500, position_y: 100, width: 200, height: 150 });
+    mockEdges = [{ ...edge('signed-edge', 'negative', 'positive'), label: 'Signed route' }];
+
+    const containerEl = document.createElement('div');
+    document.body.appendChild(containerEl);
+    stubRect(containerEl, 0, 0, 2000, 2000);
+
+    const originEl = document.createElement('div');
+    stubRect(originEl, 1200, 800, 0, 0);
+
+    for (const item of [postA, postB]) {
+      const el = document.createElement('div');
+      el.setAttribute('data-padlet-id', item.id);
+      stubRect(
+        el,
+        1200 + item.position_x * zoom,
+        800 + item.position_y * zoom,
+        item.width! * zoom,
+        item.height! * zoom,
+      );
+      containerEl.appendChild(el);
+    }
+
+    const root = mount(
+      <FreeformGraphLayer
+        boardId="board1"
+        posts={[postA, postB]}
+        containerRef={{ current: containerEl }}
+        worldOriginRef={{ current: originEl }}
+        zoom={zoom}
+      />
+    );
+    await act(async () => { await Promise.resolve(); });
+    await act(async () => { await Promise.resolve(); });
+
+    const expected = routeEdge(
+      { x: -1000, y: -500, width: 200, height: 150 },
+      { x: 500, y: 100, width: 200, height: 150 },
+      { gap: EDGE_GAP },
+    );
+    const hitPath = root.querySelector('path[stroke="transparent"]');
+    expect(hitPath?.getAttribute('d')).toBe(expected.pathD);
+    expect(hitPath?.closest('svg')?.classList.contains('overflow-visible')).toBe(true);
+    expect(root.querySelector('polygon')).not.toBeNull();
+    expect(root.querySelector('foreignObject')).not.toBeNull();
+    expect(expected.sx).toBeLessThan(0);
+  });
+});

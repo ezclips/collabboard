@@ -353,10 +353,9 @@ export default function FreeformGraphLayer({ boardId, posts, refreshToken = 0, c
 
     return (
         <>
-            {/* Present regardless of edge count purely so label-dragging always has
-                a stable rect to project cursor coordinates against -- the per-edge
-                svgs below are all inset-0 anyway, so any one of them would give the
-                same rect, but this keeps that independent of render order/z-index. */}
+            {/* Present regardless of edge count so label dragging retains the
+                logical-origin rect. Per-edge SVGs use visible overflow for signed
+                routes; this calibration SVG deliberately keeps the old geometry. */}
             <svg ref={svgRef} className="absolute inset-0 w-full h-full" style={{ pointerEvents: 'none' }} aria-hidden="true" />
             {renderEdges.map(({ edge, route, strokeColor, strokeDasharray }) => {
                     const { sx, sy, cx, cy, ex, ey, endAngle, startAngle, pathD } = route;
@@ -375,7 +374,7 @@ export default function FreeformGraphLayer({ boardId, posts, refreshToken = 0, c
                         // posts via moveEdgeLayer, not just toggling above/below all of them.
                         <svg
                             key={edge.id}
-                            className="absolute inset-0 w-full h-full"
+                            className="absolute inset-0 h-full w-full overflow-visible"
                             style={{ pointerEvents: 'none', zIndex: getEdgeZ(edge) }}
                         >
                         <g

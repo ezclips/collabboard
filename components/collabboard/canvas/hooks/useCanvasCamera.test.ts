@@ -73,12 +73,16 @@ function setGeometry(el: HTMLDivElement, geometry: CameraGeometry | (() => Camer
   Object.defineProperty(el, 'scrollHeight', { get: () => resolve().scrollHeight, configurable: true });
 }
 
-function mountCamera(geometry: CameraGeometry | (() => CameraGeometry), enabled = true) {
+function mountCamera(
+  geometry: CameraGeometry | (() => CameraGeometry),
+  enabled = true,
+  originOffset = { x: 0, y: 0 },
+) {
   const containerRefObj: React.RefObject<HTMLDivElement | null> = { current: null };
   let latestCamera: ReturnType<typeof useCanvasCamera> | null = null;
 
   function TestComponent() {
-    const camera = useCanvasCamera(containerRefObj, enabled);
+    const camera = useCanvasCamera(containerRefObj, enabled, originOffset.x, originOffset.y);
     latestCamera = camera;
     const assignRef = React.useCallback((node: HTMLDivElement | null) => {
       containerRefObj.current = node;
@@ -148,6 +152,25 @@ describe('PATCH 9S.2: mount-time gutter seeding [Phase: initial camera]', () => 
     // simply left alone (nothing in the hook re-seeds without a fresh mount).
     expect(h.el.scrollLeft).toBe(4000);
     expect(h.el.scrollTop).toBe(3000);
+  });
+});
+
+describe('PATCH 9V.2A: finite signed-stage initial seed', () => {
+  it('adds the scaled stage-origin offset without changing the viewport-sized gutter', () => {
+    const h = mountCamera({ ...VIEWPORT, ...HUGE_EXTENT }, true, { x: 5000, y: 5000 });
+    expect(h.getCamera().gutterX).toBe(1200);
+    expect(h.getCamera().gutterY).toBe(800);
+    expect(h.el.scrollLeft).toBe(6200);
+    expect(h.el.scrollTop).toBe(5800);
+  });
+
+  it('keeps logical world (0,0) at the same initial screen point as the pre-signed stage', () => {
+    const h = mountCamera({ ...VIEWPORT, ...HUGE_EXTENT }, true, { x: 5000, y: 5000 });
+    const logicalOriginScreen = {
+      x: h.getCamera().gutterX + 5000 * h.getCamera().canvasZoom - h.el.scrollLeft,
+      y: h.getCamera().gutterY + 5000 * h.getCamera().canvasZoom - h.el.scrollTop,
+    };
+    expect(logicalOriginScreen).toEqual({ x: 0, y: 0 });
   });
 });
 

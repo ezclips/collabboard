@@ -142,7 +142,14 @@ import { CanvasEditorProvider, type CanvasEditorState } from '@/components/colla
 import { CanvasConfigProvider, type CanvasConfigState } from '@/components/collabboard/canvas/contexts/CanvasConfigContext';
 import { ColorPickerContent } from '@/components/collabboard/ColorPicker';
 import { isStripVisible } from '@/components/collabboard/canvas/engine/utils';
-import { FREEFORM_WORLD_WIDTH_PX, FREEFORM_WORLD_HEIGHT_PX } from '@/components/collabboard/canvas/engine/freeformStageGeometry';
+import {
+  FREEFORM_SIGNED_WORLD_HEIGHT,
+  FREEFORM_SIGNED_WORLD_WIDTH,
+  FREEFORM_WORLD_HEIGHT_PX,
+  FREEFORM_WORLD_ORIGIN_OFFSET_X,
+  FREEFORM_WORLD_ORIGIN_OFFSET_Y,
+  FREEFORM_WORLD_WIDTH_PX,
+} from '@/components/collabboard/canvas/engine/freeformStageGeometry';
 
 // === BEGIN TYPES + CONSTANTS REGION ===
 
@@ -1111,7 +1118,14 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     canvasZoom, zoomAtViewportPoint, panByWorldDelta, handleZoomIn, handleZoomOut, handleZoomReset,
     gutterX, gutterY,
     setViewportElement,
-  } = useCanvasCamera(containerRef, isFreeformLayout);
+  } = useCanvasCamera(
+    containerRef,
+    isFreeformLayout,
+    FREEFORM_WORLD_ORIGIN_OFFSET_X,
+    FREEFORM_WORLD_ORIGIN_OFFSET_Y,
+  );
+  const freeformWorldOriginLeft = gutterX + FREEFORM_WORLD_ORIGIN_OFFSET_X * canvasZoom;
+  const freeformWorldOriginTop = gutterY + FREEFORM_WORLD_ORIGIN_OFFSET_Y * canvasZoom;
   const handleCanvasViewportRef = useCallback((node: HTMLDivElement | null) => {
     containerRef.current = node;
     setViewportElement(node);
@@ -5524,9 +5538,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     isFreeformGraphMode,
     canUseFreeformEditButton,
     isColumnsLayout,
-    gutterX,
-    gutterY,
-  }), [canvasZoom, canvasId, isFreeformGraphMode, canUseFreeformEditButton, isColumnsLayout, gutterX, gutterY]);
+    worldOriginLeft: freeformWorldOriginLeft,
+    worldOriginTop: freeformWorldOriginTop,
+  }), [canvasZoom, canvasId, isFreeformGraphMode, canUseFreeformEditButton, isColumnsLayout, freeformWorldOriginLeft, freeformWorldOriginTop]);
 
   const editorState: CanvasEditorState = {
     padletToEdit,
@@ -6686,13 +6700,12 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                   // absolute) element in this subtree, so ITS size alone
                   // deterministically defines CanvasViewport's scrollWidth/
                   // scrollHeight -- gutter (leading+trailing) + the scaled
-                  // world, on each axis. The two Line wrapper divs and
-                  // FreeformPadletCards' own wrapper are absolutely
-                  // positioned at (gutterX, gutterY) within this same
-                  // footprint (see freeformWorldOriginRef), never exceeding
-                  // it, so they don't separately contribute to scroll size.
+                  // signed world, on each axis. The three coordinate planes
+                  // remain absolutely positioned at the shared logical-zero
+                  // marker inside that footprint (see freeformWorldOriginRef),
+                  // so they do not become separate camera authorities.
                   : isFreeformLayout
-                    ? { width: gutterX * 2 + FREEFORM_WORLD_WIDTH_PX * canvasZoom, height: gutterY * 2 + FREEFORM_WORLD_HEIGHT_PX * canvasZoom }
+                    ? { width: gutterX * 2 + FREEFORM_SIGNED_WORLD_WIDTH * canvasZoom, height: gutterY * 2 + FREEFORM_SIGNED_WORLD_HEIGHT * canvasZoom }
                     : { minWidth: '2000px', minHeight: '1500px' }
               ),
               userSelect: (isLineMode || selectedLineId || lineEditModeId) ? 'none' : 'auto',
@@ -7496,8 +7509,8 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                 style={{
                   zIndex: 0,
                   pointerEvents: 'none',
-                  left: gutterX,
-                  top: gutterY,
+                  left: freeformWorldOriginLeft,
+                  top: freeformWorldOriginTop,
                   width: FREEFORM_WORLD_WIDTH_PX,
                   height: FREEFORM_WORLD_HEIGHT_PX,
                   transform: `scale(${canvasZoom})`,
@@ -7565,8 +7578,8 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                 style={{
                   zIndex: isFreeformGraphMode ? 2000 : 500,
                   pointerEvents: 'none',
-                  left: gutterX,
-                  top: gutterY,
+                  left: freeformWorldOriginLeft,
+                  top: freeformWorldOriginTop,
                   width: FREEFORM_WORLD_WIDTH_PX,
                   height: FREEFORM_WORLD_HEIGHT_PX,
                   transform: `scale(${canvasZoom})`,

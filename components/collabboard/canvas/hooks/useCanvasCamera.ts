@@ -27,15 +27,19 @@ interface PendingCameraScroll {
  * PATCH 9S.2: native scroll cannot go negative, so a focal point near the
  * world's own edges became unrepresentable at low zoom (PATCH 9S.1's root
  * cause). Fixed by a CAMERA GUTTER -- blank scrollable space surrounding the
- * 10000x10000 world, sized to a full viewport dimension per side (the worst
+ * physical world stage, sized to a full viewport dimension per side (the worst
  * case: pointer anchored at the far viewport edge, focal point at the
  * opposite world edge, needs exactly that much slack). The gutter is applied
- * entirely at the DOM/layout level by the caller (CanvasClient positions the
- * scaled world-stage wrapper at `left: gutterX, top: gutterY` instead of
- * `inset-0`); this hook only tracks the gutter's live size and folds it into
- * the same zoomAtViewportPoint formula.
+ * entirely at the DOM/layout level by the caller. This hook tracks the
+ * gutter and accepts a fixed world-origin offset solely for the initial seed;
+ * anchored zoom continues to operate in physical-stage coordinates.
  */
-export function useCanvasCamera(containerRef: React.RefObject<HTMLDivElement | null>, enabled: boolean) {
+export function useCanvasCamera(
+  containerRef: React.RefObject<HTMLDivElement | null>,
+  enabled: boolean,
+  initialWorldOriginOffsetX = 0,
+  initialWorldOriginOffsetY = 0,
+) {
   const [canvasZoom, setCanvasZoom] = useState(1);
   // Mirrors canvasZoom but updated synchronously (not batched), so rapid
   // consecutive zoomAtViewportPoint calls within the same tick (e.g. a burst
@@ -82,7 +86,7 @@ export function useCanvasCamera(containerRef: React.RefObject<HTMLDivElement | n
   }, [gutterX, gutterY]);
 
   // Measures the real viewport size once mounted/enabled (synchronously,
-  // before paint) and seeds the initial camera to the world-origin scroll
+  // before paint) and seeds the initial camera to the logical-world-origin scroll
   // position -- both together, so the first frame ever shown already has
   // world (0,0) at the top-left of the WORLD, not of the gutter. Runs once
   // per enabling; guarded so later re-renders (or later gutter changes,
@@ -95,11 +99,11 @@ export function useCanvasCamera(containerRef: React.RefObject<HTMLDivElement | n
     gutterRef.current = { x: measuredX, y: measuredY };
     setGutterX(measuredX);
     setGutterY(measuredY);
-    container.scrollLeft = measuredX;
-    container.scrollTop = measuredY;
+    container.scrollLeft = measuredX + initialWorldOriginOffsetX * zoomRef.current;
+    container.scrollTop = measuredY + initialWorldOriginOffsetY * zoomRef.current;
     seededViewportRef.current = viewportElement;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, viewportElement]);
+  }, [enabled, viewportElement, initialWorldOriginOffsetX, initialWorldOriginOffsetY]);
 
   // Keeps the gutter tracking the viewport's LIVE size on resize (browser
   // resize, sidebar toggle, devtools opening). A gutter smaller than the
@@ -139,8 +143,9 @@ export function useCanvasCamera(containerRef: React.RefObject<HTMLDivElement | n
    * Ctrl+wheel) funnels through. anchorX/anchorY are viewport-local SCREEN
    * pixels -- the world point currently under that pixel stays under it
    * after the zoom, by compensating scroll rather than the transform origin.
-   * Folds in the current gutter so the formula matches the DOM contract:
-   * screen = world*zoom + gutter - scroll  =>  world = (scroll+anchor-gutter)/zoom.
+   * Folds in the current gutter so the formula matches the physical-stage
+   * DOM contract. The fixed logical-origin offset is already part of the
+   * physical coordinate and therefore needs no special zoom compensation.
    */
   const zoomAtViewportPoint = useCallback((zoomInput: ZoomInput, anchorX: number, anchorY: number) => {
     const oldZoom = zoomRef.current;

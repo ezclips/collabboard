@@ -8,12 +8,10 @@ export type CanvasConfigState = {
   isFreeformGraphMode: boolean;
   canUseFreeformEditButton: boolean;
   isColumnsLayout: boolean;
-  // PATCH 9S.2: camera gutter (screen px, unscaled) -- see useCanvasCamera.ts.
-  // The Freeform world-stage wrapper positions itself at (gutterX, gutterY)
-  // instead of (0,0) so native scroll can represent a camera focused
-  // anywhere in the world, even near its edges, at any zoom.
-  gutterX: number;
-  gutterY: number;
+  // PATCH 9V.2A: layout-pixel position of logical world (0,0). This includes
+  // both the viewport-sized camera gutter and the scaled signed-stage lead-in.
+  worldOriginLeft: number;
+  worldOriginTop: number;
 };
 
 const CanvasConfigContext = createContext<CanvasConfigState | null>(null);

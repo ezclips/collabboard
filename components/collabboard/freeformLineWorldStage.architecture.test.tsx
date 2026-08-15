@@ -41,19 +41,26 @@ describe('PATCH 9J/9S.7: shared Freeform world-stage source of truth', () => {
     expect(surface).toContain('data-freeform-world-layer="front"');
   });
 
-  it('gives each Freeform Line plane the exact post-stage gutter, dimensions, scale, and transform origin', () => {
+  it('gives each Freeform Line plane the exact logical origin, dimensions, scale, and transform origin', () => {
     const surface = sharedSurface();
     for (const layer of ['back', 'front']) {
       const start = surface.indexOf(`data-freeform-world-layer="${layer}"`);
       const wrapper = surface.slice(start, surface.indexOf('<SimpleLineRenderer', start));
       expect(start).toBeGreaterThan(-1);
-      expect(wrapper).toContain('left: gutterX,');
-      expect(wrapper).toContain('top: gutterY,');
+      expect(wrapper).toContain('left: freeformWorldOriginLeft,');
+      expect(wrapper).toContain('top: freeformWorldOriginTop,');
       expect(wrapper).toContain('width: FREEFORM_WORLD_WIDTH_PX,');
       expect(wrapper).toContain('height: FREEFORM_WORLD_HEIGHT_PX,');
       expect(wrapper).toContain('transform: `scale(${canvasZoom})`,');
       expect(wrapper).toContain("transformOrigin: '0 0',");
     }
+  });
+
+  it('derives one shared logical origin from camera gutter plus the scaled signed-stage offset', () => {
+    expect(canvasClientSrc).toContain('const freeformWorldOriginLeft = gutterX + FREEFORM_WORLD_ORIGIN_OFFSET_X * canvasZoom;');
+    expect(canvasClientSrc).toContain('const freeformWorldOriginTop = gutterY + FREEFORM_WORLD_ORIGIN_OFFSET_Y * canvasZoom;');
+    expect(freeformSrc).toContain('left: worldOriginLeft,');
+    expect(freeformSrc).toContain('top: worldOriginTop,');
   });
 
   it('gates the marked surface and both world planes to Freeform, leaving Drawing and Map outside this coordinate system', () => {

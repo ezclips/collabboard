@@ -175,7 +175,7 @@ describe('PATCH 9U.2 blank-world and camera-gutter pan ownership', () => {
   const canStartFrom = (target: Element) => !target.closest(blockingSelector);
 
   it('1. the native scroll footprint retains leading and trailing gutter travel', () => {
-    expect(canvasClient).toContain("? { width: gutterX * 2 + FREEFORM_WORLD_WIDTH_PX * canvasZoom, height: gutterY * 2 + FREEFORM_WORLD_HEIGHT_PX * canvasZoom }");
+    expect(canvasClient).toContain("? { width: gutterX * 2 + FREEFORM_SIGNED_WORLD_WIDTH * canvasZoom, height: gutterY * 2 + FREEFORM_SIGNED_WORLD_HEIGHT * canvasZoom }");
   });
 
   it('2. CanvasViewport itself owns pan initiation, so blank world starts pan', () => {

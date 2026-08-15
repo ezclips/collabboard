@@ -275,8 +275,8 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
     isFreeformGraphMode,
     canUseFreeformEditButton,
     isColumnsLayout,
-    gutterX,
-    gutterY,
+    worldOriginLeft,
+    worldOriginTop,
   } = useCanvasConfig();
 
   const {
@@ -729,12 +729,11 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
         data-freeform-world-layer="posts"
         className="absolute inset-0 transform-origin-top-left"
         style={{
-          // PATCH 9S.2: positioned at the camera gutter offset instead of
-          // (0,0) -- co-registered with CanvasClient's mirrored Line
-          // wrapper divs (freeformWorldOriginRef), which use the identical
-          // left/top so all Freeform world layers share one screen origin.
-          left: gutterX,
-          top: gutterY,
+          // PATCH 9V.2A: remains logical world (0,0), now positioned after
+          // both the camera gutter and the signed-stage negative lead-in.
+          // CanvasClient's back/front Line planes use these identical values.
+          left: worldOriginLeft,
+          top: worldOriginTop,
           width: FREEFORM_WORLD_WIDTH_PX,
           height: FREEFORM_WORLD_HEIGHT_PX,
           transform: `scale(${canvasZoom})`,

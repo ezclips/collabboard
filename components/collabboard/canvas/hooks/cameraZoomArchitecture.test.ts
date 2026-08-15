@@ -20,8 +20,9 @@ const graphLayerSrc = read('components/graph/FreeformGraphLayer.tsx');
 describe('PATCH 9S: camera hook wiring [Phase 3]', () => {
   it('CanvasClient wires the camera hook through an explicit viewport-mount callback, not a raw setCanvasZoom', () => {
     expect(canvasClientSrc).toContain(
-      'const {\n    canvasZoom, zoomAtViewportPoint, panByWorldDelta, handleZoomIn, handleZoomOut, handleZoomReset,\n    gutterX, gutterY,\n    setViewportElement,\n  } = useCanvasCamera(containerRef, isFreeformLayout);'
+      'const {\n    canvasZoom, zoomAtViewportPoint, panByWorldDelta, handleZoomIn, handleZoomOut, handleZoomReset,\n    gutterX, gutterY,\n    setViewportElement,\n  } = useCanvasCamera(\n    containerRef,\n    isFreeformLayout,'
     );
+    expect(canvasClientSrc).toContain('FREEFORM_WORLD_ORIGIN_OFFSET_X,\n    FREEFORM_WORLD_ORIGIN_OFFSET_Y,');
     expect(canvasClientSrc).toContain('const handleCanvasViewportRef = useCallback((node: HTMLDivElement | null) => {');
     expect(canvasClientSrc).toContain('containerRef.current = node;');
     expect(canvasClientSrc).toContain('setViewportElement(node);');
@@ -29,7 +30,7 @@ describe('PATCH 9S: camera hook wiring [Phase 3]', () => {
   });
 
   it('the camera hook call is textually AFTER isFreeformLayout is defined [hook-order safety]', () => {
-    const hookCallIdx = canvasClientSrc.indexOf('useCanvasCamera(containerRef, isFreeformLayout)');
+    const hookCallIdx = canvasClientSrc.indexOf('useCanvasCamera(\n    containerRef,\n    isFreeformLayout,');
     const layoutDefIdx = canvasClientSrc.indexOf("const isFreeformLayout = canvas?.layout === 'freeform'");
     expect(layoutDefIdx).toBeGreaterThan(-1);
     expect(hookCallIdx).toBeGreaterThan(layoutDefIdx);
@@ -196,7 +197,7 @@ describe('PATCH 9S.7: freeformWorldOriginRef is the ONE canonical origin referen
     expect(canvasClientSrc).toContain('const freeformWorldOriginRef = useRef<HTMLDivElement>(null);');
   });
 
-  it('the marked PadletLayer surface contains the back Line/ref, post/Graph stage, and front Line at the same gutter origin', () => {
+  it('the marked PadletLayer surface contains the back Line/ref, post/Graph stage, and front Line at the same logical origin', () => {
     const surfaceStart = canvasClientSrc.indexOf('data-freeform-world-surface={isFreeformLayout ? \'true\' : undefined}');
     const surfaceEnd = canvasClientSrc.indexOf('</PadletLayer>', surfaceStart);
     expect(surfaceStart).toBeGreaterThan(-1);
@@ -207,7 +208,7 @@ describe('PATCH 9S.7: freeformWorldOriginRef is the ONE canonical origin referen
     expect(surface).toContain('data-freeform-world-layer="back"');
     expect(surface).toContain('<FreeformPadletCards');
     expect(surface).toContain('data-freeform-world-layer="front"');
-    expect((surface.match(/left: gutterX,\n\s*top: gutterY,/g) || []).length).toBe(2);
+    expect((surface.match(/left: freeformWorldOriginLeft,\n\s*top: freeformWorldOriginTop,/g) || []).length).toBe(2);
   });
 
   it('getCanvasPointFromClient is the ONE canonical pointer->world conversion, using freeformWorldOriginRef and no manual scrollLeft/scrollTop/padding arithmetic', () => {
@@ -247,9 +248,9 @@ describe('PATCH 9S.7: freeformWorldOriginRef is the ONE canonical origin referen
 });
 
 describe('PATCH 9S.2: PadletLayer camera-surface sizing is Freeform-scoped, Drawing\'s floor is untouched [Phase: gutter DOM contract]', () => {
-  it('a dedicated isFreeformLayout branch sizes PadletLayer to gutterX*2+world*zoom / gutterY*2+world*zoom', () => {
+  it('a dedicated isFreeformLayout branch sizes PadletLayer to gutterX*2+signed-world*zoom / gutterY*2+signed-world*zoom', () => {
     expect(canvasClientSrc).toContain(
-      'isFreeformLayout\n                    ? { width: gutterX * 2 + FREEFORM_WORLD_WIDTH_PX * canvasZoom, height: gutterY * 2 + FREEFORM_WORLD_HEIGHT_PX * canvasZoom }'
+      'isFreeformLayout\n                    ? { width: gutterX * 2 + FREEFORM_SIGNED_WORLD_WIDTH * canvasZoom, height: gutterY * 2 + FREEFORM_SIGNED_WORLD_HEIGHT * canvasZoom }'
     );
   });
 
@@ -289,10 +290,10 @@ describe('PATCH 9S.2: FreeformGraphLayer forwards worldOriginRef, measuredRects 
     );
   });
 
-  it('FreeformPadletCards positions its own world-stage wrapper at (gutterX, gutterY), co-registering with CanvasClient\'s mirrored Line wrapper divs', () => {
+  it('FreeformPadletCards positions its own world-stage wrapper at logical world zero, co-registering with CanvasClient\'s mirrored Line wrapper divs', () => {
     const padletCardsSrc = read('components/collabboard/canvas/ui/FreeformPadletCards.tsx');
     expect(padletCardsSrc).toContain('data-freeform-world-layer="posts"');
-    expect(padletCardsSrcHasGutterOffset()).toBe(true);
+    expect(padletCardsSrcHasLogicalOrigin()).toBe(true);
   });
 
   it('measuredRects prefers worldOriginRef.getBoundingClientRect() and its fallback is algebraically identical to the pre-9S.2 formula', () => {
@@ -307,8 +308,8 @@ describe('PATCH 9S.2: FreeformGraphLayer forwards worldOriginRef, measuredRects 
     expect(body).toContain('containerRect.top + padTop - container.scrollTop');
   });
 
-  function padletCardsSrcHasGutterOffset(): boolean {
+  function padletCardsSrcHasLogicalOrigin(): boolean {
     const padletCardsSrc = read('components/collabboard/canvas/ui/FreeformPadletCards.tsx');
-    return padletCardsSrc.includes('left: gutterX,') && padletCardsSrc.includes('top: gutterY,');
+    return padletCardsSrc.includes('left: worldOriginLeft,') && padletCardsSrc.includes('top: worldOriginTop,');
   }
 });
