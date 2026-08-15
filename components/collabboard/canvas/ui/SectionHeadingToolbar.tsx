@@ -40,8 +40,14 @@ export interface SectionHeadingToolbarProps {
   padlet: Padlet;
   /** Live element to anchor against -- the canonical `[data-padlet-id]` wrapper. */
   headingElement: HTMLElement | null;
-  /** Read-only: re-measure whenever the camera changes. */
-  canvasZoom: number;
+  /**
+   * PATCH SECTION-H3B Phase 12: an opaque value the host changes whenever its
+   * view transform does. The toolbar treats it purely as a re-measure trigger
+   * and never as a number to compute with -- it does no world math at all, it
+   * measures a client rect. Freeform passes its zoom; a Drawing host could
+   * pass a scroll/zoom revision counter just as validly.
+   */
+  viewportRevision: number | string;
   onChangeLevel: (padletId: string, level: SectionHeadingLevel) => void;
   onChangeTextStyle: (padletId: string, style: Partial<CaptionStyle>) => void;
   onChangeColor: (padletId: string, target: SectionHeadingColorTarget, color: string) => void;
@@ -52,7 +58,7 @@ type OpenPanel = 'text' | 'appearance' | null;
 export default function SectionHeadingToolbar({
   padlet,
   headingElement,
-  canvasZoom,
+  viewportRevision,
   onChangeLevel,
   onChangeTextStyle,
   onChangeColor,
@@ -83,7 +89,7 @@ export default function SectionHeadingToolbar({
   // geometry, the camera scale, and any scrolling ancestor (capture:true is
   // what catches the canvas viewport's scroller, not just the document).
   useLayoutEffect(() => { measure(); }, [
-    measure, canvasZoom, padlet.position_x, padlet.position_y, padlet.width, padlet.height, openPanel,
+    measure, viewportRevision, padlet.position_x, padlet.position_y, padlet.width, padlet.height, openPanel,
   ]);
 
   useEffect(() => {

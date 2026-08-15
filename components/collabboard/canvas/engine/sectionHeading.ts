@@ -1,9 +1,5 @@
 import type { Padlet } from '@/types/collabboard';
 import { resolveCaptionStyle, type ResolvedCaptionStyle } from '@/lib/domain/canvas/captionStyle';
-import {
-  FREEFORM_WORLD_MAX_X,
-  FREEFORM_WORLD_MIN_X,
-} from '@/components/collabboard/canvas/engine/freeformStageGeometry';
 
 /**
  * PATCH SECTION-H1 -- the canonical Section Heading contract.
@@ -172,42 +168,105 @@ export interface SectionHeadingRect {
 }
 
 /**
- * PATCH SECTION-H2 Phase 11: RIGHT-handle resize.
+ * PATCH SECTION-H3B Phase 3 -- the renderer-neutral horizontal bounds policy.
  *
- * `x` never moves; only the width absorbs the pointer's world delta. The
- * caller converts screen pixels to world units EXACTLY ONCE (delta / zoom)
- * before calling, which is what makes the result zoom-invariant (Phase 16).
+ * The geometry helpers below deliberately do NOT know which canvas they are
+ * running on. The HOST states how far left and right its world extends, and
+ * the helpers merely respect it. Freeform passes its signed-stage bounds from
+ * `freeformStageGeometry` (still the one source of truth for -5000/15000);
+ * a Drawing/Excalidraw host, whose scene has no finite extent, passes
+ * `SECTION_HEADING_UNBOUNDED_WORLD`.
  *
- * Clamp order is deliberate: the minimum width applies first, then the finite
- * signed-world bound wins outright. A heading parked hard against the right
- * edge is allowed to be narrower than the minimum rather than be persisted
- * with its right edge out in the camera gutter (Phase 15).
+ * There is deliberately no default value: an engine-neutral helper must never
+ * silently inherit one host's stage policy (Phase 4, design A).
  */
-export function resizeSectionHeadingRightEdge(rect: SectionHeadingRect, worldDeltaX: number): SectionHeadingRect {
-  const x = Number.isFinite(rect.x) ? rect.x : 0;
-  const width = Number.isFinite(rect.width) && rect.width > 0 ? rect.width : SECTION_HEADING_MIN_WIDTH;
-  const delta = Number.isFinite(worldDeltaX) ? worldDeltaX : 0;
-  const maxWidth = FREEFORM_WORLD_MAX_X - x;
-  const next = Math.round(width + delta);
-  return { x, width: Math.min(maxWidth, Math.max(SECTION_HEADING_MIN_WIDTH, next)) };
+export interface SectionHeadingWorldBounds {
+  minX: number;
+  maxX: number;
 }
 
 /**
- * PATCH SECTION-H2 Phase 12: LEFT-handle resize.
+ * Phase 15: the unbounded-host sentinel. The infinities are CONSTRAINTS ONLY
+ * -- both helpers below are written so an infinite bound always collapses to
+ * "no clamp on that side" and can never reach the returned geometry, which
+ * stays finite and therefore safe to persist.
+ */
+export const SECTION_HEADING_UNBOUNDED_WORLD: SectionHeadingWorldBounds = {
+  minX: Number.NEGATIVE_INFINITY,
+  maxX: Number.POSITIVE_INFINITY,
+};
+
+/**
+ * Where a horizontal resize gesture began, in WORLD units.
  *
- * The RIGHT edge is the invariant: it is computed once from the drag's
+ * Phase 7: holding the start rect together with the start pointer position
+ * lets every frame be derived from absolute world coordinates supplied by the
+ * host, with no zoom term anywhere. That is what makes the result identical at
+ * 10% and 150%, and structurally immune to the double-division class of bug.
+ */
+export interface SectionHeadingResizeOrigin {
+  rect: SectionHeadingRect;
+  pointerWorldX: number;
+}
+
+function finiteOr(value: number, fallback: number): number {
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function readOrigin(origin: SectionHeadingResizeOrigin) {
+  const x = finiteOr(origin.rect.x, 0);
+  const width = Number.isFinite(origin.rect.width) && origin.rect.width > 0
+    ? origin.rect.width
+    : SECTION_HEADING_MIN_WIDTH;
+  return { x, width, startPointerWorldX: finiteOr(origin.pointerWorldX, 0) };
+}
+
+/**
+ * PATCH SECTION-H2 Phase 11 / SECTION-H3B Phase 3: RIGHT-handle resize.
+ *
+ * `x` never moves; only the width absorbs the pointer's travel, measured
+ * between two world points the host resolved for us.
+ *
+ * Clamp order is deliberate: the minimum width applies first, then the host's
+ * right bound wins outright. A heading parked hard against a finite right edge
+ * is allowed to be narrower than the minimum rather than be persisted past
+ * that edge; under an unbounded policy the bound simply never bites.
+ */
+export function resizeSectionHeadingRightEdge(
+  origin: SectionHeadingResizeOrigin,
+  pointerWorldX: number,
+  bounds: SectionHeadingWorldBounds,
+): SectionHeadingRect {
+  const { x, width, startPointerWorldX } = readOrigin(origin);
+  const delta = finiteOr(pointerWorldX, startPointerWorldX) - startPointerWorldX;
+  const maxWidth = finiteOr(bounds.maxX, Number.POSITIVE_INFINITY) - x;
+  const next = Math.round(width + delta);
+  const clamped = Math.min(maxWidth, Math.max(SECTION_HEADING_MIN_WIDTH, next));
+  // Phase 15: an unbounded maxX must never leak into stored geometry.
+  return { x, width: finiteOr(clamped, Math.max(SECTION_HEADING_MIN_WIDTH, next)) };
+}
+
+/**
+ * PATCH SECTION-H2 Phase 12 / SECTION-H3B Phase 3: LEFT-handle resize.
+ *
+ * The RIGHT edge is the invariant: it is computed once from the gesture's
  * starting rect and every result is derived back from it, so the far edge
  * cannot drift by a pixel no matter how far the pointer travels or how the
- * clamps bite. Symmetrically to the right handle, the signed-world minimum
- * wins over the minimum width.
+ * clamps bite. Symmetrically to the right handle, the host's left bound wins
+ * over the minimum width.
  */
-export function resizeSectionHeadingLeftEdge(rect: SectionHeadingRect, worldDeltaX: number): SectionHeadingRect {
-  const x = Number.isFinite(rect.x) ? rect.x : 0;
-  const width = Number.isFinite(rect.width) && rect.width > 0 ? rect.width : SECTION_HEADING_MIN_WIDTH;
-  const delta = Number.isFinite(worldDeltaX) ? worldDeltaX : 0;
+export function resizeSectionHeadingLeftEdge(
+  origin: SectionHeadingResizeOrigin,
+  pointerWorldX: number,
+  bounds: SectionHeadingWorldBounds,
+): SectionHeadingRect {
+  const { x, width, startPointerWorldX } = readOrigin(origin);
+  const delta = finiteOr(pointerWorldX, startPointerWorldX) - startPointerWorldX;
   const right = x + width;
   const widthLimitedX = right - SECTION_HEADING_MIN_WIDTH;
-  const nextX = Math.round(Math.max(FREEFORM_WORLD_MIN_X, Math.min(widthLimitedX, x + delta)));
+  const minX = finiteOr(bounds.minX, Number.NEGATIVE_INFINITY);
+  const bounded = Math.max(minX, Math.min(widthLimitedX, x + delta));
+  const nextX = Math.round(finiteOr(bounded, widthLimitedX));
   return { x: nextX, width: right - nextX };
 }
 

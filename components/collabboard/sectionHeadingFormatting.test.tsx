@@ -71,6 +71,23 @@ const graphSrc = read('components/graph/FreeformGraphLayer.tsx');
 const noteEditorSrc = read('components/collabboard/editors/NoteEditor.tsx');
 const documentEditorSrc = read('components/collabboard/editors/DocumentEditor.tsx');
 
+/**
+ * PATCH SECTION-H3B: a synthetic HOST converter. It models a canvas whose
+ * world = client / scale, which is exactly what a camera at `scale` does --
+ * but the component under test never learns that, it only calls the function.
+ */
+function hostAtScale(scale: number) {
+  return (clientX: number, clientY: number) => ({ x: clientX / scale, y: clientY / scale });
+}
+
+/** The Freeform host's own bounds, read from the canonical signed-stage contract. */
+const FREEFORM_BOUNDS = { minX: FREEFORM_WORLD_MIN_X, maxX: FREEFORM_WORLD_MAX_X };
+
+/** Origin helper: a gesture starting on `rect` with the pointer at world 0. */
+function origin(rect: { x: number; width: number }, pointerWorldX = 0) {
+  return { rect, pointerWorldX };
+}
+
 function makeHeading(overrides: Partial<Padlet> = {}): Padlet {
   return {
     id: 'sh-1',
@@ -108,7 +125,10 @@ function render(element: React.ReactElement) {
   return host;
 }
 
-function mountHeading(padlet: Padlet, overrides: Partial<React.ComponentProps<typeof SectionHeadingPost>> = {}) {
+function mountHeading(
+  padlet: Padlet,
+  overrides: Partial<React.ComponentProps<typeof SectionHeadingPost>> & { scale?: number } = {},
+) {
   const onCommitText = vi.fn();
   const onMouseDownCapture = vi.fn();
   const onResizePreview = vi.fn();
@@ -121,7 +141,8 @@ function mountHeading(padlet: Padlet, overrides: Partial<React.ComponentProps<ty
       isDraggingThis={false}
       onMouseDownCapture={onMouseDownCapture}
       onCommitText={onCommitText}
-      canvasZoom={overrides.canvasZoom ?? 1}
+      clientToWorld={overrides.clientToWorld ?? hostAtScale(overrides.scale ?? 1)}
+      worldBounds={overrides.worldBounds ?? FREEFORM_BOUNDS}
       canResize={overrides.canResize ?? true}
       onResizePreview={onResizePreview}
       onResizeCommit={onResizeCommit}
@@ -138,7 +159,7 @@ function mountToolbar(padlet: Padlet, headingElement: HTMLElement | null = null)
     <SectionHeadingToolbar
       padlet={padlet}
       headingElement={headingElement}
-      canvasZoom={1}
+      viewportRevision={1}
       onChangeLevel={onChangeLevel}
       onChangeTextStyle={onChangeTextStyle}
       onChangeColor={onChangeColor}
@@ -370,14 +391,14 @@ describe('SECTION-H2 horizontal resize [26-51]', () => {
     expect(onResizeCommit).toHaveBeenCalledTimes(1);
     const [, rect] = onResizeCommit.mock.calls[0];
     expect(rect).toEqual({ x: 100, width: 620 });
-    expect(resizeSectionHeadingRightEdge({ x: 100, width: 500 }, -150)).toEqual({ x: 100, width: 350 });
+    expect(resizeSectionHeadingRightEdge(origin({ x: 100, width: 500 }), -150, FREEFORM_BOUNDS)).toEqual({ x: 100, width: 350 });
   });
 
   it('32/33/34. left handle: right edge is pinned while x and width both move', () => {
     const start = { x: 1000, width: 500 };
     const right = start.x + start.width;
     for (const delta of [-300, -1, 0, 120, 299]) {
-      const next = resizeSectionHeadingLeftEdge(start, delta);
+      const next = resizeSectionHeadingLeftEdge(origin(start), delta, FREEFORM_BOUNDS);
       expect(next.x).toBe(start.x + delta);
       expect(next.width).toBe(right - next.x);
       expect(next.x + next.width).toBe(right);
@@ -392,8 +413,8 @@ describe('SECTION-H2 horizontal resize [26-51]', () => {
   it('35. neither handle can shrink the heading past the ONE canonical minimum width', () => {
     expect(SECTION_HEADING_MIN_WIDTH).toBeGreaterThanOrEqual(180);
     expect(SECTION_HEADING_MIN_WIDTH).toBeLessThanOrEqual(220);
-    expect(resizeSectionHeadingRightEdge({ x: 0, width: 500 }, -100000).width).toBe(SECTION_HEADING_MIN_WIDTH);
-    const left = resizeSectionHeadingLeftEdge({ x: 0, width: 500 }, 100000);
+    expect(resizeSectionHeadingRightEdge(origin({ x: 0, width: 500 }), -100000, FREEFORM_BOUNDS).width).toBe(SECTION_HEADING_MIN_WIDTH);
+    const left = resizeSectionHeadingLeftEdge(origin({ x: 0, width: 500 }), 100000, FREEFORM_BOUNDS);
     expect(left.width).toBe(SECTION_HEADING_MIN_WIDTH);
     expect(left.x + left.width).toBe(500);
     // Default width is unchanged by this patch.
@@ -404,14 +425,14 @@ describe('SECTION-H2 horizontal resize [26-51]', () => {
   });
 
   it('36. the LEFT handle cannot cross the signed-world minimum', () => {
-    const next = resizeSectionHeadingLeftEdge({ x: -4900, width: 500 }, -1000);
+    const next = resizeSectionHeadingLeftEdge(origin({ x: -4900, width: 500 }), -1000, FREEFORM_BOUNDS);
     expect(next.x).toBe(FREEFORM_WORLD_MIN_X);
     expect(next.x).toBe(-5000);
     expect(next.x + next.width).toBe(-4400);
   });
 
   it('37. the RIGHT handle cannot cross the signed-world maximum', () => {
-    const next = resizeSectionHeadingRightEdge({ x: 14000, width: 500 }, 5000);
+    const next = resizeSectionHeadingRightEdge(origin({ x: 14000, width: 500 }), 5000, FREEFORM_BOUNDS);
     expect(next.x + next.width).toBe(FREEFORM_WORLD_MAX_X);
     expect(next.width).toBe(1000);
   });
@@ -424,7 +445,10 @@ describe('SECTION-H2 horizontal resize [26-51]', () => {
       { rect: { x: 200, width: 500 }, delta: -999999 },
     ];
     for (const { rect, delta } of cases) {
-      for (const next of [resizeSectionHeadingLeftEdge(rect, delta), resizeSectionHeadingRightEdge(rect, delta)]) {
+      for (const next of [
+        resizeSectionHeadingLeftEdge(origin(rect), delta, FREEFORM_BOUNDS),
+        resizeSectionHeadingRightEdge(origin(rect), delta, FREEFORM_BOUNDS),
+      ]) {
         expect(next.x).toBeGreaterThanOrEqual(FREEFORM_WORLD_MIN_X);
         expect(next.x + next.width).toBeLessThanOrEqual(FREEFORM_WORLD_MAX_X);
       }
@@ -440,26 +464,29 @@ describe('SECTION-H2 horizontal resize [26-51]', () => {
   ])('%s: the same WORLD delta produces the same width delta', (_label, zoom) => {
     const worldDelta = 200;
     const screenDelta = worldDelta * (zoom as number);
-    const { host, onResizeCommit } = mountHeading(makeHeading({ position_x: 100, width: 500 }), { canvasZoom: zoom as number });
+    const { host, onResizeCommit } = mountHeading(makeHeading({ position_x: 100, width: 500 }), { scale: zoom as number });
     dragHandle(host, 'right', 0, screenDelta);
     const [, rect] = onResizeCommit.mock.calls[0];
     expect(rect).toEqual({ x: 100, width: 700 });
 
-    const left = mountHeading(makeHeading({ position_x: 1000, width: 500 }), { canvasZoom: zoom as number });
+    const left = mountHeading(makeHeading({ position_x: 1000, width: 500 }), { scale: zoom as number });
     dragHandle(left.host, 'left', 0, -screenDelta);
     const [, leftRect] = left.onResizeCommit.mock.calls[0];
     expect(leftRect).toEqual({ x: 800, width: 700 });
     expect(leftRect.x + leftRect.width).toBe(1500);
   });
 
-  it('zoom is divided out exactly ONCE (no double conversion)', () => {
+  // PATCH SECTION-H3B: this was "zoom is divided out exactly once". The
+  // component no longer divides by a camera scalar AT ALL -- it asks the host
+  // for absolute world points -- so the double-division class of bug is now
+  // structurally impossible rather than merely tested for. The assertion is
+  // strengthened accordingly, not weakened.
+  it('the renderer performs NO camera arithmetic of its own', () => {
     const headingCode = code(headingSrc);
-    const divisions = headingCode.match(/\/\s*zoom/g) ?? [];
-    // One in the world-delta conversion, plus the constant-screen handle sizing.
-    expect(divisions.length).toBeGreaterThan(0);
-    expect(headingCode).toContain('(clientX - origin.startClientX) / zoom');
-    expect(headingCode).not.toMatch(/\/\s*zoom\s*\)?\s*\/\s*zoom/);
-    expect(headingCode).not.toMatch(/canvasZoom\s*\*\s*canvasZoom|zoom\s*\*\s*zoom/);
+    expect(headingCode).not.toMatch(/\/\s*zoom/);
+    expect(headingCode).not.toMatch(/canvasZoom/);
+    expect(headingCode).not.toMatch(/scrollLeft|scrollTop|scrollX|scrollY|appState|worldOrigin/);
+    expect(headingCode).toContain('clientToWorld(clientX, 0).x');
   });
 
   it('44. resizing uses pointer capture so the gesture survives leaving the heading', () => {
@@ -575,7 +602,7 @@ describe('SECTION-H2 horizontal resize [26-51]', () => {
     expect(commit).toContain('position_x: originRect.x, width: originRect.width');
     expect(commit).toContain("toast.error('Failed to resize section heading')");
     // And the origin rect genuinely comes from the gesture start.
-    expect(code(headingSrc)).toContain('const origin = sizingRef.current.rect;');
+    expect(code(headingSrc)).toContain('const origin = sizingRef.current.origin.rect;');
     expect(code(headingSrc)).toContain('onResizeCommit?.(padlet.id, next, origin);');
   });
 });
@@ -755,7 +782,8 @@ describe('SECTION-H2 text style and colors [52-67]', () => {
     roots.push(root);
     const render1 = (p: Padlet) => act(() => root.render(
       <SectionHeadingPost padlet={p} isSelected={false} canEdit isDraggingThis={false}
-        onMouseDownCapture={vi.fn()} onCommitText={vi.fn()} />,
+        onMouseDownCapture={vi.fn()} onCommitText={vi.fn()}
+        clientToWorld={hostAtScale(1)} worldBounds={FREEFORM_BOUNDS} />,
     ));
     render1(padlet);
     expect((host.querySelector('[data-section-heading-text="true"]') as HTMLElement).className).toContain(SECTION_HEADING_LEVEL_TEXT_CLASS[2]);
@@ -877,7 +905,7 @@ describe('SECTION-H2 minimap [77-80]', () => {
   });
 
   it('78. a heading resized at negative coordinates measures unclamped', () => {
-    const next = resizeSectionHeadingLeftEdge({ x: -900, width: 500 }, -600);
+    const next = resizeSectionHeadingLeftEdge(origin({ x: -900, width: 500 }), -600, FREEFORM_BOUNDS);
     expect(next).toEqual({ x: -1500, width: 1100 });
     expect(getFallbackMinimapItem(makeHeading({ position_x: next.x, position_y: -450, width: next.width })))
       .toMatchObject({ x: -1500, y: -450, width: 1100 });
@@ -952,9 +980,16 @@ describe('SECTION-H2 frozen regressions [81-91]', () => {
   it('87. the signed world is untouched and merely consumed', () => {
     expect(stageSrc).toContain('export const FREEFORM_WORLD_MIN_X = -5000;');
     expect(stageSrc).toContain('export const FREEFORM_WORLD_MAX_X = 15000;');
-    // The resize math IMPORTS the bounds rather than restating them.
-    expect(engineSrc).toContain("from '@/components/collabboard/canvas/engine/freeformStageGeometry'");
+    // PATCH SECTION-H3B moved bounds OWNERSHIP from the generic geometry module
+    // to the host. The invariant this test protects -- that the signed-stage
+    // values are consumed from the canonical contract and never restated -- is
+    // unchanged; only the file that consumes them moved, so the assertion
+    // follows it to the Freeform call site.
+    expect(cardsSrc).toContain("from '@/components/collabboard/canvas/engine/freeformStageGeometry'");
+    expect(cardsSrc).toContain('minX: FREEFORM_WORLD_MIN_X,');
+    expect(cardsSrc).toContain('maxX: FREEFORM_WORLD_MAX_X,');
     expect(code(engineSrc)).not.toMatch(/-?\b(5000|15000)\b/);
+    expect(code(cardsSrc)).not.toMatch(/minX:\s*-?5000|maxX:\s*15000/);
   });
 
   it('88/89. the unified navigator (9W) and Library stacking (9W.1) are untouched', () => {

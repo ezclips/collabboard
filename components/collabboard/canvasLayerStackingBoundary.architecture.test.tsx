@@ -189,8 +189,13 @@ describe('PATCH 9M: PATCH 9J world-stage freeze [matrix 22; negative control I]'
   });
 
   it('FreeformPadletCards.tsx post-stage wrapper is untouched', () => {
-    expect(freeformSrc).toContain(
-      "import { FREEFORM_WORLD_WIDTH_PX, FREEFORM_WORLD_HEIGHT_PX } from '@/components/collabboard/canvas/engine/freeformStageGeometry';",
+    // PATCH SECTION-H3B widened this import line (adding the signed-stage
+    // MIN_X/MAX_X that the Section Heading host bounds are built from). The
+    // invariant guarded here -- that the world-stage dimensions are CONSUMED
+    // from the shared contract rather than hardcoded -- is unchanged, so the
+    // assertion targets both symbols and the module instead of one exact line.
+    expect(freeformSrc).toMatch(
+      /import \{[^}]*FREEFORM_WORLD_WIDTH_PX[^}]*FREEFORM_WORLD_HEIGHT_PX[^}]*\} from '@\/components\/collabboard\/canvas\/engine\/freeformStageGeometry';/,
     );
   });
 });

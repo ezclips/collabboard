@@ -7681,6 +7681,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                     user={user}
                     containerRef={containerRef}
                     worldOriginRef={freeformWorldOriginRef}
+                    getWorldPointFromClient={getCanvasPointFromClient}
                     isDragging={isDragging}
                     draggingPadletId={draggingPadletId}
                     dragOverContainerId={dragOverContainerId}

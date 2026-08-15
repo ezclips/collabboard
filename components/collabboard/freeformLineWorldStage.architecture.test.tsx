@@ -25,7 +25,12 @@ describe('PATCH 9J/9S.7: shared Freeform world-stage source of truth', () => {
   });
 
   it('keeps posts on the shared stage constants without hardcoded 10000px classes', () => {
-    expect(freeformSrc).toContain("import { FREEFORM_WORLD_WIDTH_PX, FREEFORM_WORLD_HEIGHT_PX } from '@/components/collabboard/canvas/engine/freeformStageGeometry';");
+    // PATCH SECTION-H3B widened this import line (adding the signed-stage
+    // MIN_X/MAX_X the Section Heading host bounds are built from). The
+    // invariant guarded here -- that the stage dimensions are consumed
+    // from the shared contract, never hardcoded -- is unchanged, so the
+    // assertion targets the symbols instead of one exact line.
+    expect(freeformSrc).toMatch(/import \{[^}]*FREEFORM_WORLD_WIDTH_PX[^}]*FREEFORM_WORLD_HEIGHT_PX[^}]*\} from '@\/components\/collabboard\/canvas\/engine\/freeformStageGeometry';/);
     expect(freeformSrc).toContain('data-freeform-world-layer="posts"');
     expect(freeformSrc).toContain('width: FREEFORM_WORLD_WIDTH_PX,');
     expect(freeformSrc).toContain('height: FREEFORM_WORLD_HEIGHT_PX,');

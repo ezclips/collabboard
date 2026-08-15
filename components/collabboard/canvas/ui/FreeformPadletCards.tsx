@@ -43,11 +43,11 @@ import { ColumnPostContextMenu } from '@/components/collabboard/menus/ColumnPost
 import { CommentPostContextMenu } from '@/components/collabboard/menus/CommentPostContextMenu';
 import { ImagePostContextMenu } from '@/components/collabboard/context-menus/ImagePostContextMenu';
 import { isStripVisible, htmlToText, getEligibleContainerDestinations, IMAGE_CROP_TO_GRID_HEIGHT_PX } from '@/components/collabboard/canvas/engine/utils';
-import { isSectionHeading, type SectionHeadingLevel, type SectionHeadingRect } from '@/components/collabboard/canvas/engine/sectionHeading';
+import { isSectionHeading, type SectionHeadingLevel, type SectionHeadingRect, type SectionHeadingWorldBounds } from '@/components/collabboard/canvas/engine/sectionHeading';
 import SectionHeadingPost from '@/components/collabboard/canvas/ui/SectionHeadingPost';
 import SectionHeadingToolbar from '@/components/collabboard/canvas/ui/SectionHeadingToolbar';
 import type { SectionHeadingColorTarget } from '@/components/collabboard/canvas/ui/SectionHeadingAppearancePanel';
-import { FREEFORM_WORLD_WIDTH_PX, FREEFORM_WORLD_HEIGHT_PX } from '@/components/collabboard/canvas/engine/freeformStageGeometry';
+import { FREEFORM_WORLD_WIDTH_PX, FREEFORM_WORLD_HEIGHT_PX, FREEFORM_WORLD_MIN_X, FREEFORM_WORLD_MAX_X } from '@/components/collabboard/canvas/engine/freeformStageGeometry';
 import { getContainerEditTargetLabel } from '@/lib/infra/collabboard/containerEditTargetLabel';
 import { getEffectiveVisibleChildTitleIds, toggleChildPostTitleVisibility } from '@/lib/infra/collabboard/containerChildTitleVisibility';
 import {
@@ -68,6 +68,18 @@ import { useCanvasConfig } from '@/components/collabboard/canvas/contexts/Canvas
 import { getMeaningfulTitle } from '@/lib/infra/collabboard/postTitle';
 
 const DND_KIND_CONTAINER_MOVE = 'columns-container-move';
+
+/**
+ * PATCH SECTION-H3B Phase 4/5/16: the Freeform host states its OWN horizontal
+ * stage policy here, at the call site, reading the canonical signed-stage
+ * contract. The generic Section Heading geometry helpers hold no default and
+ * import nothing from freeformStageGeometry, so a Drawing host in SECTION-H3C
+ * cannot silently inherit -5000..15000.
+ */
+const FREEFORM_SECTION_HEADING_WORLD_BOUNDS: SectionHeadingWorldBounds = {
+  minX: FREEFORM_WORLD_MIN_X,
+  maxX: FREEFORM_WORLD_MAX_X,
+};
 
 type FreeformPadletActionMap = {
   duplicatePadlet: (id: string) => void;
@@ -169,6 +181,13 @@ export interface FreeformPadletCardsProps {
   // harness that mounts this component without it keeps working (Graph
   // measuredRects falls back to its pre-9S.2 formula when absent).
   worldOriginRef?: React.RefObject<HTMLDivElement | null>;
+  /**
+   * PATCH SECTION-H3B Phase 8: the canonical Freeform client -> world
+   * conversion (CanvasClient's `getCanvasPointFromClient`), threaded through
+   * rather than re-derived. Section Headings consume it as their host
+   * converter, so this component defines no second conversion formula.
+   */
+  getWorldPointFromClient: (clientX: number, clientY: number) => { x: number; y: number };
 
   // Flags
   isDragging: boolean;
@@ -212,7 +231,7 @@ export interface FreeformPadletCardsProps {
 // -- Component -----------------------------------------------------------------
 function FreeformPadletCards(props: FreeformPadletCardsProps) {
   const {
-    rootPadlets, padlets, setPadlets, user, containerRef, worldOriginRef,
+    rootPadlets, padlets, setPadlets, user, containerRef, worldOriginRef, getWorldPointFromClient,
     isDragging, draggingPadletId, dragOverContainerId, isGraphConnectMode,
     isLineMode, isDrawingMode,
     selectedPadletId, selectedPadletIds, setSelectedPadletId, setGraphConnectSelection, graphRefreshToken,
@@ -876,7 +895,8 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
           isDraggingThis={draggingPadletId === padlet.id}
           onMouseDownCapture={handlePadletMouseDown}
           onCommitText={(padletId, nextText) => { void updatePadletTitle(padletId, nextText); }}
-          canvasZoom={canvasZoom}
+          clientToWorld={getWorldPointFromClient}
+          worldBounds={FREEFORM_SECTION_HEADING_WORLD_BOUNDS}
           // PATCH SECTION-H2 Phase 20: a heading inside a multi-selection
           // keeps group drag but drops its own width handles, so the two
           // interaction models can never fight over the same pointer.
@@ -4377,7 +4397,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
         <SectionHeadingToolbar
           padlet={selectedSectionHeading}
           headingElement={selectedSectionHeadingElement}
-          canvasZoom={canvasZoom}
+          viewportRevision={canvasZoom}
           onChangeLevel={setSectionHeadingLevel}
           onChangeTextStyle={setSectionHeadingTextStyle}
           onChangeColor={setSectionHeadingColor}

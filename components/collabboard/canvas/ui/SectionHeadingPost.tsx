@@ -15,6 +15,8 @@ import {
   getSectionHeadingText,
   resizeSectionHeadingLeftEdge,
   resizeSectionHeadingRightEdge,
+  type SectionHeadingResizeOrigin,
+  type SectionHeadingWorldBounds,
   resolveSectionHeadingTextStyle,
   sanitizeSectionHeadingText,
   type SectionHeadingRect,
@@ -45,10 +47,18 @@ export interface SectionHeadingPostProps {
   /** Canonical stamped title write (useCanvasData.updatePadletTitle). */
   onCommitText: (padletId: string, text: string) => void;
   /**
-   * PATCH SECTION-H2: live camera scale. Consumed read-only so the grab
-   * targets keep a constant SCREEN size; no camera math is defined here.
+   * PATCH SECTION-H3B Phase 6/7 -- the host's client -> world converter.
+   *
+   * This is the ONLY thing the heading needs to know about the canvas it is
+   * living on. It asks "which world point is under this client position?" and
+   * the host answers using whatever camera model it owns: Freeform passes its
+   * canonical `getCanvasPointFromClient`, a Drawing host would pass
+   * `toSceneCoords(clientX, clientY, appState)`. No zoom, scroll, world
+   * origin or scene offset is ever named here.
    */
-  canvasZoom?: number;
+  clientToWorld: (clientX: number, clientY: number) => { x: number; y: number };
+  /** Phase 3: how far left/right the HOST's world extends. */
+  worldBounds: SectionHeadingWorldBounds;
   /**
    * Phase 20: suppressed while the heading is part of a multi-selection, so
    * the group-drag model and the single-object sizing model never overlap.
@@ -73,7 +83,8 @@ export default function SectionHeadingPost({
   isDraggingThis,
   onMouseDownCapture,
   onCommitText,
-  canvasZoom = 1,
+  clientToWorld,
+  worldBounds,
   canResize = true,
   onResizePreview,
   onResizeCommit,
@@ -113,19 +124,20 @@ export default function SectionHeadingPost({
   // The drag origin is captured once so every frame derives from the ORIGINAL
   // rect. Accumulating frame-to-frame deltas instead would let rounding and
   // clamping compound, and would let the "fixed" edge creep.
-  const sizingRef = useRef<{ edge: SectionHeadingEdge; startClientX: number; rect: SectionHeadingRect } | null>(null);
-
-  const zoom = Number.isFinite(canvasZoom) && Number(canvasZoom) > 0 ? Number(canvasZoom) : 1;
+  const sizingRef = useRef<{ edge: SectionHeadingEdge; origin: SectionHeadingResizeOrigin } | null>(null);
 
   const rectFor = useCallback((edge: SectionHeadingEdge, clientX: number): SectionHeadingRect | null => {
-    const origin = sizingRef.current;
-    if (!origin) return null;
-    // Screen pixels -> world units, divided by the zoom EXACTLY ONCE.
-    const worldDeltaX = (clientX - origin.startClientX) / zoom;
+    const gesture = sizingRef.current;
+    if (!gesture) return null;
+    // The host resolves the ABSOLUTE world point under the pointer. There is
+    // deliberately no arithmetic on the camera here -- no zoom division, no
+    // scroll offset -- which is exactly why the same gesture behaves
+    // identically on any engine and at any scale.
+    const pointerWorldX = clientToWorld(clientX, 0).x;
     return edge === 'right'
-      ? resizeSectionHeadingRightEdge(origin.rect, worldDeltaX)
-      : resizeSectionHeadingLeftEdge(origin.rect, worldDeltaX);
-  }, [zoom]);
+      ? resizeSectionHeadingRightEdge(gesture.origin, pointerWorldX, worldBounds)
+      : resizeSectionHeadingLeftEdge(gesture.origin, pointerWorldX, worldBounds);
+  }, [clientToWorld, worldBounds]);
 
   const handleSizingStart = useCallback((edge: SectionHeadingEdge) => (event: React.PointerEvent) => {
     if (!canEdit || !canResize) return;
@@ -134,10 +146,12 @@ export default function SectionHeadingPost({
     (event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId);
     sizingRef.current = {
       edge,
-      startClientX: event.clientX,
-      rect: { x: Number(padlet.position_x) || 0, width },
+      origin: {
+        rect: { x: Number(padlet.position_x) || 0, width },
+        pointerWorldX: clientToWorld(event.clientX, 0).x,
+      },
     };
-  }, [canEdit, canResize, padlet.position_x, width]);
+  }, [canEdit, canResize, clientToWorld, padlet.position_x, width]);
 
   const handleSizingMove = useCallback((edge: SectionHeadingEdge) => (event: React.PointerEvent) => {
     if (!sizingRef.current || sizingRef.current.edge !== edge) return;
@@ -152,7 +166,7 @@ export default function SectionHeadingPost({
     event.preventDefault();
     event.stopPropagation();
     const next = rectFor(edge, event.clientX);
-    const origin = sizingRef.current.rect;
+    const origin = sizingRef.current.origin.rect;
     sizingRef.current = null;
     (event.currentTarget as HTMLElement).releasePointerCapture?.(event.pointerId);
     // A gesture that ended exactly where it started writes nothing at all.
@@ -169,9 +183,15 @@ export default function SectionHeadingPost({
     (event.currentTarget as HTMLElement).releasePointerCapture?.(event.pointerId);
   }, []);
 
-  // Constant screen-space grab target: dividing by the live zoom means the
-  // handle is still comfortably clickable at 10% instead of a 1px sliver.
-  const handleHitWidth = SECTION_HEADING_HANDLE_HIT_PX / zoom;
+  // Constant screen-space grab target, derived from the SAME host converter
+  // rather than a camera scalar: measuring how much world a 100px client span
+  // covers yields the scale on any engine, so the handle stays comfortably
+  // clickable at 10% instead of shrinking to a 1px sliver.
+  const worldPerClientPx = (() => {
+    const scale = Math.abs(clientToWorld(100, 0).x - clientToWorld(0, 0).x) / 100;
+    return Number.isFinite(scale) && scale > 0 ? scale : 1;
+  })();
+  const handleHitWidth = SECTION_HEADING_HANDLE_HIT_PX * worldPerClientPx;
   const showHandles = isSelected && canEdit && canResize;
 
   const renderHandle = (edge: SectionHeadingEdge) => (
@@ -195,7 +215,7 @@ export default function SectionHeadingPost({
           the accent stripe it sits next to (Phase 36). */}
       <div
         className="rounded-full border border-white bg-blue-500 shadow-sm"
-        style={{ width: 4 / zoom, height: Math.min(height * 0.5, 24 / zoom) }}
+        style={{ width: 4 * worldPerClientPx, height: Math.min(height * 0.5, 24 * worldPerClientPx) }}
       />
     </div>
   );

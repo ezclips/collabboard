@@ -20,6 +20,7 @@ import {
   sanitizeSectionHeadingText,
 } from '@/components/collabboard/canvas/engine/sectionHeading';
 import { findContainerOverlappingRect, getEligibleContainerDestinations } from '@/components/collabboard/canvas/engine/utils';
+import { FREEFORM_WORLD_MAX_X, FREEFORM_WORLD_MIN_X } from '@/components/collabboard/canvas/engine/freeformStageGeometry';
 import { buildCanvasToolbarGroups } from '@/components/collabboard/canvas/ui/canvasToolbarRegistry';
 import { getMinimapItemKind, getFallbackMinimapItem } from '@/components/collabboard/canvas/minimap/useFreeformMinimapGeometry';
 import type { Padlet } from '@/types/collabboard';
@@ -97,6 +98,11 @@ function mount(padlet: Padlet, overrides: Partial<React.ComponentProps<typeof Se
       isDraggingThis={overrides.isDraggingThis ?? false}
       onMouseDownCapture={onMouseDownCapture}
       onCommitText={onCommitText}
+      // PATCH SECTION-H3B: the heading now takes its coordinate truth from the
+      // host. An identity converter keeps every SECTION-H1 assertion below
+      // measuring exactly what it measured before.
+      clientToWorld={(clientX, clientY) => ({ x: clientX, y: clientY })}
+      worldBounds={{ minX: FREEFORM_WORLD_MIN_X, maxX: FREEFORM_WORLD_MAX_X }}
     />,
   ));
   return { host, onCommitText, onMouseDownCapture };
