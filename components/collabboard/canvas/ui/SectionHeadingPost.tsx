@@ -232,6 +232,13 @@ export default function SectionHeadingPost({
         if (isEditing) return;
         onMouseDownCapture(event, padlet.id);
       }}
+      onClick={(event) => {
+        // SECTION-H3B.1: every other root post stops a click here so it never
+        // reaches the canvas viewport's blank-space handler. Without this, a
+        // heading selected on mousedown was deselected a moment later by its
+        // own click bubbling up and being read as "clicked empty canvas".
+        event.stopPropagation();
+      }}
       style={{
         left: padlet.position_x || 0,
         top: padlet.position_y || 0,
