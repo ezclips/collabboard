@@ -136,6 +136,7 @@ import OverlayLayer from '@/components/collabboard/canvas/ui/OverlayLayer';
 import ZoomControls from '@/components/collabboard/canvas/ui/ZoomControls';
 import GhostDragElement from '@/components/collabboard/canvas/ui/GhostDragElement';
 import FreeformCanvasBoardMenu from '@/components/collabboard/canvas/ui/FreeformCanvasBoardMenu';
+import FreeformMinimap from '@/components/collabboard/canvas/minimap/FreeformMinimap';
 import WallpaperSelector from '@/components/collabboard/canvas/WallpaperSelector';
 import { CanvasEditorProvider, type CanvasEditorState } from '@/components/collabboard/canvas/contexts/CanvasEditorContext';
 import { CanvasConfigProvider, type CanvasConfigState } from '@/components/collabboard/canvas/contexts/CanvasConfigContext';
@@ -8287,6 +8288,15 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
             handleChangeLineLayer={handleChangeLineLayer}
           />
         </CanvasViewport>
+
+        {isFreeformLayout && (
+          <FreeformMinimap
+            rootPosts={rootPadlets}
+            containerRef={containerRef}
+            worldOriginRef={freeformWorldOriginRef}
+            canvasZoom={canvasZoom}
+          />
+        )}
 
         {isFreeformLayout && freeformBoardMenu && (
           <FreeformCanvasBoardMenu
