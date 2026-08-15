@@ -331,7 +331,11 @@ describe('PATCH 9V.2C: canvas subsystems untouched [matrix 5, 17, 18, 19; contro
   });
 
   it('changes no minimap projection [control H]', () => {
-    expect(minimapSrc).toContain('className="pointer-events-auto absolute bottom-4 left-[72px] z-40 hidden h-[108px] w-[168px] overflow-hidden md:block"');
+    // PATCH 9W wrapped this in a ternary (embedded vs. standalone) so the
+    // minimap can compose inside FreeformNavigationControl, but the
+    // standalone string -- what actually renders when isFreeformLayout uses
+    // it directly -- is unchanged, byte for byte.
+    expect(minimapSrc).toContain('pointer-events-auto absolute bottom-4 left-[72px] z-40 hidden h-[108px] w-[168px] overflow-hidden md:block');
     const minimapGeometry = read('components/collabboard/canvas/minimap/freeformMinimapGeometry.ts');
     expect(minimapGeometry).toContain('x: projection.offsetX + (point.x - projection.displayBounds.x) * projection.scale,');
     expect(minimapGeometry).not.toContain('toolbarMenuPlacement');

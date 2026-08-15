@@ -32,14 +32,19 @@ const freeformCards = read('components/collabboard/canvas/ui/FreeformPadletCards
 const simpleLineRenderer = read('components/collabboard/SimpleLineRenderer.tsx');
 const viewportStart = canvasClient.indexOf('<CanvasViewport');
 const viewportEnd = canvasClient.indexOf('</CanvasViewport>', viewportStart);
-const minimapStart = canvasClient.indexOf('<FreeformMinimap', viewportEnd);
+// PATCH 9W: CanvasClient no longer mounts <FreeformMinimap> directly -- it
+// mounts <FreeformNavigationControl>, which composes FreeformMinimap itself
+// (verified separately in freeformNavigationControl.test.tsx). The host-gate
+// and DOM-placement invariants below now apply to that wrapper's call site.
+const navigationControlStart = canvasClient.indexOf('<FreeformNavigationControl', viewportEnd);
+const navigationControl = read('components/collabboard/canvas/minimap/FreeformNavigationControl.tsx');
 
 describe('PATCH 9U host gate and DOM placement', () => {
   it('43-45. literal Freeform and the current Table/Stream fallbacks share the existing isFreeformLayout gate', () => {
     expect(canvasClient).toContain("const isFreeformLayout = canvas?.layout === 'freeform' ||");
     expect(canvasClient).not.toContain('isTableLayout');
     expect(canvasClient).not.toContain('isStreamLayout');
-    expect(canvasClient.slice(minimapStart - 80, minimapStart)).toContain('{isFreeformLayout && (');
+    expect(canvasClient.slice(navigationControlStart - 80, navigationControlStart)).toContain('{isFreeformLayout && (');
   });
 
   it.each(['Wall', 'Columns', 'Grid', 'Timeline', 'Scheduler', 'Map', 'Drawing'])('46-52. excludes %s through the frozen predicate', (layout) => {
@@ -54,14 +59,23 @@ describe('PATCH 9U host gate and DOM placement', () => {
   it('54-56. renders after CanvasViewport and therefore outside PadletLayer and the shared world surface', () => {
     expect(viewportStart).toBeGreaterThan(-1);
     expect(viewportEnd).toBeGreaterThan(viewportStart);
-    expect(minimapStart).toBeGreaterThan(viewportEnd);
+    expect(navigationControlStart).toBeGreaterThan(viewportEnd);
     expect(canvasClient.slice(viewportStart, viewportEnd)).toContain('<PadletLayer');
     expect(canvasClient.slice(viewportStart, viewportEnd)).not.toContain('<FreeformMinimap');
+    expect(canvasClient.slice(viewportStart, viewportEnd)).not.toContain('<FreeformNavigationControl');
   });
 
   it('uses the canonical rootPadlets filter rather than inventing a child predicate', () => {
     expect(canvasClient).toContain('padlets.filter(p => !p.metadata?.parentId)');
-    expect(canvasClient.slice(minimapStart, minimapStart + 300)).toContain('rootPosts={rootPadlets}');
+    expect(canvasClient.slice(navigationControlStart, navigationControlStart + 300)).toContain('rootPosts={rootPadlets}');
+  });
+
+  it('PATCH 9W: FreeformNavigationControl composes the unchanged FreeformMinimap in embedded mode', () => {
+    expect(navigationControl).toContain("import FreeformMinimap from './FreeformMinimap'");
+    expect(navigationControl).toContain('<FreeformMinimap');
+    expect(navigationControl).toMatch(/<FreeformMinimap\s+embedded/);
+    expect(navigationControl).toContain('rootPosts={rootPosts}');
+    expect(navigationControl).toContain('panByWorldDelta={panByWorldDelta}');
   });
 });
 

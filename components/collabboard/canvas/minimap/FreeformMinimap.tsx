@@ -63,7 +63,20 @@ export interface FreeformMinimapProps {
   worldOriginRef: React.RefObject<HTMLDivElement | null>;
   canvasZoom: number;
   panByWorldDelta: (dxWorld: number, dyWorld: number) => void;
+  /**
+   * PATCH 9W: when true, renders as a plain 168x108 block child with no
+   * absolute placement/z-index of its own -- the composing
+   * FreeformNavigationControl owns the outer shell's position, stacking,
+   * and responsive visibility instead. Geometry, projection, and pointer
+   * math below are completely unaffected by this flag.
+   */
+  embedded?: boolean;
 }
+
+const STANDALONE_HOST_CLASSNAME =
+  'pointer-events-auto absolute bottom-4 left-[72px] z-40 hidden h-[108px] w-[168px] overflow-hidden md:block';
+const EMBEDDED_HOST_CLASSNAME =
+  'pointer-events-auto hidden h-[108px] w-[168px] overflow-hidden md:block';
 
 export default function FreeformMinimap({
   rootPosts,
@@ -71,6 +84,7 @@ export default function FreeformMinimap({
   worldOriginRef,
   canvasZoom,
   panByWorldDelta,
+  embedded = false,
 }: FreeformMinimapProps) {
   const minimapRef = useRef<HTMLDivElement | null>(null);
   const gestureRef = useRef<MinimapPointerGesture | null>(null);
@@ -206,7 +220,7 @@ export default function FreeformMinimap({
       ref={minimapRef}
       data-freeform-minimap="true"
       aria-hidden="true"
-      className="pointer-events-auto absolute bottom-4 left-[72px] z-40 hidden h-[108px] w-[168px] overflow-hidden md:block"
+      className={embedded ? EMBEDDED_HOST_CLASSNAME : STANDALONE_HOST_CLASSNAME}
       onMouseDown={isolateEvent}
       onClick={isolateEvent}
       onDoubleClick={isolateEvent}

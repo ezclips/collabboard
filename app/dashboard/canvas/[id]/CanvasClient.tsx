@@ -136,7 +136,7 @@ import OverlayLayer from '@/components/collabboard/canvas/ui/OverlayLayer';
 import ZoomControls from '@/components/collabboard/canvas/ui/ZoomControls';
 import GhostDragElement from '@/components/collabboard/canvas/ui/GhostDragElement';
 import FreeformCanvasBoardMenu from '@/components/collabboard/canvas/ui/FreeformCanvasBoardMenu';
-import FreeformMinimap from '@/components/collabboard/canvas/minimap/FreeformMinimap';
+import FreeformNavigationControl from '@/components/collabboard/canvas/minimap/FreeformNavigationControl';
 import WallpaperSelector from '@/components/collabboard/canvas/WallpaperSelector';
 import { CanvasEditorProvider, type CanvasEditorState } from '@/components/collabboard/canvas/contexts/CanvasEditorContext';
 import { CanvasConfigProvider, type CanvasConfigState } from '@/components/collabboard/canvas/contexts/CanvasConfigContext';
@@ -8373,12 +8373,15 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         </CanvasViewport>
 
         {isFreeformLayout && (
-          <FreeformMinimap
+          <FreeformNavigationControl
             rootPosts={rootPadlets}
             containerRef={containerRef}
             worldOriginRef={freeformWorldOriginRef}
             canvasZoom={canvasZoom}
             panByWorldDelta={panByWorldDelta}
+            handleZoomOut={handleZoomOut}
+            handleZoomReset={handleZoomReset}
+            handleZoomIn={handleZoomIn}
           />
         )}
 
@@ -8821,8 +8824,12 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
           </div>
         )}
 
-        {/* Zoom Controls (Excalidraw-style) */}
-        {!isWallLayout && !isColumnsLayout && !isGridLayout && !isDrawingLayout && !isTimelineLayout && !isKanbanLayout && !isSchedulerLayout && !isMapLayout && (
+        {/* Zoom Controls (Excalidraw-style). PATCH 9W: Freeform now gets its
+            zoom row from the unified FreeformNavigationControl above instead
+            -- every other layout that used to render this keeps doing so
+            unchanged (this exclusion previously covered Freeform only
+            incidentally, since it wasn't independently excluded). */}
+        {!isFreeformLayout && !isWallLayout && !isColumnsLayout && !isGridLayout && !isDrawingLayout && !isTimelineLayout && !isKanbanLayout && !isSchedulerLayout && !isMapLayout && (
           <ZoomControls
             canvasZoom={canvasZoom}
             handleZoomOut={handleZoomOut}
