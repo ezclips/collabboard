@@ -143,6 +143,7 @@ import { CanvasConfigProvider, type CanvasConfigState } from '@/components/colla
 import { ColorPickerContent } from '@/components/collabboard/ColorPicker';
 import { isStripVisible } from '@/components/collabboard/canvas/engine/utils';
 import {
+  clampRectPositionToFreeformBounds,
   FREEFORM_SIGNED_WORLD_HEIGHT,
   FREEFORM_SIGNED_WORLD_WIDTH,
   FREEFORM_WORLD_HEIGHT_PX,
@@ -1211,24 +1212,39 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       return { x: 0, y: 0 };
     }
 
+    // PATCH 9V.2B: reports the TRUE signed world coordinate under the
+    // pointer, including negative coordinates and coordinates out in the
+    // camera gutter beyond the world edge. This is a pure coordinate
+    // conversion -- it deliberately owns no placement policy. "Where may an
+    // object of this size legally be stored?" is answered separately, and
+    // later, by clampRectPositionToFreeformBounds.
     return {
-      x: Math.max(0, Math.round((clientX - origin.left) / canvasZoom)),
-      y: Math.max(0, Math.round((clientY - origin.top) / canvasZoom)),
+      x: Math.round((clientX - origin.left) / canvasZoom),
+      y: Math.round((clientY - origin.top) / canvasZoom),
     };
   }, [canvasZoom]);
 
   const getNewPostPosition = useCallback((cardWidth: number, cardHeight: number) => {
     const viewport = containerRef.current;
+    // Non-Freeform hosts (Wall/Grid/Columns/Timeline/...) never mount the
+    // Freeform world, so there is no world coordinate to speak of; they lay
+    // posts out by flow/section order instead. Historically they fell through
+    // to Math.max(0, round(0 - cardWidth / 2)) here, i.e. exactly (0,0).
+    if (!freeformWorldOriginRef.current) {
+      return { x: 0, y: 0 };
+    }
     const viewportRect = viewport?.getBoundingClientRect();
     const viewportWidth = viewport?.clientWidth || 1200;
     const viewportHeight = viewport?.clientHeight || 800;
     const centerClientX = (viewportRect?.left ?? 0) + viewportWidth / 2;
     const centerClientY = (viewportRect?.top ?? 0) + viewportHeight / 2;
     const center = getCanvasPointFromClient(centerClientX, centerClientY);
-    return {
-      x: Math.max(0, Math.round(center.x - cardWidth / 2)),
-      y: Math.max(0, Math.round(center.y - cardHeight / 2)),
-    };
+    return clampRectPositionToFreeformBounds({
+      x: Math.round(center.x - cardWidth / 2),
+      y: Math.round(center.y - cardHeight / 2),
+      width: cardWidth,
+      height: cardHeight,
+    });
   }, [getCanvasPointFromClient]);
 
   const openFreeformBoardMenuAt = useCallback((clientX: number, clientY: number) => {
@@ -3472,9 +3488,17 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         };
       } else {
         branch = 'freeform';
-        // FREEFORM: Apply x/y offset
-        newPadletData.position_x = padlet.position_x + 20;
-        newPadletData.position_y = padlet.position_y + 20;
+        // FREEFORM: Apply x/y offset. PATCH 9V.2B keeps the +20 duplicate
+        // offset (including from negative sources) and only bounds the
+        // resulting whole rectangle to the signed world.
+        const duplicatePosition = clampRectPositionToFreeformBounds({
+          x: padlet.position_x + 20,
+          y: padlet.position_y + 20,
+          width: padlet.width,
+          height: padlet.height,
+        });
+        newPadletData.position_x = duplicatePosition.x;
+        newPadletData.position_y = duplicatePosition.y;
       }
 
       const data = await insertPostAndSelectOrThrow(newPadletData);
@@ -3591,15 +3615,25 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     delete sourceMetadata.sectionPosition;
     delete sourceMetadata.childPadletIds;
 
-    const nextPosition = targetPosition && anchorPosition
-      ? {
-        x: targetPosition.x + ((sourcePadlet.position_x || 0) - anchorPosition.x),
-        y: targetPosition.y + ((sourcePadlet.position_y || 0) - anchorPosition.y),
-      }
-      : {
-        x: (sourcePadlet.position_x || 0) + 20,
-        y: (sourcePadlet.position_y || 0) + 20,
-      };
+    // PATCH 9V.2B: the offset/anchor semantics are unchanged (negative
+    // targets and negative sources are preserved exactly); only the final
+    // rectangle is bounded, so a paste near a finite world edge cannot be
+    // persisted with part of the post outside the signed world.
+    const nextPosition = clampRectPositionToFreeformBounds(
+      targetPosition && anchorPosition
+        ? {
+          x: targetPosition.x + ((sourcePadlet.position_x || 0) - anchorPosition.x),
+          y: targetPosition.y + ((sourcePadlet.position_y || 0) - anchorPosition.y),
+          width: sourcePadlet.width,
+          height: sourcePadlet.height,
+        }
+        : {
+          x: (sourcePadlet.position_x || 0) + 20,
+          y: (sourcePadlet.position_y || 0) + 20,
+          width: sourcePadlet.width,
+          height: sourcePadlet.height,
+        }
+    );
 
     return {
       ...rest,
@@ -3695,11 +3729,19 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       delete rest.created_at;
       delete rest.updated_at;
       delete (rest as any).location_geog;
+      // PATCH 9V.2B: same signed-world bound as duplicate/paste. The synced
+      // link metadata below is untouched.
+      const syncedCopyPosition = clampRectPositionToFreeformBounds({
+        x: padlet.position_x + 20,
+        y: padlet.position_y + 20,
+        width: padlet.width,
+        height: padlet.height,
+      });
       newPadlet = {
         ...rest,
         id: newId,
-        position_x: padlet.position_x + 20,
-        position_y: padlet.position_y + 20,
+        position_x: syncedCopyPosition.x,
+        position_y: syncedCopyPosition.y,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
         metadata: {
@@ -3784,16 +3826,24 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     }
 
     try {
-      // Create a new container at the padlet's position
+      // Create a new container at the padlet's position. PATCH 9V.2B: a
+      // negative source post yields a negative column position (no snap back
+      // to zero); the column is 350x300, so only its whole rect is bounded.
       const containerId = crypto.randomUUID();
+      const newColumnPosition = clampRectPositionToFreeformBounds({
+        x: padlet.position_x,
+        y: padlet.position_y,
+        width: 350,
+        height: 300,
+      });
       const containerPadlet = {
         id: containerId,
         board_id: canvasId,
         title: 'New Column',
         content: '',
         type: 'container',
-        position_x: padlet.position_x,
-        position_y: padlet.position_y,
+        position_x: newColumnPosition.x,
+        position_y: newColumnPosition.y,
         width: 350,
         height: 300,
         created_at: new Date().toISOString(),
@@ -5153,17 +5203,24 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     try {
       const content: LibraryItemContent = JSON.parse(libraryContentStr);
       const cleanMetadata = sanitizeLibraryMetadata(content.metadata);
-      // Calculate position
+      // Calculate position. PATCH 9V.2B: the drop point may be negative or
+      // out in the camera gutter -- the whole item rect is bounded to the
+      // signed world, so it lands where dropped unless that would push part
+      // of it outside the finite world.
       const dropPoint = getCanvasPointFromClient(e.clientX, e.clientY);
-      const x = dropPoint.x - content.width / 2;
-      const y = dropPoint.y - content.height / 2;
+      const { x, y } = clampRectPositionToFreeformBounds({
+        x: dropPoint.x - content.width / 2,
+        y: dropPoint.y - content.height / 2,
+        width: content.width,
+        height: content.height,
+      });
       await addPadletFromLibraryItem({
         board_id: canvasId,
         title: content.title,
         content: content.content,
         type: content.type || 'text',
-        position_x: Math.max(0, x),
-        position_y: Math.max(0, y),
+        position_x: x,
+        position_y: y,
         width: content.width,
         height: content.height,
         metadata: cleanMetadata,
@@ -6369,13 +6426,20 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
             const padletId = e.dataTransfer.getData('text/padlet-id');
             if (!padletId) return;
 
-            // Calculate drop position relative to canvas container
-            const dropPoint = getCanvasPointFromClient(e.clientX, e.clientY);
-            const x = dropPoint.x - 100; // Center offset approx
-            const y = dropPoint.y - 50;
-
             const draggedPadlet = padlets.find(p => p.id === padletId);
             if (!draggedPadlet) return;
+
+            // Calculate drop position relative to canvas container.
+            // PATCH 9V.2B: signed target, then ONE whole-rect bound whose
+            // result feeds BOTH the optimistic state and the persisted row
+            // below -- the two used to disagree (raw vs Math.max(0, ...)).
+            const detachPoint = getCanvasPointFromClient(e.clientX, e.clientY);
+            const { x, y } = clampRectPositionToFreeformBounds({
+              x: detachPoint.x - 100, // Center offset approx
+              y: detachPoint.y - 50,
+              width: draggedPadlet.width,
+              height: draggedPadlet.height,
+            });
 
             // Check if it's coming from a container (has parentId)
             const oldParentId = draggedPadlet.metadata?.parentId;
@@ -6396,7 +6460,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
 
                 const updatePostPositionWithMetadataBestEffort = createUpdatePostPositionWithMetadataBestEffortCommand(createPostsRepository());
                 const result = await updatePostPositionWithMetadataBestEffort(
-                  { postId: padletId, positionX: Math.max(0, x), positionY: Math.max(0, y), metadata: newMetadata },
+                  { postId: padletId, positionX: x, positionY: y, metadata: newMetadata },
                   { userId: null }
                 );
 
@@ -6858,12 +6922,18 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
               if (padletId && offsetData) {
                 try {
                   const { offsetX, offsetY } = JSON.parse(offsetData);
-                  // Ensure positions are not negative
-                  const newX = Math.max(0, dropX - offsetX);
-                  const newY = Math.max(0, dropY - offsetY);
 
                   const padlet = padlets.find(p => p.id === padletId);
                   if (padlet) {
+                    // PATCH 9V.2B: signed world placement -- the whole post
+                    // rect is bounded rather than the top-left being floored
+                    // at zero, so an HTML5 reposition can cross x=0/y=0.
+                    const { x: newX, y: newY } = clampRectPositionToFreeformBounds({
+                      x: dropX - offsetX,
+                      y: dropY - offsetY,
+                      width: padlet.width,
+                      height: padlet.height,
+                    });
                     // Store old position for rollback
                     const oldX = padlet.position_x;
                     const oldY = padlet.position_y;

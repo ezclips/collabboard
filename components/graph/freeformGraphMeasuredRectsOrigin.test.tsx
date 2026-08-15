@@ -93,7 +93,7 @@ function mount(ui: React.ReactElement) {
   const root = createRoot(container);
   act(() => { root.render(ui); });
   mounted.push({ root, container });
-  return container;
+  return { container, root };
 }
 
 describe('PATCH 9S.2: measuredRects + worldOriginRef recovers TRUE world coordinates through an arbitrary (gutter-simulating) origin offset', () => {
@@ -127,7 +127,7 @@ describe('PATCH 9S.2: measuredRects + worldOriginRef recovers TRUE world coordin
     const containerRef = { current: containerEl };
     const worldOriginRef = { current: originEl };
 
-    const root = mount(
+    const { container: root } = mount(
       <FreeformGraphLayer
         boardId="board1"
         posts={[postA, postB]}
@@ -174,7 +174,7 @@ describe('PATCH 9S.2: measuredRects fallback (no worldOriginRef supplied) remain
 
     const containerRef = { current: containerEl };
 
-    const root = mount(
+    const { container: root } = mount(
       <FreeformGraphLayer boardId="board1" posts={[postA, postB]} containerRef={containerRef} zoom={1} />
     );
     await act(async () => { await Promise.resolve(); });
@@ -216,7 +216,7 @@ describe('PATCH 9V.2A: signed Graph routes are presented outside the old zero bo
       containerEl.appendChild(el);
     }
 
-    const root = mount(
+    const { container: root } = mount(
       <FreeformGraphLayer
         boardId="board1"
         posts={[postA, postB]}
@@ -239,5 +239,80 @@ describe('PATCH 9V.2A: signed Graph routes are presented outside the old zero bo
     expect(root.querySelector('polygon')).not.toBeNull();
     expect(root.querySelector('foreignObject')).not.toBeNull();
     expect(expected.sx).toBeLessThan(0);
+  });
+});
+
+// PATCH 9V.2A proved a route already SITTING in negative world presents
+// correctly. PATCH 9V.2B makes posts actually movable there, so the property
+// that matters now is that the edge FOLLOWS a post across x=0/y=0 rather than
+// detaching or stopping at the old boundary.
+describe('PATCH 9V.2B: a Graph edge follows its post across logical zero [matrix 52, 53]', () => {
+  it('re-routes to the new negative rect after the connected post is dragged left/up', async () => {
+    const target = post('target', { position_x: 900, position_y: 400, width: 200, height: 150 });
+    const anchor = post('anchor', { position_x: 1600, position_y: 400, width: 200, height: 150 });
+    mockEdges = [{ ...edge('follow-edge', 'target', 'anchor'), label: 'Follows' }];
+
+    const ORIGIN = { x: 1200, y: 800 };
+    const containerEl = document.createElement('div');
+    document.body.appendChild(containerEl);
+    stubRect(containerEl, 0, 0, 4000, 4000);
+
+    const originEl = document.createElement('div');
+    stubRect(originEl, ORIGIN.x, ORIGIN.y, 0, 0);
+
+    const elements: Record<string, HTMLElement> = {};
+    for (const item of [target, anchor]) {
+      const el = document.createElement('div');
+      el.setAttribute('data-padlet-id', item.id);
+      stubRect(el, ORIGIN.x + item.position_x, ORIGIN.y + item.position_y, item.width!, item.height!);
+      containerEl.appendChild(el);
+      elements[item.id] = el;
+    }
+
+    const props = (posts: Padlet[]) => (
+      <FreeformGraphLayer
+        boardId="board1"
+        posts={posts}
+        containerRef={{ current: containerEl }}
+        worldOriginRef={{ current: originEl }}
+        zoom={1}
+      />
+    );
+
+    const { container: root, root: reactRoot } = mount(props([target, anchor]));
+    await act(async () => { await Promise.resolve(); });
+    await act(async () => { await Promise.resolve(); });
+
+    const before = root.querySelector('path[stroke="transparent"]')!.getAttribute('d');
+    expect(before).toBe(
+      routeEdge(
+        { x: 900, y: 400, width: 200, height: 150 },
+        { x: 1600, y: 400, width: 200, height: 150 },
+        { gap: EDGE_GAP },
+      ).pathD,
+    );
+
+    // Drag `target` to (-1100, -300): across BOTH axes.
+    const moved = { ...target, position_x: -1100, position_y: -300 } as Padlet;
+    stubRect(elements.target, ORIGIN.x - 1100, ORIGIN.y - 300, 200, 150);
+    await act(async () => { reactRoot.render(props([moved, anchor])); });
+    await act(async () => { await Promise.resolve(); });
+
+    const expected = routeEdge(
+      { x: -1100, y: -300, width: 200, height: 150 },
+      { x: 1600, y: 400, width: 200, height: 150 },
+      { gap: EDGE_GAP },
+    );
+    const after = root.querySelector('path[stroke="transparent"]')!.getAttribute('d');
+    expect(after).not.toBe(before);
+    expect(after).toBe(expected.pathD);
+    // Still fully presented: visible route, arrowhead, and label.
+    expect(expected.sx).toBeLessThan(0);
+    expect(expected.sy).toBeLessThan(0);
+    expect(root.querySelector('polygon')).not.toBeNull();
+    expect(root.querySelector('foreignObject')?.textContent).toContain('Follows');
+    // Zoom alone / movement alone must not have written anything back.
+    expect(upsertEdgeMock).not.toHaveBeenCalled();
+    expect(deleteEdgeMock).not.toHaveBeenCalled();
   });
 });

@@ -7,9 +7,59 @@ import type { NewPostDragState, Padlet } from '@/types/collabboard';
 import { debugCanvasLogger } from '@/lib/collabboard/debugCanvasLogger';
 import { findContainerOverlappingRect } from '@/components/collabboard/canvas/engine/utils';
 import { attachPostToContainer } from '@/components/collabboard/canvas/hooks/attachPostToContainer';
+import {
+  clampGroupDragDeltaToFreeformBounds,
+  clampRectPositionToFreeformBounds,
+  type FreeformGroupDragBounds,
+} from '@/components/collabboard/canvas/engine/freeformStageGeometry';
 
 const DEFAULT_DRAG_RECT_WIDTH = 180;
 const DEFAULT_DRAG_RECT_HEIGHT = 220;
+
+interface DragRectSize {
+  width: number;
+  height: number;
+}
+
+/**
+ * PATCH 9V.2B Phase 6: posts are not all 180x220 -- Notes, Images, Links,
+ * Todos, Containers, expanded Comments, Documents and AI components all size
+ * themselves, several of them by auto-height at runtime. Signed-world bounds
+ * apply to the WHOLE rectangle, so the clamp needs the post's real size.
+ *
+ * The live rect measured at mousedown (already normalized out of zoom) is the
+ * best available runtime geometry and costs nothing extra -- the drag path
+ * measures that element anyway to compute the grab offset. Declared
+ * width/height, then the historical defaults, back it up.
+ */
+function resolveDragRectSize(
+  measured: DragRectSize | null,
+  declaredWidth: unknown,
+  declaredHeight: unknown
+): DragRectSize {
+  const width = measured && measured.width > 0 ? measured.width : (Number(declaredWidth) || DEFAULT_DRAG_RECT_WIDTH);
+  const height = measured && measured.height > 0 ? measured.height : (Number(declaredHeight) || DEFAULT_DRAG_RECT_HEIGHT);
+  return { width, height };
+}
+
+/** Combined world bounds of a multi-selection at drag start. */
+function computeGroupDragBounds(
+  padlets: Padlet[],
+  selectedIds: string[]
+): FreeformGroupDragBounds | null {
+  const members = padlets.filter((padlet) => selectedIds.includes(padlet.id));
+  if (members.length === 0) return null;
+  const lefts = members.map((padlet) => padlet.position_x || 0);
+  const tops = members.map((padlet) => padlet.position_y || 0);
+  const rights = members.map((padlet) => (padlet.position_x || 0) + (Number(padlet.width) || DEFAULT_DRAG_RECT_WIDTH));
+  const bottoms = members.map((padlet) => (padlet.position_y || 0) + (Number(padlet.height) || DEFAULT_DRAG_RECT_HEIGHT));
+  return {
+    minX: Math.min(...lefts),
+    minY: Math.min(...tops),
+    maxX: Math.max(...rights),
+    maxY: Math.max(...bottoms),
+  };
+}
 
 interface UseCanvasInteractionsParams {
   containerRef: React.RefObject<HTMLDivElement | null>;
@@ -88,8 +138,16 @@ export function useCanvasInteractions({
     startY: number;
     offsetX: number;
     offsetY: number;
+    rectWidth: number;
+    rectHeight: number;
     selectOnDragStart: boolean;
   } | null>(null);
+
+  // Runtime geometry of the grabbed post, in world units (see
+  // resolveDragRectSize) -- used only to bound the drag, never to change
+  // container-overlap detection.
+  const dragRectSizeRef = useRef<DragRectSize | null>(null);
+  const dragGroupStartBoundsRef = useRef<FreeformGroupDragBounds | null>(null);
 
   // Tracks the committed drag position so handleCanvasMouseUp always saves
   // the correct coordinates even when the last setPadlets hasn't re-rendered yet.
@@ -171,6 +229,8 @@ export function useCanvasInteractions({
       startY: e.clientY,
       offsetX: (e.clientX - rect.left) / canvasZoom,
       offsetY: (e.clientY - rect.top) / canvasZoom,
+      rectWidth: rect.width / canvasZoom,
+      rectHeight: rect.height / canvasZoom,
       selectOnDragStart: !isTemporaryGroupDrag,
     };
     if (!isTemporaryGroupDrag) {
@@ -198,6 +258,8 @@ export function useCanvasInteractions({
       startY: e.clientY,
       offsetX: (e.clientX - rect.left) / canvasZoom,
       offsetY: (e.clientY - rect.top) / canvasZoom,
+      rectWidth: rect.width / canvasZoom,
+      rectHeight: rect.height / canvasZoom,
       selectOnDragStart: false,
     };
   };
@@ -228,6 +290,7 @@ export function useCanvasInteractions({
         setIsDragging(true);
         setDraggingPadletId(pending.padletId);
         draggingPadletIdsRef.current = pending.padletIds;
+        dragRectSizeRef.current = { width: pending.rectWidth, height: pending.rectHeight };
         if (pending.padletIds.length > 1) {
           dragSelectionStartPositionsRef.current = Object.fromEntries(
             padlets
@@ -237,8 +300,10 @@ export function useCanvasInteractions({
                 { x: padlet.position_x || 0, y: padlet.position_y || 0 },
               ])
           );
+          dragGroupStartBoundsRef.current = computeGroupDragBounds(padlets, pending.padletIds);
         } else {
           dragSelectionStartPositionsRef.current = {};
+          dragGroupStartBoundsRef.current = null;
         }
         if (pending.selectOnDragStart) {
           setSelectedPadletId(pending.padletId);
@@ -285,8 +350,6 @@ export function useCanvasInteractions({
 
     debugCanvasLogger('dragMove', { padletId: draggingPadletId, x: newX, y: newY });
 
-    const clampedX = Math.max(0, newX);
-    const clampedY = Math.max(0, newY);
     const draggedPadletIds = draggingPadletIdsRef.current;
 
     if (draggedPadletIds.length > 1) {
@@ -294,9 +357,16 @@ export function useCanvasInteractions({
 
       const startPositions = dragSelectionStartPositionsRef.current;
       const anchorStart = startPositions[draggingPadletId];
-      if (!anchorStart) return;
-      const dx = clampedX - anchorStart.x;
-      const dy = clampedY - anchorStart.y;
+      const groupBounds = dragGroupStartBoundsRef.current;
+      if (!anchorStart || !groupBounds) return;
+      // PATCH 9V.2B: bound the group's DELTA against the selection's combined
+      // bounds, then hand every member that identical delta. Clamping members
+      // individually would let the ones already at an edge stop while the
+      // rest kept moving, silently collapsing the selection's spacing.
+      const { dx, dy } = clampGroupDragDeltaToFreeformBounds(groupBounds, {
+        dx: newX - anchorStart.x,
+        dy: newY - anchorStart.y,
+      });
       lastDragDeltaRef.current = { dx, dy };
 
       setPadlets(prev => prev.map((padlet) => {
@@ -305,14 +375,26 @@ export function useCanvasInteractions({
         if (!start) return padlet;
         return {
           ...padlet,
-          position_x: Math.max(0, start.x + dx),
-          position_y: Math.max(0, start.y + dy),
+          position_x: start.x + dx,
+          position_y: start.y + dy,
         };
       }));
       return;
     }
 
     const draggedPadlet = padlets.find((p) => p.id === draggingPadletId);
+    // PATCH 9V.2B: signed world placement -- the post may travel left/up past
+    // logical (0,0) and stops only at the finite signed world edge, with its
+    // whole rectangle kept inside.
+    const dragSize = resolveDragRectSize(dragRectSizeRef.current, draggedPadlet?.width, draggedPadlet?.height);
+    const { x: clampedX, y: clampedY } = clampRectPositionToFreeformBounds({
+      x: newX,
+      y: newY,
+      width: dragSize.width,
+      height: dragSize.height,
+    });
+    // Container-overlap detection keeps using the post's DECLARED dimensions
+    // (PATCH 9V.2B freezes findContainerOverlappingRect's inputs).
     const draggedRect = {
       x: clampedX,
       y: clampedY,
@@ -373,8 +455,13 @@ export function useCanvasInteractions({
                 currentDraggingIds.map(async (padletId) => {
                   const start = startPositions[padletId];
                   if (!start) return;
-                  const nextX = Math.max(0, Math.round(start.x + dragDelta.dx));
-                  const nextY = Math.max(0, Math.round(start.y + dragDelta.dy));
+                  // PATCH 9V.2B: the delta was already bounded once, against
+                  // the group's combined rect (see handleCanvasMouseMove).
+                  // Re-clamping per post here is exactly the optimistic-vs-
+                  // persisted divergence this patch removes: the DB must
+                  // receive the same coordinates the user just saw.
+                  const nextX = Math.round(start.x + dragDelta.dx);
+                  const nextY = Math.round(start.y + dragDelta.dy);
                   markPadletLocallyModified(padletId);
                   const result = await updatePostPosition({ postId: padletId, positionX: nextX, positionY: nextY }, { userId: null });
                   if (!result.ok) throw result.error.cause ?? result.error;
@@ -450,6 +537,8 @@ export function useCanvasInteractions({
       setDraggingPadletId(null);
     } finally {
       dragEndInFlightRef.current = false;
+      dragRectSizeRef.current = null;
+      dragGroupStartBoundsRef.current = null;
       unlockBodySelection();
     }
   };
