@@ -385,10 +385,19 @@ describe('SECTION-H1 canvas behaviour [37-45]', () => {
     expect(code(headingSrc)).not.toMatch(/deletePadlet|duplicate|supabase|Repository/i);
   });
 
-  it('35(scope). resize is NOT implemented in SECTION-H1', () => {
+  // SECTION-H1 Phase 16 deferred resizing entirely and this test asserted the
+  // renderer contained no resize code at all. PATCH SECTION-H2 Phase 9 is the
+  // patch that was explicitly scheduled to add it, so the assertion is
+  // narrowed to what H1 was really protecting -- that a Section Heading never
+  // acquires the generic free-resize model -- and the full horizontal-only
+  // contract is proved in sectionHeadingFormatting.test.tsx.
+  it('35(scope). a Section Heading never gets the generic free-resize model', () => {
     const { host } = mount(makeHeading(), { isSelected: true });
     expect(host.querySelector('[data-resize-handle]')).toBeNull();
-    expect(code(headingSrc)).not.toMatch(/resize|Resize/);
+    // No corner/rotation affordance, and no vertical sizing of any kind.
+    expect(host.querySelector('[data-section-heading-handle="top"]')).toBeNull();
+    expect(host.querySelector('[data-section-heading-handle="bottom"]')).toBeNull();
+    expect(code(headingSrc)).not.toMatch(/nwse-resize|ns-resize|rotat/i);
   });
 });
 

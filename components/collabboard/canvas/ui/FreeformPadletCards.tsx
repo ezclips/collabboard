@@ -22,7 +22,7 @@ import CommentPopup from '@/components/collabboard/editors/CommentPopup';
 import { guardCommentMutation, guardCommentComposition, guardOwnCommentMutation, type CommentAccessMode } from '@/lib/domain/canvas/comments';
 import type { CommentModeMutations } from '@/lib/infra/canvas/commentMutations';
 import { nextTextAlign } from '@/components/collabboard/editors/textAlignCycle';
-import { resolveCaptionStyle, resolvePadletTitleStyle } from '@/lib/domain/canvas/captionStyle';
+import { normalizeCaptionStyle, resolveCaptionStyle, resolvePadletTitleStyle, type CaptionStyle } from '@/lib/domain/canvas/captionStyle';
 import { CardColorPanel } from '@/components/collabboard/editors/CardColorPanel';
 import ReactionDisplay from '@/components/collabboard/editors/ReactionDisplay';
 import EmojiReactionPicker from '@/components/collabboard/editors/EmojiReactionPicker';
@@ -43,8 +43,10 @@ import { ColumnPostContextMenu } from '@/components/collabboard/menus/ColumnPost
 import { CommentPostContextMenu } from '@/components/collabboard/menus/CommentPostContextMenu';
 import { ImagePostContextMenu } from '@/components/collabboard/context-menus/ImagePostContextMenu';
 import { isStripVisible, htmlToText, getEligibleContainerDestinations, IMAGE_CROP_TO_GRID_HEIGHT_PX } from '@/components/collabboard/canvas/engine/utils';
-import { isSectionHeading } from '@/components/collabboard/canvas/engine/sectionHeading';
+import { isSectionHeading, type SectionHeadingLevel, type SectionHeadingRect } from '@/components/collabboard/canvas/engine/sectionHeading';
 import SectionHeadingPost from '@/components/collabboard/canvas/ui/SectionHeadingPost';
+import SectionHeadingToolbar from '@/components/collabboard/canvas/ui/SectionHeadingToolbar';
+import type { SectionHeadingColorTarget } from '@/components/collabboard/canvas/ui/SectionHeadingAppearancePanel';
 import { FREEFORM_WORLD_WIDTH_PX, FREEFORM_WORLD_HEIGHT_PX } from '@/components/collabboard/canvas/engine/freeformStageGeometry';
 import { getContainerEditTargetLabel } from '@/lib/infra/collabboard/containerEditTargetLabel';
 import { getEffectiveVisibleChildTitleIds, toggleChildPostTitleVisibility } from '@/lib/infra/collabboard/containerChildTitleVisibility';
@@ -280,6 +282,118 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
     worldOriginLeft,
     worldOriginTop,
   } = useCanvasConfig();
+
+  /**
+   * PATCH SECTION-H2 Phase 17/50 -- Section Heading geometry persistence.
+   *
+   * Deliberately NOT the AI card's `persistPostFieldsBestEffort` above: that
+   * helper documents a legacy console.error-only posture with no rollback.
+   * An honest command exists (`updatePostFieldsOrThrow`), so this uses it and
+   * genuinely restores the pre-drag rect when the write fails, rather than
+   * leaving the screen showing a size the database never accepted.
+   *
+   * Called ONCE, from pointerup -- pointermove only previews through local
+   * state (`previewSectionHeadingRect`).
+   */
+  const commitSectionHeadingRect = React.useCallback(async (
+    padletId: string,
+    rect: SectionHeadingRect,
+    originRect: SectionHeadingRect,
+  ) => {
+    setPadlets(prev => prev.map(p => (
+      p.id === padletId ? { ...p, position_x: rect.x, width: rect.width } : p
+    )));
+    try {
+      await updatePostFieldsOrThrow(padletId, {
+        position_x: rect.x,
+        width: rect.width,
+        updated_at: new Date().toISOString(),
+      });
+    } catch (err) {
+      console.error('Failed to persist section heading size:', err);
+      setPadlets(prev => prev.map(p => (
+        p.id === padletId ? { ...p, position_x: originRect.x, width: originRect.width } : p
+      )));
+      toast.error('Failed to resize section heading');
+    }
+  }, [setPadlets, updatePostFieldsOrThrow]);
+
+  const previewSectionHeadingRect = React.useCallback((padletId: string, rect: SectionHeadingRect) => {
+    setPadlets(prev => prev.map(p => (
+      p.id === padletId ? { ...p, position_x: rect.x, width: rect.width } : p
+    )));
+  }, [setPadlets]);
+
+  /**
+   * PATCH SECTION-H2 Phase 7/50 -- heading level and appearance persistence.
+   *
+   * Same honest posture as the geometry write above, and deliberately not the
+   * `commitPadletMeta` debounce, whose documented contract swallows both
+   * resolved and thrown failures.
+   */
+  const commitSectionHeadingMetadata = React.useCallback(async (
+    padletId: string,
+    updates: Record<string, unknown>,
+  ) => {
+    const previous = padlets.find(p => p.id === padletId);
+    if (!previous) return;
+    const previousMetadata = previous.metadata;
+    const nextMetadata = { ...(previousMetadata || {}), ...updates };
+    setPadlets(prev => prev.map(p => (p.id === padletId ? { ...p, metadata: nextMetadata } : p)));
+    try {
+      await updatePostFieldsOrThrow(padletId, {
+        metadata: nextMetadata,
+        updated_at: new Date().toISOString(),
+      });
+    } catch (err) {
+      console.error('Failed to persist section heading appearance:', err);
+      setPadlets(prev => prev.map(p => (p.id === padletId ? { ...p, metadata: previousMetadata } : p)));
+      toast.error('Failed to update section heading');
+    }
+  }, [padlets, setPadlets, updatePostFieldsOrThrow]);
+
+  const setSectionHeadingLevel = React.useCallback((padletId: string, level: SectionHeadingLevel) => {
+    void commitSectionHeadingMetadata(padletId, { headingLevel: level });
+  }, [commitSectionHeadingMetadata]);
+
+  const setSectionHeadingTextStyle = React.useCallback((padletId: string, style: Partial<CaptionStyle>) => {
+    // Stored through the app's existing generic title-style normalizer, so a
+    // heading can never persist a style shape the shared resolver rejects.
+    void commitSectionHeadingMetadata(padletId, { titleStyle: normalizeCaptionStyle(style) ?? {} });
+  }, [commitSectionHeadingMetadata]);
+
+  /**
+   * The heading that owns the formatting toolbar. Single selection only: a
+   * multi-selection is a group-move gesture, not a formatting context.
+   */
+  const selectedSectionHeading = React.useMemo(() => {
+    if (!canUseFreeformEditButton || selectedPadletIds.length > 1) return null;
+    const found = rootPadlets.find(p => p.id === selectedPadletId);
+    return found && isSectionHeading(found) ? found : null;
+  }, [canUseFreeformEditButton, rootPadlets, selectedPadletId, selectedPadletIds]);
+
+  // Measured through the SAME generic `[data-padlet-id]` selector the minimap
+  // uses, so the heading needs no bespoke ref plumbing to be anchorable.
+  const [selectedSectionHeadingElement, setSelectedSectionHeadingElement] =
+    React.useState<HTMLElement | null>(null);
+  React.useEffect(() => {
+    if (!selectedSectionHeading) {
+      setSelectedSectionHeadingElement(null);
+      return;
+    }
+    setSelectedSectionHeadingElement(
+      document.querySelector<HTMLElement>(`[data-padlet-id="${selectedSectionHeading.id}"]`)
+    );
+  }, [selectedSectionHeading]);
+
+  const setSectionHeadingColor = React.useCallback((
+    padletId: string,
+    target: SectionHeadingColorTarget,
+    color: string,
+  ) => {
+    const field = target === 'text' ? 'textColor' : target === 'accent' ? 'accentColor' : 'backgroundColor';
+    void commitSectionHeadingMetadata(padletId, { [field]: color });
+  }, [commitSectionHeadingMetadata]);
 
   const {
     padletToEdit,
@@ -762,6 +876,13 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
           isDraggingThis={draggingPadletId === padlet.id}
           onMouseDownCapture={handlePadletMouseDown}
           onCommitText={(padletId, nextText) => { void updatePadletTitle(padletId, nextText); }}
+          canvasZoom={canvasZoom}
+          // PATCH SECTION-H2 Phase 20: a heading inside a multi-selection
+          // keeps group drag but drops its own width handles, so the two
+          // interaction models can never fight over the same pointer.
+          canResize={selectedPadletIds.length <= 1}
+          onResizePreview={previewSectionHeadingRect}
+          onResizeCommit={commitSectionHeadingRect}
         />
       ))}
 
@@ -4246,6 +4367,22 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
       <FreeformGraphLayer boardId={canvasId.toString()} posts={padlets} refreshToken={graphRefreshToken} containerRef={containerRef} worldOriginRef={worldOriginRef} zoom={canvasZoom} />
                 )}
                 </div>
+      {/* PATCH SECTION-H2 Phase 3/4: the selected heading's formatting bar is
+          rendered HERE -- a sibling of the scaled world layer that closes
+          just above, never a descendant of it. That placement is the whole
+          reason the toolbar is screen UI: inside the layer it would inherit
+          `transform: scale(canvasZoom)` and shrink to an unusable strip at
+          10%. It anchors itself from the heading's measured client rect. */}
+      {selectedSectionHeading && (
+        <SectionHeadingToolbar
+          padlet={selectedSectionHeading}
+          headingElement={selectedSectionHeadingElement}
+          canvasZoom={canvasZoom}
+          onChangeLevel={setSectionHeadingLevel}
+          onChangeTextStyle={setSectionHeadingTextStyle}
+          onChangeColor={setSectionHeadingColor}
+        />
+      )}
       {imageToolbarPadletId && (
         <div
           className="fixed inset-0 z-[60000] flex items-center justify-center bg-black/35 backdrop-blur-sm"

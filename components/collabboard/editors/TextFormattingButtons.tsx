@@ -11,7 +11,24 @@ import { Bold, Italic, Strikethrough, Underline, List, ListOrdered, AlignLeft, C
 // across post types whose content model doesn't support that particular
 // formatting yet) but are inert, same as this app's existing "Align" button
 // in Note/Document, which has never had a wired handler.
+export type TextFormattingControl =
+    | 'bold' | 'italic' | 'strikethrough' | 'underline'
+    | 'bulletList' | 'orderedList' | 'align' | 'code';
+
+const ALL_TEXT_FORMATTING_CONTROLS: TextFormattingControl[] = [
+    'bold', 'italic', 'strikethrough', 'underline', 'bulletList', 'orderedList', 'align', 'code',
+];
+
 export interface TextFormattingButtonsProps {
+    /**
+     * PATCH SECTION-H2 Phase 23: optional allow-list, defaulting to the full
+     * grid so every existing caller renders byte-identically. Freeform Section
+     * Headings pass a narrowed set because list/code controls are meaningless
+     * for a single-line board divider -- rendering them inert (this grid's
+     * usual policy for unhandled buttons) would advertise formatting the
+     * object genuinely cannot have.
+     */
+    controls?: TextFormattingControl[];
     onBold?: () => void;
     onItalic?: () => void;
     onStrikethrough?: () => void;
@@ -32,6 +49,7 @@ export interface TextFormattingButtonsProps {
 const preventFocusLoss = (e: React.MouseEvent) => e.preventDefault();
 
 export default function TextFormattingButtons({
+    controls = ALL_TEXT_FORMATTING_CONTROLS,
     onBold,
     onItalic,
     onStrikethrough,
@@ -49,15 +67,15 @@ export default function TextFormattingButtons({
     isCode = false,
 }: TextFormattingButtonsProps) {
     const buttons = [
-        { icon: Bold, label: 'Bold', onClick: onBold, active: isBold },
-        { icon: Italic, label: 'Italic', onClick: onItalic, active: isItalic },
-        { icon: Strikethrough, label: 'Strikethrough', onClick: onStrikethrough, active: isStrikethrough },
-        { icon: Underline, label: 'Underline', onClick: onUnderline, active: isUnderline },
-        { icon: List, label: 'Bullet list', onClick: onBulletList, active: isBulletList },
-        { icon: ListOrdered, label: 'Numbered list', onClick: onOrderedList, active: isOrderedList },
-        { icon: AlignLeft, label: 'Align', onClick: onAlign, active: false },
-        { icon: Code, label: 'Code', onClick: onCode, active: isCode },
-    ];
+        { id: 'bold' as const, icon: Bold, label: 'Bold', onClick: onBold, active: isBold },
+        { id: 'italic' as const, icon: Italic, label: 'Italic', onClick: onItalic, active: isItalic },
+        { id: 'strikethrough' as const, icon: Strikethrough, label: 'Strikethrough', onClick: onStrikethrough, active: isStrikethrough },
+        { id: 'underline' as const, icon: Underline, label: 'Underline', onClick: onUnderline, active: isUnderline },
+        { id: 'bulletList' as const, icon: List, label: 'Bullet list', onClick: onBulletList, active: isBulletList },
+        { id: 'orderedList' as const, icon: ListOrdered, label: 'Numbered list', onClick: onOrderedList, active: isOrderedList },
+        { id: 'align' as const, icon: AlignLeft, label: 'Align', onClick: onAlign, active: false },
+        { id: 'code' as const, icon: Code, label: 'Code', onClick: onCode, active: isCode },
+    ].filter((btn) => controls.includes(btn.id));
 
     return (
         <div className="grid grid-cols-4 gap-1.5">

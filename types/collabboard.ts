@@ -242,6 +242,12 @@ export interface Padlet {
     // existing generic metadata above rather than adding new columns --
     // SECTION-H2 wires the controls to them.
     headingLevel?: 1 | 2 | 3 | 4;
+    // PATCH SECTION-H2 Phase 29: the left accent stripe's colour -- the ONE
+    // field SECTION-H2 adds. Text colour, surface colour and whole-heading
+    // typography deliberately reuse the existing generic `textColor`,
+    // `backgroundColor` and `titleStyle` above instead of minting parallel
+    // section-heading-only keys. JSONB only; no schema column.
+    accentColor?: string;
 
     // AI Component specific
     aiComponentCode?: string;
