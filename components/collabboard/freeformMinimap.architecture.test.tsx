@@ -76,7 +76,7 @@ describe('PATCH 9U render-only UI and stacking contract', () => {
     host = null;
   });
 
-  it.each([1, 0.4, 0.2, 0.1])('57/58. mounts at zoom %s as a pointer-inert sibling without changing viewport scroll extent', (zoom) => {
+  it.each([1, 0.4, 0.2, 0.1])('57/58. mounts at zoom %s as an interactive sibling without changing viewport scroll extent', (zoom) => {
     host = document.createElement('div');
     host.innerHTML = '<div data-test-viewport><div style="width:10000px;height:10000px"></div></div><div data-test-mount></div>';
     document.body.append(host);
@@ -89,11 +89,12 @@ describe('PATCH 9U render-only UI and stacking contract', () => {
         containerRef={{ current: viewport as HTMLDivElement }}
         worldOriginRef={{ current: viewport.firstElementChild as HTMLDivElement }}
         canvasZoom={zoom}
+        panByWorldDelta={vi.fn()}
       />,
     ));
     const map = host.querySelector<HTMLElement>('[data-freeform-minimap="true"]')!;
     expect(map).toBeTruthy();
-    expect(map.className).toContain('pointer-events-none');
+    expect(map.className).toContain('pointer-events-auto');
     expect([viewport.scrollWidth, viewport.scrollHeight]).toEqual(before);
   });
 
@@ -117,12 +118,13 @@ describe('PATCH 9U render-only UI and stacking contract', () => {
     expect(component).not.toContain('shadow-md');
     expect(component).not.toContain('backdrop-blur-sm');
     expect(component).toContain('data-freeform-minimap-surface="true"');
-    expect(component).toContain("style={{ fill: '#e5e7eb' }}");
+    expect(component).toContain("style={{ fill: '#e5e7eb', cursor: 'pointer' }}");
     expect(component).not.toContain('fill-muted/40');
     expect(component).not.toContain('fill-muted-foreground/45');
     expect(component).not.toContain('fill-primary/10');
     expect(component).toContain("fill: 'var(--foreground)', fillOpacity: 0.45");
-    expect(component).toContain("fill: 'var(--foreground)', fillOpacity: 0.1, stroke: 'var(--foreground)'");
+    expect(component).toContain('fillOpacity: 0.1');
+    expect(component).toContain("stroke: 'var(--foreground)'");
     expect(component).toContain('aria-hidden="true"');
     expect(component).not.toContain('<button');
   });
@@ -146,6 +148,7 @@ describe('PATCH 9U render-only UI and stacking contract', () => {
         containerRef={{ current: document.createElement('div') }}
         worldOriginRef={{ current: document.createElement('div') }}
         canvasZoom={1}
+        panByWorldDelta={vi.fn()}
       />,
     ));
     const surface = host.querySelector<SVGRectElement>('[data-freeform-minimap-surface="true"]')!;
@@ -226,9 +229,10 @@ describe('PATCH 9U.2 blank-world and camera-gutter pan ownership', () => {
     expect(canStartFrom(child)).toBe(false);
   });
 
-  it('10. the minimap remains pointer-inert and cannot create an invisible pan boundary', () => {
-    expect(component).toContain('pointer-events-none');
-    expect(component).not.toContain('pointer-events-auto');
+  it('10. the minimap owns pointers only inside its unchanged visible footprint', () => {
+    expect(component).toContain('pointer-events-auto');
+    expect(component).toContain('h-[108px] w-[168px] overflow-hidden');
+    expect(component).not.toContain('inset-0');
   });
 });
 
@@ -256,9 +260,10 @@ describe('PATCH 9U read-only, stable, O(n)/O(k)/O(1) architecture guards', () =>
     expect(implementation).not.toMatch(/FreeformGraphLayer|GraphRepo|SimpleLineRenderer|manualLines|graphLines/);
   });
 
-  it('negative I/J: has no camera-write or interaction handler', () => {
-    expect(implementation).not.toMatch(/scrollTo|scrollBy|scrollLeft\s*=|scrollTop\s*=|onClick|onPointer|onWheel|onMouse/);
-    expect(component).toContain('pointer-events-none');
+  it('negative I/J: delegates navigation to the canonical camera primitive without direct scroll writes or secondary position state', () => {
+    expect(implementation).not.toMatch(/scrollTo|scrollBy|scrollLeft\s*=|scrollTop\s*=/);
+    expect(component).toContain('panByWorldDelta(');
+    expect(component).not.toMatch(/minimapCamera[XY]/);
   });
 
   it('negative K: imports/calls no persistence or mutation layer', () => {

@@ -514,6 +514,77 @@ describe('PATCH 9S.2: robustness -- no container mounted yet', () => {
   });
 });
 
+describe('PATCH 9V: panByWorldDelta keeps native scroll as the sole camera position', () => {
+  it('1. applies the current zoom exactly once to both world deltas', () => {
+    const h = mountCamera({ ...VIEWPORT, ...HUGE_EXTENT });
+    act(() => { h.el.scrollLeft = 5000; h.el.scrollTop = 4000; });
+    act(() => { h.getCamera().panByWorldDelta(25, -30); });
+    expect(h.el.scrollLeft).toBe(5025);
+    expect(h.el.scrollTop).toBe(3970);
+  });
+
+  it('2/3. positive X increases and negative X decreases scrollLeft', () => {
+    const h = mountCamera({ ...VIEWPORT, ...HUGE_EXTENT });
+    act(() => { h.el.scrollLeft = 5000; });
+    act(() => { h.getCamera().panByWorldDelta(100, 0); });
+    expect(h.el.scrollLeft).toBe(5100);
+    act(() => { h.getCamera().panByWorldDelta(-250, 0); });
+    expect(h.el.scrollLeft).toBe(4850);
+  });
+
+  it('4/5. positive Y increases and negative Y decreases scrollTop', () => {
+    const h = mountCamera({ ...VIEWPORT, ...HUGE_EXTENT });
+    act(() => { h.el.scrollTop = 4000; });
+    act(() => { h.getCamera().panByWorldDelta(0, 100); });
+    expect(h.el.scrollTop).toBe(4100);
+    act(() => { h.getCamera().panByWorldDelta(0, -250); });
+    expect(h.el.scrollTop).toBe(3850);
+  });
+
+  it('6. clamps at native scroll zero', () => {
+    const h = mountCamera({ ...VIEWPORT, ...HUGE_EXTENT });
+    act(() => { h.el.scrollLeft = 20; h.el.scrollTop = 30; });
+    act(() => { h.getCamera().panByWorldDelta(-100, -100); });
+    expect(h.el.scrollLeft).toBe(0);
+    expect(h.el.scrollTop).toBe(0);
+  });
+
+  it('7. clamps against the live DOM maximum', () => {
+    const geo = { clientWidth: 500, clientHeight: 400, scrollWidth: 3000, scrollHeight: 2400 };
+    const h = mountCamera(() => geo);
+    act(() => { h.el.scrollLeft = 2400; h.el.scrollTop = 1900; });
+    act(() => { h.getCamera().panByWorldDelta(1000, 1000); });
+    expect(h.el.scrollLeft).toBe(2500);
+    expect(h.el.scrollTop).toBe(2000);
+  });
+
+  it('8. never changes canvasZoom', () => {
+    const h = mountCamera({ ...VIEWPORT, ...HUGE_EXTENT });
+    const zoom = h.getCamera().canvasZoom;
+    act(() => { h.getCamera().panByWorldDelta(500, 500); });
+    expect(h.getCamera().canvasZoom).toBe(zoom);
+  });
+
+  it('9. composes with a pending zoom using the new live zoom exactly once', () => {
+    const h = mountCamera({ ...VIEWPORT, ...HUGE_EXTENT });
+    act(() => { h.el.scrollLeft = 2000; h.el.scrollTop = 2000; });
+    act(() => {
+      h.getCamera().zoomAtViewportPoint(2, 0, 0);
+      h.getCamera().panByWorldDelta(10, -20);
+    });
+    expect(h.getCamera().canvasZoom).toBe(2);
+    expect(h.el.scrollLeft).toBe(2820);
+    expect(h.el.scrollTop).toBe(3160);
+  });
+
+  it('10. adds no cameraX/cameraY React position state', () => {
+    const src = read('components/collabboard/canvas/hooks/useCanvasCamera.ts');
+    expect(src).not.toMatch(/const \[[^\]]*camera[XY][^\]]*\]\s*=\s*useState/i);
+    expect(src).toContain('container.scrollLeft = clamp(next.left, 0, maxScrollLeft);');
+    expect(src).toContain('container.scrollTop = clamp(next.top, 0, maxScrollTop);');
+  });
+});
+
 describe('PATCH 9S.2: world/persistence freeze -- the camera hook touches nothing but zoom state and scroll [source check]', () => {
   const src = read('components/collabboard/canvas/hooks/useCanvasCamera.ts');
 

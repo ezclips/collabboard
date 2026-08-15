@@ -20,7 +20,7 @@ const graphLayerSrc = read('components/graph/FreeformGraphLayer.tsx');
 describe('PATCH 9S: camera hook wiring [Phase 3]', () => {
   it('CanvasClient wires the camera hook through an explicit viewport-mount callback, not a raw setCanvasZoom', () => {
     expect(canvasClientSrc).toContain(
-      'const {\n    canvasZoom, zoomAtViewportPoint, handleZoomIn, handleZoomOut, handleZoomReset,\n    gutterX, gutterY,\n    setViewportElement,\n  } = useCanvasCamera(containerRef, isFreeformLayout);'
+      'const {\n    canvasZoom, zoomAtViewportPoint, panByWorldDelta, handleZoomIn, handleZoomOut, handleZoomReset,\n    gutterX, gutterY,\n    setViewportElement,\n  } = useCanvasCamera(containerRef, isFreeformLayout);'
     );
     expect(canvasClientSrc).toContain('const handleCanvasViewportRef = useCallback((node: HTMLDivElement | null) => {');
     expect(canvasClientSrc).toContain('containerRef.current = node;');

@@ -1108,7 +1108,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   // resize-compensation logic must be gated to Freeform-equivalent layouts
   // only -- canvasZoom itself remains available to every layout as before.
   const {
-    canvasZoom, zoomAtViewportPoint, handleZoomIn, handleZoomOut, handleZoomReset,
+    canvasZoom, zoomAtViewportPoint, panByWorldDelta, handleZoomIn, handleZoomOut, handleZoomReset,
     gutterX, gutterY,
     setViewportElement,
   } = useCanvasCamera(containerRef, isFreeformLayout);
@@ -8295,6 +8295,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
             containerRef={containerRef}
             worldOriginRef={freeformWorldOriginRef}
             canvasZoom={canvasZoom}
+            panByWorldDelta={panByWorldDelta}
           />
         )}
 

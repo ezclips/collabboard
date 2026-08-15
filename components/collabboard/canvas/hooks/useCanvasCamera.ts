@@ -168,6 +168,35 @@ export function useCanvasCamera(containerRef: React.RefObject<HTMLDivElement | n
     setCanvasZoom(newZoom);
   }, [containerRef]);
 
+  /**
+   * Moves the native scroll camera by a WORLD-space delta. When a zoom is
+   * pending, compose onto its logical target so the zoom's post-render apply
+   * cannot overwrite this pan. Otherwise mutate the live viewport directly.
+   */
+  const panByWorldDelta = useCallback((dxWorld: number, dyWorld: number) => {
+    if (!Number.isFinite(dxWorld) || !Number.isFinite(dyWorld)) return;
+    const container = containerRef.current;
+    if (!container) return;
+
+    const zoom = zoomRef.current;
+    const pending = pendingLogicalScrollRef.current;
+    const next = {
+      left: (pending?.left ?? container.scrollLeft) + dxWorld * zoom,
+      top: (pending?.top ?? container.scrollTop) + dyWorld * zoom,
+    };
+
+    if (pendingApplyRef.current) {
+      pendingLogicalScrollRef.current = next;
+      pendingApplyRef.current = next;
+      return;
+    }
+
+    const maxScrollLeft = Math.max(0, container.scrollWidth - container.clientWidth);
+    const maxScrollTop = Math.max(0, container.scrollHeight - container.clientHeight);
+    container.scrollLeft = clamp(next.left, 0, maxScrollLeft);
+    container.scrollTop = clamp(next.top, 0, maxScrollTop);
+  }, [containerRef]);
+
   // Applies the pending scroll compensation after the new zoom's transform
   // has actually committed to the DOM, reading LIVE post-render
   // scrollWidth/scrollHeight/clientWidth/clientHeight -- never a
@@ -214,6 +243,7 @@ export function useCanvasCamera(containerRef: React.RefObject<HTMLDivElement | n
     canvasZoom,
     setCanvasZoom,
     zoomAtViewportPoint,
+    panByWorldDelta,
     handleZoomIn,
     handleZoomOut,
     handleZoomReset,
