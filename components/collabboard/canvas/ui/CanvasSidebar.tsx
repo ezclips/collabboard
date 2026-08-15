@@ -11,6 +11,11 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import {
+  computeToolbarMenuSideOffset,
+  TOOLBAR_MENU_COLLISION_PADDING_PX,
+  TOOLBAR_MENU_GAP_PX,
+} from './toolbarMenuPlacement';
 
 export interface SidebarToolItem {
   icon: React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>;
@@ -73,9 +78,14 @@ export default function CanvasSidebar({
   const dividerRef = useRef<HTMLDivElement>(null);
   const toggleRef = useRef<HTMLButtonElement>(null);
   const moreMeasureRef = useRef<HTMLButtonElement>(null);
+  const moreTriggerRef = useRef<HTMLButtonElement>(null);
   const groupRefs = useRef(new Map<string, HTMLDivElement>());
   const naturalHeightsRef = useRef(new Map<string, Map<string, number>>());
   const [overflowState, setOverflowState] = useState<OverflowState | null>(null);
+  const [menuSideOffset, setMenuSideOffset] = useState(TOOLBAR_MENU_GAP_PX);
+  // The tool an overflow item selected, dispatched only once the dropdown has
+  // finished closing (see onCloseAutoFocus below).
+  const pendingToolRef = useRef<string | null>(null);
 
   const groupSignature = useMemo(
     () => `${isCollapsed ? 'collapsed' : 'expanded'}:${groups.map((group) => `${group.id}:${group.tools.length}`).join('|')}`,
@@ -101,6 +111,44 @@ export default function CanvasSidebar({
     onBeforeToolClick?.(type);
     handleToolClick(type);
   }, [handleToolClick, onBeforeToolClick]);
+
+  /**
+   * Recomputes the toolbar exclusion offset from LIVE rects. Deliberately not
+   * derived from a stored viewport width or a breakpoint: the only inputs are
+   * the two elements' current positions, so narrow->wide and wide->narrow both
+   * resolve to the correct value with no cached state to go stale.
+   */
+  const measureMenuSideOffset = useCallback(() => {
+    const toolbar = containerRef.current;
+    const trigger = moreTriggerRef.current;
+    if (!toolbar || !trigger) return;
+    const next = computeToolbarMenuSideOffset(
+      toolbar.getBoundingClientRect().right,
+      trigger.getBoundingClientRect().right,
+    );
+    setMenuSideOffset((prev) => (Math.abs(prev - next) < 0.5 ? prev : next));
+  }, []);
+
+  const hasOverflowMenu = overflowGroups.length > 0;
+
+  // Kept current for as long as the More trigger exists -- including while the
+  // menu is open -- so a resize mid-interaction repositions correctly instead
+  // of holding the placement it was opened with. No polling.
+  useLayoutEffect(() => {
+    if (!hasOverflowMenu) return;
+    measureMenuSideOffset();
+    const toolbar = containerRef.current;
+    if (!toolbar || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(measureMenuSideOffset);
+    ro.observe(toolbar);
+    window.addEventListener('resize', measureMenuSideOffset);
+    window.addEventListener('orientationchange', measureMenuSideOffset);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', measureMenuSideOffset);
+      window.removeEventListener('orientationchange', measureMenuSideOffset);
+    };
+  }, [hasOverflowMenu, measureMenuSideOffset]);
 
   useLayoutEffect(() => {
     if (isCollapsed) {
@@ -267,6 +315,7 @@ export default function CanvasSidebar({
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button
+              ref={moreTriggerRef}
               type="button"
               data-toolbar-more-trigger="true"
               className="group relative flex h-9 w-9 items-center justify-center rounded-lg text-gray-600 transition hover:bg-gray-100"
@@ -281,8 +330,33 @@ export default function CanvasSidebar({
           <DropdownMenuContent
             side="right"
             align="start"
-            className="z-[3001] w-56"
+            sideOffset={menuSideOffset}
+            collisionPadding={TOOLBAR_MENU_COLLISION_PADDING_PX}
+            // bg-background, not the shadcn bg-popover default: this project's
+            // Tailwind v4 theme only registers --background/--foreground, so
+            // `bg-popover` compiles to nothing at all and the panel rendered
+            // with a measured backgroundColor of rgba(0,0,0,0) -- the canvas
+            // and the bottom-left minimap showed straight through it. The
+            // border/text colours are set explicitly for the same reason.
+            // z-[3001] is the existing convention here: one above the
+            // toolbar's own z-[3000] wrapper, and far below the editor/modal
+            // layers (3100/4000/4100) which must still outrank a toolbar menu.
+            className="z-[3001] w-56 border-gray-200 bg-background text-gray-900 shadow-lg"
             data-toolbar-overflow-menu="true"
+            onCloseAutoFocus={(event) => {
+              const pending = pendingToolRef.current;
+              pendingToolRef.current = null;
+              if (!pending) return;
+              // Radix returns focus to the trigger as it closes. A non-modal
+              // dialog opened synchronously from onSelect (Canvas settings)
+              // saw that focus restore as an interact-outside and dismissed
+              // itself after ~66ms -- the "it tries to open then goes away"
+              // defect. Suppressing the refocus and running the action here,
+              // once the menu has finished closing, makes every overflow item
+              // behave exactly like its normal toolbar button.
+              event.preventDefault();
+              dispatchTool(pending);
+            }}
           >
             {overflowGroups.map((group, index) => (
               <React.Fragment key={group.id}>
@@ -298,8 +372,13 @@ export default function CanvasSidebar({
                       <DropdownMenuItem
                         key={tool.type}
                         disabled={isDisabled}
-                        onSelect={() => dispatchTool(tool.type, isDisabled)}
-                        className="cursor-pointer"
+                        // Queued rather than dispatched here; see the
+                        // onCloseAutoFocus handler above.
+                        onSelect={() => {
+                          if (isDisabled) return;
+                          pendingToolRef.current = tool.type;
+                        }}
+                        className="cursor-pointer focus:bg-gray-100 data-[highlighted]:bg-gray-100"
                       >
                         <IconComponent size={16} strokeWidth={1.5} className={tool.color} />
                         <span>{tool.label}</span>
