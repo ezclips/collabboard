@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState } from 'react';
+import { X } from 'lucide-react';
 import { ColorPickerContent } from '@/components/collabboard/ColorPicker';
 import { SECTION_HEADING_DEFAULT_ACCENT_COLOR } from '@/components/collabboard/canvas/engine/sectionHeading';
 
@@ -24,6 +25,12 @@ export interface SectionHeadingAppearancePanelProps {
   backgroundColor: string;
   accentColor: string;
   onChange: (target: SectionHeadingColorTarget, color: string) => void;
+  /**
+   * PATCH SECTION-H3B.3 Phase 3 -- closes the panel only. The heading's
+   * selection/edit state is owned entirely elsewhere and is never touched
+   * here, so closing can never commit, cancel, or deselect anything.
+   */
+  onClose: () => void;
 }
 
 const TARGETS: { id: SectionHeadingColorTarget; label: string }[] = [
@@ -37,6 +44,7 @@ export default function SectionHeadingAppearancePanel({
   backgroundColor,
   accentColor,
   onChange,
+  onClose,
 }: SectionHeadingAppearancePanelProps) {
   const [target, setTarget] = useState<SectionHeadingColorTarget>('background');
 
@@ -48,8 +56,26 @@ export default function SectionHeadingAppearancePanel({
   return (
     <div
       data-section-heading-appearance-panel="true"
-      className="w-64 rounded-xl border border-gray-200 bg-white p-3 shadow-2xl"
+      className="relative w-64 rounded-xl border border-gray-200 bg-white p-3 shadow-2xl"
     >
+      {/* PATCH SECTION-H3B.3 Phase 2/3 -- byte-identical to the existing
+          TextStylePopup/image-color-picker close control (FreeformPadletCards.tsx),
+          not a new visual language. Rendered inside the toolbar's already
+          fully pointer-isolated root (SectionHeadingToolbar.tsx's `isolate`
+          on mousedown/click/etc), so no click here can ever reach the canvas
+          viewport's blank-space deselect handler -- the same reason the
+          H-level and trigger buttons need no stopPropagation of their own. */}
+      <button
+        type="button"
+        // Keeps the heading's inline editor focused while the panel closes
+        // (Phase 4) -- the same guard the target-switch buttons below use.
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={onClose}
+        className="absolute -right-3 -top-3 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-400 shadow-md transition-all hover:text-gray-600"
+        title="Close"
+      >
+        <X className="h-3.5 w-3.5" />
+      </button>
       <div className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-gray-400">
         Appearance
       </div>

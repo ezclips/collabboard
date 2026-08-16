@@ -687,7 +687,7 @@ describe('SECTION-H2 text style and colors [52-67]', () => {
     const bare = mountHeading(makeHeading());
     expect((bare.host.querySelector('[data-section-heading-surface="true"]') as HTMLElement).style.backgroundColor).toBe('transparent');
     // ...and is explicitly offered by the panel, so it is reachable again.
-    const host = render(<SectionHeadingAppearancePanel textColor="#111111" backgroundColor="transparent" accentColor="#0f766e" onChange={vi.fn()} />);
+    const host = render(<SectionHeadingAppearancePanel textColor="#111111" backgroundColor="transparent" accentColor="#0f766e" onChange={vi.fn()} onClose={vi.fn()} />);
     act(() => { (host.querySelector('[data-section-heading-color-target="background"]') as HTMLElement).click(); });
     expect(host.querySelector('button[title="transparent"]')).not.toBeNull();
     // No mandatory background is hard-coded onto the object.
@@ -711,7 +711,7 @@ describe('SECTION-H2 text style and colors [52-67]', () => {
 
   it('63/64. the shared palette is reused -- no second color system', () => {
     expect(appearanceSrc).toContain("import { ColorPickerContent } from '@/components/collabboard/ColorPicker'");
-    const host = render(<SectionHeadingAppearancePanel textColor="#111111" backgroundColor="transparent" accentColor="#0f766e" onChange={vi.fn()} />);
+    const host = render(<SectionHeadingAppearancePanel textColor="#111111" backgroundColor="transparent" accentColor="#0f766e" onChange={vi.fn()} onClose={vi.fn()} />);
     expect(host.textContent).toContain('Default Colors');
     // The one preset array present is the app's own SIMPLE_PALETTE with
     // `transparent` prepended -- the same arrangement TextStylePopup uses.
@@ -728,7 +728,7 @@ describe('SECTION-H2 text style and colors [52-67]', () => {
 
   it('the appearance panel is ONE panel with three targets, not three palettes', () => {
     const onChange = vi.fn();
-    const host = render(<SectionHeadingAppearancePanel textColor="#111111" backgroundColor="transparent" accentColor="#0f766e" onChange={onChange} />);
+    const host = render(<SectionHeadingAppearancePanel textColor="#111111" backgroundColor="transparent" accentColor="#0f766e" onChange={onChange} onClose={vi.fn()} />);
     expect(host.querySelectorAll('[data-section-heading-appearance-panel="true"]').length).toBe(1);
     expect(Array.from(host.querySelectorAll('[data-section-heading-color-target]')).map((b) => b.getAttribute('data-section-heading-color-target')))
       .toEqual(['text', 'background', 'accent']);

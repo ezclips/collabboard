@@ -8,6 +8,7 @@ import {
   SECTION_HEADING_HANDLE_HIT_PX,
   SECTION_HEADING_LEVEL_TEXT_CLASS,
   SECTION_HEADING_MAX_LENGTH,
+  SECTION_HEADING_TEXT_OPTICAL_OFFSET_PX,
   getSectionHeadingAccentColor,
   getSectionHeadingBackgroundColor,
   getSectionHeadingHeight,
@@ -255,19 +256,32 @@ export default function SectionHeadingPost({
     >
       <div
         data-section-heading-surface="true"
-        className={`relative flex items-center overflow-visible rounded-md ${isSelected ? 'ring-2 ring-blue-500 ring-offset-2' : ''}`}
+        // PATCH SECTION-H3B.3 Phase 5: square surface -- a Section Heading is
+        // a board-structure marker, not a card, and CollabBoard's design
+        // requirement for it is square outer corners. No `rounded*` class of
+        // any kind on this element (resting OR selected).
+        className={`relative flex items-center overflow-visible ${isSelected ? 'ring-2 ring-blue-500 ring-offset-2' : ''}`}
         style={{ width, height, backgroundColor: surfaceColor }}
         onDoubleClick={() => { if (canEdit) setIsEditing(true); }}
       >
         {/* Left accent stripe (H1 Phase 10) -- never a top stripe, so the
-            heading stays visually compact as it stretches horizontally. */}
+            heading stays visually compact as it stretches horizontally.
+            PATCH SECTION-H3B.3 Phase 6: no rounded cap -- it runs flush from
+            the surface's (now square) top edge to its bottom edge. */}
         <div
           data-section-heading-accent="true"
           aria-hidden="true"
-          className="h-full shrink-0 rounded-l-md"
+          className="h-full shrink-0"
           style={{ width: SECTION_HEADING_ACCENT_WIDTH_PX, backgroundColor: accentColor }}
         />
-        <div className="min-w-0 flex-1 overflow-hidden px-3">
+        {/* PATCH SECTION-H3B.3 Phase 10/12: the ONE optical offset, applied to
+            the wrapper both the resting button AND the editing input live
+            inside -- so both states move together and there is never a
+            visible jump switching between them. */}
+        <div
+          className="min-w-0 flex-1 overflow-hidden px-3"
+          style={{ transform: `translateY(-${SECTION_HEADING_TEXT_OPTICAL_OFFSET_PX}px)` }}
+        >
           {isEditing ? (
             <input
               ref={inputRef}

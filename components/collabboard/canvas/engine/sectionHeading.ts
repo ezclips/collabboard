@@ -67,6 +67,19 @@ export const SECTION_HEADING_LEVEL_TEXT_CLASS: Record<SectionHeadingLevel, strin
 /** Width of the left accent stripe, in world px (Phase 10: left, never top). */
 export const SECTION_HEADING_ACCENT_WIDTH_PX = 4;
 
+/**
+ * PATCH SECTION-H3B.3 Phase 9/10 -- a small SHARED optical correction.
+ *
+ * The text sits inside a `flex items-center` line box, so it is already
+ * geometrically centered -- but font metrics (ascender/descender space baked
+ * into every level's line-height) leave visibly more empty room above the
+ * glyphs than below them at every size. Nudging the whole text wrapper up by
+ * this ONE constant fixes the illusion identically at H1-H4 without touching
+ * the height map, line-height, or per-level padding (Phase 10/11: exactly one
+ * offset, never four).
+ */
+export const SECTION_HEADING_TEXT_OPTICAL_OFFSET_PX = 2;
+
 /** SECTION-H1's accent, now the documented default the Phase 29 control resets to. */
 export const SECTION_HEADING_DEFAULT_ACCENT_COLOR = '#0f766e';
 

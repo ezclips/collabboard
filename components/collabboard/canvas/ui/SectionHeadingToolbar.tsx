@@ -231,6 +231,7 @@ export default function SectionHeadingToolbar({
               backgroundColor={getSectionHeadingBackgroundColor(padlet)}
               accentColor={getSectionHeadingAccentColor(padlet)}
               onChange={(target, color) => onChangeColor(padlet.id, target, color)}
+              onClose={() => setOpenPanel(null)}
             />
           </div>
         )}
