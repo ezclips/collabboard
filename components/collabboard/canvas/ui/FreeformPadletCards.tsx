@@ -42,6 +42,7 @@ import { TodoPostContextMenu } from '@/components/collabboard/menus/TodoPostCont
 import { ColumnPostContextMenu } from '@/components/collabboard/menus/ColumnPostContextMenu';
 import { CommentPostContextMenu } from '@/components/collabboard/menus/CommentPostContextMenu';
 import { ImagePostContextMenu } from '@/components/collabboard/context-menus/ImagePostContextMenu';
+import { SectionHeadingContextMenu } from '@/components/collabboard/menus/SectionHeadingContextMenu';
 import { isStripVisible, htmlToText, getEligibleContainerDestinations, IMAGE_CROP_TO_GRID_HEIGHT_PX } from '@/components/collabboard/canvas/engine/utils';
 import { getSectionHeadingHeight, isSectionHeading, type SectionHeadingLevel, type SectionHeadingRect, type SectionHeadingWorldBounds } from '@/components/collabboard/canvas/engine/sectionHeading';
 import SectionHeadingPost from '@/components/collabboard/canvas/ui/SectionHeadingPost';
@@ -557,6 +558,23 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
     updatePadletMetadata(id, { fullView: !(padlet.metadata as any)?.fullView });
   }, [padlets, updatePadletMetadata]);
 
+  // PATCH SECTION-H3B.4: the Section Heading right-click menu's open/position
+  // state, owned by this host (Phase 25) exactly like SectionHeadingToolbar's
+  // own state is -- the heading component itself only reports the raw event.
+  const [sectionHeadingContextMenu, setSectionHeadingContextMenu] = React.useState<{ padletId: string; x: number; y: number } | null>(null);
+
+  const handleSectionHeadingContextMenu = React.useCallback((event: React.MouseEvent, padletId: string) => {
+    // Mirrors every other post-type menu's `disabled={!canUseFreeformEditButton}`
+    // convention: in read-only mode, no CollabBoard menu opens and the
+    // browser's native context menu is left alone (no preventDefault).
+    if (!canUseFreeformEditButton) return;
+    event.preventDefault();
+    event.stopPropagation();
+    closeAllToolbars();
+    setSelectedPadletId(padletId);
+    setSectionHeadingContextMenu({ padletId, x: event.clientX, y: event.clientY });
+  }, [canUseFreeformEditButton, closeAllToolbars, setSelectedPadletId]);
+
   const [expandedContainers, setExpandedContainers] = React.useState<Record<string, boolean>>({});
   const [expandableContainers, setExpandableContainers] = React.useState<Record<string, boolean>>({});
   const [expandedAIPosts, setExpandedAIPosts] = React.useState<Record<string, boolean>>({});
@@ -905,6 +923,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
           isDraggingThis={draggingPadletId === padlet.id}
           onMouseDownCapture={handlePadletMouseDown}
           onCommitText={(padletId, nextText) => { void updatePadletTitle(padletId, nextText); }}
+          onContextMenu={handleSectionHeadingContextMenu}
           clientToWorld={getWorldPointFromClient}
           worldBounds={FREEFORM_SECTION_HEADING_WORLD_BOUNDS}
           // PATCH SECTION-H2 Phase 20: a heading inside a multi-selection
@@ -915,6 +934,20 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
           onResizeCommit={commitSectionHeadingRect}
         />
       ))}
+
+      {sectionHeadingContextMenu && (
+        <SectionHeadingContextMenu
+          isOpen
+          position={{ x: sectionHeadingContextMenu.x, y: sectionHeadingContextMenu.y }}
+          padlet={padlets.find((p) => p.id === sectionHeadingContextMenu.padletId) ?? null}
+          onClose={() => setSectionHeadingContextMenu(null)}
+          onCopy={() => copyPadlet(sectionHeadingContextMenu.padletId)}
+          onPaste={handlePaste}
+          onDelete={() => requestDeletePadlet(sectionHeadingContextMenu.padletId)}
+          onBringToFront={() => movePadletLayer(sectionHeadingContextMenu.padletId, 'bringToFront')}
+          onSendToBack={() => movePadletLayer(sectionHeadingContextMenu.padletId, 'sendToBack')}
+        />
+      )}
 
       {rootPadlets.filter(padlet => !isSectionHeading(padlet)).map(padlet => (
     <div

@@ -48,6 +48,15 @@ export interface SectionHeadingPostProps {
   /** Canonical stamped title write (useCanvasData.updatePadletTitle). */
   onCommitText: (padletId: string, text: string) => void;
   /**
+   * PATCH SECTION-H3B.4 Phase 25 -- renderer-neutral right-click reporting.
+   * This component knows nothing about menus: it forwards the raw browser
+   * event exactly like `onMouseDownCapture` already does, and the Freeform
+   * host owns the actual context-menu component, state and actions. A future
+   * Drawing adapter can wire this to its own right-click convention with no
+   * change here.
+   */
+  onContextMenu?: (event: React.MouseEvent, padletId: string) => void;
+  /**
    * PATCH SECTION-H3B Phase 6/7 -- the host's client -> world converter.
    *
    * This is the ONLY thing the heading needs to know about the canvas it is
@@ -84,6 +93,7 @@ export default function SectionHeadingPost({
   isDraggingThis,
   onMouseDownCapture,
   onCommitText,
+  onContextMenu,
   clientToWorld,
   worldBounds,
   canResize = true,
@@ -148,7 +158,12 @@ export default function SectionHeadingPost({
   }, [clientToWorld, worldBounds]);
 
   const handleSizingStart = useCallback((edge: SectionHeadingEdge) => (event: React.PointerEvent) => {
-    if (!canEdit || !canResize) return;
+    // PATCH SECTION-H3B.4 Phase 18: the right mouse button must never start a
+    // resize gesture -- it goes on to fire a `contextmenu` event, and a
+    // right-click on a handle should open the SAME heading context menu
+    // (which it already does, by bubbling from here to the outer wrapper)
+    // rather than leave a stuck drag behind.
+    if (!canEdit || !canResize || event.button === 2) return;
     event.preventDefault();
     event.stopPropagation();
     (event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId);
@@ -246,6 +261,16 @@ export default function SectionHeadingPost({
         // heading selected on mousedown was deselected a moment later by its
         // own click bubbling up and being read as "clicked empty canvas".
         event.stopPropagation();
+      }}
+      onContextMenu={(event) => {
+        // PATCH SECTION-H3B.4 Phase 17: while editing, the input owns the
+        // interaction -- skip forwarding entirely so the browser's native
+        // text-field context menu (Cut/Copy/Paste/spellcheck) appears
+        // instead, exactly like every other text input in the app. The
+        // draft is never touched: nothing here calls preventDefault, moves
+        // focus, commits or cancels.
+        if (isEditing) return;
+        onContextMenu?.(event, padlet.id);
       }}
       style={{
         left: padlet.position_x || 0,
