@@ -667,7 +667,16 @@ function DrawingEmbeddableCard({
     // with the leading one, even if the chrome classes below ever change.
     const outerBorder = cardOuterRef.current ? parseFloat(getComputedStyle(cardOuterRef.current).borderLeftWidth) || 0 : 0;
     const contentPadding = contentAreaRef.current ? parseFloat(getComputedStyle(contentAreaRef.current).paddingLeft) || 0 : 0;
-    const chromePerSide = outerBorder + contentPadding;
+    // Excalidraw wraps this card in its own `.excalidraw__embeddable__outer`
+    // element (this card's direct DOM parent), which carries a small padding
+    // of its own -- independent of our own border/`p-2` chrome above. Read it
+    // the same way, directly off computed style (a stable CSS value, not a
+    // ratio derived from the scene's own mutable width, which would create a
+    // feedback loop with the write below), so it survives Excalidraw
+    // version/style changes without depending on its internal class names.
+    const excalidrawWrapperEl = cardOuterRef.current?.parentElement ?? null;
+    const excalidrawWrapperPadding = excalidrawWrapperEl ? parseFloat(getComputedStyle(excalidrawWrapperEl).paddingLeft) || 0 : 0;
+    const chromePerSide = outerBorder + contentPadding + excalidrawWrapperPadding;
     const nextWidth = Math.max(existing.width ?? 0, Math.ceil(requiredWidth + chromePerSide * 2));
     if (nextWidth <= (existing.width ?? 0) + 1) return;
     excAPI.updateScene({
