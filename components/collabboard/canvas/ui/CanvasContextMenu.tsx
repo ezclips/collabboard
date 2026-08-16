@@ -69,6 +69,17 @@ export function CanvasContextMenu({
   const isComment = padlet.type === "comment";
   const metadata = getMetadataObject(padlet);
   const isContainerType = padlet.type === "container" || metadata.isContainer === true;
+  // PATCH SECTION-H3C: Section Heading gets the SAME minimal action set as
+  // Freeform's own SectionHeadingContextMenu (Copy/Paste/Delete/separator/
+  // Bring to Front/Send to Back) -- no Edit row (it has no modal editor, only
+  // its own inline double-click edit), no Cut/Duplicate/PNG export/forward-
+  // backward granularity. Every other post type's menu is untouched below.
+  // A plain type comparison (matching this file's existing isComment/
+  // isContainerType style) rather than importing the canonical
+  // isSectionHeading predicate -- this file deliberately imports nothing
+  // from the collabboard component tree (see
+  // excalidrawCollabBoardContextMenu.test.tsx's one-way dependency guard).
+  const isSectionHeadingType = padlet.type === "section_heading";
   const orderedOpenTargets = useMemo(() => openTargets ?? [], [openTargets]);
   const hasOpenTargets = Boolean(isContainerType && orderedOpenTargets.length > 0 && onOpenTarget);
   const singleOpenTarget = hasOpenTargets && orderedOpenTargets.length === 1 ? orderedOpenTargets[0] : null;
@@ -128,69 +139,93 @@ export function CanvasContextMenu({
       onClick={(e) => e.stopPropagation()}
       onContextMenu={(e) => e.stopPropagation()}
     >
-      {hasEditSubmenu ? (
-        <PositionedContextMenuSub>
-          <PositionedContextMenuSubTrigger>{editLabel}</PositionedContextMenuSubTrigger>
-          <PositionedContextMenuSubContent className="w-[220px]">
-            {orderedOpenTargets.map((target, idx) => (
-              <PositionedContextMenuItem
-                key={target.id}
-                icon={<Pencil size={13} />}
-                onSelect={() => onOpenTarget?.(target)}
-              >
-                <span className="truncate">{resolveOpenTargetLabel(target, idx)}</span>
-              </PositionedContextMenuItem>
-            ))}
-          </PositionedContextMenuSubContent>
-        </PositionedContextMenuSub>
-      ) : (
-        <PositionedContextMenuItem onSelect={runEdit}>{editLabel}</PositionedContextMenuItem>
-      )}
-
-      <PositionedContextMenuSeparator />
-      <PositionedContextMenuItem onSelect={() => onCut(padlet)}>Cut</PositionedContextMenuItem>
-      <PositionedContextMenuItem onSelect={() => onCopy(padlet)}>Copy</PositionedContextMenuItem>
-      <PositionedContextMenuItem disabled={!hasPaste} onSelect={() => onPaste(x, y)}>
-        Paste
-      </PositionedContextMenuItem>
-
-      {!isComment && (
+      {isSectionHeadingType ? (
         <>
+          <PositionedContextMenuItem onSelect={() => onCopy(padlet)}>Copy</PositionedContextMenuItem>
+          <PositionedContextMenuItem disabled={!hasPaste} onSelect={() => onPaste(x, y)}>
+            Paste
+          </PositionedContextMenuItem>
+          {onDelete && (
+            <PositionedContextMenuItem variant="destructive" onSelect={() => onDelete(padlet)}>
+              Delete
+            </PositionedContextMenuItem>
+          )}
+
           <PositionedContextMenuSeparator />
-          <PositionedContextMenuItem onSelect={() => onSendToBack(padlet)}>
-            Send to back
-          </PositionedContextMenuItem>
-          <PositionedContextMenuItem onSelect={() => onSendBackward(padlet)}>
-            Send backward
-          </PositionedContextMenuItem>
-          <PositionedContextMenuItem onSelect={() => onBringForward(padlet)}>
-            Bring forward
-          </PositionedContextMenuItem>
           <PositionedContextMenuItem onSelect={() => onBringToFront(padlet)}>
-            Bring to front
+            Bring to Front
           </PositionedContextMenuItem>
-
-          <PositionedContextMenuSeparator />
-          <PositionedContextMenuItem onSelect={() => onCopyAsPNG(padlet)}>
-            Copy to clipboard as PNG
-          </PositionedContextMenuItem>
-          <PositionedContextMenuItem onSelect={() => onExportAsPNG(padlet)}>
-            Export as PNG
-          </PositionedContextMenuItem>
-
-          <PositionedContextMenuSeparator />
-          <PositionedContextMenuItem onSelect={() => onDuplicate(padlet)}>
-            Duplicate
+          <PositionedContextMenuItem onSelect={() => onSendToBack(padlet)}>
+            Send to Back
           </PositionedContextMenuItem>
         </>
-      )}
-
-      {onDelete && (
+      ) : (
         <>
+          {hasEditSubmenu ? (
+            <PositionedContextMenuSub>
+              <PositionedContextMenuSubTrigger>{editLabel}</PositionedContextMenuSubTrigger>
+              <PositionedContextMenuSubContent className="w-[220px]">
+                {orderedOpenTargets.map((target, idx) => (
+                  <PositionedContextMenuItem
+                    key={target.id}
+                    icon={<Pencil size={13} />}
+                    onSelect={() => onOpenTarget?.(target)}
+                  >
+                    <span className="truncate">{resolveOpenTargetLabel(target, idx)}</span>
+                  </PositionedContextMenuItem>
+                ))}
+              </PositionedContextMenuSubContent>
+            </PositionedContextMenuSub>
+          ) : (
+            <PositionedContextMenuItem onSelect={runEdit}>{editLabel}</PositionedContextMenuItem>
+          )}
+
           <PositionedContextMenuSeparator />
-          <PositionedContextMenuItem variant="destructive" onSelect={() => onDelete(padlet)}>
-            Delete
+          <PositionedContextMenuItem onSelect={() => onCut(padlet)}>Cut</PositionedContextMenuItem>
+          <PositionedContextMenuItem onSelect={() => onCopy(padlet)}>Copy</PositionedContextMenuItem>
+          <PositionedContextMenuItem disabled={!hasPaste} onSelect={() => onPaste(x, y)}>
+            Paste
           </PositionedContextMenuItem>
+
+          {!isComment && (
+            <>
+              <PositionedContextMenuSeparator />
+              <PositionedContextMenuItem onSelect={() => onSendToBack(padlet)}>
+                Send to back
+              </PositionedContextMenuItem>
+              <PositionedContextMenuItem onSelect={() => onSendBackward(padlet)}>
+                Send backward
+              </PositionedContextMenuItem>
+              <PositionedContextMenuItem onSelect={() => onBringForward(padlet)}>
+                Bring forward
+              </PositionedContextMenuItem>
+              <PositionedContextMenuItem onSelect={() => onBringToFront(padlet)}>
+                Bring to front
+              </PositionedContextMenuItem>
+
+              <PositionedContextMenuSeparator />
+              <PositionedContextMenuItem onSelect={() => onCopyAsPNG(padlet)}>
+                Copy to clipboard as PNG
+              </PositionedContextMenuItem>
+              <PositionedContextMenuItem onSelect={() => onExportAsPNG(padlet)}>
+                Export as PNG
+              </PositionedContextMenuItem>
+
+              <PositionedContextMenuSeparator />
+              <PositionedContextMenuItem onSelect={() => onDuplicate(padlet)}>
+                Duplicate
+              </PositionedContextMenuItem>
+            </>
+          )}
+
+          {onDelete && (
+            <>
+              <PositionedContextMenuSeparator />
+              <PositionedContextMenuItem variant="destructive" onSelect={() => onDelete(padlet)}>
+                Delete
+              </PositionedContextMenuItem>
+            </>
+          )}
         </>
       )}
     </PositionedContextMenu>

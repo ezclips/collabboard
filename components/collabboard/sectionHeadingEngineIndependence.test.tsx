@@ -367,12 +367,13 @@ describe('SECTION-H3B host converter independence', () => {
 
 // ==================================================== FREEZE
 describe('SECTION-H3B product and scope freeze', () => {
-  it('Drawing is still not exposed and its files are untouched by this patch', () => {
-    // The registry gate is unchanged: the tool is emitted for Freeform only.
-    expect(registrySrc).toContain('...(isFreeformLayout ? [');
-    expect(code(registrySrc)).not.toMatch(/isDrawingLayout/);
+  it('Drawing is now exposed (superseded by SECTION-H3C) via the SAME registry condition and creation path as Freeform', () => {
+    // SECTION-H3C extended the registry gate from Freeform-only to
+    // Freeform-or-Drawing, and handleCreateSectionHeading's guard alongside
+    // it -- both changes are intentional, not a regression of this freeze.
+    expect(registrySrc).toContain('...(isFreeformLayout || isDrawingLayout ? [');
     expect(canvasClient).toContain("case 'section-heading':");
-    expect(canvasClient).toContain('if (!canvasId || !isFreeformLayout) return;');
+    expect(canvasClient).toContain('if (!canvasId || !(isFreeformLayout || isDrawingLayout)) return;');
   });
 
   it('the toolbar still does no world math and keeps its screen-space placement', () => {

@@ -1,7 +1,7 @@
 "use client";
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-import React, { useState, useEffect, useCallback, useRef, useMemo, useLayoutEffect } from 'react';
+import React, { useState, useEffect, useCallback, useContext, useRef, useMemo, useLayoutEffect, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import type { CanvasLine, Padlet } from '@/types/collabboard';
 import dynamic from 'next/dynamic';
@@ -29,6 +29,17 @@ import type { FrameSlide, RenderSlideOptions } from '@/components/presentation/P
 import { createSlideRenderer } from '@/components/presentation/slide-renderer/createSlideRenderer';
 import { CanvasContextMenu } from '@/components/collabboard/canvas/ui/CanvasContextMenu';
 import { useCanvasActions } from '@/components/collabboard/canvas/hooks/useCanvasActions';
+import SectionHeadingPost from '@/components/collabboard/canvas/ui/SectionHeadingPost';
+import SectionHeadingToolbar from '@/components/collabboard/canvas/ui/SectionHeadingToolbar';
+import {
+  isSectionHeading,
+  getSectionHeadingHeight,
+  SECTION_HEADING_UNBOUNDED_WORLD,
+  type SectionHeadingLevel,
+  type SectionHeadingRect,
+} from '@/components/collabboard/canvas/engine/sectionHeading';
+import type { CaptionStyle } from '@/lib/domain/canvas/captionStyle';
+import type { SectionHeadingColorTarget } from '@/components/collabboard/canvas/ui/SectionHeadingAppearancePanel';
 import { MessageSquarePlus, Library, MonitorPlay, X, Workflow, Pencil, ChevronDown, ChevronUp } from 'lucide-react';
 import { contrastIconColor } from '@/components/collabboard/shells/CardShell';
 import CustomMermaidModal from './CustomMermaidModal';
@@ -238,6 +249,334 @@ const toSceneCoords = (
     y: (clientY - offsetTop) / zoom - scrollY,
   };
 };
+
+/**
+ * PATCH SECTION-H3C -- Section Heading's whole-body drag start.
+ *
+ * Same underlying mechanism as DrawingEmbeddableCard's drag-handle strip
+ * below (mirror the scene element live via excAPI.updateScene, commit the
+ * canonical position on release via onDragEnd), reimplemented rather than
+ * shared because the two are driven by different event types: the strip
+ * starts from a real `onPointerDown` (PointerEvent, so it can use
+ * setPointerCapture), while Section Heading starts from SectionHeadingPost's
+ * renderer-neutral `onMouseDownCapture` contract (a plain MouseEvent, shared
+ * with Freeform) -- so this tracks the gesture via document mousemove/mouseup
+ * instead of pointer capture.
+ */
+/**
+ * PATCH SECTION-H3C: an external store for "which heading is selected",
+ * subscribed to via useSyncExternalStore -- NOT plain React state relayed
+ * through props or a reactive Context value.
+ *
+ * Excalidraw's `renderEmbeddable` output is portaled per-element through the
+ * fork's `tunnel-rat` mechanism. Two things were empirically confirmed (via a
+ * real browser, see the RETURN report) to cascade into an infinite React
+ * update loop the moment a Section Heading became selected:
+ *   1. giving `renderEmbeddable` a new identity on every selection change
+ *      (i.e. passing isSelected/onSelect as plain closure props);
+ *   2. a REACTIVE Context value (one whose reference changes when selection
+ *      changes) -- confirmed even with the consuming component's OWN JSX
+ *      output hardcoded to ignore the new value entirely; the mere act of
+ *      that component re-rendering because its Context subscription fired
+ *      was sufight to trigger the loop.
+ * A stable-identity external store, subscribed to with useSyncExternalStore,
+ * re-renders ONLY the specific subscribed component through React's normal
+ * (non-Context) scheduling path, which does not exhibit this behavior.
+ */
+/**
+ * PATCH SECTION-H3C: horizontal-only padding added around a Section Heading's
+ * OWN embeddable scene frame -- Drawing-specific, not part of the shared
+ * canonical geometry contract (padlet.position_x/width are never touched by
+ * this; only the SCENE ELEMENT the embeddable bridge creates is widened).
+ *
+ * Empirically confirmed necessary: `excalidraw__embeddable-container__inner`
+ * (part of the vendored fork, not modified) clips content to the frame's
+ * exact width via `overflow: hidden`. SectionHeadingPost's own left/right
+ * resize handles are a deliberate constant SCREEN-space grab target that
+ * protrudes slightly past the heading surface's own edge (H2 Phase 36, "so
+ * the handle stays comfortably clickable... instead of shrinking to a 1px
+ * sliver") -- without this padding, that protrusion falls outside the
+ * frame's clip box and the handles become unclickable (dead pixels; a real
+ * click there hits the raw Excalidraw canvas underneath instead).
+ *
+ * Sized for the worst case in the patch's own tested zoom range (25%-200%):
+ * the handle's hit-width is `SECTION_HEADING_HANDLE_HIT_PX / zoom` scene
+ * units, i.e. up to 14/0.25 = 56 units wide (28 each side) at 25% zoom.
+ */
+const SECTION_HEADING_DRAWING_FRAME_PADDING_PX = 40;
+
+class SectionHeadingSelectionStore {
+  private selectedId: string | null = null;
+  private listeners = new Set<() => void>();
+  getSnapshot = () => this.selectedId;
+  getServerSnapshot = () => null;
+  subscribe = (listener: () => void) => {
+    this.listeners.add(listener);
+    return () => { this.listeners.delete(listener); };
+  };
+  setSelected = (id: string | null) => {
+    if (this.selectedId === id) return;
+    this.selectedId = id;
+    this.listeners.forEach((listener) => listener());
+  };
+}
+
+const SectionHeadingDrawingContext = React.createContext<{
+  store: SectionHeadingSelectionStore;
+  setSelectedId: (id: string | null) => void;
+  registerElement: (padletId: string, el: HTMLElement | null) => void;
+} | null>(null);
+
+function startSectionHeadingBodyDrag(
+  padletId: string,
+  startEvent: { clientX: number; clientY: number },
+  deps: {
+    excalidrawAPIRef: React.RefObject<any>;
+    appStateRef: React.RefObject<any>;
+    onDragEnd?: (padletId: string, x: number, y: number) => void;
+  },
+) {
+  const excAPI = deps.excalidrawAPIRef.current;
+  if (!excAPI) return;
+  const sceneEl = excAPI.getSceneElements().find(
+    (el: any) => el.type === 'embeddable' && el.link === `padlet://${padletId}` && !el.isDeleted
+  );
+  if (!sceneEl) return;
+  const initialAppState = deps.appStateRef.current;
+  if (!initialAppState) return;
+  const startPointerScene = toSceneCoords(startEvent.clientX, startEvent.clientY, initialAppState);
+  const grabOffsetX = startPointerScene.x - sceneEl.x;
+  const grabOffsetY = startPointerScene.y - sceneEl.y;
+
+  const handleMove = (me: MouseEvent) => {
+    const appState = deps.appStateRef.current;
+    if (!appState) return;
+    const pointerScene = toSceneCoords(me.clientX, me.clientY, appState);
+    const newX = pointerScene.x - grabOffsetX;
+    const newY = pointerScene.y - grabOffsetY;
+    const liveSceneEl = excAPI.getSceneElements().find((el2: any) => el2.id === sceneEl.id) ?? sceneEl;
+    const updatedSceneEl = {
+      ...liveSceneEl,
+      x: newX,
+      y: newY,
+      version: (liveSceneEl.version ?? 1) + 1,
+      versionNonce: Math.floor(Math.random() * 1e9),
+      updated: Date.now(),
+    };
+    excAPI.updateScene({
+      ...buildDrawingSceneUpdate({
+        elements: excAPI.getSceneElements().map((el2: any) => (el2.id === sceneEl.id ? updatedSceneEl : el2)),
+        commitToHistory: false,
+      }),
+    });
+    if (typeof (excAPI as any).updateBoundElements === 'function') {
+      (excAPI as any).updateBoundElements(updatedSceneEl);
+    }
+  };
+
+  const handleUp = (ue: MouseEvent) => {
+    document.removeEventListener('mousemove', handleMove);
+    const appState = deps.appStateRef.current;
+    if (!appState) return;
+    const pointerScene = toSceneCoords(ue.clientX, ue.clientY, appState);
+    const newX = pointerScene.x - grabOffsetX;
+    const newY = pointerScene.y - grabOffsetY;
+    const membership = resolveFrameMembership(
+      { ...sceneEl, x: newX, y: newY, frameId: null },
+      excAPI.getSceneElements().filter((el: any) => el.type === 'frame' && !el.isDeleted),
+    );
+    const liveSceneElFinal = excAPI.getSceneElements().find((el2: any) => el2.id === sceneEl.id) ?? sceneEl;
+    const updatedSceneEl = {
+      ...liveSceneElFinal,
+      x: newX,
+      y: newY,
+      frameId: membership.frameId,
+      version: (liveSceneElFinal.version ?? 1) + 1,
+      versionNonce: Math.floor(Math.random() * 1e9),
+      updated: Date.now(),
+    };
+    excAPI.updateScene({
+      ...buildDrawingSceneUpdate({
+        elements: excAPI.getSceneElements().map((el2: any) => (el2.id === sceneEl.id ? updatedSceneEl : el2)),
+        commitToHistory: true,
+      }),
+    });
+    if (typeof (excAPI as any).updateBoundElements === 'function') {
+      (excAPI as any).updateBoundElements(updatedSceneEl);
+    }
+    deps.onDragEnd?.(padletId, newX, newY);
+  };
+
+  document.addEventListener('mousemove', handleMove);
+  document.addEventListener('mouseup', handleUp, { once: true });
+}
+
+type DrawingSectionHeadingCardProps = {
+  padlet: Padlet;
+  readOnly: boolean;
+  excalidrawAPIRef: React.RefObject<any>;
+  appStateRef: React.RefObject<any>;
+  onUpdatePadlet: (id: string, updates: Partial<Padlet>) => Promise<void>;
+  onContextMenu: (e: React.MouseEvent, padlet: Padlet) => void;
+  onDragEnd?: (padletId: string, x: number, y: number) => void;
+};
+
+/**
+ * PATCH SECTION-H3C -- the Drawing host adapter for Section Heading.
+ *
+ * A "very small host adapter wrapper" (per the patch spec): it owns nothing
+ * about Section Heading's presentation, geometry contract, selection ring,
+ * inline editing or resize math -- all of that is the SAME SectionHeadingPost
+ * used in Freeform. This component only translates between Drawing's own
+ * primitives (Excalidraw scene coordinates, the embeddable body-drag
+ * mechanism, Drawing's generic context-menu/canonical-update plumbing) and
+ * SectionHeadingPost's renderer-neutral prop contract -- exactly the same
+ * shape of adapter FreeformPadletCards already is, just for a different host.
+ */
+function DrawingSectionHeadingCard({
+  padlet,
+  readOnly,
+  excalidrawAPIRef,
+  appStateRef,
+  onUpdatePadlet,
+  onContextMenu,
+  onDragEnd,
+}: DrawingSectionHeadingCardProps) {
+  // Context here is stable-identity (never changes) -- only used to hand
+  // down the store/registerElement references. The actual selection VALUE is
+  // read via useSyncExternalStore, which re-renders only this component
+  // through React's normal scheduling, not Context propagation. See
+  // SectionHeadingSelectionStore's own comment for why that distinction
+  // matters here.
+  const selection = useContext(SectionHeadingDrawingContext)!;
+  const selectedId = useSyncExternalStore(
+    selection.store.subscribe,
+    selection.store.getSnapshot,
+    selection.store.getServerSnapshot,
+  );
+  const isSelected = selectedId === padlet.id;
+  const onSelect = selection.setSelectedId;
+  const registerElement = selection.registerElement;
+  const [resizePreview, setResizePreview] = useState<SectionHeadingRect | null>(null);
+  // Local-only preview during a resize drag (no DB write per frame) -- the
+  // SAME split Freeform's previewSectionHeadingRect/commitSectionHeadingRect
+  // use, just held in this adapter's own state instead of the host's padlets
+  // array, since Drawing does not expose a setPadlets-style setter here.
+  const displayPadlet = resizePreview
+    ? { ...padlet, position_x: resizePreview.x, width: resizePreview.width }
+    : padlet;
+
+  const clientToWorld = useCallback((clientX: number, clientY: number) => {
+    return toSceneCoords(clientX, clientY, appStateRef.current);
+  }, [appStateRef]);
+
+  const handleMouseDownCapture = useCallback((event: React.MouseEvent, padletId: string) => {
+    if (readOnly) return;
+    onSelect(padletId);
+    // Resize handles own their own gesture (SectionHeadingPost's internal
+    // pointerdown handlers, unchanged) -- the body drag must not compete
+    // with them for the same mousedown.
+    const targetEl = event.target as HTMLElement;
+    if (targetEl.closest?.('[data-section-heading-handle]')) return;
+    startSectionHeadingBodyDrag(
+      padletId,
+      { clientX: event.clientX, clientY: event.clientY },
+      { excalidrawAPIRef, appStateRef, onDragEnd },
+    );
+  }, [readOnly, onSelect, excalidrawAPIRef, appStateRef, onDragEnd]);
+
+  const setRef = useCallback((el: HTMLDivElement | null) => {
+    registerElement(padlet.id, el);
+  }, [registerElement, padlet.id]);
+
+  return (
+    <div
+      ref={setRef}
+      data-padlet-id={padlet.id}
+      className="w-full h-full relative"
+      onMouseDown={(e) => { if (e.button === 2) e.stopPropagation(); }}
+    >
+      {/*
+        PATCH SECTION-H3C: the Excalidraw embeddable container already
+        positions this whole card at (padlet.position_x - PADDING,
+        padlet.position_y) in scene space via its OWN CSS transform (the
+        frame is widened by SECTION_HEADING_DRAWING_FRAME_PADDING_PX so the
+        resize handles are not overflow-clipped -- see that constant's own
+        comment). SectionHeadingPost's root, built for Freeform's single
+        absolute world layer, ALSO applies `left: position_x; top:
+        position_y` as its own inline style -- left uncancelled, the two
+        positioning systems compound, rendering the heading far outside its
+        own embeddable frame (empirically confirmed: it renders, fully
+        interactive, just invisible off to the side).
+        This wrapper cancels using the STABLE (last-committed) position, not
+        the live resize-preview one, which is what keeps a live left-edge
+        resize visually anchoring the RIGHT edge exactly like Freeform: the
+        wrapper's offset stays fixed at PADDING-padlet.position_x while
+        SectionHeadingPost's own left grows to displayPadlet.position_x, so
+        their sum is PADDING plus the live delta -- not PADDING alone, not
+        the full position.
+      */}
+      <div
+        className="absolute"
+        style={{
+          left: SECTION_HEADING_DRAWING_FRAME_PADDING_PX - (padlet.position_x || 0),
+          top: -(padlet.position_y || 0),
+        }}
+      >
+        <SectionHeadingPost
+          padlet={displayPadlet}
+          isSelected={isSelected}
+          canEdit={!readOnly}
+          isDraggingThis={false}
+          onMouseDownCapture={handleMouseDownCapture}
+          onCommitText={(padletId, text) => { void onUpdatePadlet(padletId, { title: text }); }}
+          onContextMenu={(event) => onContextMenu(event, padlet)}
+          clientToWorld={clientToWorld}
+          worldBounds={SECTION_HEADING_UNBOUNDED_WORLD}
+          canResize
+          onResizePreview={(_padletId, rect) => setResizePreview(rect)}
+          onResizeCommit={(padletId, rect) => {
+            setResizePreview(null);
+            // Push the scene element's OWN x/width immediately, the same way
+            // startSectionHeadingBodyDrag's handleUp does for body moves --
+            // relying solely on the passive reconciliation effect to pick up
+            // the canonical write was empirically confirmed to race: its own
+            // "did position change" staleness tracking (previousSceneSync,
+            // shared by every padlet type) can settle to the NEW value
+            // before the scene element itself was ever actually updated,
+            // permanently leaving el.x stale (width -- a separate,
+            // unconditional check -- updates fine either way, which is what
+            // made this a position-only bug).
+            const excAPI = excalidrawAPIRef.current;
+            if (excAPI) {
+              const link = `padlet://${padletId}`;
+              const sceneEl = excAPI.getSceneElements().find(
+                (el: any) => el.type === 'embeddable' && el.link === link && !el.isDeleted
+              );
+              if (sceneEl) {
+                const updatedSceneEl = {
+                  ...sceneEl,
+                  x: rect.x - SECTION_HEADING_DRAWING_FRAME_PADDING_PX,
+                  width: rect.width + SECTION_HEADING_DRAWING_FRAME_PADDING_PX * 2,
+                  version: (sceneEl.version ?? 1) + 1,
+                  versionNonce: Math.floor(Math.random() * 1e9),
+                  updated: Date.now(),
+                };
+                excAPI.updateScene({
+                  ...buildDrawingSceneUpdate({
+                    elements: excAPI.getSceneElements().map((el2: any) => (el2.id === sceneEl.id ? updatedSceneEl : el2)),
+                    commitToHistory: true,
+                  }),
+                });
+              }
+            }
+            void onUpdatePadlet(padletId, { position_x: rect.x, width: rect.width });
+          }}
+        />
+      </div>
+    </div>
+  );
+}
 
 type DrawingEmbeddableCardProps = {
   padlet: Padlet;
@@ -837,6 +1176,54 @@ export default function DrawingLayout({
   const [presentationActive, setPresentationActive] = useState(false);
   const [presentationStartId, setPresentationStartId] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; padlet: Padlet } | null>(null);
+  // PATCH SECTION-H3C: Section Heading selection.
+  //
+  // Two representations of the SAME fact, deliberately kept separate:
+  //   - `sectionHeadingSelectionStoreRef` (a SectionHeadingSelectionStore,
+  //     see its own comment) is what the tunneled per-heading card content
+  //     subscribes to via useSyncExternalStore. Required to avoid the
+  //     infinite-loop failure mode confirmed via real-browser testing.
+  //   - `selectedSectionHeadingId` (plain React state) is what THIS
+  //     component's own JSX reads to conditionally render the toolbar --
+  //     that JSX is NOT inside tunnel-rat's portaled content, so plain state
+  //     is safe there (confirmed: unrelated DrawingLayout state changes with
+  //     full descendant re-render do not reproduce the loop).
+  // setSelectedSectionHeadingId (below) updates BOTH in one call.
+  const sectionHeadingSelectionStoreRef = useRef<SectionHeadingSelectionStore | null>(null);
+  if (sectionHeadingSelectionStoreRef.current === null) {
+    sectionHeadingSelectionStoreRef.current = new SectionHeadingSelectionStore();
+  }
+  const [selectedSectionHeadingId, setSelectedSectionHeadingIdState] = useState<string | null>(null);
+  const setSelectedSectionHeadingId = useCallback((id: string | null) => {
+    sectionHeadingSelectionStoreRef.current!.setSelected(id);
+    setSelectedSectionHeadingIdState(id);
+  }, []);
+  // Mirrors selectedSectionHeadingId for handleChange to read WITHOUT being a
+  // dependency -- handleChange is passed as ExcalidrawWrapper's `onChange`
+  // prop, and giving it a new identity on every selection change was
+  // empirically confirmed (alongside the same issue in renderEmbeddable) to
+  // cascade into an infinite update loop through the fork's tunnel-rat
+  // portal machinery.
+  const selectedSectionHeadingIdRef = useRef<string | null>(null);
+  selectedSectionHeadingIdRef.current = selectedSectionHeadingId;
+  const lastSectionHeadingViewportRef = useRef<{ zoom: number; scrollX: number; scrollY: number }>({ zoom: 1, scrollX: 0, scrollY: 0 });
+  const sectionHeadingElsRef = useRef<Map<string, HTMLElement>>(new Map());
+  const registerSectionHeadingElement = useCallback((padletId: string, el: HTMLElement | null) => {
+    if (el) sectionHeadingElsRef.current.set(padletId, el);
+    else sectionHeadingElsRef.current.delete(padletId);
+  }, []);
+  // Re-measure trigger for SectionHeadingToolbar's fixed-position anchor.
+  // Bumped from handleChange (pan/zoom/scroll), but ONLY while a heading is
+  // actually selected, so this never adds render cost to the common case.
+  const [sectionHeadingViewportRevision, setSectionHeadingViewportRevision] = useState(0);
+  // Stable-identity context value (deps never change across this
+  // component's lifetime) -- see SectionHeadingSelectionStore's comment for
+  // why this must NEVER change reference because of selection.
+  const sectionHeadingContextValue = useMemo(() => ({
+    store: sectionHeadingSelectionStoreRef.current!,
+    setSelectedId: setSelectedSectionHeadingId,
+    registerElement: registerSectionHeadingElement,
+  }), [setSelectedSectionHeadingId, registerSectionHeadingElement]);
   // Track current binary files (images embedded in drawing) for export
   const currentFilesRef = useRef<any>(null);
   const runtimeSceneElementsRef = useRef<readonly any[]>([]);
@@ -1229,6 +1616,25 @@ export default function DrawingLayout({
 
     // Always write latest appState to ref (no re-render).
     appStateRef.current = newAppState;
+    // PATCH SECTION-H3C: re-anchor the Section Heading toolbar after pan/zoom
+    // -- appStateRef is a ref specifically to avoid 60fps re-renders, so this
+    // reactive bump only fires while a heading is actually selected, AND only
+    // when the camera actually moved since the last bump. Without the
+    // actually-moved check this loops: bumping the revision re-renders
+    // DrawingLayout, which (empirically confirmed) causes Excalidraw to fire
+    // onChange again on the SAME frame, which reads the same non-null
+    // selectedSectionHeadingIdRef and bumps again -- forever, regardless of
+    // whether the camera moved at all.
+    if (selectedSectionHeadingIdRef.current) {
+      const lastViewport = lastSectionHeadingViewportRef.current;
+      const nextZoom = newAppState.zoom?.value || 1;
+      const nextScrollX = newAppState.scrollX || 0;
+      const nextScrollY = newAppState.scrollY || 0;
+      if (lastViewport.zoom !== nextZoom || lastViewport.scrollX !== nextScrollX || lastViewport.scrollY !== nextScrollY) {
+        lastSectionHeadingViewportRef.current = { zoom: nextZoom, scrollX: nextScrollX, scrollY: nextScrollY };
+        setSectionHeadingViewportRevision((rev) => rev + 1);
+      }
+    }
     // Only trigger a render when rounded zoom percent changes (drives toolbar zoom display).
     const newZoomPct = Math.round(newZoomValue * 100);
     if (newZoomPct !== prevZoomPctRef.current) {
@@ -1929,6 +2335,29 @@ export default function DrawingLayout({
     setContextMenu({ x: e.clientX, y: e.clientY, padlet });
   }, [closeSelectedShapePanel, readOnly]);
 
+  /**
+   * PATCH SECTION-H3C Phase 26 -- Section Heading's OWN z-order, via the SAME
+   * canonical metadata.zIndex infrastructure Freeform's movePadletLayer uses.
+   *
+   * Every OTHER Drawing post type's Bring to Front/Send to Back
+   * (useCanvasActions.ts's handleBringToFront/handleSendToBack) reorders
+   * Excalidraw's OWN scene element array -- canvas-draw-order ownership, not
+   * canonical data. That is explicitly what this phase forbids for Section
+   * Heading ("No Excalidraw-only order as semantic ownership"), because its
+   * CSS z-index is driven by metadata.zIndex (SectionHeadingPost's own
+   * style), which scene-array reordering never touches at all -- confirmed
+   * empirically (z-index stayed unchanged after using the generic path).
+   * Reusing Freeform's own max+1 / max(10,min-1) formula against the SAME
+   * `padlets` array keeps one z-order convention across the whole board.
+   */
+  const moveSectionHeadingZOrder = useCallback(async (padlet: Padlet, action: 'bringToFront' | 'sendToBack') => {
+    const zValues = padlets.map((p) => (p.metadata as { zIndex?: number } | undefined)?.zIndex || 100);
+    const maxZ = Math.max(...zValues);
+    const minZ = Math.min(...zValues);
+    const newZ = action === 'bringToFront' ? maxZ + 1 : Math.max(10, minZ - 1);
+    await onUpdatePadlet(padlet.id, { metadata: { ...padlet.metadata, zIndex: newZ } });
+  }, [padlets, onUpdatePadlet]);
+
   const getPadletRenderSignature = useCallback((padlet: Padlet) => {
     return JSON.stringify({
       id: padlet.id,
@@ -1951,12 +2380,18 @@ export default function DrawingLayout({
 
 
   const createEmbeddableElementForPadlet = useCallback((padlet: Padlet) => {
+    // See SECTION_HEADING_DRAWING_FRAME_PADDING_PX's own comment -- widens
+    // ONLY the scene frame so the heading's own resize handles are not
+    // clipped by the embeddable's overflow:hidden container. The canonical
+    // padlet.position_x/width are never touched; DrawingSectionHeadingCard
+    // cancels this same padding back out when positioning its content.
+    const framePadding = isSectionHeading(padlet) ? SECTION_HEADING_DRAWING_FRAME_PADDING_PX : 0;
     return {
       id: crypto.randomUUID(),
       type: "embeddable" as const,
-      x: padlet.position_x,
+      x: padlet.position_x - framePadding,
       y: padlet.position_y,
-      width: padlet.width ?? 320,
+      width: (padlet.width ?? 320) + framePadding * 2,
       height: padlet.height ?? 280,
       angle: 0,
       strokeColor: "transparent",
@@ -1976,7 +2411,16 @@ export default function DrawingLayout({
       boundElements: null,
       updated: Date.now(),
       link: `padlet://${padlet.id}`,
-      locked: false,
+      // PATCH SECTION-H3C Phase 18-21: a Section Heading's only visible
+      // transform handles are its own left/right horizontal ones
+      // (SectionHeadingPost). Locking the embeddable removes Excalidraw's
+      // native corner/edge/rotation selection chrome entirely while leaving
+      // its React content (rendered via renderEmbeddable) fully interactive
+      // -- body drag and resize are both app-owned already (see
+      // startSectionHeadingBodyDrag / SectionHeadingPost's own handles), so
+      // nothing native is lost. Every other embeddable keeps `locked: false`
+      // unchanged.
+      locked: isSectionHeading(padlet),
       customData: {
         renderSignature: getPadletRenderSignature(padlet),
       },
@@ -2009,7 +2453,13 @@ export default function DrawingLayout({
     const nonDrawingRootPadlets = padlets.filter((p) => p.type !== "drawing" && !p.metadata?.parentId);
     const previousSceneSync = lastPadletSceneSyncRef.current;
     const nextSceneSync = new Map(
-      nonDrawingRootPadlets.map((p) => [String(p.id), { x: p.position_x ?? 0, y: p.position_y ?? 0 }] as const)
+      nonDrawingRootPadlets.map((p) => [
+        String(p.id),
+        {
+          x: (p.position_x ?? 0) - (isSectionHeading(p) ? SECTION_HEADING_DRAWING_FRAME_PADDING_PX : 0),
+          y: p.position_y ?? 0,
+        },
+      ] as const)
     );
 
     const currentElements = excalidrawAPI.getSceneElements();
@@ -2052,9 +2502,13 @@ export default function DrawingLayout({
         const linkedPadlet = padletsByLink.get(el.link);
         if (!linkedPadlet) return el;
 
-        const nextX = linkedPadlet.position_x ?? 0;
+        // See SECTION_HEADING_DRAWING_FRAME_PADDING_PX's comment -- the
+        // embeddable's OWN scene frame stays padded on every reconciliation
+        // pass too, not just at creation.
+        const framePadding = isSectionHeading(linkedPadlet) ? SECTION_HEADING_DRAWING_FRAME_PADDING_PX : 0;
+        const nextX = (linkedPadlet.position_x ?? 0) - framePadding;
         const nextY = linkedPadlet.position_y ?? 0;
-        const nextWidth = linkedPadlet.width ?? 320;
+        const nextWidth = (linkedPadlet.width ?? 320) + framePadding * 2;
         const nextHeight = linkedPadlet.height ?? 280;
         const nextSignature = getPadletRenderSignature(linkedPadlet);
         const currentSignature = el.customData?.renderSignature;
@@ -2243,6 +2697,34 @@ export default function DrawingLayout({
     const padletId = link.replace("padlet://", "");
     const padlet = paddletsRef.current.find((p) => String(p.id) === padletId && p.type !== "drawing");
     if (!padlet) return null;
+    // PATCH SECTION-H3C Phase 6: Section Heading owns its entire presentation
+    // (same as Freeform), so it is routed to its dedicated adapter INSTEAD OF
+    // the generic DrawingEmbeddableCard -- not layered on top of it. This
+    // keeps it free of the title-bar/pencil-edit/comment-badge chrome every
+    // other Drawing card has, without touching DrawingEmbeddableCard at all.
+    if (isSectionHeading(padlet)) {
+      return (
+        <DrawingSectionHeadingCard
+          key={padletId}
+          padlet={padlet}
+          readOnly={readOnly}
+          excalidrawAPIRef={excalidrawAPIRef}
+          appStateRef={appStateRef}
+          onUpdatePadlet={onUpdatePadlet}
+          onContextMenu={handleContextMenu}
+          onDragEnd={(id, x, y) => {
+            // startSectionHeadingBodyDrag operates purely in "this
+            // embeddable's own scene frame" terms, which is padded (see
+            // SECTION_HEADING_DRAWING_FRAME_PADDING_PX) -- un-pad before this
+            // reaches canonical position_x, or every drag would permanently
+            // shift the heading left by the padding amount.
+            const canonicalX = x + SECTION_HEADING_DRAWING_FRAME_PADDING_PX;
+            recentlyDraggedRef.current.set(id, { x: canonicalX, y, expiresAt: Date.now() + 5000 });
+            savePadletPositionWithLock(id, canonicalX, y);
+          }}
+        />
+      );
+    }
     return (
       <DrawingEmbeddableCard
         key={padletId}
@@ -2275,7 +2757,7 @@ export default function DrawingLayout({
         onOpenDocument={onOpenDocument}
       />
     );
-  }, [canvasId, commentAccessMode, currentUserAvatar, currentUserId, currentUserName, fetchData, handleContextMenu, handleUpdateChildComments, onAddPadlet, onDeletePadlet, onUpdatePadletStrict, readOnly, savePadletPositionWithLock, onOpenDocument]);
+  }, [canvasId, commentAccessMode, currentUserAvatar, currentUserId, currentUserName, fetchData, handleContextMenu, handleUpdateChildComments, onAddPadlet, onDeletePadlet, onUpdatePadlet, onUpdatePadletStrict, readOnly, savePadletPositionWithLock, onOpenDocument]);
 
   // Stable viewport accessor for useCanvasActions -- reads appStateRef at call time so
   // callbacks never stale-close over scroll/zoom and never recreate on pan.
@@ -3209,6 +3691,7 @@ export default function DrawingLayout({
   ) : null;
 
   return (
+    <SectionHeadingDrawingContext.Provider value={sectionHeadingContextValue}>
     <div
 
       className="flex-1 w-full h-full absolute inset-0 bg-transparent"
@@ -3226,6 +3709,12 @@ export default function DrawingLayout({
           height: '100%',
           visibility: isInitialViewportSettled ? 'visible' : 'hidden',
         }}
+        // PATCH SECTION-H3C: blank-canvas click deselects a selected Section
+        // Heading -- the SAME mechanism as Freeform's viewport blank-click
+        // deselect. A click landing ON a heading never reaches here because
+        // SectionHeadingPost's own onClick already stops propagation
+        // (SECTION-H3B.1, unchanged); a click on raw Excalidraw canvas does.
+        onClick={() => setSelectedSectionHeadingId(null)}
       >
         <ExcalidrawWrapper
           excalidrawAPI={(api) => { setExcalidrawAPI(api); excalidrawAPIRef.current = api; if (drawingExcalidrawAPIRef) drawingExcalidrawAPIRef.current = api; }}
@@ -3537,15 +4026,51 @@ export default function DrawingLayout({
           onPaste={(sx, sy) => { handlePastePadlet(sx, sy); setContextMenu(null); }}
           onDuplicate={(p) => { handleDuplicatePadlet(p); setContextMenu(null); }}
           onDelete={onDeletePadlet ? (p) => { handleDeletePadlet(p); setContextMenu(null); } : undefined}
-          onSendToBack={(p) => { handleSendToBack(p); setContextMenu(null); }}
+          onSendToBack={(p) => { if (isSectionHeading(p)) { void moveSectionHeadingZOrder(p, 'sendToBack'); } else { handleSendToBack(p); } setContextMenu(null); }}
           onSendBackward={(p) => { handleSendBackward(p); setContextMenu(null); }}
           onBringForward={(p) => { handleBringForward(p); setContextMenu(null); }}
-          onBringToFront={(p) => { handleBringToFront(p); setContextMenu(null); }}
+          onBringToFront={(p) => { if (isSectionHeading(p)) { void moveSectionHeadingZOrder(p, 'bringToFront'); } else { handleBringToFront(p); } setContextMenu(null); }}
           onCopyAsPNG={(p) => { handleCopyAsPNG(p); setContextMenu(null); }}
           onExportAsPNG={(p) => { handleExportAsPNG(p); setContextMenu(null); }}
           onClose={() => setContextMenu(null)}
         />
       )}
+
+      {/* PATCH SECTION-H3C: the SAME SectionHeadingToolbar Freeform uses,
+          rendered once here (not per-heading) and anchored to whichever
+          heading is currently selected -- identical pattern to
+          FreeformPadletCards' own single toolbar instance. A sibling of
+          drawingRootRef's div, so it can never trip that div's blank-click
+          deselect handler regardless of its own internal isolation. */}
+      {!readOnly && selectedSectionHeadingId && (() => {
+        const selectedHeading = paddletsRef.current.find((p) => p.id === selectedSectionHeadingId);
+        if (!selectedHeading || !isSectionHeading(selectedHeading)) return null;
+        const headingElement = sectionHeadingElsRef.current.get(selectedSectionHeadingId) ?? null;
+        return (
+          <SectionHeadingToolbar
+            padlet={selectedHeading}
+            headingElement={headingElement}
+            viewportRevision={sectionHeadingViewportRevision}
+            onChangeLevel={(padletId, level: SectionHeadingLevel) => {
+              void onUpdatePadlet(padletId, {
+                metadata: { ...selectedHeading.metadata, headingLevel: level },
+                height: getSectionHeadingHeight(level),
+              });
+            }}
+            onChangeTextStyle={(padletId, style: Partial<CaptionStyle>) => {
+              void onUpdatePadlet(padletId, {
+                metadata: { ...selectedHeading.metadata, titleStyle: { ...(selectedHeading.metadata as any)?.titleStyle, ...style } },
+              });
+            }}
+            onChangeColor={(padletId, target: SectionHeadingColorTarget, color: string) => {
+              const key = target === 'text' ? 'textColor' : target === 'background' ? 'backgroundColor' : 'accentColor';
+              void onUpdatePadlet(padletId, {
+                metadata: { ...selectedHeading.metadata, [key]: color },
+              });
+            }}
+          />
+        );
+      })()}
 
       {/* Custom Mermaid Modal */}
       <CustomMermaidModal
@@ -3554,5 +4079,6 @@ export default function DrawingLayout({
         onInsert={handleInsertMermaid}
       />
     </div>
+    </SectionHeadingDrawingContext.Provider>
   );
 }

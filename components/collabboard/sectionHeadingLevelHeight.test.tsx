@@ -409,11 +409,11 @@ describe('SECTION-H3B.2 selection/edit regression guard (SECTION-H3B.1 frozen) [
 
 // ============================================================ FROZEN [34-37]
 describe('SECTION-H3B.2 frozen invariants [34-37]', () => {
-  it('34. Drawing still does not expose the H tool', () => {
+  it('34. non-Freeform, non-Drawing layouts still do not expose the H tool (superseded by SECTION-H3C: Drawing itself now does)', () => {
     const FLAGS = {
       isMapLayout: false, isFreeformLayout: false, isFreeformGraphMode: false,
       isTimelineLayout: false, chronoMode: null, canManageCanvasShare: false,
-      canUseFreeformEditButton: true,
+      canUseFreeformEditButton: true, isDrawingLayout: false,
     };
     const types = buildCanvasToolbarGroups(FLAGS as never).flatMap((g) => g.tools.map((t) => t.type));
     expect(types).not.toContain('section-heading');

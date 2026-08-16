@@ -32,6 +32,8 @@ export type CanvasToolbarFlags = {
   chronoMode: ChronoMode | string | null;
   canManageCanvasShare: boolean;
   canUseFreeformEditButton: boolean;
+  /** PATCH SECTION-H3C: Section heading is now also supported in Drawing. */
+  isDrawingLayout: boolean;
 };
 
 function GraphLineToolIcon({ size = 18, className, ...rest }: { size?: number; className?: string; [key: string]: unknown }) {
@@ -66,6 +68,7 @@ export function buildCanvasToolbarGroups({
   chronoMode,
   canManageCanvasShare,
   canUseFreeformEditButton,
+  isDrawingLayout,
 }: CanvasToolbarFlags): SidebarToolGroup[] {
   const canvasSpecificTools = [
     { icon: MoveRight, label: "Line", color: "text-gray-600", bg: "hover:bg-gray-50", type: "line" },
@@ -108,11 +111,12 @@ export function buildCanvasToolbarGroups({
       id: 'structure',
       label: 'Blocks',
       tools: [
-        // PATCH SECTION-H1: Freeform ONLY. Not merely disabled elsewhere --
-        // the entry is absent from the registry for every other layout, so
-        // no dead button can be mounted. Drawing gets its own adapter in
-        // SECTION-H3 and is deliberately excluded here too.
-        ...(isFreeformLayout ? [
+        // PATCH SECTION-H1: Freeform only, initially. PATCH SECTION-H3C: Drawing
+        // now shares the same canonical renderer/engine, so the tool is exposed
+        // there too. Still absent from the registry entirely (not merely
+        // disabled) for every other structured layout -- no dead button can be
+        // mounted for Wall/Columns/Grid/Table/Timeline/Stream/Map.
+        ...(isFreeformLayout || isDrawingLayout ? [
           { icon: Heading, label: "Section heading", color: "text-teal-700", bg: "hover:bg-teal-50", type: "section-heading" },
         ] : []),
         { icon: BookOpen, label: "Library", color: "text-blue-600", bg: "hover:bg-blue-50", type: "library",

@@ -933,17 +933,17 @@ describe('SECTION-H2 frozen regressions [81-91]', () => {
   const FLAGS = {
     isMapLayout: false, isFreeformLayout: false, isFreeformGraphMode: false,
     isTimelineLayout: false, chronoMode: null, canManageCanvasShare: false,
-    canUseFreeformEditButton: true,
+    canUseFreeformEditButton: true, isDrawingLayout: false,
   };
   const toolTypes = (flags: Partial<typeof FLAGS>) =>
     buildCanvasToolbarGroups({ ...FLAGS, ...flags } as never).flatMap((g) => g.tools.map((t) => t.type));
 
-  it('81/82. the global H tool is still Freeform-only, and absent from Drawing', () => {
+  it('81/82. the global H tool is Freeform + Drawing only (SECTION-H3C extended this from Freeform-only)', () => {
     expect(toolTypes({ isFreeformLayout: true })).toContain('section-heading');
-    expect(toolTypes({ isFreeformLayout: false })).not.toContain('section-heading');
-    // Drawing is not a Freeform layout, so the entry is never emitted at all.
+    expect(toolTypes({ isFreeformLayout: false, isDrawingLayout: true })).toContain('section-heading');
+    expect(toolTypes({ isFreeformLayout: false, isDrawingLayout: false })).not.toContain('section-heading');
     expect(read('app/dashboard/canvas/[id]/CanvasClient.tsx')).toContain("case 'section-heading':");
-    expect(code(read('components/collabboard/canvas/ui/canvasToolbarRegistry.tsx'))).not.toMatch(/isDrawingLayout/);
+    expect(code(read('components/collabboard/canvas/ui/canvasToolbarRegistry.tsx'))).toMatch(/isFreeformLayout \|\| isDrawingLayout/);
     // The global creation toolbar itself is unmoved by this patch.
     expect(read('components/collabboard/canvas/ui/canvasToolbarRegistry.tsx'))
       .toContain('{ icon: Heading, label: "Section heading", color: "text-teal-700", bg: "hover:bg-teal-50", type: "section-heading" },');

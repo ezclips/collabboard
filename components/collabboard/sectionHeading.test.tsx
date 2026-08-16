@@ -116,6 +116,7 @@ const FLAGS = {
   chronoMode: null,
   canManageCanvasShare: false,
   canUseFreeformEditButton: true,
+  isDrawingLayout: false,
 };
 function toolTypes(flags: Partial<typeof FLAGS>): string[] {
   return buildCanvasToolbarGroups({ ...FLAGS, ...flags } as never)
@@ -141,9 +142,10 @@ describe('SECTION-H1 type and routing [1-9]', () => {
     expect(toolTypes({ isFreeformLayout: true })).toContain('section-heading');
   });
 
-  it('4. Drawing does NOT expose it yet (SECTION-H3)', () => {
-    // Drawing is not a Freeform layout, so the registry never emits the tool.
-    expect(toolTypes({ isFreeformLayout: false })).not.toContain('section-heading');
+  it('4. Drawing now also exposes it (SECTION-H3C), via the SAME registry condition as Freeform', () => {
+    expect(toolTypes({ isFreeformLayout: false, isDrawingLayout: true })).toContain('section-heading');
+    // The shared renderer/engine still knows nothing about Excalidraw/Drawing --
+    // that knowledge lives only in the Drawing host adapter (DrawingLayout.tsx).
     expect(code(headingSrc)).not.toMatch(/excalidraw|Excalidraw|DrawingLayout/);
   });
 

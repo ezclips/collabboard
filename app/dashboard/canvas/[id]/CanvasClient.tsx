@@ -2205,21 +2205,46 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
 
   /**
    * PATCH SECTION-H1 -- create one root Section Heading on Freeform.
+   * PATCH SECTION-H3C -- extended to Drawing.
    *
    * Deliberately mirrors handleCreateEmptyFreeformContainer above rather than
    * introducing a parallel path: same signed-world placement helper (so the
    * heading can land at negative coordinates, PATCH 9V.2B), same canonical
    * repository insert, same optimistic-then-rollback failure handling, same
    * select-after-create convention.
+   *
+   * Drawing has no Freeform signed-world stage to place into, so it computes
+   * its own viewport-center scene position using the SAME math
+   * onDrawingPlacementStart already uses (drawingAppStateRef), in Drawing's
+   * own unbounded scene coordinates -- never Freeform's finite signed-stage
+   * clamp (see freeformStageGeometry.ts).
+   * Creation is immediate (no PlacementPrompt/Container-attach flow), the
+   * same "click H, get a heading" lifecycle Freeform already has, since a
+   * Section Heading is deliberately never a Container child (Phase 27).
    */
   const handleCreateSectionHeading = useCallback(async () => {
-    if (!canvasId || !isFreeformLayout) return;
+    if (!canvasId || !(isFreeformLayout || isDrawingLayout)) return;
 
     const headingId = crypto.randomUUID();
     const nowIso = new Date().toISOString();
     const width = SECTION_HEADING_DEFAULT_WIDTH;
     const height = SECTION_HEADING_DEFAULT_HEIGHT;
-    const { x: positionX, y: positionY } = getNewPostPosition(width, height);
+    let positionX: number;
+    let positionY: number;
+    if (isDrawingLayout) {
+      const _as = drawingAppStateRef.current;
+      const _zoom = (typeof _as?.zoom?.value === 'number' && _as.zoom.value > 0) ? _as.zoom.value : 1;
+      const _scrollX = typeof _as?.scrollX === 'number' ? _as.scrollX : 0;
+      const _scrollY = typeof _as?.scrollY === 'number' ? _as.scrollY : 0;
+      const _offsetLeft = typeof _as?.offsetLeft === 'number' ? _as.offsetLeft : 0;
+      const _offsetTop = typeof _as?.offsetTop === 'number' ? _as.offsetTop : 0;
+      const centerX = ((window.innerWidth - _offsetLeft) / 2 / _zoom) - _scrollX;
+      const centerY = ((window.innerHeight - _offsetTop) / 2 / _zoom) - _scrollY;
+      positionX = Number.isFinite(centerX) ? Math.round(centerX - width / 2) : 0;
+      positionY = Number.isFinite(centerY) ? Math.round(centerY - height / 2) : 0;
+    } else {
+      ({ x: positionX, y: positionY } = getNewPostPosition(width, height));
+    }
 
     const headingPayload: Padlet = {
       id: headingId,
@@ -2252,7 +2277,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       fetchData();
       return;
     }
-  }, [canvasId, isFreeformLayout, getNewPostPosition, padlets, insertPostPreservingFailureChannels, fetchData]);
+  }, [canvasId, isFreeformLayout, isDrawingLayout, getNewPostPosition, padlets, insertPostPreservingFailureChannels, fetchData]);
 
   // Handle "Add to Existing" from Column Placement Prompt
   const handleStartDragToExisting = () => {
@@ -5781,6 +5806,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     chronoMode,
     canManageCanvasShare,
     canUseFreeformEditButton,
+    isDrawingLayout,
   });
 
   const executeToolAction = (toolType: string) => {
@@ -5967,8 +5993,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         }
         break;
       case 'section-heading':
-        // Registry only offers this tool on Freeform (SECTION-H1); the guard
-        // inside handleCreateSectionHeading is the second line of defence.
+        // Registry only offers this tool on Freeform (SECTION-H1) and Drawing
+        // (SECTION-H3C); the guard inside handleCreateSectionHeading is the
+        // second line of defence.
         closeAllToolbarLaunchedUi();
         void handleCreateSectionHeading();
         break;

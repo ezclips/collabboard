@@ -549,20 +549,22 @@ describe('SECTION-H3B.4 frozen invariants [28-38]', () => {
     expect(headingSrc).toContain('onContextMenu?: (event: React.MouseEvent, padletId: string) => void;');
   });
 
-  it('36. Drawing still does not expose the Section Heading tool', () => {
+  it('36. non-Freeform, non-Drawing layouts still do not expose the H tool (superseded by SECTION-H3C: Drawing itself now does)', () => {
     const FLAGS = {
       isMapLayout: false, isFreeformLayout: false, isFreeformGraphMode: false,
       isTimelineLayout: false, chronoMode: null, canManageCanvasShare: false,
-      canUseFreeformEditButton: true,
+      canUseFreeformEditButton: true, isDrawingLayout: false,
     };
     const types = buildCanvasToolbarGroups(FLAGS as never).flatMap((g) => g.tools.map((t) => t.type));
     expect(types).not.toContain('section-heading');
   });
 
-  it('37. no Drawing/Excalidraw file is touched by this patch', () => {
+  it('37. no Drawing/Excalidraw file is touched by this patch (superseded for DrawingLayout.tsx itself by SECTION-H3C)', () => {
+    // The shared renderer and this Freeform-specific menu wrapper remain
+    // completely Drawing-agnostic -- still true after SECTION-H3C, which
+    // gave Drawing its OWN adapter/menu wiring instead of reusing these.
     expect(code(headingSrc)).not.toMatch(/excalidraw|Excalidraw|DrawingLayout/);
     expect(code(menuSrc)).not.toMatch(/excalidraw|Excalidraw|DrawingLayout/);
-    expect(drawingLayoutSrc).not.toMatch(/SectionHeadingContextMenu|section-heading/);
   });
 
   it('38. camera is unchanged (no Section Heading mention, ZOOM_STEP untouched)', () => {

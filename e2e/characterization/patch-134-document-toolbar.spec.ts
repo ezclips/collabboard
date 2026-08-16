@@ -129,6 +129,7 @@ test.describe('PATCH-134 Document toolbar registry', () => {
       chronoMode: null,
       canManageCanvasShare: true,
       canUseFreeformEditButton: true,
+      isDrawingLayout: false,
     });
     const inventory = groups.map((group) => ({
       id: group.id,

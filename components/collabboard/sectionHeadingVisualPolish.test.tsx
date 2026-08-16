@@ -395,11 +395,11 @@ describe('SECTION-H3B.3 frozen invariants [24-37]', () => {
     expect(mine).toBe(`transparent,${shared.replace(/,$/, '')}`);
   });
 
-  it('35. Drawing still does not expose the H tool', () => {
+  it('35. non-Freeform, non-Drawing layouts still do not expose the H tool (superseded by SECTION-H3C: Drawing itself now does)', () => {
     const FLAGS = {
       isMapLayout: false, isFreeformLayout: false, isFreeformGraphMode: false,
       isTimelineLayout: false, chronoMode: null, canManageCanvasShare: false,
-      canUseFreeformEditButton: true,
+      canUseFreeformEditButton: true, isDrawingLayout: false,
     };
     const types = buildCanvasToolbarGroups(FLAGS as never).flatMap((g) => g.tools.map((t) => t.type));
     expect(types).not.toContain('section-heading');
