@@ -625,7 +625,7 @@ export default function ContainerEditor({
         window.addEventListener("keydown", onKeyDown);
         return () => window.removeEventListener("keydown", onKeyDown);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [isOpen, title, titleStyle, backgroundColor, topStrip]);
+    }, [isOpen, title, titleStyle, backgroundColor, topStrip, orientation]);
 
     const handleSaveAndClose = () => {
         onSave({
