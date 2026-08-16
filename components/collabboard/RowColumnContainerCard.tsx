@@ -12,6 +12,7 @@ import { guardCommentMutation, type CommentAccessMode } from "@/lib/domain/canva
 import { getEffectiveVisibleChildTitleIds, resolveVisibleChildTitle } from "@/lib/infra/collabboard/containerChildTitleVisibility";
 import { resolveChildCardChrome } from "@/lib/domain/canvas/documentPost";
 import { useScrollbarLane } from "./useScrollbarLane";
+import { resolveContainerChildren } from "@/lib/domain/canvas/containerModel";
 
 const DEFAULT_IGNORE_KINDS = new Set(["columns-container-move"]);
 
@@ -148,19 +149,10 @@ export default function RowColumnContainerCard({
   const mutedTextColor = textColor === '#f8fafc' ? 'rgba(248,250,252,0.82)' : 'rgba(15,23,42,0.68)';
   const badgeBg = textColor === '#f8fafc' ? 'rgba(255,255,255,0.22)' : 'rgba(15,23,42,0.08)';
   const containerMetadata = (padlet.metadata ?? {}) as Record<string, unknown>;
+  const childPadlets = resolveContainerChildren(padlet, allPadlets);
   const childIds = Array.isArray(containerMetadata.childPadletIds)
     ? containerMetadata.childPadletIds.filter((id): id is string => typeof id === "string")
     : [];
-  const linkedChildren = allPadlets.filter((p) => {
-    const metadata = (p.metadata ?? {}) as Record<string, unknown>;
-    return metadata.parentId === padlet.id;
-  });
-  const childPadlets = [
-    ...childIds
-      .map((id: string) => allPadlets.find((p) => p.id === id))
-      .filter((p): p is Padlet => p !== undefined),
-    ...linkedChildren,
-  ].filter((child, index, arr) => arr.findIndex((p) => p.id === child.id) === index);
 
   // Per-Container, per-child display setting (default hidden, preserving
   // today's appearance for every existing Container): each child's own

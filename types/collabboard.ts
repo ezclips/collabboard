@@ -89,6 +89,8 @@ export interface Canvas {
   updated_at: string;
 }
 
+export type ContainerOrientation = 'vertical' | 'horizontal';
+
 export interface Padlet {
   id: string;
   board_id: string;
@@ -200,6 +202,7 @@ export interface Padlet {
 
     // Container-specific
     childPadletIds?: string[];
+    orientation?: ContainerOrientation;
     coverChildId?: string;
     coverPadletId?: string;
     coverChildPadletId?: string;

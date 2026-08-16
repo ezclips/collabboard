@@ -3,6 +3,7 @@
 import React from 'react';
 import type { AuthUser } from '@/lib/domain/auth/user';
 import type { Padlet } from '@/types/collabboard';
+import { resolveContainerChildren } from '@/lib/domain/canvas/containerModel';
 import { getMeaningfulTitle } from '@/lib/infra/collabboard/postTitle';
 import type { CaptionStyle } from '@/lib/domain/canvas/captionStyle';
 import type { CommentAccessMode } from '@/lib/domain/canvas/comments';
@@ -309,14 +310,7 @@ export default function CanvasModals({
             containerId={liveContainer?.id !== 'new' ? liveContainer?.id : undefined}
             childPadlets={
               liveContainer?.id !== 'new'
-                ? [
-                    ...((liveContainer?.metadata?.childPadletIds || []) as string[])
-                      .map((id: string) => padlets.find((p) => p.id === id))
-                      .filter((p): p is Padlet => p !== undefined),
-                    ...padlets.filter((p) => liveContainer && p.metadata?.parentId === liveContainer.id),
-                  ]
-                    .filter((p, index, arr) => arr.findIndex((x) => x.id === p.id) === index)
-                    .map((p) => ({
+                ? resolveContainerChildren(liveContainer!, padlets).map((p) => ({
                       id: p.id,
                       title: p.title,
                       content: p.content,
