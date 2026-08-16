@@ -18,7 +18,7 @@ describe('O1D Drawing Container orientation architecture', () => {
   });
 
   it('keeps Drawing width growth parent-only and grow-only', () => {
-    expect(drawingSource).toContain('const nextWidth = Math.max(existing.width ?? 0, Math.ceil(requiredWidth + 16));');
+    expect(drawingSource).toContain('const nextWidth = Math.max(existing.width ?? 0, Math.ceil(requiredWidth + chromePerSide * 2));');
     expect(drawingSource).toContain('onNaturalResize?.(padlet.id, { width: nextWidth });');
     expect(drawingSource).toContain('void onUpdatePadlet(id, { width: size.width });');
     expect(drawingSource).toContain('commitToHistory: false');

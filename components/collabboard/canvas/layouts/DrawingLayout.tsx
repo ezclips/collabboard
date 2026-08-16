@@ -648,6 +648,9 @@ function DrawingEmbeddableCard({
 
   const showExpandToggle = isContainer && canExpand;
 
+  const cardOuterRef = useRef<HTMLDivElement>(null);
+  const contentAreaRef = useRef<HTMLDivElement>(null);
+
   const updateHorizontalSceneWidth = (requiredWidth: number) => {
     if (resolveContainerOrientation(padlet.metadata) !== 'horizontal') return;
     const excAPI = excalidrawAPIRef.current;
@@ -656,7 +659,16 @@ function DrawingEmbeddableCard({
       (el: any) => el.type === 'embeddable' && el.link === `padlet://${padlet.id}` && !el.isDeleted
     );
     if (!existing) return;
-    const nextWidth = Math.max(existing.width ?? 0, Math.ceil(requiredWidth + 16));
+    // `requiredWidth` is relative to RowColumnContainerCard's own box, but the
+    // scene embeddable spans this card's OUTER chrome around it (the card's
+    // own border plus the content area's padding). Read that chrome back from
+    // computed style -- rather than hardcoding a pixel constant -- so the
+    // scene box always grows enough to keep its trailing gutter symmetric
+    // with the leading one, even if the chrome classes below ever change.
+    const outerBorder = cardOuterRef.current ? parseFloat(getComputedStyle(cardOuterRef.current).borderLeftWidth) || 0 : 0;
+    const contentPadding = contentAreaRef.current ? parseFloat(getComputedStyle(contentAreaRef.current).paddingLeft) || 0 : 0;
+    const chromePerSide = outerBorder + contentPadding;
+    const nextWidth = Math.max(existing.width ?? 0, Math.ceil(requiredWidth + chromePerSide * 2));
     if (nextWidth <= (existing.width ?? 0) + 1) return;
     excAPI.updateScene({
       ...buildDrawingSceneUpdate({
@@ -705,6 +717,7 @@ function DrawingEmbeddableCard({
 
   return (
     <div
+      ref={cardOuterRef}
       data-padlet-id={padlet.id}
       className={`w-full overflow-hidden rounded-xl bg-white flex flex-col border border-gray-200 ${isContainer ? '' : 'h-full'}`}
       onMouseDown={(e) => { if (e.button === 2) e.stopPropagation(); }}
@@ -913,6 +926,7 @@ function DrawingEmbeddableCard({
       </div>
       {/* Content area -- stop propagation so clicks/inputs don't trigger Excalidraw drag */}
       <div
+        ref={contentAreaRef}
         className={isContainer ? 'overflow-hidden p-2' : 'flex-1 overflow-hidden p-3'}
         onPointerDown={(e) => e.stopPropagation()}
       >

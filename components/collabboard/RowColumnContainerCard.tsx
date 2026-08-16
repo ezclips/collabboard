@@ -232,7 +232,16 @@ export default function RowColumnContainerCard({
       if (currentWidth < lastReportedWidthRef.current - 1) {
         lastReportedWidthRef.current = 0;
       }
-      const requiredWidth = Math.ceil(Math.max(root.scrollWidth, content.scrollWidth));
+      // `scrollWidth` on an overflowing box only accounts for the box's
+      // leading-edge padding; browsers do not extend it to include the
+      // trailing-edge padding of the side that overflows. That makes the raw
+      // measurement short by exactly `root`'s own right padding, but ONLY
+      // while `root` is actually overflowing -- once width has grown enough
+      // to fit, scrollWidth already reports the padding correctly, so adding
+      // it unconditionally would regrow the container by that amount forever.
+      const isRootOverflowing = root.scrollWidth > root.clientWidth + 1;
+      const rootRightPadding = isRootOverflowing ? (parseFloat(getComputedStyle(root).paddingRight) || 0) : 0;
+      const requiredWidth = Math.ceil(Math.max(root.scrollWidth, content.scrollWidth) + rootRightPadding);
       if (requiredWidth <= lastReportedWidthRef.current + 1) return;
       lastReportedWidthRef.current = requiredWidth;
       onRequiredWidthChange(requiredWidth);
@@ -404,13 +413,18 @@ export default function RowColumnContainerCard({
             // OWN real reservation in pixels, so `calc(100% + Npx)` width +
             // `-Npx` margin pushes EXACTLY that reservation into an outside
             // lane instead of taking it out of the child cards' width.
-            // `pr-0.5` is left untouched so the un-widened, no-scroll case
-            // (the width baseline everything else must match) is unchanged.
+            // `pr-0.5` is left untouched on the VERTICAL branch so the
+            // un-widened, no-scroll case (the width baseline everything else
+            // must match) is unchanged. The HORIZONTAL lane has no matching
+            // `pl-0.5` on its leading edge, so carrying it here would reserve
+            // an un-mirrored 2px on the trailing edge only -- PATCH O1E drops
+            // it for horizontal so the trailing gutter matches the leading
+            // one exactly, per the Container's own body padding.
             return (
               <div
                 ref={contentMeasureRef}
                 className={isHorizontal
-                  ? `${shouldEnableInternalScroll ? "max-h-[300px] overflow-y-auto overflow-x-hidden pr-0.5 scrollbar-ultrathin" : "pr-0.5"} flex flex-row flex-nowrap items-start gap-2`
+                  ? `${shouldEnableInternalScroll ? "max-h-[300px] overflow-y-auto overflow-x-hidden scrollbar-ultrathin" : ""} flex flex-row flex-nowrap items-start gap-2`
                   : shouldEnableInternalScroll ? "max-h-[300px] overflow-y-auto overflow-x-hidden pr-0.5 space-y-2 scrollbar-ultrathin" : "space-y-2 pr-0.5"}
                 style={
                   isHorizontal

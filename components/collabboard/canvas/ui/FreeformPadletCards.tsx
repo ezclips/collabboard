@@ -275,7 +275,21 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
     const current = padlets.find((p) => p.id === padletId);
     if (!current || current.type !== 'container') return;
     const currentWidth = Number(current.width) || 0;
-    const nextWidth = Math.ceil(requiredWidth);
+    // `requiredWidth` is relative to RowColumnContainerCard's own box, but
+    // `padlet.width` instead drives the OUTER card chrome around it (this
+    // card's own border plus its generic `p-3` content-area padding). Read
+    // that chrome back from computed style -- rather than hardcoding a pixel
+    // constant -- so the card always grows enough to keep its trailing
+    // gutter symmetric with the leading one, even if the chrome classes ever
+    // change.
+    const outerEl = typeof document !== 'undefined'
+      ? document.querySelector(`[data-padlet-id="${padletId}"] .group\\/image-container`)
+      : null;
+    const contentEl = outerEl?.querySelector('.p-3') ?? null;
+    const outerBorder = outerEl ? parseFloat(getComputedStyle(outerEl).borderLeftWidth) || 0 : 0;
+    const contentPadding = contentEl ? parseFloat(getComputedStyle(contentEl).paddingLeft) || 0 : 0;
+    const chromePerSide = outerBorder + contentPadding;
+    const nextWidth = Math.ceil(requiredWidth + chromePerSide * 2);
     if (!Number.isFinite(nextWidth) || nextWidth <= currentWidth + 1) return;
 
     setPadlets((prev) => prev.map((p) => p.id === padletId ? { ...p, width: nextWidth } : p));
