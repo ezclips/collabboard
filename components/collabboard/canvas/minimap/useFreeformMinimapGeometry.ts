@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type React from 'react';
 import type { Padlet } from '@/types/collabboard';
-import { POST_RESIZE_CONSTRAINTS, isImageManuallySized } from '@/lib/domain/canvas/postResizePolicy';
+import { POST_RESIZE_CONSTRAINTS, getManualResizeDimensions, isImageManuallySized } from '@/lib/domain/canvas/postResizePolicy';
 import type { MinimapWorldItem, WorldRect } from './freeformMinimapGeometry';
 import { isValidWorldRect } from './freeformMinimapGeometry';
 
@@ -54,7 +54,26 @@ export function getFallbackMinimapItem(post: Padlet): MinimapWorldItem | null {
       height = 100;
     }
   } else if (post.type === 'link') {
-    width = 320;
+    // PATCH POST-RESIZE-B2: legacy Links always rendered at a fixed 320px
+    // width regardless of stored geometry -- the fallback must agree. An
+    // explicitly-resized Link uses its manual canonical width. Height stays
+    // content-derived either way.
+    const manual = getManualResizeDimensions(post);
+    width = manual ? manual.width : 320;
+  } else if (post.type === 'text' || post.type === 'note' || post.type === 'todo' || post.type === 'table') {
+    // PATCH POST-RESIZE-B2: legacy Note/Todo/Table posts rendered at a fixed
+    // 180px width (stored generic width/height was never consumed) -- the
+    // fallback must agree, so a legacy post's stored 300x200 template
+    // dimensions can never leak a 300px-wide minimap blob next to a 180px
+    // render. Explicitly-resized posts use their manual canonical geometry.
+    const manual = getManualResizeDimensions(post);
+    if (manual) {
+      width = manual.width;
+      height = manual.height;
+    } else {
+      width = 180;
+      height = finitePositive(post.height, 100);
+    }
   } else if (post.type === 'ai-component') {
     width = Math.max(finitePositive(post.width, 500), 200);
     height = Math.max(finitePositive(post.height, 400), 150);

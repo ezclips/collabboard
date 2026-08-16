@@ -16,6 +16,15 @@ export const POST_RESIZE_HANDLE_HIT_SCREEN_PX = 28;
 
 export interface PostResizeHandleProps {
   /**
+   * PATCH POST-RESIZE-B2: resize semantics for this grip.
+   * - 'box': width AND height follow the pointer (default).
+   * - 'horizontal-only': width follows the pointer's world X delta; height is
+   *   never changed (stays at the gesture origin, content-derived types like
+   *   Link/Table). The commit callback receives the mode as its 5th argument
+   *   so the host can persist width only.
+   */
+  mode?: 'box' | 'horizontal-only';
+  /**
    * Host-provided absolute client->world conversion (Freeform:
    * getCanvasPointFromClient). The handle performs NO camera arithmetic of
    * its own -- no canvasZoom division, no scroll offsets -- so the same
@@ -31,8 +40,12 @@ export interface PostResizeHandleProps {
   maxHeight?: number;
   /** Local/optimistic preview per pointermove. Must NOT persist. */
   onResizePreview: (width: number, height: number) => void;
-  /** ONE persistence call per gesture, only when the size meaningfully changed. */
-  onResizeCommit: (width: number, height: number, originWidth: number, originHeight: number) => void;
+  /**
+   * ONE persistence call per gesture, only when the size meaningfully changed.
+   * The 5th argument is the grip's `mode` so the host can persist width-only
+   * for horizontal-only types.
+   */
+  onResizeCommit: (width: number, height: number, originWidth: number, originHeight: number, mode: 'box' | 'horizontal-only') => void;
   /**
    * Optional: captures the ACTUAL rendered post rectangle at pointerdown, in
    * world units. Needed for legacy posts whose rendered size (e.g. an Image's
@@ -63,6 +76,7 @@ interface Gesture {
  * - Shift locks the starting aspect ratio.
  */
 export default function PostResizeHandle({
+  mode = 'box',
   clientToWorld,
   startWidth,
   startHeight,
@@ -92,18 +106,22 @@ export default function PostResizeHandle({
     if (!gesture) return null;
     const point = clientToWorld(clientX, clientY);
     if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return null;
+    const horizontal = mode === 'horizontal-only';
     return resizePostBox({
       startWidth: gesture.startWidth,
       startHeight: gesture.startHeight,
       deltaX: point.x - gesture.originPointerWorld.x,
-      deltaY: point.y - gesture.originPointerWorld.y,
+      // Horizontal-only: the height axis never moves -- the pointer's world Y
+      // is deliberately ignored so a diagonal drag cannot mutate a
+      // content-derived height (PATCH POST-RESIZE-B2 Phase 5/37).
+      deltaY: horizontal ? 0 : point.y - gesture.originPointerWorld.y,
       minWidth: constraints?.minWidth,
       minHeight: constraints?.minHeight,
       maxWidth,
       maxHeight,
-      lockAspect,
+      lockAspect: horizontal ? false : lockAspect,
     });
-  }, [constraints, maxWidth, maxHeight]);
+  }, [mode, clientToWorld, constraints, maxWidth, maxHeight]);
 
   const handlePointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (event.button === 2) return;
@@ -138,9 +156,9 @@ export default function PostResizeHandle({
     gestureRef.current = null;
     if (!next) return;
     if (isMeaningfulPostResize(gesture.startWidth, gesture.startHeight, next)) {
-      onResizeCommit(next.width, next.height, gesture.startWidth, gesture.startHeight);
+      onResizeCommit(next.width, next.height, gesture.startWidth, gesture.startHeight, mode);
     }
-  }, [computeSize, onResizeCommit]);
+  }, [computeSize, onResizeCommit, mode]);
 
   const handlePointerCancel = useCallback(() => {
     gestureRef.current = null;
@@ -156,7 +174,7 @@ export default function PostResizeHandle({
       onPointerCancel={handlePointerCancel}
       title={title}
       aria-label={title}
-      className={`absolute bottom-0 right-0 z-20 flex cursor-nwse-resize items-end justify-end ${className ?? ''}`}
+      className={`absolute bottom-0 right-0 z-20 flex ${mode === 'horizontal-only' ? 'cursor-ew-resize' : 'cursor-nwse-resize'} items-end justify-end ${className ?? ''}`}
       style={{ width: hitSize, height: hitSize }}
     >
       <div

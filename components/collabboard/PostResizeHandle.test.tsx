@@ -106,7 +106,7 @@ describe('PATCH POST-RESIZE-B1 PostResizeHandle gesture', () => {
     expect(onResizePreview).toHaveBeenLastCalledWith(560, 220);
     pointer(handle, 'pointerup', 210);
     expect(onResizeCommit).toHaveBeenCalledTimes(1);
-    expect(onResizeCommit).toHaveBeenCalledWith(560, 220, 360, 220);
+    expect(onResizeCommit).toHaveBeenCalledWith(560, 220, 360, 220, 'box');
   });
 
   it('17. world dy adds exactly to height', () => {
@@ -125,7 +125,7 @@ describe('PATCH POST-RESIZE-B1 PostResizeHandle gesture', () => {
       pointer(handle, 'pointermove', 10 + clientSpan);
       pointer(handle, 'pointerup', 10 + clientSpan);
       expect(onResizePreview, `scale ${scale}`).toHaveBeenLastCalledWith(560, 220);
-      expect(onResizeCommit, `scale ${scale}`).toHaveBeenCalledWith(560, 220, 360, 220);
+      expect(onResizeCommit, `scale ${scale}`).toHaveBeenCalledWith(560, 220, 360, 220, 'box');
     }
   });
 
@@ -198,7 +198,7 @@ describe('PATCH POST-RESIZE-B1 PostResizeHandle gesture', () => {
     pointer(handle, 'pointerdown', 10);
     pointer(handle, 'pointermove', 110);
     pointer(handle, 'pointerup', 110);
-    expect(onResizeCommit).toHaveBeenCalledWith(460, 322, 360, 322);
+    expect(onResizeCommit).toHaveBeenCalledWith(460, 322, 360, 322, 'box');
   });
 
   it('Shift locks the starting aspect ratio', () => {
@@ -235,5 +235,60 @@ describe('PATCH POST-RESIZE-B1 PostResizeHandle gesture', () => {
     const { handle } = mount();
     expect(handle.getAttribute('aria-label')).toBe('Resize');
     expect(handle.getAttribute('title')).toBe('Resize');
+  });
+});
+
+// ============================================================ POST-RESIZE-B2
+describe('PATCH POST-RESIZE-B2 PostResizeHandle horizontal-only mode', () => {
+  it('26/27/28. horizontal-only: width follows the pointer, height NEVER changes', () => {
+    const { handle, onResizePreview, onResizeCommit } = mount({ mode: 'horizontal-only', startWidth: 320, startHeight: 300 });
+    pointer(handle, 'pointerdown', 10);
+    // Diagonal drag: +100 world X, +500 world Y -- the Y must be ignored.
+    pointer(handle, 'pointermove', 110, { clientY: 510 });
+    expect(onResizePreview).toHaveBeenLastCalledWith(420, 300);
+    pointer(handle, 'pointerup', 110, { clientY: 510 });
+    expect(onResizeCommit).toHaveBeenCalledWith(420, 300, 320, 300, 'horizontal-only');
+  });
+
+  it('F/G. horizontal-only mode never mutates height even when shrunk below it', () => {
+    const { handle, onResizePreview } = mount({
+      mode: 'horizontal-only',
+      startWidth: 320,
+      startHeight: 300,
+      constraints: { minWidth: 240, minHeight: 0 },
+    });
+    pointer(handle, 'pointerdown', 10);
+    pointer(handle, 'pointermove', -500, { clientY: 200 });
+    expect(onResizePreview).toHaveBeenLastCalledWith(240, 300);
+  });
+
+  it('horizontal-only clamps to the type minWidth (Link 240)', () => {
+    const { handle, onResizePreview } = mount({
+      mode: 'horizontal-only',
+      startWidth: 320,
+      startHeight: 300,
+      constraints: { minWidth: 240, minHeight: 0 },
+    });
+    pointer(handle, 'pointerdown', 10);
+    pointer(handle, 'pointermove', -500);
+    expect(onResizePreview).toHaveBeenLastCalledWith(240, 300);
+  });
+
+  it('horizontal-only: Shift does not enable aspect locking', () => {
+    const { handle, onResizePreview } = mount({ mode: 'horizontal-only', startWidth: 320, startHeight: 300 });
+    pointer(handle, 'pointerdown', 10);
+    pointer(handle, 'pointermove', 410, { shiftKey: true });
+    expect(onResizePreview).toHaveBeenLastCalledWith(720, 300);
+  });
+
+  it('horizontal-only uses the ew-resize cursor', () => {
+    const { handle } = mount({ mode: 'horizontal-only' });
+    expect(handle.className).toContain('cursor-ew-resize');
+    expect(handle.className).not.toContain('cursor-nwse-resize');
+  });
+
+  it('box mode keeps the nwse-resize cursor', () => {
+    const { handle } = mount();
+    expect(handle.className).toContain('cursor-nwse-resize');
   });
 });

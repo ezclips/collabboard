@@ -45,14 +45,14 @@ describe('PATCH POST-RESIZE-B1 shared handle wiring', () => {
   it('24/25. previews never persist; ONE commit call on release', () => {
     expect(code(handleSrc)).toContain('onResizePreview(next.width, next.height)');
     expect(code(handleSrc)).toContain('isMeaningfulPostResize(gesture.startWidth, gesture.startHeight, next)');
-    expect(code(handleSrc)).toContain('onResizeCommit(next.width, next.height, gesture.startWidth, gesture.startHeight)');
+    expect(code(handleSrc)).toContain('onResizeCommit(next.width, next.height, gesture.startWidth, gesture.startHeight, mode);');
   });
 });
 
 describe('PATCH POST-RESIZE-B1 Freeform wiring', () => {
-  it('40/41. Freeform mounts the shared handle for AI AND Image -- exactly one grip each', () => {
+  it('B1/B2 handle mount sites: Image (1) + AI (1) + generic B2 block (1) + Document/Clipart block (1)', () => {
     const occurrences = code(cardsSrc).split('<PostResizeHandle').length - 1;
-    expect(occurrences).toBe(2);
+    expect(occurrences).toBe(4);
   });
 
   it('40. the AI grip condition still gates on edit permission and lock', () => {
@@ -74,7 +74,8 @@ describe('PATCH POST-RESIZE-B1 Freeform wiring', () => {
     const commit = code(cardsSrc);
     expect(commit).toContain('commitPostResize(padlet.id, w, h, ow, oh)');
     expect(commit).toContain('await updatePostFieldsOrThrow(padletId, {');
-    expect(commit).toContain("width: originWidth, height: originHeight");
+    expect(commit).toContain('width: originWidth');
+    expect(commit).toContain('height: originHeight');
     expect(commit).toContain("toast.error('Failed to resize post')");
   });
 
@@ -226,7 +227,8 @@ describe('PATCH POST-RESIZE-B1.1 Image explicit-resize commit + rollback', () =>
 
   it('12/13. a failed resize rolls back geometry AND metadata together -- no state where manualSize=true but the resize failed', () => {
     const rollback = code(cardsSrc).match(/catch \(err\) \{[\s\S]*?toast\.error\('Failed to resize post'\);/)?.[0] ?? '';
-    expect(rollback).toContain('width: originWidth, height: originHeight');
+    expect(rollback).toContain('width: originWidth');
+    expect(rollback).toContain('height: originHeight');
     expect(rollback).toContain('metadata: originMetadata');
   });
 

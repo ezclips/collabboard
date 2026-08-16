@@ -9,7 +9,7 @@ import { createUpdatePostFieldsCommand } from '@/lib/domain/canvas/posts';
 import { selectCardModalRoute } from '@/lib/domain/canvas/cardModalRoute';
 import { selectDocumentModalDestination, type DocumentModalDestination } from '@/lib/domain/canvas/documentModalRoute';
 import { isDocumentPost } from '@/lib/domain/canvas/documentPost';
-import { getPostResizeCapability, getPostResizeConstraints, isImageManuallySized } from '@/lib/domain/canvas/postResizePolicy';
+import { getPostResizeCapability, getPostResizeConstraints, getManualResizeDimensions, isImageManuallySized } from '@/lib/domain/canvas/postResizePolicy';
 import PostResizeHandle from '@/components/collabboard/canvas/ui/PostResizeHandle';
 import { createPostsRepository } from '@/lib/infra/canvas/postsRepository';
 import ImageActionsToolbar from '@/components/collabboard/editors/ImageActionsToolbar';
@@ -347,6 +347,17 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
   }, [setPadlets]);
 
   /**
+   * PATCH POST-RESIZE-B2: horizontal-only preview (Link/Table). Only width
+   * moves; the content-derived height is never touched, locally or in the
+   * persisted write.
+   */
+  const previewPostResizeWidth = React.useCallback((padletId: string, width: number) => {
+    setPadlets(prev => prev.map(p => (
+      p.id === padletId ? { ...p, width } : p
+    )));
+  }, [setPadlets]);
+
+  /**
    * PATCH POST-RESIZE-B1: honest commit + rollback, mirroring
    * `commitSectionHeadingRect` above (deliberately NOT the AI card's old
    * console.error-only `persistPostFieldsBestEffort` posture, which
@@ -362,6 +373,10 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
    * failure the metadata patch rolls back with the geometry, so there is
    * never a persisted or locally-visible state where manualSize=true but the
    * resize that set it failed.
+   *
+   * PATCH POST-RESIZE-B2: `mode` narrows the write for horizontal-only types
+   * (Link/Table) -- width + marker are persisted, height is deliberately not
+   * rewritten at all.
    */
   const commitPostResize = React.useCallback(async (
     padletId: string,
@@ -371,16 +386,23 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
     originHeight: number,
     metadataPatch?: Record<string, any> | null,
     originMetadata?: Padlet['metadata'],
+    mode: 'box' | 'horizontal-only' = 'box',
   ) => {
+    const horizontalOnly = mode === 'horizontal-only';
     setPadlets(prev => prev.map(p => (
       p.id === padletId
-        ? { ...p, width, height, ...(metadataPatch ? { metadata: { ...p.metadata, ...metadataPatch } } : {}) }
+        ? {
+          ...p,
+          width,
+          ...(horizontalOnly ? {} : { height }),
+          ...(metadataPatch ? { metadata: { ...p.metadata, ...metadataPatch } } : {}),
+        }
         : p
     )));
     try {
       await updatePostFieldsOrThrow(padletId, {
         width,
-        height,
+        ...(horizontalOnly ? {} : { height }),
         ...(metadataPatch ? { metadata: { ...(originMetadata ?? {}), ...metadataPatch } } : {}),
         updated_at: new Date().toISOString(),
       });
@@ -388,7 +410,12 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
       console.error('Failed to persist post resize:', err);
       setPadlets(prev => prev.map(p => (
         p.id === padletId
-          ? { ...p, width: originWidth, height: originHeight, ...(metadataPatch ? { metadata: originMetadata } : {}) }
+          ? {
+            ...p,
+            width: originWidth,
+            ...(horizontalOnly ? {} : { height: originHeight }),
+            ...(metadataPatch ? { metadata: originMetadata } : {}),
+          }
           : p
       )));
       toast.error('Failed to resize post');
@@ -679,6 +706,13 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
   // world units -- the stage's `transform: scale(canvasZoom)` does not affect
   // them).
   const imageCardRefs = React.useRef<Record<string, HTMLDivElement | null>>({});
+  // PATCH POST-RESIZE-B2: rendered rects of the generic post card shells
+  // (Note/Todo/Link/Table), measured at resize pointerdown for the same reason
+  // as imageCardRefs -- a legacy fixed-layout post's REAL rendered box is the
+  // gesture origin, never its stored generic width/height.
+  const genericCardRefs = React.useRef<Record<string, HTMLDivElement | null>>({});
+  // PATCH POST-RESIZE-B2: rendered rects of the Document/Clipart card shells.
+  const cardCardRefs = React.useRef<Record<string, HTMLDivElement | null>>({});
   const activeImageToolbarPadlet = imageToolbarPadletId
     ? padlets.find((padlet) => padlet.id === imageToolbarPadletId) ?? null
     : null;
@@ -2048,6 +2082,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
         >
           <div
             key={padlet.id}
+            ref={(el) => { cardCardRefs.current[padlet.id] = el; }}
             className={`absolute group cursor-pointer transition-colors duration-200 ${isPadletSelected(padlet.id)
               ? (isDocumentPost(padlet)
                 // Follow-up correction: Document's own card is square-cornered
@@ -2361,6 +2396,34 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                   currentUserName={user?.email?.split('@')[0] || 'You'}
                 />
               </div>
+            )}
+
+            {/* Resize handle - bottom-right, selected ROOT Document/Clipart
+                posts only (PATCH POST-RESIZE-B2). Document and Clipart were
+                ALREADY rendering from canonical width/height before B2, so
+                this handle only writes geometry (+ the manualSize semantic
+                marker) -- their legacy interpretation is unchanged. */}
+            {isPadletSelected(padlet.id) && canUseFreeformEditButton && !(padlet.metadata as any)?.isLocked && (
+              <PostResizeHandle
+                clientToWorld={getWorldPointFromClient}
+                startWidth={Number(padlet.width) || 180}
+                startHeight={Number(padlet.height) || 220}
+                constraints={getPostResizeConstraints(padlet)}
+                maxWidth={FREEFORM_WORLD_MAX_X - (Number(padlet.position_x) || 0)}
+                maxHeight={FREEFORM_WORLD_MAX_Y - (Number(padlet.position_y) || 0)}
+                onResizePreview={(w, h) => previewPostResize(padlet.id, w, h)}
+                onResizeCommit={(w, h, ow, oh, m) => {
+                  void commitPostResize(padlet.id, w, h, ow, oh, { manualSize: true }, padlet.metadata, m);
+                }}
+                getStartSize={() => {
+                  const el = cardCardRefs.current[padlet.id];
+                  if (!el) return null;
+                  const width = el.offsetWidth || 180;
+                  const height = el.offsetHeight || 220;
+                  return { width, height };
+                }}
+                title="Resize"
+              />
             )}
 
           </div>
@@ -2933,8 +2996,19 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
         // the title bar carries real information (Note/Todo/Table/etc).
         const isFullViewEligibleType = padlet.type === 'drawing' || padlet.type === 'ai-component';
         const isFullView = isFullViewEligibleType && !!(padlet.metadata as any)?.fullView;
+        // PATCH POST-RESIZE-B2: shared effective-geometry gate for the
+        // marker-gated generic-branch types (Note/Todo/Link/Table). Legacy
+        // posts keep their historical fixed presentation regardless of any
+        // generic stored width/height; explicitly-resized posts render from
+        // canonical geometry. AI stays canonical-authoritative (no marker),
+        // exactly as before B2.
+        const resizeMode = getPostResizeCapability(padlet);
+        const manualGeometry = resizeMode !== 'none' ? getManualResizeDimensions(padlet) : null;
+        const boxManualHeight = resizeMode === 'box' && padlet.type !== 'ai-component' && manualGeometry ? `${manualGeometry.height}px` : undefined;
+        const needsContentScroll = resizeMode === 'box' && padlet.type !== 'ai-component' && !!manualGeometry;
         const content = (
           <div
+            ref={(el) => { genericCardRefs.current[padlet.id] = el; }}
             className={`group group/image-container relative overflow-hidden flex flex-col cursor-pointer ${isPadletSelected(padlet.id)
                 ? 'ring-2 ring-blue-500 ring-offset-2'
               : ''
@@ -2943,10 +3017,11 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
               width: padlet.type === 'container'
                 ? `${Math.max(Number(padlet.width) || 0, 360)}px`
                 : padlet.type === 'link'
-                  ? '320px'
+                  ? (manualGeometry ? `${manualGeometry.width}px` : '320px')
                   : padlet.type === 'ai-component'
                     ? `${Math.max(Number(padlet.width) || 500, 200)}px`
-                    : '180px',
+                    : (manualGeometry ? `${manualGeometry.width}px` : '180px'),
+              height: boxManualHeight,
               minHeight: padlet.type === 'container' ? '150px'
                 : padlet.type === 'ai-component' ? `${Math.max(Number(padlet.height) || 400, 150)}px`
                 : '80px',
@@ -3224,10 +3299,47 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
               />
             )}
 
+            {/* Resize handle - bottom-right, selected ROOT Note/Todo/Link/
+                Table posts only (PATCH POST-RESIZE-B2). Capability decides the
+                mode: box for Note/Todo, horizontal-only for Link/Table. Every
+                B2 resize writes `metadata.manualSize = true` atomically with
+                the geometry through `commitPostResize`, so legacy posts stay
+                exactly as they were until the user explicitly resizes. */}
+            {(resizeMode === 'box' || resizeMode === 'horizontal-only') && padlet.type !== 'ai-component' && isPadletSelected(padlet.id) && canUseFreeformEditButton && !(padlet.metadata as any)?.isLocked && (
+              <PostResizeHandle
+                mode={resizeMode}
+                clientToWorld={getWorldPointFromClient}
+                startWidth={manualGeometry?.width ?? (padlet.type === 'link' ? 320 : 180)}
+                startHeight={manualGeometry?.height ?? 80}
+                constraints={getPostResizeConstraints(padlet)}
+                maxWidth={FREEFORM_WORLD_MAX_X - (Number(padlet.position_x) || 0)}
+                maxHeight={FREEFORM_WORLD_MAX_Y - (Number(padlet.position_y) || 0)}
+                onResizePreview={(w, h) => {
+                  if (resizeMode === 'horizontal-only') previewPostResizeWidth(padlet.id, w);
+                  else previewPostResize(padlet.id, w, h);
+                }}
+                onResizeCommit={(w, h, ow, oh, m) => {
+                  void commitPostResize(padlet.id, w, h, ow, oh, { manualSize: true }, padlet.metadata, m);
+                }}
+                getStartSize={() => {
+                  const el = genericCardRefs.current[padlet.id];
+                  if (!el) return null;
+                  const width = el.offsetWidth || (padlet.type === 'link' ? 320 : 180);
+                  const height = el.offsetHeight || 80;
+                  return { width, height };
+                }}
+                title="Resize"
+              />
+            )}
 
-            {/* Content - expands to fit all text */}
+
+            {/* Content - expands to fit all text. PATCH POST-RESIZE-B2: an
+                explicitly height-resized Note/Todo (box manual geometry)
+                scrolls internally so the user's text/tasks stay accessible
+                when the card is smaller than its content. Legacy unresized
+                posts keep their historical overflow behavior. */}
             <div
-              className={`p-3 ${(padlet.type === 'link' || (padlet.type === 'ai-component' && (expandedAIPosts[padlet.id] ?? false))) ? '' : 'overflow-hidden'}`}
+              className={`p-3 ${needsContentScroll ? 'overflow-y-auto' : (padlet.type === 'link' || (padlet.type === 'ai-component' && (expandedAIPosts[padlet.id] ?? false))) ? '' : 'overflow-hidden'}`}
               style={{ maxWidth: '100%' }}
               // AI-generated content (and link thumbnails) can contain plain
               // <img> tags, which browsers make natively drag-and-droppable.

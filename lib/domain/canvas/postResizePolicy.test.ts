@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   POST_RESIZE_CONSTRAINTS,
+  getManualResizeDimensions,
   getPostResizeCapability,
   getPostResizeConstraints,
   hasValidPostResizeGeometry,
   isImageManuallySized,
+  isManuallySizedPost,
 } from '@/lib/domain/canvas/postResizePolicy';
 import type { Padlet } from '@/types/collabboard';
 
@@ -12,7 +14,24 @@ function post(type: string): Pick<Padlet, 'type'> {
   return { type: type as Padlet['type'] };
 }
 
-describe('PATCH POST-RESIZE-B1 capability matrix', () => {
+function sized(type: string, width: number, height: number, metadata?: Record<string, unknown>): Padlet {
+  return {
+    id: 'p-1',
+    board_id: 'b',
+    title: '',
+    content: '',
+    type: type as Padlet['type'],
+    position_x: 0,
+    position_y: 0,
+    width,
+    height,
+    created_at: '',
+    updated_at: '',
+    metadata,
+  };
+}
+
+describe('PATCH POST-RESIZE-B1/B2 capability matrix', () => {
   it('1. image -> box', () => {
     expect(getPostResizeCapability(post('image'))).toBe('box');
   });
@@ -25,20 +44,30 @@ describe('PATCH POST-RESIZE-B1 capability matrix', () => {
     expect(getPostResizeCapability(post('section_heading'))).toBe('horizontal-only');
   });
 
-  it('4-11. B1 exposes nothing else: note/todo/link/document/table/clipart/container/comment -> none', () => {
-    const none: Array<[string, string]> = [
-      ['4', 'text'],
-      ['4b', 'note'],
-      ['5', 'todo'],
-      ['6', 'link'],
-      ['7', 'card'],
-      ['8', 'table'],
-      ['9', 'file'],
-      ['10', 'container'],
-      ['11', 'comment'],
-    ];
-    for (const [label, type] of none) {
-      expect(getPostResizeCapability(post(type)), `${label} ${type}`).toBe('none');
+  it('B2: text/note -> box', () => {
+    expect(getPostResizeCapability(post('text'))).toBe('box');
+    expect(getPostResizeCapability(post('note'))).toBe('box');
+  });
+
+  it('B2: todo -> box', () => {
+    expect(getPostResizeCapability(post('todo'))).toBe('box');
+  });
+
+  it('B2: link -> horizontal-only', () => {
+    expect(getPostResizeCapability(post('link'))).toBe('horizontal-only');
+  });
+
+  it('B2: card (Document AND Clipart) -> box', () => {
+    expect(getPostResizeCapability(post('card'))).toBe('box');
+  });
+
+  it('B2: table -> horizontal-only', () => {
+    expect(getPostResizeCapability(post('table'))).toBe('horizontal-only');
+  });
+
+  it('B2 exposes nothing else: container/file/comment/drawing -> none', () => {
+    for (const type of ['container', 'file', 'comment', 'drawing']) {
+      expect(getPostResizeCapability(post(type)), type).toBe('none');
     }
   });
 });
@@ -53,9 +82,22 @@ describe('PATCH POST-RESIZE-B1 constraints', () => {
     expect(getPostResizeConstraints(post('image'))).toEqual({ minWidth: 100, minHeight: 100 });
   });
 
+  it('B2: text/note 120x80, todo 160x100, link 240 wide, table 200 wide', () => {
+    expect(getPostResizeConstraints(post('text'))).toEqual({ minWidth: 120, minHeight: 80 });
+    expect(getPostResizeConstraints(post('note'))).toEqual({ minWidth: 120, minHeight: 80 });
+    expect(getPostResizeConstraints(post('todo'))).toEqual({ minWidth: 160, minHeight: 100 });
+    expect(getPostResizeConstraints(post('link'))).toEqual({ minWidth: 240, minHeight: 0 });
+    expect(getPostResizeConstraints(post('table'))).toEqual({ minWidth: 200, minHeight: 0 });
+  });
+
+  it('B2: Document vs Clipart minima differ by the canonical svgUrl distinction', () => {
+    expect(getPostResizeConstraints({ type: 'card', metadata: {} })).toEqual({ minWidth: 180, minHeight: 220 });
+    expect(getPostResizeConstraints({ type: 'card', metadata: { svgUrl: '/x.svg' } })).toEqual({ minWidth: 100, minHeight: 100 });
+  });
+
   it('types without constraints return null', () => {
-    expect(getPostResizeConstraints(post('todo'))).toBeNull();
-    expect(getPostResizeConstraints(post('text'))).toBeNull();
+    expect(getPostResizeConstraints(post('container'))).toBeNull();
+    expect(getPostResizeConstraints(post('file'))).toBeNull();
   });
 });
 
@@ -135,5 +177,73 @@ describe('PATCH POST-RESIZE-B1.1 legacy Image compatibility fixture matrix', () 
 
   it('manualSize=true WITHOUT valid geometry still stays legacy (marker alone is not enough)', () => {
     expect(isImageManuallySized(imagePost({ metadata: { manualSize: true } }))).toBe(false);
+  });
+});
+
+// ============================================================ POST-RESIZE-B2
+function notePost(width: number, height: number, metadata?: Record<string, unknown>): Padlet {
+  return sized('text', width, height, metadata);
+}
+
+describe('PATCH POST-RESIZE-B2 marker-gated legacy/manual model', () => {
+  it('13. legacy Note: generic stored dimensions WITHOUT manualSize are NOT manual', () => {
+    expect(isManuallySizedPost(notePost(300, 200))).toBe(false);
+    expect(isManuallySizedPost(notePost(280, 350))).toBe(false);
+    expect(getManualResizeDimensions(notePost(300, 200))).toBeNull();
+  });
+
+  it('14. manual Note geometry (manualSize=true + valid dims) IS honored', () => {
+    const manual = notePost(400, 300, { manualSize: true });
+    expect(isManuallySizedPost(manual)).toBe(true);
+    expect(getManualResizeDimensions(manual)).toEqual({ width: 400, height: 300 });
+  });
+
+  it('manual Note geometry clamps to the type minimum', () => {
+    const tiny = notePost(50, 40, { manualSize: true });
+    expect(getManualResizeDimensions(tiny)).toEqual({ width: 120, height: 80 });
+  });
+
+  it('15. legacy Todo generic dimensions ignored', () => {
+    expect(isManuallySizedPost(sized('todo', 300, 400))).toBe(false);
+  });
+
+  it('16. manual Todo geometry honored', () => {
+    expect(getManualResizeDimensions(sized('todo', 260, 180, { manualSize: true }))).toEqual({ width: 260, height: 180 });
+  });
+
+  it('17. legacy Link generic width ignored', () => {
+    expect(isManuallySizedPost(sized('link', 500, 400))).toBe(false);
+  });
+
+  it('18. manual Link width honored (height untouched by horizontal-only resize)', () => {
+    expect(getManualResizeDimensions(sized('link', 420, 300, { manualSize: true }))).toEqual({ width: 420, height: 300 });
+  });
+
+  it('19. legacy Table generic width ignored', () => {
+    expect(isManuallySizedPost(sized('table', 400, 300))).toBe(false);
+  });
+
+  it('20. manual Table width honored', () => {
+    expect(getManualResizeDimensions(sized('table', 340, 200, { manualSize: true }))).toEqual({ width: 340, height: 200 });
+  });
+
+  it('22/23. legacy Document canonical geometry behavior unchanged (marker NOT required)', () => {
+    // Document/Clipart consumed canonical width/height BEFORE B2; the marker
+    // must never gate their historical interpretation.
+    const doc = sized('card', 640, 480);
+    expect(getManualResizeDimensions(doc)).toBeNull(); // marker-gated helper stays out of the way
+    expect(POST_RESIZE_CONSTRAINTS.document).toEqual({ minWidth: 180, minHeight: 220 });
+  });
+
+  it('24/25. legacy Clipart canonical geometry behavior unchanged (marker NOT required)', () => {
+    const clipart = sized('card', 320, 240, { svgUrl: '/x.svg' });
+    expect(getManualResizeDimensions(clipart)).toBeNull();
+    expect(POST_RESIZE_CONSTRAINTS.clipart).toEqual({ minWidth: 100, minHeight: 100 });
+  });
+
+  it('21. zero load-time migration: a pure read never implies a write', () => {
+    // The helper set is read-only; nothing here performs persistence.
+    const manual = notePost(400, 300, { manualSize: true });
+    expect(getManualResizeDimensions(manual)).toEqual({ width: 400, height: 300 });
   });
 });
