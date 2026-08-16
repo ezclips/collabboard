@@ -387,7 +387,9 @@ describe('SECTION-H3B product and scope freeze', () => {
 
   it('geometry, typography and style contracts are unchanged', () => {
     expect(SECTION_HEADING_DEFAULT_WIDTH).toBe(500);
-    expect(SECTION_HEADING_DEFAULT_HEIGHT).toBe(64);
+    // SECTION-H3B.2: default height now derives from the level->height map at
+    // the default level (H2), not a flat literal -- see sectionHeadingLevelHeight.test.tsx.
+    expect(SECTION_HEADING_DEFAULT_HEIGHT).toBe(56);
     expect(SECTION_HEADING_MIN_WIDTH).toBe(200);
     expect(engineSrc).toContain("1: 'text-2xl font-bold',");
     expect(engineSrc).toContain("2: 'text-xl font-semibold',");

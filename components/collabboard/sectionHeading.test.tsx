@@ -188,9 +188,11 @@ describe('SECTION-H1 creation [10-20]', () => {
     expect(canvasClient).toContain('headingLevel: SECTION_HEADING_DEFAULT_LEVEL,');
   });
 
-  it('15/16. default width 500 and compact height 64', () => {
+  it('15/16. default width 500 and compact height (SECTION-H3B.2: level-derived, H2 = 56)', () => {
     expect(SECTION_HEADING_DEFAULT_WIDTH).toBe(500);
-    expect(SECTION_HEADING_DEFAULT_HEIGHT).toBe(64);
+    // SECTION_HEADING_DEFAULT_HEIGHT now derives from the level->height map at
+    // the default level (H2), rather than being an independent literal.
+    expect(SECTION_HEADING_DEFAULT_HEIGHT).toBe(56);
     expect(SECTION_HEADING_DEFAULT_HEIGHT).toBeLessThan(SECTION_HEADING_DEFAULT_WIDTH / 4);
     expect(canvasClient).toContain('const width = SECTION_HEADING_DEFAULT_WIDTH;');
     expect(canvasClient).toContain('const height = SECTION_HEADING_DEFAULT_HEIGHT;');

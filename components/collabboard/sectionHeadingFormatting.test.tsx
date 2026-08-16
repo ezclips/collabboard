@@ -257,7 +257,10 @@ describe('SECTION-H2 heading levels [1-17]', () => {
   });
 
   it('16. the level persists through the generic metadata write, not a new column', () => {
-    expect(cardsSrc).toContain('commitSectionHeadingMetadata(padletId, { headingLevel: level })');
+    // SECTION-H3B.2: the SAME write now also carries the level's canonical
+    // height (see sectionHeadingLevelHeight.test.tsx) -- still one call, no
+    // new metadata key, no new column.
+    expect(cardsSrc).toContain('commitSectionHeadingMetadata(padletId, { headingLevel: level }, { height: getSectionHeadingHeight(level) })');
     const round = JSON.parse(JSON.stringify(makeHeading({ metadata: { headingLevel: 3 } as never })));
     expect(getSectionHeadingLevel(round)).toBe(3);
     expect(typesSrc).toContain('headingLevel?: 1 | 2 | 3 | 4;');
@@ -898,7 +901,7 @@ describe('SECTION-H2 minimap [77-80]', () => {
   it('77. a resized heading measures as a wider silhouette with no minimap change', () => {
     const wide = makeHeading({ width: 1400 });
     expect(getMinimapItemKind(wide)).toBe('post');
-    expect(getFallbackMinimapItem(wide)).toMatchObject({ x: 100, y: 200, width: 1400, height: 64 });
+    expect(getFallbackMinimapItem(wide)).toMatchObject({ x: 100, y: 200, width: 1400, height: SECTION_HEADING_DEFAULT_HEIGHT });
     expect(getFallbackMinimapItem(makeHeading())).toMatchObject({ width: SECTION_HEADING_DEFAULT_WIDTH });
     expect(code(minimapSrc)).not.toMatch(/section_heading|SectionHeading/);
     expect(code(read('components/collabboard/canvas/minimap/useFreeformMinimapGeometry.ts'))).not.toMatch(/section_heading|SectionHeading/);

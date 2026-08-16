@@ -20,15 +20,25 @@ export const SECTION_HEADING_TYPE = 'section_heading' as const;
 /**
  * Default geometry, in WORLD units. Deliberately wide and short: a heading
  * is a horizontal rule with a label, never a card-shaped block.
+ *
+ * PATCH SECTION-H3B.2: HEIGHT is no longer a flat constant -- it now derives
+ * from SECTION_HEADING_LEVEL_HEIGHT at the default level, below, so a newly
+ * created (always-H2) heading is born at H2's canonical height rather than at
+ * a value some other level later has to correct.
  */
 export const SECTION_HEADING_DEFAULT_WIDTH = 500;
-export const SECTION_HEADING_DEFAULT_HEIGHT = 64;
 
 export const SECTION_HEADING_DEFAULT_TEXT = 'Section heading';
 
 /** Semantic heading levels. SECTION-H2 exposes the picker; H1 persists the default. */
 export type SectionHeadingLevel = 1 | 2 | 3 | 4;
 export const SECTION_HEADING_DEFAULT_LEVEL: SectionHeadingLevel = 2;
+
+/** The ONE place a raw, possibly-malformed level value gets clamped. */
+function normalizeSectionHeadingLevel(raw: unknown): SectionHeadingLevel {
+  const value = Number(raw);
+  return value === 1 || value === 2 || value === 3 || value === 4 ? value : SECTION_HEADING_DEFAULT_LEVEL;
+}
 
 /**
  * PATCH SECTION-H2 Phase 6: the four semantic levels a CollabBoard Section
@@ -42,8 +52,10 @@ export const SECTION_HEADING_LEVELS: readonly SectionHeadingLevel[] = [1, 2, 3, 
  *
  * Introduced by SECTION-H1 inside the renderer and hoisted here so the
  * formatting toolbar can never grow a second, drifting copy: any control that
- * needs level typography reads THIS map. Sizes stay inside the frozen 64-world
- * -unit height contract (Phase 8) -- H1's 24px/32px line box is the tallest.
+ * needs level typography reads THIS map. PATCH SECTION-H3B.2: each level's
+ * line box (H1's 24px/32px down to H4's 16px/24px) comfortably fits inside
+ * that SAME level's SECTION_HEADING_LEVEL_HEIGHT entry, with roughly
+ * doubled headroom at every level -- typography was never re-tuned to fit.
  */
 export const SECTION_HEADING_LEVEL_TEXT_CLASS: Record<SectionHeadingLevel, string> = {
   1: 'text-2xl font-bold',
@@ -61,10 +73,10 @@ export const SECTION_HEADING_DEFAULT_ACCENT_COLOR = '#0f766e';
 /**
  * PATCH SECTION-H2 Phase 13: the ONE minimum width, in world units.
  *
- * 200 sits at the top of the spec's 180-220 band: at the default 64-unit
- * height it still reads as a horizontal label rather than a square block, and
- * it leaves room for the 4-unit accent stripe plus a few characters of H1 text
- * before truncation kicks in.
+ * 200 sits at the top of the spec's 180-220 band: even at H1's tallest
+ * 64-unit height it still reads as a horizontal label rather than a square
+ * block, and it leaves room for the 4-unit accent stripe plus a few
+ * characters of H1 text before truncation kicks in.
  */
 export const SECTION_HEADING_MIN_WIDTH = 200;
 
@@ -86,9 +98,46 @@ export function isSectionHeading(post: Pick<Padlet, 'type'> | null | undefined):
  * retrofit the plumbing.
  */
 export function getSectionHeadingLevel(post: Pick<Padlet, 'metadata'> | null | undefined): SectionHeadingLevel {
-  const raw = Number((post?.metadata as { headingLevel?: unknown } | undefined)?.headingLevel);
-  return raw === 1 || raw === 2 || raw === 3 || raw === 4 ? raw : SECTION_HEADING_DEFAULT_LEVEL;
+  return normalizeSectionHeadingLevel((post?.metadata as { headingLevel?: unknown } | undefined)?.headingLevel);
 }
+
+/**
+ * PATCH SECTION-H3B.2 -- the ONE level-to-height map. H1 is tallest, H4 is
+ * shortest: a smaller semantic heading no longer carries the same oversized
+ * section bar as H1. WIDTH is never part of this map -- it stays entirely
+ * user-controlled and is untouched by a level change (Phase 5/7).
+ */
+export const SECTION_HEADING_LEVEL_HEIGHT: Record<SectionHeadingLevel, number> = {
+  1: 64,
+  2: 56,
+  3: 48,
+  4: 40,
+};
+
+/**
+ * The canonical height for a semantic heading level. Accepts either a raw
+ * level (the toolbar/creation call sites already have one) or anything
+ * `getSectionHeadingLevel` accepts (a Padlet-like object, e.g. from the
+ * renderer) -- both paths resolve a malformed/missing level through the SAME
+ * `normalizeSectionHeadingLevel` clamp, so there is exactly one place that
+ * decides what an invalid level defaults to.
+ */
+export function getSectionHeadingHeight(
+  levelOrPost: SectionHeadingLevel | Pick<Padlet, 'metadata'> | null | undefined,
+): number {
+  const level = typeof levelOrPost === 'number'
+    ? normalizeSectionHeadingLevel(levelOrPost)
+    : getSectionHeadingLevel(levelOrPost);
+  return SECTION_HEADING_LEVEL_HEIGHT[level];
+}
+
+/**
+ * PATCH SECTION-H3B.2: retained as the creation-time default, now DERIVED
+ * rather than an independent literal -- a new heading is always created at
+ * SECTION_HEADING_DEFAULT_LEVEL, so its default height must be exactly that
+ * level's canonical height, never a flat number that could drift from it.
+ */
+export const SECTION_HEADING_DEFAULT_HEIGHT = SECTION_HEADING_LEVEL_HEIGHT[SECTION_HEADING_DEFAULT_LEVEL];
 
 /** The heading's display text. Title is the canonical store; content stays empty. */
 export function getSectionHeadingText(post: Pick<Padlet, 'title'> | null | undefined): string {

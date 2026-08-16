@@ -4,13 +4,13 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { Padlet } from '@/types/collabboard';
 import {
   SECTION_HEADING_ACCENT_WIDTH_PX,
-  SECTION_HEADING_DEFAULT_HEIGHT,
   SECTION_HEADING_DEFAULT_WIDTH,
   SECTION_HEADING_HANDLE_HIT_PX,
   SECTION_HEADING_LEVEL_TEXT_CLASS,
   SECTION_HEADING_MAX_LENGTH,
   getSectionHeadingAccentColor,
   getSectionHeadingBackgroundColor,
+  getSectionHeadingHeight,
   getSectionHeadingLevel,
   getSectionHeadingText,
   resizeSectionHeadingLeftEdge,
@@ -116,7 +116,14 @@ export default function SectionHeadingPost({
   }, [text]);
 
   const width = Number(padlet.width) > 0 ? Number(padlet.width) : SECTION_HEADING_DEFAULT_WIDTH;
-  const height = Number(padlet.height) > 0 ? Number(padlet.height) : SECTION_HEADING_DEFAULT_HEIGHT;
+  // PATCH SECTION-H3B.2 Phase 17/18: a heading ALWAYS renders its own
+  // persisted height, never one freshly recomputed from its level on every
+  // render -- that is what keeps a pre-existing heading's on-screen size
+  // agreeing with drag/minimap/bounds code that also reads padlet.height
+  // directly, with no silent DOM-vs-canonical divergence. The level-aware
+  // resolver is used ONLY as the fallback for genuinely missing/invalid
+  // persisted geometry, in place of the old flat default.
+  const height = Number(padlet.height) > 0 ? Number(padlet.height) : getSectionHeadingHeight(padlet);
   const accentColor = getSectionHeadingAccentColor(padlet);
   const surfaceColor = getSectionHeadingBackgroundColor(padlet);
   const textStyle = resolveSectionHeadingTextStyle(padlet);
@@ -310,8 +317,9 @@ export default function SectionHeadingPost({
         </div>
 
         {/* Phase 9: LEFT and RIGHT width handles only. There is deliberately
-            no top, bottom, corner or rotation affordance -- a Section Heading
-            has a fixed height contract and no rotation model. */}
+            no top, bottom, corner or rotation affordance -- height is never
+            drag-resized (SECTION-H3B.2: it follows the heading LEVEL instead),
+            and there is no rotation model. */}
         {showHandles && renderHandle('left')}
         {showHandles && renderHandle('right')}
       </div>

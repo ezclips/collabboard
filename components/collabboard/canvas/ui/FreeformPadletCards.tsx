@@ -43,7 +43,7 @@ import { ColumnPostContextMenu } from '@/components/collabboard/menus/ColumnPost
 import { CommentPostContextMenu } from '@/components/collabboard/menus/CommentPostContextMenu';
 import { ImagePostContextMenu } from '@/components/collabboard/context-menus/ImagePostContextMenu';
 import { isStripVisible, htmlToText, getEligibleContainerDestinations, IMAGE_CROP_TO_GRID_HEIGHT_PX } from '@/components/collabboard/canvas/engine/utils';
-import { isSectionHeading, type SectionHeadingLevel, type SectionHeadingRect, type SectionHeadingWorldBounds } from '@/components/collabboard/canvas/engine/sectionHeading';
+import { getSectionHeadingHeight, isSectionHeading, type SectionHeadingLevel, type SectionHeadingRect, type SectionHeadingWorldBounds } from '@/components/collabboard/canvas/engine/sectionHeading';
 import SectionHeadingPost from '@/components/collabboard/canvas/ui/SectionHeadingPost';
 import SectionHeadingToolbar from '@/components/collabboard/canvas/ui/SectionHeadingToolbar';
 import type { SectionHeadingColorTarget } from '@/components/collabboard/canvas/ui/SectionHeadingAppearancePanel';
@@ -345,6 +345,10 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
 
   /**
    * PATCH SECTION-H2 Phase 7/50 -- heading level and appearance persistence.
+   * PATCH SECTION-H3B.2 Phase 15 -- extended with an optional `geometry.height`
+   * so a level change persists `metadata.headingLevel` AND `height` through
+   * this SAME `updatePostFieldsOrThrow` call rather than two independent
+   * writes: one honest command, one optimistic update, one rollback.
    *
    * Same honest posture as the geometry write above, and deliberately not the
    * `commitPadletMeta` debounce, whose documented contract swallows both
@@ -353,26 +357,32 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
   const commitSectionHeadingMetadata = React.useCallback(async (
     padletId: string,
     updates: Record<string, unknown>,
+    geometry?: { height?: number },
   ) => {
     const previous = padlets.find(p => p.id === padletId);
     if (!previous) return;
     const previousMetadata = previous.metadata;
+    const previousHeight = previous.height;
     const nextMetadata = { ...(previousMetadata || {}), ...updates };
-    setPadlets(prev => prev.map(p => (p.id === padletId ? { ...p, metadata: nextMetadata } : p)));
+    const heightUpdate = geometry?.height !== undefined ? { height: geometry.height } : {};
+    setPadlets(prev => prev.map(p => (p.id === padletId ? { ...p, metadata: nextMetadata, ...heightUpdate } : p)));
     try {
       await updatePostFieldsOrThrow(padletId, {
         metadata: nextMetadata,
+        ...heightUpdate,
         updated_at: new Date().toISOString(),
       });
     } catch (err) {
       console.error('Failed to persist section heading appearance:', err);
-      setPadlets(prev => prev.map(p => (p.id === padletId ? { ...p, metadata: previousMetadata } : p)));
+      setPadlets(prev => prev.map(p => (p.id === padletId ? { ...p, metadata: previousMetadata, height: previousHeight } : p)));
       toast.error('Failed to update section heading');
     }
   }, [padlets, setPadlets, updatePostFieldsOrThrow]);
 
   const setSectionHeadingLevel = React.useCallback((padletId: string, level: SectionHeadingLevel) => {
-    void commitSectionHeadingMetadata(padletId, { headingLevel: level });
+    // Phase 5/6: x/y/width are never named here, so they are structurally
+    // untouched -- only headingLevel and its canonical height move together.
+    void commitSectionHeadingMetadata(padletId, { headingLevel: level }, { height: getSectionHeadingHeight(level) });
   }, [commitSectionHeadingMetadata]);
 
   const setSectionHeadingTextStyle = React.useCallback((padletId: string, style: Partial<CaptionStyle>) => {
