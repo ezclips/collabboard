@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type React from 'react';
 import type { Padlet } from '@/types/collabboard';
-import { POST_RESIZE_CONSTRAINTS } from '@/lib/domain/canvas/postResizePolicy';
+import { POST_RESIZE_CONSTRAINTS, isImageManuallySized } from '@/lib/domain/canvas/postResizePolicy';
 import type { MinimapWorldItem, WorldRect } from './freeformMinimapGeometry';
 import { isValidWorldRect } from './freeformMinimapGeometry';
 
@@ -38,12 +38,21 @@ export function getFallbackMinimapItem(post: Padlet): MinimapWorldItem | null {
     width = finitePositive(post.width, 180);
     height = finitePositive(post.height, 220);
   } else if (post.type === 'image') {
-    // PATCH POST-RESIZE-B1: a resized Image now renders from canonical
-    // width/height, so the fallback must prefer valid canonical geometry too.
-    // Legacy Images (no canonical geometry) keep the historical 360 fallback.
+    // PATCH POST-RESIZE-B1.1: the SAME compatibility condition the renderer
+    // uses (`isImageManuallySized`) -- a legacy Image's generic stored
+    // width/height (e.g. 300x200 template defaults) is never proof of
+    // intentional sizing, so the fallback must stay at the historical 360
+    // presentation for exactly the same posts the renderer keeps legacy.
+    // Only an explicitly-resized Image's canonical geometry feeds the
+    // minimap fallback.
     const imageMin = POST_RESIZE_CONSTRAINTS.image ?? { minWidth: 100, minHeight: 100 };
-    width = Math.max(finitePositive(post.width, 360), imageMin.minWidth);
-    height = Math.max(finitePositive(post.height, 100), imageMin.minHeight);
+    if (isImageManuallySized(post)) {
+      width = Math.max(finitePositive(post.width, 360), imageMin.minWidth);
+      height = Math.max(finitePositive(post.height, 100), imageMin.minHeight);
+    } else {
+      width = 360;
+      height = 100;
+    }
   } else if (post.type === 'link') {
     width = 320;
   } else if (post.type === 'ai-component') {

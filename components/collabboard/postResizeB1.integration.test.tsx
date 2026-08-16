@@ -4,6 +4,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { getFallbackMinimapItem } from '@/components/collabboard/canvas/minimap/useFreeformMinimapGeometry';
+import { sanitizeClonedPostMetadata } from '@/lib/infra/collabboard/clonedPostMetadata';
 import type { Padlet } from '@/types/collabboard';
 
 function read(relativePath: string): string {
@@ -77,8 +78,11 @@ describe('PATCH POST-RESIZE-B1 Freeform wiring', () => {
     expect(commit).toContain("toast.error('Failed to resize post')");
   });
 
-  it('28/31/32. Image rendering switches to canonical geometry only when valid', () => {
-    expect(code(cardsSrc)).toContain('hasValidPostResizeGeometry(padlet.width, padlet.height)');
+  it('28/31/32. Image rendering switches to canonical geometry only when explicitly resized (PATCH POST-RESIZE-B1.1)', () => {
+    // B1.1: finite-positive width/height alone is no longer sufficient --
+    // see isImageManuallySized in postResizePolicy.ts.
+    expect(code(cardsSrc)).toContain('isImageManuallySized(padlet)');
+    expect(code(cardsSrc)).not.toContain('hasValidPostResizeGeometry(padlet.width, padlet.height)');
     expect(code(cardsSrc)).toContain("${Math.max(Number(padlet.width), IMAGE_RESIZE_MIN_WIDTH)}px`");
     expect(code(cardsSrc)).toContain("${Math.max(Number(padlet.height), IMAGE_RESIZE_MIN_HEIGHT)}px`");
     // Legacy fallback stays exactly 360px.
@@ -119,8 +123,8 @@ describe('PATCH POST-RESIZE-B1 freezes', () => {
   });
 });
 
-describe('PATCH POST-RESIZE-B1 minimap canonical preference', () => {
-  it('36. a resized Image uses canonical geometry in the fallback', () => {
+describe('PATCH POST-RESIZE-B1.1 minimap canonical preference', () => {
+  it('36. an explicitly-resized Image (manualSize=true) uses canonical geometry in the fallback', () => {
     const resized: Padlet = {
       id: 'img-1',
       board_id: 'b',
@@ -133,11 +137,12 @@ describe('PATCH POST-RESIZE-B1 minimap canonical preference', () => {
       height: 480,
       created_at: '',
       updated_at: '',
+      metadata: { manualSize: true },
     };
     expect(getFallbackMinimapItem(resized)).toMatchObject({ width: 640, height: 480 });
   });
 
-  it('28b. a legacy Image keeps the 360 fallback width', () => {
+  it('28b. a legacy Image (no stored geometry) keeps the 360 fallback width', () => {
     const legacy: Padlet = {
       id: 'img-2',
       board_id: 'b',
@@ -154,7 +159,107 @@ describe('PATCH POST-RESIZE-B1 minimap canonical preference', () => {
     expect(getFallbackMinimapItem(legacy)).toMatchObject({ width: 360 });
   });
 
-  it('36b. the minimap fallback module imports the shared policy (no separate image constant)', () => {
+  it('B1.1: a legacy Image with valid generic stored geometry but no manualSize STILL keeps the 360 fallback (minimap/renderer parity)', () => {
+    const generic: Padlet = {
+      id: 'img-3',
+      board_id: 'b',
+      title: '',
+      content: '',
+      type: 'image',
+      position_x: 0,
+      position_y: 0,
+      width: 300,
+      height: 200,
+      created_at: '',
+      updated_at: '',
+    };
+    expect(getFallbackMinimapItem(generic)).toMatchObject({ width: 360, height: 100 });
+  });
+
+  it('B1.1: valid geometry + manualSize=false stays legacy in the fallback', () => {
+    const explicitlyFalse: Padlet = {
+      id: 'img-4',
+      board_id: 'b',
+      title: '',
+      content: '',
+      type: 'image',
+      position_x: 0,
+      position_y: 0,
+      width: 300,
+      height: 400,
+      created_at: '',
+      updated_at: '',
+      metadata: { manualSize: false },
+    };
+    expect(getFallbackMinimapItem(explicitlyFalse)).toMatchObject({ width: 360, height: 100 });
+  });
+
+  it('36b. the minimap fallback module imports the shared policy resolver (no separate image condition)', () => {
     expect(code(minimapSrc)).toContain('postResizePolicy');
+    expect(code(minimapSrc)).toContain('isImageManuallySized');
+  });
+});
+
+describe('PATCH POST-RESIZE-B1.1 Image explicit-resize commit + rollback', () => {
+  it('no load-time migration: nothing in the render path calls setPadlets/updatePostFieldsOrThrow merely from computing isImageManuallySized', () => {
+    // The compatibility check is a pure read (imported into a `style={{...}}`
+    // expression); it must never appear inside a mount-time effect that
+    // writes geometry/metadata back.
+    expect(code(cardsSrc)).not.toMatch(/useEffect\([^)]*isImageManuallySized/);
+  });
+
+  it('9. first resize origin uses measured rendered geometry, not stored width/height', () => {
+    expect(code(cardsSrc)).toContain('imageCardRefs.current[padlet.id]');
+    expect(code(cardsSrc)).toContain('el.offsetWidth || 360');
+    expect(code(cardsSrc)).toContain('el.offsetHeight || 100');
+    expect(code(cardsSrc)).toContain('getStartSize={() => {');
+  });
+
+  it('10. a successful Image resize commit writes metadata.manualSize = true', () => {
+    expect(code(cardsSrc)).toContain('void commitPostResize(padlet.id, w, h, ow, oh, { manualSize: true }, padlet.metadata);');
+  });
+
+  it('11. the commit preserves every other metadata field via a spread merge, both locally and in the persisted write', () => {
+    expect(code(cardsSrc)).toContain('metadata: { ...p.metadata, ...metadataPatch }');
+    expect(code(cardsSrc)).toContain('metadata: { ...(originMetadata ?? {}), ...metadataPatch }');
+  });
+
+  it('12/13. a failed resize rolls back geometry AND metadata together -- no state where manualSize=true but the resize failed', () => {
+    const rollback = code(cardsSrc).match(/catch \(err\) \{[\s\S]*?toast\.error\('Failed to resize post'\);/)?.[0] ?? '';
+    expect(rollback).toContain('width: originWidth, height: originHeight');
+    expect(rollback).toContain('metadata: originMetadata');
+  });
+
+  it('single write per successful resize: ONE updatePostFieldsOrThrow call site in commitPostResize', () => {
+    const commitFn = code(cardsSrc).match(/const commitPostResize = React\.useCallback\(async \([\s\S]*?\}, \[setPadlets, updatePostFieldsOrThrow\]\);/)?.[0] ?? '';
+    expect(commitFn.match(/updatePostFieldsOrThrow\(/g)?.length).toBe(1);
+  });
+
+  it('20. AI remains independent from the marker -- its commit call site passes no metadataPatch/originMetadata', () => {
+    expect(code(cardsSrc)).toContain('onResizeCommit={(w, h, ow, oh) => { void commitPostResize(padlet.id, w, h, ow, oh); }}');
+  });
+});
+
+describe('PATCH POST-RESIZE-B1.1 Copy / Paste / Duplicate preserve the marker', () => {
+  it('14/15/16. sanitizeClonedPostMetadata never strips manualSize', () => {
+    const explicit = { manualSize: true, imageUrl: 'x' };
+    expect(sanitizeClonedPostMetadata(explicit)).toMatchObject({ manualSize: true });
+  });
+
+  it('17. a legacy Image (no manualSize) stays legacy through the sanitizer even with generic width/height on the source padlet', () => {
+    const legacy = { imageUrl: 'x' }; // no manualSize -- width/height live on the Padlet itself, copied verbatim by the caller
+    const sanitized = sanitizeClonedPostMetadata(legacy);
+    expect((sanitized as { manualSize?: boolean }).manualSize).toBeUndefined();
+  });
+
+  it('duplicate/paste copy width/height verbatim from the source padlet (the field that carries geometry across a clone)', () => {
+    expect(code(cardsSrc) || '').toBeDefined();
+    const actionsSrc = read('components/collabboard/canvas/hooks/useCanvasActions.ts');
+    expect(code(actionsSrc)).toContain('width: padlet.width');
+    expect(code(actionsSrc)).toContain('height: padlet.height');
+    expect(code(actionsSrc)).toContain('width: clipboard.width');
+    expect(code(actionsSrc)).toContain('height: clipboard.height');
+    expect(code(actionsSrc)).toContain('sanitizeClonedPostMetadata(padlet.metadata)');
+    expect(code(actionsSrc)).toContain('sanitizeClonedPostMetadata(clipboard.metadata)');
   });
 });

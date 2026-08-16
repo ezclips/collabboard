@@ -58,13 +58,36 @@ export function getPostResizeConstraints(post: Pick<Padlet, 'type'>): PostResize
 }
 
 /**
- * A post counts as carrying explicit resize geometry only when BOTH canonical
- * dimensions are finite positive numbers. A legacy post with missing/invalid
- * width or height (the historical default for Image posts, which render at a
- * fixed 360px with natural height) keeps its legacy presentation until the
- * user explicitly resizes it; no load-time migration writes geometry.
+ * True when BOTH canonical dimensions are finite positive numbers.
+ *
+ * This is a PURE GEOMETRY-VALIDITY CHECK ONLY -- it says nothing about
+ * whether a post's stored width/height were ever intentionally set by a
+ * resize gesture. Historically Image posts were created with generic stored
+ * geometry (e.g. 300x200, 280x350, 300x400 template defaults) that the
+ * pre-B1 renderer never actually consumed (it always rendered Images at a
+ * fixed 360px presentation), so finite-positive alone CANNOT be treated as
+ * proof of intentional sizing. Do not use this alone to gate Image
+ * legacy-vs-explicit rendering -- see `isImageManuallySized` below, which is
+ * the actual compatibility condition.
  */
 export function hasValidPostResizeGeometry(width: unknown, height: unknown): boolean {
   return Number.isFinite(Number(width)) && Number(width) > 0
     && Number.isFinite(Number(height)) && Number(height) > 0;
+}
+
+/**
+ * PATCH POST-RESIZE-B1.1: the ONE shared compatibility condition for Image
+ * legacy-vs-explicit presentation. Both the Freeform renderer and the
+ * minimap fallback geometry call this -- never re-derive the condition
+ * separately -- so they can never disagree about which Image posts have
+ * been explicitly resized.
+ *
+ * True only when the post carries `metadata.manualSize === true` AND its
+ * stored width/height are valid geometry. `manualSize` alone (without valid
+ * geometry) or valid geometry alone (without `manualSize`) both mean
+ * "render the legacy presentation."
+ */
+export function isImageManuallySized(post: Pick<Padlet, 'width' | 'height' | 'metadata'>): boolean {
+  return (post.metadata as { manualSize?: boolean } | undefined)?.manualSize === true
+    && hasValidPostResizeGeometry(post.width, post.height);
 }

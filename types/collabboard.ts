@@ -171,6 +171,16 @@ export interface Padlet {
     drawing?: string; // Data URL of the drawing layer
     drawingPaths?: any[];
     drawingText?: any[];
+    // PATCH POST-RESIZE-B1.1: true only once the user has explicitly resized
+    // this post through the shared PostResizeHandle. Legacy Image posts carry
+    // generic stored width/height from their original creation path (e.g.
+    // 300x200, 280x350, 300x400 template defaults) that were never rendered
+    // from -- pre-B1 always rendered Images at a fixed 360px presentation --
+    // so finite positive width/height alone is NOT proof of intentional
+    // sizing. Missing/false means "render the legacy presentation"; true
+    // means "canonical width/height are authoritative." See
+    // lib/domain/canvas/postResizePolicy.ts#isImageManuallySized.
+    manualSize?: boolean;
     captionStyle?: {
       color?: string;
       backgroundColor?: string;

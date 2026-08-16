@@ -9,7 +9,7 @@ import { createUpdatePostFieldsCommand } from '@/lib/domain/canvas/posts';
 import { selectCardModalRoute } from '@/lib/domain/canvas/cardModalRoute';
 import { selectDocumentModalDestination, type DocumentModalDestination } from '@/lib/domain/canvas/documentModalRoute';
 import { isDocumentPost } from '@/lib/domain/canvas/documentPost';
-import { getPostResizeCapability, getPostResizeConstraints, hasValidPostResizeGeometry } from '@/lib/domain/canvas/postResizePolicy';
+import { getPostResizeCapability, getPostResizeConstraints, isImageManuallySized } from '@/lib/domain/canvas/postResizePolicy';
 import PostResizeHandle from '@/components/collabboard/canvas/ui/PostResizeHandle';
 import { createPostsRepository } from '@/lib/infra/canvas/postsRepository';
 import ImageActionsToolbar from '@/components/collabboard/editors/ImageActionsToolbar';
@@ -352,6 +352,16 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
    * console.error-only `persistPostFieldsBestEffort` posture, which
    * POST-RESIZE-B1 removed). On failure the
    * pre-gesture size is restored and a toast surfaces the problem.
+   *
+   * PATCH POST-RESIZE-B1.1: `metadataPatch`/`originMetadata` let a caller
+   * (Image's first explicit resize) commit width/height AND
+   * `metadata.manualSize = true` as ONE honest write, preserving every other
+   * metadata field via `originMetadata` (passed by the caller from its own
+   * fresh render closure, not re-read here, so the merge always starts from
+   * the field set that was actually on screen when the gesture began). On
+   * failure the metadata patch rolls back with the geometry, so there is
+   * never a persisted or locally-visible state where manualSize=true but the
+   * resize that set it failed.
    */
   const commitPostResize = React.useCallback(async (
     padletId: string,
@@ -359,20 +369,27 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
     height: number,
     originWidth: number,
     originHeight: number,
+    metadataPatch?: Record<string, any> | null,
+    originMetadata?: Padlet['metadata'],
   ) => {
     setPadlets(prev => prev.map(p => (
-      p.id === padletId ? { ...p, width, height } : p
+      p.id === padletId
+        ? { ...p, width, height, ...(metadataPatch ? { metadata: { ...p.metadata, ...metadataPatch } } : {}) }
+        : p
     )));
     try {
       await updatePostFieldsOrThrow(padletId, {
         width,
         height,
+        ...(metadataPatch ? { metadata: { ...(originMetadata ?? {}), ...metadataPatch } } : {}),
         updated_at: new Date().toISOString(),
       });
     } catch (err) {
       console.error('Failed to persist post resize:', err);
       setPadlets(prev => prev.map(p => (
-        p.id === padletId ? { ...p, width: originWidth, height: originHeight } : p
+        p.id === padletId
+          ? { ...p, width: originWidth, height: originHeight, ...(metadataPatch ? { metadata: originMetadata } : {}) }
+          : p
       )));
       toast.error('Failed to resize post');
     }
@@ -1526,10 +1543,10 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
               className={`overflow-hidden flex flex-col bg-white group relative transition-all ${(padlet.metadata as any)?.fullView ? '' : 'border border-gray-200'} ${isPadletSelected(padlet.id) ? 'ring-2 ring-blue-500' : ''
                 }`}
               style={{
-                width: hasValidPostResizeGeometry(padlet.width, padlet.height)
+                width: isImageManuallySized(padlet)
                   ? `${Math.max(Number(padlet.width), IMAGE_RESIZE_MIN_WIDTH)}px`
                   : '360px',
-                height: hasValidPostResizeGeometry(padlet.width, padlet.height)
+                height: isImageManuallySized(padlet)
                   ? `${Math.max(Number(padlet.height), IMAGE_RESIZE_MIN_HEIGHT)}px`
                   : undefined,
                 backgroundColor: padlet.metadata?.cardColor || '#ffffff',
@@ -1765,7 +1782,15 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                   maxWidth={FREEFORM_WORLD_MAX_X - (Number(padlet.position_x) || 0)}
                   maxHeight={FREEFORM_WORLD_MAX_Y - (Number(padlet.position_y) || 0)}
                   onResizePreview={(w, h) => previewPostResize(padlet.id, w, h)}
-                  onResizeCommit={(w, h, ow, oh) => { void commitPostResize(padlet.id, w, h, ow, oh); }}
+                  onResizeCommit={(w, h, ow, oh) => {
+                    // PATCH POST-RESIZE-B1.1: this IS the explicit resize --
+                    // mark it atomically with the geometry write, preserving
+                    // every other metadata field via this render's own
+                    // padlet.metadata (fresh: previewPostResize's setPadlets
+                    // calls during the drag re-render this closure before
+                    // pointerup can fire).
+                    void commitPostResize(padlet.id, w, h, ow, oh, { manualSize: true }, padlet.metadata);
+                  }}
                   getStartSize={() => {
                     const el = imageCardRefs.current[padlet.id];
                     if (!el) return null;

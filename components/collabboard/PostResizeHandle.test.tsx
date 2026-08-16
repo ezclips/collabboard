@@ -41,8 +41,25 @@ function render(element: React.ReactElement) {
 }
 
 function pointer(target: Element, type: string, clientX: number, extra: Record<string, unknown> = {}) {
-  const event = new MouseEvent(type, { bubbles: true, cancelable: true, clientX, clientY: 10 });
-  Object.assign(event, { pointerId: 1, pointerType: 'mouse', isPrimary: true, ...extra });
+  // jsdom's MouseEvent defines clientX/clientY/button/shiftKey as getter-only
+  // accessors -- they must go through the constructor's init dict, not a
+  // post-construction Object.assign (which silently no-ops for these on some
+  // engines and throws on others). pointerId/pointerType/isPrimary aren't
+  // real MouseEvent properties, so they're free to assign afterward.
+  const { clientY, button, shiftKey, ...rest } = extra as {
+    clientY?: number;
+    button?: number;
+    shiftKey?: boolean;
+  };
+  const event = new MouseEvent(type, {
+    bubbles: true,
+    cancelable: true,
+    clientX,
+    clientY: clientY ?? 10,
+    button: button ?? 0,
+    shiftKey: shiftKey ?? false,
+  });
+  Object.assign(event, { pointerId: 1, pointerType: 'mouse', isPrimary: true, ...rest });
   act(() => { target.dispatchEvent(event); });
 }
 
@@ -113,9 +130,12 @@ describe('PATCH POST-RESIZE-B1 PostResizeHandle gesture', () => {
   });
 
   it('18. min constraints clamp (AI 200x150)', () => {
+    // Width and height clamp independently (postResizeBox.test.ts's own
+    // established pattern), so both axes must actually be dragged to see
+    // both clamp -- an X-only drag leaves height at its untouched start size.
     const { handle, onResizePreview } = mount({ startWidth: 500, startHeight: 400, constraints: AI_MIN });
     pointer(handle, 'pointerdown', 10);
-    pointer(handle, 'pointermove', -10000);
+    pointer(handle, 'pointermove', -10000, { clientY: -10000 });
     expect(onResizePreview).toHaveBeenLastCalledWith(200, 150);
   });
 
@@ -190,9 +210,11 @@ describe('PATCH POST-RESIZE-B1 PostResizeHandle gesture', () => {
   });
 
   it('maxWidth/maxHeight clamp the world extent', () => {
+    // Same independent-axis contract as the min-clamp test above: both axes
+    // must be dragged to see both clamp.
     const { handle, onResizePreview } = mount({ startWidth: 360, startHeight: 220, maxWidth: 1000, maxHeight: 800 });
     pointer(handle, 'pointerdown', 10);
-    pointer(handle, 'pointermove', 100000);
+    pointer(handle, 'pointermove', 100000, { clientY: 100000 });
     expect(onResizePreview).toHaveBeenLastCalledWith(1000, 800);
   });
 

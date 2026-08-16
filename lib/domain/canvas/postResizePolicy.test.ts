@@ -4,6 +4,7 @@ import {
   getPostResizeCapability,
   getPostResizeConstraints,
   hasValidPostResizeGeometry,
+  isImageManuallySized,
 } from '@/lib/domain/canvas/postResizePolicy';
 import type { Padlet } from '@/types/collabboard';
 
@@ -72,5 +73,67 @@ describe('PATCH POST-RESIZE-B1 legacy geometry detection', () => {
     expect(hasValidPostResizeGeometry(360, 220)).toBe(true);
     expect(hasValidPostResizeGeometry(360, undefined)).toBe(false);
     expect(hasValidPostResizeGeometry(undefined, 220)).toBe(false);
+  });
+});
+
+// PATCH POST-RESIZE-B1.1: the Phase 6 legacy Image compatibility fixture
+// matrix (A-K). `hasValidPostResizeGeometry` alone (tested above) is
+// deliberately insufficient for Image -- generic template dimensions like
+// 300x200/280x350/300x400 are finite and positive but were never proof of
+// intentional sizing (the pre-B1 renderer never consumed them, always
+// rendering Images at a fixed 360px presentation). Only `isImageManuallySized`
+// is the real Image compatibility gate.
+function imagePost(overrides: Partial<Pick<Padlet, 'width' | 'height' | 'metadata'>>): Pick<Padlet, 'width' | 'height' | 'metadata'> {
+  return { width: undefined as unknown as number, height: undefined as unknown as number, metadata: undefined, ...overrides };
+}
+
+describe('PATCH POST-RESIZE-B1.1 legacy Image compatibility fixture matrix', () => {
+  it('A. width/height missing -> legacy', () => {
+    expect(isImageManuallySized(imagePost({}))).toBe(false);
+  });
+
+  it('B. null/invalid width/height -> legacy', () => {
+    expect(isImageManuallySized(imagePost({ width: null as unknown as number, height: null as unknown as number }))).toBe(false);
+    expect(isImageManuallySized(imagePost({ width: Number.NaN, height: Number.NaN }))).toBe(false);
+  });
+
+  it('C. width only -> legacy', () => {
+    expect(isImageManuallySized(imagePost({ width: 300, metadata: { manualSize: true } }))).toBe(false);
+  });
+
+  it('D. height only -> legacy', () => {
+    expect(isImageManuallySized(imagePost({ height: 200, metadata: { manualSize: true } }))).toBe(false);
+  });
+
+  it('E. generic 300x200 (no manualSize) -> legacy', () => {
+    expect(isImageManuallySized(imagePost({ width: 300, height: 200 }))).toBe(false);
+  });
+
+  it('F. generic 280x350 (no manualSize) -> legacy', () => {
+    expect(isImageManuallySized(imagePost({ width: 280, height: 350 }))).toBe(false);
+  });
+
+  it('G. generic 300x400 (no manualSize) -> legacy', () => {
+    expect(isImageManuallySized(imagePost({ width: 300, height: 400 }))).toBe(false);
+  });
+
+  it('H. arbitrary positive legacy dimensions (no manualSize) -> legacy', () => {
+    expect(isImageManuallySized(imagePost({ width: 917, height: 1203 }))).toBe(false);
+  });
+
+  it('I. valid dimensions + manualSize=false -> legacy', () => {
+    expect(isImageManuallySized(imagePost({ width: 640, height: 480, metadata: { manualSize: false } }))).toBe(false);
+  });
+
+  it('J. valid dimensions + manualSize missing -> legacy', () => {
+    expect(isImageManuallySized(imagePost({ width: 640, height: 480 }))).toBe(false);
+  });
+
+  it('K. valid dimensions + manualSize=true -> canonical (explicit resize)', () => {
+    expect(isImageManuallySized(imagePost({ width: 640, height: 480, metadata: { manualSize: true } }))).toBe(true);
+  });
+
+  it('manualSize=true WITHOUT valid geometry still stays legacy (marker alone is not enough)', () => {
+    expect(isImageManuallySized(imagePost({ metadata: { manualSize: true } }))).toBe(false);
   });
 });
