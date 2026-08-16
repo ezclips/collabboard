@@ -480,3 +480,52 @@ describe('SECTION-H3C Freeform freeze -- unchanged from 4667783 [64-70]', () => 
     expect(engineSrc).toContain('export function canBeGraphEndpoint(post: Pick<Padlet, \'type\'> | null | undefined): boolean {');
   });
 });
+
+// ============================================================ SECTION-H3C.1 CLOSURE -- NEW INVARIANTS [71-77]
+describe('SECTION-H3C.1 closure -- invariants not directly covered by the H3C suite [71-77]', () => {
+  it('71. no rotation is ever persisted for Section Heading -- resize commit never writes an angle, and the shared renderer has no rotation handle', () => {
+    const start = drawingSrc.indexOf('onResizeCommit={(padletId, rect) => {');
+    const end = drawingSrc.indexOf('}}\n        />\n      </div>', start);
+    const body = drawingSrc.slice(start, end);
+    expect(body).not.toMatch(/angle:/);
+    expect(code(headingSrc)).not.toMatch(/rotation-handle|rotate\(/);
+  });
+
+  it('72. Excalidraw customData carries only the generic renderSignature -- no semantic heading fields are duplicated into the scene element (canonical ownership stays with the padlet)', () => {
+    const start = drawingSrc.indexOf('const createEmbeddableElementForPadlet = useCallback((padlet: Padlet) => {');
+    const end = drawingSrc.indexOf('}, [getPadletRenderSignature]);', start);
+    const body = drawingSrc.slice(start, end);
+    expect(body).toContain('customData: {\n        renderSignature: getPadletRenderSignature(padlet),\n      },');
+    expect(body).not.toMatch(/headingLevel|titleStyle|accentColor/);
+  });
+
+  it('73. Container horizontal/vertical orientation is not implemented in this patch (explicit SECTION-H3C/H3C.1 scope boundary) -- no orientation field exists anywhere in DrawingLayout', () => {
+    expect(code(drawingSrc)).not.toMatch(/containerOrientation|orientation:\s*['"](horizontal|vertical)['"]/);
+  });
+
+  it('74. body drag ends by writing through the SAME canonical position path every other Drawing post uses (savePadletPositionWithLock), un-padding the scene-frame offset first', () => {
+    expect(drawingSrc).toContain('deps.onDragEnd?.(padletId, newX, newY);');
+    const start = drawingSrc.indexOf('onDragEnd={(id, x, y) => {');
+    const end = drawingSrc.indexOf('}}\n        />', start);
+    const body = drawingSrc.slice(start, end);
+    expect(body).toContain('const canonicalX = x + SECTION_HEADING_DRAWING_FRAME_PADDING_PX;');
+    expect(body).toContain('savePadletPositionWithLock(id, canonicalX, y);');
+  });
+
+  it('75. the frame-padding offset is the same 40px constant everywhere it is used -- creation, reconciliation, drag-end and resize-commit never restate a different literal', () => {
+    const paddingUses = drawingSrc.match(/SECTION_HEADING_DRAWING_FRAME_PADDING_PX/g) ?? [];
+    expect(paddingUses.length).toBeGreaterThanOrEqual(5);
+    expect(drawingSrc).toContain('const SECTION_HEADING_DRAWING_FRAME_PADDING_PX = 40;');
+  });
+
+  it('76. ordinary (non-heading) embeddables are never locked -- the locked flag is gated exclusively by isSectionHeading, never a hardcoded true', () => {
+    expect(drawingSrc).toContain('locked: isSectionHeading(padlet),');
+    expect(drawingSrc).not.toMatch(/locked:\s*true\b/);
+  });
+
+  it('77. the one-embeddable-per-padlet invariant is enforced structurally: insertion checks for an existing link before creating, and reconciliation computes missing-vs-existing by link before creating any', () => {
+    expect(drawingSrc).toContain('const alreadyExists = currentElements.some(');
+    expect(drawingSrc).toContain('if (alreadyExists) return;');
+    expect(drawingSrc).toContain('.filter((p) => !existingLinks.has(`padlet://${p.id}`))');
+  });
+});
