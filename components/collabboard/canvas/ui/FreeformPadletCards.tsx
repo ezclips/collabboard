@@ -32,6 +32,7 @@ import AIContentRenderer from '@/components/ai/AIContentRenderer';
 import PostCardContent from '@/components/collabboard/PostCardContent';
 import AIComponentExportMenu from '@/components/collabboard/AIComponentExportMenu';
 import RowColumnContainerCard from '@/components/collabboard/RowColumnContainerCard';
+import { resolveContainerOrientation } from '@/lib/domain/canvas/containerModel';
 import { contrastIconColor } from '@/components/collabboard/shells/CardShell';
 import LinkMediaEmbed, { getLinkEmbedKind } from '@/components/collabboard/LinkMediaEmbed';
 import FreeformGraphLayer from '@/components/graph/FreeformGraphLayer';
@@ -269,6 +270,26 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
       throw result.error.cause ?? result.error;
     }
   }, []);
+
+  const growContainerWidth = React.useCallback((padletId: string, requiredWidth: number) => {
+    const current = padlets.find((p) => p.id === padletId);
+    if (!current || current.type !== 'container') return;
+    const currentWidth = Number(current.width) || 0;
+    const nextWidth = Math.ceil(requiredWidth);
+    if (!Number.isFinite(nextWidth) || nextWidth <= currentWidth + 1) return;
+
+    setPadlets((prev) => prev.map((p) => p.id === padletId ? { ...p, width: nextWidth } : p));
+    void (async () => {
+      const updatePostFields = createUpdatePostFieldsCommand(createPostsRepository());
+      const result = await updatePostFields({
+        postId: padletId,
+        fields: { width: nextWidth, updated_at: new Date().toISOString() },
+      }, { userId: null });
+      if (!result.ok) {
+        console.error('Failed to grow Container width:', result.error.cause ?? result.error);
+      }
+    })();
+  }, [padlets, setPadlets]);
   /**
    * PATCH-059 (P3 fix, owner-authorized): AI-card resize persistence. The
    * legacy bare builder statements were INERT (PATCH-058 ruling) - this
@@ -3416,6 +3437,8 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                 <RowColumnContainerCard
                   padlet={padlet}
                   allPadlets={padlets}
+                  orientation={resolveContainerOrientation(padlet.metadata)}
+                  onRequiredWidthChange={(requiredWidth) => growContainerWidth(padlet.id, requiredWidth)}
                   showHeader={false}
                   isExpanded={expandedContainers[padlet.id] ?? false}
                   onExpandAvailabilityChange={(available) => setExpandableContainers(prev => prev[padlet.id] === available ? prev : { ...prev, [padlet.id]: available })}

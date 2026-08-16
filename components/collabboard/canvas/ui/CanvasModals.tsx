@@ -4,6 +4,7 @@ import React from 'react';
 import type { AuthUser } from '@/lib/domain/auth/user';
 import type { Padlet } from '@/types/collabboard';
 import { resolveContainerChildren } from '@/lib/domain/canvas/containerModel';
+import { resolveContainerOrientation, type ContainerOrientation } from '@/lib/domain/canvas/containerModel';
 import { getMeaningfulTitle } from '@/lib/infra/collabboard/postTitle';
 import type { CaptionStyle } from '@/lib/domain/canvas/captionStyle';
 import type { CommentAccessMode } from '@/lib/domain/canvas/comments';
@@ -306,6 +307,20 @@ export default function CanvasModals({
             initialTitleStyle={liveContainer?.metadata?.titleStyle as Record<string, unknown> | undefined}
             initialBackgroundColor={liveContainer?.metadata?.cardColor || '#ffffff'}
             initialTopStrip={liveContainer?.metadata?.topStrip || 'transparent'}
+            initialOrientation={resolveContainerOrientation(liveContainer?.metadata)}
+            allowOrientationControl={canvasLayout === 'freeform'}
+            onOrientationChange={(orientation: ContainerOrientation) => {
+              if (!liveContainer) return;
+              if (liveContainer.id === 'new') {
+                setPadletToEdit({
+                  ...liveContainer,
+                  metadata: { ...liveContainer.metadata, orientation },
+                });
+                return;
+              }
+              const nextMetadata = { ...liveContainer.metadata, orientation };
+              setPadlets((prev) => prev.map((p) => p.id === liveContainer.id ? { ...p, metadata: nextMetadata } : p));
+            }}
             initialDetachedComments={liveContainer?.metadata?.detachedComments || EMPTY_COMMENTS}
             containerId={liveContainer?.id !== 'new' ? liveContainer?.id : undefined}
             childPadlets={

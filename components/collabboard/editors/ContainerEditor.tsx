@@ -45,6 +45,7 @@ import {
     verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import { resolveContainerOrientation, type ContainerOrientation } from '@/lib/domain/canvas/containerModel';
 
 // Color palette matching other editors
 const BACKGROUND_COLORS = [
@@ -109,6 +110,7 @@ interface ContainerEditorProps {
         backgroundColor: string;
         topStrip?: string;
         detachedComments?: DetachedComment[];
+        orientation: ContainerOrientation;
     }) => void;
     onClose: () => void;
 
@@ -141,6 +143,10 @@ interface ContainerEditorProps {
     // current (fully writable) behavior, same convention as every other
     // canonical caller.
     accessMode?: CommentAccessMode;
+
+    allowOrientationControl?: boolean;
+    initialOrientation?: ContainerOrientation;
+    onOrientationChange?: (orientation: ContainerOrientation) => void;
 
     isOpen: boolean;
 }
@@ -463,12 +469,18 @@ export default function ContainerEditor({
     currentUserName,
     currentUserAvatar,
     accessMode = 'manage',
+    allowOrientationControl = false,
+    initialOrientation,
+    onOrientationChange,
     isOpen,
 }: ContainerEditorProps) {
     const [title, setTitle] = useState(initialTitle);
     const [titleStyle, setTitleStyle] = useState<Record<string, unknown>>(initialTitleStyle || {});
     const [backgroundColor, setBackgroundColor] = useState(initialBackgroundColor);
     const [topStrip, setTopStrip] = useState<string | null>(initialTopStrip);
+    const [orientation, setOrientation] = useState<ContainerOrientation>(
+        initialOrientation ?? resolveContainerOrientation(undefined),
+    );
     const containerTextColor = getContrastTextColor(backgroundColor);
     const mutedContainerTextColor = containerTextColor === '#f8fafc' ? 'rgba(248,250,252,0.82)' : 'rgba(15,23,42,0.68)';
 
@@ -622,6 +634,7 @@ export default function ContainerEditor({
             backgroundColor,
             topStrip: topStrip && topStrip !== "transparent" ? topStrip : undefined,
             detachedComments: detachedComments.length > 0 ? detachedComments : undefined,
+            orientation,
         });
         onClose();
     };
@@ -814,6 +827,27 @@ export default function ContainerEditor({
                                     <p className="text-[11px] mt-1" style={{ color: mutedContainerTextColor }}>
                                         Link cards open the URL. Other cards open the editor. Drag to reorder. (ESC to close)
                                     </p>
+                                    {allowOrientationControl && (
+                                        <fieldset className="mt-3" onMouseDown={(e) => e.stopPropagation()}>
+                                            <legend className="mb-1 text-xs font-semibold" style={{ color: mutedContainerTextColor }}>Layout</legend>
+                                            <div className="inline-flex rounded-md border border-gray-200 bg-gray-50 p-0.5" role="group" aria-label="Container layout">
+                                                {(['vertical', 'horizontal'] as const).map((option) => (
+                                                    <button
+                                                        key={option}
+                                                        type="button"
+                                                        aria-pressed={orientation === option}
+                                                        onClick={() => {
+                                                            setOrientation(option);
+                                                            onOrientationChange?.(option);
+                                                        }}
+                                                        className={`rounded px-3 py-1 text-xs capitalize transition-colors ${orientation === option ? 'bg-white font-semibold text-blue-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                                                    >
+                                                        {option}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </fieldset>
+                                    )}
                                 </div>
 
                                 <div

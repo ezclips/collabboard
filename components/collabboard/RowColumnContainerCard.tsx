@@ -12,7 +12,7 @@ import { guardCommentMutation, type CommentAccessMode } from "@/lib/domain/canva
 import { getEffectiveVisibleChildTitleIds, resolveVisibleChildTitle } from "@/lib/infra/collabboard/containerChildTitleVisibility";
 import { resolveChildCardChrome } from "@/lib/domain/canvas/documentPost";
 import { useScrollbarLane } from "./useScrollbarLane";
-import { resolveContainerChildren } from "@/lib/domain/canvas/containerModel";
+import { resolveContainerChildren, type ContainerOrientation } from "@/lib/domain/canvas/containerModel";
 
 const DEFAULT_IGNORE_KINDS = new Set(["columns-container-move"]);
 
@@ -103,6 +103,8 @@ type RowColumnContainerCardProps = {
   // mutation reachable from this card. Defaults to 'manage' so every
   // pre-existing caller (tests, previews) keeps today's behavior unchanged.
   accessMode?: CommentAccessMode;
+  orientation?: ContainerOrientation;
+  onRequiredWidthChange?: (requiredWidth: number) => void;
 };
 
 export default function RowColumnContainerCard({
@@ -129,15 +131,20 @@ export default function RowColumnContainerCard({
   isContentOnly = false,
   onOpenDocument,
   accessMode = 'manage',
+  orientation = 'vertical',
+  onRequiredWidthChange,
 }: RowColumnContainerCardProps) {
   const COLLAPSED_SCROLL_MAX_HEIGHT = 300;
   const [localIsExpanded, setLocalIsExpanded] = useState(false);
   const [openCommentsChildId, setOpenCommentsChildId] = useState<string | null>(null);
   const [hasExpandableOverflow, setHasExpandableOverflow] = useState(false);
   const contentMeasureRef = useRef<HTMLDivElement>(null);
+  const containerMeasureRef = useRef<HTMLDivElement>(null);
+  const lastReportedWidthRef = useRef(0);
   const isControlled = controlledIsExpanded !== undefined;
   const isExpanded = isControlled ? controlledIsExpanded : localIsExpanded;
   const shouldEnableInternalScroll = !disableInternalScroll && !isExpanded;
+  const isHorizontal = orientation === 'horizontal';
   // PATCH 9E.1: replaces PATCH 9E's guessed 6px constant -- measures this
   // viewport's OWN real scrollbar/gutter reservation (0 on platforms whose
   // scrollbar takes no layout space) instead of approximating it.
@@ -214,10 +221,35 @@ export default function RowColumnContainerCard({
     return () => resizeObserver.disconnect();
   }, [childPadlets, disableInternalScroll, onExpandAvailabilityChange]);
 
+  useEffect(() => {
+    if (!isHorizontal || !onRequiredWidthChange) return;
+
+    const reportRequiredWidth = () => {
+      const root = containerMeasureRef.current;
+      const content = contentMeasureRef.current;
+      if (!root || !content) return;
+      const currentWidth = Number(padlet.width) || 0;
+      if (currentWidth < lastReportedWidthRef.current - 1) {
+        lastReportedWidthRef.current = 0;
+      }
+      const requiredWidth = Math.ceil(Math.max(root.scrollWidth, content.scrollWidth));
+      if (requiredWidth <= lastReportedWidthRef.current + 1) return;
+      lastReportedWidthRef.current = requiredWidth;
+      onRequiredWidthChange(requiredWidth);
+    };
+
+    reportRequiredWidth();
+    const resizeObserver = new ResizeObserver(reportRequiredWidth);
+    if (containerMeasureRef.current) resizeObserver.observe(containerMeasureRef.current);
+    if (contentMeasureRef.current) resizeObserver.observe(contentMeasureRef.current);
+    return () => resizeObserver.disconnect();
+  }, [childPadlets, isExpanded, isHorizontal, onRequiredWidthChange, padlet.width]);
+
 
 
   return (
     <div
+      ref={containerMeasureRef}
       className={isContentOnly ? `w-full space-y-2 ${className || ""}` : `w-full space-y-2 p-1.5 ${className || ""}`}
       style={isContentOnly ? undefined : { backgroundColor }}
     >
@@ -377,11 +409,15 @@ export default function RowColumnContainerCard({
             return (
               <div
                 ref={contentMeasureRef}
-                className={shouldEnableInternalScroll ? "max-h-[300px] overflow-y-auto overflow-x-hidden pr-0.5 space-y-2 scrollbar-ultrathin" : "space-y-2 pr-0.5"}
+                className={isHorizontal
+                  ? `${shouldEnableInternalScroll ? "max-h-[300px] overflow-y-auto overflow-x-hidden pr-0.5 scrollbar-ultrathin" : "pr-0.5"} flex flex-row flex-nowrap items-start gap-2`
+                  : shouldEnableInternalScroll ? "max-h-[300px] overflow-y-auto overflow-x-hidden pr-0.5 space-y-2 scrollbar-ultrathin" : "space-y-2 pr-0.5"}
                 style={
-                  shouldEnableInternalScroll
-                    ? { scrollbarGutter: "stable", width: `calc(100% + ${scrollbarLane}px)`, marginRight: `-${scrollbarLane}px` }
-                    : undefined
+                  isHorizontal
+                    ? { width: "max-content", minWidth: "100%" }
+                    : shouldEnableInternalScroll
+                      ? { scrollbarGutter: "stable", width: `calc(100% + ${scrollbarLane}px)`, marginRight: `-${scrollbarLane}px` }
+                      : undefined
                 }
               >
                 {orderedChildren.map((child) => {
@@ -389,7 +425,11 @@ export default function RowColumnContainerCard({
 
                   if (isCommentType && onUpdateChildComments) {
                     return (
-                      <div key={child.id} className="w-full max-w-full overflow-hidden pointer-events-auto">
+                      <div
+                        key={child.id}
+                        className="w-full max-w-full overflow-hidden pointer-events-auto"
+                        style={isHorizontal ? { flex: `0 0 ${Math.max(Number(child.width) || 180, 1)}px`, width: Math.max(Number(child.width) || 180, 1) } : undefined}
+                      >
                         {renderChildTitle(child)}
                         <EmbeddedCommentList
                           comments={(child.metadata as any)?.comments || []}
@@ -456,7 +496,15 @@ export default function RowColumnContainerCard({
                     <div
                       key={child.id}
                       className={`relative border border-gray-200 overflow-hidden shadow-sm ${isImport ? 'pointer-events-auto' : ''}`}
-                      style={{ backgroundColor: childCardChrome.backgroundColor }}
+                      style={{
+                        backgroundColor: childCardChrome.backgroundColor,
+                        ...(isHorizontal
+                          ? {
+                              flex: `0 0 ${Math.max(Number(child.width) || 180, 1)}px`,
+                              width: Math.max(Number(child.width) || 180, 1),
+                            }
+                          : {}),
+                      }}
                     >
                       {childCardChrome.topStripColor && (
                         <div className="h-1.5 w-full" style={{ backgroundColor: childCardChrome.topStripColor }} />

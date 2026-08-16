@@ -131,6 +131,7 @@ export type SaveContainerData = {
     userName: string;
     timestamp: number;
   }>;
+  orientation?: 'vertical' | 'horizontal';
 };
 
 export type SaveCommentData = {
@@ -841,6 +842,7 @@ export function usePadletSave(params: UsePadletSaveParams) {
       titleStyle: data.titleStyle,
       childPadletIds: existingChildIds,
       detachedComments: data.detachedComments,
+      ...(data.orientation ? { orientation: data.orientation } : {}),
     };
 
     try {
