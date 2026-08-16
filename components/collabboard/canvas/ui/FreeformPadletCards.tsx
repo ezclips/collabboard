@@ -9,6 +9,8 @@ import { createUpdatePostFieldsCommand } from '@/lib/domain/canvas/posts';
 import { selectCardModalRoute } from '@/lib/domain/canvas/cardModalRoute';
 import { selectDocumentModalDestination, type DocumentModalDestination } from '@/lib/domain/canvas/documentModalRoute';
 import { isDocumentPost } from '@/lib/domain/canvas/documentPost';
+import { getPostResizeCapability, getPostResizeConstraints, hasValidPostResizeGeometry } from '@/lib/domain/canvas/postResizePolicy';
+import PostResizeHandle from '@/components/collabboard/canvas/ui/PostResizeHandle';
 import { createPostsRepository } from '@/lib/infra/canvas/postsRepository';
 import ImageActionsToolbar from '@/components/collabboard/editors/ImageActionsToolbar';
 import ImageDrawingLayer from '@/components/collabboard/editors/ImageDrawingLayer';
@@ -49,7 +51,7 @@ import { getSectionHeadingHeight, isSectionHeading, type SectionHeadingLevel, ty
 import SectionHeadingPost from '@/components/collabboard/canvas/ui/SectionHeadingPost';
 import SectionHeadingToolbar from '@/components/collabboard/canvas/ui/SectionHeadingToolbar';
 import type { SectionHeadingColorTarget } from '@/components/collabboard/canvas/ui/SectionHeadingAppearancePanel';
-import { FREEFORM_WORLD_WIDTH_PX, FREEFORM_WORLD_HEIGHT_PX, FREEFORM_WORLD_MIN_X, FREEFORM_WORLD_MAX_X } from '@/components/collabboard/canvas/engine/freeformStageGeometry';
+import { FREEFORM_WORLD_WIDTH_PX, FREEFORM_WORLD_HEIGHT_PX, FREEFORM_WORLD_MIN_X, FREEFORM_WORLD_MAX_X, FREEFORM_WORLD_MAX_Y } from '@/components/collabboard/canvas/engine/freeformStageGeometry';
 import { getContainerEditTargetLabel } from '@/lib/infra/collabboard/containerEditTargetLabel';
 import { getEffectiveVisibleChildTitleIds, toggleChildPostTitleVisibility } from '@/lib/infra/collabboard/containerChildTitleVisibility';
 import {
@@ -70,6 +72,12 @@ import { useCanvasConfig } from '@/components/collabboard/canvas/contexts/Canvas
 import { getMeaningfulTitle } from '@/lib/infra/collabboard/postTitle';
 
 const DND_KIND_CONTAINER_MOVE = 'columns-container-move';
+
+// PATCH POST-RESIZE-B1: render-side mirrors of the policy minima, so legacy
+// render fallbacks and resized canonical rendering agree with the resize
+// gesture's clamps (see lib/domain/canvas/postResizePolicy.ts).
+const IMAGE_RESIZE_MIN_WIDTH = getPostResizeConstraints({ type: 'image' })?.minWidth ?? 100;
+const IMAGE_RESIZE_MIN_HEIGHT = getPostResizeConstraints({ type: 'image' })?.minHeight ?? 100;
 
 /**
  * PATCH SECTION-H3B Phase 4/5/16: the Freeform host states its OWN horizontal
@@ -305,24 +313,13 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
     })();
   }, [padlets, setPadlets]);
   /**
-   * PATCH-059 (P3 fix, owner-authorized): AI-card resize persistence. The
-   * legacy bare builder statements were INERT (PATCH-058 ruling) - this
-   * helper is the first code that actually saves the resize. Launched
-   * without awaiting so the pointer path never blocks; the command never
-   * throws (defineCommand converts every failure into a Result), so the
-   * void'd promise cannot reject. Failure behavior, ruled deliberately:
-   * console.error only - the optimistic local size stays (no rollback, no
-   * toast, no fetch), matching the component's freeform failure posture.
+   * PATCH-059 (P3 fix, owner-authorized) -- historical note: AI-card resize
+   * persistence used to live in `persistPostFieldsBestEffort` here, the first
+   * code that actually saved the resize (the legacy bare builder statements
+   * were INERT per PATCH-058). POST-RESIZE-B1 removed that helper: the shared
+   * PostResizeHandle + `commitPostResize` (below) superseded it with the
+   * honest commit/rollback posture.
    */
-  const persistPostFieldsBestEffort = React.useCallback((id: string, fields: object) => {
-    void (async () => {
-      const updatePostFields = createUpdatePostFieldsCommand(createPostsRepository());
-      const result = await updatePostFields({ postId: id, fields }, { userId: null });
-      if (!result.ok) {
-        console.error('Failed to persist AI card resize:', result.error.cause ?? result.error);
-      }
-    })();
-  }, []);
   const isPadletSelected = React.useCallback(
     (padletId: string) => selectedPadletId === padletId || selectedPadletIds.includes(padletId),
     [selectedPadletId, selectedPadletIds]
@@ -339,10 +336,54 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
   } = useCanvasConfig();
 
   /**
+   * PATCH POST-RESIZE-B1: shared box-resize preview for Image / AI posts.
+   * Same cadence as Section Heading -- pointermove only previews through
+   * local state; the ONE persistence call happens on release.
+   */
+  const previewPostResize = React.useCallback((padletId: string, width: number, height: number) => {
+    setPadlets(prev => prev.map(p => (
+      p.id === padletId ? { ...p, width, height } : p
+    )));
+  }, [setPadlets]);
+
+  /**
+   * PATCH POST-RESIZE-B1: honest commit + rollback, mirroring
+   * `commitSectionHeadingRect` above (deliberately NOT the AI card's old
+   * console.error-only `persistPostFieldsBestEffort` posture, which
+   * POST-RESIZE-B1 removed). On failure the
+   * pre-gesture size is restored and a toast surfaces the problem.
+   */
+  const commitPostResize = React.useCallback(async (
+    padletId: string,
+    width: number,
+    height: number,
+    originWidth: number,
+    originHeight: number,
+  ) => {
+    setPadlets(prev => prev.map(p => (
+      p.id === padletId ? { ...p, width, height } : p
+    )));
+    try {
+      await updatePostFieldsOrThrow(padletId, {
+        width,
+        height,
+        updated_at: new Date().toISOString(),
+      });
+    } catch (err) {
+      console.error('Failed to persist post resize:', err);
+      setPadlets(prev => prev.map(p => (
+        p.id === padletId ? { ...p, width: originWidth, height: originHeight } : p
+      )));
+      toast.error('Failed to resize post');
+    }
+  }, [setPadlets, updatePostFieldsOrThrow]);
+
+  /**
    * PATCH SECTION-H2 Phase 17/50 -- Section Heading geometry persistence.
    *
-   * Deliberately NOT the AI card's `persistPostFieldsBestEffort` above: that
-   * helper documents a legacy console.error-only posture with no rollback.
+   * Deliberately NOT the AI card's legacy `persistPostFieldsBestEffort`
+   * posture (removed by POST-RESIZE-B1): that helper documented a
+   * console.error-only failure mode with no rollback.
    * An honest command exists (`updatePostFieldsOrThrow`), so this uses it and
    * genuinely restores the pre-drag rect when the write fails, rather than
    * leaving the screen showing a size the database never accepted.
@@ -615,7 +656,12 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
   const [expandedAIPosts, setExpandedAIPosts] = React.useState<Record<string, boolean>>({});
   const [expandableAIPosts, setExpandableAIPosts] = React.useState<Record<string, boolean>>({});
   const aiExportTargetsRef = React.useRef<Record<string, HTMLDivElement | null>>({});
-  const aiResizeRef = React.useRef<{ id: string; x: number; y: number; w: number; h: number } | null>(null);
+  // PATCH POST-RESIZE-B1: rendered rects of the Image card shells, measured at
+  // resize pointerdown so a legacy Image's natural height becomes the gesture
+  // origin (offsetWidth/offsetHeight are the element's own layout size in
+  // world units -- the stage's `transform: scale(canvasZoom)` does not affect
+  // them).
+  const imageCardRefs = React.useRef<Record<string, HTMLDivElement | null>>({});
   const activeImageToolbarPadlet = imageToolbarPadletId
     ? padlets.find((padlet) => padlet.id === imageToolbarPadletId) ?? null
     : null;
@@ -1476,10 +1522,16 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
 
             <div
               key={padlet.id}
+              ref={(el) => { imageCardRefs.current[padlet.id] = el; }}
               className={`overflow-hidden flex flex-col bg-white group relative transition-all ${(padlet.metadata as any)?.fullView ? '' : 'border border-gray-200'} ${isPadletSelected(padlet.id) ? 'ring-2 ring-blue-500' : ''
                 }`}
               style={{
-                width: '360px',
+                width: hasValidPostResizeGeometry(padlet.width, padlet.height)
+                  ? `${Math.max(Number(padlet.width), IMAGE_RESIZE_MIN_WIDTH)}px`
+                  : '360px',
+                height: hasValidPostResizeGeometry(padlet.width, padlet.height)
+                  ? `${Math.max(Number(padlet.height), IMAGE_RESIZE_MIN_HEIGHT)}px`
+                  : undefined,
                 backgroundColor: padlet.metadata?.cardColor || '#ffffff',
                 zIndex: isPadletSelected(padlet.id) ? 1000 : ((padlet.metadata as any)?.zIndex || 100),
               }}
@@ -1597,7 +1649,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
 
               <div
                 className={[
-                  "relative overflow-hidden bg-gray-50 flex items-center justify-center min-h-[100px]",
+                  "relative overflow-hidden bg-gray-50 flex items-center justify-center flex-1 min-h-[100px]",
                   padlet.metadata?.source === 'import' && padlet.metadata?.importOpenUrl ? "cursor-pointer" : "",
                 ].join(" ")}
                 onClick={() => {
@@ -1695,6 +1747,35 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                   }
                 }}
               />
+
+              {/* Resize handle - bottom-right, selected Image ROOT posts only.
+                  PATCH POST-RESIZE-B1: shared handle. The gesture origin is
+                  the ACTUAL rendered rectangle -- a legacy Image's natural
+                  height is measured from the card DOM at pointerdown -- so the
+                  first explicit resize starts from what the user sees, and the
+                  first commit is what turns the post into a canonical-geometry
+                  post. Hidden while locked, and children render through
+                  ContainerChildPreviewCard (never this root branch). */}
+              {getPostResizeCapability(padlet) === 'box' && padlet.type === 'image' && isPadletSelected(padlet.id) && canUseFreeformEditButton && !(padlet.metadata as any)?.isLocked && (
+                <PostResizeHandle
+                  clientToWorld={getWorldPointFromClient}
+                  startWidth={Number(padlet.width) || 360}
+                  startHeight={Number(padlet.height) || 100}
+                  constraints={getPostResizeConstraints(padlet)}
+                  maxWidth={FREEFORM_WORLD_MAX_X - (Number(padlet.position_x) || 0)}
+                  maxHeight={FREEFORM_WORLD_MAX_Y - (Number(padlet.position_y) || 0)}
+                  onResizePreview={(w, h) => previewPostResize(padlet.id, w, h)}
+                  onResizeCommit={(w, h, ow, oh) => { void commitPostResize(padlet.id, w, h, ow, oh); }}
+                  getStartSize={() => {
+                    const el = imageCardRefs.current[padlet.id];
+                    if (!el) return null;
+                    const width = el.offsetWidth || 360;
+                    const height = el.offsetHeight || 100;
+                    return { width, height };
+                  }}
+                  title="Resize"
+                />
+              )}
 
             </div>
 
@@ -3098,57 +3179,24 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
               </div>
             )}
 
-            {/* Resize handle - bottom-right corner, AI cards only, hidden when locked */}
+            {/* Resize handle - bottom-right corner, AI cards only, hidden when
+                locked. PATCH POST-RESIZE-B1: replaced the hand-rolled
+                delta/canvasZoom gesture with the shared PostResizeHandle
+                (host clientToWorld converter, preview per move, ONE commit on
+                release, rollback + toast on failure, screen-constant grip). */}
             {padlet.type === 'ai-component' && canUseFreeformEditButton && !(padlet.metadata as any)?.isLocked && (
-              <div
-                data-no-drag="true"
-                onPointerDown={(e) => {
-                  if (!canUseFreeformEditButton) return;
-                  e.preventDefault();
-                  e.stopPropagation();
-                  (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-                  aiResizeRef.current = {
-                    id: padlet.id,
-                    x: e.clientX,
-                    y: e.clientY,
-                    w: Number(padlet.width) || 500,
-                    h: Number(padlet.height) || 400,
-                  };
-                }}
-                onPointerMove={(e) => {
-                  if (!canUseFreeformEditButton) return;
-                  if (!aiResizeRef.current || aiResizeRef.current.id !== padlet.id) return;
-                  e.preventDefault();
-                  e.stopPropagation();
-                  const dx = (e.clientX - aiResizeRef.current.x) / canvasZoom;
-                  const dy = (e.clientY - aiResizeRef.current.y) / canvasZoom;
-                  const newW = Math.max(200, Math.round(aiResizeRef.current.w + dx));
-                  const newH = Math.max(150, Math.round(aiResizeRef.current.h + dy));
-                  setPadlets(prev => prev.map(p => p.id === padlet.id ? { ...p, width: newW, height: newH } : p));
-                }}
-                onPointerUp={(e) => {
-                  if (!canUseFreeformEditButton) return;
-                  if (!aiResizeRef.current || aiResizeRef.current.id !== padlet.id) return;
-                  e.preventDefault();
-                  e.stopPropagation();
-                  const dx = (e.clientX - aiResizeRef.current.x) / canvasZoom;
-                  const dy = (e.clientY - aiResizeRef.current.y) / canvasZoom;
-                  const newW = Math.max(200, Math.round(aiResizeRef.current.w + dx));
-                  const newH = Math.max(150, Math.round(aiResizeRef.current.h + dy));
-                  aiResizeRef.current = null;
-                  persistPostFieldsBestEffort(padlet.id, { width: newW, height: newH, updated_at: new Date().toISOString() });
-                }}
-                onPointerCancel={() => { aiResizeRef.current = null; }}
-                className="absolute bottom-1 right-1 z-10 h-5 w-5 cursor-nwse-resize flex items-center justify-center rounded-sm bg-white/80 opacity-0 shadow-sm transition-opacity hover:opacity-100 group-hover:opacity-50"
+              <PostResizeHandle
+                clientToWorld={getWorldPointFromClient}
+                startWidth={Math.max(Number(padlet.width) || 500, getPostResizeConstraints(padlet)?.minWidth ?? 200)}
+                startHeight={Math.max(Number(padlet.height) || 400, getPostResizeConstraints(padlet)?.minHeight ?? 150)}
+                constraints={getPostResizeConstraints(padlet)}
+                maxWidth={FREEFORM_WORLD_MAX_X - (Number(padlet.position_x) || 0)}
+                maxHeight={FREEFORM_WORLD_MAX_Y - (Number(padlet.position_y) || 0)}
+                onResizePreview={(w, h) => previewPostResize(padlet.id, w, h)}
+                onResizeCommit={(w, h, ow, oh) => { void commitPostResize(padlet.id, w, h, ow, oh); }}
+                className="opacity-0 transition-opacity hover:opacity-100 group-hover:opacity-50"
                 title="Resize"
-                aria-label="Resize"
-              >
-                <svg width="10" height="10" viewBox="0 0 10 10" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <line x1="9" y1="1" x2="1" y2="9" stroke="#9ca3af" strokeWidth="1.5" strokeLinecap="round" />
-                  <line x1="9" y1="5" x2="5" y2="9" stroke="#9ca3af" strokeWidth="1.5" strokeLinecap="round" />
-                  <line x1="9" y1="8" x2="8" y2="9" stroke="#9ca3af" strokeWidth="1.5" strokeLinecap="round" />
-                </svg>
-              </div>
+              />
             )}
 
 
@@ -3561,14 +3609,12 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                         onExportTargetReady: (element: HTMLDivElement | null) => {
                           aiExportTargetsRef.current[padlet.id] = element;
                         },
-                        onResize: (w: number, h: number) => {
-                          if (!canUseFreeformEditButton) return;
-                          setPadlets(prev => prev.map(p => p.id === padlet.id ? { ...p, width: w, height: h } : p));
-                        },
-                        onResizeEnd: (w: number, h: number) => {
-                          if (!canUseFreeformEditButton) return;
-                          persistPostFieldsBestEffort(padlet.id, { width: w, height: h, updated_at: new Date().toISOString() });
-                        },
+                        // PATCH POST-RESIZE-B1: onResize/onResizeEnd are
+                        // deliberately NOT supplied here anymore -- the shared
+                        // host-owned PostResizeHandle above is the ONE AI
+                        // resize grip in Freeform. AIComponentRenderer's
+                        // internal handle stays available for other hosts that
+                        // opt in, but Freeform must never render two grips.
                       }
                       : undefined}
                   />

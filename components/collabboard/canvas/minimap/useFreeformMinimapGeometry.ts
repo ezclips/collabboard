@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type React from 'react';
 import type { Padlet } from '@/types/collabboard';
+import { POST_RESIZE_CONSTRAINTS } from '@/lib/domain/canvas/postResizePolicy';
 import type { MinimapWorldItem, WorldRect } from './freeformMinimapGeometry';
 import { isValidWorldRect } from './freeformMinimapGeometry';
 
@@ -37,7 +38,12 @@ export function getFallbackMinimapItem(post: Padlet): MinimapWorldItem | null {
     width = finitePositive(post.width, 180);
     height = finitePositive(post.height, 220);
   } else if (post.type === 'image') {
-    width = 360;
+    // PATCH POST-RESIZE-B1: a resized Image now renders from canonical
+    // width/height, so the fallback must prefer valid canonical geometry too.
+    // Legacy Images (no canonical geometry) keep the historical 360 fallback.
+    const imageMin = POST_RESIZE_CONSTRAINTS.image ?? { minWidth: 100, minHeight: 100 };
+    width = Math.max(finitePositive(post.width, 360), imageMin.minWidth);
+    height = Math.max(finitePositive(post.height, 100), imageMin.minHeight);
   } else if (post.type === 'link') {
     width = 320;
   } else if (post.type === 'ai-component') {
