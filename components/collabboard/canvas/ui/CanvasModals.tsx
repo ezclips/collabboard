@@ -308,7 +308,7 @@ export default function CanvasModals({
             initialBackgroundColor={liveContainer?.metadata?.cardColor || '#ffffff'}
             initialTopStrip={liveContainer?.metadata?.topStrip || 'transparent'}
             initialOrientation={resolveContainerOrientation(liveContainer?.metadata)}
-            allowOrientationControl={canvasLayout === 'freeform'}
+            allowOrientationControl={canvasLayout === 'freeform' || canvasLayout === 'drawing'}
             onOrientationChange={(orientation: ContainerOrientation) => {
               if (!liveContainer) return;
               if (liveContainer.id === 'new') {

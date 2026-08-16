@@ -37,16 +37,16 @@ describe('O1C Freeform Container orientation architecture', () => {
     expect(rowSource).toContain('lastReportedWidthRef');
   });
 
-  it('exposes orientation UI only through the Freeform capability gate', () => {
+  it('exposes orientation UI only through the Freeform/Drawing capability gate', () => {
     expect(editorSource).toContain('allowOrientationControl = false');
     expect(editorSource).toContain('aria-pressed={orientation === option}');
-    expect(modalsSource).toContain('allowOrientationControl={canvasLayout === \'freeform\'}');
+    expect(modalsSource).toContain('allowOrientationControl={canvasLayout === \'freeform\' || canvasLayout === \'drawing\'}');
     expect(modalsSource).toContain('metadata: { ...liveContainer.metadata, orientation }');
   });
 
-  it('does not add a Drawing orientation prop or Drawing orientation UI', () => {
+  it('routes Drawing through the shared orientation-aware renderer', () => {
     const drawingSource = read('components/collabboard/canvas/layouts/DrawingLayout.tsx');
-    expect(drawingSource).not.toContain('resolveContainerOrientation');
-    expect(drawingSource).not.toContain('allowOrientationControl');
+    expect(drawingSource).toContain('resolveContainerOrientation(padlet.metadata)');
+    expect(drawingSource).toContain('onRequiredWidthChange={onRequiredWidthChange}');
   });
 });

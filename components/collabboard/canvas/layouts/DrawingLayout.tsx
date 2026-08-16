@@ -22,6 +22,7 @@ import LibraryPanel from '@/components/collabboard/LibraryPanel';
 import PostCardContent from '@/components/collabboard/PostCardContent';
 import EmbeddedCommentList from '@/components/collabboard/EmbeddedCommentList';
 import RowColumnContainerCard from '@/components/collabboard/RowColumnContainerCard';
+import { resolveContainerOrientation } from '@/lib/domain/canvas/containerModel';
 import ZoomControls from '@/components/collabboard/canvas/ui/ZoomControls';
 import { PresentationPanel } from '@/components/presentation/PresentationPanel';
 import { FullscreenPresentation, type RuntimeSlideHelpers } from '@/components/presentation/FullscreenPresentation';
@@ -61,6 +62,7 @@ type AutoHeightContainerProps = {
   padlet: Padlet;
   allPadlets: Padlet[];
   onNaturalHeight: (h: number) => void;
+  onRequiredWidthChange?: (w: number) => void;
   onDropExistingPadlet?: (containerId: string, droppedId: string) => void;
   onDropDraftIntoContainer?: (containerId: string, draftPayload: any) => void;
   currentUserId?: string;
@@ -73,7 +75,7 @@ type AutoHeightContainerProps = {
   onExpandAvailabilityChange?: (available: boolean) => void;
   onOpenDocument?: (post: Padlet) => void;
 };
-function AutoHeightContainer({ padlet, allPadlets, onNaturalHeight, onDropExistingPadlet, onDropDraftIntoContainer, currentUserId, currentUserName, currentUserAvatar, onUpdateChildComments, commentAccessMode, onScanChild, isExpanded, onExpandAvailabilityChange, onOpenDocument }: AutoHeightContainerProps) {
+function AutoHeightContainer({ padlet, allPadlets, onNaturalHeight, onRequiredWidthChange, onDropExistingPadlet, onDropDraftIntoContainer, currentUserId, currentUserName, currentUserAvatar, onUpdateChildComments, commentAccessMode, onScanChild, isExpanded, onExpandAvailabilityChange, onOpenDocument }: AutoHeightContainerProps) {
   const ref = useRef<HTMLDivElement>(null);
   const cbRef = useRef(onNaturalHeight);
   cbRef.current = onNaturalHeight;
@@ -93,6 +95,8 @@ function AutoHeightContainer({ padlet, allPadlets, onNaturalHeight, onDropExisti
       <RowColumnContainerCard
         padlet={padlet}
         allPadlets={allPadlets}
+        orientation={resolveContainerOrientation(padlet.metadata)}
+        onRequiredWidthChange={onRequiredWidthChange}
         showHeader={false}
         isExpanded={isExpanded}
         canvasContext="drawing"
@@ -599,7 +603,7 @@ type DrawingEmbeddableCardProps = {
   onPadletEditRef: React.RefObject<((padlet: Padlet) => void) | undefined>;
   onBeforePadletEdit?: () => void;
   onDragEnd?: (padletId: string, x: number, y: number) => void;
-  onNaturalResize?: (padletId: string, height: number) => void;
+  onNaturalResize?: (padletId: string, size: { width?: number; height?: number }) => void;
   onOpenDocument?: (padlet: Padlet) => void; // PATCH-149B1b-iii §27.4
 };
 
@@ -643,6 +647,27 @@ function DrawingEmbeddableCard({
   const titleColor = stripColor ? contrastIconColor(stripColor) : '#374151';
 
   const showExpandToggle = isContainer && canExpand;
+
+  const updateHorizontalSceneWidth = (requiredWidth: number) => {
+    if (resolveContainerOrientation(padlet.metadata) !== 'horizontal') return;
+    const excAPI = excalidrawAPIRef.current;
+    if (!excAPI || !Number.isFinite(requiredWidth)) return;
+    const existing = excAPI.getSceneElements().find(
+      (el: any) => el.type === 'embeddable' && el.link === `padlet://${padlet.id}` && !el.isDeleted
+    );
+    if (!existing) return;
+    const nextWidth = Math.max(existing.width ?? 0, Math.ceil(requiredWidth + 16));
+    if (nextWidth <= (existing.width ?? 0) + 1) return;
+    excAPI.updateScene({
+      ...buildDrawingSceneUpdate({
+        elements: excAPI.getSceneElements().map((el: any) => el.id === existing.id
+          ? { ...el, width: nextWidth, version: (el.version ?? 1) + 1, versionNonce: Math.floor(Math.random() * 1e9), updated: Date.now() }
+          : el),
+        commitToHistory: false,
+      }),
+    });
+    onNaturalResize?.(padlet.id, { width: nextWidth });
+  };
 
   const createAndLinkChildToContainer = async (
     containerId: string,
@@ -929,8 +954,9 @@ function DrawingEmbeddableCard({
                   commitToHistory: false,
                 }),
               });
-              onNaturalResize?.(padlet.id, newHeight);
+              onNaturalResize?.(padlet.id, { height: newHeight });
             }}
+            onRequiredWidthChange={updateHorizontalSceneWidth}
             onDropExistingPadlet={async (containerId, droppedId) => {
               const container = allPadlets.find(p => p.id === containerId);
               if (!container) return;
@@ -1128,7 +1154,7 @@ export default function DrawingLayout({
   const recentlyDraggedRef = useRef<Map<string, { x: number; y: number; expiresAt: number }>>(new Map());
   // Tracks height set by onNaturalHeight: id -> scene height we set. Sync effect skips height
   // overwrite while scene height matches our natural value; clears when DB catches up.
-  const recentlyNaturalResizedRef = useRef<Map<string, number>>(new Map());
+  const recentlyNaturalResizedRef = useRef<Map<string, { width?: number; height?: number }>>(new Map());
   // Tracks last known scene positions so handleChange can detect Excalidraw-native moves
   // (select tool drags that bypass our custom drag handle).
   const lastEmbeddablePosRef = useRef<Map<string, { x: number; y: number }>>(new Map());
@@ -2547,17 +2573,22 @@ export default function DrawingLayout({
 
         // Height lock: hold scene height while the scene has the value onNaturalHeight set.
         // Cleared automatically when DB catches up (nextHeight matches our natural value).
-        const pendingHeight = recentlyNaturalResizedRef.current.get(padletIdFromLink);
-        const heightLocked = pendingHeight !== undefined && el.height === pendingHeight;
-        if (pendingHeight !== undefined && nextHeight === pendingHeight) {
-          recentlyNaturalResizedRef.current.delete(padletIdFromLink); // DB caught up
+        const pendingNaturalSize = recentlyNaturalResizedRef.current.get(padletIdFromLink);
+        const heightLocked = pendingNaturalSize?.height !== undefined && el.height === pendingNaturalSize.height;
+        const widthLocked = pendingNaturalSize?.width !== undefined && el.width === pendingNaturalSize.width;
+        if (pendingNaturalSize) {
+          if (pendingNaturalSize.height !== undefined && nextHeight === pendingNaturalSize.height) delete pendingNaturalSize.height;
+          if (pendingNaturalSize.width !== undefined && nextWidth === pendingNaturalSize.width) delete pendingNaturalSize.width;
+          if (pendingNaturalSize.height === undefined && pendingNaturalSize.width === undefined) {
+            recentlyNaturalResizedRef.current.delete(padletIdFromLink);
+          }
         }
 
         const needsRefresh =
           (positionChangedInPadletData &&
             !positionLocked &&
             (Math.abs(el.x - nextX) >= POSITION_SYNC_EPSILON || Math.abs(el.y - nextY) >= POSITION_SYNC_EPSILON)) ||
-          el.width !== nextWidth ||
+          (!widthLocked && el.width !== nextWidth) ||
           (!heightLocked && el.height !== nextHeight) ||
           currentSignature !== nextSignature;
 
@@ -2568,7 +2599,7 @@ export default function DrawingLayout({
         const reasons: string[] = [];
         if (positionChangedInPadletData && !positionLocked && Math.abs(el.x - nextX) >= POSITION_SYNC_EPSILON) reasons.push(`x: ${el.x} -> ${nextX}`);
         if (positionChangedInPadletData && !positionLocked && Math.abs(el.y - nextY) >= POSITION_SYNC_EPSILON) reasons.push(`y: ${el.y} -> ${nextY}`);
-        if (el.width !== nextWidth) reasons.push(`width: ${el.width} -> ${nextWidth}`);
+        if (!widthLocked && el.width !== nextWidth) reasons.push(`width: ${el.width} -> ${nextWidth}`);
         if (!heightLocked && el.height !== nextHeight) reasons.push(`height: ${el.height} -> ${nextHeight}`);
         if (currentSignature !== nextSignature) reasons.push('signature changed');
         const timerActive = pendingPosTimersRef.current.has(padletIdFromLink);
@@ -2578,7 +2609,7 @@ export default function DrawingLayout({
           ...el,
           x: positionLocked || !positionChangedInPadletData ? el.x : nextX,
           y: positionLocked || !positionChangedInPadletData ? el.y : nextY,
-          width: nextWidth,
+          width: widthLocked ? el.width : nextWidth,
           height: heightLocked ? el.height : nextHeight,
           version: (el.version ?? 1) + 1,
           versionNonce: Math.floor(Math.random() * 1e9),
@@ -2751,8 +2782,15 @@ export default function DrawingLayout({
           recentlyDraggedRef.current.set(id, { x, y, expiresAt: Date.now() + 5000 });
           savePadletPositionWithLock(id, x, y);
         }}
-        onNaturalResize={(id, h) => {
-          recentlyNaturalResizedRef.current.set(id, h);
+        onNaturalResize={(id, size) => {
+          const previous = recentlyNaturalResizedRef.current.get(id) ?? {};
+          recentlyNaturalResizedRef.current.set(id, { ...previous, ...size });
+          if (size.width !== undefined) {
+            const current = paddletsRef.current.find((p) => p.id === id);
+            if (current && size.width > (Number(current.width) || 0) + 1) {
+              void onUpdatePadlet(id, { width: size.width });
+            }
+          }
         }}
         onOpenDocument={onOpenDocument}
       />
