@@ -50,9 +50,9 @@ describe('PATCH POST-RESIZE-B1 shared handle wiring', () => {
 });
 
 describe('PATCH POST-RESIZE-B1 Freeform wiring', () => {
-  it('B1/B2 handle mount sites: Image (1) + AI (1) + generic B2 block (1) + Document/Clipart block (1)', () => {
+  it('B1/B2/B3.1 handle mount sites: Image + AI + Container + generic B2 + Document/Clipart', () => {
     const occurrences = code(cardsSrc).split('<PostResizeHandle').length - 1;
-    expect(occurrences).toBe(4);
+    expect(occurrences).toBe(5);
   });
 
   it('40. the AI grip condition still gates on edit permission and lock', () => {

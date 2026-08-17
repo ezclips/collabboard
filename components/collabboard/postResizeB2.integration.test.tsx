@@ -118,7 +118,7 @@ describe('PATCH POST-RESIZE-B2R.2 low-zoom interaction-overlay ownership', () =>
   it('generic root resize chrome is outside the overflow-hidden semantic card', () => {
     expect(genericContent).toContain('relative overflow-hidden flex flex-col');
     expect(genericContent).not.toContain('<PostResizeHandle');
-    expect(genericOverlay.match(/<PostResizeHandle/g)).toHaveLength(2); // AI + B2 generic mode
+    expect(genericOverlay.match(/<PostResizeHandle/g)).toHaveLength(3); // Container + AI + B2 generic mode
     expect(stripped.match(/\{content\}\s*\{resizeHandle\}/g)).toHaveLength(4); // Link/Table/Todo/default
   });
 
@@ -155,21 +155,23 @@ describe('PATCH POST-RESIZE-B2R.2 low-zoom interaction-overlay ownership', () =>
   });
 
   it('exactly one source mount remains for each established host block', () => {
-    expect(stripped.match(/<PostResizeHandle/g)).toHaveLength(4); // Image + AI/B2 overlay + Document/Clipart
+    expect(stripped.match(/<PostResizeHandle/g)).toHaveLength(5); // Image + Container + AI/B2 overlay + Document/Clipart
     expect(genericOverlay.match(/padlet\.type === 'ai-component'/g)).toHaveLength(1);
     expect(genericOverlay.match(/mode=\{resizeMode\}/g)).toHaveLength(1);
   });
 
   it('B2 selection gating and AI always-visible behavior remain distinct', () => {
     expect(genericOverlay).toContain("(resizeMode === 'box' || resizeMode === 'horizontal-only') && isPadletSelected(padlet.id)");
-    const aiCondition = genericOverlay.slice(0, genericOverlay.indexOf(") : (resizeMode"));
+    const aiStart = genericOverlay.indexOf("padlet.type === 'ai-component'");
+    const aiCondition = genericOverlay.slice(aiStart, genericOverlay.indexOf(") : (resizeMode", aiStart));
     expect(aiCondition).not.toContain('isPadletSelected(padlet.id)');
   });
 
   it('root-only and frozen renderers still carry no shared handle', () => {
     expect(code(rowColumnSrc)).not.toContain('PostResizeHandle');
     expect(code(drawingSrc)).not.toContain('PostResizeHandle');
-    expect(stripped).not.toMatch(/padlet\.type === 'container'[\s\S]{0,180}<PostResizeHandle/);
+    expect(code(drawingSrc)).not.toContain('PostResizeHandle');
+    expect(code(rowColumnSrc)).not.toContain('PostResizeHandle');
   });
 });
 

@@ -280,10 +280,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
     }
   }, []);
 
-  const growContainerWidth = React.useCallback((padletId: string, requiredWidth: number) => {
-    const current = padlets.find((p) => p.id === padletId);
-    if (!current || current.type !== 'container') return;
-    const currentWidth = Number(current.width) || 0;
+  const getContainerRequiredOuterWidth = React.useCallback((padletId: string, requiredWidth: number) => {
     // `requiredWidth` is relative to RowColumnContainerCard's own box, but
     // `padlet.width` instead drives the OUTER card chrome around it (this
     // card's own border plus its generic `p-3` content-area padding). Read
@@ -298,7 +295,14 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
     const outerBorder = outerEl ? parseFloat(getComputedStyle(outerEl).borderLeftWidth) || 0 : 0;
     const contentPadding = contentEl ? parseFloat(getComputedStyle(contentEl).paddingLeft) || 0 : 0;
     const chromePerSide = outerBorder + contentPadding;
-    const nextWidth = Math.ceil(requiredWidth + chromePerSide * 2);
+    return Math.ceil(requiredWidth + chromePerSide * 2);
+  }, []);
+
+  const growContainerWidth = React.useCallback((padletId: string, requiredWidth: number) => {
+    const current = padlets.find((p) => p.id === padletId);
+    if (!current || current.type !== 'container') return;
+    const currentWidth = Number(current.width) || 0;
+    const nextWidth = getContainerRequiredOuterWidth(padletId, requiredWidth);
     if (!Number.isFinite(nextWidth) || nextWidth <= currentWidth + 1) return;
 
     setPadlets((prev) => prev.map((p) => p.id === padletId ? { ...p, width: nextWidth } : p));
@@ -312,7 +316,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
         console.error('Failed to grow Container width:', result.error.cause ?? result.error);
       }
     })();
-  }, [padlets, setPadlets]);
+  }, [getContainerRequiredOuterWidth, padlets, setPadlets]);
   /**
    * PATCH-059 (P3 fix, owner-authorized) -- historical note: AI-card resize
    * persistence used to live in `persistPostFieldsBestEffort` here, the first
@@ -698,6 +702,10 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
 
   const [expandedContainers, setExpandedContainers] = React.useState<Record<string, boolean>>({});
   const [expandableContainers, setExpandableContainers] = React.useState<Record<string, boolean>>({});
+  // The same measured required row width that drives horizontal auto-grow is
+  // also the lower bound for a Container's dedicated manual-width gesture.
+  // Keep it as host-local interaction state; it is not persisted metadata.
+  const [containerRequiredWidths, setContainerRequiredWidths] = React.useState<Record<string, number>>({});
   const [expandedAIPosts, setExpandedAIPosts] = React.useState<Record<string, boolean>>({});
   const [expandableAIPosts, setExpandableAIPosts] = React.useState<Record<string, boolean>>({});
   const aiExportTargetsRef = React.useRef<Record<string, HTMLDivElement | null>>({});
@@ -3009,7 +3017,34 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
         // Interaction chrome belongs to the immediate relative wrapper used
         // by each generic root branch, not to this overflow-hidden semantic
         // card. The measured ref deliberately remains on `content` below.
-        const resizeHandle = padlet.type === 'ai-component' && canUseFreeformEditButton && !(padlet.metadata as any)?.isLocked ? (
+        const containerOrientation = padlet.type === 'container'
+          ? resolveContainerOrientation(padlet.metadata)
+          : null;
+        const containerRequiredWidth = containerRequiredWidths[padlet.id] ?? 0;
+        const containerMinWidth = Math.max(
+          360,
+          containerOrientation === 'horizontal' ? containerRequiredWidth : 0,
+        );
+        const resizeHandle = padlet.type === 'container' && isPadletSelected(padlet.id) && canUseFreeformEditButton && !(padlet.metadata as any)?.isLocked ? (
+          <PostResizeHandle
+            mode="horizontal-only"
+            clientToWorld={getWorldPointFromClient}
+            startWidth={Math.max(Number(padlet.width) || 0, 360)}
+            startHeight={150}
+            constraints={{ minWidth: containerMinWidth, minHeight: 0 }}
+            maxWidth={FREEFORM_WORLD_MAX_X - (Number(padlet.position_x) || 0)}
+            onResizePreview={(w) => previewPostResizeWidth(padlet.id, w)}
+            onResizeCommit={(w, h, ow, oh, mode) => {
+              void commitPostResize(padlet.id, w, h, ow, oh, null, undefined, mode);
+            }}
+            getStartSize={() => {
+              const el = genericCardRefs.current[padlet.id];
+              if (!el) return null;
+              return { width: el.offsetWidth || 360, height: el.offsetHeight || 150 };
+            }}
+            title="Resize Container"
+          />
+        ) : padlet.type === 'ai-component' && canUseFreeformEditButton && !(padlet.metadata as any)?.isLocked ? (
           <PostResizeHandle
             clientToWorld={getWorldPointFromClient}
             startWidth={Math.max(Number(padlet.width) || 500, getPostResizeConstraints(padlet)?.minWidth ?? 200)}
@@ -3625,7 +3660,13 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                   padlet={padlet}
                   allPadlets={padlets}
                   orientation={resolveContainerOrientation(padlet.metadata)}
-                  onRequiredWidthChange={(requiredWidth) => growContainerWidth(padlet.id, requiredWidth)}
+                  onRequiredWidthChange={(requiredWidth) => {
+                    const requiredOuterWidth = getContainerRequiredOuterWidth(padlet.id, requiredWidth);
+                    setContainerRequiredWidths((prev) => prev[padlet.id] === requiredOuterWidth
+                      ? prev
+                      : { ...prev, [padlet.id]: requiredOuterWidth });
+                    growContainerWidth(padlet.id, requiredWidth);
+                  }}
                   showHeader={false}
                   isExpanded={expandedContainers[padlet.id] ?? false}
                   onExpandAvailabilityChange={(available) => setExpandableContainers(prev => prev[padlet.id] === available ? prev : { ...prev, [padlet.id]: available })}
