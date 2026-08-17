@@ -271,7 +271,11 @@ describe('SECTION-H3C selection and edit [31-40]', () => {
     // deselects a selected Container (setSelectedContainerId(null)) -- still
     // one handler, still relying on the identical portaled-content
     // reasoning; Section Heading's own deselection call is untouched.
-    expect(drawingSrc).toContain('setSelectedSectionHeadingId(null); setSelectedContainerId(null); ');
+    // PATCH POST-RESIZE-B3.2.2: both calls are now guarded by
+    // BlankDeselectGuard (a spurious-click suppression proven necessary
+    // live -- see the guard's own comment), so they are no longer adjacent
+    // on one line; assert they both still exist in the SAME handler.
+    expect(drawingSrc).toMatch(/setSelectedSectionHeadingId\(null\);\s*setSelectedContainerId\(null\);/);
     const matches = code(headingSrc).match(/onClick=\{\(event\) => \{[\s\S]{0,120}?event\.stopPropagation\(\);/g) ?? [];
     expect(matches.length).toBe(1);
   });

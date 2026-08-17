@@ -12,6 +12,7 @@ import {
   DrawingEmbeddableCard,
   ContainerResizeDrawingContext,
   ContainerResizeSelectionStore,
+  BlankDeselectGuard,
 } from '@/components/collabboard/canvas/layouts/DrawingLayout';
 
 vi.mock('@/components/collabboard/PostCardContent', () => ({
@@ -81,6 +82,7 @@ function renderCard(padletObj: Padlet, allPadlets: Padlet[], opts: {
   excAPI: any;
   onUpdatePadletStrict?: any;
   selected?: boolean;
+  markHandleInteractionEnd?: () => void;
 }) {
   const host = host0.cloneNode(false) as HTMLDivElement;
   // Drawing's resize chrome is intentionally portaled to the nearest real
@@ -96,13 +98,17 @@ function renderCard(padletObj: Padlet, allPadlets: Padlet[], opts: {
   const appStateRef = { current: { zoom: { value: 1 }, offsetLeft: 0, offsetTop: 0, scrollX: 0, scrollY: 0 } };
   const store = new ContainerResizeSelectionStore();
   if (opts.selected) store.setSelected(padletObj.id);
-  const contextValue = { store, setSelectedId: (id: string | null) => store.setSelected(id) };
+  const contextValue = {
+    store,
+    setSelectedId: (id: string | null) => store.setSelected(id),
+    markHandleInteractionEnd: opts.markHandleInteractionEnd ?? (() => {}),
+  };
 
-  act(() => root.render(
+  const renderWithPadlet = (p: Padlet, all: Padlet[]) => act(() => root.render(
     <ContainerResizeDrawingContext.Provider value={contextValue}>
       <DrawingEmbeddableCard
-        padlet={padletObj}
-        allPadlets={allPadlets}
+        padlet={p}
+        allPadlets={all}
         readOnly={false}
         excalidrawAPIRef={excalidrawAPIRef}
         appStateRef={appStateRef}
@@ -117,7 +123,8 @@ function renderCard(padletObj: Padlet, allPadlets: Padlet[], opts: {
       />
     </ContainerResizeDrawingContext.Provider>,
   ));
-  return { host, root, appStateRef };
+  renderWithPadlet(padletObj, allPadlets);
+  return { host, root, appStateRef, store, rerender: renderWithPadlet };
 }
 
 function pointerEvent(type: string, clientX: number, clientY: number) {
@@ -277,5 +284,101 @@ describe('PATCH POST-RESIZE-B3.2 Drawing Container manual width resize', () => {
     expect(excAPI.getSceneElements()[0].x).toBe(123);
     expect(excAPI.getSceneElements()[0].y).toBe(456);
     act(() => root.unmount());
+  });
+});
+
+// PATCH POST-RESIZE-B3.2.2 -- regression for the actual root cause behind
+// the B3R orientation-switch/child-removal intermittent failure: a genuine
+// native `click` landing on raw Excalidraw canvas (or on the Container's own
+// card body) shortly after a resize gesture or a metadata reconciliation,
+// reaching the app's blank-canvas deselect handler and wrongly clearing an
+// otherwise-correct ContainerResizeSelectionStore selection -- proven live
+// via instrumented production-build Playwright runs (store instance never
+// changed, context always present, an explicit setSelected(null) call with
+// a real `onClick` stack frame). These tests exercise the actual timing and
+// wiring that caused the defect, not `setSelected('x') === 'x'`.
+describe('PATCH POST-RESIZE-B3.2.2 Container selection survives spurious post-reconciliation clicks', () => {
+  it('BlankDeselectGuard: suppresses exactly one click within its window, consumed at most once', () => {
+    vi.useFakeTimers();
+    try {
+      const guard = new BlankDeselectGuard(1500);
+      // Unarmed: nothing to suppress.
+      expect(guard.consumeShouldSuppress()).toBe(false);
+
+      guard.arm();
+      // The spurious click observed live arrived ~700ms after the
+      // triggering event -- well inside the window.
+      vi.advanceTimersByTime(700);
+      expect(guard.consumeShouldSuppress()).toBe(true);
+      // Consumed: a second, unrelated click right after is NOT swallowed --
+      // this is what keeps a genuine deselect from becoming permanently
+      // sticky (PATCH section 9's contract).
+      expect(guard.consumeShouldSuppress()).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('BlankDeselectGuard: does not suppress a click after the window elapses (never indefinite)', () => {
+    vi.useFakeTimers();
+    try {
+      const guard = new BlankDeselectGuard(1500);
+      guard.arm();
+      vi.advanceTimersByTime(1501);
+      expect(guard.consumeShouldSuppress()).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('BlankDeselectGuard: re-arming resets the window from the new arm() call', () => {
+    vi.useFakeTimers();
+    try {
+      const guard = new BlankDeselectGuard(1500);
+      guard.arm();
+      vi.advanceTimersByTime(1000);
+      guard.arm(); // e.g. a second resize gesture/metadata change before the first window closed
+      vi.advanceTimersByTime(1000); // 2000ms since the FIRST arm, but only 1000ms since the second
+      expect(guard.consumeShouldSuppress()).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a selected Container re-arms the guard on handle release AND on a later metadata reconciliation (not just once at mount)', async () => {
+    const container = padlet('c1', 'container', 500, { orientation: 'vertical', childPadletIds: [] });
+    const excAPI = createMockExcalidrawAPI('c1', 500);
+    const markHandleInteractionEnd = vi.fn();
+    const { host, rerender } = renderCard(container, [container], { excAPI, selected: true, markHandleInteractionEnd });
+
+    // Mount-time arming (selected from the start).
+    expect(markHandleInteractionEnd).toHaveBeenCalledTimes(1);
+
+    const handle = host.querySelector<HTMLElement>('[data-post-resize-handle="true"]')!;
+    await act(async () => {
+      handle.dispatchEvent(pointerEvent('pointerdown', 0, 0));
+      handle.dispatchEvent(pointerEvent('pointermove', 50, 0));
+      handle.dispatchEvent(pointerEvent('pointerup', 50, 0));
+      await Promise.resolve();
+    });
+    // Handle release re-arms it -- this is the drag-drift trigger.
+    expect(markHandleInteractionEnd.mock.calls.length).toBeGreaterThanOrEqual(2);
+    const callsAfterDrag = markHandleInteractionEnd.mock.calls.length;
+
+    // A metadata reconciliation with NO intervening drag (the delayed,
+    // ~700ms-later failure mode observed live at the orientation-switch and
+    // child-removal sites) must ALSO re-arm it -- this is the part a
+    // mount-only or drag-only guard would miss.
+    const reoriented: Padlet = { ...container, metadata: { ...container.metadata, orientation: 'horizontal' as const } };
+    rerender(reoriented, [reoriented]);
+    expect(markHandleInteractionEnd.mock.calls.length).toBeGreaterThan(callsAfterDrag);
+  });
+
+  it('an unselected Container does not arm the guard on mount (only a genuinely selected one)', () => {
+    const container = padlet('c1', 'container', 500, { orientation: 'vertical', childPadletIds: [] });
+    const excAPI = createMockExcalidrawAPI('c1', 500);
+    const markHandleInteractionEnd = vi.fn();
+    renderCard(container, [container], { excAPI, selected: false, markHandleInteractionEnd });
+    expect(markHandleInteractionEnd).not.toHaveBeenCalled();
   });
 });

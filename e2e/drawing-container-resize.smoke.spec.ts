@@ -69,8 +69,55 @@ async function gutterGeometry(page: Page) {
   });
 }
 
+// Product convergence readiness, not a machine-speed guess. A reconciliation
+// that changes padlet.metadata (orientation, child membership) intentionally
+// changes getPadletRenderSignature and remounts DrawingEmbeddableCard -- the
+// handle and its portal briefly do not exist while React/Excalidraw's own
+// internal scheduling completes that remount. Poll for that convergence
+// instead of asserting on a fixed clock tick.
+async function waitForHandleReady(page: Page, timeoutMs = 5000) {
+  await expect.poll(async () => (await hit(page)).ok, { timeout: timeoutMs }).toBe(true);
+}
+
+// PATCH POST-RESIZE-B3.2.2: verifies the actual fix -- a metadata-triggered
+// reconciliation of the Container's card must NOT drop app-level selection
+// (ContainerResizeSelectionStore), the handle must remain (or reappear)
+// without any re-click, and the Container stays immediately resizable. The
+// Container's own outer DOM node (`[data-padlet-id]`) is stable across this
+// (confirmed live -- it is the selection-gated handle/portal subtree that
+// toggles away and back, not the whole card); this marker proves that
+// stability rather than assuming a full remount that doesn't actually occur.
+async function switchOrientationAndVerify(page: Page, orientation: 'vertical' | 'horizontal', label: string, resizeDelta = 40) {
+  await page.evaluate(() => {
+    const card = document.querySelector('[data-padlet-id="container-fixture"]');
+    if (card) (card as any).__b322CardIdentityMarker = true;
+  });
+
+  await page.evaluate((nextOrientation) => {
+    const api = (window as any).__drawingResizeFixture;
+    const current = api.getPadlets().find((padlet: any) => padlet.id === 'container-fixture');
+    api.updateContainer({ metadata: { ...current.metadata, orientation: nextOrientation } });
+  }, orientation);
+
+  await waitForHandleReady(page);
+
+  const cardIdentityStable = await page.evaluate(() => {
+    const card = document.querySelector('[data-padlet-id="container-fixture"]');
+    return !!(card as any)?.__b322CardIdentityMarker;
+  });
+  expect(cardIdentityStable, `${label}: Container's own card DOM node is stable across reconciliation`).toBe(true);
+
+  const hitResult = await hit(page);
+  expect(hitResult.ok, `${label}: handle survives remount without a re-click`).toBe(true);
+  expect(await page.locator('[data-post-resize-handle="true"]').count(), `${label}: exactly one handle`).toBe(1);
+
+  const before = await scene(page);
+  await dragWorld(page, resizeDelta);
+  expect((await scene(page)).width - before.width, `${label}: immediate post-transition resize applied`).toBe(resizeDelta);
+}
+
 async function dragWorld(page: Page, dx: number, dy = 0, settleMs = 350) {
-  expect((await hit(page)).ok).toBe(true);
+  await waitForHandleReady(page);
   const box = await page.locator('[data-post-resize-handle="true"]').boundingBox();
   expect(box).not.toBeNull();
   const zoom = await page.evaluate(() => (window as any).__drawingResizeFixture.apiRef.current.getAppState().zoom.value);
@@ -187,13 +234,28 @@ test('real Excalidraw keeps Drawing Container resize chrome hittable through rep
   await expect.poll(async () => (await scene(page)).width).toBe(beforeRemote.width - 125);
   await dragWorld(page, 25);
 
-  await page.evaluate(() => {
-    const api = (window as any).__drawingResizeFixture;
-    const current = api.getPadlets().find((padlet: any) => padlet.id === 'container-fixture');
-    api.updateContainer({ metadata: { ...current.metadata, orientation: 'horizontal' } });
-  });
-  await page.waitForTimeout(400);
-  expect((await hit(page)).ok).toBe(true);
+  // PATCH POST-RESIZE-B3.2.2: the B3R failure was an intermittent race
+  // immediately after a Vertical -> Horizontal orientation switch, root-
+  // caused to a spurious native click (landing on raw canvas, or on the
+  // Container's own card body) reaching the app's blank-canvas deselect
+  // handler shortly after a metadata-triggered remount. Exercise repeated
+  // alternating transitions -- not just one -- with no re-click, verifying
+  // selection/handle survive a genuine remount each time.
+  // Alternate the per-transition resize delta (grow/shrink) so accumulated
+  // width stays roughly flat across the sequence -- this loop is stacked on
+  // top of the width already grown earlier in the test (zoom sweep, remote
+  // update), and a viewport is finite; net-positive growth here would
+  // eventually push the handle off-screen for reasons that have nothing to
+  // do with the defect being verified.
+  for (const [orientation, delta] of [
+    ['horizontal', 40], ['vertical', -40], ['horizontal', 40], ['vertical', -40], ['horizontal', 40], ['vertical', -40],
+  ] as const) {
+    await switchOrientationAndVerify(page, orientation, `orientation->${orientation}`, delta);
+  }
+  // Auto-grow below is horizontal-orientation behavior; the alternating
+  // sequence above intentionally ends on vertical, so restore horizontal
+  // (itself one more verified transition) before relying on it.
+  await switchOrientationAndVerify(page, 'horizontal', 'orientation->horizontal (pre-auto-grow)', 0);
 
   const beforeAutoGrow = await scene(page);
   await page.evaluate((width) => (window as any).__drawingResizeFixture.updateChild('child-wide-fixture', { width }), beforeAutoGrow.width + 500);
@@ -201,12 +263,12 @@ test('real Excalidraw keeps Drawing Container resize chrome hittable through rep
   await dragWorld(page, 50);
 
   // A child removal changes natural height/intrinsic width but never
-  // auto-shrinks the outer width. The next manual gesture remains hittable.
+  // auto-shrinks the outer width. The next manual gesture remains hittable
+  // without a re-click (same class of defect as the orientation loop above).
   const beforeRemoval = await scene(page);
   await page.evaluate(() => (window as any).__drawingResizeFixture.removeChild('child-wide-fixture'));
-  await page.waitForTimeout(600);
+  await waitForHandleReady(page);
   expect((await scene(page)).width).toBe(beforeRemoval.width);
-  expect((await hit(page)).ok).toBe(true);
   await dragWorld(page, -1000);
 
   const final = await scene(page);

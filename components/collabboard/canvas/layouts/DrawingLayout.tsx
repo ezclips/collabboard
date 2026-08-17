@@ -368,10 +368,53 @@ export class ContainerResizeSelectionStore {
   };
 }
 
+// PATCH POST-RESIZE-B3.2.2: the Container resize handle tracks (and moves
+// with) the Container it resizes, so the pointer release that ends a resize
+// gesture can land on raw Excalidraw canvas once the handle has already
+// moved out from under it -- generating a genuine native `click` there, not
+// on the handle, not on the card. The SAME class of spurious canvas click
+// can also arrive well after a gesture settles (observed live ~700ms after
+// a drag's pointerup), timed to a metadata-triggered reconciliation of the
+// SAME Container (orientation switch, child update) rather than to the drag
+// itself. Both share one signature: a real `click` reaching the app's own
+// blank-canvas deselect handler immediately after one of these two events,
+// wrongly clearing an otherwise-correct, still-active selection. This guard
+// re-arms from either trigger and, while armed, has the deselect handler
+// ignore exactly one click -- it is NOT "poll selection back into
+// existence" (nothing here inspects or restores selection state; it only
+// ignores one already-identified class of spurious click) and NOT
+// indefinite (a genuine later deselect click is never swallowed once the
+// window elapses -- see `windowMs`). Exported for genuine, timing-accurate
+// test coverage of the actual failure class (PATCH POST-RESIZE-B3.2.2).
+export class BlankDeselectGuard {
+  private armed = false;
+  private timer: ReturnType<typeof setTimeout> | null = null;
+  constructor(private readonly windowMs = 1500) {}
+  arm(): void {
+    this.armed = true;
+    if (this.timer !== null) clearTimeout(this.timer);
+    this.timer = setTimeout(() => {
+      this.armed = false;
+      this.timer = null;
+    }, this.windowMs);
+  }
+  /** Consumes the armed state (at most one click is ever suppressed per arm). */
+  consumeShouldSuppress(): boolean {
+    if (!this.armed) return false;
+    this.armed = false;
+    if (this.timer !== null) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
+    return true;
+  }
+}
+
 // Exported for genuine DOM-mounted test coverage (PATCH POST-RESIZE-B3.2).
 export const ContainerResizeDrawingContext = React.createContext<{
   store: ContainerResizeSelectionStore;
   setSelectedId: (id: string | null) => void;
+  markHandleInteractionEnd: () => void;
 } | null>(null);
 
 /**
@@ -762,6 +805,21 @@ export function DrawingEmbeddableCard({
     containerResizeSelection?.store.getServerSnapshot ?? (() => null),
   );
   const isContainerSelected = isResizableContainer && selectedContainerId === padlet.id;
+  // PATCH POST-RESIZE-B3.2.2: see BlankDeselectGuard's own comment. Keyed on
+  // `padlet.metadata` (a new object reference on every reconciliation --
+  // orientation switch, child update) rather than `isResizableContainer`
+  // (which never changes for a given padlet and would only fire this once,
+  // at initial mount) or the card's own DOM identity (confirmed live to be
+  // stable across these reconciliations, so it is not a remount signal
+  // either) -- this is what actually re-arms the guard on every later
+  // metadata change to a selected Container, not just the drag immediately
+  // preceding it.
+  useEffect(() => {
+    if (isResizableContainer && isContainerSelected) {
+      containerResizeSelection?.markHandleInteractionEnd();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isResizableContainer, padlet.metadata]);
   const [containerManualMinWidth, setContainerManualMinWidth] = useState(0);
 
   const stripColor = padlet.metadata?.topStrip && padlet.metadata.topStrip !== 'transparent'
@@ -1323,7 +1381,10 @@ export function DrawingEmbeddableCard({
         // PostResizeHandle itself is frozen (never modified for Drawing), so
         // the fix lives in this wrapper instead.
         <DrawingContainerResizePortal anchorRef={cardOuterRef} appStateRef={appStateRef} portalTarget={containerResizePortalTarget}>
-          <div onClick={(e) => e.stopPropagation()}>
+          <div
+            onClick={(e) => e.stopPropagation()}
+            onPointerUpCapture={() => containerResizeSelection?.markHandleInteractionEnd()}
+          >
             <PostResizeHandle
               mode="horizontal-only"
               clientToWorld={clientToWorld}
@@ -1558,10 +1619,20 @@ export default function DrawingLayout({
   const setSelectedContainerId = useCallback((id: string | null) => {
     containerResizeSelectionStoreRef.current!.setSelected(id);
   }, []);
+  // See BlankDeselectGuard's own comment for the two triggers and why this
+  // is a one-shot, event-correlated suppression rather than a debounce.
+  const blankDeselectGuardRef = useRef<BlankDeselectGuard | null>(null);
+  if (blankDeselectGuardRef.current === null) {
+    blankDeselectGuardRef.current = new BlankDeselectGuard();
+  }
+  const markHandleInteractionEnd = useCallback(() => {
+    blankDeselectGuardRef.current!.arm();
+  }, []);
   const containerResizeContextValue = useMemo(() => ({
     store: containerResizeSelectionStoreRef.current!,
     setSelectedId: setSelectedContainerId,
-  }), [setSelectedContainerId]);
+    markHandleInteractionEnd,
+  }), [setSelectedContainerId, markHandleInteractionEnd]);
   // Mirrors recentlyNaturalResizedRef (declared below) but exposed as a
   // stable setter for the manual-resize handle's live preview: locks the
   // reconciliation effect's width-snapback (same mechanism onNaturalResize
@@ -4100,7 +4171,32 @@ export default function DrawingLayout({
         // PATCH POST-RESIZE-B3.2: the identical mechanism also deselects a
         // selected Container -- a click landing on a Container's own strip
         // never reaches here either (same portaled-content reasoning).
-        onClick={() => { setSelectedSectionHeadingId(null); setSelectedContainerId(null); }}
+        // PATCH POST-RESIZE-B3.2.2: see BlankDeselectGuard's own comment for
+        // the two spurious-click triggers this consumes instead of treating
+        // as a genuine blank-canvas deselect.
+        // Separately (proven live, same instrumented investigation): a
+        // Container's own card body (below the strip) has no left-click
+        // stopPropagation of its own -- only the strip does (see its own
+        // onClick above) -- so ANY click landing anywhere else in the
+        // selected Container's card (not just ones immediately following a
+        // resize) still bubbles here and wrongly deselects it. A click
+        // whose target is inside the currently-selected Container's own
+        // card is never a genuine "user clicked blank canvas" click by
+        // definition; skip it the same way the strip already does for
+        // itself, generalized to the whole card.
+        onClick={(e) => {
+          if (blankDeselectGuardRef.current!.consumeShouldSuppress()) {
+            return;
+          }
+          const selectedContainerId = containerResizeSelectionStoreRef.current!.getSnapshot();
+          if (selectedContainerId) {
+            const target = e.target as HTMLElement;
+            const cardId = target.closest?.('[data-padlet-id]')?.getAttribute('data-padlet-id');
+            if (cardId === selectedContainerId) return;
+          }
+          setSelectedSectionHeadingId(null);
+          setSelectedContainerId(null);
+        }}
       >
         <ExcalidrawWrapper
           excalidrawAPI={(api) => { setExcalidrawAPI(api); excalidrawAPIRef.current = api; if (drawingExcalidrawAPIRef) drawingExcalidrawAPIRef.current = api; }}
