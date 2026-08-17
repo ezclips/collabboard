@@ -702,10 +702,13 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
 
   const [expandedContainers, setExpandedContainers] = React.useState<Record<string, boolean>>({});
   const [expandableContainers, setExpandableContainers] = React.useState<Record<string, boolean>>({});
-  // The same measured required row width that drives horizontal auto-grow is
-  // also the lower bound for a Container's dedicated manual-width gesture.
-  // Keep it as host-local interaction state; it is not persisted metadata.
-  const [containerRequiredWidths, setContainerRequiredWidths] = React.useState<Record<string, number>>({});
+  // PATCH POST-RESIZE-B3.1.2: the manual-resize handle's shrink floor. This
+  // is DELIBERATELY a separate signal from the auto-grow required-width
+  // ratchet (see RowColumnContainerCard's `onIntrinsicRequiredWidthChange`
+  // effect) -- it can rise AND fall with the children's true current
+  // requirement, whereas auto-grow's signal only ever rises. Host-local
+  // interaction state; it is not persisted metadata.
+  const [containerManualMinRequiredWidths, setContainerManualMinRequiredWidths] = React.useState<Record<string, number>>({});
   const [expandedAIPosts, setExpandedAIPosts] = React.useState<Record<string, boolean>>({});
   const [expandableAIPosts, setExpandableAIPosts] = React.useState<Record<string, boolean>>({});
   const aiExportTargetsRef = React.useRef<Record<string, HTMLDivElement | null>>({});
@@ -3020,10 +3023,10 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
         const containerOrientation = padlet.type === 'container'
           ? resolveContainerOrientation(padlet.metadata)
           : null;
-        const containerRequiredWidth = containerRequiredWidths[padlet.id] ?? 0;
+        const containerManualMinRequiredWidth = containerManualMinRequiredWidths[padlet.id] ?? 0;
         const containerMinWidth = Math.max(
           360,
-          containerOrientation === 'horizontal' ? containerRequiredWidth : 0,
+          containerOrientation === 'horizontal' ? containerManualMinRequiredWidth : 0,
         );
         const resizeHandle = padlet.type === 'container' && isPadletSelected(padlet.id) && canUseFreeformEditButton && !(padlet.metadata as any)?.isLocked ? (
           <PostResizeHandle
@@ -3660,12 +3663,12 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                   padlet={padlet}
                   allPadlets={padlets}
                   orientation={resolveContainerOrientation(padlet.metadata)}
-                  onRequiredWidthChange={(requiredWidth) => {
-                    const requiredOuterWidth = getContainerRequiredOuterWidth(padlet.id, requiredWidth);
-                    setContainerRequiredWidths((prev) => prev[padlet.id] === requiredOuterWidth
+                  onRequiredWidthChange={(requiredWidth) => growContainerWidth(padlet.id, requiredWidth)}
+                  onIntrinsicRequiredWidthChange={(intrinsicWidth) => {
+                    const requiredOuterWidth = getContainerRequiredOuterWidth(padlet.id, intrinsicWidth);
+                    setContainerManualMinRequiredWidths((prev) => prev[padlet.id] === requiredOuterWidth
                       ? prev
                       : { ...prev, [padlet.id]: requiredOuterWidth });
-                    growContainerWidth(padlet.id, requiredWidth);
                   }}
                   showHeader={false}
                   isExpanded={expandedContainers[padlet.id] ?? false}

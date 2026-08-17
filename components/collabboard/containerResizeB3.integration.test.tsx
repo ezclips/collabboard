@@ -38,15 +38,32 @@ describe('PATCH POST-RESIZE-B3.1 Freeform Container width ownership', () => {
   it('F/G: the dedicated interaction is horizontal-only with a 360px vertical minimum', () => {
     expect(cardsSrc).toContain('mode="horizontal-only"');
     expect(cardsSrc).toContain('containerMinWidth = Math.max(');
-    expect(cardsSrc).toContain('containerOrientation === \'horizontal\' ? containerRequiredWidth : 0');
+    expect(cardsSrc).toContain('containerOrientation === \'horizontal\' ? containerManualMinRequiredWidth : 0');
     expect(cardsSrc).toContain('Math.max(Number(padlet.width) || 0, 360)');
   });
 
-  it('H/O/P: the manual minimum and auto-grow use the same required-width callback and grow-only owner', () => {
-    expect(cardsSrc).toContain('setContainerRequiredWidths');
-    expect(cardsSrc).toContain('onRequiredWidthChange={(requiredWidth) => {');
-    expect(cardsSrc).toContain('growContainerWidth(padlet.id, requiredWidth);');
+  it('H/O/P PATCH POST-RESIZE-B3.1.2: the manual-resize minimum and auto-grow are fed by TWO SEPARATE signals, not one', () => {
+    // Auto-grow keeps its own frozen, ratcheted callback and owner untouched.
+    expect(cardsSrc).toContain('onRequiredWidthChange={(requiredWidth) => growContainerWidth(padlet.id, requiredWidth)}');
     expect(cardsSrc).toContain('nextWidth <= currentWidth + 1');
+    // The manual-resize handle's floor is fed by a DIFFERENT, non-ratcheted
+    // callback -- deliberately NOT the auto-grow signal (PATCH POST-RESIZE-B3.1.2
+    // root cause: the old signal reflects the Container's own current outer
+    // width once it isn't overflowing, and never decreases).
+    expect(cardsSrc).toContain('setContainerManualMinRequiredWidths');
+    expect(cardsSrc).toContain('onIntrinsicRequiredWidthChange={(intrinsicWidth) => {');
+    expect(cardsSrc).not.toContain('setContainerRequiredWidths');
+    // Both signals reuse the SAME chrome-accounting helper -- no drifting formulas.
+    const autoGrowChrome = cardsSrc.slice(
+      cardsSrc.indexOf('const growContainerWidth ='),
+      cardsSrc.indexOf('const growContainerWidth =') + 400,
+    );
+    const manualMinChrome = cardsSrc.slice(
+      cardsSrc.indexOf('onIntrinsicRequiredWidthChange={(intrinsicWidth) => {'),
+      cardsSrc.indexOf('onIntrinsicRequiredWidthChange={(intrinsicWidth) => {') + 300,
+    );
+    expect(autoGrowChrome).toContain('getContainerRequiredOuterWidth');
+    expect(manualMinChrome).toContain('getContainerRequiredOuterWidth');
   });
 
   it('I/J/K/L/R: preview is local, release uses the existing single commit path, and no marker/height is supplied', () => {

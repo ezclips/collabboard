@@ -105,6 +105,10 @@ type RowColumnContainerCardProps = {
   accessMode?: CommentAccessMode;
   orientation?: ContainerOrientation;
   onRequiredWidthChange?: (requiredWidth: number) => void;
+  // PATCH POST-RESIZE-B3.1.2: a SEPARATE, non-ratcheted signal for the
+  // manual-resize handle's minimum -- see the effect below for why
+  // `onRequiredWidthChange` (frozen for auto-grow) cannot be reused here.
+  onIntrinsicRequiredWidthChange?: (width: number) => void;
 };
 
 export default function RowColumnContainerCard({
@@ -133,6 +137,7 @@ export default function RowColumnContainerCard({
   accessMode = 'manage',
   orientation = 'vertical',
   onRequiredWidthChange,
+  onIntrinsicRequiredWidthChange,
 }: RowColumnContainerCardProps) {
   const COLLAPSED_SCROLL_MAX_HEIGHT = 300;
   const [localIsExpanded, setLocalIsExpanded] = useState(false);
@@ -141,6 +146,7 @@ export default function RowColumnContainerCard({
   const contentMeasureRef = useRef<HTMLDivElement>(null);
   const containerMeasureRef = useRef<HTMLDivElement>(null);
   const lastReportedWidthRef = useRef(0);
+  const lastReportedIntrinsicWidthRef = useRef<number | null>(null);
   const isControlled = controlledIsExpanded !== undefined;
   const isExpanded = isControlled ? controlledIsExpanded : localIsExpanded;
   const shouldEnableInternalScroll = !disableInternalScroll && !isExpanded;
@@ -254,6 +260,58 @@ export default function RowColumnContainerCard({
     return () => resizeObserver.disconnect();
   }, [childPadlets, isExpanded, isHorizontal, onRequiredWidthChange, padlet.width]);
 
+  // PATCH POST-RESIZE-B3.1.2: a manual-resize handle needs the CURRENT true
+  // intrinsic child-row requirement as its shrink floor -- a signal that can
+  // both rise AND fall. The `onRequiredWidthChange` effect above is frozen
+  // exactly as auto-grow needs it (ratcheted, never decreasing), and its
+  // measurement (`root`/`content` scrollWidth) is unusable for this purpose
+  // regardless: `content`'s own style sets `minWidth: "100%"` for horizontal
+  // orientation (so the row visually fills a manually-widened Container),
+  // which means `content.scrollWidth` reports the Container's OWN current
+  // width, not the children's true requirement, the moment the row isn't
+  // overflowing. Summing each child wrapper's own rendered width instead
+  // sidesteps that entirely: every horizontal child is pinned via
+  // `flex: 0 0 ${width}px`, so its own `offsetWidth` reflects its true
+  // requirement no matter how wide the row around it has been stretched.
+  useEffect(() => {
+    if (!isHorizontal || !onIntrinsicRequiredWidthChange) return;
+
+    if (childPadlets.length === 0) {
+      if (lastReportedIntrinsicWidthRef.current !== 0) {
+        lastReportedIntrinsicWidthRef.current = 0;
+        onIntrinsicRequiredWidthChange(0);
+      }
+      return;
+    }
+
+    const reportIntrinsicWidth = () => {
+      const root = containerMeasureRef.current;
+      const content = contentMeasureRef.current;
+      if (!root || !content) return;
+      const children = Array.from(content.children) as HTMLElement[];
+      if (children.length === 0) return;
+      const gap = parseFloat(getComputedStyle(content).columnGap) || 8;
+      const childrenWidth = children.reduce((sum, el) => sum + el.offsetWidth, 0) + gap * (children.length - 1);
+      const rootStyle = getComputedStyle(root);
+      const rootPaddingLeft = parseFloat(rootStyle.paddingLeft) || 0;
+      const rootPaddingRight = parseFloat(rootStyle.paddingRight) || 0;
+      const intrinsicWidth = Math.ceil(childrenWidth + rootPaddingLeft + rootPaddingRight);
+      if (intrinsicWidth === lastReportedIntrinsicWidthRef.current) return;
+      lastReportedIntrinsicWidthRef.current = intrinsicWidth;
+      onIntrinsicRequiredWidthChange(intrinsicWidth);
+    };
+
+    reportIntrinsicWidth();
+    // Deliberately observes each CHILD element only -- never `root`/`content`
+    // themselves, which resize on every manual-resize preview frame (that's
+    // exactly the feedback loop this signal must not participate in).
+    const resizeObserver = new ResizeObserver(reportIntrinsicWidth);
+    const content = contentMeasureRef.current;
+    if (content) {
+      Array.from(content.children).forEach((child) => resizeObserver.observe(child));
+    }
+    return () => resizeObserver.disconnect();
+  }, [childPadlets, isHorizontal, onIntrinsicRequiredWidthChange]);
 
 
   return (
