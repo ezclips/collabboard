@@ -67,6 +67,17 @@ describe('PATCH POST-RESIZE-B2 renderer wiring', () => {
     expect(code(cardsSrc)).toContain('genericCardRefs.current[padlet.id]');
   });
 
+  it('B2R.1 negative-control H: the generic-branch (Note/Todo/Link/Table) gesture origin is the MEASURED DOM rect, not stored padlet.width/height', () => {
+    // The existing "genericCardRefs.current[padlet.id]" substring check above
+    // is satisfied by the unrelated ref-callback assignment
+    // (`ref={(el) => { genericCardRefs.current[padlet.id] = el; }}`) even if
+    // getStartSize itself is rewritten to read stored geometry instead of the
+    // DOM -- this test targets the getStartSize body specifically so that
+    // regression is actually caught.
+    expect(code(cardsSrc)).toContain('const el = genericCardRefs.current[padlet.id];');
+    expect(code(cardsSrc)).toMatch(/getStartSize=\{\(\) => \{\s*const el = genericCardRefs\.current\[padlet\.id\];\s*if \(!el\) return null;\s*const width = el\.offsetWidth/);
+  });
+
   it('26. box preview writes width+height; horizontal preview writes width only', () => {
     expect(code(cardsSrc)).toContain("if (resizeMode === 'horizontal-only') previewPostResizeWidth(padlet.id, w);");
     expect(code(cardsSrc)).toContain('else previewPostResize(padlet.id, w, h);');
