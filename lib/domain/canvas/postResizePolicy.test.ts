@@ -82,12 +82,12 @@ describe('PATCH POST-RESIZE-B1 constraints', () => {
     expect(getPostResizeConstraints(post('image'))).toEqual({ minWidth: 100, minHeight: 100 });
   });
 
-  it('B2: text/note 120x80, todo 160x100, link 240 wide, table 200 wide', () => {
+  it('B2: text/note 120x80, todo 160x100, link 240 wide, table 180 wide', () => {
     expect(getPostResizeConstraints(post('text'))).toEqual({ minWidth: 120, minHeight: 80 });
     expect(getPostResizeConstraints(post('note'))).toEqual({ minWidth: 120, minHeight: 80 });
     expect(getPostResizeConstraints(post('todo'))).toEqual({ minWidth: 160, minHeight: 100 });
     expect(getPostResizeConstraints(post('link'))).toEqual({ minWidth: 240, minHeight: 0 });
-    expect(getPostResizeConstraints(post('table'))).toEqual({ minWidth: 200, minHeight: 0 });
+    expect(getPostResizeConstraints(post('table'))).toEqual({ minWidth: 180, minHeight: 0 });
   });
 
   it('B2: Document vs Clipart minima differ by the canonical svgUrl distinction', () => {

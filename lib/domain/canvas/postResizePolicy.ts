@@ -64,7 +64,9 @@ export interface PostResizeConstraints {
  *   progress/count footer needs room at the smallest size.
  * - link: minWidth 240, height content-derived (horizontal-only: minHeight is
  *   unused and stays 0).
- * - table: minWidth 200, height content-derived (horizontal-only).
+ * - table: minWidth 180, height content-derived (horizontal-only). The
+ *   historical Freeform table shell is 180px wide, so a first resize must not
+ *   jump above the usable legacy width merely because it becomes manual.
  * - card: Document vs Clipart differ because their content natures differ --
  *   a Document's paragraphs do not reflow usefully below the historical
  *   default 180x220, while a Clipart SVG scales freely (min 100x100, like
@@ -77,7 +79,7 @@ export const POST_RESIZE_CONSTRAINTS: Record<string, PostResizeConstraints> = {
   note: { minWidth: 120, minHeight: 80 },
   todo: { minWidth: 160, minHeight: 100 },
   link: { minWidth: 240, minHeight: 0 },
-  table: { minWidth: 200, minHeight: 0 },
+  table: { minWidth: 180, minHeight: 0 },
   document: { minWidth: 180, minHeight: 220 },
   clipart: { minWidth: 100, minHeight: 100 },
 };
