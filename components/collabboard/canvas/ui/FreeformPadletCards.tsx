@@ -1799,44 +1799,35 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                 }}
               />
 
-              {/* Resize handle - bottom-right, selected Image ROOT posts only.
-                  PATCH POST-RESIZE-B1: shared handle. The gesture origin is
-                  the ACTUAL rendered rectangle -- a legacy Image's natural
-                  height is measured from the card DOM at pointerdown -- so the
-                  first explicit resize starts from what the user sees, and the
-                  first commit is what turns the post into a canonical-geometry
-                  post. Hidden while locked, and children render through
-                  ContainerChildPreviewCard (never this root branch). */}
-              {getPostResizeCapability(padlet) === 'box' && padlet.type === 'image' && isPadletSelected(padlet.id) && canUseFreeformEditButton && !(padlet.metadata as any)?.isLocked && (
-                <PostResizeHandle
-                  clientToWorld={getWorldPointFromClient}
-                  startWidth={Number(padlet.width) || 360}
-                  startHeight={Number(padlet.height) || 100}
-                  constraints={getPostResizeConstraints(padlet)}
-                  maxWidth={FREEFORM_WORLD_MAX_X - (Number(padlet.position_x) || 0)}
-                  maxHeight={FREEFORM_WORLD_MAX_Y - (Number(padlet.position_y) || 0)}
-                  onResizePreview={(w, h) => previewPostResize(padlet.id, w, h)}
-                  onResizeCommit={(w, h, ow, oh) => {
-                    // PATCH POST-RESIZE-B1.1: this IS the explicit resize --
-                    // mark it atomically with the geometry write, preserving
-                    // every other metadata field via this render's own
-                    // padlet.metadata (fresh: previewPostResize's setPadlets
-                    // calls during the drag re-render this closure before
-                    // pointerup can fire).
-                    void commitPostResize(padlet.id, w, h, ow, oh, { manualSize: true }, padlet.metadata);
-                  }}
-                  getStartSize={() => {
-                    const el = imageCardRefs.current[padlet.id];
-                    if (!el) return null;
-                    const width = el.offsetWidth || 360;
-                    const height = el.offsetHeight || 100;
-                    return { width, height };
-                  }}
-                  title="Resize"
-                />
-              )}
-
             </div>
+
+            {/* Resize interaction chrome is a sibling of the clipping Image
+                card. The existing relative group/image-container owns the
+                bottom-right anchor while imageCardRefs remains on the exact
+                semantic card whose size starts the gesture. */}
+            {getPostResizeCapability(padlet) === 'box' && padlet.type === 'image' && isPadletSelected(padlet.id) && canUseFreeformEditButton && !(padlet.metadata as any)?.isLocked && (
+              <PostResizeHandle
+                clientToWorld={getWorldPointFromClient}
+                startWidth={Number(padlet.width) || 360}
+                startHeight={Number(padlet.height) || 100}
+                constraints={getPostResizeConstraints(padlet)}
+                maxWidth={FREEFORM_WORLD_MAX_X - (Number(padlet.position_x) || 0)}
+                maxHeight={FREEFORM_WORLD_MAX_Y - (Number(padlet.position_y) || 0)}
+                onResizePreview={(w, h) => previewPostResize(padlet.id, w, h)}
+                onResizeCommit={(w, h, ow, oh) => {
+                  void commitPostResize(padlet.id, w, h, ow, oh, { manualSize: true }, padlet.metadata);
+                }}
+                getStartSize={() => {
+                  const el = imageCardRefs.current[padlet.id];
+                  if (!el) return null;
+                  const width = el.offsetWidth || 360;
+                  const height = el.offsetHeight || 100;
+                  return { width, height };
+                }}
+                className="!z-[1001]"
+                title="Resize"
+              />
+            )}
 
 
 
@@ -3006,6 +2997,48 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
         const manualGeometry = resizeMode !== 'none' ? getManualResizeDimensions(padlet) : null;
         const boxManualHeight = resizeMode === 'box' && padlet.type !== 'ai-component' && manualGeometry ? `${manualGeometry.height}px` : undefined;
         const needsContentScroll = resizeMode === 'box' && padlet.type !== 'ai-component' && !!manualGeometry;
+        // Interaction chrome belongs to the immediate relative wrapper used
+        // by each generic root branch, not to this overflow-hidden semantic
+        // card. The measured ref deliberately remains on `content` below.
+        const resizeHandle = padlet.type === 'ai-component' && canUseFreeformEditButton && !(padlet.metadata as any)?.isLocked ? (
+          <PostResizeHandle
+            clientToWorld={getWorldPointFromClient}
+            startWidth={Math.max(Number(padlet.width) || 500, getPostResizeConstraints(padlet)?.minWidth ?? 200)}
+            startHeight={Math.max(Number(padlet.height) || 400, getPostResizeConstraints(padlet)?.minHeight ?? 150)}
+            constraints={getPostResizeConstraints(padlet)}
+            maxWidth={FREEFORM_WORLD_MAX_X - (Number(padlet.position_x) || 0)}
+            maxHeight={FREEFORM_WORLD_MAX_Y - (Number(padlet.position_y) || 0)}
+            onResizePreview={(w, h) => previewPostResize(padlet.id, w, h)}
+            onResizeCommit={(w, h, ow, oh) => { void commitPostResize(padlet.id, w, h, ow, oh); }}
+            className="opacity-0 transition-opacity hover:opacity-100 group-hover:opacity-50"
+            title="Resize"
+          />
+        ) : (resizeMode === 'box' || resizeMode === 'horizontal-only') && isPadletSelected(padlet.id) && canUseFreeformEditButton && !(padlet.metadata as any)?.isLocked ? (
+          <PostResizeHandle
+            mode={resizeMode}
+            clientToWorld={getWorldPointFromClient}
+            startWidth={manualGeometry?.width ?? (padlet.type === 'link' ? 320 : 180)}
+            startHeight={manualGeometry?.height ?? 80}
+            constraints={getPostResizeConstraints(padlet)}
+            maxWidth={FREEFORM_WORLD_MAX_X - (Number(padlet.position_x) || 0)}
+            maxHeight={FREEFORM_WORLD_MAX_Y - (Number(padlet.position_y) || 0)}
+            onResizePreview={(w, h) => {
+              if (resizeMode === 'horizontal-only') previewPostResizeWidth(padlet.id, w);
+              else previewPostResize(padlet.id, w, h);
+            }}
+            onResizeCommit={(w, h, ow, oh, m) => {
+              void commitPostResize(padlet.id, w, h, ow, oh, { manualSize: true }, padlet.metadata, m);
+            }}
+            getStartSize={() => {
+              const el = genericCardRefs.current[padlet.id];
+              if (!el) return null;
+              const width = el.offsetWidth || (padlet.type === 'link' ? 320 : 180);
+              const height = el.offsetHeight || 80;
+              return { width, height };
+            }}
+            title="Resize"
+          />
+        ) : null;
         const content = (
           <div
             ref={(el) => { genericCardRefs.current[padlet.id] = el; }}
@@ -3278,60 +3311,6 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                 </svg>
               </div>
             )}
-
-            {/* Resize handle - bottom-right corner, AI cards only, hidden when
-                locked. PATCH POST-RESIZE-B1: replaced the hand-rolled
-                delta/canvasZoom gesture with the shared PostResizeHandle
-                (host clientToWorld converter, preview per move, ONE commit on
-                release, rollback + toast on failure, screen-constant grip). */}
-            {padlet.type === 'ai-component' && canUseFreeformEditButton && !(padlet.metadata as any)?.isLocked && (
-              <PostResizeHandle
-                clientToWorld={getWorldPointFromClient}
-                startWidth={Math.max(Number(padlet.width) || 500, getPostResizeConstraints(padlet)?.minWidth ?? 200)}
-                startHeight={Math.max(Number(padlet.height) || 400, getPostResizeConstraints(padlet)?.minHeight ?? 150)}
-                constraints={getPostResizeConstraints(padlet)}
-                maxWidth={FREEFORM_WORLD_MAX_X - (Number(padlet.position_x) || 0)}
-                maxHeight={FREEFORM_WORLD_MAX_Y - (Number(padlet.position_y) || 0)}
-                onResizePreview={(w, h) => previewPostResize(padlet.id, w, h)}
-                onResizeCommit={(w, h, ow, oh) => { void commitPostResize(padlet.id, w, h, ow, oh); }}
-                className="opacity-0 transition-opacity hover:opacity-100 group-hover:opacity-50"
-                title="Resize"
-              />
-            )}
-
-            {/* Resize handle - bottom-right, selected ROOT Note/Todo/Link/
-                Table posts only (PATCH POST-RESIZE-B2). Capability decides the
-                mode: box for Note/Todo, horizontal-only for Link/Table. Every
-                B2 resize writes `metadata.manualSize = true` atomically with
-                the geometry through `commitPostResize`, so legacy posts stay
-                exactly as they were until the user explicitly resizes. */}
-            {(resizeMode === 'box' || resizeMode === 'horizontal-only') && padlet.type !== 'ai-component' && isPadletSelected(padlet.id) && canUseFreeformEditButton && !(padlet.metadata as any)?.isLocked && (
-              <PostResizeHandle
-                mode={resizeMode}
-                clientToWorld={getWorldPointFromClient}
-                startWidth={manualGeometry?.width ?? (padlet.type === 'link' ? 320 : 180)}
-                startHeight={manualGeometry?.height ?? 80}
-                constraints={getPostResizeConstraints(padlet)}
-                maxWidth={FREEFORM_WORLD_MAX_X - (Number(padlet.position_x) || 0)}
-                maxHeight={FREEFORM_WORLD_MAX_Y - (Number(padlet.position_y) || 0)}
-                onResizePreview={(w, h) => {
-                  if (resizeMode === 'horizontal-only') previewPostResizeWidth(padlet.id, w);
-                  else previewPostResize(padlet.id, w, h);
-                }}
-                onResizeCommit={(w, h, ow, oh, m) => {
-                  void commitPostResize(padlet.id, w, h, ow, oh, { manualSize: true }, padlet.metadata, m);
-                }}
-                getStartSize={() => {
-                  const el = genericCardRefs.current[padlet.id];
-                  if (!el) return null;
-                  const width = el.offsetWidth || (padlet.type === 'link' ? 320 : 180);
-                  const height = el.offsetHeight || 80;
-                  return { width, height };
-                }}
-                title="Resize"
-              />
-            )}
-
 
             {/* Content - expands to fit all text. PATCH POST-RESIZE-B2: an
                 explicitly height-resized Note/Todo (box manual geometry)
@@ -3940,6 +3919,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
             >
               <div className="relative">
                 {content}
+                {resizeHandle}
 
                 {/* Comment Badge */}
                 {(() => {
@@ -4106,6 +4086,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
             >
               <div className="relative">
                 {content}
+                {resizeHandle}
 
                 {/* Comment Badge */}
                 {(() => {
@@ -4266,6 +4247,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
             >
               <div className="relative">
                 {content}
+                {resizeHandle}
 
                 {/* Comment Badge */}
                 {(() => {
@@ -4466,6 +4448,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
           >
             <div className="relative">
               {content}
+              {resizeHandle}
 
               {/* Comment Badge - yellow indicator with count */}
               {(() => {

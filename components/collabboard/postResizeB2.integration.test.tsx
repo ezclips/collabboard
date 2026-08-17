@@ -61,7 +61,7 @@ describe('PATCH POST-RESIZE-B2 renderer wiring', () => {
   });
 
   it('B2 generic-branch handle: selected-only, capability-driven mode, manualSize + mode commit', () => {
-    expect(code(cardsSrc)).toContain("(resizeMode === 'box' || resizeMode === 'horizontal-only') && padlet.type !== 'ai-component' && isPadletSelected(padlet.id)");
+    expect(code(cardsSrc)).toContain("(resizeMode === 'box' || resizeMode === 'horizontal-only') && isPadletSelected(padlet.id)");
     expect(code(cardsSrc)).toContain('mode={resizeMode}');
     expect(code(cardsSrc)).toContain("void commitPostResize(padlet.id, w, h, ow, oh, { manualSize: true }, padlet.metadata, m);");
     expect(code(cardsSrc)).toContain('genericCardRefs.current[padlet.id]');
@@ -100,6 +100,76 @@ describe('PATCH POST-RESIZE-B2 renderer wiring', () => {
   it('the card (Document/Clipart) render keeps its canonical geometry WITHOUT the marker', () => {
     expect(code(cardsSrc)).toContain('width: padlet.width || 180,');
     expect(code(cardsSrc)).toContain('height: padlet.height || 220,');
+  });
+});
+
+describe('PATCH POST-RESIZE-B2R.2 low-zoom interaction-overlay ownership', () => {
+  const stripped = code(cardsSrc);
+  const genericContentStart = stripped.indexOf('const content = (');
+  const genericContentEnd = stripped.indexOf("if (padlet.type === 'link')", genericContentStart);
+  const genericContent = stripped.slice(genericContentStart, genericContentEnd);
+  const genericOverlayStart = stripped.indexOf('const resizeHandle =');
+  const genericOverlayEnd = genericContentStart;
+  const genericOverlay = stripped.slice(genericOverlayStart, genericOverlayEnd);
+  const imageCardStart = cardsSrc.indexOf('ref={(el) => { imageCardRefs.current[padlet.id] = el; }}');
+  const imageOverlayStart = cardsSrc.indexOf('Resize interaction chrome is a sibling', imageCardStart);
+  const imageCard = cardsSrc.slice(imageCardStart, imageOverlayStart);
+
+  it('generic root resize chrome is outside the overflow-hidden semantic card', () => {
+    expect(genericContent).toContain('relative overflow-hidden flex flex-col');
+    expect(genericContent).not.toContain('<PostResizeHandle');
+    expect(genericOverlay.match(/<PostResizeHandle/g)).toHaveLength(2); // AI + B2 generic mode
+    expect(stripped.match(/\{content\}\s*\{resizeHandle\}/g)).toHaveLength(4); // Link/Table/Todo/default
+  });
+
+  it('Image resize chrome is outside its overflow-hidden semantic card', () => {
+    expect(imageCard).toContain('className={`overflow-hidden flex flex-col');
+    expect(imageCard).not.toContain('<PostResizeHandle');
+    expect(cardsSrc.slice(imageOverlayStart)).toContain('<PostResizeHandle');
+  });
+
+  it('content clipping remains intact for Image and generic root content', () => {
+    expect(stripped).toContain('className={`overflow-hidden flex flex-col bg-white group relative transition-all');
+    expect(stripped).toContain('className={`group group/image-container relative overflow-hidden flex flex-col');
+    expect(stripped).toContain("needsContentScroll ? 'overflow-y-auto'");
+    expect(stripped).toContain("'overflow-hidden'}`}");
+  });
+
+  it('resize-origin refs remain on semantic sized cards, never the interaction overlay', () => {
+    expect(genericContent).toContain('ref={(el) => { genericCardRefs.current[padlet.id] = el; }}');
+    expect(imageCard).toContain('ref={(el) => { imageCardRefs.current[padlet.id] = el; }}');
+    expect(genericOverlay).not.toContain('ref={(el) =>');
+    expect(stripped).toMatch(/getStartSize=\{\(\) => \{\s*const el = genericCardRefs\.current\[padlet\.id\]/);
+    expect(stripped).toMatch(/getStartSize=\{\(\) => \{\s*const el = imageCardRefs\.current\[padlet\.id\]/);
+  });
+
+  it('interaction wrappers add no semantic width/height and the handle remains absolute', () => {
+    expect(stripped.match(/<div className="relative">\s*\{content\}\s*\{resizeHandle\}/g)).toHaveLength(4);
+    expect(code(handleSrc)).toContain('className={`absolute bottom-0 right-0');
+  });
+
+  it('the Image handle uses only local stacking above its selected semantic card', () => {
+    const imageOverlay = cardsSrc.slice(imageOverlayStart, cardsSrc.indexOf('{/* Text Style Popup', imageOverlayStart));
+    expect(imageOverlay).toContain('className="!z-[1001]"');
+    expect(imageOverlay).not.toMatch(/z-\[9999\]|Number\.MAX_SAFE_INTEGER/);
+  });
+
+  it('exactly one source mount remains for each established host block', () => {
+    expect(stripped.match(/<PostResizeHandle/g)).toHaveLength(4); // Image + AI/B2 overlay + Document/Clipart
+    expect(genericOverlay.match(/padlet\.type === 'ai-component'/g)).toHaveLength(1);
+    expect(genericOverlay.match(/mode=\{resizeMode\}/g)).toHaveLength(1);
+  });
+
+  it('B2 selection gating and AI always-visible behavior remain distinct', () => {
+    expect(genericOverlay).toContain("(resizeMode === 'box' || resizeMode === 'horizontal-only') && isPadletSelected(padlet.id)");
+    const aiCondition = genericOverlay.slice(0, genericOverlay.indexOf(") : (resizeMode"));
+    expect(aiCondition).not.toContain('isPadletSelected(padlet.id)');
+  });
+
+  it('root-only and frozen renderers still carry no shared handle', () => {
+    expect(code(rowColumnSrc)).not.toContain('PostResizeHandle');
+    expect(code(drawingSrc)).not.toContain('PostResizeHandle');
+    expect(stripped).not.toMatch(/padlet\.type === 'container'[\s\S]{0,180}<PostResizeHandle/);
   });
 });
 
