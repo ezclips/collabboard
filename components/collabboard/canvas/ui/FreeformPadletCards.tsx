@@ -4469,9 +4469,12 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                     updatePadletMetadata(padlet.id, { visibleChildPostTitleIds: nextIds, showChildPostTitles: false });
                   }
                 : undefined}
-              postTitleVisibleIds={Array.from(getEffectiveVisibleChildTitleIds(padlet.metadata as any, containerChildPadlets))}
+            postTitleVisibleIds={Array.from(getEffectiveVisibleChildTitleIds(padlet.metadata as any, containerChildPadlets))}
             >
-              {content}
+              <div className="relative">
+                {content}
+                {resizeHandle}
+              </div>
             </ColumnPostContextMenu>
           );
         }

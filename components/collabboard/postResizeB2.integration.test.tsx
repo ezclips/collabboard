@@ -119,7 +119,7 @@ describe('PATCH POST-RESIZE-B2R.2 low-zoom interaction-overlay ownership', () =>
     expect(genericContent).toContain('relative overflow-hidden flex flex-col');
     expect(genericContent).not.toContain('<PostResizeHandle');
     expect(genericOverlay.match(/<PostResizeHandle/g)).toHaveLength(3); // Container + AI + B2 generic mode
-    expect(stripped.match(/\{content\}\s*\{resizeHandle\}/g)).toHaveLength(4); // Link/Table/Todo/default
+    expect(stripped.match(/\{content\}\s*\{resizeHandle\}/g)).toHaveLength(5); // + Container branch
   });
 
   it('Image resize chrome is outside its overflow-hidden semantic card', () => {
@@ -144,7 +144,7 @@ describe('PATCH POST-RESIZE-B2R.2 low-zoom interaction-overlay ownership', () =>
   });
 
   it('interaction wrappers add no semantic width/height and the handle remains absolute', () => {
-    expect(stripped.match(/<div className="relative">\s*\{content\}\s*\{resizeHandle\}/g)).toHaveLength(4);
+    expect(stripped.match(/<div className="relative">\s*\{content\}\s*\{resizeHandle\}/g)).toHaveLength(5); // + Container branch
     expect(code(handleSrc)).toContain('className={`absolute bottom-0 right-0');
   });
 
