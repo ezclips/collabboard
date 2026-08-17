@@ -167,11 +167,14 @@ describe('PATCH POST-RESIZE-B2R.2 low-zoom interaction-overlay ownership', () =>
     expect(aiCondition).not.toContain('isPadletSelected(padlet.id)');
   });
 
-  it('root-only and frozen renderers still carry no shared handle', () => {
+  it('root-only and frozen renderers still carry no GENERIC (B1/B2) shared handle', () => {
     expect(code(rowColumnSrc)).not.toContain('PostResizeHandle');
-    expect(code(drawingSrc)).not.toContain('PostResizeHandle');
-    expect(code(drawingSrc)).not.toContain('PostResizeHandle');
-    expect(code(rowColumnSrc)).not.toContain('PostResizeHandle');
+    // PATCH POST-RESIZE-B3.2: Drawing's own PostResizeHandle import exists,
+    // but exclusively for its dedicated, selection-gated Container path --
+    // never wired into the generic B1/B2 resizeMode/capability machinery
+    // this test file otherwise covers.
+    expect(code(drawingSrc)).not.toMatch(/resizeMode[\s\S]{0,120}PostResizeHandle/);
+    expect(code(drawingSrc)).not.toMatch(/getPostResizeCapability[\s\S]{0,120}PostResizeHandle/);
   });
 });
 
@@ -238,8 +241,9 @@ describe('PATCH POST-RESIZE-B2 freezes', () => {
     expect(code(rowColumnSrc)).not.toContain('PostResizeHandle');
   });
 
-  it('70. Drawing host is frozen: no shared handle import', () => {
-    expect(code(drawingSrc)).not.toContain('PostResizeHandle');
+  it('70. PATCH POST-RESIZE-B3.2: Drawing gained its own dedicated Container handle, still isolated from the generic B1/B2 host wiring', () => {
+    expect(code(drawingSrc)).not.toMatch(/resizeMode[\s\S]{0,120}PostResizeHandle/);
+    expect(code(drawingSrc)).not.toMatch(/getPostResizeCapability[\s\S]{0,120}PostResizeHandle/);
     expect(code(cardsSrc)).not.toMatch(/viewDrawingPadlet[\s\S]{0,80}PostResizeHandle/);
   });
 

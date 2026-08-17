@@ -58,6 +58,8 @@ const nextConfig: NextConfig = {
         ...config.resolve.alias,
         [`${path.resolve(process.cwd(), "lib/e2e/bridgeRegistration.ts")}$`]:
           path.resolve(process.cwd(), "lib/e2e/bridgeRegistration.e2e.ts"),
+        [`${path.resolve(process.cwd(), "lib/e2e/drawingResizeFixture.tsx")}$`]:
+          path.resolve(process.cwd(), "lib/e2e/drawingResizeFixture.e2e.tsx"),
       };
     }
     config.plugins.push({

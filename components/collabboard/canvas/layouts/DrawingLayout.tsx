@@ -23,6 +23,7 @@ import PostCardContent from '@/components/collabboard/PostCardContent';
 import EmbeddedCommentList from '@/components/collabboard/EmbeddedCommentList';
 import RowColumnContainerCard from '@/components/collabboard/RowColumnContainerCard';
 import { resolveContainerOrientation } from '@/lib/domain/canvas/containerModel';
+import PostResizeHandle from '@/components/collabboard/canvas/ui/PostResizeHandle';
 import ZoomControls from '@/components/collabboard/canvas/ui/ZoomControls';
 import { PresentationPanel } from '@/components/presentation/PresentationPanel';
 import { FullscreenPresentation, type RuntimeSlideHelpers } from '@/components/presentation/FullscreenPresentation';
@@ -63,6 +64,10 @@ type AutoHeightContainerProps = {
   allPadlets: Padlet[];
   onNaturalHeight: (h: number) => void;
   onRequiredWidthChange?: (w: number) => void;
+  // PATCH POST-RESIZE-B3.2: the manual-resize handle's non-ratcheted
+  // intrinsic-minimum signal (see RowColumnContainerCard's own comment) --
+  // separate from onRequiredWidthChange's frozen auto-grow ratchet above.
+  onIntrinsicRequiredWidthChange?: (w: number) => void;
   onDropExistingPadlet?: (containerId: string, droppedId: string) => void;
   onDropDraftIntoContainer?: (containerId: string, draftPayload: any) => void;
   currentUserId?: string;
@@ -75,7 +80,7 @@ type AutoHeightContainerProps = {
   onExpandAvailabilityChange?: (available: boolean) => void;
   onOpenDocument?: (post: Padlet) => void;
 };
-function AutoHeightContainer({ padlet, allPadlets, onNaturalHeight, onRequiredWidthChange, onDropExistingPadlet, onDropDraftIntoContainer, currentUserId, currentUserName, currentUserAvatar, onUpdateChildComments, commentAccessMode, onScanChild, isExpanded, onExpandAvailabilityChange, onOpenDocument }: AutoHeightContainerProps) {
+function AutoHeightContainer({ padlet, allPadlets, onNaturalHeight, onRequiredWidthChange, onIntrinsicRequiredWidthChange, onDropExistingPadlet, onDropDraftIntoContainer, currentUserId, currentUserName, currentUserAvatar, onUpdateChildComments, commentAccessMode, onScanChild, isExpanded, onExpandAvailabilityChange, onOpenDocument }: AutoHeightContainerProps) {
   const ref = useRef<HTMLDivElement>(null);
   const cbRef = useRef(onNaturalHeight);
   cbRef.current = onNaturalHeight;
@@ -97,6 +102,7 @@ function AutoHeightContainer({ padlet, allPadlets, onNaturalHeight, onRequiredWi
         allPadlets={allPadlets}
         orientation={resolveContainerOrientation(padlet.metadata)}
         onRequiredWidthChange={onRequiredWidthChange}
+        onIntrinsicRequiredWidthChange={onIntrinsicRequiredWidthChange}
         showHeader={false}
         isExpanded={isExpanded}
         canvasContext="drawing"
@@ -237,7 +243,9 @@ const getElementsFromPointSummaryForDiagnostics = (clientX: number, clientY: num
     }));
 };
 
-const toSceneCoords = (
+// Exported for genuine DOM-mounted test coverage (PATCH POST-RESIZE-B3.2) --
+// not otherwise part of this file's public surface.
+export const toSceneCoords = (
   clientX: number,
   clientY: number,
   appState: any,
@@ -330,6 +338,106 @@ const SectionHeadingDrawingContext = React.createContext<{
   setSelectedId: (id: string | null) => void;
   registerElement: (padletId: string, el: HTMLElement | null) => void;
 } | null>(null);
+
+// PATCH POST-RESIZE-B3.2: a Container embeddable is locked (see
+// createEmbeddableElementForPadlet's `locked` field) specifically so
+// Excalidraw's own native resize/rotate chrome never competes with this
+// dedicated width-only resize handle -- but locked elements are not
+// selectable through Excalidraw's native `appState.selectedElementIds`
+// either. This is the SAME problem Section Heading already solved (see
+// SectionHeadingSelectionStore's own comment for why a plain prop threaded
+// through `renderEmbeddable`'s dependency chain reproduces a real,
+// previously-confirmed infinite-loop failure through the fork's tunnel-rat
+// portal machinery) -- so Container gets an identically-shaped, independent
+// selection store rather than reusing Section Heading's (a different post
+// type must not share selection state).
+// Exported for genuine DOM-mounted test coverage (PATCH POST-RESIZE-B3.2).
+export class ContainerResizeSelectionStore {
+  private selectedId: string | null = null;
+  private listeners = new Set<() => void>();
+  getSnapshot = () => this.selectedId;
+  getServerSnapshot = () => null;
+  subscribe = (listener: () => void) => {
+    this.listeners.add(listener);
+    return () => { this.listeners.delete(listener); };
+  };
+  setSelected = (id: string | null) => {
+    if (this.selectedId === id) return;
+    this.selectedId = id;
+    this.listeners.forEach((listener) => listener());
+  };
+}
+
+// Exported for genuine DOM-mounted test coverage (PATCH POST-RESIZE-B3.2).
+export const ContainerResizeDrawingContext = React.createContext<{
+  store: ContainerResizeSelectionStore;
+  setSelectedId: (id: string | null) => void;
+} | null>(null);
+
+/**
+ * Drawing embeddables are separate transformed stacking contexts. A resize
+ * grip mounted inside one embeddable cannot paint above a later overlapping
+ * embeddable, regardless of the grip's local z-index. Keep the interaction
+ * chrome in Excalidraw's own root stacking context while deriving its box from
+ * the live card rect. The inner scale preserves PostResizeHandle's existing
+ * world-sized, screen-constant geometry without changing the shared handle.
+ */
+function DrawingContainerResizePortal({
+  anchorRef,
+  appStateRef,
+  portalTarget,
+  children,
+}: {
+  anchorRef: React.RefObject<HTMLElement | null>;
+  appStateRef: React.RefObject<any>;
+  portalTarget: HTMLElement | null;
+  children: React.ReactNode;
+}) {
+  const shellRef = useRef<HTMLDivElement>(null);
+  const scaledRef = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    if (!portalTarget) return;
+    let frameId = 0;
+    const positionChrome = () => {
+      const anchor = anchorRef.current;
+      const shell = shellRef.current;
+      const scaled = scaledRef.current;
+      if (anchor && shell && scaled) {
+        const anchorRect = anchor.getBoundingClientRect();
+        const targetRect = portalTarget.getBoundingClientRect();
+        const zoom = Number(appStateRef.current?.zoom?.value) || 1;
+        shell.style.left = `${anchorRect.left - targetRect.left}px`;
+        shell.style.top = `${anchorRect.top - targetRect.top}px`;
+        shell.style.width = `${anchorRect.width}px`;
+        shell.style.height = `${anchorRect.height}px`;
+        scaled.style.transform = `scale(${zoom})`;
+      }
+      frameId = window.requestAnimationFrame(positionChrome);
+    };
+    positionChrome();
+    return () => window.cancelAnimationFrame(frameId);
+  }, [anchorRef, appStateRef, portalTarget]);
+
+  if (!portalTarget) return null;
+  return createPortal(
+    <div
+      ref={shellRef}
+      data-drawing-container-resize-portal="true"
+      className="pointer-events-none absolute"
+      style={{ zIndex: 3 }}
+    >
+      <div
+        ref={scaledRef}
+        className="pointer-events-none absolute inset-0"
+        style={{ transformOrigin: 'bottom right' }}
+      >
+        {children}
+      </div>
+    </div>,
+    portalTarget,
+  );
+}
 
 function startSectionHeadingBodyDrag(
   padletId: string,
@@ -605,9 +713,14 @@ type DrawingEmbeddableCardProps = {
   onDragEnd?: (padletId: string, x: number, y: number) => void;
   onNaturalResize?: (padletId: string, size: { width?: number; height?: number }) => void;
   onOpenDocument?: (padlet: Padlet) => void; // PATCH-149B1b-iii §27.4
+  // PATCH POST-RESIZE-B3.2: locks the reconciliation effect's width-snapback
+  // during a live manual-resize preview, without onNaturalResize's own
+  // persistence side-effect (see lockManualResizePreviewWidth's own comment).
+  onManualResizePreviewLock?: (padletId: string, width: number) => void;
 };
 
-function DrawingEmbeddableCard({
+// Exported for genuine DOM-mounted test coverage (PATCH POST-RESIZE-B3.2).
+export function DrawingEmbeddableCard({
   padlet,
   allPadlets,
   readOnly,
@@ -630,12 +743,26 @@ function DrawingEmbeddableCard({
   onDragEnd,
   onNaturalResize,
   onOpenDocument,
+  onManualResizePreviewLock,
 }: DrawingEmbeddableCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [canExpand, setCanExpand] = useState(false);
 
   const md = padlet.metadata as any;
   const isContainer = md?.isContainer === true || (md?.childPadletIds && md.childPadletIds.length > 0) || padlet.type === "container";
+  // PATCH POST-RESIZE-B3.2: the manual width-resize handle is scoped to
+  // ROOT Containers specifically (padlet.type === 'container'), not the
+  // broader legacy-compatibility `isContainer` heuristic above (which also
+  // matches other types carrying stray childPadletIds metadata).
+  const isResizableContainer = padlet.type === 'container';
+  const containerResizeSelection = useContext(ContainerResizeDrawingContext);
+  const selectedContainerId = useSyncExternalStore(
+    containerResizeSelection?.store.subscribe ?? (() => () => {}),
+    containerResizeSelection?.store.getSnapshot ?? (() => null),
+    containerResizeSelection?.store.getServerSnapshot ?? (() => null),
+  );
+  const isContainerSelected = isResizableContainer && selectedContainerId === padlet.id;
+  const [containerManualMinWidth, setContainerManualMinWidth] = useState(0);
 
   const stripColor = padlet.metadata?.topStrip && padlet.metadata.topStrip !== 'transparent'
     ? padlet.metadata.topStrip
@@ -650,21 +777,23 @@ function DrawingEmbeddableCard({
 
   const cardOuterRef = useRef<HTMLDivElement>(null);
   const contentAreaRef = useRef<HTMLDivElement>(null);
+  const [containerResizePortalTarget, setContainerResizePortalTarget] = useState<HTMLElement | null>(null);
+  const setCardOuterRef = useCallback((node: HTMLDivElement | null) => {
+    cardOuterRef.current = node;
+    setContainerResizePortalTarget(node?.closest('.excalidraw') as HTMLElement | null);
+  }, []);
 
-  const updateHorizontalSceneWidth = (requiredWidth: number) => {
-    if (resolveContainerOrientation(padlet.metadata) !== 'horizontal') return;
-    const excAPI = excalidrawAPIRef.current;
-    if (!excAPI || !Number.isFinite(requiredWidth)) return;
-    const existing = excAPI.getSceneElements().find(
-      (el: any) => el.type === 'embeddable' && el.link === `padlet://${padlet.id}` && !el.isDeleted
-    );
-    if (!existing) return;
-    // `requiredWidth` is relative to RowColumnContainerCard's own box, but the
-    // scene embeddable spans this card's OUTER chrome around it (the card's
-    // own border plus the content area's padding). Read that chrome back from
-    // computed style -- rather than hardcoding a pixel constant -- so the
-    // scene box always grows enough to keep its trailing gutter symmetric
-    // with the leading one, even if the chrome classes below ever change.
+  // `requiredWidth` (as used by both callers below) is relative to
+  // RowColumnContainerCard's own box, but the scene embeddable spans this
+  // card's OUTER chrome around it (the card's own border plus the content
+  // area's padding, plus Excalidraw's own embeddable-wrapper padding). Read
+  // that chrome back from computed style -- rather than hardcoding a pixel
+  // constant -- so the scene box always grows enough to keep its trailing
+  // gutter symmetric with the leading one, even if the chrome classes below
+  // ever change. Shared by auto-grow (updateHorizontalSceneWidth) AND the
+  // manual-resize handle's minimum (PATCH POST-RESIZE-B3.2) so there is one
+  // chrome formula, not two drifting ones.
+  const measureChromePerSide = () => {
     const outerBorder = cardOuterRef.current ? parseFloat(getComputedStyle(cardOuterRef.current).borderLeftWidth) || 0 : 0;
     const contentPadding = contentAreaRef.current ? parseFloat(getComputedStyle(contentAreaRef.current).paddingLeft) || 0 : 0;
     // Excalidraw wraps this card in its own `.excalidraw__embeddable__outer`
@@ -677,6 +806,24 @@ function DrawingEmbeddableCard({
     const excalidrawWrapperEl = cardOuterRef.current?.parentElement ?? null;
     const excalidrawWrapperPadding = excalidrawWrapperEl ? parseFloat(getComputedStyle(excalidrawWrapperEl).paddingLeft) || 0 : 0;
     const chromePerSide = outerBorder + contentPadding + excalidrawWrapperPadding;
+    return chromePerSide;
+  };
+
+  const getExistingSceneEmbeddable = () => {
+    const excAPI = excalidrawAPIRef.current;
+    if (!excAPI) return null;
+    return excAPI.getSceneElements().find(
+      (el: any) => el.type === 'embeddable' && el.link === `padlet://${padlet.id}` && !el.isDeleted
+    ) ?? null;
+  };
+
+  const updateHorizontalSceneWidth = (requiredWidth: number) => {
+    if (resolveContainerOrientation(padlet.metadata) !== 'horizontal') return;
+    const excAPI = excalidrawAPIRef.current;
+    if (!excAPI || !Number.isFinite(requiredWidth)) return;
+    const existing = getExistingSceneEmbeddable();
+    if (!existing) return;
+    const chromePerSide = measureChromePerSide();
     const nextWidth = Math.max(existing.width ?? 0, Math.ceil(requiredWidth + chromePerSide * 2));
     if (nextWidth <= (existing.width ?? 0) + 1) return;
     excAPI.updateScene({
@@ -688,6 +835,92 @@ function DrawingEmbeddableCard({
       }),
     });
     onNaturalResize?.(padlet.id, { width: nextWidth });
+  };
+
+  // PATCH POST-RESIZE-B3.2: the manual-resize handle's minimum, fed by
+  // RowColumnContainerCard's own intrinsic (non-ratcheted, can-rise-and-fall)
+  // signal -- see its own comment for why this must be a DIFFERENT signal
+  // from onRequiredWidthChange above. Reuses the SAME chrome accounting.
+  const handleIntrinsicRequiredWidthChange = (intrinsicWidth: number) => {
+    const chromePerSide = measureChromePerSide();
+    const requiredOuterWidth = Math.ceil(intrinsicWidth + chromePerSide * 2);
+    setContainerManualMinWidth((prev) => (prev === requiredOuterWidth ? prev : requiredOuterWidth));
+  };
+
+  const resizableContainerOrientation = isResizableContainer ? resolveContainerOrientation(padlet.metadata) : null;
+  const containerResizeMinWidth = Math.max(
+    360,
+    resizableContainerOrientation === 'horizontal' ? containerManualMinWidth : 0,
+  );
+
+  const clientToWorld = useCallback((clientX: number, clientY: number) => {
+    return toSceneCoords(clientX, clientY, appStateRef.current);
+  }, [appStateRef]);
+
+  // PATCH POST-RESIZE-B3.2: honest commit + rollback, mirroring Freeform's
+  // commitPostResize -- on failure the scene element is restored to the
+  // measured pre-gesture width, and the preview lock is released so
+  // reconciliation is free to hold/confirm the (unchanged) canonical width.
+  const commitManualResizeWidth = async (finalWidth: number, originWidth: number) => {
+    const excAPI = excalidrawAPIRef.current;
+    const existing = getExistingSceneEmbeddable();
+    onManualResizePreviewLock?.(padlet.id, finalWidth);
+    if (excAPI && existing) {
+      excAPI.updateScene({
+        ...buildDrawingSceneUpdate({
+          elements: excAPI.getSceneElements().map((el: any) => el.id === existing.id
+            ? { ...el, width: finalWidth, version: (el.version ?? 1) + 1, versionNonce: Math.floor(Math.random() * 1e9), updated: Date.now() }
+            : el),
+          commitToHistory: true,
+        }),
+      });
+      if (typeof (excAPI as any).updateBoundElements === 'function') {
+        (excAPI as any).updateBoundElements({ ...existing, width: finalWidth });
+      }
+    }
+    try {
+      await onUpdatePadletStrict(padlet.id, { width: finalWidth });
+    } catch (err) {
+      console.error('Failed to persist Container resize:', err);
+      onManualResizePreviewLock?.(padlet.id, originWidth);
+      const excAPI2 = excalidrawAPIRef.current;
+      const existing2 = getExistingSceneEmbeddable();
+      if (excAPI2 && existing2) {
+        excAPI2.updateScene({
+          ...buildDrawingSceneUpdate({
+            elements: excAPI2.getSceneElements().map((el: any) => el.id === existing2.id
+              ? { ...el, width: originWidth, version: (el.version ?? 1) + 1, versionNonce: Math.floor(Math.random() * 1e9), updated: Date.now() }
+              : el),
+            commitToHistory: false,
+          }),
+        });
+        if (typeof (excAPI2 as any).updateBoundElements === 'function') {
+          (excAPI2 as any).updateBoundElements({ ...existing2, width: originWidth });
+        }
+      }
+    }
+  };
+
+  // PATCH POST-RESIZE-B3.2: live preview -- updates the SEMANTIC scene width
+  // directly (Drawing's Container geometry owner, unlike Freeform's DOM
+  // width), locks it against the reconciliation effect's snapback, and does
+  // NOT persist (0 writes per pointermove, matching the frozen B3 contract).
+  const previewManualResizeWidth = (previewWidth: number) => {
+    const excAPI = excalidrawAPIRef.current;
+    const existing = getExistingSceneEmbeddable();
+    if (!excAPI || !existing) return;
+    onManualResizePreviewLock?.(padlet.id, previewWidth);
+    excAPI.updateScene({
+      ...buildDrawingSceneUpdate({
+        elements: excAPI.getSceneElements().map((el: any) => el.id === existing.id
+          ? { ...el, width: previewWidth, version: (el.version ?? 1) + 1, versionNonce: Math.floor(Math.random() * 1e9), updated: Date.now() }
+          : el),
+        commitToHistory: false,
+      }),
+    });
+    if (typeof (excAPI as any).updateBoundElements === 'function') {
+      (excAPI as any).updateBoundElements({ ...existing, width: previewWidth });
+    }
   };
 
   const createAndLinkChildToContainer = async (
@@ -726,9 +959,9 @@ function DrawingEmbeddableCard({
 
   return (
     <div
-      ref={cardOuterRef}
+      ref={setCardOuterRef}
       data-padlet-id={padlet.id}
-      className={`w-full overflow-hidden rounded-xl bg-white flex flex-col border border-gray-200 ${isContainer ? '' : 'h-full'}`}
+      className={`relative w-full overflow-hidden rounded-xl bg-white flex flex-col border border-gray-200 ${isContainer ? '' : 'h-full'}`}
       onMouseDown={(e) => { if (e.button === 2) e.stopPropagation(); }}
       onContextMenu={(e) => {
         const target = e.target as HTMLElement | null;
@@ -784,9 +1017,17 @@ function DrawingEmbeddableCard({
           backgroundColor: stripBg,
           userSelect: 'none',
         }}
+        // PATCH POST-RESIZE-B3.2: stopping propagation on pointerdown alone
+        // does not stop the SEPARATE native `click` event a plain
+        // click/tap also generates -- that click still bubbles to the
+        // blank-canvas deselect handler and immediately clears the
+        // selection this same gesture just set. Mirrors SectionHeadingPost's
+        // own click stopPropagation (SECTION-H3B.1) for the identical reason.
+        onClick={(e) => { if (isResizableContainer) e.stopPropagation(); }}
         onPointerDown={(e) => {
           if (e.button !== 0) return; // left-click only -- ignore right-click so it doesn't set pointer capture
           e.stopPropagation();
+          if (isResizableContainer) containerResizeSelection?.setSelectedId(padlet.id);
           const excAPI = excalidrawAPIRef.current;
           if (!excAPI) return;
           const sceneEl = excAPI.getSceneElements().find(
@@ -980,6 +1221,7 @@ function DrawingEmbeddableCard({
               onNaturalResize?.(padlet.id, { height: newHeight });
             }}
             onRequiredWidthChange={updateHorizontalSceneWidth}
+            onIntrinsicRequiredWidthChange={handleIntrinsicRequiredWidthChange}
             onDropExistingPadlet={async (containerId, droppedId) => {
               const container = allPadlets.find(p => p.id === containerId);
               if (!container) return;
@@ -1069,6 +1311,38 @@ function DrawingEmbeddableCard({
           return <PostCardContent padlet={padlet} onScan={fetchData} canvasContext="drawing" onOpenDocument={onOpenDocument ? () => onOpenDocument(padlet) : undefined} accessMode={commentAccessMode} />;
         })()}
       </div>
+      {/* Interaction chrome is portaled to the Excalidraw root so a later
+          overlapping embeddable cannot steal its hit target. The portal tracks
+          cardOuterRef's live rect and does not participate in scene geometry. */}
+      {isResizableContainer && isContainerSelected && !readOnly && !(padlet.metadata as any)?.isLocked ? (
+        // PATCH POST-RESIZE-B3.2: PostResizeHandle's own pointerup calls
+        // preventDefault/stopPropagation on the POINTER event, but that does
+        // not suppress the SEPARATE native `click` a plain press-release also
+        // generates -- exactly the same class of bug already fixed on the
+        // strip above (see its own comment), just one level further down.
+        // PostResizeHandle itself is frozen (never modified for Drawing), so
+        // the fix lives in this wrapper instead.
+        <DrawingContainerResizePortal anchorRef={cardOuterRef} appStateRef={appStateRef} portalTarget={containerResizePortalTarget}>
+          <div onClick={(e) => e.stopPropagation()}>
+            <PostResizeHandle
+              mode="horizontal-only"
+              clientToWorld={clientToWorld}
+              startWidth={Math.max(Number(padlet.width) || 0, 360)}
+              startHeight={150}
+              constraints={{ minWidth: containerResizeMinWidth, minHeight: 0 }}
+              onResizePreview={(w) => previewManualResizeWidth(w)}
+              onResizeCommit={(w, _h, ow) => { void commitManualResizeWidth(w, ow); }}
+              getStartSize={() => {
+                const existing = getExistingSceneEmbeddable();
+                if (!existing) return null;
+                return { width: existing.width ?? 360, height: existing.height ?? 150 };
+              }}
+              className="pointer-events-auto"
+              title="Resize Container"
+            />
+          </div>
+        </DrawingContainerResizePortal>
+      ) : null}
     </div>
   );
 }
@@ -1273,6 +1547,31 @@ export default function DrawingLayout({
     setSelectedId: setSelectedSectionHeadingId,
     registerElement: registerSectionHeadingElement,
   }), [setSelectedSectionHeadingId, registerSectionHeadingElement]);
+  // PATCH POST-RESIZE-B3.2: Container's own selection tracking -- see
+  // ContainerResizeSelectionStore's own comment for why this must be a
+  // separate store from Section Heading's, using the SAME stable-context
+  // -value shape for the same infinite-loop-avoidance reason.
+  const containerResizeSelectionStoreRef = useRef<ContainerResizeSelectionStore | null>(null);
+  if (containerResizeSelectionStoreRef.current === null) {
+    containerResizeSelectionStoreRef.current = new ContainerResizeSelectionStore();
+  }
+  const setSelectedContainerId = useCallback((id: string | null) => {
+    containerResizeSelectionStoreRef.current!.setSelected(id);
+  }, []);
+  const containerResizeContextValue = useMemo(() => ({
+    store: containerResizeSelectionStoreRef.current!,
+    setSelectedId: setSelectedContainerId,
+  }), [setSelectedContainerId]);
+  // Mirrors recentlyNaturalResizedRef (declared below) but exposed as a
+  // stable setter for the manual-resize handle's live preview: locks the
+  // reconciliation effect's width-snapback (same mechanism onNaturalResize
+  // already uses for auto-grow) WITHOUT onNaturalResize's own persistence
+  // side-effect, which would otherwise fire a real DB write on every
+  // pointermove frame that grows the width.
+  const lockManualResizePreviewWidth = useCallback((padletId: string, width: number) => {
+    const previous = recentlyNaturalResizedRef.current.get(padletId) ?? {};
+    recentlyNaturalResizedRef.current.set(padletId, { ...previous, width });
+  }, []);
   // Track current binary files (images embedded in drawing) for export
   const currentFilesRef = useRef<any>(null);
   const runtimeSceneElementsRef = useRef<readonly any[]>([]);
@@ -2417,8 +2716,15 @@ export default function DrawingLayout({
       // position_x/y intentionally excluded: position is checked separately in scene sync
       // (el.x !== nextX || el.y !== nextY) and including it causes key change on every drag,
       // which unmounts/remounts DrawingEmbeddableCard, resetting isExpanded state.
-      width: padlet.width ?? 320,
-      height: padlet.height ?? 280,
+      // PATCH POST-RESIZE-B3.2: width/height excluded for the identical reason --
+      // both are ALSO already checked separately in scene sync (el.width !==
+      // nextWidth / el.height !== nextHeight). Including them was a latent,
+      // rarely-noticed version of the same bug for the pre-existing
+      // auto-grow/auto-height paths (an occasional silent remount); the new
+      // manual-resize handle changes width on every commit of a drag, which
+      // turned that same latent remount into total loss of gesture state
+      // (containerManualMinWidth reset, in-flight handle instance orphaned)
+      // after the very first resize of a session.
       metadata: padlet.metadata ?? null,
     });
   }, []);
@@ -2467,9 +2773,15 @@ export default function DrawingLayout({
       // its React content (rendered via renderEmbeddable) fully interactive
       // -- body drag and resize are both app-owned already (see
       // startSectionHeadingBodyDrag / SectionHeadingPost's own handles), so
-      // nothing native is lost. Every other embeddable keeps `locked: false`
-      // unchanged.
-      locked: isSectionHeading(padlet),
+      // nothing native is lost.
+      // PATCH POST-RESIZE-B3.2: a Container is locked for the identical
+      // reason -- its own width-only resize handle (DrawingEmbeddableCard's
+      // updateHorizontalSceneWidth / PostResizeHandle wiring) is now the
+      // sole width-resize mechanism; native corner/edge handles would let a
+      // user freely resize height too, contradicting the frozen "height
+      // stays derived, never persisted" contract. Every other embeddable
+      // keeps `locked: false` unchanged.
+      locked: isSectionHeading(padlet) || padlet.type === 'container',
       customData: {
         renderSignature: getPadletRenderSignature(padlet),
       },
@@ -2561,6 +2873,11 @@ export default function DrawingLayout({
         const nextHeight = linkedPadlet.height ?? 280;
         const nextSignature = getPadletRenderSignature(linkedPadlet);
         const currentSignature = el.customData?.renderSignature;
+        // PATCH POST-RESIZE-B3.2: relock Containers created before this patch
+        // (persisted scene elements carry their creation-time `locked` value
+        // forever otherwise -- see createEmbeddableElementForPadlet's own
+        // comment for why Containers must be locked).
+        const nextLocked = isSectionHeading(linkedPadlet) || linkedPadlet.type === 'container';
 
         const padletIdFromLink = el.link.replace("padlet://", "");
         const previousSyncedPos = previousSceneSync.get(padletIdFromLink);
@@ -2613,7 +2930,8 @@ export default function DrawingLayout({
             (Math.abs(el.x - nextX) >= POSITION_SYNC_EPSILON || Math.abs(el.y - nextY) >= POSITION_SYNC_EPSILON)) ||
           (!widthLocked && el.width !== nextWidth) ||
           (!heightLocked && el.height !== nextHeight) ||
-          currentSignature !== nextSignature;
+          currentSignature !== nextSignature ||
+          Boolean(el.locked) !== nextLocked;
 
         if (!needsRefresh) return el;
 
@@ -2625,6 +2943,7 @@ export default function DrawingLayout({
         if (!widthLocked && el.width !== nextWidth) reasons.push(`width: ${el.width} -> ${nextWidth}`);
         if (!heightLocked && el.height !== nextHeight) reasons.push(`height: ${el.height} -> ${nextHeight}`);
         if (currentSignature !== nextSignature) reasons.push('signature changed');
+        if (Boolean(el.locked) !== nextLocked) reasons.push(`locked: ${Boolean(el.locked)} -> ${nextLocked}`);
         const timerActive = pendingPosTimersRef.current.has(padletIdFromLink);
         if (positionLocked) reasons.push(`pos LOCKED${timerActive ? '[timer]' : '[coord]'} (scene=${el.x},${el.y} db=${nextX},${nextY})`);
         if (heightLocked) reasons.push(`height LOCKED (scene=${el.height} db=${nextHeight})`);
@@ -2634,6 +2953,7 @@ export default function DrawingLayout({
           y: positionLocked || !positionChangedInPadletData ? el.y : nextY,
           width: widthLocked ? el.width : nextWidth,
           height: heightLocked ? el.height : nextHeight,
+          locked: nextLocked,
           version: (el.version ?? 1) + 1,
           versionNonce: Math.floor(Math.random() * 1e9),
           updated: Date.now(),
@@ -2816,9 +3136,10 @@ export default function DrawingLayout({
           }
         }}
         onOpenDocument={onOpenDocument}
+        onManualResizePreviewLock={lockManualResizePreviewWidth}
       />
     );
-  }, [canvasId, commentAccessMode, currentUserAvatar, currentUserId, currentUserName, fetchData, handleContextMenu, handleUpdateChildComments, onAddPadlet, onDeletePadlet, onUpdatePadlet, onUpdatePadletStrict, readOnly, savePadletPositionWithLock, onOpenDocument]);
+  }, [canvasId, commentAccessMode, currentUserAvatar, currentUserId, currentUserName, fetchData, handleContextMenu, handleUpdateChildComments, onAddPadlet, onDeletePadlet, onUpdatePadlet, onUpdatePadletStrict, readOnly, savePadletPositionWithLock, onOpenDocument, lockManualResizePreviewWidth]);
 
   // Stable viewport accessor for useCanvasActions -- reads appStateRef at call time so
   // callbacks never stale-close over scroll/zoom and never recreate on pan.
@@ -3753,6 +4074,7 @@ export default function DrawingLayout({
 
   return (
     <SectionHeadingDrawingContext.Provider value={sectionHeadingContextValue}>
+    <ContainerResizeDrawingContext.Provider value={containerResizeContextValue}>
     <div
 
       className="flex-1 w-full h-full absolute inset-0 bg-transparent"
@@ -3775,7 +4097,10 @@ export default function DrawingLayout({
         // deselect. A click landing ON a heading never reaches here because
         // SectionHeadingPost's own onClick already stops propagation
         // (SECTION-H3B.1, unchanged); a click on raw Excalidraw canvas does.
-        onClick={() => setSelectedSectionHeadingId(null)}
+        // PATCH POST-RESIZE-B3.2: the identical mechanism also deselects a
+        // selected Container -- a click landing on a Container's own strip
+        // never reaches here either (same portaled-content reasoning).
+        onClick={() => { setSelectedSectionHeadingId(null); setSelectedContainerId(null); }}
       >
         <ExcalidrawWrapper
           excalidrawAPI={(api) => { setExcalidrawAPI(api); excalidrawAPIRef.current = api; if (drawingExcalidrawAPIRef) drawingExcalidrawAPIRef.current = api; }}
@@ -4140,6 +4465,7 @@ export default function DrawingLayout({
         onInsert={handleInsertMermaid}
       />
     </div>
+    </ContainerResizeDrawingContext.Provider>
     </SectionHeadingDrawingContext.Provider>
   );
 }

@@ -103,8 +103,9 @@ describe('PATCH POST-RESIZE-B1 Freeform wiring', () => {
 });
 
 describe('PATCH POST-RESIZE-B1 freezes', () => {
-  it('58. Drawing is frozen: no shared handle import', () => {
-    expect(code(drawingSrc)).not.toContain('PostResizeHandle');
+  it('58. PATCH POST-RESIZE-B3.2: Drawing now imports PostResizeHandle, exclusively for its own dedicated, selection-gated Container path -- never the generic B1/B2 one', () => {
+    expect(code(drawingSrc)).toContain("import PostResizeHandle from '@/components/collabboard/canvas/ui/PostResizeHandle';");
+    expect(code(drawingSrc)).toContain("const isResizableContainer = padlet.type === 'container';");
   });
 
   it('66. Section Heading keeps its own horizontal-only handles', () => {

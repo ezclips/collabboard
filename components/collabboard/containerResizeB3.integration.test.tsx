@@ -29,8 +29,13 @@ describe('PATCH POST-RESIZE-B3.1 Freeform Container width ownership', () => {
     expect(policySrc).not.toContain("case 'container':");
   });
 
-  it('D/E: Drawing and Container-child renderers remain free of shared resize handles', () => {
-    expect(drawingSrc).not.toContain('PostResizeHandle');
+  it('D/E: Container-child renderers remain free of shared resize handles; Drawing gained its own dedicated B3.2 Container handle, not the generic B1/B2 one', () => {
+    // PATCH POST-RESIZE-B3.2: Drawing now imports PostResizeHandle, but
+    // exclusively for its own dedicated, selection-gated Container path --
+    // never wired into the generic B1/B2 capability system.
+    expect(drawingSrc).toContain("import PostResizeHandle from '@/components/collabboard/canvas/ui/PostResizeHandle';");
+    expect(drawingSrc).toContain('isResizableContainer && isContainerSelected && !readOnly');
+    expect(drawingSrc).toContain("const isResizableContainer = padlet.type === 'container';");
     expect(rowColumnSrc).not.toContain('PostResizeHandle');
     expect(cardsSrc).toContain('rootPadlets.filter(padlet => !isSectionHeading(padlet))');
   });
@@ -89,6 +94,9 @@ describe('PATCH POST-RESIZE-B3.1 Freeform Container width ownership', () => {
     expect(containerHandle).not.toContain('childPadletIds');
     expect(cardsSrc).toContain('resolveContainerOrientation(padlet.metadata)');
     expect(cardsSrc).toContain('SectionHeadingPost');
-    expect(drawingSrc).not.toContain('Resize Container');
+    // PATCH POST-RESIZE-B3.2: Drawing legitimately gained its OWN "Resize
+    // Container" handle (a separate PostResizeHandle mount, not a shared one
+    // with Freeform's cardsSrc handle checked above).
+    expect(drawingSrc).toContain('title="Resize Container"');
   });
 });

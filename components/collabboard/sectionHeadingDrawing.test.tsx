@@ -267,7 +267,11 @@ describe('SECTION-H3C selection and edit [31-40]', () => {
   });
 
   it('36. blank-canvas click deselects -- a plain onClick on the Drawing root, relying on SectionHeadingPost\'s own click stopPropagation (SECTION-H3B.1, unchanged) to exclude clicks on the heading itself', () => {
-    expect(drawingSrc).toContain('onClick={() => setSelectedSectionHeadingId(null)}');
+    // PATCH POST-RESIZE-B3.2: the same blank-canvas onClick now ALSO
+    // deselects a selected Container (setSelectedContainerId(null)) -- still
+    // one handler, still relying on the identical portaled-content
+    // reasoning; Section Heading's own deselection call is untouched.
+    expect(drawingSrc).toContain('setSelectedSectionHeadingId(null); setSelectedContainerId(null); ');
     const matches = code(headingSrc).match(/onClick=\{\(event\) => \{[\s\S]{0,120}?event\.stopPropagation\(\);/g) ?? [];
     expect(matches.length).toBe(1);
   });
@@ -291,8 +295,8 @@ describe('SECTION-H3C selection and edit [31-40]', () => {
 
 // ============================================================ RESIZE / NATIVE HANDLES [41-50]
 describe('SECTION-H3C resize and native-handle suppression [41-50]', () => {
-  it('41. the embeddable is locked, specifically and only for Section Heading', () => {
-    expect(drawingSrc).toContain('locked: isSectionHeading(padlet),');
+  it('41. the embeddable is locked for Section Heading (unchanged) and, as of PATCH POST-RESIZE-B3.2, also for Container -- never any other type', () => {
+    expect(drawingSrc).toContain("locked: isSectionHeading(padlet) || padlet.type === 'container',");
   });
 
   it('42. the frame is padded horizontally so the shared resize handles are not clipped by the fork\'s overflow:hidden embeddable container -- Drawing-only accommodation, canonical geometry untouched', () => {
@@ -518,8 +522,10 @@ describe('SECTION-H3C.1 closure -- invariants not directly covered by the H3C su
     expect(drawingSrc).toContain('const SECTION_HEADING_DRAWING_FRAME_PADDING_PX = 40;');
   });
 
-  it('76. ordinary (non-heading) embeddables are never locked -- the locked flag is gated exclusively by isSectionHeading, never a hardcoded true', () => {
-    expect(drawingSrc).toContain('locked: isSectionHeading(padlet),');
+  it('76. ordinary (non-heading, non-Container) embeddables are never locked -- the locked flag is gated exclusively by isSectionHeading / padlet.type === \'container\', never a hardcoded true', () => {
+    expect(drawingSrc).toContain("locked: isSectionHeading(padlet) || padlet.type === 'container',");
+    // Reconciliation mirrors the same two-condition gate on every pass (PATCH POST-RESIZE-B3.2).
+    expect(drawingSrc).toContain("const nextLocked = isSectionHeading(linkedPadlet) || linkedPadlet.type === 'container';");
     expect(drawingSrc).not.toMatch(/locked:\s*true\b/);
   });
 
