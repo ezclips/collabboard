@@ -38,6 +38,7 @@ import { resolveContainerOrientation } from '@/lib/domain/canvas/containerModel'
 import { contrastIconColor } from '@/components/collabboard/shells/CardShell';
 import LinkMediaEmbed, { getLinkEmbedKind } from '@/components/collabboard/LinkMediaEmbed';
 import FreeformGraphLayer from '@/components/graph/FreeformGraphLayer';
+import { resolveFreeformPostRenderZIndex } from '@/components/collabboard/canvas/engine/zIndex';
 import { buildYouTubeThumbCandidates, extractYouTubeId } from '@/lib/media/youtubeThumb';
 import { NotePostContextMenu } from '@/components/collabboard/menus/NotePostContextMenu';
 import { LinkPostContextMenu } from '@/components/collabboard/menus/LinkPostContextMenu';
@@ -1116,7 +1117,15 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
         // so a fixed bump like 10000 can never actually win against one.
         // MAX_SAFE_INTEGER guarantees whatever's being dragged renders above
         // every other stored zIndex, no matter which convention set it.
-        zIndex: draggingPadletId === padlet.id ? Number.MAX_SAFE_INTEGER : ((padlet.metadata as any)?.zIndex || 1),
+        // A selected (but not dragging) post gets the same kind of outer
+        // elevation one tier down, so its own resize grip can never lose
+        // pointer hit-testing to an overlapping unselected neighbor -- see
+        // resolveFreeformPostRenderZIndex.
+        zIndex: resolveFreeformPostRenderZIndex({
+          persistedZIndex: (padlet.metadata as any)?.zIndex || 1,
+          isSelected: isPadletSelected(padlet.id),
+          isDragging: draggingPadletId === padlet.id,
+        }),
       }}
     >                {/* Comment Badge - positioned on outer container so not clipped */}
       {(() => {
