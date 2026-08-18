@@ -3970,7 +3970,11 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
               onAddImage={() => addImageToLink(padlet.id)}
               onCopyLinkAddress={() => copyLinkAddress(padlet.id)}
             >
-              <div className="relative">
+              {/* PATCH FREEFORM-SELECTION-BATCH-1: same fix as Table -- Link
+                  is selected on mousedown, but its click was never stopped,
+                  so it bubbled to CanvasClient's blank-canvas deselect and
+                  cleared selection right after it was set. */}
+              <div className="relative" onClick={(e) => e.stopPropagation()}>
                 {content}
                 {resizeHandle}
 
@@ -4311,7 +4315,11 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
               groupIntoColumnTargets={getEligibleContainerDestinations(padlets, padlet.id)}
               onRename={() => renameTodo(padlet.id)}
             >
-              <div className="relative">
+              {/* PATCH FREEFORM-SELECTION-BATCH-1: same fix as Table -- Todo
+                  is selected on mousedown, but its click was never stopped,
+                  so it bubbled to CanvasClient's blank-canvas deselect and
+                  cleared selection right after it was set. */}
+              <div className="relative" onClick={(e) => e.stopPropagation()}>
                 {content}
                 {resizeHandle}
 
@@ -4515,7 +4523,17 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
             groupIntoColumnTargets={getEligibleContainerDestinations(padlets, padlet.id)}
             onToggleFullView={padlet.type === 'drawing' || padlet.type === 'ai-component' ? () => toggleFullView(padlet.id) : undefined}
           >
-            <div className="relative">
+            {/* PATCH FREEFORM-SELECTION-BATCH-1: same fix as Table, scoped to
+                Note/AI-component ONLY -- this wrapper is also the fallback
+                for Drawing (and any other type without its own dedicated
+                branch above), which stays untouched. Note and AI-component
+                were selected on mousedown, but their click was never
+                stopped, so it bubbled to CanvasClient's blank-canvas
+                deselect and cleared selection right after it was set. */}
+            <div
+              className="relative"
+              onClick={(padlet.type === 'text' || padlet.type === 'ai-component') ? (e) => e.stopPropagation() : undefined}
+            >
               {content}
               {resizeHandle}
 

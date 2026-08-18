@@ -57,16 +57,17 @@ describe('PATCH FREEFORM-TABLE-SELECTION Table click no longer races the blank-c
     expect(contentIndex).toBeLessThan(resizeHandleIndex);
   });
 
-  it('scoped to Table only: the neighboring Link branch\'s own {content}/{resizeHandle} wrapper (same generic machinery, different post type) is untouched -- a plain <div className="relative"> with no click handler', () => {
-    // Link's wrapper immediately precedes its OWN {content}, one call before
-    // Table's in source order -- slicing back from Table's {content} would
-    // include Table's guard, so anchor on Link's own {content} instead.
-    const linkContentIndex = cardsSrc.indexOf(
-      "onCopyLinkAddress={() => copyLinkAddress(padlet.id)}",
+  it('scoped to Table only (at the time of this patch): the generic branch\'s own resize/selection machinery was not touched wholesale -- Container\'s wrapper (same {content}/{resizeHandle} machinery, explicitly frozen by both this patch and the later PATCH FREEFORM-SELECTION-BATCH-1) remains a plain <div className="relative"> with no click handler', () => {
+    // Link legitimately gained its own guard in the later, separate PATCH
+    // FREEFORM-SELECTION-BATCH-1 -- Container is the one type in this family
+    // that stays frozen across BOTH patches, so it remains the valid control
+    // proving neither patch applied the guard blanket-wide.
+    const containerContentIndex = cardsSrc.indexOf(
+      'postTitleVisibleIds={Array.from(getEffectiveVisibleChildTitleIds(padlet.metadata as any, containerChildPadlets))}',
     );
-    const linkWrapper = cardsSrc.slice(linkContentIndex, cardsSrc.indexOf('{content}', linkContentIndex));
-    expect(linkWrapper).toContain('<div className="relative">');
-    expect(linkWrapper).not.toContain('onClick');
+    const containerWrapper = cardsSrc.slice(containerContentIndex, cardsSrc.indexOf('{content}', containerContentIndex));
+    expect(containerWrapper).toContain('<div className="relative">');
+    expect(containerWrapper).not.toContain('onClick');
   });
 
   it('Clipart is unchanged: its own pre-existing card-level click guard is untouched', () => {
