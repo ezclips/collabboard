@@ -103,11 +103,10 @@ describe('PATCH POST-RESIZE-B1 Freeform wiring', () => {
     expect(code(cardsSrc)).toContain('isImageManuallySized(padlet)');
     expect(code(cardsSrc)).not.toContain('hasValidPostResizeGeometry(padlet.width, padlet.height)');
     expect(code(cardsSrc)).toContain('Math.max(Number(padlet.width), IMAGE_RESIZE_MIN_WIDTH)');
-    expect(code(cardsSrc)).toContain('Math.max(Number(padlet.height), IMAGE_RESIZE_MIN_HEIGHT)');
     // Legacy fallback stays exactly 360 (unitless base value; the `px`
     // suffix is applied once, uniformly, when the style string is built).
     expect(code(cardsSrc)).toContain('manuallySized ? Math.max(Number(padlet.width), IMAGE_RESIZE_MIN_WIDTH) : 360');
-    expect(code(cardsSrc)).toContain('manuallySized ? Math.max(Number(padlet.height), IMAGE_RESIZE_MIN_HEIGHT) : undefined');
+    expect(code(cardsSrc)).toContain('const baseHeight = undefined;');
   });
 
   it('20. children are frozen: Container child cards carry no resize handle', () => {
@@ -322,14 +321,14 @@ describe('PATCH FREEFORM-IMAGE-R3 Image media wrapper no longer letterboxes gray
     expect(code(cardsSrc)).toContain('"w-full object-cover pointer-events-none select-none"');
   });
 
-  it('PATCH FREEFORM-IMAGE-R5: a manually-resized Image drops the max-h-[500px] cap and fills the media box with h-full, so the image keeps growing with the frame instead of stalling', () => {
+  it('PATCH FREEFORM-IMAGE-R7: a manually-resized Image drops the max-h-[500px] cap but keeps content-height sizing so the frame hugs the visible image', () => {
     const imgClassName = code(cardsSrc).slice(
       code(cardsSrc).indexOf('src={padlet.metadata?.drawing || padlet.metadata?.imageUrl}'),
       code(cardsSrc).indexOf('style={(padlet.metadata as any)?.cropToGrid === true'),
     );
-    // Manually-sized: h-full, object-contain, NO height cap.
+    // Manually-sized: h-auto, object-contain, NO height cap.
     expect(imgClassName).toContain('isImageManuallySized(padlet)');
-    expect(imgClassName).toContain('"w-full h-full object-contain pointer-events-none select-none"');
+    expect(imgClassName).toContain('"w-full h-auto object-contain pointer-events-none select-none"');
     // Legacy/default (never explicitly resized): unchanged -- still capped.
     expect(imgClassName).toContain('"w-full h-auto object-contain max-h-[500px] pointer-events-none select-none"');
     // Never object-cover for either branch -- no crop, no stretch, aspect
@@ -342,10 +341,11 @@ describe('PATCH FREEFORM-IMAGE-R3 Image media wrapper no longer letterboxes gray
       code(cardsSrc).indexOf('function FreeformImageResizeBox('),
       code(cardsSrc).indexOf('function FreeformPadletCards('),
     );
-    expect(imageResizeBox).toContain('const shouldAspectLockImageResize = !((padlet.metadata as any)?.fullView || (padlet.metadata as any)?.cropToGrid === true);');
     expect(imageResizeBox).toContain('const getAspectLockedImageSize = React.useCallback((width: number, fallbackHeight: number) => {');
     expect(imageResizeBox).toContain('const chromeWidth = Math.max(cardRect.width - mediaRect.width, 0);');
     expect(imageResizeBox).toContain('const chromeHeight = Math.max(cardRect.height - mediaRect.height, 0);');
+    expect(imageResizeBox).toContain('if ((padlet.metadata as any)?.cropToGrid === true) {');
+    expect(imageResizeBox).toContain('height: chromeHeight + IMAGE_CROP_TO_GRID_HEIGHT_PX');
     expect(imageResizeBox).toContain('resizeImageOuterBoxToAspect({');
     expect(imageResizeBox).toContain('onResizePreview={(w, h) => setLivePreview(getAspectLockedImageSize(w, h))}');
     expect(imageResizeBox).toContain('const next = getAspectLockedImageSize(w, h);');
@@ -361,7 +361,14 @@ describe('PATCH FREEFORM-IMAGE-R3 Image media wrapper no longer letterboxes gray
     expect(imgClassName).toContain('"w-full object-cover pointer-events-none select-none"');
     expect(code(cardsSrc)).toContain('? { height: `${IMAGE_CROP_TO_GRID_HEIGHT_PX}px` }');
     expect(code(cardsSrc)).toContain('{!(padlet.metadata as any)?.fullView && (');
-    expect(code(cardsSrc)).toContain('const shouldAspectLockImageResize = !((padlet.metadata as any)?.fullView || (padlet.metadata as any)?.cropToGrid === true);');
+    expect(code(cardsSrc)).toContain('if ((padlet.metadata as any)?.cropToGrid === true) {');
+  });
+
+  it('PATCH IMAGE-R7: Image captions equal to the title are display-suppressed without deleting real captions', () => {
+    expect(code(cardsSrc)).toContain('function getFreeformImageDisplayCaption(padlet: Padlet): string');
+    expect(code(cardsSrc)).toContain('caption.toLocaleLowerCase() === title.toLocaleLowerCase()');
+    expect(code(cardsSrc)).toContain(': getFreeformImageDisplayCaption(padlet)}');
+    expect(code(cardsSrc)).toContain('return caption;');
   });
 
   it('Image geometry/sizing logic is untouched: same manual-size gate, same minimums, same handle wiring', () => {
@@ -371,7 +378,7 @@ describe('PATCH FREEFORM-IMAGE-R3 Image media wrapper no longer letterboxes gray
     // Math.max/minimums, still gated on the same isImageManuallySized call.
     expect(code(cardsSrc)).toContain('const manuallySized = isImageManuallySized(padlet);');
     expect(code(cardsSrc)).toContain('manuallySized ? Math.max(Number(padlet.width), IMAGE_RESIZE_MIN_WIDTH) : 360');
-    expect(code(cardsSrc)).toContain('manuallySized ? Math.max(Number(padlet.height), IMAGE_RESIZE_MIN_HEIGHT) : undefined');
+    expect(code(cardsSrc)).toContain('const baseHeight = undefined;');
   });
 
   it('PATCH FREEFORM-IMAGE-R4: Image pointermove preview is local-only (no previewPostResize/setPadlets call); pointerup still performs exactly one persistence commit', () => {

@@ -79,7 +79,14 @@ const DND_KIND_CONTAINER_MOVE = 'columns-container-move';
 // render fallbacks and resized canonical rendering agree with the resize
 // gesture's clamps (see lib/domain/canvas/postResizePolicy.ts).
 const IMAGE_RESIZE_MIN_WIDTH = getPostResizeConstraints({ type: 'image' })?.minWidth ?? 100;
-const IMAGE_RESIZE_MIN_HEIGHT = getPostResizeConstraints({ type: 'image' })?.minHeight ?? 100;
+
+function getFreeformImageDisplayCaption(padlet: Padlet): string {
+  const caption = typeof padlet.metadata?.caption === 'string' ? padlet.metadata.caption.trim() : '';
+  if (!caption) return '';
+  const title = getMeaningfulTitle(padlet.title, padlet.type).trim();
+  if (title && caption.toLocaleLowerCase() === title.toLocaleLowerCase()) return '';
+  return caption;
+}
 
 /**
  * PATCH SECTION-H3B Phase 4/5/16: the Freeform host states its OWN horizontal
@@ -281,17 +288,26 @@ function FreeformImageResizeBox({
   const isLocked = !!(padlet.metadata as any)?.isLocked;
   const manuallySized = isImageManuallySized(padlet);
   const baseWidth = manuallySized ? Math.max(Number(padlet.width), IMAGE_RESIZE_MIN_WIDTH) : 360;
-  const baseHeight = manuallySized ? Math.max(Number(padlet.height), IMAGE_RESIZE_MIN_HEIGHT) : undefined;
+  const baseHeight = undefined;
   const displayWidth = livePreview ? livePreview.width : baseWidth;
   const displayHeight = livePreview ? livePreview.height : baseHeight;
-  const shouldAspectLockImageResize = !((padlet.metadata as any)?.fullView || (padlet.metadata as any)?.cropToGrid === true);
 
   const getAspectLockedImageSize = React.useCallback((width: number, fallbackHeight: number) => {
-    if (!shouldAspectLockImageResize) return { width, height: fallbackHeight };
     const cardEl = cardRef.current;
     const imgEl = cardEl?.querySelector('img');
     const mediaEl = imgEl?.parentElement;
     if (!cardEl || !imgEl || !mediaEl) return { width, height: fallbackHeight };
+
+    const cardRect = cardEl.getBoundingClientRect();
+    const mediaRect = mediaEl.getBoundingClientRect();
+    const chromeWidth = Math.max(cardRect.width - mediaRect.width, 0);
+    const chromeHeight = Math.max(cardRect.height - mediaRect.height, 0);
+    if ((padlet.metadata as any)?.cropToGrid === true) {
+      return {
+        width: Math.max(width, IMAGE_RESIZE_MIN_WIDTH),
+        height: chromeHeight + IMAGE_CROP_TO_GRID_HEIGHT_PX,
+      };
+    }
 
     const naturalAspect = imgEl.naturalWidth > 0 && imgEl.naturalHeight > 0
       ? imgEl.naturalWidth / imgEl.naturalHeight
@@ -305,10 +321,6 @@ function FreeformImageResizeBox({
       return { width, height: fallbackHeight };
     }
 
-    const cardRect = cardEl.getBoundingClientRect();
-    const mediaRect = mediaEl.getBoundingClientRect();
-    const chromeWidth = Math.max(cardRect.width - mediaRect.width, 0);
-    const chromeHeight = Math.max(cardRect.height - mediaRect.height, 0);
     const next = resizeImageOuterBoxToAspect({
       outerWidth: width,
       imageAspectRatio,
@@ -317,7 +329,7 @@ function FreeformImageResizeBox({
       minOuterWidth: IMAGE_RESIZE_MIN_WIDTH,
     });
     return next ? { width: next.width, height: next.height } : { width, height: fallbackHeight };
-  }, [shouldAspectLockImageResize]);
+  }, [padlet.metadata]);
 
   return (
     <>
@@ -1868,19 +1880,13 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                 <img
                   src={padlet.metadata?.drawing || padlet.metadata?.imageUrl}
                   alt={padlet.metadata?.caption || 'Image'}
-                  // PATCH FREEFORM-IMAGE-R5: max-h-[500px] capped the actual
-                  // <img> well below what a manually-resized frame can grow
-                  // to -- the frame kept enlarging while the image inside it
-                  // stopped. For a manually-sized Image only, drop the cap
-                  // and fill the (now taller) media box with h-full instead
-                  // of h-auto, so the image keeps scaling with the frame.
-                  // Still object-contain (never object-cover) -- no crop, no
-                  // stretch, aspect ratio preserved either way. Legacy/
-                  // default (never explicitly resized) Images are untouched.
+                  // PATCH FREEFORM-IMAGE-R7: manually-sized Images keep the
+                  // removed max-height cap from R5, but size by content
+                  // height so the outer frame hugs the visible image.
                   className={(padlet.metadata as any)?.cropToGrid === true
                     ? "w-full object-cover pointer-events-none select-none"
                     : isImageManuallySized(padlet)
-                      ? "w-full h-full object-contain pointer-events-none select-none"
+                      ? "w-full h-auto object-contain pointer-events-none select-none"
                       : "w-full h-auto object-contain max-h-[500px] pointer-events-none select-none"}
                   style={(padlet.metadata as any)?.cropToGrid === true
                     ? { height: `${IMAGE_CROP_TO_GRID_HEIGHT_PX}px` }
@@ -1934,7 +1940,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
               <InlineCaption
                 value={(captionPopupPadletId === padlet.id || textStylePadletId === padlet.id) && !imageToolbarPadletId
                   ? editingCaption
-                  : (padlet.metadata?.caption ?? (padlet.metadata?.photographer ? `Photo by ${padlet.metadata.photographer}` : ""))}
+                  : getFreeformImageDisplayCaption(padlet)}
                 isEditing={(captionPopupPadletId === padlet.id || textStylePadletId === padlet.id) && !imageToolbarPadletId}
                 color={padlet.metadata?.captionStyle?.color}
                 backgroundColor={padlet.metadata?.captionStyle?.backgroundColor}

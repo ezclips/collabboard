@@ -220,16 +220,18 @@ async function mountAndDrag(moveCount: number) {
   const imageCard = handle!.previousElementSibling as HTMLElement;
   expect(imageCard, 'Image card should be the resize handle\'s preceding sibling').not.toBeNull();
   const widthsSeen: string[] = [];
+  const heightsSeen: string[] = [];
 
   await act(async () => { handle!.dispatchEvent(pointerEvent('pointerdown', 300, 250)); });
   for (let i = 1; i <= moveCount; i++) {
     await act(async () => { handle!.dispatchEvent(pointerEvent('pointermove', 300 + i * 3, 250 + i)); });
     widthsSeen.push(imageCard.style.width);
+    heightsSeen.push(imageCard.style.height);
   }
-  const duringMoves = { setPadletsCalls, listRenders, widthsSeen };
+  const duringMoves = { setPadletsCalls, listRenders, widthsSeen, heightsSeen };
 
   await act(async () => { handle!.dispatchEvent(pointerEvent('pointerup', 300 + moveCount * 3, 250 + moveCount)); });
-  const afterCommit = { setPadletsCalls, listRenders, finalWidth: imageCard.style.width };
+  const afterCommit = { setPadletsCalls, listRenders, finalWidth: imageCard.style.width, finalHeight: imageCard.style.height };
 
   return { host, root: root!, imageCard, duringMoves, afterCommit };
 }
@@ -256,8 +258,9 @@ describe('PATCH FREEFORM-IMAGE-R4 Image resize preview is local, not whole-list'
   });
 
   it('width AND height both change through the gesture (box mode, unchanged)', async () => {
-    const { host, root, imageCard, afterCommit } = await mountAndDrag(10);
-    expect(imageCard.style.height).not.toBe('');
+    const { host, root, duringMoves, afterCommit } = await mountAndDrag(10);
+    expect(new Set(duringMoves.heightsSeen).size).toBeGreaterThan(1);
+    expect(afterCommit.finalHeight).toBe('');
     expect(afterCommit.finalWidth).not.toBe('360px');
     await act(async () => { root.unmount(); });
     document.body.removeChild(host);
