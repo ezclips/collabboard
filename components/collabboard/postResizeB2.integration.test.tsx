@@ -56,6 +56,11 @@ describe('PATCH POST-RESIZE-B2 renderer wiring', () => {
     expect(code(cardsSrc)).toContain('height: boxManualHeight,');
   });
 
+  it('PATCH AI-R1: Freeform AI frame height is content-derived, never the stale persisted padlet height', () => {
+    expect(code(cardsSrc)).toContain("padlet.type === 'ai-component' ? undefined");
+    expect(code(cardsSrc)).not.toContain("padlet.type === 'ai-component' ? `${Math.max(Number(padlet.height) || 400, 150)}px`");
+  });
+
   it('10. manually height-resized Note/Todo content scrolls instead of clipping', () => {
     expect(code(cardsSrc)).toContain("needsContentScroll ? 'overflow-y-auto'");
   });
@@ -82,6 +87,15 @@ describe('PATCH POST-RESIZE-B2 renderer wiring', () => {
     expect(code(cardsSrc)).toContain("if (resizeMode === 'horizontal-only') previewPostResizeWidth(padlet.id, w);");
     expect(code(cardsSrc)).toContain('else previewPostResize(padlet.id, w, h);');
     expect(code(cardsSrc)).toContain('const previewPostResizeWidth = React.useCallback(');
+  });
+
+  it('PATCH AI-R1: Freeform AI resize is width-driven and persists no arbitrary height', () => {
+    const aiStart = code(cardsSrc).indexOf("padlet.type === 'ai-component' && canUseFreeformEditButton");
+    const aiBlock = code(cardsSrc).slice(aiStart, code(cardsSrc).indexOf(") : (resizeMode", aiStart));
+    expect(aiBlock).toContain('mode="horizontal-only"');
+    expect(aiBlock).toContain('onResizePreview={(w) => previewPostResizeWidth(padlet.id, w)}');
+    expect(aiBlock).toContain('onResizeCommit={(w, h, ow, oh, mode) => { void commitPostResize(padlet.id, w, h, ow, oh, null, undefined, mode); }}');
+    expect(aiBlock).not.toContain('previewPostResize(padlet.id, w, h)');
   });
 
   it('F/G. horizontal-only commit omits height from the persisted write', () => {

@@ -84,7 +84,7 @@ describe('PATCH POST-RESIZE-B1 Freeform wiring', () => {
 
   it('48. AI commit goes through the honest updatePostFieldsOrThrow with rollback + toast', () => {
     const commit = code(cardsSrc);
-    expect(commit).toContain('commitPostResize(padlet.id, w, h, ow, oh)');
+    expect(commit).toContain('commitPostResize(padlet.id, w, h, ow, oh, null, undefined, mode)');
     expect(commit).toContain('await updatePostFieldsOrThrow(padletId, {');
     expect(commit).toContain('width: originWidth');
     expect(commit).toContain('height: originHeight');
@@ -266,7 +266,7 @@ describe('PATCH POST-RESIZE-B1.1 Image explicit-resize commit + rollback', () =>
   });
 
   it('20. AI remains independent from the marker -- its commit call site passes no metadataPatch/originMetadata', () => {
-    expect(code(cardsSrc)).toContain('onResizeCommit={(w, h, ow, oh) => { void commitPostResize(padlet.id, w, h, ow, oh); }}');
+    expect(code(cardsSrc)).toContain('onResizeCommit={(w, h, ow, oh, mode) => { void commitPostResize(padlet.id, w, h, ow, oh, null, undefined, mode); }}');
   });
 });
 

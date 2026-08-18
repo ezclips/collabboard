@@ -3172,14 +3172,15 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
           />
         ) : padlet.type === 'ai-component' && canUseFreeformEditButton && !(padlet.metadata as any)?.isLocked ? (
           <PostResizeHandle
+            mode="horizontal-only"
             clientToWorld={getWorldPointFromClient}
             startWidth={Math.max(Number(padlet.width) || 500, getPostResizeConstraints(padlet)?.minWidth ?? 200)}
             startHeight={Math.max(Number(padlet.height) || 400, getPostResizeConstraints(padlet)?.minHeight ?? 150)}
             constraints={getPostResizeConstraints(padlet)}
             maxWidth={FREEFORM_WORLD_MAX_X - (Number(padlet.position_x) || 0)}
             maxHeight={FREEFORM_WORLD_MAX_Y - (Number(padlet.position_y) || 0)}
-            onResizePreview={(w, h) => previewPostResize(padlet.id, w, h)}
-            onResizeCommit={(w, h, ow, oh) => { void commitPostResize(padlet.id, w, h, ow, oh); }}
+            onResizePreview={(w) => previewPostResizeWidth(padlet.id, w)}
+            onResizeCommit={(w, h, ow, oh, mode) => { void commitPostResize(padlet.id, w, h, ow, oh, null, undefined, mode); }}
             className="opacity-0 transition-opacity hover:opacity-100 group-hover:opacity-50"
             title="Resize"
           />
@@ -3226,7 +3227,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                     : (manualGeometry ? `${manualGeometry.width}px` : '180px'),
               height: boxManualHeight,
               minHeight: padlet.type === 'container' ? '150px'
-                : padlet.type === 'ai-component' ? `${Math.max(Number(padlet.height) || 400, 150)}px`
+                : padlet.type === 'ai-component' ? undefined
                 : '80px',
               border: isFullView ? 'none' : '1px solid #e5e7eb',
               backgroundColor: isFullView ? 'transparent' : (padlet.metadata?.cardColor || '#ffffff'),
