@@ -2544,6 +2544,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     freeformWorldOriginRef,
     canvasZoom,
     canEditCanvas: canUseFreeformEditButton,
+    snapToGrid: freeformBoardAppearance.snapToGrid,
     padlets,
     setPadlets,
     selectedPadletIds,

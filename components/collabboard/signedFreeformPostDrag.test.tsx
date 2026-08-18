@@ -13,6 +13,8 @@
 // sequences through it. Only the Supabase network boundary is faked -- which
 // doubles as the proof that the coordinates the user SEES (optimistic state)
 // and the coordinates that reach the database are the same numbers.
+import fs from 'node:fs';
+import path from 'node:path';
 import React from 'react';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -99,10 +101,14 @@ function Harness({
   initialPadlets,
   selectedPadletIds,
   zoom,
+  canEditCanvas = true,
+  snapToGrid = false,
 }: {
   initialPadlets: Padlet[];
   selectedPadletIds: string[];
   zoom: number;
+  canEditCanvas?: boolean;
+  snapToGrid?: boolean;
 }) {
   const [padlets, setPadlets] = React.useState<Padlet[]>(initialPadlets);
   const containerRef = React.useRef<HTMLDivElement | null>(null);
@@ -112,7 +118,8 @@ function Harness({
     containerRef,
     freeformWorldOriginRef,
     canvasZoom: zoom,
-    canEditCanvas: true,
+    canEditCanvas,
+    snapToGrid,
     padlets,
     setPadlets,
     selectedPadletIds,
@@ -489,5 +496,171 @@ describe('PATCH 9V.2B: negative world posts stay reachable [matrix 62, 63]', () 
       expect(moved.x).toBeCloseTo(-4400, 6);
       expect(moved.y).toBeCloseTo(-4400, 6);
     }
+  });
+});
+
+// PATCH SNAP-GRID-B -- optional grid snapping during ROOT post drag. Reuses
+// this file's real hook harness; only the new `snapToGrid` prop is exercised.
+describe('PATCH SNAP-GRID-B: snap OFF is byte-for-byte unchanged', () => {
+  let persisted: PersistedPosition[];
+  beforeEach(() => { persisted = installFakeSupabase(); });
+
+  it('a drag to a non-grid-aligned world position lands EXACTLY there, no rounding to 20', () => {
+    mount(<Harness initialPadlets={[note('n1', 400, 400)]} selectedPadletIds={[]} zoom={1} snapToGrid={false} />);
+    drag('n1', { x: 413, y: 407 }, 1);
+    expect(positionOf('n1')).toEqual({ x: 413, y: 407 });
+  });
+
+  it('persists the same non-grid-aligned coordinate on release', async () => {
+    mount(<Harness initialPadlets={[note('n1', 400, 400)]} selectedPadletIds={[]} zoom={1} snapToGrid={false} />);
+    drag('n1', { x: 413, y: 407 }, 1);
+    await release();
+    expect(persisted).toEqual([{ id: 'n1', position_x: 413, position_y: 407 }]);
+  });
+});
+
+describe('PATCH SNAP-GRID-B: snap ON rounds x/y to the nearest 20 world units', () => {
+  let persisted: PersistedPosition[];
+  beforeEach(() => { persisted = installFakeSupabase(); });
+
+  it('the live preview position is already snapped during the drag', () => {
+    mount(<Harness initialPadlets={[note('n1', 400, 400)]} selectedPadletIds={[]} zoom={1} snapToGrid />);
+    // World (413,407) rounds to (420,400): Math.round(413/20)*20=420, Math.round(407/20)*20=400.
+    drag('n1', { x: 413, y: 407 }, 1);
+    expect(positionOf('n1')).toEqual({ x: 420, y: 400 });
+  });
+
+  it('persists the identical snapped position the user saw, through the existing commit path', async () => {
+    mount(<Harness initialPadlets={[note('n1', 400, 400)]} selectedPadletIds={[]} zoom={1} snapToGrid />);
+    drag('n1', { x: 413, y: 407 }, 1);
+    const seen = positionOf('n1');
+    await release();
+    expect(persisted).toEqual([{ id: 'n1', position_x: seen.x, position_y: seen.y }]);
+    expect(persisted).toEqual([{ id: 'n1', position_x: 420, position_y: 400 }]);
+    // Exactly one write -- no extra persistence beyond the existing single commit.
+    expect(persisted).toHaveLength(1);
+  });
+
+  it('a multi-selection group drag snaps every member to the grid too (still root posts)', async () => {
+    mount(
+      <Harness
+        initialPadlets={[note('a', 200, 200), note('b', 900, 700)]}
+        selectedPadletIds={['a', 'b']}
+        zoom={1}
+        snapToGrid
+      />
+    );
+    drag('a', { x: 213, y: 207 }, 1);
+    expect(positionOf('a')).toEqual({ x: 220, y: 200 });
+    // b keeps its exact offset from a (+700, +500) -- the delta itself is
+    // snapped once and shared, not re-rounded per member.
+    expect(positionOf('b')).toEqual({ x: 920, y: 700 });
+    await release();
+    expect(persisted).toEqual([
+      { id: 'a', position_x: 220, position_y: 200 },
+      { id: 'b', position_x: 920, position_y: 700 },
+    ]);
+  });
+});
+
+describe('PATCH SNAP-GRID-B: WORLD-coordinate snap is zoom invariant at 50/100/200%', () => {
+  beforeEach(() => { installFakeSupabase(); });
+
+  it.each([
+    ['50%', 0.5],
+    ['100%', 1],
+    ['200%', 2],
+  ])('dragging to world (413,407) at %s zoom still lands on the same snapped (420,400)', (_label, zoom) => {
+    mount(<Harness initialPadlets={[note('n1', 400, 400)]} selectedPadletIds={[]} zoom={zoom} snapToGrid />);
+    drag('n1', { x: 413, y: 407 }, zoom);
+    const { x, y } = positionOf('n1');
+    expect(x).toBeCloseTo(420, 6);
+    expect(y).toBeCloseTo(400, 6);
+  });
+});
+
+describe('PATCH SNAP-GRID-B: negative world coordinates snap with no positive-only assumption', () => {
+  let persisted: PersistedPosition[];
+  beforeEach(() => { persisted = installFakeSupabase(); });
+
+  it('drags to world x=-13 and lands on -20 (Math.round(-13/20)*20)', () => {
+    mount(<Harness initialPadlets={[note('n1', 0, 0)]} selectedPadletIds={[]} zoom={1} snapToGrid />);
+    drag('n1', { x: -13, y: 0 }, 1);
+    expect(positionOf('n1').x).toBe(-20);
+  });
+
+  it('drags to world x=-27 and lands on -20 (Math.round(-27/20)*20)', async () => {
+    mount(<Harness
+      initialPadlets={[note('n1', 0, 0)]}
+      selectedPadletIds={[]}
+      zoom={1}
+      snapToGrid
+    />);
+    drag('n1', { x: -27, y: -13 }, 1);
+    const { x, y } = positionOf('n1');
+    expect(x).toBe(-20);
+    expect(y).toBe(-20);
+    await release();
+    expect(persisted).toEqual([{ id: 'n1', position_x: -20, position_y: -20 }]);
+  });
+});
+
+describe('PATCH SNAP-GRID-B: root-only -- container children never reach this drag path regardless of snap', () => {
+  it('handlePadletMouseDown is wired only onto padlets from the root render branch, never inside the childPadletIds/containerChildPadlets loop', () => {
+    const source = fs.readFileSync(
+      path.join(process.cwd(), 'components/collabboard/canvas/ui/FreeformPadletCards.tsx'),
+      'utf8',
+    );
+    const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+    // Every call site passes padlet.id (the root map's own loop variable),
+    // never a child-loop identifier like `child.id`.
+    const calls = code.match(/handlePadletMouseDown\(e,\s*[\w.]+\)/g) ?? [];
+    expect(calls.length).toBeGreaterThan(0);
+    for (const call of calls) {
+      expect(call).toContain('padlet.id');
+    }
+    // The child-inventory block itself (built for the container's edit-target
+    // submenu) never calls handlePadletMouseDown at all.
+    const childBlockStart = code.indexOf('const containerChildPadlets: Padlet[] = ((padlet.metadata as any)?.childPadletIds');
+    expect(childBlockStart).toBeGreaterThan(-1);
+    const childBlockEnd = code.indexOf('return (', childBlockStart);
+    const childBlock = code.slice(childBlockStart, childBlockEnd);
+    expect(childBlock).not.toContain('handlePadletMouseDown');
+  });
+});
+
+describe('PATCH SNAP-GRID-B: snap does not bypass movement permissions or locks', () => {
+  let persisted: PersistedPosition[];
+  beforeEach(() => { persisted = installFakeSupabase(); });
+
+  it('a read-only user cannot move a post even with snap ON', async () => {
+    mount(
+      <Harness
+        initialPadlets={[note('n1', 400, 400)]}
+        selectedPadletIds={[]}
+        zoom={1}
+        canEditCanvas={false}
+        snapToGrid
+      />
+    );
+    drag('n1', { x: -300, y: -300 }, 1);
+    expect(positionOf('n1')).toEqual({ x: 400, y: 400 });
+    await release();
+    expect(persisted).toHaveLength(0);
+  });
+
+  it('a locked post cannot be moved even with snap ON', async () => {
+    mount(
+      <Harness
+        initialPadlets={[note('n1', 400, 400, { metadata: { isLocked: true } as any })]}
+        selectedPadletIds={[]}
+        zoom={1}
+        snapToGrid
+      />
+    );
+    drag('n1', { x: -300, y: -300 }, 1);
+    expect(positionOf('n1')).toEqual({ x: 400, y: 400 });
+    await release();
+    expect(persisted).toHaveLength(0);
   });
 });

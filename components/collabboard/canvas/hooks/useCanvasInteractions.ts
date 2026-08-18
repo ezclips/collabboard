@@ -10,6 +10,7 @@ import { attachPostToContainer } from '@/components/collabboard/canvas/hooks/att
 import {
   clampGroupDragDeltaToFreeformBounds,
   clampRectPositionToFreeformBounds,
+  snapWorldValueToGrid,
   type FreeformGroupDragBounds,
 } from '@/components/collabboard/canvas/engine/freeformStageGeometry';
 
@@ -70,6 +71,12 @@ interface UseCanvasInteractionsParams {
   freeformWorldOriginRef: React.RefObject<HTMLDivElement | null>;
   canvasZoom: number;
   canEditCanvas: boolean;
+  // PATCH SNAP-GRID-B: rounds a ROOT post's world x/y to the nearest 20
+  // world units while dragging and on commit. OFF leaves every existing
+  // drag number untouched (same fractional preview, same Math.round(v) at
+  // commit as before this patch). WORLD-space only -- never scaled by
+  // canvasZoom, which stays a dot-grid rendering concern.
+  snapToGrid: boolean;
   padlets: Padlet[];
   setPadlets: React.Dispatch<React.SetStateAction<Padlet[]>>;
   selectedPadletIds: string[];
@@ -95,6 +102,7 @@ export function useCanvasInteractions({
   freeformWorldOriginRef,
   canvasZoom,
   canEditCanvas,
+  snapToGrid,
   padlets,
   setPadlets,
   selectedPadletIds,
@@ -373,10 +381,12 @@ export function useCanvasInteractions({
         if (!draggedPadletIds.includes(padlet.id)) return padlet;
         const start = startPositions[padlet.id];
         if (!start) return padlet;
+        const memberX = start.x + dx;
+        const memberY = start.y + dy;
         return {
           ...padlet,
-          position_x: start.x + dx,
-          position_y: start.y + dy,
+          position_x: snapToGrid ? snapWorldValueToGrid(memberX) : memberX,
+          position_y: snapToGrid ? snapWorldValueToGrid(memberY) : memberY,
         };
       }));
       return;
@@ -407,11 +417,18 @@ export function useCanvasInteractions({
       return prev === nextId ? prev : nextId;
     });
 
-    lastDragPositionRef.current = { x: clampedX, y: clampedY };
+    // PATCH SNAP-GRID-B: snapped AFTER the existing bounds clamp, so the
+    // preview the user sees during the drag is exactly the value that will
+    // be committed (see handleCanvasMouseUp). OFF path is byte-for-byte the
+    // pre-patch clampedX/clampedY.
+    const previewX = snapToGrid ? snapWorldValueToGrid(clampedX) : clampedX;
+    const previewY = snapToGrid ? snapWorldValueToGrid(clampedY) : clampedY;
+
+    lastDragPositionRef.current = { x: previewX, y: previewY };
 
     setPadlets(prev => prev.map(p =>
       p.id === draggingPadletId
-        ? { ...p, position_x: clampedX, position_y: clampedY }
+        ? { ...p, position_x: previewX, position_y: previewY }
         : p
     ));
   };
@@ -460,8 +477,10 @@ export function useCanvasInteractions({
                   // Re-clamping per post here is exactly the optimistic-vs-
                   // persisted divergence this patch removes: the DB must
                   // receive the same coordinates the user just saw.
-                  const nextX = Math.round(start.x + dragDelta.dx);
-                  const nextY = Math.round(start.y + dragDelta.dy);
+                  const memberX = start.x + dragDelta.dx;
+                  const memberY = start.y + dragDelta.dy;
+                  const nextX = snapToGrid ? snapWorldValueToGrid(memberX) : Math.round(memberX);
+                  const nextY = snapToGrid ? snapWorldValueToGrid(memberY) : Math.round(memberY);
                   markPadletLocallyModified(padletId);
                   const result = await updatePostPosition({ postId: padletId, positionX: nextX, positionY: nextY }, { userId: null });
                   if (!result.ok) throw result.error.cause ?? result.error;
@@ -514,8 +533,8 @@ export function useCanvasInteractions({
           const finalPos = lastDragPositionRef.current;
           lastDragPositionRef.current = null;
           if (finalPos) {
-            const committedX = Math.round(finalPos.x);
-            const committedY = Math.round(finalPos.y);
+            const committedX = snapToGrid ? snapWorldValueToGrid(finalPos.x) : Math.round(finalPos.x);
+            const committedY = snapToGrid ? snapWorldValueToGrid(finalPos.y) : Math.round(finalPos.y);
             markPadletLocallyModified(currentDraggingId);
             try {
               const updatePostPosition = createUpdatePostPositionCommand(createPostsRepository());

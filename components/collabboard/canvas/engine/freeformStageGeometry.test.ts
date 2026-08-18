@@ -4,6 +4,7 @@ import {
   clampRectPositionToFreeformBounds,
   FREEFORM_SIGNED_WORLD_HEIGHT,
   FREEFORM_SIGNED_WORLD_WIDTH,
+  FREEFORM_SNAP_GRID_SIZE,
   FREEFORM_WORLD_HEIGHT_PX,
   FREEFORM_WORLD_MAX_X,
   FREEFORM_WORLD_MAX_Y,
@@ -12,6 +13,7 @@ import {
   FREEFORM_WORLD_ORIGIN_OFFSET_X,
   FREEFORM_WORLD_ORIGIN_OFFSET_Y,
   FREEFORM_WORLD_WIDTH_PX,
+  snapWorldValueToGrid,
 } from './freeformStageGeometry';
 
 // PATCH 9J -- single source of truth for the Freeform world-stage size,
@@ -174,5 +176,47 @@ describe('PATCH 9V.2B: clampGroupDragDeltaToFreeformBounds [matrix 26-30, 38]', 
   it('substitutes 0 for a non-finite requested delta', () => {
     expect(clampGroupDragDeltaToFreeformBounds(GROUP, { dx: Number.NaN, dy: Number.NaN }))
       .toEqual({ dx: 0, dy: 0 });
+  });
+});
+
+// PATCH SNAP-GRID-B -- the drag-movement snap primitive. WORLD-space only,
+// never scaled by canvasZoom (that scaling belongs solely to the dot grid's
+// own rendering, PATCH SNAP-GRID-A).
+describe('PATCH SNAP-GRID-B: snapWorldValueToGrid', () => {
+  it('grid spacing is 20 world units', () => {
+    expect(FREEFORM_SNAP_GRID_SIZE).toBe(20);
+  });
+
+  it.each([
+    [0, 0],
+    [10, 20],
+    [9, 0],
+    [20, 20],
+    [21, 20],
+    [29, 20],
+    [30, 40],
+    [1234, 1240],
+  ])('snaps %s to %s', (value, expected) => {
+    expect(snapWorldValueToGrid(value)).toBe(expected);
+  });
+
+  it.each([
+    [-13, -20],
+    [-27, -20],
+    [-10, -0],
+    [-9, -0],
+    [-11, -20],
+    [-30, -20],
+    [-31, -40],
+  ])('snaps negative %s to %s (Math.round semantics, no positive-only assumption)', (value, expected) => {
+    expect(snapWorldValueToGrid(value)).toBe(expected);
+  });
+
+  it('produces the same WORLD-coordinate snap regardless of any zoom factor (the function takes no zoom parameter at all)', () => {
+    // snapWorldValueToGrid has a single (value: number) signature -- there is
+    // no way to pass canvasZoom into it, which is the structural guarantee
+    // that callers cannot accidentally scale the grid by zoom.
+    expect(snapWorldValueToGrid.length).toBe(1);
+    expect(snapWorldValueToGrid(437)).toBe(440);
   });
 });

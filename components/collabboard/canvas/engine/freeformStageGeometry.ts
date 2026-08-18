@@ -118,3 +118,22 @@ export function clampGroupDragDeltaToFreeformBounds(
     dy: Math.max(FREEFORM_WORLD_MIN_Y - bounds.minY, Math.min(FREEFORM_WORLD_MAX_Y - bounds.maxY, dy)),
   };
 }
+
+/**
+ * PATCH SNAP-GRID-B: drag-movement snap spacing, in WORLD units -- independent
+ * of the dot grid's own 20 (CanvasClient's canvasBackgroundStyle), which is a
+ * rendering-only concern scaled by canvasZoom and deliberately not touched by
+ * this patch. The two happen to share the same value today by design intent,
+ * not by a shared constant.
+ */
+export const FREEFORM_SNAP_GRID_SIZE = 20;
+
+/**
+ * Rounds one WORLD-space coordinate to the nearest grid line. Never scaled by
+ * canvasZoom -- callers must apply this AFTER screen-to-world conversion
+ * (zoom already divided out), on the stored/committed value, never on screen
+ * pixels.
+ */
+export function snapWorldValueToGrid(value: number): number {
+  return Math.round(value / FREEFORM_SNAP_GRID_SIZE) * FREEFORM_SNAP_GRID_SIZE;
+}
