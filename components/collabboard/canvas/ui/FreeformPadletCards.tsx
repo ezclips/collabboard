@@ -1720,7 +1720,14 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
 
               <div
                 className={[
-                  "relative overflow-hidden bg-gray-50 flex items-center justify-center flex-1 min-h-[100px]",
+                  // PATCH FREEFORM-IMAGE-R3: bg-gray-50 used to be invisible
+                  // because Image had no manual resize -- once B1 let users
+                  // resize to a non-native aspect ratio, object-contain
+                  // letterboxing made this background visible as gray bars.
+                  // Removed rather than switching to object-cover, so the
+                  // image is never cropped/stretched -- see the <img> below,
+                  // still object-contain, unchanged.
+                  "relative overflow-hidden flex items-center justify-center flex-1 min-h-[100px]",
                   padlet.metadata?.source === 'import' && padlet.metadata?.importOpenUrl ? "cursor-pointer" : "",
                 ].join(" ")}
                 onClick={() => {

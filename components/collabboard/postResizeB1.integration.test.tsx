@@ -266,3 +266,51 @@ describe('PATCH POST-RESIZE-B1.1 Copy / Paste / Duplicate preserve the marker', 
     expect(code(actionsSrc)).toContain('sanitizeClonedPostMetadata(clipboard.metadata)');
   });
 });
+
+// PATCH FREEFORM-IMAGE-R3: bg-gray-50 on the Image media wrapper was already
+// present pre-B1, but had never been visible until B1 let users manually
+// resize Image to a non-native aspect ratio -- object-contain then
+// letterboxes, exposing the gray as visible bars. Removed (not switched to
+// object-cover) so the image is never cropped/stretched; geometry, the
+// resize handle, and the pointermove-preview/release-commit contract are
+// otherwise untouched.
+describe('PATCH FREEFORM-IMAGE-R3 Image media wrapper no longer letterboxes gray', () => {
+  it('the Image media wrapper no longer carries bg-gray-50', () => {
+    const imageMediaWrapperClass = code(cardsSrc).match(
+      /"relative overflow-hidden(?: bg-gray-50)? flex items-center justify-center flex-1 min-h-\[100px\]"/,
+    );
+    expect(imageMediaWrapperClass).not.toBeNull();
+    expect(imageMediaWrapperClass![0]).not.toContain('bg-gray-50');
+  });
+
+  it('the <img> itself is untouched: still object-contain, never object-cover, never cropped/stretched', () => {
+    expect(code(cardsSrc)).toContain('"w-full h-auto object-contain max-h-[500px] pointer-events-none select-none"');
+    // The ONLY object-cover on an Image post remains the pre-existing,
+    // separate cropToGrid opt-in -- not something this patch introduced or
+    // widened.
+    expect(code(cardsSrc)).toContain('"w-full object-cover pointer-events-none select-none"');
+  });
+
+  it('Image geometry/sizing logic is untouched: same manual-size gate, same minimums, same handle wiring', () => {
+    expect(code(cardsSrc)).toContain('width: isImageManuallySized(padlet)');
+    expect(code(cardsSrc)).toContain('height: isImageManuallySized(padlet)');
+    expect(code(cardsSrc)).toContain('Math.max(Number(padlet.width), IMAGE_RESIZE_MIN_WIDTH)');
+    expect(code(cardsSrc)).toContain('Math.max(Number(padlet.height), IMAGE_RESIZE_MIN_HEIGHT)');
+  });
+
+  it('persistence contract is untouched: preview is local-only, exactly one commit call on release', () => {
+    const imageResizeHandle = code(cardsSrc).slice(
+      code(cardsSrc).indexOf("padlet.type === 'image' && isPadletSelected(padlet.id)"),
+      code(cardsSrc).indexOf("padlet.type === 'image' && isPadletSelected(padlet.id)") + 900,
+    );
+    expect(imageResizeHandle).toContain('onResizePreview={(w, h) => previewPostResize(padlet.id, w, h)}');
+    expect(imageResizeHandle).toContain('void commitPostResize(padlet.id, w, h, ow, oh, { manualSize: true }, padlet.metadata);');
+    // previewPostResize itself must still only touch local React state.
+    const previewFn = code(cardsSrc).slice(
+      code(cardsSrc).indexOf('const previewPostResize = React.useCallback'),
+    );
+    const previewFnBody = previewFn.slice(0, previewFn.indexOf('}, [setPadlets]);'));
+    expect(previewFnBody).toContain('setPadlets(prev =>');
+    expect(previewFnBody).not.toMatch(/await |updatePostFields|createPostsRepository/);
+  });
+});
