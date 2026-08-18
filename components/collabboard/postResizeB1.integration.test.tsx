@@ -311,12 +311,30 @@ describe('PATCH FREEFORM-IMAGE-R3 Image media wrapper no longer letterboxes gray
     expect(imageMediaWrapperClass![0]).not.toContain('bg-gray-50');
   });
 
-  it('the <img> itself is untouched: still object-contain, never object-cover, never cropped/stretched', () => {
+  it('the <img> itself never crops/stretches: always object-contain, never object-cover (except the pre-existing, separate cropToGrid opt-in)', () => {
+    // PATCH FREEFORM-IMAGE-R5: this literal string is now the LEGACY/
+    // default (never explicitly resized) branch only -- see the dedicated
+    // R5 test below for the manually-sized branch, which drops max-h-[500px].
     expect(code(cardsSrc)).toContain('"w-full h-auto object-contain max-h-[500px] pointer-events-none select-none"');
     // The ONLY object-cover on an Image post remains the pre-existing,
     // separate cropToGrid opt-in -- not something this patch introduced or
     // widened.
     expect(code(cardsSrc)).toContain('"w-full object-cover pointer-events-none select-none"');
+  });
+
+  it('PATCH FREEFORM-IMAGE-R5: a manually-resized Image drops the max-h-[500px] cap and fills the media box with h-full, so the image keeps growing with the frame instead of stalling', () => {
+    const imgClassName = code(cardsSrc).slice(
+      code(cardsSrc).indexOf('src={padlet.metadata?.drawing || padlet.metadata?.imageUrl}'),
+      code(cardsSrc).indexOf('style={(padlet.metadata as any)?.cropToGrid === true'),
+    );
+    // Manually-sized: h-full, object-contain, NO height cap.
+    expect(imgClassName).toContain('isImageManuallySized(padlet)');
+    expect(imgClassName).toContain('"w-full h-full object-contain pointer-events-none select-none"');
+    // Legacy/default (never explicitly resized): unchanged -- still capped.
+    expect(imgClassName).toContain('"w-full h-auto object-contain max-h-[500px] pointer-events-none select-none"');
+    // Never object-cover for either branch -- no crop, no stretch, aspect
+    // ratio preserved both ways.
+    expect(imgClassName).not.toMatch(/isImageManuallySized[\s\S]{0,120}object-cover/);
   });
 
   it('Image geometry/sizing logic is untouched: same manual-size gate, same minimums, same handle wiring', () => {

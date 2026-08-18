@@ -1831,9 +1831,20 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                 <img
                   src={padlet.metadata?.drawing || padlet.metadata?.imageUrl}
                   alt={padlet.metadata?.caption || 'Image'}
+                  // PATCH FREEFORM-IMAGE-R5: max-h-[500px] capped the actual
+                  // <img> well below what a manually-resized frame can grow
+                  // to -- the frame kept enlarging while the image inside it
+                  // stopped. For a manually-sized Image only, drop the cap
+                  // and fill the (now taller) media box with h-full instead
+                  // of h-auto, so the image keeps scaling with the frame.
+                  // Still object-contain (never object-cover) -- no crop, no
+                  // stretch, aspect ratio preserved either way. Legacy/
+                  // default (never explicitly resized) Images are untouched.
                   className={(padlet.metadata as any)?.cropToGrid === true
                     ? "w-full object-cover pointer-events-none select-none"
-                    : "w-full h-auto object-contain max-h-[500px] pointer-events-none select-none"}
+                    : isImageManuallySized(padlet)
+                      ? "w-full h-full object-contain pointer-events-none select-none"
+                      : "w-full h-auto object-contain max-h-[500px] pointer-events-none select-none"}
                   style={(padlet.metadata as any)?.cropToGrid === true
                     ? { height: `${IMAGE_CROP_TO_GRID_HEIGHT_PX}px` }
                     : undefined}
