@@ -2174,7 +2174,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
           <div
             key={padlet.id}
             ref={(el) => { cardCardRefs.current[padlet.id] = el; }}
-            className={`absolute group cursor-pointer transition-colors duration-200 ${isPadletSelected(padlet.id)
+            className={`absolute group cursor-pointer transition-colors duration-200 ${isPadletSelected(padlet.id) && canUseFreeformEditButton
               ? (isDocumentPost(padlet)
                 // Follow-up correction: Document's own card is square-cornered
                 // (Note-style); the selected-state ring must not reintroduce
@@ -3169,7 +3169,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
         const content = (
           <div
             ref={(el) => { genericCardRefs.current[padlet.id] = el; }}
-            className={`group group/image-container relative overflow-hidden flex flex-col cursor-pointer ${isPadletSelected(padlet.id)
+            className={`group group/image-container relative overflow-hidden flex flex-col cursor-pointer ${isPadletSelected(padlet.id) && canUseFreeformEditButton
                 ? 'ring-2 ring-blue-500 ring-offset-2'
               : ''
               }`}
