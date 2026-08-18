@@ -289,7 +289,7 @@ function FreeformImageResizeBox({
       <div
         key={padlet.id}
         ref={cardRef}
-        className={`overflow-hidden flex flex-col bg-white group relative transition-all ${(padlet.metadata as any)?.fullView ? '' : 'border border-gray-200'} ${isSelected ? 'ring-2 ring-blue-500' : ''
+        className={`overflow-hidden flex flex-col bg-white group relative transition-all ${(padlet.metadata as any)?.fullView ? '' : 'border border-gray-200'} ${isSelected && canUseFreeformEditButton ? 'ring-2 ring-blue-500' : ''
           }`}
         style={{
           width: `${displayWidth}px`,

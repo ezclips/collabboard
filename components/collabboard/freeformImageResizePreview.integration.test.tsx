@@ -132,9 +132,10 @@ const canvasEditorValue: CanvasEditorState = {
   commentPopupPosition: null, commentPopupHighlightColor: undefined,
 };
 
-function Harness({ onSetPadletsCall, onListRender }: {
+function Harness({ onSetPadletsCall, onListRender, canUseFreeformEditButton = true }: {
   onSetPadletsCall: () => void;
   onListRender: () => void;
+  canUseFreeformEditButton?: boolean;
 }) {
   const [padlets, setPadletsRaw] = React.useState<Padlet[]>(buildInitialPadlets);
   const setPadlets = React.useCallback((updater: React.SetStateAction<Padlet[]>) => {
@@ -155,7 +156,7 @@ function Harness({ onSetPadletsCall, onListRender }: {
   return (
     <CanvasConfigProvider value={{
       canvasZoom: 1, canvasId: 'board-1', isFreeformGraphMode: false,
-      canUseFreeformEditButton: true, isColumnsLayout: false,
+      canUseFreeformEditButton, isColumnsLayout: false,
       worldOriginLeft: 0, worldOriginTop: 0,
     }}>
       <CanvasEditorProvider value={canvasEditorValue}>
@@ -298,5 +299,66 @@ describe('PATCH FREEFORM-IMAGE-R4 Image resize preview is local, not whole-list'
     } finally {
       mockPersistShouldFail = false;
     }
+  });
+});
+
+describe('PATCH FREEFORM-IMAGE-PERMISSIONS the blue edit-selection ring and resize grip are gated on canUseFreeformEditButton, not selection state alone', () => {
+  async function mountSelected(canUseFreeformEditButton: boolean) {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    let root: Root;
+    await act(async () => {
+      root = createRoot(host);
+      root.render(
+        <Harness
+          onSetPadletsCall={() => {}}
+          onListRender={() => {}}
+          canUseFreeformEditButton={canUseFreeformEditButton}
+        />,
+      );
+    });
+    return { host, root: root! };
+  }
+
+  it('edit-capable Image (selected): blue ring allowed and resize grip present', async () => {
+    const { host, root } = await mountSelected(true);
+    const handle = host.querySelector<HTMLElement>('[data-post-resize-handle="true"]');
+    expect(handle, 'edit-capable + selected: resize handle must be present').not.toBeNull();
+    const imageCard = handle!.previousElementSibling as HTMLElement;
+    expect(imageCard.className).toContain('ring-2 ring-blue-500');
+    await act(async () => { root.unmount(); });
+    document.body.removeChild(host);
+  });
+
+  it('read-only Image (selected): blue edit-selection ring does NOT activate', async () => {
+    const { host, root } = await mountSelected(false);
+    // No resize handle to anchor on when read-only, so locate the Image
+    // card directly: it is the sole element carrying the manually-sized
+    // image's background color/zIndex styling from FreeformImageResizeBox.
+    const imageCard = host.querySelector<HTMLElement>('[data-post-resize-handle]')?.previousElementSibling
+      ?? Array.from(host.querySelectorAll<HTMLElement>('div')).find((el) => el.style.width === '360px');
+    expect(imageCard, 'Image card should still render (read-only viewing is not weakened)').toBeTruthy();
+    expect(
+      imageCard!.className,
+      'read-only + selected must NOT render the blue edit-selection ring',
+    ).not.toContain('ring-2 ring-blue-500');
+    await act(async () => { root.unmount(); });
+    document.body.removeChild(host);
+  });
+
+  it('read-only Image (selected): resize handle count is 0', async () => {
+    const { host, root } = await mountSelected(false);
+    const handles = host.querySelectorAll('[data-post-resize-handle="true"]');
+    expect(handles.length, 'read-only: zero resize handles regardless of selection').toBe(0);
+    await act(async () => { root.unmount(); });
+    document.body.removeChild(host);
+  });
+
+  it('edit-capable Image resize gesture still works (permission gate did not weaken edit-capable behavior)', async () => {
+    const { host, root, duringMoves, afterCommit } = await mountAndDrag(5);
+    expect(new Set(duringMoves.widthsSeen).size).toBeGreaterThan(1);
+    expect(afterCommit.finalWidth).not.toBe('360px');
+    await act(async () => { root.unmount(); });
+    document.body.removeChild(host);
   });
 });
