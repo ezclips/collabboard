@@ -151,14 +151,21 @@ afterEach(() => {
 });
 
 describe('PATCH POST-RESIZE-B3.2 Drawing Container manual width resize', () => {
-  it('A/B: selected root Container mounts exactly one handle; unselected mounts zero', () => {
+  it('A/B/R1: root Container mounts one handle and direct unselected handle pointerdown selects it', () => {
     const container = padlet('c1', 'container', 500, { orientation: 'vertical', childPadletIds: [] });
     const selected = renderCard(container, [container], { excAPI: createMockExcalidrawAPI('c1', 500), selected: true });
     expect(selected.host.querySelectorAll('[data-post-resize-handle="true"]')).toHaveLength(1);
     act(() => selected.root.unmount());
 
     const unselected = renderCard(container, [container], { excAPI: createMockExcalidrawAPI('c1', 500), selected: false });
-    expect(unselected.host.querySelectorAll('[data-post-resize-handle="true"]')).toHaveLength(0);
+    const handle = unselected.host.querySelector<HTMLElement>('[data-post-resize-handle="true"]')!;
+    expect(handle).toBeTruthy();
+    expect(unselected.host.querySelectorAll('[data-post-resize-handle="true"]')).toHaveLength(1);
+    expect(unselected.store.getSnapshot()).toBeNull();
+    act(() => {
+      handle.dispatchEvent(pointerEvent('pointerdown', 0, 0));
+    });
+    expect(unselected.store.getSnapshot()).toBe('c1');
     act(() => unselected.root.unmount());
   });
 

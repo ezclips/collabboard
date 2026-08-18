@@ -881,6 +881,23 @@ export function DrawingEmbeddableCard({
     return chromePerSide;
   };
 
+  const measureContainerHeightChrome = () => {
+    const px = (value: string | undefined) => parseFloat(value || '') || 0;
+    const outerStyle = cardOuterRef.current ? getComputedStyle(cardOuterRef.current) : null;
+    const contentStyle = contentAreaRef.current ? getComputedStyle(contentAreaRef.current) : null;
+    const excalidrawWrapperEl = cardOuterRef.current?.parentElement ?? null;
+    const excalidrawWrapperStyle = excalidrawWrapperEl ? getComputedStyle(excalidrawWrapperEl) : null;
+    const stripEl = cardOuterRef.current?.querySelector<HTMLElement>('[data-drawing-container-strip="true"]') ?? null;
+    const stripHeight = stripEl?.getBoundingClientRect().height || (isContainer ? 28 : 22);
+    return (
+      stripHeight +
+      (outerStyle ? px(outerStyle.borderTopWidth) + px(outerStyle.borderBottomWidth) : 0) +
+      (contentStyle ? px(contentStyle.paddingTop) + px(contentStyle.paddingBottom) : 0) +
+      (excalidrawWrapperStyle ? px(excalidrawWrapperStyle.paddingTop) + px(excalidrawWrapperStyle.paddingBottom) : 0) +
+      4
+    );
+  };
+
   const getExistingSceneEmbeddable = () => {
     const excAPI = excalidrawAPIRef.current;
     if (!excAPI) return null;
@@ -924,6 +941,7 @@ export function DrawingEmbeddableCard({
     360,
     resizableContainerOrientation === 'horizontal' ? containerManualMinWidth : 0,
   );
+  const canShowContainerResizeHandle = isResizableContainer && !readOnly && !(padlet.metadata as any)?.isLocked;
 
   const clientToWorld = useCallback((clientX: number, clientY: number) => {
     return toSceneCoords(clientX, clientY, appStateRef.current);
@@ -1082,6 +1100,7 @@ export function DrawingEmbeddableCard({
     >
       {/* Drag handle -- 3-column grid: [expand | title | pencil] */}
       <div
+        data-drawing-container-strip="true"
         className="w-full flex-shrink-0 cursor-grab active:cursor-grabbing grid group/strip"
         style={{
           gridTemplateColumns: 'auto 1fr auto',
@@ -1266,8 +1285,7 @@ export function DrawingEmbeddableCard({
             onExpandAvailabilityChange={setCanExpand}
             onOpenDocument={onOpenDocument}
             onNaturalHeight={(h) => {
-              const stripH = 28;
-              const newHeight = Math.max(stripH + 22 + h, 80); // p-2 (16px) + 2px border + 4px buffer
+              const newHeight = Math.max(Math.ceil(measureContainerHeightChrome() + h), 80);
               const excAPI = excalidrawAPIRef.current;
               if (!excAPI) return;
               const existing = excAPI.getSceneElements().find(
@@ -1386,7 +1404,7 @@ export function DrawingEmbeddableCard({
       {/* Interaction chrome is portaled to the Excalidraw root so a later
           overlapping embeddable cannot steal its hit target. The portal tracks
           cardOuterRef's live rect and does not participate in scene geometry. */}
-      {isResizableContainer && isContainerSelected && !readOnly && !(padlet.metadata as any)?.isLocked ? (
+      {canShowContainerResizeHandle ? (
         // PATCH POST-RESIZE-B3.2: PostResizeHandle's own pointerup calls
         // preventDefault/stopPropagation on the POINTER event, but that does
         // not suppress the SEPARATE native `click` a plain press-release also
@@ -1396,6 +1414,10 @@ export function DrawingEmbeddableCard({
         // the fix lives in this wrapper instead.
         <DrawingContainerResizePortal anchorRef={cardOuterRef} appStateRef={appStateRef} portalTarget={containerResizePortalTarget}>
           <div
+            onPointerDownCapture={(e) => {
+              if (e.button !== 0) return;
+              containerResizeSelection?.setSelectedId(padlet.id);
+            }}
             onClick={(e) => e.stopPropagation()}
             onPointerUpCapture={() => containerResizeSelection?.markHandleInteractionEnd()}
           >
