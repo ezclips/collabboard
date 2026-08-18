@@ -2545,7 +2545,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
             // Collapsed Marker - Pin with number inside
             <div className="relative">
               <div
-                className={`relative cursor-pointer transition-transform hover:scale-110 flex flex-col items-center ${isPadletSelected(padlet.id) ? 'ring-2 ring-blue-500 ring-offset-2 rounded-lg' : ''}`}
+                className={`relative cursor-pointer transition-transform hover:scale-110 flex flex-col items-center ${isPadletSelected(padlet.id) && canUseFreeformEditButton ? 'ring-2 ring-blue-500 ring-offset-2 rounded-lg' : ''}`}
                 style={{ zIndex: (padlet.metadata as any)?.zIndex || 100 }}
                 onClick={(e) => {
                   e.stopPropagation();

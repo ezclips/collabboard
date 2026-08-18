@@ -114,17 +114,18 @@ const canvasEditorValue: CanvasEditorState = {
   commentPopupPosition: null, commentPopupHighlightColor: undefined,
 };
 
-function buildPadlets(targetType: Padlet['type']): Padlet[] {
+function buildPadlets(targetType: Padlet['type'], metadata: Padlet['metadata'] = {}): Padlet[] {
   return [
-    padlet('target-1', targetType, 200, 150),
+    padlet('target-1', targetType, 200, 150, metadata),
   ];
 }
 
-function Harness({ targetType, canUseFreeformEditButton }: {
+function Harness({ targetType, canUseFreeformEditButton, metadata }: {
   targetType: Padlet['type'];
   canUseFreeformEditButton: boolean;
+  metadata?: Padlet['metadata'];
 }) {
-  const [padlets, setPadlets] = React.useState<Padlet[]>(() => buildPadlets(targetType));
+  const [padlets, setPadlets] = React.useState<Padlet[]>(() => buildPadlets(targetType, metadata));
   const containerRef = React.useRef<HTMLDivElement>(null);
   const stableActions = useStableCanvasActions({
     duplicatePadlet: () => {}, addPadletToLibrary: () => {}, requestDeletePadlet: () => {},
@@ -173,13 +174,13 @@ function Harness({ targetType, canUseFreeformEditButton }: {
   );
 }
 
-async function mount(targetType: Padlet['type'], canUseFreeformEditButton: boolean) {
+async function mount(targetType: Padlet['type'], canUseFreeformEditButton: boolean, metadata?: Padlet['metadata']) {
   const host = document.createElement('div');
   document.body.appendChild(host);
   let root: Root;
   await act(async () => {
     root = createRoot(host);
-    root.render(<Harness targetType={targetType} canUseFreeformEditButton={canUseFreeformEditButton} />);
+    root.render(<Harness targetType={targetType} canUseFreeformEditButton={canUseFreeformEditButton} metadata={metadata} />);
   });
   return { host, root: root! };
 }
@@ -231,5 +232,42 @@ describe('PATCH FREEFORM-PRIVILEGE-BATCH Clipart/Document (card type) ring permi
     const handles = host.querySelectorAll('[data-post-resize-handle="true"]');
     expect(handles.length).toBe(0);
     await unmount(host, root);
+  });
+});
+
+describe('PATCH FREEFORM-COMMENT-PRIVILEGE collapsed standalone Comment marker ring permission', () => {
+  // The collapsed marker (padlet.metadata.isCollapsed) has no resize handle
+  // at all -- only the blue ring itself is privileged edit UI here.
+  function collapsedMarker(host: HTMLElement): HTMLElement | undefined {
+    return Array.from(host.querySelectorAll<HTMLElement>('.hover\\:scale-110'))
+      .find((el) => el.className.includes('flex-col items-center'));
+  }
+
+  it('edit-capable Comment selected: blue ring visible', async () => {
+    const { host, root } = await mount('comment', true, { isCollapsed: true });
+    const marker = collapsedMarker(host);
+    expect(marker, 'collapsed Comment marker should render').toBeTruthy();
+    expect(marker!.className).toContain('ring-2 ring-blue-500');
+    await unmount(host, root);
+  });
+
+  it('read-only Comment selected: blue ring absent', async () => {
+    const { host, root } = await mount('comment', false, { isCollapsed: true });
+    const marker = collapsedMarker(host);
+    expect(marker, 'collapsed Comment marker should still render (viewing not weakened)').toBeTruthy();
+    expect(marker!.className).not.toContain('ring-2 ring-blue-500');
+    await unmount(host, root);
+  });
+
+  it('normal Comment viewing/expansion unchanged: marker renders and remains clickable in both permission states', async () => {
+    for (const canUseFreeformEditButton of [true, false]) {
+      const { host, root } = await mount('comment', canUseFreeformEditButton, { isCollapsed: true });
+      const marker = collapsedMarker(host);
+      expect(marker).toBeTruthy();
+      // onClick is untouched by this patch -- it must not throw regardless
+      // of permission (selection/expansion behavior is out of scope here).
+      expect(() => marker!.click()).not.toThrow();
+      await unmount(host, root);
+    }
   });
 });
