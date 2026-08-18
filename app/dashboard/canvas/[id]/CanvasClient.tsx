@@ -197,6 +197,13 @@ function getFreeformDotGridStorageKey(boardId?: string) {
   return boardId ? `freeform-board-dot-grid:${boardId}` : null;
 }
 
+// PATCH SNAP-GRID-A: sibling of getFreeformDotGridStorageKey, same
+// per-board-per-browser localStorage mechanism -- snapping itself is not
+// implemented yet, this only persists the toggle's state.
+function getFreeformSnapGridStorageKey(boardId?: string) {
+  return boardId ? `freeform-board-snap-grid:${boardId}` : null;
+}
+
 // === END TYPES + CONSTANTS REGION ===
 
 export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: string; openPadletId?: string }) {
@@ -236,6 +243,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     backgroundType: 'color' as 'color' | 'gradient' | 'image',
     backgroundValue: '#f3f4f6',
     showDotGrid: false,
+    snapToGrid: false,
   });
 
   useEffect(() => {
@@ -1008,64 +1016,23 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       typeof window !== 'undefined' && dotGridStorageKey
         ? window.localStorage.getItem(dotGridStorageKey)
         : null;
+    const snapGridStorageKey = getFreeformSnapGridStorageKey(canvas?.id);
+    const storedSnapGrid =
+      typeof window !== 'undefined' && snapGridStorageKey
+        ? window.localStorage.getItem(snapGridStorageKey)
+        : null;
 
     setFreeformBoardAppearance({
       backgroundType: (canvas?.background_type as 'color' | 'gradient' | 'image') || 'color',
       backgroundValue: canvas?.background_value || '#f3f4f6',
       showDotGrid: storedDotGrid === 'true',
+      snapToGrid: storedSnapGrid === 'true',
     });
   }, [canvas?.id, canvas?.background_type, canvas?.background_value]);
 
-  const canvasBackgroundStyle = useMemo((): React.CSSProperties => {
-    if (!canvas) return { backgroundColor: '#f3f4f6' };
-
-    const bgType = freeformBoardAppearance.backgroundType;
-    const bgValue = freeformBoardAppearance.backgroundValue;
-    const showDotGrid = freeformBoardAppearance.showDotGrid;
-    const dotPattern = 'radial-gradient(rgba(148, 163, 184, 0.38) 1px, transparent 1.2px)';
-
-    if (bgType === 'color' && bgValue) {
-      return showDotGrid
-        ? {
-          backgroundColor: bgValue,
-          backgroundImage: dotPattern,
-          backgroundSize: '18px 18px',
-          backgroundPosition: '0 0',
-        }
-        : { backgroundColor: bgValue };
-    }
-    if (bgType === 'gradient' && bgValue) {
-      return showDotGrid
-        ? {
-          backgroundImage: `${dotPattern}, ${bgValue}`,
-          backgroundSize: '18px 18px, auto',
-          backgroundPosition: '0 0, center',
-        }
-        : { background: bgValue };
-    }
-    if (bgType === 'image' && bgValue) {
-      return showDotGrid
-        ? {
-          backgroundImage: `${dotPattern}, url("${bgValue}")`,
-          backgroundSize: '18px 18px, cover',
-          backgroundPosition: '0 0, center',
-          backgroundRepeat: 'repeat, no-repeat',
-        }
-        : {
-          backgroundImage: `url("${bgValue}")`,
-          backgroundSize: 'cover',
-          backgroundPosition: 'center',
-          backgroundRepeat: 'no-repeat',
-        };
-    }
-    return showDotGrid
-      ? {
-        backgroundColor: '#f3f4f6',
-        backgroundImage: dotPattern,
-        backgroundSize: '18px 18px',
-      }
-      : { backgroundColor: '#f3f4f6' };
-  }, [canvas, freeformBoardAppearance]);
+  // canvasBackgroundStyle itself is declared further below (PATCH SNAP-GRID-A),
+  // once isFreeformLayout/canvasZoom/freeformWorldOriginLeft/Top are in scope
+  // -- the dot grid must be Freeform-only and scale/pan with the world.
 
   const getGraphConnectHintStyle = useCallback((): React.CSSProperties => {
     const bgType = canvas?.background_type;
@@ -1133,6 +1100,70 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   );
   const freeformWorldOriginLeft = gutterX + FREEFORM_WORLD_ORIGIN_OFFSET_X * canvasZoom;
   const freeformWorldOriginTop = gutterY + FREEFORM_WORLD_ORIGIN_OFFSET_Y * canvasZoom;
+
+  // PATCH SNAP-GRID-A: dot grid is Freeform-only and must pan/scale with the
+  // world -- gated on isFreeformLayout so Drawing/Timeline/every other layout
+  // can never inherit dots from a showDotGrid value set while the user was
+  // previously on Freeform. Spacing is 20 world units, scaled by canvasZoom
+  // (same factor the back/front world layers use for their own transform),
+  // and positioned from the same freeformWorldOriginLeft/Top the world layers
+  // use for their left/top -- so the pattern tracks pan and zoom exactly like
+  // everything else in the Freeform world.
+  const canvasBackgroundStyle = useMemo((): React.CSSProperties => {
+    if (!canvas) return { backgroundColor: '#f3f4f6' };
+
+    const bgType = freeformBoardAppearance.backgroundType;
+    const bgValue = freeformBoardAppearance.backgroundValue;
+    const showDotGrid = isFreeformLayout && freeformBoardAppearance.showDotGrid;
+    const dotPattern = 'radial-gradient(rgba(148, 163, 184, 0.38) 1px, transparent 1.2px)';
+    const dotGridSizePx = 20 * canvasZoom;
+    const dotGridSize = `${dotGridSizePx}px ${dotGridSizePx}px`;
+    const dotGridPosition = `${freeformWorldOriginLeft}px ${freeformWorldOriginTop}px`;
+
+    if (bgType === 'color' && bgValue) {
+      return showDotGrid
+        ? {
+          backgroundColor: bgValue,
+          backgroundImage: dotPattern,
+          backgroundSize: dotGridSize,
+          backgroundPosition: dotGridPosition,
+        }
+        : { backgroundColor: bgValue };
+    }
+    if (bgType === 'gradient' && bgValue) {
+      return showDotGrid
+        ? {
+          backgroundImage: `${dotPattern}, ${bgValue}`,
+          backgroundSize: `${dotGridSize}, auto`,
+          backgroundPosition: `${dotGridPosition}, center`,
+        }
+        : { background: bgValue };
+    }
+    if (bgType === 'image' && bgValue) {
+      return showDotGrid
+        ? {
+          backgroundImage: `${dotPattern}, url("${bgValue}")`,
+          backgroundSize: `${dotGridSize}, cover`,
+          backgroundPosition: `${dotGridPosition}, center`,
+          backgroundRepeat: 'repeat, no-repeat',
+        }
+        : {
+          backgroundImage: `url("${bgValue}")`,
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+          backgroundRepeat: 'no-repeat',
+        };
+    }
+    return showDotGrid
+      ? {
+        backgroundColor: '#f3f4f6',
+        backgroundImage: dotPattern,
+        backgroundSize: dotGridSize,
+        backgroundPosition: dotGridPosition,
+      }
+      : { backgroundColor: '#f3f4f6' };
+  }, [canvas, freeformBoardAppearance, isFreeformLayout, canvasZoom, freeformWorldOriginLeft, freeformWorldOriginTop]);
+
   const handleCanvasViewportRef = useCallback((node: HTMLDivElement | null) => {
     containerRef.current = node;
     setViewportElement(node);
@@ -1268,25 +1299,22 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   }, []);
 
   const persistFreeformBoardAppearance = useCallback(async (
-    updates: Partial<{ backgroundType: 'color' | 'gradient' | 'image'; backgroundValue: string; showDotGrid: boolean }>
+    updates: Partial<{ backgroundType: 'color' | 'gradient' | 'image'; backgroundValue: string }>
   ) => {
     if (!canUseFreeformEditButton) {
       toast.error('You do not have permission to change the board background');
       return;
     }
 
-    let nextAppearance = {
+    const nextAppearance = {
+      ...freeformBoardAppearance,
       backgroundType: updates.backgroundType ?? freeformBoardAppearance.backgroundType,
       backgroundValue: updates.backgroundValue ?? freeformBoardAppearance.backgroundValue,
-      showDotGrid: updates.showDotGrid ?? freeformBoardAppearance.showDotGrid,
     };
 
-    if (nextAppearance.showDotGrid && nextAppearance.backgroundType === 'image') {
-      nextAppearance = {
-        ...nextAppearance,
-        backgroundType: 'color',
-        backgroundValue: '#f3f4f6',
-      };
+    if (freeformBoardAppearance.showDotGrid && nextAppearance.backgroundType === 'image') {
+      nextAppearance.backgroundType = 'color';
+      nextAppearance.backgroundValue = '#f3f4f6';
     }
 
     setFreeformBoardAppearance(nextAppearance);
@@ -1296,11 +1324,6 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     try {
       const currentBackgroundType = canvas?.background_type || 'color';
       const currentBackgroundValue = canvas?.background_value || '#f3f4f6';
-      const dotGridStorageKey = getFreeformDotGridStorageKey(canvasId);
-      const currentShowDotGrid =
-        typeof window !== 'undefined' && dotGridStorageKey
-          ? window.localStorage.getItem(dotGridStorageKey) === 'true'
-          : false;
 
       if (
         nextAppearance.backgroundType !== currentBackgroundType ||
@@ -1318,12 +1341,6 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
 
         if (!backgroundResult.ok) {
           throw Object.assign((backgroundResult.error.cause ?? backgroundResult.error) as object, { scope: 'background' });
-        }
-      }
-
-      if (nextAppearance.showDotGrid !== currentShowDotGrid) {
-        if (typeof window !== 'undefined' && dotGridStorageKey) {
-          window.localStorage.setItem(dotGridStorageKey, String(nextAppearance.showDotGrid));
         }
       }
     } catch (error) {
@@ -1354,6 +1371,31 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       toast.error('Board background changed locally but could not be saved');
     }
   }, [canUseFreeformEditButton, canvasId, canvas?.background_type, canvas?.background_value, freeformBoardAppearance]);
+
+  // PATCH SNAP-GRID-A: "Show dot grid" and "Snap to grid" are personal,
+  // client-local visual preferences -- they never write board data and never
+  // affect other collaborators, so (unlike backgroundType/backgroundValue
+  // above) they are intentionally NOT gated on canUseFreeformEditButton.
+  // Same per-board-per-browser localStorage mechanism as the existing dot
+  // grid toggle; snapToGrid persists here but does not affect movement yet.
+  const setFreeformGridPreference = useCallback((
+    updates: Partial<{ showDotGrid: boolean; snapToGrid: boolean }>
+  ) => {
+    setFreeformBoardAppearance((prev) => {
+      const next = { ...prev, ...updates };
+      if (typeof window !== 'undefined' && canvasId) {
+        if (updates.showDotGrid !== undefined) {
+          const key = getFreeformDotGridStorageKey(canvasId);
+          if (key) window.localStorage.setItem(key, String(next.showDotGrid));
+        }
+        if (updates.snapToGrid !== undefined) {
+          const key = getFreeformSnapGridStorageKey(canvasId);
+          if (key) window.localStorage.setItem(key, String(next.snapToGrid));
+        }
+      }
+      return next;
+    });
+  }, [canvasId]);
 
   useEffect(() => {
     void refreshClipboardAvailability();
@@ -8498,6 +8540,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
             canPaste={canPasteFromClipboard}
             canUndoPaste={lastPastedPadletIds.length > 0}
             showDotGrid={freeformBoardAppearance.showDotGrid}
+            snapToGrid={freeformBoardAppearance.snapToGrid}
             onClose={() => setFreeformBoardMenu(null)}
             onPaste={() => {
               void handlePaste({ x: freeformBoardMenu.canvasX, y: freeformBoardMenu.canvasY });
@@ -8517,9 +8560,10 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
             }}
             onOpenBackgroundEditor={() => setFreeformWallpaperDialogOpen(true)}
             onToggleDotGrid={() => {
-              void persistFreeformBoardAppearance({
-                showDotGrid: !freeformBoardAppearance.showDotGrid,
-              });
+              setFreeformGridPreference({ showDotGrid: !freeformBoardAppearance.showDotGrid });
+            }}
+            onToggleSnapToGrid={() => {
+              setFreeformGridPreference({ snapToGrid: !freeformBoardAppearance.snapToGrid });
             }}
           />
         )}
