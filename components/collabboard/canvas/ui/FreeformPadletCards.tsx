@@ -4137,7 +4137,20 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
               onGroupIntoColumn={(targetContainerId) => groupIntoColumn(padlet.id, targetContainerId)}
               groupIntoColumnTargets={getEligibleContainerDestinations(padlets, padlet.id)}
             >
-              <div className="relative">
+              <div
+                className="relative"
+                // PATCH FREEFORM-TABLE-SELECTION: Table is selected on
+                // mousedown (handlePadletMouseDown, shared across all post
+                // types), but unlike Clipart/Image it had no card-level click
+                // handler -- so the click that follows selection bubbled
+                // unobstructed to CanvasClient's blank-canvas deselect
+                // handler, which clears selection immediately unless a
+                // padlet's own click already stopped it. This mirrors
+                // Clipart's card-level `onClick={(e) => e.stopPropagation()}`
+                // (FreeformPadletCards.tsx card branch), scoped to Table's
+                // own wrapper only.
+                onClick={(e) => e.stopPropagation()}
+              >
                 {content}
                 {resizeHandle}
 

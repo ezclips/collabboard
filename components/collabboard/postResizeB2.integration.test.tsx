@@ -144,7 +144,18 @@ describe('PATCH POST-RESIZE-B2R.2 low-zoom interaction-overlay ownership', () =>
   });
 
   it('interaction wrappers add no semantic width/height and the handle remains absolute', () => {
-    expect(stripped.match(/<div className="relative">\s*\{content\}\s*\{resizeHandle\}/g)).toHaveLength(5); // + Container branch
+    // PATCH FREEFORM-TABLE-SELECTION: Table's own wrapper alone now also
+    // carries a click-propagation guard (no width/height, still no style=
+    // at all) -- allow an optional attribute list on the opening tag rather
+    // than requiring all 5 wrappers to stay byte-for-byte identical.
+    // Bounded (not unbounded-lazy) so an unrelated, distant `<div
+    // className="relative">` elsewhere in the file (e.g. the collapsed
+    // comment-popup marker) can never accidentally span forward across
+    // unrelated JSX to claim a real {content}/{resizeHandle} pair that isn't
+    // actually its own immediate sibling.
+    const wrapperMatches = stripped.match(/<div\s+className="relative"[\s\S]{0,400}?>\s*\{content\}\s*\{resizeHandle\}/g);
+    expect(wrapperMatches).toHaveLength(5); // + Container branch
+    expect(wrapperMatches!.every((wrapper) => !wrapper.includes('style='))).toBe(true);
     expect(code(handleSrc)).toContain('className={`absolute bottom-0 right-0');
   });
 
