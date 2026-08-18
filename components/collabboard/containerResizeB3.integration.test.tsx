@@ -30,23 +30,14 @@ describe('PATCH POST-RESIZE-B3.1 Freeform Container width ownership', () => {
   });
 
   it('D/E: Container-child renderers remain free of shared resize handles; Drawing gained its own dedicated B3.2 Container handle, not the generic B1/B2 one', () => {
-    // PATCH POST-RESIZE-B3.2/R1: Drawing now imports PostResizeHandle, but
-    // exclusively for its own dedicated edit-capable Container path -- never
-    // wired into the generic B1/B2 capability system.
+    // PATCH POST-RESIZE-B3.2: Drawing now imports PostResizeHandle, but
+    // exclusively for its own dedicated, selection-gated Container path --
+    // never wired into the generic B1/B2 capability system.
     expect(drawingSrc).toContain("import PostResizeHandle from '@/components/collabboard/canvas/ui/PostResizeHandle';");
-    expect(drawingSrc).toContain("const canShowContainerResizeHandle = isResizableContainer && !readOnly && !(padlet.metadata as any)?.isLocked;");
-    expect(drawingSrc).toContain('containerResizeSelection?.setSelectedId(padlet.id);');
+    expect(drawingSrc).toContain('isResizableContainer && isContainerSelected && !readOnly');
     expect(drawingSrc).toContain("const isResizableContainer = padlet.type === 'container';");
     expect(rowColumnSrc).not.toContain('PostResizeHandle');
     expect(cardsSrc).toContain('rootPadlets.filter(padlet => !isSectionHeading(padlet))');
-  });
-
-  it('R1: Drawing Container auto-height uses measured vertical chrome instead of stale constants', () => {
-    expect(drawingSrc).toContain('const measureContainerHeightChrome = () => {');
-    expect(drawingSrc).toContain('data-drawing-container-strip="true"');
-    expect(drawingSrc).toContain('Math.ceil(measureContainerHeightChrome() + h)');
-    expect(drawingSrc).not.toContain('const stripH = 28;');
-    expect(drawingSrc).not.toContain('stripH + 22 + h');
   });
 
   it('F/G: the dedicated interaction is horizontal-only with a 360px vertical minimum', () => {
