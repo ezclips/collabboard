@@ -849,6 +849,7 @@ export function DrawingEmbeddableCard({
 
   const cardOuterRef = useRef<HTMLDivElement>(null);
   const contentAreaRef = useRef<HTMLDivElement>(null);
+  const stripRef = useRef<HTMLDivElement>(null);
   const [containerResizePortalTarget, setContainerResizePortalTarget] = useState<HTMLElement | null>(null);
   const setCardOuterRef = useCallback((node: HTMLDivElement | null) => {
     cardOuterRef.current = node;
@@ -879,6 +880,32 @@ export function DrawingEmbeddableCard({
     const excalidrawWrapperPadding = excalidrawWrapperEl ? parseFloat(getComputedStyle(excalidrawWrapperEl).paddingLeft) || 0 : 0;
     const chromePerSide = outerBorder + contentPadding + excalidrawWrapperPadding;
     return chromePerSide;
+  };
+
+  // PATCH DRAWING-R2A: the vertical counterpart of measureChromePerSide,
+  // reading the SAME three unscaled getComputedStyle chrome terms (outer
+  // border, content padding, Excalidraw wrapper padding) plus the title
+  // strip's real `offsetHeight` -- never `getBoundingClientRect`, which
+  // returns zoom-scaled screen pixels and would drift from these CSS-px
+  // terms at any zoom other than 100%. Replaces the prior hardcoded
+  // `stripH=28; +22` estimate, which omitted the Excalidraw wrapper's own
+  // vertical padding entirely and assumed a strip height that stopped being
+  // accurate the moment the strip's real minHeight was exceeded (wrapped
+  // title, taller strip content) -- both of which could clip the embeddable
+  // short of its real content, cutting off the bottom border.
+  const measureContainerHeightChrome = () => {
+    const px = (value: string | undefined) => parseFloat(value || '') || 0;
+    const outerStyle = cardOuterRef.current ? getComputedStyle(cardOuterRef.current) : null;
+    const contentStyle = contentAreaRef.current ? getComputedStyle(contentAreaRef.current) : null;
+    const excalidrawWrapperEl = cardOuterRef.current?.parentElement ?? null;
+    const excalidrawWrapperStyle = excalidrawWrapperEl ? getComputedStyle(excalidrawWrapperEl) : null;
+    const stripHeight = stripRef.current?.offsetHeight || (isContainer ? 28 : 22);
+    return (
+      stripHeight +
+      (outerStyle ? px(outerStyle.borderTopWidth) + px(outerStyle.borderBottomWidth) : 0) +
+      (contentStyle ? px(contentStyle.paddingTop) + px(contentStyle.paddingBottom) : 0) +
+      (excalidrawWrapperStyle ? px(excalidrawWrapperStyle.paddingTop) + px(excalidrawWrapperStyle.paddingBottom) : 0)
+    );
   };
 
   const getExistingSceneEmbeddable = () => {
@@ -1082,6 +1109,7 @@ export function DrawingEmbeddableCard({
     >
       {/* Drag handle -- 3-column grid: [expand | title | pencil] */}
       <div
+        ref={stripRef}
         className="w-full flex-shrink-0 cursor-grab active:cursor-grabbing grid group/strip"
         style={{
           gridTemplateColumns: 'auto 1fr auto',
@@ -1266,8 +1294,7 @@ export function DrawingEmbeddableCard({
             onExpandAvailabilityChange={setCanExpand}
             onOpenDocument={onOpenDocument}
             onNaturalHeight={(h) => {
-              const stripH = 28;
-              const newHeight = Math.max(stripH + 22 + h, 80); // p-2 (16px) + 2px border + 4px buffer
+              const newHeight = Math.max(Math.ceil(measureContainerHeightChrome() + h), 80);
               const excAPI = excalidrawAPIRef.current;
               if (!excAPI) return;
               const existing = excAPI.getSceneElements().find(
