@@ -381,4 +381,42 @@ describe('PATCH POST-RESIZE-B3.2.2 Container selection survives spurious post-re
     renderCard(container, [container], { excAPI, selected: false, markHandleInteractionEnd });
     expect(markHandleInteractionEnd).not.toHaveBeenCalled();
   });
+
+  // PATCH POST-RESIZE-B3.2.2A: the guard above closed the ORIGINAL race, but
+  // its one-shot suppression window could not tell a still-pending stale
+  // click (the tail of the resize/reconciliation that armed it) apart from a
+  // genuine NEW deliberate blank-canvas click made shortly after -- both are
+  // "the next click" as far as the window is concerned. Proven live: a
+  // stale click is always the tail of an ALREADY-completed pointerdown+up
+  // pair, so no new pointerdown occurs before it; a deliberate new click
+  // necessarily starts with its own fresh pointerdown. notePointerDown()
+  // uses exactly that distinction.
+  it('BlankDeselectGuard: a stale click with no intervening pointerdown is still suppressed', () => {
+    vi.useFakeTimers();
+    try {
+      const guard = new BlankDeselectGuard(1500);
+      guard.arm();
+      vi.advanceTimersByTime(200);
+      // No notePointerDown() call -- this click is the stale tail of the
+      // gesture that armed the guard, not a new user-initiated one.
+      expect(guard.consumeShouldSuppress()).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('BlankDeselectGuard: a new pointerdown before the click marks fresh intent, so that click deselects immediately', () => {
+    vi.useFakeTimers();
+    try {
+      const guard = new BlankDeselectGuard(1500);
+      guard.arm();
+      vi.advanceTimersByTime(200);
+      // A deliberate new gesture starts with its own pointerdown, well
+      // inside the suppression window.
+      guard.notePointerDown();
+      expect(guard.consumeShouldSuppress()).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

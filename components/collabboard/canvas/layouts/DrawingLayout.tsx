@@ -398,15 +398,29 @@ export class BlankDeselectGuard {
       this.timer = null;
     }, this.windowMs);
   }
-  /** Consumes the armed state (at most one click is ever suppressed per arm). */
-  consumeShouldSuppress(): boolean {
-    if (!this.armed) return false;
+  private disarm(): void {
     this.armed = false;
     if (this.timer !== null) {
       clearTimeout(this.timer);
       this.timer = null;
     }
+  }
+  /** Consumes the armed state (at most one click is ever suppressed per arm). */
+  consumeShouldSuppress(): boolean {
+    if (!this.armed) return false;
+    this.disarm();
     return true;
+  }
+  // PATCH POST-RESIZE-B3.2.2A: a stale/spurious click is always the tail end
+  // of an already-completed pointerdown+pointerup pair from the preceding
+  // resize/reconciliation trigger -- no NEW pointerdown occurs between arm()
+  // and that click. A genuinely new user gesture (a deliberate blank-canvas
+  // click, made shortly after a resize) necessarily starts with its OWN fresh
+  // pointerdown. Disarming here, before that gesture's own click fires, lets
+  // the deliberate click through while a still-pending stale click (no
+  // intervening pointerdown) remains suppressed.
+  notePointerDown(): void {
+    if (this.armed) this.disarm();
   }
 }
 
@@ -4174,6 +4188,9 @@ export default function DrawingLayout({
         // PATCH POST-RESIZE-B3.2.2: see BlankDeselectGuard's own comment for
         // the two spurious-click triggers this consumes instead of treating
         // as a genuine blank-canvas deselect.
+        // PATCH POST-RESIZE-B3.2.2A: notePointerDown() (capture phase, so it
+        // sees a fresh gesture before that gesture's own click) disarms a
+        // still-armed guard from a PRECEDING trigger -- see its own comment.
         // Separately (proven live, same instrumented investigation): a
         // Container's own card body (below the strip) has no left-click
         // stopPropagation of its own -- only the strip does (see its own
@@ -4184,6 +4201,7 @@ export default function DrawingLayout({
         // card is never a genuine "user clicked blank canvas" click by
         // definition; skip it the same way the strip already does for
         // itself, generalized to the whole card.
+        onPointerDownCapture={() => blankDeselectGuardRef.current!.notePointerDown()}
         onClick={(e) => {
           if (blankDeselectGuardRef.current!.consumeShouldSuppress()) {
             return;
