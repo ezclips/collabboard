@@ -111,7 +111,13 @@ describe('PATCH POST-RESIZE-B2R.2 low-zoom interaction-overlay ownership', () =>
   const genericOverlayStart = stripped.indexOf('const resizeHandle =');
   const genericOverlayEnd = genericContentStart;
   const genericOverlay = stripped.slice(genericOverlayStart, genericOverlayEnd);
-  const imageCardStart = cardsSrc.indexOf('ref={(el) => { imageCardRefs.current[padlet.id] = el; }}');
+  // PATCH FREEFORM-IMAGE-R4: Image's card + resize handle moved into their
+  // own top-level component, FreeformImageResizeBox, so it can own a local
+  // live-preview state without re-rendering the rest of the padlet list --
+  // anchor on that function's body instead of the (now nonexistent) inline
+  // imageCardRefs ref-setter.
+  const imageResizeBoxStart = cardsSrc.indexOf('function FreeformImageResizeBox(');
+  const imageCardStart = cardsSrc.indexOf('ref={cardRef}', imageResizeBoxStart);
   const imageOverlayStart = cardsSrc.indexOf('Resize interaction chrome is a sibling', imageCardStart);
   const imageCard = cardsSrc.slice(imageCardStart, imageOverlayStart);
 
@@ -137,10 +143,12 @@ describe('PATCH POST-RESIZE-B2R.2 low-zoom interaction-overlay ownership', () =>
 
   it('resize-origin refs remain on semantic sized cards, never the interaction overlay', () => {
     expect(genericContent).toContain('ref={(el) => { genericCardRefs.current[padlet.id] = el; }}');
-    expect(imageCard).toContain('ref={(el) => { imageCardRefs.current[padlet.id] = el; }}');
+    // PATCH FREEFORM-IMAGE-R4: imageCardRefs (a host-owned Record) became a
+    // plain local ref owned by FreeformImageResizeBox itself.
+    expect(imageCard).toContain('ref={cardRef}');
     expect(genericOverlay).not.toContain('ref={(el) =>');
     expect(stripped).toMatch(/getStartSize=\{\(\) => \{\s*const el = genericCardRefs\.current\[padlet\.id\]/);
-    expect(stripped).toMatch(/getStartSize=\{\(\) => \{\s*const el = imageCardRefs\.current\[padlet\.id\]/);
+    expect(stripped).toMatch(/getStartSize=\{\(\) => \{\s*const el = cardRef\.current;/);
   });
 
   it('interaction wrappers add no semantic width/height and the handle remains absolute', () => {

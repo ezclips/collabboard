@@ -60,7 +60,19 @@ describe('PATCH POST-RESIZE-B1 Freeform wiring', () => {
   });
 
   it('33/34. the Image grip is selected-only, editable, unlocked', () => {
-    expect(code(cardsSrc)).toContain("padlet.type === 'image' && isPadletSelected(padlet.id) && canUseFreeformEditButton && !(padlet.metadata as any)?.isLocked");
+    // PATCH FREEFORM-IMAGE-R4: the gate now lives inside FreeformImageResizeBox
+    // (isSelected/canUseFreeformEditButton/isLocked, resolved from its own
+    // props/context) rather than as an inline `padlet.type === 'image' &&
+    // isPadletSelected(padlet.id) && ...` condition in FreeformPadletCards --
+    // the component is Image-only by construction (its sole call site is
+    // inside `padlet.type === 'image' && (...)`).
+    expect(code(cardsSrc)).toContain("<FreeformImageResizeBox\n              padlet={padlet}\n              isSelected={isPadletSelected(padlet.id)}");
+    const imageResizeBox = code(cardsSrc).slice(
+      code(cardsSrc).indexOf('function FreeformImageResizeBox('),
+      code(cardsSrc).indexOf('function FreeformPadletCards('),
+    );
+    expect(imageResizeBox).toContain('getPostResizeCapability(padlet) === \'box\' && isSelected && canUseFreeformEditButton && !isLocked');
+    expect(imageResizeBox).toContain('const isLocked = !!(padlet.metadata as any)?.isLocked;');
   });
 
   it('43. the old duplicate AI handle plumbing is gone (no aiResizeRef, no onResize inside legacyHtmlProps)', () => {
@@ -82,12 +94,20 @@ describe('PATCH POST-RESIZE-B1 Freeform wiring', () => {
   it('28/31/32. Image rendering switches to canonical geometry only when explicitly resized (PATCH POST-RESIZE-B1.1)', () => {
     // B1.1: finite-positive width/height alone is no longer sufficient --
     // see isImageManuallySized in postResizePolicy.ts.
+    // PATCH FREEFORM-IMAGE-R4: the ternary moved into two plain
+    // `manuallySized ? X : Y` variables (baseWidth/baseHeight) inside
+    // FreeformImageResizeBox, so the live-preview override (livePreview ??
+    // base) can sit on top of the SAME legacy-vs-explicit condition --
+    // still isImageManuallySized, still Math.max(..., MIN), still 360
+    // legacy fallback, just no longer written as an inline JSX ternary.
     expect(code(cardsSrc)).toContain('isImageManuallySized(padlet)');
     expect(code(cardsSrc)).not.toContain('hasValidPostResizeGeometry(padlet.width, padlet.height)');
-    expect(code(cardsSrc)).toContain("${Math.max(Number(padlet.width), IMAGE_RESIZE_MIN_WIDTH)}px`");
-    expect(code(cardsSrc)).toContain("${Math.max(Number(padlet.height), IMAGE_RESIZE_MIN_HEIGHT)}px`");
-    // Legacy fallback stays exactly 360px.
-    expect(code(cardsSrc)).toContain(": '360px',");
+    expect(code(cardsSrc)).toContain('Math.max(Number(padlet.width), IMAGE_RESIZE_MIN_WIDTH)');
+    expect(code(cardsSrc)).toContain('Math.max(Number(padlet.height), IMAGE_RESIZE_MIN_HEIGHT)');
+    // Legacy fallback stays exactly 360 (unitless base value; the `px`
+    // suffix is applied once, uniformly, when the style string is built).
+    expect(code(cardsSrc)).toContain('manuallySized ? Math.max(Number(padlet.width), IMAGE_RESIZE_MIN_WIDTH) : 360');
+    expect(code(cardsSrc)).toContain('manuallySized ? Math.max(Number(padlet.height), IMAGE_RESIZE_MIN_HEIGHT) : undefined');
   });
 
   it('20. children are frozen: Container child cards carry no resize handle', () => {
@@ -96,7 +116,10 @@ describe('PATCH POST-RESIZE-B1 Freeform wiring', () => {
   });
 
   it('37. the gesture origin is the ACTUAL rendered rectangle via getStartSize', () => {
-    expect(code(cardsSrc)).toContain('imageCardRefs.current[padlet.id]');
+    // PATCH FREEFORM-IMAGE-R4: see the sibling note in the B1.1 describe
+    // block below -- imageCardRefs became FreeformImageResizeBox's own
+    // local cardRef.
+    expect(code(cardsSrc)).toContain('const el = cardRef.current;');
     expect(code(cardsSrc)).toContain('el.offsetWidth || 360');
     expect(code(cardsSrc)).toContain('el.offsetHeight || 100');
   });
@@ -211,7 +234,12 @@ describe('PATCH POST-RESIZE-B1.1 Image explicit-resize commit + rollback', () =>
   });
 
   it('9. first resize origin uses measured rendered geometry, not stored width/height', () => {
-    expect(code(cardsSrc)).toContain('imageCardRefs.current[padlet.id]');
+    // PATCH FREEFORM-IMAGE-R4: imageCardRefs (a host-owned Record keyed by
+    // padlet id) was replaced by a plain local `cardRef` owned by
+    // FreeformImageResizeBox itself -- each Image card only ever needs its
+    // OWN ref, not a shared map. Same measured-DOM-rect origin either way.
+    expect(code(cardsSrc)).toContain('const cardRef = React.useRef<HTMLDivElement | null>(null);');
+    expect(code(cardsSrc)).toContain('const el = cardRef.current;');
     expect(code(cardsSrc)).toContain('el.offsetWidth || 360');
     expect(code(cardsSrc)).toContain('el.offsetHeight || 100');
     expect(code(cardsSrc)).toContain('getStartSize={() => {');
@@ -292,20 +320,37 @@ describe('PATCH FREEFORM-IMAGE-R3 Image media wrapper no longer letterboxes gray
   });
 
   it('Image geometry/sizing logic is untouched: same manual-size gate, same minimums, same handle wiring', () => {
-    expect(code(cardsSrc)).toContain('width: isImageManuallySized(padlet)');
-    expect(code(cardsSrc)).toContain('height: isImageManuallySized(padlet)');
-    expect(code(cardsSrc)).toContain('Math.max(Number(padlet.width), IMAGE_RESIZE_MIN_WIDTH)');
-    expect(code(cardsSrc)).toContain('Math.max(Number(padlet.height), IMAGE_RESIZE_MIN_HEIGHT)');
+    // PATCH FREEFORM-IMAGE-R4: `width: isImageManuallySized(padlet) ? ... :
+    // ...` (an inline JSX ternary) became `manuallySized ? ... : ...`
+    // feeding a `baseWidth`/`baseHeight` variable -- same condition, same
+    // Math.max/minimums, still gated on the same isImageManuallySized call.
+    expect(code(cardsSrc)).toContain('const manuallySized = isImageManuallySized(padlet);');
+    expect(code(cardsSrc)).toContain('manuallySized ? Math.max(Number(padlet.width), IMAGE_RESIZE_MIN_WIDTH) : 360');
+    expect(code(cardsSrc)).toContain('manuallySized ? Math.max(Number(padlet.height), IMAGE_RESIZE_MIN_HEIGHT) : undefined');
   });
 
-  it('persistence contract is untouched: preview is local-only, exactly one commit call on release', () => {
-    const imageResizeHandle = code(cardsSrc).slice(
-      code(cardsSrc).indexOf("padlet.type === 'image' && isPadletSelected(padlet.id)"),
-      code(cardsSrc).indexOf("padlet.type === 'image' && isPadletSelected(padlet.id)") + 900,
+  it('PATCH FREEFORM-IMAGE-R4: Image pointermove preview is local-only (no previewPostResize/setPadlets call); pointerup still performs exactly one persistence commit', () => {
+    const imageResizeBox = code(cardsSrc).slice(
+      code(cardsSrc).indexOf('function FreeformImageResizeBox('),
+      code(cardsSrc).indexOf('function FreeformPadletCards('),
     );
-    expect(imageResizeHandle).toContain('onResizePreview={(w, h) => previewPostResize(padlet.id, w, h)}');
-    expect(imageResizeHandle).toContain('void commitPostResize(padlet.id, w, h, ow, oh, { manualSize: true }, padlet.metadata);');
-    // previewPostResize itself must still only touch local React state.
+    // The defining R4 change: onResizePreview no longer reaches the parent
+    // at all -- it only ever calls the component's own setLivePreview.
+    expect(imageResizeBox).toContain('onResizePreview={(w, h) => setLivePreview({ width: w, height: h })}');
+    expect(imageResizeBox).not.toContain('previewPostResize');
+    expect(imageResizeBox).not.toMatch(/onResizePreview[\s\S]{0,80}setPadlets/);
+    // Commit is unchanged in shape: the host's onCommit prop (still,
+    // one level up, `void commitPostResize(padlet.id, w, h, ow, oh, {
+    // manualSize: true }, padlet.metadata)`) fires exactly once, from
+    // onResizeCommit only -- never from onResizePreview.
+    expect(imageResizeBox).toContain('onResizeCommit={(w, h, ow, oh) => {');
+    expect(imageResizeBox).toContain('setLivePreview(null);');
+    expect(imageResizeBox).toContain('onCommit(w, h, ow, oh);');
+    expect(code(cardsSrc)).toContain('void commitPostResize(padlet.id, w, h, ow, oh, { manualSize: true }, padlet.metadata);');
+
+    // previewPostResize (still used by Clipart/AI/generic-branch types --
+    // NOT removed, just no longer Image's own path) is untouched: still
+    // local-state-only, no persistence call of its own.
     const previewFn = code(cardsSrc).slice(
       code(cardsSrc).indexOf('const previewPostResize = React.useCallback'),
     );

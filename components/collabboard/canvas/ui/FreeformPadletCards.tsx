@@ -237,7 +237,110 @@ export interface FreeformPadletCardsProps {
   commentModeMutations?: CommentModeMutations;
 }
 
+// PATCH FREEFORM-IMAGE-R4: a genuine top-level component (not a closure
+// defined inside FreeformPadletCards) so its own local resize-preview state
+// survives across FreeformPadletCards' re-renders and, more importantly, so
+// updating that state re-renders ONLY this one Image card -- never the
+// parent's full padlet list. Image-only by construction (see its sole call
+// site, `padlet.type === 'image'` in FreeformPadletCards). Card-selection
+// click/mousedown/pointerdown handlers stay defined in FreeformPadletCards
+// (same closures as before B4, just passed down) so selection behavior is
+// byte-for-byte unchanged; `children` is the pre-existing title-strip/
+// image-content/reactions/caption JSX, also unchanged and still created (so
+// still closing over FreeformPadletCards' own state) inside FreeformPadletCards
+// -- it simply renders one level lower now.
+function FreeformImageResizeBox({
+  padlet,
+  isSelected,
+  onCardPointerDownCapture,
+  onCardMouseDown,
+  onCardClick,
+  getWorldPointFromClient,
+  onCommit,
+  children,
+}: {
+  padlet: Padlet;
+  isSelected: boolean;
+  onCardPointerDownCapture: (e: React.PointerEvent<HTMLDivElement>) => void;
+  onCardMouseDown: (e: React.MouseEvent<HTMLDivElement>) => void;
+  onCardClick: (e: React.MouseEvent<HTMLDivElement>) => void;
+  getWorldPointFromClient: (clientX: number, clientY: number) => { x: number; y: number };
+  onCommit: (width: number, height: number, originWidth: number, originHeight: number) => void;
+  children: React.ReactNode;
+}) {
+  const { canUseFreeformEditButton } = useCanvasConfig();
+  const cardRef = React.useRef<HTMLDivElement | null>(null);
+  // Local-only live resize preview. pointermove updates ONLY this state --
+  // never the parent's padlets array -- so a drag re-renders just this one
+  // Image card. null outside an active gesture: the canonical
+  // padlet.width/height (via isImageManuallySized) is the source of truth
+  // then, exactly as before this patch.
+  const [livePreview, setLivePreview] = React.useState<{ width: number; height: number } | null>(null);
 
+  const isLocked = !!(padlet.metadata as any)?.isLocked;
+  const manuallySized = isImageManuallySized(padlet);
+  const baseWidth = manuallySized ? Math.max(Number(padlet.width), IMAGE_RESIZE_MIN_WIDTH) : 360;
+  const baseHeight = manuallySized ? Math.max(Number(padlet.height), IMAGE_RESIZE_MIN_HEIGHT) : undefined;
+  const displayWidth = livePreview ? livePreview.width : baseWidth;
+  const displayHeight = livePreview ? livePreview.height : baseHeight;
+
+  return (
+    <>
+      <div
+        key={padlet.id}
+        ref={cardRef}
+        className={`overflow-hidden flex flex-col bg-white group relative transition-all ${(padlet.metadata as any)?.fullView ? '' : 'border border-gray-200'} ${isSelected ? 'ring-2 ring-blue-500' : ''
+          }`}
+        style={{
+          width: `${displayWidth}px`,
+          height: displayHeight !== undefined ? `${displayHeight}px` : undefined,
+          backgroundColor: padlet.metadata?.cardColor || '#ffffff',
+          zIndex: isSelected ? 1000 : ((padlet.metadata as any)?.zIndex || 100),
+        }}
+        onPointerDownCapture={onCardPointerDownCapture}
+        onMouseDown={onCardMouseDown}
+        onClick={onCardClick}
+      >
+        {children}
+      </div>
+
+      {/* Resize interaction chrome is a sibling of the clipping Image card
+          (PATCH POST-RESIZE-B1/R3) -- cardRef remains on the exact semantic
+          card whose size starts the gesture. */}
+      {getPostResizeCapability(padlet) === 'box' && isSelected && canUseFreeformEditButton && !isLocked && (
+        <PostResizeHandle
+          clientToWorld={getWorldPointFromClient}
+          startWidth={Number(padlet.width) || 360}
+          startHeight={Number(padlet.height) || 100}
+          constraints={getPostResizeConstraints(padlet)}
+          maxWidth={FREEFORM_WORLD_MAX_X - (Number(padlet.position_x) || 0)}
+          maxHeight={FREEFORM_WORLD_MAX_Y - (Number(padlet.position_y) || 0)}
+          onResizePreview={(w, h) => setLivePreview({ width: w, height: h })}
+          onResizeCommit={(w, h, ow, oh) => {
+            // Clear the local override in the SAME synchronous handler as
+            // the parent's own optimistic commit write (onCommit ->
+            // commitPostResize's setPadlets runs synchronously up to its
+            // first await) -- React batches both into one render, so there
+            // is no visible flash, and a later failed-persist rollback
+            // (parent resets padlets to ow/oh) is reflected automatically
+            // once local has already deferred back to padlet.width/height.
+            setLivePreview(null);
+            onCommit(w, h, ow, oh);
+          }}
+          getStartSize={() => {
+            const el = cardRef.current;
+            if (!el) return null;
+            const width = el.offsetWidth || 360;
+            const height = el.offsetHeight || 100;
+            return { width, height };
+          }}
+          className="!z-[1001]"
+          title="Resize"
+        />
+      )}
+    </>
+  );
+}
 
 // -- Component -----------------------------------------------------------------
 function FreeformPadletCards(props: FreeformPadletCardsProps) {
@@ -712,16 +815,11 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
   const [expandedAIPosts, setExpandedAIPosts] = React.useState<Record<string, boolean>>({});
   const [expandableAIPosts, setExpandableAIPosts] = React.useState<Record<string, boolean>>({});
   const aiExportTargetsRef = React.useRef<Record<string, HTMLDivElement | null>>({});
-  // PATCH POST-RESIZE-B1: rendered rects of the Image card shells, measured at
-  // resize pointerdown so a legacy Image's natural height becomes the gesture
-  // origin (offsetWidth/offsetHeight are the element's own layout size in
-  // world units -- the stage's `transform: scale(canvasZoom)` does not affect
-  // them).
-  const imageCardRefs = React.useRef<Record<string, HTMLDivElement | null>>({});
   // PATCH POST-RESIZE-B2: rendered rects of the generic post card shells
   // (Note/Todo/Link/Table), measured at resize pointerdown for the same reason
-  // as imageCardRefs -- a legacy fixed-layout post's REAL rendered box is the
-  // gesture origin, never its stored generic width/height.
+  // the Image card measures its own DOM (PATCH FREEFORM-IMAGE-R4: now a local
+  // ref owned by FreeformImageResizeBox) -- a legacy fixed-layout post's REAL
+  // rendered box is the gesture origin, never its stored generic width/height.
   const genericCardRefs = React.useRef<Record<string, HTMLDivElement | null>>({});
   // PATCH POST-RESIZE-B2: rendered rects of the Document/Clipart card shells.
   const cardCardRefs = React.useRef<Record<string, HTMLDivElement | null>>({});
@@ -1591,38 +1689,30 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
               </div>
             )}
 
-            <div
-              key={padlet.id}
-              ref={(el) => { imageCardRefs.current[padlet.id] = el; }}
-              className={`overflow-hidden flex flex-col bg-white group relative transition-all ${(padlet.metadata as any)?.fullView ? '' : 'border border-gray-200'} ${isPadletSelected(padlet.id) ? 'ring-2 ring-blue-500' : ''
-                }`}
-              style={{
-                width: isImageManuallySized(padlet)
-                  ? `${Math.max(Number(padlet.width), IMAGE_RESIZE_MIN_WIDTH)}px`
-                  : '360px',
-                height: isImageManuallySized(padlet)
-                  ? `${Math.max(Number(padlet.height), IMAGE_RESIZE_MIN_HEIGHT)}px`
-                  : undefined,
-                backgroundColor: padlet.metadata?.cardColor || '#ffffff',
-                zIndex: isPadletSelected(padlet.id) ? 1000 : ((padlet.metadata as any)?.zIndex || 100),
-              }}
-              onPointerDownCapture={(e) => {
+            <FreeformImageResizeBox
+              padlet={padlet}
+              isSelected={isPadletSelected(padlet.id)}
+              onCardPointerDownCapture={(e) => {
                 if (isImageColorPickerOpen && isPadletSelected(padlet.id)) {
                   e.stopPropagation();
                 }
               }}
-              onMouseDown={(e) => {
+              onCardMouseDown={(e) => {
                 e.stopPropagation();
                 // Don't call custom drag handler - we use native drag now
                 if (isLineMode) return;
               }}
-              onClick={(e) => {
+              onCardClick={(e) => {
                 e.stopPropagation();
                 // Select the image (blue ring for delete) but DON'T show toolbar
                 if (!isDragging) {
                   closeAllToolbars(); // Ensure all other tools (lines) are closed
                   setSelectedPadletId(padlet.id);
                 }
+              }}
+              getWorldPointFromClient={getWorldPointFromClient}
+              onCommit={(w, h, ow, oh) => {
+                void commitPostResize(padlet.id, w, h, ow, oh, { manualSize: true }, padlet.metadata);
               }}
             >
               {/* Top Strip — title centered, pencil right (same layout as
@@ -1826,35 +1916,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                 }}
               />
 
-            </div>
-
-            {/* Resize interaction chrome is a sibling of the clipping Image
-                card. The existing relative group/image-container owns the
-                bottom-right anchor while imageCardRefs remains on the exact
-                semantic card whose size starts the gesture. */}
-            {getPostResizeCapability(padlet) === 'box' && padlet.type === 'image' && isPadletSelected(padlet.id) && canUseFreeformEditButton && !(padlet.metadata as any)?.isLocked && (
-              <PostResizeHandle
-                clientToWorld={getWorldPointFromClient}
-                startWidth={Number(padlet.width) || 360}
-                startHeight={Number(padlet.height) || 100}
-                constraints={getPostResizeConstraints(padlet)}
-                maxWidth={FREEFORM_WORLD_MAX_X - (Number(padlet.position_x) || 0)}
-                maxHeight={FREEFORM_WORLD_MAX_Y - (Number(padlet.position_y) || 0)}
-                onResizePreview={(w, h) => previewPostResize(padlet.id, w, h)}
-                onResizeCommit={(w, h, ow, oh) => {
-                  void commitPostResize(padlet.id, w, h, ow, oh, { manualSize: true }, padlet.metadata);
-                }}
-                getStartSize={() => {
-                  const el = imageCardRefs.current[padlet.id];
-                  if (!el) return null;
-                  const width = el.offsetWidth || 360;
-                  const height = el.offsetHeight || 100;
-                  return { width, height };
-                }}
-                className="!z-[1001]"
-                title="Resize"
-              />
-            )}
+            </FreeformImageResizeBox>
 
 
 
