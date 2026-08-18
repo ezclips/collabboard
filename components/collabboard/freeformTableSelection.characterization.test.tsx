@@ -57,17 +57,23 @@ describe('PATCH FREEFORM-TABLE-SELECTION Table click no longer races the blank-c
     expect(contentIndex).toBeLessThan(resizeHandleIndex);
   });
 
-  it('scoped to Table only (at the time of this patch): the generic branch\'s own resize/selection machinery was not touched wholesale -- Container\'s wrapper (same {content}/{resizeHandle} machinery, explicitly frozen by both this patch and the later PATCH FREEFORM-SELECTION-BATCH-1) remains a plain <div className="relative"> with no click handler', () => {
-    // Link legitimately gained its own guard in the later, separate PATCH
-    // FREEFORM-SELECTION-BATCH-1 -- Container is the one type in this family
-    // that stays frozen across BOTH patches, so it remains the valid control
-    // proving neither patch applied the guard blanket-wide.
-    const containerContentIndex = cardsSrc.indexOf(
-      'postTitleVisibleIds={Array.from(getEffectiveVisibleChildTitleIds(padlet.metadata as any, containerChildPadlets))}',
+  it('scoped to Table only (at the time of this patch): the generic branch\'s own resize/selection machinery was not touched wholesale -- Drawing (which shares the family\'s default {content}/{resizeHandle} wrapper and is explicitly, permanently frozen -- PATCH FREEFORM-SELECTION-BATCH-1, PATCH FREEFORM-CONTAINER-SELECTION) never gets an unconditional click guard from any of these patches', () => {
+    // Link, Todo, and Container each legitimately gained their OWN guard in
+    // later, separate patches (once each was independently confirmed
+    // affected) -- Drawing is the one case in this family that stays frozen
+    // across every one of them, since it shares the default fallback
+    // wrapper with Note/AI-component but is deliberately excluded via a
+    // type-scoped ternary rather than an unconditional guard.
+    const guardIndex = cardsSrc.indexOf(
+      "onClick={(padlet.type === 'text' || padlet.type === 'ai-component') ? (e) => e.stopPropagation() : undefined}",
     );
-    const containerWrapper = cardsSrc.slice(containerContentIndex, cardsSrc.indexOf('{content}', containerContentIndex));
-    expect(containerWrapper).toContain('<div className="relative">');
-    expect(containerWrapper).not.toContain('onClick');
+    const fallbackBranchStart = cardsSrc.indexOf("return (\n          <NotePostContextMenu");
+    const contentIndex = cardsSrc.indexOf('{content}', fallbackBranchStart);
+    expect(guardIndex).toBeGreaterThan(fallbackBranchStart);
+    expect(guardIndex).toBeLessThan(contentIndex);
+    expect(cardsSrc.slice(fallbackBranchStart, contentIndex)).not.toContain(
+      '<div className="relative" onClick={(e) => e.stopPropagation()}>',
+    );
   });
 
   it('Clipart is unchanged: its own pre-existing card-level click guard is untouched', () => {

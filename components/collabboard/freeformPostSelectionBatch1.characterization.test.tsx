@@ -71,13 +71,12 @@ describe('PATCH FREEFORM-SELECTION-BATCH-1 Note/Todo/Link/AI-component click no 
     expect(fallbackBranch).toContain(": undefined}");
   });
 
-  it('Container remains untouched: its own dedicated wrapper stays bare (frozen -- PATCH POST-RESIZE-B3.1)', () => {
-    const containerBranch = branch("if (padlet.type === 'container') {", "return (\n          <NotePostContextMenu");
-    const wrapperMatch = containerBranch.match(/<div\s+className="relative"[\s\S]{0,400}?>\s*\{content\}\s*\{resizeHandle\}/);
-    expect(wrapperMatch).not.toBeNull();
-    expect(wrapperMatch![0]).toContain('<div className="relative">');
-    expect(wrapperMatch![0]).not.toContain('onClick');
-  });
+  // Container was frozen/untouched AT THE TIME of this batch (it was still
+  // bare here) -- it later received its own identical guard in PATCH
+  // FREEFORM-CONTAINER-SELECTION (freeformContainerSelection.
+  // characterization.test.tsx owns that assertion now), so this file no
+  // longer asserts Container's current state to avoid two suites disagreeing
+  // about one fact as later patches land.
 
   it('control: Table remains fixed (PATCH FREEFORM-TABLE-SELECTION, unchanged by this batch)', () => {
     const tableBranch = branch("if (padlet.type === 'table') {", "if (padlet.type === 'todo') {");

@@ -4495,7 +4495,13 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                 : undefined}
             postTitleVisibleIds={Array.from(getEffectiveVisibleChildTitleIds(padlet.metadata as any, containerChildPadlets))}
             >
-              <div className="relative">
+              {/* PATCH FREEFORM-CONTAINER-SELECTION: same fix as Table/Note/
+                  Todo/Link/AI-component -- Container is selected on
+                  mousedown, but its click was never stopped, so it bubbled
+                  to CanvasClient's blank-canvas deselect and cleared
+                  selection right after it was set. Resize geometry,
+                  orientation, auto-grow, and membership are untouched. */}
+              <div className="relative" onClick={(e) => e.stopPropagation()}>
                 {content}
                 {resizeHandle}
               </div>
