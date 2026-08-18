@@ -337,6 +337,33 @@ describe('PATCH FREEFORM-IMAGE-R3 Image media wrapper no longer letterboxes gray
     expect(imgClassName).not.toMatch(/isImageManuallySized[\s\S]{0,120}object-cover/);
   });
 
+  it('PATCH IMAGE-R6: Image resize preview/commit aspect-lock the outer frame through the measured image chrome', () => {
+    const imageResizeBox = code(cardsSrc).slice(
+      code(cardsSrc).indexOf('function FreeformImageResizeBox('),
+      code(cardsSrc).indexOf('function FreeformPadletCards('),
+    );
+    expect(imageResizeBox).toContain('const shouldAspectLockImageResize = !((padlet.metadata as any)?.fullView || (padlet.metadata as any)?.cropToGrid === true);');
+    expect(imageResizeBox).toContain('const getAspectLockedImageSize = React.useCallback((width: number, fallbackHeight: number) => {');
+    expect(imageResizeBox).toContain('const chromeWidth = Math.max(cardRect.width - mediaRect.width, 0);');
+    expect(imageResizeBox).toContain('const chromeHeight = Math.max(cardRect.height - mediaRect.height, 0);');
+    expect(imageResizeBox).toContain('resizeImageOuterBoxToAspect({');
+    expect(imageResizeBox).toContain('onResizePreview={(w, h) => setLivePreview(getAspectLockedImageSize(w, h))}');
+    expect(imageResizeBox).toContain('const next = getAspectLockedImageSize(w, h);');
+    expect(imageResizeBox).toContain('onCommit(next.width, next.height, ow, oh);');
+  });
+
+  it('PATCH IMAGE-R6: default, crop-to-grid, and Full View image render branches remain explicit and unchanged', () => {
+    const imgClassName = code(cardsSrc).slice(
+      code(cardsSrc).indexOf('src={padlet.metadata?.drawing || padlet.metadata?.imageUrl}'),
+      code(cardsSrc).indexOf('style={(padlet.metadata as any)?.cropToGrid === true'),
+    );
+    expect(imgClassName).toContain('"w-full h-auto object-contain max-h-[500px] pointer-events-none select-none"');
+    expect(imgClassName).toContain('"w-full object-cover pointer-events-none select-none"');
+    expect(code(cardsSrc)).toContain('? { height: `${IMAGE_CROP_TO_GRID_HEIGHT_PX}px` }');
+    expect(code(cardsSrc)).toContain('{!(padlet.metadata as any)?.fullView && (');
+    expect(code(cardsSrc)).toContain('const shouldAspectLockImageResize = !((padlet.metadata as any)?.fullView || (padlet.metadata as any)?.cropToGrid === true);');
+  });
+
   it('Image geometry/sizing logic is untouched: same manual-size gate, same minimums, same handle wiring', () => {
     // PATCH FREEFORM-IMAGE-R4: `width: isImageManuallySized(padlet) ? ... :
     // ...` (an inline JSX ternary) became `manuallySized ? ... : ...`
@@ -354,7 +381,7 @@ describe('PATCH FREEFORM-IMAGE-R3 Image media wrapper no longer letterboxes gray
     );
     // The defining R4 change: onResizePreview no longer reaches the parent
     // at all -- it only ever calls the component's own setLivePreview.
-    expect(imageResizeBox).toContain('onResizePreview={(w, h) => setLivePreview({ width: w, height: h })}');
+    expect(imageResizeBox).toContain('onResizePreview={(w, h) => setLivePreview(getAspectLockedImageSize(w, h))}');
     expect(imageResizeBox).not.toContain('previewPostResize');
     expect(imageResizeBox).not.toMatch(/onResizePreview[\s\S]{0,80}setPadlets/);
     // Commit is unchanged in shape: the host's onCommit prop (still,
@@ -363,7 +390,7 @@ describe('PATCH FREEFORM-IMAGE-R3 Image media wrapper no longer letterboxes gray
     // onResizeCommit only -- never from onResizePreview.
     expect(imageResizeBox).toContain('onResizeCommit={(w, h, ow, oh) => {');
     expect(imageResizeBox).toContain('setLivePreview(null);');
-    expect(imageResizeBox).toContain('onCommit(w, h, ow, oh);');
+    expect(imageResizeBox).toContain('onCommit(next.width, next.height, ow, oh);');
     expect(code(cardsSrc)).toContain('void commitPostResize(padlet.id, w, h, ow, oh, { manualSize: true }, padlet.metadata);');
 
     // previewPostResize (still used by Clipart/AI/generic-branch types --

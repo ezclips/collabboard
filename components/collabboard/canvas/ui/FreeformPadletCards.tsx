@@ -9,6 +9,7 @@ import { createUpdatePostFieldsCommand } from '@/lib/domain/canvas/posts';
 import { selectCardModalRoute } from '@/lib/domain/canvas/cardModalRoute';
 import { selectDocumentModalDestination, type DocumentModalDestination } from '@/lib/domain/canvas/documentModalRoute';
 import { isDocumentPost } from '@/lib/domain/canvas/documentPost';
+import { resizeImageOuterBoxToAspect } from '@/lib/domain/canvas/imageResizeGeometry';
 import { getPostResizeCapability, getPostResizeConstraints, getManualResizeDimensions, isImageManuallySized } from '@/lib/domain/canvas/postResizePolicy';
 import PostResizeHandle from '@/components/collabboard/canvas/ui/PostResizeHandle';
 import { createPostsRepository } from '@/lib/infra/canvas/postsRepository';
@@ -283,6 +284,40 @@ function FreeformImageResizeBox({
   const baseHeight = manuallySized ? Math.max(Number(padlet.height), IMAGE_RESIZE_MIN_HEIGHT) : undefined;
   const displayWidth = livePreview ? livePreview.width : baseWidth;
   const displayHeight = livePreview ? livePreview.height : baseHeight;
+  const shouldAspectLockImageResize = !((padlet.metadata as any)?.fullView || (padlet.metadata as any)?.cropToGrid === true);
+
+  const getAspectLockedImageSize = React.useCallback((width: number, fallbackHeight: number) => {
+    if (!shouldAspectLockImageResize) return { width, height: fallbackHeight };
+    const cardEl = cardRef.current;
+    const imgEl = cardEl?.querySelector('img');
+    const mediaEl = imgEl?.parentElement;
+    if (!cardEl || !imgEl || !mediaEl) return { width, height: fallbackHeight };
+
+    const naturalAspect = imgEl.naturalWidth > 0 && imgEl.naturalHeight > 0
+      ? imgEl.naturalWidth / imgEl.naturalHeight
+      : 0;
+    const imageRect = imgEl.getBoundingClientRect();
+    const displayedAspect = imageRect.width > 0 && imageRect.height > 0
+      ? imageRect.width / imageRect.height
+      : 0;
+    const imageAspectRatio = naturalAspect || displayedAspect;
+    if (!Number.isFinite(imageAspectRatio) || imageAspectRatio <= 0) {
+      return { width, height: fallbackHeight };
+    }
+
+    const cardRect = cardEl.getBoundingClientRect();
+    const mediaRect = mediaEl.getBoundingClientRect();
+    const chromeWidth = Math.max(cardRect.width - mediaRect.width, 0);
+    const chromeHeight = Math.max(cardRect.height - mediaRect.height, 0);
+    const next = resizeImageOuterBoxToAspect({
+      outerWidth: width,
+      imageAspectRatio,
+      chromeWidth,
+      chromeHeight,
+      minOuterWidth: IMAGE_RESIZE_MIN_WIDTH,
+    });
+    return next ? { width: next.width, height: next.height } : { width, height: fallbackHeight };
+  }, [shouldAspectLockImageResize]);
 
   return (
     <>
@@ -315,7 +350,7 @@ function FreeformImageResizeBox({
           constraints={getPostResizeConstraints(padlet)}
           maxWidth={FREEFORM_WORLD_MAX_X - (Number(padlet.position_x) || 0)}
           maxHeight={FREEFORM_WORLD_MAX_Y - (Number(padlet.position_y) || 0)}
-          onResizePreview={(w, h) => setLivePreview({ width: w, height: h })}
+          onResizePreview={(w, h) => setLivePreview(getAspectLockedImageSize(w, h))}
           onResizeCommit={(w, h, ow, oh) => {
             // Clear the local override in the SAME synchronous handler as
             // the parent's own optimistic commit write (onCommit ->
@@ -325,7 +360,9 @@ function FreeformImageResizeBox({
             // (parent resets padlets to ow/oh) is reflected automatically
             // once local has already deferred back to padlet.width/height.
             setLivePreview(null);
-            onCommit(w, h, ow, oh);
+            const next = getAspectLockedImageSize(w, h);
+            if (Math.abs(next.width - ow) < 0.5 && Math.abs(next.height - oh) < 0.5) return;
+            onCommit(next.width, next.height, ow, oh);
           }}
           getStartSize={() => {
             const el = cardRef.current;
