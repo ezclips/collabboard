@@ -254,6 +254,68 @@ async function release() {
   await act(async () => { await latest!.api.handleCanvasMouseUp(); });
 }
 
+/** Real window keydown/keyup for Alt -- exercises the hook's own listener,
+ *  covering the "Alt state changes between the last move and release" case
+ *  independently of whatever the synthetic mousemove events carried. */
+function pressAltKey() {
+  act(() => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt' })); });
+}
+function releaseAltKey() {
+  act(() => { window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Alt' })); });
+}
+
+/**
+ * Same as drag(), but every synthetic mousemove event explicitly carries
+ * `altKey: altHeld` (a real MouseEvent's altKey is always a boolean, never
+ * undefined -- the plain drag() helper above omits it, which is harmless
+ * there only because `undefined` happens to be falsy).
+ */
+function dragWithAlt(grabId: string, target: { x: number; y: number }, zoom: number, altHeld: boolean) {
+  const handle = latest!;
+  const grabbed = handle.padlets.find((p) => p.id === grabId)!;
+  const startClientX = toClientX(grabbed.position_x, zoom);
+  const startClientY = toClientY(grabbed.position_y, zoom);
+
+  const postEl = document.createElement('div');
+  stubRect(postEl, {
+    left: startClientX,
+    top: startClientY,
+    width: (Number(grabbed.width) || NOTE_WIDTH) * zoom,
+    height: (Number(grabbed.height) || NOTE_HEIGHT) * zoom,
+  });
+
+  act(() => {
+    handle.api.handlePadletMouseDown({
+      clientX: startClientX,
+      clientY: startClientY,
+      currentTarget: postEl,
+      target: { closest: () => null },
+      preventDefault: () => {},
+      stopPropagation: () => {},
+    } as any, grabId);
+  });
+
+  const move = () => act(() => {
+    latest!.api.handleCanvasMouseMove({
+      buttons: 1,
+      clientX: toClientX(target.x, zoom),
+      clientY: toClientY(target.y, zoom),
+      altKey: altHeld,
+      preventDefault: () => {},
+    } as any);
+  });
+  move();
+  move();
+}
+
+/** release(), but sets the Alt key state (via real keydown/keyup) immediately
+ *  before mouseup -- proving the bypass decision is authoritative AT RELEASE,
+ *  not merely inherited from whatever the last mousemove decided. */
+async function releaseWithAlt(altHeld: boolean) {
+  if (altHeld) pressAltKey(); else releaseAltKey();
+  await act(async () => { await latest!.api.handleCanvasMouseUp(); });
+}
+
 function positionOf(id: string) {
   const padlet = latest!.padlets.find((p) => p.id === id)!;
   return { x: padlet.position_x, y: padlet.position_y };
@@ -560,6 +622,162 @@ describe('PATCH SNAP-GRID-B: snap ON rounds x/y to the nearest 20 world units', 
       { id: 'a', position_x: 220, position_y: 200 },
       { id: 'b', position_x: 920, position_y: 700 },
     ]);
+  });
+});
+
+// PATCH SNAP-GRID-C: the 700/500-unit spacing above is itself a multiple of
+// 20, so independently snapping each member's x/y would have coincidentally
+// preserved that spacing anyway -- it would NOT have caught a defect where
+// snapping is applied per-member instead of once to a shared delta. This
+// block uses the spec's own deliberately non-grid-aligned example (A at
+// x=13, B at x=47, difference 34 -- not a multiple of 20) to prove the fix.
+describe('PATCH SNAP-GRID-C: group drag preserves relative spacing for a non-grid-aligned group (fixes independent-per-member snap defect)', () => {
+  let persisted: PersistedPosition[];
+  beforeEach(() => { persisted = installFakeSupabase(); });
+
+  it('relative x distance (34, not a multiple of 20) survives a snapped group drag', async () => {
+    mount(
+      <Harness
+        initialPadlets={[note('a', 13, 100), note('b', 47, 100)]}
+        selectedPadletIds={['a', 'b']}
+        zoom={1}
+        snapToGrid
+      />
+    );
+    // Drag anchor 'a' from world x=13 to world x=35 (raw delta +22).
+    drag('a', { x: 35, y: 100 }, 1);
+    const a = positionOf('a');
+    const b = positionOf('b');
+    // The anchor itself lands on a grid line...
+    expect(a.x % 20).toBe(0);
+    // ...but B is NOT independently re-snapped -- it inherits the anchor's
+    // exact delta, so the original 34-unit difference is untouched. (The
+    // buggy independent-snap behavior this replaces would have produced a
+    // 20-unit difference here instead of 34.)
+    expect(b.x - a.x).toBe(34);
+    await release();
+    const byId = Object.fromEntries(persisted.map((row) => [row.id, row]));
+    expect(byId.b.position_x - byId.a.position_x).toBe(34);
+  });
+
+  it('a group drag with snap OFF is unaffected (control)', () => {
+    mount(
+      <Harness
+        initialPadlets={[note('a', 13, 100), note('b', 47, 100)]}
+        selectedPadletIds={['a', 'b']}
+        zoom={1}
+        snapToGrid={false}
+      />
+    );
+    drag('a', { x: 35, y: 100 }, 1);
+    const a = positionOf('a');
+    const b = positionOf('b');
+    expect(a).toEqual({ x: 35, y: 100 });
+    expect(b.x - a.x).toBe(34);
+  });
+});
+
+describe('PATCH SNAP-GRID-C: Alt/Option temporarily bypasses snap without touching the stored preference', () => {
+  let persisted: PersistedPosition[];
+  beforeEach(() => { persisted = installFakeSupabase(); });
+
+  it('holding Alt through release commits the unsnapped position even with snap ON', async () => {
+    mount(<Harness initialPadlets={[note('n1', 400, 400)]} selectedPadletIds={[]} zoom={1} snapToGrid />);
+    dragWithAlt('n1', { x: 413, y: 407 }, 1, true);
+    expect(positionOf('n1')).toEqual({ x: 413, y: 407 });
+    await releaseWithAlt(true);
+    expect(persisted).toEqual([{ id: 'n1', position_x: 413, position_y: 407 }]);
+  });
+
+  it('releasing with Alt held snaps nothing even if Alt was NOT held during the moves (authoritative at release)', async () => {
+    mount(<Harness initialPadlets={[note('n1', 400, 400)]} selectedPadletIds={[]} zoom={1} snapToGrid />);
+    // Moves happen without Alt (preview would show snapped)...
+    dragWithAlt('n1', { x: 413, y: 407 }, 1, false);
+    expect(positionOf('n1')).toEqual({ x: 420, y: 400 });
+    // ...but Alt is held at the moment of release.
+    await releaseWithAlt(true);
+    expect(persisted).toEqual([{ id: 'n1', position_x: 413, position_y: 407 }]);
+  });
+
+  it('releasing the drag without Alt still snaps normally (Alt has no lingering effect on the next drag)', async () => {
+    mount(<Harness initialPadlets={[note('n1', 400, 400)]} selectedPadletIds={[]} zoom={1} snapToGrid />);
+    dragWithAlt('n1', { x: 413, y: 407 }, 1, false);
+    await releaseWithAlt(false);
+    expect(persisted).toEqual([{ id: 'n1', position_x: 420, position_y: 400 }]);
+  });
+
+  it('Alt has no special effect when snap is OFF', () => {
+    mount(<Harness initialPadlets={[note('n1', 400, 400)]} selectedPadletIds={[]} zoom={1} snapToGrid={false} />);
+    dragWithAlt('n1', { x: 413, y: 407 }, 1, true);
+    expect(positionOf('n1')).toEqual({ x: 413, y: 407 });
+  });
+
+  it('a group drag with Alt held bypasses snap for the whole group, preserving relative spacing exactly as the raw delta would', async () => {
+    mount(
+      <Harness
+        initialPadlets={[note('a', 13, 100), note('b', 47, 100)]}
+        selectedPadletIds={['a', 'b']}
+        zoom={1}
+        snapToGrid
+      />
+    );
+    dragWithAlt('a', { x: 35, y: 100 }, 1, true);
+    expect(positionOf('a')).toEqual({ x: 35, y: 100 });
+    expect(positionOf('b')).toEqual({ x: 69, y: 100 });
+    await releaseWithAlt(true);
+    expect(persisted).toEqual([
+      { id: 'a', position_x: 35, position_y: 100 },
+      { id: 'b', position_x: 69, position_y: 100 },
+    ]);
+  });
+});
+
+describe('PATCH SNAP-GRID-C: Root Container still snaps, its children are untouched', () => {
+  let persisted: PersistedPosition[];
+  beforeEach(() => { persisted = installFakeSupabase(); });
+
+  const container = (x: number, y: number) => note('col', x, y, {
+    type: 'container',
+    width: 350,
+    height: 300,
+    metadata: { isContainer: true, kind: 'container', childPadletIds: ['child-1'] } as any,
+  });
+  const child = () => note('child-1', 12, 40, { metadata: { parentId: 'col' } as any });
+
+  it('a root Container snaps to the grid like any other root post', async () => {
+    mount(<Harness initialPadlets={[container(13, 27), child()]} selectedPadletIds={[]} zoom={1} snapToGrid />);
+    drag('col', { x: 35, y: 40 }, 1);
+    const { x, y } = positionOf('col');
+    expect(x % 20).toBe(0);
+    expect(y % 20).toBe(0);
+    await release();
+    expect(persisted).toEqual([{ id: 'col', position_x: x, position_y: y }]);
+  });
+
+  it('the Container child keeps its exact container-local coordinates, untouched by snap', async () => {
+    mount(<Harness initialPadlets={[container(13, 27), child()]} selectedPadletIds={[]} zoom={1} snapToGrid />);
+    drag('col', { x: 35, y: 40 }, 1);
+    await release();
+    expect(positionOf('child-1')).toEqual({ x: 12, y: 40 });
+    expect(persisted.map((row) => row.id)).toEqual(['col']);
+  });
+});
+
+describe('PATCH SNAP-GRID-C: toggling snap does not reposition existing posts', () => {
+  it('re-rendering the Harness with a different snapToGrid value, with no drag, leaves every position untouched', () => {
+    const initial = [note('a', 13, 27), note('b', 900, 701)];
+    mount(<Harness initialPadlets={initial} selectedPadletIds={[]} zoom={1} snapToGrid={false} />);
+    expect(positionOf('a')).toEqual({ x: 13, y: 27 });
+    expect(positionOf('b')).toEqual({ x: 900, y: 701 });
+
+    // Simulate the user flipping the preference mid-session: remount with
+    // snapToGrid=true and fresh padlets at the SAME starting coordinates --
+    // production never re-snaps on toggle since setFreeformGridPreference
+    // (CanvasClient.tsx) never touches padlets/setPadlets, only its own
+    // localStorage-backed appearance state.
+    mount(<Harness initialPadlets={initial} selectedPadletIds={[]} zoom={1} snapToGrid />);
+    expect(positionOf('a')).toEqual({ x: 13, y: 27 });
+    expect(positionOf('b')).toEqual({ x: 900, y: 701 });
   });
 });
 

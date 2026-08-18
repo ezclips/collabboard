@@ -41,8 +41,9 @@ describe('PATCH SNAP-GRID-A dot grid: Freeform-only, scales/pans with world coor
     expect(backgroundStyleFn).toContain('const showDotGrid = isFreeformLayout && freeformBoardAppearance.showDotGrid;');
   });
 
-  it('grid spacing is 20 world units, scaled by canvasZoom', () => {
-    expect(backgroundStyleFn).toContain('const dotGridSizePx = 20 * canvasZoom;');
+  it('grid spacing is FREEFORM_SNAP_GRID_SIZE world units (shared with drag snap, PATCH SNAP-GRID-C), scaled by canvasZoom for rendering only', () => {
+    expect(backgroundStyleFn).toContain('const dotGridSizePx = FREEFORM_SNAP_GRID_SIZE * canvasZoom;');
+    expect(code(clientSrc)).toMatch(/import\s*\{[\s\S]*?FREEFORM_SNAP_GRID_SIZE[\s\S]*?\}\s*from\s*'@\/components\/collabboard\/canvas\/engine\/freeformStageGeometry'/);
   });
 
   it('grid position tracks the same world-origin values the Freeform world layers use for pan', () => {

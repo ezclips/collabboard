@@ -163,6 +163,29 @@ export function useCanvasInteractions({
   const lastDragDeltaRef = useRef<{ dx: number; dy: number } | null>(null);
   const dragSelectionStartPositionsRef = useRef<Record<string, { x: number; y: number }>>({});
 
+  // PATCH SNAP-GRID-C: Alt/Option temporarily bypasses snap for the CURRENT
+  // gesture only -- the stored `snapToGrid` preference itself is never
+  // touched. Synced from two sources so it's correct even at release with no
+  // intervening mousemove: the live mousemove event's own altKey (most
+  // authoritative while dragging) and dedicated keydown/keyup listeners
+  // (covers Alt pressed/released between the last move and mouseup).
+  const altKeyRef = useRef(false);
+
+  useEffect(() => {
+    const handleAltKeyChange = (e: KeyboardEvent) => {
+      if (e.key === 'Alt') altKeyRef.current = e.type === 'keydown';
+    };
+    const handleWindowBlur = () => { altKeyRef.current = false; };
+    window.addEventListener('keydown', handleAltKeyChange);
+    window.addEventListener('keyup', handleAltKeyChange);
+    window.addEventListener('blur', handleWindowBlur);
+    return () => {
+      window.removeEventListener('keydown', handleAltKeyChange);
+      window.removeEventListener('keyup', handleAltKeyChange);
+      window.removeEventListener('blur', handleWindowBlur);
+    };
+  }, []);
+
   const lockBodySelection = () => {
     if (bodyUserSelectRef.current) return;
     const body = document.body;
@@ -274,6 +297,10 @@ export function useCanvasInteractions({
 
   const handleCanvasMouseMove = (e: React.MouseEvent) => {
     if (!canEditCanvas) return;
+    // PATCH SNAP-GRID-C: the live event's altKey is the freshest signal while
+    // a drag is in progress; keydown/keyup (above) cover the gap between the
+    // last move and mouseup.
+    altKeyRef.current = e.altKey;
     if (isDragging && e.buttons === 0) {
       handleCanvasMouseUp();
       return;
@@ -371,22 +398,40 @@ export function useCanvasInteractions({
       // bounds, then hand every member that identical delta. Clamping members
       // individually would let the ones already at an edge stop while the
       // rest kept moving, silently collapsing the selection's spacing.
-      const { dx, dy } = clampGroupDragDeltaToFreeformBounds(groupBounds, {
+      const clampedDelta = clampGroupDragDeltaToFreeformBounds(groupBounds, {
         dx: newX - anchorStart.x,
         dy: newY - anchorStart.y,
       });
-      lastDragDeltaRef.current = { dx, dy };
+      // PATCH SNAP-GRID-C: the ref stores the RAW (pre-snap) delta -- the
+      // commit re-derives the snapped/bypassed delta itself from this, using
+      // whatever Alt state is authoritative AT RELEASE (see
+      // handleCanvasMouseUp), not whatever this particular mousemove decided.
+      lastDragDeltaRef.current = clampedDelta;
+
+      // PATCH SNAP-GRID-C: snap the DELTA once, off the anchor (the post the
+      // user is actually holding), then apply that identical delta to every
+      // member -- never snap each member's x/y independently, which would
+      // round every post toward its own nearest grid line and destroy the
+      // group's relative spacing (post A at x=13, post B at x=47 must still
+      // differ by exactly 34 after a snapped group drag). Alt/Option
+      // temporarily bypasses snapping for this gesture without touching the
+      // stored preference.
+      const effectiveSnapToGrid = snapToGrid && !altKeyRef.current;
+      const dx = effectiveSnapToGrid
+        ? snapWorldValueToGrid(anchorStart.x + clampedDelta.dx) - anchorStart.x
+        : clampedDelta.dx;
+      const dy = effectiveSnapToGrid
+        ? snapWorldValueToGrid(anchorStart.y + clampedDelta.dy) - anchorStart.y
+        : clampedDelta.dy;
 
       setPadlets(prev => prev.map((padlet) => {
         if (!draggedPadletIds.includes(padlet.id)) return padlet;
         const start = startPositions[padlet.id];
         if (!start) return padlet;
-        const memberX = start.x + dx;
-        const memberY = start.y + dy;
         return {
           ...padlet,
-          position_x: snapToGrid ? snapWorldValueToGrid(memberX) : memberX,
-          position_y: snapToGrid ? snapWorldValueToGrid(memberY) : memberY,
+          position_x: start.x + dx,
+          position_y: start.y + dy,
         };
       }));
       return;
@@ -417,14 +462,19 @@ export function useCanvasInteractions({
       return prev === nextId ? prev : nextId;
     });
 
-    // PATCH SNAP-GRID-B: snapped AFTER the existing bounds clamp, so the
-    // preview the user sees during the drag is exactly the value that will
-    // be committed (see handleCanvasMouseUp). OFF path is byte-for-byte the
-    // pre-patch clampedX/clampedY.
-    const previewX = snapToGrid ? snapWorldValueToGrid(clampedX) : clampedX;
-    const previewY = snapToGrid ? snapWorldValueToGrid(clampedY) : clampedY;
+    // PATCH SNAP-GRID-C: the ref stores the RAW (pre-snap) clamped position --
+    // the commit re-derives snapped-or-bypassed from this using whatever Alt
+    // state is authoritative AT RELEASE, not whatever this mousemove decided.
+    lastDragPositionRef.current = { x: clampedX, y: clampedY };
 
-    lastDragPositionRef.current = { x: previewX, y: previewY };
+    // PATCH SNAP-GRID-B/C: snapped AFTER the existing bounds clamp, so the
+    // preview the user sees during the drag is exactly the value that will
+    // be committed (see handleCanvasMouseUp) -- unless Alt/Option is held,
+    // which bypasses snapping for this gesture without touching the stored
+    // preference. Plain OFF path is byte-for-byte the pre-patch clampedX/Y.
+    const effectiveSnapToGrid = snapToGrid && !altKeyRef.current;
+    const previewX = effectiveSnapToGrid ? snapWorldValueToGrid(clampedX) : clampedX;
+    const previewY = effectiveSnapToGrid ? snapWorldValueToGrid(clampedY) : clampedY;
 
     setPadlets(prev => prev.map(p =>
       p.id === draggingPadletId
@@ -461,11 +511,25 @@ export function useCanvasInteractions({
 
       if (currentIsDragging && currentDraggingId) {
         if (currentDraggingIds.length > 1) {
-          const dragDelta = lastDragDeltaRef.current;
+          // PATCH SNAP-GRID-C: rawDelta is the pre-snap delta captured by the
+          // last mousemove. The snap-or-bypass decision is made HERE, fresh,
+          // from the Alt state as it stands AT RELEASE -- not inherited from
+          // whatever the last mousemove happened to decide -- so "release
+          // with Alt held commits unsnapped" holds even if Alt changed after
+          // the final pointer move.
+          const rawDelta = lastDragDeltaRef.current;
           const startPositions = dragSelectionStartPositionsRef.current;
+          const anchorStart = startPositions[currentDraggingId];
           lastDragDeltaRef.current = null;
           dragSelectionStartPositionsRef.current = {};
-          if (dragDelta) {
+          if (rawDelta && anchorStart) {
+            const effectiveSnapToGrid = snapToGrid && !altKeyRef.current;
+            const dx = effectiveSnapToGrid
+              ? snapWorldValueToGrid(anchorStart.x + rawDelta.dx) - anchorStart.x
+              : rawDelta.dx;
+            const dy = effectiveSnapToGrid
+              ? snapWorldValueToGrid(anchorStart.y + rawDelta.dy) - anchorStart.y
+              : rawDelta.dy;
             try {
               const updatePostPosition = createUpdatePostPositionCommand(createPostsRepository());
               await Promise.all(
@@ -477,10 +541,13 @@ export function useCanvasInteractions({
                   // Re-clamping per post here is exactly the optimistic-vs-
                   // persisted divergence this patch removes: the DB must
                   // receive the same coordinates the user just saw.
-                  const memberX = start.x + dragDelta.dx;
-                  const memberY = start.y + dragDelta.dy;
-                  const nextX = snapToGrid ? snapWorldValueToGrid(memberX) : Math.round(memberX);
-                  const nextY = snapToGrid ? snapWorldValueToGrid(memberY) : Math.round(memberY);
+                  //
+                  // PATCH SNAP-GRID-C: dx/dy are the SAME single value for
+                  // every member -- applying an identical delta to each
+                  // (never re-snapping per member) is what preserves the
+                  // group's relative spacing.
+                  const nextX = Math.round(start.x + dx);
+                  const nextY = Math.round(start.y + dy);
                   markPadletLocallyModified(padletId);
                   const result = await updatePostPosition({ postId: padletId, positionX: nextX, positionY: nextY }, { userId: null });
                   if (!result.ok) throw result.error.cause ?? result.error;
@@ -533,8 +600,13 @@ export function useCanvasInteractions({
           const finalPos = lastDragPositionRef.current;
           lastDragPositionRef.current = null;
           if (finalPos) {
-            const committedX = snapToGrid ? snapWorldValueToGrid(finalPos.x) : Math.round(finalPos.x);
-            const committedY = snapToGrid ? snapWorldValueToGrid(finalPos.y) : Math.round(finalPos.y);
+            // PATCH SNAP-GRID-C: finalPos is the RAW (pre-snap) clamped
+            // position from the last mousemove; the snap-or-bypass decision
+            // is made fresh here from the Alt state at release, matching the
+            // group path above.
+            const effectiveSnapToGrid = snapToGrid && !altKeyRef.current;
+            const committedX = effectiveSnapToGrid ? snapWorldValueToGrid(finalPos.x) : Math.round(finalPos.x);
+            const committedY = effectiveSnapToGrid ? snapWorldValueToGrid(finalPos.y) : Math.round(finalPos.y);
             markPadletLocallyModified(currentDraggingId);
             try {
               const updatePostPosition = createUpdatePostPositionCommand(createPostsRepository());

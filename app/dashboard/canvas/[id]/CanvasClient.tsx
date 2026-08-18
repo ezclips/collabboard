@@ -146,6 +146,7 @@ import {
   clampRectPositionToFreeformBounds,
   FREEFORM_SIGNED_WORLD_HEIGHT,
   FREEFORM_SIGNED_WORLD_WIDTH,
+  FREEFORM_SNAP_GRID_SIZE,
   FREEFORM_WORLD_HEIGHT_PX,
   FREEFORM_WORLD_ORIGIN_OFFSET_X,
   FREEFORM_WORLD_ORIGIN_OFFSET_Y,
@@ -1116,7 +1117,11 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     const bgValue = freeformBoardAppearance.backgroundValue;
     const showDotGrid = isFreeformLayout && freeformBoardAppearance.showDotGrid;
     const dotPattern = 'radial-gradient(rgba(148, 163, 184, 0.38) 1px, transparent 1.2px)';
-    const dotGridSizePx = 20 * canvasZoom;
+    // PATCH SNAP-GRID-C: ONE shared world-grid constant -- visual dot spacing
+    // and drag snap spacing (useCanvasInteractions' snapWorldValueToGrid)
+    // both derive from FREEFORM_SNAP_GRID_SIZE now, so they can never drift
+    // apart. Only THIS factor (canvasZoom) is rendering-only, per SNAP-GRID-B.
+    const dotGridSizePx = FREEFORM_SNAP_GRID_SIZE * canvasZoom;
     const dotGridSize = `${dotGridSizePx}px ${dotGridSizePx}px`;
     const dotGridPosition = `${freeformWorldOriginLeft}px ${freeformWorldOriginTop}px`;
 
