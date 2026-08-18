@@ -23,6 +23,8 @@ const forbidden = [
   'getInteractionState',
   'subscribeToSceneChange',
   'getSceneRevision',
+  'drawingResizeFixture.e2e',
+  '__drawingResizeFixture',
 ];
 
 if (!existsSync(nextDir) || !existsSync(buildId)) {
