@@ -185,3 +185,55 @@ describe('PATCH ALIGN-D alignment guides preference: same personal-preference me
     expect(code(clientSrc)).toContain('alignmentGuidesEnabled: freeformBoardAppearance.alignmentGuidesEnabled,');
   });
 });
+
+describe('PATCH SPACE-P3 spacing guides preference: independent of Alignment Guides, same personal-preference mechanism, default ON', () => {
+  const setterFn = slice(
+    code(clientSrc),
+    'const setFreeformGridPreference = useCallback(',
+    '}, [canvasId]);',
+  );
+
+  it('persists to its own distinct localStorage key, independent of the alignment-guides key', () => {
+    expect(code(clientSrc)).toContain("`freeform-board-spacing-guides:${boardId}`");
+  });
+
+  it('defaults to ON: absence of a stored value means true, only an explicit "false" turns it off', () => {
+    const loadEffect = slice(
+      code(clientSrc),
+      'const spacingGuidesStorageKey = getFreeformSpacingGuidesStorageKey(canvas?.id);',
+      'setFreeformBoardAppearance({',
+    );
+    expect(loadEffect).toContain('window.localStorage.getItem(spacingGuidesStorageKey)');
+    const assignment = slice(code(clientSrc), 'spacingGuidesEnabled: storedSpacingGuides', ',');
+    expect(assignment).toContain("!== 'false'");
+  });
+
+  it('setFreeformGridPreference has no permission gate for the spacing-guides update either', () => {
+    expect(setterFn).not.toMatch(/canUseFreeformEditButton/);
+  });
+
+  it('setFreeformGridPreference writes the spacing-guides key only when that specific update is present, independent of the other three', () => {
+    expect(setterFn).toContain('updates.spacingGuidesEnabled !== undefined');
+    expect(setterFn).toContain('getFreeformSpacingGuidesStorageKey(canvasId)');
+  });
+
+  it('onToggleSpacingGuides updates only its own key, not showDotGrid, snapToGrid or alignmentGuidesEnabled', () => {
+    const toggle = slice(code(clientSrc), 'onToggleSpacingGuides={() => {', '/>');
+    expect(toggle).toContain(
+      'setFreeformGridPreference({ spacingGuidesEnabled: !freeformBoardAppearance.spacingGuidesEnabled });',
+    );
+    expect(toggle).not.toContain('showDotGrid:');
+    expect(toggle).not.toContain('snapToGrid:');
+    expect(toggle).not.toContain('alignmentGuidesEnabled:');
+  });
+
+  it('the Freeform board menu exposes Spacing Guides as its own independent prop, not derived from the other three toggles', () => {
+    const propsBlock = slice(code(menuSrc), 'type FreeformCanvasBoardMenuProps = {', '};');
+    expect(propsBlock).toContain('spacingGuides: boolean;');
+    expect(propsBlock).toContain('onToggleSpacingGuides: () => void;');
+  });
+
+  it('is wired into useCanvasInteractions as spacingGuidesEnabled, its own independent param from alignmentGuidesEnabled', () => {
+    expect(code(clientSrc)).toContain('spacingGuidesEnabled: freeformBoardAppearance.spacingGuidesEnabled,');
+  });
+});

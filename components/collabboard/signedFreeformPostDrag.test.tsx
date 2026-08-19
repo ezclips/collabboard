@@ -121,6 +121,7 @@ function Harness({
     canEditCanvas,
     snapToGrid,
     alignmentGuidesEnabled: true,
+    spacingGuidesEnabled: true,
     padlets,
     setPadlets,
     selectedPadletIds,

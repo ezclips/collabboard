@@ -218,6 +218,14 @@ function getFreeformAlignmentGuidesStorageKey(boardId?: string) {
   return boardId ? `freeform-board-alignment-guides:${boardId}` : null;
 }
 
+// PATCH SPACE-P3: sibling of getFreeformAlignmentGuidesStorageKey -- its own
+// distinct localStorage key, independent of the alignment-guides one, also
+// defaulting ON (absence of a stored value means "never toggled", not
+// "explicitly turned off").
+function getFreeformSpacingGuidesStorageKey(boardId?: string) {
+  return boardId ? `freeform-board-spacing-guides:${boardId}` : null;
+}
+
 // === END TYPES + CONSTANTS REGION ===
 
 export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: string; openPadletId?: string }) {
@@ -259,6 +267,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     showDotGrid: false,
     snapToGrid: false,
     alignmentGuidesEnabled: true,
+    spacingGuidesEnabled: true,
   });
 
   useEffect(() => {
@@ -1041,6 +1050,11 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       typeof window !== 'undefined' && alignmentGuidesStorageKey
         ? window.localStorage.getItem(alignmentGuidesStorageKey)
         : null;
+    const spacingGuidesStorageKey = getFreeformSpacingGuidesStorageKey(canvas?.id);
+    const storedSpacingGuides =
+      typeof window !== 'undefined' && spacingGuidesStorageKey
+        ? window.localStorage.getItem(spacingGuidesStorageKey)
+        : null;
 
     setFreeformBoardAppearance({
       backgroundType: (canvas?.background_type as 'color' | 'gradient' | 'image') || 'color',
@@ -1051,6 +1065,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       // toggled it off before) turns it off. No stored value at all (first
       // visit, or localStorage cleared) means ON.
       alignmentGuidesEnabled: storedAlignmentGuides !== 'false',
+      // PATCH SPACE-P3: same defaults-ON contract as alignmentGuidesEnabled
+      // above, its own independent key.
+      spacingGuidesEnabled: storedSpacingGuides !== 'false',
     });
   }, [canvas?.id, canvas?.background_type, canvas?.background_value]);
 
@@ -1438,7 +1455,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   // Same per-board-per-browser localStorage mechanism as the existing dot
   // grid toggle; snapToGrid persists here but does not affect movement yet.
   const setFreeformGridPreference = useCallback((
-    updates: Partial<{ showDotGrid: boolean; snapToGrid: boolean; alignmentGuidesEnabled: boolean }>
+    updates: Partial<{ showDotGrid: boolean; snapToGrid: boolean; alignmentGuidesEnabled: boolean; spacingGuidesEnabled: boolean }>
   ) => {
     setFreeformBoardAppearance((prev) => {
       const next = { ...prev, ...updates };
@@ -1454,6 +1471,12 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         if (updates.alignmentGuidesEnabled !== undefined) {
           const key = getFreeformAlignmentGuidesStorageKey(canvasId);
           if (key) window.localStorage.setItem(key, String(next.alignmentGuidesEnabled));
+        }
+        // PATCH SPACE-P3: writes only its own key, independent of the other
+        // three -- same "only when that specific update is present" pattern.
+        if (updates.spacingGuidesEnabled !== undefined) {
+          const key = getFreeformSpacingGuidesStorageKey(canvasId);
+          if (key) window.localStorage.setItem(key, String(next.spacingGuidesEnabled));
         }
       }
       return next;
@@ -2612,6 +2635,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     canEditCanvas: canUseFreeformEditButton,
     snapToGrid: freeformBoardAppearance.snapToGrid,
     alignmentGuidesEnabled: freeformBoardAppearance.alignmentGuidesEnabled,
+    spacingGuidesEnabled: freeformBoardAppearance.spacingGuidesEnabled,
     padlets,
     setPadlets,
     selectedPadletIds,
@@ -8642,6 +8666,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
             showDotGrid={freeformBoardAppearance.showDotGrid}
             snapToGrid={freeformBoardAppearance.snapToGrid}
             alignmentGuides={freeformBoardAppearance.alignmentGuidesEnabled}
+            spacingGuides={freeformBoardAppearance.spacingGuidesEnabled}
             onClose={() => setFreeformBoardMenu(null)}
             onPaste={() => {
               void handlePaste({ x: freeformBoardMenu.canvasX, y: freeformBoardMenu.canvasY });
@@ -8668,6 +8693,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
             }}
             onToggleAlignmentGuides={() => {
               setFreeformGridPreference({ alignmentGuidesEnabled: !freeformBoardAppearance.alignmentGuidesEnabled });
+            }}
+            onToggleSpacingGuides={() => {
+              setFreeformGridPreference({ spacingGuidesEnabled: !freeformBoardAppearance.spacingGuidesEnabled });
             }}
           />
         )}

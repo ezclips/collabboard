@@ -112,6 +112,10 @@ interface UseCanvasInteractionsParams {
   // immediately clears any guide already on screen the instant it flips off
   // -- not just at the next mousemove.
   alignmentGuidesEnabled: boolean;
+  // PATCH SPACE-P3: sibling of alignmentGuidesEnabled -- an independent
+  // personal preference that gates ONLY the spacing-gap detectors below,
+  // not the alignment-match detectors. Either, both, or neither may be ON.
+  spacingGuidesEnabled: boolean;
   padlets: Padlet[];
   setPadlets: React.Dispatch<React.SetStateAction<Padlet[]>>;
   selectedPadletIds: string[];
@@ -139,6 +143,7 @@ export function useCanvasInteractions({
   canEditCanvas,
   snapToGrid,
   alignmentGuidesEnabled,
+  spacingGuidesEnabled,
   padlets,
   setPadlets,
   selectedPadletIds,
@@ -208,10 +213,17 @@ export function useCanvasInteractions({
     if (!alignmentGuidesEnabled) {
       setAlignmentGuides({ verticalX: null, horizontalY: null });
       setAlignmentGuideKinds({ verticalIsAdjacency: false, horizontalIsAdjacency: false, verticalMarkerY: null, horizontalMarkerX: null });
-      // PATCH SPACE-P1: same OFF-means-off contract as the two lines above.
-      setSpacingGuides({ horizontalGap: null, verticalGap: null });
     }
   }, [alignmentGuidesEnabled]);
+
+  // PATCH SPACE-P3: spacingGuides now has its OWN independent preference --
+  // same immediate-clear-on-OFF contract as ALIGN-D above, but on its own
+  // toggle rather than piggybacking on alignmentGuidesEnabled.
+  useEffect(() => {
+    if (!spacingGuidesEnabled) {
+      setSpacingGuides({ horizontalGap: null, verticalGap: null });
+    }
+  }, [spacingGuidesEnabled]);
 
   const dragEndInFlightRef = useRef(false);
   const isDraggingRef = useRef(false);
@@ -565,13 +577,16 @@ export function useCanvasInteractions({
     // dragged post excluded by id. Both axes are computed independently from
     // the SAME candidate list and may both be non-null at once.
     //
-    // ALIGN-D: when the personal preference is OFF, skip BOTH detectors
-    // entirely (no wasted computation every mousemove) rather than compute
-    // and then discard -- the guide stays cleared via the effect above, and
-    // post movement (previewX/Y, already computed above) is untouched either
-    // way.
-    if (alignmentGuidesEnabled) {
-      const alignmentToleranceWorld = FREEFORM_ALIGNMENT_GUIDE_TOLERANCE_SCREEN_PX / (canvasZoom > 0 ? canvasZoom : 1);
+    // ALIGN-D / PATCH SPACE-P3: when BOTH personal preferences are OFF, skip
+    // building the candidate list entirely (no wasted computation every
+    // mousemove) rather than compute and then discard -- each guide stays
+    // cleared via its own effect above, and post movement (previewX/Y,
+    // already computed above) is untouched either way. When only one
+    // preference is ON, the candidate list is still built (both detectors
+    // read the SAME live-measured rects) but only that preference's own
+    // detector runs and writes state -- this is what makes Alignment Guides
+    // and Spacing Guides independently toggleable.
+    if (alignmentGuidesEnabled || spacingGuidesEnabled) {
       const alignmentCandidates = padlets
         .filter((p) => !p.metadata?.parentId && p.id !== draggingPadletId)
         .map((p) => {
@@ -595,48 +610,54 @@ export function useCanvasInteractions({
             height: liveSize?.height ?? (Number(p.height) || DEFAULT_DRAG_RECT_HEIGHT),
           };
         });
-      // PATCH ALIGN-E2: the richer *Match variants report which pair family
-      // won (adjacency vs same-edge/center) alongside the value -- purely
-      // presentational, threaded into the separate alignmentGuideKinds
-      // state below. alignmentGuides itself still receives only the value,
-      // exactly as every prior patch left it.
-      const verticalMatch = detectVerticalAlignmentMatch(
-        { x: previewX, width: dragSize.width },
-        alignmentCandidates,
-        alignmentToleranceWorld,
-      );
-      const horizontalMatch = detectHorizontalAlignmentMatch(
-        { y: previewY, height: dragSize.height },
-        alignmentCandidates,
-        alignmentToleranceWorld,
-      );
-      setAlignmentGuides({ verticalX: verticalMatch?.value ?? null, horizontalY: horizontalMatch?.value ?? null });
-      // PATCH ALIGN-E2: an adjacency marker's cross-axis position is the
-      // DRAGGED post's own center on that axis -- the vertical (X-axis)
-      // guide line runs its full length at a fixed X, so the marker needs a
-      // Y to sit at; the dragged post's vertical center is the simplest
-      // stable answer without tracking which candidate rect won.
-      setAlignmentGuideKinds({
-        verticalIsAdjacency: verticalMatch?.isAdjacency ?? false,
-        horizontalIsAdjacency: horizontalMatch?.isAdjacency ?? false,
-        verticalMarkerY: verticalMatch?.isAdjacency ? previewY + dragSize.height / 2 : null,
-        horizontalMarkerX: horizontalMatch?.isAdjacency ? previewX + dragSize.width / 2 : null,
-      });
 
-      // PATCH SPACE-P1: spacing-gap bracket detection -- reuses the SAME
-      // alignmentCandidates list and preview position above (this is purely
-      // an additional read of already-computed geometry, nothing here feeds
-      // back into previewX/Y or dragSize). Screen-constant max distance
-      // converted through canvasZoom the same way the alignment tolerance
-      // is, just above.
-      const spacingMaxDistanceWorld = FREEFORM_SPACING_GUIDE_MAX_DISTANCE_SCREEN_PX / (canvasZoom > 0 ? canvasZoom : 1);
-      const draggedSpacingRect = { x: previewX, y: previewY, width: dragSize.width, height: dragSize.height };
-      const horizontalSpacingMatch = detectHorizontalSpacingGap(draggedSpacingRect, alignmentCandidates, spacingMaxDistanceWorld);
-      const verticalSpacingMatch = detectVerticalSpacingGap(draggedSpacingRect, alignmentCandidates, spacingMaxDistanceWorld);
-      setSpacingGuides({
-        horizontalGap: horizontalSpacingMatch,
-        verticalGap: verticalSpacingMatch,
-      });
+      if (alignmentGuidesEnabled) {
+        const alignmentToleranceWorld = FREEFORM_ALIGNMENT_GUIDE_TOLERANCE_SCREEN_PX / (canvasZoom > 0 ? canvasZoom : 1);
+        // PATCH ALIGN-E2: the richer *Match variants report which pair
+        // family won (adjacency vs same-edge/center) alongside the value --
+        // purely presentational, threaded into the separate
+        // alignmentGuideKinds state below. alignmentGuides itself still
+        // receives only the value, exactly as every prior patch left it.
+        const verticalMatch = detectVerticalAlignmentMatch(
+          { x: previewX, width: dragSize.width },
+          alignmentCandidates,
+          alignmentToleranceWorld,
+        );
+        const horizontalMatch = detectHorizontalAlignmentMatch(
+          { y: previewY, height: dragSize.height },
+          alignmentCandidates,
+          alignmentToleranceWorld,
+        );
+        setAlignmentGuides({ verticalX: verticalMatch?.value ?? null, horizontalY: horizontalMatch?.value ?? null });
+        // PATCH ALIGN-E2: an adjacency marker's cross-axis position is the
+        // DRAGGED post's own center on that axis -- the vertical (X-axis)
+        // guide line runs its full length at a fixed X, so the marker needs
+        // a Y to sit at; the dragged post's vertical center is the simplest
+        // stable answer without tracking which candidate rect won.
+        setAlignmentGuideKinds({
+          verticalIsAdjacency: verticalMatch?.isAdjacency ?? false,
+          horizontalIsAdjacency: horizontalMatch?.isAdjacency ?? false,
+          verticalMarkerY: verticalMatch?.isAdjacency ? previewY + dragSize.height / 2 : null,
+          horizontalMarkerX: horizontalMatch?.isAdjacency ? previewX + dragSize.width / 2 : null,
+        });
+      }
+
+      if (spacingGuidesEnabled) {
+        // PATCH SPACE-P1: spacing-gap bracket detection -- reuses the SAME
+        // alignmentCandidates list and preview position above (this is
+        // purely an additional read of already-computed geometry, nothing
+        // here feeds back into previewX/Y or dragSize). Screen-constant max
+        // distance converted through canvasZoom the same way the alignment
+        // tolerance is, above.
+        const spacingMaxDistanceWorld = FREEFORM_SPACING_GUIDE_MAX_DISTANCE_SCREEN_PX / (canvasZoom > 0 ? canvasZoom : 1);
+        const draggedSpacingRect = { x: previewX, y: previewY, width: dragSize.width, height: dragSize.height };
+        const horizontalSpacingMatch = detectHorizontalSpacingGap(draggedSpacingRect, alignmentCandidates, spacingMaxDistanceWorld);
+        const verticalSpacingMatch = detectVerticalSpacingGap(draggedSpacingRect, alignmentCandidates, spacingMaxDistanceWorld);
+        setSpacingGuides({
+          horizontalGap: horizontalSpacingMatch,
+          verticalGap: verticalSpacingMatch,
+        });
+      }
     }
 
     setPadlets(prev => prev.map(p =>

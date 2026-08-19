@@ -72,11 +72,13 @@ function Harness({
   zoom,
   snapToGrid = false,
   alignmentGuidesEnabled = true,
+  spacingGuidesEnabled = true,
 }: {
   initialPadlets: Padlet[];
   zoom: number;
   snapToGrid?: boolean;
   alignmentGuidesEnabled?: boolean;
+  spacingGuidesEnabled?: boolean;
 }) {
   const [padlets, setPadlets] = React.useState<Padlet[]>(initialPadlets);
   const containerRef = React.useRef<HTMLDivElement | null>(null);
@@ -89,6 +91,7 @@ function Harness({
     canEditCanvas: true,
     snapToGrid,
     alignmentGuidesEnabled,
+    spacingGuidesEnabled,
     padlets,
     setPadlets,
     selectedPadletIds: [],
@@ -1145,14 +1148,16 @@ describe('PATCH SPACE-P1: spacing-gap bracket detection (spacingGuides)', () => 
     expect(latest!.api.spacingGuides).toEqual({ horizontalGap: null, verticalGap: null });
   });
 
-  it('Alignment Guides OFF suppresses spacingGuides too, even where a qualifying gap would otherwise show', () => {
+  it('PATCH SPACE-P3: Alignment Guides OFF no longer suppresses spacingGuides -- they are independent preferences', () => {
     mount(<Harness initialPadlets={[
       padlet('a', 0, 0, { width: 100, height: 100 }),
       padlet('b', 280, 20, { width: 80, height: 60 }),
-    ]} zoom={1} alignmentGuidesEnabled={false} />);
+    ]} zoom={1} alignmentGuidesEnabled={false} spacingGuidesEnabled />);
 
-    drag('a', { x: 130, y: 0 }, 1); // would show a horizontal bracket if the preference were ON
-    expect(latest!.api.spacingGuides).toEqual({ horizontalGap: null, verticalGap: null });
+    drag('a', { x: 130, y: 0 }, 1);
+    expect(latest!.api.spacingGuides.horizontalGap).toEqual({ gapStart: 230, gapEnd: 280, crossCenter: 50, distance: 50 });
+    // Alignment Guides itself stays off, matching PATCH ALIGN-D's own contract.
+    expect(latest!.api.alignmentGuides).toEqual({ verticalX: null, horizontalY: null });
   });
 
   it('spacingGuides clears on mouseup, exactly like alignmentGuides', async () => {
@@ -1178,6 +1183,106 @@ describe('PATCH SPACE-P1: spacing-gap bracket detection (spacingGuides)', () => 
 
     drag('a', { x: 133, y: 0 }, 1); // not a multiple of 20 -- snaps to 140
     expect(latest!.api.spacingGuides.horizontalGap).not.toBeNull(); // a bracket IS showing during this drag
+
+    await release();
+    expect(persisted).toEqual([{ id: 'a', position_x: 140, position_y: 0 }]);
+  });
+});
+
+describe('PATCH SPACE-P3: spacing guides preference (on/off, independent of Alignment Guides)', () => {
+  it('ON (explicit): spacing brackets work exactly as SPACE-P1/P2 left them', () => {
+    mount(<Harness initialPadlets={[
+      padlet('a', 0, 0, { width: 100, height: 100 }),
+      padlet('b', 280, 20, { width: 80, height: 60 }),
+    ]} zoom={1} spacingGuidesEnabled />);
+
+    drag('a', { x: 130, y: 0 }, 1);
+    expect(latest!.api.spacingGuides.horizontalGap).toEqual({ gapStart: 230, gapEnd: 280, crossCenter: 50, distance: 50 });
+  });
+
+  it('OFF: no spacing gap is computed during drag even when a neighbour would otherwise qualify', () => {
+    mount(<Harness initialPadlets={[
+      padlet('a', 0, 0, { width: 100, height: 100 }),
+      padlet('b', 280, 20, { width: 80, height: 60 }),
+    ]} zoom={1} spacingGuidesEnabled={false} />);
+
+    drag('a', { x: 130, y: 0 }, 1); // would show a horizontal bracket if the preference were ON
+    expect(latest!.api.spacingGuides).toEqual({ horizontalGap: null, verticalGap: null });
+  });
+
+  it('OFF: post movement (preview position) is completely unaffected', () => {
+    installFakeSupabase();
+    mount(<Harness initialPadlets={[
+      padlet('a', 0, 0, { width: 100, height: 100 }),
+      padlet('b', 280, 20, { width: 80, height: 60 }),
+    ]} zoom={1} spacingGuidesEnabled={false} />);
+
+    drag('a', { x: 130, y: 0 }, 1);
+    const moved = latest!.padlets.find((p) => p.id === 'a')!;
+    expect({ x: moved.position_x, y: moved.position_y }).toEqual({ x: 130, y: 0 });
+  });
+
+  it('switching OFF mid-drag clears an already-visible bracket immediately, without waiting for the next mousemove', () => {
+    const root = mount(<Harness initialPadlets={[
+      padlet('a', 0, 0, { width: 100, height: 100 }),
+      padlet('b', 280, 20, { width: 80, height: 60 }),
+    ]} zoom={1} spacingGuidesEnabled />);
+
+    drag('a', { x: 130, y: 0 }, 1);
+    expect(latest!.api.spacingGuides.horizontalGap).not.toBeNull();
+
+    act(() => {
+      root.render(<Harness initialPadlets={[
+        padlet('a', 130, 0, { width: 100, height: 100 }),
+        padlet('b', 280, 20, { width: 80, height: 60 }),
+      ]} zoom={1} spacingGuidesEnabled={false} />);
+    });
+
+    expect(latest!.api.spacingGuides).toEqual({ horizontalGap: null, verticalGap: null });
+  });
+
+  it('Alignment Guides ON + Spacing Guides OFF: alignment lines show, spacing brackets do not', () => {
+    mount(<Harness initialPadlets={[
+      padlet('a', 0, 0, { width: 100, height: 100 }),
+      padlet('b', 500, 500, { width: 180, height: 180 }),
+    ]} zoom={1} alignmentGuidesEnabled spacingGuidesEnabled={false} />);
+
+    drag('a', { x: 503, y: 503 }, 1);
+    expect(latest!.api.alignmentGuides).toEqual({ verticalX: 500, horizontalY: 500 });
+    expect(latest!.api.spacingGuides).toEqual({ horizontalGap: null, verticalGap: null });
+  });
+
+  it('Alignment Guides OFF + Spacing Guides ON: spacing brackets show, alignment lines do not', () => {
+    mount(<Harness initialPadlets={[
+      padlet('a', 0, 0, { width: 100, height: 100 }),
+      padlet('b', 280, 20, { width: 80, height: 60 }),
+    ]} zoom={1} alignmentGuidesEnabled={false} spacingGuidesEnabled />);
+
+    drag('a', { x: 130, y: 0 }, 1);
+    expect(latest!.api.spacingGuides.horizontalGap).not.toBeNull();
+    expect(latest!.api.alignmentGuides).toEqual({ verticalX: null, horizontalY: null });
+  });
+
+  it('both OFF: neither alignment lines nor spacing brackets are computed', () => {
+    mount(<Harness initialPadlets={[
+      padlet('a', 0, 0, { width: 100, height: 100 }),
+      padlet('b', 280, 20, { width: 80, height: 60 }),
+    ]} zoom={1} alignmentGuidesEnabled={false} spacingGuidesEnabled={false} />);
+
+    drag('a', { x: 130, y: 0 }, 1);
+    expect(latest!.api.alignmentGuides).toEqual({ verticalX: null, horizontalY: null });
+    expect(latest!.api.spacingGuides).toEqual({ horizontalGap: null, verticalGap: null });
+  });
+
+  it('Snap-to-Grid works independently of the spacing guides preference -- OFF does not disable or alter snapping', async () => {
+    const persisted = installFakeSupabase();
+    mount(<Harness initialPadlets={[
+      padlet('a', 0, 0, { width: 100 }),
+      padlet('b', 280, 20, { width: 80, height: 60 }),
+    ]} zoom={1} snapToGrid spacingGuidesEnabled={false} />);
+
+    drag('a', { x: 133, y: 0 }, 1); // not a multiple of 20
+    expect(latest!.api.spacingGuides).toEqual({ horizontalGap: null, verticalGap: null });
 
     await release();
     expect(persisted).toEqual([{ id: 'a', position_x: 140, position_y: 0 }]);

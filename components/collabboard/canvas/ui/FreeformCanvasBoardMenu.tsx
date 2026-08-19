@@ -18,6 +18,7 @@ type FreeformCanvasBoardMenuProps = {
   showDotGrid: boolean;
   snapToGrid: boolean;
   alignmentGuides: boolean;
+  spacingGuides: boolean;
   onClose: () => void;
   onPaste: () => void;
   onUndo: () => void;
@@ -27,6 +28,7 @@ type FreeformCanvasBoardMenuProps = {
   onToggleDotGrid: () => void;
   onToggleSnapToGrid: () => void;
   onToggleAlignmentGuides: () => void;
+  onToggleSpacingGuides: () => void;
 };
 
 export const FREEFORM_BOARD_TOOL_ITEMS = [
@@ -56,6 +58,7 @@ export default function FreeformCanvasBoardMenu({
   showDotGrid,
   snapToGrid,
   alignmentGuides,
+  spacingGuides,
   onClose,
   onPaste,
   onUndo,
@@ -65,6 +68,7 @@ export default function FreeformCanvasBoardMenu({
   onToggleDotGrid,
   onToggleSnapToGrid,
   onToggleAlignmentGuides,
+  onToggleSpacingGuides,
 }: FreeformCanvasBoardMenuProps) {
   const visibleToolItems = useMemo(
     () => FREEFORM_BOARD_TOOL_ITEMS.filter((item) => item.type !== 'graph-line' || showGraphLine),
@@ -164,6 +168,23 @@ export default function FreeformCanvasBoardMenu({
       >
         Alignment Guides
         {alignmentGuides && (
+          <span className="ml-auto pl-4 flex items-center text-slate-700">
+            <Check className="h-4 w-4" />
+          </span>
+        )}
+      </PositionedContextMenuItem>
+      <PositionedContextMenuItem
+        // PATCH SPACE-P3: same personal-preference pattern as the three
+        // toggles above, but independent of Alignment Guides -- this only
+        // gates whether spacing brackets/distance numbers render during
+        // drag, not the edge/center alignment lines.
+        onSelect={(event) => {
+          event.preventDefault();
+          onToggleSpacingGuides();
+        }}
+      >
+        Spacing Guides
+        {spacingGuides && (
           <span className="ml-auto pl-4 flex items-center text-slate-700">
             <Check className="h-4 w-4" />
           </span>

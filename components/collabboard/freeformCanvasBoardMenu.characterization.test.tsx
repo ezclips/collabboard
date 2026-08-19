@@ -108,6 +108,7 @@ function makeHandlers() {
     onToggleDotGrid: vi.fn(),
     onToggleSnapToGrid: vi.fn(),
     onToggleAlignmentGuides: vi.fn(),
+    onToggleSpacingGuides: vi.fn(),
   };
 }
 
@@ -123,6 +124,7 @@ const ACTION_KEYS = [
   'onToggleDotGrid',
   'onToggleSnapToGrid',
   'onToggleAlignmentGuides',
+  'onToggleSpacingGuides',
 ] as const;
 
 function renderMenu(
@@ -140,6 +142,7 @@ function renderMenu(
       showDotGrid={false}
       snapToGrid={false}
       alignmentGuides={false}
+      spacingGuides={false}
       {...handlers}
       {...overrides}
     />,
@@ -178,6 +181,7 @@ const ALL_ROWS = [
   'Show Dot Grid',
   'Snap to Grid',
   'Alignment Guides',
+  'Spacing Guides',
 ];
 
 function readSource(relativePath: string): string {
@@ -248,12 +252,13 @@ describe('FreeformCanvasBoardMenu — frozen visibility & permissions', () => {
     expect(isDisabled(rowByLabel('Change Board Background...'))).toBe(true);
   });
 
-  it('read-only boards still allow Select All, Show Dot Grid, Snap to Grid and Alignment Guides (view-only/personal-preference actions)', () => {
+  it('read-only boards still allow Select All, Show Dot Grid, Snap to Grid, Alignment Guides and Spacing Guides (view-only/personal-preference actions)', () => {
     renderMenu({ isEditable: false });
     expect(isDisabled(rowByLabel('Select All'))).toBe(false);
     expect(isDisabled(rowByLabel('Show Dot Grid'))).toBe(false);
     expect(isDisabled(rowByLabel('Snap to Grid'))).toBe(false);
     expect(isDisabled(rowByLabel('Alignment Guides'))).toBe(false);
+    expect(isDisabled(rowByLabel('Spacing Guides'))).toBe(false);
   });
 
   it('editable boards enable every row when clipboard state allows', () => {
@@ -328,19 +333,34 @@ describe('FreeformCanvasBoardMenu — frozen visibility & permissions', () => {
     expect(rowByLabel('Alignment Guides').querySelector('svg')).not.toBeNull();
   });
 
-  it('Show Dot Grid, Snap to Grid and Alignment Guides check independently of each other', () => {
-    renderMenu({ showDotGrid: true, snapToGrid: false, alignmentGuides: false });
+  it('Show Dot Grid, Snap to Grid, Alignment Guides and Spacing Guides check independently of each other', () => {
+    renderMenu({ showDotGrid: true, snapToGrid: false, alignmentGuides: false, spacingGuides: false });
     expect(rowByLabel('Show Dot Grid').querySelector('svg')).not.toBeNull();
     expect(rowByLabel('Snap to Grid').querySelector('svg')).toBeNull();
     expect(rowByLabel('Alignment Guides').querySelector('svg')).toBeNull();
+    expect(rowByLabel('Spacing Guides').querySelector('svg')).toBeNull();
 
     mounted.forEach((m) => { act(() => { m.root.unmount(); }); m.container.remove(); });
     mounted = [];
 
-    renderMenu({ showDotGrid: false, snapToGrid: true, alignmentGuides: true });
+    renderMenu({ showDotGrid: false, snapToGrid: true, alignmentGuides: true, spacingGuides: false });
     expect(rowByLabel('Show Dot Grid').querySelector('svg')).toBeNull();
     expect(rowByLabel('Snap to Grid').querySelector('svg')).not.toBeNull();
     expect(rowByLabel('Alignment Guides').querySelector('svg')).not.toBeNull();
+    expect(rowByLabel('Spacing Guides').querySelector('svg')).toBeNull();
+  });
+
+  it('checks Spacing Guides only when spacingGuides is true, independent of Alignment Guides', () => {
+    renderMenu({ alignmentGuides: true, spacingGuides: false });
+    expect(rowByLabel('Alignment Guides').querySelector('svg')).not.toBeNull();
+    expect(rowByLabel('Spacing Guides').querySelector('svg')).toBeNull();
+
+    mounted.forEach((m) => { act(() => { m.root.unmount(); }); m.container.remove(); });
+    mounted = [];
+
+    renderMenu({ alignmentGuides: false, spacingGuides: true });
+    expect(rowByLabel('Alignment Guides').querySelector('svg')).toBeNull();
+    expect(rowByLabel('Spacing Guides').querySelector('svg')).not.toBeNull();
   });
 });
 
@@ -353,6 +373,7 @@ describe('FreeformCanvasBoardMenu — frozen callback parity', () => {
     { label: 'Show Dot Grid', key: 'onToggleDotGrid' },
     { label: 'Snap to Grid', key: 'onToggleSnapToGrid' },
     { label: 'Alignment Guides', key: 'onToggleAlignmentGuides' },
+    { label: 'Spacing Guides', key: 'onToggleSpacingGuides' },
   ];
 
   for (const { label, key } of CASES) {
@@ -403,6 +424,13 @@ describe('FreeformCanvasBoardMenu — frozen callback parity', () => {
     const handlers = renderMenu();
     click(rowByLabel('Alignment Guides'));
     expect(handlers.onToggleAlignmentGuides).toHaveBeenCalledTimes(1);
+    expect(handlers.onClose).not.toHaveBeenCalled();
+  });
+
+  it('"Spacing Guides" toggles without dismissing, so the checkmark stays visible', () => {
+    const handlers = renderMenu();
+    click(rowByLabel('Spacing Guides'));
+    expect(handlers.onToggleSpacingGuides).toHaveBeenCalledTimes(1);
     expect(handlers.onClose).not.toHaveBeenCalled();
   });
 });
@@ -505,6 +533,7 @@ describe('FreeformCanvasBoardMenu — normalized interaction', () => {
       ['Show Dot Grid', 'onToggleDotGrid'],
       ['Snap to Grid', 'onToggleSnapToGrid'],
       ['Alignment Guides', 'onToggleAlignmentGuides'],
+      ['Spacing Guides', 'onToggleSpacingGuides'],
     ] as const) {
       const handlers = renderMenu();
       click(rowByLabel(label));
@@ -592,8 +621,9 @@ describe('FreeformCanvasBoardMenu — shared shell adoption', () => {
     const call = source.slice(start, source.indexOf('/>', start));
     for (const prop of [
       'x=', 'y=', 'isEditable=', 'showGraphLine=', 'canPaste=', 'canUndoPaste=',
-      'showDotGrid=', 'snapToGrid=', 'alignmentGuides=', 'onClose=', 'onPaste=', 'onUndo=', 'onSelectAll=',
+      'showDotGrid=', 'snapToGrid=', 'alignmentGuides=', 'spacingGuides=', 'onClose=', 'onPaste=', 'onUndo=', 'onSelectAll=',
       'onToolAction=', 'onOpenBackgroundEditor=', 'onToggleDotGrid=', 'onToggleSnapToGrid=', 'onToggleAlignmentGuides=',
+      'onToggleSpacingGuides=',
     ]) {
       expect(call, `CanvasClient must still pass ${prop}`).toContain(prop);
     }
