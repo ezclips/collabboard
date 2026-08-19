@@ -139,6 +139,24 @@ function mount(ui: React.ReactElement): Root {
   return root;
 }
 
+/**
+ * PATCH ALIGN-E1: a bare, un-rendered `[data-padlet-id]` stand-in for a
+ * candidate post's actual DOM box -- the Harness itself never renders real
+ * post cards, so without this, measureLiveCandidateSize's
+ * `document.querySelector` always misses and the fallback-to-stored path is
+ * all any test here could exercise. `rect` is in SCREEN px (post-zoom),
+ * matching what a real getBoundingClientRect() would report.
+ */
+let liveCandidateEls: HTMLElement[] = [];
+function mountLiveCandidateEl(padletId: string, rect: { left: number; top: number; width: number; height: number }) {
+  const el = document.createElement('div');
+  el.setAttribute('data-padlet-id', padletId);
+  document.body.appendChild(el);
+  stubRect(el, rect);
+  liveCandidateEls.push(el);
+  return el;
+}
+
 beforeEach(() => { latest = null; });
 
 afterEach(() => {
@@ -147,6 +165,8 @@ afterEach(() => {
     m.container.remove();
   }
   mounted = [];
+  for (const el of liveCandidateEls) el.remove();
+  liveCandidateEls = [];
   vi.clearAllMocks();
 });
 
@@ -565,5 +585,98 @@ describe('PATCH ALIGN-E: adjacent edge alignment guides', () => {
 
     await release();
     expect(persisted).toEqual([{ id: 'a', position_x: 500, position_y: 0 }]);
+  });
+});
+
+describe('PATCH ALIGN-E1: live rendered post size for alignment candidates', () => {
+  it('Car-style post: a stale stored height (527) is ignored in favor of the live rendered height (216) -- top->bottom adjacency', () => {
+    // Numbers from the ALIGN-E LIVE DIAG live inspection: the real Car post
+    // had stored height 527 but rendered (actual on-screen) height 216.
+    mount(<Harness initialPadlets={[
+      padlet('a', 0, 0, { width: 100, height: 100 }),
+      padlet('car', 900, 0, { width: 248, height: 527 }), // stored height is stale
+    ]} zoom={1} />);
+    mountLiveCandidateEl('car', { left: toClientX(900, 1), top: toClientY(0, 1), width: 248, height: 216 });
+
+    // a.top = 213, 3 units from the LIVE bottom (216) -- 314 units from the
+    // STALE stored bottom (527), which would never qualify on its own.
+    drag('a', { x: 0, y: 213 }, 1);
+    expect(latest!.api.alignmentGuides).toEqual({ verticalX: null, horizontalY: 216 });
+  });
+
+  it('Biden-style post: a slightly stale stored height (439) is ignored in favor of the live rendered height (432.859375) -- bottom->bottom same-edge', () => {
+    // Numbers from the ALIGN-E LIVE DIAG live inspection: the real Biden
+    // post had stored height 439 but rendered height 432.859375 -- a small
+    // (~6px) drift that on its own already exceeds the 6px tolerance.
+    mount(<Harness initialPadlets={[
+      padlet('a', 0, 0, { width: 100, height: 100 }),
+      padlet('biden', 900, 0, { width: 357, height: 439 }), // stored height is slightly stale
+    ]} zoom={1} />);
+    mountLiveCandidateEl('biden', { left: toClientX(900, 1), top: toClientY(0, 1), width: 357, height: 432.859375 });
+
+    // a.bottom = 430, 2.859375 units from the LIVE bottom (432.859375) --
+    // 9 units from the STALE stored bottom (439), which is outside tolerance.
+    drag('a', { x: 0, y: 330 }, 1);
+    expect(latest!.api.alignmentGuides).toEqual({ verticalX: null, horizontalY: 432.859375 });
+  });
+
+  it('left/right adjacency still works when the live-measured width matches stored (no drift case)', () => {
+    mount(<Harness initialPadlets={[
+      padlet('a', 0, 0, { width: 100 }),
+      padlet('b', 600, 900, { width: 180 }),
+    ]} zoom={1} />);
+    mountLiveCandidateEl('b', { left: toClientX(600, 1), top: toClientY(900, 1), width: 180, height: 220 });
+
+    drag('a', { x: 497, y: 0 }, 1); // a.right = 597, 3 units from b.left = 600
+    expect(latest!.api.alignmentGuides).toEqual({ verticalX: 600, horizontalY: null });
+  });
+
+  it('falls back to stored width/height when the candidate has no mounted DOM node', () => {
+    mount(<Harness initialPadlets={[
+      padlet('a', 0, 0, { width: 100 }),
+      padlet('b', 600, 900, { width: 180 }), // no mountLiveCandidateEl call for 'b'
+    ]} zoom={1} />);
+
+    drag('a', { x: 497, y: 0 }, 1);
+    expect(latest!.api.alignmentGuides).toEqual({ verticalX: 600, horizontalY: null });
+  });
+
+  it('the live measurement is converted through canvasZoom, not read as raw screen pixels', () => {
+    // At zoom 0.5, a live screen height of 108px is a WORLD height of 216 --
+    // matching the Car post's real live height and producing the same
+    // world-space guide value regardless of zoom.
+    mount(<Harness initialPadlets={[
+      padlet('a', 0, 0, { width: 100, height: 100 }),
+      padlet('car', 900, 0, { width: 248, height: 527 }),
+    ]} zoom={0.5} />);
+    mountLiveCandidateEl('car', { left: toClientX(900, 0.5), top: toClientY(0, 0.5), width: 124, height: 108 });
+
+    drag('a', { x: 0, y: 213 }, 0.5);
+    expect(latest!.api.alignmentGuides).toEqual({ verticalX: null, horizontalY: 216 });
+  });
+
+  it('Alignment Guides OFF still suppresses detection even with a live-measured candidate present', () => {
+    mount(<Harness initialPadlets={[
+      padlet('a', 0, 0, { width: 100, height: 100 }),
+      padlet('car', 900, 0, { width: 248, height: 527 }),
+    ]} zoom={1} alignmentGuidesEnabled={false} />);
+    mountLiveCandidateEl('car', { left: toClientX(900, 1), top: toClientY(0, 1), width: 248, height: 216 });
+
+    drag('a', { x: 0, y: 213 }, 1);
+    expect(latest!.api.alignmentGuides).toEqual({ verticalX: null, horizontalY: null });
+  });
+
+  it('Snap-to-Grid still determines the committed position exactly as before, with a live-measured candidate present', async () => {
+    const persisted = installFakeSupabase();
+    mount(<Harness initialPadlets={[
+      padlet('a', 0, 0, { width: 100, height: 100 }),
+      padlet('car', 900, 0, { width: 248, height: 527 }),
+    ]} zoom={1} snapToGrid />);
+    mountLiveCandidateEl('car', { left: toClientX(900, 1), top: toClientY(0, 1), width: 248, height: 216 });
+
+    // 213 is NOT a multiple of 20; Snap-to-Grid must still round it to 220.
+    drag('a', { x: 0, y: 213 }, 1);
+    await release();
+    expect(persisted).toEqual([{ id: 'a', position_x: 0, position_y: 220 }]);
   });
 });

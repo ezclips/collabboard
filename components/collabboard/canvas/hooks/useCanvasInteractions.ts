@@ -46,6 +46,28 @@ function resolveDragRectSize(
   return { width, height };
 }
 
+/**
+ * PATCH ALIGN-E1: same measured-DOM-first convention as resolveDragRectSize
+ * above, applied to an OTHER (non-dragged) root post's alignment-candidate
+ * box. Stored `padlet.width`/`height` can go stale relative to what is
+ * actually on screen -- most visibly for Image posts, whose outer frame
+ * height is intentionally CSS `auto` (PATCH FREEFORM-IMAGE-R7) and is never
+ * written back to the stored field outside a manual resize commit. Reading
+ * the live `[data-padlet-id]` box (which hugs its content exactly -- see
+ * ALIGN-E LIVE DIAG) sidesteps that drift entirely; the stored width/height
+ * remains the fallback for a post with no mounted DOM node (off-screen
+ * virtualized, or mid-unmount).
+ */
+function measureLiveCandidateSize(padletId: string, canvasZoom: number): DragRectSize | null {
+  if (typeof document === 'undefined') return null;
+  const el = document.querySelector<HTMLElement>(`[data-padlet-id="${padletId}"]`);
+  if (!el) return null;
+  const rect = el.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) return null;
+  const zoom = canvasZoom > 0 ? canvasZoom : 1;
+  return { width: rect.width / zoom, height: rect.height / zoom };
+}
+
 /** Combined world bounds of a multi-selection at drag start. */
 function computeGroupDragBounds(
   padlets: Padlet[],
@@ -523,12 +545,18 @@ export function useCanvasInteractions({
       const alignmentToleranceWorld = FREEFORM_ALIGNMENT_GUIDE_TOLERANCE_SCREEN_PX / (canvasZoom > 0 ? canvasZoom : 1);
       const alignmentCandidates = padlets
         .filter((p) => !p.metadata?.parentId && p.id !== draggingPadletId)
-        .map((p) => ({
-          x: p.position_x || 0,
-          width: Number(p.width) || DEFAULT_DRAG_RECT_WIDTH,
-          y: p.position_y || 0,
-          height: Number(p.height) || DEFAULT_DRAG_RECT_HEIGHT,
-        }));
+        .map((p) => {
+          // PATCH ALIGN-E1: prefer the OTHER post's live rendered box over
+          // its stored width/height (see measureLiveCandidateSize) -- x/y
+          // still come straight from position_x/position_y, unchanged.
+          const liveSize = measureLiveCandidateSize(p.id, canvasZoom);
+          return {
+            x: p.position_x || 0,
+            width: liveSize?.width ?? (Number(p.width) || DEFAULT_DRAG_RECT_WIDTH),
+            y: p.position_y || 0,
+            height: liveSize?.height ?? (Number(p.height) || DEFAULT_DRAG_RECT_HEIGHT),
+          };
+        });
       const verticalGuideX = detectVerticalAlignmentGuide(
         { x: previewX, width: dragSize.width },
         alignmentCandidates,

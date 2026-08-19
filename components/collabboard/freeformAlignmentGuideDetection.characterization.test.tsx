@@ -88,6 +88,51 @@ describe('PATCH ALIGN-B detection call site: single-post branch only, after snap
   });
 });
 
+describe('PATCH ALIGN-E1 candidate geometry: live DOM measurement, stored value as fallback only', () => {
+  const singlePostBlock = slice(
+    code(hookSrc),
+    'const draggedPadlet = padlets.find((p) => p.id === draggingPadletId);',
+    'const handleCanvasMouseUp = async',
+  );
+
+  it('measureLiveCandidateSize is defined as a standalone helper (same shape as resolveDragRectSize), not inlined into the candidate map', () => {
+    expect(code(hookSrc)).toContain('function measureLiveCandidateSize(padletId: string, canvasZoom: number): DragRectSize | null {');
+  });
+
+  it('the helper queries the live DOM by [data-padlet-id] and measures via getBoundingClientRect, guarding against a zero/negative zoom the same way the tolerance conversion does', () => {
+    const fn = slice(code(hookSrc), 'function measureLiveCandidateSize(', '\n}');
+    expect(fn).toContain('document.querySelector<HTMLElement>(`[data-padlet-id="${padletId}"]`)');
+    expect(fn).toContain('el.getBoundingClientRect()');
+    expect(fn).toContain('canvasZoom > 0 ? canvasZoom : 1');
+  });
+
+  it('each OTHER candidate prefers the live measurement and falls back to stored width/height only when it is null (no DOM node, or a degenerate zero-size box)', () => {
+    const candidateBlock = slice(singlePostBlock, 'const alignmentCandidates = padlets', '});');
+    expect(candidateBlock).toContain('const liveSize = measureLiveCandidateSize(p.id, canvasZoom);');
+    expect(candidateBlock).toContain('liveSize?.width ?? (Number(p.width) || DEFAULT_DRAG_RECT_WIDTH)');
+    expect(candidateBlock).toContain('liveSize?.height ?? (Number(p.height) || DEFAULT_DRAG_RECT_HEIGHT)');
+  });
+
+  it('candidate x/y still come straight from position_x/position_y -- only width/height gained a live-measurement path', () => {
+    const candidateBlock = slice(singlePostBlock, 'const alignmentCandidates = padlets', '});');
+    expect(candidateBlock).toContain('x: p.position_x || 0,');
+    expect(candidateBlock).toContain('y: p.position_y || 0,');
+    expect(candidateBlock).not.toMatch(/measureLiveCandidateSize\([^)]*\)\.x/);
+    expect(candidateBlock).not.toMatch(/measureLiveCandidateSize\([^)]*\)\.y/);
+  });
+
+  it('the DRAGGED post keeps its existing dragSize (resolveDragRectSize/dragRectSizeRef) untouched -- ALIGN-E1 only changed how OTHER posts are measured', () => {
+    expect(singlePostBlock).toContain('{ x: previewX, width: dragSize.width }');
+    expect(singlePostBlock).toContain('{ y: previewY, height: dragSize.height }');
+    expect(singlePostBlock).not.toContain('measureLiveCandidateSize(draggingPadletId');
+  });
+
+  it('stored width/height are never mutated -- the live measurement only feeds the transient candidate rect, not padlets state', () => {
+    const fn = slice(code(hookSrc), 'function measureLiveCandidateSize(', '\n}');
+    expect(fn).not.toMatch(/setPadlets|position_x|position_y/);
+  });
+});
+
 describe('PATCH ALIGN-B scope: group drag, Snap-to-Grid, resize, Drawing untouched', () => {
   it('the group-drag branch (multi-select) never calls detectVerticalAlignmentGuide or setAlignmentGuides with a real value', () => {
     const groupBlock = slice(
