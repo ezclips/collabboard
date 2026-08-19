@@ -206,6 +206,14 @@ function getFreeformSnapGridStorageKey(boardId?: string) {
   return boardId ? `freeform-board-snap-grid:${boardId}` : null;
 }
 
+// PATCH ALIGN-D: sibling of the dot-grid/snap-grid keys above, same
+// per-board-per-browser localStorage mechanism. Unlike those two (default
+// OFF), alignment guides default ON -- absence of a stored value means
+// "never toggled", not "explicitly turned off".
+function getFreeformAlignmentGuidesStorageKey(boardId?: string) {
+  return boardId ? `freeform-board-alignment-guides:${boardId}` : null;
+}
+
 // === END TYPES + CONSTANTS REGION ===
 
 export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: string; openPadletId?: string }) {
@@ -246,6 +254,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     backgroundValue: '#f3f4f6',
     showDotGrid: false,
     snapToGrid: false,
+    alignmentGuidesEnabled: true,
   });
 
   useEffect(() => {
@@ -1023,12 +1032,21 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       typeof window !== 'undefined' && snapGridStorageKey
         ? window.localStorage.getItem(snapGridStorageKey)
         : null;
+    const alignmentGuidesStorageKey = getFreeformAlignmentGuidesStorageKey(canvas?.id);
+    const storedAlignmentGuides =
+      typeof window !== 'undefined' && alignmentGuidesStorageKey
+        ? window.localStorage.getItem(alignmentGuidesStorageKey)
+        : null;
 
     setFreeformBoardAppearance({
       backgroundType: (canvas?.background_type as 'color' | 'gradient' | 'image') || 'color',
       backgroundValue: canvas?.background_value || '#f3f4f6',
       showDotGrid: storedDotGrid === 'true',
       snapToGrid: storedSnapGrid === 'true',
+      // PATCH ALIGN-D: defaults ON -- only an explicit "false" (the user
+      // toggled it off before) turns it off. No stored value at all (first
+      // visit, or localStorage cleared) means ON.
+      alignmentGuidesEnabled: storedAlignmentGuides !== 'false',
     });
   }, [canvas?.id, canvas?.background_type, canvas?.background_value]);
 
@@ -1385,7 +1403,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   // Same per-board-per-browser localStorage mechanism as the existing dot
   // grid toggle; snapToGrid persists here but does not affect movement yet.
   const setFreeformGridPreference = useCallback((
-    updates: Partial<{ showDotGrid: boolean; snapToGrid: boolean }>
+    updates: Partial<{ showDotGrid: boolean; snapToGrid: boolean; alignmentGuidesEnabled: boolean }>
   ) => {
     setFreeformBoardAppearance((prev) => {
       const next = { ...prev, ...updates };
@@ -1397,6 +1415,10 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         if (updates.snapToGrid !== undefined) {
           const key = getFreeformSnapGridStorageKey(canvasId);
           if (key) window.localStorage.setItem(key, String(next.snapToGrid));
+        }
+        if (updates.alignmentGuidesEnabled !== undefined) {
+          const key = getFreeformAlignmentGuidesStorageKey(canvasId);
+          if (key) window.localStorage.setItem(key, String(next.alignmentGuidesEnabled));
         }
       }
       return next;
@@ -2552,6 +2574,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     canvasZoom,
     canEditCanvas: canUseFreeformEditButton,
     snapToGrid: freeformBoardAppearance.snapToGrid,
+    alignmentGuidesEnabled: freeformBoardAppearance.alignmentGuidesEnabled,
     padlets,
     setPadlets,
     selectedPadletIds,
@@ -8575,6 +8598,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
             canUndoPaste={lastPastedPadletIds.length > 0}
             showDotGrid={freeformBoardAppearance.showDotGrid}
             snapToGrid={freeformBoardAppearance.snapToGrid}
+            alignmentGuides={freeformBoardAppearance.alignmentGuidesEnabled}
             onClose={() => setFreeformBoardMenu(null)}
             onPaste={() => {
               void handlePaste({ x: freeformBoardMenu.canvasX, y: freeformBoardMenu.canvasY });
@@ -8598,6 +8622,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
             }}
             onToggleSnapToGrid={() => {
               setFreeformGridPreference({ snapToGrid: !freeformBoardAppearance.snapToGrid });
+            }}
+            onToggleAlignmentGuides={() => {
+              setFreeformGridPreference({ alignmentGuidesEnabled: !freeformBoardAppearance.alignmentGuidesEnabled });
             }}
           />
         )}

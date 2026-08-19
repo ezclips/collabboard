@@ -80,6 +80,13 @@ interface UseCanvasInteractionsParams {
   // commit as before this patch). WORLD-space only -- never scaled by
   // canvasZoom, which stays a dot-grid rendering concern.
   snapToGrid: boolean;
+  // PATCH ALIGN-D: personal, client-local visual preference -- same
+  // never-gated-on-edit-permission treatment as snapToGrid above. OFF
+  // suppresses BOTH detection calls below (no wasted computation during
+  // drag) and, via the effect right after this hook's state declarations,
+  // immediately clears any guide already on screen the instant it flips off
+  // -- not just at the next mousemove.
+  alignmentGuidesEnabled: boolean;
   padlets: Padlet[];
   setPadlets: React.Dispatch<React.SetStateAction<Padlet[]>>;
   selectedPadletIds: string[];
@@ -106,6 +113,7 @@ export function useCanvasInteractions({
   canvasZoom,
   canEditCanvas,
   snapToGrid,
+  alignmentGuidesEnabled,
   padlets,
   setPadlets,
   selectedPadletIds,
@@ -144,6 +152,15 @@ export function useCanvasInteractions({
     verticalX: null,
     horizontalY: null,
   });
+
+  // PATCH ALIGN-D: flipping the preference off must clear an already-visible
+  // guide IMMEDIATELY, not just withhold new ones starting at the next
+  // mousemove -- the toggle lives in a menu the user can open mid-drag.
+  useEffect(() => {
+    if (!alignmentGuidesEnabled) {
+      setAlignmentGuides({ verticalX: null, horizontalY: null });
+    }
+  }, [alignmentGuidesEnabled]);
 
   const dragEndInFlightRef = useRef(false);
   const isDraggingRef = useRef(false);
@@ -489,33 +506,41 @@ export function useCanvasInteractions({
     const previewX = effectiveSnapToGrid ? snapWorldValueToGrid(clampedX) : clampedX;
     const previewY = effectiveSnapToGrid ? snapWorldValueToGrid(clampedY) : clampedY;
 
-    // PATCH ALIGN-B/C: alignment guide detection OBSERVES the final preview
+    // PATCH ALIGN-B/C/D: alignment guide detection OBSERVES the final preview
     // position (previewX/Y -- already bounds-clamped and, if Snap-to-Grid is
     // on, already snapped) -- it never feeds back into previewX/Y, so
     // Snap-to-Grid's own output is byte-for-byte unaffected by this block.
     // Root posts only (mirrors CanvasClient's rootPadlets predicate exactly),
     // dragged post excluded by id. Both axes are computed independently from
     // the SAME candidate list and may both be non-null at once.
-    const alignmentToleranceWorld = FREEFORM_ALIGNMENT_GUIDE_TOLERANCE_SCREEN_PX / (canvasZoom > 0 ? canvasZoom : 1);
-    const alignmentCandidates = padlets
-      .filter((p) => !p.metadata?.parentId && p.id !== draggingPadletId)
-      .map((p) => ({
-        x: p.position_x || 0,
-        width: Number(p.width) || DEFAULT_DRAG_RECT_WIDTH,
-        y: p.position_y || 0,
-        height: Number(p.height) || DEFAULT_DRAG_RECT_HEIGHT,
-      }));
-    const verticalGuideX = detectVerticalAlignmentGuide(
-      { x: previewX, width: dragSize.width },
-      alignmentCandidates,
-      alignmentToleranceWorld,
-    );
-    const horizontalGuideY = detectHorizontalAlignmentGuide(
-      { y: previewY, height: dragSize.height },
-      alignmentCandidates,
-      alignmentToleranceWorld,
-    );
-    setAlignmentGuides({ verticalX: verticalGuideX, horizontalY: horizontalGuideY });
+    //
+    // ALIGN-D: when the personal preference is OFF, skip BOTH detectors
+    // entirely (no wasted computation every mousemove) rather than compute
+    // and then discard -- the guide stays cleared via the effect above, and
+    // post movement (previewX/Y, already computed above) is untouched either
+    // way.
+    if (alignmentGuidesEnabled) {
+      const alignmentToleranceWorld = FREEFORM_ALIGNMENT_GUIDE_TOLERANCE_SCREEN_PX / (canvasZoom > 0 ? canvasZoom : 1);
+      const alignmentCandidates = padlets
+        .filter((p) => !p.metadata?.parentId && p.id !== draggingPadletId)
+        .map((p) => ({
+          x: p.position_x || 0,
+          width: Number(p.width) || DEFAULT_DRAG_RECT_WIDTH,
+          y: p.position_y || 0,
+          height: Number(p.height) || DEFAULT_DRAG_RECT_HEIGHT,
+        }));
+      const verticalGuideX = detectVerticalAlignmentGuide(
+        { x: previewX, width: dragSize.width },
+        alignmentCandidates,
+        alignmentToleranceWorld,
+      );
+      const horizontalGuideY = detectHorizontalAlignmentGuide(
+        { y: previewY, height: dragSize.height },
+        alignmentCandidates,
+        alignmentToleranceWorld,
+      );
+      setAlignmentGuides({ verticalX: verticalGuideX, horizontalY: horizontalGuideY });
+    }
 
     setPadlets(prev => prev.map(p =>
       p.id === draggingPadletId

@@ -17,6 +17,7 @@ type FreeformCanvasBoardMenuProps = {
   canUndoPaste: boolean;
   showDotGrid: boolean;
   snapToGrid: boolean;
+  alignmentGuides: boolean;
   onClose: () => void;
   onPaste: () => void;
   onUndo: () => void;
@@ -25,6 +26,7 @@ type FreeformCanvasBoardMenuProps = {
   onOpenBackgroundEditor: () => void;
   onToggleDotGrid: () => void;
   onToggleSnapToGrid: () => void;
+  onToggleAlignmentGuides: () => void;
 };
 
 export const FREEFORM_BOARD_TOOL_ITEMS = [
@@ -53,6 +55,7 @@ export default function FreeformCanvasBoardMenu({
   canUndoPaste,
   showDotGrid,
   snapToGrid,
+  alignmentGuides,
   onClose,
   onPaste,
   onUndo,
@@ -61,6 +64,7 @@ export default function FreeformCanvasBoardMenu({
   onOpenBackgroundEditor,
   onToggleDotGrid,
   onToggleSnapToGrid,
+  onToggleAlignmentGuides,
 }: FreeformCanvasBoardMenuProps) {
   const visibleToolItems = useMemo(
     () => FREEFORM_BOARD_TOOL_ITEMS.filter((item) => item.type !== 'graph-line' || showGraphLine),
@@ -144,6 +148,22 @@ export default function FreeformCanvasBoardMenu({
       >
         Snap to Grid
         {snapToGrid && (
+          <span className="ml-auto pl-4 flex items-center text-slate-700">
+            <Check className="h-4 w-4" />
+          </span>
+        )}
+      </PositionedContextMenuItem>
+      <PositionedContextMenuItem
+        // Same personal-preference pattern as Show Dot Grid / Snap to Grid
+        // above: no disabled/isEditable gate -- it's a client-local visual
+        // toggle (which guides render during drag), not an edit action.
+        onSelect={(event) => {
+          event.preventDefault();
+          onToggleAlignmentGuides();
+        }}
+      >
+        Alignment Guides
+        {alignmentGuides && (
           <span className="ml-auto pl-4 flex items-center text-slate-700">
             <Check className="h-4 w-4" />
           </span>

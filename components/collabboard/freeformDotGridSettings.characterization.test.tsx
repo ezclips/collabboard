@@ -134,3 +134,54 @@ describe('PATCH SNAP-GRID-A scope: resize, selection, and Drawing are untouched'
     expect(propsBlock).toContain('onToggleSnapToGrid: () => void;');
   });
 });
+
+describe('PATCH ALIGN-D alignment guides preference: same personal-preference mechanism, default ON', () => {
+  const setterFn = slice(
+    code(clientSrc),
+    'const setFreeformGridPreference = useCallback(',
+    '}, [canvasId]);',
+  );
+
+  it('persists to its own distinct localStorage key, a third sibling of the dot-grid/snap-grid keys', () => {
+    expect(code(clientSrc)).toContain("`freeform-board-alignment-guides:${boardId}`");
+  });
+
+  it('defaults to ON: absence of a stored value means true, only an explicit "false" turns it off', () => {
+    const loadEffect = slice(
+      code(clientSrc),
+      'const alignmentGuidesStorageKey = getFreeformAlignmentGuidesStorageKey(canvas?.id);',
+      'setFreeformBoardAppearance({',
+    );
+    expect(loadEffect).toContain('window.localStorage.getItem(alignmentGuidesStorageKey)');
+    const assignment = slice(code(clientSrc), 'alignmentGuidesEnabled: storedAlignmentGuides', ',');
+    expect(assignment).toContain("!== 'false'");
+  });
+
+  it('setFreeformGridPreference has no permission gate for the alignment-guides update either', () => {
+    expect(setterFn).not.toMatch(/canUseFreeformEditButton/);
+  });
+
+  it('setFreeformGridPreference writes the alignment-guides key only when that specific update is present, independent of showDotGrid/snapToGrid', () => {
+    expect(setterFn).toContain('updates.alignmentGuidesEnabled !== undefined');
+    expect(setterFn).toContain('getFreeformAlignmentGuidesStorageKey(canvasId)');
+  });
+
+  it('onToggleAlignmentGuides updates only its own key, not showDotGrid or snapToGrid', () => {
+    const toggle = slice(code(clientSrc), 'onToggleAlignmentGuides={() => {', '/>');
+    expect(toggle).toContain(
+      'setFreeformGridPreference({ alignmentGuidesEnabled: !freeformBoardAppearance.alignmentGuidesEnabled });',
+    );
+    expect(toggle).not.toContain('showDotGrid:');
+    expect(toggle).not.toContain('snapToGrid:');
+  });
+
+  it('the Freeform board menu exposes Alignment Guides as its own independent prop, not derived from the other two toggles', () => {
+    const propsBlock = slice(code(menuSrc), 'type FreeformCanvasBoardMenuProps = {', '};');
+    expect(propsBlock).toContain('alignmentGuides: boolean;');
+    expect(propsBlock).toContain('onToggleAlignmentGuides: () => void;');
+  });
+
+  it('is wired into useCanvasInteractions as alignmentGuidesEnabled, driving detection rather than board-appearance rendering', () => {
+    expect(code(clientSrc)).toContain('alignmentGuidesEnabled: freeformBoardAppearance.alignmentGuidesEnabled,');
+  });
+});

@@ -71,10 +71,12 @@ function Harness({
   initialPadlets,
   zoom,
   snapToGrid = false,
+  alignmentGuidesEnabled = true,
 }: {
   initialPadlets: Padlet[];
   zoom: number;
   snapToGrid?: boolean;
+  alignmentGuidesEnabled?: boolean;
 }) {
   const [padlets, setPadlets] = React.useState<Padlet[]>(initialPadlets);
   const containerRef = React.useRef<HTMLDivElement | null>(null);
@@ -86,6 +88,7 @@ function Harness({
     canvasZoom: zoom,
     canEditCanvas: true,
     snapToGrid,
+    alignmentGuidesEnabled,
     padlets,
     setPadlets,
     selectedPadletIds: [],
@@ -127,12 +130,13 @@ function Harness({
 
 let mounted: Array<{ root: Root; container: HTMLElement }> = [];
 
-function mount(ui: React.ReactElement) {
+function mount(ui: React.ReactElement): Root {
   const container = document.createElement('div');
   document.body.appendChild(container);
   const root = createRoot(container);
   act(() => { root.render(ui); });
   mounted.push({ root, container });
+  return root;
 }
 
 beforeEach(() => { latest = null; });
@@ -411,5 +415,75 @@ describe('PATCH ALIGN-C: horizontal alignment guide detection', () => {
 
     await release();
     expect(persisted).toEqual([{ id: 'a', position_x: 0, position_y: 500 }]);
+  });
+});
+
+describe('PATCH ALIGN-D: alignment guides preference (on/off)', () => {
+  it('ON (explicit): vertical and horizontal guides work exactly as ALIGN-B/C left them', () => {
+    mount(<Harness initialPadlets={[
+      padlet('a', 0, 0, { width: 100, height: 100 }),
+      padlet('b', 500, 500, { width: 180, height: 180 }),
+    ]} zoom={1} alignmentGuidesEnabled />);
+
+    drag('a', { x: 503, y: 503 }, 1);
+    expect(latest!.api.alignmentGuides).toEqual({ verticalX: 500, horizontalY: 500 });
+  });
+
+  it('OFF: no guide is computed during drag even when the post is well within tolerance of a match', () => {
+    mount(<Harness initialPadlets={[
+      padlet('a', 0, 0, { width: 100, height: 100 }),
+      padlet('b', 500, 500, { width: 180, height: 180 }),
+    ]} zoom={1} alignmentGuidesEnabled={false} />);
+
+    drag('a', { x: 503, y: 503 }, 1); // would match both axes if the preference were ON
+    expect(latest!.api.alignmentGuides).toEqual({ verticalX: null, horizontalY: null });
+  });
+
+  it('OFF: post movement (preview position) is completely unaffected -- identical to the ON case for the same drag', () => {
+    installFakeSupabase();
+    mount(<Harness initialPadlets={[
+      padlet('a', 0, 0, { width: 100, height: 100 }),
+      padlet('b', 500, 500, { width: 180, height: 180 }),
+    ]} zoom={1} alignmentGuidesEnabled={false} />);
+
+    drag('a', { x: 503, y: 503 }, 1);
+    const moved = latest!.padlets.find((p) => p.id === 'a')!;
+    expect({ x: moved.position_x, y: moved.position_y }).toEqual({ x: 503, y: 503 });
+  });
+
+  it('switching OFF mid-drag clears an already-visible guide immediately, without waiting for the next mousemove', () => {
+    const root = mount(<Harness initialPadlets={[
+      padlet('a', 0, 0, { width: 100 }),
+      padlet('b', 500, 0, { width: 180 }),
+    ]} zoom={1} alignmentGuidesEnabled />);
+
+    drag('a', { x: 503, y: 0 }, 1);
+    expect(latest!.api.alignmentGuides.verticalX).not.toBeNull();
+
+    // Re-render with the SAME hook instance (React Fast Refresh-style prop
+    // flip, not a fresh mount) and the SAME padlets -- simulates the user
+    // toggling the menu item mid-drag, with no further pointer movement.
+    act(() => {
+      root.render(<Harness initialPadlets={[
+        padlet('a', 503, 0, { width: 100 }),
+        padlet('b', 500, 0, { width: 180 }),
+      ]} zoom={1} alignmentGuidesEnabled={false} />);
+    });
+
+    expect(latest!.api.alignmentGuides).toEqual({ verticalX: null, horizontalY: null });
+  });
+
+  it('Snap-to-Grid works independently of the alignment guides preference -- OFF does not disable or alter snapping', async () => {
+    const persisted = installFakeSupabase();
+    mount(<Harness initialPadlets={[
+      padlet('a', 0, 0, { width: 100 }),
+      padlet('b', 500, 0, { width: 180 }),
+    ]} zoom={1} snapToGrid alignmentGuidesEnabled={false} />);
+
+    drag('a', { x: 503, y: 0 }, 1); // not a multiple of 20
+    expect(latest!.api.alignmentGuides).toEqual({ verticalX: null, horizontalY: null });
+
+    await release();
+    expect(persisted).toEqual([{ id: 'a', position_x: 500, position_y: 0 }]);
   });
 });

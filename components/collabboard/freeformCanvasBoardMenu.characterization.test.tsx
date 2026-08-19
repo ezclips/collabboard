@@ -107,6 +107,7 @@ function makeHandlers() {
     onOpenBackgroundEditor: vi.fn(),
     onToggleDotGrid: vi.fn(),
     onToggleSnapToGrid: vi.fn(),
+    onToggleAlignmentGuides: vi.fn(),
   };
 }
 
@@ -121,6 +122,7 @@ const ACTION_KEYS = [
   'onOpenBackgroundEditor',
   'onToggleDotGrid',
   'onToggleSnapToGrid',
+  'onToggleAlignmentGuides',
 ] as const;
 
 function renderMenu(
@@ -137,6 +139,7 @@ function renderMenu(
       canUndoPaste
       showDotGrid={false}
       snapToGrid={false}
+      alignmentGuides={false}
       {...handlers}
       {...overrides}
     />,
@@ -174,6 +177,7 @@ const ALL_ROWS = [
   'Change Board Background...',
   'Show Dot Grid',
   'Snap to Grid',
+  'Alignment Guides',
 ];
 
 function readSource(relativePath: string): string {
@@ -244,11 +248,12 @@ describe('FreeformCanvasBoardMenu — frozen visibility & permissions', () => {
     expect(isDisabled(rowByLabel('Change Board Background...'))).toBe(true);
   });
 
-  it('read-only boards still allow Select All, Show Dot Grid and Snap to Grid (view-only/personal-preference actions)', () => {
+  it('read-only boards still allow Select All, Show Dot Grid, Snap to Grid and Alignment Guides (view-only/personal-preference actions)', () => {
     renderMenu({ isEditable: false });
     expect(isDisabled(rowByLabel('Select All'))).toBe(false);
     expect(isDisabled(rowByLabel('Show Dot Grid'))).toBe(false);
     expect(isDisabled(rowByLabel('Snap to Grid'))).toBe(false);
+    expect(isDisabled(rowByLabel('Alignment Guides'))).toBe(false);
   });
 
   it('editable boards enable every row when clipboard state allows', () => {
@@ -311,6 +316,32 @@ describe('FreeformCanvasBoardMenu — frozen visibility & permissions', () => {
     expect(rowByLabel('Show Dot Grid').querySelector('svg')).toBeNull();
     expect(rowByLabel('Snap to Grid').querySelector('svg')).not.toBeNull();
   });
+
+  it('checks Alignment Guides only when alignmentGuides is true', () => {
+    renderMenu({ alignmentGuides: false });
+    expect(rowByLabel('Alignment Guides').querySelector('svg')).toBeNull();
+
+    mounted.forEach((m) => { act(() => { m.root.unmount(); }); m.container.remove(); });
+    mounted = [];
+
+    renderMenu({ alignmentGuides: true });
+    expect(rowByLabel('Alignment Guides').querySelector('svg')).not.toBeNull();
+  });
+
+  it('Show Dot Grid, Snap to Grid and Alignment Guides check independently of each other', () => {
+    renderMenu({ showDotGrid: true, snapToGrid: false, alignmentGuides: false });
+    expect(rowByLabel('Show Dot Grid').querySelector('svg')).not.toBeNull();
+    expect(rowByLabel('Snap to Grid').querySelector('svg')).toBeNull();
+    expect(rowByLabel('Alignment Guides').querySelector('svg')).toBeNull();
+
+    mounted.forEach((m) => { act(() => { m.root.unmount(); }); m.container.remove(); });
+    mounted = [];
+
+    renderMenu({ showDotGrid: false, snapToGrid: true, alignmentGuides: true });
+    expect(rowByLabel('Show Dot Grid').querySelector('svg')).toBeNull();
+    expect(rowByLabel('Snap to Grid').querySelector('svg')).not.toBeNull();
+    expect(rowByLabel('Alignment Guides').querySelector('svg')).not.toBeNull();
+  });
 });
 
 describe('FreeformCanvasBoardMenu — frozen callback parity', () => {
@@ -321,6 +352,7 @@ describe('FreeformCanvasBoardMenu — frozen callback parity', () => {
     { label: 'Change Board Background...', key: 'onOpenBackgroundEditor' },
     { label: 'Show Dot Grid', key: 'onToggleDotGrid' },
     { label: 'Snap to Grid', key: 'onToggleSnapToGrid' },
+    { label: 'Alignment Guides', key: 'onToggleAlignmentGuides' },
   ];
 
   for (const { label, key } of CASES) {
@@ -364,6 +396,13 @@ describe('FreeformCanvasBoardMenu — frozen callback parity', () => {
     const handlers = renderMenu();
     click(rowByLabel('Snap to Grid'));
     expect(handlers.onToggleSnapToGrid).toHaveBeenCalledTimes(1);
+    expect(handlers.onClose).not.toHaveBeenCalled();
+  });
+
+  it('"Alignment Guides" toggles without dismissing, so the checkmark stays visible', () => {
+    const handlers = renderMenu();
+    click(rowByLabel('Alignment Guides'));
+    expect(handlers.onToggleAlignmentGuides).toHaveBeenCalledTimes(1);
     expect(handlers.onClose).not.toHaveBeenCalled();
   });
 });
@@ -465,6 +504,7 @@ describe('FreeformCanvasBoardMenu — normalized interaction', () => {
       ['Select All', 'onSelectAll'],
       ['Show Dot Grid', 'onToggleDotGrid'],
       ['Snap to Grid', 'onToggleSnapToGrid'],
+      ['Alignment Guides', 'onToggleAlignmentGuides'],
     ] as const) {
       const handlers = renderMenu();
       click(rowByLabel(label));
@@ -552,8 +592,8 @@ describe('FreeformCanvasBoardMenu — shared shell adoption', () => {
     const call = source.slice(start, source.indexOf('/>', start));
     for (const prop of [
       'x=', 'y=', 'isEditable=', 'showGraphLine=', 'canPaste=', 'canUndoPaste=',
-      'showDotGrid=', 'snapToGrid=', 'onClose=', 'onPaste=', 'onUndo=', 'onSelectAll=',
-      'onToolAction=', 'onOpenBackgroundEditor=', 'onToggleDotGrid=', 'onToggleSnapToGrid=',
+      'showDotGrid=', 'snapToGrid=', 'alignmentGuides=', 'onClose=', 'onPaste=', 'onUndo=', 'onSelectAll=',
+      'onToolAction=', 'onOpenBackgroundEditor=', 'onToggleDotGrid=', 'onToggleSnapToGrid=', 'onToggleAlignmentGuides=',
     ]) {
       expect(call, `CanvasClient must still pass ${prop}`).toContain(prop);
     }

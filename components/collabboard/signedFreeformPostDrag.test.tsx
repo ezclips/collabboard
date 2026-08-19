@@ -120,6 +120,7 @@ function Harness({
     canvasZoom: zoom,
     canEditCanvas,
     snapToGrid,
+    alignmentGuidesEnabled: true,
     padlets,
     setPadlets,
     selectedPadletIds,
