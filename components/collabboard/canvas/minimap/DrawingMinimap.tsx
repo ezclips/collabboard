@@ -59,10 +59,22 @@ function isInsideFittedMap(point: WorldPoint, projection: MinimapProjection): bo
 
 export interface DrawingMinimapProps {
   excalidrawAPI: DrawingMinimapExcalidrawAPI | null | undefined;
+  /**
+   * PATCH DRAWING-MINIMAP-C: when true, renders as a plain 176x112 block
+   * child with no absolute placement/z-index/border/background of its own
+   * -- the composing DrawingNavigationControl owns the outer shell's
+   * position, stacking, and chrome instead. Geometry, projection, and
+   * pointer math below are completely unaffected by this flag. Mirrors
+   * FreeformMinimap's own `embedded` prop (see its own doc comment) --
+   * deliberately duplicated, not imported, to keep Freeform untouched.
+   */
+  embedded?: boolean;
 }
 
-const HOST_CLASSNAME =
+const STANDALONE_HOST_CLASSNAME =
   'pointer-events-auto absolute bottom-[84px] right-[var(--drawing-zoom-controls-right,1.5rem)] z-[130] hidden h-[112px] w-[176px] overflow-hidden rounded-md border border-gray-300 bg-white shadow-md md:block';
+const EMBEDDED_HOST_CLASSNAME =
+  'pointer-events-auto hidden h-[112px] w-[176px] overflow-hidden md:block';
 
 /**
  * PATCH DRAWING-MINIMAP-B: a synthetic single-rect scene used only when
@@ -74,7 +86,7 @@ const HOST_CLASSNAME =
  */
 const ORIGIN_PLACEHOLDER_RECT: WorldRect = { x: 0, y: 0, width: 1, height: 1 };
 
-export default function DrawingMinimap({ excalidrawAPI }: DrawingMinimapProps) {
+export default function DrawingMinimap({ excalidrawAPI, embedded = false }: DrawingMinimapProps) {
   const minimapRef = useRef<HTMLDivElement | null>(null);
   const gestureRef = useRef<MinimapPointerGesture | null>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -219,7 +231,7 @@ export default function DrawingMinimap({ excalidrawAPI }: DrawingMinimapProps) {
       ref={minimapRef}
       data-drawing-minimap="true"
       aria-hidden="true"
-      className={HOST_CLASSNAME}
+      className={embedded ? EMBEDDED_HOST_CLASSNAME : STANDALONE_HOST_CLASSNAME}
       onMouseDown={isolateEvent}
       onClick={isolateEvent}
       onDoubleClick={isolateEvent}

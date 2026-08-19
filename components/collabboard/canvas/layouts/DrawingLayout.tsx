@@ -24,7 +24,6 @@ import EmbeddedCommentList from '@/components/collabboard/EmbeddedCommentList';
 import RowColumnContainerCard from '@/components/collabboard/RowColumnContainerCard';
 import { resolveContainerOrientation } from '@/lib/domain/canvas/containerModel';
 import PostResizeHandle from '@/components/collabboard/canvas/ui/PostResizeHandle';
-import ZoomControls from '@/components/collabboard/canvas/ui/ZoomControls';
 import { PresentationPanel } from '@/components/presentation/PresentationPanel';
 import { FullscreenPresentation, type RuntimeSlideHelpers } from '@/components/presentation/FullscreenPresentation';
 import type { FrameSlide, RenderSlideOptions } from '@/components/presentation/PresentationPanel';
@@ -51,7 +50,7 @@ import type { DrawingViewport } from '@/lib/infra/drawing/canvasLineCoordinates'
 import { registerE2EBridge } from '@/lib/e2e/bridgeRegistration';
 import { isElementBeingLaidOut } from '@/lib/infra/drawing/isElementBeingLaidOut';
 import { guardCommentMutation, type CommentAccessMode } from '@/lib/domain/canvas/comments';
-import DrawingMinimap from '@/components/collabboard/canvas/minimap/DrawingMinimap';
+import DrawingNavigationControl from '@/components/collabboard/canvas/minimap/DrawingNavigationControl';
 
 const ExcalidrawWrapper = dynamic(
   () => import('@/components/collabboard/editors/ExcalidrawWrapper'),
@@ -4361,28 +4360,23 @@ export default function DrawingLayout({
         ? createPortal(topFloatingToolbar, rightClusterAnchorEl ?? drawingRootRef.current!)
         : null}
 
+      {/* PATCH DRAWING-MINIMAP-C: zoom row + navigation minimap combined
+          into ONE bottom-right shell, visually mirroring the (frozen)
+          FreeformNavigationControl. Portaled into the same screen-fixed
+          viewportContainerRef so it stays put during pan/zoom/Full View,
+          exactly like the two separate controls it replaces did. Reuses
+          the SAME applyZoom/zoomPercent state as before -- no new zoom
+          logic -- and DrawingMinimap continues to read the live
+          excalidrawAPI directly, entirely self-contained from
+          DrawingLayout's own onChange/persistence pipeline. */}
       {isInitialViewportSettled && viewportContainerRef?.current ? createPortal(
-        <ZoomControls
+        <DrawingNavigationControl
           canvasZoom={zoomPercent / 100}
           handleZoomOut={() => applyZoom('out')}
           handleZoomReset={() => applyZoom('reset')}
           handleZoomIn={() => applyZoom('in')}
-          className="absolute bottom-6 right-[var(--drawing-zoom-controls-right,1.5rem)] z-[130] flex items-center bg-white rounded-lg shadow-md border border-gray-200 pointer-events-auto"
+          excalidrawAPI={excalidrawAPI}
         />,
-        viewportContainerRef.current
-      ) : null}
-
-      {/* PATCH DRAWING-MINIMAP-A: navigation minimap, bottom-right of the
-          Drawing canvas, stacked directly above ZoomControls (same
-          `--drawing-zoom-controls-right` CSS var so it shifts alongside
-          Zoom Controls whenever a side panel like Presentation/Library
-          changes the available width). Portaled into the same
-          screen-fixed viewportContainerRef so it stays put during
-          pan/zoom/Full View, exactly like ZoomControls above. Entirely
-          self-contained: it reads the live excalidrawAPI directly and
-          never touches DrawingLayout's own onChange/persistence pipeline. */}
-      {isInitialViewportSettled && viewportContainerRef?.current ? createPortal(
-        <DrawingMinimap excalidrawAPI={excalidrawAPI} />,
         viewportContainerRef.current
       ) : null}
 

@@ -29,38 +29,73 @@ const minimapSrc = read('components/collabboard/canvas/minimap/DrawingMinimap.ts
 const geometrySrc = read('components/collabboard/canvas/minimap/drawingMinimapGeometry.ts');
 const navigationSrc = read('components/collabboard/canvas/minimap/drawingMinimapNavigation.ts');
 const sceneHookSrc = read('components/collabboard/canvas/minimap/useDrawingMinimapScene.ts');
+const navControlSrc = read('components/collabboard/canvas/minimap/DrawingNavigationControl.tsx');
 
-describe('PATCH DRAWING-MINIMAP-A: mounted in DrawingLayout, gated and portaled like ZoomControls', () => {
-  it('imports DrawingMinimap from its own new module', () => {
+describe('PATCH DRAWING-MINIMAP-C: mounted in DrawingLayout as ONE combined control, gated like the two separate controls it replaces', () => {
+  it('imports DrawingNavigationControl from its own new module, and no longer imports DrawingMinimap or ZoomControls directly', () => {
     expect(code(layoutSrc)).toContain(
-      "import DrawingMinimap from '@/components/collabboard/canvas/minimap/DrawingMinimap';",
+      "import DrawingNavigationControl from '@/components/collabboard/canvas/minimap/DrawingNavigationControl';",
     );
+    expect(code(layoutSrc)).not.toContain("from '@/components/collabboard/canvas/minimap/DrawingMinimap'");
+    expect(code(layoutSrc)).not.toContain("from '@/components/collabboard/canvas/ui/ZoomControls'");
   });
 
-  it('is portaled into the same screen-fixed viewportContainerRef, gated on isInitialViewportSettled -- same contract as ZoomControls', () => {
+  it('is portaled into the same screen-fixed viewportContainerRef, gated on isInitialViewportSettled -- same contract the two controls it replaces both had', () => {
     const mountBlock = slice(
       code(layoutSrc),
-      '<DrawingMinimap',
+      '<DrawingNavigationControl',
       'viewportContainerRef.current\n      ) : null}',
     );
     expect(mountBlock).toContain('excalidrawAPI={excalidrawAPI}');
     const gate = slice(
       code(layoutSrc),
-      'isInitialViewportSettled && viewportContainerRef?.current ? createPortal(\n        <DrawingMinimap',
+      'isInitialViewportSettled && viewportContainerRef?.current ? createPortal(\n        <DrawingNavigationControl',
       '/>',
     );
     expect(gate).toContain('excalidrawAPI={excalidrawAPI}');
   });
 
-  it('passes no readOnly flag -- navigation is view-only regardless of edit permission, per the patch\'s permissions contract', () => {
-    const mountBlock = slice(code(layoutSrc), '<DrawingMinimap', '/>');
+  it('reuses the SAME applyZoom/zoomPercent state DrawingLayout already had -- no new zoom logic', () => {
+    const mountBlock = slice(code(layoutSrc), '<DrawingNavigationControl', '/>');
+    expect(mountBlock).toContain('canvasZoom={zoomPercent / 100}');
+    expect(mountBlock).toContain("handleZoomOut={() => applyZoom('out')}");
+    expect(mountBlock).toContain("handleZoomReset={() => applyZoom('reset')}");
+    expect(mountBlock).toContain("handleZoomIn={() => applyZoom('in')}");
+  });
+
+  it('passes no readOnly flag -- navigation is view-only regardless of edit permission, per the original patch\'s permissions contract', () => {
+    const mountBlock = slice(code(layoutSrc), '<DrawingNavigationControl', '/>');
     expect(mountBlock).not.toMatch(/readOnly/);
   });
 });
 
-describe('PATCH DRAWING-MINIMAP-A: isolation from the frozen Freeform minimap', () => {
-  it('none of the new Drawing minimap files import from the Freeform minimap module', () => {
-    for (const src of [minimapSrc, geometrySrc, navigationSrc, sceneHookSrc]) {
+describe('PATCH DRAWING-MINIMAP-C: DrawingNavigationControl composition -- no duplicated zoom logic or navigation state', () => {
+  it('renders DrawingMinimap embedded, passing excalidrawAPI straight through', () => {
+    expect(code(navControlSrc)).toContain('<DrawingMinimap embedded excalidrawAPI={excalidrawAPI} />');
+  });
+
+  it('owns only local expand/collapse UI state -- no zoom state, no scene/viewport state of its own', () => {
+    expect(code(navControlSrc)).toContain('const [expanded, setExpanded] = useState(true);');
+    expect(code(navControlSrc)).not.toMatch(/useState.*zoom/i);
+    expect(code(navControlSrc)).not.toMatch(/elementRects|viewportWorldRect|getSceneElements|getAppState/);
+  });
+
+  it('the zoom row buttons call the passed-in handlers directly -- no reimplementation of zoom math', () => {
+    expect(code(navControlSrc)).toContain('onClick={handleZoomOut}');
+    expect(code(navControlSrc)).toContain('onClick={handleZoomReset}');
+    expect(code(navControlSrc)).toContain('onClick={handleZoomIn}');
+    expect(code(navControlSrc)).not.toMatch(/Math\.min\(3|Math\.max\(0\.1/); // DrawingLayout's own applyZoom clamp math
+  });
+
+  it('collapsing hides the minimap slot entirely (unmounts DrawingMinimap) rather than just hiding it with CSS', () => {
+    expect(code(navControlSrc)).toContain('{expanded && (');
+    expect(code(navControlSrc)).not.toMatch(/display:\s*expanded/);
+  });
+});
+
+describe('PATCH DRAWING-MINIMAP-A/C: isolation from the frozen Freeform minimap/navigation control', () => {
+  it('none of the new Drawing minimap/navigation files import from the Freeform minimap module', () => {
+    for (const src of [minimapSrc, geometrySrc, navigationSrc, sceneHookSrc, navControlSrc]) {
       expect(code(src)).not.toMatch(/freeformMinimap|useFreeformMinimap|FreeformNavigationControl/);
     }
   });
@@ -69,11 +104,13 @@ describe('PATCH DRAWING-MINIMAP-A: isolation from the frozen Freeform minimap', 
     expect(code(minimapSrc)).not.toContain('FreeformMinimap');
   });
 
-  it('the Freeform minimap module itself has no new reference to the Drawing minimap', () => {
+  it('the Freeform minimap and navigation-control modules themselves have no new reference to Drawing\'s', () => {
     const freeformSrc = read('components/collabboard/canvas/minimap/FreeformMinimap.tsx');
     const freeformGeometrySrc = read('components/collabboard/canvas/minimap/freeformMinimapGeometry.ts');
+    const freeformNavControlSrc = read('components/collabboard/canvas/minimap/FreeformNavigationControl.tsx');
     expect(code(freeformSrc)).not.toMatch(/DrawingMinimap|drawingMinimap/);
     expect(code(freeformGeometrySrc)).not.toMatch(/DrawingMinimap|drawingMinimap/);
+    expect(code(freeformNavControlSrc)).not.toMatch(/DrawingNavigationControl|drawingMinimap/);
   });
 });
 
@@ -143,5 +180,31 @@ describe('PATCH DRAWING-MINIMAP-B: the minimap shell is never hidden', () => {
 
   it('the host shell now carries a visible border/background of its own, independent of the inner SVG surface rect', () => {
     expect(code(minimapSrc)).toMatch(/HOST_CLASSNAME[\s\S]{0,10}=[\s\S]{0,200}border[\s\S]{0,200}bg-white/);
+  });
+});
+
+describe('PATCH DRAWING-MINIMAP-C: DrawingMinimap gained an embedded mode, geometry/pointer math untouched', () => {
+  it('has an optional embedded prop, mirroring FreeformMinimap\'s own (deliberately duplicated, not imported)', () => {
+    expect(code(minimapSrc)).toContain('embedded?: boolean;');
+    expect(code(minimapSrc)).toContain('embedded = false');
+  });
+
+  it('the embedded variant drops its own absolute positioning/z-index/border/background -- the composing control owns those now', () => {
+    const embeddedClass = slice(code(minimapSrc), 'const EMBEDDED_HOST_CLASSNAME =', ';');
+    expect(embeddedClass).not.toMatch(/absolute|z-\[|border|bg-white|shadow/);
+    expect(embeddedClass).toContain('h-[112px] w-[176px]');
+  });
+
+  it('the standalone variant is untouched -- still self-positions bottom-right with its own chrome', () => {
+    expect(code(minimapSrc)).toContain(
+      "'pointer-events-auto absolute bottom-[84px] right-[var(--drawing-zoom-controls-right,1.5rem)] z-[130] hidden h-[112px] w-[176px] overflow-hidden rounded-md border border-gray-300 bg-white shadow-md md:block';",
+    );
+  });
+
+  it('none of the geometry/projection/pointer-handler logic changed for this patch -- only the host classname selection did', () => {
+    expect(code(minimapSrc)).toContain('className={embedded ? EMBEDDED_HOST_CLASSNAME : STANDALONE_HOST_CLASSNAME}');
+    // Every pointer handler and the click/drag navigation helpers are called exactly as before.
+    expect(code(minimapSrc)).toContain('onPointerDown={handlePointerDown}');
+    expect(code(minimapSrc)).toContain('panDrawingViewportByWorldDelta(excalidrawAPI, targetWorld.x - currentCenter.x, targetWorld.y - currentCenter.y);');
   });
 });
