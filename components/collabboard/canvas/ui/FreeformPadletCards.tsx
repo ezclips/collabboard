@@ -1901,9 +1901,20 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                 )}
               </div>
 
-              {/* Reactions Row - Lower left, above caption */}
+              {/* Reactions Row - Lower left, above caption.
+                  PATCH FULLVIEW-FRAME-R1: with zero actual reactions, this
+                  row exists only to host the add-reaction control, which is
+                  itself invisible until hover (see ReactionDisplay's
+                  opacity-0 "+" button) -- reserving in-flow height for it
+                  left a blank gap inside the visible outer frame, most
+                  obvious in Full View where no border/title strip explains
+                  it away. Overlaid (absolute, no flow height) instead in
+                  that zero-reaction case; real reaction badges keep their
+                  original in-flow placement unchanged. */}
               {((padlet.metadata?.reactions?.length ?? 0) > 0 || isPadletSelected(padlet.id)) && (
-                <div className="flex items-center gap-1.5 px-3 py-1.5">
+                <div className={(padlet.metadata?.reactions?.length ?? 0) > 0
+                  ? "flex items-center gap-1.5 px-3 py-1.5"
+                  : "absolute bottom-1.5 left-3 flex items-center gap-1.5"}>
                   <ReactionDisplay
                     reactions={padlet.metadata?.reactions || []}
                     onAddClick={() => {
@@ -3894,6 +3905,14 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                         padletId: padlet.id,
                         width: Number(padlet.width) || 500,
                         height: Number(padlet.height) || 400,
+                        // PATCH FULLVIEW-FRAME-R1: AIComponentRenderer's own
+                        // default minHeight (280) pads the card with blank
+                        // space below shorter generated content, regardless
+                        // of Full View. Its own hard floor (150, see
+                        // AIComponentRenderer.tsx's `Math.max(minHeight,
+                        // 150)`) still applies underneath this -- this only
+                        // removes the EXTRA 130px Freeform never asked for.
+                        minHeight: 0,
                         canvasZoom,
                         isExpanded: expandedAIPosts[padlet.id] ?? false,
                         onExpandAvailabilityChange: (available: boolean) => {
@@ -4016,9 +4035,18 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                   applied here so Note/Todo/Table/Link/AI/Drawing posts get
                   the same on-canvas display Image already had. Container is
                   excluded: its branch below has no relative-positioned
-                  wrapper to anchor the add-picker popup against. */}
+                  wrapper to anchor the add-picker popup against.
+                  PATCH FULLVIEW-FRAME-R1: for AI Component specifically
+                  (scope of this patch), a zero-reaction row exists only to
+                  host the invisible-until-hover add-reaction control -- see
+                  the matching comment on the Image post's own Reactions Row
+                  above. Overlaid instead of reserving flow height in that
+                  case; every other type (and AI with real reaction badges)
+                  keeps this row's original in-flow placement unchanged. */}
               {padlet.type !== 'container' && ((padlet.metadata?.reactions?.length ?? 0) > 0 || isPadletSelected(padlet.id)) && (
-                <div className="flex items-center gap-1.5 pt-1.5 mt-1.5 border-t border-gray-100">
+                <div className={padlet.type === 'ai-component' && (padlet.metadata?.reactions?.length ?? 0) === 0
+                  ? "absolute bottom-1.5 left-3 flex items-center gap-1.5"
+                  : "flex items-center gap-1.5 pt-1.5 mt-1.5 border-t border-gray-100"}>
                   <ReactionDisplay
                     reactions={padlet.metadata?.reactions || []}
                     onAddClick={() => {
