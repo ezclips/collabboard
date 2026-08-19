@@ -42,9 +42,9 @@ describe('PATCH 9S: camera hook wiring [Phase 3]', () => {
 });
 
 describe('PATCH FREEFORM-ZOOM-A: default open zoom is 30%, Freeform-scoped only', () => {
-  it('FREEFORM_DEFAULT_ZOOM is 0.3, defined in the shared geometry module (not hardcoded inline)', () => {
+  it('FREEFORM_DEFAULT_ZOOM is 0.8 (PATCH FREEFORM-ZOOM-B raised it from 0.3), defined in the shared geometry module (not hardcoded inline)', () => {
     const stageGeometrySrc = read('components/collabboard/canvas/engine/freeformStageGeometry.ts');
-    expect(stageGeometrySrc).toContain('export const FREEFORM_DEFAULT_ZOOM = 0.3;');
+    expect(stageGeometrySrc).toContain('export const FREEFORM_DEFAULT_ZOOM = 0.8;');
   });
 
   it('CanvasClient imports FREEFORM_DEFAULT_ZOOM from the geometry module', () => {

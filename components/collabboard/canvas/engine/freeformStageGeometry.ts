@@ -32,8 +32,12 @@ export const FREEFORM_WORLD_ORIGIN_OFFSET_Y = -FREEFORM_WORLD_MIN_Y;
  * (no existing/restored zoom) -- fed into useCanvasCamera's `initialZoom`
  * parameter so its useState/useRef seed stay byte-identical to each other,
  * exactly as the pre-patch `1` default did.
+ *
+ * PATCH FREEFORM-ZOOM-B: raised 0.3 -> 0.8, paired with the same patch's
+ * center-anchored initial camera seed (see useCanvasCamera's mount-time
+ * useLayoutEffect).
  */
-export const FREEFORM_DEFAULT_ZOOM = 0.3;
+export const FREEFORM_DEFAULT_ZOOM = 0.8;
 
 export interface FreeformRectPlacement {
   x: number;

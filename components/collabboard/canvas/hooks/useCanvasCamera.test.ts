@@ -131,12 +131,12 @@ function worldAtAnchor(el: HTMLDivElement, camera: ReturnType<typeof useCanvasCa
 }
 
 describe('PATCH 9S.2: mount-time gutter seeding [Phase: initial camera]', () => {
-  it('seeds gutterX/gutterY to the measured viewport size and scrolls to (gutterX, gutterY) on first mount', () => {
+  it('seeds gutterX/gutterY to the measured viewport size (unchanged) and scrolls to HALF that (gutterX/2, gutterY/2) on first mount -- PATCH FREEFORM-ZOOM-B centers the world origin instead of the pre-patch top-left target', () => {
     const h = mountCamera({ ...VIEWPORT, ...HUGE_EXTENT });
     expect(h.getCamera().gutterX).toBe(1200);
     expect(h.getCamera().gutterY).toBe(800);
-    expect(h.el.scrollLeft).toBe(1200);
-    expect(h.el.scrollTop).toBe(800);
+    expect(h.el.scrollLeft).toBe(600);
+    expect(h.el.scrollTop).toBe(400);
   });
 
   it('does not seed/measure gutter at all when disabled (non-Freeform layout)', () => {
@@ -164,17 +164,20 @@ describe('PATCH 9V.2A: finite signed-stage initial seed', () => {
     const h = mountCamera({ ...VIEWPORT, ...HUGE_EXTENT }, true, { x: 5000, y: 5000 });
     expect(h.getCamera().gutterX).toBe(1200);
     expect(h.getCamera().gutterY).toBe(800);
-    expect(h.el.scrollLeft).toBe(6200);
-    expect(h.el.scrollTop).toBe(5800);
+    // PATCH FREEFORM-ZOOM-B: half-gutter seed target (600/400) instead of
+    // the pre-patch full-gutter (1200/800) -- see the dedicated centering
+    // describe block below for the on-screen invariant this produces.
+    expect(h.el.scrollLeft).toBe(5600);
+    expect(h.el.scrollTop).toBe(5400);
   });
 
-  it('keeps logical world (0,0) at the same initial screen point as the pre-signed stage', () => {
+  it('PATCH FREEFORM-ZOOM-B: logical world (0,0) now lands at screen CENTER on initial seed, not the pre-patch top-left corner', () => {
     const h = mountCamera({ ...VIEWPORT, ...HUGE_EXTENT }, true, { x: 5000, y: 5000 });
     const logicalOriginScreen = {
       x: h.getCamera().gutterX + 5000 * h.getCamera().canvasZoom - h.el.scrollLeft,
       y: h.getCamera().gutterY + 5000 * h.getCamera().canvasZoom - h.el.scrollTop,
     };
-    expect(logicalOriginScreen).toEqual({ x: 0, y: 0 });
+    expect(logicalOriginScreen).toEqual({ x: VIEWPORT.clientWidth / 2, y: VIEWPORT.clientHeight / 2 });
   });
 });
 
@@ -189,26 +192,27 @@ describe('PATCH FREEFORM-ZOOM-A: initialZoom parameter -- opt-in default, byte-i
     expect(h.getCamera().canvasZoom).toBe(0.3);
   });
 
-  it('the mount-time seed (gutter + world-origin-offset scroll) uses initialZoom consistently, not the stale pre-patch 1 -- proves zoomRef was seeded together with the canvasZoom state, not left behind', () => {
+  it('the mount-time seed (half-gutter + world-origin-offset scroll) uses initialZoom consistently, not the stale pre-patch 1 -- proves zoomRef was seeded together with the canvasZoom state, not left behind', () => {
     // With a non-zero origin offset, the seeded scrollLeft/scrollTop is
-    // measuredGutter + offset * zoom. If zoomRef (used by the mount-time
-    // useLayoutEffect) were still hardcoded/defaulted to 1 while canvasZoom
-    // state itself became 0.3, this seed would use the WRONG factor and the
-    // asserted scroll values below would be off by offset * 0.7.
+    // measuredGutter/2 + offset * zoom (PATCH FREEFORM-ZOOM-B's half-gutter
+    // centering target). If zoomRef (used by the mount-time useLayoutEffect)
+    // were still hardcoded/defaulted to 1 while canvasZoom state itself
+    // became 0.3, this seed would use the WRONG factor and the asserted
+    // scroll values below would be off by offset * 0.7.
     const h = mountCamera({ ...VIEWPORT, ...HUGE_EXTENT }, true, { x: 5000, y: 5000 }, 0.3);
     expect(h.getCamera().gutterX).toBe(1200);
     expect(h.getCamera().gutterY).toBe(800);
-    expect(h.el.scrollLeft).toBe(1200 + 5000 * 0.3);
-    expect(h.el.scrollTop).toBe(800 + 5000 * 0.3);
+    expect(h.el.scrollLeft).toBe(600 + 5000 * 0.3);
+    expect(h.el.scrollTop).toBe(400 + 5000 * 0.3);
   });
 
-  it('logical world (0,0) still lands at the same initial screen point at the new default zoom, exactly like the pre-patch zoom-1 seed', () => {
+  it('logical world (0,0) lands at screen CENTER at the new default zoom too -- the centering invariant is independent of which zoom seeded it', () => {
     const h = mountCamera({ ...VIEWPORT, ...HUGE_EXTENT }, true, { x: 5000, y: 5000 }, 0.3);
     const logicalOriginScreen = {
       x: h.getCamera().gutterX + 5000 * h.getCamera().canvasZoom - h.el.scrollLeft,
       y: h.getCamera().gutterY + 5000 * h.getCamera().canvasZoom - h.el.scrollTop,
     };
-    expect(logicalOriginScreen).toEqual({ x: 0, y: 0 });
+    expect(logicalOriginScreen).toEqual({ x: VIEWPORT.clientWidth / 2, y: VIEWPORT.clientHeight / 2 });
   });
 
   it('zoom +/- controls step normally from the new initial value, through the exact same clamp/step primitive', () => {
@@ -224,6 +228,43 @@ describe('PATCH FREEFORM-ZOOM-A: initialZoom parameter -- opt-in default, byte-i
     const { anchorX, anchorY } = centerAnchorFor(h.getCamera());
     act(() => { h.getCamera().handleZoomReset(); });
     expect(h.getCamera().canvasZoom).toBe(1);
+  });
+});
+
+describe('PATCH FREEFORM-ZOOM-B: initial camera centers the world origin on screen [core patch behavior]', () => {
+  it('at the real app zoom (0.8) and real world-origin offset (5000,5000), the logical world origin lands at exact screen center on first paint', () => {
+    const h = mountCamera({ ...VIEWPORT, ...HUGE_EXTENT }, true, { x: 5000, y: 5000 }, 0.8);
+    const screenX = h.getCamera().gutterX + 5000 * h.getCamera().canvasZoom - h.el.scrollLeft;
+    const screenY = h.getCamera().gutterY + 5000 * h.getCamera().canvasZoom - h.el.scrollTop;
+    expect(screenX).toBe(VIEWPORT.clientWidth / 2);
+    expect(screenY).toBe(VIEWPORT.clientHeight / 2);
+  });
+
+  it('centering holds across a range of realistic viewport sizes -- not a coincidence of one fixed VIEWPORT constant', () => {
+    const viewports = [
+      { clientWidth: 800, clientHeight: 600 },
+      { clientWidth: 1920, clientHeight: 1080 },
+      { clientWidth: 375, clientHeight: 667 }, // mobile-ish, odd numbers
+    ];
+    for (const viewport of viewports) {
+      const h = mountCamera({ ...viewport, ...HUGE_EXTENT }, true, { x: 5000, y: 5000 }, 0.8);
+      const screenX = h.getCamera().gutterX + 5000 * h.getCamera().canvasZoom - h.el.scrollLeft;
+      const screenY = h.getCamera().gutterY + 5000 * h.getCamera().canvasZoom - h.el.scrollTop;
+      expect(screenX).toBe(viewport.clientWidth / 2);
+      expect(screenY).toBe(viewport.clientHeight / 2);
+    }
+  });
+
+  it('never produces a negative scroll for the real offset/zoom -- the Math.max(0, ...) guard is defensive, not load-bearing, for actual Freeform geometry', () => {
+    const h = mountCamera({ ...VIEWPORT, ...HUGE_EXTENT }, true, { x: 5000, y: 5000 }, 0.8);
+    expect(h.el.scrollLeft).toBeGreaterThan(0);
+    expect(h.el.scrollTop).toBeGreaterThan(0);
+  });
+
+  it('the gutter itself is still a FULL viewport per side, unchanged -- only the seed TARGET within it moved; shrinking the gutter would reintroduce the PATCH 9S.1 low-zoom clamp defect', () => {
+    const h = mountCamera({ ...VIEWPORT, ...HUGE_EXTENT }, true, { x: 5000, y: 5000 }, 0.8);
+    expect(h.getCamera().gutterX).toBe(VIEWPORT.clientWidth);
+    expect(h.getCamera().gutterY).toBe(VIEWPORT.clientHeight);
   });
 });
 
@@ -258,8 +299,10 @@ describe('PATCH 9S.5: viewport availability lifecycle [load-bearing]', () => {
 
     expect(latestCamera!.gutterX).toBe(VIEWPORT.clientWidth);
     expect(latestCamera!.gutterY).toBe(VIEWPORT.clientHeight);
-    expect(containerRefObj.current!.scrollLeft).toBe(VIEWPORT.clientWidth);
-    expect(containerRefObj.current!.scrollTop).toBe(VIEWPORT.clientHeight);
+    // PATCH FREEFORM-ZOOM-B: half-gutter seed target (centers the world
+    // origin) instead of the pre-patch full-gutter top-left target.
+    expect(containerRefObj.current!.scrollLeft).toBe(VIEWPORT.clientWidth / 2);
+    expect(containerRefObj.current!.scrollTop).toBe(VIEWPORT.clientHeight / 2);
   });
 });
 

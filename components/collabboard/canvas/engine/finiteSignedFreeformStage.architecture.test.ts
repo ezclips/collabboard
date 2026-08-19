@@ -48,8 +48,12 @@ describe('PATCH 9V.2A: finite signed Freeform stage architecture', () => {
   });
 
   it('changes only the initial camera seed; anchored zoom and pan stay native-scroll based', () => {
-    expect(camera).toContain('measuredX + initialWorldOriginOffsetX * zoomRef.current');
-    expect(camera).toContain('measuredY + initialWorldOriginOffsetY * zoomRef.current');
+    // PATCH FREEFORM-ZOOM-B legitimately updated this exact seed line (world
+    // origin now centers on screen instead of landing at top-left) -- the
+    // rest of this test's invariants (anchored zoom/pan formulas) are
+    // unaffected and still pinned below.
+    expect(camera).toContain('measuredX / 2 + initialWorldOriginOffsetX * zoomRef.current');
+    expect(camera).toContain('measuredY / 2 + initialWorldOriginOffsetY * zoomRef.current');
     expect(camera).toContain('const worldX = (oldScrollLeft + anchorX - gx) / oldZoom;');
     expect(camera).toContain('left: worldX * newZoom + gx - anchorX,');
     expect(camera).toContain('left: (pending?.left ?? container.scrollLeft) + dxWorld * zoom,');
@@ -226,7 +230,10 @@ describe('PATCH 9V.2B: camera, Line, world and data freezes [matrix 59-61, 64-71
     expect(camera).not.toContain('freeformStageGeometry');
     expect(camera).toContain('const worldX = (oldScrollLeft + anchorX - gx) / oldZoom;');
     expect(camera).toContain('left: worldX * newZoom + gx - anchorX,');
-    expect(camera).toContain('measuredX + initialWorldOriginOffsetX * zoomRef.current');
+    // PATCH FREEFORM-ZOOM-B legitimately updated the seed line itself (see
+    // the dedicated centering test above) -- the anchored zoom/pan formulas
+    // this control actually guards are unaffected.
+    expect(camera).toContain('measuredX / 2 + initialWorldOriginOffsetX * zoomRef.current');
     expect(camera).toContain('left: (pending?.left ?? container.scrollLeft) + dxWorld * zoom,');
   });
 

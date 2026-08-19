@@ -95,9 +95,20 @@ export function useCanvasCamera(
   // Measures the real viewport size once mounted/enabled (synchronously,
   // before paint) and seeds the initial camera to the logical-world-origin scroll
   // position -- both together, so the first frame ever shown already has
-  // world (0,0) at the top-left of the WORLD, not of the gutter. Runs once
-  // per enabling; guarded so later re-renders (or later gutter changes,
-  // handled separately below) never reseed and jump the user's camera back.
+  // world (0,0) positioned deliberately, not wherever the raw gutter math
+  // happens to land it. Runs once per enabling; guarded so later re-renders
+  // (or later gutter changes, handled separately below) never reseed and
+  // jump the user's camera back.
+  //
+  // PATCH FREEFORM-ZOOM-B: the gutter itself stays a full viewport per side
+  // (unchanged -- shrinking it would reintroduce PATCH 9S.1's low-zoom clamp
+  // defect), but the SEED TARGET within that gutter now lands world (0,0) at
+  // screen CENTER (measuredX/Y / 2) instead of the pre-patch screen (0,0)
+  // top-left corner -- the confirmed live problem ("Freeform starts near the
+  // upper-left of the viewport"). Math.max(0, ...) guards the formula the
+  // same way every other scroll write in this hook does; in practice
+  // initialWorldOriginOffsetX/Y * zoom is always far larger than half a
+  // viewport for real Freeform geometry, so this never actually clamps.
   useLayoutEffect(() => {
     if (!enabled || !viewportElement || seededViewportRef.current === viewportElement) return;
     const container = viewportElement;
@@ -106,8 +117,8 @@ export function useCanvasCamera(
     gutterRef.current = { x: measuredX, y: measuredY };
     setGutterX(measuredX);
     setGutterY(measuredY);
-    container.scrollLeft = measuredX + initialWorldOriginOffsetX * zoomRef.current;
-    container.scrollTop = measuredY + initialWorldOriginOffsetY * zoomRef.current;
+    container.scrollLeft = Math.max(0, measuredX / 2 + initialWorldOriginOffsetX * zoomRef.current);
+    container.scrollTop = Math.max(0, measuredY / 2 + initialWorldOriginOffsetY * zoomRef.current);
     seededViewportRef.current = viewportElement;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, viewportElement, initialWorldOriginOffsetX, initialWorldOriginOffsetY]);
