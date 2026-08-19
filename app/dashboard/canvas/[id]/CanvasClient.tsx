@@ -132,6 +132,7 @@ import CanvasModals from '@/components/collabboard/canvas/ui/CanvasModals';
 import CanvasViewport from '@/components/collabboard/canvas/ui/CanvasViewport';
 import PadletLayer from '@/components/collabboard/canvas/ui/PadletLayer';
 import FreeformPadletCards from '@/components/collabboard/canvas/ui/FreeformPadletCards';
+import FreeformAlignmentGuides from '@/components/collabboard/canvas/ui/FreeformAlignmentGuides';
 import OverlayLayer from '@/components/collabboard/canvas/ui/OverlayLayer';
 import ZoomControls from '@/components/collabboard/canvas/ui/ZoomControls';
 import GhostDragElement from '@/components/collabboard/canvas/ui/GhostDragElement';
@@ -2541,6 +2542,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     isDragging,
     draggingPadletId,
     dragOverContainerId,
+    alignmentGuides,
     handlePadletMouseDown,
     handleCanvasMouseMove,
     handleCanvasMouseUp,
@@ -7812,6 +7814,32 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                   canvasZoom={isFreeformLayout ? canvasZoom : undefined}
                   forcePointerEvents={shouldEnableMapLinePointerEvents}
                 />
+              </div>
+            )}
+
+            {/* PATCH ALIGN-A: Smart Alignment Guide foundation -- same
+                world-scaled wrapper pattern as the front/back Line planes
+                above (left/top at the world origin, transform: scale(canvasZoom),
+                pointer-events: none), stacked above them so a guide is never
+                hidden behind a Line. Renders nothing while alignmentGuides is
+                { null, null } (every drag today, since ALIGN-B has not wired
+                detection yet). */}
+            {isFreeformLayout && (
+              <div
+                data-freeform-world-layer="alignment-guides"
+                className="absolute inset-0"
+                style={{
+                  zIndex: 2500,
+                  pointerEvents: 'none',
+                  left: freeformWorldOriginLeft,
+                  top: freeformWorldOriginTop,
+                  width: FREEFORM_WORLD_WIDTH_PX,
+                  height: FREEFORM_WORLD_HEIGHT_PX,
+                  transform: `scale(${canvasZoom})`,
+                  transformOrigin: '0 0',
+                }}
+              >
+                <FreeformAlignmentGuides guides={alignmentGuides} />
               </div>
             )}
 

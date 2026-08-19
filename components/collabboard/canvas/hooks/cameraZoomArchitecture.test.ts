@@ -208,7 +208,11 @@ describe('PATCH 9S.7: freeformWorldOriginRef is the ONE canonical origin referen
     expect(surface).toContain('data-freeform-world-layer="back"');
     expect(surface).toContain('<FreeformPadletCards');
     expect(surface).toContain('data-freeform-world-layer="front"');
-    expect((surface.match(/left: freeformWorldOriginLeft,\n\s*top: freeformWorldOriginTop,/g) || []).length).toBe(2);
+    // PATCH ALIGN-A: a third layer (data-freeform-world-layer="alignment-guides")
+    // joined back/front at this SAME logical origin -- still one canonical
+    // reference point, now with a third consumer.
+    expect(surface).toContain('data-freeform-world-layer="alignment-guides"');
+    expect((surface.match(/left: freeformWorldOriginLeft,\n\s*top: freeformWorldOriginTop,/g) || []).length).toBe(3);
   });
 
   it('getCanvasPointFromClient is the ONE canonical pointer->world conversion, using freeformWorldOriginRef and no manual scrollLeft/scrollTop/padding arithmetic', () => {

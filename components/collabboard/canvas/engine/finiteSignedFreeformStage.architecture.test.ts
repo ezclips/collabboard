@@ -25,8 +25,11 @@ describe('PATCH 9V.2A: finite signed Freeform stage architecture', () => {
   it('places logical zero at the one canonical scaled stage offset', () => {
     expect(canvas).toContain('const freeformWorldOriginLeft = gutterX + FREEFORM_WORLD_ORIGIN_OFFSET_X * canvasZoom;');
     expect(canvas).toContain('const freeformWorldOriginTop = gutterY + FREEFORM_WORLD_ORIGIN_OFFSET_Y * canvasZoom;');
-    expect((canvas.match(/left: freeformWorldOriginLeft,/g) || []).length).toBe(2);
-    expect((canvas.match(/top: freeformWorldOriginTop,/g) || []).length).toBe(2);
+    // PATCH ALIGN-A added a third layer (the alignment-guide foundation)
+    // anchored at this SAME canonical origin -- still the one shared
+    // reference point, just a third consumer of it.
+    expect((canvas.match(/left: freeformWorldOriginLeft,/g) || []).length).toBe(3);
+    expect((canvas.match(/top: freeformWorldOriginTop,/g) || []).length).toBe(3);
     expect(cards).toContain('left: worldOriginLeft,');
     expect(cards).toContain('top: worldOriginTop,');
     expect(canvas).toContain('ref={freeformWorldOriginRef}');

@@ -382,6 +382,16 @@ export type NewPostDragState = {
   grabOffset: { x: number; y: number };
 };
 
+// PATCH ALIGN-A: transient, non-persisted Freeform Smart Alignment Guide
+// state -- a single vertical/horizontal guide line in WORLD coordinates, or
+// null on either axis when no guide is showing. Detection (comparing the
+// dragged post's edges/center against other root posts) is NOT implemented
+// yet; this is only the state shape the render layer consumes.
+export type FreeformAlignmentGuideState = {
+  verticalX: number | null;
+  horizontalY: number | null;
+};
+
 export type ColumnDragPayload =
   | { kind: "container"; id: string; fromSectionId: string }
   | { kind: "post"; id: string; fromSectionId: string };

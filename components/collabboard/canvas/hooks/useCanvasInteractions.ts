@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createUpdatePostPositionCommand } from '@/lib/domain/canvas/posts';
 import { createPostsRepository } from '@/lib/infra/canvas/postsRepository';
-import type { NewPostDragState, Padlet } from '@/types/collabboard';
+import type { FreeformAlignmentGuideState, NewPostDragState, Padlet } from '@/types/collabboard';
 import { debugCanvasLogger } from '@/lib/collabboard/debugCanvasLogger';
 import { findContainerOverlappingRect } from '@/components/collabboard/canvas/engine/utils';
 import { attachPostToContainer } from '@/components/collabboard/canvas/hooks/attachPostToContainer';
@@ -131,6 +131,16 @@ export function useCanvasInteractions({
   // (dropping a multi-select into a container isn't supported, same as the
   // drop handler below).
   const [dragOverContainerId, setDragOverContainerId] = useState<string | null>(null);
+  // PATCH ALIGN-A: Smart Alignment Guide foundation -- transient, never
+  // persisted, cleared on every drag end (see handleCanvasMouseUp's cleanup
+  // below). Nothing in this patch sets it to a non-null value; detection
+  // (comparing the dragged post's edges/center against other ROOT posts,
+  // see the marked point in the single-post branch of handleCanvasMouseMove
+  // below) is ALIGN-B's job.
+  const [alignmentGuides, setAlignmentGuides] = useState<FreeformAlignmentGuideState>({
+    verticalX: null,
+    horizontalY: null,
+  });
 
   const dragEndInFlightRef = useRef(false);
   const isDraggingRef = useRef(false);
@@ -476,6 +486,16 @@ export function useCanvasInteractions({
     const previewX = effectiveSnapToGrid ? snapWorldValueToGrid(clampedX) : clampedX;
     const previewY = effectiveSnapToGrid ? snapWorldValueToGrid(clampedY) : clampedY;
 
+    // PATCH ALIGN-A: identified hook point for ALIGN-B's Smart Alignment
+    // Guide detection. Everything alignment needs is already in scope right
+    // here -- the dragged post's live world position (previewX/previewY),
+    // its size (dragSize.width/height), and every other ROOT post to compare
+    // against (padlets, filtered by !parentId the same way CanvasClient's
+    // rootPadlets already is). ALIGN-B compares edges/centers against that
+    // set and calls setAlignmentGuides(...); this patch deliberately leaves
+    // that call out -- alignmentGuides stays { null, null } for the whole
+    // gesture, so the render layer stays hidden.
+
     setPadlets(prev => prev.map(p =>
       p.id === draggingPadletId
         ? { ...p, position_x: previewX, position_y: previewY }
@@ -630,6 +650,9 @@ export function useCanvasInteractions({
       dragEndInFlightRef.current = false;
       dragRectSizeRef.current = null;
       dragGroupStartBoundsRef.current = null;
+      // PATCH ALIGN-A: no persistence -- every drag end clears any guide,
+      // matching every other per-gesture ref reset in this block.
+      setAlignmentGuides({ verticalX: null, horizontalY: null });
       unlockBodySelection();
     }
   };
@@ -666,6 +689,8 @@ export function useCanvasInteractions({
     lastMousePosition,
     setLastMousePosition,
     dragOverContainerId,
+    alignmentGuides,
+    setAlignmentGuides,
     handlePadletMouseDown,
     handleImagePadletDrag,
     handleCanvasMouseMove,
