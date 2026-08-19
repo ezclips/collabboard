@@ -392,6 +392,31 @@ export type FreeformAlignmentGuideState = {
   horizontalY: number | null;
 };
 
+// PATCH ALIGN-E2: presentation-only sibling of FreeformAlignmentGuideState --
+// which pair family produced each axis's current guide (adjacency vs
+// ordinary same-edge/center), plus WHERE along that guide line an adjacency
+// marker should sit, so the render layer can draw a small perpendicular
+// tick at the actual touching point without needing the winning candidate's
+// own rect. Deliberately a SEPARATE state/type rather than new fields on
+// FreeformAlignmentGuideState itself: geometry (where the line is) and
+// presentation (how/whether to mark it) are independent concerns, and
+// keeping them apart means every existing `{ verticalX, horizontalY }`
+// assertion across the ALIGN-B through ALIGN-E1 test suites stays exact,
+// unaffected by this patch.
+//
+// The marker's cross-axis position is the DRAGGED post's own center on that
+// axis (verticalMarkerY = dragged post's vertical center, for a vertical/
+// X-axis guide; horizontalMarkerX = dragged post's horizontal center, for a
+// horizontal/Y-axis guide) -- not the touching OTHER post's center, which
+// this state never tracks. False/null whenever the corresponding axis has
+// no guide showing, or its guide is an ordinary (non-adjacency) match.
+export type FreeformAlignmentGuideKindState = {
+  verticalIsAdjacency: boolean;
+  horizontalIsAdjacency: boolean;
+  verticalMarkerY: number | null;
+  horizontalMarkerX: number | null;
+};
+
 export type ColumnDragPayload =
   | { kind: "container"; id: string; fromSectionId: string }
   | { kind: "post"; id: string; fromSectionId: string };

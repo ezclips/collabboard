@@ -159,6 +159,20 @@ export interface FreeformHorizontalAlignmentCandidateRect {
 }
 
 /**
+ * PATCH ALIGN-E2: a resolved alignment-guide match, carrying not just WHERE
+ * the guide sits but WHICH pair family produced it -- adjacency (posts
+ * butted edge-to-edge) vs ordinary same-edge/center. Value alone is
+ * ambiguous here: an adjacency pair (e.g. dragged-right/other-left) and a
+ * same-edge pair (dragged-left/other-left) can both resolve to the exact
+ * same `otherLeft`, so the kind has to be captured at the moment the
+ * nearest-wins search actually picks a winner, not re-derived afterward.
+ */
+export interface FreeformAlignmentMatch {
+  value: number;
+  isAdjacency: boolean;
+}
+
+/**
  * PATCH ALIGN-B/E: vertical (X-axis) alignment-guide detection for a single
  * dragged root post against other root posts, in WORLD units.
  *
@@ -178,22 +192,19 @@ export interface FreeformHorizontalAlignmentCandidateRect {
  * non-root post from `others`; this function has no post-identity concept,
  * only rectangles.
  *
- * Returns the WORLD x of the nearest qualifying match (a candidate's own
- * edge/center, the value a guide line should be drawn at) within
- * `toleranceWorld`, or null when nothing qualifies. Never scaled by
- * canvasZoom -- convert the screen tolerance to world units before calling,
- * same convention as snapWorldValueToGrid above.
+ * Never scaled by canvasZoom -- convert the screen tolerance to world units
+ * before calling, same convention as snapWorldValueToGrid above.
  */
-export function detectVerticalAlignmentGuide(
+export function detectVerticalAlignmentMatch(
   dragged: FreeformAlignmentCandidateRect,
   others: FreeformAlignmentCandidateRect[],
   toleranceWorld: number,
-): number | null {
+): FreeformAlignmentMatch | null {
   const draggedLeft = dragged.x;
   const draggedRight = dragged.x + dragged.width;
   const draggedCenter = dragged.x + dragged.width / 2;
 
-  let bestX: number | null = null;
+  let best: FreeformAlignmentMatch | null = null;
   let bestDistance = Infinity;
 
   for (const other of others) {
@@ -201,31 +212,46 @@ export function detectVerticalAlignmentGuide(
     const otherRight = other.x + other.width;
     const otherCenter = other.x + other.width / 2;
 
-    const pairs: Array<[number, number]> = [
-      [draggedLeft, otherLeft],
-      [draggedCenter, otherCenter],
-      [draggedRight, otherRight],
+    const pairs: Array<[number, number, boolean]> = [
+      [draggedLeft, otherLeft, false],
+      [draggedCenter, otherCenter, false],
+      [draggedRight, otherRight, false],
       // PATCH ALIGN-E: horizontal adjacency -- posts sitting side by side.
-      [draggedRight, otherLeft],
-      [draggedLeft, otherRight],
+      [draggedRight, otherLeft, true],
+      [draggedLeft, otherRight, true],
     ];
 
-    for (const [draggedValue, otherValue] of pairs) {
+    for (const [draggedValue, otherValue, isAdjacency] of pairs) {
       const distance = Math.abs(draggedValue - otherValue);
       if (distance <= toleranceWorld && distance < bestDistance) {
         bestDistance = distance;
-        bestX = otherValue;
+        best = { value: otherValue, isAdjacency };
       }
     }
   }
 
-  return bestX;
+  return best;
+}
+
+/**
+ * PATCH ALIGN-B/E: byte-identical public behavior to before PATCH ALIGN-E2 --
+ * a thin wrapper over detectVerticalAlignmentMatch that discards the new
+ * `isAdjacency` metadata. Kept so every existing caller/test of the
+ * number-returning API needs no changes; `useCanvasInteractions.ts` calls
+ * detectVerticalAlignmentMatch directly for the richer result.
+ */
+export function detectVerticalAlignmentGuide(
+  dragged: FreeformAlignmentCandidateRect,
+  others: FreeformAlignmentCandidateRect[],
+  toleranceWorld: number,
+): number | null {
+  return detectVerticalAlignmentMatch(dragged, others, toleranceWorld)?.value ?? null;
 }
 
 /**
  * PATCH ALIGN-C/E: horizontal (Y-axis) alignment-guide detection for a
  * single dragged root post against other root posts, in WORLD units. Exact
- * top/center/bottom(+adjacency) counterpart of detectVerticalAlignmentGuide
+ * top/center/bottom(+adjacency) counterpart of detectVerticalAlignmentMatch
  * above -- same same-type-only matching, same nearest-wins tie-break, same
  * caller responsibilities (exclude dragged post + non-root posts, pre-convert
  * the tolerance from screen px via canvasZoom).
@@ -239,16 +265,16 @@ export function detectVerticalAlignmentGuide(
  * axis stays trivially readable and testable on its own -- mirrors this
  * file's existing preference for small, single-purpose exports.
  */
-export function detectHorizontalAlignmentGuide(
+export function detectHorizontalAlignmentMatch(
   dragged: FreeformHorizontalAlignmentCandidateRect,
   others: FreeformHorizontalAlignmentCandidateRect[],
   toleranceWorld: number,
-): number | null {
+): FreeformAlignmentMatch | null {
   const draggedTop = dragged.y;
   const draggedBottom = dragged.y + dragged.height;
   const draggedCenter = dragged.y + dragged.height / 2;
 
-  let bestY: number | null = null;
+  let best: FreeformAlignmentMatch | null = null;
   let bestDistance = Infinity;
 
   for (const other of others) {
@@ -256,23 +282,38 @@ export function detectHorizontalAlignmentGuide(
     const otherBottom = other.y + other.height;
     const otherCenter = other.y + other.height / 2;
 
-    const pairs: Array<[number, number]> = [
-      [draggedTop, otherTop],
-      [draggedCenter, otherCenter],
-      [draggedBottom, otherBottom],
+    const pairs: Array<[number, number, boolean]> = [
+      [draggedTop, otherTop, false],
+      [draggedCenter, otherCenter, false],
+      [draggedBottom, otherBottom, false],
       // PATCH ALIGN-E: vertical adjacency -- posts stacked with no gap.
-      [draggedBottom, otherTop],
-      [draggedTop, otherBottom],
+      [draggedBottom, otherTop, true],
+      [draggedTop, otherBottom, true],
     ];
 
-    for (const [draggedValue, otherValue] of pairs) {
+    for (const [draggedValue, otherValue, isAdjacency] of pairs) {
       const distance = Math.abs(draggedValue - otherValue);
       if (distance <= toleranceWorld && distance < bestDistance) {
         bestDistance = distance;
-        bestY = otherValue;
+        best = { value: otherValue, isAdjacency };
       }
     }
   }
 
-  return bestY;
+  return best;
+}
+
+/**
+ * PATCH ALIGN-C/E: byte-identical public behavior to before PATCH ALIGN-E2 --
+ * a thin wrapper over detectHorizontalAlignmentMatch that discards the new
+ * `isAdjacency` metadata. Kept so every existing caller/test of the
+ * number-returning API needs no changes; `useCanvasInteractions.ts` calls
+ * detectHorizontalAlignmentMatch directly for the richer result.
+ */
+export function detectHorizontalAlignmentGuide(
+  dragged: FreeformHorizontalAlignmentCandidateRect,
+  others: FreeformHorizontalAlignmentCandidateRect[],
+  toleranceWorld: number,
+): number | null {
+  return detectHorizontalAlignmentMatch(dragged, others, toleranceWorld)?.value ?? null;
 }

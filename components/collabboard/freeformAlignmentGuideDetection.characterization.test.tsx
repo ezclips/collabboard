@@ -37,20 +37,20 @@ describe('PATCH ALIGN-B detection call site: single-post branch only, after snap
   );
 
   it('vertical detection reads previewX/dragSize.width (the SAME values Snap-to-Grid already produced) -- it does not recompute position', () => {
-    const detectionCall = slice(singlePostBlock, 'const verticalGuideX = detectVerticalAlignmentGuide(', ');');
+    const detectionCall = slice(singlePostBlock, 'const verticalMatch = detectVerticalAlignmentMatch(', ');');
     expect(detectionCall).toContain('{ x: previewX, width: dragSize.width }');
   });
 
   it('horizontal detection reads previewY/dragSize.height (the SAME values Snap-to-Grid already produced) -- it does not recompute position', () => {
-    const detectionCall = slice(singlePostBlock, 'const horizontalGuideY = detectHorizontalAlignmentGuide(', ');');
+    const detectionCall = slice(singlePostBlock, 'const horizontalMatch = detectHorizontalAlignmentMatch(', ');');
     expect(detectionCall).toContain('{ y: previewY, height: dragSize.height }');
   });
 
   it('both detection calls sit AFTER previewX/previewY are computed and BEFORE the setPadlets commit -- ordering guarantees Snap-to-Grid output is untouched', () => {
     const previewIdx = singlePostBlock.indexOf('const previewX = effectiveSnapToGrid ? snapWorldValueToGrid(clampedX) : clampedX;');
-    const verticalDetectIdx = singlePostBlock.indexOf('const verticalGuideX = detectVerticalAlignmentGuide(');
-    const horizontalDetectIdx = singlePostBlock.indexOf('const horizontalGuideY = detectHorizontalAlignmentGuide(');
-    const setGuidesIdx = singlePostBlock.indexOf('setAlignmentGuides({ verticalX: verticalGuideX, horizontalY: horizontalGuideY });');
+    const verticalDetectIdx = singlePostBlock.indexOf('const verticalMatch = detectVerticalAlignmentMatch(');
+    const horizontalDetectIdx = singlePostBlock.indexOf('const horizontalMatch = detectHorizontalAlignmentMatch(');
+    const setGuidesIdx = singlePostBlock.indexOf('setAlignmentGuides({ verticalX: verticalMatch?.value ?? null, horizontalY: horizontalMatch?.value ?? null });');
     const setPadletsIdx = singlePostBlock.indexOf('setPadlets(prev => prev.map(p =>');
     expect(previewIdx).toBeGreaterThan(-1);
     expect(verticalDetectIdx).toBeGreaterThan(previewIdx);
@@ -71,18 +71,18 @@ describe('PATCH ALIGN-B detection call site: single-post branch only, after snap
   });
 
   it('both axes are computed independently from the same candidate list and committed together in one setAlignmentGuides call', () => {
-    expect(singlePostBlock).toContain('setAlignmentGuides({ verticalX: verticalGuideX, horizontalY: horizontalGuideY });');
+    expect(singlePostBlock).toContain('setAlignmentGuides({ verticalX: verticalMatch?.value ?? null, horizontalY: horizontalMatch?.value ?? null });');
     // Exactly one `horizontalY:` occurrence in this branch -- the live value
     // above -- there is no stray second write hiding elsewhere in the block.
     expect((singlePostBlock.match(/horizontalY:/g) ?? []).length).toBe(1);
   });
 
-  it('detectVerticalAlignmentGuide and detectHorizontalAlignmentGuide are both imported from the shared geometry module, not reimplemented locally', () => {
+  it('detectVerticalAlignmentMatch and detectHorizontalAlignmentMatch are both imported from the shared geometry module, not reimplemented locally', () => {
     expect(code(hookSrc)).toContain(
-      "detectVerticalAlignmentGuide,",
+      "detectVerticalAlignmentMatch,",
     );
     expect(code(hookSrc)).toContain(
-      "detectHorizontalAlignmentGuide,",
+      "detectHorizontalAlignmentMatch,",
     );
     expect(code(hookSrc)).toMatch(/from '@\/components\/collabboard\/canvas\/engine\/freeformStageGeometry'/);
   });
@@ -130,6 +130,75 @@ describe('PATCH ALIGN-E1 candidate geometry: live DOM measurement, stored value 
   it('stored width/height are never mutated -- the live measurement only feeds the transient candidate rect, not padlets state', () => {
     const fn = slice(code(hookSrc), 'function measureLiveCandidateSize(', '\n}');
     expect(fn).not.toMatch(/setPadlets|position_x|position_y/);
+  });
+});
+
+describe('PATCH ALIGN-E2 adjacency marker wiring: presentation-only, no detector/geometry change', () => {
+  const singlePostBlock = slice(
+    code(hookSrc),
+    'const draggedPadlet = padlets.find((p) => p.id === draggingPadletId);',
+    'const handleCanvasMouseUp = async',
+  );
+
+  it('alignmentGuideKinds is declared with all four fields, defaulting to no adjacency anywhere', () => {
+    expect(code(hookSrc)).toContain(
+      'const [alignmentGuideKinds, setAlignmentGuideKinds] = useState<FreeformAlignmentGuideKindState>({',
+    );
+    const decl = slice(code(hookSrc), 'const [alignmentGuideKinds, setAlignmentGuideKinds] = useState<FreeformAlignmentGuideKindState>({', '});');
+    expect(decl).toContain('verticalIsAdjacency: false,');
+    expect(decl).toContain('horizontalIsAdjacency: false,');
+    expect(decl).toContain('verticalMarkerY: null,');
+    expect(decl).toContain('horizontalMarkerX: null,');
+  });
+
+  it('setAlignmentGuideKinds derives isAdjacency straight from the Match objects, and the marker position from the DRAGGED post\'s own preview center -- never from a candidate\'s rect', () => {
+    const kindsCall = slice(singlePostBlock, 'setAlignmentGuideKinds({', '});');
+    expect(kindsCall).toContain('verticalIsAdjacency: verticalMatch?.isAdjacency ?? false,');
+    expect(kindsCall).toContain('horizontalIsAdjacency: horizontalMatch?.isAdjacency ?? false,');
+    expect(kindsCall).toContain('verticalMarkerY: verticalMatch?.isAdjacency ? previewY + dragSize.height / 2 : null,');
+    expect(kindsCall).toContain('horizontalMarkerX: horizontalMatch?.isAdjacency ? previewX + dragSize.width / 2 : null,');
+  });
+
+  it('setAlignmentGuideKinds is called AFTER setAlignmentGuides in the same branch -- geometry commits first, presentation metadata follows', () => {
+    const guidesIdx = singlePostBlock.indexOf('setAlignmentGuides({ verticalX: verticalMatch?.value ?? null, horizontalY: horizontalMatch?.value ?? null });');
+    const kindsIdx = singlePostBlock.indexOf('setAlignmentGuideKinds({');
+    expect(guidesIdx).toBeGreaterThan(-1);
+    expect(kindsIdx).toBeGreaterThan(guidesIdx);
+  });
+
+  it('the ALIGN-D toggle-off effect and the drag-end cleanup both reset alignmentGuideKinds to the same no-adjacency shape as alignmentGuides', () => {
+    expect((code(hookSrc).match(/setAlignmentGuideKinds\(\{ verticalIsAdjacency: false, horizontalIsAdjacency: false, verticalMarkerY: null, horizontalMarkerX: null \}\);/g) ?? []).length).toBe(2);
+  });
+
+  it('the drag-end cleanup resets alignmentGuideKinds exactly once, alongside (not instead of) alignmentGuides', () => {
+    const cleanupBlock = slice(code(hookSrc), 'dragEndInFlightRef.current = false;', 'unlockBodySelection();');
+    const guidesCalls = cleanupBlock.match(/setAlignmentGuides\(/g) ?? [];
+    const kindsCalls = cleanupBlock.match(/setAlignmentGuideKinds\(/g) ?? [];
+    expect(guidesCalls.length).toBe(1);
+    expect(kindsCalls.length).toBe(1);
+  });
+
+  it('the hook exposes alignmentGuideKinds and its setter from its return object', () => {
+    const returnBlock = slice(code(hookSrc), 'return {\n    isDragging,', '\n  };\n}');
+    expect(returnBlock).toContain('alignmentGuideKinds,');
+    expect(returnBlock).toContain('setAlignmentGuideKinds,');
+  });
+
+  it('the group-drag branch never touches alignmentGuideKinds', () => {
+    const groupBlock = slice(
+      code(hookSrc),
+      'if (draggedPadletIds.length > 1) {',
+      '\n      return;\n    }',
+    );
+    expect(groupBlock).not.toMatch(/setAlignmentGuideKinds/);
+  });
+
+  it('the underlying detector/geometry call sites are completely untouched by ALIGN-E2 -- same candidates, same tolerance, same *Match functions ALIGN-E1 already used', () => {
+    expect(singlePostBlock).toContain('const alignmentCandidates = padlets');
+    expect(singlePostBlock).toContain('const liveSize = measureLiveCandidateSize(p.id, canvasZoom);');
+    expect(singlePostBlock).toContain(
+      'FREEFORM_ALIGNMENT_GUIDE_TOLERANCE_SCREEN_PX / (canvasZoom > 0 ? canvasZoom : 1)',
+    );
   });
 });
 

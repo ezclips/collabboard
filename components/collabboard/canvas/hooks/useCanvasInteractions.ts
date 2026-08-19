@@ -3,15 +3,15 @@
 import { useEffect, useRef, useState } from 'react';
 import { createUpdatePostPositionCommand } from '@/lib/domain/canvas/posts';
 import { createPostsRepository } from '@/lib/infra/canvas/postsRepository';
-import type { FreeformAlignmentGuideState, NewPostDragState, Padlet } from '@/types/collabboard';
+import type { FreeformAlignmentGuideKindState, FreeformAlignmentGuideState, NewPostDragState, Padlet } from '@/types/collabboard';
 import { debugCanvasLogger } from '@/lib/collabboard/debugCanvasLogger';
 import { findContainerOverlappingRect } from '@/components/collabboard/canvas/engine/utils';
 import { attachPostToContainer } from '@/components/collabboard/canvas/hooks/attachPostToContainer';
 import {
   clampGroupDragDeltaToFreeformBounds,
   clampRectPositionToFreeformBounds,
-  detectHorizontalAlignmentGuide,
-  detectVerticalAlignmentGuide,
+  detectHorizontalAlignmentMatch,
+  detectVerticalAlignmentMatch,
   snapWorldValueToGrid,
   FREEFORM_ALIGNMENT_GUIDE_TOLERANCE_SCREEN_PX,
   type FreeformGroupDragBounds,
@@ -174,6 +174,17 @@ export function useCanvasInteractions({
     verticalX: null,
     horizontalY: null,
   });
+  // PATCH ALIGN-E2: presentation-only sibling of alignmentGuides -- which
+  // axis, if any, is currently showing an ADJACENCY match rather than an
+  // ordinary same-edge/center one. Kept as its own state (not new fields on
+  // alignmentGuides) so it never changes alignmentGuides' own shape -- see
+  // FreeformAlignmentGuideKindState's doc comment.
+  const [alignmentGuideKinds, setAlignmentGuideKinds] = useState<FreeformAlignmentGuideKindState>({
+    verticalIsAdjacency: false,
+    horizontalIsAdjacency: false,
+    verticalMarkerY: null,
+    horizontalMarkerX: null,
+  });
 
   // PATCH ALIGN-D: flipping the preference off must clear an already-visible
   // guide IMMEDIATELY, not just withhold new ones starting at the next
@@ -181,6 +192,7 @@ export function useCanvasInteractions({
   useEffect(() => {
     if (!alignmentGuidesEnabled) {
       setAlignmentGuides({ verticalX: null, horizontalY: null });
+      setAlignmentGuideKinds({ verticalIsAdjacency: false, horizontalIsAdjacency: false, verticalMarkerY: null, horizontalMarkerX: null });
     }
   }, [alignmentGuidesEnabled]);
 
@@ -557,17 +569,33 @@ export function useCanvasInteractions({
             height: liveSize?.height ?? (Number(p.height) || DEFAULT_DRAG_RECT_HEIGHT),
           };
         });
-      const verticalGuideX = detectVerticalAlignmentGuide(
+      // PATCH ALIGN-E2: the richer *Match variants report which pair family
+      // won (adjacency vs same-edge/center) alongside the value -- purely
+      // presentational, threaded into the separate alignmentGuideKinds
+      // state below. alignmentGuides itself still receives only the value,
+      // exactly as every prior patch left it.
+      const verticalMatch = detectVerticalAlignmentMatch(
         { x: previewX, width: dragSize.width },
         alignmentCandidates,
         alignmentToleranceWorld,
       );
-      const horizontalGuideY = detectHorizontalAlignmentGuide(
+      const horizontalMatch = detectHorizontalAlignmentMatch(
         { y: previewY, height: dragSize.height },
         alignmentCandidates,
         alignmentToleranceWorld,
       );
-      setAlignmentGuides({ verticalX: verticalGuideX, horizontalY: horizontalGuideY });
+      setAlignmentGuides({ verticalX: verticalMatch?.value ?? null, horizontalY: horizontalMatch?.value ?? null });
+      // PATCH ALIGN-E2: an adjacency marker's cross-axis position is the
+      // DRAGGED post's own center on that axis -- the vertical (X-axis)
+      // guide line runs its full length at a fixed X, so the marker needs a
+      // Y to sit at; the dragged post's vertical center is the simplest
+      // stable answer without tracking which candidate rect won.
+      setAlignmentGuideKinds({
+        verticalIsAdjacency: verticalMatch?.isAdjacency ?? false,
+        horizontalIsAdjacency: horizontalMatch?.isAdjacency ?? false,
+        verticalMarkerY: verticalMatch?.isAdjacency ? previewY + dragSize.height / 2 : null,
+        horizontalMarkerX: horizontalMatch?.isAdjacency ? previewX + dragSize.width / 2 : null,
+      });
     }
 
     setPadlets(prev => prev.map(p =>
@@ -727,6 +755,8 @@ export function useCanvasInteractions({
       // PATCH ALIGN-A: no persistence -- every drag end clears any guide,
       // matching every other per-gesture ref reset in this block.
       setAlignmentGuides({ verticalX: null, horizontalY: null });
+      // PATCH ALIGN-E2: its presentation-only sibling resets alongside it.
+      setAlignmentGuideKinds({ verticalIsAdjacency: false, horizontalIsAdjacency: false, verticalMarkerY: null, horizontalMarkerX: null });
       unlockBodySelection();
     }
   };
@@ -765,6 +795,8 @@ export function useCanvasInteractions({
     dragOverContainerId,
     alignmentGuides,
     setAlignmentGuides,
+    alignmentGuideKinds,
+    setAlignmentGuideKinds,
     handlePadletMouseDown,
     handleImagePadletDrag,
     handleCanvasMouseMove,

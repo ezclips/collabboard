@@ -680,3 +680,145 @@ describe('PATCH ALIGN-E1: live rendered post size for alignment candidates', () 
     expect(persisted).toEqual([{ id: 'a', position_x: 0, position_y: 220 }]);
   });
 });
+
+describe('PATCH ALIGN-E2: adjacency marker classification (alignmentGuideKinds)', () => {
+  it('an ordinary left-left same-edge match reports isAdjacency: false and no marker position', () => {
+    mount(<Harness initialPadlets={[
+      padlet('a', 0, 0, { width: 100 }),
+      padlet('b', 500, 900, { width: 180 }),
+    ]} zoom={1} />);
+
+    drag('a', { x: 503, y: 0 }, 1); // a.left = 503, matches b.left = 500 (same-edge)
+    expect(latest!.api.alignmentGuides).toEqual({ verticalX: 500, horizontalY: null });
+    expect(latest!.api.alignmentGuideKinds).toEqual({
+      verticalIsAdjacency: false, horizontalIsAdjacency: false,
+      verticalMarkerY: null, horizontalMarkerX: null,
+    });
+  });
+
+  it('right->left adjacency reports isAdjacency: true and a marker Y at the DRAGGED post\'s own vertical center', () => {
+    mount(<Harness initialPadlets={[
+      padlet('a', 0, 100, { width: 100, height: 40 }), // vertical center = 100 + 20 = 120
+      padlet('b', 600, 900, { width: 180 }),
+    ]} zoom={1} />);
+
+    drag('a', { x: 497, y: 100 }, 1); // a.right = 597, 3 units from b.left = 600
+    expect(latest!.api.alignmentGuides).toEqual({ verticalX: 600, horizontalY: null });
+    expect(latest!.api.alignmentGuideKinds).toEqual({
+      verticalIsAdjacency: true, horizontalIsAdjacency: false,
+      verticalMarkerY: 120, horizontalMarkerX: null,
+    });
+  });
+
+  it('left->right adjacency reports isAdjacency: true and the same dragged-center marker convention', () => {
+    mount(<Harness initialPadlets={[
+      padlet('a', 0, 100, { width: 100, height: 40 }), // vertical center = 120
+      padlet('b', 100, 900, { width: 200 }), // right = 300
+    ]} zoom={1} />);
+
+    drag('a', { x: 303, y: 100 }, 1); // a.left = 303, 3 units from b.right = 300
+    expect(latest!.api.alignmentGuides).toEqual({ verticalX: 300, horizontalY: null });
+    expect(latest!.api.alignmentGuideKinds).toEqual({
+      verticalIsAdjacency: true, horizontalIsAdjacency: false,
+      verticalMarkerY: 120, horizontalMarkerX: null,
+    });
+  });
+
+  it('bottom->top adjacency reports isAdjacency: true and a marker X at the DRAGGED post\'s own horizontal center', () => {
+    mount(<Harness initialPadlets={[
+      padlet('a', 100, 0, { width: 40, height: 100 }), // horizontal center = 100 + 20 = 120
+      padlet('b', 900, 600, { width: 100, height: 180 }),
+    ]} zoom={1} />);
+
+    drag('a', { x: 100, y: 497 }, 1); // a.bottom = 597, 3 units from b.top = 600
+    expect(latest!.api.alignmentGuides).toEqual({ verticalX: null, horizontalY: 600 });
+    expect(latest!.api.alignmentGuideKinds).toEqual({
+      verticalIsAdjacency: false, horizontalIsAdjacency: true,
+      verticalMarkerY: null, horizontalMarkerX: 120,
+    });
+  });
+
+  it('top->bottom adjacency reports isAdjacency: true and the same dragged-center marker convention', () => {
+    mount(<Harness initialPadlets={[
+      padlet('a', 100, 0, { width: 40, height: 100 }), // horizontal center = 120
+      padlet('b', 900, 100, { width: 100, height: 200 }), // bottom = 300
+    ]} zoom={1} />);
+
+    drag('a', { x: 100, y: 303 }, 1); // a.top = 303, 3 units from b.bottom = 300
+    expect(latest!.api.alignmentGuides).toEqual({ verticalX: null, horizontalY: 300 });
+    expect(latest!.api.alignmentGuideKinds).toEqual({
+      verticalIsAdjacency: false, horizontalIsAdjacency: true,
+      verticalMarkerY: null, horizontalMarkerX: 120,
+    });
+  });
+
+  it('both axes can be adjacency matches simultaneously, each with its own marker', () => {
+    mount(<Harness initialPadlets={[
+      padlet('a', 0, 0, { width: 100, height: 100 }), // center = (50, 50)
+      padlet('b', 600, 600, { width: 180, height: 180 }),
+    ]} zoom={1} />);
+
+    drag('a', { x: 497, y: 497 }, 1); // right->left AND bottom->top adjacency
+    expect(latest!.api.alignmentGuides).toEqual({ verticalX: 600, horizontalY: 600 });
+    expect(latest!.api.alignmentGuideKinds).toEqual({
+      verticalIsAdjacency: true, horizontalIsAdjacency: true,
+      verticalMarkerY: 547, horizontalMarkerX: 547,
+    });
+  });
+
+  it('when a same-edge match wins over a nearer-in-principle-but-farther-in-fact adjacency candidate, isAdjacency correctly reads false', () => {
+    mount(<Harness initialPadlets={[
+      padlet('a', 0, 0, { width: 100 }),
+      padlet('b1', 498, 900, { width: 180 }), // left-left (same-edge) distance 2 -- nearest
+      padlet('b2', 605, 900, { width: 180 }), // right-left (adjacency) distance 5
+    ]} zoom={1} />);
+
+    drag('a', { x: 500, y: 0 }, 1);
+    expect(latest!.api.alignmentGuides).toEqual({ verticalX: 498, horizontalY: null });
+    expect(latest!.api.alignmentGuideKinds.verticalIsAdjacency).toBe(false);
+  });
+
+  it('Alignment Guides OFF suppresses alignmentGuideKinds too, even where an adjacency match would otherwise apply', () => {
+    mount(<Harness initialPadlets={[
+      padlet('a', 0, 0, { width: 100 }),
+      padlet('b', 600, 900, { width: 180 }),
+    ]} zoom={1} alignmentGuidesEnabled={false} />);
+
+    drag('a', { x: 497, y: 0 }, 1); // would be right->left adjacency if the preference were ON
+    expect(latest!.api.alignmentGuideKinds).toEqual({
+      verticalIsAdjacency: false, horizontalIsAdjacency: false,
+      verticalMarkerY: null, horizontalMarkerX: null,
+    });
+  });
+
+  it('alignmentGuideKinds clears to no-adjacency on mouseup, exactly like alignmentGuides', async () => {
+    installFakeSupabase();
+    mount(<Harness initialPadlets={[
+      padlet('a', 0, 0, { width: 100 }),
+      padlet('b', 600, 900, { width: 180 }),
+    ]} zoom={1} />);
+
+    drag('a', { x: 497, y: 0 }, 1);
+    expect(latest!.api.alignmentGuideKinds.verticalIsAdjacency).toBe(true);
+
+    await release();
+    expect(latest!.api.alignmentGuideKinds).toEqual({
+      verticalIsAdjacency: false, horizontalIsAdjacency: false,
+      verticalMarkerY: null, horizontalMarkerX: null,
+    });
+  });
+
+  it('Snap-to-Grid still determines the committed position exactly as before, with an adjacency marker also showing', async () => {
+    const persisted = installFakeSupabase();
+    mount(<Harness initialPadlets={[
+      padlet('a', 0, 0, { width: 100 }),
+      padlet('b', 600, 900, { width: 180 }),
+    ]} zoom={1} snapToGrid />);
+
+    drag('a', { x: 503, y: 0 }, 1); // a.right previews to 603, 3 units from b.left = 600
+    expect(latest!.api.alignmentGuideKinds.verticalIsAdjacency).toBe(true);
+
+    await release();
+    expect(persisted).toEqual([{ id: 'a', position_x: 500, position_y: 0 }]);
+  });
+});

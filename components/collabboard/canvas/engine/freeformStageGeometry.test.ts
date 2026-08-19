@@ -15,7 +15,9 @@ import {
   FREEFORM_WORLD_WIDTH_PX,
   FREEFORM_ALIGNMENT_GUIDE_TOLERANCE_SCREEN_PX,
   detectHorizontalAlignmentGuide,
+  detectHorizontalAlignmentMatch,
   detectVerticalAlignmentGuide,
+  detectVerticalAlignmentMatch,
   snapWorldValueToGrid,
 } from './freeformStageGeometry';
 
@@ -304,6 +306,71 @@ describe('detectVerticalAlignmentGuide', () => {
   });
 });
 
+// PATCH ALIGN-E2: detectVerticalAlignmentMatch is the richer sibling behind
+// detectVerticalAlignmentGuide -- same nearest-wins search, but the winner
+// also reports whether an adjacency pair (not a same-edge/center pair)
+// produced it. detectVerticalAlignmentGuide's own tests above already prove
+// the VALUE math is unchanged (byte-identical wrapper); these tests only
+// pin the NEW isAdjacency classification.
+describe('detectVerticalAlignmentMatch', () => {
+  const dragged = { x: 500, width: 100 }; // left=500, center=550, right=600
+
+  it('a same-edge match reports isAdjacency: false', () => {
+    const result = detectVerticalAlignmentMatch(dragged, [{ x: 503, width: 180 }], 6);
+    expect(result).toEqual({ value: 503, isAdjacency: false });
+  });
+
+  it('a center match reports isAdjacency: false', () => {
+    const result = detectVerticalAlignmentMatch(dragged, [{ x: 460, width: 180 }], 6);
+    expect(result).toEqual({ value: 550, isAdjacency: false });
+  });
+
+  it('a right->left adjacency match reports isAdjacency: true', () => {
+    const result = detectVerticalAlignmentMatch(dragged, [{ x: 603, width: 180 }], 6);
+    expect(result).toEqual({ value: 603, isAdjacency: true });
+  });
+
+  it('a left->right adjacency match reports isAdjacency: true', () => {
+    const result = detectVerticalAlignmentMatch(dragged, [{ x: 298, width: 200 }], 6);
+    expect(result).toEqual({ value: 498, isAdjacency: true });
+  });
+
+  it('returns null (not a match object) when nothing qualifies', () => {
+    expect(detectVerticalAlignmentMatch(dragged, [{ x: 900, width: 50 }], 6)).toBeNull();
+  });
+
+  it('when an adjacency match is nearer than a same-edge match, the winner is correctly flagged isAdjacency: true', () => {
+    const result = detectVerticalAlignmentMatch(dragged, [
+      { x: 505, width: 180 },  // left-left (same-edge) distance 5
+      { x: 602, width: 180 },  // right-left (adjacency) distance 2 -- nearest
+    ], 6);
+    expect(result).toEqual({ value: 602, isAdjacency: true });
+  });
+
+  it('when a same-edge match is nearer than an adjacency match, the winner is correctly flagged isAdjacency: false', () => {
+    const result = detectVerticalAlignmentMatch(dragged, [
+      { x: 498, width: 180 },  // left-left (same-edge) distance 2 -- nearest
+      { x: 605, width: 180 },  // right-left (adjacency) distance 5
+    ], 6);
+    expect(result).toEqual({ value: 498, isAdjacency: false });
+  });
+
+  it('the ambiguous-value case: same-edge-left and adjacency-right-left can target the SAME otherLeft -- the actually-nearer draggedValue decides the flag, not the value alone', () => {
+    // other.x = 500 -> otherLeft = 500. dragged.left (500) matches it at
+    // distance 0 (same-edge); dragged.right (600) is 100 away (would-be
+    // adjacency, but only same-edge is ever close enough here). The value
+    // 500 is reachable via EITHER pair type, so this proves classification
+    // reads the winning pair's own type, not just the resulting number.
+    const result = detectVerticalAlignmentMatch(dragged, [{ x: 500, width: 50 }], 6);
+    expect(result).toEqual({ value: 500, isAdjacency: false });
+  });
+
+  it('detectVerticalAlignmentGuide (the plain-number API) stays byte-identical to detectVerticalAlignmentMatch(...)?.value', () => {
+    const others = [{ x: 603, width: 180 }, { x: 505, width: 180 }];
+    expect(detectVerticalAlignmentGuide(dragged, others, 6)).toBe(detectVerticalAlignmentMatch(dragged, others, 6)?.value);
+  });
+});
+
 // PATCH ALIGN-C: exact Y-axis counterpart of detectVerticalAlignmentGuide
 // above -- same tolerance semantics, same nearest-wins tie-break, same
 // same-type-only matching, mirrored test-for-test.
@@ -376,5 +443,56 @@ describe('detectHorizontalAlignmentGuide', () => {
       { y: 602, height: 180 },  // bottom-top (adjacency) distance 2 -- nearest
     ], 6);
     expect(result).toBe(602);
+  });
+});
+
+// PATCH ALIGN-E2: exact Y-axis counterpart of detectVerticalAlignmentMatch
+// above -- same isAdjacency classification, mirrored test-for-test.
+describe('detectHorizontalAlignmentMatch', () => {
+  const dragged = { y: 500, height: 100 }; // top=500, center=550, bottom=600
+
+  it('a same-edge match reports isAdjacency: false', () => {
+    const result = detectHorizontalAlignmentMatch(dragged, [{ y: 503, height: 180 }], 6);
+    expect(result).toEqual({ value: 503, isAdjacency: false });
+  });
+
+  it('a center match reports isAdjacency: false', () => {
+    const result = detectHorizontalAlignmentMatch(dragged, [{ y: 460, height: 180 }], 6);
+    expect(result).toEqual({ value: 550, isAdjacency: false });
+  });
+
+  it('a bottom->top adjacency match reports isAdjacency: true', () => {
+    const result = detectHorizontalAlignmentMatch(dragged, [{ y: 603, height: 180 }], 6);
+    expect(result).toEqual({ value: 603, isAdjacency: true });
+  });
+
+  it('a top->bottom adjacency match reports isAdjacency: true', () => {
+    const result = detectHorizontalAlignmentMatch(dragged, [{ y: 298, height: 200 }], 6);
+    expect(result).toEqual({ value: 498, isAdjacency: true });
+  });
+
+  it('returns null (not a match object) when nothing qualifies', () => {
+    expect(detectHorizontalAlignmentMatch(dragged, [{ y: 900, height: 50 }], 6)).toBeNull();
+  });
+
+  it('when an adjacency match is nearer than a same-edge match, the winner is correctly flagged isAdjacency: true', () => {
+    const result = detectHorizontalAlignmentMatch(dragged, [
+      { y: 505, height: 180 },  // top-top (same-edge) distance 5
+      { y: 602, height: 180 },  // bottom-top (adjacency) distance 2 -- nearest
+    ], 6);
+    expect(result).toEqual({ value: 602, isAdjacency: true });
+  });
+
+  it('when a same-edge match is nearer than an adjacency match, the winner is correctly flagged isAdjacency: false', () => {
+    const result = detectHorizontalAlignmentMatch(dragged, [
+      { y: 498, height: 180 },  // top-top (same-edge) distance 2 -- nearest
+      { y: 605, height: 180 },  // bottom-top (adjacency) distance 5
+    ], 6);
+    expect(result).toEqual({ value: 498, isAdjacency: false });
+  });
+
+  it('detectHorizontalAlignmentGuide (the plain-number API) stays byte-identical to detectHorizontalAlignmentMatch(...)?.value', () => {
+    const others = [{ y: 603, height: 180 }, { y: 505, height: 180 }];
+    expect(detectHorizontalAlignmentGuide(dragged, others, 6)).toBe(detectHorizontalAlignmentMatch(dragged, others, 6)?.value);
   });
 });

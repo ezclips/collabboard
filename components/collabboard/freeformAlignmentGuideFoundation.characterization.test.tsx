@@ -67,7 +67,7 @@ describe('PATCH ALIGN-A render layer: world-scaled, pointer-events: none, Freefo
     const layerBlock = slice(
       code(clientSrc),
       'data-freeform-world-layer="alignment-guides"',
-      '<FreeformAlignmentGuides guides={alignmentGuides} />',
+      '<FreeformAlignmentGuides guides={alignmentGuides} kinds={alignmentGuideKinds} />',
     );
     expect(layerBlock).toContain('left: freeformWorldOriginLeft,');
     expect(layerBlock).toContain('top: freeformWorldOriginTop,');

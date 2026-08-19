@@ -2565,6 +2565,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     draggingPadletId,
     dragOverContainerId,
     alignmentGuides,
+    alignmentGuideKinds,
     handlePadletMouseDown,
     handleCanvasMouseMove,
     handleCanvasMouseUp,
@@ -7862,7 +7863,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                   transformOrigin: '0 0',
                 }}
               >
-                <FreeformAlignmentGuides guides={alignmentGuides} />
+                <FreeformAlignmentGuides guides={alignmentGuides} kinds={alignmentGuideKinds} />
               </div>
             )}
 
