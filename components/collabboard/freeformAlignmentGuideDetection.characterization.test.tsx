@@ -108,7 +108,7 @@ describe('PATCH ALIGN-E1 candidate geometry: live DOM measurement, stored value 
 
   it('each OTHER candidate prefers the live measurement and falls back to stored width/height only when it is null (no DOM node, or a degenerate zero-size box)', () => {
     const candidateBlock = slice(singlePostBlock, 'const alignmentCandidates = padlets', '});');
-    expect(candidateBlock).toContain('const liveSize = resolveVisualAlignmentCandidateSize(p.id, p.type, canvasZoom);');
+    expect(candidateBlock).toContain('const liveSize = measureLiveCandidateSize(p.id, canvasZoom);');
     expect(candidateBlock).toContain('liveSize?.width ?? (Number(p.width) || DEFAULT_DRAG_RECT_WIDTH)');
     expect(candidateBlock).toContain('liveSize?.height ?? (Number(p.height) || DEFAULT_DRAG_RECT_HEIGHT)');
   });
@@ -117,8 +117,8 @@ describe('PATCH ALIGN-E1 candidate geometry: live DOM measurement, stored value 
     const candidateBlock = slice(singlePostBlock, 'const alignmentCandidates = padlets', '});');
     expect(candidateBlock).toContain('x: p.position_x || 0,');
     expect(candidateBlock).toContain('y: p.position_y || 0,');
-    expect(candidateBlock).not.toMatch(/resolveVisualAlignmentCandidateSize\([^)]*\)\.x/);
-    expect(candidateBlock).not.toMatch(/resolveVisualAlignmentCandidateSize\([^)]*\)\.y/);
+    expect(candidateBlock).not.toMatch(/measureLiveCandidateSize\([^)]*\)\.x/);
+    expect(candidateBlock).not.toMatch(/measureLiveCandidateSize\([^)]*\)\.y/);
   });
 
   it('the DRAGGED post keeps its existing dragSize (resolveDragRectSize/dragRectSizeRef) untouched -- ALIGN-E1 only changed how OTHER posts are measured', () => {
@@ -195,95 +195,71 @@ describe('PATCH ALIGN-E2 adjacency marker wiring: presentation-only, no detector
 
   it('the underlying detector/geometry call sites are completely untouched by ALIGN-E2 -- same candidates, same tolerance, same *Match functions ALIGN-E1 already used', () => {
     expect(singlePostBlock).toContain('const alignmentCandidates = padlets');
-    expect(singlePostBlock).toContain('const liveSize = resolveVisualAlignmentCandidateSize(p.id, p.type, canvasZoom);');
+    expect(singlePostBlock).toContain('const liveSize = measureLiveCandidateSize(p.id, canvasZoom);');
     expect(singlePostBlock).toContain(
       'FREEFORM_ALIGNMENT_GUIDE_TOLERANCE_SCREEN_PX / (canvasZoom > 0 ? canvasZoom : 1)',
     );
   });
 });
 
-describe('PATCH ALIGN-E3 visual alignment rect: candidate-only, DOM-geometry-only, no rendering change', () => {
+describe('PATCH SPACE-P2 canonical guide geometry: the outer [data-padlet-id] frame, for every post type, no exceptions', () => {
   const singlePostBlock = slice(
     code(hookSrc),
     'const draggedPadlet = padlets.find((p) => p.id === draggingPadletId);',
     'const handleCanvasMouseUp = async',
   );
 
-  it('resolveVisualAlignmentCandidateSize is a standalone helper defined above the hook, wrapping measureLiveCandidateSize as its fallback', () => {
-    const fn = slice(code(hookSrc), 'function resolveVisualAlignmentCandidateSize(', '\n}');
-    expect(fn).toContain('return measureLiveCandidateSize(padletId, canvasZoom);');
+  it('PATCH ALIGN-E3/E4\'s special-cased content-bound resolver (resolveVisualAlignmentCandidateSize) no longer exists -- removed, not merely bypassed', () => {
+    expect(code(hookSrc)).not.toContain('function resolveVisualAlignmentCandidateSize(');
+    expect(code(hookSrc)).not.toContain('resolveVisualAlignmentCandidateSize(');
   });
 
-  it('PATCH ALIGN-E4: both ai-component and image get special-cased -- every other padlet type falls straight through to the unchanged E1 measurement', () => {
-    const fn = slice(code(hookSrc), 'function resolveVisualAlignmentCandidateSize(', '\n}');
-    expect(fn).toContain("padletType === 'ai-component' || padletType === 'image'");
+  it('no trace of the removed Image/AI content-bound machinery remains in the hook -- no <img> query, no [data-ai-content-root] query, no .ai-component-renderer reference', () => {
+    expect(code(hookSrc)).not.toMatch(/querySelector<HTMLImageElement>\('img'\)/);
+    expect(code(hookSrc)).not.toContain('[data-ai-content-root]');
+    expect(code(hookSrc)).not.toContain('.ai-component-renderer');
   });
 
-  it("PATCH ALIGN-E4: the ai-component branch reaches the AI content root through the measurement-only [data-ai-content-root] marker rather than walking a fragile parent chain from .ai-component-renderer", () => {
-    const fn = slice(code(hookSrc), 'function resolveVisualAlignmentCandidateSize(', '\n}');
-    expect(fn).toContain("outer.querySelector<HTMLElement>('[data-ai-content-root]')");
-    expect(fn).toContain("contentRoot?.querySelector<HTMLElement>('.ai-component-renderer')");
-  });
-
-  it('PATCH ALIGN-E4: the image branch measures the single <img> element itself, not the outer [data-padlet-id] box', () => {
-    const fn = slice(code(hookSrc), 'function resolveVisualAlignmentCandidateSize(', '\n}');
-    expect(fn).toContain("outer.querySelector<HTMLImageElement>('img')");
-    expect(fn).toContain('img ? img.getBoundingClientRect().bottom : null');
-  });
-
-  it('PATCH ALIGN-E4: structured AI content (content root present, no legacy .ai-component-renderer inside it) measures the content root\'s own rendered bottom', () => {
-    const fn = slice(code(hookSrc), 'function resolveVisualAlignmentCandidateSize(', '\n}');
-    expect(fn).toContain('contentBottom = contentRoot.getBoundingClientRect().bottom;');
-  });
-
-  it('PATCH ALIGN-E4: both branches derive height from the resolved content bottom relative to the outer box\'s own top -- never from the outer box\'s own height, which is what let the Reactions/Caption footer leak in before this patch', () => {
-    const fn = slice(code(hookSrc), 'function resolveVisualAlignmentCandidateSize(', '\n}');
-    expect(fn).toContain('const height = contentBottom - outerRect.top;');
-    expect(fn).not.toMatch(/const height = outerRect\.height/);
-  });
-
-  it('PATCH ALIGN-E4: AIComponentRenderer\'s own root and AIContentRenderer\'s structured wrapper both carry the data-ai-content-root measurement marker (no class/style change)', () => {
-    const legacyRendererSrc = code(read('components/collabboard/AIComponentRenderer.tsx'));
-    const contentRendererSrc = code(read('components/ai/AIContentRenderer.tsx'));
-    expect(legacyRendererSrc).toContain('data-ai-content-root="true"');
-    expect(contentRendererSrc).toContain('data-ai-content-root="true"');
-  });
-
-  it('the natural-height re-sum skips absolutely positioned children (loading/error overlays, the resize grip) -- only in-flow content counts as real layout space', () => {
-    const fn = slice(code(hookSrc), 'function resolveVisualAlignmentCandidateSize(', '\n}');
-    expect(fn).toContain("getComputedStyle(child).position === 'absolute'");
-  });
-
-  it('width is never recomputed -- only height, since the minHeight bug this patch fixes only ever inflates height', () => {
-    const fn = slice(code(hookSrc), 'function resolveVisualAlignmentCandidateSize(', '\n}');
-    expect(fn).toContain('const width = outerRect.width;');
-    expect(fn).not.toMatch(/const width = .*legacyOuterRect/);
-  });
-
-  it("the candidate map now calls resolveVisualAlignmentCandidateSize with the padlet's own type -- p.type is threaded through, nothing else about the candidate shape changed", () => {
+  it('the candidate map calls measureLiveCandidateSize directly, with no padlet-type argument -- one measurement rule for every type', () => {
     const candidateBlock = slice(singlePostBlock, 'const alignmentCandidates = padlets', '});');
-    expect(candidateBlock).toContain('resolveVisualAlignmentCandidateSize(p.id, p.type, canvasZoom)');
+    expect(candidateBlock).toContain('const liveSize = measureLiveCandidateSize(p.id, canvasZoom);');
+    expect(candidateBlock).not.toMatch(/measureLiveCandidateSize\(p\.id,\s*p\.type/);
   });
 
-  it("the DRAGGED post's own dragSize (resolveDragRectSize/dragRectSizeRef, used for bounds-clamping and container-overlap too) is completely untouched -- this patch only ever changes how OTHER candidates are measured", () => {
+  it("the DRAGGED post's own dragSize (resolveDragRectSize/dragRectSizeRef, used for bounds-clamping and container-overlap too) is untouched by this patch -- it was already the same live outer-frame rect captured at mousedown", () => {
     expect(singlePostBlock).toContain('{ x: previewX, width: dragSize.width }');
     expect(singlePostBlock).toContain('{ y: previewY, height: dragSize.height }');
-    expect(singlePostBlock).not.toContain('resolveVisualAlignmentCandidateSize(draggingPadletId');
-    expect(singlePostBlock).not.toContain('resolveVisualAlignmentCandidateSize(padletId,');
   });
 
-  it('Snap-to-Grid and movement are untouched -- previewX/previewY are computed and committed to setPadlets before this resolver is ever consulted', () => {
+  it('Snap-to-Grid and movement are untouched -- previewX/previewY are computed and committed to setPadlets before the candidate map ever runs', () => {
     const previewIdx = singlePostBlock.indexOf('const previewX = effectiveSnapToGrid ? snapWorldValueToGrid(clampedX) : clampedX;');
-    const resolverIdx = singlePostBlock.indexOf('resolveVisualAlignmentCandidateSize(p.id, p.type, canvasZoom)');
+    const candidateIdx = singlePostBlock.indexOf('const liveSize = measureLiveCandidateSize(p.id, canvasZoom);');
     const setPadletsIdx = singlePostBlock.indexOf('setPadlets(prev => prev.map(p =>');
     expect(previewIdx).toBeGreaterThan(-1);
-    expect(resolverIdx).toBeGreaterThan(previewIdx);
-    expect(setPadletsIdx).toBeGreaterThan(resolverIdx);
+    expect(candidateIdx).toBeGreaterThan(previewIdx);
+    expect(setPadletsIdx).toBeGreaterThan(candidateIdx);
   });
 
-  it('stored width/height are never mutated by the resolver -- it only ever reads the DOM, never writes padlets state', () => {
-    const fn = slice(code(hookSrc), 'function resolveVisualAlignmentCandidateSize(', '\n}');
+  it('measureLiveCandidateSize itself never mutates stored state -- it only ever reads the DOM', () => {
+    const fn = slice(code(hookSrc), 'function measureLiveCandidateSize(', '\n}');
     expect(fn).not.toMatch(/setPadlets|position_x|position_y/);
+  });
+
+  it('AIComponentRenderer and AIContentRenderer no longer carry the now-unused data-ai-content-root measurement marker', () => {
+    const legacyRendererSrc = code(read('components/collabboard/AIComponentRenderer.tsx'));
+    const contentRendererSrc = code(read('components/ai/AIContentRenderer.tsx'));
+    expect(legacyRendererSrc).not.toContain('data-ai-content-root');
+    expect(contentRendererSrc).not.toContain('data-ai-content-root');
+  });
+
+  it('Full View independence: measurement is purely a query against the outer [data-padlet-id] node, which never varies with any inner Full View class/content differences -- structurally guaranteed by there being no branch on padlet type or content shape at all', () => {
+    const fn = slice(code(hookSrc), 'function measureLiveCandidateSize(', '\n}');
+    expect(fn).toContain('document.querySelector<HTMLElement>(`[data-padlet-id="${padletId}"]`)');
+    expect(fn).toContain('el.getBoundingClientRect()');
+    // No parameter or reference to padlet type/kind/content anywhere in the
+    // helper's signature or body -- only padletId and canvasZoom ever flow
+    // in, so there is nothing for a type or Full View state to branch on.
+    expect(fn).not.toMatch(/padletType|fullView|querySelector\(['"]img['"]\)|data-ai-content-root/i);
   });
 });
 

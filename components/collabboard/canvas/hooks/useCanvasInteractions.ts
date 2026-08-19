@@ -71,71 +71,6 @@ function measureLiveCandidateSize(padletId: string, canvasZoom: number): DragRec
   return { width: rect.width / zoom, height: rect.height / zoom };
 }
 
-/**
- * PATCH ALIGN-E3: the alignment-guide "visual rect" for a candidate post.
- * The one confirmed exception to the plain `[data-padlet-id]` box
- * (measureLiveCandidateSize, ALIGN-E1) was an ai-component post rendered
- * through the legacy `AIComponentRenderer` path (`.ai-component-renderer`):
- * that component's own outer node applies a fixed `minHeight` (280px by
- * default) regardless of the actual generated content, padding the card
- * with blank space below a shorter response.
- *
- * PATCH ALIGN-E4: generalizes the same "measure the real content, not a
- * padded/chrome-inclusive box" idea to Image posts, and closes a gap
- * ALIGN-E3 left open for ai-component -- FreeformPadletCards renders a
- * Reactions row and a Caption footer BELOW the AI/Image content itself
- * (visible once a candidate actually has reactions or a real caption);
- * ALIGN-E3 only corrected the legacy renderer's own padded minHeight, so a
- * candidate with real reactions/a caption still measured past them. Both
- * branches below now resolve a dedicated "visible content" node instead of
- * the outer box: `img` for Image (exactly one renders per Image post -- the
- * media itself), and `[data-ai-content-root]` for AI, a measurement-only
- * attribute added to AIComponentRenderer's own root node and
- * AIContentRenderer's structured-content wrapper (no class/style change, so
- * neither post's actual layout moves). When that AI content root also
- * contains the legacy `.ai-component-renderer` node, ALIGN-E3's natural-
- * height re-sum (in-flow children only -- skipping absolutely positioned
- * chrome like the loading/error overlays and the resize grip) still applies
- * underneath it. Horizontal geometry (x/width) is never touched by either
- * branch -- only the vertical bottom edge candidates align to moves.
- */
-function resolveVisualAlignmentCandidateSize(
-  padletId: string,
-  padletType: string,
-  canvasZoom: number,
-): DragRectSize | null {
-  if (typeof document !== 'undefined' && (padletType === 'ai-component' || padletType === 'image')) {
-    const outer = document.querySelector<HTMLElement>(`[data-padlet-id="${padletId}"]`);
-    let contentBottom: number | null = null;
-    if (outer && padletType === 'image') {
-      const img = outer.querySelector<HTMLImageElement>('img');
-      contentBottom = img ? img.getBoundingClientRect().bottom : null;
-    } else if (outer && padletType === 'ai-component') {
-      const contentRoot = outer.querySelector<HTMLElement>('[data-ai-content-root]');
-      const legacyContent = contentRoot?.querySelector<HTMLElement>('.ai-component-renderer') ?? null;
-      if (contentRoot && legacyContent) {
-        const naturalLegacyHeight = Array.from(contentRoot.children).reduce((sum, child) => {
-          if (getComputedStyle(child).position === 'absolute') return sum;
-          return sum + child.getBoundingClientRect().height;
-        }, 0);
-        contentBottom = contentRoot.getBoundingClientRect().top + naturalLegacyHeight;
-      } else if (contentRoot) {
-        contentBottom = contentRoot.getBoundingClientRect().bottom;
-      }
-    }
-    if (outer && contentBottom !== null) {
-      const outerRect = outer.getBoundingClientRect();
-      const width = outerRect.width;
-      const height = contentBottom - outerRect.top;
-      if (width > 0 && height > 0) {
-        const zoom = canvasZoom > 0 ? canvasZoom : 1;
-        return { width: width / zoom, height: height / zoom };
-      }
-    }
-  }
-  return measureLiveCandidateSize(padletId, canvasZoom);
-}
-
 /** Combined world bounds of a multi-selection at drag start. */
 function computeGroupDragBounds(
   padlets: Padlet[],
@@ -640,10 +575,19 @@ export function useCanvasInteractions({
       const alignmentCandidates = padlets
         .filter((p) => !p.metadata?.parentId && p.id !== draggingPadletId)
         .map((p) => {
-          // PATCH ALIGN-E1/E3: prefer the OTHER post's live rendered box
-          // over its stored width/height (see resolveVisualAlignmentCandidateSize)
-          // -- x/y still come straight from position_x/position_y, unchanged.
-          const liveSize = resolveVisualAlignmentCandidateSize(p.id, p.type, canvasZoom);
+          // PATCH ALIGN-E1: prefer the OTHER post's live rendered OUTER
+          // frame over its stored width/height -- x/y still come straight
+          // from position_x/position_y, unchanged.
+          //
+          // PATCH SPACE-P2: the outer `[data-padlet-id]` frame is the SOLE
+          // canonical rect for every post type, with no per-type exception.
+          // PATCH ALIGN-E3/E4 previously special-cased Image/AI to measure
+          // their inner visible CONTENT instead (excluding the top strip,
+          // Reactions row, or Caption footer) -- reverted here per product
+          // decision: guides/spacing must attach to the same visible blue
+          // post border the user actually sees and drags, for every type,
+          // Full View included.
+          const liveSize = measureLiveCandidateSize(p.id, canvasZoom);
           return {
             x: p.position_x || 0,
             width: liveSize?.width ?? (Number(p.width) || DEFAULT_DRAG_RECT_WIDTH),

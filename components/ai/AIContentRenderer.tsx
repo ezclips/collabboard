@@ -174,16 +174,7 @@ export default function AIContentRenderer({
       // Wrapper div gives export callers a stable DOM anchor that spans the
       // entire rendered output (header + visual + source code).
       rendered = (
-        <div
-          ref={structuredRef}
-          className="h-full w-full"
-          // PATCH ALIGN-E4: measurement-only marker (no class/style change),
-          // mirroring AIComponentRenderer's own root -- lets the Freeform
-          // alignment-guide resolver find structured AI content's true
-          // bottom without also counting the Reactions/Caption footer
-          // FreeformPadletCards renders below it.
-          data-ai-content-root="true"
-        >
+        <div ref={structuredRef} className="h-full w-full">
           {renderStructuredContent(normalized.data, { editable, onDataChange: onContentChange, onFocusField })}
         </div>
       );

@@ -813,42 +813,41 @@ describe('PATCH ALIGN-E1: live rendered post size for alignment candidates', () 
   });
 });
 
-describe('PATCH ALIGN-E3: visual alignment rect excludes the legacy AI renderer\'s padded minHeight', () => {
-  it('a legacy ai-component candidate padded to 280 by AIComponentRenderer\'s fixed minHeight is measured at its NATURAL content bottom (90), not the padded bottom -- absolutely positioned chrome (the resize grip) contributes nothing', () => {
+describe('PATCH SPACE-P2: guide geometry always uses the outer [data-padlet-id] frame, reverting ALIGN-E3/E4\'s Image/AI content-bound overrides', () => {
+  it('a legacy ai-component candidate (the same padded-minHeight DOM shape ALIGN-E3 corrected) is now measured at the OUTER frame\'s own bottom (280), NOT the natural content bottom (90) -- the correction is gone', () => {
     mount(<Harness initialPadlets={[
       padlet('a', 0, 0, { width: 100, height: 100 }),
       padlet('ai1', 900, 0, { width: 200, height: 280, type: 'ai-component' }),
     ]} zoom={1} />);
     mountLegacyAiCandidateEl(
       'ai1',
-      { left: toClientX(900, 1), top: toClientY(0, 1), width: 200, height: 280 }, // padded outer box
+      { left: toClientX(900, 1), top: toClientY(0, 1), width: 200, height: 280 }, // outer frame -- now authoritative
       [
-        { left: toClientX(900, 1), top: toClientY(0, 1), width: 200, height: 70 }, // viewport/content
-        { left: toClientX(900, 1), top: toClientY(70, 1), width: 200, height: 20 }, // attribution row
+        { left: toClientX(900, 1), top: toClientY(0, 1), width: 200, height: 70 }, // viewport/content (now IGNORED)
+        { left: toClientX(900, 1), top: toClientY(70, 1), width: 200, height: 20 }, // attribution row (now IGNORED)
       ],
-      [{ left: toClientX(900, 1), top: toClientY(260, 1), width: 20, height: 20 }], // resize grip (absolute)
+      [{ left: toClientX(900, 1), top: toClientY(260, 1), width: 20, height: 20 }], // resize grip (now IGNORED)
     );
 
-    // a.top = 87, 3 units from the NATURAL bottom (90). If the padded
-    // ancestor's own height (280) leaked through unfixed, or the absolute
-    // resize grip were wrongly summed in (-> 110), this would land outside
-    // the 6px tolerance and no guide would appear at all.
-    drag('a', { x: 0, y: 87 }, 1);
-    expect(latest!.api.alignmentGuides).toEqual({ verticalX: null, horizontalY: 90 });
+    // a.top = 277, 3 units from the OUTER frame's own bottom (280). Under
+    // the old ALIGN-E3 correction this would have resolved to 90 instead --
+    // proves the outer frame, not the inner content, now wins.
+    drag('a', { x: 0, y: 277 }, 1);
+    expect(latest!.api.alignmentGuides).toEqual({ verticalX: null, horizontalY: 280 });
   });
 
-  it('structured AI content (no .ai-component-renderer in the DOM) is completely unaffected -- falls straight through to the plain outer-box measurement, exactly like any other post type', () => {
+  it('structured AI content (no .ai-component-renderer in the DOM) measures the plain outer-box, exactly like any other post type', () => {
     mount(<Harness initialPadlets={[
       padlet('a', 0, 0, { width: 100, height: 100 }),
       padlet('ai2', 900, 0, { width: 200, height: 500, type: 'ai-component' }), // stale stored height
     ]} zoom={1} />);
     mountLiveCandidateEl('ai2', { left: toClientX(900, 1), top: toClientY(0, 1), width: 200, height: 216 });
 
-    drag('a', { x: 0, y: 213 }, 1); // 3 units from the live (tight) bottom = 216
+    drag('a', { x: 0, y: 213 }, 1); // 3 units from the live outer-box bottom = 216
     expect(latest!.api.alignmentGuides).toEqual({ verticalX: null, horizontalY: 216 });
   });
 
-  it('an Image candidate with no mounted <img> (e.g. off-screen/virtualized) falls back to the plain outer box, same as before PATCH ALIGN-E4', () => {
+  it('an Image candidate measures the plain outer box regardless of its inner <img>\'s own size', () => {
     mount(<Harness initialPadlets={[
       padlet('a', 0, 0, { width: 100, height: 100 }),
       padlet('car', 900, 0, { width: 248, height: 527, type: 'image' }), // stale stored height
@@ -859,82 +858,83 @@ describe('PATCH ALIGN-E3: visual alignment rect excludes the legacy AI renderer\
     expect(latest!.api.alignmentGuides).toEqual({ verticalX: null, horizontalY: 216 });
   });
 
-  it('the un-padded AI height is converted through canvasZoom exactly like every other live measurement', () => {
+  it('the outer-frame height is converted through canvasZoom exactly like every other live measurement', () => {
     mount(<Harness initialPadlets={[
       padlet('a', 0, 0, { width: 100, height: 100 }),
       padlet('ai1', 900, 0, { width: 200, height: 280, type: 'ai-component' }),
     ]} zoom={0.5} />);
     mountLegacyAiCandidateEl(
       'ai1',
-      { left: toClientX(900, 0.5), top: toClientY(0, 0.5), width: 100, height: 140 }, // padded outer, screen px at zoom 0.5
-      [{ left: toClientX(900, 0.5), top: toClientY(0, 0.5), width: 100, height: 45 }], // natural content, screen px
+      { left: toClientX(900, 0.5), top: toClientY(0, 0.5), width: 100, height: 140 }, // outer frame, screen px at zoom 0.5
+      [{ left: toClientX(900, 0.5), top: toClientY(0, 0.5), width: 100, height: 45 }], // inner content (now IGNORED)
     );
 
-    // Natural screen height 45 / zoom 0.5 = world height 90 -- same world
-    // value as the zoom-1 test above, proving the correction happens BEFORE
-    // the existing zoom division, not after.
-    drag('a', { x: 0, y: 87 }, 0.5);
-    expect(latest!.api.alignmentGuides).toEqual({ verticalX: null, horizontalY: 90 });
+    // Outer screen height 140 / zoom 0.5 = world height 280.
+    drag('a', { x: 0, y: 277 }, 0.5);
+    expect(latest!.api.alignmentGuides).toEqual({ verticalX: null, horizontalY: 280 });
   });
-});
 
-describe("PATCH ALIGN-E4: visual alignment rect targets Image/AI's own visible content, excluding the Reactions/Caption footer below it", () => {
-  it('an Image candidate with a real Reactions+Caption footer below it is measured at the <img>\'s own bottom, not the taller footer-inclusive outer box', () => {
+  it('an Image candidate with a real Reactions+Caption footer is measured at the OUTER frame\'s own bottom (300, footer included) -- ALIGN-E4\'s content-only exclusion is gone', () => {
     mount(<Harness initialPadlets={[
       padlet('a', 0, 0, { width: 100, height: 100 }),
       padlet('img1', 900, 0, { width: 200, height: 300, type: 'image' }),
     ]} zoom={1} />);
     mountImageCandidateEl(
       'img1',
-      { left: toClientX(900, 1), top: toClientY(0, 1), width: 200, height: 300 }, // outer includes the footer
-      { left: toClientX(900, 1), top: toClientY(0, 1), width: 200, height: 200 }, // the <img> itself
+      { left: toClientX(900, 1), top: toClientY(0, 1), width: 200, height: 300 }, // outer frame -- now authoritative
+      { left: toClientX(900, 1), top: toClientY(0, 1), width: 200, height: 200 }, // the <img> itself (now IGNORED)
       [{ left: toClientX(900, 1), top: toClientY(200, 1), width: 200, height: 100 }], // Reactions+Caption footer
     );
 
-    // a.top = 197, 3 units from the <img>'s own bottom (200). If the taller
-    // footer-inclusive outer box (300) leaked through, this would land
-    // outside the 6px tolerance and no guide would appear at all.
-    drag('a', { x: 0, y: 197 }, 1);
-    expect(latest!.api.alignmentGuides).toEqual({ verticalX: null, horizontalY: 200 });
+    // a.top = 297, 3 units from the OUTER frame's own bottom (300). Under
+    // the old ALIGN-E4 exclusion this would have resolved to 200 instead.
+    drag('a', { x: 0, y: 297 }, 1);
+    expect(latest!.api.alignmentGuides).toEqual({ verticalX: null, horizontalY: 300 });
   });
 
-  it('structured AI content (no .ai-component-renderer) also excludes its own Reactions/Caption footer, via [data-ai-content-root]', () => {
+  it('structured AI content with a Reactions+Caption footer is measured at the OUTER frame\'s own bottom (260, footer included)', () => {
     mount(<Harness initialPadlets={[
       padlet('a', 0, 0, { width: 100, height: 100 }),
       padlet('ai3', 900, 0, { width: 200, height: 260, type: 'ai-component' }),
     ]} zoom={1} />);
     mountStructuredAiCandidateEl(
       'ai3',
-      { left: toClientX(900, 1), top: toClientY(0, 1), width: 200, height: 260 }, // outer includes the footer
-      { left: toClientX(900, 1), top: toClientY(0, 1), width: 200, height: 216 }, // the content root itself
+      { left: toClientX(900, 1), top: toClientY(0, 1), width: 200, height: 260 }, // outer frame -- now authoritative
+      { left: toClientX(900, 1), top: toClientY(0, 1), width: 200, height: 216 }, // content root (now IGNORED)
       [{ left: toClientX(900, 1), top: toClientY(216, 1), width: 200, height: 44 }], // Reactions+Caption footer
     );
 
-    drag('a', { x: 0, y: 213 }, 1); // 3 units from the content root's own bottom (216)
-    expect(latest!.api.alignmentGuides).toEqual({ verticalX: null, horizontalY: 216 });
+    drag('a', { x: 0, y: 257 }, 1); // 3 units from the OUTER frame's own bottom (260)
+    expect(latest!.api.alignmentGuides).toEqual({ verticalX: null, horizontalY: 260 });
   });
 
-  it('a legacy ai-component candidate with a Reactions/Caption footer AFTER the padded renderer still measures at its natural content bottom, unaffected by the footer', () => {
+  it('Full View ON vs OFF: an outer frame of the SAME rendered size resolves to the SAME guide regardless of how much/little inner chrome (top strip, content padding) exists behind it -- the resolver never inspects fullView, only the outer node itself', () => {
+    // "Full View OFF" stand-in: outer frame with a top strip + bordered
+    // content area as separate inner children (extra DOM nodes present).
     mount(<Harness initialPadlets={[
       padlet('a', 0, 0, { width: 100, height: 100 }),
-      padlet('ai4', 900, 0, { width: 200, height: 330, type: 'ai-component' }),
+      padlet('fvOff', 900, 0, { width: 200, height: 216, type: 'image' }),
     ]} zoom={1} />);
-    mountLegacyAiCandidateEl(
-      'ai4',
-      { left: toClientX(900, 1), top: toClientY(0, 1), width: 200, height: 330 }, // padded outer + footer
-      [
-        { left: toClientX(900, 1), top: toClientY(0, 1), width: 200, height: 70 }, // viewport/content
-        { left: toClientX(900, 1), top: toClientY(70, 1), width: 200, height: 20 }, // attribution row
-      ],
-      [{ left: toClientX(900, 1), top: toClientY(260, 1), width: 20, height: 20 }], // resize grip (absolute)
-      [{ left: toClientX(900, 1), top: toClientY(280, 1), width: 200, height: 50 }], // Reactions+Caption footer
-    );
+    const fvOff = mountLiveCandidateEl('fvOff', { left: toClientX(900, 1), top: toClientY(0, 1), width: 200, height: 216 });
+    const topStrip = document.createElement('div');
+    fvOff.appendChild(topStrip);
+    drag('a', { x: 0, y: 213 }, 1);
+    const fvOffResult = latest!.api.alignmentGuides.horizontalY;
 
-    // Same natural bottom (90) as PATCH ALIGN-E3's equivalent test -- proves
-    // the footer, appended AFTER the content root this time, contributes
-    // nothing to the measured height.
-    drag('a', { x: 0, y: 87 }, 1);
-    expect(latest!.api.alignmentGuides).toEqual({ verticalX: null, horizontalY: 90 });
+    // "Full View ON" stand-in: the SAME outer rect, but with no inner
+    // children at all (top strip/border removed, per FreeformImageResizeBox's
+    // own fullView-gated JSX) -- the outer node itself is unchanged.
+    mount(<Harness initialPadlets={[
+      padlet('a', 0, 0, { width: 100, height: 100 }),
+      padlet('fvOn', 900, 0, { width: 200, height: 216, type: 'image' }),
+    ]} zoom={1} />);
+    mountLiveCandidateEl('fvOn', { left: toClientX(900, 1), top: toClientY(0, 1), width: 200, height: 216 });
+    drag('a', { x: 0, y: 213 }, 1);
+    const fvOnResult = latest!.api.alignmentGuides.horizontalY;
+
+    expect(fvOffResult).toBe(216);
+    expect(fvOnResult).toBe(216);
+    expect(fvOffResult).toBe(fvOnResult);
   });
 });
 
