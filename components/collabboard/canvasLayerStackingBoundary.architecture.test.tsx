@@ -212,9 +212,6 @@ describe('Drawing PATCH-117 clip-path containment freeze [matrix 24; negative co
   it('visibleCanvasRightInsetPx/boundaryClipPath in SimpleLineRenderer.tsx are untouched', () => {
     expect(simpleLineRendererSrc).toContain('visibleCanvasRightInsetPx?: number;');
     expect(simpleLineRendererSrc).toContain("const explicitRightInsetPx = typeof visibleCanvasRightInsetPx === 'number'");
-    expect(simpleLineRendererSrc).toContain(
-      "'inset(0 var(--drawing-visible-canvas-right-inset, 0px) 0 var(--drawing-visible-canvas-left-inset, 0px))'",
-    );
   });
 
   it('DrawingLayout.tsx\'s --drawing-visible-canvas-right-inset CSS variable wiring is untouched', () => {
@@ -227,6 +224,26 @@ describe('Drawing PATCH-117 clip-path containment freeze [matrix 24; negative co
     expect(drawingLayoutSrc).toContain("viewportEl.style.setProperty('--drawing-visible-canvas-left-inset', `${nextVisibleCanvasLeftInsetPx}px`);");
     expect(drawingLayoutSrc).toContain("viewportEl.style.removeProperty('--drawing-visible-canvas-left-inset');");
     expect(drawingLayoutSrc).toContain("cleanupViewportEl?.style.removeProperty('--drawing-visible-canvas-left-inset');");
+  });
+
+  it('PATCH DRAWING-LINE-CLIP-R2: DrawingLayout.tsx also publishes --drawing-native-ui-top-inset, so the left containment is a top-left NOTCH (bounded by the menu Stack.Col\'s own height) rather than a permanent full-height strip', () => {
+    expect(drawingLayoutSrc).toContain('const nextNativeUiTopInsetPx = nativeLeftPanelRect');
+    expect(drawingLayoutSrc).toContain("viewportEl.style.setProperty('--drawing-native-ui-top-inset', `${nextNativeUiTopInsetPx}px`);");
+    expect(drawingLayoutSrc).toContain("viewportEl.style.removeProperty('--drawing-native-ui-top-inset');");
+    expect(drawingLayoutSrc).toContain("cleanupViewportEl?.style.removeProperty('--drawing-native-ui-top-inset');");
+  });
+
+  it('PATCH DRAWING-LINE-CLIP-R2: SimpleLineRenderer.tsx builds a notched polygon() clip (not a full-height inset()) for the CSS-var Drawing branch', () => {
+    expect(simpleLineRendererSrc).toContain("? 'polygon('");
+    expect(simpleLineRendererSrc).toContain("'var(--drawing-visible-canvas-left-inset, 0px) 0, '");
+    expect(simpleLineRendererSrc).toContain("'0 var(--drawing-native-ui-top-inset, 0px), '");
+  });
+
+  it('PATCH DRAWING-LINE-CLIP-R2: the root <svg> clip is gesture-aware (isActiveGesture), NOT the same as the always-on boundaryClipPath used by the inner <g>', () => {
+    expect(simpleLineRendererSrc).toContain('const isActiveGesture = !!drawing || isDragging;');
+    expect(simpleLineRendererSrc).toContain('const rootClipPath = isActiveGesture ? undefined : boundaryClipPath;');
+    expect(simpleLineRendererSrc).toContain('...(rootClipPath ? { clipPath: rootClipPath } : {}),');
+    expect(simpleLineRendererSrc).toContain("style={boundaryClipPath ? { clipPath: boundaryClipPath } : undefined}");
   });
 
   it('CanvasClient.tsx never passes visibleCanvasRightInsetPx to the Freeform Line layers -- this patch did not wire Drawing\'s containment mechanism into Freeform', () => {

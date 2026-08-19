@@ -648,11 +648,37 @@ function SimpleLineRenderer({
     const explicitRightInsetPx = typeof visibleCanvasRightInsetPx === 'number'
         ? Math.max(0, visibleCanvasRightInsetPx)
         : null;
+    // Native Excalidraw chrome (main-menu button / selected-shape properties
+    // Island) only occupies a top-left CORNER, not the full canvas height, so
+    // this is a notched hexagon -- the visible-canvas rect with that corner
+    // and the right-side chrome strip cut out -- rather than a full-height
+    // inset() on the left edge.
     const boundaryClipPath = explicitRightInsetPx !== null
         ? `inset(0 ${explicitRightInsetPx}px 0 0)`
         : excalidrawAPIRef
-            ? 'inset(0 var(--drawing-visible-canvas-right-inset, 0px) 0 var(--drawing-visible-canvas-left-inset, 0px))'
+            ? 'polygon('
+            + 'var(--drawing-visible-canvas-left-inset, 0px) 0, '
+            + 'calc(100% - var(--drawing-visible-canvas-right-inset, 0px)) 0, '
+            + 'calc(100% - var(--drawing-visible-canvas-right-inset, 0px)) 100%, '
+            + '0 100%, '
+            + '0 var(--drawing-native-ui-top-inset, 0px), '
+            + 'var(--drawing-visible-canvas-left-inset, 0px) var(--drawing-native-ui-top-inset, 0px)'
+            + ')'
             : undefined;
+
+    // PATCH DRAWING-LINE-CLIP-R2: clip-path on an element removes it from
+    // hit-testing outside the clipped region, so applying it to the root
+    // (interactive) SVG meant a drag that moved or released over the clipped
+    // area fell through to Excalidraw's own canvas underneath -- which can
+    // stop propagation before our window-level mousemove/mouseup listeners
+    // ever see the event, silently breaking line/arrow commit. The root SVG
+    // must stay unclipped for the full duration of any pointer lifecycle
+    // (background draw, line drag, point/handle drag) so it remains the
+    // hit-tested element everywhere and those events always bubble to
+    // window; the boundary is enforced instead on an inner <g> that owns
+    // only rendering, so paint still never crosses the chrome boundary.
+    const isActiveGesture = !!drawing || isDragging;
+    const rootClipPath = isActiveGesture ? undefined : boundaryClipPath;
 
     return (
         <svg
@@ -666,7 +692,7 @@ function SimpleLineRenderer({
                 pointerEvents: (isLineMode || forcePointerEvents) ? 'auto' : 'none',
                 cursor: isLineMode ? 'crosshair' : 'default',
                 zIndex: layer === 'back' ? 0 : (isLineMode || selectedLineId || isEditMode) ? 1000 : 10,
-                ...(boundaryClipPath ? { clipPath: boundaryClipPath } : {}),
+                ...(rootClipPath ? { clipPath: rootClipPath } : {}),
             }}
             onMouseDown={handleCanvasMouseDown}
             onContextMenu={(e) => {
@@ -710,6 +736,18 @@ function SimpleLineRenderer({
                     </React.Fragment>
                 ))}
             </defs>
+
+            {/* PATCH DRAWING-LINE-CLIP-R2: the boundary clip lives here, on an
+                inner rendering-only group, instead of on the root <svg> above.
+                The root stays unclipped so it remains hit-testable (and thus
+                the target that bubbles pointer events to window) for the
+                entire duration of a draw/drag; this group is purely about
+                keeping painted ink -- hit areas, visible strokes, handles,
+                the drawing preview -- from crossing the chrome boundary. */}
+            <g
+                data-line-containment={boundaryClipPath ? 'visible-canvas' : undefined}
+                style={boundaryClipPath ? { clipPath: boundaryClipPath } : undefined}
+            >
 
             {/* Interactive hit areas - front layer renders ALL lines' hit areas */}
             {lineGroups.map(({ key, lines: groupedLines, transform }) => (
@@ -946,6 +984,7 @@ function SimpleLineRenderer({
                     strokeDasharray="4,4"
                 />
             )}
+            </g>
         </svg>
     );
 }

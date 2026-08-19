@@ -1875,6 +1875,15 @@ export default function DrawingLayout({
       const nextVisibleCanvasLeftInsetPx = nativeLeftPanelRect
         ? Math.max(0, Math.min(nativeLeftPanelRect.right, viewportRight) - viewportLeft)
         : 0;
+      // The native menu/properties Island only occupies a top-left CORNER, not
+      // the full canvas height -- pair the width above with its own height so
+      // the clip can carve out just that corner (a notch) instead of cutting a
+      // permanent full-height strip down the whole left edge.
+      const viewportTop = viewportRect?.top ?? 0;
+      const viewportBottom = viewportRect?.bottom ?? window.innerHeight;
+      const nextNativeUiTopInsetPx = nativeLeftPanelRect
+        ? Math.max(0, Math.min(nativeLeftPanelRect.bottom, viewportBottom) - viewportTop)
+        : 0;
       if (viewportEl) {
         if (nextVisibleCanvasRightInsetPx === null) {
           viewportEl.style.removeProperty('--drawing-visible-canvas-right-inset');
@@ -1887,6 +1896,11 @@ export default function DrawingLayout({
           viewportEl.style.removeProperty('--drawing-visible-canvas-left-inset');
         } else {
           viewportEl.style.setProperty('--drawing-visible-canvas-left-inset', `${nextVisibleCanvasLeftInsetPx}px`);
+        }
+        if (nextNativeUiTopInsetPx === 0) {
+          viewportEl.style.removeProperty('--drawing-native-ui-top-inset');
+        } else {
+          viewportEl.style.setProperty('--drawing-native-ui-top-inset', `${nextNativeUiTopInsetPx}px`);
         }
       }
       const reservedSidebarLeft = visibleCanvasRight ?? (viewportRight - 320);
@@ -1935,6 +1949,7 @@ export default function DrawingLayout({
       cleanupViewportEl?.style.removeProperty('--drawing-visible-canvas-right-inset');
       cleanupViewportEl?.style.removeProperty('--drawing-zoom-controls-right');
       cleanupViewportEl?.style.removeProperty('--drawing-visible-canvas-left-inset');
+      cleanupViewportEl?.style.removeProperty('--drawing-native-ui-top-inset');
       window.removeEventListener('resize', requestUpdate);
     };
   }, [rightClusterAnchorEl, viewportContainerRef, activeTool, key]);
