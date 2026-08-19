@@ -159,14 +159,24 @@ export interface FreeformHorizontalAlignmentCandidateRect {
 }
 
 /**
- * PATCH ALIGN-B: vertical (X-axis) alignment-guide detection for a single
+ * PATCH ALIGN-B/E: vertical (X-axis) alignment-guide detection for a single
  * dragged root post against other root posts, in WORLD units.
  *
- * Same-type matching only -- dragged-left vs other-left, dragged-center vs
- * other-center, dragged-right vs other-right -- not every cross-combination
- * (e.g. dragged-left vs other-center never matches). Callers are responsible
- * for excluding the dragged post itself and any non-root post from `others`;
- * this function has no post-identity concept, only rectangles.
+ * Two families of same-type-only pairs -- never every cross-combination
+ * (e.g. dragged-left vs other-center never matches):
+ *  - ALIGN-B same-edge: dragged-left/other-left, dragged-center/other-center,
+ *    dragged-right/other-right (posts sharing a left/center/right line).
+ *  - ALIGN-E adjacency: dragged-right/other-left and dragged-left/other-right
+ *    (posts butted up side by side, no gap). This is still purely a guide at
+ *    the matching X -- it never nudges either rect together; magnetic
+ *    snapping and equal-spacing detection are explicitly out of scope here.
+ * All five pairs feed the SAME nearest-wins search below, so an adjacency
+ * match can beat a same-edge match (or vice versa) purely on distance, same
+ * as any other candidate.
+ *
+ * Callers are responsible for excluding the dragged post itself and any
+ * non-root post from `others`; this function has no post-identity concept,
+ * only rectangles.
  *
  * Returns the WORLD x of the nearest qualifying match (a candidate's own
  * edge/center, the value a guide line should be drawn at) within
@@ -195,6 +205,9 @@ export function detectVerticalAlignmentGuide(
       [draggedLeft, otherLeft],
       [draggedCenter, otherCenter],
       [draggedRight, otherRight],
+      // PATCH ALIGN-E: horizontal adjacency -- posts sitting side by side.
+      [draggedRight, otherLeft],
+      [draggedLeft, otherRight],
     ];
 
     for (const [draggedValue, otherValue] of pairs) {
@@ -210,12 +223,17 @@ export function detectVerticalAlignmentGuide(
 }
 
 /**
- * PATCH ALIGN-C: horizontal (Y-axis) alignment-guide detection for a single
- * dragged root post against other root posts, in WORLD units. Exact
- * top/center/bottom counterpart of detectVerticalAlignmentGuide above --
- * same same-type-only matching, same nearest-wins tie-break, same caller
- * responsibilities (exclude dragged post + non-root posts, pre-convert the
- * tolerance from screen px via canvasZoom).
+ * PATCH ALIGN-C/E: horizontal (Y-axis) alignment-guide detection for a
+ * single dragged root post against other root posts, in WORLD units. Exact
+ * top/center/bottom(+adjacency) counterpart of detectVerticalAlignmentGuide
+ * above -- same same-type-only matching, same nearest-wins tie-break, same
+ * caller responsibilities (exclude dragged post + non-root posts, pre-convert
+ * the tolerance from screen px via canvasZoom).
+ *
+ * ALIGN-E adds vertical adjacency: dragged-bottom/other-top and
+ * dragged-top/other-bottom (posts stacked with no gap), fed into the same
+ * nearest-wins search as the ALIGN-C same-edge pairs -- a guide only, never
+ * a snap.
  *
  * Kept as an independent function (not a generalized axis parameter) so each
  * axis stays trivially readable and testable on its own -- mirrors this
@@ -242,6 +260,9 @@ export function detectHorizontalAlignmentGuide(
       [draggedTop, otherTop],
       [draggedCenter, otherCenter],
       [draggedBottom, otherBottom],
+      // PATCH ALIGN-E: vertical adjacency -- posts stacked with no gap.
+      [draggedBottom, otherTop],
+      [draggedTop, otherBottom],
     ];
 
     for (const [draggedValue, otherValue] of pairs) {

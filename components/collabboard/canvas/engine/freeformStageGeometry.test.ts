@@ -277,6 +277,27 @@ describe('detectVerticalAlignmentGuide', () => {
     expect(detectVerticalAlignmentGuide(dragged, [other], 6)).toBeNull();
   });
 
+  // PATCH ALIGN-E: horizontal adjacency -- posts butted up side by side.
+  it('right -> left adjacency: dragged right edge close to another rect\'s left edge matches', () => {
+    // other.x = 603 -> left = 603, 3 units from dragged.right = 600
+    const result = detectVerticalAlignmentGuide(dragged, [{ x: 603, width: 180 }], 6);
+    expect(result).toBe(603);
+  });
+
+  it('left -> right adjacency: dragged left edge close to another rect\'s right edge matches', () => {
+    // other: x=298, width=200 -> right=498, 2 units from dragged.left = 500
+    const result = detectVerticalAlignmentGuide(dragged, [{ x: 298, width: 200 }], 6);
+    expect(result).toBe(498);
+  });
+
+  it('adjacency and same-edge candidates compete on the same nearest-wins search', () => {
+    const result = detectVerticalAlignmentGuide(dragged, [
+      { x: 505, width: 180 },  // left-left distance 5
+      { x: 602, width: 180 },  // right-left (adjacency) distance 2 -- nearest
+    ], 6);
+    expect(result).toBe(602);
+  });
+
   it('FREEFORM_ALIGNMENT_GUIDE_TOLERANCE_SCREEN_PX is a small positive screen-pixel constant, not pre-divided by any zoom', () => {
     expect(FREEFORM_ALIGNMENT_GUIDE_TOLERANCE_SCREEN_PX).toBeGreaterThan(0);
     expect(FREEFORM_ALIGNMENT_GUIDE_TOLERANCE_SCREEN_PX).toBeLessThan(20);
@@ -334,5 +355,26 @@ describe('detectHorizontalAlignmentGuide', () => {
     // must NOT count as a match, since only same-type pairs are compared.
     const other = { y: 500 - 90, height: 180 }; // center = 500
     expect(detectHorizontalAlignmentGuide(dragged, [other], 6)).toBeNull();
+  });
+
+  // PATCH ALIGN-E: vertical adjacency -- posts stacked with no gap.
+  it('bottom -> top adjacency: dragged bottom edge close to another rect\'s top edge matches', () => {
+    // other.y = 603 -> top = 603, 3 units from dragged.bottom = 600
+    const result = detectHorizontalAlignmentGuide(dragged, [{ y: 603, height: 180 }], 6);
+    expect(result).toBe(603);
+  });
+
+  it('top -> bottom adjacency: dragged top edge close to another rect\'s bottom edge matches', () => {
+    // other: y=298, height=200 -> bottom=498, 2 units from dragged.top = 500
+    const result = detectHorizontalAlignmentGuide(dragged, [{ y: 298, height: 200 }], 6);
+    expect(result).toBe(498);
+  });
+
+  it('adjacency and same-edge candidates compete on the same nearest-wins search', () => {
+    const result = detectHorizontalAlignmentGuide(dragged, [
+      { y: 505, height: 180 },  // top-top distance 5
+      { y: 602, height: 180 },  // bottom-top (adjacency) distance 2 -- nearest
+    ], 6);
+    expect(result).toBe(602);
   });
 });

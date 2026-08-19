@@ -487,3 +487,83 @@ describe('PATCH ALIGN-D: alignment guides preference (on/off)', () => {
     expect(persisted).toEqual([{ id: 'a', position_x: 500, position_y: 0 }]);
   });
 });
+
+describe('PATCH ALIGN-E: adjacent edge alignment guides', () => {
+  it('right -> left: dragged post right edge close to another root post left edge shows a guide there (posts butted up horizontally)', () => {
+    mount(<Harness initialPadlets={[
+      padlet('a', 0, 0, { width: 100 }),
+      padlet('b', 600, 900, { width: 180 }), // y kept far apart -- isolates this to the vertical (X) guide only
+    ]} zoom={1} />);
+
+    drag('a', { x: 497, y: 0 }, 1); // a.right = 597, 3 units from b.left = 600
+    expect(latest!.api.alignmentGuides).toEqual({ verticalX: 600, horizontalY: null });
+  });
+
+  it('left -> right: dragged post left edge close to another root post right edge shows a guide there (posts butted up horizontally)', () => {
+    mount(<Harness initialPadlets={[
+      padlet('a', 0, 0, { width: 100 }),
+      padlet('b', 100, 900, { width: 200 }), // right = 300, y kept far apart
+    ]} zoom={1} />);
+
+    drag('a', { x: 303, y: 0 }, 1); // a.left = 303, 3 units from b.right = 300
+    expect(latest!.api.alignmentGuides).toEqual({ verticalX: 300, horizontalY: null });
+  });
+
+  it('bottom -> top: dragged post bottom edge close to another root post top edge shows a guide there (posts stacked vertically)', () => {
+    mount(<Harness initialPadlets={[
+      padlet('a', 0, 0, { width: 100, height: 100 }),
+      padlet('b', 900, 600, { width: 100, height: 180 }), // x kept far apart -- isolates this to the horizontal (Y) guide only
+    ]} zoom={1} />);
+
+    drag('a', { x: 0, y: 497 }, 1); // a.bottom = 597, 3 units from b.top = 600
+    expect(latest!.api.alignmentGuides).toEqual({ verticalX: null, horizontalY: 600 });
+  });
+
+  it('top -> bottom: dragged post top edge close to another root post bottom edge shows a guide there (posts stacked vertically)', () => {
+    mount(<Harness initialPadlets={[
+      padlet('a', 0, 0, { width: 100, height: 100 }),
+      padlet('b', 900, 100, { width: 100, height: 200 }), // bottom = 300, x kept far apart
+    ]} zoom={1} />);
+
+    drag('a', { x: 0, y: 303 }, 1); // a.top = 303, 3 units from b.bottom = 300
+    expect(latest!.api.alignmentGuides).toEqual({ verticalX: null, horizontalY: 300 });
+  });
+
+  it('nearest candidate wins across same-edge AND adjacency matches together', () => {
+    mount(<Harness initialPadlets={[
+      padlet('a', 0, 0, { width: 100 }),
+      padlet('b1', 505, 900, { width: 180 }), // left-left (same-edge) distance 5
+      padlet('b2', 602, 900, { width: 180 }), // right-left (adjacency) distance 2 -- nearer
+    ]} zoom={1} />);
+
+    drag('a', { x: 500, y: 0 }, 1);
+    expect(latest!.api.alignmentGuides).toEqual({ verticalX: 602, horizontalY: null });
+  });
+
+  it('Alignment Guides OFF also suppresses adjacency detection, not just same-edge', () => {
+    mount(<Harness initialPadlets={[
+      padlet('a', 0, 0, { width: 100 }),
+      padlet('b', 600, 900, { width: 180 }),
+    ]} zoom={1} alignmentGuidesEnabled={false} />);
+
+    drag('a', { x: 497, y: 0 }, 1); // would match right->left adjacency if the preference were ON
+    expect(latest!.api.alignmentGuides).toEqual({ verticalX: null, horizontalY: null });
+  });
+
+  it('Snap-to-Grid still determines the committed position exactly as before, even with an adjacency guide also showing', async () => {
+    const persisted = installFakeSupabase();
+    mount(<Harness initialPadlets={[
+      padlet('a', 0, 0, { width: 100 }),
+      padlet('b', 600, 900, { width: 180 }),
+    ]} zoom={1} snapToGrid />);
+
+    // 503 is NOT a multiple of 20; Snap-to-Grid must still round it to 500
+    // even though the unsnapped preview (a.right = 603) is also within
+    // adjacency tolerance of b.left = 600.
+    drag('a', { x: 503, y: 0 }, 1);
+    expect(latest!.api.alignmentGuides).toEqual({ verticalX: 600, horizontalY: null });
+
+    await release();
+    expect(persisted).toEqual([{ id: 'a', position_x: 500, position_y: 0 }]);
+  });
+});
