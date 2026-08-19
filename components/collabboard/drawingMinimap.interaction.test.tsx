@@ -121,17 +121,36 @@ function clickAt(target: Element, svg: SVGSVGElement, point: { clientX: number; 
   });
 }
 
-describe('PATCH DRAWING-MINIMAP-A: empty-drawing behavior', () => {
-  it('renders nothing when there are no scene elements', () => {
+describe('PATCH DRAWING-MINIMAP-B: the shell is always visible, never hidden for empty/unavailable data', () => {
+  it('renders the shell when there are no scene elements but a viewport is known', () => {
     mockedScene = { elementRects: [], viewportWorldRect: VIEWPORT_RECT };
     const { minimap } = mountMinimap();
-    expect(minimap).toBeNull();
+    expect(minimap).not.toBeNull();
   });
 
-  it('renders once at least one element exists', () => {
+  it('renders the shell even when NEITHER elements NOR a viewport are known yet (pre-first-measurement)', () => {
+    mockedScene = { elementRects: [], viewportWorldRect: null };
+    const { minimap } = mountMinimap();
+    expect(minimap).not.toBeNull();
+  });
+
+  it('renders the shell once at least one element exists', () => {
     mockedScene = { elementRects: ELEMENT_RECTS, viewportWorldRect: VIEWPORT_RECT };
     const { minimap } = mountMinimap();
     expect(minimap).not.toBeNull();
+  });
+
+  it('an empty drawing with a known viewport shows the viewport rectangle but no item footprints', () => {
+    mockedScene = { elementRects: [], viewportWorldRect: VIEWPORT_RECT };
+    const { host, viewport } = mountMinimap();
+    expect(host.querySelectorAll('[data-minimap-item-index]')).toHaveLength(0);
+    expect(viewport).not.toBeNull();
+  });
+
+  it('the background surface is always present, independent of scene/viewport availability', () => {
+    mockedScene = { elementRects: [], viewportWorldRect: null };
+    const { host } = mountMinimap();
+    expect(host.querySelector('[data-drawing-minimap-surface="true"]')).not.toBeNull();
   });
 });
 

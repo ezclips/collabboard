@@ -107,3 +107,41 @@ describe('PATCH DRAWING-MINIMAP-A: element mutation surface', () => {
     expect(code(geometrySrc)).not.toMatch(/el\.\w+\s*=[^=]/);
   });
 });
+
+describe('PATCH DRAWING-MINIMAP-B: root-cause fix -- StrictMode-safe frame scheduling', () => {
+  it('the scheduled-frame id is a plain per-effect local variable, not a useRef -- a useRef survives Strict Mode\'s ' +
+    'mount->cleanup->remount and left the id permanently non-null after the first (discarded) cleanup, which made ' +
+    'every later scheduleMeasure() call a silent no-op and the hook never left its empty initial state', () => {
+    expect(code(sceneHookSrc)).toContain('let frameId: number | null = null;');
+    expect(code(sceneHookSrc)).not.toMatch(/const\s+\w*[Rr]af\w*\s*=\s*useRef/);
+    // useState/useEffect only -- useRef is no longer imported by this hook at all.
+    expect(code(sceneHookSrc)).toMatch(/import\s*\{\s*useEffect,\s*useState\s*\}\s*from\s*'react';/);
+  });
+
+  it('the cleanup cancels the pending frame using the SAME local binding it was scheduled with', () => {
+    const effectBody = slice(code(sceneHookSrc), 'useEffect(() => {', '}, [excalidrawAPI]);');
+    expect(effectBody).toContain('if (frameId !== null) window.cancelAnimationFrame(frameId);');
+  });
+});
+
+describe('PATCH DRAWING-MINIMAP-B: the minimap shell is never hidden', () => {
+  it('the component no longer has an early return that hides the whole shell for empty/unavailable bounds', () => {
+    expect(code(minimapSrc)).not.toMatch(/if\s*\(\s*!displayBounds\s*\|\|\s*!projection\s*\)\s*return\s*null;/);
+  });
+
+  it('displayBounds falls back to the current viewport, then to a fixed placeholder, when there are no elements', () => {
+    const fallbackBlock = slice(code(minimapSrc), 'const displayBounds = useMemo(() => {', '}, [elementRects, viewportWorldRect]);');
+    expect(fallbackBlock).toContain('if (elementRects.length > 0) return getSceneDisplayBounds(elementRects);');
+    expect(fallbackBlock).toContain('if (viewportWorldRect) return getSceneDisplayBounds([viewportWorldRect]);');
+    expect(fallbackBlock).toContain('return getSceneDisplayBounds([ORIGIN_PLACEHOLDER_RECT]);');
+  });
+
+  it('getSceneDisplayBounds itself (the pure geometry function) is untouched -- only its caller\'s input selection changed', () => {
+    expect(code(geometrySrc)).toContain('export function getSceneDisplayBounds(elementRects: readonly WorldRect[]): WorldRect | null {');
+    expect(code(geometrySrc)).toContain('if (validRects.length === 0) return null;');
+  });
+
+  it('the host shell now carries a visible border/background of its own, independent of the inner SVG surface rect', () => {
+    expect(code(minimapSrc)).toMatch(/HOST_CLASSNAME[\s\S]{0,10}=[\s\S]{0,200}border[\s\S]{0,200}bg-white/);
+  });
+});

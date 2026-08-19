@@ -9,6 +9,7 @@ import {
   type MinimapInnerRect,
   type MinimapProjection,
   type WorldPoint,
+  type WorldRect,
 } from './drawingMinimapGeometry';
 import { panDrawingViewportByWorldDelta, type DrawingMinimapExcalidrawAPI } from './drawingMinimapNavigation';
 import { useDrawingMinimapScene } from './useDrawingMinimapScene';
@@ -61,7 +62,17 @@ export interface DrawingMinimapProps {
 }
 
 const HOST_CLASSNAME =
-  'pointer-events-auto absolute bottom-[84px] right-[var(--drawing-zoom-controls-right,1.5rem)] z-[130] hidden h-[112px] w-[176px] overflow-hidden md:block';
+  'pointer-events-auto absolute bottom-[84px] right-[var(--drawing-zoom-controls-right,1.5rem)] z-[130] hidden h-[112px] w-[176px] overflow-hidden rounded-md border border-gray-300 bg-white shadow-md md:block';
+
+/**
+ * PATCH DRAWING-MINIMAP-B: a synthetic single-rect scene used only when
+ * there is truly nothing else to frame the minimap around (excalidrawAPI
+ * not yet available, before the very first measurement). Centered on the
+ * origin at exactly the display-bounds floor size, so it produces the same
+ * "default" fitted view getSceneDisplayBounds already falls back to for a
+ * tiny/empty scene -- not a new geometry rule, just a stand-in input.
+ */
+const ORIGIN_PLACEHOLDER_RECT: WorldRect = { x: 0, y: 0, width: 1, height: 1 };
 
 export default function DrawingMinimap({ excalidrawAPI }: DrawingMinimapProps) {
   const minimapRef = useRef<HTMLDivElement | null>(null);
@@ -69,7 +80,20 @@ export default function DrawingMinimap({ excalidrawAPI }: DrawingMinimapProps) {
   const [isDragging, setIsDragging] = useState(false);
   const clipId = `drawing-minimap-${useId().replace(/:/g, '')}`;
   const { elementRects, viewportWorldRect } = useDrawingMinimapScene(excalidrawAPI);
-  const displayBounds = useMemo(() => getSceneDisplayBounds(elementRects), [elementRects]);
+  // PATCH DRAWING-MINIMAP-B: the minimap shell must stay visible for an
+  // empty drawing (and before the scene subscription's first measurement),
+  // not just once real elements exist. getSceneDisplayBounds itself is
+  // untouched (still returns null for an empty input) -- this only widens
+  // what gets fed into it: real element footprints when there are any,
+  // otherwise the current viewport rect (so an empty drawing shows "you are
+  // here" against its own padded surroundings), otherwise a single-point
+  // placeholder at the origin (so the shell still has a valid, if
+  // arbitrary, frame before the very first measurement lands).
+  const displayBounds = useMemo(() => {
+    if (elementRects.length > 0) return getSceneDisplayBounds(elementRects);
+    if (viewportWorldRect) return getSceneDisplayBounds([viewportWorldRect]);
+    return getSceneDisplayBounds([ORIGIN_PLACEHOLDER_RECT]);
+  }, [elementRects, viewportWorldRect]);
   const projection = useMemo(
     () => displayBounds ? createMinimapProjection(displayBounds, MINIMAP_INNER_RECT) : null,
     [displayBounds],
@@ -178,12 +202,15 @@ export default function DrawingMinimap({ excalidrawAPI }: DrawingMinimapProps) {
     return () => minimap.removeEventListener('wheel', isolateWheel);
   }, [projection]);
 
-  // PATCH DRAWING-MINIMAP-A: hide entirely for an empty drawing rather than
-  // showing an empty-state placeholder, per the patch spec's preference for
-  // whichever gives cleaner UX.
-  if (!displayBounds || !projection) return null;
-
-  const projectedViewport = viewportWorldRect
+  // PATCH DRAWING-MINIMAP-B: the shell (host box + background surface) now
+  // ALWAYS renders once this component is mounted -- it is never hidden for
+  // an empty scene, unavailable bounds, or a subscription that has not
+  // emitted yet. Only the projection-dependent content (element footprints,
+  // the viewport rectangle) is conditional; the 3-tier fallback above means
+  // `projection` is realistically always defined, but this guard keeps the
+  // shell itself visible even in the theoretically-unreachable case where
+  // it somehow isn't, rather than ever falling back to rendering nothing.
+  const projectedViewport = projection && viewportWorldRect
     ? projectWorldRect(viewportWorldRect, projection)
     : null;
 
@@ -226,26 +253,28 @@ export default function DrawingMinimap({ excalidrawAPI }: DrawingMinimapProps) {
           width={MINIMAP_INNER_RECT.width}
           height={MINIMAP_INNER_RECT.height}
           rx="3"
-          style={{ fill: '#e5e7eb', cursor: 'pointer' }}
+          style={{ fill: '#e5e7eb', cursor: projection ? 'pointer' : 'default' }}
         />
 
-        <g data-drawing-minimap-items="true" pointerEvents="none">
-          {elementRects.map((rect, index) => {
-            const projected = projectWorldRect(rect, projection);
-            return (
-              <rect
-                key={index}
-                data-minimap-item-index={index}
-                x={projected.x}
-                y={projected.y}
-                width={Math.max(projected.width, 0.75)}
-                height={Math.max(projected.height, 0.75)}
-                rx="0.5"
-                style={{ fill: 'var(--foreground)', fillOpacity: 0.45 }}
-              />
-            );
-          })}
-        </g>
+        {projection && (
+          <g data-drawing-minimap-items="true" pointerEvents="none">
+            {elementRects.map((rect, index) => {
+              const projected = projectWorldRect(rect, projection);
+              return (
+                <rect
+                  key={index}
+                  data-minimap-item-index={index}
+                  x={projected.x}
+                  y={projected.y}
+                  width={Math.max(projected.width, 0.75)}
+                  height={Math.max(projected.height, 0.75)}
+                  rx="0.5"
+                  style={{ fill: 'var(--foreground)', fillOpacity: 0.45 }}
+                />
+              );
+            })}
+          </g>
+        )}
 
         {projectedViewport && (
           <g clipPath={`url(#${clipId})`}>
