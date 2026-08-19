@@ -77,12 +77,16 @@ function mountCamera(
   geometry: CameraGeometry | (() => CameraGeometry),
   enabled = true,
   originOffset = { x: 0, y: 0 },
+  initialZoom?: number,
 ) {
   const containerRefObj: React.RefObject<HTMLDivElement | null> = { current: null };
   let latestCamera: ReturnType<typeof useCanvasCamera> | null = null;
 
   function TestComponent() {
-    const camera = useCanvasCamera(containerRefObj, enabled, originOffset.x, originOffset.y);
+    // `initialZoom` undefined still triggers the hook's own default param
+    // (JS default parameters substitute on an explicit `undefined` too), so
+    // this single call form covers both the omitted and explicit cases.
+    const camera = useCanvasCamera(containerRefObj, enabled, originOffset.x, originOffset.y, initialZoom);
     latestCamera = camera;
     const assignRef = React.useCallback((node: HTMLDivElement | null) => {
       containerRefObj.current = node;
@@ -171,6 +175,55 @@ describe('PATCH 9V.2A: finite signed-stage initial seed', () => {
       y: h.getCamera().gutterY + 5000 * h.getCamera().canvasZoom - h.el.scrollTop,
     };
     expect(logicalOriginScreen).toEqual({ x: 0, y: 0 });
+  });
+});
+
+describe('PATCH FREEFORM-ZOOM-A: initialZoom parameter -- opt-in default, byte-identical when omitted', () => {
+  it('omitting initialZoom preserves the pre-patch default of exactly 1 (100%)', () => {
+    const h = mountCamera({ ...VIEWPORT, ...HUGE_EXTENT });
+    expect(h.getCamera().canvasZoom).toBe(1);
+  });
+
+  it('passing initialZoom seeds canvasZoom to that value on first mount', () => {
+    const h = mountCamera({ ...VIEWPORT, ...HUGE_EXTENT }, true, { x: 0, y: 0 }, 0.3);
+    expect(h.getCamera().canvasZoom).toBe(0.3);
+  });
+
+  it('the mount-time seed (gutter + world-origin-offset scroll) uses initialZoom consistently, not the stale pre-patch 1 -- proves zoomRef was seeded together with the canvasZoom state, not left behind', () => {
+    // With a non-zero origin offset, the seeded scrollLeft/scrollTop is
+    // measuredGutter + offset * zoom. If zoomRef (used by the mount-time
+    // useLayoutEffect) were still hardcoded/defaulted to 1 while canvasZoom
+    // state itself became 0.3, this seed would use the WRONG factor and the
+    // asserted scroll values below would be off by offset * 0.7.
+    const h = mountCamera({ ...VIEWPORT, ...HUGE_EXTENT }, true, { x: 5000, y: 5000 }, 0.3);
+    expect(h.getCamera().gutterX).toBe(1200);
+    expect(h.getCamera().gutterY).toBe(800);
+    expect(h.el.scrollLeft).toBe(1200 + 5000 * 0.3);
+    expect(h.el.scrollTop).toBe(800 + 5000 * 0.3);
+  });
+
+  it('logical world (0,0) still lands at the same initial screen point at the new default zoom, exactly like the pre-patch zoom-1 seed', () => {
+    const h = mountCamera({ ...VIEWPORT, ...HUGE_EXTENT }, true, { x: 5000, y: 5000 }, 0.3);
+    const logicalOriginScreen = {
+      x: h.getCamera().gutterX + 5000 * h.getCamera().canvasZoom - h.el.scrollLeft,
+      y: h.getCamera().gutterY + 5000 * h.getCamera().canvasZoom - h.el.scrollTop,
+    };
+    expect(logicalOriginScreen).toEqual({ x: 0, y: 0 });
+  });
+
+  it('zoom +/- controls step normally from the new initial value, through the exact same clamp/step primitive', () => {
+    const h = mountCamera({ ...VIEWPORT, ...HUGE_EXTENT }, true, { x: 0, y: 0 }, 0.3);
+    act(() => { h.getCamera().handleZoomIn(); });
+    expect(h.getCamera().canvasZoom).toBeCloseTo(0.4, 5);
+    act(() => { h.getCamera().handleZoomOut(); h.getCamera().handleZoomOut(); });
+    expect(h.getCamera().canvasZoom).toBeCloseTo(0.2, 5);
+  });
+
+  it('Reset still returns to exactly 1 (100%), not back to initialZoom -- Reset is an unrelated zoom control, untouched by this patch', () => {
+    const h = mountCamera({ ...VIEWPORT, ...HUGE_EXTENT }, true, { x: 0, y: 0 }, 0.3);
+    const { anchorX, anchorY } = centerAnchorFor(h.getCamera());
+    act(() => { h.getCamera().handleZoomReset(); });
+    expect(h.getCamera().canvasZoom).toBe(1);
   });
 });
 

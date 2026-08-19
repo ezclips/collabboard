@@ -41,6 +41,31 @@ describe('PATCH 9S: camera hook wiring [Phase 3]', () => {
   });
 });
 
+describe('PATCH FREEFORM-ZOOM-A: default open zoom is 30%, Freeform-scoped only', () => {
+  it('FREEFORM_DEFAULT_ZOOM is 0.3, defined in the shared geometry module (not hardcoded inline)', () => {
+    const stageGeometrySrc = read('components/collabboard/canvas/engine/freeformStageGeometry.ts');
+    expect(stageGeometrySrc).toContain('export const FREEFORM_DEFAULT_ZOOM = 0.3;');
+  });
+
+  it('CanvasClient imports FREEFORM_DEFAULT_ZOOM from the geometry module', () => {
+    expect(canvasClientSrc).toMatch(/FREEFORM_DEFAULT_ZOOM,?\s*\n[\s\S]{0,400}from '@\/components\/collabboard\/canvas\/engine\/freeformStageGeometry'/);
+  });
+
+  it('the 5th useCanvasCamera argument gates the new default to isFreeformLayout only -- every other (Gantt-sharing) layout keeps the pre-patch default of 1', () => {
+    const hookCallIdx = canvasClientSrc.indexOf('useCanvasCamera(\n    containerRef,\n    isFreeformLayout,');
+    expect(hookCallIdx).toBeGreaterThan(-1);
+    const closeIdx = canvasClientSrc.indexOf(');', hookCallIdx);
+    const callBody = canvasClientSrc.slice(hookCallIdx, closeIdx);
+    expect(callBody).toContain('isFreeformLayout ? FREEFORM_DEFAULT_ZOOM : 1,');
+  });
+
+  it('no other zoom entry point (zoom controls, wheel, reset, minimap) was touched -- only the useCanvasCamera call site gained an argument', () => {
+    expect(canvasClientSrc).toContain('const zoomDelta = e.deltaY > 0 ? -0.1 : 0.1;');
+    expect(canvasClientSrc).toContain('zoomAtViewportPoint((z) => z + zoomDelta, anchorX, anchorY);');
+    expect(canvasClientSrc).not.toMatch(/setCanvasZoom/);
+  });
+});
+
 describe('PATCH 9S: Ctrl+wheel is gated to Freeform-equivalent layouts and uses the shared primitive [Phase 8, 9, 10; negative controls B, C, J]', () => {
   const start = canvasClientSrc.indexOf('onWheel={(e) => {');
   const end = canvasClientSrc.indexOf('onMouseDown={handleFreeformPanMouseDown}', start);

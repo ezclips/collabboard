@@ -27,6 +27,14 @@ export const FREEFORM_SIGNED_WORLD_HEIGHT = FREEFORM_WORLD_MAX_Y - FREEFORM_WORL
 export const FREEFORM_WORLD_ORIGIN_OFFSET_X = -FREEFORM_WORLD_MIN_X;
 export const FREEFORM_WORLD_ORIGIN_OFFSET_Y = -FREEFORM_WORLD_MIN_Y;
 
+/**
+ * PATCH FREEFORM-ZOOM-A: the camera's initial zoom on a fresh Freeform open
+ * (no existing/restored zoom) -- fed into useCanvasCamera's `initialZoom`
+ * parameter so its useState/useRef seed stay byte-identical to each other,
+ * exactly as the pre-patch `1` default did.
+ */
+export const FREEFORM_DEFAULT_ZOOM = 0.3;
+
 export interface FreeformRectPlacement {
   x: number;
   y: number;

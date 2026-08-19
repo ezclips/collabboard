@@ -39,13 +39,20 @@ export function useCanvasCamera(
   enabled: boolean,
   initialWorldOriginOffsetX = 0,
   initialWorldOriginOffsetY = 0,
+  // PATCH FREEFORM-ZOOM-A: the fallback zoom when there is no existing/
+  // restored camera state -- defaults to the pre-patch value of 1 so every
+  // OTHER caller of this generic hook (e.g. Gantt, which reuses the same
+  // canvasZoom/handleZoomIn/Out/Reset for its own unrelated zoom feature) is
+  // completely unaffected. CanvasClient passes FREEFORM_DEFAULT_ZOOM here
+  // only when the active layout is actually Freeform.
+  initialZoom = 1,
 ) {
-  const [canvasZoom, setCanvasZoom] = useState(1);
+  const [canvasZoom, setCanvasZoom] = useState(initialZoom);
   // Mirrors canvasZoom but updated synchronously (not batched), so rapid
   // consecutive zoomAtViewportPoint calls within the same tick (e.g. a burst
   // of Ctrl+wheel events) each compose on top of the previous call's result
   // instead of a stale pre-render closure value.
-  const zoomRef = useRef(1);
+  const zoomRef = useRef(initialZoom);
   // The scroll target computed by the MOST RECENT zoomAtViewportPoint call
   // that has not yet actually committed to the DOM. React batches all
   // zoomAtViewportPoint calls inside one synchronous burst into a single

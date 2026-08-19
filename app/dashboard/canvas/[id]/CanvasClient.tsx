@@ -145,6 +145,7 @@ import { ColorPickerContent } from '@/components/collabboard/ColorPicker';
 import { isStripVisible } from '@/components/collabboard/canvas/engine/utils';
 import {
   clampRectPositionToFreeformBounds,
+  FREEFORM_DEFAULT_ZOOM,
   FREEFORM_SIGNED_WORLD_HEIGHT,
   FREEFORM_SIGNED_WORLD_WIDTH,
   FREEFORM_SNAP_GRID_SIZE,
@@ -1117,6 +1118,11 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     isFreeformLayout,
     FREEFORM_WORLD_ORIGIN_OFFSET_X,
     FREEFORM_WORLD_ORIGIN_OFFSET_Y,
+    // PATCH FREEFORM-ZOOM-A: only Freeform gets the new 30% default -- every
+    // other layout that happens to share this same hook instance (e.g.
+    // Gantt, via the shared canvasZoom/handleZoomIn/Out/Reset below) keeps
+    // the hook's own pre-patch default of 1 (100%).
+    isFreeformLayout ? FREEFORM_DEFAULT_ZOOM : 1,
   );
   const freeformWorldOriginLeft = gutterX + FREEFORM_WORLD_ORIGIN_OFFSET_X * canvasZoom;
   const freeformWorldOriginTop = gutterY + FREEFORM_WORLD_ORIGIN_OFFSET_Y * canvasZoom;
