@@ -13,6 +13,8 @@ import {
   FREEFORM_WORLD_ORIGIN_OFFSET_X,
   FREEFORM_WORLD_ORIGIN_OFFSET_Y,
   FREEFORM_WORLD_WIDTH_PX,
+  FREEFORM_ALIGNMENT_GUIDE_TOLERANCE_SCREEN_PX,
+  detectVerticalAlignmentGuide,
   snapWorldValueToGrid,
 } from './freeformStageGeometry';
 
@@ -218,5 +220,64 @@ describe('PATCH SNAP-GRID-B: snapWorldValueToGrid', () => {
     // that callers cannot accidentally scale the grid by zoom.
     expect(snapWorldValueToGrid.length).toBe(1);
     expect(snapWorldValueToGrid(437)).toBe(440);
+  });
+});
+
+// PATCH ALIGN-B -- pure unit coverage of the detection function in
+// isolation (no drag/DOM involved at all). The mounted-drag proof of the
+// same behavior lives in freeformAlignmentGuideDetection.test.tsx.
+describe('detectVerticalAlignmentGuide', () => {
+  const dragged = { x: 500, width: 100 }; // left=500, center=550, right=600
+
+  it('matches a left edge within tolerance and returns the OTHER rect\'s edge value', () => {
+    const result = detectVerticalAlignmentGuide(dragged, [{ x: 503, width: 180 }], 6);
+    expect(result).toBe(503);
+  });
+
+  it('matches a center within tolerance', () => {
+    // other center = 460 + 180/2 = 550, exact match against dragged center 550
+    const result = detectVerticalAlignmentGuide(dragged, [{ x: 460, width: 180 }], 6);
+    expect(result).toBe(550);
+  });
+
+  it('matches a right edge within tolerance', () => {
+    // other: x=420, width=180 -> right=600, exact match against dragged right 600
+    const result = detectVerticalAlignmentGuide(dragged, [{ x: 420, width: 180 }], 6);
+    expect(result).toBe(600);
+  });
+
+  it('returns null when nothing is within tolerance', () => {
+    const result = detectVerticalAlignmentGuide(dragged, [{ x: 900, width: 50 }], 6);
+    expect(result).toBeNull();
+  });
+
+  it('returns null for an empty candidate list', () => {
+    expect(detectVerticalAlignmentGuide(dragged, [], 6)).toBeNull();
+  });
+
+  it('picks the strictly nearest match across multiple candidates and multiple edge types', () => {
+    const result = detectVerticalAlignmentGuide(dragged, [
+      { x: 505, width: 180 }, // left distance 5
+      { x: 498, width: 180 }, // left distance 2 -- nearest
+      { x: 900, width: 50 },  // far away, irrelevant
+    ], 6);
+    expect(result).toBe(498);
+  });
+
+  it('a value exactly AT the tolerance boundary counts as a match (<=, not <)', () => {
+    const result = detectVerticalAlignmentGuide(dragged, [{ x: 506, width: 180 }], 6); // distance exactly 6
+    expect(result).toBe(506);
+  });
+
+  it('does not cross-match different edge types (dragged left is never compared to another center/right)', () => {
+    // other rect positioned so its CENTER lands exactly on dragged's LEFT --
+    // must NOT count as a match, since only same-type pairs are compared.
+    const other = { x: 500 - 90, width: 180 }; // center = 500
+    expect(detectVerticalAlignmentGuide(dragged, [other], 6)).toBeNull();
+  });
+
+  it('FREEFORM_ALIGNMENT_GUIDE_TOLERANCE_SCREEN_PX is a small positive screen-pixel constant, not pre-divided by any zoom', () => {
+    expect(FREEFORM_ALIGNMENT_GUIDE_TOLERANCE_SCREEN_PX).toBeGreaterThan(0);
+    expect(FREEFORM_ALIGNMENT_GUIDE_TOLERANCE_SCREEN_PX).toBeLessThan(20);
   });
 });

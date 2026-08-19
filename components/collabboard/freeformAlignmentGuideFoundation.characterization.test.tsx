@@ -52,33 +52,12 @@ describe('PATCH ALIGN-A guide state: transient, typed, no persistence', () => {
     expect(cleanupBlock).toContain('setAlignmentGuides({ verticalX: null, horizontalY: null });');
   });
 
-  it('NOTHING in this patch calls setAlignmentGuides with a real value -- detection is ALIGN-B, not this patch', () => {
-    // Every call site in the hook must be the null-reset; scanning for the
-    // literal call form catches any accidental non-null write.
-    const calls = code(hookSrc).match(/setAlignmentGuides\([^)]*\)/g) ?? [];
-    expect(calls.length).toBeGreaterThan(0);
-    for (const call of calls) {
-      expect(call.replace(/\s+/g, ' ')).toBe('setAlignmentGuides({ verticalX: null, horizontalY: null })');
-    }
-  });
-
-  it('the identified drag-hook point sits AFTER the existing snap/clamp math, where world x/y, size, and other posts are already in scope -- and does not restructure it', () => {
-    // The marker lives inside a `//` comment by design (it is a hook-point
-    // annotation, not code) -- code() strips comments, so this one check
-    // deliberately reads the RAW source instead.
-    const marked = slice(
-      hookSrc,
-      '// PATCH ALIGN-A: identified hook point',
-      'setPadlets(prev => prev.map(p =>',
-    );
-    const markedCode = code(marked);
-    // No new branching, no new setPadlets/state writes added at this point
-    // in THIS patch -- only the comment itself.
-    expect(markedCode.trim()).toBe('');
-    // The values ALIGN-B will need are already computed above this point.
-    expect(code(hookSrc)).toContain('const previewX = effectiveSnapToGrid ? snapWorldValueToGrid(clampedX) : clampedX;');
-    expect(code(hookSrc)).toContain('const dragSize = resolveDragRectSize(dragRectSizeRef.current, draggedPadlet?.width, draggedPadlet?.height);');
-  });
+  // PATCH ALIGN-B superseded the two ALIGN-A-scope guards that used to sit
+  // here ("nothing calls setAlignmentGuides with a real value" / "the marked
+  // region is comment-only") -- ALIGN-B's whole job is to fill that exact
+  // spot with real detection. See freeformAlignmentGuideDetection.characterization.test.tsx
+  // for ALIGN-B's own contract tests (detection call site, ordering
+  // relative to snap math, horizontalY staying null, etc.).
 });
 
 describe('PATCH ALIGN-A render layer: world-scaled, pointer-events: none, Freeform-only', () => {

@@ -137,3 +137,69 @@ export const FREEFORM_SNAP_GRID_SIZE = 20;
 export function snapWorldValueToGrid(value: number): number {
   return Math.round(value / FREEFORM_SNAP_GRID_SIZE) * FREEFORM_SNAP_GRID_SIZE;
 }
+
+/**
+ * PATCH ALIGN-B: Smart Alignment Guide magnetic tolerance, in ON-SCREEN
+ * pixels -- callers divide by canvasZoom to get the WORLD-space tolerance
+ * this file's detection functions actually compare against. Same
+ * screen-constant-size pattern PostResizeHandle's grip uses (a fixed world-
+ * unit tolerance would shrink to imperceptible at 10% zoom and swallow half
+ * the canvas at 400%).
+ */
+export const FREEFORM_ALIGNMENT_GUIDE_TOLERANCE_SCREEN_PX = 6;
+
+export interface FreeformAlignmentCandidateRect {
+  x: number;
+  width: number;
+}
+
+/**
+ * PATCH ALIGN-B: vertical (X-axis) alignment-guide detection for a single
+ * dragged root post against other root posts, in WORLD units.
+ *
+ * Same-type matching only -- dragged-left vs other-left, dragged-center vs
+ * other-center, dragged-right vs other-right -- not every cross-combination
+ * (e.g. dragged-left vs other-center never matches). Callers are responsible
+ * for excluding the dragged post itself and any non-root post from `others`;
+ * this function has no post-identity concept, only rectangles.
+ *
+ * Returns the WORLD x of the nearest qualifying match (a candidate's own
+ * edge/center, the value a guide line should be drawn at) within
+ * `toleranceWorld`, or null when nothing qualifies. Never scaled by
+ * canvasZoom -- convert the screen tolerance to world units before calling,
+ * same convention as snapWorldValueToGrid above.
+ */
+export function detectVerticalAlignmentGuide(
+  dragged: FreeformAlignmentCandidateRect,
+  others: FreeformAlignmentCandidateRect[],
+  toleranceWorld: number,
+): number | null {
+  const draggedLeft = dragged.x;
+  const draggedRight = dragged.x + dragged.width;
+  const draggedCenter = dragged.x + dragged.width / 2;
+
+  let bestX: number | null = null;
+  let bestDistance = Infinity;
+
+  for (const other of others) {
+    const otherLeft = other.x;
+    const otherRight = other.x + other.width;
+    const otherCenter = other.x + other.width / 2;
+
+    const pairs: Array<[number, number]> = [
+      [draggedLeft, otherLeft],
+      [draggedCenter, otherCenter],
+      [draggedRight, otherRight],
+    ];
+
+    for (const [draggedValue, otherValue] of pairs) {
+      const distance = Math.abs(draggedValue - otherValue);
+      if (distance <= toleranceWorld && distance < bestDistance) {
+        bestDistance = distance;
+        bestX = otherValue;
+      }
+    }
+  }
+
+  return bestX;
+}
