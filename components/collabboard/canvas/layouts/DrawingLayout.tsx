@@ -850,6 +850,15 @@ export function DrawingEmbeddableCard({
   const cardOuterRef = useRef<HTMLDivElement>(null);
   const contentAreaRef = useRef<HTMLDivElement>(null);
   const stripRef = useRef<HTMLDivElement>(null);
+  // PATCH DRAWING-R2B: the resize chrome's own wrapper. Needed because the
+  // chrome is PORTALED to the Excalidraw root -- it is not a DOM descendant
+  // of the card -- so moving the pointer from the card onto the handle fires
+  // a genuine `pointerleave` on the card even though the user is, visually,
+  // still on the same Container. Hover is therefore resolved against BOTH
+  // subtrees via relatedTarget (below) rather than by CSS `group-hover:`,
+  // which cannot cross a portal boundary at all.
+  const resizeChromeRef = useRef<HTMLDivElement>(null);
+  const [isCardHovered, setIsCardHovered] = useState(false);
   const [containerResizePortalTarget, setContainerResizePortalTarget] = useState<HTMLElement | null>(null);
   const setCardOuterRef = useCallback((node: HTMLDivElement | null) => {
     cardOuterRef.current = node;
@@ -951,6 +960,42 @@ export function DrawingEmbeddableCard({
     360,
     resizableContainerOrientation === 'horizontal' ? containerManualMinWidth : 0,
   );
+
+  // PATCH DRAWING-R2B: hover is one logical region spanning two DOM subtrees
+  // (the card, and the portaled resize chrome that overlaps its bottom-right
+  // corner). A leave that merely crosses between them is not a real exit, so
+  // it is resolved by relatedTarget -- deterministic, and free of the
+  // unmount/remount flicker a naive per-subtree pointerleave produces when
+  // the pointer moves from the card onto the handle sitting on top of it.
+  const isPointerLeavingResizeRegion = (relatedTarget: EventTarget | null) => {
+    // React substitutes the WINDOW for relatedTarget when the pointer leaves
+    // the document altogether -- window is an EventTarget but not a Node, and
+    // passing it to Node.contains() throws. Anything that is not a real Node
+    // is by definition outside both subtrees, so treat it as a genuine exit.
+    const node = relatedTarget as Node | null;
+    if (!node || typeof (node as Node).nodeType !== 'number') return true;
+    if (cardOuterRef.current?.contains(node)) return false;
+    if (resizeChromeRef.current?.contains(node)) return false;
+    return true;
+  };
+  const handleResizeRegionPointerEnter = isResizableContainer ? () => setIsCardHovered(true) : undefined;
+  const handleResizeRegionPointerLeave = isResizableContainer
+    ? (e: React.PointerEvent) => {
+        if (isPointerLeavingResizeRegion(e.relatedTarget)) setIsCardHovered(false);
+      }
+    : undefined;
+
+  // Hover only DECIDES VISIBILITY; selection is what keeps the chrome mounted
+  // for the duration of a gesture. Setting pointer capture at pointerdown
+  // fires a genuine `pointerleave` on the card, and dragging past the card's
+  // own edge fires another -- neither may tear the handle out mid-resize, so
+  // the selected branch (established by this same pointerdown, see the
+  // portal wrapper's onPointerDownCapture) is what holds it in place.
+  const canShowContainerResizeHandle =
+    isResizableContainer
+    && (isContainerSelected || isCardHovered)
+    && !readOnly
+    && !(padlet.metadata as any)?.isLocked;
 
   const clientToWorld = useCallback((clientX: number, clientY: number) => {
     return toSceneCoords(clientX, clientY, appStateRef.current);
@@ -1061,6 +1106,8 @@ export function DrawingEmbeddableCard({
       ref={setCardOuterRef}
       data-padlet-id={padlet.id}
       className={`relative w-full overflow-hidden rounded-xl bg-white flex flex-col border border-gray-200 ${isContainer ? '' : 'h-full'}`}
+      onPointerEnter={handleResizeRegionPointerEnter}
+      onPointerLeave={handleResizeRegionPointerLeave}
       onMouseDown={(e) => { if (e.button === 2) e.stopPropagation(); }}
       onContextMenu={(e) => {
         const target = e.target as HTMLElement | null;
@@ -1413,7 +1460,7 @@ export function DrawingEmbeddableCard({
       {/* Interaction chrome is portaled to the Excalidraw root so a later
           overlapping embeddable cannot steal its hit target. The portal tracks
           cardOuterRef's live rect and does not participate in scene geometry. */}
-      {isResizableContainer && isContainerSelected && !readOnly && !(padlet.metadata as any)?.isLocked ? (
+      {canShowContainerResizeHandle ? (
         // PATCH POST-RESIZE-B3.2: PostResizeHandle's own pointerup calls
         // preventDefault/stopPropagation on the POINTER event, but that does
         // not suppress the SEPARATE native `click` a plain press-release also
@@ -1423,6 +1470,20 @@ export function DrawingEmbeddableCard({
         // the fix lives in this wrapper instead.
         <DrawingContainerResizePortal anchorRef={cardOuterRef} appStateRef={appStateRef} portalTarget={containerResizePortalTarget}>
           <div
+            ref={resizeChromeRef}
+            onPointerEnter={handleResizeRegionPointerEnter}
+            onPointerLeave={handleResizeRegionPointerLeave}
+            // PATCH DRAWING-R2B: selection is claimed in the CAPTURE phase, so
+            // it lands before PostResizeHandle's own (bubble-phase)
+            // onPointerDown starts the gesture -- one pointerdown both selects
+            // the Container and begins the resize, with no title-strip click
+            // first. It must stay in capture: PostResizeHandle stopPropagation's
+            // the pointerdown it handles, so a bubble-phase listener here would
+            // never see it.
+            onPointerDownCapture={(e) => {
+              if (e.button !== 0) return;
+              containerResizeSelection?.setSelectedId(padlet.id);
+            }}
             onClick={(e) => e.stopPropagation()}
             onPointerUpCapture={() => containerResizeSelection?.markHandleInteractionEnd()}
           >

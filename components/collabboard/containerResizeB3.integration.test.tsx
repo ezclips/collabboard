@@ -31,10 +31,16 @@ describe('PATCH POST-RESIZE-B3.1 Freeform Container width ownership', () => {
 
   it('D/E: Container-child renderers remain free of shared resize handles; Drawing gained its own dedicated B3.2 Container handle, not the generic B1/B2 one', () => {
     // PATCH POST-RESIZE-B3.2: Drawing now imports PostResizeHandle, but
-    // exclusively for its own dedicated, selection-gated Container path --
-    // never wired into the generic B1/B2 capability system.
+    // exclusively for its own dedicated Container path -- never wired into
+    // the generic B1/B2 capability system.
     expect(drawingSrc).toContain("import PostResizeHandle from '@/components/collabboard/canvas/ui/PostResizeHandle';");
-    expect(drawingSrc).toContain('isResizableContainer && isContainerSelected && !readOnly');
+    // PATCH DRAWING-R2B: gated on selected-OR-hovered rather than selected
+    // alone (so one gesture can both select and resize), but STILL gated --
+    // read-only and locked Containers never mount it, and an untouched
+    // Container mounts nothing at all.
+    expect(drawingSrc).toContain('&& (isContainerSelected || isCardHovered)');
+    expect(drawingSrc).toContain('&& !readOnly');
+    expect(drawingSrc).toContain("&& !(padlet.metadata as any)?.isLocked;");
     expect(drawingSrc).toContain("const isResizableContainer = padlet.type === 'container';");
     expect(rowColumnSrc).not.toContain('PostResizeHandle');
     expect(cardsSrc).toContain('rootPadlets.filter(padlet => !isSectionHeading(padlet))');
