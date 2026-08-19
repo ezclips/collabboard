@@ -108,7 +108,7 @@ describe('PATCH ALIGN-E1 candidate geometry: live DOM measurement, stored value 
 
   it('each OTHER candidate prefers the live measurement and falls back to stored width/height only when it is null (no DOM node, or a degenerate zero-size box)', () => {
     const candidateBlock = slice(singlePostBlock, 'const alignmentCandidates = padlets', '});');
-    expect(candidateBlock).toContain('const liveSize = measureLiveCandidateSize(p.id, canvasZoom);');
+    expect(candidateBlock).toContain('const liveSize = resolveVisualAlignmentCandidateSize(p.id, p.type, canvasZoom);');
     expect(candidateBlock).toContain('liveSize?.width ?? (Number(p.width) || DEFAULT_DRAG_RECT_WIDTH)');
     expect(candidateBlock).toContain('liveSize?.height ?? (Number(p.height) || DEFAULT_DRAG_RECT_HEIGHT)');
   });
@@ -117,8 +117,8 @@ describe('PATCH ALIGN-E1 candidate geometry: live DOM measurement, stored value 
     const candidateBlock = slice(singlePostBlock, 'const alignmentCandidates = padlets', '});');
     expect(candidateBlock).toContain('x: p.position_x || 0,');
     expect(candidateBlock).toContain('y: p.position_y || 0,');
-    expect(candidateBlock).not.toMatch(/measureLiveCandidateSize\([^)]*\)\.x/);
-    expect(candidateBlock).not.toMatch(/measureLiveCandidateSize\([^)]*\)\.y/);
+    expect(candidateBlock).not.toMatch(/resolveVisualAlignmentCandidateSize\([^)]*\)\.x/);
+    expect(candidateBlock).not.toMatch(/resolveVisualAlignmentCandidateSize\([^)]*\)\.y/);
   });
 
   it('the DRAGGED post keeps its existing dragSize (resolveDragRectSize/dragRectSizeRef) untouched -- ALIGN-E1 only changed how OTHER posts are measured', () => {
@@ -195,10 +195,74 @@ describe('PATCH ALIGN-E2 adjacency marker wiring: presentation-only, no detector
 
   it('the underlying detector/geometry call sites are completely untouched by ALIGN-E2 -- same candidates, same tolerance, same *Match functions ALIGN-E1 already used', () => {
     expect(singlePostBlock).toContain('const alignmentCandidates = padlets');
-    expect(singlePostBlock).toContain('const liveSize = measureLiveCandidateSize(p.id, canvasZoom);');
+    expect(singlePostBlock).toContain('const liveSize = resolveVisualAlignmentCandidateSize(p.id, p.type, canvasZoom);');
     expect(singlePostBlock).toContain(
       'FREEFORM_ALIGNMENT_GUIDE_TOLERANCE_SCREEN_PX / (canvasZoom > 0 ? canvasZoom : 1)',
     );
+  });
+});
+
+describe('PATCH ALIGN-E3 visual alignment rect: candidate-only, DOM-geometry-only, no rendering change', () => {
+  const singlePostBlock = slice(
+    code(hookSrc),
+    'const draggedPadlet = padlets.find((p) => p.id === draggingPadletId);',
+    'const handleCanvasMouseUp = async',
+  );
+
+  it('resolveVisualAlignmentCandidateSize is a standalone helper defined above the hook, wrapping measureLiveCandidateSize as its fallback', () => {
+    const fn = slice(code(hookSrc), 'function resolveVisualAlignmentCandidateSize(', '\n}');
+    expect(fn).toContain('return measureLiveCandidateSize(padletId, canvasZoom);');
+  });
+
+  it('only ai-component gets special-cased -- every other padlet type (including image) falls straight through to the unchanged E1 measurement', () => {
+    const fn = slice(code(hookSrc), 'function resolveVisualAlignmentCandidateSize(', '\n}');
+    expect(fn).toContain("padletType === 'ai-component'");
+    // No branch on 'image' anywhere in the resolver -- Image already
+    // measures tight through the plain [data-padlet-id] box (confirmed live).
+    expect(fn).not.toMatch(/padletType === 'image'/);
+  });
+
+  it("the ai-component branch reaches the legacy AIComponentRenderer's own root node (two levels above .ai-component-renderer) rather than trusting the padded [data-padlet-id] ancestor", () => {
+    const fn = slice(code(hookSrc), 'function resolveVisualAlignmentCandidateSize(', '\n}');
+    expect(fn).toContain("outer?.querySelector<HTMLElement>('.ai-component-renderer')");
+    expect(fn).toContain('legacyContent?.parentElement?.parentElement');
+  });
+
+  it('the natural-height re-sum skips absolutely positioned children (loading/error overlays, the resize grip) -- only in-flow content counts as real layout space', () => {
+    const fn = slice(code(hookSrc), 'function resolveVisualAlignmentCandidateSize(', '\n}');
+    expect(fn).toContain("getComputedStyle(child).position === 'absolute'");
+  });
+
+  it('width is never recomputed -- only height, since the minHeight bug this patch fixes only ever inflates height', () => {
+    const fn = slice(code(hookSrc), 'function resolveVisualAlignmentCandidateSize(', '\n}');
+    expect(fn).toContain('const width = outerRect.width;');
+    expect(fn).not.toMatch(/const width = .*legacyOuterRect/);
+  });
+
+  it("the candidate map now calls resolveVisualAlignmentCandidateSize with the padlet's own type -- p.type is threaded through, nothing else about the candidate shape changed", () => {
+    const candidateBlock = slice(singlePostBlock, 'const alignmentCandidates = padlets', '});');
+    expect(candidateBlock).toContain('resolveVisualAlignmentCandidateSize(p.id, p.type, canvasZoom)');
+  });
+
+  it("the DRAGGED post's own dragSize (resolveDragRectSize/dragRectSizeRef, used for bounds-clamping and container-overlap too) is completely untouched -- this patch only ever changes how OTHER candidates are measured", () => {
+    expect(singlePostBlock).toContain('{ x: previewX, width: dragSize.width }');
+    expect(singlePostBlock).toContain('{ y: previewY, height: dragSize.height }');
+    expect(singlePostBlock).not.toContain('resolveVisualAlignmentCandidateSize(draggingPadletId');
+    expect(singlePostBlock).not.toContain('resolveVisualAlignmentCandidateSize(padletId,');
+  });
+
+  it('Snap-to-Grid and movement are untouched -- previewX/previewY are computed and committed to setPadlets before this resolver is ever consulted', () => {
+    const previewIdx = singlePostBlock.indexOf('const previewX = effectiveSnapToGrid ? snapWorldValueToGrid(clampedX) : clampedX;');
+    const resolverIdx = singlePostBlock.indexOf('resolveVisualAlignmentCandidateSize(p.id, p.type, canvasZoom)');
+    const setPadletsIdx = singlePostBlock.indexOf('setPadlets(prev => prev.map(p =>');
+    expect(previewIdx).toBeGreaterThan(-1);
+    expect(resolverIdx).toBeGreaterThan(previewIdx);
+    expect(setPadletsIdx).toBeGreaterThan(resolverIdx);
+  });
+
+  it('stored width/height are never mutated by the resolver -- it only ever reads the DOM, never writes padlets state', () => {
+    const fn = slice(code(hookSrc), 'function resolveVisualAlignmentCandidateSize(', '\n}');
+    expect(fn).not.toMatch(/setPadlets|position_x|position_y/);
   });
 });
 

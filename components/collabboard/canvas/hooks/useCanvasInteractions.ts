@@ -68,6 +68,56 @@ function measureLiveCandidateSize(padletId: string, canvasZoom: number): DragRec
   return { width: rect.width / zoom, height: rect.height / zoom };
 }
 
+/**
+ * PATCH ALIGN-E3: the alignment-guide "visual rect" for a candidate post.
+ * Live verification against the real board confirmed the plain
+ * `[data-padlet-id]` box (measureLiveCandidateSize, ALIGN-E1) already hugs
+ * Image posts exactly -- FreeformImageResizeBox's card is auto-height with
+ * no unaccounted chrome, in every case checked (fullView, cropped, with a
+ * real caption, with reactions). The one confirmed exception is an
+ * ai-component post rendered through the legacy `AIComponentRenderer`
+ * path (`.ai-component-renderer`): that component's own outer node applies
+ * a fixed `minHeight` (280px by default) regardless of the actual generated
+ * content, padding the card with blank space below a shorter response.
+ * Newer structured AI content never renders `.ai-component-renderer` and
+ * falls straight through, already tight (also verified live).
+ *
+ * Rather than trusting that padded ancestor, this walks to the renderer's
+ * own root node (two levels above `.ai-component-renderer`: its content
+ * viewport, then the renderer's outer div) and re-sums that node's IN-FLOW
+ * children only -- skipping absolutely positioned chrome (loading/error
+ * overlays, the resize grip), which contribute nothing to real layout
+ * height. The outer `[data-padlet-id]` box's own height is then corrected
+ * by swapping the padded ancestor's measured height for that natural sum;
+ * width is untouched since only height is ever artificially floored.
+ */
+function resolveVisualAlignmentCandidateSize(
+  padletId: string,
+  padletType: string,
+  canvasZoom: number,
+): DragRectSize | null {
+  if (padletType === 'ai-component' && typeof document !== 'undefined') {
+    const outer = document.querySelector<HTMLElement>(`[data-padlet-id="${padletId}"]`);
+    const legacyContent = outer?.querySelector<HTMLElement>('.ai-component-renderer') ?? null;
+    const legacyOuter = legacyContent?.parentElement?.parentElement ?? null;
+    if (outer && legacyOuter) {
+      const outerRect = outer.getBoundingClientRect();
+      const legacyOuterRect = legacyOuter.getBoundingClientRect();
+      const naturalLegacyHeight = Array.from(legacyOuter.children).reduce((sum, child) => {
+        if (getComputedStyle(child).position === 'absolute') return sum;
+        return sum + child.getBoundingClientRect().height;
+      }, 0);
+      const width = outerRect.width;
+      const height = outerRect.height - legacyOuterRect.height + naturalLegacyHeight;
+      if (width > 0 && height > 0) {
+        const zoom = canvasZoom > 0 ? canvasZoom : 1;
+        return { width: width / zoom, height: height / zoom };
+      }
+    }
+  }
+  return measureLiveCandidateSize(padletId, canvasZoom);
+}
+
 /** Combined world bounds of a multi-selection at drag start. */
 function computeGroupDragBounds(
   padlets: Padlet[],
@@ -558,10 +608,10 @@ export function useCanvasInteractions({
       const alignmentCandidates = padlets
         .filter((p) => !p.metadata?.parentId && p.id !== draggingPadletId)
         .map((p) => {
-          // PATCH ALIGN-E1: prefer the OTHER post's live rendered box over
-          // its stored width/height (see measureLiveCandidateSize) -- x/y
-          // still come straight from position_x/position_y, unchanged.
-          const liveSize = measureLiveCandidateSize(p.id, canvasZoom);
+          // PATCH ALIGN-E1/E3: prefer the OTHER post's live rendered box
+          // over its stored width/height (see resolveVisualAlignmentCandidateSize)
+          // -- x/y still come straight from position_x/position_y, unchanged.
+          const liveSize = resolveVisualAlignmentCandidateSize(p.id, p.type, canvasZoom);
           return {
             x: p.position_x || 0,
             width: liveSize?.width ?? (Number(p.width) || DEFAULT_DRAG_RECT_WIDTH),

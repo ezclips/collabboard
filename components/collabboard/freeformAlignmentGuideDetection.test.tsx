@@ -157,6 +157,60 @@ function mountLiveCandidateEl(padletId: string, rect: { left: number; top: numbe
   return el;
 }
 
+/**
+ * PATCH ALIGN-E3: a bare stand-in for an ai-component candidate rendered
+ * through the legacy AIComponentRenderer path -- reproducing the exact
+ * nesting resolveVisualAlignmentCandidateSize walks (outer `[data-padlet-id]`
+ * -> the renderer's own root div -> its content viewport -> the
+ * `.ai-component-renderer` node itself), with the OUTER box padded taller
+ * than its real content (the confirmed live bug: a fixed minHeight applied
+ * regardless of actual generated content). `naturalChildRects` are the
+ * renderer root's own in-flow children (content viewport, optional
+ * attribution row); `absoluteChildRects` are chrome that must NOT count
+ * (loading/error overlay, the resize grip).
+ */
+function mountLegacyAiCandidateEl(
+  padletId: string,
+  outerRect: { left: number; top: number; width: number; height: number },
+  naturalChildRects: Array<{ left: number; top: number; width: number; height: number }>,
+  absoluteChildRects: Array<{ left: number; top: number; width: number; height: number }> = [],
+) {
+  const outer = document.createElement('div');
+  outer.setAttribute('data-padlet-id', padletId);
+  document.body.appendChild(outer);
+  stubRect(outer, outerRect);
+
+  const legacyOuter = document.createElement('div');
+  outer.appendChild(legacyOuter);
+  stubRect(legacyOuter, outerRect); // the padded ancestor -- same box as outer
+
+  const viewport = document.createElement('div');
+  legacyOuter.appendChild(viewport);
+  const first = naturalChildRects[0] ?? outerRect;
+  stubRect(viewport, first);
+
+  const content = document.createElement('div');
+  content.className = 'ai-component-renderer';
+  viewport.appendChild(content);
+  stubRect(content, first);
+
+  for (const rect of naturalChildRects.slice(1)) {
+    const sibling = document.createElement('div');
+    legacyOuter.appendChild(sibling);
+    stubRect(sibling, rect);
+  }
+
+  for (const rect of absoluteChildRects) {
+    const chrome = document.createElement('div');
+    chrome.style.position = 'absolute';
+    legacyOuter.appendChild(chrome);
+    stubRect(chrome, rect);
+  }
+
+  liveCandidateEls.push(outer);
+  return outer;
+}
+
 beforeEach(() => { latest = null; });
 
 afterEach(() => {
@@ -678,6 +732,71 @@ describe('PATCH ALIGN-E1: live rendered post size for alignment candidates', () 
     drag('a', { x: 0, y: 213 }, 1);
     await release();
     expect(persisted).toEqual([{ id: 'a', position_x: 0, position_y: 220 }]);
+  });
+});
+
+describe('PATCH ALIGN-E3: visual alignment rect excludes the legacy AI renderer\'s padded minHeight', () => {
+  it('a legacy ai-component candidate padded to 280 by AIComponentRenderer\'s fixed minHeight is measured at its NATURAL content bottom (90), not the padded bottom -- absolutely positioned chrome (the resize grip) contributes nothing', () => {
+    mount(<Harness initialPadlets={[
+      padlet('a', 0, 0, { width: 100, height: 100 }),
+      padlet('ai1', 900, 0, { width: 200, height: 280, type: 'ai-component' }),
+    ]} zoom={1} />);
+    mountLegacyAiCandidateEl(
+      'ai1',
+      { left: toClientX(900, 1), top: toClientY(0, 1), width: 200, height: 280 }, // padded outer box
+      [
+        { left: toClientX(900, 1), top: toClientY(0, 1), width: 200, height: 70 }, // viewport/content
+        { left: toClientX(900, 1), top: toClientY(70, 1), width: 200, height: 20 }, // attribution row
+      ],
+      [{ left: toClientX(900, 1), top: toClientY(260, 1), width: 20, height: 20 }], // resize grip (absolute)
+    );
+
+    // a.top = 87, 3 units from the NATURAL bottom (90). If the padded
+    // ancestor's own height (280) leaked through unfixed, or the absolute
+    // resize grip were wrongly summed in (-> 110), this would land outside
+    // the 6px tolerance and no guide would appear at all.
+    drag('a', { x: 0, y: 87 }, 1);
+    expect(latest!.api.alignmentGuides).toEqual({ verticalX: null, horizontalY: 90 });
+  });
+
+  it('structured AI content (no .ai-component-renderer in the DOM) is completely unaffected -- falls straight through to the plain outer-box measurement, exactly like any other post type', () => {
+    mount(<Harness initialPadlets={[
+      padlet('a', 0, 0, { width: 100, height: 100 }),
+      padlet('ai2', 900, 0, { width: 200, height: 500, type: 'ai-component' }), // stale stored height
+    ]} zoom={1} />);
+    mountLiveCandidateEl('ai2', { left: toClientX(900, 1), top: toClientY(0, 1), width: 200, height: 216 });
+
+    drag('a', { x: 0, y: 213 }, 1); // 3 units from the live (tight) bottom = 216
+    expect(latest!.api.alignmentGuides).toEqual({ verticalX: null, horizontalY: 216 });
+  });
+
+  it('image candidates are never routed through the ai-component branch -- explicit type: \'image\' still measures the plain outer box exactly as ALIGN-E1 left it', () => {
+    mount(<Harness initialPadlets={[
+      padlet('a', 0, 0, { width: 100, height: 100 }),
+      padlet('car', 900, 0, { width: 248, height: 527, type: 'image' }), // stale stored height
+    ]} zoom={1} />);
+    mountLiveCandidateEl('car', { left: toClientX(900, 1), top: toClientY(0, 1), width: 248, height: 216 });
+
+    drag('a', { x: 0, y: 213 }, 1);
+    expect(latest!.api.alignmentGuides).toEqual({ verticalX: null, horizontalY: 216 });
+  });
+
+  it('the un-padded AI height is converted through canvasZoom exactly like every other live measurement', () => {
+    mount(<Harness initialPadlets={[
+      padlet('a', 0, 0, { width: 100, height: 100 }),
+      padlet('ai1', 900, 0, { width: 200, height: 280, type: 'ai-component' }),
+    ]} zoom={0.5} />);
+    mountLegacyAiCandidateEl(
+      'ai1',
+      { left: toClientX(900, 0.5), top: toClientY(0, 0.5), width: 100, height: 140 }, // padded outer, screen px at zoom 0.5
+      [{ left: toClientX(900, 0.5), top: toClientY(0, 0.5), width: 100, height: 45 }], // natural content, screen px
+    );
+
+    // Natural screen height 45 / zoom 0.5 = world height 90 -- same world
+    // value as the zoom-1 test above, proving the correction happens BEFORE
+    // the existing zoom division, not after.
+    drag('a', { x: 0, y: 87 }, 0.5);
+    expect(latest!.api.alignmentGuides).toEqual({ verticalX: null, horizontalY: 90 });
   });
 });
 
