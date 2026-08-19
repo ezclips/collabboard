@@ -51,6 +51,7 @@ import type { DrawingViewport } from '@/lib/infra/drawing/canvasLineCoordinates'
 import { registerE2EBridge } from '@/lib/e2e/bridgeRegistration';
 import { isElementBeingLaidOut } from '@/lib/infra/drawing/isElementBeingLaidOut';
 import { guardCommentMutation, type CommentAccessMode } from '@/lib/domain/canvas/comments';
+import DrawingMinimap from '@/components/collabboard/canvas/minimap/DrawingMinimap';
 
 const ExcalidrawWrapper = dynamic(
   () => import('@/components/collabboard/editors/ExcalidrawWrapper'),
@@ -4368,6 +4369,20 @@ export default function DrawingLayout({
           handleZoomIn={() => applyZoom('in')}
           className="absolute bottom-6 right-[var(--drawing-zoom-controls-right,1.5rem)] z-[130] flex items-center bg-white rounded-lg shadow-md border border-gray-200 pointer-events-auto"
         />,
+        viewportContainerRef.current
+      ) : null}
+
+      {/* PATCH DRAWING-MINIMAP-A: navigation minimap, bottom-right of the
+          Drawing canvas, stacked directly above ZoomControls (same
+          `--drawing-zoom-controls-right` CSS var so it shifts alongside
+          Zoom Controls whenever a side panel like Presentation/Library
+          changes the available width). Portaled into the same
+          screen-fixed viewportContainerRef so it stays put during
+          pan/zoom/Full View, exactly like ZoomControls above. Entirely
+          self-contained: it reads the live excalidrawAPI directly and
+          never touches DrawingLayout's own onChange/persistence pipeline. */}
+      {isInitialViewportSettled && viewportContainerRef?.current ? createPortal(
+        <DrawingMinimap excalidrawAPI={excalidrawAPI} />,
         viewportContainerRef.current
       ) : null}
 
