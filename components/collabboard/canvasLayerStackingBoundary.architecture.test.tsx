@@ -251,6 +251,34 @@ describe('Drawing PATCH-117 clip-path containment freeze [matrix 24; negative co
   });
 });
 
+describe('PATCH DRAWING-LINE-GESTURE-R1: the drawing-preview effect depends only on gesture-active state, not on churning callback identities', () => {
+  it('the effect\'s dependency array is exactly [isDrawingGestureActive] -- not [drawing, onCreateLine, getMousePos] any more', () => {
+    expect(simpleLineRendererSrc).toContain('const isDrawingGestureActive = !!drawing;');
+    expect(simpleLineRendererSrc).toContain('}, [isDrawingGestureActive]);');
+    expect(simpleLineRendererSrc).not.toContain('}, [drawing, onCreateLine, getMousePos]);');
+  });
+
+  it('the handlers read onCreateLine/getMousePos/drawing through refs kept fresh in the render body, matching the draggingPointRef/draggingLineRef pattern already used above', () => {
+    expect(simpleLineRendererSrc).toContain('const onCreateLineRef = useRef(onCreateLine);');
+    expect(simpleLineRendererSrc).toContain('onCreateLineRef.current = onCreateLine;');
+    expect(simpleLineRendererSrc).toContain('const getMousePosRef = useRef(getMousePos);');
+    expect(simpleLineRendererSrc).toContain('getMousePosRef.current = getMousePos;');
+    expect(simpleLineRendererSrc).toContain('const drawingRef = useRef(drawing);');
+    expect(simpleLineRendererSrc).toContain('drawingRef.current = drawing;');
+  });
+
+  it('this patch did not touch the R2 containment architecture -- isActiveGesture/rootClipPath/the inner clipped <g> are byte-identical to their R2 form', () => {
+    expect(simpleLineRendererSrc).toContain('const isActiveGesture = !!drawing || isDragging;');
+    expect(simpleLineRendererSrc).toContain('const rootClipPath = isActiveGesture ? undefined : boundaryClipPath;');
+    expect(simpleLineRendererSrc).toContain('...(rootClipPath ? { clipPath: rootClipPath } : {}),');
+    expect(simpleLineRendererSrc).toContain("style={boundaryClipPath ? { clipPath: boundaryClipPath } : undefined}");
+  });
+
+  it('the OTHER window-listener effect (point/line dragging of EXISTING lines) is untouched -- this patch\'s scope is the new-line drawing-preview effect only, per its own diagnosis', () => {
+    expect(simpleLineRendererSrc).toContain("}, [isDragging, onUpdateLine, onSaveLine, getMousePos, drawingViewport]);");
+  });
+});
+
 describe('PATCH DRAWING-LINE-CLIP-R1: left-inset boundary is independent of minimap/zoom and of pan/zoom state', () => {
   it('the boundary effect\'s dependency array is unchanged -- still only [rightClusterAnchorEl, viewportContainerRef, activeTool, key], so DrawingNavigationControl\'s local collapse/expand state and zoomPercent cannot retrigger or skip it', () => {
     expect(drawingLayoutSrc).toContain('}, [rightClusterAnchorEl, viewportContainerRef, activeTool, key]);');

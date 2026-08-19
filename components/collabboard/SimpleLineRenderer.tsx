@@ -501,17 +501,43 @@ function SimpleLineRenderer({
         };
     }, [isDragging, onUpdateLine, onSaveLine, getMousePos, drawingViewport]);
 
-    // Separate useEffect for drawing preview
+    // PATCH DRAWING-LINE-GESTURE-R1: the window mousemove/mouseup listeners
+    // below must stay attached for the FULL duration of a drawing gesture.
+    // Depending the effect on `drawing` itself was the bug -- `drawing` gets
+    // a brand-new object on every mousemove (see handleMouseMove below), and
+    // `onCreateLine`/`getMousePos` can also change identity across an
+    // unrelated parent re-render (e.g. drawingViewport recomputing), so the
+    // effect was tearing down and re-registering the listeners roughly every
+    // 10-30ms during an active drag. A real mouseup landing in one of those
+    // gaps silently failed to commit.
+    //
+    // Fix: the effect now depends only on the gesture's lifecycle boolean
+    // (isDrawingGestureActive), so it mounts once when a gesture starts and
+    // cleans up once when it ends -- never on an intermediate move or on an
+    // unrelated callback-identity change. The handlers read the always-latest
+    // callback/state through refs (updated in the render body every render,
+    // matching the draggingPointRef/draggingLineRef pattern already used
+    // above for the same reason), so nothing here is stale.
+    const onCreateLineRef = useRef(onCreateLine);
+    onCreateLineRef.current = onCreateLine;
+    const getMousePosRef = useRef(getMousePos);
+    getMousePosRef.current = getMousePos;
+    const drawingRef = useRef(drawing);
+    drawingRef.current = drawing;
+
+    const isDrawingGestureActive = !!drawing;
+
     useEffect(() => {
-        if (!drawing) return;
+        if (!isDrawingGestureActive) return;
         const handleMouseMove = (e: MouseEvent) => {
-            const pos = getMousePos(e);
+            const pos = getMousePosRef.current(e);
             setDrawing(prev => prev ? { ...prev, endX: pos.x, endY: pos.y } : null);
         };
         const handleMouseUp = (e: MouseEvent) => {
-            const pos = getMousePos(e);
-            if (drawing && (Math.abs(pos.x - drawing.startX) > 10 || Math.abs(pos.y - drawing.startY) > 10)) {
-                onCreateLine(drawing.startX, drawing.startY, pos.x, pos.y);
+            const pos = getMousePosRef.current(e);
+            const current = drawingRef.current;
+            if (current && (Math.abs(pos.x - current.startX) > 10 || Math.abs(pos.y - current.startY) > 10)) {
+                onCreateLineRef.current(current.startX, current.startY, pos.x, pos.y);
             }
             setDrawing(null);
         };
@@ -522,7 +548,7 @@ function SimpleLineRenderer({
             window.removeEventListener('mousemove', handleMouseMove);
             window.removeEventListener('mouseup', handleMouseUp);
         };
-    }, [drawing, onCreateLine, getMousePos]);
+    }, [isDrawingGestureActive]);
 
     // Separate useEffect for keyboard shortcuts (Delete point)
     useEffect(() => {
