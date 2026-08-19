@@ -705,6 +705,20 @@ function SimpleLineRenderer({
     // only rendering, so paint still never crosses the chrome boundary.
     const isActiveGesture = !!drawing || isDragging;
     const rootClipPath = isActiveGesture ? undefined : boundaryClipPath;
+    // PATCH DRAWING-LINE-EDIT-CLIP-R1: the root <svg> is a CSS-laid-out
+    // element with a real border box, so the polygon above resolves against
+    // the viewport there -- which is what the CSS variables measure. The
+    // inner <g> below has NO CSS layout box, so per CSS Masking the same
+    // basic shape resolves against `fill-box` (the <g>'s own object bounding
+    // box) instead: the "108px notch" landed 108px in from wherever the
+    // rendered lines happened to start, and moved/resized with them. That
+    // silently excluded real, usable Drawing canvas from hit-testing, making
+    // whichever endpoint handle fell in that band unclickable in edit mode
+    // (measured live: a <g> bbox at x=294 excluded x < 402, killing a handle
+    // at x=300 while the one at x=700 kept working). `view-box` pins the
+    // shape to the nearest SVG viewport so it matches the root and the
+    // variables' own coordinate space.
+    const contentClipPath = boundaryClipPath ? `${boundaryClipPath} view-box` : undefined;
 
     return (
         <svg
@@ -772,7 +786,7 @@ function SimpleLineRenderer({
                 the drawing preview -- from crossing the chrome boundary. */}
             <g
                 data-line-containment={boundaryClipPath ? 'visible-canvas' : undefined}
-                style={boundaryClipPath ? { clipPath: boundaryClipPath } : undefined}
+                style={contentClipPath ? { clipPath: contentClipPath } : undefined}
             >
 
             {/* Interactive hit areas - front layer renders ALL lines' hit areas */}

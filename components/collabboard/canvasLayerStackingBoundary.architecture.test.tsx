@@ -243,7 +243,7 @@ describe('Drawing PATCH-117 clip-path containment freeze [matrix 24; negative co
     expect(simpleLineRendererSrc).toContain('const isActiveGesture = !!drawing || isDragging;');
     expect(simpleLineRendererSrc).toContain('const rootClipPath = isActiveGesture ? undefined : boundaryClipPath;');
     expect(simpleLineRendererSrc).toContain('...(rootClipPath ? { clipPath: rootClipPath } : {}),');
-    expect(simpleLineRendererSrc).toContain("style={boundaryClipPath ? { clipPath: boundaryClipPath } : undefined}");
+    expect(simpleLineRendererSrc).toContain("style={contentClipPath ? { clipPath: contentClipPath } : undefined}");
   });
 
   it('CanvasClient.tsx never passes visibleCanvasRightInsetPx to the Freeform Line layers -- this patch did not wire Drawing\'s containment mechanism into Freeform', () => {
@@ -271,7 +271,7 @@ describe('PATCH DRAWING-LINE-GESTURE-R1: the drawing-preview effect depends only
     expect(simpleLineRendererSrc).toContain('const isActiveGesture = !!drawing || isDragging;');
     expect(simpleLineRendererSrc).toContain('const rootClipPath = isActiveGesture ? undefined : boundaryClipPath;');
     expect(simpleLineRendererSrc).toContain('...(rootClipPath ? { clipPath: rootClipPath } : {}),');
-    expect(simpleLineRendererSrc).toContain("style={boundaryClipPath ? { clipPath: boundaryClipPath } : undefined}");
+    expect(simpleLineRendererSrc).toContain("style={contentClipPath ? { clipPath: contentClipPath } : undefined}");
   });
 
   it('the OTHER window-listener effect (point/line dragging of EXISTING lines) is untouched -- this patch\'s scope is the new-line drawing-preview effect only, per its own diagnosis', () => {
@@ -298,7 +298,7 @@ describe('PATCH DRAWING-LINE-CLIP-R3: the left/top notch is derived from the ACT
     expect(simpleLineRendererSrc).toContain("? 'polygon('");
     expect(simpleLineRendererSrc).toContain("'var(--drawing-visible-canvas-left-inset, 0px) 0, '");
     expect(simpleLineRendererSrc).toContain("'0 var(--drawing-native-ui-top-inset, 0px), '");
-    expect(simpleLineRendererSrc).toContain("style={boundaryClipPath ? { clipPath: boundaryClipPath } : undefined}");
+    expect(simpleLineRendererSrc).toContain("style={contentClipPath ? { clipPath: contentClipPath } : undefined}");
   });
 
   it('G: DRAWING-LINE-GESTURE-R1\'s listener lifecycle is untouched -- this patch only edited DrawingLayout.tsx, not the gesture-active effect in SimpleLineRenderer.tsx', () => {
@@ -320,6 +320,39 @@ describe('PATCH DRAWING-LINE-CLIP-R3: the left/top notch is derived from the ACT
 
   it('the boundary effect\'s dependency array is still unchanged by this geometry-only fix', () => {
     expect(drawingLayoutSrc).toContain('}, [rightClusterAnchorEl, viewportContainerRef, activeTool, key]);');
+  });
+});
+
+describe('PATCH DRAWING-LINE-EDIT-CLIP-R1: the inner <g> clip is anchored to the SVG viewport, not to its own content bbox', () => {
+  it('1/8) the inner containment <g> uses a view-box-anchored clip -- without that keyword a basic shape on an SVG element with no CSS layout box resolves against fill-box (its content bounding box), which moved the native-UI notch onto whatever real canvas the lines happened to occupy and killed the endpoint handles there', () => {
+    expect(simpleLineRendererSrc).toContain('const contentClipPath = boundaryClipPath ? `${boundaryClipPath} view-box` : undefined;');
+    expect(simpleLineRendererSrc).toContain('style={contentClipPath ? { clipPath: contentClipPath } : undefined}');
+  });
+
+  it('9) the root <svg> keeps its own unsuffixed rootClipPath -- it already has a real CSS border box, so the R2/R3-verified viewport-relative containment there is byte-identical and was NOT re-anchored by this patch', () => {
+    expect(simpleLineRendererSrc).toContain('const rootClipPath = isActiveGesture ? undefined : boundaryClipPath;');
+    expect(simpleLineRendererSrc).toContain('...(rootClipPath ? { clipPath: rootClipPath } : {}),');
+    // The root must NOT have acquired the keyword.
+    expect(simpleLineRendererSrc).not.toContain('rootClipPath} view-box');
+    expect(simpleLineRendererSrc).not.toContain('${rootClipPath} view-box');
+  });
+
+  it('the notched polygon formula itself is unchanged -- this patch changed only which box that same shape resolves against', () => {
+    expect(simpleLineRendererSrc).toContain("'var(--drawing-visible-canvas-left-inset, 0px) 0, '");
+    expect(simpleLineRendererSrc).toContain("'0 var(--drawing-native-ui-top-inset, 0px), '");
+    expect(simpleLineRendererSrc).toContain("'calc(100% - var(--drawing-visible-canvas-right-inset, 0px)) 0, '");
+  });
+
+  it('10) DRAWING-LINE-GESTURE-R1\'s listener stabilization and the R2 gesture-aware root unclip are both untouched', () => {
+    expect(simpleLineRendererSrc).toContain('const isDrawingGestureActive = !!drawing;');
+    expect(simpleLineRendererSrc).toContain('}, [isDrawingGestureActive]);');
+    expect(simpleLineRendererSrc).toContain('const isActiveGesture = !!drawing || isDragging;');
+    expect(simpleLineRendererSrc).toContain("}, [isDragging, onUpdateLine, onSaveLine, getMousePos, drawingViewport]);");
+  });
+
+  it('R3\'s panel measurement in DrawingLayout.tsx is untouched -- this patch edited SimpleLineRenderer.tsx only', () => {
+    expect(drawingLayoutSrc).toContain("drawingRoot?.querySelector<HTMLElement>('.selected-shape-actions .Island');");
+    expect(drawingLayoutSrc).toContain('const nativeNotchRect = (nativePropertiesPanelRect && nativePropertiesPanelRect.width > 0 && nativePropertiesPanelRect.height > 0)');
   });
 });
 
