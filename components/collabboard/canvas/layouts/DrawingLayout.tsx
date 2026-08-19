@@ -1860,10 +1860,21 @@ export default function DrawingLayout({
       }
       const viewportEl = viewportContainerRef?.current;
       const viewportRect = viewportEl?.getBoundingClientRect();
+      const viewportLeft = viewportRect?.left ?? 0;
       const viewportRight = viewportRect?.right ?? window.innerWidth;
       const sidebarRect = presentationSidebarRef.current?.getBoundingClientRect() ?? null;
       const visibleCanvasRight = sidebarRect ? Math.min(Math.max(sidebarRect.left, viewportRect?.left ?? 0), viewportRight) : null;
       const nextVisibleCanvasRightInsetPx = visibleCanvasRight === null ? null : Math.max(0, viewportRight - visibleCanvasRight);
+      // Native Excalidraw chrome (main-menu button, and the selected-shape
+      // properties Island when a shape is selected) is anchored top-left and
+      // shares this one Stack.Col wrapper regardless of which of the two is
+      // showing, so its bounding rect alone is enough to keep the CanvasLine
+      // layer's containment in sync with either state.
+      const nativeLeftPanelEl = drawingRoot?.querySelector<HTMLElement>('.App-menu_top__left');
+      const nativeLeftPanelRect = nativeLeftPanelEl?.getBoundingClientRect() ?? null;
+      const nextVisibleCanvasLeftInsetPx = nativeLeftPanelRect
+        ? Math.max(0, Math.min(nativeLeftPanelRect.right, viewportRight) - viewportLeft)
+        : 0;
       if (viewportEl) {
         if (nextVisibleCanvasRightInsetPx === null) {
           viewportEl.style.removeProperty('--drawing-visible-canvas-right-inset');
@@ -1871,6 +1882,11 @@ export default function DrawingLayout({
         } else {
           viewportEl.style.setProperty('--drawing-visible-canvas-right-inset', `${nextVisibleCanvasRightInsetPx}px`);
           viewportEl.style.setProperty('--drawing-zoom-controls-right', `${nextVisibleCanvasRightInsetPx + 24}px`);
+        }
+        if (nextVisibleCanvasLeftInsetPx === 0) {
+          viewportEl.style.removeProperty('--drawing-visible-canvas-left-inset');
+        } else {
+          viewportEl.style.setProperty('--drawing-visible-canvas-left-inset', `${nextVisibleCanvasLeftInsetPx}px`);
         }
       }
       const reservedSidebarLeft = visibleCanvasRight ?? (viewportRight - 320);
@@ -1918,6 +1934,7 @@ export default function DrawingLayout({
       }
       cleanupViewportEl?.style.removeProperty('--drawing-visible-canvas-right-inset');
       cleanupViewportEl?.style.removeProperty('--drawing-zoom-controls-right');
+      cleanupViewportEl?.style.removeProperty('--drawing-visible-canvas-left-inset');
       window.removeEventListener('resize', requestUpdate);
     };
   }, [rightClusterAnchorEl, viewportContainerRef, activeTool, key]);

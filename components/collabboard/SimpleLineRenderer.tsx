@@ -651,7 +651,7 @@ function SimpleLineRenderer({
     const boundaryClipPath = explicitRightInsetPx !== null
         ? `inset(0 ${explicitRightInsetPx}px 0 0)`
         : excalidrawAPIRef
-            ? 'inset(0 var(--drawing-visible-canvas-right-inset, 0px) 0 0)'
+            ? 'inset(0 var(--drawing-visible-canvas-right-inset, 0px) 0 var(--drawing-visible-canvas-left-inset, 0px))'
             : undefined;
 
     return (

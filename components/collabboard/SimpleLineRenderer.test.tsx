@@ -226,3 +226,57 @@ describe('SimpleLineRenderer visible canvas containment', () => {
     expect(JSON.stringify(source)).toBe(before);
   });
 });
+
+describe('PATCH DRAWING-LINE-CLIP-R1: containment against native Excalidraw chrome (left edge)', () => {
+  it('clips both edges via CSS var on the Drawing surface (excalidrawAPIRef present, no explicit inset prop)', () => {
+    const markup = renderWithProps({
+      lines: [line('drawing-line', { coord_space: null })],
+      layer: 'front',
+      selectedLineId: 'drawing-line',
+      excalidrawAPIRef: { current: {} },
+    });
+
+    expect(markup).toContain('data-line-containment="visible-canvas"');
+    expect(markup).toContain(
+      'clip-path:inset(0 var(--drawing-visible-canvas-right-inset, 0px) 0 var(--drawing-visible-canvas-left-inset, 0px))',
+    );
+    expect(markup).toContain('z-index:1000');
+  });
+
+  it('keeps the back layer on the same two-sided CSS-var containment as the front layer', () => {
+    const markup = renderWithProps({
+      lines: [line('drawing-back', { coord_space: null })],
+      layer: 'back',
+      excalidrawAPIRef: { current: {} },
+    });
+
+    expect(markup).toContain(
+      'clip-path:inset(0 var(--drawing-visible-canvas-right-inset, 0px) 0 var(--drawing-visible-canvas-left-inset, 0px))',
+    );
+    expect(markup).toContain('z-index:0');
+  });
+
+  it('an explicit visibleCanvasRightInsetPx prop still only clips the right edge -- unaffected by the new left-inset var', () => {
+    const markup = renderWithProps({
+      lines: [line('explicit', { coord_space: null })],
+      layer: 'front',
+      visibleCanvasRightInsetPx: 320,
+      excalidrawAPIRef: { current: {} },
+    });
+
+    expect(markup).toContain('clip-path:inset(0 320px 0 0)');
+    expect(markup).not.toContain('--drawing-visible-canvas-left-inset');
+  });
+
+  it('leaves non-Drawing surfaces (no excalidrawAPIRef, no explicit inset) free of any containment markup -- Freeform/Map protection unchanged', () => {
+    const markup = renderWithProps({
+      lines: [line('freeform-line', { coord_space: null })],
+      layer: 'front',
+      selectedLineId: 'freeform-line',
+    });
+
+    expect(markup).not.toContain('data-line-containment');
+    expect(markup).not.toContain('clip-path');
+    expect(markup).not.toContain('--drawing-visible-canvas-left-inset');
+  });
+});

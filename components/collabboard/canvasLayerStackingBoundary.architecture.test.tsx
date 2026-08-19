@@ -212,7 +212,9 @@ describe('Drawing PATCH-117 clip-path containment freeze [matrix 24; negative co
   it('visibleCanvasRightInsetPx/boundaryClipPath in SimpleLineRenderer.tsx are untouched', () => {
     expect(simpleLineRendererSrc).toContain('visibleCanvasRightInsetPx?: number;');
     expect(simpleLineRendererSrc).toContain("const explicitRightInsetPx = typeof visibleCanvasRightInsetPx === 'number'");
-    expect(simpleLineRendererSrc).toContain("'inset(0 var(--drawing-visible-canvas-right-inset, 0px) 0 0)'");
+    expect(simpleLineRendererSrc).toContain(
+      "'inset(0 var(--drawing-visible-canvas-right-inset, 0px) 0 var(--drawing-visible-canvas-left-inset, 0px))'",
+    );
   });
 
   it('DrawingLayout.tsx\'s --drawing-visible-canvas-right-inset CSS variable wiring is untouched', () => {
@@ -220,8 +222,51 @@ describe('Drawing PATCH-117 clip-path containment freeze [matrix 24; negative co
     expect(drawingLayoutSrc).toContain("viewportEl.style.removeProperty('--drawing-visible-canvas-right-inset');");
   });
 
+  it('PATCH DRAWING-LINE-CLIP-R1: DrawingLayout.tsx also publishes --drawing-visible-canvas-left-inset, measured from the native Excalidraw top-left menu/properties Stack.Col so it never gets painted over by a promoted CanvasLine layer', () => {
+    expect(drawingLayoutSrc).toContain("drawingRoot?.querySelector<HTMLElement>('.App-menu_top__left');");
+    expect(drawingLayoutSrc).toContain("viewportEl.style.setProperty('--drawing-visible-canvas-left-inset', `${nextVisibleCanvasLeftInsetPx}px`);");
+    expect(drawingLayoutSrc).toContain("viewportEl.style.removeProperty('--drawing-visible-canvas-left-inset');");
+    expect(drawingLayoutSrc).toContain("cleanupViewportEl?.style.removeProperty('--drawing-visible-canvas-left-inset');");
+  });
+
   it('CanvasClient.tsx never passes visibleCanvasRightInsetPx to the Freeform Line layers -- this patch did not wire Drawing\'s containment mechanism into Freeform', () => {
     expect(canvasClientSrc).not.toContain('visibleCanvasRightInsetPx=');
+  });
+});
+
+describe('PATCH DRAWING-LINE-CLIP-R1: left-inset boundary is independent of minimap/zoom and of pan/zoom state', () => {
+  it('the boundary effect\'s dependency array is unchanged -- still only [rightClusterAnchorEl, viewportContainerRef, activeTool, key], so DrawingNavigationControl\'s local collapse/expand state and zoomPercent cannot retrigger or skip it', () => {
+    expect(drawingLayoutSrc).toContain('}, [rightClusterAnchorEl, viewportContainerRef, activeTool, key]);');
+  });
+
+  it('the left-inset measurement reads only getBoundingClientRect() screen coordinates off the native Excalidraw menu -- no reference to canvasZoom, zoomPercent, or applyZoom in the same computation', () => {
+    const boundaryEffectStart = drawingLayoutSrc.indexOf("const nativeLeftPanelEl = drawingRoot?.querySelector<HTMLElement>('.App-menu_top__left');");
+    const boundaryEffectEnd = drawingLayoutSrc.indexOf('const reservedSidebarLeft = visibleCanvasRight ?? (viewportRight - 320);', boundaryEffectStart);
+    expect(boundaryEffectStart).toBeGreaterThan(-1);
+    expect(boundaryEffectEnd).toBeGreaterThan(boundaryEffectStart);
+    const boundarySlice = drawingLayoutSrc.slice(boundaryEffectStart, boundaryEffectEnd);
+    expect(boundarySlice).not.toContain('canvasZoom');
+    expect(boundarySlice).not.toContain('zoomPercent');
+    expect(boundarySlice).not.toContain('applyZoom');
+  });
+
+  it('DrawingNavigationControl.tsx / DrawingMinimap.tsx never reference --drawing-visible-canvas-left-inset -- the minimap/zoom panel and the line-clip boundary remain two unrelated CSS custom properties', () => {
+    const navControlSrc = read('components/collabboard/canvas/minimap/DrawingNavigationControl.tsx');
+    const drawingMinimapSrc = read('components/collabboard/canvas/minimap/DrawingMinimap.tsx');
+    expect(navControlSrc).not.toContain('drawing-visible-canvas-left-inset');
+    expect(drawingMinimapSrc).not.toContain('drawing-visible-canvas-left-inset');
+  });
+
+  it('the same MutationObserver/ResizeObserver pair drives both insets -- no second observer was introduced for the left measurement', () => {
+    const observerCount = (drawingLayoutSrc.match(/new MutationObserver\(/g) ?? []).length
+      + (drawingLayoutSrc.match(/new ResizeObserver\(/g) ?? []).length;
+    // Unchanged from the PATCH-117 baseline: one MutationObserver + one
+    // ResizeObserver for this effect, plus the DRAWING-MINIMAP-A/B/C
+    // ResizeObserver inside useDrawingMinimapScene lives in a different file
+    // entirely, so this count is a stable pin for DrawingLayout.tsx alone.
+    expect(observerCount).toBeGreaterThan(0);
+    expect(drawingLayoutSrc).not.toContain('nativeLeftPanelEl, {');
+    expect(drawingLayoutSrc).not.toContain('resizeObserver.observe(nativeLeftPanelEl)');
   });
 });
 
