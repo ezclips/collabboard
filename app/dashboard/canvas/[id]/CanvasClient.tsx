@@ -138,6 +138,8 @@ import ZoomControls from '@/components/collabboard/canvas/ui/ZoomControls';
 import GhostDragElement from '@/components/collabboard/canvas/ui/GhostDragElement';
 import FreeformCanvasBoardMenu from '@/components/collabboard/canvas/ui/FreeformCanvasBoardMenu';
 import FreeformNavigationControl from '@/components/collabboard/canvas/minimap/FreeformNavigationControl';
+import { resolveMinimapWorldItems } from '@/components/collabboard/canvas/minimap/useFreeformMinimapGeometry';
+import { getMinimapDisplayBounds } from '@/components/collabboard/canvas/minimap/freeformMinimapGeometry';
 import WallpaperSelector from '@/components/collabboard/canvas/WallpaperSelector';
 import { CanvasEditorProvider, type CanvasEditorState } from '@/components/collabboard/canvas/contexts/CanvasEditorContext';
 import { CanvasConfigProvider, type CanvasConfigState } from '@/components/collabboard/canvas/contexts/CanvasConfigContext';
@@ -1104,6 +1106,27 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   const isMapLayout = canvas?.layout === 'map';
   const isFreeformLayout = canvas?.layout === 'freeform' || (!isWallLayout && !isColumnsLayout && !isKanbanLayout && !isGanttLayout && !isSchedulerLayout && !isGridLayout && !isDrawingLayout && !isTimelineLayout && !isMapLayout);
 
+  // PATCH FREEFORM-ZOOM-C: the initial camera's focal point, reusing the
+  // SAME content-bounds algorithm FreeformNavigationControl's minimap
+  // already uses (getMinimapDisplayBounds over resolveMinimapWorldItems) --
+  // not a second bounds algorithm. This runs before any post has ever
+  // rendered (this component's own loading gate below keeps CanvasViewport
+  // unmounted, and therefore the camera's mount-time seed effect inert,
+  // until `padlets` has already loaded -- see the `if (!hasMounted ||
+  // loading) return` guard further down), so no live DOM measurement is
+  // available yet; an empty measuredRects map makes every item resolve
+  // through the same pure declared-geometry fallback the minimap itself
+  // falls back to before its own first DOM measurement lands. An empty
+  // board (no valid items) yields null, and the camera hook's own default
+  // (world origin) takes over unchanged.
+  const initialFreeformFocalPoint = useMemo(() => {
+    const rootPostsForBounds = padlets.filter((p) => !p.metadata?.parentId);
+    const items = resolveMinimapWorldItems(rootPostsForBounds, {});
+    const bounds = getMinimapDisplayBounds(items);
+    if (!bounds) return null;
+    return { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 };
+  }, [padlets]);
+
   // === BEGIN CAMERA REGION ===
   // Relocated below isFreeformLayout (rather than declared near containerRef
   // at the top of the component) because PATCH 9S.2's camera gutter/seeding/
@@ -1123,6 +1146,11 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     // Gantt, via the shared canvasZoom/handleZoomIn/Out/Reset below) keeps
     // the hook's own pre-patch default of 1 (100%).
     isFreeformLayout ? FREEFORM_DEFAULT_ZOOM : 1,
+    // PATCH FREEFORM-ZOOM-C: center on board content instead of world origin
+    // when there is any -- omitted (0,0) for every other layout, matching
+    // the hook's own default and leaving them byte-identical to before.
+    isFreeformLayout ? (initialFreeformFocalPoint?.x ?? 0) : 0,
+    isFreeformLayout ? (initialFreeformFocalPoint?.y ?? 0) : 0,
   );
   const freeformWorldOriginLeft = gutterX + FREEFORM_WORLD_ORIGIN_OFFSET_X * canvasZoom;
   const freeformWorldOriginTop = gutterY + FREEFORM_WORLD_ORIGIN_OFFSET_Y * canvasZoom;

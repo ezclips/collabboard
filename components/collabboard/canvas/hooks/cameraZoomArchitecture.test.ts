@@ -66,6 +66,54 @@ describe('PATCH FREEFORM-ZOOM-A: default open zoom is 30%, Freeform-scoped only'
   });
 });
 
+describe('PATCH FREEFORM-ZOOM-C: initial camera centers on board content, reusing the minimap bounds algorithm', () => {
+  it('imports resolveMinimapWorldItems and getMinimapDisplayBounds from the SAME minimap geometry modules FreeformNavigationControl already uses -- no second bounds algorithm', () => {
+    expect(canvasClientSrc).toContain(
+      "import { resolveMinimapWorldItems } from '@/components/collabboard/canvas/minimap/useFreeformMinimapGeometry';"
+    );
+    expect(canvasClientSrc).toContain(
+      "import { getMinimapDisplayBounds } from '@/components/collabboard/canvas/minimap/freeformMinimapGeometry';"
+    );
+  });
+
+  it('initialFreeformFocalPoint filters root posts the SAME way rootPadlets/the minimap/alignment-candidates already do (!p.metadata?.parentId), resolves items through the empty-measuredRects fallback path, and derives the center from the SHARED bounds rect', () => {
+    const start = canvasClientSrc.indexOf('const initialFreeformFocalPoint = useMemo(');
+    expect(start).toBeGreaterThan(-1);
+    const end = canvasClientSrc.indexOf('}, [padlets]);', start);
+    expect(end).toBeGreaterThan(start);
+    const body = canvasClientSrc.slice(start, end);
+    expect(body).toContain('padlets.filter((p) => !p.metadata?.parentId)');
+    expect(body).toContain('resolveMinimapWorldItems(rootPostsForBounds, {});');
+    expect(body).toContain('getMinimapDisplayBounds(items);');
+    expect(body).toContain('if (!bounds) return null;');
+    expect(body).toContain('x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2');
+  });
+
+  it('the useCanvasCamera call passes the focal point ONLY for Freeform, falling back to (0,0) for every other layout -- the hook default already means (0,0) reproduces PATCH FREEFORM-ZOOM-B exactly', () => {
+    const hookCallIdx = canvasClientSrc.indexOf('useCanvasCamera(\n    containerRef,\n    isFreeformLayout,');
+    expect(hookCallIdx).toBeGreaterThan(-1);
+    const closeIdx = canvasClientSrc.indexOf(');', hookCallIdx);
+    const callBody = canvasClientSrc.slice(hookCallIdx, closeIdx);
+    expect(callBody).toContain('isFreeformLayout ? (initialFreeformFocalPoint?.x ?? 0) : 0,');
+    expect(callBody).toContain('isFreeformLayout ? (initialFreeformFocalPoint?.y ?? 0) : 0,');
+  });
+
+  it('the focal-point computation sits BEFORE the useCanvasCamera call that consumes it [hook-order safety]', () => {
+    const focalIdx = canvasClientSrc.indexOf('const initialFreeformFocalPoint = useMemo(');
+    const hookCallIdx = canvasClientSrc.indexOf('useCanvasCamera(\n    containerRef,\n    isFreeformLayout,');
+    expect(focalIdx).toBeGreaterThan(-1);
+    expect(hookCallIdx).toBeGreaterThan(focalIdx);
+  });
+
+  it('no other zoom/pan/minimap entry point was touched -- zoom controls, wheel, reset, and the minimap\'s own rendering are all untouched', () => {
+    expect(canvasClientSrc).toContain('const zoomDelta = e.deltaY > 0 ? -0.1 : 0.1;');
+    expect(canvasClientSrc).toContain('zoomAtViewportPoint((z) => z + zoomDelta, anchorX, anchorY);');
+    expect(canvasClientSrc).toContain('<FreeformNavigationControl');
+    expect(canvasClientSrc).toContain('rootPosts={rootPadlets}');
+    expect(canvasClientSrc).not.toMatch(/setCanvasZoom/);
+  });
+});
+
 describe('PATCH 9S: Ctrl+wheel is gated to Freeform-equivalent layouts and uses the shared primitive [Phase 8, 9, 10; negative controls B, C, J]', () => {
   const start = canvasClientSrc.indexOf('onWheel={(e) => {');
   const end = canvasClientSrc.indexOf('onMouseDown={handleFreeformPanMouseDown}', start);

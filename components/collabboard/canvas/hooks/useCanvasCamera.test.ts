@@ -78,15 +78,20 @@ function mountCamera(
   enabled = true,
   originOffset = { x: 0, y: 0 },
   initialZoom?: number,
+  initialFocalWorld?: { x: number; y: number },
 ) {
   const containerRefObj: React.RefObject<HTMLDivElement | null> = { current: null };
   let latestCamera: ReturnType<typeof useCanvasCamera> | null = null;
 
   function TestComponent() {
-    // `initialZoom` undefined still triggers the hook's own default param
-    // (JS default parameters substitute on an explicit `undefined` too), so
-    // this single call form covers both the omitted and explicit cases.
-    const camera = useCanvasCamera(containerRefObj, enabled, originOffset.x, originOffset.y, initialZoom);
+    // `initialZoom`/`initialFocalWorld.x/.y` undefined still trigger the
+    // hook's own default params (JS default parameters substitute on an
+    // explicit `undefined` too), so this single call form covers both the
+    // omitted and explicit cases.
+    const camera = useCanvasCamera(
+      containerRefObj, enabled, originOffset.x, originOffset.y, initialZoom,
+      initialFocalWorld?.x, initialFocalWorld?.y,
+    );
     latestCamera = camera;
     const assignRef = React.useCallback((node: HTMLDivElement | null) => {
       containerRefObj.current = node;
@@ -265,6 +270,71 @@ describe('PATCH FREEFORM-ZOOM-B: initial camera centers the world origin on scre
     const h = mountCamera({ ...VIEWPORT, ...HUGE_EXTENT }, true, { x: 5000, y: 5000 }, 0.8);
     expect(h.getCamera().gutterX).toBe(VIEWPORT.clientWidth);
     expect(h.getCamera().gutterY).toBe(VIEWPORT.clientHeight);
+  });
+});
+
+describe('PATCH FREEFORM-ZOOM-C: initial camera centers on an arbitrary focal world point (board content), generalizing PATCH FREEFORM-ZOOM-B', () => {
+  const OFFSET = { x: 5000, y: 5000 };
+  const ZOOM = 0.8;
+
+  it('omitting initialFocalWorld reproduces PATCH FREEFORM-ZOOM-B exactly -- world origin still lands at screen center', () => {
+    const h = mountCamera({ ...VIEWPORT, ...HUGE_EXTENT }, true, OFFSET, ZOOM);
+    const screenX = h.getCamera().gutterX + OFFSET.x * ZOOM - h.el.scrollLeft;
+    const screenY = h.getCamera().gutterY + OFFSET.y * ZOOM - h.el.scrollTop;
+    expect(screenX).toBe(VIEWPORT.clientWidth / 2);
+    expect(screenY).toBe(VIEWPORT.clientHeight / 2);
+  });
+
+  it('a zero focal point ({x:0,y:0}) is byte-identical to omitting it entirely', () => {
+    const withZero = mountCamera({ ...VIEWPORT, ...HUGE_EXTENT }, true, OFFSET, ZOOM, { x: 0, y: 0 });
+    const omitted = mountCamera({ ...VIEWPORT, ...HUGE_EXTENT }, true, OFFSET, ZOOM);
+    expect(withZero.el.scrollLeft).toBe(omitted.el.scrollLeft);
+    expect(withZero.el.scrollTop).toBe(omitted.el.scrollTop);
+  });
+
+  it('passing a non-zero focal world point (the board content center) centers THAT point on screen instead of the world origin', () => {
+    const focal = { x: 2000, y: -1000 };
+    const h = mountCamera({ ...VIEWPORT, ...HUGE_EXTENT }, true, OFFSET, ZOOM, focal);
+    const screenXOfFocal = h.getCamera().gutterX + (OFFSET.x + focal.x) * ZOOM - h.el.scrollLeft;
+    const screenYOfFocal = h.getCamera().gutterY + (OFFSET.y + focal.y) * ZOOM - h.el.scrollTop;
+    expect(screenXOfFocal).toBe(VIEWPORT.clientWidth / 2);
+    expect(screenYOfFocal).toBe(VIEWPORT.clientHeight / 2);
+  });
+
+  it('world origin (0,0) is NOT centered when a non-zero focal point is used -- proves the seed really moved to content, not still hardcoded to origin', () => {
+    const focal = { x: 2000, y: -1000 };
+    const h = mountCamera({ ...VIEWPORT, ...HUGE_EXTENT }, true, OFFSET, ZOOM, focal);
+    const screenXOfOrigin = h.getCamera().gutterX + OFFSET.x * ZOOM - h.el.scrollLeft;
+    const screenYOfOrigin = h.getCamera().gutterY + OFFSET.y * ZOOM - h.el.scrollTop;
+    expect(screenXOfOrigin).not.toBe(VIEWPORT.clientWidth / 2);
+    expect(screenYOfOrigin).not.toBe(VIEWPORT.clientHeight / 2);
+    // Displaced from center by exactly focal.x/y * zoom -- the focal shift
+    // is scaled by zoom just like every other world->screen conversion.
+    expect(screenXOfOrigin).toBeCloseTo(VIEWPORT.clientWidth / 2 - focal.x * ZOOM, 5);
+    expect(screenYOfOrigin).toBeCloseTo(VIEWPORT.clientHeight / 2 - focal.y * ZOOM, 5);
+  });
+
+  it('the focal point is converted through the SAME zoom as everything else -- the seed target scales linearly with zoom', () => {
+    const focal = { x: 1000, y: 500 };
+    const hLow = mountCamera({ ...VIEWPORT, ...HUGE_EXTENT }, true, { x: 0, y: 0 }, 0.4, focal);
+    const hHigh = mountCamera({ ...VIEWPORT, ...HUGE_EXTENT }, true, { x: 0, y: 0 }, 0.8, focal);
+    // Seed = clientWidth/2 + focal*zoom -- the DIFFERENCE between the two
+    // isolates the focal contribution, since clientWidth/2 is identical.
+    expect(hHigh.el.scrollLeft - hLow.el.scrollLeft).toBeCloseTo(focal.x * (0.8 - 0.4), 5);
+    expect(hHigh.el.scrollTop - hLow.el.scrollTop).toBeCloseTo(focal.y * (0.8 - 0.4), 5);
+  });
+
+  it('resize compensation and anchored zoom/pan are unaffected once seeded from a focal point -- the rest of the camera treats it as an ordinary starting scroll position', () => {
+    const geo = { clientWidth: 1200, clientHeight: 800, ...HUGE_EXTENT };
+    const h = mountCamera(() => geo, true, OFFSET, ZOOM, { x: 2000, y: -1000 });
+    const { anchorX, anchorY } = centerAnchorFor(h.getCamera());
+    const before = worldAtAnchor(h.el, h.getCamera(), anchorX, anchorY);
+
+    act(() => { h.getCamera().zoomAtViewportPoint((z) => z + 0.1, anchorX, anchorY); });
+
+    const after = worldAtAnchor(h.el, h.getCamera(), anchorX, anchorY);
+    expect(after.x).toBeCloseTo(before.x, 4);
+    expect(after.y).toBeCloseTo(before.y, 4);
   });
 });
 

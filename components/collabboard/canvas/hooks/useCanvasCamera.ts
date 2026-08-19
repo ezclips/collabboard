@@ -46,6 +46,13 @@ export function useCanvasCamera(
   // completely unaffected. CanvasClient passes FREEFORM_DEFAULT_ZOOM here
   // only when the active layout is actually Freeform.
   initialZoom = 1,
+  // PATCH FREEFORM-ZOOM-C: the LOGICAL world point (same coordinate space as
+  // post.position_x/position_y -- NOT yet offset to physical-stage
+  // coordinates) that should sit at screen center on the initial seed.
+  // Defaults to (0,0), i.e. world origin, preserving PATCH FREEFORM-ZOOM-B's
+  // exact centering behavior for every OTHER caller/omitted case.
+  initialFocalWorldX = 0,
+  initialFocalWorldY = 0,
 ) {
   const [canvasZoom, setCanvasZoom] = useState(initialZoom);
   // Mirrors canvasZoom but updated synchronously (not batched), so rapid
@@ -102,13 +109,20 @@ export function useCanvasCamera(
   //
   // PATCH FREEFORM-ZOOM-B: the gutter itself stays a full viewport per side
   // (unchanged -- shrinking it would reintroduce PATCH 9S.1's low-zoom clamp
-  // defect), but the SEED TARGET within that gutter now lands world (0,0) at
-  // screen CENTER (measuredX/Y / 2) instead of the pre-patch screen (0,0)
-  // top-left corner -- the confirmed live problem ("Freeform starts near the
-  // upper-left of the viewport"). Math.max(0, ...) guards the formula the
-  // same way every other scroll write in this hook does; in practice
-  // initialWorldOriginOffsetX/Y * zoom is always far larger than half a
-  // viewport for real Freeform geometry, so this never actually clamps.
+  // defect), but the SEED TARGET within that gutter now lands the focal
+  // world point at screen CENTER (measuredX/Y / 2) instead of the pre-patch
+  // screen (0,0) top-left corner -- the confirmed live problem ("Freeform
+  // starts near the upper-left of the viewport"). Math.max(0, ...) guards
+  // the formula the same way every other scroll write in this hook does; in
+  // practice initialWorldOriginOffsetX/Y * zoom is always far larger than
+  // half a viewport for real Freeform geometry, so this never actually
+  // clamps.
+  //
+  // PATCH FREEFORM-ZOOM-C: generalized from "always the logical world
+  // origin" to "any logical world point" -- initialFocalWorldX/Y (default
+  // 0,0) is added to the origin offset BEFORE scaling, so passing (0,0)
+  // reproduces PATCH FREEFORM-ZOOM-B exactly, and the caller (CanvasClient)
+  // can instead pass the board's own content-center world point.
   useLayoutEffect(() => {
     if (!enabled || !viewportElement || seededViewportRef.current === viewportElement) return;
     const container = viewportElement;
@@ -117,11 +131,11 @@ export function useCanvasCamera(
     gutterRef.current = { x: measuredX, y: measuredY };
     setGutterX(measuredX);
     setGutterY(measuredY);
-    container.scrollLeft = Math.max(0, measuredX / 2 + initialWorldOriginOffsetX * zoomRef.current);
-    container.scrollTop = Math.max(0, measuredY / 2 + initialWorldOriginOffsetY * zoomRef.current);
+    container.scrollLeft = Math.max(0, measuredX / 2 + (initialWorldOriginOffsetX + initialFocalWorldX) * zoomRef.current);
+    container.scrollTop = Math.max(0, measuredY / 2 + (initialWorldOriginOffsetY + initialFocalWorldY) * zoomRef.current);
     seededViewportRef.current = viewportElement;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, viewportElement, initialWorldOriginOffsetX, initialWorldOriginOffsetY]);
+  }, [enabled, viewportElement, initialWorldOriginOffsetX, initialWorldOriginOffsetY, initialFocalWorldX, initialFocalWorldY]);
 
   // Keeps the gutter tracking the viewport's LIVE size on resize (browser
   // resize, sidebar toggle, devtools opening). A gutter smaller than the
