@@ -153,6 +153,11 @@ export interface FreeformAlignmentCandidateRect {
   width: number;
 }
 
+export interface FreeformHorizontalAlignmentCandidateRect {
+  y: number;
+  height: number;
+}
+
 /**
  * PATCH ALIGN-B: vertical (X-axis) alignment-guide detection for a single
  * dragged root post against other root posts, in WORLD units.
@@ -202,4 +207,51 @@ export function detectVerticalAlignmentGuide(
   }
 
   return bestX;
+}
+
+/**
+ * PATCH ALIGN-C: horizontal (Y-axis) alignment-guide detection for a single
+ * dragged root post against other root posts, in WORLD units. Exact
+ * top/center/bottom counterpart of detectVerticalAlignmentGuide above --
+ * same same-type-only matching, same nearest-wins tie-break, same caller
+ * responsibilities (exclude dragged post + non-root posts, pre-convert the
+ * tolerance from screen px via canvasZoom).
+ *
+ * Kept as an independent function (not a generalized axis parameter) so each
+ * axis stays trivially readable and testable on its own -- mirrors this
+ * file's existing preference for small, single-purpose exports.
+ */
+export function detectHorizontalAlignmentGuide(
+  dragged: FreeformHorizontalAlignmentCandidateRect,
+  others: FreeformHorizontalAlignmentCandidateRect[],
+  toleranceWorld: number,
+): number | null {
+  const draggedTop = dragged.y;
+  const draggedBottom = dragged.y + dragged.height;
+  const draggedCenter = dragged.y + dragged.height / 2;
+
+  let bestY: number | null = null;
+  let bestDistance = Infinity;
+
+  for (const other of others) {
+    const otherTop = other.y;
+    const otherBottom = other.y + other.height;
+    const otherCenter = other.y + other.height / 2;
+
+    const pairs: Array<[number, number]> = [
+      [draggedTop, otherTop],
+      [draggedCenter, otherCenter],
+      [draggedBottom, otherBottom],
+    ];
+
+    for (const [draggedValue, otherValue] of pairs) {
+      const distance = Math.abs(draggedValue - otherValue);
+      if (distance <= toleranceWorld && distance < bestDistance) {
+        bestDistance = distance;
+        bestY = otherValue;
+      }
+    }
+  }
+
+  return bestY;
 }

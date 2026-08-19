@@ -207,10 +207,11 @@ describe('PATCH ALIGN-B: vertical alignment guide detection', () => {
   it('left <-> left: dragged post left edge close to another root post left edge shows a guide at that edge', () => {
     // Dragged width 100, other width 180 at x=500 (left=500) -- widths differ
     // deliberately so left/center/right cannot coincidentally all match at
-    // once (see file header reasoning).
+    // once (see file header reasoning). Y kept far apart (0 vs 900) so
+    // ALIGN-C's horizontal detection cannot spuriously also match here.
     mount(<Harness initialPadlets={[
       padlet('a', 0, 0, { width: 100 }),
-      padlet('b', 500, 0, { width: 180 }),
+      padlet('b', 500, 900, { width: 180 }),
     ]} zoom={1} />);
 
     drag('a', { x: 503, y: 0 }, 1); // a.left = 503, 3 world units from b.left = 500
@@ -220,7 +221,7 @@ describe('PATCH ALIGN-B: vertical alignment guide detection', () => {
   it('center <-> center: dragged post center close to another root post center shows a guide at that center', () => {
     mount(<Harness initialPadlets={[
       padlet('a', 0, 0, { width: 100 }),
-      padlet('b', 500, 0, { width: 180 }), // center = 590
+      padlet('b', 500, 900, { width: 180 }), // center = 590
     ]} zoom={1} />);
 
     drag('a', { x: 540, y: 0 }, 1); // a.center = 540 + 50 = 590, exact match
@@ -230,7 +231,7 @@ describe('PATCH ALIGN-B: vertical alignment guide detection', () => {
   it('right <-> right: dragged post right edge close to another root post right edge shows a guide at that edge', () => {
     mount(<Harness initialPadlets={[
       padlet('a', 0, 0, { width: 100 }),
-      padlet('b', 500, 0, { width: 180 }), // right = 680
+      padlet('b', 500, 900, { width: 180 }), // right = 680
     ]} zoom={1} />);
 
     drag('a', { x: 578, y: 0 }, 1); // a.right = 578 + 100 = 678, 2 units from 680
@@ -240,7 +241,7 @@ describe('PATCH ALIGN-B: vertical alignment guide detection', () => {
   it('outside tolerance: no candidate within range clears/withholds the guide', () => {
     mount(<Harness initialPadlets={[
       padlet('a', 0, 0, { width: 100 }),
-      padlet('b', 500, 0, { width: 180 }),
+      padlet('b', 500, 900, { width: 180 }),
     ]} zoom={1} />);
 
     drag('a', { x: 480, y: 0 }, 1); // a.left = 480, 20 units from b.left = 500 -- past the 6px/zoom-1 tolerance
@@ -250,8 +251,8 @@ describe('PATCH ALIGN-B: vertical alignment guide detection', () => {
   it('nearest candidate wins when several posts are within tolerance', () => {
     mount(<Harness initialPadlets={[
       padlet('a', 0, 0, { width: 100 }),
-      padlet('b1', 496, 0, { width: 180 }), // |500-4 - 496| -- b1.left=496, distance from a.left(500)=4
-      padlet('b2', 502, 0, { width: 180 }), // b2.left=502, distance from a.left(500)=2 -- nearer
+      padlet('b1', 496, 900, { width: 180 }), // |500-4 - 496| -- b1.left=496, distance from a.left(500)=4
+      padlet('b2', 502, 900, { width: 180 }), // b2.left=502, distance from a.left(500)=2 -- nearer
     ]} zoom={1} />);
 
     drag('a', { x: 500, y: 0 }, 1);
@@ -292,7 +293,7 @@ describe('PATCH ALIGN-B: vertical alignment guide detection', () => {
     // than staying a constant world-unit number.
     mount(<Harness initialPadlets={[
       padlet('a', 0, 0, { width: 100 }),
-      padlet('b', 490, 0, { width: 180 }), // b.left = 490, 10 world units from a.left = 500
+      padlet('b', 490, 900, { width: 180 }), // b.left = 490, 10 world units from a.left = 500
     ]} zoom={0.5} />);
 
     drag('a', { x: 500, y: 0 }, 0.5);
@@ -303,7 +304,7 @@ describe('PATCH ALIGN-B: vertical alignment guide detection', () => {
     const persisted = installFakeSupabase();
     mount(<Harness initialPadlets={[
       padlet('a', 0, 0, { width: 100 }),
-      padlet('b', 500, 0, { width: 180 }),
+      padlet('b', 500, 900, { width: 180 }),
     ]} zoom={1} snapToGrid />);
 
     // 503 is NOT a multiple of 20; Snap-to-Grid must still round it to 500
@@ -313,5 +314,102 @@ describe('PATCH ALIGN-B: vertical alignment guide detection', () => {
 
     await release();
     expect(persisted).toEqual([{ id: 'a', position_x: 500, position_y: 0 }]);
+  });
+});
+
+describe('PATCH ALIGN-C: horizontal alignment guide detection', () => {
+  it('top <-> top: dragged post top edge close to another root post top edge shows a guide at that edge', () => {
+    // x positions kept far apart (0 vs 1000) so no vertical match can occur
+    // alongside this horizontal one -- heights differ (100 vs 180) so
+    // top/center/bottom cannot all coincidentally match at once.
+    mount(<Harness initialPadlets={[
+      padlet('a', 0, 0, { width: 100, height: 100 }),
+      padlet('b', 1000, 500, { width: 180, height: 180 }),
+    ]} zoom={1} />);
+
+    drag('a', { x: 0, y: 503 }, 1); // a.top = 503, 3 world units from b.top = 500
+    expect(latest!.api.alignmentGuides).toEqual({ verticalX: null, horizontalY: 500 });
+  });
+
+  it('center <-> center: dragged post center close to another root post center shows a guide at that center', () => {
+    mount(<Harness initialPadlets={[
+      padlet('a', 0, 0, { width: 100, height: 100 }),
+      padlet('b', 1000, 500, { width: 180, height: 180 }), // center = 590
+    ]} zoom={1} />);
+
+    drag('a', { x: 0, y: 540 }, 1); // a.center = 540 + 50 = 590, exact match
+    expect(latest!.api.alignmentGuides).toEqual({ verticalX: null, horizontalY: 590 });
+  });
+
+  it('bottom <-> bottom: dragged post bottom edge close to another root post bottom edge shows a guide at that edge', () => {
+    mount(<Harness initialPadlets={[
+      padlet('a', 0, 0, { width: 100, height: 100 }),
+      padlet('b', 1000, 500, { width: 180, height: 180 }), // bottom = 680
+    ]} zoom={1} />);
+
+    drag('a', { x: 0, y: 578 }, 1); // a.bottom = 578 + 100 = 678, 2 units from 680
+    expect(latest!.api.alignmentGuides).toEqual({ verticalX: null, horizontalY: 680 });
+  });
+
+  it('outside tolerance: no candidate within range clears/withholds the horizontal guide', () => {
+    mount(<Harness initialPadlets={[
+      padlet('a', 0, 0, { width: 100, height: 100 }),
+      padlet('b', 1000, 500, { width: 180, height: 180 }),
+    ]} zoom={1} />);
+
+    drag('a', { x: 0, y: 480 }, 1); // a.top = 480, 20 units from b.top = 500 -- past tolerance
+    expect(latest!.api.alignmentGuides).toEqual({ verticalX: null, horizontalY: null });
+  });
+
+  it('nearest candidate wins when several posts are within tolerance', () => {
+    mount(<Harness initialPadlets={[
+      padlet('a', 0, 0, { width: 100, height: 100 }),
+      padlet('b1', 1000, 496, { width: 180, height: 180 }), // top=496, distance from a.top(500)=4
+      padlet('b2', 1000, 502, { width: 180, height: 180 }), // top=502, distance from a.top(500)=2 -- nearer
+    ]} zoom={1} />);
+
+    drag('a', { x: 0, y: 500 }, 1);
+    expect(latest!.api.alignmentGuides).toEqual({ verticalX: null, horizontalY: 502 });
+  });
+
+  it('both axes simultaneously: a vertical and a horizontal guide may both be shown at once', () => {
+    mount(<Harness initialPadlets={[
+      padlet('a', 0, 0, { width: 100, height: 100 }),
+      padlet('b', 500, 500, { width: 180, height: 180 }),
+    ]} zoom={1} />);
+
+    // a.left = 503 (3 units from b.left = 500), a.top = 503 (3 units from b.top = 500).
+    drag('a', { x: 503, y: 503 }, 1);
+    expect(latest!.api.alignmentGuides).toEqual({ verticalX: 500, horizontalY: 500 });
+  });
+
+  it('guide clears on mouseup', async () => {
+    installFakeSupabase();
+    mount(<Harness initialPadlets={[
+      padlet('a', 0, 0, { width: 100, height: 100 }),
+      padlet('b', 1000, 500, { width: 180, height: 180 }),
+    ]} zoom={1} />);
+
+    drag('a', { x: 0, y: 500 }, 1);
+    expect(latest!.api.alignmentGuides.horizontalY).not.toBeNull();
+
+    await release();
+    expect(latest!.api.alignmentGuides).toEqual({ verticalX: null, horizontalY: null });
+  });
+
+  it('Snap-to-Grid still determines the committed Y position exactly as before -- this patch only observes and displays', async () => {
+    const persisted = installFakeSupabase();
+    mount(<Harness initialPadlets={[
+      padlet('a', 0, 0, { width: 100, height: 100 }),
+      padlet('b', 1000, 500, { width: 180, height: 180 }),
+    ]} zoom={1} snapToGrid />);
+
+    // 503 is NOT a multiple of 20; Snap-to-Grid must still round it to 500
+    // regardless of a guide also being shown at that same value.
+    drag('a', { x: 0, y: 503 }, 1);
+    expect(latest!.api.alignmentGuides).toEqual({ verticalX: null, horizontalY: 500 });
+
+    await release();
+    expect(persisted).toEqual([{ id: 'a', position_x: 0, position_y: 500 }]);
   });
 });

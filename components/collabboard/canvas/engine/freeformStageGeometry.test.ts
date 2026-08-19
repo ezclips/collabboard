@@ -14,6 +14,7 @@ import {
   FREEFORM_WORLD_ORIGIN_OFFSET_Y,
   FREEFORM_WORLD_WIDTH_PX,
   FREEFORM_ALIGNMENT_GUIDE_TOLERANCE_SCREEN_PX,
+  detectHorizontalAlignmentGuide,
   detectVerticalAlignmentGuide,
   snapWorldValueToGrid,
 } from './freeformStageGeometry';
@@ -279,5 +280,59 @@ describe('detectVerticalAlignmentGuide', () => {
   it('FREEFORM_ALIGNMENT_GUIDE_TOLERANCE_SCREEN_PX is a small positive screen-pixel constant, not pre-divided by any zoom', () => {
     expect(FREEFORM_ALIGNMENT_GUIDE_TOLERANCE_SCREEN_PX).toBeGreaterThan(0);
     expect(FREEFORM_ALIGNMENT_GUIDE_TOLERANCE_SCREEN_PX).toBeLessThan(20);
+  });
+});
+
+// PATCH ALIGN-C: exact Y-axis counterpart of detectVerticalAlignmentGuide
+// above -- same tolerance semantics, same nearest-wins tie-break, same
+// same-type-only matching, mirrored test-for-test.
+describe('detectHorizontalAlignmentGuide', () => {
+  const dragged = { y: 500, height: 100 }; // top=500, center=550, bottom=600
+
+  it('matches a top edge within tolerance and returns the OTHER rect\'s edge value', () => {
+    const result = detectHorizontalAlignmentGuide(dragged, [{ y: 503, height: 180 }], 6);
+    expect(result).toBe(503);
+  });
+
+  it('matches a center within tolerance', () => {
+    // other center = 460 + 180/2 = 550, exact match against dragged center 550
+    const result = detectHorizontalAlignmentGuide(dragged, [{ y: 460, height: 180 }], 6);
+    expect(result).toBe(550);
+  });
+
+  it('matches a bottom edge within tolerance', () => {
+    // other: y=420, height=180 -> bottom=600, exact match against dragged bottom 600
+    const result = detectHorizontalAlignmentGuide(dragged, [{ y: 420, height: 180 }], 6);
+    expect(result).toBe(600);
+  });
+
+  it('returns null when nothing is within tolerance', () => {
+    const result = detectHorizontalAlignmentGuide(dragged, [{ y: 900, height: 50 }], 6);
+    expect(result).toBeNull();
+  });
+
+  it('returns null for an empty candidate list', () => {
+    expect(detectHorizontalAlignmentGuide(dragged, [], 6)).toBeNull();
+  });
+
+  it('picks the strictly nearest match across multiple candidates and multiple edge types', () => {
+    const result = detectHorizontalAlignmentGuide(dragged, [
+      { y: 505, height: 180 }, // top distance 5
+      { y: 498, height: 180 }, // top distance 2 -- nearest
+      { y: 900, height: 50 },  // far away, irrelevant
+    ], 6);
+    expect(result).toBe(498);
+  });
+
+  it('a value exactly AT the tolerance boundary counts as a match (<=, not <)', () => {
+    const result = detectHorizontalAlignmentGuide(dragged, [{ y: 506, height: 180 }], 6); // distance exactly 6
+    expect(result).toBe(506);
+  });
+
+  it('does not cross-match different edge types (dragged top is never compared to another center/bottom)', () => {
+    // other rect positioned so its CENTER lands exactly on dragged's TOP --
+    // must NOT count as a match, since only same-type pairs are compared.
+    const other = { y: 500 - 90, height: 180 }; // center = 500
+    expect(detectHorizontalAlignmentGuide(dragged, [other], 6)).toBeNull();
   });
 });

@@ -36,19 +36,26 @@ describe('PATCH ALIGN-B detection call site: single-post branch only, after snap
     'const handleCanvasMouseUp = async',
   );
 
-  it('detection reads previewX/dragSize.width (the SAME values Snap-to-Grid already produced) -- it does not recompute position', () => {
+  it('vertical detection reads previewX/dragSize.width (the SAME values Snap-to-Grid already produced) -- it does not recompute position', () => {
     const detectionCall = slice(singlePostBlock, 'const verticalGuideX = detectVerticalAlignmentGuide(', ');');
     expect(detectionCall).toContain('{ x: previewX, width: dragSize.width }');
   });
 
-  it('the detection call sits AFTER previewX/previewY are computed and BEFORE the setPadlets commit -- ordering guarantees Snap-to-Grid output is untouched', () => {
+  it('horizontal detection reads previewY/dragSize.height (the SAME values Snap-to-Grid already produced) -- it does not recompute position', () => {
+    const detectionCall = slice(singlePostBlock, 'const horizontalGuideY = detectHorizontalAlignmentGuide(', ');');
+    expect(detectionCall).toContain('{ y: previewY, height: dragSize.height }');
+  });
+
+  it('both detection calls sit AFTER previewX/previewY are computed and BEFORE the setPadlets commit -- ordering guarantees Snap-to-Grid output is untouched', () => {
     const previewIdx = singlePostBlock.indexOf('const previewX = effectiveSnapToGrid ? snapWorldValueToGrid(clampedX) : clampedX;');
-    const detectIdx = singlePostBlock.indexOf('const verticalGuideX = detectVerticalAlignmentGuide(');
-    const setGuidesIdx = singlePostBlock.indexOf('setAlignmentGuides({ verticalX: verticalGuideX, horizontalY: null });');
+    const verticalDetectIdx = singlePostBlock.indexOf('const verticalGuideX = detectVerticalAlignmentGuide(');
+    const horizontalDetectIdx = singlePostBlock.indexOf('const horizontalGuideY = detectHorizontalAlignmentGuide(');
+    const setGuidesIdx = singlePostBlock.indexOf('setAlignmentGuides({ verticalX: verticalGuideX, horizontalY: horizontalGuideY });');
     const setPadletsIdx = singlePostBlock.indexOf('setPadlets(prev => prev.map(p =>');
     expect(previewIdx).toBeGreaterThan(-1);
-    expect(detectIdx).toBeGreaterThan(previewIdx);
-    expect(setGuidesIdx).toBeGreaterThan(detectIdx);
+    expect(verticalDetectIdx).toBeGreaterThan(previewIdx);
+    expect(horizontalDetectIdx).toBeGreaterThan(verticalDetectIdx);
+    expect(setGuidesIdx).toBeGreaterThan(horizontalDetectIdx);
     expect(setPadletsIdx).toBeGreaterThan(setGuidesIdx);
   });
 
@@ -56,23 +63,26 @@ describe('PATCH ALIGN-B detection call site: single-post branch only, after snap
     expect(singlePostBlock).toContain("!p.metadata?.parentId && p.id !== draggingPadletId");
   });
 
-  it('the tolerance is converted from screen px through canvasZoom, guarded against zero/negative zoom', () => {
+  it('the tolerance is converted from screen px through canvasZoom, guarded against zero/negative zoom, and shared by both axes (computed once)', () => {
     expect(singlePostBlock).toContain(
       'FREEFORM_ALIGNMENT_GUIDE_TOLERANCE_SCREEN_PX / (canvasZoom > 0 ? canvasZoom : 1)',
     );
+    expect((singlePostBlock.match(/FREEFORM_ALIGNMENT_GUIDE_TOLERANCE_SCREEN_PX \/ \(canvasZoom > 0 \? canvasZoom : 1\)/g) ?? []).length).toBe(1);
   });
 
-  it('horizontalY is always written as null in this patch -- horizontal guides are ALIGN-C scope, not this one', () => {
-    expect(singlePostBlock).toContain('setAlignmentGuides({ verticalX: verticalGuideX, horizontalY: null });');
-    // Exactly one `horizontalY:` occurrence in this branch, and it is the
-    // null literal above -- there is no second, non-null write hiding
-    // elsewhere in the block.
+  it('both axes are computed independently from the same candidate list and committed together in one setAlignmentGuides call', () => {
+    expect(singlePostBlock).toContain('setAlignmentGuides({ verticalX: verticalGuideX, horizontalY: horizontalGuideY });');
+    // Exactly one `horizontalY:` occurrence in this branch -- the live value
+    // above -- there is no stray second write hiding elsewhere in the block.
     expect((singlePostBlock.match(/horizontalY:/g) ?? []).length).toBe(1);
   });
 
-  it('detectVerticalAlignmentGuide is imported from the shared geometry module, not reimplemented locally', () => {
+  it('detectVerticalAlignmentGuide and detectHorizontalAlignmentGuide are both imported from the shared geometry module, not reimplemented locally', () => {
     expect(code(hookSrc)).toContain(
       "detectVerticalAlignmentGuide,",
+    );
+    expect(code(hookSrc)).toContain(
+      "detectHorizontalAlignmentGuide,",
     );
     expect(code(hookSrc)).toMatch(/from '@\/components\/collabboard\/canvas\/engine\/freeformStageGeometry'/);
   });
@@ -86,6 +96,7 @@ describe('PATCH ALIGN-B scope: group drag, Snap-to-Grid, resize, Drawing untouch
       '\n      return;\n    }',
     );
     expect(groupBlock).not.toMatch(/detectVerticalAlignmentGuide/);
+    expect(groupBlock).not.toMatch(/detectHorizontalAlignmentGuide/);
     expect(groupBlock).not.toMatch(/setAlignmentGuides/);
   });
 
@@ -101,9 +112,11 @@ describe('PATCH ALIGN-B scope: group drag, Snap-to-Grid, resize, Drawing untouch
     expect(cleanupBlock).toContain('setAlignmentGuides({ verticalX: null, horizontalY: null });');
   });
 
-  it('no Drawing/Excalidraw or resize-handle reference exists in the detection function or its call site', () => {
-    const detectFn = slice(geometrySrc, 'export function detectVerticalAlignmentGuide(', '\n}');
-    expect(detectFn).not.toMatch(/[Ee]xcalidraw|DrawingLayout|PostResizeHandle|commitPostResize/);
+  it('no Drawing/Excalidraw or resize-handle reference exists in either detection function or the call site', () => {
+    const verticalFn = slice(geometrySrc, 'export function detectVerticalAlignmentGuide(', '\n}');
+    const horizontalFn = slice(geometrySrc, 'export function detectHorizontalAlignmentGuide(', '\n}');
+    expect(verticalFn).not.toMatch(/[Ee]xcalidraw|DrawingLayout|PostResizeHandle|commitPostResize/);
+    expect(horizontalFn).not.toMatch(/[Ee]xcalidraw|DrawingLayout|PostResizeHandle|commitPostResize/);
     const singlePostBlock = slice(
       code(hookSrc),
       'const draggedPadlet = padlets.find((p) => p.id === draggingPadletId);',
@@ -112,8 +125,10 @@ describe('PATCH ALIGN-B scope: group drag, Snap-to-Grid, resize, Drawing untouch
     expect(singlePostBlock).not.toMatch(/[Ee]xcalidraw|DrawingLayout/);
   });
 
-  it('detectVerticalAlignmentGuide itself has no persistence/network call -- pure geometry only', () => {
-    const detectFn = slice(geometrySrc, 'export function detectVerticalAlignmentGuide(', '\n}');
-    expect(detectFn).not.toMatch(/updatePostPosition|supabase|await |createPostsRepository/);
+  it('neither detection function has a persistence/network call -- pure geometry only', () => {
+    const verticalFn = slice(geometrySrc, 'export function detectVerticalAlignmentGuide(', '\n}');
+    const horizontalFn = slice(geometrySrc, 'export function detectHorizontalAlignmentGuide(', '\n}');
+    expect(verticalFn).not.toMatch(/updatePostPosition|supabase|await |createPostsRepository/);
+    expect(horizontalFn).not.toMatch(/updatePostPosition|supabase|await |createPostsRepository/);
   });
 });

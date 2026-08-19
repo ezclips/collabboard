@@ -10,6 +10,7 @@ import { attachPostToContainer } from '@/components/collabboard/canvas/hooks/att
 import {
   clampGroupDragDeltaToFreeformBounds,
   clampRectPositionToFreeformBounds,
+  detectHorizontalAlignmentGuide,
   detectVerticalAlignmentGuide,
   snapWorldValueToGrid,
   FREEFORM_ALIGNMENT_GUIDE_TOLERANCE_SCREEN_PX,
@@ -488,22 +489,33 @@ export function useCanvasInteractions({
     const previewX = effectiveSnapToGrid ? snapWorldValueToGrid(clampedX) : clampedX;
     const previewY = effectiveSnapToGrid ? snapWorldValueToGrid(clampedY) : clampedY;
 
-    // PATCH ALIGN-B: alignment guide detection OBSERVES the final preview
+    // PATCH ALIGN-B/C: alignment guide detection OBSERVES the final preview
     // position (previewX/Y -- already bounds-clamped and, if Snap-to-Grid is
     // on, already snapped) -- it never feeds back into previewX/Y, so
     // Snap-to-Grid's own output is byte-for-byte unaffected by this block.
     // Root posts only (mirrors CanvasClient's rootPadlets predicate exactly),
-    // dragged post excluded by id.
+    // dragged post excluded by id. Both axes are computed independently from
+    // the SAME candidate list and may both be non-null at once.
     const alignmentToleranceWorld = FREEFORM_ALIGNMENT_GUIDE_TOLERANCE_SCREEN_PX / (canvasZoom > 0 ? canvasZoom : 1);
     const alignmentCandidates = padlets
       .filter((p) => !p.metadata?.parentId && p.id !== draggingPadletId)
-      .map((p) => ({ x: p.position_x || 0, width: Number(p.width) || DEFAULT_DRAG_RECT_WIDTH }));
+      .map((p) => ({
+        x: p.position_x || 0,
+        width: Number(p.width) || DEFAULT_DRAG_RECT_WIDTH,
+        y: p.position_y || 0,
+        height: Number(p.height) || DEFAULT_DRAG_RECT_HEIGHT,
+      }));
     const verticalGuideX = detectVerticalAlignmentGuide(
       { x: previewX, width: dragSize.width },
       alignmentCandidates,
       alignmentToleranceWorld,
     );
-    setAlignmentGuides({ verticalX: verticalGuideX, horizontalY: null });
+    const horizontalGuideY = detectHorizontalAlignmentGuide(
+      { y: previewY, height: dragSize.height },
+      alignmentCandidates,
+      alignmentToleranceWorld,
+    );
+    setAlignmentGuides({ verticalX: verticalGuideX, horizontalY: horizontalGuideY });
 
     setPadlets(prev => prev.map(p =>
       p.id === draggingPadletId

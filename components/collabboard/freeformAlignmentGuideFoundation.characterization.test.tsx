@@ -55,9 +55,11 @@ describe('PATCH ALIGN-A guide state: transient, typed, no persistence', () => {
   // PATCH ALIGN-B superseded the two ALIGN-A-scope guards that used to sit
   // here ("nothing calls setAlignmentGuides with a real value" / "the marked
   // region is comment-only") -- ALIGN-B's whole job is to fill that exact
-  // spot with real detection. See freeformAlignmentGuideDetection.characterization.test.tsx
-  // for ALIGN-B's own contract tests (detection call site, ordering
-  // relative to snap math, horizontalY staying null, etc.).
+  // spot with real detection. PATCH ALIGN-C then added the horizontal
+  // counterpart in the same spot. See
+  // freeformAlignmentGuideDetection.characterization.test.tsx for both
+  // patches' own contract tests (detection call sites, ordering relative to
+  // snap math, both axes committed together, etc.).
 });
 
 describe('PATCH ALIGN-A render layer: world-scaled, pointer-events: none, Freeform-only', () => {
