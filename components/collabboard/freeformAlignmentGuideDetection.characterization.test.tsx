@@ -214,18 +214,39 @@ describe('PATCH ALIGN-E3 visual alignment rect: candidate-only, DOM-geometry-onl
     expect(fn).toContain('return measureLiveCandidateSize(padletId, canvasZoom);');
   });
 
-  it('only ai-component gets special-cased -- every other padlet type (including image) falls straight through to the unchanged E1 measurement', () => {
+  it('PATCH ALIGN-E4: both ai-component and image get special-cased -- every other padlet type falls straight through to the unchanged E1 measurement', () => {
     const fn = slice(code(hookSrc), 'function resolveVisualAlignmentCandidateSize(', '\n}');
-    expect(fn).toContain("padletType === 'ai-component'");
-    // No branch on 'image' anywhere in the resolver -- Image already
-    // measures tight through the plain [data-padlet-id] box (confirmed live).
-    expect(fn).not.toMatch(/padletType === 'image'/);
+    expect(fn).toContain("padletType === 'ai-component' || padletType === 'image'");
   });
 
-  it("the ai-component branch reaches the legacy AIComponentRenderer's own root node (two levels above .ai-component-renderer) rather than trusting the padded [data-padlet-id] ancestor", () => {
+  it("PATCH ALIGN-E4: the ai-component branch reaches the AI content root through the measurement-only [data-ai-content-root] marker rather than walking a fragile parent chain from .ai-component-renderer", () => {
     const fn = slice(code(hookSrc), 'function resolveVisualAlignmentCandidateSize(', '\n}');
-    expect(fn).toContain("outer?.querySelector<HTMLElement>('.ai-component-renderer')");
-    expect(fn).toContain('legacyContent?.parentElement?.parentElement');
+    expect(fn).toContain("outer.querySelector<HTMLElement>('[data-ai-content-root]')");
+    expect(fn).toContain("contentRoot?.querySelector<HTMLElement>('.ai-component-renderer')");
+  });
+
+  it('PATCH ALIGN-E4: the image branch measures the single <img> element itself, not the outer [data-padlet-id] box', () => {
+    const fn = slice(code(hookSrc), 'function resolveVisualAlignmentCandidateSize(', '\n}');
+    expect(fn).toContain("outer.querySelector<HTMLImageElement>('img')");
+    expect(fn).toContain('img ? img.getBoundingClientRect().bottom : null');
+  });
+
+  it('PATCH ALIGN-E4: structured AI content (content root present, no legacy .ai-component-renderer inside it) measures the content root\'s own rendered bottom', () => {
+    const fn = slice(code(hookSrc), 'function resolveVisualAlignmentCandidateSize(', '\n}');
+    expect(fn).toContain('contentBottom = contentRoot.getBoundingClientRect().bottom;');
+  });
+
+  it('PATCH ALIGN-E4: both branches derive height from the resolved content bottom relative to the outer box\'s own top -- never from the outer box\'s own height, which is what let the Reactions/Caption footer leak in before this patch', () => {
+    const fn = slice(code(hookSrc), 'function resolveVisualAlignmentCandidateSize(', '\n}');
+    expect(fn).toContain('const height = contentBottom - outerRect.top;');
+    expect(fn).not.toMatch(/const height = outerRect\.height/);
+  });
+
+  it('PATCH ALIGN-E4: AIComponentRenderer\'s own root and AIContentRenderer\'s structured wrapper both carry the data-ai-content-root measurement marker (no class/style change)', () => {
+    const legacyRendererSrc = code(read('components/collabboard/AIComponentRenderer.tsx'));
+    const contentRendererSrc = code(read('components/ai/AIContentRenderer.tsx'));
+    expect(legacyRendererSrc).toContain('data-ai-content-root="true"');
+    expect(contentRendererSrc).toContain('data-ai-content-root="true"');
   });
 
   it('the natural-height re-sum skips absolutely positioned children (loading/error overlays, the resize grip) -- only in-flow content counts as real layout space', () => {

@@ -174,6 +174,11 @@ function mountLegacyAiCandidateEl(
   outerRect: { left: number; top: number; width: number; height: number },
   naturalChildRects: Array<{ left: number; top: number; width: number; height: number }>,
   absoluteChildRects: Array<{ left: number; top: number; width: number; height: number }> = [],
+  // PATCH ALIGN-E4: a Reactions/Caption footer FreeformPadletCards renders
+  // AFTER the AI content root, as a sibling of `legacyOuter` (NOT one of its
+  // own children) -- reproducing the real DOM shape so tests can prove the
+  // footer no longer inflates the measured content bottom.
+  footerRects: Array<{ left: number; top: number; width: number; height: number }> = [],
 ) {
   const outer = document.createElement('div');
   outer.setAttribute('data-padlet-id', padletId);
@@ -181,6 +186,9 @@ function mountLegacyAiCandidateEl(
   stubRect(outer, outerRect);
 
   const legacyOuter = document.createElement('div');
+  // PATCH ALIGN-E4: measurement-only marker AIComponentRenderer's own root
+  // now carries in production (see AIComponentRenderer.tsx).
+  legacyOuter.setAttribute('data-ai-content-root', 'true');
   outer.appendChild(legacyOuter);
   stubRect(legacyOuter, outerRect); // the padded ancestor -- same box as outer
 
@@ -205,6 +213,76 @@ function mountLegacyAiCandidateEl(
     chrome.style.position = 'absolute';
     legacyOuter.appendChild(chrome);
     stubRect(chrome, rect);
+  }
+
+  for (const rect of footerRects) {
+    const footer = document.createElement('div');
+    outer.appendChild(footer);
+    stubRect(footer, rect);
+  }
+
+  liveCandidateEls.push(outer);
+  return outer;
+}
+
+/**
+ * PATCH ALIGN-E4: a bare stand-in for an Image candidate -- the outer
+ * `[data-padlet-id]` box, its single `<img>` (the real visible content), and
+ * an optional Reactions/Caption footer rendered AFTER the `<img>` as a
+ * sibling, exactly as FreeformPadletCards renders it.
+ */
+function mountImageCandidateEl(
+  padletId: string,
+  outerRect: { left: number; top: number; width: number; height: number },
+  imgRect: { left: number; top: number; width: number; height: number },
+  footerRects: Array<{ left: number; top: number; width: number; height: number }> = [],
+) {
+  const outer = document.createElement('div');
+  outer.setAttribute('data-padlet-id', padletId);
+  document.body.appendChild(outer);
+  stubRect(outer, outerRect);
+
+  const img = document.createElement('img');
+  outer.appendChild(img);
+  stubRect(img, imgRect);
+
+  for (const rect of footerRects) {
+    const footer = document.createElement('div');
+    outer.appendChild(footer);
+    stubRect(footer, rect);
+  }
+
+  liveCandidateEls.push(outer);
+  return outer;
+}
+
+/**
+ * PATCH ALIGN-E4: a bare stand-in for a STRUCTURED ai-component candidate
+ * (no legacy `.ai-component-renderer` involved) -- the outer
+ * `[data-padlet-id]` box, its `[data-ai-content-root]` content wrapper (the
+ * real visible content), and an optional Reactions/Caption footer rendered
+ * AFTER it as a sibling, exactly as FreeformPadletCards renders it.
+ */
+function mountStructuredAiCandidateEl(
+  padletId: string,
+  outerRect: { left: number; top: number; width: number; height: number },
+  contentRect: { left: number; top: number; width: number; height: number },
+  footerRects: Array<{ left: number; top: number; width: number; height: number }> = [],
+) {
+  const outer = document.createElement('div');
+  outer.setAttribute('data-padlet-id', padletId);
+  document.body.appendChild(outer);
+  stubRect(outer, outerRect);
+
+  const contentRoot = document.createElement('div');
+  contentRoot.setAttribute('data-ai-content-root', 'true');
+  outer.appendChild(contentRoot);
+  stubRect(contentRoot, contentRect);
+
+  for (const rect of footerRects) {
+    const footer = document.createElement('div');
+    outer.appendChild(footer);
+    stubRect(footer, rect);
   }
 
   liveCandidateEls.push(outer);
@@ -770,7 +848,7 @@ describe('PATCH ALIGN-E3: visual alignment rect excludes the legacy AI renderer\
     expect(latest!.api.alignmentGuides).toEqual({ verticalX: null, horizontalY: 216 });
   });
 
-  it('image candidates are never routed through the ai-component branch -- explicit type: \'image\' still measures the plain outer box exactly as ALIGN-E1 left it', () => {
+  it('an Image candidate with no mounted <img> (e.g. off-screen/virtualized) falls back to the plain outer box, same as before PATCH ALIGN-E4', () => {
     mount(<Harness initialPadlets={[
       padlet('a', 0, 0, { width: 100, height: 100 }),
       padlet('car', 900, 0, { width: 248, height: 527, type: 'image' }), // stale stored height
@@ -796,6 +874,66 @@ describe('PATCH ALIGN-E3: visual alignment rect excludes the legacy AI renderer\
     // value as the zoom-1 test above, proving the correction happens BEFORE
     // the existing zoom division, not after.
     drag('a', { x: 0, y: 87 }, 0.5);
+    expect(latest!.api.alignmentGuides).toEqual({ verticalX: null, horizontalY: 90 });
+  });
+});
+
+describe("PATCH ALIGN-E4: visual alignment rect targets Image/AI's own visible content, excluding the Reactions/Caption footer below it", () => {
+  it('an Image candidate with a real Reactions+Caption footer below it is measured at the <img>\'s own bottom, not the taller footer-inclusive outer box', () => {
+    mount(<Harness initialPadlets={[
+      padlet('a', 0, 0, { width: 100, height: 100 }),
+      padlet('img1', 900, 0, { width: 200, height: 300, type: 'image' }),
+    ]} zoom={1} />);
+    mountImageCandidateEl(
+      'img1',
+      { left: toClientX(900, 1), top: toClientY(0, 1), width: 200, height: 300 }, // outer includes the footer
+      { left: toClientX(900, 1), top: toClientY(0, 1), width: 200, height: 200 }, // the <img> itself
+      [{ left: toClientX(900, 1), top: toClientY(200, 1), width: 200, height: 100 }], // Reactions+Caption footer
+    );
+
+    // a.top = 197, 3 units from the <img>'s own bottom (200). If the taller
+    // footer-inclusive outer box (300) leaked through, this would land
+    // outside the 6px tolerance and no guide would appear at all.
+    drag('a', { x: 0, y: 197 }, 1);
+    expect(latest!.api.alignmentGuides).toEqual({ verticalX: null, horizontalY: 200 });
+  });
+
+  it('structured AI content (no .ai-component-renderer) also excludes its own Reactions/Caption footer, via [data-ai-content-root]', () => {
+    mount(<Harness initialPadlets={[
+      padlet('a', 0, 0, { width: 100, height: 100 }),
+      padlet('ai3', 900, 0, { width: 200, height: 260, type: 'ai-component' }),
+    ]} zoom={1} />);
+    mountStructuredAiCandidateEl(
+      'ai3',
+      { left: toClientX(900, 1), top: toClientY(0, 1), width: 200, height: 260 }, // outer includes the footer
+      { left: toClientX(900, 1), top: toClientY(0, 1), width: 200, height: 216 }, // the content root itself
+      [{ left: toClientX(900, 1), top: toClientY(216, 1), width: 200, height: 44 }], // Reactions+Caption footer
+    );
+
+    drag('a', { x: 0, y: 213 }, 1); // 3 units from the content root's own bottom (216)
+    expect(latest!.api.alignmentGuides).toEqual({ verticalX: null, horizontalY: 216 });
+  });
+
+  it('a legacy ai-component candidate with a Reactions/Caption footer AFTER the padded renderer still measures at its natural content bottom, unaffected by the footer', () => {
+    mount(<Harness initialPadlets={[
+      padlet('a', 0, 0, { width: 100, height: 100 }),
+      padlet('ai4', 900, 0, { width: 200, height: 330, type: 'ai-component' }),
+    ]} zoom={1} />);
+    mountLegacyAiCandidateEl(
+      'ai4',
+      { left: toClientX(900, 1), top: toClientY(0, 1), width: 200, height: 330 }, // padded outer + footer
+      [
+        { left: toClientX(900, 1), top: toClientY(0, 1), width: 200, height: 70 }, // viewport/content
+        { left: toClientX(900, 1), top: toClientY(70, 1), width: 200, height: 20 }, // attribution row
+      ],
+      [{ left: toClientX(900, 1), top: toClientY(260, 1), width: 20, height: 20 }], // resize grip (absolute)
+      [{ left: toClientX(900, 1), top: toClientY(280, 1), width: 200, height: 50 }], // Reactions+Caption footer
+    );
+
+    // Same natural bottom (90) as PATCH ALIGN-E3's equivalent test -- proves
+    // the footer, appended AFTER the content root this time, contributes
+    // nothing to the measured height.
+    drag('a', { x: 0, y: 87 }, 1);
     expect(latest!.api.alignmentGuides).toEqual({ verticalX: null, horizontalY: 90 });
   });
 });

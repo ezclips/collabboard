@@ -152,6 +152,11 @@ export default function AIComponentRenderer({
       )}
       style={{ minHeight: Math.max(minHeight, 150) }}
       data-padlet-id={padletId}
+      // PATCH ALIGN-E4: measurement-only marker (no class/style change) so
+      // the Freeform alignment-guide resolver can find this node -- the
+      // legacy AI content's true root -- without walking a fragile
+      // parent-chain from the internal `.ai-component-renderer` node.
+      data-ai-content-root="true"
     >
       {isLoading && (
         <div className="absolute inset-0 z-10 animate-pulse bg-gradient-to-br from-neutral-100 via-neutral-50 to-neutral-100">

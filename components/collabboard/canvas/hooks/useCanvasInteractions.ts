@@ -70,45 +70,60 @@ function measureLiveCandidateSize(padletId: string, canvasZoom: number): DragRec
 
 /**
  * PATCH ALIGN-E3: the alignment-guide "visual rect" for a candidate post.
- * Live verification against the real board confirmed the plain
- * `[data-padlet-id]` box (measureLiveCandidateSize, ALIGN-E1) already hugs
- * Image posts exactly -- FreeformImageResizeBox's card is auto-height with
- * no unaccounted chrome, in every case checked (fullView, cropped, with a
- * real caption, with reactions). The one confirmed exception is an
- * ai-component post rendered through the legacy `AIComponentRenderer`
- * path (`.ai-component-renderer`): that component's own outer node applies
- * a fixed `minHeight` (280px by default) regardless of the actual generated
- * content, padding the card with blank space below a shorter response.
- * Newer structured AI content never renders `.ai-component-renderer` and
- * falls straight through, already tight (also verified live).
+ * The one confirmed exception to the plain `[data-padlet-id]` box
+ * (measureLiveCandidateSize, ALIGN-E1) was an ai-component post rendered
+ * through the legacy `AIComponentRenderer` path (`.ai-component-renderer`):
+ * that component's own outer node applies a fixed `minHeight` (280px by
+ * default) regardless of the actual generated content, padding the card
+ * with blank space below a shorter response.
  *
- * Rather than trusting that padded ancestor, this walks to the renderer's
- * own root node (two levels above `.ai-component-renderer`: its content
- * viewport, then the renderer's outer div) and re-sums that node's IN-FLOW
- * children only -- skipping absolutely positioned chrome (loading/error
- * overlays, the resize grip), which contribute nothing to real layout
- * height. The outer `[data-padlet-id]` box's own height is then corrected
- * by swapping the padded ancestor's measured height for that natural sum;
- * width is untouched since only height is ever artificially floored.
+ * PATCH ALIGN-E4: generalizes the same "measure the real content, not a
+ * padded/chrome-inclusive box" idea to Image posts, and closes a gap
+ * ALIGN-E3 left open for ai-component -- FreeformPadletCards renders a
+ * Reactions row and a Caption footer BELOW the AI/Image content itself
+ * (visible once a candidate actually has reactions or a real caption);
+ * ALIGN-E3 only corrected the legacy renderer's own padded minHeight, so a
+ * candidate with real reactions/a caption still measured past them. Both
+ * branches below now resolve a dedicated "visible content" node instead of
+ * the outer box: `img` for Image (exactly one renders per Image post -- the
+ * media itself), and `[data-ai-content-root]` for AI, a measurement-only
+ * attribute added to AIComponentRenderer's own root node and
+ * AIContentRenderer's structured-content wrapper (no class/style change, so
+ * neither post's actual layout moves). When that AI content root also
+ * contains the legacy `.ai-component-renderer` node, ALIGN-E3's natural-
+ * height re-sum (in-flow children only -- skipping absolutely positioned
+ * chrome like the loading/error overlays and the resize grip) still applies
+ * underneath it. Horizontal geometry (x/width) is never touched by either
+ * branch -- only the vertical bottom edge candidates align to moves.
  */
 function resolveVisualAlignmentCandidateSize(
   padletId: string,
   padletType: string,
   canvasZoom: number,
 ): DragRectSize | null {
-  if (padletType === 'ai-component' && typeof document !== 'undefined') {
+  if (typeof document !== 'undefined' && (padletType === 'ai-component' || padletType === 'image')) {
     const outer = document.querySelector<HTMLElement>(`[data-padlet-id="${padletId}"]`);
-    const legacyContent = outer?.querySelector<HTMLElement>('.ai-component-renderer') ?? null;
-    const legacyOuter = legacyContent?.parentElement?.parentElement ?? null;
-    if (outer && legacyOuter) {
+    let contentBottom: number | null = null;
+    if (outer && padletType === 'image') {
+      const img = outer.querySelector<HTMLImageElement>('img');
+      contentBottom = img ? img.getBoundingClientRect().bottom : null;
+    } else if (outer && padletType === 'ai-component') {
+      const contentRoot = outer.querySelector<HTMLElement>('[data-ai-content-root]');
+      const legacyContent = contentRoot?.querySelector<HTMLElement>('.ai-component-renderer') ?? null;
+      if (contentRoot && legacyContent) {
+        const naturalLegacyHeight = Array.from(contentRoot.children).reduce((sum, child) => {
+          if (getComputedStyle(child).position === 'absolute') return sum;
+          return sum + child.getBoundingClientRect().height;
+        }, 0);
+        contentBottom = contentRoot.getBoundingClientRect().top + naturalLegacyHeight;
+      } else if (contentRoot) {
+        contentBottom = contentRoot.getBoundingClientRect().bottom;
+      }
+    }
+    if (outer && contentBottom !== null) {
       const outerRect = outer.getBoundingClientRect();
-      const legacyOuterRect = legacyOuter.getBoundingClientRect();
-      const naturalLegacyHeight = Array.from(legacyOuter.children).reduce((sum, child) => {
-        if (getComputedStyle(child).position === 'absolute') return sum;
-        return sum + child.getBoundingClientRect().height;
-      }, 0);
       const width = outerRect.width;
-      const height = outerRect.height - legacyOuterRect.height + naturalLegacyHeight;
+      const height = contentBottom - outerRect.top;
       if (width > 0 && height > 0) {
         const zoom = canvasZoom > 0 ? canvasZoom : 1;
         return { width: width / zoom, height: height / zoom };
