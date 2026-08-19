@@ -1865,24 +1865,43 @@ export default function DrawingLayout({
       const sidebarRect = presentationSidebarRef.current?.getBoundingClientRect() ?? null;
       const visibleCanvasRight = sidebarRect ? Math.min(Math.max(sidebarRect.left, viewportRect?.left ?? 0), viewportRight) : null;
       const nextVisibleCanvasRightInsetPx = visibleCanvasRight === null ? null : Math.max(0, viewportRight - visibleCanvasRight);
-      // Native Excalidraw chrome (main-menu button, and the selected-shape
-      // properties Island when a shape is selected) is anchored top-left and
-      // shares this one Stack.Col wrapper regardless of which of the two is
-      // showing, so its bounding rect alone is enough to keep the CanvasLine
-      // layer's containment in sync with either state.
+      // Native Excalidraw top-left chrome (just the main-menu hamburger
+      // button) lives in this wrapper, but its own bounding box does NOT
+      // include the selected-shape/active-tool properties panel -- that
+      // panel renders as a separately-positioned Island nested under
+      // .selected-shape-actions (a 0x0 flex wrapper) and only exists in the
+      // DOM while a shape is selected or a drawing tool with its own
+      // defaults panel is active. Measuring only the hamburger wrapper is
+      // why the notch previously stayed a fixed ~108x76 even when the full
+      // Stroke/Background/Stroke width/Stroke style/Sloppiness/Edges/
+      // Opacity/Layers/Actions panel (measured ~200x665px live) was open
+      // and visibly wider/taller than that.
       const nativeLeftPanelEl = drawingRoot?.querySelector<HTMLElement>('.App-menu_top__left');
       const nativeLeftPanelRect = nativeLeftPanelEl?.getBoundingClientRect() ?? null;
-      const nextVisibleCanvasLeftInsetPx = nativeLeftPanelRect
-        ? Math.max(0, Math.min(nativeLeftPanelRect.right, viewportRight) - viewportLeft)
+      const nativePropertiesPanelEl = drawingRoot?.querySelector<HTMLElement>('.selected-shape-actions .Island');
+      const nativePropertiesPanelRect = nativePropertiesPanelEl?.getBoundingClientRect() ?? null;
+      // The properties panel resizes in place (its height varies with which
+      // shape/tool's controls are showing), so keep it under the same
+      // ResizeObserver instance already driving this effect -- observing an
+      // already-observed target is a no-op, so this is safe to call on
+      // every tick without accumulating duplicate observations.
+      if (nativePropertiesPanelEl) {
+        resizeObserver?.observe(nativePropertiesPanelEl);
+      }
+      const nativeNotchRect = (nativePropertiesPanelRect && nativePropertiesPanelRect.width > 0 && nativePropertiesPanelRect.height > 0)
+        ? nativePropertiesPanelRect
+        : nativeLeftPanelRect;
+      const nextVisibleCanvasLeftInsetPx = nativeNotchRect
+        ? Math.max(0, Math.min(nativeNotchRect.right, viewportRight) - viewportLeft)
         : 0;
-      // The native menu/properties Island only occupies a top-left CORNER, not
-      // the full canvas height -- pair the width above with its own height so
-      // the clip can carve out just that corner (a notch) instead of cutting a
-      // permanent full-height strip down the whole left edge.
+      // The native notch only occupies a top-left CORNER, not the full
+      // canvas height -- pair the width above with its own height so the
+      // clip can carve out just that corner instead of cutting a permanent
+      // full-height strip down the whole left edge.
       const viewportTop = viewportRect?.top ?? 0;
       const viewportBottom = viewportRect?.bottom ?? window.innerHeight;
-      const nextNativeUiTopInsetPx = nativeLeftPanelRect
-        ? Math.max(0, Math.min(nativeLeftPanelRect.bottom, viewportBottom) - viewportTop)
+      const nextNativeUiTopInsetPx = nativeNotchRect
+        ? Math.max(0, Math.min(nativeNotchRect.bottom, viewportBottom) - viewportTop)
         : 0;
       if (viewportEl) {
         if (nextVisibleCanvasRightInsetPx === null) {

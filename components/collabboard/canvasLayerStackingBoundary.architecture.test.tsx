@@ -226,8 +226,8 @@ describe('Drawing PATCH-117 clip-path containment freeze [matrix 24; negative co
     expect(drawingLayoutSrc).toContain("cleanupViewportEl?.style.removeProperty('--drawing-visible-canvas-left-inset');");
   });
 
-  it('PATCH DRAWING-LINE-CLIP-R2: DrawingLayout.tsx also publishes --drawing-native-ui-top-inset, so the left containment is a top-left NOTCH (bounded by the menu Stack.Col\'s own height) rather than a permanent full-height strip', () => {
-    expect(drawingLayoutSrc).toContain('const nextNativeUiTopInsetPx = nativeLeftPanelRect');
+  it('PATCH DRAWING-LINE-CLIP-R2: DrawingLayout.tsx also publishes --drawing-native-ui-top-inset, so the left containment is a top-left NOTCH (bounded by the panel\'s own height) rather than a permanent full-height strip', () => {
+    expect(drawingLayoutSrc).toContain('const nextNativeUiTopInsetPx = nativeNotchRect');
     expect(drawingLayoutSrc).toContain("viewportEl.style.setProperty('--drawing-native-ui-top-inset', `${nextNativeUiTopInsetPx}px`);");
     expect(drawingLayoutSrc).toContain("viewportEl.style.removeProperty('--drawing-native-ui-top-inset');");
     expect(drawingLayoutSrc).toContain("cleanupViewportEl?.style.removeProperty('--drawing-native-ui-top-inset');");
@@ -276,6 +276,50 @@ describe('PATCH DRAWING-LINE-GESTURE-R1: the drawing-preview effect depends only
 
   it('the OTHER window-listener effect (point/line dragging of EXISTING lines) is untouched -- this patch\'s scope is the new-line drawing-preview effect only, per its own diagnosis', () => {
     expect(simpleLineRendererSrc).toContain("}, [isDragging, onUpdateLine, onSaveLine, getMousePos, drawingViewport]);");
+  });
+});
+
+describe('PATCH DRAWING-LINE-CLIP-R3: the left/top notch is derived from the ACTUAL native properties panel, not just the hamburger-button wrapper', () => {
+  it('A/D: measures .selected-shape-actions .Island (the real panel), falling back to the hamburger-only .App-menu_top__left rect when no panel is rendered', () => {
+    expect(drawingLayoutSrc).toContain("drawingRoot?.querySelector<HTMLElement>('.selected-shape-actions .Island');");
+    expect(drawingLayoutSrc).toContain('const nativeNotchRect = (nativePropertiesPanelRect && nativePropertiesPanelRect.width > 0 && nativePropertiesPanelRect.height > 0)');
+    expect(drawingLayoutSrc).toContain('? nativePropertiesPanelRect');
+    expect(drawingLayoutSrc).toContain(': nativeLeftPanelRect;');
+  });
+
+  it('B/C/E: both left-inset and top-inset are computed from the SAME nativeNotchRect, so an open panel notch always extends to its own right+bottom edges and a closed panel collapses back to the small hamburger notch', () => {
+    expect(drawingLayoutSrc).toContain('const nextVisibleCanvasLeftInsetPx = nativeNotchRect');
+    expect(drawingLayoutSrc).toContain('Math.min(nativeNotchRect.right, viewportRight) - viewportLeft');
+    expect(drawingLayoutSrc).toContain('const nextNativeUiTopInsetPx = nativeNotchRect');
+    expect(drawingLayoutSrc).toContain('Math.min(nativeNotchRect.bottom, viewportBottom) - viewportTop');
+  });
+
+  it('F: this patch did not touch the R2 containment architecture in SimpleLineRenderer.tsx -- the inner clipped <g> and its polygon() formula are byte-identical', () => {
+    expect(simpleLineRendererSrc).toContain("? 'polygon('");
+    expect(simpleLineRendererSrc).toContain("'var(--drawing-visible-canvas-left-inset, 0px) 0, '");
+    expect(simpleLineRendererSrc).toContain("'0 var(--drawing-native-ui-top-inset, 0px), '");
+    expect(simpleLineRendererSrc).toContain("style={boundaryClipPath ? { clipPath: boundaryClipPath } : undefined}");
+  });
+
+  it('G: DRAWING-LINE-GESTURE-R1\'s listener lifecycle is untouched -- this patch only edited DrawingLayout.tsx, not the gesture-active effect in SimpleLineRenderer.tsx', () => {
+    expect(simpleLineRendererSrc).toContain('const isDrawingGestureActive = !!drawing;');
+    expect(simpleLineRendererSrc).toContain('}, [isDrawingGestureActive]);');
+  });
+
+  it('reuses the existing ResizeObserver instance to track the panel\'s own resizes (no polling, no second observer instance introduced)', () => {
+    expect(drawingLayoutSrc).toContain('resizeObserver?.observe(nativePropertiesPanelEl);');
+    // Pinned count of observer *instantiations* in the whole file (unrelated
+    // to this effect's own MutationObserver/ResizeObserver pair -- e.g. the
+    // minimap-scene hook has its own). This patch adds an extra .observe()
+    // call on the SAME already-constructed resizeObserver instance, so this
+    // count must stay exactly what it was on the pre-R3 baseline.
+    const observerCount = (drawingLayoutSrc.match(/new MutationObserver\(/g) ?? []).length
+      + (drawingLayoutSrc.match(/new ResizeObserver\(/g) ?? []).length;
+    expect(observerCount).toBe(3);
+  });
+
+  it('the boundary effect\'s dependency array is still unchanged by this geometry-only fix', () => {
+    expect(drawingLayoutSrc).toContain('}, [rightClusterAnchorEl, viewportContainerRef, activeTool, key]);');
   });
 });
 
