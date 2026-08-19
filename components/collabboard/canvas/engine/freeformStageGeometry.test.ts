@@ -14,10 +14,13 @@ import {
   FREEFORM_WORLD_ORIGIN_OFFSET_Y,
   FREEFORM_WORLD_WIDTH_PX,
   FREEFORM_ALIGNMENT_GUIDE_TOLERANCE_SCREEN_PX,
+  FREEFORM_SPACING_GUIDE_MAX_DISTANCE_SCREEN_PX,
   detectHorizontalAlignmentGuide,
   detectHorizontalAlignmentMatch,
+  detectHorizontalSpacingGap,
   detectVerticalAlignmentGuide,
   detectVerticalAlignmentMatch,
+  detectVerticalSpacingGap,
   snapWorldValueToGrid,
 } from './freeformStageGeometry';
 
@@ -494,5 +497,104 @@ describe('detectHorizontalAlignmentMatch', () => {
   it('detectHorizontalAlignmentGuide (the plain-number API) stays byte-identical to detectHorizontalAlignmentMatch(...)?.value', () => {
     const others = [{ y: 603, height: 180 }, { y: 505, height: 180 }];
     expect(detectHorizontalAlignmentGuide(dragged, others, 6)).toBe(detectHorizontalAlignmentMatch(dragged, others, 6)?.value);
+  });
+});
+
+describe('PATCH SPACE-P1: FREEFORM_SPACING_GUIDE_MAX_DISTANCE_SCREEN_PX', () => {
+  it('is 160', () => {
+    expect(FREEFORM_SPACING_GUIDE_MAX_DISTANCE_SCREEN_PX).toBe(160);
+  });
+});
+
+describe('PATCH SPACE-P1: detectHorizontalSpacingGap (X-axis, side-by-side)', () => {
+  const dragged = { x: 0, y: 0, width: 100, height: 100 }; // right=100, top=0, bottom=100
+
+  it('a neighbour to the RIGHT with sufficient Y overlap resolves the gap between the facing edges', () => {
+    const result = detectHorizontalSpacingGap(dragged, [{ x: 150, y: 20, width: 80, height: 60 }], 1000);
+    // overlapTop=max(0,20)=20, overlapBottom=min(100,80)=80 -> crossCenter 50
+    expect(result).toEqual({ gapStart: 100, gapEnd: 150, crossCenter: 50, distance: 50 });
+  });
+
+  it('a neighbour to the LEFT resolves the same way, mirrored', () => {
+    const draggedRight = { x: 200, y: 0, width: 100, height: 100 }; // left=200
+    const result = detectHorizontalSpacingGap(draggedRight, [{ x: 50, y: 0, width: 100, height: 100 }], 1000);
+    expect(result).toEqual({ gapStart: 150, gapEnd: 200, crossCenter: 50, distance: 50 });
+  });
+
+  it('overlapping on X (not side-by-side) never qualifies, regardless of Y', () => {
+    expect(detectHorizontalSpacingGap(dragged, [{ x: 50, y: 0, width: 100, height: 100 }], 1000)).toBeNull();
+  });
+
+  it('touching (gap exactly 0) does not qualify -- this is a positive-gap measurement only', () => {
+    expect(detectHorizontalSpacingGap(dragged, [{ x: 100, y: 0, width: 100, height: 100 }], 1000)).toBeNull();
+  });
+
+  it('a gap beyond maxDistanceWorld is excluded', () => {
+    expect(detectHorizontalSpacingGap(dragged, [{ x: 250, y: 0, width: 100, height: 100 }], 100)).toBeNull();
+    expect(detectHorizontalSpacingGap(dragged, [{ x: 200, y: 0, width: 100, height: 100 }], 100)).not.toBeNull();
+  });
+
+  it('a corner-only sliver overlap on the perpendicular (Y) axis is excluded', () => {
+    // overlap = 5, shorter rect height = 100 -> ratio 0.05, below the 0.25 floor
+    expect(detectHorizontalSpacingGap(dragged, [{ x: 150, y: 95, width: 80, height: 100 }], 1000)).toBeNull();
+  });
+
+  it('no Y overlap at all is excluded', () => {
+    expect(detectHorizontalSpacingGap(dragged, [{ x: 150, y: 200, width: 80, height: 60 }], 1000)).toBeNull();
+  });
+
+  it('the nearest qualifying neighbour wins among several candidates', () => {
+    const result = detectHorizontalSpacingGap(dragged, [
+      { x: 300, y: 0, width: 50, height: 100 }, // gap 200
+      { x: 130, y: 0, width: 50, height: 100 }, // gap 30 -- nearest
+      { x: 180, y: 0, width: 50, height: 100 }, // gap 80
+    ], 1000);
+    expect(result).toEqual({ gapStart: 100, gapEnd: 130, crossCenter: 50, distance: 30 });
+  });
+
+  it('returns null when no candidates are given', () => {
+    expect(detectHorizontalSpacingGap(dragged, [], 1000)).toBeNull();
+  });
+});
+
+describe('PATCH SPACE-P1: detectVerticalSpacingGap (Y-axis, stacked)', () => {
+  const dragged = { x: 0, y: 0, width: 100, height: 100 }; // bottom=100, left=0, right=100
+
+  it('a neighbour BELOW with sufficient X overlap resolves the gap between the facing edges', () => {
+    const result = detectVerticalSpacingGap(dragged, [{ x: 20, y: 150, width: 60, height: 80 }], 1000);
+    // overlapLeft=max(0,20)=20, overlapRight=min(100,80)=80 -> crossCenter 50
+    expect(result).toEqual({ gapStart: 100, gapEnd: 150, crossCenter: 50, distance: 50 });
+  });
+
+  it('a neighbour ABOVE resolves the same way, mirrored', () => {
+    const draggedBelow = { x: 0, y: 200, width: 100, height: 100 }; // top=200
+    const result = detectVerticalSpacingGap(draggedBelow, [{ x: 0, y: 50, width: 100, height: 100 }], 1000);
+    expect(result).toEqual({ gapStart: 150, gapEnd: 200, crossCenter: 50, distance: 50 });
+  });
+
+  it('overlapping on Y (not stacked) never qualifies, regardless of X', () => {
+    expect(detectVerticalSpacingGap(dragged, [{ x: 0, y: 50, width: 100, height: 100 }], 1000)).toBeNull();
+  });
+
+  it('touching (gap exactly 0) does not qualify', () => {
+    expect(detectVerticalSpacingGap(dragged, [{ x: 0, y: 100, width: 100, height: 100 }], 1000)).toBeNull();
+  });
+
+  it('a gap beyond maxDistanceWorld is excluded', () => {
+    expect(detectVerticalSpacingGap(dragged, [{ x: 0, y: 250, width: 100, height: 100 }], 100)).toBeNull();
+    expect(detectVerticalSpacingGap(dragged, [{ x: 0, y: 200, width: 100, height: 100 }], 100)).not.toBeNull();
+  });
+
+  it('a corner-only sliver overlap on the perpendicular (X) axis is excluded', () => {
+    expect(detectVerticalSpacingGap(dragged, [{ x: 95, y: 150, width: 100, height: 80 }], 1000)).toBeNull();
+  });
+
+  it('the nearest qualifying neighbour wins among several candidates', () => {
+    const result = detectVerticalSpacingGap(dragged, [
+      { x: 0, y: 300, width: 100, height: 50 }, // gap 200
+      { x: 0, y: 130, width: 100, height: 50 }, // gap 30 -- nearest
+      { x: 0, y: 180, width: 100, height: 50 }, // gap 80
+    ], 1000);
+    expect(result).toEqual({ gapStart: 100, gapEnd: 130, crossCenter: 50, distance: 30 });
   });
 });

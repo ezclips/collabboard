@@ -329,3 +329,168 @@ export function detectHorizontalAlignmentGuide(
 ): number | null {
   return detectHorizontalAlignmentMatch(dragged, others, toleranceWorld)?.value ?? null;
 }
+
+/**
+ * PATCH SPACE-P1: maximum screen-pixel distance a spacing-gap bracket may
+ * still show at, before the neighbour is considered too far away to be
+ * useful layout context. Screen-constant (not world-constant) for the same
+ * reason FREEFORM_ALIGNMENT_GUIDE_TOLERANCE_SCREEN_PX above is -- callers
+ * convert through canvasZoom to get the world-space cap this file's
+ * detectors actually compare against.
+ */
+export const FREEFORM_SPACING_GUIDE_MAX_DISTANCE_SCREEN_PX = 160;
+
+/**
+ * PATCH SPACE-P1: how much of the shorter rect's own cross-axis span two
+ * posts must overlap by, for their gap to count as "side by side"/"stacked"
+ * rather than a glancing corner-only overlap that would produce a
+ * misleadingly tall/wide bracket. A documented, deliberately simple
+ * threshold for this prototype -- not derived from any existing constant.
+ */
+const FREEFORM_SPACING_GUIDE_MIN_CROSS_OVERLAP_RATIO = 0.25;
+
+export interface FreeformSpacingCandidateRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * PATCH SPACE-P1: a resolved spacing-gap bracket target -- WHERE the two
+ * facing edges are (gapStart/gapEnd, along the gap's own axis) and WHERE the
+ * bracket sits on the perpendicular axis (crossCenter, the overlap band's
+ * own midpoint), plus the resolved distance for convenience.
+ */
+export interface FreeformSpacingGapMatch {
+  gapStart: number;
+  gapEnd: number;
+  crossCenter: number;
+  distance: number;
+}
+
+/**
+ * PATCH SPACE-P1: horizontal (X-axis, side-by-side) spacing-gap detection --
+ * "horizontal" here matches the spec's own bracket vocabulary (a
+ * horizontally-drawn bracket measuring the open space between a left/right
+ * pair of posts, `[ A ]  <--20-->  [ B ]`), which is the OPPOSITE axis
+ * relationship from this file's existing "horizontal guide LINE"
+ * (detectHorizontalAlignmentMatch, a Y-axis top/center/bottom match). Do not
+ * confuse the two.
+ *
+ * A candidate qualifies only when:
+ *  - the two rects do NOT overlap on X (the measured axis) -- this alone
+ *    makes gapStart < gapEnd, i.e. a well-defined, strictly positive gap;
+ *  - they overlap "sufficiently" on Y (the perpendicular axis) -- at least
+ *    FREEFORM_SPACING_GUIDE_MIN_CROSS_OVERLAP_RATIO of the SHORTER rect's
+ *    own height, so a corner-only sliver overlap is excluded;
+ *  - the gap itself is within `maxDistanceWorld` (already converted from
+ *    FREEFORM_SPACING_GUIDE_MAX_DISTANCE_SCREEN_PX through canvasZoom by the
+ *    caller, same convention as the alignment tolerance above).
+ * Nearest (smallest gap) wins among all qualifying candidates -- callers are
+ * responsible for excluding the dragged post itself and any non-root post
+ * from `others`, same as the alignment detectors above.
+ */
+export function detectHorizontalSpacingGap(
+  dragged: FreeformSpacingCandidateRect,
+  others: FreeformSpacingCandidateRect[],
+  maxDistanceWorld: number,
+): FreeformSpacingGapMatch | null {
+  const draggedLeft = dragged.x;
+  const draggedRight = dragged.x + dragged.width;
+  const draggedTop = dragged.y;
+  const draggedBottom = dragged.y + dragged.height;
+
+  let best: FreeformSpacingGapMatch | null = null;
+
+  for (const other of others) {
+    const otherLeft = other.x;
+    const otherRight = other.x + other.width;
+
+    let gapStart: number;
+    let gapEnd: number;
+    if (draggedRight <= otherLeft) {
+      gapStart = draggedRight;
+      gapEnd = otherLeft;
+    } else if (otherRight <= draggedLeft) {
+      gapStart = otherRight;
+      gapEnd = draggedLeft;
+    } else {
+      continue; // overlapping on X -- not a side-by-side pair
+    }
+
+    const distance = gapEnd - gapStart;
+    if (distance <= 0 || distance > maxDistanceWorld) continue;
+
+    const otherTop = other.y;
+    const otherBottom = other.y + other.height;
+    const overlapTop = Math.max(draggedTop, otherTop);
+    const overlapBottom = Math.min(draggedBottom, otherBottom);
+    const overlap = overlapBottom - overlapTop;
+    if (overlap <= 0) continue;
+    const minCrossSpan = Math.min(dragged.height, other.height);
+    if (minCrossSpan > 0 && overlap < minCrossSpan * FREEFORM_SPACING_GUIDE_MIN_CROSS_OVERLAP_RATIO) continue;
+
+    if (!best || distance < best.distance) {
+      best = { gapStart, gapEnd, crossCenter: (overlapTop + overlapBottom) / 2, distance };
+    }
+  }
+
+  return best;
+}
+
+/**
+ * PATCH SPACE-P1: vertical (Y-axis, stacked) spacing-gap detection -- the
+ * exact top/bottom, X-as-perpendicular counterpart of
+ * detectHorizontalSpacingGap above. Same "opposite of this file's existing
+ * guide-LINE naming" caveat applies: this measures a vertically-drawn
+ * bracket for a top/bottom pair of posts, unrelated to
+ * detectVerticalAlignmentMatch's X-axis left/center/right guide LINE.
+ */
+export function detectVerticalSpacingGap(
+  dragged: FreeformSpacingCandidateRect,
+  others: FreeformSpacingCandidateRect[],
+  maxDistanceWorld: number,
+): FreeformSpacingGapMatch | null {
+  const draggedTop = dragged.y;
+  const draggedBottom = dragged.y + dragged.height;
+  const draggedLeft = dragged.x;
+  const draggedRight = dragged.x + dragged.width;
+
+  let best: FreeformSpacingGapMatch | null = null;
+
+  for (const other of others) {
+    const otherTop = other.y;
+    const otherBottom = other.y + other.height;
+
+    let gapStart: number;
+    let gapEnd: number;
+    if (draggedBottom <= otherTop) {
+      gapStart = draggedBottom;
+      gapEnd = otherTop;
+    } else if (otherBottom <= draggedTop) {
+      gapStart = otherBottom;
+      gapEnd = draggedTop;
+    } else {
+      continue; // overlapping on Y -- not a stacked pair
+    }
+
+    const distance = gapEnd - gapStart;
+    if (distance <= 0 || distance > maxDistanceWorld) continue;
+
+    const otherLeft = other.x;
+    const otherRight = other.x + other.width;
+    const overlapLeft = Math.max(draggedLeft, otherLeft);
+    const overlapRight = Math.min(draggedRight, otherRight);
+    const overlap = overlapRight - overlapLeft;
+    if (overlap <= 0) continue;
+    const minCrossSpan = Math.min(dragged.width, other.width);
+    if (minCrossSpan > 0 && overlap < minCrossSpan * FREEFORM_SPACING_GUIDE_MIN_CROSS_OVERLAP_RATIO) continue;
+
+    if (!best || distance < best.distance) {
+      best = { gapStart, gapEnd, crossCenter: (overlapLeft + overlapRight) / 2, distance };
+    }
+  }
+
+  return best;
+}

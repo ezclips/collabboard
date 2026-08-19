@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createUpdatePostPositionCommand } from '@/lib/domain/canvas/posts';
 import { createPostsRepository } from '@/lib/infra/canvas/postsRepository';
-import type { FreeformAlignmentGuideKindState, FreeformAlignmentGuideState, NewPostDragState, Padlet } from '@/types/collabboard';
+import type { FreeformAlignmentGuideKindState, FreeformAlignmentGuideState, FreeformSpacingGuideState, NewPostDragState, Padlet } from '@/types/collabboard';
 import { debugCanvasLogger } from '@/lib/collabboard/debugCanvasLogger';
 import { findContainerOverlappingRect } from '@/components/collabboard/canvas/engine/utils';
 import { attachPostToContainer } from '@/components/collabboard/canvas/hooks/attachPostToContainer';
@@ -11,9 +11,12 @@ import {
   clampGroupDragDeltaToFreeformBounds,
   clampRectPositionToFreeformBounds,
   detectHorizontalAlignmentMatch,
+  detectHorizontalSpacingGap,
   detectVerticalAlignmentMatch,
+  detectVerticalSpacingGap,
   snapWorldValueToGrid,
   FREEFORM_ALIGNMENT_GUIDE_TOLERANCE_SCREEN_PX,
+  FREEFORM_SPACING_GUIDE_MAX_DISTANCE_SCREEN_PX,
   type FreeformGroupDragBounds,
 } from '@/components/collabboard/canvas/engine/freeformStageGeometry';
 
@@ -250,6 +253,18 @@ export function useCanvasInteractions({
     verticalMarkerY: null,
     horizontalMarkerX: null,
   });
+  // PATCH SPACE-P1: transient "spacing guide" state -- a measurement-only
+  // bracket showing the actual positive gap to the nearest non-overlapping
+  // neighbour on each axis. Same lifecycle as alignmentGuides above (cleared
+  // on drag end, cleared immediately when alignmentGuidesEnabled flips off --
+  // this prototype rides the SAME preference, per patch spec) but kept as
+  // its own state rather than new fields on alignmentGuides: geometry (an
+  // edge/center MATCH) and a gap MEASUREMENT are different concepts that can
+  // both be present, absent, or independently null per axis.
+  const [spacingGuides, setSpacingGuides] = useState<FreeformSpacingGuideState>({
+    horizontalGap: null,
+    verticalGap: null,
+  });
 
   // PATCH ALIGN-D: flipping the preference off must clear an already-visible
   // guide IMMEDIATELY, not just withhold new ones starting at the next
@@ -258,6 +273,8 @@ export function useCanvasInteractions({
     if (!alignmentGuidesEnabled) {
       setAlignmentGuides({ verticalX: null, horizontalY: null });
       setAlignmentGuideKinds({ verticalIsAdjacency: false, horizontalIsAdjacency: false, verticalMarkerY: null, horizontalMarkerX: null });
+      // PATCH SPACE-P1: same OFF-means-off contract as the two lines above.
+      setSpacingGuides({ horizontalGap: null, verticalGap: null });
     }
   }, [alignmentGuidesEnabled]);
 
@@ -661,6 +678,21 @@ export function useCanvasInteractions({
         verticalMarkerY: verticalMatch?.isAdjacency ? previewY + dragSize.height / 2 : null,
         horizontalMarkerX: horizontalMatch?.isAdjacency ? previewX + dragSize.width / 2 : null,
       });
+
+      // PATCH SPACE-P1: spacing-gap bracket detection -- reuses the SAME
+      // alignmentCandidates list and preview position above (this is purely
+      // an additional read of already-computed geometry, nothing here feeds
+      // back into previewX/Y or dragSize). Screen-constant max distance
+      // converted through canvasZoom the same way the alignment tolerance
+      // is, just above.
+      const spacingMaxDistanceWorld = FREEFORM_SPACING_GUIDE_MAX_DISTANCE_SCREEN_PX / (canvasZoom > 0 ? canvasZoom : 1);
+      const draggedSpacingRect = { x: previewX, y: previewY, width: dragSize.width, height: dragSize.height };
+      const horizontalSpacingMatch = detectHorizontalSpacingGap(draggedSpacingRect, alignmentCandidates, spacingMaxDistanceWorld);
+      const verticalSpacingMatch = detectVerticalSpacingGap(draggedSpacingRect, alignmentCandidates, spacingMaxDistanceWorld);
+      setSpacingGuides({
+        horizontalGap: horizontalSpacingMatch,
+        verticalGap: verticalSpacingMatch,
+      });
     }
 
     setPadlets(prev => prev.map(p =>
@@ -822,6 +854,8 @@ export function useCanvasInteractions({
       setAlignmentGuides({ verticalX: null, horizontalY: null });
       // PATCH ALIGN-E2: its presentation-only sibling resets alongside it.
       setAlignmentGuideKinds({ verticalIsAdjacency: false, horizontalIsAdjacency: false, verticalMarkerY: null, horizontalMarkerX: null });
+      // PATCH SPACE-P1: same per-gesture reset as the two lines above.
+      setSpacingGuides({ horizontalGap: null, verticalGap: null });
       unlockBodySelection();
     }
   };
@@ -862,6 +896,8 @@ export function useCanvasInteractions({
     setAlignmentGuides,
     alignmentGuideKinds,
     setAlignmentGuideKinds,
+    spacingGuides,
+    setSpacingGuides,
     handlePadletMouseDown,
     handleImagePadletDrag,
     handleCanvasMouseMove,

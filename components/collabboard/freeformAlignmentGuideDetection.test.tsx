@@ -1079,3 +1079,107 @@ describe('PATCH ALIGN-E2: adjacency marker classification (alignmentGuideKinds)'
     expect(persisted).toEqual([{ id: 'a', position_x: 500, position_y: 0 }]);
   });
 });
+
+describe('PATCH SPACE-P1: spacing-gap bracket detection (spacingGuides)', () => {
+  it('horizontal positive gap: a neighbour to the RIGHT with sufficient Y overlap resolves the exact facing-edge gap', () => {
+    mount(<Harness initialPadlets={[
+      padlet('a', 0, 0, { width: 100, height: 100 }),
+      padlet('b', 280, 20, { width: 80, height: 60 }),
+    ]} zoom={1} />);
+
+    drag('a', { x: 130, y: 0 }, 1); // a.right previews to 230, gap to b.left (280) = 50
+    expect(latest!.api.spacingGuides.horizontalGap).toEqual({ gapStart: 230, gapEnd: 280, crossCenter: 50, distance: 50 });
+    expect(latest!.api.spacingGuides.verticalGap).toBeNull();
+  });
+
+  it('vertical positive gap: a neighbour BELOW with sufficient X overlap resolves the exact facing-edge gap', () => {
+    mount(<Harness initialPadlets={[
+      padlet('a', 0, 0, { width: 100, height: 100 }),
+      padlet('b', 20, 280, { width: 60, height: 80 }),
+    ]} zoom={1} />);
+
+    drag('a', { x: 0, y: 130 }, 1); // a.bottom previews to 230, gap to b.top (280) = 50
+    expect(latest!.api.spacingGuides.verticalGap).toEqual({ gapStart: 230, gapEnd: 280, crossCenter: 50, distance: 50 });
+    expect(latest!.api.spacingGuides.horizontalGap).toBeNull();
+  });
+
+  it('distance is a WORLD-unit value, not a screen-pixel one -- unaffected by zoom, unlike the max-visibility-distance cap that gates it', () => {
+    mount(<Harness initialPadlets={[
+      padlet('a', 0, 0, { width: 100, height: 100 }),
+      padlet('b', 280, 20, { width: 80, height: 60 }),
+    ]} zoom={0.5} />);
+
+    drag('a', { x: 130, y: 0 }, 0.5);
+    expect(latest!.api.spacingGuides.horizontalGap?.distance).toBe(50);
+  });
+
+  it('the nearest qualifying neighbour wins, exactly matching detectHorizontalSpacingGap\'s own nearest-wins contract', () => {
+    mount(<Harness initialPadlets={[
+      padlet('a', -6, 0, { width: 100, height: 100 }), // starts 6 units off target -- clears the drag-start threshold
+      padlet('far', 500, 0, { width: 50, height: 100 }),  // gap 400
+      padlet('near', 260, 0, { width: 50, height: 100 }), // gap 160 -- nearest
+      padlet('mid', 350, 0, { width: 50, height: 100 }),  // gap 250
+    ]} zoom={1} />);
+
+    drag('a', { x: 0, y: 0 }, 1); // a.right = 100
+    expect(latest!.api.spacingGuides.horizontalGap).toEqual({ gapStart: 100, gapEnd: 260, crossCenter: 50, distance: 160 });
+  });
+
+  it('overlapping posts (both axes) produce no gap measurement on either axis', () => {
+    mount(<Harness initialPadlets={[
+      padlet('a', -6, 0, { width: 100, height: 100 }), // starts 6 units off target -- clears the drag-start threshold
+      padlet('b', 40, 40, { width: 100, height: 100 }),
+    ]} zoom={1} />);
+
+    drag('a', { x: 0, y: 0 }, 1); // a and b overlap on both X and Y
+    expect(latest!.api.spacingGuides).toEqual({ horizontalGap: null, verticalGap: null });
+  });
+
+  it('a far-away post (beyond the 160-screen-px cap) produces no measurement', () => {
+    mount(<Harness initialPadlets={[
+      padlet('a', -6, 0, { width: 100, height: 100 }), // starts 6 units off target -- clears the drag-start threshold
+      padlet('b', 1000, 20, { width: 80, height: 60 }), // gap 900, far beyond the cap
+    ]} zoom={1} />);
+
+    drag('a', { x: 0, y: 0 }, 1);
+    expect(latest!.api.spacingGuides).toEqual({ horizontalGap: null, verticalGap: null });
+  });
+
+  it('Alignment Guides OFF suppresses spacingGuides too, even where a qualifying gap would otherwise show', () => {
+    mount(<Harness initialPadlets={[
+      padlet('a', 0, 0, { width: 100, height: 100 }),
+      padlet('b', 280, 20, { width: 80, height: 60 }),
+    ]} zoom={1} alignmentGuidesEnabled={false} />);
+
+    drag('a', { x: 130, y: 0 }, 1); // would show a horizontal bracket if the preference were ON
+    expect(latest!.api.spacingGuides).toEqual({ horizontalGap: null, verticalGap: null });
+  });
+
+  it('spacingGuides clears on mouseup, exactly like alignmentGuides', async () => {
+    installFakeSupabase();
+    mount(<Harness initialPadlets={[
+      padlet('a', 0, 0, { width: 100, height: 100 }),
+      padlet('b', 280, 20, { width: 80, height: 60 }),
+    ]} zoom={1} />);
+
+    drag('a', { x: 130, y: 0 }, 1);
+    expect(latest!.api.spacingGuides.horizontalGap).not.toBeNull();
+
+    await release();
+    expect(latest!.api.spacingGuides).toEqual({ horizontalGap: null, verticalGap: null });
+  });
+
+  it('Snap-to-Grid still determines the committed position exactly as before -- the spacing bracket never moves or snaps the post', async () => {
+    const persisted = installFakeSupabase();
+    mount(<Harness initialPadlets={[
+      padlet('a', 0, 0, { width: 100, height: 100 }),
+      padlet('b', 280, 20, { width: 80, height: 60 }),
+    ]} zoom={1} snapToGrid />);
+
+    drag('a', { x: 133, y: 0 }, 1); // not a multiple of 20 -- snaps to 140
+    expect(latest!.api.spacingGuides.horizontalGap).not.toBeNull(); // a bracket IS showing during this drag
+
+    await release();
+    expect(persisted).toEqual([{ id: 'a', position_x: 140, position_y: 0 }]);
+  });
+});

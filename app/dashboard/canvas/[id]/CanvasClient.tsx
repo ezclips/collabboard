@@ -133,6 +133,7 @@ import CanvasViewport from '@/components/collabboard/canvas/ui/CanvasViewport';
 import PadletLayer from '@/components/collabboard/canvas/ui/PadletLayer';
 import FreeformPadletCards from '@/components/collabboard/canvas/ui/FreeformPadletCards';
 import FreeformAlignmentGuides from '@/components/collabboard/canvas/ui/FreeformAlignmentGuides';
+import FreeformSpacingGuides from '@/components/collabboard/canvas/ui/FreeformSpacingGuides';
 import OverlayLayer from '@/components/collabboard/canvas/ui/OverlayLayer';
 import ZoomControls from '@/components/collabboard/canvas/ui/ZoomControls';
 import GhostDragElement from '@/components/collabboard/canvas/ui/GhostDragElement';
@@ -2600,6 +2601,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     dragOverContainerId,
     alignmentGuides,
     alignmentGuideKinds,
+    spacingGuides,
     handlePadletMouseDown,
     handleCanvasMouseMove,
     handleCanvasMouseUp,
@@ -7898,6 +7900,12 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                 }}
               >
                 <FreeformAlignmentGuides guides={alignmentGuides} kinds={alignmentGuideKinds} />
+                {/* PATCH SPACE-P1: spacing-gap measurement prototype -- same
+                    world-scaled, pointer-events-none wrapper as the
+                    alignment guide lines above; a wholly separate component
+                    so this prototype can be removed independently without
+                    touching FreeformAlignmentGuides. */}
+                <FreeformSpacingGuides guides={spacingGuides} canvasZoom={canvasZoom} />
               </div>
             )}
 

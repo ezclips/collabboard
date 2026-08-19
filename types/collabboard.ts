@@ -417,6 +417,39 @@ export type FreeformAlignmentGuideKindState = {
   horizontalMarkerX: number | null;
 };
 
+// PATCH SPACE-P1: transient, non-persisted "spacing guide" state -- the
+// actual positive gap (world units) between the dragged root post and its
+// nearest non-overlapping neighbour, shown as a measurement bracket rather
+// than a snapping/alignment line. Independent of FreeformAlignmentGuideState
+// (which marks WHERE edges/centers line up, not the magnitude of open
+// space between two posts that do NOT line up). `horizontalGap` is a
+// side-by-side (left/right neighbour) gap measured along X, drawn as a
+// horizontally-spanning bracket; `verticalGap` is a stacked (top/bottom
+// neighbour) gap measured along Y, drawn as a vertically-spanning bracket --
+// this naming matches the bracket's own drawn orientation, NOT
+// FreeformAlignmentGuideState's "verticalX/horizontalY" convention (there,
+// "vertical"/"horizontal" name the guide LINE's orientation, which is the
+// opposite axis relationship). At most one of each may be non-null at a
+// time -- the nearest qualifying neighbour on that axis, or null when none
+// qualifies.
+export type FreeformSpacingGuideAxisState = {
+  // World-space coordinates of the two facing edges the bracket spans
+  // between, along the gap's own axis. gapEnd is always > gapStart.
+  gapStart: number;
+  gapEnd: number;
+  // World-space midpoint of the overlap band on the PERPENDICULAR axis --
+  // where the bracket line, its end ticks, and its label are centered.
+  crossCenter: number;
+  // gapEnd - gapStart, kept alongside the raw edges so render layers never
+  // need to re-derive it.
+  distance: number;
+} | null;
+
+export type FreeformSpacingGuideState = {
+  horizontalGap: FreeformSpacingGuideAxisState;
+  verticalGap: FreeformSpacingGuideAxisState;
+};
+
 export type ColumnDragPayload =
   | { kind: "container"; id: string; fromSectionId: string }
   | { kind: "post"; id: string; fromSectionId: string };
