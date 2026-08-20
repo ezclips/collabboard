@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
+import fs from 'node:fs';
 import path from 'node:path';
 
 export const OPENDATALOADER_PDF_VERSION = '2.5.0' as const;
@@ -201,5 +202,6 @@ export function assertWorkerRuntimePath(value: string | undefined, name: string)
   if (!value || !path.isAbsolute(value)) {
     throw new Error(`${name} must be configured as an absolute path`);
   }
+  if (!fs.existsSync(value)) throw new Error(`${name} is unavailable at the configured path`);
   return value;
 }

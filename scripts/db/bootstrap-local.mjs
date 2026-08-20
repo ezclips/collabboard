@@ -401,6 +401,9 @@ function writeIntegrationEnv(projectRoot, workerRuntime, fixtureDir) {
             P5_JAVA_BIN: workerRuntime.javaBin,
             P5_JAR_PATH: workerRuntime.jarPath,
             P5_FIXTURE_DIR: fixtureDir,
+            ...(process.env.P5E_CONTAINER_IMAGE
+              ? { P5E_CONTAINER_IMAGE: process.env.P5E_CONTAINER_IMAGE }
+              : {}),
           }
         : {}),
     }),
@@ -415,6 +418,7 @@ function runKnowledgeIntegrationTests() {
     'lib/infra/knowledge/knowledgeExtraction.integration.test.ts',
     'workers/knowledge-pdf/knowledgePdfWorker.integration.test.ts',
     'workers/knowledge-pdf/knowledgePdfDispatcher.integration.test.ts',
+    'workers/knowledge-pdf/knowledgePdfContainer.integration.test.ts',
   ];
   const outputs = [];
   for (const testFile of testFiles) {
