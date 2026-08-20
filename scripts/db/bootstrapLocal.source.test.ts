@@ -16,7 +16,9 @@ describe('reproducible local database bootstrap', () => {
     expect(source).toContain('20260820_provision_knowledge_documents_bucket.sql');
     expect(source).toContain('20260821_add_knowledge_extraction_lifecycle.sql');
     expect(source).toContain('20260822_add_knowledge_processing_lease.sql');
+    expect(source).toContain('20260823_add_knowledge_processing_candidates.sql');
     expect(source).toContain('workers/knowledge-pdf/knowledgePdfWorker.integration.test.ts');
+    expect(source).toContain('workers/knowledge-pdf/knowledgePdfDispatcher.integration.test.ts');
     expect(source).not.toContain('001_create_collabboard_schema.sql');
     expect(source).not.toContain('120260710_fix_board_sections_wrong_table_rls.sql');
   });

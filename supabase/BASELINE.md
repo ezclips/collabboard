@@ -31,6 +31,7 @@ loads the baseline snapshot, and applies this exact post-baseline manifest:
 5. `20260820_provision_knowledge_documents_bucket.sql`
 6. `20260821_add_knowledge_extraction_lifecycle.sql`
 7. `20260822_add_knowledge_processing_lease.sql`
+8. `20260823_add_knowledge_processing_candidates.sql`
 
 The `120260710_fix_board_sections_wrong_table_rls.sql` file is a duplicate
 archival copy and is intentionally not applied. The snapshot contains the net

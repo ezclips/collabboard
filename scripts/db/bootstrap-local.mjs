@@ -52,6 +52,10 @@ export const POST_BASELINE_MIGRATIONS = [
     source: '20260822_add_knowledge_processing_lease.sql',
     target: '20260822000000_knowledge_processing_lease.sql',
   },
+  {
+    source: '20260823_add_knowledge_processing_candidates.sql',
+    target: '20260823000000_knowledge_processing_candidates.sql',
+  },
 ];
 
 const REQUIRED_EXTENSIONS_SQL = `
@@ -244,6 +248,11 @@ SELECT json_build_object(
       AND NOT has_function_privilege('anon', p.oid, 'EXECUTE')
       AND NOT has_function_privilege('authenticated', p.oid, 'EXECUTE')
   ),
+  'candidate_rpc_not_public', NOT has_function_privilege('authenticated', (
+    SELECT p.oid FROM pg_proc p
+    JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname = 'public' AND p.proname = 'list_knowledge_processing_candidates'
+  ), 'EXECUTE'),
   'p3_constraints', (
     SELECT count(*) >= 8
     FROM pg_constraint
@@ -405,6 +414,7 @@ function runKnowledgeIntegrationTests() {
     'lib/infra/knowledge/knowledgeDeletion.integration.test.ts',
     'lib/infra/knowledge/knowledgeExtraction.integration.test.ts',
     'workers/knowledge-pdf/knowledgePdfWorker.integration.test.ts',
+    'workers/knowledge-pdf/knowledgePdfDispatcher.integration.test.ts',
   ];
   const outputs = [];
   for (const testFile of testFiles) {

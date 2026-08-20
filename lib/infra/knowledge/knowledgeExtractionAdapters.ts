@@ -31,14 +31,15 @@ interface KnowledgeExtractionRpcResult {
 }
 
 export interface KnowledgeExtractionSupabaseClient {
-  rpc(
+  rpc<TData = unknown>(
     fn:
       | 'claim_knowledge_extraction'
       | 'renew_knowledge_processing_lease'
       | 'complete_knowledge_extraction'
-      | 'fail_knowledge_extraction',
+      | 'fail_knowledge_extraction'
+      | 'list_knowledge_processing_candidates',
     args: Record<string, unknown>,
-  ): Promise<{ data: KnowledgeExtractionRpcResult | null; error: SupabaseErrorLike | null }>;
+  ): Promise<{ data: TData; error: SupabaseErrorLike | null }>;
 }
 
 function unavailable(message: string, cause: unknown): Result<never, DomainError> {
@@ -107,12 +108,12 @@ export class SupabaseKnowledgeExtractionRepository implements KnowledgeExtractio
 
   async claim(documentId: KnowledgeDocumentId, leaseTtlSeconds: number): Promise<Result<KnowledgeExtractionJob, DomainError>> {
     try {
-      const { data, error } = await this.client.rpc('claim_knowledge_extraction', {
+      const { data: rawData, error } = await this.client.rpc<KnowledgeExtractionRpcResult | null>('claim_knowledge_extraction', {
         p_document_id: documentId,
         p_lease_ttl_seconds: leaseTtlSeconds,
       });
       if (error) return unavailable('Could not claim the Knowledge document', error);
-      return mapClaimResult(data, documentId);
+      return mapClaimResult(rawData, documentId);
     } catch (cause: unknown) {
       return unavailable('Could not claim the Knowledge document', cause);
     }
@@ -120,15 +121,15 @@ export class SupabaseKnowledgeExtractionRepository implements KnowledgeExtractio
 
   async renew(documentId: KnowledgeDocumentId, leaseToken: string, leaseTtlSeconds: number): Promise<Result<KnowledgeProcessingLease, DomainError>> {
     try {
-      const { data, error } = await this.client.rpc('renew_knowledge_processing_lease', {
+      const { data: rawData, error } = await this.client.rpc<KnowledgeExtractionRpcResult | null>('renew_knowledge_processing_lease', {
         p_document_id: documentId,
         p_lease_token: leaseToken,
         p_lease_ttl_seconds: leaseTtlSeconds,
       });
       if (error) return unavailable('Could not renew the Knowledge processing lease', error);
-      if (data?.status === 'not_found') return err(domainError('not_found', 'Knowledge document was not found'));
-      if (data?.status !== 'renewed') return err(domainError('conflict', 'Knowledge processing lease is stale', { details: data }));
-      return leaseFromResult(data);
+      if (rawData?.status === 'not_found') return err(domainError('not_found', 'Knowledge document was not found'));
+      if (rawData?.status !== 'renewed') return err(domainError('conflict', 'Knowledge processing lease is stale', { details: rawData }));
+      return leaseFromResult(rawData);
     } catch (cause: unknown) {
       return unavailable('Could not renew the Knowledge processing lease', cause);
     }
@@ -136,7 +137,7 @@ export class SupabaseKnowledgeExtractionRepository implements KnowledgeExtractio
 
   async complete(completion: KnowledgeExtractionCompletion): Promise<Result<void, DomainError>> {
     try {
-      const { data, error } = await this.client.rpc('complete_knowledge_extraction', {
+      const { data: rawData, error } = await this.client.rpc<KnowledgeExtractionRpcResult | null>('complete_knowledge_extraction', {
         p_document_id: completion.documentId,
         p_lease_token: completion.leaseToken,
         p_page_count: completion.pageCount,
@@ -148,19 +149,19 @@ export class SupabaseKnowledgeExtractionRepository implements KnowledgeExtractio
         p_expected_content_sha256: completion.expectedContentSha256,
       });
       if (error) return unavailable('Could not commit the extraction result', error);
-      switch (data?.status) {
+      switch (rawData?.status) {
         case 'completed':
           return ok(undefined);
         case 'not_found':
           return err(domainError('not_found', 'Knowledge document was not found'));
         case 'conflict':
           return err(domainError('conflict', 'Knowledge processing lease is stale', {
-            details: { currentStatus: data.currentStatus, reason: data.reason },
+              details: { currentStatus: rawData.currentStatus, reason: rawData.reason },
           }));
         case 'content_mismatch':
           return err(domainError('conflict', 'Knowledge document content changed during extraction'));
         default:
-          return unavailable('Could not commit the extraction result', { data });
+          return unavailable('Could not commit the extraction result', { data: rawData });
       }
     } catch (cause: unknown) {
       return unavailable('Could not commit the extraction result', cause);
@@ -169,22 +170,37 @@ export class SupabaseKnowledgeExtractionRepository implements KnowledgeExtractio
 
   async fail(documentId: KnowledgeDocumentId, leaseToken: string, message: string): Promise<Result<void, DomainError>> {
     try {
-      const { data, error } = await this.client.rpc('fail_knowledge_extraction', {
+      const { data: rawData, error } = await this.client.rpc<KnowledgeExtractionRpcResult | null>('fail_knowledge_extraction', {
         p_document_id: documentId,
         p_lease_token: leaseToken,
         p_processing_error: message,
       });
       if (error) return unavailable('Could not record the extraction failure', error);
-      switch (data?.status) {
+      switch (rawData?.status) {
         case 'failed':
           return ok(undefined);
         case 'not_found':
           return err(domainError('not_found', 'Knowledge document was not found'));
         default:
-          return err(domainError('conflict', 'Knowledge processing lease is stale', { details: data }));
+          return err(domainError('conflict', 'Knowledge processing lease is stale', { details: rawData }));
       }
     } catch (cause: unknown) {
       return unavailable('Could not record the extraction failure', cause);
+    }
+  }
+
+  async listProcessingCandidates(
+    limit: number,
+  ): Promise<Result<readonly KnowledgeDocumentId[], DomainError>> {
+    try {
+      const { data, error } = await this.client.rpc<readonly { document_id: string }[]>(
+        'list_knowledge_processing_candidates',
+        { p_limit: limit },
+      );
+      if (error) return unavailable('Could not discover Knowledge processing candidates', error);
+      return ok((data ?? []).map((row) => row.document_id as KnowledgeDocumentId));
+    } catch (cause: unknown) {
+      return unavailable('Could not discover Knowledge processing candidates', cause);
     }
   }
 }

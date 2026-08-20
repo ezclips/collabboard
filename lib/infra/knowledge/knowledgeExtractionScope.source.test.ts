@@ -151,13 +151,13 @@ describe('P5A scope -- worker privilege boundary', () => {
 
 describe('P5C scope -- the state machine is not bypassable', () => {
   it('claim is delegated to the database-time fenced claim RPC', () => {
-    expect(infraSource).toContain("rpc('claim_knowledge_extraction'");
+    expect(infraSource).toMatch(/rpc(?:<[^>]+>)?\('claim_knowledge_extraction'/);
     expect(infraSource).toContain('p_lease_ttl_seconds');
     expect(infraSource).toContain('leaseToken');
   });
 
   it('fail is delegated to the fenced failure RPC with a lease token', () => {
-    expect(infraSource).toContain("rpc('fail_knowledge_extraction'");
+    expect(infraSource).toMatch(/rpc(?:<[^>]+>)?\('fail_knowledge_extraction'/);
     expect(infraSource).toContain('p_lease_token');
     expect(leaseMigration).toContain('processing_lease_token = NULL');
     expect(leaseMigration).toContain('raw_artifact_path = NULL');

@@ -18,6 +18,19 @@ Invoke it with the repository’s existing isolated TypeScript runner:
 vite-node workers/knowledge-pdf/cli.ts <knowledge-document-id>
 ```
 
+The long-running database-discovery dispatcher is separate:
+
+```text
+KNOWLEDGE_PDF_WORKER_CONCURRENCY=2
+KNOWLEDGE_PDF_POLL_INTERVAL_MS=5000
+vite-node workers/knowledge-pdf/runDispatcher.ts
+```
+
+It selects only `uploaded` and database-time expired `processing` rows. Failed
+rows are intentionally excluded from automatic retry. Discovery does not claim
+ownership; the P5C lease claim remains authoritative, so multiple dispatcher
+processes are safe.
+
 The worker pins OpenDataLoader PDF CLI `2.5.0`, invokes Java with an argument
 array and `shell: false`, uses deterministic native/local options, and never
 downloads or upgrades runtime artifacts. Java and the JAR are deployment
