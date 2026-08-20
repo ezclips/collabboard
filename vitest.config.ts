@@ -14,6 +14,7 @@ export default defineConfig({
       'lib/infra/**/*.test.ts',
       'scripts/harness/**/*.test.ts',
       'scripts/*.test.ts',
+      'scripts/db/**/*.test.ts',
       'tools/pdf-extraction-prototype/**/*.test.ts',
       'components/collabboard/*.test.tsx',
       'components/collabboard/editors/*.test.tsx',

@@ -1,0 +1,16 @@
+# Local-only Supabase configuration.
+#
+# The historical migrations directory is archival and does not reconstruct the
+# live schema. Use scripts/db/bootstrap-local.mjs for a current local database.
+project_id = "collabboard"
+
+[db]
+port = 54322
+shadow_port = 54320
+major_version = 17
+
+[db.migrations]
+enabled = false
+
+[db.seed]
+enabled = false
