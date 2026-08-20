@@ -44,6 +44,10 @@ export const POST_BASELINE_MIGRATIONS = [
     source: '20260820_provision_knowledge_documents_bucket.sql',
     target: '20260820010000_knowledge_documents_bucket.sql',
   },
+  {
+    source: '20260821_add_knowledge_extraction_lifecycle.sql',
+    target: '20260821000000_knowledge_extraction_lifecycle.sql',
+  },
 ];
 
 const REQUIRED_EXTENSIONS_SQL = `
@@ -205,6 +209,16 @@ SELECT json_build_object(
       AND name = 'knowledge-documents'
       AND public = false
   ),
+  'extraction_rpc', EXISTS (
+    SELECT 1 FROM pg_proc p
+    JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname = 'public' AND p.proname = 'complete_knowledge_extraction'
+  ),
+  'extraction_rpc_not_public', NOT has_function_privilege('authenticated', (
+    SELECT p.oid FROM pg_proc p
+    JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname = 'public' AND p.proname = 'complete_knowledge_extraction'
+  ), 'EXECUTE'),
   'p3_constraints', (
     SELECT count(*) >= 8
     FROM pg_constraint
@@ -302,13 +316,14 @@ async function storageSmoke(projectRoot, projectId) {
 function writeIntegrationEnv(projectRoot) {
   const values = localStatusEnv(projectRoot);
   const url = assertLoopbackUrl(values.API_URL, 'Local Supabase API URL');
-  if (!values.SERVICE_ROLE_KEY) throw new Error('Local Supabase status did not provide service role credentials');
+  if (!values.SERVICE_ROLE_KEY || !values.ANON_KEY) throw new Error('Local Supabase status did not provide service role credentials');
   const envPath = path.join(repoRoot, 'scripts', '.tmp-p4-env.json');
   fs.writeFileSync(
     envPath,
     JSON.stringify({
       P4_SUPABASE_URL: url,
       P4_SERVICE_ROLE_KEY: values.SERVICE_ROLE_KEY,
+      P4_ANON_KEY: values.ANON_KEY,
       P4_BOARD_A: '00000000-0000-0000-0000-000000002011',
       P4_BOARD_B: '00000000-0000-0000-0000-000000002012',
       P4_OWNER: '00000000-0000-0000-0000-000000001011',
@@ -324,6 +339,7 @@ function runKnowledgeIntegrationTests() {
   const testFiles = [
     'lib/infra/knowledge/knowledgeIngestion.integration.test.ts',
     'lib/infra/knowledge/knowledgeDeletion.integration.test.ts',
+    'lib/infra/knowledge/knowledgeExtraction.integration.test.ts',
   ];
   const outputs = [];
   for (const testFile of testFiles) {

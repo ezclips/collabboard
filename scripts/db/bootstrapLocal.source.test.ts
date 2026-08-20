@@ -14,6 +14,7 @@ describe('reproducible local database bootstrap', () => {
     expect(source).toContain('20260726_add_canvas_line_coord_space.sql');
     expect(source).toContain('20260820_create_knowledge_data_foundation.sql');
     expect(source).toContain('20260820_provision_knowledge_documents_bucket.sql');
+    expect(source).toContain('20260821_add_knowledge_extraction_lifecycle.sql');
     expect(source).not.toContain('001_create_collabboard_schema.sql');
     expect(source).not.toContain('120260710_fix_board_sections_wrong_table_rls.sql');
   });
