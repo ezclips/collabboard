@@ -12,6 +12,7 @@ import {
   claimKnowledgeDocumentForProcessing,
   completeKnowledgeExtraction,
   failKnowledgeExtraction,
+  renewKnowledgeProcessingLease,
   sanitizeKnowledgeProcessingError,
 } from './knowledgeExtraction';
 import type {
@@ -21,6 +22,7 @@ import type {
 } from './knowledgeExtraction';
 
 const DOCUMENT = asKnowledgeDocumentId('44444444-4444-4444-4444-444444444444');
+const LEASE_TOKEN = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
 
 const hasher = {
   sha256: async (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex'),
@@ -59,7 +61,7 @@ function repository(
   const failures: { id: string; message: string }[] = [];
   const repo: KnowledgeExtractionRepository = {
     claim: behaviour.claim
-      ?? (async (documentId) =>
+      ?? (async (documentId, _leaseTtlSeconds) =>
         ({
           ok: true,
           value: {
@@ -67,8 +69,19 @@ function repository(
             boardId: '11111111-1111-1111-1111-111111111111' as never,
             storagePath: `knowledge/board/${documentId}/original.pdf`,
             contentSha256: 'a'.repeat(64),
+            leaseToken: LEASE_TOKEN,
+            processingAttempt: 1,
+            leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
           },
         })),
+    renew: async () => ({
+      ok: true,
+      value: {
+        leaseToken: LEASE_TOKEN,
+        processingAttempt: 1,
+        leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+      },
+    }),
     complete:
       behaviour.complete
       ?? (async (completion) => {
@@ -77,7 +90,7 @@ function repository(
       }),
     fail:
       behaviour.fail
-      ?? (async (documentId, message) => {
+      ?? (async (documentId, _leaseToken, message) => {
         failures.push({ id: documentId, message });
         return { ok: true, value: undefined };
       }),
@@ -239,6 +252,7 @@ describe('completeKnowledgeExtraction', () => {
       { repository: repo, hasher },
       {
         documentId: DOCUMENT,
+        processingLeaseToken: LEASE_TOKEN,
         extraction: extraction([
           { pageNumber: 1, text: 'first' },
           { pageNumber: 2, text: 'second' },
@@ -268,6 +282,7 @@ describe('completeKnowledgeExtraction', () => {
       { repository: repo, hasher },
       {
         documentId: DOCUMENT,
+        processingLeaseToken: LEASE_TOKEN,
         extraction: extraction([{ pageNumber: 1, text: 'first' }]),
         geometry: geometry(1),
       },
@@ -284,6 +299,7 @@ describe('completeKnowledgeExtraction', () => {
       { repository: repo, hasher },
       {
         documentId: DOCUMENT,
+        processingLeaseToken: LEASE_TOKEN,
         extraction: extraction([{ pageNumber: 1, text: 'a' }]),
         geometry: geometry(1),
       },
@@ -299,6 +315,7 @@ describe('completeKnowledgeExtraction', () => {
       { repository: repo, hasher },
       {
         documentId: DOCUMENT,
+        processingLeaseToken: LEASE_TOKEN,
         extraction: extraction([{ pageNumber: 1, text: 'a' }]),
         geometry: [],
       },
@@ -320,6 +337,7 @@ describe('completeKnowledgeExtraction', () => {
       { repository: repo, hasher },
       {
         documentId: DOCUMENT,
+        processingLeaseToken: LEASE_TOKEN,
         extraction: extraction([{ pageNumber: 1, text: 'a' }]),
         geometry: geometry(1),
       },
@@ -340,6 +358,7 @@ describe('completeKnowledgeExtraction', () => {
       { repository: repo, hasher },
       {
         documentId: DOCUMENT,
+        processingLeaseToken: LEASE_TOKEN,
         extraction: extraction([{ pageNumber: 1, text: 'a' }]),
         geometry: geometry(1),
       },
@@ -359,6 +378,9 @@ describe('claimKnowledgeDocumentForProcessing', () => {
       'boardId',
       'contentSha256',
       'documentId',
+      'leaseExpiresAt',
+      'leaseToken',
+      'processingAttempt',
       'storagePath',
     ]);
   });
@@ -372,6 +394,22 @@ describe('claimKnowledgeDocumentForProcessing', () => {
     });
     const result = await claimKnowledgeDocumentForProcessing({ repository: repo }, DOCUMENT);
     expect(!result.ok && result.error.code).toBe('conflict');
+  });
+
+  it('renews with a configurable lease TTL and rejects invalid operational TTLs', async () => {
+    const { repo } = repository();
+    const renewed = await renewKnowledgeProcessingLease(
+      { repository: repo, leaseTtlSeconds: 2 },
+      DOCUMENT,
+      LEASE_TOKEN,
+    );
+    expect(renewed.ok).toBe(true);
+
+    const invalid = await claimKnowledgeDocumentForProcessing(
+      { repository: repo, leaseTtlSeconds: 0 },
+      DOCUMENT,
+    );
+    expect(!invalid.ok && invalid.error.code).toBe('validation');
   });
 });
 
@@ -429,6 +467,7 @@ describe('failure message sanitization', () => {
     await failKnowledgeExtraction(
       { repository: repo },
       DOCUMENT,
+      LEASE_TOKEN,
       new Error('crashed\n    at frame (/x.js:1:1) password=hunter2'),
     );
     expect(failures[0].message).toBe('crashed');

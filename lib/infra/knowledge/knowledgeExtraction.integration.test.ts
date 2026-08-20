@@ -8,11 +8,16 @@ import { asBoardId, asKnowledgeDocumentId, asUserId } from '../../domain/core/id
 import type { KnowledgeDocumentId } from '../../domain/core/ids';
 import { createKnowledgePdfUpload } from '../../domain/knowledge/knowledgeIngestion';
 import {
-  claimKnowledgeDocumentForProcessing,
-  completeKnowledgeExtraction,
-  failKnowledgeExtraction,
+  claimKnowledgeDocumentForProcessing as claimKnowledgeDocumentForProcessingService,
+  completeKnowledgeExtraction as completeKnowledgeExtractionService,
+  failKnowledgeExtraction as failKnowledgeExtractionService,
+  renewKnowledgeProcessingLease,
 } from '../../domain/knowledge/knowledgeExtraction';
-import type { KnowledgePageGeometryInput } from '../../domain/knowledge/knowledgeExtraction';
+import type {
+  CompleteKnowledgeExtractionInput,
+  KnowledgeExtractionDeps,
+  KnowledgePageGeometryInput,
+} from '../../domain/knowledge/knowledgeExtraction';
 import type { KnowledgePdfExtractionResult } from '../../domain/knowledge/pdfExtraction';
 import {
   KNOWLEDGE_STORAGE_BUCKET,
@@ -43,6 +48,36 @@ const BOARD = asBoardId(env.P4_BOARD_A || '00000000-0000-0000-0000-000000002011'
 const OWNER = asUserId(env.P4_OWNER || '00000000-0000-0000-0000-000000001011');
 
 const hasher = new NodeKnowledgeContentHasher();
+const leaseTokens = new Map<string, string>();
+const EMPTY_LEASE_TOKEN = '00000000-0000-0000-0000-000000000000';
+
+async function claimKnowledgeDocumentForProcessing(
+  deps: Pick<KnowledgeExtractionDeps, 'repository' | 'leaseTtlSeconds'>,
+  documentId: KnowledgeDocumentId,
+  leaseTtlSeconds = 300,
+) {
+  const result = await claimKnowledgeDocumentForProcessingService({ ...deps, leaseTtlSeconds }, documentId);
+  if (result.ok) leaseTokens.set(documentId, result.value.leaseToken);
+  return result;
+}
+
+async function completeKnowledgeExtraction(
+  deps: KnowledgeExtractionDeps,
+  input: Omit<CompleteKnowledgeExtractionInput, 'processingLeaseToken'> & { processingLeaseToken?: string },
+) {
+  return completeKnowledgeExtractionService(deps, {
+    ...input,
+    processingLeaseToken: input.processingLeaseToken ?? leaseTokens.get(input.documentId) ?? EMPTY_LEASE_TOKEN,
+  });
+}
+
+async function failKnowledgeExtraction(
+  deps: Pick<KnowledgeExtractionDeps, 'repository'>,
+  documentId: KnowledgeDocumentId,
+  error: unknown,
+) {
+  return failKnowledgeExtractionService(deps, documentId, leaseTokens.get(documentId) ?? EMPTY_LEASE_TOKEN, error);
+}
 
 function pdf(label: string): Uint8Array {
   return new Uint8Array(Buffer.from(`%PDF-1.7\n${label}\n%%EOF`, 'utf8'));
@@ -107,7 +142,7 @@ describe.skipIf(!hasLocalStack)('P5A extraction lifecycle -- local Postgres inte
   async function statusOf(id: KnowledgeDocumentId) {
     const { data } = await client
       .from('knowledge_documents')
-      .select('processing_status, processing_error, page_count, parser_name, parser_version, parser_options_hash, raw_artifact_path, content_sha256')
+      .select('processing_status, processing_error, page_count, parser_name, parser_version, parser_options_hash, raw_artifact_path, content_sha256, processing_lease_token, processing_lease_expires_at, processing_attempt')
       .eq('id', id)
       .maybeSingle();
     return data;
@@ -134,6 +169,9 @@ describe.skipIf(!hasLocalStack)('P5A extraction lifecycle -- local Postgres inte
       boardId: BOARD,
       storagePath: document.storagePath,
       contentSha256: document.contentSha256,
+      leaseToken: expect.any(String),
+      processingAttempt: 1,
+      leaseExpiresAt: expect.any(String),
     });
     expect((await statusOf(document.id))?.processing_status).toBe('processing');
   });
@@ -161,6 +199,118 @@ describe.skipIf(!hasLocalStack)('P5A extraction lifecycle -- local Postgres inte
     expect(losers).toHaveLength(1);
     expect(losers[0].ok === false && losers[0].error.code).toBe('conflict');
     expect((await statusOf(document.id))?.processing_status).toBe('processing');
+  });
+
+  it('reclaims an expired lease with a new token and fences the old attempt', async () => {
+    const { document } = await ingest('lease-expiry-fence');
+    const first = await claimKnowledgeDocumentForProcessing({ repository }, document.id, 1);
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    await new Promise((resolve) => setTimeout(resolve, 1_100));
+
+    const second = await claimKnowledgeDocumentForProcessing({ repository }, document.id, 1);
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    expect(second.value.leaseToken).not.toBe(first.value.leaseToken);
+    expect(second.value.processingAttempt).toBe(first.value.processingAttempt + 1);
+
+    const staleCompletion = await completeKnowledgeExtractionService(
+      { repository, hasher },
+      {
+        documentId: document.id,
+        processingLeaseToken: first.value.leaseToken,
+        extraction: extraction(document.contentSha256, [{ pageNumber: 1, text: 'stale A' }]),
+        geometry: geometry(1),
+      },
+    );
+    expect(!staleCompletion.ok && staleCompletion.error.code).toBe('conflict');
+
+    const staleFailure = await failKnowledgeExtractionService(
+      { repository },
+      document.id,
+      first.value.leaseToken,
+      new Error('stale A failure'),
+    );
+    expect(!staleFailure.ok && staleFailure.error.code).toBe('conflict');
+
+    const staleRenew = await renewKnowledgeProcessingLease(
+      { repository, leaseTtlSeconds: 1 },
+      document.id,
+      first.value.leaseToken,
+    );
+    expect(!staleRenew.ok && staleRenew.error.code).toBe('conflict');
+    expect((await statusOf(document.id))?.processing_attempt).toBe(2);
+    expect((await statusOf(document.id))?.processing_status).toBe('processing');
+  });
+
+  it('allows exactly one concurrent reclaim after expiry', async () => {
+    const { document } = await ingest('lease-reclaim-race');
+    const initial = await claimKnowledgeDocumentForProcessing({ repository }, document.id, 1);
+    expect(initial.ok).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 1_100));
+    const other = new SupabaseKnowledgeExtractionRepository(
+      createClient(env.P4_SUPABASE_URL, env.P4_SERVICE_ROLE_KEY, {
+        auth: { autoRefreshToken: false, persistSession: false },
+      }) as never,
+    );
+    const [a, b] = await Promise.all([
+      claimKnowledgeDocumentForProcessing({ repository }, document.id, 1),
+      claimKnowledgeDocumentForProcessing({ repository: other }, document.id, 1),
+    ]);
+    expect([a, b].filter((result) => result.ok)).toHaveLength(1);
+    expect([a, b].filter((result) => !result.ok)).toHaveLength(1);
+    expect((await statusOf(document.id))?.processing_attempt).toBe(2);
+    expect((await statusOf(document.id))?.processing_status).toBe('processing');
+  });
+
+  it('keeps B authoritative when expired A resumes after B completes', async () => {
+    const { document } = await ingest('lease-resumed-worker-race');
+    const a = await claimKnowledgeDocumentForProcessing({ repository }, document.id, 1);
+    expect(a.ok).toBe(true);
+    if (!a.ok) return;
+    await new Promise((resolve) => setTimeout(resolve, 1_100));
+    const b = await claimKnowledgeDocumentForProcessing({ repository }, document.id, 60);
+    expect(b.ok).toBe(true);
+    if (!b.ok) return;
+
+    const rawA = `knowledge/${BOARD}/${document.id}/extraction/attempt-${a.value.processingAttempt}-${a.value.leaseToken}/opendataloader-2.5.0.json`;
+    const rawB = `knowledge/${BOARD}/${document.id}/extraction/attempt-${b.value.processingAttempt}-${b.value.leaseToken}/opendataloader-2.5.0.json`;
+    expect(rawA).not.toBe(rawB);
+    expect((await client.storage.from(KNOWLEDGE_STORAGE_BUCKET).upload(rawA, Buffer.from('{"attempt":"A"}'), { contentType: 'application/json' })).error).toBeNull();
+    expect((await client.storage.from(KNOWLEDGE_STORAGE_BUCKET).upload(rawB, Buffer.from('{"attempt":"B"}'), { contentType: 'application/json' })).error).toBeNull();
+
+    const bCompleted = await completeKnowledgeExtractionService(
+      { repository, hasher },
+      {
+        documentId: document.id,
+        processingLeaseToken: b.value.leaseToken,
+        extraction: extraction(document.contentSha256, [{ pageNumber: 1, text: 'B wins' }]),
+        geometry: geometry(1),
+        rawArtifactPath: rawB,
+      },
+    );
+    expect(bCompleted.ok).toBe(true);
+
+    const aCompleted = await completeKnowledgeExtractionService(
+      { repository, hasher },
+      {
+        documentId: document.id,
+        processingLeaseToken: a.value.leaseToken,
+        extraction: extraction(document.contentSha256, [{ pageNumber: 1, text: 'A must not win' }]),
+        geometry: geometry(1),
+        rawArtifactPath: rawA,
+      },
+    );
+    expect(!aCompleted.ok && aCompleted.error.code).toBe('conflict');
+    const aFailed = await failKnowledgeExtractionService({ repository }, document.id, a.value.leaseToken, new Error('stale A'));
+    expect(!aFailed.ok && aFailed.error.code).toBe('conflict');
+
+    const row = await statusOf(document.id);
+    expect(row?.processing_status).toBe('ready');
+    expect(row?.raw_artifact_path).toBe(rawB);
+    expect((await pagesOf(document.id))[0].text).toBe('B wins');
+    expect((await client.storage.from(KNOWLEDGE_STORAGE_BUCKET).remove([rawA])).error).toBeNull();
+    expect((await client.storage.from(KNOWLEDGE_STORAGE_BUCKET).download(rawB)).error).toBeNull();
   });
 
   // 4
@@ -213,6 +363,8 @@ describe.skipIf(!hasLocalStack)('P5A extraction lifecycle -- local Postgres inte
     expect(row?.parser_version).toBe('1.4.0');
     expect(row?.parser_options_hash).toBe('opts-abc');
     expect(row?.raw_artifact_path).toBe(`knowledge/${BOARD}/${document.id}/raw.json`);
+    expect(row?.processing_lease_token).toBeNull();
+    expect(row?.processing_lease_expires_at).toBeNull();
     expect(row?.processing_error).toBeNull();
 
     const pages = await pagesOf(document.id);
@@ -318,6 +470,7 @@ describe.skipIf(!hasLocalStack)('P5A extraction lifecycle -- local Postgres inte
     // cast, so the INSERT raises after the DELETE has already run.
     const { data, error } = await client.rpc('complete_knowledge_extraction', {
       p_document_id: document.id,
+      p_lease_token: leaseTokens.get(document.id),
       p_page_count: 2,
       p_pages: [
         { page_number: 1, width_points: 612, height_points: 792, rotation: 0, text: 'new one' },
@@ -367,6 +520,8 @@ describe.skipIf(!hasLocalStack)('P5A extraction lifecycle -- local Postgres inte
     expect(result.ok).toBe(true);
     const row = await statusOf(document.id);
     expect(row?.processing_status).toBe('failed');
+    expect(row?.processing_lease_token).toBeNull();
+    expect(row?.processing_lease_expires_at).toBeNull();
     expect(row?.processing_error).toBe('Parser exited with code 1');
     expect(row?.processing_error).not.toContain(secret);
     expect(row?.processing_error).not.toContain('at run');
@@ -531,18 +686,25 @@ describe.skipIf(!hasLocalStack)('P5A extraction lifecycle -- local Postgres inte
       auth: { autoRefreshToken: false, persistSession: false },
     });
     const { document } = await ingest('anon-rpc');
-    const { error } = await anon.rpc('complete_knowledge_extraction', {
-      p_document_id: document.id,
-      p_page_count: 1,
-      p_pages: [{ page_number: 1, width_points: 612, height_points: 792, text: 'x' }],
-      p_parser_name: 'x',
-      p_parser_version: '1',
-      p_parser_options_hash: null,
-      p_raw_artifact_path: null,
-      p_expected_content_sha256: null,
-    });
+    const token = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+    const calls = await Promise.all([
+      anon.rpc('claim_knowledge_extraction', { p_document_id: document.id, p_lease_ttl_seconds: 1 }),
+      anon.rpc('renew_knowledge_processing_lease', { p_document_id: document.id, p_lease_token: token, p_lease_ttl_seconds: 1 }),
+      anon.rpc('complete_knowledge_extraction', {
+        p_document_id: document.id,
+        p_lease_token: token,
+        p_page_count: 1,
+        p_pages: [{ page_number: 1, width_points: 612, height_points: 792, text: 'x' }],
+        p_parser_name: 'x',
+        p_parser_version: '1',
+        p_parser_options_hash: null,
+        p_raw_artifact_path: null,
+        p_expected_content_sha256: null,
+      }),
+      anon.rpc('fail_knowledge_extraction', { p_document_id: document.id, p_lease_token: token, p_processing_error: 'x' }),
+    ]);
 
-    expect(error).not.toBeNull();
+    expect(calls.every(({ error }) => error !== null)).toBe(true);
     expect((await statusOf(asKnowledgeDocumentId(document.id)))?.processing_status).toBe('uploaded');
   });
 });

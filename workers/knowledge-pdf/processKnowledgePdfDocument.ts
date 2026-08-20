@@ -10,6 +10,7 @@ import {
   claimKnowledgeDocumentForProcessing,
   completeKnowledgeExtraction,
   failKnowledgeExtraction,
+  renewKnowledgeProcessingLease,
   sanitizeKnowledgeProcessingError,
 } from '../../lib/domain/knowledge/knowledgeExtraction';
 import type {
@@ -17,6 +18,7 @@ import type {
   KnowledgeExtractionRepository,
   KnowledgePageGeometryInput,
 } from '../../lib/domain/knowledge/knowledgeExtraction';
+import { DEFAULT_KNOWLEDGE_PROCESSING_LEASE_TTL_SECONDS } from '../../lib/domain/knowledge/knowledgeExtraction';
 import { normalizeOpenDataLoaderPdf } from '../../lib/infra/knowledge/openDataLoaderPdfNormalizer';
 import {
   KNOWLEDGE_STORAGE_BUCKET,
@@ -39,7 +41,10 @@ import type { OpenDataLoaderRunInput, OpenDataLoaderRunResult } from './openData
 export const KNOWLEDGE_RAW_ARTIFACT_PATH = (
   boardId: string,
   documentId: string,
-): string => `knowledge/${boardId}/${documentId}/extraction/opendataloader-${OPENDATALOADER_PDF_VERSION}.json`;
+  processingAttempt: number,
+  leaseToken: string,
+): string =>
+  `knowledge/${boardId}/${documentId}/extraction/attempt-${processingAttempt}-${leaseToken}/opendataloader-${OPENDATALOADER_PDF_VERSION}.json`;
 
 const DEFAULT_MAX_PARSER_JSON_BYTES = 64 * 1024 * 1024;
 
@@ -62,6 +67,8 @@ export interface KnowledgePdfWorkerDependencies {
   readonly parserOptionsHash: string;
   readonly parserName: string;
   readonly parserVersion: string;
+  readonly leaseTtlSeconds?: number;
+  readonly heartbeatIntervalMs?: number;
   readonly maxParserJsonBytes?: number;
   readonly tempRoot?: string;
 }
@@ -89,6 +96,60 @@ class KnowledgePdfWorkerError extends Error {
     this.stage = stage;
     this.diagnostics = diagnostics ? boundedDiagnostic(diagnostics) : undefined;
   }
+}
+
+class StaleKnowledgeLeaseError extends Error {
+  constructor() {
+    super('Knowledge processing lease is stale');
+    this.name = 'StaleKnowledgeLeaseError';
+  }
+}
+
+interface LeaseHeartbeat {
+  readonly lost: () => boolean;
+  stop(): Promise<void>;
+}
+
+function startLeaseHeartbeat(
+  deps: KnowledgePdfWorkerDependencies,
+  job: KnowledgeExtractionJob,
+): LeaseHeartbeat {
+  const leaseTtlSeconds = deps.leaseTtlSeconds ?? DEFAULT_KNOWLEDGE_PROCESSING_LEASE_TTL_SECONDS;
+  const intervalMs = deps.heartbeatIntervalMs ?? Math.max(1_000, Math.floor((leaseTtlSeconds * 1_000) / 3));
+  let stopped = false;
+  let leaseLost = false;
+  let timer: NodeJS.Timeout | undefined;
+  let inFlight: Promise<void> | undefined;
+
+  const tick = async (): Promise<void> => {
+    if (stopped || leaseLost) return;
+    inFlight = (async () => {
+      const renewed = await renewKnowledgeProcessingLease(
+        { repository: deps.repository, leaseTtlSeconds },
+        job.documentId,
+        job.leaseToken,
+      );
+      if (!renewed.ok) leaseLost = true;
+    })();
+    try {
+      await inFlight;
+    } catch {
+      leaseLost = true;
+    } finally {
+      inFlight = undefined;
+    }
+    if (!stopped && !leaseLost) timer = setTimeout(() => void tick(), intervalMs);
+  };
+
+  timer = setTimeout(() => void tick(), intervalMs);
+  return {
+    lost: () => leaseLost,
+    async stop() {
+      stopped = true;
+      if (timer) clearTimeout(timer);
+      if (inFlight) await inFlight;
+    },
+  };
 }
 
 function errorMessage(error: unknown): string {
@@ -166,13 +227,14 @@ async function removeRawArtifact(
 async function recordFailure(
   deps: KnowledgePdfWorkerDependencies,
   documentId: KnowledgeDocumentId,
+  leaseToken: string,
   error: unknown,
   stage: string,
   cleanupWarning?: string,
 ): Promise<KnowledgePdfWorkerResult> {
   let failure: Result<void, DomainError>;
   try {
-    failure = await failKnowledgeExtraction(deps, documentId, error);
+    failure = await failKnowledgeExtraction(deps, documentId, leaseToken, error);
   } catch (failureError: unknown) {
     return {
       status: 'failed',
@@ -226,7 +288,11 @@ export async function processKnowledgePdfDocument(
   deps: KnowledgePdfWorkerDependencies,
   documentId: KnowledgeDocumentId,
 ): Promise<KnowledgePdfWorkerResult> {
-  const claimed = await claimKnowledgeDocumentForProcessing({ repository: deps.repository }, documentId);
+  const leaseTtlSeconds = deps.leaseTtlSeconds ?? DEFAULT_KNOWLEDGE_PROCESSING_LEASE_TTL_SECONDS;
+  const claimed = await claimKnowledgeDocumentForProcessing(
+    { repository: deps.repository, leaseTtlSeconds },
+    documentId,
+  );
   if (!claimed.ok) {
     return { status: 'not_claimed', documentId, stage: 'claim', error: sanitizeKnowledgeProcessingError(claimed.error) };
   }
@@ -236,6 +302,11 @@ export async function processKnowledgePdfDocument(
   let rawArtifactPath: string | undefined;
   let rawUploaded = false;
   let tempDirectory: string | undefined;
+  const heartbeat = startLeaseHeartbeat(deps, job);
+
+  const assertLease = (): void => {
+    if (heartbeat.lost()) throw new StaleKnowledgeLeaseError();
+  };
 
   try {
     const originalBytes = await deps.storage.download(job.storagePath);
@@ -250,6 +321,7 @@ export async function processKnowledgePdfDocument(
 
     stage = 'geometry';
     const geometry = await deps.geometry(originalBytes);
+    assertLease();
     tempDirectory = await fs.mkdtemp(path.join(deps.tempRoot ?? os.tmpdir(), 'collabboard-knowledge-pdf-'));
     const inputPath = path.join(tempDirectory, 'source.pdf');
     const outputDir = path.join(tempDirectory, 'output');
@@ -258,6 +330,7 @@ export async function processKnowledgePdfDocument(
 
     stage = 'parser';
     const execution = await deps.parser.run({ inputPath, outputDir });
+    assertLease();
     if (execution.exitCode !== 0) {
       throw new KnowledgePdfWorkerError(
         stage,
@@ -280,20 +353,29 @@ export async function processKnowledgePdfDocument(
       },
       pageGeometry: geometryRecord(geometry),
     });
+    assertLease();
 
     stage = 'raw-artifact-upload';
-    rawArtifactPath = KNOWLEDGE_RAW_ARTIFACT_PATH(job.boardId, job.documentId);
+    rawArtifactPath = KNOWLEDGE_RAW_ARTIFACT_PATH(
+      job.boardId,
+      job.documentId,
+      job.processingAttempt,
+      job.leaseToken,
+    );
     await deps.storage.upload(rawArtifactPath, parserOutput.bytes, 'application/json');
     rawUploaded = true;
+    assertLease();
 
     stage = 'complete';
+    await heartbeat.stop();
+    assertLease();
     const completed = await completeKnowledgeExtraction(
       { repository: deps.repository, hasher: deps.hasher },
-      { documentId, extraction, geometry, rawArtifactPath },
+      { documentId, processingLeaseToken: job.leaseToken, extraction, geometry, rawArtifactPath },
     );
     if (!completed.ok) {
       const cleanupWarning = await removeRawArtifact(deps.storage, rawUploaded ? rawArtifactPath : undefined);
-      return recordFailure(deps, documentId, completed.error, stage, cleanupWarning);
+      return recordFailure(deps, documentId, job.leaseToken, completed.error, stage, cleanupWarning);
     }
 
     return {
@@ -305,8 +387,18 @@ export async function processKnowledgePdfDocument(
     };
   } catch (error: unknown) {
     const cleanupWarning = await removeRawArtifact(deps.storage, rawUploaded ? rawArtifactPath : undefined);
-    return recordFailure(deps, documentId, error, currentStage(error, stage), cleanupWarning);
+    if (error instanceof StaleKnowledgeLeaseError || heartbeat.lost()) {
+      return {
+        status: 'stale',
+        documentId,
+        stage: currentStage(error, stage),
+        error: 'Knowledge processing lease is stale',
+        cleanupWarning,
+      };
+    }
+    return recordFailure(deps, documentId, job.leaseToken, error, currentStage(error, stage), cleanupWarning);
   } finally {
+    await heartbeat.stop();
     if (tempDirectory) {
       try {
         await fs.rm(tempDirectory, { recursive: true, force: true });
@@ -352,6 +444,8 @@ export interface KnowledgePdfWorkerEnvironment {
   readonly OPENDATALOADER_JAVA_BIN?: string;
   readonly OPENDATALOADER_JAR_PATH?: string;
   readonly OPENDATALOADER_TIMEOUT_MS?: string;
+  readonly KNOWLEDGE_PROCESSING_LEASE_TTL_SECONDS?: string;
+  readonly KNOWLEDGE_PROCESSING_HEARTBEAT_INTERVAL_MS?: string;
 }
 
 function requiredEnvironment(value: string | undefined, name: string): string {
@@ -366,6 +460,13 @@ function timeoutFromEnvironment(value: string | undefined): number {
   return timeout;
 }
 
+function positiveIntegerEnvironment(value: string | undefined, name: string, fallback: number): number {
+  if (value === undefined) return fallback;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) throw new Error(`${name} must be a positive integer`);
+  return parsed;
+}
+
 export function createKnowledgePdfWorkerFromEnvironment(
   environment: KnowledgePdfWorkerEnvironment = process.env,
 ): KnowledgePdfWorkerDependencies {
@@ -373,6 +474,18 @@ export function createKnowledgePdfWorkerFromEnvironment(
   const serviceRoleKey = requiredEnvironment(environment.SUPABASE_SERVICE_ROLE_KEY, 'SUPABASE_SERVICE_ROLE_KEY');
   const javaBin = assertWorkerRuntimePath(environment.OPENDATALOADER_JAVA_BIN, 'OPENDATALOADER_JAVA_BIN');
   const jarPath = assertWorkerRuntimePath(environment.OPENDATALOADER_JAR_PATH, 'OPENDATALOADER_JAR_PATH');
+  const leaseTtlSeconds = positiveIntegerEnvironment(
+    environment.KNOWLEDGE_PROCESSING_LEASE_TTL_SECONDS,
+    'KNOWLEDGE_PROCESSING_LEASE_TTL_SECONDS',
+    DEFAULT_KNOWLEDGE_PROCESSING_LEASE_TTL_SECONDS,
+  );
+  const heartbeatIntervalMs = environment.KNOWLEDGE_PROCESSING_HEARTBEAT_INTERVAL_MS
+    ? positiveIntegerEnvironment(
+        environment.KNOWLEDGE_PROCESSING_HEARTBEAT_INTERVAL_MS,
+        'KNOWLEDGE_PROCESSING_HEARTBEAT_INTERVAL_MS',
+        1_000,
+      )
+    : Math.max(1_000, Math.floor((leaseTtlSeconds * 1_000) / 3));
   const client = createClient(url, serviceRoleKey, {
     auth: { autoRefreshToken: false, persistSession: false },
   });
@@ -392,5 +505,7 @@ export function createKnowledgePdfWorkerFromEnvironment(
     parserName: OPENDATALOADER_PARSER_NAME,
     parserVersion: OPENDATALOADER_PDF_VERSION,
     parserOptionsHash: openDataLoaderOptionsHash(OPENDATALOADER_PARSER_CONFIGURATION),
+    leaseTtlSeconds,
+    heartbeatIntervalMs,
   };
 }

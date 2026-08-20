@@ -28,6 +28,7 @@ const infraSource = read(P5A_FILES[1]);
 const p5aSource = `${domainSource}\n${infraSource}`;
 const p5aCode = codeOnly(p5aSource);
 const migration = read('supabase/migrations/20260821_add_knowledge_extraction_lifecycle.sql');
+const leaseMigration = read('supabase/migrations/20260822_add_knowledge_processing_lease.sql');
 
 describe('P5A scope -- no extraction runtime (17, 18)', () => {
   it('contains no parser, JVM, container or subprocess invocation', () => {
@@ -86,7 +87,7 @@ describe('P5A scope -- no chunking, embeddings or RAG (16)', () => {
     const tables = new Set(
       [...p5aSource.matchAll(/from\(\s*['"]([a-z_]+)['"]\s*\)/g)].map((match) => match[1]),
     );
-    expect([...tables].sort()).toEqual(['knowledge_documents']);
+    expect([...tables].sort()).toEqual([]);
     // Pages are only ever written inside the transactional function.
     expect(migration).toContain('public.knowledge_pages');
   });
@@ -148,15 +149,18 @@ describe('P5A scope -- worker privilege boundary', () => {
   });
 });
 
-describe('P5A scope -- the state machine is not bypassable', () => {
-  it('claim is a single conditional update restricted to claimable statuses', () => {
-    expect(infraSource).toContain("update({ processing_status: 'processing', processing_error: null })");
-    expect(infraSource).toContain(".in('processing_status', KNOWLEDGE_CLAIMABLE_STATUSES)");
+describe('P5C scope -- the state machine is not bypassable', () => {
+  it('claim is delegated to the database-time fenced claim RPC', () => {
+    expect(infraSource).toContain("rpc('claim_knowledge_extraction'");
+    expect(infraSource).toContain('p_lease_ttl_seconds');
+    expect(infraSource).toContain('leaseToken');
   });
 
-  it('fail is restricted to processing and clears the raw artifact pointer', () => {
-    expect(infraSource).toContain(".eq('processing_status', 'processing')");
-    expect(infraSource).toContain('raw_artifact_path: null');
+  it('fail is delegated to the fenced failure RPC with a lease token', () => {
+    expect(infraSource).toContain("rpc('fail_knowledge_extraction'");
+    expect(infraSource).toContain('p_lease_token');
+    expect(leaseMigration).toContain('processing_lease_token = NULL');
+    expect(leaseMigration).toContain('raw_artifact_path = NULL');
   });
 
   it('nothing in P5A can set ready outside the transactional function', () => {

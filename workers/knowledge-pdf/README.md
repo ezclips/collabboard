@@ -31,13 +31,24 @@ claim -> private download -> SHA-256 check -> PDF.js geometry
 -> transactional processing/ready completion
 ```
 
+Parser artifacts are attempt-scoped:
+
+```text
+knowledge/{boardId}/{documentId}/extraction/attempt-{attempt}-{leaseToken}/opendataloader-2.5.0.json
+```
+
+This prevents an expired worker from overwriting a newer attempt’s artifact.
+
 Failures use P5A’s sanitized `processing -> failed` transition. A successful
 raw upload is removed if completion fails. A deleted document is reported as a
 stale job. Temporary files are always removed.
 
 P5A has no lease or heartbeat. A hard worker/process/host crash after claim
-can therefore strand a document in `processing`; production dispatch remains
-blocked until a later lease/recovery patch addresses that limitation.
+can therefore strand a document in `processing`; P5C adds database-time lease
+recovery, token fencing, and an in-job heartbeat, but a hard crash after raw
+artifact upload can still leave an unreachable attempt artifact. Production
+dispatch remains blocked until later maintenance/recovery work addresses that
+cross-system orphan case.
 
 Geometry invariant: `knowledge_pages.width_points` and `height_points` are
 canonical source-page dimensions from PDF.js at rotation `0`, while

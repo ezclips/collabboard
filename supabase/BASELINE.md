@@ -29,6 +29,8 @@ loads the baseline snapshot, and applies this exact post-baseline manifest:
 3. `20260726_add_canvas_line_coord_space.sql`
 4. `20260820_create_knowledge_data_foundation.sql`
 5. `20260820_provision_knowledge_documents_bucket.sql`
+6. `20260821_add_knowledge_extraction_lifecycle.sql`
+7. `20260822_add_knowledge_processing_lease.sql`
 
 The `120260710_fix_board_sections_wrong_table_rls.sql` file is a duplicate
 archival copy and is intentionally not applied. The snapshot contains the net
@@ -46,6 +48,11 @@ volumes. It never uses linked credentials, remote URLs, `db push`, or migration
 repair. When `OPENDATALOADER_JAVA_BIN` and `OPENDATALOADER_JAR_PATH` are not
 provided as absolute local paths, the bootstrap reports the real P5B worker
 integration as **BLOCKED** rather than substituting a fake parser.
+
+The P5C lease migration adds database-time claim/reclaim, renewal, and fenced
+completion/failure RPCs. A hard crash can still leave an unreachable
+attempt-scoped Storage artifact after upload; no garbage collector is part of
+this patch.
 
 `supabase/config.toml` is intentionally secret-free. Its migrations and seed
 execution are disabled because direct `supabase db reset --local` would replay

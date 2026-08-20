@@ -42,6 +42,9 @@ export const KNOWLEDGE_CLAIMABLE_STATUSES: readonly KnowledgeDocumentProcessingS
   'failed',
 ];
 
+/** Operational default; this is not a PDF upload or processing-size policy. */
+export const DEFAULT_KNOWLEDGE_PROCESSING_LEASE_TTL_SECONDS = 300;
+
 export function canTransitionKnowledgeStatus(
   from: KnowledgeDocumentProcessingStatus,
   to: KnowledgeDocumentProcessingStatus,
@@ -63,6 +66,15 @@ export interface KnowledgeExtractionJob {
   readonly boardId: BoardId;
   readonly storagePath: string;
   readonly contentSha256: string;
+  readonly leaseToken: string;
+  readonly processingAttempt: number;
+  readonly leaseExpiresAt: string;
+}
+
+export interface KnowledgeProcessingLease {
+  readonly leaseToken: string;
+  readonly processingAttempt: number;
+  readonly leaseExpiresAt: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -255,6 +267,7 @@ export function sanitizeKnowledgeProcessingError(error: unknown): string {
 
 export interface KnowledgeExtractionCompletion {
   readonly documentId: KnowledgeDocumentId;
+  readonly leaseToken: string;
   readonly pageCount: number;
   readonly pages: readonly KnowledgeExtractionPageWrite[];
   readonly parserName: string;
@@ -281,17 +294,24 @@ export interface KnowledgeExtractionRepository {
    * exactly one of two concurrent claims may succeed and the other must get a
    * deterministic conflict.
    */
-  claim(documentId: KnowledgeDocumentId): Promise<Result<KnowledgeExtractionJob, DomainError>>;
+  claim(documentId: KnowledgeDocumentId, leaseTtlSeconds: number): Promise<Result<KnowledgeExtractionJob, DomainError>>;
+  /** Renew only the current, unexpired lease. */
+  renew(
+    documentId: KnowledgeDocumentId,
+    leaseToken: string,
+    leaseTtlSeconds: number,
+  ): Promise<Result<KnowledgeProcessingLease, DomainError>>;
   /** Atomically replace pages and move `processing -> ready`, or change nothing. */
   complete(completion: KnowledgeExtractionCompletion): Promise<Result<void, DomainError>>;
   /** Move `processing -> failed` with an already-sanitized message. */
-  fail(documentId: KnowledgeDocumentId, message: string): Promise<Result<void, DomainError>>;
+  fail(documentId: KnowledgeDocumentId, leaseToken: string, message: string): Promise<Result<void, DomainError>>;
 }
 
 export interface KnowledgeExtractionDeps {
   readonly repository: KnowledgeExtractionRepository;
   /** Reused from ingestion; used only to hash page text. */
   readonly hasher: KnowledgeContentHasher;
+  readonly leaseTtlSeconds?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -304,14 +324,31 @@ export interface KnowledgeExtractionDeps {
  * is terminal), and `not_found` when it no longer exists.
  */
 export async function claimKnowledgeDocumentForProcessing(
-  deps: Pick<KnowledgeExtractionDeps, 'repository'>,
+  deps: Pick<KnowledgeExtractionDeps, 'repository' | 'leaseTtlSeconds'>,
   documentId: KnowledgeDocumentId,
 ): Promise<Result<KnowledgeExtractionJob, DomainError>> {
-  return deps.repository.claim(documentId);
+  const leaseTtlSeconds = deps.leaseTtlSeconds ?? DEFAULT_KNOWLEDGE_PROCESSING_LEASE_TTL_SECONDS;
+  if (!Number.isInteger(leaseTtlSeconds) || leaseTtlSeconds <= 0) {
+    return err(domainError('validation', 'Processing lease TTL must be a positive integer'));
+  }
+  return deps.repository.claim(documentId, leaseTtlSeconds);
+}
+
+export async function renewKnowledgeProcessingLease(
+  deps: Pick<KnowledgeExtractionDeps, 'repository' | 'leaseTtlSeconds'>,
+  documentId: KnowledgeDocumentId,
+  leaseToken: string,
+): Promise<Result<KnowledgeProcessingLease, DomainError>> {
+  const leaseTtlSeconds = deps.leaseTtlSeconds ?? DEFAULT_KNOWLEDGE_PROCESSING_LEASE_TTL_SECONDS;
+  if (!Number.isInteger(leaseTtlSeconds) || leaseTtlSeconds <= 0) {
+    return err(domainError('validation', 'Processing lease TTL must be a positive integer'));
+  }
+  return deps.repository.renew(documentId, leaseToken, leaseTtlSeconds);
 }
 
 export interface CompleteKnowledgeExtractionInput {
   readonly documentId: KnowledgeDocumentId;
+  readonly processingLeaseToken: string;
   readonly extraction: KnowledgePdfExtractionResult;
   readonly geometry: readonly KnowledgePageGeometryInput[];
   readonly rawArtifactPath?: string | null;
@@ -346,6 +383,7 @@ export async function completeKnowledgeExtraction(
 
   const committed = await deps.repository.complete({
     documentId: input.documentId,
+    leaseToken: input.processingLeaseToken,
     pageCount: pages.length,
     pages,
     parserName: input.extraction.parser.name,
@@ -367,7 +405,8 @@ export async function completeKnowledgeExtraction(
 export async function failKnowledgeExtraction(
   deps: Pick<KnowledgeExtractionDeps, 'repository'>,
   documentId: KnowledgeDocumentId,
+  leaseToken: string,
   error: unknown,
 ): Promise<Result<void, DomainError>> {
-  return deps.repository.fail(documentId, sanitizeKnowledgeProcessingError(error));
+  return deps.repository.fail(documentId, leaseToken, sanitizeKnowledgeProcessingError(error));
 }

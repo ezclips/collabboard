@@ -48,6 +48,10 @@ export const POST_BASELINE_MIGRATIONS = [
     source: '20260821_add_knowledge_extraction_lifecycle.sql',
     target: '20260821000000_knowledge_extraction_lifecycle.sql',
   },
+  {
+    source: '20260822_add_knowledge_processing_lease.sql',
+    target: '20260822000000_knowledge_processing_lease.sql',
+  },
 ];
 
 const REQUIRED_EXTENSIONS_SQL = `
@@ -219,6 +223,27 @@ SELECT json_build_object(
     JOIN pg_namespace n ON n.oid = p.pronamespace
     WHERE n.nspname = 'public' AND p.proname = 'complete_knowledge_extraction'
   ), 'EXECUTE'),
+  'lease_columns', (
+    SELECT count(*) = 3
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'knowledge_documents'
+      AND column_name IN ('processing_lease_token', 'processing_lease_expires_at', 'processing_attempt')
+  ),
+  'lease_rpcs_not_public', (
+    SELECT count(*) = 4
+    FROM pg_proc p
+    JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname = 'public'
+      AND p.proname IN (
+        'claim_knowledge_extraction',
+        'renew_knowledge_processing_lease',
+        'complete_knowledge_extraction',
+        'fail_knowledge_extraction'
+      )
+      AND NOT has_function_privilege('anon', p.oid, 'EXECUTE')
+      AND NOT has_function_privilege('authenticated', p.oid, 'EXECUTE')
+  ),
   'p3_constraints', (
     SELECT count(*) >= 8
     FROM pg_constraint

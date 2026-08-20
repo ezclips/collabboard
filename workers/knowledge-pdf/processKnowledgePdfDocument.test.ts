@@ -8,7 +8,7 @@ import { domainError } from '../../lib/domain/core/errors';
 import type { DomainError } from '../../lib/domain/core/errors';
 import { err, ok } from '../../lib/domain/core/result';
 import type { Result } from '../../lib/domain/core/result';
-import type { KnowledgeExtractionCompletion, KnowledgeExtractionJob, KnowledgeExtractionRepository } from '../../lib/domain/knowledge/knowledgeExtraction';
+import type { KnowledgeExtractionCompletion, KnowledgeExtractionJob, KnowledgeExtractionRepository, KnowledgeProcessingLease } from '../../lib/domain/knowledge/knowledgeExtraction';
 import basicFixture from '../../lib/infra/knowledge/fixtures/openDataLoader-basic.json';
 import {
   KNOWLEDGE_RAW_ARTIFACT_PATH,
@@ -25,6 +25,7 @@ const DOCUMENT = asKnowledgeDocumentId('00000000-0000-0000-0000-000000000101');
 const BOARD = asBoardId('00000000-0000-0000-0000-000000000201');
 const SOURCE_PATH = 'knowledge/board/document/original.pdf';
 const SOURCE_BYTES = new Uint8Array(Buffer.from('%PDF-1.7\nworker test\n%%EOF', 'utf8'));
+const LEASE_TOKEN = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
 
 class FakeStorage implements KnowledgeWorkerStorage {
   readonly objects = new Map<string, Uint8Array>([[SOURCE_PATH, SOURCE_BYTES]]);
@@ -52,6 +53,11 @@ class FakeRepository implements KnowledgeExtractionRepository {
   status: 'uploaded' | 'processing' | 'failed' | 'ready' = 'uploaded';
   completeResult: Result<void, DomainError> = ok(undefined);
   failResult: Result<void, DomainError> = ok(undefined);
+  renewResult: Result<KnowledgeProcessingLease, DomainError> = ok({
+    leaseToken: LEASE_TOKEN,
+    processingAttempt: 1,
+    leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+  });
   readonly completions: KnowledgeExtractionCompletion[] = [];
   readonly failures: string[] = [];
 
@@ -65,8 +71,15 @@ class FakeRepository implements KnowledgeExtractionRepository {
       boardId: BOARD,
       storagePath: SOURCE_PATH,
       contentSha256: createHash('sha256').update(SOURCE_BYTES).digest('hex'),
+      leaseToken: LEASE_TOKEN,
+      processingAttempt: 1,
+      leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
     };
     return ok(job);
+  }
+
+  async renew() {
+    return this.renewResult;
   }
 
   async complete(completion: KnowledgeExtractionCompletion) {
@@ -76,7 +89,7 @@ class FakeRepository implements KnowledgeExtractionRepository {
     return this.completeResult;
   }
 
-  async fail(_documentId: typeof DOCUMENT, message: string) {
+  async fail(_documentId: typeof DOCUMENT, _leaseToken: string, message: string) {
     this.failures.push(message);
     if (this.failResult.ok) this.status = 'failed';
     return this.failResult;
@@ -127,7 +140,7 @@ describe('processKnowledgePdfDocument', () => {
       const result = await processKnowledgePdfDocument(deps(repository, storage, parserFromFixture(), root), DOCUMENT);
 
       expect(result.status).toBe('ready');
-      expect(result.rawArtifactPath).toBe(KNOWLEDGE_RAW_ARTIFACT_PATH(BOARD, DOCUMENT));
+      expect(result.rawArtifactPath).toBe(KNOWLEDGE_RAW_ARTIFACT_PATH(BOARD, DOCUMENT, 1, LEASE_TOKEN));
       expect(repository.status).toBe('ready');
       expect(repository.completions[0].parserVersion).toBe('2.5.0');
       expect(repository.completions[0].parserOptionsHash).toBe('options-hash');
@@ -154,6 +167,9 @@ describe('processKnowledgePdfDocument', () => {
       boardId: BOARD,
       storagePath: SOURCE_PATH,
       contentSha256: 'f'.repeat(64),
+      leaseToken: LEASE_TOKEN,
+      processingAttempt: 1,
+      leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
     });
 
     const result = await processKnowledgePdfDocument(deps(repository, storage, parser), DOCUMENT);
@@ -211,7 +227,7 @@ describe('processKnowledgePdfDocument', () => {
     const result = await processKnowledgePdfDocument(deps(repository, storage), DOCUMENT);
 
     expect(result.status).toBe('failed');
-    expect(storage.removed).toContain(KNOWLEDGE_RAW_ARTIFACT_PATH(BOARD, DOCUMENT));
+    expect(storage.removed).toContain(KNOWLEDGE_RAW_ARTIFACT_PATH(BOARD, DOCUMENT, 1, LEASE_TOKEN));
     expect(repository.status).toBe('failed');
   });
 
@@ -224,7 +240,7 @@ describe('processKnowledgePdfDocument', () => {
     const result = await processKnowledgePdfDocument(deps(repository, storage), DOCUMENT);
 
     expect(result.status).toBe('stale');
-    expect(storage.removed).toContain(KNOWLEDGE_RAW_ARTIFACT_PATH(BOARD, DOCUMENT));
+    expect(storage.removed).toContain(KNOWLEDGE_RAW_ARTIFACT_PATH(BOARD, DOCUMENT, 1, LEASE_TOKEN));
   });
 
   it('can retry a failed document and reach ready without a second lifecycle implementation', async () => {
@@ -246,5 +262,47 @@ describe('processKnowledgePdfDocument', () => {
     expect(first.status).toBe('failed');
     expect(second.status).toBe('ready');
     expect(attempts).toBe(2);
+  });
+
+  it('keeps a deliberately slow job alive with heartbeats', async () => {
+    const repository = new FakeRepository();
+    const storage = new FakeStorage();
+    const parser: KnowledgePdfParser = {
+      run: async (input) => {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        await fs.writeFile(path.join(input.outputDir, 'result.json'), JSON.stringify(basicFixture));
+        return { exitCode: 0, signal: null, stdout: '', stderr: '', timedOut: false, elapsedMs: 50 };
+      },
+    };
+
+    const result = await processKnowledgePdfDocument(
+      { ...deps(repository, storage, parser), leaseTtlSeconds: 1, heartbeatIntervalMs: 5 },
+      DOCUMENT,
+    );
+
+    expect(result.status).toBe('ready');
+    expect(repository.completions).toHaveLength(1);
+  });
+
+  it('stops without fail/complete when the heartbeat loses the lease', async () => {
+    const repository = new FakeRepository();
+    repository.renewResult = err(domainError('conflict', 'stale lease'));
+    const storage = new FakeStorage();
+    const parser: KnowledgePdfParser = {
+      run: async (input) => {
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        await fs.writeFile(path.join(input.outputDir, 'result.json'), JSON.stringify(basicFixture));
+        return { exitCode: 0, signal: null, stdout: '', stderr: '', timedOut: false, elapsedMs: 30 };
+      },
+    };
+
+    const result = await processKnowledgePdfDocument(
+      { ...deps(repository, storage, parser), leaseTtlSeconds: 1, heartbeatIntervalMs: 5 },
+      DOCUMENT,
+    );
+
+    expect(result.status).toBe('stale');
+    expect(repository.completions).toHaveLength(0);
+    expect(repository.failures).toEqual([]);
   });
 });
