@@ -68,7 +68,11 @@ export function normalizeRotation(rotation: number): 0 | 90 | 180 | 270 {
 async function loadWithPdfJs(bytes: Uint8Array): Promise<PdfGeometryDocument> {
   const { getDocument } = await import('pdfjs-dist/legacy/build/pdf.mjs');
   const loadingTask = getDocument({
-    data: bytes,
+    // PDF.js takes ownership of `data` and DETACHES the caller's ArrayBuffer:
+    // after loading, the caller's view has byteLength 0. The worker still
+    // needs those bytes to write the parser's input file, so PDF.js gets its
+    // own copy and geometry extraction stays free of side effects.
+    data: new Uint8Array(bytes),
     isEvalSupported: false,
     useSystemFonts: false,
   });
