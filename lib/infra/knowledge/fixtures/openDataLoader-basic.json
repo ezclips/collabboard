@@ -1,0 +1,40 @@
+{
+  "file name": "basic.pdf",
+  "number of pages": 2,
+  "author": null,
+  "title": null,
+  "kids": [
+    {
+      "type": "heading",
+      "id": 1,
+      "page number": 1,
+      "bounding box": [72, 700, 300, 724],
+      "heading level": 1,
+      "content": "Project Notes"
+    },
+    {
+      "type": "paragraph",
+      "id": 2,
+      "page number": 1,
+      "bounding box": [72, 650, 500, 690],
+      "content": "A paragraph with two lines.\nThe line break is retained."
+    },
+    {
+      "type": "list",
+      "id": 3,
+      "page number": 1,
+      "numbering style": "bullet",
+      "list items": [
+        { "type": "list item", "id": 4, "page number": 1, "content": "First item" },
+        { "type": "list item", "id": 5, "page number": 1, "content": "Second item" }
+      ]
+    },
+    {
+      "type": "future-parser-element",
+      "id": 6,
+      "page number": 2,
+      "bounding box": [72, 500, 180, 520],
+      "content": "Future content"
+    }
+  ]
+}

@@ -1,0 +1,74 @@
+{
+  "file name": "table.pdf",
+  "number of pages": 1,
+  "author": "Fixture Author",
+  "title": "Table Fixture",
+  "kids": [
+    {
+      "type": "table",
+      "id": 10,
+      "page number": 1,
+      "bounding box": [72, 400, 540, 600],
+      "number of rows": 2,
+      "number of columns": 2,
+      "rows": [
+        {
+          "type": "table row",
+          "row number": 1,
+          "cells": [
+            {
+              "type": "table cell",
+              "id": 11,
+              "page number": 1,
+              "bounding box": [72, 500, 300, 600],
+              "row number": 1,
+              "column number": 1,
+              "row span": 1,
+              "column span": 1,
+              "kids": [{ "type": "paragraph", "id": 12, "page number": 1, "content": "Name" }]
+            },
+            {
+              "type": "table cell",
+              "id": 13,
+              "page number": 1,
+              "bounding box": [300, 500, 540, 600],
+              "row number": 1,
+              "column number": 2,
+              "row span": 1,
+              "column span": 1,
+              "kids": [{ "type": "paragraph", "id": 14, "page number": 1, "content": "Value" }]
+            }
+          ]
+        },
+        {
+          "type": "table row",
+          "row number": 2,
+          "cells": [
+            {
+              "type": "table cell",
+              "id": 15,
+              "page number": 1,
+              "bounding box": [72, 400, 300, 500],
+              "row number": 2,
+              "column number": 1,
+              "row span": 1,
+              "column span": 1,
+              "kids": [{ "type": "paragraph", "id": 16, "page number": 1, "content": "Alpha" }]
+            },
+            {
+              "type": "table cell",
+              "id": 17,
+              "page number": 1,
+              "bounding box": [300, 400, 540, 500],
+              "row number": 2,
+              "column number": 2,
+              "row span": 1,
+              "column span": 1,
+              "kids": [{ "type": "paragraph", "id": 18, "page number": 1, "content": "42" }]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
