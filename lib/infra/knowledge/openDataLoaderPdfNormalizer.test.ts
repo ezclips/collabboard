@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import basicFixture from './fixtures/openDataLoader-basic.json';
+import observedNativeShapeFixture from './fixtures/openDataLoader-real-shape.json';
 import tableFixture from './fixtures/openDataLoader-table.json';
 import { normalizeOpenDataLoaderPdf } from './openDataLoaderPdfNormalizer';
 
@@ -74,6 +75,27 @@ describe('normalizeOpenDataLoaderPdf', () => {
     });
     expect(table.children?.[0].children?.[0]).toMatchObject({ type: 'paragraph', text: 'Name' });
     expect(result.citationReady).toBe(true);
+  });
+
+  it('handles observed native text blocks and table cells without source IDs', () => {
+    const result = normalizeOpenDataLoaderPdf(observedNativeShapeFixture, {
+      contentSha256: 'sha-observed-native-shape',
+      parser,
+    });
+    const [textBlock, table] = result.pages[0].elements;
+
+    expect(textBlock).toMatchObject({
+      type: 'other',
+      sourceElementId: '5',
+      metadata: { sourceType: 'text block' },
+      children: [{ type: 'paragraph', sourceElementId: '1', text: 'Figure placeholder' }],
+    });
+    expect(table.children?.[0]).toMatchObject({
+      type: 'table-cell',
+      metadata: { rowNumber: 1, columnNumber: 1 },
+      bbox: { coordinateSystem: 'pdf-points-bottom-left' },
+    });
+    expect(table.children?.[0]).not.toHaveProperty('sourceElementId');
   });
 
   it('does not invent page dimensions and reports citation readiness explicitly', () => {

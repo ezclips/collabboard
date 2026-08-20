@@ -1,0 +1,51 @@
+{
+  "file name": "observed-native-shape.pdf",
+  "number of pages": 1,
+  "author": "fixture",
+  "title": "Observed native shape",
+  "kids": [
+    {
+      "type": "text block",
+      "id": 5,
+      "page number": 1,
+      "bounding box": [299.9, 511.9, 520.1, 632.1],
+      "kids": [
+        {
+          "type": "paragraph",
+          "pdfua_tag": "P",
+          "id": 1,
+          "page number": 1,
+          "bounding box": [342, 564.525, 433.091, 577.241],
+          "content": "Figure placeholder"
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "id": 3,
+      "page number": 1,
+      "bounding box": [71.9, 518.9, 540.1, 647.1],
+      "number of rows": 1,
+      "number of columns": 1,
+      "rows": [
+        {
+          "type": "table row",
+          "row number": 1,
+          "cells": [
+            {
+              "type": "table cell",
+              "pdfua_tag": "TD",
+              "page number": 1,
+              "bounding box": [72, 615, 540, 647],
+              "row number": 1,
+              "column number": 1,
+              "row span": 1,
+              "column span": 1,
+              "kids": []
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
