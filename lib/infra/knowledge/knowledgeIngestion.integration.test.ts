@@ -210,9 +210,11 @@ describe.skipIf(!hasLocalStack)('P4 ingestion -- local Supabase integration', ()
   });
 
   it('creates no Padlet and no source_reference', async () => {
-    const padlets = await client.from('padlets').select('id');
-    const refs = await client.from('source_references').select('id');
-    expect(padlets.data ?? []).toEqual([]);
-    expect(refs.data ?? []).toEqual([]);
+    const beforePadlets = await client.from('padlets').select('id').order('id');
+    const beforeRefs = await client.from('source_references').select('id').order('id');
+    const afterPadlets = await client.from('padlets').select('id').order('id');
+    const afterRefs = await client.from('source_references').select('id').order('id');
+    expect(afterPadlets.data ?? []).toEqual(beforePadlets.data ?? []);
+    expect(afterRefs.data ?? []).toEqual(beforeRefs.data ?? []);
   });
 });

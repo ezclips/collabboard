@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { createClient } from '@supabase/supabase-js';
 
 const repoRoot = path.resolve(import.meta.dirname, '..', '..');
 const baselineSnapshot = path.join(repoRoot, 'supabase', 'baseline', 'schema_snapshot_2026-07-05.sql');
@@ -39,6 +40,10 @@ export const POST_BASELINE_MIGRATIONS = [
     source: '20260820_create_knowledge_data_foundation.sql',
     target: '20260820000000_knowledge_data_foundation.sql',
   },
+  {
+    source: '20260820_provision_knowledge_documents_bucket.sql',
+    target: '20260820010000_knowledge_documents_bucket.sql',
+  },
 ];
 
 const REQUIRED_EXTENSIONS_SQL = `
@@ -50,7 +55,8 @@ CREATE EXTENSION IF NOT EXISTS postgis;
 const LOCAL_CONFIG = (projectId) => `project_id = "${projectId}"
 
 [api]
-enabled = false
+enabled = true
+port = 56321
 
 [db]
 port = 56322
@@ -70,7 +76,7 @@ enabled = false
 enabled = false
 
 [storage]
-enabled = false
+enabled = true
 
 [auth]
 enabled = true
@@ -192,6 +198,13 @@ SELECT json_build_object(
     WHERE schemaname = 'public'
       AND tablename IN ('knowledge_documents', 'knowledge_pages', 'knowledge_chunks', 'source_references')
   ),
+  'knowledge_bucket', EXISTS (
+    SELECT 1
+    FROM storage.buckets
+    WHERE id = 'knowledge-documents'
+      AND name = 'knowledge-documents'
+      AND public = false
+  ),
   'p3_constraints', (
     SELECT count(*) >= 8
     FROM pg_constraint
@@ -209,6 +222,125 @@ SELECT json_build_object(
   )
 ) AS validation;
 `;
+}
+
+function localStatusEnv(projectRoot) {
+  const output = requireSuccess(
+    run('supabase', ['status', '-o', 'env', '--workdir', projectRoot]),
+    'Local Supabase status lookup',
+  ).stdout;
+  const values = {};
+  for (const line of output.split(/\r?\n/)) {
+    const match = line.match(/^([A-Z][A-Z0-9_]*)=(.*)$/);
+    if (!match) continue;
+    values[match[1]] = match[2].trim().replace(/^(['"])(.*)\1$/, '$2');
+  }
+  return values;
+}
+
+function assertLoopbackUrl(value, description) {
+  const parsed = new URL(value);
+  if (!['127.0.0.1', 'localhost'].includes(parsed.hostname)) {
+    throw new Error(`${description} is not loopback: ${parsed.hostname}`);
+  }
+  return parsed.toString().replace(/\/$/, '');
+}
+
+async function storageSmoke(projectRoot, projectId) {
+  const values = localStatusEnv(projectRoot);
+  const url = assertLoopbackUrl(values.API_URL, 'Local Supabase API URL');
+  if (!values.ANON_KEY || !values.SERVICE_ROLE_KEY) {
+    throw new Error('Local Supabase status did not provide Storage credentials');
+  }
+
+  const serviceClient = createClient(url, values.SERVICE_ROLE_KEY, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
+  const anonymousClient = createClient(url, values.ANON_KEY, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
+  const smokePath = `knowledge/bootstrap-smoke/${projectId}/original.pdf`;
+  const bytes = Buffer.from('%PDF-1.7\nbootstrap smoke\n%%EOF', 'utf8');
+
+  let uploaded;
+  for (let attempt = 0; attempt < 15; attempt += 1) {
+    uploaded = await serviceClient.storage
+      .from('knowledge-documents')
+      .upload(smokePath, bytes, { contentType: 'application/pdf', upsert: false });
+    if (!uploaded.error || !String(uploaded.error.message).includes('fetch failed')) break;
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+  if (uploaded.error) throw new Error(`Local Storage upload failed: ${uploaded.error.message}`);
+
+  const anonymousRead = await anonymousClient.storage
+    .from('knowledge-documents')
+    .download(smokePath);
+  if (!anonymousRead.error) {
+    throw new Error('Private Knowledge bucket allowed anonymous download');
+  }
+
+  const serviceRead = await serviceClient.storage
+    .from('knowledge-documents')
+    .download(smokePath);
+  if (serviceRead.error || !serviceRead.data) {
+    throw new Error(`Service-role Storage read failed: ${serviceRead.error?.message ?? 'no data'}`);
+  }
+  const stored = Buffer.from(await serviceRead.data.arrayBuffer());
+  if (!stored.equals(bytes)) throw new Error('Local Storage PDF bytes were not preserved');
+
+  const removed = await serviceClient.storage.from('knowledge-documents').remove([smokePath]);
+  if (removed.error) throw new Error(`Local Storage remove failed: ${removed.error.message}`);
+
+  return {
+    bucket: 'knowledge-documents',
+    private: true,
+    mimeRestriction: 'not-used',
+    serviceRoleUploadRemove: true,
+  };
+}
+
+function writeIntegrationEnv(projectRoot) {
+  const values = localStatusEnv(projectRoot);
+  const url = assertLoopbackUrl(values.API_URL, 'Local Supabase API URL');
+  if (!values.SERVICE_ROLE_KEY) throw new Error('Local Supabase status did not provide service role credentials');
+  const envPath = path.join(repoRoot, 'scripts', '.tmp-p4-env.json');
+  fs.writeFileSync(
+    envPath,
+    JSON.stringify({
+      P4_SUPABASE_URL: url,
+      P4_SERVICE_ROLE_KEY: values.SERVICE_ROLE_KEY,
+      P4_BOARD_A: '00000000-0000-0000-0000-000000002011',
+      P4_BOARD_B: '00000000-0000-0000-0000-000000002012',
+      P4_OWNER: '00000000-0000-0000-0000-000000001011',
+      P4_EDITOR: '00000000-0000-0000-0000-000000001012',
+      P4_VIEWER: '00000000-0000-0000-0000-000000001013',
+      P4_UNRELATED: '00000000-0000-0000-0000-000000001014',
+    }),
+  );
+  return envPath;
+}
+
+function runKnowledgeIntegrationTests() {
+  const testFiles = [
+    'lib/infra/knowledge/knowledgeIngestion.integration.test.ts',
+    'lib/infra/knowledge/knowledgeDeletion.integration.test.ts',
+  ];
+  const outputs = [];
+  for (const testFile of testFiles) {
+    const result = run(process.execPath, [
+      path.join(repoRoot, 'node_modules', 'vitest', 'vitest.mjs'),
+      'run',
+      testFile,
+    ]);
+    if (result.error || result.status !== 0) {
+      const detail = `${result.error ?? ''}\n${result.stdout}\n${result.stderr}`.trim();
+      throw new Error(
+        `Local Knowledge Storage/Postgres integration tests failed${detail ? `: ${detail.slice(-12000)}` : ''}`,
+      );
+    }
+    outputs.push(result.stdout.trim());
+  }
+  return { stdout: outputs.join('\n') };
 }
 
 function knowledgeSmokeSql() {
@@ -265,6 +397,32 @@ ROLLBACK;
 `;
 }
 
+function integrationFixtureSql() {
+  return String.raw`
+BEGIN;
+SET LOCAL ROLE postgres;
+INSERT INTO auth.users (id, aud, role, email, encrypted_password, email_confirmed_at, created_at, updated_at)
+VALUES
+  ('00000000-0000-0000-0000-000000001011', 'authenticated', 'authenticated', 'p4-owner@example.invalid', 'not-a-password', now(), now(), now()),
+  ('00000000-0000-0000-0000-000000001012', 'authenticated', 'authenticated', 'p4-editor@example.invalid', 'not-a-password', now(), now(), now()),
+  ('00000000-0000-0000-0000-000000001013', 'authenticated', 'authenticated', 'p4-viewer@example.invalid', 'not-a-password', now(), now(), now()),
+  ('00000000-0000-0000-0000-000000001014', 'authenticated', 'authenticated', 'p4-unrelated@example.invalid', 'not-a-password', now(), now(), now());
+INSERT INTO public.boards (id, user_id, title)
+VALUES
+  ('00000000-0000-0000-0000-000000002011', '00000000-0000-0000-0000-000000001011', 'P4D board A'),
+  ('00000000-0000-0000-0000-000000002012', '00000000-0000-0000-0000-000000001011', 'P4D board B');
+INSERT INTO public.padlets (id, board_id, title, content, type)
+VALUES
+  ('00000000-0000-0000-0000-000000003011', '00000000-0000-0000-0000-000000002011', 'P4D note A', '', 'text'),
+  ('00000000-0000-0000-0000-000000003012', '00000000-0000-0000-0000-000000002012', 'P4D note B', '', 'text');
+INSERT INTO public.board_collaborators (user_id, role, board_id)
+VALUES
+  ('00000000-0000-0000-0000-000000001012', 'editor', '00000000-0000-0000-0000-000000002011'),
+  ('00000000-0000-0000-0000-000000001013', 'viewer', '00000000-0000-0000-0000-000000002011');
+COMMIT;
+`;
+}
+
 function migrationLint(projectRoot) {
   const result = run('supabase', ['db', 'lint', '--local', '--level', 'warning', '--fail-on', 'none', '--workdir', projectRoot]);
   const output = `${result.stdout}\n${result.stderr}`.trim();
@@ -290,7 +448,7 @@ function stopProject(projectId) {
   run('supabase', ['stop', '--project-id', projectId, '--no-backup']);
 }
 
-function runOnce() {
+async function runOnce() {
   assertDocker();
   const { projectRoot, projectId } = createTempProject();
   try {
@@ -298,6 +456,15 @@ function runOnce() {
     const container = dbContainerFor(projectId);
     const schemaOutput = runSql(container, schemaSmokeSql());
     const knowledgeOutput = runSql(container, knowledgeSmokeSql());
+    runSql(container, integrationFixtureSql());
+    const storageOutput = await storageSmoke(projectRoot, projectId);
+    const integrationEnvPath = writeIntegrationEnv(projectRoot);
+    let integrationOutput;
+    try {
+      integrationOutput = runKnowledgeIntegrationTests().stdout.trim().slice(-12000);
+    } finally {
+      fs.rmSync(integrationEnvPath, { force: true });
+    }
     const lint = migrationLint(projectRoot);
     return {
       projectId,
@@ -306,6 +473,8 @@ function runOnce() {
       appliedMigrations: appliedMigrations(container),
       schemaOutput: schemaOutput.trim(),
       knowledgeOutput: knowledgeOutput.trim(),
+      storageOutput,
+      integrationOutput,
       lint,
     };
   } finally {
@@ -318,5 +487,5 @@ const runs = Number(process.argv[2] ?? '2');
 if (!Number.isInteger(runs) || runs < 1) throw new Error('Usage: node scripts/db/bootstrap-local.mjs [runs>=1]');
 
 const reports = [];
-for (let index = 0; index < runs; index += 1) reports.push(runOnce());
+for (let index = 0; index < runs; index += 1) reports.push(await runOnce());
 console.log(JSON.stringify({ strategy: 'BASELINE', runs: reports }, null, 2));

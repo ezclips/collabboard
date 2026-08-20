@@ -22,12 +22,9 @@ import type {
  * (`padlet-files`, `images`, `thumbnails`) is public, and a public bucket
  * would hand out board-scoped PDFs to anyone holding the URL, defeating the
  * RLS the P3 migration exists to enforce. The upload *mechanism* is reused;
- * only the destination differs.
- *
- * This bucket must be provisioned as NON-public. Bucket provisioning has no
- * migration home in this repository (the only `storage.buckets` inserts live
- * in `supabase/legacy/`, which BASELINE.md forbids re-applying), so it stays
- * an operational prerequisite -- reported by P4, not silently invented here.
+ * only the destination differs. The bucket is provisioned by the normal
+ * post-baseline migration
+ * `20260820_provision_knowledge_documents_bucket.sql`.
  */
 export const KNOWLEDGE_STORAGE_BUCKET = 'knowledge-documents';
 

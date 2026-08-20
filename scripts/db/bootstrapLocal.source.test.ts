@@ -13,6 +13,7 @@ describe('reproducible local database bootstrap', () => {
     expect(source).toContain('20260713_fix_kanban_board_member_policy_recursion.sql');
     expect(source).toContain('20260726_add_canvas_line_coord_space.sql');
     expect(source).toContain('20260820_create_knowledge_data_foundation.sql');
+    expect(source).toContain('20260820_provision_knowledge_documents_bucket.sql');
     expect(source).not.toContain('001_create_collabboard_schema.sql');
     expect(source).not.toContain('120260710_fix_board_sections_wrong_table_rls.sql');
   });
@@ -22,7 +23,7 @@ describe('reproducible local database bootstrap', () => {
     expect(source).toContain('supabase');
     expect(source).toContain("['stop', '--project-id', projectId, '--no-backup']");
     expect(source).not.toContain('--linked');
-    expect(source).not.toContain('SUPABASE_SERVICE_ROLE_KEY');
+    expect(source).toContain('SERVICE_ROLE_KEY');
     expect(source).not.toContain('db push');
     expect(source).not.toContain('migration repair');
   });
