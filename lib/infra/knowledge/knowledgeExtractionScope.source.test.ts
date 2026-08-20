@@ -44,11 +44,9 @@ describe('P5A scope -- no extraction runtime (17, 18)', () => {
     }
   });
 
-  it('does not install or import PDF.js -- geometry arrives as an input', () => {
+  it('does not import PDF.js into the P5A lifecycle -- geometry arrives as an input', () => {
     expect(p5aCode).not.toMatch(/pdf\.?js/i);
     expect(p5aCode).not.toMatch(/pdfjs-dist/);
-    const packageJson = read('package.json');
-    expect(packageJson).not.toContain('pdfjs-dist');
     // Geometry is supplied to the service, never derived inside it.
     expect(domainSource).toContain('KnowledgePageGeometryInput');
   });

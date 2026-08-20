@@ -16,6 +16,7 @@ export default defineConfig({
       'scripts/*.test.ts',
       'scripts/db/**/*.test.ts',
       'tools/pdf-extraction-prototype/**/*.test.ts',
+      'workers/knowledge-pdf/**/*.test.ts',
       'components/collabboard/*.test.tsx',
       'components/collabboard/editors/*.test.tsx',
       'components/collabboard/comments/*.test.tsx',

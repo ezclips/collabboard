@@ -43,7 +43,9 @@ private-bucket checks, executes a Knowledge document/page/chunk/source-reference
 RLS and cascade smoke test, verifies service-role PDF upload/remove plus failed
 anonymous read, runs local `db lint`, then destroys the disposable project and
 volumes. It never uses linked credentials, remote URLs, `db push`, or migration
-repair.
+repair. When `OPENDATALOADER_JAVA_BIN` and `OPENDATALOADER_JAR_PATH` are not
+provided as absolute local paths, the bootstrap reports the real P5B worker
+integration as **BLOCKED** rather than substituting a fake parser.
 
 `supabase/config.toml` is intentionally secret-free. Its migrations and seed
 execution are disabled because direct `supabase db reset --local` would replay

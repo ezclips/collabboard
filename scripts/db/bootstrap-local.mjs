@@ -313,7 +313,39 @@ async function storageSmoke(projectRoot, projectId) {
   };
 }
 
-function writeIntegrationEnv(projectRoot) {
+function localWorkerRuntime() {
+  const javaBin = process.env.OPENDATALOADER_JAVA_BIN;
+  const jarPath = process.env.OPENDATALOADER_JAR_PATH;
+  if (!javaBin || !jarPath) {
+    return {
+      status: 'blocked',
+      reason: 'Set OPENDATALOADER_JAVA_BIN and OPENDATALOADER_JAR_PATH for real P5B execution.',
+    };
+  }
+  if (!path.isAbsolute(javaBin) || !path.isAbsolute(jarPath)) {
+    return { status: 'blocked', reason: 'P5B Java and JAR paths must be absolute.' };
+  }
+  if (!fs.existsSync(javaBin)) return { status: 'blocked', reason: `Java executable is unavailable at ${javaBin}.` };
+  if (!fs.existsSync(jarPath)) return { status: 'blocked', reason: `OpenDataLoader JAR is unavailable at ${jarPath}.` };
+  const probe = run(javaBin, ['-version']);
+  if (probe.error || probe.status !== 0) {
+    return { status: 'blocked', reason: 'Configured Java executable could not be invoked.' };
+  }
+  return { status: 'available', javaBin, jarPath };
+}
+
+function generateWorkerFixtures(projectRoot) {
+  const fixtureDir = path.join(projectRoot, 'p5-fixtures');
+  const result = run(process.execPath, [
+    path.join(repoRoot, 'tools', 'pdf-extraction-prototype', 'generate-fixtures.mjs'),
+    '--out',
+    fixtureDir,
+  ]);
+  requireSuccess(result, 'P5B deterministic fixture generation');
+  return fixtureDir;
+}
+
+function writeIntegrationEnv(projectRoot, workerRuntime, fixtureDir) {
   const values = localStatusEnv(projectRoot);
   const url = assertLoopbackUrl(values.API_URL, 'Local Supabase API URL');
   if (!values.SERVICE_ROLE_KEY || !values.ANON_KEY) throw new Error('Local Supabase status did not provide service role credentials');
@@ -330,6 +362,13 @@ function writeIntegrationEnv(projectRoot) {
       P4_EDITOR: '00000000-0000-0000-0000-000000001012',
       P4_VIEWER: '00000000-0000-0000-0000-000000001013',
       P4_UNRELATED: '00000000-0000-0000-0000-000000001014',
+      ...(workerRuntime.status === 'available'
+        ? {
+            P5_JAVA_BIN: workerRuntime.javaBin,
+            P5_JAR_PATH: workerRuntime.jarPath,
+            P5_FIXTURE_DIR: fixtureDir,
+          }
+        : {}),
     }),
   );
   return envPath;
@@ -340,6 +379,7 @@ function runKnowledgeIntegrationTests() {
     'lib/infra/knowledge/knowledgeIngestion.integration.test.ts',
     'lib/infra/knowledge/knowledgeDeletion.integration.test.ts',
     'lib/infra/knowledge/knowledgeExtraction.integration.test.ts',
+    'workers/knowledge-pdf/knowledgePdfWorker.integration.test.ts',
   ];
   const outputs = [];
   for (const testFile of testFiles) {
@@ -474,7 +514,9 @@ async function runOnce() {
     const knowledgeOutput = runSql(container, knowledgeSmokeSql());
     runSql(container, integrationFixtureSql());
     const storageOutput = await storageSmoke(projectRoot, projectId);
-    const integrationEnvPath = writeIntegrationEnv(projectRoot);
+    const workerRuntime = localWorkerRuntime();
+    const fixtureDir = workerRuntime.status === 'available' ? generateWorkerFixtures(projectRoot) : undefined;
+    const integrationEnvPath = writeIntegrationEnv(projectRoot, workerRuntime, fixtureDir);
     let integrationOutput;
     try {
       integrationOutput = runKnowledgeIntegrationTests().stdout.trim().slice(-12000);
@@ -490,6 +532,9 @@ async function runOnce() {
       schemaOutput: schemaOutput.trim(),
       knowledgeOutput: knowledgeOutput.trim(),
       storageOutput,
+      workerIntegration: workerRuntime.status === 'available'
+        ? { status: 'pass' }
+        : { status: 'blocked', reason: workerRuntime.reason },
       integrationOutput,
       lint,
     };

@@ -61,8 +61,10 @@ describe('P3 Knowledge data foundation migration', () => {
     expect(persistenceDomain).not.toMatch(/from\s+['"]@opendataloader\/pdf['"]|child_process|java\s+-jar|jvm/i);
   });
 
-  it('does not add the parser runtime to the application dependency graph', () => {
-    expect(packageJson).not.toMatch(/@opendataloader\/pdf|opendataloader-pdf|pdfjs-dist/i);
+  it('does not add the OpenDataLoader runtime to the application dependency graph', () => {
+    // P5B owns the isolated PDF.js geometry dependency. OpenDataLoader’s Java
+    // runtime/JAR remains external and is deliberately not an npm package.
+    expect(packageJson).not.toMatch(/@opendataloader\/pdf|opendataloader-pdf/i);
   });
 
   it('documents the server-authorized worker write path and lifecycle invariants', () => {

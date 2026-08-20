@@ -15,6 +15,7 @@ describe('reproducible local database bootstrap', () => {
     expect(source).toContain('20260820_create_knowledge_data_foundation.sql');
     expect(source).toContain('20260820_provision_knowledge_documents_bucket.sql');
     expect(source).toContain('20260821_add_knowledge_extraction_lifecycle.sql');
+    expect(source).toContain('workers/knowledge-pdf/knowledgePdfWorker.integration.test.ts');
     expect(source).not.toContain('001_create_collabboard_schema.sql');
     expect(source).not.toContain('120260710_fix_board_sections_wrong_table_rls.sql');
   });
@@ -27,6 +28,7 @@ describe('reproducible local database bootstrap', () => {
     expect(source).toContain('SERVICE_ROLE_KEY');
     expect(source).not.toContain('db push');
     expect(source).not.toContain('migration repair');
+    expect(source).toContain("status: 'blocked'");
   });
 
   it('documents the cutoff, local command, and historical-chain boundary', () => {
