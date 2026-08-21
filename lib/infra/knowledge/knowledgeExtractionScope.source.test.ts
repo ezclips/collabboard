@@ -29,6 +29,9 @@ const p5aSource = `${domainSource}\n${infraSource}`;
 const p5aCode = codeOnly(p5aSource);
 const migration = read('supabase/migrations/20260821_add_knowledge_extraction_lifecycle.sql');
 const leaseMigration = read('supabase/migrations/20260822_add_knowledge_processing_lease.sql');
+const spatialMigration = read('supabase/migrations/20260824_add_knowledge_chunk_provenance.sql');
+const chunkingSource = read('lib/domain/knowledge/knowledgeChunking.ts');
+const workerSource = read('workers/knowledge-pdf/processKnowledgePdfDocument.ts');
 
 describe('P5A scope -- no extraction runtime (17, 18)', () => {
   it('contains no parser, JVM, container or subprocess invocation', () => {
@@ -67,13 +70,16 @@ describe('P5A scope -- no extraction runtime (17, 18)', () => {
   });
 });
 
-describe('P5A scope -- no chunking, embeddings or RAG (16)', () => {
-  it('never writes knowledge_chunks and adds no vector machinery', () => {
-    expect(p5aSource).not.toContain('knowledge_chunks');
-    for (const forbidden of [/pgvector/i, /embedding/i, /\bchunk/i, /openai/i, /anthropic/i]) {
-      expect(p5aCode).not.toMatch(forbidden);
+describe('P6H scope -- chunk completion only, without retrieval machinery', () => {
+  it('allows only the reviewed derived-chunk completion expansion', () => {
+    for (const forbidden of [/pgvector/i, /embedding/i, /langchain/i, /openai/i, /anthropic/i, /vector/i]) {
+      expect(`${p5aCode}\n${chunkingSource}\n${spatialMigration}`).not.toMatch(forbidden);
     }
     expect(migration).not.toContain('knowledge_chunks');
+    expect(spatialMigration).toContain('knowledge_chunks');
+    expect(p5aCode).toContain('p_chunks');
+    expect(infraSource).toContain('p_chunks: toKnowledgeChunkRecords(completion)');
+    expect(workerSource).toContain('buildKnowledgeChunks');
   });
 
   it('creates no Padlet and no source_reference', () => {
@@ -146,6 +152,36 @@ describe('P5A scope -- worker privilege boundary', () => {
   it('the repository factory is server-only', () => {
     expect(infraSource).toContain('getSupabaseAdmin');
     expect(infraSource).toContain('createServerKnowledgeExtractionRepository');
+  });
+});
+
+describe('P6H persistence scope -- provenance and privilege guards', () => {
+  it('adds one locator array with no child table or secondary index', () => {
+    expect(spatialMigration).toContain("ADD COLUMN IF NOT EXISTS source_locators jsonb NOT NULL DEFAULT '[]'::jsonb");
+    expect(spatialMigration).toContain("CHECK (jsonb_typeof(source_locators) = 'array')");
+    expect(spatialMigration).not.toMatch(/CREATE\s+(?:UNIQUE\s+)?INDEX/i);
+    expect(spatialMigration).not.toMatch(/CREATE TABLE[^;]*knowledge_(?:chunk_)?elements/i);
+  });
+
+  it('passes chunks to the same replacement RPC and validates row counts', () => {
+    expect(spatialMigration).toContain('p_chunks jsonb');
+    expect(spatialMigration).toContain('DELETE FROM public.knowledge_chunks');
+    expect(spatialMigration).toContain('inserted_chunks');
+    expect(spatialMigration).toContain('jsonb_typeof(c.source_locators) <> \'array\'');
+    expect(spatialMigration).toContain("processing_status = 'ready'");
+    expect(spatialMigration).toContain('processing_lease_token = NULL');
+  });
+
+  it('revokes the exact replacement RPC from every browser role', () => {
+    const signature = 'uuid, uuid, integer, jsonb, jsonb, text, text, text, text, text';
+    expect(spatialMigration).toContain(`REVOKE ALL ON FUNCTION public.complete_knowledge_extraction(\n    ${signature}\n) FROM PUBLIC, anon, authenticated;`);
+    expect(spatialMigration).toContain(`GRANT EXECUTE ON FUNCTION public.complete_knowledge_extraction(\n    ${signature}\n) TO service_role;`);
+  });
+
+  it('keeps the expansion server-side and leaves citations independent', () => {
+    expect(chunkingSource).not.toMatch(/from ['"](?:@supabase|node:)/);
+    expect(p5aSource).not.toContain('source_references');
+    expect(spatialMigration).not.toMatch(/chunk_id|originChunkIndex/i);
   });
 });
 

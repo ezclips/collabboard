@@ -103,6 +103,21 @@ export function toKnowledgePageRecords(
   }));
 }
 
+export function toKnowledgeChunkRecords(
+  completion: KnowledgeExtractionCompletion,
+): readonly Record<string, unknown>[] {
+  return (completion.chunks ?? []).map((chunk) => ({
+    page_start: chunk.pageStart,
+    page_end: chunk.pageEnd,
+    text: chunk.text,
+    char_start: chunk.charStart,
+    char_end: chunk.charEnd,
+    text_hash: chunk.textHash,
+    chunk_index: chunk.chunkIndex,
+    source_locators: chunk.sourceLocators,
+  }));
+}
+
 export class SupabaseKnowledgeExtractionRepository implements KnowledgeExtractionRepository {
   constructor(private readonly client: KnowledgeExtractionSupabaseClient) {}
 
@@ -142,6 +157,7 @@ export class SupabaseKnowledgeExtractionRepository implements KnowledgeExtractio
         p_lease_token: completion.leaseToken,
         p_page_count: completion.pageCount,
         p_pages: toKnowledgePageRecords(completion),
+        p_chunks: toKnowledgeChunkRecords(completion),
         p_parser_name: completion.parserName,
         p_parser_version: completion.parserVersion,
         p_parser_options_hash: completion.parserOptionsHash,

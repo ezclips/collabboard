@@ -6,6 +6,7 @@ import { err, ok } from '../core/result';
 import type { KnowledgeContentHasher } from './knowledgeIngestion';
 import type { KnowledgeDocumentProcessingStatus } from './knowledgePersistence';
 import type { KnowledgePdfExtractionResult } from './pdfExtraction';
+import type { KnowledgeChunkDraft, KnowledgeChunkWrite } from './knowledgeChunking';
 
 /**
  * P5A -- Knowledge extraction lifecycle.
@@ -270,6 +271,8 @@ export interface KnowledgeExtractionCompletion {
   readonly leaseToken: string;
   readonly pageCount: number;
   readonly pages: readonly KnowledgeExtractionPageWrite[];
+  /** Derived, page-local retrieval units with parser-neutral provenance. */
+  readonly chunks?: readonly KnowledgeChunkWrite[];
   readonly parserName: string;
   readonly parserVersion: string;
   readonly parserOptionsHash: string | null;
@@ -351,6 +354,7 @@ export interface CompleteKnowledgeExtractionInput {
   readonly processingLeaseToken: string;
   readonly extraction: KnowledgePdfExtractionResult;
   readonly geometry: readonly KnowledgePageGeometryInput[];
+  readonly chunks?: readonly KnowledgeChunkDraft[];
   readonly rawArtifactPath?: string | null;
 }
 
@@ -380,12 +384,17 @@ export async function completeKnowledgeExtraction(
   for (const page of built.value) {
     pages.push({ ...page, textHash: await deps.hasher.sha256(encoder.encode(page.text)) });
   }
+  const chunks: KnowledgeChunkWrite[] = [];
+  for (const chunk of input.chunks ?? []) {
+    chunks.push({ ...chunk, textHash: await deps.hasher.sha256(encoder.encode(chunk.text)) });
+  }
 
   const committed = await deps.repository.complete({
     documentId: input.documentId,
     leaseToken: input.processingLeaseToken,
     pageCount: pages.length,
     pages,
+    chunks,
     parserName: input.extraction.parser.name,
     parserVersion: input.extraction.parser.version,
     parserOptionsHash: input.extraction.parser.optionsHash ?? null,

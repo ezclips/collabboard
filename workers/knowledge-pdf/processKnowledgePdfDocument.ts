@@ -20,6 +20,7 @@ import type {
 } from '../../lib/domain/knowledge/knowledgeExtraction';
 import { DEFAULT_KNOWLEDGE_PROCESSING_LEASE_TTL_SECONDS } from '../../lib/domain/knowledge/knowledgeExtraction';
 import { normalizeOpenDataLoaderPdf } from '../../lib/infra/knowledge/openDataLoaderPdfNormalizer';
+import { buildKnowledgeChunks } from '../../lib/domain/knowledge/knowledgeChunking';
 import {
   KNOWLEDGE_STORAGE_BUCKET,
   NodeKnowledgeContentHasher,
@@ -353,6 +354,7 @@ export async function processKnowledgePdfDocument(
       },
       pageGeometry: geometryRecord(geometry),
     });
+    const chunks = buildKnowledgeChunks(extraction.pages);
     assertLease();
 
     stage = 'raw-artifact-upload';
@@ -371,7 +373,7 @@ export async function processKnowledgePdfDocument(
     assertLease();
     const completed = await completeKnowledgeExtraction(
       { repository: deps.repository, hasher: deps.hasher },
-      { documentId, processingLeaseToken: job.leaseToken, extraction, geometry, rawArtifactPath },
+      { documentId, processingLeaseToken: job.leaseToken, extraction, geometry, chunks, rawArtifactPath },
     );
     if (!completed.ok) {
       const cleanupWarning = await removeRawArtifact(deps.storage, rawUploaded ? rawArtifactPath : undefined);
