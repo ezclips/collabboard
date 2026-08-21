@@ -2,6 +2,7 @@
 
 import React, { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { MoreVertical } from 'lucide-react';
+import KnowledgeDocumentsList from '@/components/collabboard/KnowledgeDocumentsList';
 import KnowledgePdfUploader, { type KnowledgePdfUploaderHandle } from '@/components/collabboard/KnowledgePdfUploader';
 import {
   DropdownMenu,
@@ -85,9 +86,15 @@ export default function CanvasSidebar({
   const naturalHeightsRef = useRef(new Map<string, Map<string, number>>());
   const [overflowState, setOverflowState] = useState<OverflowState | null>(null);
   const [menuSideOffset, setMenuSideOffset] = useState(TOOLBAR_MENU_GAP_PX);
+  // Bumped by the uploader so the read surface refetches instead of polling.
+  const [knowledgeRefreshToken, setKnowledgeRefreshToken] = useState(0);
   // The tool an overflow item selected, dispatched only once the dropdown has
   // finished closing (see onCloseAutoFocus below).
   const pendingToolRef = useRef<string | null>(null);
+
+  const handleKnowledgeChanged = useCallback(() => {
+    setKnowledgeRefreshToken((token) => token + 1);
+  }, []);
 
   const groupSignature = useMemo(
     () => `${isCollapsed ? 'collapsed' : 'expanded'}:${groups.map((group) => `${group.id}:${group.tools.length}`).join('|')}`,
@@ -250,7 +257,8 @@ export default function CanvasSidebar({
       data-toolbar-sidebar="true"
       className={`${isCollapsed ? 'w-12' : 'w-14'} h-full bg-white border-r flex flex-col items-center py-6 gap-3 shadow-sm z-20 relative overflow-visible transition-[width] duration-150`}
     >
-      <KnowledgePdfUploader ref={knowledgePdfUploaderRef} />
+      <KnowledgePdfUploader ref={knowledgePdfUploaderRef} onKnowledgeChanged={handleKnowledgeChanged} />
+      <KnowledgeDocumentsList refreshToken={knowledgeRefreshToken} />
       <button
         ref={moreMeasureRef}
         type="button"

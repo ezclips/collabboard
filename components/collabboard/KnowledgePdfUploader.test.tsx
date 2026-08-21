@@ -3,7 +3,7 @@
 import React, { createRef } from 'react';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import KnowledgePdfUploader, {
   listKnowledgePdfs,
   uploadKnowledgePdf,
@@ -139,6 +139,101 @@ describe('P6C Knowledge PDF upload client', () => {
 
     act(() => ref.current?.openPicker());
     expect(click).toHaveBeenCalledOnce();
+
+    await act(async () => root.unmount());
+  });
+});
+
+describe('P6D upload notifies the Knowledge read surface', () => {
+  let originalFetch: typeof globalThis.fetch;
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    originalFetch = globalThis.fetch;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  /**
+   * Drives one real upload through the component. The notification spy records
+   * how many fetches had completed each time it fired, which is what makes the
+   * ordering assertions below possible: the first notification must land while
+   * only the POST has been issued, the second only after a status GET.
+   */
+  async function runUpload(terminalStatus: 'ready' | 'failed') {
+    fetchMock = vi.fn(async (_url: string, init?: RequestInit) => (
+      init?.method === 'POST'
+        ? jsonResponse({
+          id: DOCUMENT_ID,
+          boardId: BOARD_ID,
+          originalFilename: 'lesson.pdf',
+          processingStatus: 'uploaded',
+        }, 201)
+        : jsonResponse({ documents: [summary(terminalStatus)] })
+    ));
+    globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch;
+
+    const fetchCountsAtNotify: number[] = [];
+    const onKnowledgeChanged = vi.fn(() => {
+      fetchCountsAtNotify.push(fetchMock.mock.calls.length);
+    });
+
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    await act(async () => {
+      root.render(<KnowledgePdfUploader onKnowledgeChanged={onKnowledgeChanged} />);
+    });
+
+    const input = host.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File(['%PDF-1.7\n%%EOF'], 'lesson.pdf', { type: 'application/pdf' });
+    Object.defineProperty(input, 'files', { value: [file], configurable: true });
+
+    await act(async () => {
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    return { host, root, onKnowledgeChanged, fetchCountsAtNotify };
+  }
+
+  it('notifies once the row exists server-side and again when it reaches ready', async () => {
+    const { host, root, onKnowledgeChanged, fetchCountsAtNotify } = await runUpload('ready');
+
+    expect(onKnowledgeChanged).toHaveBeenCalledTimes(2);
+    // First notification: POST done, no status GET yet.
+    expect(fetchCountsAtNotify[0]).toBe(1);
+    // Second notification: only after a status read reported a terminal state.
+    expect(fetchCountsAtNotify[1]).toBeGreaterThan(1);
+    expect(host.querySelector('[data-knowledge-pdf-status]')?.textContent)
+      .toContain('lesson.pdf is ready.');
+
+    await act(async () => root.unmount());
+  });
+
+  it('notifies again when processing reaches failed', async () => {
+    const { host, root, onKnowledgeChanged } = await runUpload('failed');
+
+    expect(onKnowledgeChanged).toHaveBeenCalledTimes(2);
+    const toast = host.querySelector('[data-knowledge-pdf-status]');
+    expect(toast?.getAttribute('data-knowledge-pdf-status')).toBe('error');
+    expect(toast?.textContent).toContain('Processing lesson.pdf failed.');
+
+    await act(async () => root.unmount());
+  });
+
+  it('keeps the existing toast surface intact rather than replacing it with a list', async () => {
+    const { host, root } = await runUpload('ready');
+
+    const toast = host.querySelector('[data-knowledge-pdf-status]');
+    expect(toast?.getAttribute('role')).toBe('status');
+    expect(toast?.getAttribute('data-knowledge-pdf-status')).toBe('success');
+    expect(host.querySelector('ul, li, iframe, embed')).toBeNull();
 
     await act(async () => root.unmount());
   });

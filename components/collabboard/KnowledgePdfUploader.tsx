@@ -34,6 +34,11 @@ export interface KnowledgePdfUploaderHandle {
   openPicker(): void;
 }
 
+export interface KnowledgePdfUploaderProps {
+  /** Fired whenever this uploader has learned that server state changed. */
+  onKnowledgeChanged?: () => void;
+}
+
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
 type UploadNotice = {
@@ -178,7 +183,7 @@ function isAbortError(error: unknown) {
   return error instanceof DOMException && error.name === 'AbortError';
 }
 
-const KnowledgePdfUploader = forwardRef<KnowledgePdfUploaderHandle>(function KnowledgePdfUploader(_, ref) {
+const KnowledgePdfUploader = forwardRef<KnowledgePdfUploaderHandle, KnowledgePdfUploaderProps>(function KnowledgePdfUploader({ onKnowledgeChanged }, ref) {
   const params = useParams<{ id: string }>();
   const boardId = params?.id;
   const inputRef = useRef<HTMLInputElement>(null);
@@ -205,11 +210,18 @@ const KnowledgePdfUploader = forwardRef<KnowledgePdfUploaderHandle>(function Kno
 
     try {
       const uploaded = await uploadKnowledgePdf(boardId, file);
+      // The row exists server-side from here on, so any read surface should be
+      // able to show it as `uploaded` before processing has finished.
+      onKnowledgeChanged?.();
       setNotice({ tone: 'info', message: `Processing ${uploaded.originalFilename}…` });
 
       const completed = await waitForKnowledgePdf(boardId, uploaded.id, {
         signal: controller.signal,
       });
+
+      // Terminal status, or polling gave up while the worker continues: either
+      // way the last known server state is newer than what was fetched above.
+      onKnowledgeChanged?.();
 
       if (!completed) {
         setNotice({
