@@ -24,6 +24,10 @@ const componentCode = fs
   .readFileSync(path.join(process.cwd(), 'components/collabboard/KnowledgeDocumentsList.tsx'), 'utf8')
   .replace(/\/\*[\s\S]*?\*\//g, '')
   .replace(/^\s*\/\/.*$/gm, '');
+const sidebarCode = fs.readFileSync(
+  path.join(process.cwd(), 'components/collabboard/canvas/ui/CanvasSidebar.tsx'),
+  'utf8',
+);
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -76,20 +80,20 @@ async function settle() {
   });
 }
 
-async function renderList(refreshToken = 0): Promise<HTMLDivElement> {
+async function renderList(refreshToken = 0, isOpen = true, onClose = vi.fn()): Promise<HTMLDivElement> {
   host = document.createElement('div');
   document.body.appendChild(host);
   root = createRoot(host);
   await act(async () => {
-    root!.render(<KnowledgeDocumentsList refreshToken={refreshToken} />);
+    root!.render(<KnowledgeDocumentsList refreshToken={refreshToken} isOpen={isOpen} onClose={onClose} />);
   });
   await settle();
   return host;
 }
 
-async function rerender(refreshToken: number) {
+async function rerender(refreshToken: number, isOpen = true, onClose = vi.fn()) {
   await act(async () => {
-    root!.render(<KnowledgeDocumentsList refreshToken={refreshToken} />);
+    root!.render(<KnowledgeDocumentsList refreshToken={refreshToken} isOpen={isOpen} onClose={onClose} />);
   });
   await settle();
 }
@@ -198,7 +202,7 @@ describe('P6D Knowledge documents read surface', () => {
     // `readOnly` is deliberately absent from this list: under /i it is
     // indistinguishable from TypeScript's own `readonly` modifier, which this
     // component uses for immutable state, and would fail on that alone.
-    expect(componentCode).not.toMatch(/canEdit|isEditor|isViewer|permission|collaborator|\brole\b/i);
+    expect(componentCode).not.toMatch(/canEdit|isEditor|isViewer|permission|collaborator/i);
   });
 
   it('refetches when the parent bumps the refresh token', async () => {
@@ -213,13 +217,39 @@ describe('P6D Knowledge documents read surface', () => {
     expect(container.textContent).toContain('Ready');
   });
 
+  it('uses a centered modal shell with close and reopen behavior', async () => {
+    const onClose = vi.fn();
+    const container = await renderList(0, true, onClose);
+    const surface = container.querySelector('[data-knowledge-documents]') as HTMLElement;
+
+    expect(surface.className).toContain('fixed inset-0');
+    expect(surface.className).toContain('items-center');
+    expect(surface.className).not.toContain('left-full');
+    surface.querySelector('button[aria-label="Close Knowledge"]')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(onClose).toHaveBeenCalledOnce();
+
+    await rerender(0, false, onClose);
+    expect(container.querySelector('[data-knowledge-documents]')).toBeNull();
+    await rerender(0, true, onClose);
+    expect(container.querySelector('[data-knowledge-documents]')).not.toBeNull();
+  });
+
+  it('keeps Add PDF separate from the Knowledge trigger', () => {
+    expect(sidebarCode).toContain("if (type === 'knowledge-pdf')");
+    expect(sidebarCode).toContain('knowledgePdfUploaderRef.current?.openPicker()');
+    expect(sidebarCode).toContain('data-knowledge-trigger="true"');
+    expect(sidebarCode).toContain('onClick={() => setKnowledgeOpen(true)}');
+    expect(sidebarCode).toContain('isOpen={knowledgeOpen}');
+    expect(sidebarCode).toContain('onClose={() => setKnowledgeOpen(false)}');
+  });
+
   it('is a read surface only: it neither renders PDF content nor creates posts', async () => {
     fetchMock.mockResolvedValue(jsonResponse({ documents: [doc()] }));
 
     const container = await renderList();
 
     expect(container.querySelector('iframe, embed, object, canvas, img')).toBeNull();
-    expect(container.querySelector('a[download], button')).toBeNull();
+    expect(container.querySelector('a[download]')).toBeNull();
     expect(componentCode).not.toMatch(/pdfjs|getDocument\(|createPost|addPost|handleToolClick|storagePath/i);
   });
 });

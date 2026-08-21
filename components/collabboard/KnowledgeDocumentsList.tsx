@@ -22,6 +22,8 @@ export interface KnowledgeDocumentsListProps {
    * for no extra information.
    */
   refreshToken?: number;
+  isOpen?: boolean;
+  onClose?: () => void;
 }
 
 interface KnowledgeListEntry {
@@ -78,15 +80,13 @@ function metadataLine(entry: KnowledgeListEntry): string | null {
 /**
  * Read-only list of the PDFs already attached to the current board.
  *
- * Anchored beside the toolbar rail rather than inside it: the rail is a 56px
- * icon column, which cannot render a filename, and an in-flow child would also
- * feed the rail's height-overflow measurement and push real tools into the
- * More menu. Absolute positioning keeps that measurement arithmetic untouched.
+ * The data reader remains mounted with the board so its GET lifecycle stays
+ * unchanged; only the presentation is gated by isOpen.
  *
  * No client-side role gating: whatever the server returns is rendered, so
  * read-only collaborators see the same list an editor does.
  */
-export default function KnowledgeDocumentsList({ refreshToken = 0 }: KnowledgeDocumentsListProps) {
+export default function KnowledgeDocumentsList({ refreshToken = 0, isOpen = true, onClose }: KnowledgeDocumentsListProps) {
   const params = useParams<{ id: string }>();
   const boardId = params?.id;
   const [phase, setPhase] = useState<ListPhase>('loading');
@@ -123,18 +123,47 @@ export default function KnowledgeDocumentsList({ refreshToken = 0 }: KnowledgeDo
     };
   }, [boardId, refreshToken]);
 
-  if (!boardId) return null;
+  useEffect(() => {
+    if (!isOpen || !onClose) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
+  if (!boardId || !isOpen) return null;
 
   return (
     <div
       data-knowledge-documents="true"
-      className="absolute left-full top-0 z-[100] ml-2 w-56 rounded-lg border border-gray-200 bg-white px-3 py-2 text-left shadow-sm"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Knowledge documents"
+      className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/50 p-4"
+      onClick={(event) => {
+        if (event.target === event.currentTarget) onClose?.();
+      }}
     >
-      <span className="select-none text-[9px] font-medium uppercase leading-none tracking-wider text-gray-400">
-        Knowledge
-      </span>
+      <div
+        className="relative max-h-[80vh] w-full max-w-md overflow-y-auto rounded-xl border border-gray-200 bg-white px-4 py-3 text-left shadow-2xl"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-center justify-between gap-3">
+          <span className="select-none text-[9px] font-medium uppercase leading-none tracking-wider text-gray-400">
+            Knowledge
+          </span>
+          <button
+            type="button"
+            aria-label="Close Knowledge"
+            className="rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+            onClick={() => onClose?.()}
+          >
+            ×
+          </button>
+        </div>
 
-      {phase === 'error' ? (
+        {phase === 'error' ? (
         <p className="mt-2 text-[11px] text-gray-500">Knowledge documents unavailable.</p>
       ) : entries.length > 0 ? (
         <ul className="mt-2 max-h-64 space-y-2 overflow-y-auto">
@@ -156,7 +185,8 @@ export default function KnowledgeDocumentsList({ refreshToken = 0 }: KnowledgeDo
         <p className="mt-2 text-[11px] text-gray-500">Loading PDFs…</p>
       ) : (
         <p className="mt-2 text-[11px] text-gray-500">No PDFs added yet.</p>
-      )}
+        )}
+      </div>
     </div>
   );
 }

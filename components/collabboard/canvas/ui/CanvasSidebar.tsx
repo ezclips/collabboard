@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { MoreVertical } from 'lucide-react';
+import { BookOpen, MoreVertical } from 'lucide-react';
 import KnowledgeDocumentsList from '@/components/collabboard/KnowledgeDocumentsList';
 import KnowledgePdfUploader, { type KnowledgePdfUploaderHandle } from '@/components/collabboard/KnowledgePdfUploader';
 import {
@@ -88,6 +88,7 @@ export default function CanvasSidebar({
   const [menuSideOffset, setMenuSideOffset] = useState(TOOLBAR_MENU_GAP_PX);
   // Bumped by the uploader so the read surface refetches instead of polling.
   const [knowledgeRefreshToken, setKnowledgeRefreshToken] = useState(0);
+  const [knowledgeOpen, setKnowledgeOpen] = useState(false);
   // The tool an overflow item selected, dispatched only once the dropdown has
   // finished closing (see onCloseAutoFocus below).
   const pendingToolRef = useRef<string | null>(null);
@@ -258,7 +259,11 @@ export default function CanvasSidebar({
       className={`${isCollapsed ? 'w-12' : 'w-14'} h-full bg-white border-r flex flex-col items-center py-6 gap-3 shadow-sm z-20 relative overflow-visible transition-[width] duration-150`}
     >
       <KnowledgePdfUploader ref={knowledgePdfUploaderRef} onKnowledgeChanged={handleKnowledgeChanged} />
-      <KnowledgeDocumentsList refreshToken={knowledgeRefreshToken} />
+      <KnowledgeDocumentsList
+        refreshToken={knowledgeRefreshToken}
+        isOpen={knowledgeOpen}
+        onClose={() => setKnowledgeOpen(false)}
+      />
       <button
         ref={moreMeasureRef}
         type="button"
@@ -283,6 +288,20 @@ export default function CanvasSidebar({
       </button>
 
       <div ref={dividerRef} className="w-6 h-px bg-gray-200" />
+
+      <button
+        type="button"
+        data-knowledge-trigger="true"
+        className="group relative flex h-9 w-9 items-center justify-center rounded-lg text-gray-600 transition hover:bg-gray-100"
+        aria-label="Knowledge"
+        title="Knowledge"
+        onClick={() => setKnowledgeOpen(true)}
+      >
+        <BookOpen size={18} strokeWidth={1.5} />
+        <span className="absolute left-full ml-2 rounded bg-gray-700 px-2 py-1 text-xs whitespace-nowrap text-white opacity-0 group-hover:opacity-100 z-[100] pointer-events-none">
+          Knowledge
+        </span>
+      </button>
 
       {/* Tool groups */}
       {visibleGroups.map((group) => (
