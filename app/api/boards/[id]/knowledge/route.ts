@@ -1,5 +1,6 @@
 import { cookies } from 'next/headers';
 import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
+import { requireBoardPermission } from '@/lib/auth/permissions';
 import {
   NodeKnowledgeContentHasher,
   RandomKnowledgeDocumentIdFactory,
@@ -7,10 +8,37 @@ import {
   SupabaseKnowledgeIngestionRepository,
   SupabaseKnowledgeStorageGateway,
 } from '@/lib/infra/knowledge/knowledgeIngestionAdapters';
+import { SupabaseKnowledgeDocumentReadRepository } from '@/lib/infra/knowledge/knowledgeReadAdapters';
+import { createKnowledgeListGetHandler } from '@/lib/server/knowledge/knowledgeListRoute';
 import { createKnowledgeUploadPostHandler } from '@/lib/server/knowledge/knowledgeUploadRoute';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 
 export const runtime = 'nodejs';
+
+export const GET = createKnowledgeListGetHandler({
+  async getAuthenticatedSession() {
+    const cookieStore = await cookies();
+    const sessionClient = createRouteHandlerClient({ cookies: async () => cookieStore });
+    const {
+      data: { user },
+      error,
+    } = await sessionClient.auth.getUser();
+
+    if (error || !user) return null;
+
+    return {
+      async canViewBoard(boardId) {
+        const access = await requireBoardPermission(sessionClient, boardId, user.id, 'reader');
+        return access.allowed;
+      },
+    };
+  },
+
+  createRepository() {
+    const adminClient = getSupabaseAdmin();
+    return new SupabaseKnowledgeDocumentReadRepository(adminClient as never);
+  },
+});
 
 export const POST = createKnowledgeUploadPostHandler({
   async getAuthenticatedUserId() {
