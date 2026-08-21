@@ -1,7 +1,7 @@
 import { cookies } from 'next/headers';
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
+import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import {
   parseRetryAfterHeaderSeconds,
@@ -47,6 +47,33 @@ function getAuthFailureMessage(errorMessage: string | undefined) {
   }
 
   return errorMessage || INVALID_CREDENTIALS_MESSAGE;
+}
+
+async function createLoginSessionClient() {
+  const cookieStore = await cookies();
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+  if (!supabaseUrl || !supabaseAnonKey) {
+    throw new Error('Missing public Supabase configuration');
+  }
+
+  return createServerClient(supabaseUrl, supabaseAnonKey, {
+    cookies: {
+      getAll() {
+        return cookieStore.getAll();
+      },
+      setAll(cookiesToSet: { name: string; value: string; options: CookieOptions }[]) {
+        try {
+          cookiesToSet.forEach(({ name, value, options }) => {
+            cookieStore.set(name, value, options);
+          });
+        } catch {
+          // Cookie writes can be unavailable in read-only request contexts.
+        }
+      },
+    },
+  });
 }
 
 function getSupabaseAnonServerClient() {
@@ -232,8 +259,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (phase === 'success') {
-      const cookieStore = cookies();
-      const routeSupabase = createRouteHandlerClient({ cookies: () => cookieStore });
+      const routeSupabase = await createLoginSessionClient();
       const {
         data: { user },
         error: userError,
@@ -314,8 +340,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const cookieStore = cookies();
-    const routeSupabase = createRouteHandlerClient({ cookies: () => cookieStore });
+    const routeSupabase = await createLoginSessionClient();
     const { error: sessionError } = await routeSupabase.auth.setSession({
       access_token: data.session.access_token,
       refresh_token: data.session.refresh_token,
