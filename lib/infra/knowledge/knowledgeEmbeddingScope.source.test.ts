@@ -7,18 +7,22 @@ const root = process.cwd();
 const read = (relative: string) => fs.readFileSync(path.join(root, relative), 'utf8').replace(/\r\n/g, '\n');
 const migration = read('supabase/migrations/20260825_add_knowledge_chunk_embeddings.sql');
 const baselineHead = 'ef9bd49b55196cbd8e41eb1b11b3bd1243a427e5';
+const reviewedHead = 'a49a54d521f31f43403fd751c9fea37cff38b3da';
 const previousP6hMigration = execFileSync('git', ['show', `${baselineHead}:supabase/migrations/20260824_add_knowledge_chunk_provenance.sql`], { cwd: root, encoding: 'utf8' }).replace(/\r\n/g, '\n');
+const reviewedP6iMigration = execFileSync('git', ['show', `${reviewedHead}:supabase/migrations/20260825_add_knowledge_chunk_embeddings.sql`], { cwd: root, encoding: 'utf8' }).replace(/\r\n/g, '\n');
 const domain = read('lib/domain/knowledge/knowledgeEmbedding.ts');
 const adapter = read('lib/infra/knowledge/knowledgeEmbeddingAdapters.ts');
 const provider = read('workers/knowledge-embedding/openAIEmbeddingProvider.ts');
 const documentWorker = read('workers/knowledge-embedding/embedDocument.ts');
 const worker = read('workers/knowledge-embedding/runEmbeddingWorker.ts');
 const cli = read('workers/knowledge-embedding/cli.ts');
-const newSources = [migration, domain, adapter, provider, documentWorker, worker, cli].join('\n');
+const integration = read('lib/infra/knowledge/knowledgeEmbedding.integration.test.ts');
+const newSources = [migration, domain, adapter, provider, documentWorker, worker, cli, integration].join('\n');
 
 describe('P6I-A embedding scope and SQL guards', () => {
   it('keeps P6H immutable and adds only the embedding table/RPC layer', () => {
     expect(read('supabase/migrations/20260824_add_knowledge_chunk_provenance.sql')).toBe(previousP6hMigration);
+    expect(migration).toBe(reviewedP6iMigration);
     expect(migration).not.toMatch(/ALTER TABLE public\.knowledge_chunks/i);
     expect(migration).not.toMatch(/complete_knowledge_extraction|source_references/i);
     expect(migration).toContain('CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA extensions');
@@ -86,5 +90,22 @@ describe('P6I-A embedding scope and SQL guards', () => {
       'middleware.ts', 'package.json', 'package-lock.json', 'deploy/', 'Dockerfile',
     ]) expect(changed).not.toContain(forbidden);
     expect(newSources).not.toMatch(/pgvector|embedding provider outside|\bAI\b|backfill|Cloud Run|gcloud/i);
+  });
+
+  it('structurally cannot mutate the PDF Ready lifecycle', () => {
+    const lifecycle = /knowledge_documents|processing_status|processing_error|processing_lease_token|processing_lease_expires_at/i;
+    expect(domain).not.toMatch(lifecycle);
+    expect(adapter).not.toMatch(lifecycle);
+    expect(documentWorker).not.toMatch(lifecycle);
+    expect(worker).not.toMatch(lifecycle);
+    expect(domain).toContain('KnowledgeEmbeddingRepository');
+    expect(integration).toContain('P6I_RUN_LOCAL_INTEGRATION');
+    expect(integration).toContain("['127.0.0.1', 'localhost']");
+  });
+
+  it('keeps provider diagnostics free of secrets, text, and vectors', () => {
+    expect(newSources).not.toMatch(/console\.(log|error)[^\n]*(?:text|vector|secret|API_KEY|SERVICE_ROLE)/i);
+    expect(provider).toContain('fetchImpl');
+    expect(cli).not.toMatch(/console\.(log|error).*error\.message/i);
   });
 });

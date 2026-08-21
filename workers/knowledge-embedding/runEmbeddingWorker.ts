@@ -11,13 +11,16 @@ import type { EmbedDocumentSummary } from './embedDocument';
 const DEFAULT_EMBEDDING_MODEL = 'text-embedding-3-small';
 const DEFAULT_EMBEDDING_DIMENSIONS = 1536;
 const DEFAULT_EMBEDDING_MODEL_ID = 'openai:text-embedding-3-small';
+const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+const POLL_BACKOFF_BASE_MS = 1_000;
+const POLL_BACKOFF_MAX_MS = 30_000;
 
 export interface KnowledgeEmbeddingWorkerConfig {
   readonly profile: KnowledgeEmbeddingProfile;
   readonly batchSize: number;
   readonly pollIntervalMs: number;
   readonly discoveryLimit: number;
-  readonly createdAfter?: string | null;
+  readonly createdAfter: string;
 }
 
 export interface KnowledgeEmbeddingWorkerDependencies {
@@ -28,6 +31,16 @@ export interface KnowledgeEmbeddingWorkerDependencies {
 export interface KnowledgeEmbeddingPollSummary {
   readonly candidates: number;
   readonly documents: readonly EmbedDocumentSummary[];
+}
+
+export interface KnowledgeEmbeddingLoopOptions {
+  readonly sleep?: (milliseconds: number, signal: AbortSignal) => Promise<void>;
+  readonly maxPolls?: number;
+}
+
+interface ResolvedKnowledgeEmbeddingConfig extends KnowledgeEmbeddingWorkerConfig {
+  readonly apiKey: string;
+  readonly requestTimeoutMs: number;
 }
 
 function positiveInteger(value: string | undefined, fallback: number, name: string): number {
@@ -43,9 +56,17 @@ function required(environment: Record<string, string | undefined>, name: string)
   return value;
 }
 
+function requiredIsoTimestamp(environment: Record<string, string | undefined>, name: string): string {
+  const value = environment[name]?.trim();
+  if (!value || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value) || Number.isNaN(Date.parse(value))) {
+    throw new Error(`${name} must be a valid ISO date-time`);
+  }
+  return value;
+}
+
 export function resolveKnowledgeEmbeddingConfig(
   environment: Record<string, string | undefined> = process.env,
-): KnowledgeEmbeddingWorkerConfig & { readonly apiKey: string } {
+): ResolvedKnowledgeEmbeddingConfig {
   const dimensions = positiveInteger(
     environment.KNOWLEDGE_EMBEDDING_DIMENSIONS,
     DEFAULT_EMBEDDING_DIMENSIONS,
@@ -61,7 +82,8 @@ export function resolveKnowledgeEmbeddingConfig(
     batchSize: positiveInteger(environment.KNOWLEDGE_EMBEDDING_BATCH_SIZE, 16, 'KNOWLEDGE_EMBEDDING_BATCH_SIZE'),
     pollIntervalMs: positiveInteger(environment.KNOWLEDGE_EMBEDDING_POLL_INTERVAL_MS, 5_000, 'KNOWLEDGE_EMBEDDING_POLL_INTERVAL_MS'),
     discoveryLimit: positiveInteger(environment.KNOWLEDGE_EMBEDDING_DISCOVERY_LIMIT, 16, 'KNOWLEDGE_EMBEDDING_DISCOVERY_LIMIT'),
-    createdAfter: environment.KNOWLEDGE_EMBEDDING_CREATED_AFTER || null,
+    createdAfter: requiredIsoTimestamp(environment, 'KNOWLEDGE_EMBEDDING_CREATED_AFTER'),
+    requestTimeoutMs: positiveInteger(environment.KNOWLEDGE_EMBEDDING_REQUEST_TIMEOUT_MS, DEFAULT_REQUEST_TIMEOUT_MS, 'KNOWLEDGE_EMBEDDING_REQUEST_TIMEOUT_MS'),
   };
 }
 
@@ -72,7 +94,7 @@ export function createKnowledgeEmbeddingWorkerFromEnvironment(
   return {
     dependencies: {
       repository: createKnowledgeEmbeddingRepositoryFromEnvironment(environment),
-      provider: new OpenAIEmbeddingProvider({ apiKey: resolved.apiKey }),
+      provider: new OpenAIEmbeddingProvider({ apiKey: resolved.apiKey, requestTimeoutMs: resolved.requestTimeoutMs }),
     },
     config: {
       profile: resolved.profile,
@@ -87,6 +109,7 @@ export function createKnowledgeEmbeddingWorkerFromEnvironment(
 export async function runKnowledgeEmbeddingPoll(
   deps: KnowledgeEmbeddingWorkerDependencies,
   config: KnowledgeEmbeddingWorkerConfig,
+  signal?: AbortSignal,
 ): Promise<KnowledgeEmbeddingPollSummary> {
   const documentIds = await deps.repository.listCandidateDocumentIds(
     config.profile,
@@ -99,6 +122,7 @@ export async function runKnowledgeEmbeddingPoll(
       documentId,
       profile: config.profile,
       batchSize: config.batchSize,
+      signal,
     }));
   }
   return { candidates: documentIds.length, documents };
@@ -115,9 +139,24 @@ export async function runKnowledgeEmbeddingWorker(
   deps: KnowledgeEmbeddingWorkerDependencies,
   config: KnowledgeEmbeddingWorkerConfig,
   signal: AbortSignal,
+  options: KnowledgeEmbeddingLoopOptions = {},
 ): Promise<void> {
-  while (!signal.aborted) {
-    await runKnowledgeEmbeddingPoll(deps, config);
-    if (!signal.aborted) await waitForPoll(config.pollIntervalMs, signal);
+  const sleep = options.sleep ?? waitForPoll;
+  let consecutiveFailures = 0;
+  let polls = 0;
+  while (!signal.aborted && (options.maxPolls === undefined || polls < options.maxPolls)) {
+    polls += 1;
+    try {
+      await runKnowledgeEmbeddingPoll(deps, config, signal);
+      consecutiveFailures = 0;
+      if (!signal.aborted) await sleep(config.pollIntervalMs, signal);
+    } catch {
+      consecutiveFailures += 1;
+      const backoff = Math.min(
+        POLL_BACKOFF_MAX_MS,
+        POLL_BACKOFF_BASE_MS * (2 ** (consecutiveFailures - 1)),
+      );
+      if (!signal.aborted) await sleep(backoff, signal);
+    }
   }
 }

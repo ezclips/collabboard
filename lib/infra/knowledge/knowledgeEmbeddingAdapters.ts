@@ -37,7 +37,7 @@ function requireRows<T>(result: { data: readonly T[] | null; error: SupabaseErro
 }
 
 function isDeletedChunkError(error: SupabaseErrorLike): boolean {
-  return error.code === '23503' || /foreign key|knowledge_chunks/i.test(error.message ?? '');
+  return error.code === '23503';
 }
 
 function vectorLiteral(vector: readonly number[]): string {
@@ -94,12 +94,14 @@ export class SupabaseKnowledgeEmbeddingRepository implements KnowledgeEmbeddingR
     let persisted = 0;
     let skippedDeleted = 0;
     for (const vector of vectors) {
+      const embeddedAt = new Date().toISOString();
       const result = await this.client.from('knowledge_chunk_embeddings').upsert({
         chunk_id: vector.chunkId,
         model_id: vector.modelId,
         dimensions: vector.dimensions,
         embedding: vectorLiteral(vector.embedding),
         chunk_text_hash: vector.textHash,
+        embedded_at: embeddedAt,
       }, { onConflict: 'chunk_id,model_id,dimensions' });
       if (!result.error) {
         persisted += 1;

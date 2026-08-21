@@ -18,6 +18,7 @@ export interface EmbedDocumentOptions {
   readonly documentId: string;
   readonly profile: KnowledgeEmbeddingProfile;
   readonly batchSize: number;
+  readonly signal?: AbortSignal;
 }
 
 export interface EmbedDocumentSummary {
@@ -53,7 +54,7 @@ export async function embedKnowledgeDocument(
 
   for (const batch of batches) {
     try {
-      const vectors = await deps.provider.embed({ profile: options.profile, inputs: batch });
+      const vectors = await deps.provider.embed({ profile: options.profile, inputs: batch, signal: options.signal });
       const validVectors = validateKnowledgeEmbeddingVectors(vectors, batch, options.profile);
       const result = await deps.repository.upsertEmbeddings(validVectors);
       persisted += result.persisted;

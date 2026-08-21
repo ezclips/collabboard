@@ -13,6 +13,7 @@ export interface KnowledgeEmbeddingInput {
 export interface KnowledgeEmbeddingProviderRequest {
   readonly profile: KnowledgeEmbeddingProfile;
   readonly inputs: readonly KnowledgeEmbeddingInput[];
+  readonly signal?: AbortSignal;
 }
 
 export interface KnowledgeEmbeddingVector {
@@ -48,10 +49,6 @@ export interface KnowledgeEmbeddingRepository {
   upsertEmbeddings(
     vectors: readonly KnowledgeEmbeddingVector[],
   ): Promise<{ readonly persisted: number; readonly skippedDeleted: number }>;
-}
-
-export function embeddingIdentityKey(chunkId: string, modelId: string, dimensions: number): string {
-  return `${chunkId}\u0000${modelId}\u0000${dimensions}`;
 }
 
 export function isKnowledgeEmbeddingCurrent(

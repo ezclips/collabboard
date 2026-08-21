@@ -1,6 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 import { OpenAIEmbeddingProvider } from '../../../workers/knowledge-embedding/openAIEmbeddingProvider';
 import { embedKnowledgeDocument } from '../../../workers/knowledge-embedding/embedDocument';
+import {
+  createKnowledgeEmbeddingWorkerFromEnvironment,
+  resolveKnowledgeEmbeddingConfig,
+  runKnowledgeEmbeddingPoll,
+  runKnowledgeEmbeddingWorker,
+} from '../../../workers/knowledge-embedding/runEmbeddingWorker';
+import { SupabaseKnowledgeEmbeddingRepository } from '../../infra/knowledge/knowledgeEmbeddingAdapters';
+import type { KnowledgeEmbeddingSupabaseClient } from '../../infra/knowledge/knowledgeEmbeddingAdapters';
 import type {
   KnowledgeEmbeddingInput,
   KnowledgeEmbeddingProfile,
@@ -11,7 +19,6 @@ import type {
 } from './knowledgeEmbedding';
 import {
   buildKnowledgeEmbeddingBatches,
-  embeddingIdentityKey,
   isKnowledgeEmbeddingCurrent,
 } from './knowledgeEmbedding';
 
@@ -36,12 +43,13 @@ class FakeRepository implements KnowledgeEmbeddingRepository {
   readonly states: KnowledgeEmbeddingState[] = [];
   readonly upserts: KnowledgeEmbeddingVector[][] = [];
   deletedOnUpsert = false;
-  readonly readyStatus = 'ready';
 
   constructor(chunks: readonly KnowledgeEmbeddingInput[]) { this.chunks = [...chunks]; }
   async listCandidateDocumentIds(): Promise<readonly string[]> { return ['document-1']; }
   async listChunks(): Promise<readonly KnowledgeEmbeddingInput[]> { return this.chunks; }
-  async listEmbeddingStates(): Promise<readonly KnowledgeEmbeddingState[]> { return this.states; }
+  async listEmbeddingStates(_chunkIds: readonly string[], profile: KnowledgeEmbeddingProfile): Promise<readonly KnowledgeEmbeddingState[]> {
+    return this.states.filter((state) => state.modelId === profile.modelId && state.dimensions === profile.dimensions);
+  }
   async upsertEmbeddings(items: readonly KnowledgeEmbeddingVector[]) {
     this.upserts.push([...items]);
     if (this.deletedOnUpsert) return { persisted: 0, skippedDeleted: items.length };
@@ -66,9 +74,10 @@ class FakeProvider implements KnowledgeEmbeddingProvider {
 }
 
 describe('P6I-A embedding foundation', () => {
-  it('makes dimensions part of the operational embedding identity', () => {
-    expect(embeddingIdentityKey('chunk-1', 'openai:model', 1536)).not.toBe(embeddingIdentityKey('chunk-1', 'openai:model', 3072));
+  it('requires matching hash, model, and dimensions for a current embedding', () => {
     expect(isKnowledgeEmbeddingCurrent(input('chunk-1'), { chunkId: 'chunk-1', modelId: PROFILE.modelId, dimensions: 3, chunkTextHash: 'chunk-1-hash' }, PROFILE)).toBe(true);
+    expect(isKnowledgeEmbeddingCurrent(input('chunk-1'), { chunkId: 'chunk-1', modelId: PROFILE.modelId, dimensions: 7, chunkTextHash: 'chunk-1-hash' }, PROFILE)).toBe(false);
+    expect(isKnowledgeEmbeddingCurrent(input('chunk-1'), { chunkId: 'chunk-1', modelId: 'other:model', dimensions: 3, chunkTextHash: 'chunk-1-hash' }, PROFILE)).toBe(false);
   });
 
   it('batches deterministically and rejects a provider vector dimension mismatch', async () => {
@@ -121,12 +130,109 @@ describe('P6I-A embedding foundation', () => {
     expect(second.persisted).toBe(1);
   });
 
-  it('treats a deleted chunk during persistence as a benign skip and never changes Ready state', async () => {
+  it('treats a deleted chunk during persistence as a benign skip', async () => {
     const repository = new FakeRepository([input('deleted')]);
     repository.deletedOnUpsert = true;
     const provider = new FakeProvider();
     const result = await embedKnowledgeDocument({ repository, provider }, { documentId: 'document-1', profile: PROFILE, batchSize: 1 });
     expect(result.skippedDeleted).toBe(1);
-    expect(repository.readyStatus).toBe('ready');
+  });
+});
+
+describe('P6I-A.1 worker hardening', () => {
+  const environment = {
+    OPENAI_API_KEY: 'test-key',
+    SUPABASE_URL: 'http://127.0.0.1:54321',
+    SUPABASE_SERVICE_ROLE_KEY: 'test-service-role',
+  };
+
+  it('fails closed before discovery when createdAfter is missing or invalid', () => {
+    expect(() => createKnowledgeEmbeddingWorkerFromEnvironment(environment)).toThrow(/CREATED_AFTER/);
+    expect(() => resolveKnowledgeEmbeddingConfig({ ...environment, KNOWLEDGE_EMBEDDING_CREATED_AFTER: 'not-a-date' })).toThrow(/ISO/);
+  });
+
+  it('passes a valid createdAfter exactly to candidate discovery', async () => {
+    const createdAfter = '2026-08-21T12:34:56Z';
+    const received: Array<string | null | undefined> = [];
+    const repository: KnowledgeEmbeddingRepository = {
+      listCandidateDocumentIds: async (_profile, _limit, value) => { received.push(value); return []; },
+      listChunks: async () => [],
+      listEmbeddingStates: async () => [],
+      upsertEmbeddings: async () => ({ persisted: 0, skippedDeleted: 0 }),
+    };
+    const provider = new FakeProvider();
+    const config = { profile: PROFILE, batchSize: 2, pollIntervalMs: 1, discoveryLimit: 2, createdAfter };
+    await runKnowledgeEmbeddingPoll({ repository, provider }, config);
+    expect(received).toEqual([createdAfter]);
+  });
+
+  it('retries discovery failures with bounded backoff and continues after recovery', async () => {
+    const controller = new AbortController();
+    let discoveries = 0;
+    const delays: number[] = [];
+    const repository: KnowledgeEmbeddingRepository = {
+      listCandidateDocumentIds: async () => {
+        discoveries += 1;
+        if (discoveries === 1 || discoveries === 3) throw new Error('temporary discovery failure');
+        return [];
+      },
+      listChunks: async () => [],
+      listEmbeddingStates: async () => [],
+      upsertEmbeddings: async () => ({ persisted: 0, skippedDeleted: 0 }),
+    };
+    await runKnowledgeEmbeddingWorker(
+      { repository, provider: new FakeProvider() },
+      { profile: PROFILE, batchSize: 1, pollIntervalMs: 5, discoveryLimit: 1, createdAfter: '2026-08-21T00:00:00Z' },
+      controller.signal,
+      { sleep: async (milliseconds) => { delays.push(milliseconds); if (delays.length === 3) controller.abort(); } },
+    );
+    expect(discoveries).toBe(3);
+    expect(delays).toEqual([1_000, 5, 1_000]);
+  });
+
+  it('aborts provider requests on timeout and shutdown', async () => {
+    const hangingFetch = async (_url: string, init?: RequestInit): Promise<Response> => new Promise((_resolve, reject) => {
+      const signal = init?.signal;
+      if (signal?.aborted) { reject(new DOMException('aborted', 'AbortError')); return; }
+      signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), { once: true });
+    });
+    const request = { profile: PROFILE, inputs: [input('timeout')] };
+    await expect(new OpenAIEmbeddingProvider({ apiKey: 'test', fetchImpl: hangingFetch, requestTimeoutMs: 1 }).embed(request)).rejects.toThrow();
+    const controller = new AbortController();
+    const pending = new OpenAIEmbeddingProvider({ apiKey: 'test', fetchImpl: hangingFetch, requestTimeoutMs: 30_000 }).embed({ ...request, signal: controller.signal });
+    controller.abort();
+    await expect(pending).rejects.toThrow();
+  });
+
+  it('persists nothing when provider validation fails', async () => {
+    const repository = new FakeRepository([input('bad')]);
+    const provider: KnowledgeEmbeddingProvider = { embed: async () => [{ ...vectors([input('bad')])[0], embedding: [1, 2] }] };
+    const result = await embedKnowledgeDocument({ repository, provider }, { documentId: 'document-1', profile: PROFILE, batchSize: 1 });
+    expect(result.failedBatches).toBe(1);
+    expect(repository.upserts).toHaveLength(0);
+  });
+
+  it('refreshes embedded_at and swallows only SQLSTATE 23503', async () => {
+    const rows: Record<string, unknown>[] = [];
+    const client = {
+      from: () => ({ upsert: async (row: Record<string, unknown>) => { rows.push(row); return { error: null }; } }),
+    } as unknown as KnowledgeEmbeddingSupabaseClient;
+    const repository = new SupabaseKnowledgeEmbeddingRepository(client);
+    const vector = vectors([input('timestamp')])[0];
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-08-21T00:00:00.000Z'));
+      await repository.upsertEmbeddings([vector]);
+      vi.setSystemTime(new Date('2026-08-21T00:00:01.000Z'));
+      await repository.upsertEmbeddings([vector]);
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(rows[1].embedded_at).not.toBe(rows[0].embedded_at);
+
+    const deletedClient = { from: () => ({ upsert: async () => ({ error: { code: '23503', message: 'unrelated wording' } }) }) } as unknown as KnowledgeEmbeddingSupabaseClient;
+    await expect(new SupabaseKnowledgeEmbeddingRepository(deletedClient).upsertEmbeddings([vector])).resolves.toEqual({ persisted: 0, skippedDeleted: 1 });
+    const failedClient = { from: () => ({ upsert: async () => ({ error: { code: 'XX000', message: 'knowledge_chunks wording' } }) }) } as unknown as KnowledgeEmbeddingSupabaseClient;
+    await expect(new SupabaseKnowledgeEmbeddingRepository(failedClient).upsertEmbeddings([vector])).rejects.toThrow();
   });
 });
