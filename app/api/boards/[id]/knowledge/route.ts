@@ -1,5 +1,5 @@
 import { cookies } from 'next/headers';
-import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
+import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { requireBoardPermission } from '@/lib/auth/permissions';
 import {
   NodeKnowledgeContentHasher,
@@ -15,10 +15,36 @@ import { getSupabaseAdmin } from '@/lib/supabase/admin';
 
 export const runtime = 'nodejs';
 
+async function createKnowledgeAuthClient() {
+  const cookieStore = await cookies();
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+  if (!supabaseUrl || !supabaseAnonKey) {
+    throw new Error('Missing public Supabase configuration');
+  }
+
+  return createServerClient(supabaseUrl, supabaseAnonKey, {
+    cookies: {
+      getAll() {
+        return cookieStore.getAll();
+      },
+      setAll(cookiesToSet: { name: string; value: string; options: CookieOptions }[]) {
+        try {
+          cookiesToSet.forEach(({ name, value, options }) => {
+            cookieStore.set(name, value, options);
+          });
+        } catch {
+          // Cookie writes can be unavailable in read-only request contexts.
+        }
+      },
+    },
+  });
+}
+
 export const GET = createKnowledgeListGetHandler({
   async getAuthenticatedSession() {
-    const cookieStore = await cookies();
-    const sessionClient = createRouteHandlerClient({ cookies: async () => cookieStore });
+    const sessionClient = await createKnowledgeAuthClient();
     const {
       data: { user },
       error,
@@ -42,8 +68,7 @@ export const GET = createKnowledgeListGetHandler({
 
 export const POST = createKnowledgeUploadPostHandler({
   async getAuthenticatedUserId() {
-    const cookieStore = await cookies();
-    const sessionClient = createRouteHandlerClient({ cookies: async () => cookieStore });
+    const sessionClient = await createKnowledgeAuthClient();
     const {
       data: { user },
       error,
