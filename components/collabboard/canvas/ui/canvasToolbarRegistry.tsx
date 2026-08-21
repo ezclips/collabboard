@@ -7,6 +7,7 @@ import {
   CloudDownload,
   Columns3,
   FileText,
+  FileUp,
   Heading,
   Image as ImageIcon,
   Link,
@@ -132,6 +133,7 @@ export function buildCanvasToolbarGroups({
       tools: [
         { icon: Link, label: "Link", color: "text-blue-600", bg: "hover:bg-blue-50", type: "link" },
         { icon: ImageIcon, label: "Add image", color: "text-pink-600", bg: "hover:bg-pink-50", type: "image" },
+        { icon: FileUp, label: "Add PDF", color: "text-rose-700", bg: "hover:bg-rose-50", type: "knowledge-pdf" },
         { icon: Upload, label: "Upload", color: "text-cyan-600", bg: "hover:bg-cyan-50", type: "upload" },
         { icon: CloudDownload, label: "Import", color: "text-sky-600", bg: "hover:bg-sky-50", type: "import" },
       ],
