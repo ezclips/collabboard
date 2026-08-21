@@ -2,6 +2,7 @@
 
 import React, { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { MoreVertical } from 'lucide-react';
+import KnowledgePdfUploader, { type KnowledgePdfUploaderHandle } from '@/components/collabboard/KnowledgePdfUploader';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -79,6 +80,7 @@ export default function CanvasSidebar({
   const toggleRef = useRef<HTMLButtonElement>(null);
   const moreMeasureRef = useRef<HTMLButtonElement>(null);
   const moreTriggerRef = useRef<HTMLButtonElement>(null);
+  const knowledgePdfUploaderRef = useRef<KnowledgePdfUploaderHandle>(null);
   const groupRefs = useRef(new Map<string, HTMLDivElement>());
   const naturalHeightsRef = useRef(new Map<string, Map<string, number>>());
   const [overflowState, setOverflowState] = useState<OverflowState | null>(null);
@@ -109,6 +111,10 @@ export default function CanvasSidebar({
   const dispatchTool = useCallback((type: string, disabled?: boolean) => {
     if (disabled) return;
     onBeforeToolClick?.(type);
+    if (type === 'knowledge-pdf') {
+      knowledgePdfUploaderRef.current?.openPicker();
+      return;
+    }
     handleToolClick(type);
   }, [handleToolClick, onBeforeToolClick]);
 
@@ -244,6 +250,7 @@ export default function CanvasSidebar({
       data-toolbar-sidebar="true"
       className={`${isCollapsed ? 'w-12' : 'w-14'} h-full bg-white border-r flex flex-col items-center py-6 gap-3 shadow-sm z-20 relative overflow-visible transition-[width] duration-150`}
     >
+      <KnowledgePdfUploader ref={knowledgePdfUploaderRef} />
       <button
         ref={moreMeasureRef}
         type="button"
