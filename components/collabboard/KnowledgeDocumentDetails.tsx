@@ -1,6 +1,6 @@
 "use client";
 
-import React from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 
 export interface KnowledgeDocumentDetailPage {
   pageNumber: number;
@@ -16,6 +16,53 @@ export interface KnowledgeDocumentDetailsProps {
   onBack: () => void;
 }
 
+type TextMatch = { pageIndex: number; start: number; end: number };
+
+function findMatches(pages: readonly KnowledgeDocumentDetailPage[], query: string): TextMatch[] {
+  const needle = query.toLowerCase();
+  if (!needle) return [];
+  return pages.flatMap((page, pageIndex) => {
+    const source = page.text.toLowerCase();
+    const matches: TextMatch[] = [];
+    let offset = 0;
+    while (offset < source.length) {
+      const start = source.indexOf(needle, offset);
+      if (start < 0) break;
+      matches.push({ pageIndex, start, end: start + needle.length });
+      offset = start + needle.length;
+    }
+    return matches;
+  });
+}
+
+function highlightedText(
+  text: string,
+  pageIndex: number,
+  pageMatches: readonly TextMatch[],
+  activeMatch: TextMatch | undefined,
+  activeRef: React.MutableRefObject<HTMLElement | null>,
+) {
+  const nodes: React.ReactNode[] = [];
+  let cursor = 0;
+  pageMatches.forEach((match) => {
+    if (match.start > cursor) nodes.push(<React.Fragment key={`text-${cursor}`}>{text.slice(cursor, match.start)}</React.Fragment>);
+    const active = match === activeMatch;
+    nodes.push(
+      <mark
+        key={`match-${match.start}`}
+        ref={active ? activeRef : undefined}
+        data-active-match={active ? 'true' : undefined}
+        className={active ? 'rounded bg-blue-300 text-gray-900 ring-2 ring-blue-500' : 'rounded bg-yellow-200 text-gray-900'}
+      >
+        {text.slice(match.start, match.end)}
+      </mark>,
+    );
+    cursor = match.end;
+  });
+  if (cursor < text.length) nodes.push(<React.Fragment key={`text-${cursor}`}>{text.slice(cursor)}</React.Fragment>);
+  return nodes;
+}
+
 export default function KnowledgeDocumentDetails({
   originalFilename,
   pageCount,
@@ -24,6 +71,24 @@ export default function KnowledgeDocumentDetails({
   error,
   onBack,
 }: KnowledgeDocumentDetailsProps) {
+  const [query, setQuery] = useState('');
+  const [activeMatchIndex, setActiveMatchIndex] = useState(0);
+  const activeMatchRef = useRef<HTMLElement | null>(null);
+  const matches = useMemo(() => findMatches(pages, query), [pages, query]);
+
+  useEffect(() => {
+    setActiveMatchIndex(0);
+  }, [query]);
+
+  useEffect(() => {
+    activeMatchRef.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [activeMatchIndex, matches]);
+
+  const moveMatch = (delta: number) => {
+    if (matches.length === 0) return;
+    setActiveMatchIndex((current) => (current + delta + matches.length) % matches.length);
+  };
+
   return (
     <div className="min-w-0">
       <button
@@ -42,6 +107,28 @@ export default function KnowledgeDocumentDetails({
         </p>
       </div>
 
+      <div className="mb-3">
+        <input
+          type="search"
+          value={query}
+          onChange={(event) => setQuery(event.currentTarget.value)}
+          placeholder="Search in this PDF…"
+          aria-label="Search in this PDF"
+          className="w-full rounded-md border border-gray-200 px-2 py-1.5 text-xs text-gray-700 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-200"
+        />
+        {query ? (
+          <div className="mt-1 flex items-center gap-2 text-[11px] text-gray-500">
+            <span>{matches.length === 0 ? 'No matches' : `${matches.length} ${matches.length === 1 ? 'match' : 'matches'}`}</span>
+            {matches.length > 1 ? (
+              <>
+                <button type="button" className="underline hover:text-gray-900" onClick={() => moveMatch(-1)}>Previous</button>
+                <button type="button" className="underline hover:text-gray-900" onClick={() => moveMatch(1)}>Next</button>
+              </>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+
       {loading ? (
         <p className="text-[11px] text-gray-500">Loading extracted text…</p>
       ) : error ? (
@@ -50,10 +137,12 @@ export default function KnowledgeDocumentDetails({
         <p className="text-[11px] text-gray-500">No extracted text available.</p>
       ) : (
         <div className="max-h-[60vh] space-y-4 overflow-y-auto pr-1">
-          {pages.map((page) => (
+          {pages.map((page, pageIndex) => (
             <section key={page.pageNumber}>
               <h3 className="mb-1 text-[11px] font-semibold text-gray-500">Page {page.pageNumber}</h3>
-              <p className="select-text whitespace-pre-wrap text-xs leading-5 text-gray-700">{page.text}</p>
+              <p className="select-text whitespace-pre-wrap text-xs leading-5 text-gray-700">
+                {highlightedText(page.text, pageIndex, matches.filter((match) => match.pageIndex === pageIndex), matches[activeMatchIndex], activeMatchRef)}
+              </p>
             </section>
           ))}
         </div>
