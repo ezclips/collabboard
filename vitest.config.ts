@@ -12,6 +12,7 @@ export default defineConfig({
     include: [
       'lib/domain/**/*.test.ts',
       'lib/infra/**/*.test.ts',
+      'lib/server/**/*.test.ts',
       'scripts/harness/**/*.test.ts',
       'scripts/*.test.ts',
       'scripts/db/**/*.test.ts',
