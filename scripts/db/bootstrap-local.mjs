@@ -56,6 +56,14 @@ export const POST_BASELINE_MIGRATIONS = [
     source: '20260823_add_knowledge_processing_candidates.sql',
     target: '20260823000000_knowledge_processing_candidates.sql',
   },
+  {
+    source: '20260824_add_knowledge_chunk_provenance.sql',
+    target: '20260824000000_knowledge_chunk_provenance.sql',
+  },
+  {
+    source: '20260825_add_knowledge_chunk_embeddings.sql',
+    target: '20260825000000_knowledge_chunk_embeddings.sql',
+  },
 ];
 
 const REQUIRED_EXTENSIONS_SQL = `
@@ -419,6 +427,7 @@ function runKnowledgeIntegrationTests() {
     'workers/knowledge-pdf/knowledgePdfWorker.integration.test.ts',
     'workers/knowledge-pdf/knowledgePdfDispatcher.integration.test.ts',
     'workers/knowledge-pdf/knowledgePdfContainer.integration.test.ts',
+    'lib/infra/knowledge/knowledgeEmbedding.integration.test.ts',
   ];
   const outputs = [];
   for (const testFile of testFiles) {
