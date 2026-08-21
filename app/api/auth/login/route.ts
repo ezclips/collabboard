@@ -1,7 +1,7 @@
 import { cookies } from 'next/headers';
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { createServerClient, type CookieOptions } from '@supabase/ssr';
+import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import {
   parseRetryAfterHeaderSeconds,
@@ -49,30 +49,12 @@ function getAuthFailureMessage(errorMessage: string | undefined) {
   return errorMessage || INVALID_CREDENTIALS_MESSAGE;
 }
 
-async function createLoginSessionClient() {
-  const cookieStore = await cookies();
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+type ResolvedNextCookieStore = Awaited<ReturnType<typeof cookies>>;
 
-  if (!supabaseUrl || !supabaseAnonKey) {
-    throw new Error('Missing public Supabase configuration');
-  }
-
-  return createServerClient(supabaseUrl, supabaseAnonKey, {
-    cookies: {
-      getAll() {
-        return cookieStore.getAll();
-      },
-      setAll(cookiesToSet: { name: string; value: string; options: CookieOptions }[]) {
-        try {
-          cookiesToSet.forEach(({ name, value, options }) => {
-            cookieStore.set(name, value, options);
-          });
-        } catch {
-          // Cookie writes can be unavailable in read-only request contexts.
-        }
-      },
-    },
+function createLoginRouteClient(cookieStore: ResolvedNextCookieStore) {
+  return createRouteHandlerClient({
+    // Next 15 cookies() is awaited first; auth-helper runtime requires the resolved synchronous store.
+    cookies: () => cookieStore as unknown as ReturnType<typeof cookies>,
   });
 }
 
@@ -259,7 +241,8 @@ export async function POST(req: NextRequest) {
     }
 
     if (phase === 'success') {
-      const routeSupabase = await createLoginSessionClient();
+      const cookieStore = await cookies();
+      const routeSupabase = createLoginRouteClient(cookieStore);
       const {
         data: { user },
         error: userError,
@@ -340,7 +323,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const routeSupabase = await createLoginSessionClient();
+    const cookieStore = await cookies();
+    const routeSupabase = createLoginRouteClient(cookieStore);
     const { error: sessionError } = await routeSupabase.auth.setSession({
       access_token: data.session.access_token,
       refresh_token: data.session.refresh_token,

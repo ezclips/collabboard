@@ -6,13 +6,13 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 const mocks = vi.hoisted(() => ({
   cookies: vi.fn(),
   createClient: vi.fn(),
-  createServerClient: vi.fn(),
+  createRouteHandlerClient: vi.fn(),
   getSupabaseAdmin: vi.fn(),
 }));
 
 vi.mock('next/headers', () => ({ cookies: mocks.cookies }));
 vi.mock('@supabase/supabase-js', () => ({ createClient: mocks.createClient }));
-vi.mock('@supabase/ssr', () => ({ createServerClient: mocks.createServerClient }));
+vi.mock('@supabase/auth-helpers-nextjs', () => ({ createRouteHandlerClient: mocks.createRouteHandlerClient }));
 vi.mock('@/lib/supabase/admin', () => ({ getSupabaseAdmin: mocks.getSupabaseAdmin }));
 
 const EMAIL = 'person@example.com';
@@ -48,7 +48,7 @@ function request(body: Record<string, unknown>) {
 
 function configureSuccessfulLogin() {
   const cookieStore = {
-    getAll: vi.fn(() => [{ name: 'sb-access-token', value: 'before-refresh' }]),
+    get: vi.fn(() => null),
     set: vi.fn(),
   };
   const profileUpsert = vi.fn(async () => ({ error: null }));
@@ -60,14 +60,13 @@ function configureSuccessfulLogin() {
       })),
       setSession: vi.fn(async () => {
         const options = serverOptions as {
-          cookies: {
-            setAll(values: readonly { name: string; value: string; options: unknown }[]): void;
+          cookies: () => {
+            set(name: string, value: string, options: unknown): void;
           };
         };
-        await options.cookies.setAll([
-          { name: 'sb-access-token', value: ACCESS_TOKEN, options: { path: '/' } },
-          { name: 'sb-refresh-token', value: REFRESH_TOKEN, options: { path: '/' } },
-        ]);
+        const resolvedCookieStore = options.cookies();
+        resolvedCookieStore.set('sb-access-token', ACCESS_TOKEN, { path: '/' });
+        resolvedCookieStore.set('sb-refresh-token', REFRESH_TOKEN, { path: '/' });
         return { error: null };
       }),
     },
@@ -91,7 +90,7 @@ function configureSuccessfulLogin() {
 
   mocks.cookies.mockResolvedValue(cookieStore);
   mocks.createClient.mockReturnValue(providerAuthClient);
-  mocks.createServerClient.mockImplementation((_url: string, _key: string, options: unknown) => {
+  mocks.createRouteHandlerClient.mockImplementation((options: unknown) => {
     serverOptions = options;
     return serverAuthClient;
   });
@@ -128,6 +127,9 @@ describe('P6C.2 login session cookie wiring', () => {
     }));
 
     expect(response.status).toBe(200);
+    const routeOptions = serverOptions as { cookies: () => unknown };
+    expect(routeOptions.cookies()).toBe(state.cookieStore);
+    expect(routeOptions.cookies()).not.toBeInstanceOf(Promise);
     expect(state.serverAuthClient.auth.setSession).toHaveBeenCalledWith({
       access_token: ACCESS_TOKEN,
       refresh_token: REFRESH_TOKEN,
@@ -160,7 +162,7 @@ describe('P6C.2 login session cookie wiring', () => {
     const response = await loginRoute.POST(request({ email: EMAIL, password: 'wrong-password' }));
 
     expect(response.status).toBe(401);
-    expect(mocks.createServerClient).not.toHaveBeenCalled();
+    expect(mocks.createRouteHandlerClient).not.toHaveBeenCalled();
     expect(mocks.cookies).not.toHaveBeenCalled();
   });
 
@@ -184,12 +186,13 @@ describe('P6C.2 login session cookie wiring', () => {
       'utf8',
     );
 
-    expect(source).toContain("import { createServerClient, type CookieOptions } from '@supabase/ssr';");
-    expect(source).not.toContain('createRouteHandlerClient');
+    expect(source).toContain("import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';");
+    expect(source).not.toContain('@supabase/ssr');
+    expect(source).toContain('createRouteHandlerClient');
     expect(source).not.toContain('const cookieStore = cookies()');
     expect(source).toContain('const cookieStore = await cookies()');
-    expect(source).toContain('getAll()');
-    expect(source).toContain('setAll(');
+    expect(source).toContain('createLoginRouteClient(cookieStore)');
+    expect(source).toContain('cookies: () => cookieStore as unknown as ReturnType<typeof cookies>');
     expect(source).toContain('auth.setSession({');
   });
 });

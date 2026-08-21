@@ -1,5 +1,5 @@
 import { cookies } from 'next/headers';
-import { createServerClient, type CookieOptions } from '@supabase/ssr';
+import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 import { requireBoardPermission } from '@/lib/auth/permissions';
 import {
   NodeKnowledgeContentHasher,
@@ -15,36 +15,19 @@ import { getSupabaseAdmin } from '@/lib/supabase/admin';
 
 export const runtime = 'nodejs';
 
-async function createKnowledgeAuthClient() {
-  const cookieStore = await cookies();
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+type ResolvedNextCookieStore = Awaited<ReturnType<typeof cookies>>;
 
-  if (!supabaseUrl || !supabaseAnonKey) {
-    throw new Error('Missing public Supabase configuration');
-  }
-
-  return createServerClient(supabaseUrl, supabaseAnonKey, {
-    cookies: {
-      getAll() {
-        return cookieStore.getAll();
-      },
-      setAll(cookiesToSet: { name: string; value: string; options: CookieOptions }[]) {
-        try {
-          cookiesToSet.forEach(({ name, value, options }) => {
-            cookieStore.set(name, value, options);
-          });
-        } catch {
-          // Cookie writes can be unavailable in read-only request contexts.
-        }
-      },
-    },
+function createKnowledgeRouteClient(cookieStore: ResolvedNextCookieStore) {
+  return createRouteHandlerClient({
+    // Next 15 cookies() is awaited first; auth-helper runtime requires the resolved synchronous store.
+    cookies: () => cookieStore as unknown as ReturnType<typeof cookies>,
   });
 }
 
 export const GET = createKnowledgeListGetHandler({
   async getAuthenticatedSession() {
-    const sessionClient = await createKnowledgeAuthClient();
+    const cookieStore = await cookies();
+    const sessionClient = createKnowledgeRouteClient(cookieStore);
     const {
       data: { user },
       error,
@@ -68,7 +51,8 @@ export const GET = createKnowledgeListGetHandler({
 
 export const POST = createKnowledgeUploadPostHandler({
   async getAuthenticatedUserId() {
-    const sessionClient = await createKnowledgeAuthClient();
+    const cookieStore = await cookies();
+    const sessionClient = createKnowledgeRouteClient(cookieStore);
     const {
       data: { user },
       error,

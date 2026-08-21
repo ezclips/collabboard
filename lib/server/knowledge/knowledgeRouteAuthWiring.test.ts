@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 type UploadAuthDependencies = {
@@ -12,12 +14,12 @@ type ReadAuthDependencies = {
 
 const mocks = vi.hoisted(() => ({
   cookies: vi.fn(),
-  createServerClient: vi.fn(),
+  createRouteHandlerClient: vi.fn(),
   requireBoardPermission: vi.fn(),
 }));
 
 vi.mock('next/headers', () => ({ cookies: mocks.cookies }));
-vi.mock('@supabase/ssr', () => ({ createServerClient: mocks.createServerClient }));
+vi.mock('@supabase/auth-helpers-nextjs', () => ({ createRouteHandlerClient: mocks.createRouteHandlerClient }));
 vi.mock('@/lib/auth/permissions', () => ({ requireBoardPermission: mocks.requireBoardPermission }));
 vi.mock('@/lib/server/knowledge/knowledgeUploadRoute', () => ({
   createKnowledgeUploadPostHandler: (deps: UploadAuthDependencies) => async () => {
@@ -69,7 +71,7 @@ function postRequest() {
 
 function configureAuth(user: { id: string } | null) {
   const cookieStore = {
-    getAll: vi.fn(() => [{ name: 'sb-access-token', value: 'signed-cookie' }]),
+    get: vi.fn(() => null),
     set: vi.fn(),
   };
   const authClient = {
@@ -79,7 +81,7 @@ function configureAuth(user: { id: string } | null) {
   };
 
   mocks.cookies.mockResolvedValue(cookieStore);
-  mocks.createServerClient.mockImplementation((_url: string, _key: string, options: unknown) => {
+  mocks.createRouteHandlerClient.mockImplementation((options: unknown) => {
     capturedOptions = options;
     return authClient;
   });
@@ -113,13 +115,14 @@ describe('Knowledge route Next 15 auth cookie wiring', () => {
 
     if (!capturedOptions) throw new Error('SSR client options were not captured');
     const adapter = capturedOptions as {
-      cookies: {
-        getAll(): unknown;
-        setAll(values: readonly { name: string; value: string; options?: unknown }[]): void;
+      cookies: () => {
+        get(name: string): unknown;
+        set(name: string, value: string, options: unknown): void;
       };
     };
-    expect(adapter.cookies.getAll()).toEqual(cookieStore.getAll());
-    adapter.cookies.setAll([{ name: 'sb-refresh-token', value: 'refreshed', options: { path: '/' } }]);
+    expect(adapter.cookies()).toBe(cookieStore);
+    expect(adapter.cookies()).not.toBeInstanceOf(Promise);
+    adapter.cookies().set('sb-refresh-token', 'refreshed', { path: '/' });
     expect(cookieStore.set).toHaveBeenCalledWith(
       'sb-refresh-token',
       'refreshed',
@@ -166,5 +169,18 @@ describe('Knowledge route Next 15 auth cookie wiring', () => {
       SIGNED_IN_USER_ID,
       'reader',
     );
+  });
+
+  it('keeps GET and POST on the canonical auth-helper cookie format', () => {
+    const source = readFileSync(
+      resolve(process.cwd(), 'app/api/boards/[id]/knowledge/route.ts'),
+      'utf8',
+    );
+
+    expect(source).toContain("import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';");
+    expect(source).not.toContain('@supabase/ssr');
+    expect(source).not.toContain('cookies: async () => cookieStore');
+    expect(source).toContain('const cookieStore = await cookies()');
+    expect(source).toContain('createKnowledgeRouteClient(cookieStore)');
   });
 });
