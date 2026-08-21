@@ -31,12 +31,12 @@ CREATE FUNCTION public.complete_knowledge_extraction(
     p_lease_token uuid,
     p_page_count integer,
     p_pages jsonb,
-    p_chunks jsonb,
     p_parser_name text,
     p_parser_version text,
     p_parser_options_hash text DEFAULT NULL,
     p_raw_artifact_path text DEFAULT NULL,
-    p_expected_content_sha256 text DEFAULT NULL
+    p_expected_content_sha256 text DEFAULT NULL,
+    p_chunks jsonb DEFAULT '[]'::jsonb
 )
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -234,9 +234,9 @@ COMMENT ON FUNCTION public.complete_knowledge_extraction IS
     'Atomically complete the current Knowledge extraction lease with pages and derived chunks.';
 
 REVOKE ALL ON FUNCTION public.complete_knowledge_extraction(
-    uuid, uuid, integer, jsonb, jsonb, text, text, text, text, text
+    uuid, uuid, integer, jsonb, text, text, text, text, text, jsonb
 ) FROM PUBLIC, anon, authenticated;
 
 GRANT EXECUTE ON FUNCTION public.complete_knowledge_extraction(
-    uuid, uuid, integer, jsonb, jsonb, text, text, text, text, text
+    uuid, uuid, integer, jsonb, text, text, text, text, text, jsonb
 ) TO service_role;

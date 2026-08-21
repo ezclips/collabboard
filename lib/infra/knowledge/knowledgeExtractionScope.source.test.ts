@@ -163,6 +163,16 @@ describe('P6H persistence scope -- provenance and privilege guards', () => {
     expect(spatialMigration).not.toMatch(/CREATE TABLE[^;]*knowledge_(?:chunk_)?elements/i);
   });
 
+  it('pins one rollout-compatible completion signature with optional final chunks', () => {
+    const correctedSignature = 'uuid, uuid, integer, jsonb, text, text, text, text, text, jsonb';
+    expect((spatialMigration.match(/CREATE FUNCTION public\.complete_knowledge_extraction\(/g) ?? [])).toHaveLength(1);
+    expect(spatialMigration).toContain('p_parser_name text,');
+    expect(spatialMigration).toContain("p_chunks jsonb DEFAULT '[]'::jsonb");
+    expect(spatialMigration).not.toContain('p_pages jsonb,\n    p_chunks jsonb,');
+    expect(spatialMigration).toContain('DROP FUNCTION IF EXISTS public.complete_knowledge_extraction(\n    uuid, uuid, integer, jsonb, jsonb, text, text, text, text, text\n);');
+    expect(spatialMigration).toContain(`REVOKE ALL ON FUNCTION public.complete_knowledge_extraction(\n    ${correctedSignature}`);
+  });
+
   it('passes chunks to the same replacement RPC and validates row counts', () => {
     expect(spatialMigration).toContain('p_chunks jsonb');
     expect(spatialMigration).toContain('DELETE FROM public.knowledge_chunks');
@@ -173,7 +183,7 @@ describe('P6H persistence scope -- provenance and privilege guards', () => {
   });
 
   it('revokes the exact replacement RPC from every browser role', () => {
-    const signature = 'uuid, uuid, integer, jsonb, jsonb, text, text, text, text, text';
+    const signature = 'uuid, uuid, integer, jsonb, text, text, text, text, text, jsonb';
     expect(spatialMigration).toContain(`REVOKE ALL ON FUNCTION public.complete_knowledge_extraction(\n    ${signature}\n) FROM PUBLIC, anon, authenticated;`);
     expect(spatialMigration).toContain(`GRANT EXECUTE ON FUNCTION public.complete_knowledge_extraction(\n    ${signature}\n) TO service_role;`);
   });
