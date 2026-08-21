@@ -49,7 +49,12 @@ function validate() {
   const pool = (process.env.WORKER_POOL_NAME || DEFAULT_POOL).trim();
   if (!/^[a-z][a-z0-9-]{0,62}$/.test(pool)) throw new Error('WORKER_POOL_NAME has invalid syntax');
   const serviceAccount = required('SERVICE_ACCOUNT_EMAIL');
-  if (!/^[^@\s]+@[^@\s]+\.iam\.gserviceaccount\.com$/.test(serviceAccount)) throw new Error('SERVICE_ACCOUNT_EMAIL has invalid syntax');
+  const accountMatch = serviceAccount.match(/^([^@\s]+)@([^@\s]+)\.iam\.gserviceaccount\.com$/);
+  if (!accountMatch || accountMatch[2] !== project) throw new Error('SERVICE_ACCOUNT_EMAIL must belong to GCP_PROJECT_ID');
+  const accountId = accountMatch[1];
+  if (accountId.length < 6 || accountId.length > 30 || !/^[a-z0-9](?:[a-z0-9-]{4,28}[a-z0-9])$/.test(accountId)) {
+    throw new Error('SERVICE_ACCOUNT_EMAIL account ID must be 6-30 lowercase alphanumeric characters or hyphens');
+  }
   const cpu = (process.env.GCP_WORKER_CPU || DEFAULT_CPU).trim();
   const memory = (process.env.GCP_WORKER_MEMORY || DEFAULT_MEMORY).trim();
   if (cpu !== '1' || memory !== '1Gi') throw new Error('Initial embedding worker sizing must be CPU=1 and memory=1Gi');

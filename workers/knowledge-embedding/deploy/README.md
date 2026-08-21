@@ -41,7 +41,7 @@ authorization and an explicitly chosen earlier cutoff.
 ## Secrets and identity
 
 Use a separate least-privilege service account, for example
-`collabboard-knowledge-embedding-worker@callabboard.iam.gserviceaccount.com`.
+`collabboard-embed-worker@callabboard.iam.gserviceaccount.com`.
 Do not reuse the PDF worker identity. The deployment passes only pinned Secret
 Manager references for `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and
 `OPENAI_API_KEY`; values never belong in this repository, image arguments,
