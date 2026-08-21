@@ -190,6 +190,37 @@ describe('P6I-A.1 worker hardening', () => {
     expect(delays).toEqual([1_000, 5, 1_000]);
   });
 
+  it('emits only the bounded poll-failure event payload', async () => {
+    const controller = new AbortController();
+    let discoveries = 0;
+    const repository: KnowledgeEmbeddingRepository = {
+      listCandidateDocumentIds: async () => {
+        discoveries += 1;
+        if (discoveries === 1) throw new Error('secret text and vector must not be logged');
+        return [];
+      },
+      listChunks: async () => [],
+      listEmbeddingStates: async () => [],
+      upsertEmbeddings: async () => ({ persisted: 0, skippedDeleted: 0 }),
+    };
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      await runKnowledgeEmbeddingWorker(
+        { repository, provider: new FakeProvider() },
+        { profile: PROFILE, batchSize: 1, pollIntervalMs: 1, discoveryLimit: 1, createdAfter: '2026-08-21T00:00:00Z' },
+        controller.signal,
+        { sleep: async () => { if (discoveries === 2) controller.abort(); }, maxPolls: 2 },
+      );
+    } finally {
+      const calls = [...log.mock.calls];
+      log.mockRestore();
+      expect(calls).toHaveLength(1);
+      expect(calls[0]).toEqual([JSON.stringify({ event: 'knowledge-embedding-worker-poll-failed', consecutiveFailures: 1 })]);
+      expect(calls.join(' ')).not.toContain('secret text');
+    }
+    expect(discoveries).toBe(2);
+  });
+
   it('aborts provider requests on timeout and shutdown', async () => {
     const hangingFetch = async (_url: string, init?: RequestInit): Promise<Response> => new Promise((_resolve, reject) => {
       const signal = init?.signal;

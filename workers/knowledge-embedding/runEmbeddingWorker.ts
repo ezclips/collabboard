@@ -36,6 +36,7 @@ export interface KnowledgeEmbeddingPollSummary {
 export interface KnowledgeEmbeddingLoopOptions {
   readonly sleep?: (milliseconds: number, signal: AbortSignal) => Promise<void>;
   readonly maxPolls?: number;
+  readonly onPollFailure?: (consecutiveFailures: number) => void;
 }
 
 interface ResolvedKnowledgeEmbeddingConfig extends KnowledgeEmbeddingWorkerConfig {
@@ -152,6 +153,10 @@ export async function runKnowledgeEmbeddingWorker(
       if (!signal.aborted) await sleep(config.pollIntervalMs, signal);
     } catch {
       consecutiveFailures += 1;
+      (options.onPollFailure ?? ((count) => console.log(JSON.stringify({
+        event: 'knowledge-embedding-worker-poll-failed',
+        consecutiveFailures: count,
+      }))))(consecutiveFailures);
       const backoff = Math.min(
         POLL_BACKOFF_MAX_MS,
         POLL_BACKOFF_BASE_MS * (2 ** (consecutiveFailures - 1)),
