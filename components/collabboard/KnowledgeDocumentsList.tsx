@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
+import KnowledgeDocumentDetails, { type KnowledgeDocumentDetailPage } from '@/components/collabboard/KnowledgeDocumentDetails';
 import {
   listKnowledgePdfs,
   type KnowledgePdfProcessingStatus,
@@ -35,6 +36,8 @@ interface KnowledgeListEntry {
 }
 
 type ListPhase = 'loading' | 'loaded' | 'error';
+
+interface KnowledgeDetailsState { entry: KnowledgeListEntry; pages: readonly KnowledgeDocumentDetailPage[]; loading: boolean; error: boolean; }
 
 function isProcessingStatus(value: unknown): value is KnowledgePdfProcessingStatus {
   return value === 'uploaded' || value === 'processing' || value === 'ready' || value === 'failed';
@@ -97,6 +100,7 @@ export default function KnowledgeDocumentsList({ refreshToken = 0, isOpen = true
   const boardId = params?.id;
   const [phase, setPhase] = useState<ListPhase>('loading');
   const [entries, setEntries] = useState<readonly KnowledgeListEntry[]>([]);
+  const [details, setDetails] = useState<KnowledgeDetailsState | null>(null);
 
   useEffect(() => {
     if (!boardId) return;
@@ -129,10 +133,31 @@ export default function KnowledgeDocumentsList({ refreshToken = 0, isOpen = true
     };
   }, [boardId, refreshToken]);
 
+  const openDetails = async (entry: KnowledgeListEntry) => {
+    if (!boardId) return;
+    setDetails({ entry, pages: [], loading: true, error: false });
+    try {
+      const response = await fetch(`/api/boards/${encodeURIComponent(boardId)}/knowledge/${encodeURIComponent(entry.id)}/pages`);
+      const payload = await response.json().catch(() => null) as { pages?: unknown } | null;
+      if (!response.ok || !payload || !Array.isArray(payload.pages)) throw new Error('details unavailable');
+      const pages = payload.pages.filter((page): page is KnowledgeDocumentDetailPage => (
+        !!page && typeof page === 'object' && typeof (page as KnowledgeDocumentDetailPage).pageNumber === 'number' && typeof (page as KnowledgeDocumentDetailPage).text === 'string'
+      ));
+      setDetails({ entry, pages, loading: false, error: false });
+    } catch {
+      setDetails((current) => current?.entry.id === entry.id ? { ...current, loading: false, error: true } : current);
+    }
+  };
+
+  const closeSurface = () => {
+    setDetails(null);
+    onClose?.();
+  };
+
   useEffect(() => {
     if (!isOpen || !onClose) return;
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
+      if (event.key === 'Escape') closeSurface();
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
@@ -148,7 +173,7 @@ export default function KnowledgeDocumentsList({ refreshToken = 0, isOpen = true
       aria-label="Knowledge documents"
       className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/50 p-4"
       onClick={(event) => {
-        if (event.target === event.currentTarget) onClose?.();
+        if (event.target === event.currentTarget) closeSurface();
       }}
     >
       <div
@@ -163,13 +188,22 @@ export default function KnowledgeDocumentsList({ refreshToken = 0, isOpen = true
             type="button"
             aria-label="Close Knowledge"
             className="rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
-            onClick={() => onClose?.()}
+            onClick={closeSurface}
           >
             ×
           </button>
         </div>
 
-        {phase === 'error' ? (
+        {details ? (
+          <KnowledgeDocumentDetails
+            originalFilename={details.entry.originalFilename}
+            pageCount={details.entry.pageCount}
+            pages={details.pages}
+            loading={details.loading}
+            error={details.error}
+            onBack={() => setDetails(null)}
+          />
+        ) : phase === 'error' ? (
         <p className="mt-2 text-[11px] text-gray-500">Knowledge documents unavailable.</p>
       ) : entries.length > 0 ? (
         <ul className="mt-2 max-h-64 space-y-2 overflow-y-auto">
@@ -194,6 +228,15 @@ export default function KnowledgeDocumentsList({ refreshToken = 0, isOpen = true
                   )}
                 {metadata !== null ? (
                   <p className="text-[11px] text-gray-500">{metadata}</p>
+                ) : null}
+                {entry.processingStatus === 'ready' ? (
+                  <button
+                    type="button"
+                    className="mt-1 text-[11px] font-medium text-gray-600 underline underline-offset-2 hover:text-gray-900"
+                    onClick={() => void openDetails(entry)}
+                  >
+                    View text
+                  </button>
                 ) : null}
               </li>
             );

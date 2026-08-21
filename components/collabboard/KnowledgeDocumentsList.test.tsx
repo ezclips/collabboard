@@ -133,6 +133,82 @@ describe('P6D Knowledge documents read surface', () => {
     }
   });
 
+  it('fetches page details only after View text and returns to the list', async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ documents: [doc()] }))
+      .mockResolvedValueOnce(jsonResponse({
+        document: { id: 'doc-1', originalFilename: 'EMG_checklist.pdf', pageCount: 2 },
+        pages: [
+          { pageNumber: 1, text: 'Page one extracted text' },
+          { pageNumber: 2, text: 'Page two\nwith readable lines' },
+        ],
+      }));
+    const container = await renderList();
+    const viewText = container.querySelector('button:not([aria-label])') as HTMLButtonElement;
+
+    await act(async () => {
+      viewText.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await settle();
+
+    expect(fetchMock.mock.calls[1][0]).toBe(`/api/boards/${BOARD_ID}/knowledge/doc-1/pages`);
+    expect(container.textContent).toContain('EMG_checklist.pdf');
+    expect(container.textContent).toContain('2 pages');
+    expect(container.textContent).toContain('Page 1');
+    expect(container.textContent).toContain('Page one extracted text');
+    expect(container.textContent).toContain('Page 2');
+    expect(container.textContent).toContain('Page two\nwith readable lines');
+    expect(container.querySelector('iframe, embed, object')).toBeNull();
+
+    const back = Array.from(container.querySelectorAll('button')).find((button) => button.textContent?.includes('Back to PDFs'))!;
+    await act(async () => {
+      back.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(container.textContent).toContain('View text');
+  });
+
+  it('shows details errors and empty-page responses without blocking the modal', async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ documents: [doc()] }))
+      .mockResolvedValueOnce(jsonResponse({
+        document: { id: 'doc-1', originalFilename: 'EMG_checklist.pdf', pageCount: 2 },
+        pages: [],
+      }));
+    const emptyContainer = await renderList();
+    await act(async () => {
+      emptyContainer.querySelector('button:not([aria-label])')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await settle();
+    expect(emptyContainer.textContent).toContain('No extracted text available.');
+
+    const back = Array.from(emptyContainer.querySelectorAll('button')).find((button) => button.textContent?.includes('Back to PDFs'))!;
+    await act(async () => {
+      back.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ documents: [doc()] }))
+      .mockResolvedValueOnce(jsonResponse({ error: 'Unavailable' }, 503));
+    await rerender(1, true);
+    await act(async () => {
+      emptyContainer.querySelector('button:not([aria-label])')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await settle();
+    expect(emptyContainer.textContent).toContain('Extracted text unavailable.');
+  });
+
+  it('shows View text only for ready documents', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ documents: [doc()] }));
+    const container = await renderList();
+    expect(container.textContent).toContain('View text');
+
+    for (const [index, processingStatus] of ['uploaded', 'processing', 'failed'].entries()) {
+      fetchMock.mockResolvedValue(jsonResponse({ documents: [doc({ processingStatus })] }));
+      await rerender(index + 1);
+      expect(container.textContent).not.toContain('View text');
+    }
+  });
+
   it('pluralises the page count and pairs it with the status', async () => {
     fetchMock.mockResolvedValue(jsonResponse({ documents: [doc({ pageCount: 2 })] }));
     expect((await renderList()).textContent).toContain('2 pages · Ready');
