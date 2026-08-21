@@ -46,7 +46,7 @@ beforeEach(() => {
 
 describe('P6C Knowledge PDF upload client', () => {
   it('posts a browser-owned multipart form with the canonical file field', async () => {
-    const fetchImpl = vi.fn(async () => jsonResponse({
+    const fetchImpl = vi.fn(async (_input: string, _init?: RequestInit) => jsonResponse({
       id: DOCUMENT_ID,
       boardId: BOARD_ID,
       originalFilename: 'lesson.pdf',
