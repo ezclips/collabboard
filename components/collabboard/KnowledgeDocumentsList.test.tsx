@@ -116,6 +116,23 @@ describe('P6D Knowledge documents read surface', () => {
     expect(container.textContent).toContain('EMG_checklist.pdf');
   });
 
+  it('opens only a ready PDF through the same-origin original route', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ documents: [doc()] }));
+    const container = await renderList();
+    const link = container.querySelector('a') as HTMLAnchorElement;
+
+    expect(link.getAttribute('href')).toBe(`/api/boards/${BOARD_ID}/knowledge/doc-1/original`);
+    expect(link.target).toBe('_blank');
+    expect(link.rel).toBe('noopener noreferrer');
+
+    for (const [index, processingStatus] of ['uploaded', 'processing', 'failed'].entries()) {
+      fetchMock.mockResolvedValue(jsonResponse({ documents: [doc({ processingStatus })] }));
+      await rerender(index + 1);
+      expect(container.querySelector('a')).toBeNull();
+      expect(container.textContent).toContain('EMG_checklist.pdf');
+    }
+  });
+
   it('pluralises the page count and pairs it with the status', async () => {
     fetchMock.mockResolvedValue(jsonResponse({ documents: [doc({ pageCount: 2 })] }));
     expect((await renderList()).textContent).toContain('2 pages · Ready');

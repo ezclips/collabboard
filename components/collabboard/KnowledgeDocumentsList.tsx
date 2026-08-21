@@ -30,6 +30,7 @@ interface KnowledgeListEntry {
   id: string;
   originalFilename: string;
   pageCount: number | null;
+  processingStatus: KnowledgePdfProcessingStatus | null;
   statusLabel: string | null;
 }
 
@@ -62,6 +63,7 @@ function toEntry(value: unknown): KnowledgeListEntry | null {
     id: record.id,
     originalFilename: record.originalFilename,
     pageCount,
+    processingStatus: isProcessingStatus(record.processingStatus) ? record.processingStatus : null,
     statusLabel: isProcessingStatus(record.processingStatus)
       ? STATUS_LABELS[record.processingStatus]
       : null,
@@ -75,6 +77,10 @@ function metadataLine(entry: KnowledgeListEntry): string | null {
   }
   if (entry.statusLabel !== null) parts.push(entry.statusLabel);
   return parts.length > 0 ? parts.join(' · ') : null;
+}
+
+function originalPdfPath(boardId: string, documentId: string) {
+  return `/api/boards/${encodeURIComponent(boardId)}/knowledge/${encodeURIComponent(documentId)}/original`;
 }
 
 /**
@@ -171,9 +177,21 @@ export default function KnowledgeDocumentsList({ refreshToken = 0, isOpen = true
             const metadata = metadataLine(entry);
             return (
               <li key={entry.id} className="min-w-0">
-                <p className="truncate text-xs text-gray-700" title={entry.originalFilename}>
-                  {entry.originalFilename}
-                </p>
+                  {entry.processingStatus === 'ready' ? (
+                    <a
+                      href={originalPdfPath(boardId, entry.id)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="truncate text-xs text-blue-700 underline decoration-blue-200 underline-offset-2 hover:text-blue-900"
+                      title={`Open ${entry.originalFilename}`}
+                    >
+                      {entry.originalFilename}
+                    </a>
+                  ) : (
+                    <p className="truncate text-xs text-gray-700" title={entry.originalFilename}>
+                      {entry.originalFilename}
+                    </p>
+                  )}
                 {metadata !== null ? (
                   <p className="text-[11px] text-gray-500">{metadata}</p>
                 ) : null}
