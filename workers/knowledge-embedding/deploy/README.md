@@ -1,81 +1,110 @@
-# Semantic embedding worker deployment preparation
+# Local Voyage embedding Worker Pool preparation
 
-P6I-B prepares a separate Cloud Run Worker Pool package. It deploys nothing,
-builds or pushes no image, creates no Google Cloud resource, reads or creates
-no secret, calls no OpenAI endpoint, and does not connect to production
-Supabase. Run `predeploy.mjs` locally with placeholders before any separately
-authorized deployment.
+This directory prepares, but does not deploy, the P6I local semantic
+embedding Worker Pool. It performs no Google Cloud operation, image push,
+secret access, IAM change, production Supabase access, or hosted inference.
 
-## Production target
+## Locked runtime
 
-| Setting | Value |
-| --- | --- |
-| Project | `callabboard` |
-| Region | `europe-west6` |
-| Worker Pool | `collabboard-knowledge-embedding-worker` |
-| Artifact Registry repository/image | `collabboard-workers/knowledge-embedding-worker` |
-| Instances | `1` |
-| CPU | `1` |
-| Memory | `1Gi` |
+The Node embedding worker remains the orchestrator. The Worker Pool revision
+contains two containers in one instance:
 
-The immutable deployment image is:
+| Container | Image | Resources | Role |
+| --- | --- | --- | --- |
+| `knowledge-worker` | `knowledge-embedding-worker@sha256:<digest>` | 1 CPU, 1Gi | Node polling and persistence |
+| `voyage-tei` | `knowledge-embedding-tei@sha256:<digest>` | 2 CPU, 3Gi | Local Voyage-4-nano TEI |
+
+The TEI sidecar is reached only through `http://127.0.0.1:8080`. It is not a
+public service. Cloud Run container dependencies start `voyage-tei` first;
+the Node container depends on it. The TEI startup probe is `GET /health` with
+36 five-second attempts, allowing 180 seconds for the measured cold start.
+
+The Worker Pool is deliberately prepared with manual `instances=0`. Creating
+or scaling an instance requires a separate explicit operator action. The
+deployment script never changes this safe default to 1.
+
+## Immutable TEI image
+
+`tei/Dockerfile` is a multi-stage build. The final image is based on the exact
+upstream TEI digest:
 
 ```text
-europe-west6-docker.pkg.dev/callabboard/collabboard-workers/knowledge-embedding-worker@sha256:<64-hex-digest>
+ghcr.io/huggingface/text-embeddings-inference@sha256:ad950d30878eceb72aaf32024d26fa2b1d04a75304fa0b4776b49aa1941fea07
 ```
 
-Never deploy `latest`, a mutable tag, or the PDF worker image/pool. The
-embedding worker has no JVM, OpenDataLoader, PDF.js, HTTP server, port, or
-health endpoint. Its exec-form command is a direct Node process so SIGTERM and
-SIGINT reach the worker.
+The build downloads the public `voyageai/voyage-4-nano` snapshot at revision
+`67fabc9bef010dabc5f6024aa1b1b6b93410426f` into `/model`. The final command
+passes `/model` to TEI, so runtime startup does not fetch model files from
+Hugging Face. Offline environment flags are set as a defense in depth; they
+are not an egress-isolation claim.
 
-## Approved profile and cutoff
+The fixed TEI command is:
 
-The initial profile is `text-embedding-3-small`, 1536 dimensions, with
-`model_id=openai:text-embedding-3-small`. `KNOWLEDGE_EMBEDDING_CREATED_AFTER`
-is mandatory and must be set to the production enable timestamp. It has no
-default: omitting it is a predeploy failure. This prevents pre-existing Ready
-documents from becoming eligible implicitly. Backfill requires separate
-authorization and an explicitly chosen earlier cutoff.
+```text
+--model-id /model --port 8080
+--max-batch-tokens 4096
+--max-concurrent-requests 8
+--max-client-batch-size 8
+--tokenization-workers 2
+```
 
-## Secrets and identity
+Automatic global truncation is not disabled. The Node provider continues to
+send `truncate=false` for each small document request.
 
-Use a separate least-privilege service account, for example
-`collabboard-embed-worker@callabboard.iam.gserviceaccount.com`.
-Do not reuse the PDF worker identity. The deployment passes only pinned Secret
-Manager references for `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and
-`OPENAI_API_KEY`; values never belong in this repository, image arguments,
-logs, or metadata. Each secret has its own required positive version.
+## Local provider configuration
 
-Required secret inputs are:
+The prepared Node container uses:
 
-- `SUPABASE_URL_SECRET_NAME` / `SUPABASE_URL_SECRET_VERSION`
-- `SUPABASE_SERVICE_ROLE_KEY_SECRET_NAME` / `SUPABASE_SERVICE_ROLE_KEY_SECRET_VERSION`
-- `OPENAI_API_KEY_SECRET_NAME` / `OPENAI_API_KEY_SECRET_VERSION`
+```text
+KNOWLEDGE_EMBEDDING_PROVIDER=local-tei
+KNOWLEDGE_EMBEDDING_TEI_URL=http://127.0.0.1:8080
+KNOWLEDGE_EMBEDDING_MODEL=voyageai/voyage-4-nano
+KNOWLEDGE_EMBEDDING_MODEL_ID=local:voyage-4-nano
+KNOWLEDGE_EMBEDDING_DIMENSIONS=1024
+KNOWLEDGE_EMBEDDING_CREATED_AFTER=2026-08-21T22:06:19Z
+```
 
-## Local preparation
+Only the existing Supabase URL and service-role secret references are mounted
+into the local Node container. No OpenAI secret is required or included in
+this deployment path. The existing OpenAI provider remains dormant runtime
+compatibility in the worker code and is not selected by this preparation.
 
-Set the inputs from `production.env.example` in a protected operator shell,
-including a real immutable image digest and explicit cutoff, then run:
+## Predeploy and deployment preparation
+
+Copy `production.env.example` into a protected operator environment and
+replace both image-digest placeholders. Then run:
 
 ```text
 node workers/knowledge-embedding/deploy/predeploy.mjs
 ```
 
-The validator is local and side-effect free. It prints configuration metadata,
-secret names/versions, and the digest only; it never prints secret values.
-The deployment command is documented by `deploy.ps1` but is not run by P6I-B.
+The validator is local and side-effect free. It requires both immutable
+Artifact Registry image digests, the exact local profile, loopback TEI URL,
+the exact production cutoff, pinned Supabase secret versions, and the safe
+zero-instance setting. It never prints secret values.
 
-## First controlled production test
+The separately authorized deployment command is:
 
-After separate deployment and data-test authorization, use one new,
-non-sensitive disposable PDF uploaded after the cutoff. Verify candidate
-discovery, embedding persistence, retrieval, stale-hash behavior, and worker
-health, then delete that test document through the normal lifecycle. Do not
-use an existing private document for the smoke test.
+```powershell
+.\workers\knowledge-embedding\deploy\deploy.ps1
+```
 
-## Rollback
+It generates a temporary Worker Pool YAML specification, uses the supported
+Cloud Run Worker Pool sidecar/dependency/startup-probe configuration, invokes
+`gcloud run worker-pools replace`, and removes the temporary file. This patch
+does not run it.
 
-Scale the worker pool to zero or restore the previous immutable revision/image.
-Do not drop P6I tables or RPCs, rewrite PDF Ready state, or mutate extraction
-leases. Embeddings are derived rows and cascade from their chunks.
+## Cutoff and rollback
+
+The exact production cutoff is `2026-08-21T22:06:19Z`; the historical EMG
+document remains excluded. No backfill is part of this preparation.
+
+To disable a separately deployed pool, an explicitly authorized operator can
+run:
+
+```text
+gcloud run worker-pools update collabboard-knowledge-embedding-worker --instances=0
+```
+
+Do not delete P6I tables, rewrite extraction state, or mutate Knowledge rows
+as a rollback action.

@@ -5,123 +5,131 @@ import { describe, expect, it } from 'vitest';
 
 const root = process.cwd();
 const read = (relative: string) => fs.readFileSync(path.join(root, relative), 'utf8');
-const dockerfile = read('workers/knowledge-embedding/Dockerfile');
+const dockerfile = read('workers/knowledge-embedding/tei/Dockerfile');
 const predeploy = read('workers/knowledge-embedding/deploy/predeploy.mjs');
 const deploy = read('workers/knowledge-embedding/deploy/deploy.ps1');
 const environment = read('workers/knowledge-embedding/deploy/production.env.example');
 const readme = read('workers/knowledge-embedding/deploy/README.md');
 const worker = read('workers/knowledge-embedding/runEmbeddingWorker.ts');
 const baselineHead = '21db28b4f49156954cab93f599c3e5427a22ceb3';
-const safePredeployEnv = {
+const cutoff = '2026-08-21T22:06:19Z';
+const teiDigest = 'sha256:' + 'b'.repeat(64);
+
+const safePredeployEnv: Record<string, string> = {
   GCP_PROJECT_ID: 'callabboard', GCP_REGION: 'europe-west6',
-  IMAGE_DIGEST: `sha256:${'a'.repeat(64)}`,
+  IMAGE_DIGEST: `sha256:${'a'.repeat(64)}`, TEI_IMAGE_DIGEST: teiDigest,
   WORKER_POOL_NAME: 'collabboard-knowledge-embedding-worker',
+  SERVICE_ACCOUNT_EMAIL: 'collabboard-embed-worker@callabboard.iam.gserviceaccount.com',
   SUPABASE_URL_SECRET_NAME: 'test-url', SUPABASE_URL_SECRET_VERSION: '1',
   SUPABASE_SERVICE_ROLE_KEY_SECRET_NAME: 'test-service-role', SUPABASE_SERVICE_ROLE_KEY_SECRET_VERSION: '2',
-  OPENAI_API_KEY_SECRET_NAME: 'test-openai', OPENAI_API_KEY_SECRET_VERSION: '3',
-  KNOWLEDGE_EMBEDDING_CREATED_AFTER: '2026-08-21T00:00:00Z',
+  KNOWLEDGE_EMBEDDING_PROVIDER: 'local-tei',
+  KNOWLEDGE_EMBEDDING_TEI_URL: 'http://127.0.0.1:8080',
+  KNOWLEDGE_EMBEDDING_MODEL: 'voyageai/voyage-4-nano',
+  KNOWLEDGE_EMBEDDING_MODEL_ID: 'local:voyage-4-nano',
+  KNOWLEDGE_EMBEDDING_DIMENSIONS: '1024', GCP_WORKER_INSTANCES: '0',
+  KNOWLEDGE_EMBEDDING_CREATED_AFTER: cutoff,
 };
-function runPredeploy(account: string, project = 'callabboard') {
+
+function runPredeploy(overrides: Record<string, string | undefined> = {}) {
+  const env = { ...process.env, ...safePredeployEnv, ...overrides } as NodeJS.ProcessEnv;
+  if (!Object.prototype.hasOwnProperty.call(overrides, 'OPENAI_API_KEY_SECRET_NAME')) delete env.OPENAI_API_KEY_SECRET_NAME;
+  if (!Object.prototype.hasOwnProperty.call(overrides, 'OPENAI_API_KEY_SECRET_VERSION')) delete env.OPENAI_API_KEY_SECRET_VERSION;
   return spawnSync(process.execPath, [path.join(root, 'workers/knowledge-embedding/deploy/predeploy.mjs')], {
-    cwd: root, encoding: 'utf8', env: { ...safePredeployEnv, GCP_PROJECT_ID: project, SERVICE_ACCOUNT_EMAIL: account } as unknown as NodeJS.ProcessEnv,
+    cwd: root, encoding: 'utf8', env,
   });
 }
 
-describe('P6I-B deployment preparation scope', () => {
-  it('packages a non-HTTP, non-PDF Node worker as an immutable runtime', () => {
-    expect(dockerfile).toContain('FROM node:22.14.0-bookworm-slim AS build');
-    expect(dockerfile).toContain('FROM node:22.14.0-bookworm-slim AS runtime');
-    expect(dockerfile).toContain('COPY package.json package-lock.json ./');
-    expect(dockerfile).toContain('npm ci');
-    expect(dockerfile).toContain('workers/knowledge-embedding/cli.ts');
-    expect(dockerfile).toContain('--bundle');
-    expect(dockerfile).toContain('--target=node22');
-    expect(dockerfile).toContain('USER collabboard');
-    expect(dockerfile).toContain('CMD ["node", "/app/dist/knowledgeEmbeddingWorker.mjs"]');
-    expect(dockerfile).not.toMatch(/EXPOSE|openjdk|java|opendataloader|pdfjs|http server/i);
-  });
-
-  it('targets only the embedding pool with a digest and explicit resources', () => {
-    expect(deploy).toContain('collabboard-knowledge-embedding-worker');
-    expect(deploy).toContain('knowledge-embedding-worker@');
-    expect(deploy).toContain('--instances');
-    expect(deploy).toContain("'1'");
-    expect(deploy).toContain('--cpu');
-    expect(deploy).toContain('--memory');
-    expect(deploy).toContain('--service-account');
-    expect(deploy).toContain('--image');
-    expect(deploy).toContain('$imageDigest');
-    expect(deploy).not.toContain('latest');
-    expect(deploy).not.toContain('knowledge-pdf-worker');
-    expect(deploy).toContain('gcloud');
-  });
-
-  it('requires independent pinned secret references and fail-closed cutoff', () => {
-    for (const name of [
-      'SUPABASE_URL_SECRET_NAME', 'SUPABASE_URL_SECRET_VERSION',
-      'SUPABASE_SERVICE_ROLE_KEY_SECRET_NAME', 'SUPABASE_SERVICE_ROLE_KEY_SECRET_VERSION',
-      'OPENAI_API_KEY_SECRET_NAME', 'OPENAI_API_KEY_SECRET_VERSION',
-      'SERVICE_ACCOUNT_EMAIL', 'KNOWLEDGE_EMBEDDING_CREATED_AFTER',
-    ]) {
-      expect(predeploy).toContain(name);
+describe('P6I-D3 local Voyage Worker Pool preparation', () => {
+  it('pins the TEI base image, model revision, local model path, and bounded runtime', () => {
+    expect(dockerfile).toContain('ghcr.io/huggingface/text-embeddings-inference@sha256:ad950d30878eceb72aaf32024d26fa2b1d04a75304fa0b4776b49aa1941fea07');
+    expect(dockerfile).toContain('67fabc9bef010dabc5f6024aa1b1b6b93410426f');
+    expect(dockerfile).toContain("repo_id='voyageai/voyage-4-nano'");
+    expect(dockerfile).toContain("--model-id\", \"/model");
+    expect(dockerfile).toContain('--port", "8080');
+    for (const argument of ['--max-batch-tokens", "4096', '--max-concurrent-requests", "8', '--max-client-batch-size", "8', '--tokenization-workers", "2']) {
+      expect(dockerfile).toContain(argument);
     }
-    expect(deploy).toContain('$urlVersion');
-    expect(deploy).toContain('$serviceRoleVersion');
-    expect(deploy).toContain('$openAiVersion');
-    expect(predeploy).toContain('must be a valid ISO-8601 date-time');
-    expect(predeploy).not.toMatch(/CREATED_AFTER[^\n]*(?:default|null|optional)/i);
-    expect(environment).toContain('KNOWLEDGE_EMBEDDING_CREATED_AFTER=');
-    expect(environment).not.toMatch(/^SUPABASE_URL\s*=/m);
-    expect(environment).not.toMatch(/^OPENAI_API_KEY\s*=/m);
+    expect(dockerfile).toContain('HF_HUB_OFFLINE=1');
+    expect(dockerfile).not.toContain('HF_TOKEN');
+    expect(dockerfile).not.toContain('OPENAI');
   });
 
-  it('enforces a valid separate account ID and exact project ownership', () => {
-    const documented = 'collabboard-embed-worker@callabboard.iam.gserviceaccount.com';
-    const oldAccountId = ['collabboard', 'knowledge', 'embedding', 'worker'].join('-');
-    const oldInvalid = `${oldAccountId}@callabboard.iam.gserviceaccount.com`;
-    expect(runPredeploy(documented).status).toBe(0);
-    expect(runPredeploy(oldInvalid).status).not.toBe(0);
-    expect(runPredeploy(`${'a'.repeat(31)}@callabboard.iam.gserviceaccount.com`).status).not.toBe(0);
-    expect(runPredeploy(`${'a'.repeat(30)}@callabboard.iam.gserviceaccount.com`).status).toBe(0);
-    expect(runPredeploy(`aaaaaa@callabboard.iam.gserviceaccount.com`).status).toBe(0);
-    expect(runPredeploy(`aaaaa@callabboard.iam.gserviceaccount.com`).status).not.toBe(0);
-    expect(runPredeploy(`AAAAAA@callabboard.iam.gserviceaccount.com`).status).not.toBe(0);
-    expect(runPredeploy(`aaaa_a@callabboard.iam.gserviceaccount.com`).status).not.toBe(0);
-    expect(runPredeploy(`aaaaaa@otherproject.iam.gserviceaccount.com`).status).not.toBe(0);
-    expect(environment).toContain(`SERVICE_ACCOUNT_EMAIL=${documented}`);
-    expect(readme).toContain(`collabboard-embed-worker@callabboard.iam.gserviceaccount.com`);
-    expect(`${predeploy}\n${environment}\n${readme}`).not.toContain(oldInvalid);
+  it('validates the exact local profile, immutable deployment images, cutoff, and secret isolation', () => {
+    const result = runPredeploy();
+    expect(result.status).toBe(0);
+    const parsed = JSON.parse(result.stdout);
+    expect(parsed.provider).toBe('local-tei');
+    expect(parsed.model).toBe('voyageai/voyage-4-nano');
+    expect(parsed.modelId).toBe('local:voyage-4-nano');
+    expect(parsed.dimensions).toBe('1024');
+    expect(parsed.teiUrl).toBe('http://127.0.0.1:8080');
+    expect(parsed.instances).toBe('0');
+    expect(parsed.createdAfter).toBe(cutoff);
+    expect(parsed.nodeDigest).toBe(safePredeployEnv.IMAGE_DIGEST);
+    expect(parsed.teiDigest).toBe(teiDigest);
+    expect(predeploy).toContain('TEI_IMAGE_DIGEST');
+    expect(predeploy).toContain('must be sha256:<64 lowercase hex characters>');
+    expect(predeploy).toContain('OpenAI secrets must be absent');
+    expect(environment).not.toMatch(/^OPENAI_API_KEY/m);
+    expect(deploy).not.toMatch(/OPENAI_API_KEY/);
   });
 
-  it('pins the approved profile, bounded configuration, and safe predeploy behavior', () => {
-    expect(predeploy).toContain('text-embedding-3-small');
-    expect(predeploy).toContain('openai:text-embedding-3-small');
-    expect(predeploy).toContain("DEFAULT_DIMENSIONS = '1536'");
-    expect(predeploy).toContain('120_000');
-    expect(predeploy).toContain('2048');
-    expect(predeploy).toContain('100');
-    expect(predeploy).not.toMatch(/spawn|fetch\(|gcloud/i);
-    expect(deploy).toContain('KNOWLEDGE_EMBEDDING_MODEL=');
-    expect(deploy).toContain('KNOWLEDGE_EMBEDDING_MODEL_ID=');
-    expect(deploy).toContain('KNOWLEDGE_EMBEDDING_DIMENSIONS=');
-    expect(deploy).toContain('KNOWLEDGE_EMBEDDING_REQUEST_TIMEOUT_MS=');
-    expect(deploy).toContain('KNOWLEDGE_EMBEDDING_CREATED_AFTER=');
+  it('rejects floating image references and unsafe deployment overrides', () => {
+    expect(runPredeploy({ IMAGE_DIGEST: 'latest' }).status).not.toBe(0);
+    expect(runPredeploy({ TEI_IMAGE_DIGEST: 'ghcr.io/example/tei:latest' }).status).not.toBe(0);
+    expect(runPredeploy({ GCP_WORKER_INSTANCES: '1' }).status).not.toBe(0);
+    expect(runPredeploy({ KNOWLEDGE_EMBEDDING_TEI_URL: 'http://tei:8080' }).status).not.toBe(0);
+    expect(runPredeploy({ OPENAI_API_KEY_SECRET_NAME: 'legacy-openai' }).status).not.toBe(0);
   });
 
-  it('documents cutoff safety, controlled smoke, and rollback without data reversal', () => {
-    expect(readme).toContain('P6I-B prepares');
-    expect(readme).toContain('deploys nothing');
-    expect(readme).toContain('KNOWLEDGE_EMBEDDING_CREATED_AFTER');
-    expect(readme).toMatch(/Backfill requires separate\s+authorization/);
-    expect(readme).toContain('new,');
-    expect(readme).toContain('non-sensitive disposable PDF');
-    expect(readme).not.toMatch(/EMG_checklist/i);
-    expect(readme).toMatch(/scale the worker pool to zero/i);
-    expect(readme).toContain('Do not drop P6I tables');
-    expect(readme).not.toMatch(/supabase\.co|OPENAI_API_KEY\s*=/i);
+  it('represents the supported two-container Worker Pool topology and readiness dependency', () => {
+    expect(deploy).toContain('kind: WorkerPool');
+    expect(deploy).toContain('name: knowledge-worker');
+    expect(deploy).toContain('name: voyage-tei');
+    expect(deploy).toContain('run.googleapis.com/container-dependencies');
+    expect(deploy).toContain('knowledge-worker":["voyage-tei"]');
+    expect(deploy).toContain('startupProbe:');
+    expect(deploy).toContain('path: /health');
+    expect(deploy).toContain('port: 8080');
+    expect(deploy).toContain('periodSeconds: 5');
+    expect(deploy).toContain('failureThreshold: 36');
+    expect(deploy).toContain('manualInstanceCount: "0"');
+    expect(deploy).not.toMatch(/manualInstanceCount:\s*["']?1/);
+    expect(deploy).toContain('gcloud run worker-pools replace');
   });
 
-  it('proves protected files and migrations remain unchanged', () => {
+  it('pins per-container resources and the loopback local provider configuration', () => {
+    expect(deploy).toContain('cpu: "$nodeCpu"');
+    expect(deploy).toContain('memory: "$nodeMemory"');
+    expect(deploy).toContain('cpu: "$teiCpu"');
+    expect(deploy).toContain('memory: "$teiMemory"');
+    expect(environment).toContain('GCP_WORKER_CPU=1');
+    expect(environment).toContain('GCP_WORKER_MEMORY=1Gi');
+    expect(environment).toContain('GCP_TEI_CPU=2');
+    expect(environment).toContain('GCP_TEI_MEMORY=3Gi');
+    for (const value of [
+      'KNOWLEDGE_EMBEDDING_PROVIDER=local-tei',
+      'KNOWLEDGE_EMBEDDING_TEI_URL=http://127.0.0.1:8080',
+      'KNOWLEDGE_EMBEDDING_MODEL=voyageai/voyage-4-nano',
+      'KNOWLEDGE_EMBEDDING_MODEL_ID=local:voyage-4-nano',
+      'KNOWLEDGE_EMBEDDING_DIMENSIONS=1024',
+    ]) expect(environment).toContain(value);
+    expect(worker).toContain("const LOCAL_EMBEDDING_MODEL = 'voyageai/voyage-4-nano'");
+    expect(worker).toContain("const LOCAL_EMBEDDING_MODEL_ID = 'local:voyage-4-nano'");
+  });
+
+  it('documents no deployment side effects, exact cutoff, and safe scale-zero operation', () => {
+    expect(readme).toContain('does not deploy');
+    expect(readme).toContain('instances=0');
+    expect(readme).toContain(cutoff);
+    expect(readme).toContain('no Google Cloud operation');
+    expect(readme).toMatch(/no OpenAI secret/i);
+    expect(readme).not.toMatch(/EMG_checklist\.pdf/i);
+    expect(readme).not.toMatch(/Good\.pdf/i);
+    expect(readme).toContain('gcloud run worker-pools update collabboard-knowledge-embedding-worker --instances=0');
+  });
+
+  it('keeps migrations, protected worker code, and unrelated files unchanged', () => {
     for (const migration of ['20260824_add_knowledge_chunk_provenance.sql', '20260825_add_knowledge_chunk_embeddings.sql']) {
       const current = read(`supabase/migrations/${migration}`);
       const previous = execFileSync('git', ['show', `${baselineHead}:supabase/migrations/${migration}`], { cwd: root, encoding: 'utf8' });
@@ -131,10 +139,7 @@ describe('P6I-B deployment preparation scope', () => {
     for (const line of status.split(/\r?\n/).filter(Boolean)) {
       const file = line.slice(3).replace(/^"|"$/g, '');
       expect([
-        'scripts/db/bootstrap-local.mjs',
         'workers/knowledge-embedding/',
-        'lib/domain/knowledge/knowledgeEmbedding.test.ts',
-        'lib/infra/knowledge/knowledgeEmbeddingScope.source.test.ts',
         'lib/infra/knowledge/knowledgeEmbeddingDeploy.source.test.ts',
       ].some((allowed) => file === allowed || file.startsWith(allowed))).toBe(true);
     }

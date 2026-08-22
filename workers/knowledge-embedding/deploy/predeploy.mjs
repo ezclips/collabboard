@@ -1,13 +1,19 @@
 const DEFAULT_POOL = 'collabboard-knowledge-embedding-worker';
-const DEFAULT_CPU = '1';
-const DEFAULT_MEMORY = '1Gi';
-const DEFAULT_MODEL = 'text-embedding-3-small';
-const DEFAULT_MODEL_ID = 'openai:text-embedding-3-small';
-const DEFAULT_DIMENSIONS = '1536';
+const DEFAULT_PROVIDER = 'local-tei';
+const DEFAULT_MODEL = 'voyageai/voyage-4-nano';
+const DEFAULT_MODEL_ID = 'local:voyage-4-nano';
+const DEFAULT_DIMENSIONS = '1024';
+const DEFAULT_TEI_URL = 'http://127.0.0.1:8080';
+const DEFAULT_NODE_CPU = '1';
+const DEFAULT_NODE_MEMORY = '1Gi';
+const DEFAULT_TEI_CPU = '2';
+const DEFAULT_TEI_MEMORY = '3Gi';
+const DEFAULT_INSTANCES = '0';
 const DEFAULT_BATCH_SIZE = '16';
 const DEFAULT_POLL_INTERVAL_MS = '5000';
 const DEFAULT_DISCOVERY_LIMIT = '16';
 const DEFAULT_REQUEST_TIMEOUT_MS = '30000';
+const PRODUCTION_CUTOFF = '2026-08-21T22:06:19Z';
 
 function required(name) {
   const value = process.env[name]?.trim();
@@ -20,6 +26,12 @@ function positive(name, fallback, maximum = Number.MAX_SAFE_INTEGER) {
   if (!/^\d+$/.test(value) || Number(value) < 1 || Number(value) > maximum) {
     throw new Error(`${name} must be a positive bounded integer`);
   }
+  return value;
+}
+
+function immutableDigest(name) {
+  const value = required(name);
+  if (!/^sha256:[0-9a-f]{64}$/.test(value)) throw new Error(`${name} must be sha256:<64 lowercase hex characters>`);
   return value;
 }
 
@@ -44,8 +56,8 @@ function validate() {
   if (!/^[a-z][a-z0-9-]{4,28}[a-z0-9]$/.test(project)) throw new Error('GCP_PROJECT_ID has invalid syntax');
   const region = required('GCP_REGION');
   if (!/^[a-z]+-[a-z0-9]+[0-9]$/.test(region)) throw new Error('GCP_REGION has invalid syntax');
-  const digest = required('IMAGE_DIGEST');
-  if (!/^sha256:[0-9a-f]{64}$/.test(digest)) throw new Error('IMAGE_DIGEST must be sha256:<64 lowercase hex characters>');
+  const nodeDigest = immutableDigest('IMAGE_DIGEST');
+  const teiDigest = immutableDigest('TEI_IMAGE_DIGEST');
   const pool = (process.env.WORKER_POOL_NAME || DEFAULT_POOL).trim();
   if (!/^[a-z][a-z0-9-]{0,62}$/.test(pool)) throw new Error('WORKER_POOL_NAME has invalid syntax');
   const serviceAccount = required('SERVICE_ACCOUNT_EMAIL');
@@ -55,30 +67,48 @@ function validate() {
   if (accountId.length < 6 || accountId.length > 30 || !/^[a-z0-9](?:[a-z0-9-]{4,28}[a-z0-9])$/.test(accountId)) {
     throw new Error('SERVICE_ACCOUNT_EMAIL account ID must be 6-30 lowercase alphanumeric characters or hyphens');
   }
-  const cpu = (process.env.GCP_WORKER_CPU || DEFAULT_CPU).trim();
-  const memory = (process.env.GCP_WORKER_MEMORY || DEFAULT_MEMORY).trim();
-  if (cpu !== '1' || memory !== '1Gi') throw new Error('Initial embedding worker sizing must be CPU=1 and memory=1Gi');
+
+  const provider = (process.env.KNOWLEDGE_EMBEDDING_PROVIDER || DEFAULT_PROVIDER).trim();
+  if (provider !== DEFAULT_PROVIDER) throw new Error('Embedding deployment preparation requires KNOWLEDGE_EMBEDDING_PROVIDER=local-tei');
   const model = (process.env.KNOWLEDGE_EMBEDDING_MODEL || DEFAULT_MODEL).trim();
   const modelId = (process.env.KNOWLEDGE_EMBEDDING_MODEL_ID || DEFAULT_MODEL_ID).trim();
-  if (!model || !modelId) throw new Error('Embedding model and model_id are required');
-  if ((process.env.KNOWLEDGE_EMBEDDING_DIMENSIONS || DEFAULT_DIMENSIONS).trim() !== DEFAULT_DIMENSIONS) throw new Error('Initial embedding dimensions must be 1536');
+  const dimensions = (process.env.KNOWLEDGE_EMBEDDING_DIMENSIONS || DEFAULT_DIMENSIONS).trim();
+  const teiUrl = (process.env.KNOWLEDGE_EMBEDDING_TEI_URL || DEFAULT_TEI_URL).trim();
+  if (model !== DEFAULT_MODEL || modelId !== DEFAULT_MODEL_ID || dimensions !== DEFAULT_DIMENSIONS) {
+    throw new Error('Local TEI embedding profile must be Voyage-4-nano at 1024 dimensions');
+  }
+  if (teiUrl !== DEFAULT_TEI_URL) throw new Error('KNOWLEDGE_EMBEDDING_TEI_URL must be http://127.0.0.1:8080');
+  if (process.env.OPENAI_API_KEY_SECRET_NAME || process.env.OPENAI_API_KEY_SECRET_VERSION) {
+    throw new Error('OpenAI secrets must be absent from the local-tei deployment');
+  }
+
+  const nodeCpu = (process.env.GCP_WORKER_CPU || DEFAULT_NODE_CPU).trim();
+  const nodeMemory = (process.env.GCP_WORKER_MEMORY || DEFAULT_NODE_MEMORY).trim();
+  const teiCpu = (process.env.GCP_TEI_CPU || DEFAULT_TEI_CPU).trim();
+  const teiMemory = (process.env.GCP_TEI_MEMORY || DEFAULT_TEI_MEMORY).trim();
+  if (nodeCpu !== DEFAULT_NODE_CPU || nodeMemory !== DEFAULT_NODE_MEMORY) throw new Error('Node worker sizing must be CPU=1 and memory=1Gi');
+  if (teiCpu !== DEFAULT_TEI_CPU || teiMemory !== DEFAULT_TEI_MEMORY) throw new Error('TEI sizing must be CPU=2 and memory=3Gi');
+  const instances = (process.env.GCP_WORKER_INSTANCES || DEFAULT_INSTANCES).trim();
+  if (instances !== DEFAULT_INSTANCES) throw new Error('Worker Pool instances must remain 0 in deployment preparation');
+
+  const createdAfter = isoDateTime('KNOWLEDGE_EMBEDDING_CREATED_AFTER');
+  if (createdAfter !== PRODUCTION_CUTOFF) throw new Error(`KNOWLEDGE_EMBEDDING_CREATED_AFTER must remain ${PRODUCTION_CUTOFF}`);
   const config = {
-    model, modelId, dimensions: DEFAULT_DIMENSIONS,
     batchSize: positive('KNOWLEDGE_EMBEDDING_BATCH_SIZE', DEFAULT_BATCH_SIZE, 2048),
     pollIntervalMs: positive('KNOWLEDGE_EMBEDDING_POLL_INTERVAL_MS', DEFAULT_POLL_INTERVAL_MS, 3_600_000),
     discoveryLimit: positive('KNOWLEDGE_EMBEDDING_DISCOVERY_LIMIT', DEFAULT_DISCOVERY_LIMIT, 100),
     requestTimeoutMs: positive('KNOWLEDGE_EMBEDDING_REQUEST_TIMEOUT_MS', DEFAULT_REQUEST_TIMEOUT_MS, 120_000),
-    createdAfter: isoDateTime('KNOWLEDGE_EMBEDDING_CREATED_AFTER'),
   };
   const secrets = {
     SUPABASE_URL: secretReference('SUPABASE_URL_SECRET_NAME', 'SUPABASE_URL_SECRET_VERSION'),
     SUPABASE_SERVICE_ROLE_KEY: secretReference('SUPABASE_SERVICE_ROLE_KEY_SECRET_NAME', 'SUPABASE_SERVICE_ROLE_KEY_SECRET_VERSION'),
-    OPENAI_API_KEY: secretReference('OPENAI_API_KEY_SECRET_NAME', 'OPENAI_API_KEY_SECRET_VERSION'),
   };
   return {
-    project, region, pool, serviceAccount, cpu, memory, digest,
-    image: `${region}-docker.pkg.dev/${project}/collabboard-workers/knowledge-embedding-worker@${digest}`,
-    config, secrets,
+    project, region, pool, serviceAccount, provider, model, modelId, dimensions, teiUrl,
+    nodeCpu, nodeMemory, teiCpu, teiMemory, instances, nodeDigest, teiDigest,
+    workerImage: `${region}-docker.pkg.dev/${project}/collabboard-workers/knowledge-embedding-worker@${nodeDigest}`,
+    teiImage: `${region}-docker.pkg.dev/${project}/collabboard-workers/knowledge-embedding-tei@${teiDigest}`,
+    config, createdAfter, secrets,
   };
 }
 
