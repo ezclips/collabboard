@@ -15,7 +15,13 @@ RUN mkdir -p /app/dist \
        --platform=node \
        --format=esm \
        --target=node22 \
-       --outfile=/app/dist/knowledgeEmbeddingWorker.mjs
+       --outfile=/app/dist/knowledgeEmbeddingWorker.mjs \
+  && npx esbuild workers/knowledge-embedding/querySmokeCli.ts \
+       --bundle \
+       --platform=node \
+       --format=esm \
+       --target=node22 \
+       --outfile=/app/dist/knowledgeQuerySmoke.mjs
 
 FROM node:22.14.0-bookworm-slim AS runtime
 

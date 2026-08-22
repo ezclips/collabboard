@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { SupabaseKnowledgeEmbeddingRepository } from './knowledgeEmbeddingAdapters';
-import type { KnowledgeEmbeddingSupabaseClient } from './knowledgeEmbeddingAdapters';
+import { SupabaseKnowledgeSemanticSearchRepository } from './knowledgeSemanticSearchAdapters';
+import type { KnowledgeSemanticSearchSupabaseClient } from './knowledgeSemanticSearchAdapters';
 
 const profile = { model: 'voyageai/voyage-4-nano', modelId: 'local:voyage-4-nano', dimensions: 3 };
 const queryEmbedding = { modelId: profile.modelId, dimensions: 3, embedding: [1, 0, 0] };
@@ -9,7 +9,7 @@ function clientWithRpc(data: unknown, error: { message: string } | null = null) 
   return {
     rpc: vi.fn(async () => ({ data, error })),
     from: vi.fn(),
-  } as unknown as KnowledgeEmbeddingSupabaseClient;
+  } as unknown as KnowledgeSemanticSearchSupabaseClient;
 }
 
 describe('Supabase semantic knowledge search adapter', () => {
@@ -19,7 +19,7 @@ describe('Supabase semantic knowledge search adapter', () => {
       page_start: 2, page_end: 3, chunk_index: 4, text: 'recovery text',
       source_locators: [{ pageNumber: 2, bbox: { left: 1 } }], similarity: 0.91,
     }]);
-    const result = await new SupabaseKnowledgeEmbeddingRepository(client).searchBoardKnowledge({
+    const result = await new SupabaseKnowledgeSemanticSearchRepository(client).searchBoardKnowledge({
       boardId: 'board-1', queryEmbedding, profile, limit: 10, minSimilarity: 0.5,
     });
     expect(client.rpc).toHaveBeenCalledWith('search_board_knowledge_chunks', {
@@ -36,12 +36,12 @@ describe('Supabase semantic knowledge search adapter', () => {
 
   it('rejects invalid search bounds, vectors, and raw RPC errors safely', async () => {
     const client = clientWithRpc([]);
-    const repository = new SupabaseKnowledgeEmbeddingRepository(client);
+    const repository = new SupabaseKnowledgeSemanticSearchRepository(client);
     await expect(repository.searchBoardKnowledge({ boardId: '', queryEmbedding, profile, limit: 1 })).rejects.toThrow();
     await expect(repository.searchBoardKnowledge({ boardId: 'board-1', queryEmbedding, profile, limit: 51 })).rejects.toThrow();
     await expect(repository.searchBoardKnowledge({ boardId: 'board-1', queryEmbedding, profile, limit: 1, minSimilarity: 2 })).rejects.toThrow();
     await expect(repository.searchBoardKnowledge({ boardId: 'board-1', queryEmbedding: { ...queryEmbedding, embedding: [1, 2] }, profile, limit: 1 })).rejects.toThrow();
-    const failed = new SupabaseKnowledgeEmbeddingRepository(clientWithRpc(null, { message: 'secret database detail' }));
+    const failed = new SupabaseKnowledgeSemanticSearchRepository(clientWithRpc(null, { message: 'secret database detail' }));
     await expect(failed.searchBoardKnowledge({ boardId: 'board-1', queryEmbedding, profile, limit: 1 })).rejects.toThrow('Could not search Knowledge chunks');
   });
 });

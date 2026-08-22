@@ -17,6 +17,10 @@ const documentWorker = read('workers/knowledge-embedding/embedDocument.ts');
 const worker = read('workers/knowledge-embedding/runEmbeddingWorker.ts');
 const cli = read('workers/knowledge-embedding/cli.ts');
 const integration = read('lib/infra/knowledge/knowledgeEmbedding.integration.test.ts');
+const semanticSearchAdapter = read('lib/infra/knowledge/knowledgeSemanticSearchAdapters.ts');
+const querySmoke = read('workers/knowledge-embedding/querySmoke.ts');
+const querySmokeCli = read('workers/knowledge-embedding/querySmokeCli.ts');
+const querySmokeDockerfile = read('workers/knowledge-embedding/Dockerfile');
 const newSources = [migration, domain, adapter, provider, documentWorker, worker, cli, integration].join('\n');
 
 describe('P6I-A embedding scope and SQL guards', () => {
@@ -115,5 +119,16 @@ describe('P6I-A embedding scope and SQL guards', () => {
     expect(newSources).not.toMatch(/console\.(log|error)[^\n]*(?:text|vector|secret|API_KEY|SERVICE_ROLE)/i);
     expect(provider).toContain('fetchImpl');
     expect(cli).not.toMatch(/console\.(log|error).*error\.message/i);
+  });
+
+  it('keeps the production query smoke surface search-only and safe', () => {
+    expect(semanticSearchAdapter).toContain('search_board_knowledge_chunks');
+    expect(semanticSearchAdapter).not.toMatch(/INSERT|UPDATE|DELETE|UPSERT|upsert|listCandidateDocumentIds|processing_status|knowledge_documents/i);
+    expect(querySmokeCli).not.toMatch(/runEmbeddingWorker|embedDocument|OpenAIEmbeddingProvider|knowledgeEmbeddingAdapters|upsertEmbeddings|listCandidateDocumentIds|processing_status|knowledge_documents/i);
+    expect(querySmokeDockerfile).toContain('knowledgeQuerySmoke.mjs');
+    expect(querySmokeDockerfile).toContain('CMD ["node", "/app/dist/knowledgeEmbeddingWorker.mjs"]');
+    expect(querySmokeCli).not.toMatch(/console\.(log|error)[^\n]*(query|text|vector|documentId|chunkId|filename|error\.message)/i);
+    expect(querySmoke).toContain('expectedDocumentFound');
+    expect(querySmoke).toContain('forbiddenDocumentPresent');
   });
 });
