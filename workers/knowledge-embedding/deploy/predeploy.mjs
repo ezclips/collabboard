@@ -7,7 +7,7 @@ const DEFAULT_TEI_URL = 'http://127.0.0.1:8080';
 const DEFAULT_NODE_CPU = '1';
 const DEFAULT_NODE_MEMORY = '1Gi';
 const DEFAULT_TEI_CPU = '2';
-const DEFAULT_TEI_MEMORY = '3Gi';
+const DEFAULT_TEI_MEMORY = '4Gi';
 const DEFAULT_INSTANCES = '0';
 const DEFAULT_BATCH_SIZE = '16';
 const DEFAULT_POLL_INTERVAL_MS = '5000';
@@ -87,7 +87,7 @@ function validate() {
   const teiCpu = (process.env.GCP_TEI_CPU || DEFAULT_TEI_CPU).trim();
   const teiMemory = (process.env.GCP_TEI_MEMORY || DEFAULT_TEI_MEMORY).trim();
   if (nodeCpu !== DEFAULT_NODE_CPU || nodeMemory !== DEFAULT_NODE_MEMORY) throw new Error('Node worker sizing must be CPU=1 and memory=1Gi');
-  if (teiCpu !== DEFAULT_TEI_CPU || teiMemory !== DEFAULT_TEI_MEMORY) throw new Error('TEI sizing must be CPU=2 and memory=3Gi');
+  if (teiCpu !== DEFAULT_TEI_CPU || teiMemory !== DEFAULT_TEI_MEMORY) throw new Error('TEI sizing must be CPU=2 and memory=4Gi');
   const instances = (process.env.GCP_WORKER_INSTANCES || DEFAULT_INSTANCES).trim();
   if (instances !== DEFAULT_INSTANCES) throw new Error('Worker Pool instances must remain 0 in deployment preparation');
 

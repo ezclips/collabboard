@@ -12,7 +12,7 @@ contains two containers in one instance:
 | Container | Image | Resources | Role |
 | --- | --- | --- | --- |
 | `knowledge-worker` | `knowledge-embedding-worker@sha256:<digest>` | 1 CPU, 1Gi | Node polling and persistence |
-| `voyage-tei` | `knowledge-embedding-tei@sha256:<digest>` | 2 CPU, 3Gi | Local Voyage-4-nano TEI |
+| `voyage-tei` | `knowledge-embedding-tei@sha256:<digest>` | 2 CPU, 4Gi | Local Voyage-4-nano TEI |
 
 The TEI sidecar is reached only through `http://127.0.0.1:8080`. It is not a
 public service. Cloud Run container dependencies start `voyage-tei` first;

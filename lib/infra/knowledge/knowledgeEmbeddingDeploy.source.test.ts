@@ -80,6 +80,7 @@ describe('P6I-D3 local Voyage Worker Pool preparation', () => {
     expect(runPredeploy({ IMAGE_DIGEST: 'latest' }).status).not.toBe(0);
     expect(runPredeploy({ TEI_IMAGE_DIGEST: 'ghcr.io/example/tei:latest' }).status).not.toBe(0);
     expect(runPredeploy({ GCP_WORKER_INSTANCES: '1' }).status).not.toBe(0);
+    expect(runPredeploy({ GCP_TEI_MEMORY: '3Gi' }).status).not.toBe(0);
     expect(runPredeploy({ KNOWLEDGE_EMBEDDING_TEI_URL: 'http://tei:8080' }).status).not.toBe(0);
     expect(runPredeploy({ OPENAI_API_KEY_SECRET_NAME: 'legacy-openai' }).status).not.toBe(0);
   });
@@ -111,7 +112,10 @@ describe('P6I-D3 local Voyage Worker Pool preparation', () => {
     expect(environment).toContain('GCP_WORKER_CPU=1');
     expect(environment).toContain('GCP_WORKER_MEMORY=1Gi');
     expect(environment).toContain('GCP_TEI_CPU=2');
-    expect(environment).toContain('GCP_TEI_MEMORY=3Gi');
+    expect(environment).toContain('GCP_TEI_MEMORY=4Gi');
+    expect(predeploy).toContain("const DEFAULT_TEI_MEMORY = '4Gi'");
+    expect(deploy).toContain("$teiMemory = '4Gi'");
+    expect(readme).toContain('2 CPU, 4Gi');
     for (const value of [
       'KNOWLEDGE_EMBEDDING_PROVIDER=local-tei',
       'KNOWLEDGE_EMBEDDING_TEI_URL=http://127.0.0.1:8080',
