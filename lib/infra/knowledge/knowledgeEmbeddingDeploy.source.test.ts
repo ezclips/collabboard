@@ -134,6 +134,7 @@ describe('P6I-B deployment preparation scope', () => {
         'scripts/db/bootstrap-local.mjs',
         'workers/knowledge-embedding/',
         'lib/domain/knowledge/knowledgeEmbedding.test.ts',
+        'lib/infra/knowledge/knowledgeEmbeddingScope.source.test.ts',
         'lib/infra/knowledge/knowledgeEmbeddingDeploy.source.test.ts',
       ].some((allowed) => file === allowed || file.startsWith(allowed))).toBe(true);
     }

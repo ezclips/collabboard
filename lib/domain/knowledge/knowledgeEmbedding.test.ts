@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { OpenAIEmbeddingProvider } from '../../../workers/knowledge-embedding/openAIEmbeddingProvider';
+import { LocalTeiEmbeddingProvider, assertLocalTeiUrl } from '../../../workers/knowledge-embedding/localTeiEmbeddingProvider';
 import { embedKnowledgeDocument } from '../../../workers/knowledge-embedding/embedDocument';
 import {
   createKnowledgeEmbeddingWorkerFromEnvironment,
@@ -120,10 +121,12 @@ describe('P6I-A embedding foundation', () => {
   it('survives a partial provider failure and retries only the remainder', async () => {
     const repository = new FakeRepository([input('a'), input('b'), input('c')]);
     const provider = new FakeProvider();
+    const failures: unknown[] = [];
     provider.failCallNumbers.add(2);
-    const first = await embedKnowledgeDocument({ repository, provider }, { documentId: 'document-1', profile: PROFILE, batchSize: 2 });
+    const first = await embedKnowledgeDocument({ repository, provider, onBatchFailure: (event) => failures.push(event) }, { documentId: 'document-1', profile: PROFILE, batchSize: 2 });
     expect(first.persisted).toBe(2);
     expect(first.failedBatches).toBe(1);
+    expect(failures).toEqual([{ event: 'knowledge-embedding-document-batch-failed', documentId: 'document-1', batchNumber: 2, batchSize: 1 }]);
     provider.failCallNumbers.clear();
     const second = await embedKnowledgeDocument({ repository, provider }, { documentId: 'document-1', profile: PROFILE, batchSize: 2 });
     expect(provider.calls.map((batch) => batch.map((item) => item.chunkId))).toEqual([['a', 'b'], ['c'], ['c']]);
@@ -141,6 +144,7 @@ describe('P6I-A embedding foundation', () => {
 
 describe('P6I-A.1 worker hardening', () => {
   const environment = {
+    KNOWLEDGE_EMBEDDING_PROVIDER: 'openai',
     OPENAI_API_KEY: 'test-key',
     SUPABASE_URL: 'http://127.0.0.1:54321',
     SUPABASE_SERVICE_ROLE_KEY: 'test-service-role',
@@ -149,6 +153,28 @@ describe('P6I-A.1 worker hardening', () => {
   it('fails closed before discovery when createdAfter is missing or invalid', () => {
     expect(() => createKnowledgeEmbeddingWorkerFromEnvironment(environment)).toThrow(/CREATED_AFTER/);
     expect(() => resolveKnowledgeEmbeddingConfig({ ...environment, KNOWLEDGE_EMBEDDING_CREATED_AFTER: 'not-a-date' })).toThrow(/ISO/);
+  });
+
+  it('selects local-tei without requiring OpenAI and locks the Voyage profile', () => {
+    const localEnvironment = {
+      ...environment,
+      KNOWLEDGE_EMBEDDING_PROVIDER: 'local-tei',
+      KNOWLEDGE_EMBEDDING_TEI_URL: 'http://127.0.0.1:8080',
+      KNOWLEDGE_EMBEDDING_CREATED_AFTER: '2026-08-21T00:00:00Z',
+      OPENAI_API_KEY: undefined,
+    };
+    const worker = createKnowledgeEmbeddingWorkerFromEnvironment(localEnvironment);
+    expect(worker.config.profile).toEqual({ model: 'voyageai/voyage-4-nano', modelId: 'local:voyage-4-nano', dimensions: 1024 });
+    expect(worker.dependencies.provider).toBeInstanceOf(LocalTeiEmbeddingProvider);
+  });
+
+  it('fails closed for missing or unsupported provider and invalid local TEI URL', () => {
+    const missing = { ...environment, KNOWLEDGE_EMBEDDING_PROVIDER: undefined };
+    expect(() => resolveKnowledgeEmbeddingConfig(missing)).toThrow(/PROVIDER/);
+    expect(() => resolveKnowledgeEmbeddingConfig({ ...environment, KNOWLEDGE_EMBEDDING_PROVIDER: 'unknown' })).toThrow(/unsupported/);
+    expect(() => resolveKnowledgeEmbeddingConfig({ ...environment, KNOWLEDGE_EMBEDDING_PROVIDER: 'local-tei', KNOWLEDGE_EMBEDDING_TEI_URL: 'https://example.com' })).toThrow(/loopback/);
+    expect(() => resolveKnowledgeEmbeddingConfig({ ...environment, KNOWLEDGE_EMBEDDING_PROVIDER: 'local-tei' })).toThrow(/TEI_URL/);
+    expect(() => resolveKnowledgeEmbeddingConfig({ ...environment, KNOWLEDGE_EMBEDDING_PROVIDER: 'openai', OPENAI_API_KEY: undefined, KNOWLEDGE_EMBEDDING_CREATED_AFTER: '2026-08-21T00:00:00Z' })).toThrow(/OPENAI_API_KEY/);
   });
 
   it('passes a valid createdAfter exactly to candidate discovery', async () => {
@@ -265,5 +291,66 @@ describe('P6I-A.1 worker hardening', () => {
     await expect(new SupabaseKnowledgeEmbeddingRepository(deletedClient).upsertEmbeddings([vector])).resolves.toEqual({ persisted: 0, skippedDeleted: 1 });
     const failedClient = { from: () => ({ upsert: async () => ({ error: { code: 'XX000', message: 'knowledge_chunks wording' } }) }) } as unknown as KnowledgeEmbeddingSupabaseClient;
     await expect(new SupabaseKnowledgeEmbeddingRepository(failedClient).upsertEmbeddings([vector])).rejects.toThrow();
+  });
+});
+
+describe('LocalTeiEmbeddingProvider', () => {
+  const localProfile = { model: 'voyageai/voyage-4-nano', modelId: 'local:voyage-4-nano', dimensions: 3 };
+  const localInputs = [input('local-a'), input('local-b')];
+  const localRequest = { profile: localProfile, inputs: localInputs };
+
+  it('sends the document contract without credentials and preserves input order', async () => {
+    let receivedUrl = '';
+    let receivedInit: RequestInit | undefined;
+    const provider = new LocalTeiEmbeddingProvider({
+      baseUrl: 'http://127.0.0.1:8080',
+      fetchImpl: async (url, init) => {
+        receivedUrl = url;
+        receivedInit = init;
+        return new Response(JSON.stringify([[1, 0, 0], [0, 1, 0]]), { status: 200 });
+      },
+    });
+    const result = await provider.embed(localRequest);
+    expect(receivedUrl).toBe('http://127.0.0.1:8080/embed');
+    expect(JSON.parse(String(receivedInit?.body))).toEqual({ inputs: ['text-local-a', 'text-local-b'], prompt_name: 'document', dimensions: 3, normalize: true, truncate: false });
+    expect(receivedInit?.credentials).toBe('omit');
+    expect(receivedInit?.headers).toEqual({ 'content-type': 'application/json' });
+    expect(result.map((item) => item.chunkId)).toEqual(['local-a', 'local-b']);
+  });
+
+  it('accepts only unauthenticated HTTP loopback URLs', () => {
+    expect(assertLocalTeiUrl('http://localhost:8080')).toBe('http://localhost:8080/embed');
+    expect(assertLocalTeiUrl('http://[::1]:8080')).toBe('http://[::1]:8080/embed');
+    for (const value of ['https://localhost:8080', 'http://example.com:8080', 'http://user:pass@127.0.0.1:8080']) {
+      expect(() => assertLocalTeiUrl(value)).toThrow(/loopback/);
+    }
+  });
+
+  it('does not call TEI for empty input', async () => {
+    let calls = 0;
+    const provider = new LocalTeiEmbeddingProvider({ baseUrl: 'http://localhost:8080', fetchImpl: async () => { calls += 1; return new Response('[]'); } });
+    expect(await provider.embed({ ...localRequest, inputs: [] })).toEqual([]);
+    expect(calls).toBe(0);
+  });
+
+  it('rejects malformed, wrong-dimension, and non-finite responses', async () => {
+    for (const body of [JSON.stringify([[1, 2, 3]]), JSON.stringify([[1, 2], [3, 4]]), JSON.stringify([[1, 2, 3], [3, 4, 'bad']]), JSON.stringify({ data: [] })]) {
+      const provider = new LocalTeiEmbeddingProvider({ baseUrl: 'http://localhost:8080', fetchImpl: async () => new Response(body) });
+      await expect(provider.embed(localRequest)).rejects.toThrow();
+    }
+  });
+
+  it('exposes only status for non-2xx responses and supports timeout/abort', async () => {
+    const failed = new LocalTeiEmbeddingProvider({ baseUrl: 'http://localhost:8080', fetchImpl: async () => new Response('private body', { status: 503 }) });
+    await expect(failed.embed(localRequest)).rejects.toThrow('status 503');
+    const hanging = async (_url: string, init?: RequestInit): Promise<Response> => new Promise((_resolve, reject) => {
+      if (init?.signal?.aborted) { reject(new DOMException('aborted', 'AbortError')); return; }
+      init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), { once: true });
+    });
+    await expect(new LocalTeiEmbeddingProvider({ baseUrl: 'http://localhost:8080', fetchImpl: hanging, requestTimeoutMs: 1 }).embed(localRequest)).rejects.toThrow();
+    const controller = new AbortController();
+    const pending = new LocalTeiEmbeddingProvider({ baseUrl: 'http://localhost:8080', fetchImpl: hanging }).embed({ ...localRequest, signal: controller.signal });
+    controller.abort();
+    await expect(pending).rejects.toThrow();
   });
 });

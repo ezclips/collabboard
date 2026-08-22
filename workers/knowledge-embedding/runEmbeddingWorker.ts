@@ -5,12 +5,16 @@ import type {
 } from '../../lib/domain/knowledge/knowledgeEmbedding';
 import { createKnowledgeEmbeddingRepositoryFromEnvironment } from '../../lib/infra/knowledge/knowledgeEmbeddingAdapters';
 import { OpenAIEmbeddingProvider } from './openAIEmbeddingProvider';
+import { LocalTeiEmbeddingProvider, assertLocalTeiUrl } from './localTeiEmbeddingProvider';
 import { embedKnowledgeDocument } from './embedDocument';
 import type { EmbedDocumentSummary } from './embedDocument';
 
 const DEFAULT_EMBEDDING_MODEL = 'text-embedding-3-small';
 const DEFAULT_EMBEDDING_DIMENSIONS = 1536;
 const DEFAULT_EMBEDDING_MODEL_ID = 'openai:text-embedding-3-small';
+const LOCAL_EMBEDDING_MODEL = 'voyageai/voyage-4-nano';
+const LOCAL_EMBEDDING_DIMENSIONS = 1024;
+const LOCAL_EMBEDDING_MODEL_ID = 'local:voyage-4-nano';
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 const POLL_BACKOFF_BASE_MS = 1_000;
 const POLL_BACKOFF_MAX_MS = 30_000;
@@ -40,7 +44,9 @@ export interface KnowledgeEmbeddingLoopOptions {
 }
 
 interface ResolvedKnowledgeEmbeddingConfig extends KnowledgeEmbeddingWorkerConfig {
-  readonly apiKey: string;
+  readonly provider: 'local-tei' | 'openai';
+  readonly apiKey?: string;
+  readonly teiUrl?: string;
   readonly requestTimeoutMs: number;
 }
 
@@ -68,16 +74,28 @@ function requiredIsoTimestamp(environment: Record<string, string | undefined>, n
 export function resolveKnowledgeEmbeddingConfig(
   environment: Record<string, string | undefined> = process.env,
 ): ResolvedKnowledgeEmbeddingConfig {
+  const provider = required(environment, 'KNOWLEDGE_EMBEDDING_PROVIDER');
+  if (provider !== 'local-tei' && provider !== 'openai') throw new Error('KNOWLEDGE_EMBEDDING_PROVIDER is unsupported');
+  const local = provider === 'local-tei';
   const dimensions = positiveInteger(
     environment.KNOWLEDGE_EMBEDDING_DIMENSIONS,
-    DEFAULT_EMBEDDING_DIMENSIONS,
+    local ? LOCAL_EMBEDDING_DIMENSIONS : DEFAULT_EMBEDDING_DIMENSIONS,
     'KNOWLEDGE_EMBEDDING_DIMENSIONS',
   );
+  const model = environment.KNOWLEDGE_EMBEDDING_MODEL || (local ? LOCAL_EMBEDDING_MODEL : DEFAULT_EMBEDDING_MODEL);
+  const modelId = environment.KNOWLEDGE_EMBEDDING_MODEL_ID || (local ? LOCAL_EMBEDDING_MODEL_ID : DEFAULT_EMBEDDING_MODEL_ID);
+  if (local && (model !== LOCAL_EMBEDDING_MODEL || modelId !== LOCAL_EMBEDDING_MODEL_ID || dimensions !== LOCAL_EMBEDDING_DIMENSIONS)) {
+    throw new Error('Local TEI embedding profile must be Voyage-4-nano at 1024 dimensions');
+  }
+  const teiUrl = local ? required(environment, 'KNOWLEDGE_EMBEDDING_TEI_URL') : undefined;
+  if (teiUrl) assertLocalTeiUrl(teiUrl);
   return {
-    apiKey: required(environment, 'OPENAI_API_KEY'),
+    provider,
+    apiKey: local ? undefined : required(environment, 'OPENAI_API_KEY'),
+    teiUrl,
     profile: {
-      model: environment.KNOWLEDGE_EMBEDDING_MODEL || DEFAULT_EMBEDDING_MODEL,
-      modelId: environment.KNOWLEDGE_EMBEDDING_MODEL_ID || DEFAULT_EMBEDDING_MODEL_ID,
+      model,
+      modelId,
       dimensions,
     },
     batchSize: positiveInteger(environment.KNOWLEDGE_EMBEDDING_BATCH_SIZE, 16, 'KNOWLEDGE_EMBEDDING_BATCH_SIZE'),
@@ -95,7 +113,9 @@ export function createKnowledgeEmbeddingWorkerFromEnvironment(
   return {
     dependencies: {
       repository: createKnowledgeEmbeddingRepositoryFromEnvironment(environment),
-      provider: new OpenAIEmbeddingProvider({ apiKey: resolved.apiKey, requestTimeoutMs: resolved.requestTimeoutMs }),
+      provider: resolved.provider === 'local-tei'
+        ? new LocalTeiEmbeddingProvider({ baseUrl: resolved.teiUrl!, requestTimeoutMs: resolved.requestTimeoutMs })
+        : new OpenAIEmbeddingProvider({ apiKey: resolved.apiKey!, requestTimeoutMs: resolved.requestTimeoutMs }),
     },
     config: {
       profile: resolved.profile,

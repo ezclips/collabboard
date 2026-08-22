@@ -12,6 +12,14 @@ import type {
 export interface EmbedDocumentDependencies {
   readonly repository: KnowledgeEmbeddingRepository;
   readonly provider: KnowledgeEmbeddingProvider;
+  readonly onBatchFailure?: (event: KnowledgeEmbeddingBatchFailureEvent) => void;
+}
+
+export interface KnowledgeEmbeddingBatchFailureEvent {
+  readonly event: 'knowledge-embedding-document-batch-failed';
+  readonly documentId: string;
+  readonly batchNumber: number;
+  readonly batchSize: number;
 }
 
 export interface EmbedDocumentOptions {
@@ -52,7 +60,7 @@ export async function embedKnowledgeDocument(
   let failedBatches = 0;
   let failedChunks = 0;
 
-  for (const batch of batches) {
+  for (const [batchIndex, batch] of batches.entries()) {
     try {
       const vectors = await deps.provider.embed({ profile: options.profile, inputs: batch, signal: options.signal });
       const validVectors = validateKnowledgeEmbeddingVectors(vectors, batch, options.profile);
@@ -60,6 +68,13 @@ export async function embedKnowledgeDocument(
       persisted += result.persisted;
       skippedDeleted += result.skippedDeleted;
     } catch {
+      const failureEvent: KnowledgeEmbeddingBatchFailureEvent = {
+        event: 'knowledge-embedding-document-batch-failed',
+        documentId: options.documentId,
+        batchNumber: batchIndex + 1,
+        batchSize: batch.length,
+      };
+      (deps.onBatchFailure ?? ((event) => console.log(JSON.stringify(event))))(failureEvent);
       // A failed provider or persistence batch remains discoverable through the
       // missing/stale candidate RPC and is retried on a later poll.
       failedBatches += 1;
