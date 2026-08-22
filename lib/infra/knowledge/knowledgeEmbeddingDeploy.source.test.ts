@@ -71,6 +71,8 @@ describe('P6I-D3 local Voyage Worker Pool preparation', () => {
     expect(predeploy).toContain('must be sha256:<64 lowercase hex characters>');
     expect(predeploy).toContain('OpenAI secrets must be absent');
     expect(environment).not.toMatch(/^OPENAI_API_KEY/m);
+    expect(environment).toContain('SUPABASE_URL_SECRET_VERSION=1');
+    expect(environment).toContain('SUPABASE_SERVICE_ROLE_KEY_SECRET_VERSION=3');
     expect(deploy).not.toMatch(/OPENAI_API_KEY/);
   });
 
