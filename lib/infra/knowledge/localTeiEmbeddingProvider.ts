@@ -2,7 +2,7 @@ import {
   validateKnowledgeEmbeddingVectors,
   validateKnowledgeQueryEmbeddingVector,
   validateKnowledgeQueryText,
-} from '../../lib/domain/knowledge/knowledgeEmbedding';
+} from '../../domain/knowledge/knowledgeEmbedding';
 import type {
   KnowledgeEmbeddingProvider,
   KnowledgeEmbeddingProviderRequest,
@@ -10,7 +10,7 @@ import type {
   KnowledgeQueryEmbeddingProvider,
   KnowledgeQueryEmbeddingRequest,
   KnowledgeQueryEmbeddingVector,
-} from '../../lib/domain/knowledge/knowledgeEmbedding';
+} from '../../domain/knowledge/knowledgeEmbedding';
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 const MAX_REQUEST_TIMEOUT_MS = 120_000;

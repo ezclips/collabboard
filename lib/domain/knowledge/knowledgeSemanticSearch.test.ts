@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { searchKnowledge } from './searchKnowledge';
+import { searchKnowledge } from './knowledgeSemanticSearch';
 
 const profile = { model: 'voyageai/voyage-4-nano', modelId: 'local:voyage-4-nano', dimensions: 3 };
 const result = { chunkId: 'chunk-1', documentId: 'document-1', originalFilename: 'manual.pdf', pageStart: 1, pageEnd: 1, chunkIndex: 0, text: 'text', sourceLocators: [], similarity: 0.8 };

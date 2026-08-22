@@ -5,7 +5,7 @@ import type {
 } from '../../lib/domain/knowledge/knowledgeEmbedding';
 import { createKnowledgeEmbeddingRepositoryFromEnvironment } from '../../lib/infra/knowledge/knowledgeEmbeddingAdapters';
 import { OpenAIEmbeddingProvider } from './openAIEmbeddingProvider';
-import { LocalTeiEmbeddingProvider, assertLocalTeiUrl } from './localTeiEmbeddingProvider';
+import { LocalTeiEmbeddingProvider, assertLocalTeiUrl } from '../../lib/infra/knowledge/localTeiEmbeddingProvider';
 import { embedKnowledgeDocument } from './embedDocument';
 import type { EmbedDocumentSummary } from './embedDocument';
 

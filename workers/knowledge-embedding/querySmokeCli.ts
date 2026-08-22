@@ -1,5 +1,5 @@
-import { assertLocalTeiUrl, LocalTeiEmbeddingProvider } from './localTeiEmbeddingProvider';
-import { searchKnowledge } from './searchKnowledge';
+import { assertLocalTeiUrl, LocalTeiEmbeddingProvider } from '../../lib/infra/knowledge/localTeiEmbeddingProvider';
+import { searchKnowledge } from '../../lib/domain/knowledge/knowledgeSemanticSearch';
 import { createKnowledgeSemanticSearchRepositoryFromEnvironment } from '../../lib/infra/knowledge/knowledgeSemanticSearchAdapters';
 import type { KnowledgeEmbeddingProfile } from '../../lib/domain/knowledge/knowledgeEmbedding';
 import { summarizeQuerySmokeResults, validateQuerySmokeConfig, type QuerySmokeOutput } from './querySmoke';

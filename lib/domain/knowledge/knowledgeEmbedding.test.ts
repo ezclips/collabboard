@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { OpenAIEmbeddingProvider } from '../../../workers/knowledge-embedding/openAIEmbeddingProvider';
-import { LocalTeiEmbeddingProvider, assertLocalTeiUrl } from '../../../workers/knowledge-embedding/localTeiEmbeddingProvider';
+import { LocalTeiEmbeddingProvider, assertLocalTeiUrl } from '../../infra/knowledge/localTeiEmbeddingProvider';
 import { embedKnowledgeDocument } from '../../../workers/knowledge-embedding/embedDocument';
 import {
   createKnowledgeEmbeddingWorkerFromEnvironment,

@@ -3,8 +3,8 @@ import type {
   KnowledgeQueryEmbeddingProvider,
   KnowledgeSemanticSearchRepository,
   KnowledgeSemanticSearchResult,
-} from '../../lib/domain/knowledge/knowledgeEmbedding';
-import { validateKnowledgeQueryText, validateKnowledgeSemanticSearchParameters } from '../../lib/domain/knowledge/knowledgeEmbedding';
+} from './knowledgeEmbedding';
+import { validateKnowledgeQueryText, validateKnowledgeSemanticSearchParameters } from './knowledgeEmbedding';
 
 export interface SearchKnowledgeOptions {
   readonly query: string;

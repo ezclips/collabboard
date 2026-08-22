@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assertLocalTeiUrl } from './localTeiEmbeddingProvider';
+import { assertLocalTeiUrl } from '../../lib/infra/knowledge/localTeiEmbeddingProvider';
 import { summarizeQuerySmokeResults, validateQuerySmokeConfig } from './querySmoke';
 
 const result = (documentId: string, similarity: number) => ({
