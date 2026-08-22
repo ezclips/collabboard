@@ -16,6 +16,16 @@ export interface KnowledgeBoardReadAuthorizationClient {
   ): PromiseLike<{ data: boolean | null; error: unknown }>;
 }
 
+/**
+ * Knowledge read access mirrors the RLS policy: board owner OR
+ * public.is_board_member(board_id, auth.uid()). Do not use
+ * requireBoardPermission/get_board_permission: those belong to the legacy
+ * canvas/workspace model, whose path selects canvases.workspace_id, absent from
+ * the current schema. Mutation/editor authorization is also wrong for reads:
+ * viewer collaborators are valid readers because is_board_member has no editor
+ * requirement. This runs as the authenticated user with RLS applicable;
+ * lookup/RPC errors throw so authorization fails closed.
+ */
 export async function canReadBoardKnowledge(
   client: KnowledgeBoardReadAuthorizationClient,
   boardId: string,
