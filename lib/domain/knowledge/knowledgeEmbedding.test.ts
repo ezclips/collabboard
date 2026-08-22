@@ -326,6 +326,32 @@ describe('LocalTeiEmbeddingProvider', () => {
     }
   });
 
+  it('sends query embeddings with the query prompt and locked request options', async () => {
+    let receivedInit: RequestInit | undefined;
+    const provider = new LocalTeiEmbeddingProvider({ baseUrl: 'http://127.0.0.1:8080', fetchImpl: async (_url, init) => {
+      receivedInit = init;
+      return new Response(JSON.stringify([[1, 0, 0]]), { status: 200 });
+    } });
+    await expect(provider.embedQuery({ profile: localProfile, query: 'Which planet has rings?' })).resolves.toEqual({ modelId: localProfile.modelId, dimensions: 3, embedding: [1, 0, 0] });
+    expect(JSON.parse(String(receivedInit?.body))).toEqual({ inputs: ['Which planet has rings?'], prompt_name: 'query', dimensions: 3, normalize: true, truncate: false });
+    expect(receivedInit?.credentials).toBe('omit');
+  });
+
+  it('rejects invalid query text and query vector responses', async () => {
+    for (const query of ['', '   ', 'q'.repeat(4001)]) {
+      const provider = new LocalTeiEmbeddingProvider({ baseUrl: 'http://localhost:8080', fetchImpl: async () => new Response('[[1,2,3]]') });
+      await expect(provider.embedQuery({ profile: localProfile, query })).rejects.toThrow();
+    }
+    for (const body of ['[]', '[[1,2,3],[4,5,6]]', '[[1,2]]']) {
+      const provider = new LocalTeiEmbeddingProvider({ baseUrl: 'http://localhost:8080', fetchImpl: async () => new Response(body) });
+      await expect(provider.embedQuery({ profile: localProfile, query: 'valid' })).rejects.toThrow();
+    }
+    for (const embedding of [[1, 2, Number.NaN], [1, 2, Number.POSITIVE_INFINITY]]) {
+      const provider = new LocalTeiEmbeddingProvider({ baseUrl: 'http://localhost:8080', fetchImpl: async () => ({ ok: true, status: 200, json: async () => [embedding] } as Response) });
+      await expect(provider.embedQuery({ profile: localProfile, query: 'valid' })).rejects.toThrow();
+    }
+  });
+
   it('does not call TEI for empty input', async () => {
     let calls = 0;
     const provider = new LocalTeiEmbeddingProvider({ baseUrl: 'http://localhost:8080', fetchImpl: async () => { calls += 1; return new Response('[]'); } });
