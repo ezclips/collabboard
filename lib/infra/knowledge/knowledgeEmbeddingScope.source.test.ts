@@ -89,6 +89,7 @@ describe('P6I-A embedding scope and SQL guards', () => {
       file
       && !file.startsWith('workers/knowledge-embedding/deploy/')
       && file !== 'workers/knowledge-embedding/Dockerfile'
+      && file !== 'workers/knowledge-embedding/tei/Dockerfile'
       && !file.startsWith('scripts/benchmarks/knowledge-retrieval/')
       && file !== 'scripts/db/bootstrap-local.mjs',
     ).join('\n');

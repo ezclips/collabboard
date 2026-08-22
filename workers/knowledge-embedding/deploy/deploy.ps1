@@ -106,9 +106,6 @@ spec:
               key: "$serviceRoleVersion"
       - name: voyage-tei
         image: $teiImage
-        ports:
-        - name: http1
-          containerPort: 8080
         resources:
           limits:
             cpu: "$teiCpu"

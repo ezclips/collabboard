@@ -89,6 +89,9 @@ describe('P6I-D3 local Voyage Worker Pool preparation', () => {
     expect(deploy).toContain('run.googleapis.com/container-dependencies');
     expect(deploy).toContain('knowledge-worker":["voyage-tei"]');
     expect(deploy).toContain('startupProbe:');
+    expect(deploy).not.toContain('containerPort:');
+    expect(deploy).not.toContain('ports:');
+    expect(deploy).toContain('httpGet:');
     expect(deploy).toContain('path: /health');
     expect(deploy).toContain('port: 8080');
     expect(deploy).toContain('periodSeconds: 5');
@@ -141,6 +144,7 @@ describe('P6I-D3 local Voyage Worker Pool preparation', () => {
       expect([
         'workers/knowledge-embedding/',
         'lib/infra/knowledge/knowledgeEmbeddingDeploy.source.test.ts',
+        'lib/infra/knowledge/knowledgeEmbeddingScope.source.test.ts',
       ].some((allowed) => file === allowed || file.startsWith(allowed))).toBe(true);
     }
     expect(status).not.toMatch(/workers[\\/]knowledge-pdf|components|package(-lock)?\.json|middleware|auth/i);
