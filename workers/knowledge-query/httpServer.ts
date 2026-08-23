@@ -3,6 +3,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 
 const MAX_BODY_BYTES = 16 * 1024;
 const SEARCH_PATH = '/v1/knowledge/search';
+const WARM_PATH = '/v1/knowledge/warm';
 
 export interface QueryHttpRequest {
   readonly method: string;
@@ -54,7 +55,7 @@ export function createKnowledgeQueryHttpServer(handler: QueryHttpHandler): Serve
       if (request.method !== 'GET') return writeJson(response, 405, { error: 'method_not_allowed' });
       return writeJson(response, 200, { ok: true }, true);
     }
-    if (path !== SEARCH_PATH) return writeJson(response, 404, { error: 'not_found' });
+    if (path !== SEARCH_PATH && path !== WARM_PATH) return writeJson(response, 404, { error: 'not_found' });
     if (request.method !== 'POST') return writeJson(response, 405, { error: 'method_not_allowed' }, true);
     try {
       const rawBody = await readBody(request);

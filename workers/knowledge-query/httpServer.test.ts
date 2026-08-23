@@ -44,8 +44,21 @@ describe('knowledge query HTTP transport', () => {
     await withServer(async () => ({ status: 200, body: {} }), async (port) => {
       expect((await call(port, 'GET', '/unknown')).status).toBe(404);
       expect((await call(port, 'GET', '/v1/knowledge/search')).status).toBe(405);
+      expect((await call(port, 'GET', '/v1/knowledge/warm')).status).toBe(405);
       expect((await call(port, 'POST', '/v1/knowledge/search', '{bad')).status).toBe(400);
       expect((await call(port, 'POST', '/v1/knowledge/search', 'x'.repeat(16 * 1024 + 1))).status).toBe(413);
+    });
+  });
+
+  it('routes the warm POST without changing health or search transport behavior', async () => {
+    let received: QueryHttpRequest | undefined;
+    await withServer(async (request) => { received = request; return { status: 200, body: { ok: true } }; }, async (port) => {
+      const warm = await call(port, 'POST', '/v1/knowledge/warm', '{"boardId":"b"}', { authorization: 'Bearer token' });
+      expect(warm.status).toBe(200);
+      expect(JSON.parse(warm.body)).toEqual({ ok: true });
+      expect(received?.path).toBe('/v1/knowledge/warm');
+      expect(received?.body).toEqual({ boardId: 'b' });
+      expect(warm.headers['cache-control']).toBe('no-store');
     });
   });
 });

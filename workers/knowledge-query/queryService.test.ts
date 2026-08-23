@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { InMemoryKnowledgeQueryRateLimiter, KNOWLEDGE_QUERY_PROFILE, createKnowledgeQueryService } from './queryService';
+import { InMemoryKnowledgeQueryRateLimiter, KNOWLEDGE_QUERY_PROFILE, createKnowledgeQueryService, createKnowledgeWarmService } from './queryService';
 import { QueryAuthenticationError, QueryAuthenticationUnavailableError } from './supabaseQuerySecurity';
 import type { KnowledgeBoardReadAuthorizationClient } from '../../lib/server/knowledge/knowledgeBoardReadAuthorization';
 import type { KnowledgeQueryRateLimiter } from './queryService';
@@ -124,5 +124,31 @@ describe('authenticated knowledge query service', () => {
     expect(client.from).toHaveBeenCalledTimes(authCalls);
     expect(provider.embedQuery).toHaveBeenCalledTimes(embedCalls);
     expect(repository.searchBoardKnowledge).toHaveBeenCalledTimes(searchCalls);
+  });
+
+  it('warms with auth only, never consumes search budget, and leaves search behavior intact', async () => {
+    const rateLimiter = { consume: vi.fn(() => true) };
+    const state = setup({ rateLimiter });
+    const warm = createKnowledgeWarmService({ security: state.security });
+    await expect(warm({ boardId: BOARD_ID }, 'Bearer token')).resolves.toEqual({ status: 200, body: { ok: true } });
+    for (let i = 0; i < 10; i++) await expect(warm({ boardId: BOARD_ID }, 'Bearer token')).resolves.toMatchObject({ status: 200 });
+    expect(rateLimiter.consume).not.toHaveBeenCalled();
+    expect(state.provider.embedQuery).not.toHaveBeenCalled();
+    expect(state.repository.searchBoardKnowledge).not.toHaveBeenCalled();
+    await expect(warm({ boardId: BOARD_ID, query: 'not allowed' }, 'Bearer token')).resolves.toMatchObject({ status: 400 });
+    await expect(warm({ boardId: 'not-a-uuid' }, 'Bearer token')).resolves.toMatchObject({ status: 400 });
+    await expect(warm({ boardId: BOARD_ID }, undefined)).resolves.toMatchObject({ status: 401 });
+    const invalid = setup({ security: { verifyAccessToken: vi.fn(async () => { throw new QueryAuthenticationError(); }) } });
+    await expect(createKnowledgeWarmService({ security: invalid.security })({ boardId: BOARD_ID }, 'Bearer bad')).resolves.toMatchObject({ status: 401 });
+    const unavailable = setup({ security: { verifyAccessToken: vi.fn(async () => { throw new QueryAuthenticationUnavailableError(); }) } });
+    await expect(createKnowledgeWarmService({ security: unavailable.security })({ boardId: BOARD_ID }, 'Bearer token')).resolves.toMatchObject({ status: 503 });
+    const forbidden = setup({ security: { verifyAccessToken: vi.fn(async () => ({ userId: USER_ID, client: boardClient({ data: null, error: null }) })) } });
+    await expect(createKnowledgeWarmService({ security: forbidden.security })({ boardId: BOARD_ID }, 'Bearer token')).resolves.toMatchObject({ status: 403 });
+    const authorizationFailure = setup({ security: { verifyAccessToken: vi.fn(async () => ({ userId: USER_ID, client: boardClient({ data: null, error: new Error('db') }) })) } });
+    await expect(createKnowledgeWarmService({ security: authorizationFailure.security })({ boardId: BOARD_ID }, 'Bearer token')).resolves.toMatchObject({ status: 503 });
+    await expect(state.service(body(), 'Bearer token')).resolves.toMatchObject({ status: 200 });
+    expect(rateLimiter.consume).toHaveBeenCalledTimes(1);
+    expect(state.provider.embedQuery).toHaveBeenCalledTimes(1);
+    expect(state.repository.searchBoardKnowledge).toHaveBeenCalledTimes(1);
   });
 });

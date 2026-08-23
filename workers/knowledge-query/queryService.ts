@@ -82,6 +82,13 @@ function parseRequestBody(value: unknown): KnowledgeQueryRequestBody {
   return { boardId: body.boardId, query: body.query, limit: body.limit as number | undefined };
 }
 
+function parseWarmRequestBody(value: unknown): { boardId: string } {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('invalid_request');
+  const body = value as Record<string, unknown>;
+  if (Object.keys(body).length !== 1 || typeof body.boardId !== 'string' || !UUID_PATTERN.test(body.boardId)) throw new Error('invalid_request');
+  return { boardId: body.boardId };
+}
+
 function extractBearer(authorization: string | undefined): string {
   const match = authorization?.match(/^Bearer\s+(\S+)$/i);
   if (!match) throw new QueryAuthenticationError();
@@ -126,5 +133,24 @@ export function createKnowledgeQueryService(dependencies: KnowledgeQueryServiceD
       });
       return { status: 200, body: { results: publicResults(results) } };
     } catch { return response(503, 'service_unavailable'); }
+  };
+}
+
+export function createKnowledgeWarmService(dependencies: Pick<KnowledgeQueryServiceDependencies, 'security'>) {
+  return async function handleKnowledgeWarm(bodyValue: unknown, authorization: string | undefined): Promise<KnowledgeQueryServiceResponse> {
+    let body: { boardId: string };
+    try { body = parseWarmRequestBody(bodyValue); } catch { return response(400, 'invalid_request'); }
+
+    let verified: { userId: string; client: KnowledgeBoardReadAuthorizationClient };
+    try {
+      verified = await dependencies.security.verifyAccessToken(extractBearer(authorization));
+    } catch (error) {
+      if (error instanceof QueryAuthenticationError) return response(401, 'unauthenticated');
+      return response(503, 'service_unavailable');
+    }
+    try {
+      if (!await canReadBoardKnowledge(verified.client, body.boardId, verified.userId)) return response(403, 'forbidden');
+    } catch { return response(503, 'service_unavailable'); }
+    return { status: 200, body: { ok: true } };
   };
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { handleKnowledgeSearchProxy } from './knowledgeSearchProxyRoute';
+import { handleKnowledgeSearchProxy, handleKnowledgeWarmProxy } from './knowledgeSearchProxyRoute';
 import type { KnowledgeBoardReadAuthorizationClient } from './knowledgeBoardReadAuthorization';
 
 const BOARD_ID = '11111111-1111-4111-8111-111111111111';
@@ -16,6 +16,7 @@ function client() {
 type AuthClient = { auth: { getUser: ReturnType<typeof vi.fn>; getSession: ReturnType<typeof vi.fn> } };
 
 function request(body: unknown) { return new Request('http://localhost/api/boards/' + BOARD_ID + '/knowledge/search', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }); }
+function warmRequest(body?: string) { return new Request('http://localhost/api/boards/' + BOARD_ID + '/knowledge/warm', { method: 'POST', ...(body === undefined ? {} : { body, headers: { 'content-type': 'application/json' } }) }); }
 function context(id = BOARD_ID) { return { params: Promise.resolve({ id }) }; }
 
 describe('Knowledge search proxy route service', () => {
@@ -60,5 +61,35 @@ describe('Knowledge search proxy route service', () => {
     fetchImpl.mockResolvedValue(new Response(JSON.stringify({ results: [] }), { status: 200 }));
     const response = await handleKnowledgeSearchProxy(request({ query: 'q' }), context(), state, { canReadBoardKnowledge: authorize as never, serviceUrl: 'https://query.example', fetchImpl });
     expect(response.headers.get('cache-control')).toBe('no-store');
+  });
+
+  it('warms only after auth and board authorization, forwarding only boardId', async () => {
+    const state = client();
+    const order: string[] = [];
+    state.auth.getUser.mockImplementation(async () => { order.push('getUser'); return { data: { user: { id: USER_ID } }, error: null }; });
+    state.auth.getSession.mockImplementation(async () => { order.push('getSession'); return { data: { session: { access_token: TOKEN } }, error: null }; });
+    const authorize = vi.fn(async (_client, boardId, userId) => { order.push('authorize'); expect(boardId).toBe(BOARD_ID); expect(userId).toBe(USER_ID); return true; });
+    const fetchImpl = vi.fn(async (_url, init) => { order.push('upstream'); return new Response(JSON.stringify({ ok: true, secret: 'hidden' }), { status: 200 }); });
+    const response = await handleKnowledgeWarmProxy(warmRequest(), context(), state, { canReadBoardKnowledge: authorize as never, serviceUrl: 'https://query.example', fetchImpl });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true });
+    expect(order).toEqual(['getUser', 'getSession', 'authorize', 'upstream']);
+    expect(JSON.parse(String(fetchImpl.mock.calls[0][1]?.body))).toEqual({ boardId: BOARD_ID });
+    expect(fetchImpl.mock.calls[0][1]?.headers).toEqual({ authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' });
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    expect((await handleKnowledgeWarmProxy(warmRequest(JSON.stringify({ query: 'secret' })), context(), state, { canReadBoardKnowledge: authorize as never, serviceUrl: 'https://query.example', fetchImpl })).status).toBe(400);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps warm failures generic and fails closed before upstream', async () => {
+    const forbidden = client();
+    const authorize = vi.fn(async () => false);
+    const fetchImpl = vi.fn();
+    expect((await handleKnowledgeWarmProxy(warmRequest(), context('not-a-uuid'), forbidden, { canReadBoardKnowledge: authorize as never, serviceUrl: 'https://query.example', fetchImpl })).status).toBe(400);
+    expect((await handleKnowledgeWarmProxy(warmRequest(), context(), forbidden, { canReadBoardKnowledge: authorize as never, serviceUrl: 'https://query.example', fetchImpl })).status).toBe(403);
+    expect(fetchImpl).not.toHaveBeenCalled();
+    forbidden.auth.getUser.mockResolvedValue({ data: { user: null }, error: null });
+    expect((await handleKnowledgeWarmProxy(warmRequest(), context(), forbidden, { canReadBoardKnowledge: authorize as never, serviceUrl: 'https://query.example', fetchImpl })).status).toBe(401);
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 });

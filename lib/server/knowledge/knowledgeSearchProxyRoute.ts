@@ -25,13 +25,13 @@ function json(status: number, body: Record<string, unknown>): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
 }
 
-function validServiceUrl(value: string | undefined): string | null {
+function validServiceUrl(value: string | undefined, path = '/v1/knowledge/search'): string | null {
   if (!value) return null;
   try {
     const parsed = new URL(value);
     const loopback = ['localhost', '127.0.0.1', '[::1]', '::1'].includes(parsed.hostname.toLowerCase());
     if ((!loopback && parsed.protocol !== 'https:') || parsed.username || parsed.password || parsed.search || parsed.hash) return null;
-    return new URL('/v1/knowledge/search', parsed).toString();
+    return new URL(path, parsed).toString();
   } catch { return null; }
 }
 
@@ -108,6 +108,52 @@ export async function handleKnowledgeSearchProxy(
     if (!upstream.ok) return json(503, { error: 'service_unavailable' });
     const results = publicResults(await upstream.json() as unknown);
     return results ? json(200, { results }) : json(503, { error: 'service_unavailable' });
+  } catch { return json(503, { error: 'service_unavailable' }); }
+  finally { clearTimeout(timeout); }
+}
+
+export async function handleKnowledgeWarmProxy(
+  request: Request,
+  context: ProxyContext,
+  sessionClient: KnowledgeSearchProxySessionClient,
+  dependencies: KnowledgeSearchProxyDependencies = {},
+): Promise<Response> {
+  if (request.method !== 'POST') return json(405, { error: 'method_not_allowed' });
+  let rawBody: string;
+  try { rawBody = await request.text(); } catch { return json(400, { error: 'invalid_request' }); }
+  if (rawBody.trim().length > 0) return json(400, { error: 'invalid_request' });
+  const { id: boardId } = await context.params;
+  if (!UUID_PATTERN.test(boardId)) return json(400, { error: 'invalid_request' });
+
+  let user: { id: string };
+  try {
+    const result = await sessionClient.auth.getUser();
+    if (result.error || !result.data.user) return json(401, { error: 'unauthenticated' });
+    user = result.data.user;
+  } catch { return json(503, { error: 'service_unavailable' }); }
+  let accessToken: string;
+  try {
+    const result = await sessionClient.auth.getSession();
+    accessToken = result.data.session?.access_token ?? '';
+    if (result.error || !accessToken) return json(401, { error: 'unauthenticated' });
+  } catch { return json(503, { error: 'service_unavailable' }); }
+  try {
+    if (!await (dependencies.canReadBoardKnowledge ?? canReadBoardKnowledge)(sessionClient, boardId, user.id)) return json(403, { error: 'forbidden' });
+  } catch { return json(503, { error: 'service_unavailable' }); }
+
+  const endpoint = validServiceUrl(dependencies.serviceUrl ?? process.env.KNOWLEDGE_QUERY_SERVICE_URL, '/v1/knowledge/warm');
+  if (!endpoint) return json(503, { error: 'service_unavailable' });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 180_000);
+  try {
+    const upstream = await (dependencies.fetchImpl ?? fetch)(endpoint, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ boardId }),
+      signal: controller.signal,
+    });
+    const payload = await upstream.json().catch(() => null) as { ok?: unknown } | null;
+    return upstream.ok && payload?.ok === true ? json(200, { ok: true }) : json(503, { error: 'service_unavailable' });
   } catch { return json(503, { error: 'service_unavailable' }); }
   finally { clearTimeout(timeout); }
 }
