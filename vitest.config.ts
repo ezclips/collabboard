@@ -18,6 +18,8 @@ export default defineConfig({
       'scripts/db/**/*.test.ts',
       'tools/pdf-extraction-prototype/**/*.test.ts',
       'workers/knowledge-pdf/**/*.test.ts',
+      'workers/knowledge-embedding/**/*.test.ts',
+      'workers/knowledge-query/**/*.test.ts',
       'components/collabboard/*.test.tsx',
       'components/collabboard/editors/*.test.tsx',
       'components/collabboard/comments/*.test.tsx',

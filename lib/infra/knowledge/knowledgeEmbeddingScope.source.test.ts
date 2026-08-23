@@ -94,6 +94,7 @@ describe('P6I-A embedding scope and SQL guards', () => {
       && !file.startsWith('workers/knowledge-embedding/deploy/')
       && file !== 'workers/knowledge-embedding/Dockerfile'
       && file !== 'workers/knowledge-embedding/tei/Dockerfile'
+      && file !== 'workers/knowledge-query/Dockerfile'
       && file !== 'app/api/boards/[id]/knowledge/route.ts'
       && file !== 'lib/server/knowledge/knowledgeBoardReadAuthorization.ts'
       && !file.startsWith('scripts/benchmarks/knowledge-retrieval/')
