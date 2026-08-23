@@ -68,7 +68,7 @@ describe('authenticated knowledge query service', () => {
     const response = await setupState.service(body(), 'Bearer verified');
     expect(response.status).toBe(200);
     expect(setupState.provider.embedQuery).toHaveBeenCalledWith({ profile: KNOWLEDGE_QUERY_PROFILE, query: 'recovery', signal: undefined });
-    expect(setupState.repository.searchBoardKnowledge).toHaveBeenCalledWith(expect.objectContaining({ boardId: BOARD_ID, profile: KNOWLEDGE_QUERY_PROFILE, limit: 5, minSimilarity: null }));
+    expect(setupState.repository.searchBoardKnowledge).toHaveBeenCalledWith(expect.objectContaining({ boardId: BOARD_ID, profile: KNOWLEDGE_QUERY_PROFILE, limit: 5, minSimilarity: 0.35 }));
     expect(response.body).toEqual({ results: [{ chunkId: 'chunk', documentId: 'document', originalFilename: 'file.pdf', pageStart: 1, pageEnd: 1, chunkIndex: 0, text: 'text', sourceLocators: [] }] });
     await setupState.service(body({ limit: 99 }), 'Bearer verified');
     expect(setupState.repository.searchBoardKnowledge).toHaveBeenLastCalledWith(expect.objectContaining({ limit: 10 }));

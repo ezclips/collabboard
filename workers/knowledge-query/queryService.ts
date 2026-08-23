@@ -11,6 +11,7 @@ export const KNOWLEDGE_QUERY_PROFILE = {
 
 const DEFAULT_LIMIT = 5;
 const MAX_LIMIT = 10;
+const MIN_SIMILARITY = 0.35;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export interface KnowledgeQueryRequestBody {
@@ -136,7 +137,7 @@ export function createKnowledgeQueryService(dependencies: KnowledgeQueryServiceD
         queryEmbedding,
         profile: KNOWLEDGE_QUERY_PROFILE,
         limit: Math.min(body.limit ?? DEFAULT_LIMIT, MAX_LIMIT),
-        minSimilarity: null,
+        minSimilarity: MIN_SIMILARITY,
       });
       logSimilarityDiagnostic(results);
       return { status: 200, body: { results: publicResults(results) } };
