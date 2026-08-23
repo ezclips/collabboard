@@ -41,6 +41,7 @@ interface KnowledgeDetailsState { entry: KnowledgeListEntry; pages: readonly Kno
 
 interface KnowledgeSearchResult { originalFilename: string; pageStart: number; pageEnd: number; text: string; }
 type SearchPhase = 'idle' | 'loading' | 'loaded' | 'error';
+type WarmPhase = 'idle' | 'warming' | 'ready' | 'failed';
 function isProcessingStatus(value: unknown): value is KnowledgePdfProcessingStatus {
   return value === 'uploaded' || value === 'processing' || value === 'ready' || value === 'failed';
 }
@@ -114,6 +115,41 @@ function pageLabel(result: KnowledgeSearchResult): string {
     : `Pages ${result.pageStart}–${result.pageEnd}`;
 }
 
+interface KnowledgeWarmSubscription { promise: Promise<boolean>; release: () => void; }
+interface KnowledgeWarmFlight { controller: AbortController; consumers: Set<symbol>; promise: Promise<boolean>; }
+const knowledgeWarmFlights = new Map<string, KnowledgeWarmFlight>();
+
+function subscribeToKnowledgeWarm(boardId: string): KnowledgeWarmSubscription {
+  let flight = knowledgeWarmFlights.get(boardId);
+  if (!flight) {
+    const controller = new AbortController();
+    let currentFlight: KnowledgeWarmFlight;
+    const timeout = setTimeout(() => controller.abort(), 120_000);
+    const promise = fetch(`/api/boards/${encodeURIComponent(boardId)}/knowledge/warm`, { method: 'POST', signal: controller.signal })
+      .then((response) => !controller.signal.aborted && response.ok)
+      .catch(() => false)
+      .finally(() => {
+        clearTimeout(timeout);
+        if (knowledgeWarmFlights.get(boardId) === currentFlight) knowledgeWarmFlights.delete(boardId);
+      });
+    currentFlight = { controller, consumers: new Set(), promise };
+    flight = currentFlight;
+    knowledgeWarmFlights.set(boardId, flight);
+  }
+  const consumer = Symbol('knowledge-warm');
+  flight.consumers.add(consumer);
+  let released = false;
+  return {
+    promise: flight.promise,
+    release: () => {
+      if (released) return;
+      released = true;
+      flight!.consumers.delete(consumer);
+      if (flight!.consumers.size === 0 && knowledgeWarmFlights.get(boardId) === flight) flight!.controller.abort();
+    },
+  };
+}
+
 /**
  * Read-only list of the PDFs already attached to the current board.
  *
@@ -130,8 +166,13 @@ export default function KnowledgeDocumentsList({ refreshToken = 0, isOpen = true
   const [entries, setEntries] = useState<readonly KnowledgeListEntry[]>([]);
   const [details, setDetails] = useState<KnowledgeDetailsState | null>(null);
   const [searchQuery, setSearchQuery] = useState(''), [searchPhase, setSearchPhase] = useState<SearchPhase>('idle'), [searchResults, setSearchResults] = useState<readonly KnowledgeSearchResult[]>([]);
+  const [warmPhase, setWarmPhase] = useState<WarmPhase>('idle');
   const searchControllerRef = useRef<AbortController | null>(null);
   const searchGenerationRef = useRef(0);
+  const warmGenerationRef = useRef(0);
+  const warmReleaseRef = useRef<(() => void) | null>(null);
+  const queuedSearchRef = useRef<string | null>(null);
+  const executeSearchRef = useRef<(query: string) => void>(() => undefined);
 
   useEffect(() => {
     if (!boardId) return;
@@ -167,17 +208,44 @@ export default function KnowledgeDocumentsList({ refreshToken = 0, isOpen = true
   useEffect(() => () => {
     searchGenerationRef.current += 1;
     searchControllerRef.current?.abort();
+    queuedSearchRef.current = null;
+    warmReleaseRef.current?.();
+    warmReleaseRef.current = null;
+    warmGenerationRef.current += 1;
   }, []);
   useEffect(() => {
     if (isOpen) return;
     searchGenerationRef.current += 1;
     searchControllerRef.current?.abort();
+    queuedSearchRef.current = null;
   }, [isOpen]);
-  const submitSearch = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const query = searchQuery.trim();
-    if (!boardId || query.length === 0) return;
 
+  useEffect(() => {
+    if (!boardId || !isOpen) return;
+    const generation = ++warmGenerationRef.current;
+    const subscription = subscribeToKnowledgeWarm(boardId);
+    warmReleaseRef.current = subscription.release;
+    setWarmPhase('warming');
+    void subscription.promise.then((ready) => {
+      if (generation !== warmGenerationRef.current) return;
+      warmReleaseRef.current = null;
+      setWarmPhase(ready ? 'ready' : 'failed');
+      const queued = queuedSearchRef.current;
+      queuedSearchRef.current = null;
+      if (queued) executeSearchRef.current(queued);
+    });
+    return () => {
+      if (warmGenerationRef.current === generation) {
+        warmGenerationRef.current += 1;
+        queuedSearchRef.current = null;
+        warmReleaseRef.current?.();
+        warmReleaseRef.current = null;
+      } else subscription.release();
+    };
+  }, [boardId, isOpen]);
+
+  const executeSearch = async (query: string) => {
+    if (!boardId) return;
     searchGenerationRef.current += 1;
     const generation = searchGenerationRef.current;
     searchControllerRef.current?.abort();
@@ -205,6 +273,20 @@ export default function KnowledgeDocumentsList({ refreshToken = 0, isOpen = true
     } finally {
       if (searchControllerRef.current === controller) searchControllerRef.current = null;
     }
+  };
+  executeSearchRef.current = (query) => { void executeSearch(query); };
+
+  const submitSearch = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const query = searchQuery.trim();
+    if (!boardId || query.length === 0) return;
+    if (warmPhase === 'warming') {
+      queuedSearchRef.current = query;
+      setSearchPhase('idle');
+      setSearchResults([]);
+      return;
+    }
+    void executeSearch(query);
   };
 
   const openDetails = async (entry: KnowledgeListEntry) => {
@@ -296,6 +378,7 @@ export default function KnowledgeDocumentsList({ refreshToken = 0, isOpen = true
                 Search
               </button>
             </form>
+            {warmPhase === 'warming' ? <p className="mt-2 text-[11px] text-gray-500">Search engine is waking up…</p> : null}
             {searchPhase === 'loading' ? <p className="mt-2 text-[11px] text-gray-500">Searching Knowledge…</p> : null}
             {searchPhase === 'error' ? <p className="mt-2 text-[11px] text-gray-500">Knowledge search unavailable.</p> : null}
             {searchPhase === 'loaded' && searchResults.length === 0 ? <p className="mt-2 text-[11px] text-gray-500">No matching Knowledge found.</p> : null}

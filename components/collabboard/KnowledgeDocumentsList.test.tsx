@@ -60,7 +60,9 @@ beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   document.body.innerHTML = '';
   originalFetch = globalThis.fetch;
-  fetchMock = vi.fn(async () => jsonResponse({ documents: [] }));
+  fetchMock = vi.fn(async (input: RequestInfo | URL) => String(input).includes('/knowledge/warm')
+    ? jsonResponse({ ok: true })
+    : jsonResponse({ documents: [] }));
   globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch;
 });
 
@@ -98,6 +100,10 @@ async function rerender(refreshToken: number, isOpen = true, onClose = vi.fn()) 
   await settle();
 }
 
+async function flushMicrotasks() {
+  await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+}
+
 function typeIntoSearch(container: HTMLElement, value: string) {
   const input = container.querySelector('input[aria-label="Search Knowledge"]') as HTMLInputElement;
   act(() => {
@@ -123,10 +129,20 @@ describe('P6D Knowledge documents read surface', () => {
   it('issues exactly one GET for the current board on mount', async () => {
     await renderList();
 
-    expect(fetchMock).toHaveBeenCalledOnce();
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit | undefined];
+    const [url, init] = fetchMock.mock.calls.find(([input]) => String(input).endsWith(`/api/boards/${BOARD_ID}/knowledge`)) as [string, RequestInit | undefined];
     expect(url).toBe(`/api/boards/${BOARD_ID}/knowledge`);
     expect(init?.method).toBe('GET');
+    const warmCall = fetchMock.mock.calls.filter(([input]) => String(input).includes('/knowledge/warm'));
+    expect(warmCall).toHaveLength(1);
+    expect(warmCall[0][0]).toBe(`/api/boards/${BOARD_ID}/knowledge/warm`);
+    expect(warmCall[0][1]?.method).toBe('POST');
+    expect(warmCall[0][1]?.body).toBeUndefined();
+    expect(fetchMock.mock.calls.filter(([input]) => String(input).includes('/knowledge/search'))).toHaveLength(0);
+  });
+
+  it('does not prewarm while the Knowledge modal is closed', async () => {
+    await renderList(0, false);
+    expect(fetchMock.mock.calls.filter(([input]) => String(input).includes('/knowledge/warm'))).toHaveLength(0);
   });
 
   it('renders an already-attached PDF by its original filename', async () => {
@@ -157,6 +173,7 @@ describe('P6D Knowledge documents read surface', () => {
   it('fetches page details only after View text and returns to the list', async () => {
     fetchMock
       .mockResolvedValueOnce(jsonResponse({ documents: [doc()] }))
+      .mockResolvedValueOnce(jsonResponse({ ok: true }))
       .mockResolvedValueOnce(jsonResponse({
         document: { id: 'doc-1', originalFilename: 'EMG_checklist.pdf', pageCount: 2 },
         pages: [
@@ -172,7 +189,7 @@ describe('P6D Knowledge documents read surface', () => {
     });
     await settle();
 
-    expect(fetchMock.mock.calls[1][0]).toBe(`/api/boards/${BOARD_ID}/knowledge/doc-1/pages`);
+    expect(fetchMock.mock.calls.find(([input]) => String(input).endsWith('/pages'))?.[0]).toBe(`/api/boards/${BOARD_ID}/knowledge/doc-1/pages`);
     expect(container.textContent).toContain('EMG_checklist.pdf');
     expect(container.textContent).toContain('2 pages');
     expect(container.textContent).toContain('Page 1');
@@ -191,6 +208,7 @@ describe('P6D Knowledge documents read surface', () => {
   it('shows details errors and empty-page responses without blocking the modal', async () => {
     fetchMock
       .mockResolvedValueOnce(jsonResponse({ documents: [doc()] }))
+      .mockResolvedValueOnce(jsonResponse({ ok: true }))
       .mockResolvedValueOnce(jsonResponse({
         document: { id: 'doc-1', originalFilename: 'EMG_checklist.pdf', pageCount: 2 },
         pages: [],
@@ -327,7 +345,7 @@ describe('P6D Knowledge documents read surface', () => {
     fetchMock.mockResolvedValue(jsonResponse({ documents: [doc({ processingStatus: 'ready' })] }));
     await rerender(1);
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(container.textContent).toContain('Ready');
   });
 
@@ -381,6 +399,7 @@ describe('P6D Knowledge documents read surface', () => {
   it('submits only the trimmed query to the same-origin board search route', async () => {
     fetchMock
       .mockResolvedValueOnce(jsonResponse({ documents: [] }))
+      .mockResolvedValueOnce(jsonResponse({ ok: true }))
       .mockResolvedValueOnce(jsonResponse({ results: [] }));
     const container = await renderList();
 
@@ -398,6 +417,7 @@ describe('P6D Knowledge documents read surface', () => {
   it('renders safe result metadata while preserving the PDF list', async () => {
     fetchMock
       .mockResolvedValueOnce(jsonResponse({ documents: [doc()] }))
+      .mockResolvedValueOnce(jsonResponse({ ok: true }))
       .mockResolvedValueOnce(jsonResponse({
         results: [
           {
@@ -433,6 +453,7 @@ describe('P6D Knowledge documents read surface', () => {
   it('renders page ranges and drops malformed result rows', async () => {
     fetchMock
       .mockResolvedValueOnce(jsonResponse({ documents: [] }))
+      .mockResolvedValueOnce(jsonResponse({ ok: true }))
       .mockResolvedValueOnce(jsonResponse({ results: [
         { originalFilename: 'Guide.pdf', pageStart: 2, pageEnd: 3, text: 'Two-page excerpt' },
         { originalFilename: 'bad.pdf', pageStart: 2, pageEnd: 1, text: 'invalid range' },
@@ -452,6 +473,7 @@ describe('P6D Knowledge documents read surface', () => {
   it('shows no-results and generic error states without exposing server details', async () => {
     fetchMock
       .mockResolvedValueOnce(jsonResponse({ documents: [] }))
+      .mockResolvedValueOnce(jsonResponse({ ok: true }))
       .mockResolvedValueOnce(jsonResponse({ results: [] }));
     const container = await renderList();
     typeIntoSearch(container, 'missing');
@@ -519,5 +541,164 @@ describe('P6D Knowledge documents read surface', () => {
     await act(async () => root!.unmount());
     root = null;
     expect((searchInit?.signal as AbortSignal).aborted).toBe(true);
+  });
+
+  it('shows the waking state and keeps warm traffic free of user or document data', async () => {
+    const warm = deferred<Response>();
+    let warmInit: RequestInit | undefined;
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).includes('/knowledge/warm')) { warmInit = init; return warm.promise; }
+      return Promise.resolve(jsonResponse({ documents: [] }));
+    });
+    const container = await renderList();
+    expect(container.textContent).toContain('Search engine is waking up…');
+    expect(fetchMock.mock.calls.filter(([input]) => String(input).includes('/knowledge/warm'))).toHaveLength(1);
+    expect(warmInit?.body).toBeUndefined();
+    expect(JSON.stringify(warmInit)).not.toMatch(/query|document|EMG_checklist|https?:\/\//i);
+    expect(fetchMock.mock.calls.filter(([input]) => String(input).includes('/knowledge/search'))).toHaveLength(0);
+    warm.resolve(jsonResponse({ ok: true }));
+    await settle();
+  });
+
+  it('queues only the latest explicit query until warm succeeds', async () => {
+    const warm = deferred<Response>();
+    const searchBodies: Record<string, unknown>[] = [];
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).includes('/knowledge/warm')) return warm.promise;
+      if (String(input).includes('/knowledge/search')) {
+        searchBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        return Promise.resolve(jsonResponse({ results: [] }));
+      }
+      return Promise.resolve(jsonResponse({ documents: [] }));
+    });
+    const container = await renderList();
+    typeIntoSearch(container, 'old query');
+    await submitSearch(container);
+    typeIntoSearch(container, 'new query');
+    await submitSearch(container);
+    expect(searchBodies).toHaveLength(0);
+    warm.resolve(jsonResponse({ ok: true }));
+    await settle();
+    expect(searchBodies).toEqual([{ query: 'new query' }]);
+  });
+
+  it('does not auto-search when warm fails without a queued intent', async () => {
+    fetchMock.mockImplementation((input: RequestInfo | URL) => String(input).includes('/knowledge/warm')
+      ? Promise.resolve(jsonResponse({ error: 'down' }, 503))
+      : Promise.resolve(jsonResponse({ documents: [] })));
+    const container = await renderList();
+    expect(container.textContent).not.toContain('No matching Knowledge found.');
+    expect(fetchMock.mock.calls.filter(([input]) => String(input).includes('/knowledge/search'))).toHaveLength(0);
+  });
+
+  it('falls back exactly once through search when a queued query meets warm failure', async () => {
+    const warm = deferred<Response>();
+    const searchBodies: Record<string, unknown>[] = [];
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).includes('/knowledge/warm')) return warm.promise;
+      if (String(input).includes('/knowledge/search')) {
+        searchBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        return Promise.resolve(jsonResponse({ results: [] }));
+      }
+      return Promise.resolve(jsonResponse({ documents: [] }));
+    });
+    const container = await renderList();
+    typeIntoSearch(container, 'fallback query');
+    await submitSearch(container);
+    warm.resolve(jsonResponse({ error: 'down' }, 503));
+    await settle();
+    expect(searchBodies).toEqual([{ query: 'fallback query' }]);
+  });
+
+  it('aborts warm at 120 seconds and falls back once', async () => {
+    vi.useFakeTimers();
+    try {
+      const warm = deferred<Response>();
+      const searchBodies: Record<string, unknown>[] = [];
+      let warmInit: RequestInit | undefined;
+      fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).includes('/knowledge/warm')) { warmInit = init; return warm.promise; }
+        if (String(input).includes('/knowledge/search')) {
+          searchBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+          return Promise.resolve(jsonResponse({ results: [] }));
+        }
+        return Promise.resolve(jsonResponse({ documents: [] }));
+      });
+      host = document.createElement('div');
+      document.body.appendChild(host);
+      root = createRoot(host);
+      await act(async () => { root!.render(<KnowledgeDocumentsList />); });
+      const container = host;
+      typeIntoSearch(container, 'deadline query');
+      await submitSearch(container);
+      vi.advanceTimersByTime(120_000);
+      expect((warmInit?.signal as AbortSignal).aborted).toBe(true);
+      warm.resolve(jsonResponse({ ok: true }));
+      await flushMicrotasks();
+      expect(searchBodies).toEqual([{ query: 'deadline query' }]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('deduplicates one pending warm flight across mounts and aborts after the last closes', async () => {
+    const warm = deferred<Response>();
+    let warmCalls = 0;
+    let warmInit: RequestInit | undefined;
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).includes('/knowledge/warm')) { warmCalls += 1; warmInit = init; return warm.promise; }
+      return Promise.resolve(jsonResponse({ documents: [] }));
+    });
+    await renderList();
+    const secondHost = document.createElement('div');
+    document.body.appendChild(secondHost);
+    const secondRoot = createRoot(secondHost);
+    await act(async () => { secondRoot.render(<KnowledgeDocumentsList />); });
+    await settle();
+    expect(warmCalls).toBe(1);
+    await act(async () => secondRoot.unmount());
+    expect((warmInit?.signal as AbortSignal).aborted).toBe(false);
+    await act(async () => root!.unmount());
+    root = null;
+    expect((warmInit?.signal as AbortSignal).aborted).toBe(true);
+    warm.resolve(jsonResponse({ ok: true }));
+    await settle();
+  });
+
+  it('clears queued search and aborts warm when the modal closes', async () => {
+    const warm = deferred<Response>();
+    const search = vi.fn(async () => jsonResponse({ results: [] }));
+    let warmInit: RequestInit | undefined;
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).includes('/knowledge/warm')) { warmInit = init; return warm.promise; }
+      if (String(input).includes('/knowledge/search')) return search();
+      return Promise.resolve(jsonResponse({ documents: [] }));
+    });
+    const container = await renderList();
+    typeIntoSearch(container, 'closed query');
+    await submitSearch(container);
+    await rerender(0, false);
+    expect((warmInit?.signal as AbortSignal).aborted).toBe(true);
+    warm.resolve(jsonResponse({ ok: true }));
+    await settle();
+    expect(search).not.toHaveBeenCalled();
+  });
+
+  it('keeps real search abort behavior when the modal closes', async () => {
+    const search = deferred<Response>();
+    let searchInit: RequestInit | undefined;
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).includes('/knowledge/warm')) return Promise.resolve(jsonResponse({ ok: true }));
+      if (String(input).includes('/knowledge/search')) { searchInit = init; return search.promise; }
+      return Promise.resolve(jsonResponse({ documents: [] }));
+    });
+    const container = await renderList();
+    typeIntoSearch(container, 'close during search');
+    await submitSearch(container);
+    await rerender(0, false);
+    expect((searchInit?.signal as AbortSignal).aborted).toBe(true);
+    search.resolve(jsonResponse({ results: [{ originalFilename: 'stale.pdf', pageStart: 1, pageEnd: 1, text: 'stale' }] }));
+    await settle();
+    expect(container.textContent).not.toContain('stale.pdf');
   });
 });
