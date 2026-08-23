@@ -151,4 +151,71 @@ describe('authenticated knowledge query service', () => {
     expect(state.provider.embedQuery).toHaveBeenCalledTimes(1);
     expect(state.repository.searchBoardKnowledge).toHaveBeenCalledTimes(1);
   });
+
+  describe('internal similarity diagnostic', () => {
+    const SENTINELS = ['recovery', 'text', 'file.pdf', BOARD_ID, USER_ID];
+    const FORBIDDEN_KEYS = /query|text|filename|document|chunk|board|user|token|embedding|vector|model|dimension|sourceLocator/i;
+
+    it('logs rank-ordered similarity while keeping the public response similarity-free', async () => {
+      const spy = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+      try {
+        const repository = { searchBoardKnowledge: vi.fn(async () => [
+          { ...result, similarity: 0.8123 },
+          { ...result, similarity: 0.6441 },
+        ]) };
+        const state = setup({ repository });
+        const response = await state.service(body(), 'Bearer token');
+        expect(spy).toHaveBeenCalledWith('[KNOWLEDGE-SEARCH-SIMILARITY]', {
+          resultCount: 2,
+          results: [{ rank: 1, similarity: 0.8123 }, { rank: 2, similarity: 0.6441 }],
+        });
+        expect(JSON.stringify(response.body)).not.toContain('similarity');
+      } finally { spy.mockRestore(); }
+    });
+
+    it('contains no sentinel values or forbidden keys beyond rank/similarity/resultCount', async () => {
+      const spy = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+      try {
+        const state = setup();
+        await state.service(body(), 'Bearer token');
+        const call = spy.mock.calls.find(([prefix]) => prefix === '[KNOWLEDGE-SEARCH-SIMILARITY]');
+        const serialized = JSON.stringify(call?.[1]);
+        for (const sentinel of SENTINELS) expect(serialized).not.toContain(sentinel);
+        for (const entry of (call?.[1] as { results: Record<string, unknown>[] }).results) {
+          for (const key of Object.keys(entry)) expect(key).not.toMatch(FORBIDDEN_KEYS);
+        }
+      } finally { spy.mockRestore(); }
+    });
+
+    it('logs resultCount 0 with an empty results array for a successful empty search', async () => {
+      const spy = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+      try {
+        const repository = { searchBoardKnowledge: vi.fn(async () => []) };
+        const state = setup({ repository });
+        await state.service(body(), 'Bearer token');
+        expect(spy).toHaveBeenCalledWith('[KNOWLEDGE-SEARCH-SIMILARITY]', { resultCount: 0, results: [] });
+      } finally { spy.mockRestore(); }
+    });
+
+    it('emits no similarity diagnostic for a warm request', async () => {
+      const spy = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+      try {
+        const state = setup();
+        const warm = createKnowledgeWarmService({ security: state.security });
+        await warm({ boardId: BOARD_ID }, 'Bearer token');
+        expect(spy).not.toHaveBeenCalledWith('[KNOWLEDGE-SEARCH-SIMILARITY]', expect.anything());
+      } finally { spy.mockRestore(); }
+    });
+
+    it('emits no similarity diagnostic when the search never reaches the repository', async () => {
+      const spy = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+      try {
+        const forbidden = setup({
+          security: { verifyAccessToken: vi.fn(async () => ({ userId: USER_ID, client: boardClient({ data: null, error: null }, { data: false, error: null }) })) },
+        });
+        await forbidden.service(body(), 'Bearer token');
+        expect(spy).not.toHaveBeenCalledWith('[KNOWLEDGE-SEARCH-SIMILARITY]', expect.anything());
+      } finally { spy.mockRestore(); }
+    });
+  });
 });
