@@ -39,15 +39,8 @@ type ListPhase = 'loading' | 'loaded' | 'error';
 
 interface KnowledgeDetailsState { entry: KnowledgeListEntry; pages: readonly KnowledgeDocumentDetailPage[]; loading: boolean; error: boolean; }
 
-interface KnowledgeSearchResult {
-  originalFilename: string;
-  pageStart: number;
-  pageEnd: number;
-  text: string;
-}
-
+interface KnowledgeSearchResult { originalFilename: string; pageStart: number; pageEnd: number; text: string; }
 type SearchPhase = 'idle' | 'loading' | 'loaded' | 'error';
-
 function isProcessingStatus(value: unknown): value is KnowledgePdfProcessingStatus {
   return value === 'uploaded' || value === 'processing' || value === 'ready' || value === 'failed';
 }
@@ -115,7 +108,6 @@ function parseSearchResults(value: unknown): readonly KnowledgeSearchResult[] | 
     .map(toSearchResult)
     .filter((result): result is KnowledgeSearchResult => result !== null);
 }
-
 function pageLabel(result: KnowledgeSearchResult): string {
   return result.pageStart === result.pageEnd
     ? `Page ${result.pageStart}`
@@ -137,9 +129,7 @@ export default function KnowledgeDocumentsList({ refreshToken = 0, isOpen = true
   const [phase, setPhase] = useState<ListPhase>('loading');
   const [entries, setEntries] = useState<readonly KnowledgeListEntry[]>([]);
   const [details, setDetails] = useState<KnowledgeDetailsState | null>(null);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchPhase, setSearchPhase] = useState<SearchPhase>('idle');
-  const [searchResults, setSearchResults] = useState<readonly KnowledgeSearchResult[]>([]);
+  const [searchQuery, setSearchQuery] = useState(''), [searchPhase, setSearchPhase] = useState<SearchPhase>('idle'), [searchResults, setSearchResults] = useState<readonly KnowledgeSearchResult[]>([]);
   const searchControllerRef = useRef<AbortController | null>(null);
   const searchGenerationRef = useRef(0);
 
@@ -178,13 +168,11 @@ export default function KnowledgeDocumentsList({ refreshToken = 0, isOpen = true
     searchGenerationRef.current += 1;
     searchControllerRef.current?.abort();
   }, []);
-
   useEffect(() => {
     if (isOpen) return;
     searchGenerationRef.current += 1;
     searchControllerRef.current?.abort();
   }, [isOpen]);
-
   const submitSearch = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const query = searchQuery.trim();
@@ -197,7 +185,6 @@ export default function KnowledgeDocumentsList({ refreshToken = 0, isOpen = true
     searchControllerRef.current = controller;
     setSearchPhase('loading');
     setSearchResults([]);
-
     try {
       const response = await fetch(`/api/boards/${encodeURIComponent(boardId)}/knowledge/search`, {
         method: 'POST',
