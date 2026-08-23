@@ -96,10 +96,20 @@ describe('P6I-A embedding scope and SQL guards', () => {
       && file !== 'workers/knowledge-embedding/tei/Dockerfile'
       && file !== 'workers/knowledge-query/Dockerfile'
       && file !== 'app/api/boards/[id]/knowledge/route.ts'
+      && file !== 'app/api/boards/[id]/knowledge/search/route.ts'
       && file !== 'lib/server/knowledge/knowledgeBoardReadAuthorization.ts'
+      && file !== 'lib/server/knowledge/knowledgeSearchProxyRoute.ts'
+      && file !== 'lib/server/knowledge/knowledgeSearchProxyRoute.test.ts'
       && !file.startsWith('scripts/benchmarks/knowledge-retrieval/')
       && file !== 'scripts/db/bootstrap-local.mjs',
     ).join('\n');
+    const reviewedProxyPaths = [
+      'app/api/boards/[id]/knowledge/search/route.ts',
+      'lib/server/knowledge/knowledgeSearchProxyRoute.ts',
+      'lib/server/knowledge/knowledgeSearchProxyRoute.test.ts',
+    ];
+    expect(reviewedProxyPaths).not.toContain('app/api/boards/[id]/knowledge/other-route.ts');
+    expect(reviewedProxyPaths).not.toContain('lib/server/knowledge/unreviewedKnowledgeRoute.ts');
     for (const forbidden of [
       'workers/knowledge-pdf/', 'app/api/boards/', 'lib/server/knowledge/', 'components/',
       'middleware.ts', 'package.json', 'package-lock.json', 'deploy/', 'Dockerfile',
