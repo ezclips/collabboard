@@ -701,4 +701,47 @@ describe('P6D Knowledge documents read surface', () => {
     await settle();
     expect(container.textContent).not.toContain('stale.pdf');
   });
+
+  it('does not search after warm succeeds with no queued query', async () => {
+    const warm = deferred<Response>();
+    const searchBodies: Record<string, unknown>[] = [];
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).includes('/knowledge/warm')) return warm.promise;
+      if (String(input).includes('/knowledge/search')) {
+        searchBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        return Promise.resolve(jsonResponse({ results: [] }));
+      }
+      return Promise.resolve(jsonResponse({ documents: [] }));
+    });
+    await renderList();
+    warm.resolve(jsonResponse({ ok: true }));
+    await settle();
+    expect(searchBodies).toHaveLength(0);
+  });
+
+  it('keeps a shared prewarm flight alive across a StrictMode mount/cleanup/remount cycle', async () => {
+    const warm = deferred<Response>();
+    let warmInit: RequestInit | undefined;
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).includes('/knowledge/warm')) { warmInit = init; return warm.promise; }
+      return Promise.resolve(jsonResponse({ documents: [] }));
+    });
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    root = createRoot(host);
+    await act(async () => {
+      root!.render(
+        <React.StrictMode>
+          <KnowledgeDocumentsList />
+        </React.StrictMode>,
+      );
+    });
+    await flushMicrotasks();
+    expect(fetchMock.mock.calls.filter(([input]) => String(input).includes('/knowledge/warm'))).toHaveLength(1);
+    expect((warmInit?.signal as AbortSignal).aborted).toBe(false);
+    expect(host.textContent).toContain('Search engine is waking up…');
+    warm.resolve(jsonResponse({ ok: true }));
+    await settle();
+    expect(host.textContent).not.toContain('Search engine is waking up…');
+  });
 });

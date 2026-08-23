@@ -145,7 +145,11 @@ function subscribeToKnowledgeWarm(boardId: string): KnowledgeWarmSubscription {
       if (released) return;
       released = true;
       flight!.consumers.delete(consumer);
-      if (flight!.consumers.size === 0 && knowledgeWarmFlights.get(boardId) === flight) flight!.controller.abort();
+      if (flight!.consumers.size === 0) {
+        queueMicrotask(() => {
+          if (flight!.consumers.size === 0 && knowledgeWarmFlights.get(boardId) === flight) flight!.controller.abort();
+        });
+      }
     },
   };
 }
