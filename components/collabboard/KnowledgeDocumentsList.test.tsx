@@ -423,6 +423,7 @@ describe('P6D Knowledge documents read surface', () => {
     expect(container.textContent).toContain('EMG_checklist.pdf');
     expect(container.textContent).toContain('View text');
     expect(container.querySelector('[data-knowledge-search-results] li')).not.toBeNull();
+    expect(container.querySelector('[data-knowledge-search-results] li p:last-child')?.className).toContain('line-clamp-4');
     expect(container.querySelector('b')).toBeNull();
     expect(container.textContent).not.toContain('hidden-model');
     expect(container.textContent).not.toContain('0.99');

@@ -305,7 +305,7 @@ export default function KnowledgeDocumentsList({ refreshToken = 0, isOpen = true
                   <li key={`${result.originalFilename}-${result.pageStart}-${result.pageEnd}-${index}`} className="rounded-md border border-gray-100 px-2 py-1.5">
                     <p className="truncate text-xs font-medium text-gray-700">{result.originalFilename}</p>
                     <p className="text-[11px] text-gray-500">{pageLabel(result)}</p>
-                    <p className="mt-1 whitespace-pre-wrap text-xs text-gray-600">{result.text}</p>
+                    <p className="mt-1 line-clamp-4 whitespace-pre-wrap text-xs text-gray-600">{result.text}</p>
                   </li>
                 ))}
               </ul>
