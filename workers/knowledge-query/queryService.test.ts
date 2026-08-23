@@ -95,4 +95,34 @@ describe('authenticated knowledge query service', () => {
     const other = setup({ security: otherUserSecurity, rateLimiter: limiter });
     await expect(other.service(body(), 'Bearer token')).resolves.toMatchObject({ status: 200 });
   });
+
+  it('keeps a boundary-straddling request inside the rolling window', async () => {
+    let now = 0;
+    const limiter = new InMemoryKnowledgeQueryRateLimiter(() => now);
+    const state = setup({ rateLimiter: limiter });
+    for (let i = 0; i < 9; i++) await expect(state.service(body(), 'Bearer token')).resolves.toMatchObject({ status: 200 });
+    now = 59_000;
+    await expect(state.service(body(), 'Bearer token')).resolves.toMatchObject({ status: 200 });
+    now = 60_001;
+    for (let i = 0; i < 9; i++) await expect(state.service(body(), 'Bearer token')).resolves.toMatchObject({ status: 200 });
+    await expect(state.service(body(), 'Bearer token')).resolves.toMatchObject({ status: 429 });
+  });
+
+  it('does not call authorization, embedding, or search after rate rejection', async () => {
+    let now = 0;
+    const limiter = new InMemoryKnowledgeQueryRateLimiter(() => now);
+    const client = boardClient();
+    const security = { verifyAccessToken: vi.fn(async () => ({ userId: USER_ID, client })) };
+    const provider = { embedQuery: vi.fn(async () => ({ modelId: KNOWLEDGE_QUERY_PROFILE.modelId, dimensions: 1024, embedding: [0] })) };
+    const repository = { searchBoardKnowledge: vi.fn(async () => [result]) };
+    const state = setup({ security, provider, repository, rateLimiter: limiter });
+    for (let i = 0; i < 10; i++) await state.service(body(), 'Bearer token');
+    const authCalls = (client.from as unknown as ReturnType<typeof vi.fn>).mock.calls.length;
+    const embedCalls = provider.embedQuery.mock.calls.length;
+    const searchCalls = repository.searchBoardKnowledge.mock.calls.length;
+    await expect(state.service(body(), 'Bearer token')).resolves.toMatchObject({ status: 429 });
+    expect(client.from).toHaveBeenCalledTimes(authCalls);
+    expect(provider.embedQuery).toHaveBeenCalledTimes(embedCalls);
+    expect(repository.searchBoardKnowledge).toHaveBeenCalledTimes(searchCalls);
+  });
 });

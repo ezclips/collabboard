@@ -40,20 +40,22 @@ export interface KnowledgeQueryRateLimiter {
 }
 
 export class InMemoryKnowledgeQueryRateLimiter implements KnowledgeQueryRateLimiter {
-  private readonly entries = new Map<string, { count: number; expiresAt: number }>();
+  private readonly entries = new Map<string, number[]>();
 
   constructor(private readonly now: () => number = Date.now, private readonly windowMs = 60_000, private readonly maxAttempts = 10) {}
 
   consume(userId: string): boolean {
     const currentTime = this.now();
-    for (const [key, entry] of this.entries) if (entry.expiresAt <= currentTime) this.entries.delete(key);
-    const entry = this.entries.get(userId);
-    if (!entry || entry.expiresAt <= currentTime) {
-      this.entries.set(userId, { count: 1, expiresAt: currentTime + this.windowMs });
-      return true;
+    const cutoff = currentTime - this.windowMs;
+    for (const [key, timestamps] of this.entries) {
+      const recent = timestamps.filter((timestamp) => timestamp > cutoff);
+      if (recent.length === 0) this.entries.delete(key);
+      else this.entries.set(key, recent);
     }
-    if (entry.count >= this.maxAttempts) return false;
-    entry.count += 1;
+    const timestamps = this.entries.get(userId) ?? [];
+    if (timestamps.length >= this.maxAttempts) return false;
+    timestamps.push(currentTime);
+    this.entries.set(userId, timestamps);
     return true;
   }
 }
