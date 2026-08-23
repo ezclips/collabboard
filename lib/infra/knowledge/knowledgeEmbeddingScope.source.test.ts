@@ -100,6 +100,8 @@ describe('P6I-A embedding scope and SQL guards', () => {
       && file !== 'lib/server/knowledge/knowledgeBoardReadAuthorization.ts'
       && file !== 'lib/server/knowledge/knowledgeSearchProxyRoute.ts'
       && file !== 'lib/server/knowledge/knowledgeSearchProxyRoute.test.ts'
+      && file !== 'components/collabboard/KnowledgeDocumentsList.tsx'
+      && file !== 'components/collabboard/KnowledgeDocumentsList.test.tsx'
       && !file.startsWith('scripts/benchmarks/knowledge-retrieval/')
       && file !== 'scripts/db/bootstrap-local.mjs',
     ).join('\n');
@@ -107,9 +109,12 @@ describe('P6I-A embedding scope and SQL guards', () => {
       'app/api/boards/[id]/knowledge/search/route.ts',
       'lib/server/knowledge/knowledgeSearchProxyRoute.ts',
       'lib/server/knowledge/knowledgeSearchProxyRoute.test.ts',
+      'components/collabboard/KnowledgeDocumentsList.tsx',
+      'components/collabboard/KnowledgeDocumentsList.test.tsx',
     ];
     expect(reviewedProxyPaths).not.toContain('app/api/boards/[id]/knowledge/other-route.ts');
     expect(reviewedProxyPaths).not.toContain('lib/server/knowledge/unreviewedKnowledgeRoute.ts');
+    expect(reviewedProxyPaths).not.toContain('components/collabboard/UnreviewedKnowledgeSearch.tsx');
     for (const forbidden of [
       'workers/knowledge-pdf/', 'app/api/boards/', 'lib/server/knowledge/', 'components/',
       'middleware.ts', 'package.json', 'package-lock.json', 'deploy/', 'Dockerfile',

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import KnowledgeDocumentDetails, { type KnowledgeDocumentDetailPage } from '@/components/collabboard/KnowledgeDocumentDetails';
 import {
@@ -38,6 +38,15 @@ interface KnowledgeListEntry {
 type ListPhase = 'loading' | 'loaded' | 'error';
 
 interface KnowledgeDetailsState { entry: KnowledgeListEntry; pages: readonly KnowledgeDocumentDetailPage[]; loading: boolean; error: boolean; }
+
+interface KnowledgeSearchResult {
+  originalFilename: string;
+  pageStart: number;
+  pageEnd: number;
+  text: string;
+}
+
+type SearchPhase = 'idle' | 'loading' | 'loaded' | 'error';
 
 function isProcessingStatus(value: unknown): value is KnowledgePdfProcessingStatus {
   return value === 'uploaded' || value === 'processing' || value === 'ready' || value === 'failed';
@@ -86,6 +95,33 @@ function originalPdfPath(boardId: string, documentId: string) {
   return `/api/boards/${encodeURIComponent(boardId)}/knowledge/${encodeURIComponent(documentId)}/original`;
 }
 
+function toSearchResult(value: unknown): KnowledgeSearchResult | null {
+  if (!value || typeof value !== 'object') return null;
+  const record = value as Record<string, unknown>;
+  const pageStart = record.pageStart;
+  const pageEnd = record.pageEnd;
+  if (
+    typeof record.originalFilename !== 'string' || record.originalFilename.length === 0
+    || typeof pageStart !== 'number' || !Number.isInteger(pageStart) || pageStart < 1
+    || typeof pageEnd !== 'number' || !Number.isInteger(pageEnd) || pageEnd < pageStart
+    || typeof record.text !== 'string'
+  ) return null;
+  return { originalFilename: record.originalFilename, pageStart, pageEnd, text: record.text };
+}
+
+function parseSearchResults(value: unknown): readonly KnowledgeSearchResult[] | null {
+  if (!value || typeof value !== 'object' || !Array.isArray((value as Record<string, unknown>).results)) return null;
+  return (value as { results: unknown[] }).results
+    .map(toSearchResult)
+    .filter((result): result is KnowledgeSearchResult => result !== null);
+}
+
+function pageLabel(result: KnowledgeSearchResult): string {
+  return result.pageStart === result.pageEnd
+    ? `Page ${result.pageStart}`
+    : `Pages ${result.pageStart}–${result.pageEnd}`;
+}
+
 /**
  * Read-only list of the PDFs already attached to the current board.
  *
@@ -101,6 +137,11 @@ export default function KnowledgeDocumentsList({ refreshToken = 0, isOpen = true
   const [phase, setPhase] = useState<ListPhase>('loading');
   const [entries, setEntries] = useState<readonly KnowledgeListEntry[]>([]);
   const [details, setDetails] = useState<KnowledgeDetailsState | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchPhase, setSearchPhase] = useState<SearchPhase>('idle');
+  const [searchResults, setSearchResults] = useState<readonly KnowledgeSearchResult[]>([]);
+  const searchControllerRef = useRef<AbortController | null>(null);
+  const searchGenerationRef = useRef(0);
 
   useEffect(() => {
     if (!boardId) return;
@@ -132,6 +173,52 @@ export default function KnowledgeDocumentsList({ refreshToken = 0, isOpen = true
       controller.abort();
     };
   }, [boardId, refreshToken]);
+
+  useEffect(() => () => {
+    searchGenerationRef.current += 1;
+    searchControllerRef.current?.abort();
+  }, []);
+
+  useEffect(() => {
+    if (isOpen) return;
+    searchGenerationRef.current += 1;
+    searchControllerRef.current?.abort();
+  }, [isOpen]);
+
+  const submitSearch = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const query = searchQuery.trim();
+    if (!boardId || query.length === 0) return;
+
+    searchGenerationRef.current += 1;
+    const generation = searchGenerationRef.current;
+    searchControllerRef.current?.abort();
+    const controller = new AbortController();
+    searchControllerRef.current = controller;
+    setSearchPhase('loading');
+    setSearchResults([]);
+
+    try {
+      const response = await fetch(`/api/boards/${encodeURIComponent(boardId)}/knowledge/search`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ query }),
+        signal: controller.signal,
+      });
+      const payload = await response.json().catch(() => null);
+      const results = response.ok ? parseSearchResults(payload) : null;
+      if (!results) throw new Error('search unavailable');
+      if (generation !== searchGenerationRef.current) return;
+      setSearchResults(results);
+      setSearchPhase('loaded');
+    } catch {
+      if (controller.signal.aborted || generation !== searchGenerationRef.current) return;
+      setSearchResults([]);
+      setSearchPhase('error');
+    } finally {
+      if (searchControllerRef.current === controller) searchControllerRef.current = null;
+    }
+  };
 
   const openDetails = async (entry: KnowledgeListEntry) => {
     if (!boardId) return;
@@ -203,14 +290,48 @@ export default function KnowledgeDocumentsList({ refreshToken = 0, isOpen = true
             error={details.error}
             onBack={() => setDetails(null)}
           />
-        ) : phase === 'error' ? (
-        <p className="mt-2 text-[11px] text-gray-500">Knowledge documents unavailable.</p>
-      ) : entries.length > 0 ? (
-        <ul className="mt-2 max-h-64 space-y-2 overflow-y-auto">
-          {entries.map((entry) => {
-            const metadata = metadataLine(entry);
-            return (
-              <li key={entry.id} className="min-w-0">
+        ) : (
+          <>
+            <form className="mt-3 flex gap-2" onSubmit={(event) => void submitSearch(event)}>
+              <input
+                type="search"
+                aria-label="Search Knowledge"
+                placeholder="Search across PDFs…"
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                className="min-w-0 flex-1 rounded-md border border-gray-200 px-2 py-1.5 text-xs text-gray-700 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-200"
+              />
+              <button
+                type="submit"
+                aria-label="Submit Knowledge search"
+                className="rounded-md border border-gray-200 px-2 py-1.5 text-xs text-gray-700 hover:bg-gray-50"
+              >
+                Search
+              </button>
+            </form>
+            {searchPhase === 'loading' ? <p className="mt-2 text-[11px] text-gray-500">Searching Knowledge…</p> : null}
+            {searchPhase === 'error' ? <p className="mt-2 text-[11px] text-gray-500">Knowledge search unavailable.</p> : null}
+            {searchPhase === 'loaded' && searchResults.length === 0 ? <p className="mt-2 text-[11px] text-gray-500">No matching Knowledge found.</p> : null}
+            {searchPhase === 'loaded' && searchResults.length > 0 ? (
+              <ul data-knowledge-search-results="true" className="mt-2 space-y-2">
+                {searchResults.map((result, index) => (
+                  <li key={`${result.originalFilename}-${result.pageStart}-${result.pageEnd}-${index}`} className="rounded-md border border-gray-100 px-2 py-1.5">
+                    <p className="truncate text-xs font-medium text-gray-700">{result.originalFilename}</p>
+                    <p className="text-[11px] text-gray-500">{pageLabel(result)}</p>
+                    <p className="mt-1 whitespace-pre-wrap text-xs text-gray-600">{result.text}</p>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+
+            {phase === 'error' ? (
+              <p className="mt-2 text-[11px] text-gray-500">Knowledge documents unavailable.</p>
+            ) : entries.length > 0 ? (
+              <ul className="mt-2 max-h-64 space-y-2 overflow-y-auto">
+                {entries.map((entry) => {
+                  const metadata = metadataLine(entry);
+                  return (
+                    <li key={entry.id} className="min-w-0">
                   {entry.processingStatus === 'ready' ? (
                     <a
                       href={originalPdfPath(boardId, entry.id)}
@@ -238,14 +359,16 @@ export default function KnowledgeDocumentsList({ refreshToken = 0, isOpen = true
                     View text
                   </button>
                 ) : null}
-              </li>
-            );
-          })}
-        </ul>
-      ) : phase === 'loading' ? (
-        <p className="mt-2 text-[11px] text-gray-500">Loading PDFs…</p>
-      ) : (
-        <p className="mt-2 text-[11px] text-gray-500">No PDFs added yet.</p>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : phase === 'loading' ? (
+              <p className="mt-2 text-[11px] text-gray-500">Loading PDFs…</p>
+            ) : (
+              <p className="mt-2 text-[11px] text-gray-500">No PDFs added yet.</p>
+            )}
+          </>
         )}
       </div>
     </div>

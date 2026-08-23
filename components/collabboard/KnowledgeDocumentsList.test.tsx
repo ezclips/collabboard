@@ -98,6 +98,27 @@ async function rerender(refreshToken: number, isOpen = true, onClose = vi.fn()) 
   await settle();
 }
 
+function typeIntoSearch(container: HTMLElement, value: string) {
+  const input = container.querySelector('input[aria-label="Search Knowledge"]') as HTMLInputElement;
+  act(() => {
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    setter.call(input, value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
+
+async function submitSearch(container: HTMLElement) {
+  await act(async () => {
+    container.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  });
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((nextResolve) => { resolve = nextResolve; });
+  return { promise, resolve };
+}
+
 describe('P6D Knowledge documents read surface', () => {
   it('issues exactly one GET for the current board on mount', async () => {
     await renderList();
@@ -344,5 +365,158 @@ describe('P6D Knowledge documents read surface', () => {
     expect(container.querySelector('iframe, embed, object, canvas, img')).toBeNull();
     expect(container.querySelector('a[download]')).toBeNull();
     expect(componentCode).not.toMatch(/pdfjs|getDocument\(|createPost|addPost|handleToolClick|storagePath/i);
+  });
+
+  it('does not search on mount, typing, or an empty submitted query', async () => {
+    const container = await renderList();
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes('/knowledge/search'))).toHaveLength(0);
+
+    typeIntoSearch(container, '   ');
+    await settle();
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes('/knowledge/search'))).toHaveLength(0);
+    await submitSearch(container);
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes('/knowledge/search'))).toHaveLength(0);
+  });
+
+  it('submits only the trimmed query to the same-origin board search route', async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ documents: [] }))
+      .mockResolvedValueOnce(jsonResponse({ results: [] }));
+    const container = await renderList();
+
+    typeIntoSearch(container, '  evacuation plan  ');
+    await submitSearch(container);
+
+    const searchCall = fetchMock.mock.calls.find(([url]) => String(url).includes('/knowledge/search')) as [string, RequestInit];
+    expect(searchCall[0]).toBe(`/api/boards/${BOARD_ID}/knowledge/search`);
+    expect(searchCall[1].method).toBe('POST');
+    expect(searchCall[1].body).toBe(JSON.stringify({ query: 'evacuation plan' }));
+    expect(searchCall[1].headers).toEqual({ 'content-type': 'application/json' });
+    expect(Object.keys(searchCall[1])).toEqual(['method', 'headers', 'body', 'signal']);
+  });
+
+  it('renders safe result metadata while preserving the PDF list', async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ documents: [doc()] }))
+      .mockResolvedValueOnce(jsonResponse({
+        results: [
+          {
+            originalFilename: 'Good.pdf',
+            pageStart: 1,
+            pageEnd: 1,
+            text: '<b>Evacuation</b>\nRoute to exit',
+            similarity: 0.99,
+            model: 'hidden-model',
+            vector: [1, 2, 3],
+          },
+          { originalFilename: 'malformed.pdf', pageStart: 0, pageEnd: 1, text: 'drop me' },
+        ],
+      }));
+    const container = await renderList();
+
+    typeIntoSearch(container, 'exit');
+    await submitSearch(container);
+
+    expect(container.textContent).toContain('Good.pdf');
+    expect(container.textContent).toContain('Page 1');
+    expect(container.textContent).toContain('<b>Evacuation</b>');
+    expect(container.textContent).toContain('EMG_checklist.pdf');
+    expect(container.textContent).toContain('View text');
+    expect(container.querySelector('[data-knowledge-search-results] li')).not.toBeNull();
+    expect(container.querySelector('b')).toBeNull();
+    expect(container.textContent).not.toContain('hidden-model');
+    expect(container.textContent).not.toContain('0.99');
+    expect(container.textContent).not.toContain('1,2,3');
+  });
+
+  it('renders page ranges and drops malformed result rows', async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ documents: [] }))
+      .mockResolvedValueOnce(jsonResponse({ results: [
+        { originalFilename: 'Guide.pdf', pageStart: 2, pageEnd: 3, text: 'Two-page excerpt' },
+        { originalFilename: 'bad.pdf', pageStart: 2, pageEnd: 1, text: 'invalid range' },
+        null,
+      ] }));
+    const container = await renderList();
+
+    typeIntoSearch(container, 'guide');
+    await submitSearch(container);
+
+    expect(container.textContent).toContain('Pages 2–3');
+    expect(container.textContent).toContain('Two-page excerpt');
+    expect(container.textContent).not.toContain('invalid range');
+    expect(container.querySelectorAll('[data-knowledge-search-results] li')).toHaveLength(1);
+  });
+
+  it('shows no-results and generic error states without exposing server details', async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ documents: [] }))
+      .mockResolvedValueOnce(jsonResponse({ results: [] }));
+    const container = await renderList();
+    typeIntoSearch(container, 'missing');
+    await submitSearch(container);
+    expect(container.textContent).toContain('No matching Knowledge found.');
+
+    fetchMock.mockResolvedValueOnce(jsonResponse({ error: 'upstream secret' }, 502));
+    typeIntoSearch(container, 'again');
+    await submitSearch(container);
+    expect(container.textContent).toContain('Knowledge search unavailable.');
+    expect(container.textContent).not.toContain('upstream secret');
+
+    fetchMock.mockResolvedValueOnce(jsonResponse({ unexpected: true }));
+    typeIntoSearch(container, 'malformed');
+    await submitSearch(container);
+    expect(container.textContent).toContain('Knowledge search unavailable.');
+  });
+
+  it('shows loading and prevents stale results from replacing a newer search', async () => {
+    const first = deferred<Response>();
+    const second = deferred<Response>();
+    let searchCount = 0;
+    let firstInit: RequestInit | undefined;
+    let secondInit: RequestInit | undefined;
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      if (!String(input).includes('/knowledge/search')) return Promise.resolve(jsonResponse({ documents: [] }));
+      searchCount += 1;
+      if (searchCount === 1) {
+        firstInit = init;
+        return first.promise;
+      }
+      secondInit = init;
+      return second.promise;
+    });
+    const container = await renderList();
+
+    typeIntoSearch(container, 'old query');
+    await submitSearch(container);
+    expect(container.textContent).toContain('Searching Knowledge…');
+    typeIntoSearch(container, 'new query');
+    await submitSearch(container);
+    expect((firstInit?.signal as AbortSignal).aborted).toBe(true);
+    expect(secondInit?.method).toBe('POST');
+
+    second.resolve(jsonResponse({ results: [{ originalFilename: 'new.pdf', pageStart: 1, pageEnd: 1, text: 'new result' }] }));
+    await settle();
+    expect(container.textContent).toContain('new result');
+    first.resolve(jsonResponse({ results: [{ originalFilename: 'old.pdf', pageStart: 1, pageEnd: 1, text: 'old result' }] }));
+    await settle();
+    expect(container.textContent).toContain('new result');
+    expect(container.textContent).not.toContain('old result');
+  });
+
+  it('aborts an in-flight search when the modal unmounts', async () => {
+    const pending = deferred<Response>();
+    let searchInit: RequestInit | undefined;
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      if (!String(input).includes('/knowledge/search')) return Promise.resolve(jsonResponse({ documents: [] }));
+      searchInit = init;
+      return pending.promise;
+    });
+    const container = await renderList();
+    typeIntoSearch(container, 'query');
+    await submitSearch(container);
+    await act(async () => root!.unmount());
+    root = null;
+    expect((searchInit?.signal as AbortSignal).aborted).toBe(true);
   });
 });
