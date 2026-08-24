@@ -36,6 +36,7 @@ type SourceReferenceQueryResult = {
 
 interface SourceReferenceListQuery {
   eq(column: string, value: string): SourceReferenceListQuery;
+  in(column: string, values: readonly string[]): SourceReferenceListQuery;
   order(column: string, options: { ascending: boolean }): SourceReferenceListQuery;
   then<TResult1 = SourceReferenceQueryResult>(
     onfulfilled?: ((value: SourceReferenceQueryResult) => TResult1 | PromiseLike<TResult1>) | null,
@@ -85,8 +86,11 @@ function toSourceReference(row: SourceReferenceRow): SourceReference {
   };
 }
 
+/** One shape for both reads: neither may leak provider text to the caller. */
+const UNAVAILABLE_MESSAGE = 'Could not read the source references';
+
 export class SupabaseKnowledgeSourceReferenceReader
-implements Pick<KnowledgeRepository, 'listReferencesByTargetPadletId'> {
+implements Pick<KnowledgeRepository, 'listReferencesByTargetPadletId' | 'listReferencesByTargetPadletIds'> {
   constructor(private readonly client: KnowledgeSourceReferenceSupabaseClient) {}
 
   async listReferencesByTargetPadletId(
@@ -102,12 +106,45 @@ implements Pick<KnowledgeRepository, 'listReferencesByTargetPadletId'> {
         .order('id', { ascending: true });
 
       if (error) {
-        return err(domainError('unavailable', 'Could not read the source references', { cause: error }));
+        return err(domainError('unavailable', UNAVAILABLE_MESSAGE, { cause: error }));
       }
 
       return ok((data ?? []).map(toSourceReference));
     } catch (cause) {
-      return err(domainError('unavailable', 'Could not read the source references', { cause }));
+      return err(domainError('unavailable', UNAVAILABLE_MESSAGE, { cause }));
+    }
+  }
+
+  /**
+   * Exactly one query for the whole target set, which is the entire reason this
+   * method exists: the single-target read called in a loop would put one request
+   * on the wire per Note on the board.
+   */
+  async listReferencesByTargetPadletIds(
+    targetPadletIds: readonly PostId[],
+  ): Promise<Result<readonly SourceReference[], DomainError>> {
+    // No targets means nothing to ask about. Returning early keeps an empty
+    // board off the network entirely rather than sending `in ()`.
+    const uniqueIds = Array.from(new Set<string>(targetPadletIds));
+    if (uniqueIds.length === 0) return ok([]);
+
+    try {
+      const { data, error } = await this.client
+        .from('source_references')
+        .select(SOURCE_REFERENCE_COLUMNS)
+        .in('target_padlet_id', uniqueIds)
+        // Same total order as the single-target read, so a Note's citations
+        // read identically whichever of the two loaded them.
+        .order('created_at', { ascending: true })
+        .order('id', { ascending: true });
+
+      if (error) {
+        return err(domainError('unavailable', UNAVAILABLE_MESSAGE, { cause: error }));
+      }
+
+      return ok((data ?? []).map(toSourceReference));
+    } catch (cause) {
+      return err(domainError('unavailable', UNAVAILABLE_MESSAGE, { cause }));
     }
   }
 }

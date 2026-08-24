@@ -86,6 +86,16 @@ import { getVerifiedAuthUser, onAuthSessionChanged, updateCurrentUserMetadata } 
 import { createStorageGateway } from '@/lib/infra/supabase/storage';
 import type { Padlet, BoardSection, PendingPostDraft, NewPostDragState, DropIndicatorState, CanvasLine } from '@/types/collabboard';
 import { buildKnowledgeSourceNoteDraft } from '@/lib/domain/knowledge/knowledgeSourceNoteDraft';
+import {
+  EMPTY_KNOWLEDGE_SOURCE_REFERENCE_INDEX,
+  buildKnowledgeSourceReferenceIndex,
+  parseKnowledgeSourceReference,
+  upsertKnowledgeSourceReference,
+} from '@/lib/domain/knowledge/knowledgeSourceReferenceIndex';
+import type { KnowledgeSourceReferenceIndex } from '@/lib/domain/knowledge/knowledgeSourceReferenceIndex';
+import { SupabaseKnowledgeSourceReferenceReader } from '@/lib/infra/knowledge/knowledgeSourceReferenceAdapters';
+import type { KnowledgeSourceReferenceSupabaseClient } from '@/lib/infra/knowledge/knowledgeSourceReferenceAdapters';
+import { asPostId } from '@/lib/domain/core/ids';
 import type { KnowledgeSourcePageRequest, KnowledgeSourceReferenceDraft } from '@/lib/domain/knowledge/knowledgeSourceNoteDraft';
 import type { AuthUser, AuthSession } from '@/lib/domain/auth/user';
 import {
@@ -1499,6 +1509,63 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   // tidy up a link failure would destroy work to protect metadata.
   const [sourceNoteReference, setSourceNoteReference] = useState<KnowledgeSourceReferenceDraft | null>(null);
 
+  // ==========================================================================
+  // P6J-F6-B1 -- board-scoped source-reference read + local index
+  // ==========================================================================
+  // Transient read state only. Durable provenance stays exclusively in
+  // source_references: nothing here is ever written back to a padlet row or
+  // into padlet metadata.
+  const [sourceReferencesByPadletId, setSourceReferencesByPadletId] =
+    useState<KnowledgeSourceReferenceIndex>(EMPTY_KNOWLEDGE_SOURCE_REFERENCE_INDEX);
+
+  // The read depends on WHICH posts exist, not on their contents. Collapsing
+  // the set to a sorted key means moving, renaming or recolouring a post -- the
+  // common case -- does not re-issue the query, and a set that merely reorders
+  // is recognised as the same set.
+  const sourceReferenceTargetKey = useMemo(
+    () => Array.from(new Set(padlets.map((padlet) => String(padlet.id)))).sort().join(','),
+    [padlets],
+  );
+
+  useEffect(() => {
+    // An unresolved session would read as an anonymous user and see nothing.
+    if (!sessionReady) return;
+
+    const targetIds = sourceReferenceTargetKey.length > 0 ? sourceReferenceTargetKey.split(',') : [];
+    if (targetIds.length === 0) {
+      setSourceReferencesByPadletId(EMPTY_KNOWLEDGE_SOURCE_REFERENCE_INDEX);
+      return;
+    }
+
+    let cancelled = false;
+    const load = async () => {
+      const reader = new SupabaseKnowledgeSourceReferenceReader(
+        // The board's own authenticated browser client. No admin client, no
+        // service role: RLS stays the read boundary.
+        supabase as unknown as KnowledgeSourceReferenceSupabaseClient,
+      );
+      // ONE query for the whole board, never one per Note.
+      const result = await reader.listReferencesByTargetPadletIds(targetIds.map(asPostId));
+      // A slower earlier request must not overwrite a newer post set.
+      if (cancelled) return;
+      if (!result.ok) {
+        // Provenance is supplementary UI: a failed read costs badges, not the
+        // board. No toast, no throw, and only the stable developer-facing
+        // message -- never provider text.
+        console.warn('Knowledge source references unavailable:', result.error.message);
+        setSourceReferencesByPadletId(EMPTY_KNOWLEDGE_SOURCE_REFERENCE_INDEX);
+        return;
+      }
+      setSourceReferencesByPadletId(buildKnowledgeSourceReferenceIndex(result.value));
+    };
+
+    void load().catch(() => {
+      if (!cancelled) setSourceReferencesByPadletId(EMPTY_KNOWLEDGE_SOURCE_REFERENCE_INDEX);
+    });
+
+    return () => { cancelled = true; };
+  }, [sessionReady, sourceReferenceTargetKey, supabase]);
+
   const persistKnowledgeSourceReference = useCallback(async (
     targetPadletId: string,
     sourceReference: KnowledgeSourceReferenceDraft,
@@ -1519,6 +1586,25 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
         }),
       });
       if (!response.ok) throw new Error(`source reference rejected with ${response.status}`);
+
+      // Past this point the durable row EXISTS. Everything below only updates
+      // local read state, so it is deliberately kept out of the catch: a
+      // parse problem here must never be reported as a failed save. Reading
+      // the body cannot throw into that catch either -- the rejection is
+      // absorbed here and degrades to "nothing to index".
+      const created = parseKnowledgeSourceReference(
+        await response
+          .json()
+          .then((payload) => (payload as { reference?: unknown } | null)?.reference)
+          .catch(() => null),
+      );
+      if (created) {
+        // Without this the new Note carries no visible provenance until the
+        // board is reloaded -- there is no source_references realtime channel.
+        setSourceReferencesByPadletId((current) => upsertKnowledgeSourceReference(current, created));
+      } else {
+        console.warn('Knowledge source reference saved, but its response could not be indexed locally');
+      }
     } catch (err) {
       // The Note stays. No delete, no rollback, no retry, and nothing thrown
       // back into the already-successful creation path.

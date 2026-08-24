@@ -101,4 +101,13 @@ export interface KnowledgeRepository {
   listPagesByDocumentId(id: KnowledgeDocumentId): Promise<Result<readonly KnowledgePage[], DomainError>>;
   listChunksByDocumentId(id: KnowledgeDocumentId): Promise<Result<readonly KnowledgeChunk[], DomainError>>;
   listReferencesByTargetPadletId(id: PostId): Promise<Result<readonly SourceReference[], DomainError>>;
+  /**
+   * Batch sibling of the single-target read. A board renders many Notes at
+   * once, so asking per Note would issue one request per card; this exists so
+   * the whole visible set costs a single query. Callers get one flat list --
+   * grouping is the caller's concern, not the repository's.
+   */
+  listReferencesByTargetPadletIds(
+    targetPadletIds: readonly PostId[],
+  ): Promise<Result<readonly SourceReference[], DomainError>>;
 }

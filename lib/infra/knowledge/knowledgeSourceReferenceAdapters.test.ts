@@ -28,14 +28,21 @@ function row(overrides: Record<string, unknown> = {}) {
 }
 
 /**
- * Records the exact query the adapter builds. Only `select`, `eq` and `order`
- * exist, so any attempt to mutate through this client is a type error at author
- * time and a missing-method crash at run time.
+ * Records the exact query the adapter builds. Only `select`, `eq`, `in` and
+ * `order` exist, so any attempt to mutate through this client is a type error
+ * at author time and a missing-method crash at run time.
  */
 function setup(result: { data: unknown[] | null; error: unknown } | Error) {
-  const calls = { select: [] as string[], eq: [] as Array<[string, string]>, order: [] as Array<[string, { ascending: boolean }]>, from: [] as string[] };
+  const calls = {
+    select: [] as string[],
+    eq: [] as Array<[string, string]>,
+    in: [] as Array<[string, readonly string[]]>,
+    order: [] as Array<[string, { ascending: boolean }]>,
+    from: [] as string[],
+  };
   const query = {
     eq: vi.fn((column: string, value: string) => { calls.eq.push([column, value]); return query; }),
+    in: vi.fn((column: string, values: readonly string[]) => { calls.in.push([column, values]); return query; }),
     order: vi.fn((column: string, options: { ascending: boolean }) => { calls.order.push([column, options]); return query; }),
     // Must honour the rejection handler: a thenable that drops it leaves the
     // caller's await hanging instead of surfacing the failure.
@@ -182,6 +189,124 @@ describe('P6J-F3 Supabase source reference reader', () => {
     for (const method of ['rpc', 'storage', 'auth']) {
       expect((state.client as unknown as Record<string, unknown>)[method]).toBeUndefined();
     }
-    expect(Object.keys(state.query)).toEqual(['eq', 'order', 'then']);
+    expect(Object.keys(state.query)).toEqual(['eq', 'in', 'order', 'then']);
+  });
+});
+
+// ============================================================================
+// P6J-F6-B1 -- batch read for the board's current post set
+// ============================================================================
+// A board renders many Notes at once. The single-target read called per card
+// would put one request on the wire per Note, so the whole point of this method
+// is that N targets still cost exactly one query.
+describe('P6J-F6 batch source reference read', () => {
+  const OTHER_PADLET_ID = '44444444-4444-4444-8444-444444444444';
+  const THIRD_PADLET_ID = '55555555-5555-4555-8555-555555555555';
+
+  it('asks the database nothing at all when there are no targets', async () => {
+    const state = setup({ data: [row()], error: null });
+
+    const result = await state.reader.listReferencesByTargetPadletIds([]);
+
+    expect(result).toEqual({ ok: true, value: [] });
+    // An empty board must not reach the network.
+    expect(state.client.from).not.toHaveBeenCalled();
+    expect(state.calls.from).toEqual([]);
+    expect(state.calls.in).toEqual([]);
+  });
+
+  it('issues one query with one .in for a single target', async () => {
+    const state = setup({ data: [row()], error: null });
+
+    await state.reader.listReferencesByTargetPadletIds([asPostId(PADLET_ID)]);
+
+    expect(state.calls.from).toEqual(['source_references']);
+    expect(state.calls.select).toEqual([SOURCE_REFERENCE_COLUMNS]);
+    expect(state.calls.in).toEqual([['target_padlet_id', [PADLET_ID]]]);
+    // The batch read never falls back to per-target equality filtering.
+    expect(state.calls.eq).toEqual([]);
+  });
+
+  it('still issues exactly one query for many targets', async () => {
+    const state = setup({ data: [], error: null });
+    const targets = [PADLET_ID, OTHER_PADLET_ID, THIRD_PADLET_ID];
+
+    await state.reader.listReferencesByTargetPadletIds(targets.map(asPostId));
+
+    // The anti-N+1 invariant: three targets, one round trip.
+    expect(state.client.from).toHaveBeenCalledTimes(1);
+    expect(state.calls.from).toHaveLength(1);
+    expect(state.calls.select).toHaveLength(1);
+    expect(state.calls.in).toHaveLength(1);
+    expect(state.calls.in[0]).toEqual(['target_padlet_id', targets]);
+  });
+
+  it('collapses duplicate target ids before building the filter', async () => {
+    const state = setup({ data: [], error: null });
+
+    await state.reader.listReferencesByTargetPadletIds(
+      [PADLET_ID, OTHER_PADLET_ID, PADLET_ID, OTHER_PADLET_ID, PADLET_ID].map(asPostId),
+    );
+
+    expect(state.calls.in).toEqual([['target_padlet_id', [PADLET_ID, OTHER_PADLET_ID]]]);
+  });
+
+  it('requests the same deterministic ordering as the single-target read', async () => {
+    const state = setup({ data: [], error: null });
+
+    await state.reader.listReferencesByTargetPadletIds([asPostId(PADLET_ID)]);
+
+    expect(state.calls.order).toEqual([
+      ['created_at', { ascending: true }],
+      ['id', { ascending: true }],
+    ]);
+  });
+
+  it('preserves every reference, including several for one target', async () => {
+    const state = setup({ data: [
+      row({ id: 'reference-1', page_start: 1, page_end: 1 }),
+      row({ id: 'reference-2', page_start: 9, page_end: 9 }),
+      row({ id: 'reference-3', target_padlet_id: OTHER_PADLET_ID }),
+    ], error: null });
+
+    const result = await state.reader.listReferencesByTargetPadletIds(
+      [PADLET_ID, OTHER_PADLET_ID].map(asPostId),
+    );
+
+    expect(result.ok).toBe(true);
+    const references = result.ok ? result.value : [];
+    // Flat list, no grouping and no dedup: that is the caller's concern.
+    expect(references.map((reference) => reference.id)).toEqual(['reference-1', 'reference-2', 'reference-3']);
+    expect(references.filter((reference) => reference.targetPadletId === PADLET_ID)).toHaveLength(2);
+  });
+
+  it('returns an empty list rather than an error when nothing is referenced', async () => {
+    for (const data of [[], null]) {
+      const state = setup({ data, error: null });
+      const result = await state.reader.listReferencesByTargetPadletIds([asPostId(PADLET_ID)]);
+      expect(result).toEqual({ ok: true, value: [] });
+    }
+  });
+
+  it('maps a provider error to the same unavailable result the single read uses', async () => {
+    const state = setup({ data: null, error: { code: '42501', message: 'permission denied for table source_references' } });
+
+    const result = await state.reader.listReferencesByTargetPadletIds([asPostId(PADLET_ID)]);
+
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.error.code).toBe('unavailable');
+    expect(result.ok === false && result.error.message).toBe('Could not read the source references');
+    expect(result.ok === false && result.error.message).not.toContain('permission denied');
+  });
+
+  it('maps a thrown query failure to the same unavailable result', async () => {
+    const state = setup(new Error('socket hang up'));
+
+    const result = await state.reader.listReferencesByTargetPadletIds([asPostId(PADLET_ID)]);
+
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.error.code).toBe('unavailable');
+    expect(result.ok === false && result.error.message).toBe('Could not read the source references');
+    expect(result.ok === false && result.error.message).not.toContain('socket hang up');
   });
 });
