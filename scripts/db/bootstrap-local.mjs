@@ -64,6 +64,10 @@ export const POST_BASELINE_MIGRATIONS = [
     source: '20260825_add_knowledge_chunk_embeddings.sql',
     target: '20260825000000_knowledge_chunk_embeddings.sql',
   },
+  {
+    source: '20260826_dedupe_knowledge_search_by_document.sql',
+    target: '20260826000000_dedupe_knowledge_search_by_document.sql',
+  },
 ];
 
 const REQUIRED_EXTENSIONS_SQL = `
