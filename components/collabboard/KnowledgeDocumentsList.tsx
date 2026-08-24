@@ -39,7 +39,7 @@ type ListPhase = 'loading' | 'loaded' | 'error';
 
 interface KnowledgeDetailsState { entry: KnowledgeListEntry; pages: readonly KnowledgeDocumentDetailPage[]; loading: boolean; error: boolean; }
 
-interface KnowledgeSearchResult { originalFilename: string; pageStart: number; pageEnd: number; text: string; }
+interface KnowledgeSearchResult { documentId: string; originalFilename: string; pageStart: number; pageEnd: number; text: string; }
 type SearchPhase = 'idle' | 'loading' | 'loaded' | 'error';
 type WarmPhase = 'idle' | 'warming' | 'ready' | 'failed';
 function isProcessingStatus(value: unknown): value is KnowledgePdfProcessingStatus {
@@ -95,12 +95,13 @@ function toSearchResult(value: unknown): KnowledgeSearchResult | null {
   const pageStart = record.pageStart;
   const pageEnd = record.pageEnd;
   if (
-    typeof record.originalFilename !== 'string' || record.originalFilename.length === 0
+    typeof record.documentId !== 'string' || record.documentId.length === 0
+    || typeof record.originalFilename !== 'string' || record.originalFilename.length === 0
     || typeof pageStart !== 'number' || !Number.isInteger(pageStart) || pageStart < 1
     || typeof pageEnd !== 'number' || !Number.isInteger(pageEnd) || pageEnd < pageStart
     || typeof record.text !== 'string'
   ) return null;
-  return { originalFilename: record.originalFilename, pageStart, pageEnd, text: record.text };
+  return { documentId: record.documentId, originalFilename: record.originalFilename, pageStart, pageEnd, text: record.text };
 }
 
 function parseSearchResults(value: unknown): readonly KnowledgeSearchResult[] | null {
@@ -404,10 +405,17 @@ export default function KnowledgeDocumentsList({ refreshToken = 0, isOpen = true
             {searchPhase === 'loaded' && searchResults.length > 0 ? (
               <ul data-knowledge-search-results="true" className="mt-2 space-y-2">
                 {searchResults.map((result, index) => (
-                  <li key={`${result.originalFilename}-${result.pageStart}-${result.pageEnd}-${index}`} className="rounded-md border border-gray-100 px-2 py-1.5">
-                    <p className="truncate text-xs font-medium text-gray-700">{result.originalFilename}</p>
-                    <p className="text-[11px] text-gray-500">{pageLabel(result)}</p>
-                    <p className="mt-1 line-clamp-4 whitespace-pre-wrap text-xs text-gray-600">{result.text}</p>
+                  <li key={`${result.documentId}-${result.pageStart}-${result.pageEnd}-${index}`} className="rounded-md border border-gray-100">
+                    <button
+                      type="button"
+                      // Identity is documentId: two sources can share a filename.
+                      onClick={() => void openDetails({ id: result.documentId, originalFilename: result.originalFilename, pageCount: null, processingStatus: null, statusLabel: null })}
+                      className="block w-full rounded-md px-2 py-1.5 text-left hover:bg-gray-50 focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-300"
+                    >
+                      <p className="truncate text-xs font-medium text-gray-700">{result.originalFilename}</p>
+                      <p className="text-[11px] text-gray-500">{pageLabel(result)}</p>
+                      <p className="mt-1 line-clamp-4 whitespace-pre-wrap text-xs text-gray-600">{result.text}</p>
+                    </button>
                   </li>
                 ))}
               </ul>

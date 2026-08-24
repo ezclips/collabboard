@@ -421,6 +421,7 @@ describe('P6D Knowledge documents read surface', () => {
       .mockResolvedValueOnce(jsonResponse({
         results: [
           {
+            documentId: 'doc-good',
             originalFilename: 'Good.pdf',
             pageStart: 1,
             pageEnd: 1,
@@ -429,7 +430,7 @@ describe('P6D Knowledge documents read surface', () => {
             model: 'hidden-model',
             vector: [1, 2, 3],
           },
-          { originalFilename: 'malformed.pdf', pageStart: 0, pageEnd: 1, text: 'drop me' },
+          { documentId: 'doc-malformed', originalFilename: 'malformed.pdf', pageStart: 0, pageEnd: 1, text: 'drop me' },
         ],
       }));
     const container = await renderList();
@@ -455,8 +456,9 @@ describe('P6D Knowledge documents read surface', () => {
       .mockResolvedValueOnce(jsonResponse({ documents: [] }))
       .mockResolvedValueOnce(jsonResponse({ ok: true }))
       .mockResolvedValueOnce(jsonResponse({ results: [
-        { originalFilename: 'Guide.pdf', pageStart: 2, pageEnd: 3, text: 'Two-page excerpt' },
-        { originalFilename: 'bad.pdf', pageStart: 2, pageEnd: 1, text: 'invalid range' },
+        { documentId: 'doc-guide', originalFilename: 'Guide.pdf', pageStart: 2, pageEnd: 3, text: 'Two-page excerpt' },
+        { documentId: 'doc-bad', originalFilename: 'bad.pdf', pageStart: 2, pageEnd: 1, text: 'invalid range' },
+        { originalFilename: 'no-id.pdf', pageStart: 1, pageEnd: 1, text: 'missing document id' },
         null,
       ] }));
     const container = await renderList();
@@ -467,6 +469,7 @@ describe('P6D Knowledge documents read surface', () => {
     expect(container.textContent).toContain('Pages 2–3');
     expect(container.textContent).toContain('Two-page excerpt');
     expect(container.textContent).not.toContain('invalid range');
+    expect(container.textContent).not.toContain('missing document id');
     expect(container.querySelectorAll('[data-knowledge-search-results] li')).toHaveLength(1);
   });
 
@@ -518,10 +521,10 @@ describe('P6D Knowledge documents read surface', () => {
     expect((firstInit?.signal as AbortSignal).aborted).toBe(true);
     expect(secondInit?.method).toBe('POST');
 
-    second.resolve(jsonResponse({ results: [{ originalFilename: 'new.pdf', pageStart: 1, pageEnd: 1, text: 'new result' }] }));
+    second.resolve(jsonResponse({ results: [{ documentId: 'doc-new', originalFilename: 'new.pdf', pageStart: 1, pageEnd: 1, text: 'new result' }] }));
     await settle();
     expect(container.textContent).toContain('new result');
-    first.resolve(jsonResponse({ results: [{ originalFilename: 'old.pdf', pageStart: 1, pageEnd: 1, text: 'old result' }] }));
+    first.resolve(jsonResponse({ results: [{ documentId: 'doc-old', originalFilename: 'old.pdf', pageStart: 1, pageEnd: 1, text: 'old result' }] }));
     await settle();
     expect(container.textContent).toContain('new result');
     expect(container.textContent).not.toContain('old result');
@@ -697,7 +700,7 @@ describe('P6D Knowledge documents read surface', () => {
     await submitSearch(container);
     await rerender(0, false);
     expect((searchInit?.signal as AbortSignal).aborted).toBe(true);
-    search.resolve(jsonResponse({ results: [{ originalFilename: 'stale.pdf', pageStart: 1, pageEnd: 1, text: 'stale' }] }));
+    search.resolve(jsonResponse({ results: [{ documentId: 'doc-stale', originalFilename: 'stale.pdf', pageStart: 1, pageEnd: 1, text: 'stale' }] }));
     await settle();
     expect(container.textContent).not.toContain('stale.pdf');
   });
@@ -826,6 +829,150 @@ describe('P6D Knowledge documents read surface', () => {
     await settle();
 
     expect(searchBodies).toEqual([{ query: 'queued query' }]);
+  });
+
+  // P6J-F2: a semantic result is a source, so activating one opens that source in
+  // the existing details view. Identity is documentId; the filename is display
+  // metadata that two different documents may share.
+  function searchResultButtons(container: HTMLElement) {
+    return Array.from(container.querySelectorAll('[data-knowledge-search-results] li button')) as HTMLButtonElement[];
+  }
+
+  async function searchThen(container: HTMLElement, query: string) {
+    typeIntoSearch(container, query);
+    await submitSearch(container);
+  }
+
+  async function activate(button: HTMLButtonElement) {
+    await act(async () => { button.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await settle();
+  }
+
+  it('opens a semantic result as a source through the existing details fetch', async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ documents: [] }))
+      .mockResolvedValueOnce(jsonResponse({ ok: true }))
+      .mockResolvedValueOnce(jsonResponse({ results: [
+        { documentId: 'doc-source', originalFilename: 'Handbook.pdf', pageStart: 2, pageEnd: 2, text: 'excerpt from the source' },
+      ] }))
+      .mockResolvedValueOnce(jsonResponse({
+        document: { id: 'doc-source', originalFilename: 'Handbook.pdf', pageCount: 3 },
+        pages: [{ pageNumber: 2, text: 'full page two text' }],
+      }));
+    const container = await renderList();
+    await searchThen(container, 'handbook');
+
+    const buttons = searchResultButtons(container);
+    expect(buttons).toHaveLength(1);
+    const searchCallsBefore = fetchMock.mock.calls.filter(([url]) => String(url).includes('/knowledge/search')).length;
+
+    await activate(buttons[0]);
+
+    expect(fetchMock.mock.calls.find(([url]) => String(url).endsWith('/pages'))?.[0])
+      .toBe(`/api/boards/${BOARD_ID}/knowledge/doc-source/pages`);
+    expect(container.textContent).toContain('full page two text');
+    expect(container.textContent).toContain('Page 2');
+    // No second semantic search, and no mutating request of any kind.
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes('/knowledge/search'))).toHaveLength(searchCallsBefore);
+    expect(fetchMock.mock.calls.every(([, init]) => (init as RequestInit | undefined)?.method !== 'DELETE')).toBe(true);
+    expect(fetchMock.mock.calls.filter(([url], index) => (
+      String(url).endsWith(`/api/boards/${BOARD_ID}/knowledge`) && (fetchMock.mock.calls[index][1] as RequestInit | undefined)?.method === 'POST'
+    ))).toHaveLength(0);
+  });
+
+  it('identifies a source by documentId even when two results share a filename', async () => {
+    // URL-aware so the second search returns results again rather than consuming
+    // a queued pages response.
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/knowledge/warm')) return jsonResponse({ ok: true });
+      if (url.includes('/knowledge/search')) {
+        return jsonResponse({ results: [
+          { documentId: 'document-a', originalFilename: 'duplicate.pdf', pageStart: 1, pageEnd: 1, text: 'first source' },
+          { documentId: 'document-b', originalFilename: 'duplicate.pdf', pageStart: 4, pageEnd: 4, text: 'second source' },
+        ] });
+      }
+      if (url.endsWith('/pages')) return jsonResponse({ document: { id: 'x', originalFilename: 'duplicate.pdf', pageCount: 1 }, pages: [] });
+      return jsonResponse({ documents: [] });
+    });
+    const container = await renderList();
+    await searchThen(container, 'duplicate');
+    expect(searchResultButtons(container)).toHaveLength(2);
+
+    await activate(searchResultButtons(container)[1]);
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/pages')).map(([url]) => url))
+      .toEqual([`/api/boards/${BOARD_ID}/knowledge/document-b/pages`]);
+
+    const back = Array.from(container.querySelectorAll('button')).find((button) => button.textContent?.includes('Back to PDFs'))!;
+    await act(async () => { back.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await searchThen(container, 'duplicate again');
+    await activate(searchResultButtons(container)[0]);
+
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/pages')).map(([url]) => url))
+      .toEqual([
+        `/api/boards/${BOARD_ID}/knowledge/document-b/pages`,
+        `/api/boards/${BOARD_ID}/knowledge/document-a/pages`,
+      ]);
+  });
+
+  it('returns from a source opened by search to the ordinary document list', async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ documents: [doc()] }))
+      .mockResolvedValueOnce(jsonResponse({ ok: true }))
+      .mockResolvedValueOnce(jsonResponse({ results: [
+        { documentId: 'doc-source', originalFilename: 'Handbook.pdf', pageStart: 1, pageEnd: 1, text: 'excerpt' },
+      ] }))
+      .mockResolvedValueOnce(jsonResponse({ document: { id: 'doc-source', originalFilename: 'Handbook.pdf', pageCount: 1 }, pages: [] }));
+    const container = await renderList();
+    await searchThen(container, 'handbook');
+    await activate(searchResultButtons(container)[0]);
+
+    const back = Array.from(container.querySelectorAll('button')).find((button) => button.textContent?.includes('Back to PDFs'))!;
+    await act(async () => { back.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    // Existing behaviour: clearing the query leaves search mode and restores the list.
+    typeIntoSearch(container, '');
+    await settle();
+    expect(container.textContent).toContain('EMG_checklist.pdf');
+    expect(container.textContent).toContain('View text');
+  });
+
+  it('drops a semantic result that carries no documentId', async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ documents: [] }))
+      .mockResolvedValueOnce(jsonResponse({ ok: true }))
+      .mockResolvedValueOnce(jsonResponse({ results: [
+        { originalFilename: 'anonymous.pdf', pageStart: 1, pageEnd: 1, text: 'no identity' },
+        { documentId: '', originalFilename: 'empty.pdf', pageStart: 1, pageEnd: 1, text: 'blank identity' },
+        { documentId: 'doc-kept', originalFilename: 'kept.pdf', pageStart: 1, pageEnd: 1, text: 'has identity' },
+      ] }));
+    const container = await renderList();
+    await searchThen(container, 'identity');
+
+    expect(searchResultButtons(container)).toHaveLength(1);
+    expect(container.textContent).toContain('kept.pdf');
+    expect(container.textContent).not.toContain('anonymous.pdf');
+    expect(container.textContent).not.toContain('empty.pdf');
+  });
+
+  it('exposes each semantic result as a single keyboard-reachable control', async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ documents: [] }))
+      .mockResolvedValueOnce(jsonResponse({ ok: true }))
+      .mockResolvedValueOnce(jsonResponse({ results: [
+        { documentId: 'doc-a11y', originalFilename: 'Access.pdf', pageStart: 1, pageEnd: 1, text: 'reachable excerpt' },
+      ] }));
+    const container = await renderList();
+    await searchThen(container, 'access');
+
+    const [button] = searchResultButtons(container);
+    expect(button.type).toBe('button');
+    expect(button.disabled).toBe(false);
+    // One control per row, and no interactive element nested inside it.
+    expect(button.querySelectorAll('button, a, input, select, textarea')).toHaveLength(0);
+    expect(button.textContent).toContain('Access.pdf');
+    expect(button.textContent).toContain('Page 1');
+    expect(button.textContent).toContain('reachable excerpt');
   });
 
   it('keeps a shared prewarm flight alive across a StrictMode mount/cleanup/remount cycle', async () => {
