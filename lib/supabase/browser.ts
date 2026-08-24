@@ -27,22 +27,49 @@ const clearStaleSessionOnLoginPage = () => {
   }
 };
 
-// Create singleton instance
-let supabaseInstance: ReturnType<typeof createClientComponentClient<any>> | null = null;
+type BrowserSupabaseClient = ReturnType<typeof createClientComponentClient<any>>;
 
-export const supabaseBrowser = () => {
-  if (!supabaseInstance) {
-    clearStaleSessionOnLoginPage();
-    // Circuit breaker: after one provider 429 on /auth/v1/token, further
-    // refresh attempts short-circuit locally for 5 minutes instead of
-    // hammering the same per-IP budget the password sign-in needs.
-    const guardedFetch = createAuthTokenCircuitBreaker({
-      fetchImpl: (input, init) => fetch(input, init),
-      storage: typeof window !== "undefined" ? window.localStorage : null,
-    });
-    supabaseInstance = createClientComponentClient<any>({
-      options: { global: { fetch: guardedFetch } },
-    });
+function createBrowserSupabaseClient(): BrowserSupabaseClient {
+  clearStaleSessionOnLoginPage();
+  // Circuit breaker: after one provider 429 on a refresh-token request,
+  // further refresh attempts short-circuit locally for 5 minutes instead of
+  // hammering the same per-IP budget the password sign-in needs.
+  const guardedFetch = createAuthTokenCircuitBreaker({
+    fetchImpl: (input, init) => fetch(input, init),
+    storage: typeof window !== "undefined" ? window.localStorage : null,
+  });
+  return createClientComponentClient<any>({
+    options: { global: { fetch: guardedFetch } },
+  });
+}
+
+const GLOBAL_KEY = "__collabboardSupabaseBrowserClient__" as const;
+
+type BrowserGlobalScope = typeof globalThis & {
+  [GLOBAL_KEY]?: BrowserSupabaseClient;
+};
+
+// Never meaningfully reused: this module only does anything once it runs in
+// an actual browser tab. A module-local `let` alone is not the right
+// identity boundary there -- Next.js Fast Refresh re-evaluates this module on
+// every edit, and a plain module-local singleton would construct a second
+// live GoTrueClient (with its own refresh timers) next to the orphaned first
+// one, doubling refresh-token traffic for the same page. `globalThis` in a
+// browser tab IS that tab's `window`, already isolated per page/user, so
+// anchoring the singleton there survives the module reload HMR performs.
+let serverFallbackInstance: BrowserSupabaseClient | null = null;
+
+export const supabaseBrowser = (): BrowserSupabaseClient => {
+  if (typeof window === "undefined") {
+    if (!serverFallbackInstance) {
+      serverFallbackInstance = createBrowserSupabaseClient();
+    }
+    return serverFallbackInstance;
   }
-  return supabaseInstance;
+
+  const globalScope = window as BrowserGlobalScope;
+  if (!globalScope[GLOBAL_KEY]) {
+    globalScope[GLOBAL_KEY] = createBrowserSupabaseClient();
+  }
+  return globalScope[GLOBAL_KEY];
 };

@@ -92,51 +92,35 @@ function getSupabaseAnonServerClient() {
   };
 }
 
-async function fetchRecentFailures(emailHash: string, ipHash: string | null) {
+async function fetchRecentEmailFailures(emailHash: string) {
   const supabaseAdmin = getSupabaseAdmin();
   const windowStart = new Date(Date.now() - LOGIN_RATE_LIMIT_WINDOW_MS).toISOString();
 
-  const [{ data: emailFailures, error: emailError }, ipResult] = await Promise.all([
-    supabaseAdmin
-      .from('auth_rate_limit_events')
-      .select('created_at')
-      .eq('action', 'login')
-      .eq('success', false)
-      .eq('email_hash', emailHash)
-      .gte('created_at', windowStart)
-      .order('created_at', { ascending: false })
-      .limit(32),
-    ipHash
-      ? supabaseAdmin
-          .from('auth_rate_limit_events')
-          .select('created_at')
-          .eq('action', 'login')
-          .eq('success', false)
-          .eq('ip_hash', ipHash)
-          .gte('created_at', windowStart)
-          .order('created_at', { ascending: false })
-          .limit(32)
-      : Promise.resolve({ data: [], error: null }),
-  ]);
+  const { data, error } = await supabaseAdmin
+    .from('auth_rate_limit_events')
+    .select('created_at')
+    .eq('action', 'login')
+    .eq('success', false)
+    .eq('email_hash', emailHash)
+    .gte('created_at', windowStart)
+    .order('created_at', { ascending: false })
+    .limit(32);
 
-  if (emailError) {
-    throw new Error(emailError.message);
+  if (error) {
+    throw new Error(error.message);
   }
 
-  if (ipResult.error) {
-    throw new Error(ipResult.error.message);
-  }
-
-  return {
-    emailFailures: (emailFailures ?? []) as RateLimitEvent[],
-    ipFailures: ((ipResult.data ?? []) as RateLimitEvent[]),
-  };
+  return (data ?? []) as RateLimitEvent[];
 }
 
-function getThrottleState(emailFailures: RateLimitEvent[], ipFailures: RateLimitEvent[]) {
-  const dominantFailures = emailFailures.length >= ipFailures.length ? emailFailures : ipFailures;
-  const latestFailure = dominantFailures[0];
-  const backoffMs = getLoginBackoffMs(dominantFailures.length);
+// Blocking decision is keyed by the normalized email alone (AUTH-H1): a
+// throttle keyed on IP history let another/stale process on a shared IP make
+// one user's first typo look like their 5th+ failure. IP is still hashed and
+// stored on every recorded event for telemetry/investigation -- it just no
+// longer decides whether an ordinary login request is allowed through.
+function getThrottleState(emailFailures: RateLimitEvent[]) {
+  const latestFailure = emailFailures[0];
+  const backoffMs = getLoginBackoffMs(emailFailures.length);
 
   if (!latestFailure || backoffMs === 0) {
     return null;
@@ -187,6 +171,30 @@ async function clearLoginFailures(emailHash: string) {
   }
 }
 
+// The session is already established (cookies set) by the time this runs, so
+// a transient failure recording/clearing throttle history must not turn an
+// otherwise-successful sign-in into a 500 for the user.
+async function recordSuccessfulLoginNonBlocking(params: {
+  emailHash: string;
+  ipHash: string;
+  userAgent: string;
+}) {
+  try {
+    await Promise.all([
+      recordRateLimitEvent({
+        action: 'login',
+        emailHash: params.emailHash,
+        ipHash: params.ipHash,
+        success: true,
+        userAgent: params.userAgent,
+      }),
+      clearLoginFailures(params.emailHash),
+    ]);
+  } catch (error) {
+    console.warn('Login throttle bookkeeping after success failed:', error);
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
@@ -204,8 +212,8 @@ export async function POST(req: NextRequest) {
     const storedIpHash = ipHash ?? hashRateLimitValue(`unknown:${emailHash}`);
     const userAgent = req.headers.get('user-agent') ?? '';
 
-    const { emailFailures, ipFailures } = await fetchRecentFailures(emailHash, ipHash);
-    const throttleState = getThrottleState(emailFailures, ipFailures);
+    const emailFailures = await fetchRecentEmailFailures(emailHash);
+    const throttleState = getThrottleState(emailFailures);
     if (throttleState) {
       return NextResponse.json(
         {
@@ -252,16 +260,7 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: 'Unable to verify signed-in user.' }, { status: 401 });
       }
 
-      await Promise.all([
-        recordRateLimitEvent({
-          action: 'login',
-          emailHash,
-          ipHash: storedIpHash,
-          success: true,
-          userAgent,
-        }),
-        clearLoginFailures(emailHash),
-      ]);
+      await recordSuccessfulLoginNonBlocking({ emailHash, ipHash: storedIpHash, userAgent });
 
       return NextResponse.json({
         success: true,
@@ -354,16 +353,7 @@ export async function POST(req: NextRequest) {
       console.warn('Profile upsert after login failed:', profileError);
     }
 
-    await Promise.all([
-      recordRateLimitEvent({
-        action: 'login',
-        emailHash,
-        ipHash: storedIpHash,
-        success: true,
-        userAgent,
-      }),
-      clearLoginFailures(emailHash),
-    ]);
+    await recordSuccessfulLoginNonBlocking({ emailHash, ipHash: storedIpHash, userAgent });
 
     return NextResponse.json({
       success: true,
