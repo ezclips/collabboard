@@ -85,6 +85,8 @@ import { createSectionsRepository } from '@/lib/infra/canvas/sectionsRepository'
 import { getVerifiedAuthUser, onAuthSessionChanged, updateCurrentUserMetadata } from '@/lib/infra/supabase/authState';
 import { createStorageGateway } from '@/lib/infra/supabase/storage';
 import type { Padlet, BoardSection, PendingPostDraft, NewPostDragState, DropIndicatorState, CanvasLine } from '@/types/collabboard';
+import { buildKnowledgeSourceNoteDraft } from '@/lib/domain/knowledge/knowledgeSourceNoteDraft';
+import type { KnowledgeSourcePageRequest, KnowledgeSourceReferenceDraft } from '@/lib/domain/knowledge/knowledgeSourceNoteDraft';
 import type { AuthUser, AuthSession } from '@/lib/domain/auth/user';
 import {
   Link,
@@ -1487,6 +1489,64 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     void refreshClipboardAvailability();
   }, [refreshClipboardAvailability]);
 
+  // ==========================================================================
+  // P6J-F5 -- Knowledge source page -> normal Note -> durable source reference
+  // ==========================================================================
+  // The reference is written only after a Note row exists, because
+  // source_references.target_padlet_id is a real foreign key. That ordering
+  // makes one failure mode possible -- a Note whose source link did not save --
+  // and it is deliberately left in place: deleting the user's brand-new Note to
+  // tidy up a link failure would destroy work to protect metadata.
+  const [sourceNoteReference, setSourceNoteReference] = useState<KnowledgeSourceReferenceDraft | null>(null);
+  // Drawing's "add to existing container" hands the draft to a drag ghost whose
+  // drop payload is rebuilt field by field, so provenance cannot ride it. The
+  // controller owns both ends of that hop, so it keeps the draft here instead.
+  const drawingGhostSourceReferenceRef = useRef<KnowledgeSourceReferenceDraft | null>(null);
+
+  const persistKnowledgeSourceReference = useCallback(async (
+    targetPadletId: string,
+    sourceReference: KnowledgeSourceReferenceDraft,
+  ) => {
+    if (!canvasId) return;
+    try {
+      const response = await fetch(`/api/boards/${encodeURIComponent(canvasId)}/knowledge/references`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        // Exactly the five client-owned fields. Board and user identity are the
+        // route's to decide, and quoteHash is computed server-side.
+        body: JSON.stringify({
+          targetPadletId,
+          sourceDocumentId: sourceReference.sourceDocumentId,
+          pageStart: sourceReference.pageStart,
+          pageEnd: sourceReference.pageEnd,
+          quoteText: sourceReference.quoteText,
+        }),
+      });
+      if (!response.ok) throw new Error(`source reference rejected with ${response.status}`);
+    } catch (err) {
+      // The Note stays. No delete, no rollback, no retry, and nothing thrown
+      // back into the already-successful creation path.
+      console.error('Failed to save Knowledge source reference:', err);
+      toast.error('Note created, but source link could not be saved');
+    }
+  }, [canvasId]);
+
+  /** The one completion point for any Note finalised out of a placement draft. */
+  const completeSourceReferenceForDraft = useCallback((
+    targetPadletId: string,
+    draft: { kind?: string; sourceReference?: KnowledgeSourceReferenceDraft } | null | undefined,
+  ) => {
+    if (!draft || draft.kind !== 'note' || !draft.sourceReference) return;
+    void persistKnowledgeSourceReference(targetPadletId, draft.sourceReference);
+  }, [persistKnowledgeSourceReference]);
+
+  // Closing the Note editor for any reason -- cancel, save, or a deferred
+  // placement handoff -- ends this source workflow. A later ordinary Note can
+  // never inherit it.
+  useEffect(() => {
+    if (!isNoteEditorOpen) setSourceNoteReference(null);
+  }, [isNoteEditorOpen]);
+
   const {
     saveNote,
     saveLink,
@@ -1528,6 +1588,8 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     padlets,
     setPadlets,
     getNewPostPosition,
+    sourceNoteReference,
+    onSourceNoteCreated: persistKnowledgeSourceReference,
     onDrawingPlacementStart: (draft) => {
       const _as = drawingAppStateRef.current;
       const _zoom = (typeof _as?.zoom?.value === 'number' && _as.zoom.value > 0) ? _as.zoom.value : 1;
@@ -2047,6 +2109,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
 
       if (!childResult.ok) throw childResult.error.cause ?? childResult.error;
       const childData = childResult.value as any;
+      completeSourceReferenceForDraft(childData.id, wallPendingPostDraft);
 
       // 4. Update container metadata with child ID and save container
       const finalContainerPayload = {
@@ -2118,6 +2181,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
 
       if (!childResult.ok) throw childResult.error.cause ?? childResult.error;
       const childData = childResult.value as any;
+      completeSourceReferenceForDraft(childData.id, currentDraft);
 
       const finalContainerPayload = {
         ...containerPayload,
@@ -2193,6 +2257,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
 
       // 3. Persist Post
       await insertPostOrThrow(newPost);
+      completeSourceReferenceForDraft(newId, draft);
 
       // 4. Persist Container Update
       const updatePostMetadata = createUpdatePostMetadataCommand(createPostsRepository());
@@ -2793,6 +2858,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
 
       if (!childResult.ok) throw childResult.error.cause ?? childResult.error;
       const childData = childResult.value as any;
+      completeSourceReferenceForDraft(childData.id, currentDraft);
 
       // 5. Now create the final container payload WITH the child ID
       const finalContainerPayload = {
@@ -5401,6 +5467,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
       const createSchedulerContainerWithPost = createCreateSchedulerContainerWithPostCommand(createPostsRepository());
       const pairResult = await createSchedulerContainerWithPost({ containerRow: newContainer, postRow: newPost }, { userId: null });
       if (!pairResult.ok) throw pairResult.error.cause ?? pairResult.error;
+      completeSourceReferenceForDraft(postId, draft);
       setSelectedSchedulerSlot({ start, end });
       setSelectedSchedulerContainerId(containerId);
       toast.success('Post added to a new time slot');
@@ -5500,8 +5567,13 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     delete newPadlet.canvas_id;
     setPadlets(prev => [...prev, newPadlet as any]);
 
-    return await addDrawingLayoutPadlet(newPadlet, newId);
-  }, [canvasId, setPadlets, addDrawingLayoutPadlet]);
+    const created = await addDrawingLayoutPadlet(newPadlet, newId);
+    // Consume-once: the pending source draft belongs to exactly one dropped ghost.
+    const pendingSource = drawingGhostSourceReferenceRef.current;
+    drawingGhostSourceReferenceRef.current = null;
+    if (created && pendingSource) void persistKnowledgeSourceReference(newId, pendingSource);
+    return created;
+  }, [canvasId, setPadlets, addDrawingLayoutPadlet, persistKnowledgeSourceReference]);
 
   const handleDrawingLayoutUpdatePadlet = useCallback(async (id: string, updates: any) => {
     const normalizedUpdates = { ...updates };
@@ -5751,6 +5823,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     try {
       await insertPostOrThrow(containerPadlet);
       await insertPostOrThrow(childPadlet);
+      completeSourceReferenceForDraft(childId, drawingPendingDraft as { kind?: string; sourceReference?: KnowledgeSourceReferenceDraft });
     } catch (err: any) {
       console.error('Failed to create drawing container with image:', err?.message || err?.code || err?.details || err, { posX, posY });
       toast.error('Failed to create container');
@@ -5760,6 +5833,11 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
 
   const handleDrawingAddToExisting = useCallback(() => {
     setDrawingContainerPromptOpen(false);
+    // The ghost's drop payload is rebuilt field by field inside DrawingLayout,
+    // so provenance is held here instead and consumed once on the way in.
+    const pendingKind = (drawingPendingDraft as { kind?: string } | null)?.kind;
+    const pendingSource = (drawingPendingDraft as { sourceReference?: KnowledgeSourceReferenceDraft } | null)?.sourceReference;
+    drawingGhostSourceReferenceRef.current = pendingKind === 'note' && pendingSource ? pendingSource : null;
     const ghost = drawingPendingDraft
       ? {
           ...drawingPendingDraft,
@@ -5944,6 +6022,9 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
   });
 
   const executeToolAction = (toolType: string) => {
+    // Any ordinary toolbar creation starts clean: a source workflow the user
+    // abandoned can never attach itself to the next Note.
+    setSourceNoteReference(null);
     if (selectedPadletIds.length > 0) {
       setSelectedPadletIds([]);
     }
@@ -6410,6 +6491,36 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
     setIsContainerEditorOpen(false);
   };
 
+  /**
+   * P6J-F5 entry point. Opens the ORDINARY Note editor with the source
+   * document's filename as its title and a blank body; nothing is written yet,
+   * and the eventual save takes whatever placement path this layout already
+   * uses for a toolbar Note.
+   */
+  const handleCreateNoteFromKnowledgePage = (request: KnowledgeSourcePageRequest) => {
+    // The same capability the creation toolbar itself is gated on.
+    if (!canUseCanvasToolbar) return;
+    const draft = buildKnowledgeSourceNoteDraft(request);
+    setSourceNoteReference(draft.sourceReference);
+    closeDrawingSelectedShapePanel();
+    closeDrawingEditorsBeforePadletEdit();
+    setPadletToEdit({
+      id: 'new',
+      board_id: canvasId,
+      title: draft.title,
+      content: draft.content,
+      type: 'text',
+      position_x: 0,
+      position_y: 0,
+      width: 280,
+      height: 250,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      metadata: {},
+    } as Padlet);
+    setIsNoteEditorOpen(true);
+  };
+
   // === BEGIN RENDER REGION (JSX ONLY) ===
   // All hooks are declared above the early returns to preserve hook ordering.
   if (isKanbanLayout) {
@@ -6469,6 +6580,7 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
               onBeforeToolClick={closeDrawingSelectedShapePanel}
               handleToolClick={handleToolClick}
               onBack={() => router.push('/dashboard')}
+              onCreateNoteFromKnowledgePage={handleCreateNoteFromKnowledgePage}
             />
           </div>
         )}
@@ -7463,7 +7575,12 @@ export default function CanvasClient({ canvasId, openPadletId }: { canvasId?: st
                 onDeleteOverlayPadlets={handleDrawingLayoutDeleteOverlayPadlets}
                 onOpenDocument={openDocumentFromPreview}
                 ghostDraft={drawingGhostDraft}
-                onGhostDraftDropped={() => setDrawingGhostDraft(null)}
+                onGhostDraftDropped={() => {
+                  // An abandoned ghost must not leave provenance behind for the
+                  // next unrelated drop.
+                  drawingGhostSourceReferenceRef.current = null;
+                  setDrawingGhostDraft(null);
+                }}
                 drawingAppStateRef={drawingAppStateRef}
                 drawingExcalidrawAPIRef={drawingExcalidrawAPIRef}
                 onDrawingViewportChange={setDrawingViewport}

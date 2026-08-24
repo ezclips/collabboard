@@ -1,6 +1,7 @@
 // types/collabboard.ts
 
 import type { LoadedAIContent } from '@/lib/ai/contracts';
+import type { KnowledgeSourceReferenceDraft } from '@/lib/domain/knowledge/knowledgeSourceNoteDraft';
 
 export type ChronoMode =
   | 'VERTICAL'
@@ -373,6 +374,13 @@ export type PendingPostDraft = {
   position_x?: number;
   position_y?: number;
   createdAt: number;
+  /**
+   * P6J-F5 transient provenance for a Note created from a Knowledge source
+   * page. It rides the placement draft only; it is NEVER written to a padlets
+   * column or into padlets.metadata. The one durable home is source_references,
+   * written through the F4-B route after the Note row exists.
+   */
+  sourceReference?: KnowledgeSourceReferenceDraft;
 };
 
 export type NewPostDragState = {

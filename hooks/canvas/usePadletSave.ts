@@ -29,6 +29,7 @@ export type SaveAIComponentData = {
 import { useCallback, useMemo, Dispatch, SetStateAction } from 'react';
 import { Padlet, PendingPostDraft, SavedAIComponent, StoredAIImageAsset } from '@/types/collabboard';
 import { supabaseBrowser } from '@/lib/supabase/browser';
+import type { KnowledgeSourceReferenceDraft } from '@/lib/domain/knowledge/knowledgeSourceNoteDraft';
 
 // ============================================================================
 // Types for save handler data payloads
@@ -238,6 +239,13 @@ export type UsePadletSaveParams = {
   padlets: Padlet[];
   setPadlets: Dispatch<SetStateAction<Padlet[]>>;
   getNewPostPosition: (cardWidth: number, cardHeight: number) => { x: number; y: number };
+  /**
+   * P6J-F5: set only while the open NoteEditor was launched from a Knowledge
+   * source page. Ordinary toolbar Notes leave it null and are untouched.
+   */
+  sourceNoteReference?: KnowledgeSourceReferenceDraft | null;
+  /** Called with the REAL inserted row id, only after the insert has succeeded. */
+  onSourceNoteCreated?: (targetPadletId: string, sourceReference: KnowledgeSourceReferenceDraft) => void;
 };
 
 // ============================================================================
@@ -281,6 +289,8 @@ export function usePadletSave(params: UsePadletSaveParams) {
     padlets,
     setPadlets,
     getNewPostPosition,
+    sourceNoteReference,
+    onSourceNoteCreated,
   } = params;
 
   const checkGridPlacementRequired = useGridPadletSave({
@@ -304,6 +314,8 @@ export function usePadletSave(params: UsePadletSaveParams) {
     metadata: any;
     title?: string;
     file_url?: string;
+    /** P6J-F5 transient provenance; every branch below spreads the draft whole. */
+    sourceReference?: KnowledgeSourceReferenceDraft;
   };
 
   const checkPlacementRequired = (
@@ -404,8 +416,13 @@ export function usePadletSave(params: UsePadletSaveParams) {
     });
     // Check if placement prompt is needed (grid/columns/wall layouts)
 
+    // A source-created Note additionally carries its provenance and its
+    // filename title through placement; ordinary Notes keep their existing
+    // title-less placement draft exactly as before.
     const placementNeeded = checkPlacementRequired(
-      { kind: 'note', content: data.content, metadata },
+      sourceNoteReference
+        ? { kind: 'note', content: data.content, metadata, title: data.title, sourceReference: sourceNoteReference }
+        : { kind: 'note', content: data.content, metadata },
       () => setIsNoteEditorOpen(false)
     );
     if (placementNeeded) {
@@ -434,6 +451,11 @@ export function usePadletSave(params: UsePadletSaveParams) {
           .single();
         if (error) throw error;
         createdPadlet = newPadlet;
+        // P6J-F5: only now does a real target id exist. The row itself carries
+        // no provenance -- source_references is its one durable home.
+        if (sourceNoteReference && newPadlet?.id) {
+          onSourceNoteCreated?.(newPadlet.id, sourceNoteReference);
+        }
         // If this post has a parentId, update the container's childPadletIds
         const parentId = metadata?.parentId;
         if (parentId && newPadlet) {
@@ -520,6 +542,8 @@ export function usePadletSave(params: UsePadletSaveParams) {
     setWallPlacementPromptOpen,
     onTimelinePlacementStart,
     setPadlets,
+    sourceNoteReference,
+    onSourceNoteCreated,
   ]);
 
   // ============================================================================

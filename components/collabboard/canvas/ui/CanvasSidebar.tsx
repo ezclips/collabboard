@@ -4,6 +4,7 @@ import React, { useCallback, useLayoutEffect, useMemo, useRef, useState } from '
 import { BookOpen, MoreVertical } from 'lucide-react';
 import KnowledgeDocumentsList from '@/components/collabboard/KnowledgeDocumentsList';
 import KnowledgePdfUploader, { type KnowledgePdfUploaderHandle } from '@/components/collabboard/KnowledgePdfUploader';
+import type { KnowledgeSourcePageRequest } from '@/lib/domain/knowledge/knowledgeSourceNoteDraft';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -48,6 +49,11 @@ interface CanvasSidebarProps {
   onBeforeToolClick?: (type: string) => void;
   handleToolClick: (type: string) => void;
   onBack: () => void;
+  /**
+   * P6J-F5. The sidebar only closes its own Knowledge modal and forwards the
+   * request; the canvas controller owns placement and every write.
+   */
+  onCreateNoteFromKnowledgePage?: (request: KnowledgeSourcePageRequest) => void;
 }
 
 // Retained for the old model's documentation and source-level regression checks.
@@ -74,6 +80,7 @@ export default function CanvasSidebar({
   onBeforeToolClick,
   handleToolClick,
   onBack,
+  onCreateNoteFromKnowledgePage,
 }: CanvasSidebarProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const backRef = useRef<HTMLButtonElement>(null);
@@ -263,6 +270,12 @@ export default function CanvasSidebar({
         refreshToken={knowledgeRefreshToken}
         isOpen={knowledgeOpen}
         onClose={() => setKnowledgeOpen(false)}
+        onCreateNoteFromPage={onCreateNoteFromKnowledgePage
+          ? (request) => {
+            setKnowledgeOpen(false);
+            onCreateNoteFromKnowledgePage(request);
+          }
+          : undefined}
       />
       <button
         ref={moreMeasureRef}

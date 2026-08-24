@@ -9,6 +9,12 @@ type PlacementDraft = {
   metadata: any;
   title?: string;
   file_url?: string;
+  /**
+   * P6J-F5 transient provenance. The three placement branches below already
+   * spread the whole draft, so it survives to pendingPostDraft /
+   * wallPendingPostDraft untouched -- and never enters metadata.
+   */
+  sourceReference?: PendingPostDraft['sourceReference'];
 };
 
 type UseGridPadletSaveParams = {

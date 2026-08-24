@@ -1039,3 +1039,161 @@ describe('P6D Knowledge documents read surface', () => {
     expect(host.textContent).not.toContain('Search engine is waking up…');
   });
 });
+
+// P6J-F5. The reader surface gains one action: emit this page upward. It still
+// writes nothing itself, and the page's identity remains the documentId the
+// list already holds -- never the filename, which is display text and is not
+// unique across a board.
+describe('P6J-F5 create Note from a source page', () => {
+  const PAGES = [
+    { pageNumber: 1, text: 'Page one extracted text' },
+    { pageNumber: 2, text: '  spaced\r\nlines  ' },
+  ];
+
+  async function renderWithCreate(onCreateNoteFromPage?: (request: unknown) => void): Promise<HTMLDivElement> {
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    root = createRoot(host);
+    await act(async () => {
+      root!.render(
+        <KnowledgeDocumentsList
+          refreshToken={0}
+          isOpen
+          onClose={vi.fn()}
+          onCreateNoteFromPage={onCreateNoteFromPage}
+        />,
+      );
+    });
+    await settle();
+    return host;
+  }
+
+  async function openFirstDocument(container: HTMLElement) {
+    const viewText = container.querySelector('button:not([aria-label])') as HTMLButtonElement;
+    await act(async () => {
+      viewText.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await settle();
+  }
+
+  function createNoteButtons(container: HTMLElement): HTMLButtonElement[] {
+    return Array.from(container.querySelectorAll('button'))
+      .filter((button) => button.textContent?.trim() === 'Create Note') as HTMLButtonElement[];
+  }
+
+  it('emits the real document id, filename, page number and exact page text', async () => {
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/knowledge/warm')) return Promise.resolve(jsonResponse({ ok: true }));
+      if (url.endsWith('/pages')) return Promise.resolve(jsonResponse({ pages: PAGES }));
+      return Promise.resolve(jsonResponse({ documents: [doc({ id: 'doc-real', originalFilename: 'sources.pdf' })] }));
+    });
+    const onCreate = vi.fn();
+    const container = await renderWithCreate(onCreate);
+    await openFirstDocument(container);
+
+    const buttons = createNoteButtons(container);
+    expect(buttons).toHaveLength(2);
+    await act(async () => {
+      buttons[1].dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(onCreate).toHaveBeenCalledTimes(1);
+    expect(onCreate.mock.calls[0][0]).toEqual({
+      sourceDocumentId: 'doc-real',
+      originalFilename: 'sources.pdf',
+      pageNumber: 2,
+      // Byte-exact: whitespace and CRLF are evidence, not formatting.
+      pageText: '  spaced\r\nlines  ',
+    });
+  });
+
+  it('identifies the page by documentId when two documents share a filename', async () => {
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/knowledge/warm')) return Promise.resolve(jsonResponse({ ok: true }));
+      if (url.endsWith('/pages')) return Promise.resolve(jsonResponse({ pages: [PAGES[0]] }));
+      return Promise.resolve(jsonResponse({
+        documents: [
+          doc({ id: 'document-a', originalFilename: 'duplicate.pdf' }),
+          doc({ id: 'document-b', originalFilename: 'duplicate.pdf' }),
+        ],
+      }));
+    });
+    const onCreate = vi.fn();
+    const container = await renderWithCreate(onCreate);
+
+    // Open the SECOND of two identically named documents.
+    const viewTextButtons = Array.from(container.querySelectorAll('button:not([aria-label])')) as HTMLButtonElement[];
+    await act(async () => {
+      viewTextButtons[1].dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await settle();
+    await act(async () => {
+      createNoteButtons(container)[0].dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    const request = onCreate.mock.calls[0][0] as { sourceDocumentId: string; originalFilename: string };
+    expect(request.sourceDocumentId).toBe('document-b');
+    expect(request.originalFilename).toBe('duplicate.pdf');
+  });
+
+  it('offers no creation action to a viewer without the capability', async () => {
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/knowledge/warm')) return Promise.resolve(jsonResponse({ ok: true }));
+      if (url.endsWith('/pages')) return Promise.resolve(jsonResponse({ pages: PAGES }));
+      return Promise.resolve(jsonResponse({ documents: [doc()] }));
+    });
+    const container = await renderWithCreate(undefined);
+    await openFirstDocument(container);
+
+    expect(container.textContent).toContain('Page one extracted text');
+    // Absent entirely, not rendered disabled.
+    expect(createNoteButtons(container)).toHaveLength(0);
+    expect(container.textContent).not.toContain('Create Note');
+  });
+
+  it('shows no action until pages have actually rendered', async () => {
+    const pages = deferred<Response>();
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/knowledge/warm')) return Promise.resolve(jsonResponse({ ok: true }));
+      if (url.endsWith('/pages')) return pages.promise;
+      return Promise.resolve(jsonResponse({ documents: [doc()] }));
+    });
+    const onCreate = vi.fn();
+    const container = await renderWithCreate(onCreate);
+    await openFirstDocument(container);
+
+    expect(container.textContent).toContain('Loading extracted text…');
+    expect(createNoteButtons(container)).toHaveLength(0);
+
+    pages.resolve(jsonResponse({ pages: [PAGES[0]] }));
+    await settle();
+    expect(createNoteButtons(container)).toHaveLength(1);
+    expect(onCreate).not.toHaveBeenCalled();
+  });
+
+  it('leaves Back to PDFs working while the action is present', async () => {
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/knowledge/warm')) return Promise.resolve(jsonResponse({ ok: true }));
+      if (url.endsWith('/pages')) return Promise.resolve(jsonResponse({ pages: PAGES }));
+      return Promise.resolve(jsonResponse({ documents: [doc()] }));
+    });
+    const onCreate = vi.fn();
+    const container = await renderWithCreate(onCreate);
+    await openFirstDocument(container);
+    expect(createNoteButtons(container)).toHaveLength(2);
+
+    const back = Array.from(container.querySelectorAll('button')).find((button) => button.textContent?.includes('Back to PDFs'))!;
+    await act(async () => {
+      back.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(container.textContent).toContain('View text');
+    expect(createNoteButtons(container)).toHaveLength(0);
+    expect(onCreate).not.toHaveBeenCalled();
+  });
+});

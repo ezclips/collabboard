@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import type { KnowledgeSourcePageRequest } from '@/lib/domain/knowledge/knowledgeSourceNoteDraft';
 
 export interface KnowledgeDocumentDetailPage {
   pageNumber: number;
@@ -8,12 +9,24 @@ export interface KnowledgeDocumentDetailPage {
 }
 
 export interface KnowledgeDocumentDetailsProps {
+  /**
+   * Optional only so the pre-F5 render tests still compile; the live list
+   * always supplies it. The Create Note action fails closed without it rather
+   * than emitting a request with no real source identity.
+   */
+  documentId?: string;
   originalFilename: string;
   pageCount: number | null;
   pages: readonly KnowledgeDocumentDetailPage[];
   loading: boolean;
   error: boolean;
   onBack: () => void;
+  /**
+   * Absent for readers who cannot create posts on this board. The action is
+   * then not rendered at all rather than rendered disabled -- the same
+   * capability the canvas toolbar itself is gated on decides this.
+   */
+  onCreateNoteFromPage?: (request: KnowledgeSourcePageRequest) => void;
 }
 
 type TextMatch = { pageIndex: number; start: number; end: number };
@@ -75,12 +88,14 @@ function highlightedText(
 }
 
 export default function KnowledgeDocumentDetails({
+  documentId,
   originalFilename,
   pageCount,
   pages,
   loading,
   error,
   onBack,
+  onCreateNoteFromPage,
 }: KnowledgeDocumentDetailsProps) {
   const [query, setQuery] = useState('');
   const [activeMatchIndex, setActiveMatchIndex] = useState(0);
@@ -151,7 +166,25 @@ export default function KnowledgeDocumentDetails({
         <div className="max-h-[60vh] space-y-4 overflow-y-auto pr-1">
           {pages.map((page, pageIndex) => (
             <section key={page.pageNumber}>
-              <h3 className="mb-1 text-[11px] font-semibold text-gray-500">Page {page.pageNumber}</h3>
+              <div className="mb-1 flex items-baseline justify-between gap-2">
+                <h3 className="text-[11px] font-semibold text-gray-500">Page {page.pageNumber}</h3>
+                {onCreateNoteFromPage && documentId ? (
+                  <button
+                    type="button"
+                    aria-label={`Create Note from page ${page.pageNumber}`}
+                    className="shrink-0 rounded border border-gray-200 px-1.5 py-0.5 text-[11px] text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+                    onClick={() => onCreateNoteFromPage({
+                      // The document's real identity, never its filename.
+                      sourceDocumentId: documentId,
+                      originalFilename,
+                      pageNumber: page.pageNumber,
+                      pageText: page.text,
+                    })}
+                  >
+                    Create Note
+                  </button>
+                ) : null}
+              </div>
               <p className="select-text whitespace-pre-wrap text-xs leading-5 text-gray-700">
                 {highlightedText(page.text, pageIndex, matches.filter((match) => match.pageIndex === pageIndex), matches[activeMatchIndex], activeMatchRef)}
               </p>

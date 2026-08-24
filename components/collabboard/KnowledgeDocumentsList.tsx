@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import KnowledgeDocumentDetails, { type KnowledgeDocumentDetailPage } from '@/components/collabboard/KnowledgeDocumentDetails';
+import type { KnowledgeSourcePageRequest } from '@/lib/domain/knowledge/knowledgeSourceNoteDraft';
 import {
   listKnowledgePdfs,
   type KnowledgePdfProcessingStatus,
@@ -25,6 +26,8 @@ export interface KnowledgeDocumentsListProps {
   refreshToken?: number;
   isOpen?: boolean;
   onClose?: () => void;
+  /** Forwarded verbatim to the page reader; absent when the viewer cannot create posts. */
+  onCreateNoteFromPage?: (request: KnowledgeSourcePageRequest) => void;
 }
 
 interface KnowledgeListEntry {
@@ -164,7 +167,7 @@ function subscribeToKnowledgeWarm(boardId: string): KnowledgeWarmSubscription {
  * No client-side role gating: whatever the server returns is rendered, so
  * read-only collaborators see the same list an editor does.
  */
-export default function KnowledgeDocumentsList({ refreshToken = 0, isOpen = true, onClose }: KnowledgeDocumentsListProps) {
+export default function KnowledgeDocumentsList({ refreshToken = 0, isOpen = true, onClose, onCreateNoteFromPage }: KnowledgeDocumentsListProps) {
   const params = useParams<{ id: string }>();
   const boardId = params?.id;
   const [phase, setPhase] = useState<ListPhase>('loading');
@@ -372,12 +375,14 @@ export default function KnowledgeDocumentsList({ refreshToken = 0, isOpen = true
 
         {details ? (
           <KnowledgeDocumentDetails
+            documentId={details.entry.id}
             originalFilename={details.entry.originalFilename}
             pageCount={details.entry.pageCount}
             pages={details.pages}
             loading={details.loading}
             error={details.error}
             onBack={() => setDetails(null)}
+            onCreateNoteFromPage={onCreateNoteFromPage}
           />
         ) : (
           <>
